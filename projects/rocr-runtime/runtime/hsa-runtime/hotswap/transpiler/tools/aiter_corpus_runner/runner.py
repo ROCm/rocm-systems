@@ -59,7 +59,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -597,14 +597,20 @@ def _sanitize_log_component(s: str) -> str:
 #     already made visible to this shell, so running this tool on
 #     a shared box never steps on someone else's GPU.
 #
-#   * ``_run_warmup`` — serial native-mode pass over every unique
-#     script, pinned to ``gpu_pool[0]``.  AITER's @compile_ops
-#     lazily invokes hipcc on first import, writing into
-#     ``_jit_cache/``.  Two parallel workers racing to build the
-#     same module is at best wasted CPU, at worst a corrupted .so
-#     that the next worker dlopen's and crashes on.  One serial
-#     warm-up pass populates the cache once; subsequent workers are
-#     pure ``dlopen`` of the cached artefact.
+#   * ``_reap_orphan_build_locks`` — AITER serialises concurrent
+#     @compile_ops builds of the same module via a FileBaton (empty
+#     marker file created with O_CREAT|O_EXCL, unlinked by
+#     ``baton.release()`` in a ``finally``).  SIGKILL / OOM / Ctrl-C
+#     skip finally blocks, leaving the marker on disk; any future
+#     concurrent build of that module then spins forever in
+#     ``baton.wait()``.  We detect orphans at runner startup by
+#     cross-referencing each ``build/lock_<md>`` file's inode against
+#     every open FD on the host — a live owner still holds the FD,
+#     a crashed owner does not.  If ``/proc`` inspection is
+#     incomplete (permission denied on any pid's fd dir) we refuse
+#     to reap: distinguishing "orphan" from "held by a process we
+#     can't inspect" is not possible and stomping a live builder
+#     corrupts its ``.so`` output.
 #
 #   * ``_run_parallel`` — a ``ThreadPoolExecutor`` fronting one
 #     child-process worker per pool slot, plus a ``queue.Queue[str]``
@@ -612,7 +618,9 @@ def _sanitize_log_component(s: str) -> str:
 #     to completion, releases the GPU.  We don't allow the pool
 #     size to exceed the GPU pool: two workers on the same device
 #     index would either OOM or thrash, and the speedup we're
-#     after is strictly 1 GPU = 1 job.
+#     after is strictly 1 GPU = 1 job.  Cold-cache concurrent
+#     builds are correctly serialised by AITER's own FileBaton —
+#     there is no runner-side "warmup" pass.
 def _resolve_gpu_pool(arg_gpus: str, jobs: int) -> List[str]:
     """Produce the list of GPU IDs the parallel pool will draw from.
 
@@ -1015,80 +1023,143 @@ def _run_one(
     )
 
 
-def _run_warmup(
-    scripts: List[str],
-    warmup_gpu: str,
-    args: argparse.Namespace,
-    native_gfx: str,
-    spoof_arch: str,
-    log_dir: Optional[str],
-    base_dirs: List[str],
-) -> Dict[str, RunResult]:
-    """Native-mode pre-pass, serial, pinned to ``warmup_gpu``.
+def _reap_orphan_build_locks(jit_cache: str) -> Tuple[List[str], List[str]]:
+    """Remove FileBaton lock files left behind by crashed AITER builds.
 
-    Purpose: populate ``--jit-cache`` before fanning out.  AITER's
-    ``@compile_ops`` decorator lazily invokes hipcc on first import,
-    writing the resulting ``.so`` into ``_jit_cache/``.  Two parallel
-    workers racing to build the same module is at best wasted CPU,
-    at worst a corrupted ``.so`` that the next dlopen crashes on.
-    One sequential warm-up pass reduces the parallel phase to pure
-    dlopen-of-cached-artefact, which does parallelise cleanly.
+    AITER's ``@compile_ops`` decorator serialises concurrent builds
+    of the same module via ``aiter/jit/utils/file_baton.py``.  The
+    baton creates an empty ``build/lock_<module_md5>`` file with
+    ``O_CREAT|O_EXCL`` on acquire and unlinks it on release.
+    Release runs in a ``finally`` block, so any exit path that
+    skips finally blocks — SIGKILL, OOM-killer, kernel panic,
+    Ctrl-C during certain syscalls — leaves the marker file in
+    place.  Every subsequent concurrent build of that same module
+    then spins forever in ``baton.wait()`` waiting for a release
+    that will never come.
 
-    We run *native* mode specifically because it's the lightest
-    path (no ``LD_PRELOAD`` of libsalmon/libhsa, no arch-spoof
-    shim) — it exercises exactly the codegen needed to populate
-    the JIT cache, and nothing else.  Results are returned keyed
-    by script so the caller can reuse them as the native column of
-    the output grid when ``native`` is one of the requested modes
-    (avoiding a redundant re-run in the parallel phase).
+    We detect orphans by cross-referencing each lock file's inode
+    against every open FD on the host via ``/proc/<pid>/fd``.  A
+    live baton owner still holds the FD (``os.open`` + stash in
+    ``self.fd``); a crashed owner's FD was closed by the kernel
+    on process exit but the unlink never happened.
+
+    Scope of the scan: we only inspect same-UID Python processes.
+    AITER's ``mp_lock`` is only reached from ``@compile_ops`` in a
+    Python import of AITER, so the FileBaton owner, if it exists,
+    must be a Python interpreter (``/proc/<pid>/comm`` starts with
+    ``"python"``) running as the current user.  Other processes on
+    the host are out of scope:
+
+    * other users' processes — cannot have opened an AITER-path
+      baton, and their ``/proc/<pid>/fd`` is unreadable anyway;
+    * same-UID non-Python processes — notably setuid-exec'd ssh
+      daemons whose fd table the kernel hides from us even though
+      the euid matches.  These are not Python, did not import
+      AITER, and cannot hold an AITER baton.
+
+    If a same-UID *Python* process's ``fd`` dir is un-scannable
+    (should not happen on a stock kernel — indicates ptrace
+    hardening or a setuid python wrapper) we refuse to reap.
+    Deleting a live builder's lock would allow a second concurrent
+    hipcc invocation to produce a corrupted ``.so``.  Per project
+    rule: never silently fall back.
+
+    Returns ``(reaped_paths, inspection_errors)``.  Callers should
+    print both — the errors list surfaces inspection gaps that
+    prevented cleanup, so a user running on a shared box knows
+    why orphan locks weren't touched.
     """
-    print(
-        f"[warmup] priming JIT cache via {len(scripts)} native-mode "
-        f"run(s), serial on gpu={warmup_gpu} "
-        f"(disable with --warmup off)",
-        file=sys.stderr,
-        flush=True,
-    )
-    results: Dict[str, RunResult] = {}
-    native_mode = MODES["native"]
-    for i, script in enumerate(scripts, 1):
-        label = _short_label(script, base_dirs)
-        print(
-            f"[warmup {i}/{len(scripts)}] {label} :: native ... ",
-            end="", flush=True, file=sys.stderr,
-        )
-        if args.tee_stderr:
-            print("", file=sys.stderr, flush=True)
-        r = _run_one(
-            script=script, mode=native_mode,
-            aiter_root=args.aiter_root,
-            triton_venv=args.triton_venv,
-            libsalmon=args.libsalmon,
-            libhsa=args.libhsa,
-            libamdhip=args.libamdhip,
-            libarch_spoof=args.libarch_spoof,
-            spoof_arch=spoof_arch,
-            native_gfx=native_gfx,
-            strict_tol=args.strict_tolerance,
-            perftest_iters=args.perftest_iters,
-            jit_cache=args.jit_cache,
-            timeout_s=args.timeout,
-            visible_devices=warmup_gpu,
-            script_args=args.script_arg,
-            rng_seed=args.rng_seed,
-            tee_stderr=args.tee_stderr,
-            log_dir=log_dir,
-            script_label=label,
-        )
-        results[script] = r
-        verdict_line = (
-            f"[warmup verdict] {label} :: native ... "
-            f"{r.verdict} ({r.detail}, {r.elapsed_s:.1f}s)"
-            if args.tee_stderr else
-            f"{r.verdict} ({r.detail}, {r.elapsed_s:.1f}s)"
-        )
-        print(verdict_line, file=sys.stderr)
-    return results
+    build_dir = os.path.join(jit_cache, "build")
+    if not os.path.isdir(build_dir):
+        return [], []
+
+    try:
+        lock_names = [n for n in os.listdir(build_dir) if n.startswith("lock_")]
+    except OSError as e:
+        return [], [f"listdir({build_dir}): {e}"]
+    if not lock_names:
+        return [], []
+
+    # Resolve each candidate lock to its (st_dev, st_ino) so we can
+    # match on inode rather than path — robust against someone
+    # renaming or moving the file under us mid-scan.
+    targets: Dict[Tuple[int, int], str] = {}
+    for name in lock_names:
+        p = os.path.join(build_dir, name)
+        try:
+            st = os.stat(p)
+        except FileNotFoundError:
+            continue
+        targets[(st.st_dev, st.st_ino)] = p
+    if not targets:
+        return [], []
+
+    # Walk every same-UID Python process's fd table.  Non-Python
+    # processes cannot have imported AITER; different-UID processes
+    # cannot have opened a file in our home dir through AITER's
+    # code path.  A process that exited mid-scan is fine — its FDs
+    # died with it.  Permission-denied on the fd dir of a same-UID
+    # *python* process is a genuine inspection gap → fail closed.
+    my_uid = os.getuid()
+    errors: List[str] = []
+    try:
+        proc_entries = [e.path for e in os.scandir("/proc") if e.name.isdigit()]
+    except OSError as e:
+        return [], [f"scandir(/proc): {e}"]
+
+    live_inodes: Set[Tuple[int, int]] = set()
+    for ppath in proc_entries:
+        try:
+            proc_uid = os.stat(ppath).st_uid
+        except FileNotFoundError:
+            continue  # process exited mid-scan
+        except PermissionError:
+            # /proc/<pid> itself should be stat-able on a stock
+            # kernel; PermissionError here indicates hidepid=2
+            # which already hides the process from us entirely.
+            # Conservative: ignore (any baton it holds has also
+            # been hidden from us and there is nothing actionable).
+            continue
+        if proc_uid != my_uid:
+            continue
+        try:
+            with open(os.path.join(ppath, "comm"), "r") as f:
+                comm = f.read().strip()
+        except (FileNotFoundError, PermissionError, OSError):
+            continue  # exited or genuinely unreadable — treat as not-python
+        if not comm.startswith("python"):
+            continue  # cannot have imported AITER's FileBaton
+        fd_dir = os.path.join(ppath, "fd")
+        try:
+            fd_names = os.listdir(fd_dir)
+        except FileNotFoundError:
+            continue  # process exited; its FDs are gone with it
+        except PermissionError:
+            errors.append(f"{fd_dir}: permission denied (comm={comm!r})")
+            continue
+        for fd in fd_names:
+            try:
+                st = os.stat(os.path.join(fd_dir, fd))
+            except (FileNotFoundError, PermissionError):
+                continue  # fd closed mid-scan, or symlink unreadable
+            key = (st.st_dev, st.st_ino)
+            if key in targets:
+                live_inodes.add(key)
+
+    if errors:
+        # Fail closed: we can't prove these locks are orphan.
+        return [], errors
+
+    reaped: List[str] = []
+    for key, path in targets.items():
+        if key in live_inodes:
+            continue
+        try:
+            os.unlink(path)
+            reaped.append(path)
+        except FileNotFoundError:
+            continue
+    return reaped, []
 
 
 def _run_parallel(
@@ -1595,10 +1666,11 @@ def main() -> int:
         "--jobs", type=int, default=1, metavar="N",
         help="run up to N (script, mode) jobs concurrently, one per "
              "GPU in the --gpus pool.  Default 1 (strictly serial).  "
-             "A --warmup pass (enabled automatically for --jobs > 1) "
-             "first populates the JIT cache serially so parallel "
-             "workers hit dlopen-only hot paths.  Pool size is "
-             "capped to len(--gpus).  Use this on a multi-GPU box "
+             "Pool size is capped to len(--gpus).  AITER's own "
+             "FileBaton-based mp_lock serialises concurrent "
+             "@compile_ops builds of the same module, so a cold "
+             "--jit-cache parallel run is correct — no runner-side "
+             "warmup pass is needed.  Use this on a multi-GPU box "
              "to cut full-corpus sweep time from hours to minutes.",
     )
     ap.add_argument(
@@ -1610,17 +1682,6 @@ def main() -> int:
              "set and --jobs > 1, the runner errors before doing "
              "any work.  No auto-discovery: we honour whatever the "
              "shell has declared visible so shared-box usage is safe.",
-    )
-    ap.add_argument(
-        "--warmup", default="auto", choices=("auto", "on", "off"),
-        help="whether to run a serial native-mode pre-pass to prime "
-             "the JIT cache before the parallel phase.  'auto' "
-             "(default) enables warmup iff --jobs > 1; 'on' forces "
-             "it even in --jobs 1 mode; 'off' skips it.  Skipping "
-             "warmup with --jobs > 1 on a cold --jit-cache is a "
-             "well-known way to produce duplicated hipcc work and "
-             "rarely a corrupted .so — recommended only when you "
-             "know the cache is already populated.",
     )
     ap.add_argument(
         "--rng-seed", default="0",
@@ -1740,13 +1801,33 @@ def main() -> int:
         )
         jobs = len(gpu_pool)
 
-    # Warmup decision.  The auto default matches the rationale in
-    # ``_run_warmup``: cold JIT cache + parallel workers is the
-    # textbook recipe for racing hipcc.
-    if args.warmup == "auto":
-        warmup_enabled = jobs > 1
-    else:
-        warmup_enabled = args.warmup == "on"
+    # Startup hygiene: reap any orphan FileBaton locks left in
+    # ``_jit_cache/build/`` by previously-SIGKILLed AITER builds.
+    # A lingering lock blocks any future concurrent build of the
+    # same module in ``baton.wait()`` forever — see the comment on
+    # ``_reap_orphan_build_locks`` for the why.  We do this
+    # unconditionally (serial and parallel) because the bug also
+    # bites sequential second runs of the same script.  Skipped
+    # only when ``--print-command`` is set (dry-run, no cache work).
+    if not args.print_command:
+        reaped, inspection_errors = _reap_orphan_build_locks(args.jit_cache)
+        for p in reaped:
+            print(
+                f"[jit-cache] reaped orphan FileBaton lock: {p}",
+                file=sys.stderr,
+            )
+        if inspection_errors:
+            # Surface every gap — we will not reap any lock when
+            # inspection is incomplete, and the user needs to know
+            # why.  This is deliberately not a warning-and-continue
+            # pattern: it's an explicit refusal to silently fall back.
+            print(
+                "[jit-cache] orphan-lock reaper: refusing to reap any "
+                "lock because /proc inspection is incomplete:",
+                file=sys.stderr,
+            )
+            for err in inspection_errors:
+                print(f"[jit-cache]   {err}", file=sys.stderr)
 
     # --print-command: no spawning, no work, just emit the exact
     # invocation the runner *would* use for each (script, mode)
@@ -1806,7 +1887,6 @@ def main() -> int:
         f"jobs={jobs} (serial)" if jobs == 1
         else f"jobs={jobs} × gpus=[{','.join(gpu_pool[:jobs])}]"
     )
-    warmup_banner = "on" if warmup_enabled else "off"
     print(
         f"aiter corpus runner: {len(scripts)} script(s), "
         f"modes={args.modes}, native_gfx={native_gfx!r}, "
@@ -1817,7 +1897,7 @@ def main() -> int:
         f"timeout={args.timeout:.0f}s, jit_cache={args.jit_cache}, "
         f"tee_stderr={args.tee_stderr}, "
         f"log_dir={log_dir or '<off>'}, "
-        f"{parallel_banner}, warmup={warmup_banner}",
+        f"{parallel_banner}",
         file=sys.stderr,
     )
     for s in scripts:
@@ -1826,29 +1906,15 @@ def main() -> int:
 
     results: List[RunResult] = []
 
-    # Optional warmup pass.  Populates ``_jit_cache/`` so parallel
-    # workers don't race hipcc.  When ``native`` is among the
-    # requested modes the warmup results double as the native column
-    # of the output — no need to redo those runs in the main phase.
-    warmup_captured_native = False
-    if warmup_enabled:
-        warmup_results = _run_warmup(
-            scripts=scripts,
-            warmup_gpu=gpu_pool[0],
-            args=args, native_gfx=native_gfx, spoof_arch=spoof_arch,
-            log_dir=log_dir, base_dirs=base_dirs,
-        )
-        if "native" in args.modes:
-            results.extend(warmup_results.values())
-            warmup_captured_native = True
-        print(file=sys.stderr)
-
-    # Main run matrix, minus native pairs already done in warmup.
+    # Full run matrix.  Concurrent @compile_ops builds of the same
+    # module are serialised correctly by AITER's own FileBaton
+    # (see ``aiter/jit/core.py::mp_lock`` + ``file_baton.py``), so
+    # a cold ``--jit-cache`` parallel run is safe — the first
+    # worker to enter the critical section builds, the others
+    # spin-wait on the marker file and then dlopen the cached
+    # artefact.  No runner-side warmup pass is needed.
     main_jobs: List[Tuple[str, str]] = [
-        (s, m)
-        for s in scripts
-        for m in args.modes
-        if not (warmup_captured_native and m == "native")
+        (s, m) for s in scripts for m in args.modes
     ]
 
     if jobs == 1:
@@ -1927,7 +1993,6 @@ def main() -> int:
                     "aiter_root": args.aiter_root,
                     "jobs": jobs,
                     "gpu_pool": gpu_pool[:jobs],
-                    "warmup": warmup_enabled,
                     "results": [dataclasses.asdict(r) for r in results],
                 },
                 f,

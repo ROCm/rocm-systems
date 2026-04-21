@@ -14,7 +14,7 @@ cd projects/rocr-runtime/runtime/hsa-runtime/hotswap/transpiler/tools/aiter_corp
 # Curated subset (~12 op-tests), all three modes, 1 GPU
 python3 runner.py
 
-# Same sweep fanned out across 8 GPUs (one job per GPU, automatic warmup)
+# Same sweep fanned out across 8 GPUs (one job per GPU)
 export HIP_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 python3 runner.py --jobs 8
 
@@ -43,15 +43,13 @@ and cut wall-clock time roughly linearly.  Defaults:
   `HIP_VISIBLE_DEVICES`) so a wedged kernel on one device can't
   blast the others.
 - Pool size is capped to `len(--gpus)`; `--jobs 100 --gpus 0-3` runs 4.
-- **`--warmup` (default `auto`)** — when `--jobs > 1`, the runner
-  first does a serial native-mode pass over every unique script on
-  `gpu_pool[0]` to populate `--jit-cache/`.  AITER's `@compile_ops`
-  lazily invokes `hipcc` on first import; two parallel workers racing
-  to build the same module would at best duplicate work and at worst
-  race on a half-written `.so`.  One serial warmup makes the
-  subsequent parallel phase pure dlopen-of-cached-artifact.  When
-  `native` is among `--modes`, the warmup verdicts are reused as the
-  native column and not re-run in parallel.
+- **No runner-side warmup pass.**  AITER's own
+  `aiter/jit/core.py::mp_lock` (backed by `FileBaton`) serialises
+  concurrent `@compile_ops` builds of the same module at the
+  filesystem level: the first worker to enter the critical section
+  runs `hipcc`, the others spin-wait on the marker file and then
+  `dlopen` the cached artefact.  Parallel runs against a cold
+  `_jit_cache/` are therefore correct without any pre-pass.
 
 GPU discovery is **literally** `HIP_VISIBLE_DEVICES` (or an explicit
 `--gpus 0,1,2,...` / `--gpus 0-7`).  We don't scan the box with
@@ -64,22 +62,44 @@ Example output with `--jobs 4`:
 
 ```
 aiter corpus runner: 14 script(s), modes=['native','legacy','salmon'], ...
-  jobs=4 × gpus=[0,1,2,3], warmup=on
+  jobs=4 × gpus=[0,1,2,3]
 
-[warmup] priming JIT cache via 14 native-mode run(s), serial on gpu=0 (disable with --warmup off)
-[warmup 1/14] test_moeTopkSoftmax.py :: native ... PASS (ok, 6.2s)
-...
-[run 1/28] test_layernorm2d.py :: legacy ... (gpu=2)
-[run 2/28] test_moeTopkSoftmax.py :: legacy ... (gpu=0)
-[run 3/28] test_rmsnorm2d.py :: legacy ... (gpu=1)
-[run 4/28] test_layernorm2d.py :: salmon ... (gpu=3)
-[verdict 2/28] test_moeTopkSoftmax.py :: legacy ... PASS (ok, 5.8s, gpu=0)
+[run 1/42] test_layernorm2d.py :: native ... (gpu=2)
+[run 2/42] test_moeTopkSoftmax.py :: native ... (gpu=0)
+[run 3/42] test_rmsnorm2d.py :: native ... (gpu=1)
+[run 4/42] test_layernorm2d.py :: legacy ... (gpu=3)
+[verdict 2/42] test_moeTopkSoftmax.py :: native ... PASS (ok, 5.8s, gpu=0)
 ...
 ```
 
 `[run k/N]` lines go out before the child starts; `[verdict k/N]`
 after it exits.  Interleaving is expected — sort the final grid /
 summary instead of the live progress.
+
+### Orphan JIT-cache lock reaper
+
+AITER's `FileBaton` creates `_jit_cache/build/lock_<module_md5>` on
+`acquire` and unlinks it on `release`.  Release runs in a `finally`,
+so any exit path that skips finally blocks — SIGKILL, OOM-killer,
+Ctrl-C mid-syscall — leaves the marker on disk.  Any future
+concurrent build of that same module then spins forever in
+`baton.wait()` waiting for a release that will never come.
+
+At startup (every invocation, serial or parallel) the runner scans
+`_jit_cache/build/` for `lock_*` files and cross-references each
+file's inode against the open-FD table of every same-UID Python
+process on the host (via `/proc/<pid>/fd`).  A live baton owner still
+holds the FD; a crashed owner does not.  Unlocked entries get
+unlinked and logged as `[jit-cache] reaped orphan FileBaton lock:
+<path>`.
+
+If any same-UID Python process's `fd` directory is unreadable
+(ptrace hardening, setuid wrapper) the reaper refuses to touch any
+lock and prints the exact `/proc/<pid>/fd` paths that blocked
+inspection — deleting a live builder's lock would allow a second
+concurrent `hipcc` to corrupt its `.so` output.  Non-Python and
+different-UID processes are excluded from the scan because neither
+can have opened an AITER baton through its normal code path.
 
 ## What it does
 
@@ -283,7 +303,6 @@ python3 runner.py --aiter-root /path/to/your/aiter \
 | `--gpu`              | `0`                                                                        | `HIP_VISIBLE_DEVICES` in serial (`--jobs 1`) mode; ignored with `--jobs > 1` |
 | `--jobs N`           | `1`                                                                        | run `N` `(script, mode)` jobs in parallel, one per GPU slot              |
 | `--gpus LIST`        | — (falls back to `HIP_VISIBLE_DEVICES`)                                    | comma list / range for the parallel pool (`0,1,2`, `0-7`, `0,2-5,7`)     |
-| `--warmup {auto,on,off}` | `auto` (= on when `--jobs > 1`)                                        | serial native-mode pre-pass to prime `--jit-cache` before the parallel phase |
 | `--script-arg A`     | —                                                                          | forward one argv token to the user script (repeatable)                   |
 | `--tee-stderr`       | off                                                                        | stream each child's stderr live with `[<script>::<mode>]` prefix          |
 | `--log-dir DIR`      | —                                                                          | full per-run transcripts under `DIR/<script>__<mode>__<ts>__pid<pid>.log` |
