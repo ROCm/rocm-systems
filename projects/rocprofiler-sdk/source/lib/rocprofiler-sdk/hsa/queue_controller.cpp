@@ -234,7 +234,10 @@ queue_controller_load_attach_queues()
 uint64_t
 compute_queue_k_factor()
 {
-    // TODO: re-enable when metadata queue support is implemented
+    for(const auto& itr : context::get_registered_contexts())
+    {
+        if(itr->dispatch_counter_collection || itr->dispatch_thread_trace) return 7;
+    }
     return 0;
 }
 
