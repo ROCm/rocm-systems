@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <hsa/hsa.h>
 
 #include <fcntl.h>
@@ -418,6 +419,40 @@ public:
     }
 
 private:
+    void log_subscription_snapshot(const char* reason, size_t max_entries = 8)
+    {
+        if(!ioctl_monitor_diag_enabled()) return;
+
+        std::lock_guard<std::mutex> lock(subscriptions_mutex_);
+
+        std::vector<std::string> entries = {};
+        entries.reserve(std::min(max_entries, subscriptions_.size()));
+        size_t count = 0;
+        for(const auto& [id, subscription] : subscriptions_)
+        {
+            auto current_value = ops_.load(subscription.signal);
+            entries.emplace_back(fmt::format("{{id={}, signal={}, pending={}, value={}, "
+                                             "condition={}, compare={}, has_event_id={}, "
+                                             "event_id={}}}",
+                                             id,
+                                             subscription.signal.handle,
+                                             subscription.pending,
+                                             current_value,
+                                             to_string(subscription.condition),
+                                             subscription.compare_value,
+                                             subscription.has_event_id,
+                                             subscription.event_id));
+            ++count;
+            if(count >= max_entries) break;
+        }
+
+        ROCP_ERROR << fmt::format(
+            "DEBUG: ioctl monitor snapshot reason={} subscription_count={} entries={}",
+            reason,
+            subscriptions_.size(),
+            fmt::join(entries, ", "));
+    }
+
     void collect_ready(std::vector<CallbackItem>& ready, std::vector<uint32_t>* event_ids)
     {
         if(!running_.load()) return;
@@ -557,6 +592,12 @@ private:
                                    static_cast<bool>(ops_.wait_events),
                                    idle_sleep_cycles,
                                    common::get_tid());
+
+                if(ioctl_monitor_diag_enabled() &&
+                   (idle_sleep_cycles == 1 || (idle_sleep_cycles % 10000) == 0))
+                {
+                    log_subscription_snapshot("timed-sleep");
+                }
                 std::this_thread::sleep_for(poll_interval);
             }
             else
