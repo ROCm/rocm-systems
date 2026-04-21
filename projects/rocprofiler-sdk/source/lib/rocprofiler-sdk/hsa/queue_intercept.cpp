@@ -151,9 +151,21 @@ sync_metadata_impl(QueueState* compute_state,
 
 namespace
 {
-thread_local QueueState* tls_state      = nullptr;
-thread_local uint64_t    tls_submit_pos = 0;
-thread_local uint32_t    tls_pkt_size   = 64;
+thread_local QueueState*          tls_state                     = nullptr;
+thread_local uint64_t             tls_submit_pos                = 0;
+thread_local uint32_t             tls_pkt_size                  = 64;
+thread_local const doorbell_fn_t* tls_ring_doorbell             = nullptr;
+thread_local uint64_t             tls_last_published_submit_pos = 0;
+
+inline void
+publish_submitted_packets(QueueState* state, uint64_t submit_pos)
+{
+    if(!tls_ring_doorbell || submit_pos <= tls_last_published_submit_pos || submit_pos == 0) return;
+
+    __atomic_store_n(state->real_wdid, submit_pos, __ATOMIC_RELEASE);
+    (*tls_ring_doorbell)(state->doorbell_signal, static_cast<hsa_signal_value_t>(submit_pos - 1));
+    tls_last_published_submit_pos = submit_pos;
+}
 
 inline void
 wait_for_free_slot(QueueState* state, uint64_t submit_pos)
@@ -166,6 +178,11 @@ wait_for_free_slot(QueueState* state, uint64_t submit_pos)
         {
             return;
         }
+
+        // If the producer is blocked on a full ring and has already written
+        // packets beyond the last visible write index, publish progress so the
+        // consumer can observe and drain them.
+        publish_submitted_packets(state, submit_pos);
         std::this_thread::yield();
     }
 }
@@ -233,10 +250,12 @@ process_doorbell_impl(const queue_state_ptr_t& state,
         memcpy(source_snapshot.data() + (i * state_ptr->pkt_size), src, state_ptr->pkt_size);
     }
 
-    tls_state                 = state_ptr;
-    tls_submit_pos            = state_ptr->next_submit_pos;
-    tls_pkt_size              = state_ptr->pkt_size;
-    uint64_t start_submit_pos = tls_submit_pos;
+    tls_state                     = state_ptr;
+    tls_submit_pos                = state_ptr->next_submit_pos;
+    tls_pkt_size                  = state_ptr->pkt_size;
+    tls_ring_doorbell             = &ring_doorbell;
+    tls_last_published_submit_pos = state_ptr->next_submit_pos;
+    uint64_t start_submit_pos     = tls_submit_pos;
 
     auto*        qc = get_queue_controller();
     const Queue* queue =
@@ -319,8 +338,11 @@ process_doorbell_impl(const queue_state_ptr_t& state,
                      << ", next_submit_pos=" << state_ptr->next_submit_pos;
     }
 
-    __atomic_store_n(state_ptr->real_wdid, state_ptr->next_submit_pos, __ATOMIC_RELEASE);
-    ring_doorbell(state_ptr->doorbell_signal, doorbell_val);
+    publish_submitted_packets(state_ptr, state_ptr->next_submit_pos);
+
+    tls_ring_doorbell             = nullptr;
+    tls_last_published_submit_pos = 0;
+    tls_state                     = nullptr;
 }
 
 void
