@@ -41,25 +41,28 @@ struct count_spec
     static constexpr count_spec range(int lo, int hi) noexcept { return { -1, lo, hi }; }
     static constexpr count_spec at_least(int lo) noexcept { return { -1, lo, -1 }; }
     static constexpr count_spec at_most(int hi) noexcept { return { -1, -1, hi }; }
+    static constexpr count_spec any() noexcept { return {}; }
 };
 
 using custom_action_t = void (*)(parser_t&, parser_data&);
 
+// Convention: when multiple names are provided, the LONG name must be last.
+// `parser_key_from` derives the parser lookup key from `names.back()`.
 struct flag_descriptor
 {
     std::vector<std::string_view> names;
     std::string_view              help;
-    std::string_view              dtype       = {};
-    count_spec                    count       = {};
-    value_kind                    kind        = value_kind::flag;
-    join_with                     join        = join_with::none;
-    std::vector<std::string_view> env_vars    = {};
-    common::update_mode           mode        = common::update_mode::REPLACE;
-    std::vector<std::string_view> aliased_env = {};
-    std::vector<std::string_view> choices     = {};
-    std::vector<std::string_view> conflicts   = {};
-    std::vector<std::string_view> requires_   = {};
-    custom_action_t               custom      = nullptr;
+    std::string_view              dtype      = {};
+    count_spec                    count      = count_spec::any();
+    value_kind                    kind       = value_kind::flag;
+    join_with                     join       = join_with::none;
+    std::vector<std::string_view> env_vars   = {};
+    common::update_mode           mode       = common::update_mode::REPLACE;
+    std::vector<std::string_view> dedup_keys = {};
+    std::vector<std::string_view> choices    = {};
+    std::vector<std::string_view> conflicts  = {};
+    std::vector<std::string_view> requires_  = {};
+    custom_action_t               custom     = nullptr;
 };
 
 struct flag_group

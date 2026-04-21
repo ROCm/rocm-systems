@@ -13,6 +13,7 @@
 #include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <set>
 #include <string>
@@ -24,7 +25,7 @@ namespace argparse
 {
 namespace
 {
-std::string_view
+[[nodiscard]] std::string_view
 strip_dashes(std::string_view name) noexcept
 {
     while(!name.empty() && name.front() == '-')
@@ -32,42 +33,43 @@ strip_dashes(std::string_view name) noexcept
     return name;
 }
 
-std::string
-parser_key_from(const flag_descriptor& descriptor)
+struct flag_keys
+{
+    std::string parser_key;  // for parser.get<T>(key) — uses hyphens, e.g. "log-level"
+    std::string env_key;  // for processed_environs dedup — uses underscores, "log_level"
+};
+
+[[nodiscard]] flag_keys
+keys_from(const flag_descriptor& descriptor)
 {
     if(descriptor.names.empty())
         throw exception<std::runtime_error>("flag_descriptor has no names");
-    return std::string{ strip_dashes(descriptor.names.back()) };
+    auto parser_key = std::string{ strip_dashes(descriptor.names.back()) };
+    auto env_key    = parser_key;
+    std::replace(env_key.begin(), env_key.end(), '-', '_');
+    return { std::move(parser_key), std::move(env_key) };
 }
 
-std::string
-env_key_from(const std::string& parser_key)
+template <typename Container>
+[[nodiscard]] Container
+to_container(const std::vector<std::string_view>& source)
 {
-    auto result = parser_key;
-    std::replace(result.begin(), result.end(), '-', '_');
+    Container result;
+    if constexpr(std::is_same_v<Container, std::vector<std::string>>)
+    {
+        result.reserve(source.size());
+        for(auto value : source)
+            result.emplace_back(value);
+    }
+    else
+    {
+        for(auto value : source)
+            result.emplace(std::string{ value });
+    }
     return result;
 }
 
-std::vector<std::string>
-to_strvec(const std::vector<std::string_view>& source)
-{
-    std::vector<std::string> result;
-    result.reserve(source.size());
-    std::transform(source.begin(), source.end(), std::back_inserter(result),
-                   [](std::string_view value) { return std::string{ value }; });
-    return result;
-}
-
-std::set<std::string>
-to_strset(const std::vector<std::string_view>& source)
-{
-    std::set<std::string> result;
-    for(auto value : source)
-        result.emplace(value);
-    return result;
-}
-
-const char*
+[[nodiscard]] std::string_view
 delimiter_for(join_with join) noexcept
 {
     switch(join)
@@ -75,26 +77,27 @@ delimiter_for(join_with join) noexcept
         case join_with::space: return " ";
         case join_with::comma: return ",";
         case join_with::colon: return ":";
-        case join_with::none:
-        default: return " ";
+        case join_with::none: return {};
     }
+    return {};
 }
 
-std::string
+[[nodiscard]] std::string
 read_value(parser_t& parser, const std::string& key, const flag_descriptor& descriptor)
 {
     switch(descriptor.kind)
     {
         case value_kind::flag: return parser.get<bool>(key) ? "true" : "false";
-
         case value_kind::scalar: return parser.get<std::string>(key);
-
         case value_kind::scalar_int: return std::to_string(parser.get<int64_t>(key));
-
         case value_kind::scalar_double: return std::to_string(parser.get<double>(key));
-
         case value_kind::list:
         {
+            // List values must declare a join. `join_with::none` is a caller
+            // bug — emit_env's delimiter would be empty and produce concatenated
+            // garbage like "abc-def" instead of "abc,def".
+            assert(descriptor.join != join_with::none &&
+                   "value_kind::list requires an explicit join_with");
             auto values = parser.get<std::vector<std::string>>(key);
             return fmt::format("{}", fmt::join(values, delimiter_for(descriptor.join)));
         }
@@ -105,20 +108,19 @@ read_value(parser_t& parser, const std::string& key, const flag_descriptor& desc
 void
 emit_env(parser_data& data, const flag_descriptor& descriptor, const std::string& value)
 {
+    auto delim = delimiter_for(descriptor.join);
+    if(delim.empty()) delim = ":";  // safe scalar default for env-list joiners
     for(auto env_var : descriptor.env_vars)
-    {
-        common::update_env(data.env.current, env_var, value, descriptor.mode,
-                           delimiter_for(descriptor.join), data.env.updated,
-                           data.env.initial);
-    }
+        common::update_env(data.env.current, env_var, value, descriptor.mode, delim,
+                           data.env.updated, data.env.initial);
 }
 
 void
-remember_processed(parser_data& data, const std::string& key,
+remember_processed(parser_data& data, const std::string& env_key,
                    const flag_descriptor& descriptor)
 {
-    data.reg.processed_environs.emplace(key);
-    for(auto alias : descriptor.aliased_env)
+    data.reg.processed_environs.emplace(env_key);
+    for(auto alias : descriptor.dedup_keys)
         data.reg.processed_environs.emplace(std::string{ alias });
 }
 
@@ -129,25 +131,28 @@ apply_count(parser_t::argument& arg, const count_spec& count) noexcept
     if(count.min >= 0) arg.min_count(count.min);
     if(count.max >= 0) arg.max_count(count.max);
 }
-}  // namespace
 
 void
 register_flag(parser_t& parser, parser_data& data, const flag_descriptor& descriptor)
 {
-    auto parser_key = parser_key_from(descriptor);
-    auto env_key    = env_key_from(parser_key);
-    if(!data.reg.environ_filter(env_key, data)) return;
+    auto keys = keys_from(descriptor);
+    if(!data.reg.environ_filter(keys.env_key, data)) return;
 
     auto& arg =
-        parser.add_argument(to_strvec(descriptor.names), std::string{ descriptor.help });
+        parser.add_argument(to_container<std::vector<std::string>>(descriptor.names),
+                            std::string{ descriptor.help });
 
     apply_count(arg, descriptor.count);
     if(!descriptor.dtype.empty()) arg.dtype(std::string{ descriptor.dtype });
-    if(!descriptor.choices.empty()) arg.choices(to_strset(descriptor.choices));
-    if(!descriptor.conflicts.empty()) arg.conflicts(to_strset(descriptor.conflicts));
-    if(!descriptor.requires_.empty()) arg.required(to_strvec(descriptor.requires_));
+    if(!descriptor.choices.empty())
+        arg.choices(to_container<std::set<std::string>>(descriptor.choices));
+    if(!descriptor.conflicts.empty())
+        arg.conflicts(to_container<std::set<std::string>>(descriptor.conflicts));
+    if(!descriptor.requires_.empty())
+        arg.required(to_container<std::vector<std::string>>(descriptor.requires_));
 
-    arg.action([&data, descriptor, parser_key](parser_t& parser_ref) {
+    arg.action([&data, descriptor,
+                parser_key = std::move(keys.parser_key)](parser_t& parser_ref) {
         if(descriptor.custom != nullptr)
         {
             descriptor.custom(parser_ref, data);
@@ -156,8 +161,9 @@ register_flag(parser_t& parser, parser_data& data, const flag_descriptor& descri
         emit_env(data, descriptor, read_value(parser_ref, parser_key, descriptor));
     });
 
-    remember_processed(data, env_key, descriptor);
+    remember_processed(data, keys.env_key, descriptor);
 }
+}  // namespace
 
 void
 register_group(parser_t& parser, parser_data& data, const flag_group& group)

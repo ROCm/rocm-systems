@@ -71,29 +71,19 @@ get_clock_id_choices()
 
 using rocprofsys::common::update_mode;
 
-template <typename Tp>
 void
-update_env(parser_data& _data, std::string_view _env_var, Tp&& _env_val,
-           update_mode _mode = update_mode::REPLACE, std::string_view _join_delim = ":")
+filter_papi_choices(const std::shared_ptr<tim::vsettings>& setting)
 {
-    rocprofsys::common::update_env(_data.env.current, _env_var,
-                                   std::forward<Tp>(_env_val), _mode, _join_delim,
-                                   _data.env.updated, _data.env.initial);
-}
+    static const std::regex prefixed_event{ "[A-Za-z0-9]:([A-Za-z_]+)" };
+    static const std::regex io_event{ "io:::" };
 
-void
-apply_papi_choice_filter(const std::shared_ptr<tim::vsettings>& setting)
-{
-    if(setting->get_name() != "papi_events") return;
     auto choices = setting->get_choices();
-    choices.erase(
-        std::remove_if(choices.begin(), choices.end(),
-                       [](const auto& choice) {
-                           return std::regex_search(
-                                      choice, std::regex{ "[A-Za-z0-9]:([A-Za-z_]+)" }) ||
-                                  std::regex_search(choice, std::regex{ "io:::" });
-                       }),
-        choices.end());
+    choices.erase(std::remove_if(choices.begin(), choices.end(),
+                                 [](const auto& choice) {
+                                     return std::regex_search(choice, prefixed_event) ||
+                                            std::regex_search(choice, io_event);
+                                 }),
+                  choices.end());
     choices.emplace_back("... run `rocprof-sys-avail -H -c CPU` for full list ...");
     setting->set_choices(choices);
 }
@@ -124,13 +114,13 @@ default_setting_filter(vsetting_t* _v, const parser_data& _data)
 bool
 default_environ_filter(std::string_view _v, const parser_data& _data)
 {
-    return (_data.reg.processed_environs.count(_v.data()) == 0);
+    return (_data.reg.processed_environs.count(std::string{ _v }) == 0);
 }
 
 bool
 default_grouping_filter(std::string_view _v, const parser_data& _data)
 {
-    return (_data.reg.processed_groups.count(_v.data()) == 0);
+    return (_data.reg.processed_groups.count(std::string{ _v }) == 0);
 }
 
 parser_data&
@@ -148,10 +138,10 @@ init_parser(parser_data& _data)
         path::realpath(path::get_internal_libpath("librocprof-sys.so").c_str());
 
     auto _libexecpath = path::realpath(path::get_internal_script_path());
-    update_env(_data, env::SCRIPT_PATH, _libexecpath, update_mode::REPLACE);
+    _data.env.set(env::SCRIPT_PATH, _libexecpath, update_mode::REPLACE);
 
     auto _rootpath = path::realpath(path::get_rocprofsys_root());
-    update_env(_data, env::ROOT, _rootpath, update_mode::REPLACE);
+    _data.env.set(env::ROOT, _rootpath, update_mode::REPLACE);
 
     return _data;
 }
@@ -159,7 +149,7 @@ init_parser(parser_data& _data)
 parser_data&
 add_ld_preload(parser_data& _data)
 {
-    update_env(_data, "LD_PRELOAD", _data.env.dl_libpath, update_mode::APPEND);
+    _data.env.set("LD_PRELOAD", _data.env.dl_libpath, update_mode::APPEND);
     return _data;
 }
 
@@ -168,7 +158,7 @@ add_ld_library_path(parser_data& _data)
 {
     auto _libdir = filepath::dirname(_data.env.dl_libpath);
     if(filepath::exists(_libdir))
-        update_env(_data, "LD_LIBRARY_PATH", _libdir, update_mode::APPEND);
+        _data.env.set("LD_LIBRARY_PATH", _libdir, update_mode::APPEND);
     return _data;
 }
 
@@ -211,7 +201,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _backend_choices.erase("amd-smi");
         _backend_choices.erase("rocm");
 
-        update_env(_data, env::USE_AMD_SMI, false);
+        _data.env.set(env::USE_AMD_SMI, false);
     }
 
     _parser.start_group("BACKEND OPTIONS",
@@ -228,7 +218,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 auto _v      = p.get<strset_t>("include");
                 auto _update = [&](const auto& _opt, bool _cond) {
-                    if(_cond || _v.count("all") > 0) update_env(_data, _opt, true);
+                    if(_cond || _v.count("all") > 0) _data.env.set(_opt, true);
                 };
                 _update(env::USE_KOKKOSP, _v.count("kokkosp") > 0);
                 _update(env::USE_MPIP, _v.count("mpip") > 0);
@@ -240,8 +230,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 _update(env::TRACE_THREAD_SPIN_LOCKS, _v.count("spin-locks") > 0);
 
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
-                    update_env(_data, "KOKKOS_TOOLS_LIBS", _data.env.omni_libpath,
-                               update_mode::PREPEND);
+                    _data.env.set("KOKKOS_TOOLS_LIBS", _data.env.omni_libpath,
+                                  update_mode::PREPEND);
             });
 
         _data.reg.processed_environs.emplace("include");
@@ -257,7 +247,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 auto _v      = p.get<strset_t>("exclude");
                 auto _update = [&](const auto& _opt, bool _cond) {
-                    if(_cond || _v.count("all") > 0) update_env(_data, _opt, false);
+                    if(_cond || _v.count("all") > 0) _data.env.set(_opt, false);
                 };
                 _update(env::USE_KOKKOSP, _v.count("kokkosp") > 0);
                 _update(env::USE_MPIP, _v.count("mpip") > 0);
@@ -321,8 +311,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .count(1)
             .dtype("clock-id")
             .action([&](parser_t& p) {
-                update_env(_data, env::TRACE_PERIOD_CLOCK_ID,
-                           p.get<double>("trace-clock-id"));
+                _data.env.set(env::TRACE_PERIOD_CLOCK_ID,
+                              p.get<double>("trace-clock-id"));
             })
             .choices(_clock_id_choices.first)
             .choice_aliases(_clock_id_choices.second);
@@ -392,7 +382,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                 if(_value.empty()) _value = fmt::format("{}", p.get<bool>(_name));
                 if(_value.empty())
                     throw exception<std::runtime_error>("Error! no value for " + _name);
-                update_env(_data, itr->get_env_name(), _value);
+                _data.env.set(itr->get_env_name(), _value);
             });
         }
         else
@@ -405,7 +395,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                     if(_value.empty())
                         throw exception<std::runtime_error>("Error! no value for " +
                                                             _name);
-                    update_env(_data, itr->get_env_name(), _value);
+                    _data.env.set(itr->get_env_name(), _value);
                 });
         }
         return true;
@@ -423,7 +413,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
 
         itr.second->set_enabled(true);
         _settings.emplace_back(itr.second);
-        apply_papi_choice_filter(itr.second);
+        if(itr.second->get_name() == "papi_events") filter_papi_choices(itr.second);
     }
 
     sort_settings_by_name_length(_settings);
@@ -461,7 +451,7 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
 
         itr.second->set_enabled(true);
         _settings.emplace_back(itr.second);
-        apply_papi_choice_filter(itr.second);
+        if(itr.second->get_name() == "papi_events") filter_papi_choices(itr.second);
 
         for(const auto& citr : itr.second->get_categories())
         {

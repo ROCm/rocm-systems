@@ -11,9 +11,7 @@ namespace rocprofsys
 namespace argparse
 {
 
-void
-register_flag(parser_t& parser, parser_data& data, const flag_descriptor& descriptor);
-
+// Walks a flag_group, registering each descriptor onto the parser.
 void
 register_group(parser_t& parser, parser_data& data, const flag_group& group);
 
