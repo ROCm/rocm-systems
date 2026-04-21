@@ -809,7 +809,9 @@ Queue::Queue(
 {
     ROCP_TRACE << "Queue ctor (inline path)";
 
-    if(!context::get_registered_contexts([](const context::context* ctx) {
+    // TODO: re-enable profiler-active PM4 packet when inline intercept supports it
+    if(!queue_intercept::is_intercepting_inline() &&
+       !context::get_registered_contexts([](const context::context* ctx) {
             return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
                     ctx->dispatch_thread_trace || ctx->device_thread_trace);
         }).empty())
