@@ -18,7 +18,7 @@ Source: [TheRock python_style_guide.md](https://github.com/ROCm/TheRock/blob/mai
 ## Type Hints
 
 - Type hints on **all** function signatures
-- Modern syntax only (Python 3.10+): `list[T]`, `dict[K, V]`, `set[T]`, `T | None`
+- Syntax that is compatible with python 3.6.8+
 - **Never** use `Any` except in rare generic code
 - **Never** use `Optional[T]`, `Union[X, Y]`, `List`, `Dict` — use built-in equivalents
 - **Do NOT** use `from __future__ import annotations`

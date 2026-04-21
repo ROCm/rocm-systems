@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 // Include amd_smi.hpp first to get proper AMD_SMI_SDMA_SUPPORTED detection
 // based on the actual AMD SMI library version
@@ -2523,5 +2523,120 @@ TEST_F(DeviceTest, sdma_delta_computation)
     EXPECT_LE(metrics2.sdma_usage, 100U);
 }
 #endif
+
+/**
+ * Verify that sentinel values (0xFFFF) in per-XCP vcn_busy arrays
+ * are preserved during collection — filtering happens at the processor layer.
+ */
+TEST_F(DeviceTest, vcn_busy_collection_preserves_sentinels)
+{
+    amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
+
+    metrics.xcp_stats[0].vcn_busy[0] = 80;
+
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+
+    uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
+            DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
+
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+
+    EXPECT_TRUE(dev.get_supported_metrics().bits.vcn_busy);
+
+    auto collected =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
+
+    EXPECT_EQ(collected.xcp_stats[0].vcn_busy[0], 80U);
+    for(size_t vcn = 1; vcn < AMDSMI_MAX_NUM_VCN; ++vcn)
+    {
+        EXPECT_EQ(collected.xcp_stats[0].vcn_busy[vcn], METRIC_VALUE_NOT_SUPPORTED_16)
+            << "Sentinel in vcn_busy[" << vcn
+            << "] must be preserved for processor-layer filtering";
+    }
+}
+
+/**
+ * Verify that sentinel values (0xFFFF) in device-level vcn_activity
+ * array are preserved during collection — filtering happens at the processor layer.
+ */
+TEST_F(DeviceTest, vcn_activity_device_level_preserves_sentinels)
+{
+    amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
+
+    metrics.vcn_activity[0] = 42;
+
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+
+    uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
+            DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
+
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+
+    EXPECT_TRUE(dev.get_supported_metrics().bits.vcn_activity);
+    EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_busy);
+
+    auto collected =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
+
+    EXPECT_EQ(collected.vcn_activity[0], 42U);
+    for(size_t i = 1; i < AMDSMI_MAX_NUM_VCN; ++i)
+    {
+        EXPECT_EQ(collected.vcn_activity[i], METRIC_VALUE_NOT_SUPPORTED_16)
+            << "Sentinel in vcn_activity[" << i
+            << "] must be preserved for processor-layer filtering";
+    }
+}
+
+/**
+ * Verify that sentinel values in per-XCP jpeg_busy arrays
+ * are preserved during collection — filtering happens at the processor layer.
+ */
+TEST_F(DeviceTest, jpeg_busy_collection_preserves_sentinels)
+{
+    amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
+
+    metrics.xcp_stats[0].jpeg_busy[0] = 60;
+
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+
+    uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
+            DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
+
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+
+    EXPECT_TRUE(dev.get_supported_metrics().bits.jpeg_busy);
+
+    auto collected =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
+
+    EXPECT_EQ(collected.xcp_stats[0].jpeg_busy[0], 60U);
+    for(size_t jpeg = 1; jpeg < ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT; ++jpeg)
+    {
+        EXPECT_EQ(collected.xcp_stats[0].jpeg_busy[jpeg], METRIC_VALUE_NOT_SUPPORTED_16)
+            << "Sentinel in jpeg_busy[" << jpeg
+            << "] must be preserved for processor-layer filtering";
+    }
+}
 
 }  // namespace rocprofsys::pmc::collectors::gpu::testing

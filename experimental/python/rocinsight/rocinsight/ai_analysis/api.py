@@ -26,7 +26,7 @@ Example:
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 
 try:
     from importlib.metadata import version as _pkg_version
@@ -40,6 +40,9 @@ from ..analysis import (
     identify_hotspots,
     analyze_memory_copies,
     analyze_hardware_counters,
+    detect_warmup_issues,
+    analyze_kernel_resources,
+    analyze_api_overhead,
     generate_recommendations,
     _detect_already_collected,
 )
@@ -509,7 +512,7 @@ class AnalysisResult:
 
 
 def analyze_database(
-    database_path: Path,
+    database_path: Union[str, Path],
     *,
     custom_prompt: Optional[str] = None,
     enable_llm: bool = False,
@@ -557,6 +560,7 @@ def analyze_database(
         >>> for rec in result.recommendations.high_priority:
         ...     print(f"- {rec.title}")
     """
+    database_path = Path(database_path)
     # Validate database exists
     if not database_path.exists():
         raise DatabaseNotFoundError(f"Database file not found: {database_path}")
@@ -583,6 +587,11 @@ def analyze_database(
         hardware_counters = analyze_hardware_counters(connection)
         already_collected = _detect_already_collected(connection)
 
+        # ROCM-21553: new analysis functions
+        warmup_issues = detect_warmup_issues(connection, hotspots)
+        kernel_resources = analyze_kernel_resources(connection, hotspots)
+        api_overhead_data = analyze_api_overhead(connection)
+
         # TraceLens-derived analysis
         interval_timeline = compute_interval_timeline(connection)
         kernel_categories = analyze_kernels_by_category(
@@ -608,6 +617,8 @@ def analyze_database(
             short_kernels=short_kernels_data,
             interval_timeline=interval_timeline,
             att_analysis=att_analysis if att_dir else None,
+            warmup_issues=warmup_issues,
+            api_overhead=api_overhead_data,
         )
 
         if verbose:
@@ -630,11 +641,17 @@ def analyze_database(
     result.kernel_categories = kernel_categories
     result.short_kernels = short_kernels_data
     result.interval_timeline = interval_timeline
+    result.kernel_resources = kernel_resources
+    result.api_overhead = api_overhead_data
+    result.warmup_issues = warmup_issues
 
     # Also write into _raw so to_json() / to_webview() include them
     result._raw["interval_timeline"] = interval_timeline
     result._raw["kernel_categories"] = kernel_categories
     result._raw["short_kernels"] = short_kernels_data
+    result._raw["kernel_resources"] = kernel_resources
+    result._raw["api_overhead"] = api_overhead_data
+    result._raw["warmup_issues"] = warmup_issues
     if att_dir and att_analysis.get("has_att_data"):
         result._raw["att_trace"] = att_analysis
         result._raw["att_analysis"] = att_analysis
@@ -821,7 +838,7 @@ def _build_analysis_result(
 
         if priority_upper == "HIGH":
             rec_set.high_priority.append(recommendation)
-        elif priority_upper == "MEDIUM":
+        elif priority_upper in ("MEDIUM", "INFO"):
             rec_set.medium_priority.append(recommendation)
         else:
             rec_set.low_priority.append(recommendation)
@@ -923,8 +940,8 @@ def _convert_result_to_llm_format(result: AnalysisResult) -> Dict[str, Any]:
 
 
 def analyze_database_to_json(
-    database_path: Path,
-    output_json_path: Optional[Path] = None,
+    database_path: Union[str, Path],
+    output_json_path: Optional[Union[str, Path]] = None,
     **kwargs,
 ) -> str:
     """
@@ -948,12 +965,12 @@ def analyze_database_to_json(
     json_output = result.to_json()
 
     if output_json_path:
-        output_json_path.write_text(json_output)
+        Path(output_json_path).write_text(json_output)
 
     return json_output
 
 
-def get_kernel_analysis(database_path: Path, kernel_name: str, **kwargs) -> Dict:
+def get_kernel_analysis(database_path: Union[str, Path], kernel_name: str, **kwargs) -> Dict:
     """
     Get analysis for a specific kernel.
 
@@ -970,7 +987,7 @@ def get_kernel_analysis(database_path: Path, kernel_name: str, **kwargs) -> Dict
 
 
 def get_recommendations(
-    database_path: Path,
+    database_path: Union[str, Path],
     priority_filter: Optional[str] = None,
     category_filter: Optional[str] = None,
     **kwargs,
@@ -1006,7 +1023,7 @@ def get_recommendations(
 
 
 def analyze_source(
-    source_dir: Path,
+    source_dir: Union[str, Path],
     *,
     custom_prompt: Optional[str] = None,
     enable_llm: bool = False,
@@ -1046,6 +1063,7 @@ def analyze_source(
         >>> for rec in result.recommendations:
         ...     print(f"[{rec['priority']}] {rec['category']}: {rec['issue']}")
     """
+    source_dir = Path(source_dir)
     if not source_dir.exists() or not source_dir.is_dir():
         raise SourceDirectoryNotFoundError(
             f"Source directory not found or not a directory: {source_dir}"
@@ -1097,7 +1115,7 @@ def analyze_source(
     return result
 
 
-def validate_database(database_path: Path) -> Dict[str, Any]:
+def validate_database(database_path: Union[str, Path]) -> Dict[str, Any]:
     """
     Validate database schema and contents without performing analysis.
 
@@ -1112,6 +1130,7 @@ def validate_database(database_path: Path) -> Dict[str, Any]:
         >>> print(f"Valid: {validation['is_valid']}")
         >>> print(f"Analysis tier: {validation['tier']}")
     """
+    database_path = Path(database_path)
     if not database_path.exists():
         raise DatabaseNotFoundError(f"Database not found: {database_path}")
 

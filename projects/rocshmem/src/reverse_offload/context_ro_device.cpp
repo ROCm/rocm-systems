@@ -35,6 +35,7 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
 #include "backend_type.hpp"
+#include "log.hpp"
 #include "hdp_policy.hpp"
 #include "backend_proxy.hpp"
 #include "backend_ro.hpp"
@@ -276,26 +277,6 @@ __device__ void ROContext::sync_wg(rocshmem_team_t team) {
   __syncthreads();
 }
 
-__device__ void ROContext::ctx_destroy() {
-  if (is_thread_zero_in_block()) {
-    ROBackend *backend{static_cast<ROBackend *>(device_backend_proxy)};
-    BackendProxyT &backend_proxy{backend->backend_proxy};
-    auto *proxy{backend_proxy.get()};
-
-    build_queue_element(RO_NET_FINALIZE, nullptr, nullptr, 0, 0, 0, 0, 0,
-                        nullptr, nullptr, NULL, ro_net_win_id,
-                        block_handle, true, get_status_flag(), is_default_ctx);
-
-    int buffer_id = ro_net_win_id;
-    backend->queue_.descriptor(buffer_id)->write_index = block_handle->write_index;
-
-    ROStats &global_handle = proxy->profiler[buffer_id];
-    global_handle.accumulateStats(block_handle->profiler);
-  }
-
-  __syncthreads();
-}
-
 __device__ void ROContext::putmem_wg(void *dest, const void *source,
                                      size_t nelems, int pe) {
   int local_pe{-1};
@@ -456,7 +437,7 @@ __device__ void ROContext::putmem_signal(void *dest, const void *source, size_t 
       amo_add<uint64_t>(static_cast<void*>(sig_addr), signal, pe);
       break;
     default:
-      DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
+      LOGD_WARN("[%s] Invalid sig_op value (%d)", __func__, sig_op);
       break;
   }
 }
@@ -476,7 +457,7 @@ __device__ void ROContext::putmem_signal_wg(void *dest, const void *source, size
       amo_add<uint64_t>(static_cast<void*>(sig_addr), signal, pe);
       break;
     default:
-      DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
+      LOGD_WARN("[%s] Invalid sig_op value (%d)", __func__, sig_op);
       break;
     }
   }
@@ -497,7 +478,7 @@ __device__ void ROContext::putmem_signal_wave(void *dest, const void *source, si
       amo_add<uint64_t>(static_cast<void*>(sig_addr), signal, pe);
       break;
     default:
-      DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
+      LOGD_WARN("[%s] Invalid sig_op value (%d)", __func__, sig_op);
       break;
     }
   }

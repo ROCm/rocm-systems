@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 #
 set(component_sources
     ${CMAKE_CURRENT_LIST_DIR}/backtrace.cpp

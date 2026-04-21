@@ -49,7 +49,13 @@ rocDecode is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. 
       * :doc:`The rocDecode parser API <./reference/rocDecode-parser>`
       * :doc:`The rocDecode hardware decoder API <./reference/rocDecode-hw-decoder>`
       * :doc:`The rocDecode software decoder API <./reference/rocDecode-sw-decoder>`
-      
+    
+    * :doc:`The rocDecode utility classes <./reference/rocDecode-utility-classes>`
+
+      * :doc:`The rocDecode RocVideoDecoder<./reference/rocDecode-util-decoder>`
+      * :doc:`The rocDecode demultiplexer <./reference/rocDecode-demux>`
+      * :doc:`The rocDecode FFMpeg decoder <./reference/rocDecode-ffmpeg-decoder>`
+
     * :doc:`rocDecode logging levels <./reference/rocDecode-logging-control>`
     * :doc:`rocDecode codec support and hardware capabilities <./reference/rocDecode-formats-and-architectures>`
     * :doc:`API library <../doxygen/html/files>`

@@ -19,7 +19,7 @@
                     "description": "Check for vcn_activity amd-smi metrics",
                     "error_message": "Did not find vcn_activity in amd-smi metrics",
                     "expected_result": 1,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE symbol LIKE 'VcnAct%'"
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE symbol LIKE 'device_vcn_activity_%'"
                 }
             ]
         },

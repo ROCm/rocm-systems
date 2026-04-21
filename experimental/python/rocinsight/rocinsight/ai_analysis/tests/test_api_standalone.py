@@ -397,3 +397,44 @@ class TestBuildAnalysisResultKeyMapping:
             custom_prompt=None,
         )
         assert len(result.recommendations.medium_priority) == 1
+
+
+# ---------------------------------------------------------------------------
+# str path coercion (analyze_database, analyze_source, validate_database)
+# ---------------------------------------------------------------------------
+
+
+class TestStrPathCoercion:
+    """Verify that public API functions accept str paths without crashing."""
+
+    def test_analyze_database_rejects_missing_str_path(self):
+        """analyze_database(str) should raise DatabaseNotFoundError, not AttributeError."""
+        from rocinsight.ai_analysis.api import analyze_database
+        from rocinsight.ai_analysis.exceptions import DatabaseNotFoundError
+
+        with pytest.raises(DatabaseNotFoundError):
+            analyze_database("/nonexistent/path/to/db.db")
+
+    def test_analyze_source_rejects_missing_str_path(self):
+        """analyze_source(str) should raise SourceDirectoryNotFoundError, not AttributeError."""
+        from rocinsight.ai_analysis.api import analyze_source
+        from rocinsight.ai_analysis.exceptions import SourceDirectoryNotFoundError
+
+        with pytest.raises(SourceDirectoryNotFoundError):
+            analyze_source("/nonexistent/path/to/source")
+
+    def test_validate_database_rejects_missing_str_path(self):
+        """validate_database(str) should raise DatabaseNotFoundError, not AttributeError."""
+        from rocinsight.ai_analysis.api import validate_database
+        from rocinsight.ai_analysis.exceptions import DatabaseNotFoundError
+
+        with pytest.raises(DatabaseNotFoundError):
+            validate_database("/nonexistent/path/to/db.db")
+
+    def test_analyze_database_accepts_path_object(self):
+        """analyze_database(Path) still works (regression guard)."""
+        from rocinsight.ai_analysis.api import analyze_database
+        from rocinsight.ai_analysis.exceptions import DatabaseNotFoundError
+
+        with pytest.raises(DatabaseNotFoundError):
+            analyze_database(Path("/nonexistent/path/to/db.db"))
