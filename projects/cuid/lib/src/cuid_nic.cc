@@ -201,7 +201,6 @@ amdcuid_status_t CuidNic::get_primary_cuid(amdcuid_primary_id &id) const {
   std::string cuid_file_path = CuidUtilities::priv_cuid_file();
   CuidFile primary_file(cuid_file_path, false);
   primary_file.load();
-  std::vector<CuidFileEntry> entries = primary_file.get_entries();
 
   CuidFileEntry entry;
   amdcuid_status_t status =

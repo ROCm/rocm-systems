@@ -49,8 +49,8 @@ uint64_t PciUtil::le64_to_be64(uint64_t value) {
          ((value & 0xFF00000000000000ULL) >> 56);
 }
 
-// function should only work with PCI devices, which so far includes GPUs and
-// NICs. May later include NPU and storage.
+// This function should only work with PCI devices, which currently includes
+// GPUs, NICs, and NPUs. It may later include storage devices as well.
 amdcuid_status_t PciUtil::read_pci_config_space(std::string bdf,
                                                 uint8_t *buffer,
                                                 size_t buffer_size,
@@ -71,26 +71,35 @@ amdcuid_status_t PciUtil::read_pci_config_space(std::string bdf,
   }
 
   config_file.seekg(0, std::ios::end);
-  int length = config_file.tellg();
+  std::ifstream::pos_type length = config_file.tellg();
+  if (length < 0) {
+    config_file.close();
+    return AMDCUID_STATUS_PCI_ERROR;
+  }
   config_file.seekg(0, std::ios::beg);
+  if (!config_file) {
+    config_file.close();
+    return AMDCUID_STATUS_PCI_ERROR;
+  }
+
+  if (static_cast<std::ifstream::pos_type>(offset) + buffer_size > length) {
+    config_file.close();
+    return AMDCUID_STATUS_PCI_ERROR;
+  }
 
   config_file.seekg(offset, std::ios::beg);
+  if (!config_file) {
+    config_file.close();
+    return AMDCUID_STATUS_PCI_ERROR;
+  }
+
   config_file.read(reinterpret_cast<char *>(buffer), buffer_size);
-  int err = errno;
-  if (config_file.bad()) {
+  if (config_file.fail() || static_cast<size_t>(config_file.gcount()) !=
+                                buffer_size) {
     config_file.close();
     return AMDCUID_STATUS_PCI_ERROR;
   }
   return AMDCUID_STATUS_SUCCESS;
-}
-
-// Helper to check if a handle has non-zero bytes
-static bool is_pci_handle_nonzero(const amdcuid_id_t &handle) {
-  for (int i = 0; i < 16; ++i) {
-    if (handle.bytes[i] != 0)
-      return true;
-  }
-  return false;
 }
 
 // iterate capabilities list to find the relevant capability

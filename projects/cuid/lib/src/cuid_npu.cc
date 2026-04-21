@@ -283,12 +283,12 @@ CuidNpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
     status = PciUtil::read_pci_config_space(m_info.bdf, fingerprint_bytes,
                                             fingerprint_size, offset);
     if (status == AMDCUID_STATUS_SUCCESS) {
-      fingerprint = PciUtil::le64_to_be64(
-          *reinterpret_cast<uint64_t *>(fingerprint_bytes));
+      uint64_t fingerprint_value = 0;
+      std::memcpy(&fingerprint_value, fingerprint_bytes, fingerprint_size);
+      fingerprint = PciUtil::le64_to_be64(fingerprint_value);
       return AMDCUID_STATUS_SUCCESS;
     } else {
       fingerprint = 0;
-      delete[] fingerprint_bytes;
       return status;
     }
   }
