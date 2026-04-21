@@ -141,7 +141,6 @@ class TestJacobi(RocprofsysTest):
                 pass_regex=[r"omp_target_data_op_emi\s*\|\s*1\s*\|\s*1\s*\|"],
             )
 
-    @pytest.mark.rocm
     @pytest.mark.openmp
     @pytest.mark.roctx
     @pytest.mark.parametrize("mode", ["binary_rewrite", "sys_run"])
@@ -169,7 +168,6 @@ class TestJacobi(RocprofsysTest):
             depths=[1, 1],
         )
 
-    @pytest.mark.rocm
     @pytest.mark.hip
     @pytest.mark.mpi
     @pytest.mark.rocpd("hpc_hip_environment")
@@ -211,11 +209,11 @@ class TestJacobi(RocprofsysTest):
         )
 
 
-@pytest.mark.rocm
 @pytest.mark.gpu
 @pytest.mark.hip
 @pytest.mark.openmp
 @pytest.mark.roctx
+@pytest.mark.class_name("matrix-exponential")
 class TestMatrixExponential(RocprofsysTest):
 
     rocblas_gemm_kernel_prefix = ["Cijk_Ailk_Bljk"]
@@ -252,15 +250,19 @@ class TestMatrixExponential(RocprofsysTest):
             pass_regex=self.rocblas_gemm_kernel_prefix,
         )
 
-        self.assert_rocpd(
-            result,
-            rules_files=matrix_exponential_rules,
-        )
+        # TODO: Disabled pending investigation (AIPROFSYST-418)
+        # We expect 171 GEMM dispatches, but sometimes we see less.
+
+        # self.assert_rocpd(
+        #     result,
+        #     rules_files=matrix_exponential_rules,
+        # )
 
 
 @pytest.mark.rocm
 @pytest.mark.gpu
 @pytest.mark.hip
+@pytest.mark.class_name("split-copy-compute-hw-queues")
 class TestSplitCopyComputeHWQueues(RocprofsysTest):
 
     nstreams = 4

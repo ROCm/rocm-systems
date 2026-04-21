@@ -170,6 +170,7 @@ def get_ls_command() -> tuple[str, list[str]]:
 
 
 @pytest.mark.instrument
+@pytest.mark.class_name("rocprofiler-systems-instrument")
 class TestRocprofilerSystemsInstrument(RocprofsysTest):
     """Tests for rocprof-sys-instrument binary."""
 
@@ -333,6 +334,7 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
 
 
 @pytest.mark.avail
+@pytest.mark.class_name("rocprofiler-systems-avail")
 class TestRocprofilerSystemsAvail(RocprofsysTest):
     """Tests for rocprof-sys-avail binary."""
 
@@ -774,6 +776,7 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
 
 
 @pytest.mark.sys_run
+@pytest.mark.class_name("rocprofiler-systems-run")
 class TestRocprofilerSystemsRun(RocprofsysTest):
     """Tests for rocprof-sys-run binary."""
 

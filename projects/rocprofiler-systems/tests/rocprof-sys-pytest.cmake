@@ -63,7 +63,7 @@ else()
 endif()
 
 # Read requirements.txt for the minimum pytest version
-set(_requirements_file "${CMAKE_SOURCE_DIR}/requirements.txt")
+set(_requirements_file "${PROJECT_SOURCE_DIR}/requirements.txt")
 if(EXISTS "${_requirements_file}")
     file(STRINGS "${_requirements_file}" _req_lines REGEX "^pytest>=")
     if(_req_lines)
@@ -96,7 +96,7 @@ function(ROCPROFILER_SYSTEMS_CONFIGURE_TEST_VAR PYTEST_VAR LIST_TO_ADD TO_INCLUD
         if(_current)
             string(APPEND _current " and ")
         endif()
-        if(${TO_INCLUDE})
+        if(TO_INCLUDE)
             string(APPEND _current "${_to_add}")
         else()
             string(APPEND _current "not ${_to_add}")

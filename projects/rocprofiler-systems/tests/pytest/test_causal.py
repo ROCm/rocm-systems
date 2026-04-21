@@ -174,6 +174,7 @@ class TestCausal(RocprofsysTest):
         ),
     ],
 )
+@pytest.mark.class_name("causal-e2e")
 class TestCausalE2E(RocprofsysTest):
     PASS_REGEX = [
         r"Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"

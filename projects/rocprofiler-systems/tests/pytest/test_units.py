@@ -17,6 +17,7 @@ pytestmark = [pytest.mark.unit_tests]
 # =============================================================================
 
 
+@pytest.mark.class_name("unit-tests")
 class TestUnitTests(RocprofsysTest):
     def test(self, rocprof_config):
         if rocprof_config.is_installed:

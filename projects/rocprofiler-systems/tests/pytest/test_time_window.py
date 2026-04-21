@@ -33,6 +33,7 @@ def time_window_env() -> dict[str, str]:
 # ============================================================================
 
 
+@pytest.mark.class_name("trace-time-window")
 class TestTraceTimeWindow(RocprofsysTest):
     REWRITE_ARGS = ["-e", "-v", "2", "--caller-include", "inner", "-i", "4096"]
     RUNTIME_ARGS = ["-e", "-v", "1", "--caller-include", "inner", "-i", "4096"]

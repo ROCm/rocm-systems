@@ -191,7 +191,7 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_FOR_THEROCK "Build rocprofiler-s
 # own python discovery, even when versions differ. Unset them to prevent this.
 unset(Python3_EXECUTABLE CACHE)
 
-# Old behavior, will be removed once CTest calls pytest
+# TODO: Deprecate once TheRock switches to CTests
 if(ROCPROFSYS_BUILD_FOR_THEROCK AND NOT DEFINED ROCPROFSYS_USE_PYTESTS)
     set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
     set(ROCPROFSYS_INSTALL_EXAMPLES ON CACHE BOOL "Enable installing examples" FORCE)

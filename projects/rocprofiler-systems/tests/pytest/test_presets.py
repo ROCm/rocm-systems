@@ -34,8 +34,8 @@ ROCPD_PRESETS = ["workload-trace"]
 
 
 @pytest.mark.sampling
+@pytest.mark.class_name("sample-presets")
 class TestSamplePresets(RocprofsysTest):
-
     @pytest.mark.timeout(60)
     @pytest.mark.parametrize("preset", PRESETS)
     def test_preset(self, preset):
@@ -74,6 +74,7 @@ class TestSamplePresets(RocprofsysTest):
 
 @pytest.mark.timeout(60)
 @pytest.mark.sys_run
+@pytest.mark.class_name("run-presets")
 class TestRunPresets(RocprofsysTest):
     @pytest.mark.parametrize("preset", PRESETS)
     def test_preset(self, preset):
@@ -110,8 +111,8 @@ class TestRunPresets(RocprofsysTest):
 
 
 @pytest.mark.timeout(60)
+@pytest.mark.class_name("sample-domain-flags")
 class TestSampleDomainFlags(RocprofsysTest):
-
     @pytest.mark.sampling
     def test_gpu(self):
         result = self.run_test(
@@ -189,8 +190,8 @@ class TestSampleDomainFlags(RocprofsysTest):
 
 
 @pytest.mark.timeout(60)
+@pytest.mark.class_name("run-domain-flags")
 class TestRunDomainFlags(RocprofsysTest):
-
     @pytest.mark.sys_run
     def test_gpu(self):
         result = self.run_test(
@@ -268,8 +269,8 @@ class TestRunDomainFlags(RocprofsysTest):
 
 
 @pytest.mark.timeout(30)
+@pytest.mark.class_name("export-config")
 class TestExportConfig(RocprofsysTest):
-
     @pytest.mark.sys_run
     def test_export_run(self):
         result = self.run_test(
@@ -297,6 +298,7 @@ class TestExportConfig(RocprofsysTest):
 
 
 @pytest.mark.timeout(30)
+@pytest.mark.class_name("preset-discovery")
 class TestPresetDiscovery(RocprofsysTest):
     @pytest.mark.sys_run
     def test_list_presets_run(self):

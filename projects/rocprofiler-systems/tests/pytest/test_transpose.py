@@ -253,6 +253,7 @@ class TestTranspose(RocprofsysTest):
 @pytest.mark.mpi_optional("transpose")
 @pytest.mark.rocprofiler
 @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite"])
+@pytest.mark.class_name("transpose-rocprofiler")
 class TestTransposeROCProfiler(RocprofsysTest):
     REWRITE_ARGS = ["-e", "-v", "2", "-E", "uniform_int_distribution"]
 

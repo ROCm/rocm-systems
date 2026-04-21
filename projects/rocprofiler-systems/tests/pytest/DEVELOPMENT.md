@@ -98,6 +98,28 @@ Transpose_parametrized_2_32_32_sys_run
 
 Note: pytest applies decorators bottom-up, so the **bottom** `@pytest.mark.parametrize` varies first (outermost loop). Place `mode` on top so it varies last in the name.
 
+### Standardized test names
+
+During collection, `_standardize_test_name()` in `conftest.py` builds a short name used for `-k` filtering and CTest identity.
+
+- The `test_` / `test-` prefix is stripped from the method name.
+- By default, the **`Test`** prefix is stripped from the class name, then the class segment and method segment are joined.
+
+**Shape:** Prefer names that read as **`<word>-<word>-...`**. Standardized names use **lowercase hyphenated** form: underscores become hyphens, repeated hyphens are collapsed, and the combined string is lowercased.
+
+**Long CamelCase classes:** A class like `TestRocprofilerSystemsRun` would produce a long, hard-to-read segment. Put **`@pytest.mark.class_name("rocprofiler-systems-run")`** on the class to supply an explicit hyphenated prefix. Example:
+
+```python
+@pytest.mark.class_name("rocprofiler-systems-run")
+class TestRocprofilerSystemsRun(RocprofsysTest):
+    def test_help(self):
+        ...
+```
+
+That yields a stable name such as `rocprofiler-systems-run-help`.
+
+`@pytest.mark.depends_on(...)` refers to the **standardized** name; use the same naming rules when declaring dependencies.
+
 ### ROCpd Validation
 
 ROCpd requires an environment fixture for injection. Mark the test with `@pytest.mark.rocpd("<env_fixture_name>")`. Do **not** set `ROCPROFSYS_USE_ROCPD=ON` explicitly. It is injected automatically when conditions are met.
@@ -148,10 +170,12 @@ If a test requires significant resources, mark it with `@pytest.mark.serialize` 
 
 ### Test Dependencies
 
-If a test depends on the output of another test, use `depends_on` and `preserve` together:
+If a test depends on the output of another test, use `depends_on` and `preserve` together.
+
+Use the **standardized test name** of the producer in both `@pytest.mark.depends_on(...)` and any path under `test_output_base` (output directories are named after `request.node.name`, which is set during collection). Those names follow the rules in **Standardized test names** above—derive them from class + method (and parametrization) the same way, or copy the name from a generated `CTestTestfile.cmake` / `ctest -N` listing when in doubt.
 
 - `@pytest.mark.preserve("file1", "file2", ...)` — Prevents files from being deleted after the test completes, even when `ROCPROFSYS_KEEP_TEST_OUTPUT=0`.
-- `@pytest.mark.depends_on("TestName_method")` - Declares a CTest dependency. The argument is the standardized test name (see `_standardize_test_name()` in `conftest.py`).
+- `@pytest.mark.depends_on("producer-generate", ...)` — Declares a CTest dependency on one or more tests. Each argument must **exactly** match the producer’s standardized name (implementation: `_standardize_test_name()` in `conftest.py`).
 
 ```python
 class TestProducer(RocprofsysTest):
@@ -160,9 +184,9 @@ class TestProducer(RocprofsysTest):
         ...
 
 class TestConsumer(RocprofsysTest):
-    @pytest.mark.depends_on("Producer_generate")
+    @pytest.mark.depends_on("producer-generate")
     def test_consume(self, test_output_base):
-        file_path = test_output_base / "Producer_generate" / "coverage.json"
+        file_path = test_output_base / "producer-generate" / "coverage.json"
         ...
 ```
 
@@ -179,7 +203,7 @@ There are two types of markers:
 When adding a functional marker:
 
 1. Register it in `pytest_configure()`.
-2. Add skip logic in `pytest_collection_modifyitems`. If the condition requires system checks, prefer wrapping it in a lambda for deferred evaluation.
+2. Add skip logic in `pytest_collection_modifyitems`. The convention is to define a checker function named `<keyword>_unavailable_reason(...)` that returns either `None` (when the requirement is met) or a `str` explaining why the test must be skipped (e.g. `gpu_unavailable_reason`, `mpi_unavailable_reason`). Then plug that function into the `_skip(...)` call for your marker.
 3. If the marker depends on a system capability not already tracked by `SystemCapabilities`, add it to `capabilities.py`.
 
 **CTest label behavior:** By default, all markers are included as CTest labels (e.g., `ctest -L "rocm"` filters by the `@pytest.mark.rocm` marker). To change how a marker appears in the generated CTest definitions, add it to one of these sets in `_generate_ctest_definitions()`:

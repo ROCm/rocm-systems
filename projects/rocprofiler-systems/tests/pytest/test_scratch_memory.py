@@ -43,6 +43,7 @@ def scratch_memory_rules(validation_rules_dir: Path) -> list[Path]:
 # =============================================================================
 
 
+@pytest.mark.class_name("scratch-memory")
 class TestScratchMemory(RocprofsysTest):
     SCRATCH_MEMORY_PASS_REGEX = [
         "Detected [1-9][0-9]* agents",

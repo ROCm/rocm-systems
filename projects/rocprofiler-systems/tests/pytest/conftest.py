@@ -65,6 +65,8 @@ _show_on_subfail_key: StashKey[bool] = StashKey()
 SKIP_RETURN_CODE = 77
 # Default timeout for tests in seconds
 DEFAULT_TIMEOUT = 300
+# Extra seconds added to pytest timeout in generated CTest (flush / teardown)
+CTEST_TIMEOUT_BUFFER = 5
 
 # Accepted runner types when using parametrized "mode" marker
 ROCPROFSYS_RUNNER_CLASSES = {
@@ -79,6 +81,8 @@ ROCPROFSYS_RUNNER_CLASSES = {
 # Accepted runner types when using parametrized "mode" marker
 ROCPROFSYS_RUNNER_NAMES = list(ROCPROFSYS_RUNNER_CLASSES.keys())
 
+# rocprofiler-sdk < 1.2.2 can abort on undefined KFD node IDs; product disables KFD domains.
+KFD_MIN_SDK_VERSION: tuple[int, int, int] = (1, 2, 2)
 
 # ============================================================================
 #
@@ -179,7 +183,7 @@ def pytest_configure(config: pytest.Config) -> None:
 
     if config.getoption("--show-config-only", default=False):
         pytest._config_ref = config
-        header = _generate_rocprofsys_config_header(config)
+        header = _generate_rocprofsys_config_header()
         for line in header:
             print(line)
         pytest.exit("Header generated", returncode=0)
@@ -256,6 +260,12 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         "serialize: mark test as serializable (used for CTest)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "class_name(segment): hyphenated logical name for standardized / CTest test "
+        "names (replaces the auto-derived class segment from TestCamelCase; "
+        "e.g. 'rocprofiler-systems-instrument')",
     )
     config.addinivalue_line(
         "markers",
@@ -356,7 +366,7 @@ def pytest_configure(config: pytest.Config) -> None:
 def pytest_report_header(config) -> list[str]:
     if not config.getoption("--ci-mode", default=False):
         return []
-    return _generate_rocprofsys_config_header(config)
+    return _generate_rocprofsys_config_header()
 
 
 # ----------------------------------------------------------------------------
@@ -403,6 +413,20 @@ def pytest_generate_tests(metafunc):
             )
 
 
+# ----------------------------------------------------------------------------
+# run_if_gpu_category: namespace for eval() (not an availability / skip reason helper)
+# ----------------------------------------------------------------------------
+
+
+def gpu_category_eval_context() -> dict[str, bool]:
+    info = get_gpu_info()
+    return {
+        "instinct": info is not None and "instinct" in info.categories,
+        "radeon": info is not None and "radeon" in info.categories,
+        "apu": info is not None and "apu" in info.categories,
+    }
+
+
 def pytest_collection_modifyitems(config, items) -> None:
     """Modify items based on markers."""
     verbose = config.option.verbose > 0
@@ -412,56 +436,17 @@ def pytest_collection_modifyitems(config, items) -> None:
     except Exception as e:
         pytest.exit(f"{e}")
 
-    # Availability conditions for certain tests
-    # These should always be lambdas for performance
-    overflow_available = lambda: (
-        rocprof_config.capabilities.perf_event_paranoid <= 3
-        or rocprof_config.capabilities.cap_sys_admin
-        or rocprof_config.capabilities.cap_perfmon
-    )
-    gpu_available = lambda: (
-        (gpu_info := get_gpu_info()) is not None and gpu_info.available
-    )
-    gpu_category_eval_context = lambda: {
-        "instinct": (info := get_gpu_info()) is not None
-        and "instinct" in info.categories,
-        "radeon": (info := get_gpu_info()) is not None and "radeon" in info.categories,
-        "apu": (info := get_gpu_info()) is not None and "apu" in info.categories,
-    }
-    annotate_available = lambda: (
-        rocprof_config.capabilities.papi_availability and overflow_available()
-    )
-    attach_available = lambda: rocprof_config.capabilities.ptrace_scope == 0
-    nic_available = lambda: (
-        rocprof_config.capabilities.papi_nic_events is not None
-        and rocprof_config.capabilities.perf_event_paranoid <= 2
-    )
-    # rocprofiler-sdk < 1.2.2 can abort on undefined KFD node IDs; product disables KFD domains.
-    _kfd_min_sdk = (1, 2, 2)
-    kfd_available = lambda: (
-        (_sdk := rocprof_config.capabilities.rocprofiler_sdk_version) is not None
-        and _sdk >= _kfd_min_sdk
-    )
-    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
-    mpi_available = lambda: (
-        rocprof_config.capabilities.mpiexec_exec is not None
-        and not config.getoption("--ci-mode", default=False)
-    )
-    python_base_available = lambda: (rocprof_config.rocprofsys_python is not None)
-    python_versions_available = lambda: (
-        rocprof_config.capabilities.supported_python_versions is not None
-        and os.environ.get("ROCPROFSYS_USE_PYTHON", "ON").upper() == "ON"
-    )
-    xnack_available = lambda: (get_xnack_support(rocprof_config.rocm_path))
-
     # ----------------------------------------------------------------------------
     def base_modifications(item: pytest.Item) -> None:
         """This function should be called for every item."""
-        _standardize_test_name(item, verbose=verbose)
+        _standardize_test_name(item, config, verbose=verbose)
 
         # Handle optional markers
         # The general form is <name>_optional(...). If the condition is met, <name> marker is added
-        if "mpi_optional" in item.keywords and mpi_available():
+        if (
+            "mpi_optional" in item.keywords
+            and mpi_unavailable_reason(rocprof_config, config) is None
+        ):
             target = item.get_closest_marker("mpi_optional").args[0]
             try:
                 target_path = rocprof_config.get_target_executable(target)
@@ -471,12 +456,16 @@ def pytest_collection_modifyitems(config, items) -> None:
                 pass
 
         # Marker dependencies
-        add_marker_if(item, "papi", cond=annotate_available, req_mark="annotate")
+        add_marker_if(
+            item,
+            "papi",
+            req_mark="annotate",
+            unavailable_reason=lambda: annotate_unavailable_reason(rocprof_config),
+        )
         add_marker_if(item, "mpi", req_mark="mpi_implementation")
         add_marker_if(item, "python", req_mark="python_versions")
         add_marker_if(item, "gpu", req_mark="multi_gpu")
 
-        # ----------------------------------------------------------------------------
         # Add corresponding runner type markers based on parametrized values ("mode")
         detected_runners: set[str] = set()
         if hasattr(item, "callspec") and item.callspec:
@@ -518,12 +507,16 @@ def pytest_collection_modifyitems(config, items) -> None:
     # "Skip" markers are left for runtime evaluation
     for item in items:
         base_modifications(item)
-        if "gpu" in item.keywords and not gpu_available():
-            item.add_marker(pytest.mark.skip(reason="No valid GPU available"))
+        if "gpu" in item.keywords:
+            _msg = gpu_unavailable_reason()
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
         if "ucx" in item.keywords and not rocprof_config.capabilities.ucx_availability:
             item.add_marker(pytest.mark.skip(reason="UCX not available"))
-        if "mpi" in item.keywords and not mpi_available():
-            item.add_marker(pytest.mark.skip(reason="MPI not available"))
+        if "mpi" in item.keywords:
+            _msg = mpi_unavailable_reason(rocprof_config, config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
         if "mpi_implementation" in item.keywords:
             req_impl = item.get_closest_marker("mpi_implementation").args[0]
             if req_impl != rocprof_config.capabilities.mpi_implementation:
@@ -532,56 +525,45 @@ def pytest_collection_modifyitems(config, items) -> None:
                         reason=f"Requires {req_impl}, but {rocprof_config.capabilities.mpi_implementation} found"
                     )
                 )
-        if "overflow" in item.keywords and not overflow_available():
-            item.add_marker(
-                pytest.mark.skip(
-                    reason="Requires either perf_event_paranoid <= 3, CAP_SYS_ADMIN, or CAP_PERFMON to be available"
-                )
-            )
-        if "attach" in item.keywords and not attach_available():
-            item.add_marker(
-                pytest.mark.skip(
-                    reason="Requires ptrace_scope to be 0. Run 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope' to enable attaching to process"
-                )
-            )
+        if "overflow" in item.keywords:
+            _msg = overflow_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "attach" in item.keywords:
+            _msg = attach_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
         if "python" in item.keywords:
-            if not python_base_available():
-                item.add_marker(pytest.mark.skip(reason="rocprof-sys-python not found"))
-            if not python_versions_available():
-                item.add_marker(
-                    pytest.mark.skip(
-                        reason="No supported Python versions. Each version needs a corresponding "
-                        "libpyrocprofsys.<IMPL>-<VERSION>-<ARCH>-<OS>-<ABI>.so in site-packages/rocprofsys."
-                    )
-                )
-        if "julia" in item.keywords and not rocprof_config.capabilities.julia_exec:
-            item.add_marker(pytest.mark.skip(reason="Julia not available"))
-        if "xnack" in item.keywords and not xnack_available():
-            item.add_marker(pytest.mark.skip(reason="XNACK not supported"))
-        if "no_docker" in item.keywords and rocprof_config.capabilities.is_inside_docker:
-            item.add_marker(
-                pytest.mark.skip(reason="Test cannot run inside a Docker container")
-            )
-        if "shmem" in item.keywords and not rocprof_config.capabilities.oshrun_exec:
-            item.add_marker(pytest.mark.skip(reason="SHMEM not available"))
-        if "nic" in item.keywords and not nic_available():
-            item.add_marker(
-                pytest.mark.skip(
-                    reason="Requires PAPI network events and perf_event_paranoid <= 2 to be available"
-                )
-            )
-        if "kfd" in item.keywords and not kfd_available():
-            _req = ".".join(map(str, _kfd_min_sdk))
-            _sdk = rocprof_config.capabilities.rocprofiler_sdk_version
-            _found = ".".join(map(str, _sdk)) if _sdk is not None else "not found"
-            item.add_marker(
-                pytest.mark.skip(
-                    reason=(
-                        f"Requires rocprofiler-sdk minimum {_req}, "
-                        f"but system detected version {_found}"
-                    )
-                )
-            )
+            _msg = python_base_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+            _msg = python_versions_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "julia" in item.keywords:
+            _msg = julia_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "xnack" in item.keywords:
+            _msg = xnack_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "no_docker" in item.keywords:
+            _msg = no_docker_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "shmem" in item.keywords:
+            _msg = shmem_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "nic" in item.keywords:
+            _msg = nic_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "kfd" in item.keywords:
+            _msg = kfd_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
         if "rocm_min_version" in item.keywords:
             req_version = item.get_closest_marker("rocm_min_version").args[0]
             system_version = rocprof_config.rocm_version
@@ -611,8 +593,9 @@ def pytest_collection_modifyitems(config, items) -> None:
                         )
                     )
         if "run_if_gpu_category" in item.keywords:
-            if not gpu_available():
-                item.add_marker(pytest.mark.skip(reason="No valid GPU available"))
+            _gpu_msg = gpu_unavailable_reason()
+            if _gpu_msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_gpu_msg))
             expr = item.get_closest_marker("run_if_gpu_category").args[0]
             try:
                 result = eval(expr, {"__builtins__": {}}, gpu_category_eval_context())
@@ -763,112 +746,139 @@ def pytest_sessionfinish(session, exitstatus):
 #
 # ============================================================================
 
+# ----------------------------------------------------------------------------
+# Collection-time availability: return None if OK, else a skip reason string.
+# ----------------------------------------------------------------------------
+
+
+def overflow_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    caps = rocprof_config.capabilities
+    if caps.perf_event_paranoid <= 3 or caps.cap_sys_admin or caps.cap_perfmon:
+        return None
+    return "Requires either perf_event_paranoid <= 3, CAP_SYS_ADMIN, or CAP_PERFMON to be available"
+
+
+def gpu_unavailable_reason() -> Optional[str]:
+    gpu_info = get_gpu_info()
+    if gpu_info is not None and gpu_info.available:
+        return None
+    return "No valid GPU available"
+
+
+def annotate_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    msg = overflow_unavailable_reason(rocprof_config)
+    if msg is not None:
+        return msg
+    if not rocprof_config.capabilities.papi_availability:
+        return "PAPI not available"
+    return None
+
+
+def attach_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    if rocprof_config.capabilities.ptrace_scope == 0:
+        return None
+    return (
+        "Requires ptrace_scope to be 0. Run 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope' "
+        "to enable attaching to process"
+    )
+
+
+def nic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    caps = rocprof_config.capabilities
+    if caps.papi_nic_events is not None and caps.perf_event_paranoid <= 2:
+        return None
+    return "Requires PAPI network events and perf_event_paranoid <= 2 to be available"
+
+
+def kfd_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    sdk = rocprof_config.capabilities.rocprofiler_sdk_version
+    if sdk is not None and sdk >= KFD_MIN_SDK_VERSION:
+        return None
+    _req = ".".join(map(str, KFD_MIN_SDK_VERSION))
+    _found = ".".join(map(str, sdk)) if sdk is not None else "not found"
+    return (
+        f"Requires rocprofiler-sdk minimum {_req}, but system detected version {_found}"
+    )
+
 
 # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
-def configure_mode(config: pytest.Config) -> None:
-    """Configure the mode based on the command line options.
-
-    Modes:
-     - --ci-mode: CI mode
-     - --ctest-mode: CTest integration mode
-     - --dev: Developer mode
-    """
-
-    # MPI is disabled in CI mode, this is done in collection_modifyit
-    ci_mode = config.getoption("--ci-mode", default=False)
-    ctest_mode = config.getoption("--ctest-mode", default="off") == "run"
-    dev_mode = config.getoption("--dev", default=False)
-
-    if ci_mode or ctest_mode:
-        config.option.verbose = max(config.option.verbose, 1)  # -v
-        config.option.tbstyle = "short"  # --tb=short
-        if "s" not in config.option.reportchars:  # -rs
-            config.option.reportchars += "s"
-
-    if ctest_mode:
-        config.option.no_header = True
-        config.option.show_test_output = "all"
-
-    if ci_mode:
-        config.option.show_config = True
-        config.option.show_test_output = "subtest"
-
-    if dev_mode:
-        config.option.show_config = True
-        config.option.show_test_output = "subtest"
-        config.option.verbose = max(config.option.verbose, 1)  # -v
-        config.option.tbstyle = "short"  # --tb=short
-        if "s" not in config.option.reportchars:  # -rs
-            config.option.reportchars += "s"
+def mpi_unavailable_reason(
+    rocprof_config: RocprofsysConfig, config: pytest.Config
+) -> Optional[str]:
+    if rocprof_config.capabilities.mpiexec_exec is None:
+        return "MPI not available"
+    if config.getoption("--ci-mode", default=False):
+        return "MPI tests are not run in --ci-mode"
+    return None
 
 
-def _standardize_test_name(item: pytest.Item, verbose: bool = False) -> None:
-    class_name = item.cls.__name__ if item.cls else None
+def python_base_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    if rocprof_config.rocprofsys_python is not None:
+        return None
+    return "rocprof-sys-python binary not found"
+
+
+def python_versions_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    if (
+        rocprof_config.capabilities.supported_python_versions is not None
+        and os.environ.get("ROCPROFSYS_USE_PYTHON", "ON").upper() == "ON"
+    ):
+        return None
+    return (
+        "No supported Python versions. Each version needs a corresponding "
+        "libpyrocprofsys.<IMPL>-<VERSION>-<ARCH>-<OS>-<ABI>.so in site-packages/rocprofsys."
+    )
+
+
+def julia_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    if rocprof_config.capabilities.julia_exec:
+        return None
+    return "Julia not available"
+
+
+def xnack_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    if get_xnack_support(rocprof_config.rocm_path):
+        return None
+    return "XNACK not supported"
+
+
+def no_docker_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    if not rocprof_config.capabilities.is_inside_docker:
+        return None
+    return "Test cannot run inside a Docker container"
+
+
+def shmem_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    if rocprof_config.capabilities.oshrun_exec:
+        return None
+    return "SHMEM not available"
+
+
+# ----------------------------------------------------------------------------
+# CTest generator functions
+# ----------------------------------------------------------------------------
+
+
+def _cmake_escape(s: str) -> str:
+    """Escape a string for use inside CMake double-quoted arguments."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _ctest_item_ctest_identity(item: pytest.Item) -> tuple[str, str, str]:
+    """Return ``(original_nodeid, item name, CTest nodeid fragment)`` for CMake generation."""
+    test_id = item.stash.get(_original_nodeid_key, item.nodeid)
     test_name = item.name
-
-    # Strip 'Test' prefix from class name and 'test_'/'test-' prefix from test name
-    if class_name and class_name.startswith("Test"):
-        class_name = class_name[4:]
-    if test_name.startswith("test"):
-        test_name = test_name[4:]
-        if test_name.startswith(("_", "-")):
-            test_name = test_name[1:]
-    full_name = f"{class_name}-{test_name}" if class_name else test_name
-    formatted_name = "".join(c if c.isalnum() or c == "." else "-" for c in full_name)
-    formatted_name = formatted_name.replace("-", "_")
-    while "__" in formatted_name:
-        formatted_name = formatted_name.replace("__", "_")
-    formatted_name = formatted_name.strip("_")
-
-    item.stash[_original_nodeid_key] = item.nodeid
-    # nodeid is what is used to display the test name in the terminal
-    # By default, it groups it by module. In verbose, it shows the full path + class + method
-    # To get a cleaner output in verbose mode, we modify the nodeid but only if verbose is True
-    # This avoids breaking the default grouping by module in non-verbose mode
-    if verbose:
-        item._nodeid = formatted_name
-    item.name = formatted_name
-
-    # Allow -k filtering by the formatted name
-    item.extra_keyword_matches.add(formatted_name)
-    item.extra_keyword_matches.add(formatted_name.lower())
+    if "::" in test_id:
+        file_part, _, rest = test_id.partition("::")
+        test_nodeid = f"{Path(file_part).name}::{rest}"
+    else:
+        test_nodeid = Path(test_id).name
+    return test_id, test_name, test_nodeid
 
 
-def _ctest_generate_tests(
-    items: list[pytest.Item], output_path: Optional[Path] = None
-) -> None:
-    """Generate a CTestTestfile.cmake file and print it to stdout."""
-
-    no_report_markers = {
-        "parametrize",  # Ignored, except for "mode" parameter (instrumentation mode)
-        # Pytest built-in
-        "usefixtures",
-        "filterwarnings",
-        "skipif",
-        "skip",
-        "xfail",
-        # Internal markers
-        "python_versions",
-        "ci_enable",
-        "ci_disable",
-        "mpi_optional",
-        "no_docker",
-        "oshrun_min_version",
-        "rocm_min_version",
-        "run_if_gpu_category",
-        "preserve",
-        # For CTests
-        "timeout",
-        "depends_on",
-        "serialize",
-    }
-    no_report_args_markers = {"rocpd"}
-    only_report_args_markers = {"mpi_implementation"}
-
-    def _cmake_escape(s: str) -> str:
-        return s.replace("\\", "\\\\").replace('"', '\\"')
-
-    lines = [
+def _emit_ctest_header_block() -> list[str]:
+    """CMake preamble for generated CTestTestfile.cmake (env, paths, pytest/python discovery)."""
+    return [
         "# Auto-generated CTest definitions from rocprofiler-systems pytest suite",
         "# DO NOT EDIT — regenerate via: pytest <dir> --ctest-mode=generate",
         "#",
@@ -937,44 +947,146 @@ def _ctest_generate_tests(
         "",
     ]
 
-    # Ensure that the configuration header can be generated
-    lines.append(
-        'add_test("RocprofilerSystems_pytest_config" "${_ROCPROFSYS_EXE}"'
+
+def _emit_prerequisite_block() -> list[str]:
+    """``rocprofiler-systems-pytest-config`` prerequisite test (global tmp fixture setup)."""
+    return [
+        'add_test("rocprofiler-systems-pytest-config" "${_ROCPROFSYS_EXE}"'
         ' "${_ROCPROFSYS_EXE_ARGS}"'
-        ' "${_ROCPROFSYS_NODEID_PFX}" "--show-config-only")'
+        ' "${_ROCPROFSYS_NODEID_PFX}" "--show-config-only")',
+        'set_tests_properties("rocprofiler-systems-pytest-config" PROPERTIES',
+        '    FIXTURES_SETUP "rocprofsys-global-tmp-files"',
+        '    LABELS "prerequisite;global"',
+        "    TIMEOUT 10",
+        ")",
+        "",
+    ]
+
+
+def _emit_cleanup_block() -> list[str]:
+    """``rocprofiler-systems-test-cleanup`` (global tmp fixture cleanup)."""
+    return [
+        'add_test("rocprofiler-systems-test-cleanup" "${_ROCPROFSYS_EXE}"'
+        ' "${_ROCPROFSYS_EXE_ARGS}"'
+        ' "${_ROCPROFSYS_NODEID_PFX}" "--ctest-mode" "cleanup")',
+        'set_tests_properties("rocprofiler-systems-test-cleanup" PROPERTIES',
+        '    FIXTURES_CLEANUP "rocprofsys-global-tmp-files"',
+        '    LABELS "cleanup;global"',
+        "    TIMEOUT 30",
+        ")",
+        "",
+    ]
+
+
+def _emit_test_timeout_block(
+    item: pytest.Item, timeout_buffer: int = CTEST_TIMEOUT_BUFFER
+) -> list[str]:
+    """One CMake block: set ``_TEST_TIMEOUT`` from ``ROCPROFSYS_CI_TIMEOUT`` or pytest timeout (+ buffer)."""
+    timeout_marker = item.get_closest_marker("timeout")
+    timeout = (
+        int(timeout_marker.args[0])
+        if timeout_marker and timeout_marker.args
+        else DEFAULT_TIMEOUT
     )
-    lines.append('set_tests_properties("RocprofilerSystems_pytest_config" PROPERTIES')
-    lines.append('    FIXTURES_SETUP "rocprofsys-global-tmp-files"')
-    lines.append('    LABELS "prerequisite;global"')
-    lines.append("    TIMEOUT 10")
-    lines.append(")")
-    lines.append("")
+    default_timeout = timeout + timeout_buffer
+    return [
+        "if(DEFINED _ROCPROFSYS_CI_TIMEOUT)",
+        f'    math(EXPR _TEST_TIMEOUT "${{_ROCPROFSYS_CI_TIMEOUT}} + {timeout_buffer}")',
+        "else()",
+        f"    set(_TEST_TIMEOUT {default_timeout})",
+        "endif()",
+        "",
+    ]
+
+
+def _emit_test_item_block(
+    item: pytest.Item,
+    labels: set[str],
+    depends_on: list[str],
+    run_serial: bool,
+) -> list[str]:
+    """``add_test`` + ``set_tests_properties`` for one item (timeout block emitted separately)."""
+    _, test_name, test_nodeid = _ctest_item_ctest_identity(item)
+    escaped_name = _cmake_escape(test_name)
+    escaped_nodeid = _cmake_escape(test_nodeid)
+
+    # Check if the test runs on a specific python version
+    extra_args = ""
+    if hasattr(item, "callspec") and "python_version" in item.callspec.params:
+        py_ver = item.callspec.params["python_version"]
+        if py_ver is not None:
+            extra_args += f' "--python-versions={py_ver}"'
+
+    lines_out: list[str] = [
+        f'add_test("{escaped_name}" "${{_ROCPROFSYS_EXE}}"'
+        f' "${{_ROCPROFSYS_EXE_ARGS}}"'
+        f' "${{_ROCPROFSYS_NODEID_PFX}}{escaped_nodeid}"'
+        f"{extra_args} ${{_ROCPROFSYS_EXTRA_ARGS}})"
+    ]
+    props: list[str] = []
+    if labels:
+        props.append(f'    LABELS "{";".join(sorted(labels))}"')
+    props.append(f"    TIMEOUT ${{_TEST_TIMEOUT}}")
+    props.append(f"    SKIP_RETURN_CODE {SKIP_RETURN_CODE}")
+    props.append('    FIXTURES_REQUIRED "rocprofsys-global-tmp-files"')
+    if run_serial:
+        props.append("    RUN_SERIAL TRUE")
+    if depends_on:
+        deps_str = ";".join(_cmake_escape(d) for d in depends_on)
+        props.append(f'    DEPENDS "{deps_str}"')
+
+    lines_out.append(f'set_tests_properties("{escaped_name}" PROPERTIES')
+    lines_out.extend(props)
+    lines_out.append(")")
+    lines_out.append("")
+    return lines_out
+
+
+def _ctest_generate_tests(
+    items: list[pytest.Item], output_path: Optional[Path] = None
+) -> None:
+    """Generate a CTestTestfile.cmake file and print it to stdout."""
+
+    no_report_markers = {
+        "parametrize",  # Ignored, except for "mode" parameter (instrumentation mode)
+        # Pytest built-in
+        "usefixtures",
+        "filterwarnings",
+        "skipif",
+        "skip",
+        "xfail",
+        # Internal markers
+        "python_versions",
+        "ci_enable",
+        "ci_disable",
+        "mpi_optional",
+        "no_docker",
+        "oshrun_min_version",
+        "rocm_min_version",
+        "run_if_gpu_category",
+        "preserve",
+        # For CTests
+        "timeout",
+        "depends_on",
+        "serialize",
+        "class_name",
+    }
+    no_report_args_markers = {"rocpd"}
+    only_report_args_markers = {"mpi_implementation"}
+
+    lines = _emit_ctest_header_block()
+    lines.extend(_emit_prerequisite_block())
 
     seen_names: dict[str, str] = {}  # escaped_name -> original nodeid
 
     for item in items:
-        test_id = item.stash.get(_original_nodeid_key, item.nodeid)
-        test_name = item.name
+        test_id, test_name, _ = _ctest_item_ctest_identity(item)
 
-        if "::" in test_id:
-            file_part, _, rest = test_id.partition("::")
-            test_nodeid = f"{Path(file_part).name}::{rest}"
-        else:
-            test_nodeid = Path(test_id).name
-
-        # Handle certain markers that affect how the CTest is configured
+        # Handle certain markers that affect how CTest is configured
 
         labels: set[str] = set()
         depends_on: list[str] = []
         run_serial = False
-
-        TIMEOUT_BUFFER = 5  # So that pytest has time to dump its output
-        timeout_marker = item.get_closest_marker("timeout")
-        timeout = (
-            int(timeout_marker.args[0])
-            if timeout_marker and timeout_marker.args
-            else DEFAULT_TIMEOUT
-        )
 
         depends_marker = item.get_closest_marker("depends_on")
         if depends_marker:
@@ -1002,7 +1114,6 @@ def _ctest_generate_tests(
                 labels.add(f"{marker.name}[{args_str}]")
 
         escaped_name = _cmake_escape(test_name)
-        escaped_nodeid = _cmake_escape(test_nodeid)
 
         if escaped_name in seen_names:
             pytest.exit(
@@ -1015,61 +1126,17 @@ def _ctest_generate_tests(
             )
         seen_names[escaped_name] = test_id
 
-        # Check if this test requires a specific Python version
-        py_ver = None
-        extra_args = ""
-        if hasattr(item, "callspec") and "python_version" in item.callspec.params:
-            py_ver = item.callspec.params["python_version"]
-            if py_ver is not None:
-                extra_args += f' "--python-versions={py_ver}"'
-
-        # Generate the CTest
-
-        lines.append(
-            f'add_test("{escaped_name}" "${{_ROCPROFSYS_EXE}}"'
-            f' "${{_ROCPROFSYS_EXE_ARGS}}"'
-            f' "${{_ROCPROFSYS_NODEID_PFX}}{escaped_nodeid}"'
-            f"{extra_args} ${{_ROCPROFSYS_EXTRA_ARGS}})"
+        lines.extend(_emit_test_timeout_block(item))
+        lines.extend(
+            _emit_test_item_block(
+                item,
+                labels,
+                depends_on,
+                run_serial,
+            )
         )
 
-        # Allow support for ROCPROFSYS_CI_TIMEOUT
-        default_timeout = timeout + TIMEOUT_BUFFER
-        lines.append(f"if(DEFINED _ROCPROFSYS_CI_TIMEOUT)")
-        lines.append(
-            f'    math(EXPR _TEST_TIMEOUT "${{_ROCPROFSYS_CI_TIMEOUT}} + {TIMEOUT_BUFFER}")'
-        )
-        lines.append(f"else()")
-        lines.append(f"    set(_TEST_TIMEOUT {default_timeout})")
-        lines.append(f"endif()")
-        props = []
-        if labels:
-            props.append(f'    LABELS "{";".join(sorted(labels))}"')
-        props.append(f"    TIMEOUT ${{_TEST_TIMEOUT}}")
-        props.append(f"    SKIP_RETURN_CODE {SKIP_RETURN_CODE}")
-        props.append(f'    FIXTURES_REQUIRED "rocprofsys-global-tmp-files"')
-        if run_serial:
-            props.append(f"    RUN_SERIAL TRUE")
-        if depends_on:
-            deps_str = ";".join(_cmake_escape(d) for d in depends_on)
-            props.append(f'    DEPENDS "{deps_str}"')
-
-        lines.append(f'set_tests_properties("{escaped_name}" PROPERTIES')
-        lines.extend(props)
-        lines.append(f")")
-        lines.append("")
-
-    # Generate a cleanup test that runs pytest --ctest-mode=cleanup
-    lines.append(
-        'add_test("RocprofilerSystems_test_cleanup" "${_ROCPROFSYS_EXE}"'
-        ' "${_ROCPROFSYS_EXE_ARGS}"'
-        ' "${_ROCPROFSYS_NODEID_PFX}" "--ctest-mode" "cleanup")'
-    )
-    lines.append('set_tests_properties("RocprofilerSystems_test_cleanup" PROPERTIES')
-    lines.append('    FIXTURES_CLEANUP "rocprofsys-global-tmp-files"')
-    lines.append('    LABELS "cleanup;global"')
-    lines.append("    TIMEOUT 30")
-    lines.append(")")
-    lines.append("")
+    lines.extend(_emit_cleanup_block())
 
     content = "\n".join(lines)
     if output_path:
@@ -1081,7 +1148,106 @@ def _ctest_generate_tests(
     pytest.exit("CTest generation complete", returncode=0)
 
 
-def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
+# ----------------------------------------------------------------------------
+# Other helpers
+# ----------------------------------------------------------------------------
+
+# TODO: Deprecate once TheRock switches to CTest and CTest based filtering
+def configure_mode(config: pytest.Config) -> None:
+    """Configure the mode based on the command line options.
+
+    Modes:
+     - --ci-mode: CI mode
+     - --ctest-mode: CTest integration mode
+     - --dev: Developer mode
+    """
+
+    # MPI is disabled in CI mode, this is done in collection_modifyit
+    ci_mode = config.getoption("--ci-mode", default=False)
+    ctest_mode = config.getoption("--ctest-mode", default="off") == "run"
+    dev_mode = config.getoption("--dev", default=False)
+
+    if ci_mode or ctest_mode:
+        config.option.verbose = max(config.option.verbose, 1)  # -v
+        config.option.tbstyle = "short"  # --tb=short
+        if "s" not in config.option.reportchars:  # -rs
+            config.option.reportchars += "s"
+
+    if ctest_mode:
+        config.option.no_header = True
+        config.option.show_test_output = "all"
+
+    if ci_mode:
+        config.option.show_config = True
+        config.option.show_test_output = "subtest"
+
+    if dev_mode:
+        config.option.show_config = True
+        config.option.show_test_output = "subtest"
+        config.option.verbose = max(config.option.verbose, 1)  # -v
+        config.option.tbstyle = "short"  # --tb=short
+        if "s" not in config.option.reportchars:  # -rs
+            config.option.reportchars += "s"
+
+
+def _standardize_test_name(
+    item: pytest.Item, config: pytest.Config, verbose: bool = False
+) -> None:
+
+    # Strip test prefix from the test method name
+    test_name = item.name
+    if test_name.startswith("test"):
+        test_name = test_name[4:]
+        if test_name.startswith(("_", "-")):
+            test_name = test_name[1:]
+
+    ctest_mode = config.getoption("--ctest-mode", default="off") in ("generate", "run")
+    class_name = None
+    if ctest_mode:
+        name_marker = item.get_closest_marker("class_name")
+        if name_marker and name_marker.args:
+            class_name = str(name_marker.args[0]).strip()
+
+    if class_name:
+        full_name = f"{class_name}-{test_name}"
+    elif item.cls:
+        py_class = item.cls.__name__
+        if py_class.startswith("Test"):
+            py_class = py_class[4:]
+        full_name = f"{py_class}-{test_name}"
+    else:
+        full_name = test_name
+
+    formatted_name = "".join(c if c.isalnum() or c == "." else "-" for c in full_name)
+
+    if ctest_mode:
+        formatted_name = formatted_name.replace("_", "-")
+        while "--" in formatted_name:
+            formatted_name = formatted_name.replace("--", "-")
+        formatted_name = formatted_name.strip("-")
+        formatted_name = formatted_name.lower()
+    else:
+        # TODO: Deprecate once TheRock switches to CTests
+        formatted_name = formatted_name.replace("-", "_")
+        while "__" in formatted_name:
+            formatted_name = formatted_name.replace("__", "_")
+        formatted_name = formatted_name.strip("_")
+
+    item.stash[_original_nodeid_key] = item.nodeid
+    # nodeid is what is used to display the test name in the terminal
+    # By default, it groups it by module. In verbose, it shows the full path + class + method
+    # To get a cleaner output in verbose mode, we modify the nodeid but only if verbose is True
+    # This avoids breaking the default grouping by module in non-verbose mode
+    if verbose:
+        item._nodeid = formatted_name
+    item.name = formatted_name
+
+    # Allow -k filtering by the formatted name
+    item.extra_keyword_matches.add(formatted_name)
+    item.extra_keyword_matches.add(formatted_name.lower())
+
+
+def _generate_rocprofsys_config_header() -> list[str]:
     try:
         rocprof_config = get_rocprof_config()
         cap = rocprof_config.capabilities
@@ -1235,13 +1401,26 @@ def add_marker_if(
     cond: Callable[[], bool] = lambda: True,
     req_mark: Optional[str] = None,
     skip_reason: Optional[str] = None,
+    unavailable_reason: Optional[Callable[[], Optional[str]]] = None,
 ) -> None:
     """Add a marker to a test item if:
         - target_marker is present (or not specified)
         - AND condition evaluates to True (lambda)
+
+    If ``unavailable_reason`` is set, it is called: ``None`` means add the marker;
+    a non-empty string means skip the test with that reason (preferred over cond/skip_reason).
+
     If condition is False and skip_reason is provided, add a skip marker instead.
     """
     if req_mark and not item.get_closest_marker(req_mark):
+        return
+
+    if unavailable_reason is not None:
+        msg = unavailable_reason()
+        if msg is None:
+            item.add_marker(getattr(pytest.mark, marker_to_add))
+        else:
+            item.add_marker(pytest.mark.skip(reason=msg))
         return
 
     if cond():
@@ -1323,7 +1502,7 @@ def get_rocprof_config() -> RocprofsysConfig:
             rocm_optional=rocm_optional,
         )
     except Exception as e:
-        raise RuntimeError(f"Failed to get rocprofiler-systems configuration: {e}")
+        raise RuntimeError("Failed to get rocprofiler-systems configuration") from e
 
 
 @lru_cache(maxsize=1)
@@ -1849,12 +2028,6 @@ def run_test(
         no_base_env: bool = False,
         **kwargs,
     ) -> TestResult:
-        # Check for mode-specific timeout
-        # Normalize runner_type for lookup (hyphens to underscores)
-        timeout_key = f"{runner_type.replace('-', '_')}_timeout"
-        if timeout_key in kwargs:
-            timeout = kwargs.pop(timeout_key)
-
         # Filter kwargs to only pass runner-specific args that each runner accepts.
         runner_specific_args = {
             "baseline": {"command"},
@@ -1897,8 +2070,7 @@ def run_test(
         if request.config.getoption("--monochrome", default=False):
             env["ROCPROFSYS_MONOCHROME"] = "ON"
 
-        # Timeout: Prioritize ROCPROFSYS_CI_TIMEOUT env, else
-        # fallback to timeout marker if defined
+        # Timeout: ROCPROFSYS_CI_TIMEOUT env, else @pytest.mark.timeout, else default
         ci_timeout_env = os.environ.get("ROCPROFSYS_CI_TIMEOUT")
         if ci_timeout_env is not None:
             timeout = int(ci_timeout_env)

@@ -75,6 +75,7 @@ def get_thread_limit() -> int:
         get_thread_limit(),
     ],
 )
+@pytest.mark.class_name("thread-limit")
 class TestThreadLimit(RocprofsysTest):
     REWRITE_ARGS = ["-e", "-v", "2", "-i", "1024", "--label", "return", "args"]
     RUNTIME_ARGS = ["-e", "-v", "1", "-i", "1024", "--label", "return", "args"]

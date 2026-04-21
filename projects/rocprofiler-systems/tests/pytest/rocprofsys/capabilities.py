@@ -517,7 +517,12 @@ def _get_supported_python_versions_and_executables(
                     found_versions.append(version)
                     found_executables.append(exe_path)
 
-    if not found_versions or not found_executables:
+    if len(found_versions) != len(found_executables):
+        raise RuntimeError(
+            f"found_versions ({len(found_versions)}) and found_executables "
+            f"({len(found_executables)}) length mismatch"
+        )
+    if not found_versions:
         return None, None
 
     # Filter out based on the rocprofsys site packages

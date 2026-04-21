@@ -6,12 +6,9 @@
 #
 include_guard(GLOBAL)
 
-# TODO: Remove this once TheRock is switched to CTests
-if(ROCPROFSYS_USE_PYTESTS)
-    # Required to maintain compatibility with TheRock until it can be switched to CTests
-    include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
-else()
-    include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
+include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
+if(NOT ROCPROFSYS_USE_PYTESTS)
+    # TODO: Will be the default once TheRock is switched to CTests
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pytest.cmake)
 endif()
 

@@ -53,14 +53,14 @@ def gpu_connect_rules(validation_rules_dir: Path) -> list[Path]:
 
 @pytest.mark.multi_gpu(2)
 @pytest.mark.run_if_gpu_category("not apu or instinct")
-class TestGPUConnect(RocprofsysTest):
+class TestTransferBench(RocprofsysTest):
     """Tests for GPU connectivity tests."""
 
     @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
         "mode", [pytest.param("sys_run", marks=pytest.mark.rocpd("gpu_connect_env"))]
     )
-    def test_transferbench(self, mode, gpu_connect_env, gpu_connect_rules):
+    def test(self, mode, gpu_connect_env, gpu_connect_rules):
         result = self.run_test(
             mode,
             "transferBench",

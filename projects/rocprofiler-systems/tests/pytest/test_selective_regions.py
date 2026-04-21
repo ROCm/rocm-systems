@@ -53,6 +53,7 @@ def no_marker_env() -> dict[str, str]:
 
 @pytest.mark.parametrize("mode", ["sys_run", "sampling"])
 @pytest.mark.parametrize("marker_api", ["enabled", "disabled"])
+@pytest.mark.class_name("pause-resume")
 class TestPauseResume(RocprofsysTest):
     """Tests for roctxProfilerPause/Resume without region filtering.
 
@@ -104,6 +105,7 @@ class TestPauseResume(RocprofsysTest):
 
 
 @pytest.mark.parametrize("mode", ["sys_run", "sampling"])
+@pytest.mark.class_name("selective-region")
 class TestSelectiveRegion(RocprofsysTest):
     """Tests for selective region tracing without pause/resume.
 
@@ -228,6 +230,7 @@ class TestSelectiveRegion(RocprofsysTest):
         pytest.param("selective_region_pause_3", id="outside"),
     ],
 )
+@pytest.mark.class_name("selective-region-pause")
 class TestSelectiveRegionPause(RocprofsysTest):
     """Tests for pause/resume interaction with selective region filtering.
 
@@ -362,6 +365,7 @@ class TestSelectiveRegionPause(RocprofsysTest):
 
 
 @pytest.mark.parametrize("mode", ["sys_run", "sampling"])
+@pytest.mark.class_name("selective-region-no-marker")
 class TestSelectiveRegionNoMarker(RocprofsysTest):
     """Tests for region filtering with ConditionB only (no marker_api).
 

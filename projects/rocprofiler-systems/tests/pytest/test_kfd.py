@@ -55,7 +55,7 @@ def kfd_rules(validation_rules_dir) -> list[Path]:
 # =============================================================================
 
 
-class TestKfdEvents(RocprofsysTest):
+class TestKFD(RocprofsysTest):
     """KFD event tracing tests using the unified-memory HIP example.
 
     The unified-memory example exercises managed memory (hipMallocManaged)
@@ -71,7 +71,7 @@ class TestKfdEvents(RocprofsysTest):
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("kfd_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
-    def test_kfd_events(self, mode, kfd_environment, kfd_rules):
+    def test_events(self, mode, kfd_environment, kfd_rules):
         """Run unified-memory and validate KFD events in Perfetto + ROCpd."""
         result = self.run_test(
             mode,
@@ -128,7 +128,7 @@ class TestKfdEvents(RocprofsysTest):
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("kfd_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
-    def test_kfd_prefetch_events(self, mode, kfd_environment, kfd_rules):
+    def test_prefetch_events(self, mode, kfd_environment, kfd_rules):
         """Focused test for prefetch-driven page migrations.
 
         Uses more prefetch iterations to generate a high volume of
@@ -183,7 +183,7 @@ class TestKfdEvents(RocprofsysTest):
     @pytest.mark.timeout(180)
     @pytest.mark.rocpd("kfd_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
-    def test_kfd_memory_pressure(self, mode, kfd_environment, kfd_rules):
+    def test_memory_pressure(self, mode, kfd_environment, kfd_rules):
         """Stress test with high memory pressure to trigger queue evictions.
 
         Uses larger pressure allocation to maximize the chance of

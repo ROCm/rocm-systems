@@ -67,6 +67,7 @@ def get_run_args(rocprof_config) -> list[str]:
         "sys_run",
     ],
 )
+@pytest.mark.class_name("jpeg-decode")
 class TestJPEGDecode(RocprofsysTest):
     def test(self, mode, jpeg_decode_env, jpeg_decode_rules, get_run_args, gpu_info):
         result = self.run_test(

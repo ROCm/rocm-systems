@@ -63,6 +63,7 @@ __all__ = [
     "SysRunRunner",
     "CausalRunner",
     "PythonRunner",
+    "safe_remove",
     # Validators
     "ValidationResult",
     "validate_perfetto_trace",
@@ -79,4 +80,5 @@ __all__ = [
     "lookup_gpu_category",
     "get_target_gpu_arch",
     "get_offload_extractor",
+    "get_xnack_support",
 ]

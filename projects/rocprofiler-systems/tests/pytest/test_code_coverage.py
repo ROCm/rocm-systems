@@ -17,6 +17,7 @@ pytestmark = [pytest.mark.code_coverage]
 # =============================================================================
 
 
+@pytest.mark.class_name("code-coverage")
 class TestCodeCoverage(RocprofsysTest):
     def get_rewrite_args(self, type) -> list[str]:
         ret = ["-e", "-v", "2", "--min-instructions=4", "-E", "^std::"]
@@ -87,28 +88,28 @@ class TestCodeCoverage(RocprofsysTest):
 
     @pytest.mark.timeout(120)
     @pytest.mark.depends_on(
-        "CodeCoverage_basic_blocks_binary_rewrite",
-        "CodeCoverage_basic_blocks_hybrid_runtime_instrument",
+        "code-coverage-basic-blocks-binary-rewrite",
+        "code-coverage-basic-blocks-hybrid-runtime-instrument",
     )
     @pytest.mark.python_versions
     def test_python(self, python_version, test_output_base):
         # Get the coverage paths from the previously ran tests
         brw_coverage_path = (
             test_output_base
-            / "CodeCoverage_basic_blocks_binary_rewrite"
+            / "code-coverage-basic-blocks-binary-rewrite"
             / "coverage.json"
         )
         ri_coverage_path = (
             test_output_base
-            / "CodeCoverage_basic_blocks_hybrid_runtime_instrument"
+            / "code-coverage-basic-blocks-hybrid-runtime-instrument"
             / "coverage.json"
         )
         missing = []
         if not brw_coverage_path.exists():
-            missing.append("CodeCoverage_basic_blocks_binary_rewrite/coverage.json")
+            missing.append("code-coverage-basic-blocks-binary-rewrite/coverage.json")
         if not ri_coverage_path.exists():
             missing.append(
-                "CodeCoverage_basic_blocks_hybrid_runtime_instrument/coverage.json"
+                "code-coverage-basic-blocks-hybrid-runtime-instrument/coverage.json"
             )
         if missing:
             pytest.skip(f"Missing output from dependency tests: {', '.join(missing)}")
