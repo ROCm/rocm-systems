@@ -519,7 +519,7 @@ wrap_signal_store_relaxed(hsa_signal_t sig, hsa_signal_value_t val)
     auto s = lookup_queue_state_by_doorbell(sig);
     if(s)
     {
-        process_doorbell_impl(std::move(s), val, [](hsa_signal_t db, hsa_signal_value_t v) {
+        process_doorbell_impl(s, val, [](hsa_signal_t db, hsa_signal_value_t v) {
             s_next_table.hsa_signal_store_relaxed_fn(db, v);
         });
         return;
@@ -539,7 +539,7 @@ wrap_signal_store_screlease(hsa_signal_t sig, hsa_signal_value_t val)
     auto s = lookup_queue_state_by_doorbell(sig);
     if(s)
     {
-        process_doorbell_impl(std::move(s), val, [](hsa_signal_t db, hsa_signal_value_t v) {
+        process_doorbell_impl(s, val, [](hsa_signal_t db, hsa_signal_value_t v) {
             s_next_table.hsa_signal_store_screlease_fn(db, v);
         });
         return;
