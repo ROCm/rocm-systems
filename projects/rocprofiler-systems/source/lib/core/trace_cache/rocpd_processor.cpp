@@ -634,7 +634,8 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& _cpu_pmc_sample
 
         const auto core_freq_samples = deserialize_freqs(_cpu_pmc_sample.freqs);
         for(const auto& core : core_freq_samples)
-            insert_event_and_sample(get_freq_track_name(core.id).c_str(), core.value);
+            insert_event_and_sample(get_freq_track_name(core.id).c_str(),
+                                    static_cast<double>(core.value));
     }
 
     if(_em.bits.load)
@@ -646,7 +647,8 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& _cpu_pmc_sample
 
         const auto core_load_samples = deserialize_loads(_cpu_pmc_sample.loads);
         for(const auto& core : core_load_samples)
-            insert_event_and_sample(get_load_track_name(core.id).c_str(), core.value);
+            insert_event_and_sample(get_load_track_name(core.id).c_str(),
+                                    static_cast<double>(core.value));
     }
 }
 

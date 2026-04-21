@@ -72,14 +72,14 @@ struct cache_policy
                 { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
                   freq_name.c_str(), freq_name.c_str(), "CPU Core Frequency",
                   LONG_DESCRIPTION, COMPONENT, "MHz", rocprofsys::trace_cache::ABSOLUTE,
-                  BLOCK, EXPRESSION, 0, 0 });
+                  BLOCK, EXPRESSION, 0, 0, "{}" });
 
             const auto load_name = fmt::format("cpu{}_load", cpu_id);
             trace_cache::get_metadata_registry().add_pmc_info(
                 { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
                   load_name.c_str(), load_name.c_str(), "CPU Core Load Percentage",
                   LONG_DESCRIPTION, COMPONENT, trace_cache::PERCENTAGE,
-                  rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+                  rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
         }
 
         // Process-level metrics are process-wide; register under first selected socket
@@ -89,31 +89,31 @@ struct cache_policy
             { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               "process_page_rss", "Page RSS", "Process Physical Memory (RSS)",
               LONG_DESCRIPTION, COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0 });
+              BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               "process_virt_mem", "Virt Mem", "Process Virtual Memory", LONG_DESCRIPTION,
               COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
-              0 });
+              0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               "process_peak_rss", "Peak RSS", "Process Peak Memory (HWM)",
               LONG_DESCRIPTION, COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0 });
+              BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               "process_ctx_switches", "Ctx Switches", "Context Switches",
               LONG_DESCRIPTION, COMPONENT, "count", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0 });
+              BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               "process_page_faults", "Page Faults", "Page Faults", LONG_DESCRIPTION,
               COMPONENT, "count", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
-              0 });
+              0, "{}" });
     }
 
     /**
