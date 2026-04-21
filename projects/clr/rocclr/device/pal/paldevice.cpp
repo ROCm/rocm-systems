@@ -462,7 +462,7 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   info_.preferredLocalAtomicAlignment_ = 0;
   info_.queueProperties_ = CL_QUEUE_PROFILING_ENABLE;
 
-  info_.platform_ = AMD_PLATFORM;
+  info_.platform_ = reinterpret_cast<intptr_t>(AMD_PLATFORM);
 
   ::strncpy(info_.name_, isa().targetId(), sizeof(info_.name_));
   ::strncpy(info_.vendor_, "Advanced Micro Devices, Inc.", sizeof(info_.vendor_) - 1);
@@ -1501,13 +1501,13 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
 
   Resource::MemoryType type =
       (owner.forceSysMemAlloc() ||
-       (owner.getMemFlags() & amd::MemFlags::SvmFineGrain) != amd::MemFlags::None)
+       (owner.getMemFlags() & amd::MemFlags::SvmFineGrain) != amd::MemFlags::Empty)
           ? Resource::Remote
           : Resource::Local;
 
   // Check if runtime can force a tiny buffer into USWC memory
   if ((size <= (GPU_MAX_REMOTE_MEM_SIZE * Ki)) && (type == Resource::Local) &&
-      (owner.getMemFlags() & amd::MemFlags::ReadOnly) != amd::MemFlags::None) {
+      (owner.getMemFlags() & amd::MemFlags::ReadOnly) != amd::MemFlags::Empty) {
     type = Resource::RemoteUSWC;
   }
 
@@ -1515,7 +1515,7 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
     type = Resource::BusAddressable;
   } else if (owner.getMemFlags() & CL_MEM_EXTERNAL_PHYSICAL_AMD) {
     type = Resource::ExternalPhysical;
-  } else if ((owner.getMemFlags() & amd::MemFlags::VaRangeAmd) != amd::MemFlags::None) {
+  } else if ((owner.getMemFlags() & amd::MemFlags::VaRangeAmd) != amd::MemFlags::Empty) {
     type = Resource::VaRange;
   }
 
@@ -1523,7 +1523,7 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
   bool remoteAlloc = false;
   // Internal means VirtualDevice!=nullptr
   bool internalAlloc =
-      ((owner.getMemFlags() & amd::MemFlags::UseHostPtr) != amd::MemFlags::None &&
+      ((owner.getMemFlags() & amd::MemFlags::UseHostPtr) != amd::MemFlags::Empty &&
        (owner.getVirtualDevice() != nullptr))
           ? true
           : false;
@@ -2710,8 +2710,8 @@ bool Device::createBlitProgram() {
   if (asm_program != nullptr) {
     std::vector<amd::Device*> devices{this};
     std::string opt = "-cl-internal-kernel ";
-    if (auto retval =
-            asm_program->build(devices, opt.c_str(), nullptr, nullptr, false) != CL_SUCCESS) {
+    amd::Status retval = asm_program->build(devices, opt.c_str(), nullptr, nullptr, false);
+    if (retval != amd::Status::Success) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
               "Build failed for trap handler with error code: %d\n", retval);
       asm_program->release();

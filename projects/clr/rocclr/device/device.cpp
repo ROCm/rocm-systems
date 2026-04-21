@@ -682,7 +682,7 @@ bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKe
                                  const std::string& extraOptions) {
   std::vector<amd::Device*> devices;
   devices.push_back(device);
-  int32_t retval = 0;
+  amd::Status retval = amd::Status::Success;
   std::string kernels(device::BlitLinearSourceCode);
   std::string image_kernels(device::BlitImageSourceCode);
 
@@ -719,9 +719,9 @@ bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKe
 #endif
 #endif
   if ((retval = program_->build(devices, opt.c_str(), nullptr, nullptr, GPU_DUMP_BLIT_KERNELS)) !=
-      0) {
+      amd::Status::Success) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-             "Build failed for Kernel: %s with error code %d", kernels.c_str(), retval);
+             "Build failed for Kernel: %s with error code %d", kernels.c_str(), static_cast<int32_t>(retval));
     return false;
   }
   if (!program_->load()) {

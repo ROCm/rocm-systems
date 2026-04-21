@@ -76,23 +76,23 @@ const Symbol* Program::findSymbol(const char* kernelName) const {
   return (it == symbolTable_->cend()) ? NULL : &it->second;
 }
 
-int32_t Program::addDeviceProgram(Device& device, const void* image, size_t length, bool make_copy,
-                                  amd::option::Options* options, const amd::Program* same_prog,
-                                  amd::Os::FileDesc fdesc, size_t foffset, std::string uri) {
+amd::Status Program::addDeviceProgram(Device& device, const void* image, size_t length, bool make_copy,
+                                      amd::option::Options* options, const amd::Program* same_prog,
+                                      amd::Os::FileDesc fdesc, size_t foffset, std::string uri) {
   if (image != NULL && !amd::Elf::isElfMagic((const char*)image)) {
-    return CL_INVALID_BINARY;
+    return amd::Status::InvalidBinary;
   }
 
   // Check if the device is already associated with this program
   if (deviceList_.find(&device) != deviceList_.end()) {
-    return CL_INVALID_VALUE;
+    return amd::Status::InvalidValue;
   }
 
   Device& rootDev = device;
 
   // if the rootDev is already associated with a program
   if (getDeviceProgram(rootDev) != NULL) {
-    return CL_SUCCESS;
+    return amd::Status::Success;
   }
 
   amd::option::Options emptyOpts;
@@ -103,7 +103,7 @@ int32_t Program::addDeviceProgram(Device& device, const void* image, size_t leng
   options->oVariables->BinaryIsSpirv = language_ == SPIRV;
   device::Program* program = rootDev.createProgram(*this, options);
   if (program == NULL) {
-    return CL_OUT_OF_HOST_MEMORY;
+    return amd::Status::OutOfHostMemory;
   }
 
   if (image != NULL) {
@@ -114,7 +114,7 @@ int32_t Program::addDeviceProgram(Device& device, const void* image, size_t leng
         auto* image_copy = new (std::nothrow) uint8_t[length];
         if (image_copy == NULL) {
           delete program;
-          return CL_OUT_OF_HOST_MEMORY;
+          return amd::Status::OutOfHostMemory;
         }
 
         ::memcpy(image_copy, image, length);
@@ -137,14 +137,14 @@ int32_t Program::addDeviceProgram(Device& device, const void* image, size_t leng
     if (!program->setBinary(reinterpret_cast<const char*>(memory), length, same_dev_prog, fdesc,
                             foffset, uri)) {
       delete program;
-      return CL_INVALID_BINARY;
+      return amd::Status::InvalidBinary;
     }
   }
 
   devicePrograms_[&rootDev] = program;
 
   deviceList_.insert(&device);
-  return CL_SUCCESS;
+  return amd::Status::Success;
 }
 
 device::Program* Program::getDeviceProgram(const Device& device) const {
@@ -171,14 +171,14 @@ static bool adjustOptionsOnIgnoreEnv(std::string& cppstr) {
   return optionChangable;
 }
 
-int32_t Program::compile(const std::vector<Device*>& devices, size_t numHeaders,
-                         const std::vector<const Program*>& headerPrograms,
-                         const char** headerIncludeNames, const char* options,
-                         void(*notifyFptr)(void* program_handle, void*), void* data,
-                         bool optionChangable) {
+amd::Status Program::compile(const std::vector<Device*>& devices, size_t numHeaders,
+                             const std::vector<const Program*>& headerPrograms,
+                             const char** headerIncludeNames, const char* options,
+                             void(*notifyFptr)(void* program_handle, void*), void* data,
+                             bool optionChangable) {
   std::scoped_lock sl(programLock_);
 
-  int32_t retval = CL_SUCCESS;
+  amd::Status retval = amd::Status::Success;
 
   // Clear the program object
   clear();
@@ -200,14 +200,14 @@ int32_t Program::compile(const std::vector<Device*>& devices, size_t numHeaders,
     if (!ParseAllOptions(cppstr, parsedOptions, optionChangable, LinkOptsOnly)) {
       programLog_ = parsedOptions.optionsLog();
       LogError("Parsing compile options failed.");
-      return CL_INVALID_COMPILER_OPTIONS;
+      return amd::Status::InvalidCompilerOptions;
     }
     device::Program* devProgram = getDeviceProgram(*it);
     if (devProgram == NULL) {
       const binary_t& bin = binary(*it);
       retval =
           addDeviceProgram(*it, std::get<0>(bin), std::get<1>(bin).first, false, &parsedOptions);
-      if (retval != CL_SUCCESS) {
+      if (retval != amd::Status::Success) {
         return retval;
       }
       devProgram = getDeviceProgram(*it);
@@ -217,44 +217,44 @@ int32_t Program::compile(const std::vector<Device*>& devices, size_t numHeaders,
       continue;
     }
     // We only build a Device-Program once
-    if (devProgram->buildStatus() != CL_BUILD_NONE) {
+    if (devProgram->buildStatus() != static_cast<int32_t>(amd::BuildStatus::BuildNone)) {
       continue;
     }
     if (sourceCode_.empty()) {
-      return CL_INVALID_OPERATION;
+      return amd::Status::InvalidOperation;
     }
     int32_t result =
         devProgram->compile(sourceCode_, headers, headerIncludeNames, options, &parsedOptions);
 
     // Check if the previous device failed a build
-    if ((result != CL_SUCCESS) && (retval != CL_SUCCESS)) {
-      retval = CL_INVALID_OPERATION;
+    if ((result != static_cast<int32_t>(amd::Status::Success)) && (retval != amd::Status::Success)) {
+      retval = amd::Status::InvalidOperation;
     }
     // Update the returned value with a build error
-    else if (result != CL_SUCCESS) {
-      retval = result;
+    else if (result != static_cast<int32_t>(amd::Status::Success)) {
+      retval = static_cast<amd::Status>(result);
     }
   }
 
   if (notifyFptr != NULL) {
-    notifyFptr(as_cl(this), data);
+    notifyFptr(static_cast<void*>(this), data);
   }
 
   return retval;
 }
 
-int32_t Program::link(const std::vector<Device*>& devices, size_t numInputs,
-                      const std::vector<Program*>& inputPrograms, const char* options,
-                      void(*notifyFptr)(void* program_handle, void*), void* data,
-                      bool optionChangable) {
+amd::Status Program::link(const std::vector<Device*>& devices, size_t numInputs,
+                          const std::vector<Program*>& inputPrograms, const char* options,
+                          void(*notifyFptr)(void* program_handle, void*), void* data,
+                          bool optionChangable) {
   std::scoped_lock sl(programLock_);
 
-  int32_t retval = CL_SUCCESS;
+  amd::Status retval = amd::Status::Success;
 
   if (symbolTable_ == NULL) {
     symbolTable_ = new symbols_t;
     if (symbolTable_ == NULL) {
-      return CL_OUT_OF_HOST_MEMORY;
+      return amd::Status::OutOfHostMemory;
     }
   }
 
@@ -272,7 +272,7 @@ int32_t Program::link(const std::vector<Device*>& devices, size_t numInputs,
     if (!ParseAllOptions(cppstr, parsedOptions, optionChangable, LinkOptsOnly)) {
       programLog_ = parsedOptions.optionsLog();
       LogError("Parsing link options failed.");
-      return CL_INVALID_LINKER_OPTIONS;
+      return amd::Status::InvalidLinkerOptions;
     }
     // find the corresponding device program in each input program
     std::vector<device::Program*> inputDevPrograms(numInputs);
@@ -295,7 +295,7 @@ int32_t Program::link(const std::vector<Device*>& devices, size_t numInputs,
       continue;
     }
     if (inputDevPrograms.size() < numInputs) {
-      return CL_INVALID_VALUE;
+      return amd::Status::InvalidValue;
     }
 
     device::Program* devProgram = getDeviceProgram(*it);
@@ -303,29 +303,29 @@ int32_t Program::link(const std::vector<Device*>& devices, size_t numInputs,
       const binary_t& bin = binary(*it);
       retval =
           addDeviceProgram(*it, std::get<0>(bin), std::get<1>(bin).first, false, &parsedOptions);
-      if (retval != CL_SUCCESS) {
+      if (retval != amd::Status::Success) {
         return retval;
       }
       devProgram = getDeviceProgram(*it);
     }
 
     // We only build a Device-Program once
-    if (devProgram->buildStatus() != CL_BUILD_NONE) {
+    if (devProgram->buildStatus() != static_cast<int32_t>(amd::BuildStatus::BuildNone)) {
       continue;
     }
     int32_t result = devProgram->link(inputDevPrograms, options, &parsedOptions);
 
     // Check if the previous device failed a build
-    if ((result != CL_SUCCESS) && (retval != CL_SUCCESS)) {
-      retval = CL_INVALID_OPERATION;
+    if ((result != static_cast<int32_t>(amd::Status::Success)) && (retval != amd::Status::Success)) {
+      retval = amd::Status::InvalidOperation;
     }
     // Update the returned value with a build error
-    else if (result != CL_SUCCESS) {
-      retval = result;
+    else if (result != static_cast<int32_t>(amd::Status::Success)) {
+      retval = static_cast<amd::Status>(result);
     }
   }
 
-  if (retval != CL_SUCCESS) {
+  if (retval != amd::Status::Success) {
     return retval;
   }
 
@@ -341,13 +341,13 @@ int32_t Program::link(const std::vector<Device*>& devices, size_t numInputs,
 
       Symbol& symbol = (*symbolTable_)[name];
       if (!symbol.setDeviceKernel(device, devKernel)) {
-        retval = CL_LINK_PROGRAM_FAILURE;
+        retval = amd::Status::LinkProgramFailure;
       }
     }
   }
 
   if (notifyFptr != NULL) {
-    notifyFptr(as_cl(this), data);
+    notifyFptr(static_cast<void*>(this), data);
   }
 
   return retval;
@@ -390,17 +390,17 @@ void Program::StubProgramSource(const std::string& app_name) {
   program_counter++;
 }
 
-int32_t Program::build(const std::vector<Device*>& devices, const char* options,
-                       void(*notifyFptr)(void* program_handle, void*), void* data,
-                       bool optionChangable, bool newDevProg) {
+amd::Status Program::build(const std::vector<Device*>& devices, const char* options,
+                           void(*notifyFptr)(void* program_handle, void*), void* data,
+                           bool optionChangable, bool newDevProg) {
   std::scoped_lock sl(programLock_);
 
-  int32_t retval = CL_SUCCESS;
+  amd::Status retval = amd::Status::Success;
 
   if (symbolTable_ == NULL) {
     symbolTable_ = new symbols_t;
     if (symbolTable_ == NULL) {
-      return CL_OUT_OF_HOST_MEMORY;
+      return amd::Status::OutOfHostMemory;
     }
   }
 
@@ -425,19 +425,18 @@ int32_t Program::build(const std::vector<Device*>& devices, const char* options,
     if ((language_ != HIP) && !ParseAllOptions(cppstr, parsedOptions, optionChangable, LinkOptsOnly)) {
       programLog_ = parsedOptions.optionsLog();
       LogError("Parsing compile options failed.");
-      return CL_INVALID_COMPILER_OPTIONS;
+      return amd::Status::InvalidCompilerOptions;
     }
 
     device::Program* devProgram = getDeviceProgram(*it);
     if (devProgram == NULL) {
       const binary_t& bin = binary(*it);
       if (sourceCode_.empty() && (std::get<0>(bin) == NULL)) {
-        retval = false;
         continue;
       }
       retval =
           addDeviceProgram(*it, std::get<0>(bin), std::get<1>(bin).first, false, &parsedOptions);
-      if (retval != CL_SUCCESS) {
+      if (retval != amd::Status::Success) {
         return retval;
       }
       devProgram = getDeviceProgram(*it);
@@ -457,22 +456,22 @@ int32_t Program::build(const std::vector<Device*>& devices, const char* options,
     }
 
     // We only build a Device-Program once
-    if (devProgram->buildStatus() != CL_BUILD_NONE) {
+    if (devProgram->buildStatus() != static_cast<int32_t>(amd::BuildStatus::BuildNone)) {
       continue;
     }
     int32_t result = devProgram->build(sourceCode_, options, &parsedOptions);
 
     // Check if the previous device failed a build
-    if ((result != CL_SUCCESS) && (retval != CL_SUCCESS)) {
-      retval = CL_INVALID_OPERATION;
+    if ((result != static_cast<int32_t>(amd::Status::Success)) && (retval != amd::Status::Success)) {
+      retval = amd::Status::InvalidOperation;
     }
     // Update the returned value with a build error
-    else if (result != CL_SUCCESS) {
-      retval = result;
+    else if (result != static_cast<int32_t>(amd::Status::Success)) {
+      retval = static_cast<amd::Status>(result);
     }
   }
 
-  if (retval == CL_SUCCESS) {
+  if (retval == amd::Status::Success) {
     // Rebuild the symbol table
     for (const auto& it : devicePrograms_) {
       const Device& device = *(it.first);
@@ -485,14 +484,14 @@ int32_t Program::build(const std::vector<Device*>& devices, const char* options,
 
         Symbol& symbol = (*symbolTable_)[name];
         if (!symbol.setDeviceKernel(device, devKernel)) {
-          retval = CL_BUILD_PROGRAM_FAILURE;
+          retval = amd::Status::BuildProgramFailure;
         }
       }
     }
   }
 
   if (notifyFptr != NULL) {
-    notifyFptr(as_cl(this), data);
+    notifyFptr(static_cast<void*>(this), data);
   }
 
   return retval;

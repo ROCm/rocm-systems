@@ -11,6 +11,7 @@
 #include "platform/kernel.hpp"
 #include "platform/sampler.hpp"
 #include "cl_semaphore_amd.h"
+#include "cl_type_map.hpp"
 
 #include <vector>
 
@@ -27,7 +28,7 @@ static amd::Program* createProgram(cl_context context, cl_uint num_devices,
   if (device_list == NULL) {
     const std::vector<amd::Device*>& devices = as_amd(context)->devices();
     for (const auto& it : devices) {
-      if (program->addDeviceProgram(*it) == CL_OUT_OF_HOST_MEMORY) {
+      if (program->addDeviceProgram(*it) == amd::Status::OutOfHostMemory) {
         *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
         program->release();
         return NULL;
@@ -46,7 +47,7 @@ static amd::Program* createProgram(cl_context context, cl_uint num_devices,
       return NULL;
     }
 
-    cl_int status = program->addDeviceProgram(*as_amd(device));
+    cl_int status = amd::cl::to_cl(program->addDeviceProgram(*as_amd(device)));
     if (status == CL_OUT_OF_HOST_MEMORY) {
       *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
       program->release();
@@ -144,7 +145,7 @@ RUNTIME_ENTRY_RET(cl_program, clCreateProgramWithSource,
   // Add programs for all devices in the context.
   const std::vector<amd::Device*>& devices = as_amd(context)->devices();
   for (const auto& it : devices) {
-    if (program->addDeviceProgram(*it) == CL_OUT_OF_HOST_MEMORY) {
+    if (program->addDeviceProgram(*it) == amd::Status::OutOfHostMemory) {
       *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
       program->release();
       return (cl_program)0;
@@ -205,7 +206,7 @@ RUNTIME_ENTRY_RET(cl_program, clCreateProgramWithIL,
   // Add programs for all devices in the context.
   const std::vector<amd::Device*>& devices = as_amd(context)->devices();
   for (const auto& it : devices) {
-    if (program->addDeviceProgram(*it, il, length) == CL_OUT_OF_HOST_MEMORY) {
+    if (program->addDeviceProgram(*it, il, length) == amd::Status::OutOfHostMemory) {
       *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
       program->release();
       return (cl_program)0;
@@ -311,7 +312,7 @@ RUNTIME_ENTRY_RET(cl_program, clCreateProgramWithBinary,
       continue;
     }
 
-    cl_int status = program->addDeviceProgram(*as_amd(device), binaries[i], lengths[i]);
+    cl_int status = amd::cl::to_cl(program->addDeviceProgram(*as_amd(device), binaries[i], lengths[i]));
 
     *not_null(errcode_ret) = status;
 
@@ -368,7 +369,7 @@ RUNTIME_ENTRY_RET(cl_program, clCreateProgramWithAssemblyAMD,
   // Add programs for all devices in the context.
   const std::vector<amd::Device*>& devices = as_amd(context)->devices();
   for (const auto& it : devices) {
-    if (program->addDeviceProgram(*it) == CL_OUT_OF_HOST_MEMORY) {
+    if (program->addDeviceProgram(*it) == amd::Status::OutOfHostMemory) {
       *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
       program->release();
       return (cl_program)0;
@@ -494,7 +495,7 @@ RUNTIME_ENTRY(cl_int, clBuildProgram,
 
   if (device_list == NULL) {
     // build for all devices in the context.
-    return amdProgram->build(amdProgram->context().devices(), options, pfn_notify, user_data);
+    return amd::cl::to_cl(amdProgram->build(amdProgram->context().devices(), options, pfn_notify, user_data));
   }
 
   std::vector<amd::Device*> devices(num_devices);
@@ -505,7 +506,7 @@ RUNTIME_ENTRY(cl_int, clBuildProgram,
     }
     devices[i] = device;
   }
-  return amdProgram->build(devices, options, pfn_notify, user_data);
+  return amd::cl::to_cl(amdProgram->build(devices, options, pfn_notify, user_data));
 }
 RUNTIME_EXIT
 
@@ -626,8 +627,8 @@ RUNTIME_ENTRY(cl_int, clCompileProgram,
 
   if (device_list == NULL) {
     // compile for all devices in the context.
-    return amdProgram->compile(amdProgram->context().devices(), num_input_headers, headerPrograms,
-                               header_include_names, options, pfn_notify, user_data);
+    return amd::cl::to_cl(amdProgram->compile(amdProgram->context().devices(), num_input_headers, headerPrograms,
+                               header_include_names, options, pfn_notify, user_data));
   }
 
   std::vector<amd::Device*> devices(num_devices);
@@ -640,8 +641,8 @@ RUNTIME_ENTRY(cl_int, clCompileProgram,
     devices[i] = device;
   }
 
-  return amdProgram->compile(devices, num_input_headers, headerPrograms, header_include_names,
-                             options, pfn_notify, user_data);
+  return amd::cl::to_cl(amdProgram->compile(devices, num_input_headers, headerPrograms, header_include_names,
+                             options, pfn_notify, user_data));
 }
 RUNTIME_EXIT
 
@@ -781,8 +782,8 @@ RUNTIME_ENTRY_RET(cl_program, clLinkProgram,
 
   if (device_list == NULL) {
     // compile for all devices in the context.
-    status = program->link(as_amd(context)->devices(), num_input_programs, inputPrograms, options,
-                           pfn_notify, user_data);
+    status = amd::cl::to_cl(program->link(as_amd(context)->devices(), num_input_programs, inputPrograms, options,
+                           pfn_notify, user_data));
   } else {
     std::vector<amd::Device*> devices(num_devices);
 
@@ -797,7 +798,7 @@ RUNTIME_ENTRY_RET(cl_program, clLinkProgram,
     }
 
     status =
-        program->link(devices, num_input_programs, inputPrograms, options, pfn_notify, user_data);
+        amd::cl::to_cl(program->link(devices, num_input_programs, inputPrograms, options, pfn_notify, user_data));
   }
   *not_null(errcode_ret) = status;
   if (status == CL_SUCCESS) {
@@ -1599,7 +1600,23 @@ RUNTIME_ENTRY(cl_int, clSetKernelArg,
     }
   }
 
-  as_amd(kernel)->parameters().set(static_cast<size_t>(arg_index), arg_size, arg_value);
+  amd::KernelParameters& params = as_amd(kernel)->parameters();
+  params.set(static_cast<size_t>(arg_index), arg_size, arg_value);
+
+  // After set(), assign the converted amd::* objects for handle-type arguments.
+  // (rocclr's set() cannot call as_amd; the opencl layer does the conversion here.)
+  if (!is_local && (desc.type_ == amd::KernelArgValueType::Pointer) && (arg_value != NULL)) {
+    cl_mem memObj = *static_cast<const cl_mem*>(arg_value);
+    amd::Memory* mem = as_amd(memObj);
+    params.setMemoryArg(static_cast<size_t>(arg_index), desc.info_.arrayIndex_, mem);
+  } else if (desc.type_ == amd::KernelArgValueType::Sampler && arg_value != NULL) {
+    cl_sampler sampler = *static_cast<const cl_sampler*>(arg_value);
+    params.setSamplerArg(desc.info_.arrayIndex_, as_amd(sampler));
+  } else if (desc.type_ == amd::KernelArgValueType::Queue && arg_value != NULL) {
+    cl_command_queue queue = *static_cast<const cl_command_queue*>(arg_value);
+    params.setQueueArg(desc.info_.arrayIndex_, as_amd(queue)->asDeviceQueue());
+  }
+
   return CL_SUCCESS;
 }
 RUNTIME_EXIT

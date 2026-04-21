@@ -162,11 +162,11 @@ class Program : public RuntimeObject {
   const std::string& programLog() const { return programLog_; }
 
   //! Add a new device program with or without binary image and options.
-  int32_t addDeviceProgram(Device&, const void* image = NULL, size_t len = 0, bool make_copy = true,
-                           amd::option::Options* options = NULL,
-                           const amd::Program* same_prog = nullptr,
-                           amd::Os::FileDesc fdesc = amd::Os::FDescInit(), size_t foffset = 0,
-                           std::string uri = std::string());
+  amd::Status addDeviceProgram(Device&, const void* image = NULL, size_t len = 0, bool make_copy = true,
+                               amd::option::Options* options = NULL,
+                               const amd::Program* same_prog = nullptr,
+                               amd::Os::FileDesc fdesc = amd::Os::FDescInit(), size_t foffset = 0,
+                               std::string uri = std::string());
 
   //! Find the section for the given device. Return NULL if not found.
   device::Program* getDeviceProgram(const Device& device) const;
@@ -181,22 +181,22 @@ class Program : public RuntimeObject {
   const std::string& kernelNames();
 
   //! Compile the program for the given devices.
-  int32_t compile(const std::vector<Device*>& devices, size_t numHeaders,
-                  const std::vector<const Program*>& headerPrograms,
-                  const char** headerIncludeNames, const char* options = NULL,
-                  void(*notifyFptr)(void* program_handle, void*) = NULL, void* data = NULL,
-                  bool optionChangable = true);
+  amd::Status compile(const std::vector<Device*>& devices, size_t numHeaders,
+                      const std::vector<const Program*>& headerPrograms,
+                      const char** headerIncludeNames, const char* options = NULL,
+                      void(*notifyFptr)(void* program_handle, void*) = NULL, void* data = NULL,
+                      bool optionChangable = true);
 
   //! Link the programs for the given devices.
-  int32_t link(const std::vector<Device*>& devices, size_t numInputs,
-               const std::vector<Program*>& inputPrograms, const char* options = NULL,
-               void(*notifyFptr)(void* program_handle, void*) = NULL, void* data = NULL,
-               bool optionChangable = true);
+  amd::Status link(const std::vector<Device*>& devices, size_t numInputs,
+                   const std::vector<Program*>& inputPrograms, const char* options = NULL,
+                   void(*notifyFptr)(void* program_handle, void*) = NULL, void* data = NULL,
+                   bool optionChangable = true);
 
   //! Build the program for the given devices.
-  int32_t build(const std::vector<Device*>& devices, const char* options = NULL,
-                void(*notifyFptr)(void* program_handle, void*) = NULL, void* data = NULL,
-                bool optionChangable = true, bool newDevProg = true);
+  amd::Status build(const std::vector<Device*>& devices, const char* options = NULL,
+                    void(*notifyFptr)(void* program_handle, void*) = NULL, void* data = NULL,
+                    bool optionChangable = true, bool newDevProg = true);
 
   //! Load the program. If devices is not specified, then load program for all devices.
   bool load(const std::vector<Device*>& devices = {});

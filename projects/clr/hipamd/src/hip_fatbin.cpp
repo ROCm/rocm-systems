@@ -735,7 +735,7 @@ hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_
   if (program == nullptr) {
     return hipErrorOutOfMemory;
   }
-  if (CL_SUCCESS !=
+  if (amd::Status::Success !=
       program->addDeviceProgram(*ctx->devices()[0], binary_image, binary_size, false, nullptr,
                                 nullptr, (ufd_ != nullptr ? ufd_->fdesc_ : amd::Os::FDescInit()),
                                 binary_offset, uri_)) {
@@ -756,9 +756,9 @@ hipError_t FatBinaryInfo::BuildProgram(const int device_id) {
   if (dev_programs_[device_id]->IsProgramBuilt(*g_devices[device_id]->devices()[0]) == false) {
     constexpr bool kOptionChangeable = true;
     constexpr bool kNewDevProg = false;
-    if (CL_SUCCESS != dev_programs_[device_id]->build(g_devices[device_id]->devices(), nullptr,
-                                                      nullptr, nullptr, kOptionChangeable,
-                                                      kNewDevProg)) {
+    if (amd::Status::Success != dev_programs_[device_id]->build(g_devices[device_id]->devices(), nullptr,
+                                                                nullptr, nullptr, kOptionChangeable,
+                                                                kNewDevProg)) {
       return hipErrorNoBinaryForGpu;
     }
     if (!dev_programs_[device_id]->load()) {
