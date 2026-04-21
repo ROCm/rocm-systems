@@ -24,6 +24,7 @@
 
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/aqlprofile/aqlprofile.hpp"
+#include "lib/common/container/stable_vector.hpp"
 #include "lib/common/dl.hpp"
 #include "lib/common/elf_utils.hpp"
 #include "lib/common/environment.hpp"
@@ -71,6 +72,7 @@
 #include <rocprofiler-sdk/ompt.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/version.h>
+#include <rocprofiler-sdk/cxx/utility.hpp>
 
 #include <fmt/format.h>
 
@@ -325,8 +327,8 @@ struct client_library
         delete configure_attach_result;
     }
 
-    client_library(const client_library&)     = delete;
-    client_library(client_library&&) noexcept = default;
+    client_library(const client_library&)       = delete;
+    client_library(client_library&& v) noexcept = default;
 
     client_library& operator=(const client_library&) = delete;
     client_library& operator=(client_library&&) noexcept = delete;
@@ -339,15 +341,67 @@ struct client_library
     rocprofiler_tool_configure_attach_result_t* configure_attach_result = nullptr;
     rocprofiler_client_id_t                     internal_client_id      = {};
     rocprofiler_client_id_t                     mutable_client_id       = {};
+
+    std::string_view get_name() const
+    {
+        if(mutable_client_id.name)
+            return mutable_client_id.name;
+        else if(internal_client_id.name)
+            return internal_client_id.name;
+        else
+            return name;
+    }
+
+    friend bool operator==(const client_library& lhs, const client_library& rhs)
+    {
+        return std::tie(lhs.configure_func, lhs.configure_attach_func) ==
+                   std::tie(rhs.configure_func, rhs.configure_attach_func) ||
+               std::tie(lhs.configure_result, lhs.configure_attach_result) ==
+                   std::tie(rhs.configure_result, rhs.configure_attach_result);
+    }
 };
 
-using client_library_vec_t = std::vector<std::optional<client_library>>;
+using client_library_vec_t = common::container::stable_vector<std::optional<client_library>>;
+
+template <typename Tp>
+decltype(auto)
+emplace_client(Tp&                                 data,
+               std::string_view                    _name,
+               void*                               _dlhandle,
+               rocprofiler_configure_func_t        _cfg_func,
+               rocprofiler_configure_attach_func_t _attach_func)
+{
+    constexpr auto client_id_size = sizeof(rocprofiler_client_id_t);
+    uint32_t       _prio          = get_client_offset() + data.size();
+    auto           _client_v      = client_library{std::string{_name},
+                                    _dlhandle,
+                                    _cfg_func,
+                                    _attach_func,
+                                    nullptr,
+                                    nullptr,
+                                    rocprofiler_client_id_t{client_id_size, nullptr, _prio},
+                                    rocprofiler_client_id_t{client_id_size, nullptr, _prio}};
+
+    // return existing client if evaluates to equal
+    for(auto& itr : data)
+    {
+        if(itr && *itr == _client_v)
+        {
+            ROCP_WARNING << fmt::format(
+                "found matching client library for '{}' :: {}", _name, itr->get_name());
+            return itr;
+        }
+    }
+
+    ROCP_WARNING << fmt::format("registering new client library '{}'", _name);
+    auto& client = data.emplace_back(std::move(_client_v));
+    return client;
+}
 
 client_library_vec_t
 find_clients()
 {
-    auto data            = client_library_vec_t{};
-    auto priority_offset = get_client_offset();
+    auto data = client_library_vec_t{};
 
     auto is_unique_configure_func = [&data](auto* _cfg_func) {
         for(const auto& itr : data)
@@ -355,25 +409,6 @@ find_clients()
             if(itr && itr->configure_func && itr->configure_func == _cfg_func) return false;
         }
         return true;
-    };
-
-    auto emplace_client =
-        [&data, priority_offset](
-            std::string_view                    _name,
-            void*                               _dlhandle,
-            auto*                               _cfg_func,
-            rocprofiler_configure_attach_func_t _attach_func) -> std::optional<client_library>& {
-        constexpr auto client_id_size = sizeof(rocprofiler_client_id_t);
-        uint32_t       _prio          = priority_offset + data.size();
-        return data.emplace_back(
-            client_library{std::string{_name},
-                           _dlhandle,
-                           _cfg_func,
-                           _attach_func,
-                           nullptr,
-                           nullptr,
-                           rocprofiler_client_id_t{client_id_size, nullptr, _prio},
-                           rocprofiler_client_id_t{client_id_size, nullptr, _prio}});
     };
 
     auto rocprofiler_configure_dlsym = [](auto _handle) {
@@ -391,7 +426,7 @@ find_clients()
     if(get_forced_configure() && is_unique_configure_func(get_forced_configure()))
     {
         ROCP_INFO << "adding forced configure";
-        emplace_client("(forced)", nullptr, get_forced_configure(), nullptr);
+        emplace_client(data, "(forced)", nullptr, get_forced_configure(), nullptr);
     }
 
     auto get_env_libs = []() {
@@ -493,13 +528,13 @@ find_clients()
                     << "[ROCP_TOOL_LIBRARIES] rocprofiler-sdk tool library '" << itr
                     << "' did not contain rocprofiler_configure symbol (search method: dlsym)";
                 if(_sym && is_unique_configure_func(_sym))
-                    emplace_client(itr, handle, _sym, _attach_sym);
+                    emplace_client(data, itr, handle, _sym, _attach_sym);
             }
         }
     }
 
     if(rocprofiler_configure && is_unique_configure_func(rocprofiler_configure))
-        emplace_client("unknown", nullptr, rocprofiler_configure, nullptr);
+        emplace_client(data, "unknown", nullptr, rocprofiler_configure, nullptr);
 
     auto _default_configure        = rocprofiler_configure_dlsym(RTLD_DEFAULT);
     auto _next_configure           = rocprofiler_configure_dlsym(RTLD_NEXT);
@@ -507,10 +542,11 @@ find_clients()
     auto _next_configure_attach    = rocprofiler_configure_attach_dlsym(RTLD_NEXT);
 
     if(_default_configure && is_unique_configure_func(_default_configure))
-        emplace_client("(RTLD_DEFAULT)", nullptr, _default_configure, _default_configure_attach);
+        emplace_client(
+            data, "(RTLD_DEFAULT)", nullptr, _default_configure, _default_configure_attach);
 
     if(_next_configure && is_unique_configure_func(_next_configure))
-        emplace_client("(RTLD_NEXT)", nullptr, _next_configure, _next_configure_attach);
+        emplace_client(data, "(RTLD_NEXT)", nullptr, _next_configure, _next_configure_attach);
 
     // if there are two "rocprofiler_configures", we need to trigger a search of all the shared
     // libraries
@@ -573,7 +609,7 @@ find_clients()
             }
             else if(is_unique_configure_func(_sym))
             {
-                auto& entry                    = emplace_client(itr, handle, _sym, _attach_sym);
+                auto& entry = emplace_client(data, itr, handle, _sym, _attach_sym);
                 entry->internal_client_id.name = entry->name.c_str();
             }
         }
@@ -616,6 +652,77 @@ get_registration_mutex()
 }
 
 bool
+invoke_client_configure(std::optional<client_library>& itr)
+{
+    if(!itr->configure_func)
+    {
+        ROCP_INFO << "rocprofiler::registration::invoke_client_configure() attempted to "
+                     "invoke configure function from "
+                  << itr->get_name() << " that had no configuration function";
+        return false;
+    }
+
+    if(get_invoked_configures().find(itr->configure_func) != get_invoked_configures().end())
+    {
+        ROCP_INFO << "rocprofiler::registration::invoke_client_configure() attempted to "
+                     "invoke configure function from "
+                  << itr->get_name() << " (addr="
+                  << fmt::format("{:#018x}", reinterpret_cast<uint64_t>(itr->configure_func))
+                  << ") more than once";
+        return false;
+    }
+    else
+    {
+        ROCP_INFO << "rocprofiler::registration::invoke_client_configure() invoking configure "
+                     "function from "
+                  << itr->get_name() << " (addr="
+                  << fmt::format("{:#018x}", reinterpret_cast<uint64_t>(itr->configure_func))
+                  << ")";
+    }
+
+    auto* _result = itr->configure_func(ROCPROFILER_VERSION,
+                                        ROCPROFILER_VERSION_STRING,
+                                        itr->internal_client_id.handle - get_client_offset(),
+                                        &itr->mutable_client_id);
+
+    if(_result)
+    {
+        itr->configure_result = new rocprofiler_tool_configure_result_t{*_result};
+
+        if(itr->configure_attach_func)
+        {
+            auto* _attach_result =
+                itr->configure_attach_func(ROCPROFILER_VERSION,
+                                           ROCPROFILER_VERSION_STRING,
+                                           itr->internal_client_id.handle - get_client_offset(),
+                                           &itr->mutable_client_id);
+
+            if(_attach_result)
+            {
+                itr->configure_attach_result =
+                    new rocprofiler_tool_configure_attach_result_t{*_attach_result};
+            }
+        }
+
+        ROCP_WARNING << fmt::format("initialized tool configure for {} :: {} :: {} :: {} :: {}",
+                                    itr->get_name(),
+                                    sdk::utility::as_hex(itr->configure_func),
+                                    sdk::utility::as_hex(itr->configure_result),
+                                    sdk::utility::as_hex(itr->configure_result->initialize),
+                                    sdk::utility::as_hex(itr->configure_result->finalize));
+    }
+    else
+    {
+        context::deactivate_client_contexts(itr->internal_client_id);
+        context::deregister_client_contexts(itr->internal_client_id);
+    }
+
+    get_invoked_configures().emplace(itr->configure_func);
+
+    return true;
+}
+
+bool
 invoke_client_configures()
 {
     if(get_init_status() > 0) return false;
@@ -628,65 +735,36 @@ invoke_client_configures()
 
     for(auto& itr : *get_clients())
     {
-        if(!itr) continue;
+        if(itr) invoke_client_configure(itr);
+    }
 
-        if(!itr->configure_func)
-        {
-            ROCP_ERROR << "rocprofiler::registration::invoke_client_configures() attempted to "
-                          "invoke configure function from "
-                       << itr->name << " that had no configuration function";
-            continue;
-        }
+    return true;
+}
 
-        if(get_invoked_configures().find(itr->configure_func) != get_invoked_configures().end())
-        {
-            ROCP_ERROR << "rocprofiler::registration::invoke_client_configures() attempted to "
-                          "invoke configure function from "
-                       << itr->name << " (addr="
-                       << fmt::format("{:#018x}", reinterpret_cast<uint64_t>(itr->configure_func))
-                       << ") more than once";
-            continue;
-        }
-        else
-        {
-            ROCP_INFO << "rocprofiler::registration::invoke_client_configures() invoking configure "
-                         "function from "
-                      << itr->name << " (addr="
-                      << fmt::format("{:#018x}", reinterpret_cast<uint64_t>(itr->configure_func))
-                      << ")";
-        }
+bool
+invoke_client_initializer(std::optional<client_library>& itr)
+{
+    if(itr && itr->configure_result && itr->configure_result->initialize)
+    {
+        rocprofiler_client_finalize_t client_fini_func = [](rocprofiler_client_id_t _id) -> void {
+            // if there is only one client, just fully finalize
+            if(get_clients()->size() == 1)
+                finalize();
+            else
+                invoke_client_finalizer(_id);
+        };
 
-        auto* _result = itr->configure_func(ROCPROFILER_VERSION,
-                                            ROCPROFILER_VERSION_STRING,
-                                            itr->internal_client_id.handle - get_client_offset(),
-                                            &itr->mutable_client_id);
-
-        if(_result)
-        {
-            itr->configure_result = new rocprofiler_tool_configure_result_t{*_result};
-
-            if(itr->configure_attach_func)
-            {
-                auto* _attach_result =
-                    itr->configure_attach_func(ROCPROFILER_VERSION,
-                                               ROCPROFILER_VERSION_STRING,
-                                               itr->internal_client_id.handle - get_client_offset(),
-                                               &itr->mutable_client_id);
-
-                if(_attach_result)
-                {
-                    itr->configure_attach_result =
-                        new rocprofiler_tool_configure_attach_result_t{*_attach_result};
-                }
-            }
-        }
-        else
-        {
-            context::deactivate_client_contexts(itr->internal_client_id);
-            context::deregister_client_contexts(itr->internal_client_id);
-        }
-
-        get_invoked_configures().emplace(itr->configure_func);
+        ROCP_WARNING << fmt::format("invoking tool initialize for {} :: {} :: {} :: {} :: {}",
+                                    itr->get_name(),
+                                    sdk::utility::as_hex(itr->configure_func),
+                                    sdk::utility::as_hex(itr->configure_result),
+                                    sdk::utility::as_hex(itr->configure_result->initialize),
+                                    sdk::utility::as_hex(itr->configure_result->finalize));
+        context::push_client(itr->internal_client_id.handle);
+        itr->configure_result->initialize(client_fini_func, itr->configure_result->tool_data);
+        context::pop_client(itr->internal_client_id.handle);
+        // set to nullptr so initialize only gets called once
+        itr->configure_result->initialize = nullptr;
     }
 
     return true;
@@ -703,21 +781,9 @@ invoke_client_initializers()
 
     if(!get_clients()) return false;
 
-    // if there is only one client, just fully finalize
-    rocprofiler_client_finalize_t client_fini_func =
-        (get_clients()->size() == 1) ? [](rocprofiler_client_id_t) -> void { finalize(); }
-                                     : &invoke_client_finalizer;
-
     for(auto& itr : *get_clients())
     {
-        if(itr && itr->configure_result && itr->configure_result->initialize)
-        {
-            context::push_client(itr->internal_client_id.handle);
-            itr->configure_result->initialize(client_fini_func, itr->configure_result->tool_data);
-            context::pop_client(itr->internal_client_id.handle);
-            // set to nullptr so initialize only gets called once
-            itr->configure_result->initialize = nullptr;
-        }
+        invoke_client_initializer(itr);
     }
 
     return true;
@@ -843,6 +909,13 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
             context::stop_client_contexts(itr->internal_client_id);
             if(itr->configure_result && itr->configure_result->finalize)
             {
+                ROCP_WARNING << fmt::format("invoking tool finalize for {} :: {} :: {} :: {} :: {}",
+                                            itr->get_name(),
+                                            sdk::utility::as_hex(itr->configure_func),
+                                            sdk::utility::as_hex(itr->configure_result),
+                                            sdk::utility::as_hex(itr->configure_result->initialize),
+                                            sdk::utility::as_hex(itr->configure_result->finalize));
+
                 // set to nullptr so finalize only gets called once
                 rocprofiler_tool_finalize_t _finalize_func = nullptr;
                 std::swap(_finalize_func, itr->configure_result->finalize);
@@ -922,6 +995,28 @@ void
 set_fini_status(int v)
 {
     if(get_status()) get_status()->second.store(v, std::memory_order_release);
+}
+
+void
+client_initialize(std::optional<client_library>& client)
+{
+    // ensure we have already initialized
+    // initialize();
+
+    // auto  _temp_clients = find_clients();
+    // auto* _clients      = CHECK_NOTNULL(get_clients());
+    // for(auto& itr : _temp_clients)
+    // {
+    //     emplace_client(*_clients, itr->name, itr->dlhandle, itr->configure_func,
+    //     itr->configure_attach_func);
+    // }
+
+    set_init_status(-1);
+    invoke_client_configure(client);
+    invoke_client_initializer(client);
+    if(get_num_clients() > 0) internal_threading::initialize();
+    // initialization is no longer available
+    set_init_status(1);
 }
 
 void
@@ -1076,6 +1171,22 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
     ROCP_INFO << "forcing rocprofiler configuration";
 
     auto& forced_config = rocprofiler::registration::get_forced_configure();
+
+    if(forced_config || rocprofiler::registration::get_init_status() > 0)
+    {
+        ROCP_INFO << "adding forced configure";
+        forced_config = configure_func;
+        auto& _client = emplace_client(*rocprofiler::registration::get_clients(),
+                                       "(forced...)",
+                                       nullptr,
+                                       forced_config,
+                                       nullptr);
+
+        rocprofiler::registration::client_initialize(_client);
+        return ROCPROFILER_STATUS_SUCCESS;
+        // auto status = rocprofiler::registration::late::invoke_register_propagation();
+        // return status;
+    }
 
     // init status may be -1 (currently initializing) or 1 (already initialized).
     // if either case, we want to ignore this function call but if this is
