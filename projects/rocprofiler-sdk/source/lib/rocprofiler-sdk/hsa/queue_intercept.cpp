@@ -192,6 +192,15 @@ process_doorbell_impl(QueueState*          state,
     ROCP_TRACE << "doorbell: processing " << pkt_count << " packets [" << scan_pos << ".."
                << scan_end << ") stride=" << stride;
 
+    // DIAG: H2 — detect stride mismatch where app advanced virtual_wptr by non-stride amount
+    if(pkt_count == 0 && scan_end > scan_pos)
+    {
+        ROCP_FATAL << "DIAG-H2: pkt_count=0 but pending data! scan_pos=" << scan_pos
+                   << " scan_end=" << scan_end << " stride=" << stride
+                   << " remainder=" << ((scan_end - scan_pos) % stride)
+                   << " gap=" << (scan_end - scan_pos) << " queue=" << state->hsa_queue;
+    }
+
     // Set up TLS for ring_buffer_writer
     tls_state      = state;
     tls_submit_pos = state->next_submit_pos;
@@ -240,6 +249,15 @@ process_doorbell_impl(QueueState*          state,
             }
 
             uint64_t used = tls_submit_pos - start_submit;
+
+            // DIAG: H3 — detect expansion exceeding stride
+            if(used > stride)
+            {
+                ROCP_FATAL << "DIAG-H3: used(" << used << ") > stride(" << stride
+                           << ") — spillover corruption! pkt_pos=" << pkt_pos
+                           << " queue=" << state->hsa_queue;
+            }
+
             if(used < stride)
             {
                 uint64_t remaining = stride - used;
@@ -270,6 +288,18 @@ process_doorbell_impl(QueueState*          state,
                 static_cast<char*>(state->ring_buf) +
                 ((pkt_pos & state->ring_mask) * state->pkt_size));
             sync_metadata_impl(state, pkt, 0);
+        }
+    }
+
+    // DIAG: H4 — detect ring overflow
+    {
+        auto diag_rdid = __atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE);
+        auto diag_used = state->next_submit_pos - diag_rdid;
+        if(diag_used > state->ring_size)
+        {
+            ROCP_FATAL << "DIAG-H4: ring overflow! submit_pos=" << state->next_submit_pos
+                       << " rdid=" << diag_rdid << " used=" << diag_used
+                       << " ring_size=" << state->ring_size << " queue=" << state->hsa_queue;
         }
     }
 
