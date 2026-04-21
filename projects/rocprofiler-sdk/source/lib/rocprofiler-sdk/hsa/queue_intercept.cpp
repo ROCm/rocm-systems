@@ -95,9 +95,11 @@ unregister_doorbell(hsa_signal_t doorbell)
 uint64_t
 add_write_index_impl(QueueState* state, uint64_t value)
 {
-    auto prev = state->virtual_wptr.fetch_add(value, std::memory_order_relaxed);
+    uint64_t stride = 1 + state->k_factor;
+    auto     prev   = state->virtual_wptr.fetch_add(value * stride, std::memory_order_relaxed);
     ROCP_TRACE << "add_write_index: queue=" << state->hsa_queue << " +=" << value
-               << " prev=" << prev << " new=" << (prev + value);
+               << " stride=" << stride << " prev=" << prev
+               << " new=" << (prev + value * stride);
     return prev;
 }
 
@@ -158,9 +160,10 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
                << " submit_pos=" << tls_submit_pos << " k_factor=" << state->k_factor;
     for(uint64_t i = 0; i < pkt_count; i++)
     {
-        auto  slot = tls_submit_pos & state->ring_mask;
-        auto* dst  = static_cast<char*>(state->ring_buf) + (slot * pkt_size);
-        memcpy(dst, src + i * pkt_size, pkt_size);
+        auto        slot = tls_submit_pos & state->ring_mask;
+        auto*       dst  = static_cast<char*>(state->ring_buf) + (slot * pkt_size);
+        const auto* s    = src + i * pkt_size;
+        if(dst != s) memcpy(dst, s, pkt_size);
         ROCP_TRACE << "  pkt[" << i << "] -> slot=" << slot << " submit_pos=" << tls_submit_pos;
         tls_submit_pos++;
 
@@ -193,11 +196,10 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t
         return;
     }
 
-    uint64_t pkt_count = scan_end - scan_pos;
+    uint64_t stride    = 1 + state->k_factor;
+    uint64_t pkt_count = (scan_end - scan_pos) / stride;
     ROCP_TRACE << "doorbell: processing " << pkt_count << " packets [" << scan_pos << ".."
-               << scan_end << ") k_factor=" << state->k_factor;
-    auto* first_pkt =
-        static_cast<char*>(state->ring_buf) + ((scan_pos & state->ring_mask) * state->pkt_size);
+               << scan_end << ") stride=" << stride;
 
     // Set up TLS for ring_buffer_writer
     tls_state      = state;
@@ -208,13 +210,20 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t
     auto*        qc    = get_queue_controller();
     const Queue* queue = (qc && state->hsa_queue) ? qc->get_queue(*state->hsa_queue) : nullptr;
 
-    if(queue)
+    // Packets are strided in the ring — process each one individually
+    for(uint64_t i = 0; i < pkt_count; i++)
     {
-        queue->invoke_write_interceptor(first_pkt, pkt_count, ring_buffer_writer);
-    }
-    else
-    {
-        ring_buffer_writer(first_pkt, pkt_count);
+        uint64_t pkt_pos = scan_pos + i * stride;
+        auto*    pkt     = static_cast<char*>(state->ring_buf) +
+                       ((pkt_pos & state->ring_mask) * state->pkt_size);
+        if(queue)
+        {
+            queue->invoke_write_interceptor(pkt, 1, ring_buffer_writer);
+        }
+        else
+        {
+            ring_buffer_writer(pkt, 1);
+        }
     }
 
     state->next_scan_pos   = scan_end;
@@ -226,9 +235,10 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t
     {
         for(uint64_t i = 0; i < pkt_count; i++)
         {
-            auto* pkt = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
+            uint64_t pkt_pos = scan_pos + i * stride;
+            auto*    pkt     = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
                 static_cast<char*>(state->ring_buf) +
-                (((scan_pos + i) & state->ring_mask) * state->pkt_size));
+                ((pkt_pos & state->ring_mask) * state->pkt_size));
             sync_metadata_impl(state, pkt, 0);
         }
     }
