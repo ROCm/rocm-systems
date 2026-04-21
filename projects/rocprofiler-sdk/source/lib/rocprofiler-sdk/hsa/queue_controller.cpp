@@ -715,6 +715,13 @@ queue_controller_fini()
         queue_fini();
         ROCP_INFO << "[TEARDOWN-DIAG][QC-FINI-QUEUE-FINI-END]";
     }
+
+    if(queue_intercept::is_intercepting_inline())
+    {
+        ROCP_INFO << "[TEARDOWN-DIAG][QC-FINI-QI-SHUTDOWN-BEGIN]";
+        queue_intercept::shutdown_intercept();
+        ROCP_INFO << "[TEARDOWN-DIAG][QC-FINI-QI-SHUTDOWN-END]";
+    }
 }
 
 void

@@ -592,6 +592,27 @@ is_intercepting_inline()
 }
 
 void
+shutdown_intercept()
+{
+    const auto queue_entries_before    = queue_registry_size();
+    const auto doorbell_entries_before = doorbell_registry_size();
+
+    get_queue_registry().wlock([](auto& map) { map.clear(); });
+    get_doorbell_map().wlock([](auto& map) { map.clear(); });
+
+    const auto queue_entries_after    = queue_registry_size();
+    const auto doorbell_entries_after = doorbell_registry_size();
+
+    s_intercept_installed = false;
+
+    ROCP_INFO << "[TEARDOWN-DIAG][QI-SHUTDOWN] queue_entries_before="
+              << queue_entries_before << " doorbell_entries_before="
+              << doorbell_entries_before << " queue_entries_after="
+              << queue_entries_after << " doorbell_entries_after=" << doorbell_entries_after
+              << " intercept_installed=" << s_intercept_installed;
+}
+
+void
 install_intercept(CoreApiTable& core_table)
 {
     // Save current table entries as our next-in-chain (tracing functors when called
