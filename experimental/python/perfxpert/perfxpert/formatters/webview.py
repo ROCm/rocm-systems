@@ -1183,8 +1183,20 @@ def _format_as_webview(
     return html
 
 
-def _format_tier0_webview(tier0_result: Any, has_profiling: bool = False) -> str:
-    """Generate a self-contained AMD-themed HTML Tier 0 report (identical design system as Tier 1/2)."""
+def _format_tier0_webview(
+    tier0_result: Any,
+    has_profiling: bool = False,
+    hotspots: Optional[List[Dict[str, Any]]] = None,
+) -> str:
+    """Generate a self-contained AMD-themed HTML Tier 0 report (identical design system as Tier 1/2).
+
+    When ``hotspots`` is provided (combined-mode: -i + --source-dir), each
+    row in the Detected GPU Kernels table that matches a Tier-1 hotspot
+    (by canonicalized kernel name) is colored by the hotspot's
+    ``percent_of_total`` bucket via ``h-src-critical`` / ``h-src-hot`` /
+    ``h-src-warm`` / ``h-src-cool`` CSS classes on the ``<tr>``. Source-only
+    callers (``hotspots=None``) render the table without severity coloring.
+    """
     import html as _html
     import json as _json
 
@@ -1333,19 +1345,84 @@ def _format_tier0_webview(tier0_result: Any, has_profiling: bool = False) -> str
     )
 
     # -- Kernels table --
+    # Build a hotspot lookup so each detected source kernel can be colored
+    # by its Tier-1 % Total bucket. Key: canonicalized name (namespace/
+    # template/argument peeled + lowercased). Source-only callers pass
+    # ``hotspots=None`` → lookup stays empty → no severity coloring.
+    from ._source_correlation import (
+        _classify_severity as _cls_sev_t0,
+        _demangle_basename as _demangle_t0,
+    )
+    _hotspot_pct_by_key: Dict[str, float] = {}
+    if hotspots:
+        for _hs in hotspots:
+            _hname = _hs.get("name") or ""
+            _hkey = _demangle_t0(_hname)
+            if not _hkey:
+                continue
+            try:
+                _hp = float(_hs.get("percent_of_total", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                _hp = 0.0
+            # Keep the highest percent on duplicate keys (defensive —
+            # hotspots list normally de-dups upstream).
+            if _hkey not in _hotspot_pct_by_key or _hp > _hotspot_pct_by_key[_hkey]:
+                _hotspot_pct_by_key[_hkey] = _hp
+
+    _T0_SEV_CLASS = {
+        "HIGH": "h-src-critical",
+        "MEDIUM": "h-src-hot",
+        "LOW": "h-src-warm",
+        "INFO": "h-src-cool",
+    }
+    _show_runtime_col = bool(_hotspot_pct_by_key)
+
     kernel_rows = []
     for i, k in enumerate(tier0_result.detected_kernels[:50]):
         fname = _h(k.get("file", "").split("/")[-1])
+        # Match this source kernel against the Tier-1 hotspot lookup.
+        _k_key = _demangle_t0(k.get("name") or "")
+        _row_cls = ""
+        _rt_cell = '<td class="tier0-sev-pct dim">&mdash;</td>' if _show_runtime_col else ""
+        if _k_key and _k_key in _hotspot_pct_by_key:
+            _k_pct = _hotspot_pct_by_key[_k_key]
+            _k_sev_id, _, _ = _cls_sev_t0(_k_pct)
+            _row_cls = _T0_SEV_CLASS.get(_k_sev_id, "")
+            if _show_runtime_col:
+                _rt_cell = (
+                    f'<td class="tier0-sev-pct" data-v="{_k_pct}">{_k_pct:.1f}%</td>'
+                )
+        _cls_attr = f' class="{_row_cls}"' if _row_cls else ""
         kernel_rows.append(
-            f"<tr>"
+            f"<tr{_cls_attr}>"
             f"<td>{i + 1}</td>"
             f'<td class="kname" title="{_h(k.get("name", ""))}"><code>{_h(k.get("name", ""))}</code></td>'
             f'<td>{_h(k.get("launch_type", ""))}</td>'
             f"<td>{fname}</td>"
             f'<td data-v="{k.get("line", 0)}">{_h(str(k.get("line", "")))}</td>'
+            f"{_rt_cell}"
             f"</tr>"
         )
     if kernel_rows:
+        _rt_th = (
+            "<th data-tip='Runtime share from the matched Tier-1 hotspot. "
+            "Row color: red >=20%, orange 5-20%, yellow 1-5%, blue <1%, "
+            "no border = not in top hotspots.'>Runtime % &#8645;</th>"
+            if _show_runtime_col
+            else ""
+        )
+        _legend_html = (
+            '<p class="dim tier0-sev-legend" style="margin:.5rem 0 0;font-size:.78rem;">'
+            "Row color indicates runtime share from Tier-1 hotspot match &mdash; "
+            '<span style="color:#e84040;font-weight:600;">red: &ge;20%</span>, '
+            '<span style="color:#f08432;font-weight:600;">orange: 5-20%</span>, '
+            '<span style="color:#caa828;font-weight:600;">yellow: 1-5%</span>, '
+            '<span style="color:#4d8ef2;font-weight:600;">blue: &lt;1%</span>, '
+            "no border: not in top hotspots."
+            "</p>"
+            if _show_runtime_col
+            else ""
+        )
         kernels_section = (
             '<section class="scard">'
             '<div class="shdr">'
@@ -1354,16 +1431,17 @@ def _format_tier0_webview(tier0_result: Any, has_profiling: bool = False) -> str
             f'<span class="shdr-badge sbadge-info">{tier0_result.kernel_count} found</span>'
             "</div>"
             '<div class="sbody"><div class="tbl-wrap">'
-            '<table class="dtable sortable">'
+            '<table class="dtable sortable tier0-kernels-table">'
             "<thead><tr>"
             "<th data-tip='Rank by order found in source.'>#</th>"
             "<th data-tip='GPU kernel function name detected in source code. For HIP/CUDA: __global__ functions.'>Kernel Name</th>"
             "<th data-tip='How the kernel is launched: __global__ for HIP/CUDA, kernel for OpenCL.'>Launch Type</th>"
             "<th data-tip='Source file where the kernel is defined (basename only).'>File</th>"
             "<th data-tip='Line number of the kernel definition in the source file.'>Line &#8645;</th>"
+            f"{_rt_th}"
             "</tr></thead>"
             "<tbody>" + "".join(kernel_rows) + "</tbody>"
-            "</table></div></div></section>"
+            "</table></div>" + _legend_html + "</div></section>"
         )
     else:
         kernels_section = (

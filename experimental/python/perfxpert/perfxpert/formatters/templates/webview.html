@@ -213,6 +213,14 @@ code { font-family:var(--mono); font-size:.87em; }
 .h-src-row.h-src-hot      td { border-left:3px solid #f08432; }
 .h-src-row.h-src-warm     td { border-left:3px solid #caa828; }
 .h-src-row.h-src-cool     td { border-left:3px solid #4d8ef2; }
+/* Tier-0 Detected GPU Kernels table — severity coloring keyed by
+   the matched Tier-1 hotspot's % Total bucket. Mirrors the .h-src-row
+   palette so the whole report uses one severity language. */
+.tier0-kernels-table tr.h-src-critical td:first-child { border-left:3px solid #e84040; }
+.tier0-kernels-table tr.h-src-hot      td:first-child { border-left:3px solid #f08432; }
+.tier0-kernels-table tr.h-src-warm     td:first-child { border-left:3px solid #caa828; }
+.tier0-kernels-table tr.h-src-cool     td:first-child { border-left:3px solid #4d8ef2; }
+.tier0-kernels-table td.tier0-sev-pct  { font-variant-numeric:tabular-nums; text-align:right; }
 .h-src-panel { display:flex; flex-direction:column; gap:.5rem; }
 .h-src-panel.h-src-empty { color:var(--sub); font-size:.88rem; }
 .h-src-item { display:flex; align-items:center; flex-wrap:wrap; gap:.55rem;
