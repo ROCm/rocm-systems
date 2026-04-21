@@ -56,11 +56,15 @@ We do NOT shell out at analyze time — the user must capture the log
 
 ## Tool allowlist (max 5)
 
-- latency_techniques.catalog
 - arch.lookup_peaks
 - rccl_analysis.analyze_collectives
 - interconnect.lookup_peaks
 - dependency_graph.reconstruct_dag
+
+Latency-technique catalogs live in YAML
+(`knowledge/optimization_techniques.yaml`). This is a **YAML lookup**,
+not an MCP tool — the agent loads it via the knowledge loader. One
+allowlist slot is intentionally unused.
 
 `gpu_runtime_monitor.*` is reachable via the MCP surface only — thermal
 envelope analysis is diagnostic / out-of-band.

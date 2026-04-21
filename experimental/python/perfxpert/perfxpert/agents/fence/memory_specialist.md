@@ -49,11 +49,16 @@ bytes, page_faults, estimated_penalty_ns, recommendations}` dict.
 
 ## Tool allowlist (max 5)
 
-- memory_techniques.catalog
 - arch.lookup_peaks
 - bottleneck.lookup_signatures
 - predict_impact.predict_change_impact
 - unified_memory.analyze_paging
+
+Memory-technique catalogs live in YAML
+(`knowledge/optimization_techniques.yaml`,
+`knowledge/memory_patterns.yaml`). These are **YAML lookups**, not
+MCP tools — the agent loads them via the knowledge loader. One
+allowlist slot is intentionally unused.
 
 ## Output schema (≤5 fields)
 

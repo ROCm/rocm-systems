@@ -15,10 +15,14 @@ rebalancing, loop unrolling, LDS tiling.
 
 ## Tool allowlist (max 5)
 
-- compute_techniques.catalog
 - arch.lookup_peaks
 - roofline.classify
 - compiler.lookup_flags
+
+Compute-technique catalogs live in YAML (`knowledge/optimization_
+techniques.yaml`, `knowledge/proven_optimizations.yaml`). These are
+**YAML lookups**, not MCP tools — the agent loads them via the
+knowledge loader. Two allowlist slots are intentionally unused.
 
 ## Output schema (≤5 fields)
 
