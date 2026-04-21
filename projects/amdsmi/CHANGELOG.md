@@ -8,6 +8,22 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added support for GPU metrics v1.9 new fields**.  
+  - Added new temperature fields to `amdsmi_gpu_metrics_t`:
+    - `temperature_hbm_stacks` — per-stack HBM temperatures (°C)
+    - `temperature_mid` — per-MID temperatures (°C)
+    - `temperature_aid` — per-AID temperatures (°C)
+    - `temperature_xcd` — per-XCC compute die temperatures (°C)
+  - Added new per-die clock fields to `amdsmi_gpu_metrics_t`:
+    - `current_uclk_aid` — per-AID uclk (MHz)
+    - `current_socclks_mid` — per-MID SOC clock (MHz)
+  - Added new constants:
+    - `AMDSMI_MAX_NUM_HBM_STACKS` (12)
+    - `AMDSMI_MAX_NUM_AID` (2)
+    - `AMDSMI_MAX_NUM_MID` (2)
+    - `AMDSMI_MAX_NUM_CLKS_PER_AID` (2)
+    - `AMDSMI_MAX_NUM_CLKS_PER_MID` (2)
+
 - **Added VRAM and GTT tuning interface**.  
   - New `amd-smi static --mem-carveout` to view VRAM carveout options.
   - New `amd-smi set --mem-carveout` to change the VRAM carveout (APU).
@@ -61,6 +77,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Process `cu_occupancy` is now initialized to `INVALID` instead of zero, so `amd-smi process` displays `N/A` rather than a misleading `0%` when the sysfs file is not accessible.
 
 ### Changed
+
+- **Renamed `lc_perf_other_end_recovery` to `lc_perf_other_end_recovery_count` in `amd-smi metric` CLI output for unification**.  
 
 - **Removed references to deprecated `amd-smi reset -r`**.  
   - CLI help text and memory partition change warnings no longer reference `amd-smi reset -r` for driver reloading.
@@ -149,6 +167,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Modified asic_serial to display "N/A" when not available**.  
   - Skipped setting asic_serial when kfd node unique_id is 0.
   - Python interface will validate against max uint64 to display N/A.
+
+- **Made `libdrm` a required runtime dependency** ([#3349](https://github.com/ROCm/rocm-systems/pull/3349)).  
+  - Debian: `libdrm-dev` moved from `Recommends` to `Depends` on the `amd-smi-lib` package; `libdrm-amdgpu-dev` remains in `Recommends` (not shipped by Debian 10).
+  - RPM: `libdrm-devel` moved from `Suggests` to `Requires`; `libdrm-amdgpu-devel` remains in `Suggests` (not shipped by Azure Linux).
+  - Building from source now requires `libdrm-dev` / `libdrm-devel`; the project `Dockerfile` was updated accordingly.
+  - Removed the "libdrm is optional" note from `docs/install/install.md` — firmware and hardware-IP queries previously gated on libdrm are now always available.
 
 ### Removed
 

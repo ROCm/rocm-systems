@@ -109,7 +109,7 @@ struct client_data
 
     using buffer_name_info_t   = rocprofiler::sdk::buffer_name_info_t<std::string_view>;
     using callback_name_info_t = rocprofiler::sdk::callback_name_info_t<std::string_view>;
-    using kernel_symbol_vec_t  = std::vector<kernel_symbol_callback_record_t*>;
+    using kernel_symbol_vec_t  = std::vector<kernel_symbol_callback_record_t>;
     using code_object_vec_t    = std::vector<code_object_callback_record_t>;
     using buffer_id_vec_t      = std::array<rocprofiler_buffer_id_t, num_buffers>;
     using context_id_vec_t     = std::array<rocprofiler_context_id_t, num_contexts>;
@@ -222,9 +222,9 @@ client_data::get_kernel_symbol_info(uint64_t _kernel_id) const
         [_kernel_id](const auto& _data) -> const kernel_symbol_data_t* {
             for(const auto& itr : _data)
             {
-                if(_kernel_id == itr->payload.kernel_id)
+                if(_kernel_id == itr.payload.kernel_id)
                 {
-                    return &itr->payload;
+                    return &itr.payload;
                     break;
                 }
             }

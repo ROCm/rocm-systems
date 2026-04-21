@@ -43,8 +43,6 @@ static char memSetVal = 'a';
  */
 HIP_TEMPLATE_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_Positive_Basic, uint8_t, uint16_t,
                    uint32_t) {
-  CHECK_IMAGE_SUPPORT
-
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
@@ -148,8 +146,6 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_Negative_Parameters) {
  *    - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_2D) {
-  CHECK_IMAGE_SUPPORT
-
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
@@ -235,8 +231,6 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_2D) {
  *    - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_1D) {
-  CHECK_IMAGE_SUPPORT
-
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
@@ -316,8 +310,6 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_1D) {
  *    - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_2D) {
-  CHECK_IMAGE_SUPPORT
-
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
@@ -410,8 +402,6 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_2D) {
  *    - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_1D) {
-  CHECK_IMAGE_SUPPORT
-
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;

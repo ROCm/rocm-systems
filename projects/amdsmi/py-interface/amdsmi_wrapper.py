@@ -2115,6 +2115,7 @@ struct_amdsmi_gpu_xcp_metrics_t._fields_ = [
     ('gfx_below_host_limit_thm_acc', ctypes.c_uint64 * 8),
     ('gfx_low_utilization_acc', ctypes.c_uint64 * 8),
     ('gfx_below_host_limit_total_acc', ctypes.c_uint64 * 8),
+    ('temperature_xcd', ctypes.c_uint16 * 8),
 ]
 
 amdsmi_gpu_xcp_metrics_t = struct_amdsmi_gpu_xcp_metrics_t
@@ -2198,6 +2199,11 @@ struct_amdsmi_gpu_metrics_t._fields_ = [
     ('PADDING_5', ctypes.c_ubyte * 4),
     ('vram_max_bandwidth', ctypes.c_uint64),
     ('xgmi_link_status', ctypes.c_uint16 * 8),
+    ('temperature_hbm_stacks', ctypes.c_uint16 * 12),
+    ('temperature_mid', ctypes.c_uint16 * 2),
+    ('temperature_aid', ctypes.c_uint16 * 2),
+    ('current_uclk_aid', ctypes.c_uint16 * 2),
+    ('current_socclks_mid', ctypes.c_uint16 * 2),
 ]
 
 amdsmi_gpu_metrics_t = struct_amdsmi_gpu_metrics_t
