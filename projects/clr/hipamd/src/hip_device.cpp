@@ -11,6 +11,7 @@
 #include "hip_internal.hpp"
 #include "hip_mempool_impl.hpp"
 #include "hip_platform.hpp"
+#include "device/devhostcall.hpp"
 
 #undef hipGetDeviceProperties
 #undef hipDeviceProp_t
