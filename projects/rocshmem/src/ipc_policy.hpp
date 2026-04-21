@@ -84,6 +84,8 @@ class IpcOnImpl {
     pes_with_ipc_avail = other.pes_with_ipc_avail;
   }
 
+  void assignSdmaChannel([[maybe_unused]] unsigned int ctx_id) {}
+
   __device__ void ipcGpuInit(Backend *gpu_backend, Context *ctx, int thread_id);
 
   __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe,
@@ -191,6 +193,12 @@ class IpcSdmaImpl : public IpcOnImpl {
     sdmaImpl_ = other.sdmaImpl_;
   }
 
+  void assignSdmaChannel(unsigned int ctx_id) {
+    if (sdmaImpl_.numChannels > 0) {
+      sdmaImpl_.sdmaChannel = ctx_id % sdmaImpl_.numChannels;
+    }
+  }
+
   __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                             MPI_Comm thread_comm);
 
@@ -214,10 +222,12 @@ class IpcSdmaImpl : public IpcOnImpl {
   __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe,
                              bool blocking = false) {
     if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
-      auto* handle = sdmaImpl_.sdmaCopy_wg(dst, src, size, local_pe);
-      if (blocking && handle) {
-        handle->quietAll();
+      anvil::SdmaQueueDeviceHandle* handle = nullptr;
+      if (is_thread_zero_in_block()) {
+        handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
       }
+      __syncthreads();
+      if (blocking && handle) handle->quietAll();
       return;
     }
     memcpy_wg(dst, src, size);
@@ -226,10 +236,11 @@ class IpcSdmaImpl : public IpcOnImpl {
   __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe,
                                bool blocking = false) {
     if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
-      auto* handle = sdmaImpl_.sdmaCopy_wave(dst, src, size, local_pe);
-      if (blocking && handle) {
-        handle->quietAll();
+      anvil::SdmaQueueDeviceHandle* handle = nullptr;
+      if (is_thread_zero_in_wave()) {
+        handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
       }
+      if (blocking && handle) handle->quietAll();
       return;
     }
     memcpy_wave(dst, src, size);
@@ -268,6 +279,8 @@ class IpcOffImpl {
   __host__ __device__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int *local_target_pe) { return false; }
 
   void initFrom(const IpcOffImpl &) {}
+
+  void assignSdmaChannel(unsigned int) {}
 
   __device__ void ipcGpuInit(Backend *rocshmem_handle, Context *ctx,
                              int thread_id) {}

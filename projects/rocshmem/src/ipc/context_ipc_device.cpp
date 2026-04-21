@@ -38,6 +38,7 @@ __host__ IPCContext::IPCContext(Backend *b, unsigned int ctx_id)
     : Context(b) {
   IPCBackend *backend{static_cast<IPCBackend *>(b)};
   ipcImpl_.initFrom(b->ipcImpl);
+  ipcImpl_.assignSdmaChannel(ctx_id);
 
   barrier_sync = backend->barrier_sync;
   fence_pool = backend->fence_pool;

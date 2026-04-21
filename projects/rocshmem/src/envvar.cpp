@@ -214,8 +214,6 @@ namespace envvar {
     const var<bool> enabled("ENABLED", "Enable SDMA transport at runtime", true);
     const var<size_t> threshold("THRESHOLD", "SDMA transfer size threshold in bytes", 128);
     const var<int32_t> num_channels("NUM_CHANNELS", "Number of SDMA channels per destination", 1);
-    const var<size_t> min_chunk_per_channel("MIN_CHUNK_PER_CHANNEL",
-        "Minimum bytes per channel for multi-channel transfers", 4096);
   }  // namespace sdma
 
   namespace _detail {
