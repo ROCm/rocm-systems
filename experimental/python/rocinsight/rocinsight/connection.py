@@ -201,22 +201,49 @@ def merge_sqlite_dbs(
         for idx, src in enumerate(db_paths[1:], start=1):
             alias = f"src{idx}"
             conn.execute(f"ATTACH DATABASE ? AS {alias}", (str(src),))
-            cursor = conn.execute(f"PRAGMA {alias}.sqlite_master")
+            cursor = conn.execute(
+                f"SELECT type, name FROM {alias}.sqlite_master "
+                f"WHERE type = 'table'"
+            )
             tables = [
                 row[1]
                 for row in cursor.fetchall()
-                if row[0] == "table" and not row[1].startswith("sqlite_")
+                if not row[1].startswith("sqlite_")
             ]
             for table in tables:
                 try:
+                    # Check for primary key collisions before inserting
+                    pk_cols = [
+                        row[1] for row in conn.execute(
+                            f"PRAGMA table_info({table})"
+                        ).fetchall()
+                        if row[5] > 0  # row[5] is the 'pk' column
+                    ]
+                    if pk_cols:
+                        pk_join = " AND ".join(
+                            f"src.{c} = dst.{c}" for c in pk_cols
+                        )
+                        collision = conn.execute(
+                            f"SELECT COUNT(*) FROM {alias}.{table} src "
+                            f"INNER JOIN main.{table} dst ON {pk_join}"
+                        ).fetchone()
+                        if collision and collision[0] > 0:
+                            raise ValueError(
+                                f"Primary key collision in table '{table}': "
+                                f"{collision[0]} overlapping row(s) between "
+                                f"shards. Cannot merge losslessly. Use "
+                                f"RocinsightConnection([db1, db2]) for "
+                                f"multi-DB analysis instead of physical merge."
+                            )
+                    # No collision (or no PK) — safe to insert
                     conn.execute(
-                        f"INSERT OR IGNORE INTO main.{table} "
+                        f"INSERT INTO main.{table} "
                         f"SELECT * FROM {alias}.{table}"
                     )
                 except sqlite3.OperationalError:
                     pass  # table may have different schema in this shard
+            conn.commit()
             conn.execute(f"DETACH DATABASE {alias}")
-        conn.commit()
     finally:
         conn.close()
 

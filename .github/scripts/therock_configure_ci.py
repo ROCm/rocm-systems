@@ -1,8 +1,10 @@
 """
-This script determines which build flag and tests to run based on SUBTREES
+This script determines which build flags and tests to run based on the
+GitHub event type and configured subtrees/projects.
 
-Required environment variables:
-  - SUBTREES
+For push and pull_request events, SUBTREES is used to decide which parts
+of the repository changed and which projects to run. Nightly (schedule)
+and some workflow_dispatch invocations do not require SUBTREES.
 """
 
 import fnmatch
@@ -148,6 +150,21 @@ def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
 
 
 def retrieve_projects(args):
+    # Nightly (schedule): use same test coverage as TheRock submodule bump PRs —
+    # single nightly job with THEROCK_ENABLE_ALL=ON and full projects_to_test list.
+    if args.get("is_nightly"):
+        nightly_config = project_map.get("nightly")
+        if not nightly_config:
+            logging.warning("No 'nightly' entry in project_map, nightly will have no jobs")
+            return []
+        # Run full coverage on both Linux and Windows (no path-based skip).
+        return [
+            {
+                "cmake_options": nightly_config.get("cmake_options", ""),
+                "projects_to_test": nightly_config.get("projects_to_test", ""),
+            }
+        ]
+
     # Check if CI should be skipped based on modified paths
     # (only for push and pull_request events, not workflow_dispatch or nightly)
     base_ref = args.get("base_ref")
@@ -191,10 +208,6 @@ def retrieve_projects(args):
             else:
                 subtrees = list(matched_subtrees)
 
-        # Scheduled run (nightly runs) → evaluate all subtrees
-        elif args.get("is_nightly"):
-            subtrees = list(subtree_to_project_map.keys())
-
         # Default case
         else:
             subtrees = list(matched_subtrees)
@@ -206,10 +219,21 @@ def retrieve_projects(args):
             )
             subtrees = list(subtree_to_project_map.keys())
 
+    # Holds the python-specific cmake options passed to TheRock build.
+    common_python_options = []
+
     # Linux CI skip logic: exclude Windows-only subtrees so they don't
     # produce Linux projects. If nothing remains, Linux CI is skipped.
     if args.get("platform") == "linux":
         subtrees = [s for s in subtrees if s not in windows_only_subtrees]
+
+        # Common Python executable options for all builds.
+        # Replaces TheRock's manylinux build behavior.
+        # See build_tools/github_actions/manylinux_config.py in TheRock.
+        common_python_options = [
+            "-DTHEROCK_SHARED_PYTHON_EXECUTABLES=/opt/python-shared/cp310-cp310/bin/python3;/opt/python-shared/cp311-cp311/bin/python3;/opt/python-shared/cp312-cp312/bin/python3;/opt/python-shared/cp313-cp313/bin/python3;/opt/python-shared/cp314-cp314/bin/python3",
+            "-DTHEROCK_DIST_PYTHON_EXECUTABLES=/opt/python/cp310-cp310/bin/python;/opt/python/cp311-cp311/bin/python;/opt/python/cp312-cp312/bin/python;/opt/python/cp313-cp313/bin/python",
+        ]
 
     # Windows CI skip logic: skip if neither the modified file paths nor the
     # explicitly selected subtrees require Windows CI.
@@ -259,6 +283,8 @@ def retrieve_projects(args):
         final_flags_list = sorted(merged_flags)
     # Always append -DTHEROCK_ENABLE_CORE=ON as a default at the end
     final_flags_list.append("-DTHEROCK_ENABLE_CORE=ON")
+    # Always append the Python options.
+    final_flags_list += common_python_options
     # Removing duplicates
     final_flags_list = list(set(final_flags_list))
     final_flags = " ".join(final_flags_list)

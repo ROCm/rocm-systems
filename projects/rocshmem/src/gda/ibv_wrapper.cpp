@@ -24,6 +24,7 @@
 
 #include "ibv_wrapper.hpp"
 #include "envvar.hpp"
+#include "log.hpp"
 #include "util.hpp"
 #include "memory/default_allocator.hpp"
 
@@ -47,14 +48,14 @@ IBVWrapper::IBVWrapper() {
     ibv_handle = dlopen("/usr/lib/x86_64-linux-gnu/libibverbs.so", RTLD_NOW);
 
     if (!ibv_handle) {
-      DPRINTF("Could not open libibverbs. Disabled.\n");
+      LOG_WARN("Could not open libibverbs. Disabled.");
       return;
     }
   }
 
   err = init_function_table();
   if (err != ROCSHMEM_SUCCESS) {
-    DPRINTF("Could not construct InfiniBand Verbs function table. Disabled.\n");
+    LOG_WARN("Could not construct InfiniBand Verbs function table. Disabled.");
     return;
   }
 
@@ -86,13 +87,13 @@ void IBVWrapper::init_dmabuf_support_flag() {
   }
 
   if (ibv.reg_dmabuf_mr == NULL) {
-    DPRINTF("ibv_reg_dmabuf_mr not present in verbs library");
+    LOG_TRACE("ibv_reg_dmabuf_mr not present in verbs library");
     dmabuf_is_supported = 0;
     return;
   }
 
   if (uname(&utsname) == -1) {
-    DPRINTF("could not get kernel name");
+    LOG_TRACE("could not get kernel name");
     dmabuf_is_supported = 0;
     return;
   }
@@ -101,7 +102,7 @@ void IBVWrapper::init_dmabuf_support_flag() {
            "/boot/config-%s", utsname.release);
   fp = fopen(kernel_conf_file, "r");
   if (fp == NULL) {
-    DPRINTF("could not open kernel conf file %s error: %m",
+    LOG_TRACE("could not open kernel conf file %s error: %m",
             kernel_conf_file);
     dmabuf_is_supported = 0;
     return;
@@ -150,7 +151,8 @@ int IBVWrapper::init_function_table() {
   DLSYM_HELPER(ibv, ibv_, ibv_handle, create_qp);
   DLSYM_HELPER(ibv, ibv_, ibv_handle, modify_qp);
   DLSYM_HELPER(ibv, ibv_, ibv_handle, destroy_qp);
-  DLSYM_HELPER(ibv, ibv_, ibv_handle, resolve_eth_l2_from_gid);
+  DLSYM_HELPER(ibv, ibv_, ibv_handle, create_ah);
+  DLSYM_HELPER(ibv, ibv_, ibv_handle, destroy_ah);
   return ROCSHMEM_SUCCESS;
 }
 
@@ -228,13 +230,13 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
     uint64_t offset = 0;
     int fd = 0;
 
-    DPRINTF("Using ibv_reg_dmabuf_mr()\n");
+    LOG_TRACE("Using ibv_reg_dmabuf_mr()");
 
     // Use provided allocator or fall back to default allocator
     HIPAllocator* alloc = (allocator != nullptr) ? allocator : get_default_allocator();
     hipError_t err = alloc->GetDmabufHandle(addr, length, &fd, &offset);
     if (err != hipSuccess) {
-      fprintf(stderr, "Failed to get dmabuf handle: %s\n", hipGetErrorString(err));
+      LOG_ERROR("Failed to get dmabuf handle: %s", hipGetErrorString(err));
       return nullptr;
     }
 
@@ -244,7 +246,7 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
 
     return mr;
   } else {
-    DPRINTF("Using ibv_reg_mr()\n");
+    LOG_TRACE("Using ibv_reg_mr(%p, %zd)", addr, length);
 
     // Passthrough function for ibv_reg_mr macro in verbs.h
     int is_access_const = __builtin_constant_p(((int)(access) & IBV_ACCESS_OPTIONAL_RANGE) == 0);
@@ -304,15 +306,17 @@ int IBVWrapper::destroy_qp(struct ibv_qp *qp) {
   return ibv.destroy_qp(qp);
 }
 
-int IBVWrapper::resolve_eth_l2_from_gid(struct ibv_context *context, struct ibv_ah_attr *attr,
-                                        uint8_t eth_mac[ETHERNET_LL_SIZE], uint16_t *vid) {
-  return ibv.resolve_eth_l2_from_gid(context, attr, eth_mac, vid);
-}
-
 uint16_t IBVWrapper::flow_label_to_udp_sport(uint32_t fl) {
   // Passthrough function for ibv_flow_label_to_udp_sport inline function in verbs.h
   return ibv_flow_label_to_udp_sport(fl);
 }
 
+struct ibv_ah* IBVWrapper::create_ah(struct ibv_pd *pd, struct ibv_ah_attr *attr) {
+  return ibv.create_ah(pd, attr);
+}
+
+int IBVWrapper::destroy_ah(struct ibv_ah *ah) {
+  return ibv.destroy_ah(ah);
+}
 
 } // namespace rocshmem

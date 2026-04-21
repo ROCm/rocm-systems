@@ -533,3 +533,5 @@ hipMipmappedArrayGetMemoryRequirements
 hipKernelGetAttribute
 hipKernelSetAttribute
 hipKernelGetFunction
+hipOccupancyMaxPotentialClusterSize
+hipOccupancyMaxActiveClusters

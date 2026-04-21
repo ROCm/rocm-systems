@@ -62,7 +62,7 @@
 
 cmake_minimum_required(VERSION 3.8)
 
-project(amd-dbgapi VERSION 0.79.0)
+project(amd-dbgapi VERSION 0.80.0)
 
 include(CheckIncludeFile)
 include(CheckIncludeFiles)

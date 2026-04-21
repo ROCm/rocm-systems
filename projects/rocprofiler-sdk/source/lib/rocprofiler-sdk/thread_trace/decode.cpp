@@ -33,7 +33,7 @@
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
-#include <glog/logging.h>
+#include "lib/common/logging.hpp"
 
 #include <atomic>
 #include <cstdint>

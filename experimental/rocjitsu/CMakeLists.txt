@@ -3,15 +3,33 @@
 
 cmake_minimum_required(VERSION 3.28)
 
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+include(rj_default_compiler)
+
 project(rocm_jit_suite)
+
+# Default install prefix to /opt/rocm, matching other ROCm projects.
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  if(DEFINED ENV{ROCM_PATH})
+    set(CMAKE_INSTALL_PREFIX "$ENV{ROCM_PATH}" CACHE PATH "" FORCE)
+  else()
+    set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "" FORCE)
+  endif()
+endif()
+
+include(CTest)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 find_package(Threads REQUIRED)
 
+# HSA/KFD headers (local copies from rocr-runtime).
+set(HSA_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers")
+
 option(RJ_BUILD_GUI "Build the simulation GUI (requires OpenGL)" ON)
+
+include(rj_log)
 
 # Sanitizer and static analysis options.
 option(RJ_SANITIZER "Enable sanitizer (asan, ubsan, tsan, or msan)" "")
@@ -33,6 +51,11 @@ if(RJ_SANITIZER)
     if(RJ_SANITIZER STREQUAL "asan")
       add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
       add_link_options(-fsanitize=address)
+      # GCC 13+ emits false-positive -Wmaybe-uninitialized in std_function.h
+      # when ASAN is enabled. Suppress to avoid -Werror failures.
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        add_compile_options(-Wno-maybe-uninitialized)
+      endif()
     elseif(RJ_SANITIZER STREQUAL "ubsan")
       add_compile_options(-fsanitize=undefined -fno-omit-frame-pointer)
       add_link_options(-fsanitize=undefined)
@@ -62,7 +85,12 @@ if(RJ_CLANG_TIDY)
 endif()
 
 # Third-party dependencies (fetched into third_party/).
-set(FETCHCONTENT_BASE_DIR ${PROJECT_SOURCE_DIR}/third_party)
+# Third-party dependencies (fetched into third_party/).
+# Third-party dependencies (fetched into third_party/ by default).
+# Override with -DFETCHCONTENT_BASE_DIR=/path for container builds.
+if(NOT FETCHCONTENT_BASE_DIR)
+  set(FETCHCONTENT_BASE_DIR ${PROJECT_SOURCE_DIR}/third_party)
+endif()
 include(FetchContent)
 
 # Google Test
@@ -72,6 +100,7 @@ FetchContent_Declare(
     GIT_TAG v1.15.2
 )
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 
 # FlatBuffers - serialization for config, checkpoint, and wire format.
 FetchContent_Declare(
@@ -194,8 +223,8 @@ set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
 target_link_libraries(rocjitsu_shared PRIVATE
     rocjitsu_code
     rocjitsu_isa
-    rocjitsu_isa_cdna3
-    rocjitsu_isa_cdna4
+    rocjitsu_isa_cdna1 rocjitsu_isa_cdna2 rocjitsu_isa_cdna3 rocjitsu_isa_cdna4
+    rocjitsu_isa_rdna1 rocjitsu_isa_rdna2 rocjitsu_isa_rdna3 rocjitsu_isa_rdna3_5 rocjitsu_isa_rdna4
     rocjitsu_isa_risc_v
     simdojo
     rocjitsu_vm
@@ -214,4 +243,31 @@ if(RJ_BUILD_GUI)
 endif()
 
 # Tests and scaling tools.
-add_subdirectory(tests)
+if(BUILD_TESTING)
+  add_subdirectory(tests)
+endif()
+
+# ---------------------------------------------------------------------------
+# Install rules.
+# ---------------------------------------------------------------------------
+
+include(GNUInstallDirs)
+
+# Public headers: include/rocjitsu/
+install(DIRECTORY lib/rocjitsu/include/rocjitsu
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        FILES_MATCHING PATTERN "*.h")
+
+# Libraries: lib/
+install(TARGETS rocjitsu_shared
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  install(TARGETS rocjitsu_kmd_shim
+          LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+endif()
+
+# Config files and schemas: share/rocjitsu/
+install(DIRECTORY configs/ DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/configs)
+install(DIRECTORY schemas/ DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/schemas
+        FILES_MATCHING PATTERN "*.fbs")

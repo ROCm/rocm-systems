@@ -659,6 +659,8 @@ kfd_driver_base_t::agent_snapshot (
 
       agent_info.os_agent_id = entry.gpu_id;
 
+      agent_info.agent_address_base = entry.gpuvm_base;
+      agent_info.agent_address_limit = entry.gpuvm_limit;
       agent_info.local_address_aperture_base = entry.lds_base;
       agent_info.local_address_aperture_limit = entry.lds_limit;
       agent_info.private_address_aperture_base = entry.scratch_base;
@@ -747,9 +749,12 @@ kfd_driver_base_t::queue_snapshot (
       queue_info.queue_type = os_queue_type (entry.queue_type);
       queue_info.exception_status
         = kfd_to_os_exception_mask (entry.exception_status);
-      queue_info.ring_base_address = entry.ring_base_address;
-      queue_info.write_pointer_address = entry.write_pointer_address;
-      queue_info.read_pointer_address = entry.read_pointer_address;
+      queue_info.ring_base_address
+        = static_cast<host_address_t> (entry.ring_base_address);
+      queue_info.write_pointer_address
+        = static_cast<host_address_t> (entry.write_pointer_address);
+      queue_info.read_pointer_address
+        = static_cast<host_address_t> (entry.read_pointer_address);
       queue_info.ctx_save_restore_address = entry.ctx_save_restore_address;
       queue_info.ctx_save_restore_area_size = entry.ctx_save_restore_area_size;
       queue_info.ring_size = entry.ring_size;

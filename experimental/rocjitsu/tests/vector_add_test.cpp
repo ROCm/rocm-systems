@@ -8,11 +8,19 @@
 /// threads computes C[gid] = A[gid] + B[gid]. Results are compared against a
 /// CPU golden reference.
 
+#include "aql_queue.h"
+
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/AMDHSAKernelDescriptor.h"
+RJ_DIAGNOSTIC_POP
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -35,8 +43,8 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string kSchemaPath = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
-const std::string kConfigPath = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
+const std::string SCHEMA_PATH = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
 
 std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
 
@@ -46,38 +54,11 @@ constexpr uint32_t TOTAL_CUS = TOTAL_XCDS * CUS_PER_XCD;
 constexpr uint32_t WF_SIZE = 64;
 constexpr uint32_t N = TOTAL_CUS * WF_SIZE; // 16384 elements, one WG per CU
 
-constexpr uint64_t CODE_ADDR = 0x1000;
+constexpr uint64_t KD_ADDR = 0x10000;
 constexpr uint64_t A_ADDR = 0x100000;
 constexpr uint64_t B_ADDR = 0x200000;
 constexpr uint64_t C_ADDR = 0x300000;
 constexpr uint64_t KERNARG_ADDR = 0x400000;
-
-struct KernelDescriptor {
-  uint32_t group_segment_fixed_size;
-  uint32_t private_segment_fixed_size;
-  uint32_t kernarg_size;
-  uint8_t reserved0[4];
-  int64_t kernel_code_entry_byte_offset;
-  uint8_t reserved1[20];
-  uint32_t compute_pgm_rsrc3;
-  uint32_t compute_pgm_rsrc1;
-  uint32_t compute_pgm_rsrc2;
-  uint16_t kernel_code_properties;
-  uint16_t kernarg_preload_spec;
-  uint8_t reserved2[4];
-};
-static_assert(sizeof(KernelDescriptor) == 64);
-
-KernelDescriptor read_kernel_descriptor(const CodeObject &co) {
-  for (const auto *sec : co.rodata_sections())
-    if (sec->size() >= sizeof(KernelDescriptor)) {
-      KernelDescriptor kd;
-      std::memcpy(&kd, sec->data(), sizeof(kd));
-      return kd;
-    }
-  ADD_FAILURE() << "No .rodata section with kernel descriptor found";
-  return {};
-}
 
 TEST(VectorAddStressTest, AllCUsGoldenReference) {
   // Load the compiled vector_add kernel.
@@ -87,11 +68,8 @@ TEST(VectorAddStressTest, AllCUsGoldenReference) {
   auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   ASSERT_NE(co, nullptr);
 
-  auto kd = read_kernel_descriptor(*co);
-  ASSERT_NE(kd.kernel_code_entry_byte_offset, 0);
-
   // Build the simulation engine with CDNA4 topology.
-  auto loaded = config::load_config(kConfigPath, kSchemaPath);
+  auto loaded = config::load_config(CONFIG_PATH, SCHEMA_PATH);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
@@ -99,9 +77,18 @@ TEST(VectorAddStressTest, AllCUsGoldenReference) {
   loaded.wire_links(engine->topology());
   engine->build();
 
-  // Load kernel code into GPU memory.
-  const auto *text = co->text_sections()[0];
-  memory->load_image(reinterpret_cast<const uint8_t *>(text->data()), text->size(), CODE_ADDR);
+  // Load code into GPU memory. Place .rodata (kernel descriptor) and .text (code)
+  // at their virtual addresses relative to a base. The .kd symbol value matches
+  // the rodata vaddr, and kernel_code_entry_byte_offset bridges to .text vaddr.
+  uint64_t kd_offset = co->kernel_descriptor_offset("vector_add");
+  ASSERT_NE(kd_offset, 0u) << "Kernel descriptor symbol not found";
+  for (const auto *sec : co->rodata_sections())
+    memory->load_image(reinterpret_cast<const uint8_t *>(sec->data()), sec->size(),
+                       KD_ADDR + sec->vaddr());
+  for (const auto *sec : co->text_sections())
+    memory->load_image(reinterpret_cast<const uint8_t *>(sec->data()), sec->size(),
+                       KD_ADDR + sec->vaddr());
+  uint64_t kernel_object = KD_ADDR + kd_offset;
 
   // Generate input vectors.
   size_t vec_bytes = N * sizeof(float);
@@ -124,20 +111,14 @@ TEST(VectorAddStressTest, AllCUsGoldenReference) {
   } args = {A_ADDR, B_ADDR, C_ADDR, N};
   memory->load_image(reinterpret_cast<const uint8_t *>(&args), sizeof(args), KERNARG_ADDR);
 
-  // Dispatch across all XCDs.
+  // Dispatch across all XCDs via AQL queues.
   uint32_t wgs_per_xcd = TOTAL_CUS / TOTAL_XCDS;
-  amdgpu::DispatchPacket pkt;
-  pkt.kernel_entry_pc = CODE_ADDR;
-  pkt.wfs_per_workgroup = 1;
-  pkt.sgprs_per_wf = 104;
-  pkt.vgprs_per_wf = 256;
-  pkt.kernarg_addr = KERNARG_ADDR;
-  pkt.num_user_sgprs = (kd.compute_pgm_rsrc2 >> 1) & 0x1F; // bits[5:1] = USER_SGPR
-
   for (uint32_t xi = 0; xi < TOTAL_XCDS; ++xi) {
-    pkt.workgroup_count = wgs_per_xcd;
-    pkt.workgroup_id_offset = xi * wgs_per_xcd;
-    soc->xcd(xi)->command_processor()->enqueue(pkt);
+    auto *cp = soc->xcd(xi)->command_processor();
+    cp->set_workgroup_id_offset(xi * wgs_per_xcd);
+    uint64_t ring = 0xF0000000ULL + xi * 0x100000ULL;
+    test::AqlQueue queue(memory, cp, ring, 4096, ring + 0x10000, ring + 0x10008, ring + 0x10010);
+    queue.dispatch(kernel_object, wgs_per_xcd * WF_SIZE, WF_SIZE, KERNARG_ADDR);
   }
 
   // Engine drives all CPs and CUs to completion.
@@ -167,10 +148,7 @@ TEST(VectorAddStressTest, AllCUsGoldenReference_MultiThreaded) {
   auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   ASSERT_NE(co, nullptr);
 
-  auto kd = read_kernel_descriptor(*co);
-  ASSERT_NE(kd.kernel_code_entry_byte_offset, 0);
-
-  auto loaded = config::load_config(kConfigPath, kSchemaPath);
+  auto loaded = config::load_config(CONFIG_PATH, SCHEMA_PATH);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   loaded.engine_config.num_threads = TOTAL_XCDS;
@@ -194,8 +172,9 @@ TEST(VectorAddStressTest, AllCUsGoldenReference_MultiThreaded) {
       });
   engine->build();
 
-  const auto *text = co->text_sections()[0];
-  memory->load_image(reinterpret_cast<const uint8_t *>(text->data()), text->size(), CODE_ADDR);
+  co->load_to_memory(memory, KD_ADDR);
+  uint64_t kernel_object = KD_ADDR + co->kernel_descriptor_offset("vector_add");
+  ASSERT_NE(kernel_object, KD_ADDR);
 
   size_t vec_bytes = N * sizeof(float);
   std::vector<float> A(N), B(N), C_expected(N);
@@ -217,18 +196,12 @@ TEST(VectorAddStressTest, AllCUsGoldenReference_MultiThreaded) {
   memory->load_image(reinterpret_cast<const uint8_t *>(&args), sizeof(args), KERNARG_ADDR);
 
   uint32_t wgs_per_xcd = TOTAL_CUS / TOTAL_XCDS;
-  amdgpu::DispatchPacket pkt;
-  pkt.kernel_entry_pc = CODE_ADDR;
-  pkt.wfs_per_workgroup = 1;
-  pkt.sgprs_per_wf = 104;
-  pkt.vgprs_per_wf = 256;
-  pkt.kernarg_addr = KERNARG_ADDR;
-  pkt.num_user_sgprs = (kd.compute_pgm_rsrc2 >> 1) & 0x1F;
-
   for (uint32_t xi = 0; xi < TOTAL_XCDS; ++xi) {
-    pkt.workgroup_count = wgs_per_xcd;
-    pkt.workgroup_id_offset = xi * wgs_per_xcd;
-    soc->xcd(xi)->command_processor()->enqueue(pkt);
+    auto *cp = soc->xcd(xi)->command_processor();
+    cp->set_workgroup_id_offset(xi * wgs_per_xcd);
+    uint64_t ring = 0xF0000000ULL + xi * 0x100000ULL;
+    test::AqlQueue queue(memory, cp, ring, 4096, ring + 0x10000, ring + 0x10008, ring + 0x10010);
+    queue.dispatch(kernel_object, wgs_per_xcd * WF_SIZE, WF_SIZE, KERNARG_ADDR);
   }
 
   engine->run();
@@ -256,7 +229,7 @@ TEST(VectorAddCodeObjectTest, LoadsAndDecodes) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   const auto *text = co->text_sections()[0];
   const auto *data = reinterpret_cast<const uint32_t *>(text->data());
-  auto inst = decoder->decode(data);
+  std::unique_ptr<Instruction> inst(decoder->decode(data));
   EXPECT_NE(inst, nullptr) << "Failed to decode first instruction";
 }
 
