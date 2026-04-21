@@ -31,7 +31,7 @@
 
    "Name:                    amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-"
 
- * This lists the offload taret gfx942)
+ * This lists the offload target gfx942)
  * Therefore, we need to specify --offload-arch=gfx942 to our link and compile commands.
  * Please modify the compile and link commands to suit your system
 

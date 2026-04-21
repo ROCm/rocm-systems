@@ -387,23 +387,23 @@ TestRMAGet() {
   ################################ User Buffer Tests ################################
   if [[ $TEST != gda* ]]; then # AIROCSHMEM-383
     export LOCALBUFTYPE=host
-    ExecTest  "putnbi"           2       32           128       512
+    ExecTest  "getnbi"           2       32           128       512
     unset LOCALBUFTYPE
 
     export LOCALBUFTYPE=device
-    ExecTest  "putnbi"           2       32           128       512
+    ExecTest  "getnbi"           2       32           128       512
     unset LOCALBUFTYPE
 
     export LOCALBUFTYPE=fine
-    ExecTest  "putnbi"           2       32           128       512
+    ExecTest  "getnbi"           2       32           128       512
     unset LOCALBUFTYPE
 
     export LOCALBUFTYPE=uncached
-    ExecTest  "putnbi"           2       32           128       512
+    ExecTest  "getnbi"           2       32           128       512
     unset LOCALBUFTYPE
 
     export LOCALBUFTYPE=managed
-    ExecTest  "putnbi"           2       32           128       512
+    ExecTest  "getnbi"           2       32           128       512
     unset LOCALBUFTYPE
   fi
 }

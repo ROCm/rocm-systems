@@ -44,7 +44,7 @@ ROCSHMEM_BUFFER_REGISTER
   :returns: ROCSHMEM_SUCCESS or an error.
 
 **Description:**
-Registers a user allocated user buffer. This buffer can be used as a local
+Registers a user-allocated buffer. This buffer can be used as a local
 buffer to most rocSHMEM communication calls. It is erroneous to use it for a
 remote buffer.
 Currently, this call is only implemented for IPC and RO, GDA is
