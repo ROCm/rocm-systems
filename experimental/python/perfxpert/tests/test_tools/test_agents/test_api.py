@@ -21,12 +21,29 @@ _AGENT_NAMES = (
     "agent_latency_specialist",
 )
 
+# Non-agent callables that live alongside the agent mirrors in
+# ``perfxpert.api``. Confluence row #7 added ``trace_diff_diff_runs``
+# so the Python API has first-class access to the diff engine.
+_NON_AGENT_API_NAMES = (
+    "trace_diff_diff_runs",
+)
 
-def test_api_exports_exactly_the_seven_agent_tools() -> None:
-    """``api.__all__`` lists exactly the 7 agent callables."""
+
+def test_api_exports_exactly_the_agent_tools_plus_trace_diff() -> None:
+    """``api.__all__`` lists the 7 agent callables + the trace-diff mirror."""
     from perfxpert import api
 
-    assert tuple(sorted(api.__all__)) == tuple(sorted(_AGENT_NAMES))
+    expected = tuple(sorted(_AGENT_NAMES + _NON_AGENT_API_NAMES))
+    assert tuple(sorted(api.__all__)) == expected
+
+
+def test_api_trace_diff_diff_runs_is_the_tool_function():
+    """``perfxpert.api.trace_diff_diff_runs`` IS the same function object
+    as ``perfxpert.tools.trace_diff.diff_runs`` — no wrapper, no shim."""
+    from perfxpert import api
+    from perfxpert.tools.trace_diff import diff_runs
+
+    assert api.trace_diff_diff_runs is diff_runs
 
 
 def test_api_module_docstring_references_mirror() -> None:

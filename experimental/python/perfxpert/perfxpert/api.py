@@ -30,6 +30,7 @@ from perfxpert.tools.agents.latency import agent_latency_specialist
 from perfxpert.tools.agents.memory import agent_memory_specialist
 from perfxpert.tools.agents.recommendation import agent_recommendation
 from perfxpert.tools.agents.root import agent_root
+from perfxpert.tools.trace_diff import diff_runs as trace_diff_diff_runs
 
 __all__ = [
     "agent_root",
@@ -39,4 +40,5 @@ __all__ = [
     "agent_compute_specialist",
     "agent_memory_specialist",
     "agent_latency_specialist",
+    "trace_diff_diff_runs",
 ]
