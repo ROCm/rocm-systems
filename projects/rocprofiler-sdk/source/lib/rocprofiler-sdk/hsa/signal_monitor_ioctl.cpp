@@ -282,22 +282,16 @@ public:
             if(!running_.exchange(false)) return;
         }
 
-        size_t cleared_subscriptions = 0;
+        size_t remaining_subscriptions = 0;
         {
             std::lock_guard<std::mutex> lock(subscriptions_mutex_);
-            cleared_subscriptions = subscriptions_.size();
-            for(auto& [id, subscription] : subscriptions_)
-            {
-                (void) id;
-                subscription.pending = false;
-            }
+            remaining_subscriptions = subscriptions_.size();
         }
 
-        size_t cleared_callbacks = 0;
+        size_t queued_callbacks = 0;
         {
             std::lock_guard<std::mutex> lock(queue_mutex_);
-            cleared_callbacks = callback_queue_.size();
-            callback_queue_.clear();
+            queued_callbacks = callback_queue_.size();
         }
         queue_cv_.notify_all();
 
@@ -308,10 +302,27 @@ public:
         }
         worker_threads_.clear();
 
+        size_t cleared_subscriptions = 0;
+        {
+            std::lock_guard<std::mutex> lock(subscriptions_mutex_);
+            cleared_subscriptions = subscriptions_.size();
+            subscriptions_.clear();
+        }
+
+        size_t cleared_callbacks = 0;
+        {
+            std::lock_guard<std::mutex> lock(queue_mutex_);
+            cleared_callbacks = callback_queue_.size();
+            callback_queue_.clear();
+        }
+
         ROCP_ERROR_IF(ioctl_monitor_diag_enabled())
-            << fmt::format("DEBUG: ioctl monitor stop complete monitor={} cleared_subscriptions={} "
-                           "cleared_callbacks={} tid={}",
+            << fmt::format("DEBUG: ioctl monitor stop complete monitor={} "
+                           "remaining_subscriptions={} queued_callbacks={} "
+                           "cleared_subscriptions={} cleared_callbacks={} tid={}",
                            static_cast<void*>(this),
+                           remaining_subscriptions,
+                           queued_callbacks,
                            cleared_subscriptions,
                            cleared_callbacks,
                            common::get_tid());
@@ -409,7 +420,11 @@ public:
 private:
     void collect_ready(std::vector<CallbackItem>& ready, std::vector<uint32_t>* event_ids)
     {
+        if(!running_.load()) return;
+
         std::lock_guard<std::mutex> lock(subscriptions_mutex_);
+        if(!running_.load()) return;
+
         for(auto& [id, subscription] : subscriptions_)
         {
             if(subscription.pending) continue;
@@ -442,7 +457,7 @@ private:
 
     void enqueue_ready(const std::vector<CallbackItem>& ready)
     {
-        if(ready.empty()) return;
+        if(ready.empty() || !running_.load()) return;
 
         {
             std::lock_guard<std::mutex> lock(queue_mutex_);
