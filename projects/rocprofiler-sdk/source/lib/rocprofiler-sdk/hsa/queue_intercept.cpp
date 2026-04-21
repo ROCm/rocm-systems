@@ -400,6 +400,7 @@ wrap_signal_store_screlease(hsa_signal_t sig, hsa_signal_value_t val)
         });
         return;
     }
+    ROCP_TRACE << "signal_store_screlease passthrough: sig=" << sig.handle << " val=" << val;
     s_next_table.hsa_signal_store_screlease_fn(sig, val);
 }
 

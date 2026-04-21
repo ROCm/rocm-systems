@@ -729,6 +729,8 @@ Queue::Queue(const AgentCache&  agent,
 , _ext_api(ext_api)
 , _agent(agent)
 {
+    ROCP_TRACE << "Queue ctor (InterceptQueue path)";
+
     ROCP_HSA_TABLE_CALL(FATAL,
                         _ext_api.hsa_amd_queue_intercept_create_fn(_agent.get_hsa_agent(),
                                                                    size,
@@ -805,6 +807,8 @@ Queue::Queue(
 , _agent(agent)
 , _intercept_queue(queue)
 {
+    ROCP_TRACE << "Queue ctor (inline path)";
+
     if(!context::get_registered_contexts([](const context::context* ctx) {
             return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
                     ctx->dispatch_thread_trace || ctx->device_thread_trace);
