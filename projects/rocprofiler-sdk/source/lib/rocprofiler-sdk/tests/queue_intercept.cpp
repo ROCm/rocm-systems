@@ -281,7 +281,8 @@ TEST(QueueIntercept, DoorbellWithKFactor)
     state.real_rdid = &real_rdid;
     state.k_factor  = 7;
 
-    state.virtual_wptr.store(1);
+    // virtual_wptr uses stride-scaled positions: 1 packet * stride(8) = 8
+    state.virtual_wptr.store(8);
     auto* pkt          = get_pkt(ring, 0, 511);
     pkt->header        = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
     pkt->kernel_object = 0xCAFE;
@@ -291,7 +292,7 @@ TEST(QueueIntercept, DoorbellWithKFactor)
     // With K=7: 1 app packet at submit pos 0, next_submit_pos advances to 0 + 1 + 7 = 8
     EXPECT_EQ(real_wdid, 8u);
     EXPECT_EQ(state.next_submit_pos, 8u);
-    EXPECT_EQ(state.next_scan_pos, 1u);
+    EXPECT_EQ(state.next_scan_pos, 8u);
 
     auto* submitted = get_pkt(ring, 0, 511);
     EXPECT_EQ(submitted->kernel_object, static_cast<uint64_t>(0xCAFE));
@@ -312,11 +313,12 @@ TEST(QueueIntercept, DoorbellTwoPacketsWithKFactor)
     state.real_rdid = &real_rdid;
     state.k_factor  = 7;
 
-    state.virtual_wptr.store(2);
-    get_pkt(ring, 0, 511)->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    // 2 packets * stride(8) = 16
+    state.virtual_wptr.store(16);
+    get_pkt(ring, 0, 511)->header        = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
     get_pkt(ring, 0, 511)->kernel_object = 0xAAAA;
-    get_pkt(ring, 1, 511)->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
-    get_pkt(ring, 1, 511)->kernel_object = 0xBBBB;
+    get_pkt(ring, 8, 511)->header        = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    get_pkt(ring, 8, 511)->kernel_object = 0xBBBB;
 
     process_doorbell_impl(&state, 0, [](hsa_signal_t, hsa_signal_value_t) {});
 
@@ -387,7 +389,8 @@ TEST(QueueIntercept, MetadataSyncWritesEntries)
     meta_state.real_wdid = &meta_wdid;
     meta_state.real_rdid = &meta_rdid;
 
-    compute_state.virtual_wptr.store(1);
+    // 1 packet * stride(8) = 8
+    compute_state.virtual_wptr.store(8);
     auto* pkt          = get_pkt(compute_ring, 0, 255);
     pkt->header        = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
     pkt->kernel_object = 0x1234;
@@ -413,7 +416,8 @@ TEST(QueueIntercept, NoMetadataSyncWhenNoPairing)
     compute_state.k_factor       = 7;
     compute_state.metadata_state = nullptr;
 
-    compute_state.virtual_wptr.store(1);
+    // 1 packet * stride(8) = 8
+    compute_state.virtual_wptr.store(8);
     get_pkt(ring, 0, 255)->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
 
     process_doorbell_impl(&compute_state, 0, [](hsa_signal_t, hsa_signal_value_t) {});
