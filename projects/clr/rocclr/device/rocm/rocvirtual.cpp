@@ -1151,6 +1151,7 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
 
   return processOpenCLMemObjects(kernel, params, ldsAddress, cooperativeGroups, imageBufferWrtBack,
                                  wrtBackImageBuffer);
+}
 void VirtualGPU::AcquireQueueWithPreference() {
   std::scoped_lock lock(execution());
   if (!dedicated_queue_ && gpu_queue_ == nullptr && last_hwq_ != nullptr) {
