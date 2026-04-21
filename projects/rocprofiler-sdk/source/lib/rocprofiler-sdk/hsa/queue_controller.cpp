@@ -230,6 +230,16 @@ queue_controller_load_attach_queues()
 
 }  // namespace
 
+uint64_t
+compute_queue_k_factor()
+{
+    for(const auto& itr : context::get_registered_contexts())
+    {
+        if(itr->dispatch_counter_collection || itr->dispatch_thread_trace) return 7;
+    }
+    return 0;
+}
+
 void
 QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 {
@@ -560,16 +570,6 @@ enable_queue_intercept()
     }
 
     return false;
-}
-
-uint64_t
-compute_queue_k_factor()
-{
-    for(const auto& itr : context::get_registered_contexts())
-    {
-        if(itr->dispatch_counter_collection || itr->dispatch_thread_trace) return 7;
-    }
-    return 0;
 }
 
 void
