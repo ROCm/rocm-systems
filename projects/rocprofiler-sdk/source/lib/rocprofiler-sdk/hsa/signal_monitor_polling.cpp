@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/signal_monitor.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -37,6 +38,17 @@ namespace rocprofiler::hsa
 {
 namespace
 {
+hsa_signal_value_t
+default_load_signal(hsa_signal_t signal)
+{
+    auto* core_api = get_core_table();
+    if(core_api && core_api->hsa_signal_load_relaxed_fn)
+    {
+        return core_api->hsa_signal_load_relaxed_fn(signal);
+    }
+    return hsa_signal_value_t{0};
+}
+
 struct CallbackItem
 {
     signal_subscription_id_t id = 0;
@@ -59,10 +71,7 @@ public:
     : cfg_{cfg}
     , ops_{std::move(ops)}
     {
-        if(!ops_.load)
-        {
-            ops_.load = [](hsa_signal_t signal) { return hsa_signal_load_relaxed(signal); };
-        }
+        if(!ops_.load) ops_.load = default_load_signal;
     }
 
     ~PollingSignalMonitor() override { stop(); }

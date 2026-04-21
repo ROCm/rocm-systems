@@ -68,7 +68,12 @@ struct Subscription
 hsa_signal_value_t
 default_load_signal(hsa_signal_t signal)
 {
-    return hsa_signal_load_relaxed(signal);
+    auto* core_api = get_core_table();
+    if(core_api && core_api->hsa_signal_load_relaxed_fn)
+    {
+        return core_api->hsa_signal_load_relaxed_fn(signal);
+    }
+    return hsa_signal_value_t{0};
 }
 
 template <typename TableT, typename = void>
@@ -174,14 +179,6 @@ default_wait_events(const std::vector<uint32_t>& event_ids, uint32_t timeout_ms)
 
     if(ioctl(fd, AMDKFD_IOC_WAIT_EVENTS, &args) != 0) return false;
     return (args.wait_result != KFD_IOC_WAIT_RESULT_FAIL);
-}
-
-bool
-has_default_ioctl_support()
-{
-    auto* ext_api = get_amd_ext_table();
-    if(!has_event_id_support(ext_api)) return false;
-    return (get_kfd_wait_fd() >= 0);
 }
 
 class IoctlSignalMonitor final : public SignalMonitor
@@ -452,20 +449,20 @@ namespace detail
 std::shared_ptr<SignalMonitor>
 create_ioctl_signal_monitor(const SignalMonitorConfig& cfg, SignalMonitorOps ops)
 {
-    const bool has_custom_ops =
-        static_cast<bool>(ops.load) || static_cast<bool>(ops.get_event_id) ||
-        static_cast<bool>(ops.wait_events);
-
     if(!ops.load) ops.load = default_load_signal;
 
-    if(!has_custom_ops)
+    // Populate default event-id support only when the runtime table provides it.
+    if(!ops.get_event_id && has_event_id_support(get_amd_ext_table()))
     {
-        if(!has_default_ioctl_support()) return {};
         ops.get_event_id = default_get_event_id;
-        ops.wait_events  = default_wait_events;
     }
 
-    if(!ops.get_event_id || !ops.wait_events) return {};
+    // Use KFD wait-events if available; otherwise detector loop will remain in timed polling mode.
+    if(!ops.wait_events && get_kfd_wait_fd() >= 0)
+    {
+        ops.wait_events = default_wait_events;
+    }
+
     return std::make_shared<IoctlSignalMonitor>(cfg, std::move(ops));
 }
 }  // namespace detail
