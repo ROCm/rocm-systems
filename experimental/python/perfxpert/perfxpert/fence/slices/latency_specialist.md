@@ -11,12 +11,19 @@ host-side API batching.
 1. Look up waves_per_cu target via occupancy tables.
 2. Check API-overhead fraction via topdown.classify_overhead.
 3. Examine stall reasons via att.classify_stall_reason (if ATT data available).
-4. Propose one latency-centric technique.
+4. If RCCL collectives appear in the trace (regex-detected in
+   `tracelens_port.py` under the `NCCL` category), call
+   `rccl_analysis.analyze_collectives` to compute bus bandwidth vs peak and
+   comm/compute overlap, then use `interconnect.lookup_peaks` to cross-check
+   the achievable XGMI / PCIe ceiling for the target arch.
+5. Propose one latency-centric technique.
 
 ## Tool allowlist (max 5)
 
 - latency_techniques.catalog
 - arch.lookup_peaks
+- rccl_analysis.analyze_collectives
+- interconnect.lookup_peaks
 
 ## Output schema (≤5 fields)
 
