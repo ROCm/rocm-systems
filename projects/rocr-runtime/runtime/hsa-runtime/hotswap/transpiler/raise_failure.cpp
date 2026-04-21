@@ -26,6 +26,10 @@ const char *reasonString(RaiseFailureReason r) {
     return "cross-wave-replica-race";
   case RaiseFailureReason::CrossWaveLanePredicatedExec:
     return "cross-wave-lane-predicated-exec";
+  case RaiseFailureReason::StrictUnsafeLowering:
+    return "strict-unsafe-lowering";
+  case RaiseFailureReason::MissingKernelDescriptor:
+    return "missing-kernel-descriptor";
   }
   return "UnknownRaiseFailureReason";
 }
@@ -136,6 +140,28 @@ RaiseFailure RaiseFailure::crossWaveLanePredicatedExec(
     const DecodedInst &di, const llvm::Twine &kindDetail) {
   return makeCrossWaveFailure(
       RaiseFailureReason::CrossWaveLanePredicatedExec, di, kindDetail);
+}
+
+RaiseFailure RaiseFailure::strictUnsafeLowering(const DecodedInst &di,
+                                                  llvm::StringRef site,
+                                                  const llvm::Twine &detail) {
+  RaiseFailure f;
+  f.reason = RaiseFailureReason::StrictUnsafeLowering;
+  f.mnemonic = di.mnemonic;
+  f.format = site.str();
+  f.offset = di.offset;
+  f.detail = detail.str();
+  return f;
+}
+
+RaiseFailure RaiseFailure::missingKernelDescriptor(llvm::StringRef kernelName) {
+  RaiseFailure f;
+  f.reason = RaiseFailureReason::MissingKernelDescriptor;
+  f.mnemonic = "<kernel-descriptor>";
+  f.format = reasonString(RaiseFailureReason::MissingKernelDescriptor);
+  f.offset = 0;
+  f.detail = ("kernel '" + kernelName + "': .kd symbol not parsed").str();
+  return f;
 }
 
 RaiseFailure RaiseFailure::crossWaveRewriteOracleDisagreement(
