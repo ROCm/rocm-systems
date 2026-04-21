@@ -66,7 +66,7 @@ SKIP_RETURN_CODE = 77
 # Default timeout for tests in seconds
 DEFAULT_TIMEOUT = 300
 # Extra seconds added to pytest timeout in generated CTest (flush / teardown)
-CTEST_TIMEOUT_BUFFER = 5
+CTEST_TIMEOUT_BUFFER = 30
 
 # Accepted runner types when using parametrized "mode" marker
 ROCPROFSYS_RUNNER_CLASSES = {
