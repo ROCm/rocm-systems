@@ -236,7 +236,7 @@ compute_queue_k_factor()
 {
     for(const auto& itr : context::get_registered_contexts())
     {
-        if(itr->dispatch_counter_collection || itr->dispatch_thread_trace) return 7;
+        if(itr->dispatch_counter_collection || itr->dispatch_thread_trace) return 12;
     }
     return 0;
 }
