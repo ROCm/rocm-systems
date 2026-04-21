@@ -162,7 +162,16 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
         auto* dst  = static_cast<char*>(state->ring_buf) + (slot * pkt_size);
         memcpy(dst, src + i * pkt_size, pkt_size);
         ROCP_TRACE << "  pkt[" << i << "] -> slot=" << slot << " submit_pos=" << tls_submit_pos;
-        tls_submit_pos += 1 + state->k_factor;
+        tls_submit_pos++;
+
+        for(uint64_t k = 0; k < state->k_factor; k++)
+        {
+            auto  kslot = tls_submit_pos & state->ring_mask;
+            auto* kdst  = static_cast<char*>(state->ring_buf) + (kslot * pkt_size);
+            memset(kdst, 0, pkt_size);
+            *reinterpret_cast<uint16_t*>(kdst) = (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE);
+            tls_submit_pos++;
+        }
     }
     ROCP_TRACE << "ring_buffer_writer done: final submit_pos=" << tls_submit_pos;
 }
