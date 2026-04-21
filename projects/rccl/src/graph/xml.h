@@ -12,6 +12,7 @@
 #include "debug.h"
 #include "checks.h"
 #include "alloc.h"
+#include <inttypes.h>
 #include <stdlib.h>
 #include "archinfo.h"
 
