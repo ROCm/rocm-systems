@@ -67,6 +67,7 @@ rocDecStatus HevcVideoParser::UnInitialize() {
 rocDecStatus HevcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
     FunctionEntryLog(g_rocdec_logger);
     if (p_data->payload && p_data->payload_size) {
+        DebugLog(g_rocdec_logger, ROCDEC_STR("Parsing picture ") + ROCDEC_TOSTR(pic_count_) + ROCDEC_STR(" with payload size ") + ROCDEC_TOSTR(p_data->payload_size) + ROCDEC_STR(" bytes ..."));
         curr_pts_ = p_data->pts;
         if (ParsePictureData(p_data->payload, p_data->payload_size) != PARSER_OK) {
             ErrorLog(g_rocdec_logger, ROCDEC_STR("Parser failed!"));
@@ -541,9 +542,9 @@ int HevcVideoParser::SendPicForDecode() {
         }
     }
 
-#if DBGINFO
-    PrintVappiBufInfo();
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintVappiBufInfo();
+    }
 
     if (pfn_decode_picture_cb_(parser_params_.user_data, &dec_pic_params_) == 0) {
         ErrorLog(g_rocdec_logger, "Decode error occurred.");
@@ -698,9 +699,9 @@ ParserResult HevcVideoParser::ParsePictureData(const uint8_t* p_stream, uint32_t
                             return PARSER_FAIL;
                         }
 
-#if DBGINFO
-                        PrintDpb();
-#endif // DBGINFO
+                        if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+                            PrintDpb();
+                        }
                     }
                     num_slices_++;
                     break;
@@ -1343,9 +1344,9 @@ ParserResult HevcVideoParser::ParseVps(uint8_t *nalu, size_t size) {
     p_vps->vps_extension_flag = Parser::GetBit(nalu, offset);
     p_vps->is_received = 1;
 
-#if DBGINFO
-    PrintVps(p_vps);
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintVps(p_vps);
+    }
     FunctionExitLog(g_rocdec_logger);
     return PARSER_OK;
 }
@@ -1522,9 +1523,9 @@ ParserResult HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
     sps_ptr->sps_extension_flag = Parser::GetBit(nalu, offset);
     sps_ptr->is_received = 1;
 
-#if DBGINFO
-    PrintSps(sps_ptr);
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintSps(sps_ptr);
+    }
     FunctionExitLog(g_rocdec_logger);
     return PARSER_OK;
 }
@@ -1668,9 +1669,9 @@ ParserResult HevcVideoParser::ParsePps(uint8_t *nalu, size_t size) {
     }
 
     pps_ptr->is_received = 1;
-#if DBGINFO
-    PrintPps(pps_ptr);
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintPps(pps_ptr);
+    }
     FunctionExitLog(g_rocdec_logger);
     return PARSER_OK;
 }
@@ -2037,9 +2038,9 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
     }
 #endif
 
-#if DBGINFO
-    PrintSliceSegHeader(p_slice_header);
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintSliceSegHeader(p_slice_header);
+    }
 
     FunctionExitLog(g_rocdec_logger);
     return PARSER_OK;
@@ -2542,7 +2543,6 @@ int HevcVideoParser::BumpPicFromDpb() {
     return PARSER_OK;
 }
 
-#if DBGINFO
 void HevcVideoParser::PrintVps(HevcVideoParamSet *vps_ptr) {
     MSG("=== hevc_video_parameter_set_t ===");
     MSG("vps_video_parameter_set_id               = " <<  vps_ptr->vps_video_parameter_set_id);
@@ -3000,4 +3000,3 @@ void HevcVideoParser::PrintVappiBufInfo() {
         MSG("");
     }
 }
-#endif // DBGINFO
