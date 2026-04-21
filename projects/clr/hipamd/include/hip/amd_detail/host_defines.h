@@ -111,12 +111,42 @@ template <typename _Tp> struct numeric_limits {
   static constexpr _Tp lowest() noexcept { return _Tp(); }
 };
 
-#define __HIP_INTERNAL_NUMERIC_LIMITS_SIGNED_INTEGER(_Type, _MinValue, _MaxValue)                  \
+template <size_t _NumBytes> struct __hip_internal_unsigned_of_size;
+template <> struct __hip_internal_unsigned_of_size<1> {
+  using type = unsigned char;
+};
+template <> struct __hip_internal_unsigned_of_size<2> {
+  using type = unsigned short;
+};
+template <> struct __hip_internal_unsigned_of_size<4> {
+  using type = unsigned int;
+};
+template <> struct __hip_internal_unsigned_of_size<8> {
+  using type = unsigned long long;
+};
+
+template <typename _Type>
+constexpr _Type __hip_internal_unsigned_max() noexcept {
+  return static_cast<_Type>(~static_cast<_Type>(0));
+}
+
+template <typename _Type>
+constexpr _Type __hip_internal_signed_max() noexcept {
+  using _UnsignedType = typename __hip_internal_unsigned_of_size<sizeof(_Type)>::type;
+  return static_cast<_Type>(__hip_internal_unsigned_max<_UnsignedType>() >> 1);
+}
+
+template <typename _Type>
+constexpr _Type __hip_internal_signed_min() noexcept {
+  return static_cast<_Type>(-__hip_internal_signed_max<_Type>() - 1);
+}
+
+#define __HIP_INTERNAL_NUMERIC_LIMITS_SIGNED_INTEGER(_Type)                                          \
   template <> struct numeric_limits<_Type> {                                                         \
     static constexpr bool is_specialized = true;                                                     \
     static constexpr bool is_signed = true;                                                          \
-    static constexpr _Type min() noexcept { return static_cast<_Type>(_MinValue); }                 \
-    static constexpr _Type max() noexcept { return static_cast<_Type>(_MaxValue); }                 \
+    static constexpr _Type min() noexcept { return __hip_internal_signed_min<_Type>(); }            \
+    static constexpr _Type max() noexcept { return __hip_internal_signed_max<_Type>(); }            \
     static constexpr _Type lowest() noexcept { return min(); }                                       \
   }
 
@@ -125,21 +155,32 @@ template <typename _Tp> struct numeric_limits {
     static constexpr bool is_specialized = true;                                                     \
     static constexpr bool is_signed = false;                                                         \
     static constexpr _Type min() noexcept { return static_cast<_Type>(0); }                         \
-    static constexpr _Type max() noexcept { return static_cast<_Type>(~static_cast<_Type>(0)); }    \
+    static constexpr _Type max() noexcept { return __hip_internal_unsigned_max<_Type>(); }          \
     static constexpr _Type lowest() noexcept { return min(); }                                       \
   }
 
-__HIP_INTERNAL_NUMERIC_LIMITS_SIGNED_INTEGER(signed char, (-__SCHAR_MAX__ - 1), __SCHAR_MAX__);
+__HIP_INTERNAL_NUMERIC_LIMITS_SIGNED_INTEGER(signed char);
 __HIP_INTERNAL_NUMERIC_LIMITS_UNSIGNED_INTEGER(unsigned char);
-__HIP_INTERNAL_NUMERIC_LIMITS_SIGNED_INTEGER(short, (-__SHRT_MAX__ - 1), __SHRT_MAX__);
+__HIP_INTERNAL_NUMERIC_LIMITS_SIGNED_INTEGER(short);
 __HIP_INTERNAL_NUMERIC_LIMITS_UNSIGNED_INTEGER(unsigned short);
-__HIP_INTERNAL_NUMERIC_LIMITS_SIGNED_INTEGER(int, (-__INT_MAX__ - 1), __INT_MAX__);
+__HIP_INTERNAL_NUMERIC_LIMITS_SIGNED_INTEGER(int);
 __HIP_INTERNAL_NUMERIC_LIMITS_UNSIGNED_INTEGER(unsigned int);
-__HIP_INTERNAL_NUMERIC_LIMITS_SIGNED_INTEGER(long, (-__LONG_MAX__ - 1L), __LONG_MAX__);
+__HIP_INTERNAL_NUMERIC_LIMITS_SIGNED_INTEGER(long);
 __HIP_INTERNAL_NUMERIC_LIMITS_UNSIGNED_INTEGER(unsigned long);
-__HIP_INTERNAL_NUMERIC_LIMITS_SIGNED_INTEGER(long long, (-__LONG_LONG_MAX__ - 1LL),
-                                             __LONG_LONG_MAX__);
+__HIP_INTERNAL_NUMERIC_LIMITS_SIGNED_INTEGER(long long);
 __HIP_INTERNAL_NUMERIC_LIMITS_UNSIGNED_INTEGER(unsigned long long);
+template <> struct numeric_limits<char> {
+  static constexpr bool is_specialized = true;
+  static constexpr bool is_signed = __hip_internal::is_signed<char>::value;
+  static constexpr char min() noexcept {
+    return is_signed ? __hip_internal_signed_min<char>() : static_cast<char>(0);
+  }
+  static constexpr char max() noexcept {
+    return is_signed ? __hip_internal_signed_max<char>()
+                     : static_cast<char>(__hip_internal_unsigned_max<unsigned char>());
+  }
+  static constexpr char lowest() noexcept { return min(); }
+};
 
 template <> struct numeric_limits<float> {
   static constexpr bool is_specialized = true;
