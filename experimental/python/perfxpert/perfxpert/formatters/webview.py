@@ -33,6 +33,7 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from ._source_correlation import correlate_hotspots_with_source
 from .json_fmt import _build_summary, _format_as_json, _tier0_to_dict
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
@@ -56,6 +57,7 @@ def _format_as_webview(
     kernel_categories=None,
     short_kernels=None,
     att_analysis: Optional[Dict[str, Any]] = None,
+    detected_kernels: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """
     Generate a self-contained interactive HTML report.
@@ -227,16 +229,92 @@ def _format_as_webview(
     )
 
     # -- hotspots table --
+    # Cross-reference each hotspot with Tier-0 detected_kernels so each row
+    # can optionally expand to show the source definition + launch site
+    # (VTune / NSight-style source correlation).
+    _have_source_scan = detected_kernels is not None
+    _annotated_hotspots = correlate_hotspots_with_source(
+        hotspots or [], detected_kernels if _have_source_scan else None
+    )
+    _LAUNCH_BADGE = {
+        "GLOBAL_KERNEL_DEF": ("__global__", "var(--blue)"),
+        "HIP_KERNEL_LAUNCH": ("HIP_KERNEL_LAUNCH", "var(--orange)"),
+        "TRIPLE_ANGLE_LAUNCH": ("&lt;&lt;&lt; &gt;&gt;&gt;", "var(--purple)"),
+    }
+
+    def _render_source_panel(idx: int, locs: List[Dict[str, Any]]) -> str:
+        """Inner cell body for the expandable Source-location panel."""
+        if not _have_source_scan:
+            return (
+                '<div class="h-src-panel h-src-empty">'
+                "<em>No source scan available.</em> "
+                "Pass <code>--source-dir &lt;path&gt;</code> to analyze so PerfXpert can "
+                "correlate each hotspot with its definition + launch site."
+                "</div>"
+            )
+        if not locs:
+            return (
+                '<div class="h-src-panel h-src-empty">'
+                "<em>No matching source location detected.</em> "
+                "The scanned <code>--source-dir</code> did not contain a symbol matching "
+                "this kernel's basename."
+                "</div>"
+            )
+        rows = []
+        for j, lo in enumerate(locs):
+            cite_id = f"h-src-cite-{idx}-{j}"
+            kind = lo.get("kind", "definition")
+            kind_label = "Definition" if kind == "definition" else "Launch site"
+            lt = lo.get("launch_type", "GLOBAL_KERNEL_DEF")
+            badge_text, badge_color = _LAUNCH_BADGE.get(
+                lt, (lt.replace("_", " "), "var(--teal)")
+            )
+            file_ = _h(lo.get("file", "?"))
+            line = int(lo.get("line", 0))
+            cite = f"{file_}:{line}"
+            rows.append(
+                f'<div class="h-src-item">'
+                f'<span class="h-src-kind">{_h(kind_label)}:</span> '
+                f'<span class="cmd-row" id="{cite_id}">'
+                f"<code>{cite}</code>"
+                f'<button class="cp-btn" onclick="cpCmd(\'{cite_id}\')">Copy</button>'
+                f"</span>"
+                f'<span class="h-src-badge" style="background:{badge_color}">{badge_text}</span>'
+                f"</div>"
+            )
+        return '<div class="h-src-panel">' + "".join(rows) + "</div>"
+
     hotspot_rows = []
-    for i, k in enumerate(hotspots or []):
+    for i, k in enumerate(_annotated_hotspots):
         pct = float(k.get("percent_of_total", 0))
         bar = min(100.0, pct)
         name = k.get("name", "unknown")
         hot = ' class="hot-row"' if pct >= 20 else ""
+        locs = k.get("source_locations") or []
+        # Chevron always rendered so users know a source panel can be
+        # expanded; when no --source-dir was supplied the panel explains
+        # how to enable the correlation.
+        has_match = bool(locs)
+        chevron_title = (
+            "Show source location"
+            if has_match
+            else "No matching source location (pass --source-dir)"
+        )
+        toggle_btn = (
+            f'<button class="h-src-toggle" type="button" '
+            f'onclick="toggleHSrc(this)" '
+            f'aria-expanded="false" '
+            f'title="{chevron_title}">'
+            f'<span class="h-src-chev">&#9662;</span>'
+            f"</button>"
+        )
         hotspot_rows.append(
-            f"<tr{hot}>"
+            f"<tr{hot} data-h-src-row>"
             f"<td>{i + 1}</td>"
-            f'<td class="kname" title="{_h(name)}"><code>{_h(name)}</code></td>'
+            f'<td class="kname" title="{_h(name)}">'
+            f"{toggle_btn}"
+            f'<code>{_h(name)}</code>'
+            f"</td>"
             f'<td data-v="{k.get("calls", 0)}">{int(k.get("calls", 0)):,}</td>'
             f'<td data-v="{k.get("total_duration", 0)}">{_fmt_ns(k.get("total_duration", 0))}</td>'
             f'<td data-v="{k.get("avg_duration", 0)}">{_fmt_ns(k.get("avg_duration", 0))}</td>'
@@ -245,6 +323,13 @@ def _format_as_webview(
             f'<div class="pbar"><div class="pfill" style="width:{bar:.1f}%"></div>'
             f"<span>{pct:.1f}%</span></div>"
             f"</td></tr>"
+        )
+        # Hidden sibling row with the source-location panel.
+        hotspot_rows.append(
+            f'<tr class="h-src-row" hidden>'
+            f'<td colspan="7">'
+            + _render_source_panel(i, locs)
+            + "</td></tr>"
         )
     hotspots_html = ""
     if hotspot_rows:
@@ -258,7 +343,7 @@ def _format_as_webview(
             '<table class="dtable sortable" id="hs-tbl">'
             "<thead><tr>"
             "<th data-tip='Rank by total execution time \u2014 1 is the hottest kernel.'>#</th>"
-            "<th data-tip='Demangled GPU kernel function name dispatched to the GPU. Rows highlighted in red consume &gt;20% of total runtime.'>Kernel Name</th>"
+            "<th data-tip='Demangled GPU kernel function name dispatched to the GPU. Click the &#9662; arrow to expand a VTune-style source-location panel showing the definition + launch site (requires --source-dir). Rows highlighted in red consume &gt;20% of total runtime.'>Kernel Name</th>"
             "<th data-tip='Number of times this kernel was dispatched. Very high call counts with low avg time suggest kernel launch overhead dominates useful work.'>Calls &#8645;</th>"
             "<th data-tip='Sum of all dispatch durations for this kernel \u2014 the primary metric for identifying hotspots. Longer total time = bigger optimization target.'>Total Time &#8645;</th>"
             "<th data-tip='Mean duration per single dispatch. Values below 10 &micro;s suggest kernel launch overhead may dominate the actual computation.'>Avg Time &#8645;</th>"

@@ -46,6 +46,7 @@ def _format_as_json(
     custom_prompt: Optional[str] = None,
     kernel_resources: Optional[Dict[str, Any]] = None,
     api_overhead: Optional[Dict[str, Any]] = None,
+    detected_kernels: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """Serialize analysis results to JSON conforming to the current schema version (v0.3.0 when TraceLens fields are present, v0.1.0 otherwise).
 
@@ -106,20 +107,8 @@ def _format_as_json(
             "idle_time_ns": idle_time_ns,
             "idle_time_pct": round(idle_pct, 2),
         },
-        # --- hotspots ---
-        "hotspots": [
-            {
-                "rank": i + 1,
-                "name": k.get("name", "unknown"),
-                "calls": int(k.get("calls", 0)),
-                "total_duration_ns": int(k.get("total_duration", 0)),
-                "avg_duration_ns": float(k.get("avg_duration", 0)),
-                "min_duration_ns": int(k.get("min_duration", 0)),
-                "max_duration_ns": int(k.get("max_duration", 0)),
-                "pct_of_total": round(float(k.get("percent_of_total", 0)), 2),
-            }
-            for i, k in enumerate(hotspots or [])
-        ],
+        # --- hotspots (schema >= 0.3.1 optionally carries source_locations) ---
+        "hotspots": _build_hotspots_json(hotspots or [], detected_kernels),
         # --- memory_analysis ---
         "memory_analysis": {
             direction: {
@@ -158,6 +147,13 @@ def _format_as_json(
     if interval_timeline or kernel_categories or short_kernels:
         doc["schema_version"] = "0.3.0"
         doc["metadata"]["analysis_version"] = "0.3.0"
+    # 0.3.1: hotspots[*].source_locations cross-reference with Tier-0
+    # detected_kernels (Confluence row #5 — Source Code Line numbers).
+    if detected_kernels is not None and any(
+        h.get("source_locations") for h in doc.get("hotspots", [])
+    ):
+        doc["schema_version"] = "0.3.1"
+        doc["metadata"]["analysis_version"] = "0.3.1"
     if att_analysis and att_analysis.get("has_att_data"):
         doc["schema_version"] = "0.4.0"
         doc["metadata"]["analysis_version"] = "0.4.0"
@@ -174,6 +170,44 @@ def _format_as_json(
         }
 
     return _json.dumps(doc, indent=2)
+
+
+def _build_hotspots_json(
+    hotspots: List[Dict[str, Any]],
+    detected_kernels: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """Render the ``hotspots`` list for the JSON schema.
+
+    When ``detected_kernels`` is provided (schema >= 0.3.1) each hotspot
+    entry carries a ``source_locations`` list of ``{file, line, kind}``
+    objects, where ``kind`` is ``"definition"`` or ``"launch"``.
+    """
+    from ._source_correlation import correlate_hotspots_with_source
+
+    annotated = correlate_hotspots_with_source(hotspots or [], detected_kernels)
+    out: List[Dict[str, Any]] = []
+    for i, k in enumerate(annotated):
+        entry: Dict[str, Any] = {
+            "rank": i + 1,
+            "name": k.get("name", "unknown"),
+            "calls": int(k.get("calls", 0)),
+            "total_duration_ns": int(k.get("total_duration", 0)),
+            "avg_duration_ns": float(k.get("avg_duration", 0)),
+            "min_duration_ns": int(k.get("min_duration", 0)),
+            "max_duration_ns": int(k.get("max_duration", 0)),
+            "pct_of_total": round(float(k.get("percent_of_total", 0)), 2),
+        }
+        if detected_kernels is not None:
+            entry["source_locations"] = [
+                {
+                    "file": lo.get("file"),
+                    "line": int(lo.get("line", 0)),
+                    "kind": lo.get("kind", "definition"),
+                }
+                for lo in (k.get("source_locations") or [])
+            ]
+        out.append(entry)
+    return out
 
 
 def _build_summary(

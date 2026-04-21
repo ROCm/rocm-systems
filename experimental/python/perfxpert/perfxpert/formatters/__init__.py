@@ -121,6 +121,11 @@ def format_analysis_output(
         return output
 
     if output_format == "markdown":
+        _detected_kernels = (
+            getattr(tier0_result, "detected_kernels", None)
+            if tier0_result is not None
+            else None
+        )
         output = _format_as_markdown(
             time_breakdown=time_breakdown,
             hotspots=hotspots,
@@ -131,6 +136,7 @@ def format_analysis_output(
             interval_timeline=interval_timeline,
             kernel_categories=kernel_categories,
             short_kernels=short_kernels,
+            detected_kernels=_detected_kernels,
         )
         if tier0_result is not None:
             output += "\n\n---\n\n## Tier 0: Source Code Analysis\n\n"
@@ -138,6 +144,11 @@ def format_analysis_output(
         return output
 
     if output_format == "webview":
+        # Surface Tier-0 detected_kernels (if any) so the Top Kernel
+        # Hotspots table can correlate each row with its source location.
+        _detected_kernels = None
+        if tier0_result is not None:
+            _detected_kernels = getattr(tier0_result, "detected_kernels", None)
         return _format_as_webview(
             time_breakdown=time_breakdown,
             hotspots=hotspots,
@@ -149,6 +160,7 @@ def format_analysis_output(
             kernel_categories=kernel_categories,
             short_kernels=short_kernels,
             att_analysis=att_analysis,
+            detected_kernels=_detected_kernels,
         )
 
     # Default: text
@@ -226,8 +238,21 @@ def format_analysis_output(
         )
         lines.append("\u2500" * width)
 
+        # Cross-reference hotspots with Tier-0 source locations so each row
+        # can carry a one-line "Source: file.hip:42 (definition)" annotation.
+        from ._source_correlation import (
+            correlate_hotspots_with_source as _corr_hs,
+            format_source_citation_inline as _cite_hs,
+        )
+        _text_detected = (
+            getattr(tier0_result, "detected_kernels", None)
+            if tier0_result is not None
+            else None
+        )
+        _text_annotated = _corr_hs(hotspots, _text_detected)
+
         # Table rows
-        for i, kernel in enumerate(hotspots, 1):
+        for i, kernel in enumerate(_text_annotated, 1):
             name = kernel.get("name", "unknown")
             if len(name) > 30:
                 name = name[:27] + "..."
@@ -240,6 +265,9 @@ def format_analysis_output(
             lines.append(
                 f"{i:2}  {name:<30}  {calls:6}  {total_ms:10,.2f}  {avg_us:9,.1f}  {percent:6.1f}%"
             )
+            _cite = _cite_hs(kernel.get("source_locations"))
+            if _cite:
+                lines.append(f"      Source: {_cite}")
 
         lines.append("")
 

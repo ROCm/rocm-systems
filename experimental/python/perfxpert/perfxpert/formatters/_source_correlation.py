@@ -1,0 +1,188 @@
+###############################################################################
+# MIT License
+#
+# Copyright (c) 2025 Advanced Micro Devices, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+###############################################################################
+
+"""
+Source-location correlation helper for PerfXpert formatters.
+
+Cross-references Tier-1 hotspot kernel names (typically demangled,
+namespace-qualified, possibly template-decorated) with Tier-0
+``detected_kernels`` entries (raw source-level identifiers) so each
+hotspot row can carry an optional ``source_locations`` list describing
+the definition line and, when detected, the launch site.
+
+This is a pure-data helper — no formatter-specific logic lives here.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any, Dict, Iterable, List, Optional
+
+
+# Classification of launch_type entries to the user-facing ``kind`` field.
+_LAUNCH_KIND = {
+    "GLOBAL_KERNEL_DEF": "definition",
+    "HIP_KERNEL_LAUNCH": "launch",
+    "TRIPLE_ANGLE_LAUNCH": "launch",
+}
+
+
+def _demangle_basename(name: str) -> str:
+    """Canonicalize a kernel name for comparison.
+
+    Rules (applied in order):
+      * Strip anything inside the first pair of matching parentheses
+        (argument lists such as ``(int, const float*)``).
+      * Drop any template-argument block (``<...>``).
+      * Take the substring after the last ``::`` (namespace/class peel).
+      * Lowercase the result.
+
+    The original signature is preserved by the caller for display —
+    this helper returns ONLY the comparison key.
+    """
+    if not name:
+        return ""
+    s = str(name)
+    # Remove the argument list — everything from the first '(' onward.
+    paren = s.find("(")
+    if paren != -1:
+        s = s[:paren]
+    # Remove template-argument blocks iteratively (handles nested depth via
+    # a simple stack since `re` does not handle nested balanced groups).
+    out = []
+    depth = 0
+    for ch in s:
+        if ch == "<":
+            depth += 1
+            continue
+        if ch == ">":
+            if depth > 0:
+                depth -= 1
+            continue
+        if depth == 0:
+            out.append(ch)
+    s = "".join(out)
+    # Namespace peel.
+    if "::" in s:
+        s = s.rsplit("::", 1)[-1]
+    # Strip common function-pointer / reference decoration.
+    s = s.strip().strip("*&")
+    # Whitespace collapse.
+    s = re.sub(r"\s+", "", s)
+    return s.lower()
+
+
+def _kernel_entry_to_location(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Convert a Tier-0 ``detected_kernels`` entry to a ``source_locations`` item."""
+    file_ = entry.get("file")
+    line = entry.get("line")
+    launch_type = entry.get("launch_type") or "GLOBAL_KERNEL_DEF"
+    if not file_ or line is None:
+        return None
+    kind = _LAUNCH_KIND.get(launch_type, "definition")
+    return {
+        "file": str(file_),
+        "line": int(line),
+        "kind": kind,
+        "launch_type": launch_type,
+    }
+
+
+def correlate_hotspots_with_source(
+    hotspots: Iterable[Dict[str, Any]],
+    detected_kernels: Optional[Iterable[Dict[str, Any]]],
+) -> List[Dict[str, Any]]:
+    """Annotate each hotspot with a ``source_locations`` list.
+
+    Parameters
+    ----------
+    hotspots:
+        Iterable of hotspot dicts as produced by ``analysis.core``. Each
+        carries at minimum a ``name`` key (the demangled kernel name).
+    detected_kernels:
+        Iterable of Tier-0 kernel entries — ``{name, file, line,
+        launch_type}``. May be ``None`` or empty when no source scan
+        was performed.
+
+    Returns
+    -------
+    A NEW list of hotspot dicts (shallow copies) where each entry gains
+    a ``source_locations`` key. When there is no match the field is an
+    empty list — callers can distinguish "no match" from "source scan
+    was never attempted" by checking whether ``detected_kernels`` was
+    passed at all.
+    """
+    # Build lookup: canonicalized name -> list of source_locations
+    index: Dict[str, List[Dict[str, Any]]] = {}
+    for k in detected_kernels or []:
+        name = k.get("name")
+        loc = _kernel_entry_to_location(k)
+        if not name or loc is None:
+            continue
+        key = _demangle_basename(name)
+        if not key:
+            continue
+        index.setdefault(key, []).append(loc)
+
+    annotated: List[Dict[str, Any]] = []
+    for h in hotspots or []:
+        out = dict(h)  # shallow copy — preserve callers' data
+        hname = out.get("name") or ""
+        key = _demangle_basename(hname)
+        locs = index.get(key, []) if key else []
+        # Stable order: definitions first (useful for UI — "where is it
+        # defined?" is more load-bearing than "where was it launched?"),
+        # then launch sites.
+        kind_rank = {"definition": 0, "launch": 1}
+        locs = sorted(
+            (dict(loc) for loc in locs),
+            key=lambda lo: (kind_rank.get(lo.get("kind"), 9), lo.get("file", ""), lo.get("line", 0)),
+        )
+        out["source_locations"] = locs
+        annotated.append(out)
+    return annotated
+
+
+def format_source_citation_inline(locations: Optional[List[Dict[str, Any]]]) -> str:
+    """Render a compact ``file.hip:42 (definition), file.hip:58 (launch)`` string.
+
+    Returns ``""`` when ``locations`` is falsy. Used by the Markdown and
+    text formatters to append a one-line citation to hotspot rows.
+    """
+    if not locations:
+        return ""
+    parts = []
+    for lo in locations:
+        f = lo.get("file", "?")
+        line = lo.get("line", "?")
+        kind = lo.get("kind", "definition")
+        parts.append(f"{f}:{line} ({kind})")
+    return ", ".join(parts)
+
+
+__all__ = [
+    "correlate_hotspots_with_source",
+    "format_source_citation_inline",
+    "_demangle_basename",
+]

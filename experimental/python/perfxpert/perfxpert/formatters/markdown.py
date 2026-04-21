@@ -29,6 +29,11 @@ Markdown formatting functions for PerfXpert analysis results.
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from ._source_correlation import (
+    correlate_hotspots_with_source,
+    format_source_citation_inline,
+)
+
 
 def _format_as_markdown(
     time_breakdown: Dict[str, Any],
@@ -40,6 +45,7 @@ def _format_as_markdown(
     interval_timeline=None,
     kernel_categories=None,
     short_kernels=None,
+    detected_kernels: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """Format analysis results as Markdown."""
     breakdown = time_breakdown or {}
@@ -83,7 +89,8 @@ def _format_as_markdown(
         lines.append("")
         lines.append("| Rank | Kernel | Calls | Total (ms) | Avg (\u03bcs) | % Total |")
         lines.append("|------|--------|-------|------------|----------|---------|")
-        for i, k in enumerate(hotspots, 1):
+        annotated = correlate_hotspots_with_source(hotspots, detected_kernels)
+        for i, k in enumerate(annotated, 1):
             name = k.get("name", "unknown")
             if len(name) > 40:
                 name = name[:37] + "..."
@@ -93,6 +100,9 @@ def _format_as_markdown(
                 f"| {k.get('avg_duration', 0) / 1e3:,.1f} "
                 f"| {k.get('percent_of_total', 0):.1f}% |"
             )
+            cite = format_source_citation_inline(k.get("source_locations"))
+            if cite:
+                lines.append(f"    - Source: {cite}")
         lines.append("")
 
     if memory_analysis:

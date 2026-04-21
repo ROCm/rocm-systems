@@ -197,6 +197,26 @@ code { font-family:var(--mono); font-size:.87em; }
 .hot-row td { background:rgba(224,26,34,.08) !important; }
 .hot-row td:last-child { font-weight:700; }
 .kname { max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* Top Kernel Hotspots -- expandable per-row source-location panel. */
+.h-src-toggle { display:inline-flex; align-items:center; justify-content:center;
+                 width:1.45em; height:1.45em; margin-right:.35rem;
+                 padding:0; background:transparent; border:1px solid var(--bdr);
+                 border-radius:4px; color:var(--dim); cursor:pointer;
+                 font-size:.8rem; vertical-align:middle; transition:var(--trans); }
+.h-src-toggle:hover { color:var(--text); border-color:var(--blue); }
+.h-src-toggle .h-src-chev { display:inline-block; transition:transform .2s ease; }
+.h-src-toggle.open .h-src-chev { transform:rotate(180deg); }
+.h-src-row td { background:var(--bg2); padding:.75rem 1.1rem !important; }
+.h-src-panel { display:flex; flex-direction:column; gap:.5rem; }
+.h-src-panel.h-src-empty { color:var(--sub); font-size:.88rem; }
+.h-src-item { display:flex; align-items:center; flex-wrap:wrap; gap:.55rem;
+               font-size:.87rem; }
+.h-src-kind { color:var(--sub); font-weight:600; font-size:.78rem;
+               text-transform:uppercase; letter-spacing:.05em; }
+.h-src-item .cmd-row { flex:0 1 auto; min-width:0; margin-top:0; }
+.h-src-badge { color:#fff; font-weight:600; font-size:.7rem;
+                padding:.18em .55em; border-radius:3px; white-space:nowrap;
+                letter-spacing:.03em; }
 .pbar { display:flex; align-items:center; gap:.4rem; }
 .pfill { height:10px; background:var(--blue); border-radius:3px; min-width:2px; }
 .pbar span { font-size:.78rem; white-space:nowrap; color:var(--dim); }
@@ -417,6 +437,26 @@ function toggleR(hdr) {
 document.querySelectorAll('.r-card[data-p="HIGH"]').forEach(function(c) {
   c.classList.add('open');
 });
+
+// Top Kernel Hotspots: expand/collapse the per-row source-location panel.
+// The source row is always the immediate next <tr> sibling, added with
+// `hidden` by the formatter.
+function toggleHSrc(btn) {
+  var tr = btn.closest('tr');
+  if (!tr) { return; }
+  var srcRow = tr.nextElementSibling;
+  if (!srcRow || !srcRow.classList.contains('h-src-row')) { return; }
+  var isHidden = srcRow.hasAttribute('hidden');
+  if (isHidden) {
+    srcRow.removeAttribute('hidden');
+    btn.setAttribute('aria-expanded', 'true');
+    btn.classList.add('open');
+  } else {
+    srcRow.setAttribute('hidden', '');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.classList.remove('open');
+  }
+}
 
 function cpCmd(id) {
   var el = document.getElementById(id);

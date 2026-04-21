@@ -739,6 +739,9 @@ def _format_agentic_output(
         return tier0_text
 
     if output_format == "json":
+        _json_detected_kernels = None
+        if tier0_findings is not None:
+            _json_detected_kernels = tier0_findings.get("detected_kernels") or []
         base_json = _format_as_json(
             time_breakdown=time_breakdown,
             hotspots=hotspots,
@@ -749,6 +752,7 @@ def _format_agentic_output(
             att_analysis=thread_trace,
             kernel_resources=kernel_resources,
             api_overhead=api_overhead,
+            detected_kernels=_json_detected_kernels,
         )
         import json as _json
         try:
@@ -793,6 +797,12 @@ def _format_agentic_output(
         if _existing in ("0.1.0", "0.2.0"):
             doc["schema_version"] = "0.3.0"
             doc.setdefault("metadata", {})["analysis_version"] = "0.3.0"
+        # When hotspots carry source_locations (Confluence row #5 — Source
+        # Code Line numbers), bump to 0.3.1.
+        if any(h.get("source_locations") for h in doc.get("hotspots", [])):
+            if _existing not in ("0.4.0",):
+                doc["schema_version"] = "0.3.1"
+                doc.setdefault("metadata", {})["analysis_version"] = "0.3.1"
         # ``narrative`` is the canonical agent-brain field; mirror it into
         # the legacy ``llm_enhanced_explanation`` alias so consumers that
         # still read that key do not regress.
@@ -808,6 +818,9 @@ def _format_agentic_output(
         return _json.dumps(doc, indent=2)
 
     if output_format == "markdown":
+        _md_detected_kernels = None
+        if tier0_findings is not None:
+            _md_detected_kernels = tier0_findings.get("detected_kernels") or []
         md = _format_as_markdown(
             time_breakdown=time_breakdown,
             hotspots=hotspots,
@@ -815,6 +828,7 @@ def _format_agentic_output(
             recommendations=merged_recs,
             hardware_counters=hardware_counters,
             database_path=database_path,
+            detected_kernels=_md_detected_kernels,
         )
         # Splice the agent Summary in between the H1 and the metadata
         # block (``**Database:**`` / ``**Analysis Date:**`` /
@@ -887,6 +901,12 @@ def _format_agentic_output(
         return md
 
     if output_format == "webview":
+        # Pass Tier-0 detected_kernels into the webview so the Top Kernel
+        # Hotspots table can correlate each row with its source definition
+        # + launch site (expandable per-row panel).
+        _detected_kernels = None
+        if tier0_findings is not None:
+            _detected_kernels = tier0_findings.get("detected_kernels") or []
         html = _format_as_webview(
             time_breakdown=time_breakdown,
             hotspots=hotspots,
@@ -895,6 +915,7 @@ def _format_agentic_output(
             hardware_counters=hardware_counters,
             database_path=database_path,
             att_analysis=thread_trace,
+            detected_kernels=_detected_kernels,
         )
         # Splice the narrative as a standard `.scard` Summary section at the
         # TOP of the report (right after the Overview card inside
