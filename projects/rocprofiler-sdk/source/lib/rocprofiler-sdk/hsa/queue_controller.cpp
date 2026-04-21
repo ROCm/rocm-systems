@@ -262,6 +262,7 @@ compute_queue_k_factor()
     return k;
 }
 
+void
 QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 {
     CHECK(queue);
