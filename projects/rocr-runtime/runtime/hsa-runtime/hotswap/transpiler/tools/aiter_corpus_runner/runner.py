@@ -65,6 +65,100 @@ from typing import Dict, List, Optional, Set, Tuple
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+# -- Child process registry + Ctrl-C handling ----------------------------
+#
+# We spawn every child with ``start_new_session=True`` so that a per-run
+# 600s timeout can SIGKILL the child's whole session (hipcc + HSA
+# background threads + any grandchildren).  Side effect: each child is
+# in a *different* session than the runner, so a shell-level Ctrl-C on
+# the runner does not propagate to the children.  Without the machinery
+# below, Ctrl-C therefore leaks N orphan python processes (one per live
+# worker) reparented to init — each still spinning in HSA wait loops
+# or holding JIT-cache FileBaton locks.
+#
+# Fix: the parent tracks every live child's (pid, pgid) in a module-
+# level registry protected by a lock, and installs SIGINT/SIGTERM
+# handlers that:
+#
+#   * first signal → SIGTERM every live child session (graceful),
+#     raise KeyboardInterrupt so main() unwinds;
+#   * second signal (user impatient) → SIGKILL every survivor and
+#     ``os._exit`` immediately, bypassing any worker-thread stalls.
+#
+# ``_register_child`` is called right after ``Popen`` returns; the
+# pgid equals the pid because ``start_new_session=True`` makes the
+# child a session leader.  ``_unregister_child`` runs in a
+# ``finally`` inside ``_run_one`` so the registry is always consistent
+# even if the pump threads or ``proc.wait`` raise.
+_live_children_lock = threading.Lock()
+_live_children: Dict[int, int] = {}  # pid -> pgid (== pid under start_new_session)
+_shutdown_signals_received = 0
+_shutdown_count_lock = threading.Lock()
+
+
+def _register_child(pid: int) -> None:
+    with _live_children_lock:
+        _live_children[pid] = pid  # pgid == pid via start_new_session
+
+
+def _unregister_child(pid: int) -> None:
+    with _live_children_lock:
+        _live_children.pop(pid, None)
+
+
+def _kill_live_children(sig: int) -> int:
+    """SIGnal every live child's process *group*.  Swallows
+    ``ProcessLookupError`` (race: child already exited / was reaped by
+    another thread).  Returns the number of pgids we actually signalled
+    (excluding already-dead ones)."""
+    with _live_children_lock:
+        snapshot = list(_live_children.items())
+    signalled = 0
+    for pid, pgid in snapshot:
+        try:
+            os.killpg(pgid, sig)
+            signalled += 1
+        except ProcessLookupError:
+            continue
+    return signalled
+
+
+def _shutdown_handler(signum: int, frame) -> None:
+    """SIGINT / SIGTERM handler.  First signal is graceful (SIGTERM to
+    every child session, then raise KeyboardInterrupt to let main()
+    unwind through its finally blocks and emit a partial summary).
+    Second signal escalates to SIGKILL + ``os._exit`` — covers the case
+    where a child ignores SIGTERM because it's wedged inside an
+    uninterruptible HSA / hipcc call."""
+    global _shutdown_signals_received
+    with _shutdown_count_lock:
+        _shutdown_signals_received += 1
+        escalating = _shutdown_signals_received > 1
+    if escalating:
+        n = _kill_live_children(signal.SIGKILL)
+        sys.stderr.write(
+            f"\n[aiter_corpus_runner] signal {signum} again: SIGKILLed "
+            f"{n} surviving child session(s); exiting immediately.\n"
+        )
+        sys.stderr.flush()
+        os._exit(128 + signum)
+    n = _kill_live_children(signal.SIGTERM)
+    sys.stderr.write(
+        f"\n[aiter_corpus_runner] caught signal {signum}; SIGTERM'd "
+        f"{n} live child session(s).  Press Ctrl-C again to SIGKILL "
+        f"and exit immediately.\n"
+    )
+    sys.stderr.flush()
+    raise KeyboardInterrupt()
+
+
+def _install_shutdown_handlers() -> None:
+    """Install our teardown handler for SIGINT and SIGTERM.  Must be
+    called from the main thread before spawning any children."""
+    signal.signal(signal.SIGINT, _shutdown_handler)
+    signal.signal(signal.SIGTERM, _shutdown_handler)
+
+
 @functools.lru_cache(maxsize=1)
 def _detect_native_gfx() -> str:
     """Return the gfx arch of the live GPU as reported by rocminfo
@@ -795,6 +889,18 @@ def _run_one(
             elapsed_s=0.0, stderr_tail="",
         )
 
+    # Child is alive.  Register before touching pipes so a signal
+    # arriving mid-setup still finds this pgid in the registry and
+    # can SIGTERM it via ``_kill_live_children``.  The matching
+    # ``_unregister_child`` is just before the final ``return``; the
+    # intervening code is exception-free by inspection.  If it ever
+    # becomes otherwise (e.g. KeyboardInterrupt injected by our
+    # shutdown handler), leaving a stale entry behind is safe: the
+    # handler already SIGTERM'd the pgid, any follow-up ``killpg``
+    # swallows ``ProcessLookupError``, and ``main`` SIGKILLs the
+    # whole registry on exit as belt-and-braces.
+    _register_child(proc.pid)
+
     # Pumps.  One thread per stream so a flood on one side (e.g.
     # hipcc emitting MB of compile output on stdout) can't starve
     # the other and mask a critical stderr line.  Each pump:
@@ -1010,6 +1116,12 @@ def _run_one(
             detail = "ok"
     if log_path is not None:
         detail = f"{detail}; log={log_path}"
+
+    # Child is done — either exited, crashed, or was SIGKILLed on
+    # timeout — and has been reaped by ``proc.wait``.  Drop it from
+    # the registry so a later shutdown signal doesn't try to kill
+    # a dead / recycled pgid.
+    _unregister_child(proc.pid)
 
     return RunResult(
         script=script,
@@ -1245,22 +1357,44 @@ def _run_parallel(
             gpu_queue.put(gpu)
 
     results: List[RunResult] = []
-    with concurrent.futures.ThreadPoolExecutor(
+    # Manual executor lifetime (not ``with``) so we can pass
+    # ``cancel_futures=True`` on shutdown.  Critical on Ctrl-C: the
+    # default ``__exit__`` calls ``shutdown(wait=True)`` which does
+    # *not* cancel pending futures, so worker threads would keep
+    # popping the executor queue and spawning brand-new children
+    # even after our SIGINT handler has SIGTERM'd the in-flight
+    # ones — exactly the orphan-process leak this registry exists
+    # to prevent.
+    pool = concurrent.futures.ThreadPoolExecutor(
         max_workers=n_workers,
         thread_name_prefix="aiter-worker",
-    ) as pool:
-        futures = [
-            pool.submit(_dispatch, i, s, m)
-            for i, (s, m) in enumerate(jobs_spec, 1)
-        ]
+    )
+    futures = [
+        pool.submit(_dispatch, i, s, m)
+        for i, (s, m) in enumerate(jobs_spec, 1)
+    ]
+    try:
         # ``as_completed`` drains futures in finish-order; exceptions
         # (which would be a bug in ``_dispatch`` itself, not a child
         # failure — child failures surface as RunResult.verdict=CRASH)
-        # propagate out of ``.result()`` and abort the sweep, which
-        # is what we want.  Daemon threads would leak on Ctrl-C;
-        # relying on ThreadPoolExecutor's ``__exit__`` drain instead.
+        # propagate out of ``.result()`` and abort the sweep.
         for f in concurrent.futures.as_completed(futures):
             results.append(f.result())
+    except KeyboardInterrupt:
+        # Signal handler already SIGTERM'd every live child.  Cancel
+        # the not-yet-started futures so workers stop dispatching new
+        # work, then re-raise so ``main``'s outer handler can print
+        # the interrupted banner and exit 130.
+        for f in futures:
+            f.cancel()
+        raise
+    finally:
+        # ``wait=False`` lets us unwind immediately.  Python will
+        # still wait for the worker *threads* to return before the
+        # interpreter exits, but that's bounded: in-flight children
+        # have been SIGTERM'd or completed, so each worker's
+        # ``_run_one`` returns within a few seconds.
+        pool.shutdown(wait=False, cancel_futures=True)
     return results
 
 
@@ -2014,4 +2148,41 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Install our SIGINT / SIGTERM handler before any child is
+    # spawned.  The handler propagates the signal to every live
+    # child's process group (see ``_shutdown_handler``), which is
+    # essential because we spawn children with
+    # ``start_new_session=True`` — so the shell's Ctrl-C does *not*
+    # otherwise reach them and would leak orphan python processes
+    # plus stale JIT-cache locks.
+    _install_shutdown_handlers()
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        # Belt-and-braces cleanup.  Our SIGINT handler already
+        # SIGTERM'd every live child session before raising
+        # KeyboardInterrupt; most children will have drained and
+        # unregistered themselves through ``_run_one``'s return
+        # path by the time we arrive here, but there's a small
+        # race where a worker thread may not have called
+        # ``_unregister_child`` yet.  Anything *still* in the
+        # registry either (a) just hasn't been reaped yet (harmless
+        # — killpg on a dying pgid no-ops or ESRCHes) or (b) ignored
+        # SIGTERM (wedged in an uninterruptible HSA / hipcc call),
+        # in which case SIGKILL is the only way out.  Report both
+        # cases the same way — the count is the upper bound of
+        # "children that may still be alive".
+        pending = _kill_live_children(signal.SIGKILL)
+        if pending:
+            sys.stderr.write(
+                f"[aiter_corpus_runner] interrupted; escalated "
+                f"SIGKILL to {pending} child session(s) that had "
+                f"not yet exited.\n"
+            )
+        else:
+            sys.stderr.write(
+                "[aiter_corpus_runner] interrupted; all children "
+                "already exited cleanly.\n"
+            )
+        sys.stderr.flush()
+        sys.exit(130)

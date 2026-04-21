@@ -101,6 +101,34 @@ concurrent `hipcc` to corrupt its `.so` output.  Non-Python and
 different-UID processes are excluded from the scan because neither
 can have opened an AITER baton through its normal code path.
 
+### Ctrl-C (interrupting a run)
+
+Children are spawned with `start_new_session=True` so that the
+per-run 600s timeout's `SIGKILL` reaches every grandchild (HSA
+threads, `hipcc` helpers, etc.).  Side effect: a shell-level Ctrl-C
+on the runner does **not** propagate to those children — they
+belong to a different session.  Without intervention, Ctrl-C would
+therefore leak one orphan Python process per live worker, each
+stuck spinning in an HSA wait loop and/or holding a JIT-cache
+`FileBaton`.
+
+The runner installs its own `SIGINT`/`SIGTERM` handler with two
+escalation levels:
+
+1. **First Ctrl-C — graceful.**  The handler `SIGTERM`s every live
+   child session and raises `KeyboardInterrupt` on the main thread.
+   Pending parallel jobs are cancelled, in-flight workers drain as
+   their children exit, and the runner prints how many survivors it
+   force-killed on the way out before exiting `130`.
+2. **Second Ctrl-C — immediate.**  If a child ignores `SIGTERM`
+   (wedged inside an uninterruptible HSA / `hipcc` call), the next
+   signal `SIGKILL`s every survivor and `os._exit(130)`s the runner
+   right away, bypassing any stuck worker threads.
+
+The startup orphan-lock reaper (above) cleans up any `lock_*` files
+that a crashed / interrupted run left behind, so the *next* run
+isn't blocked by baton waits.
+
 ## What it does
 
 For each `(op-test, mode)` pair the runner spawns a child Python,
