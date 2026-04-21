@@ -8,6 +8,7 @@ PerfXpert, jump to [../contributing/README.md](../contributing/README.md).
 | You want to… | Read |
 |--------------|------|
 | Install + run your first analysis | [getting-started.md](getting-started.md) |
+| Run the first-time wizard (`perfxpert init`) | [getting-started.md §3.3](getting-started.md#33-first-run--perfxpert-init) |
 | Understand how the agent brain works at runtime | [agentic-mode.md](agentic-mode.md) |
 | Drive PerfXpert from a coding backend (opencode / claude / codex / gemini) | [backends.md](backends.md) |
 | Embed the agent hierarchy in your own Python code | [python-api.md](python-api.md) |

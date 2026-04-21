@@ -301,6 +301,79 @@ this as a separate step BEFORE MCP registration:
   non-zero. `ConfigClobber` is raised if `~/.codex/config.toml` is
   git-tracked or fails to parse.
 
+## 3.3 First run — `perfxpert init`
+
+New in Phase 8 (Confluence roadmap row #29). A single guided wizard
+that chains the four things every new user asks about into one flow
+so you don't have to discover them separately:
+
+1. **GPU detection** — `rocm-smi --showproductname --showmeminfo vram
+   --json` (fallback: `rocminfo`; manual `--arch gfx942` when neither
+   is available), looked up against the architecture catalog in
+   `perfxpert/knowledge/gpu_specs.yaml`.
+2. **Framework detection** — Tier-0 source scan (same scanner as
+   `analyze --source-dir`, same `.git` / `node_modules` filters) plus a
+   Python import probe for `torch`, `tensorflow`, `jax`, `cupy`.
+3. **Config generation** — writes
+   `~/.config/perfxpert/config.yaml` with the Pydantic-validated
+   defaults and the detected provider. When the file already exists
+   the wizard prints a unified diff and asks before overwriting
+   (skipped under `--non-interactive`).
+4. **Suggested first profiling command** — the lowest rung of the
+   cost-ordered ladder (`rocprofv3 --sys-trace`). When the source scan
+   found HIP kernels, a second `--pmc SQ_WAVES GRBM_COUNT
+   GRBM_GUI_ACTIVE` line is emitted too; when a Python framework is
+   detected, the target is `python train.py` instead of `./your_app`.
+
+```bash
+# SKIP-SAMPLE — requires perfxpert on PATH from the pip install above
+perfxpert init                              # interactive (confirms diffs)
+perfxpert init --non-interactive            # CI / scripting
+perfxpert init --source-dir ./my_project    # target a specific source tree
+perfxpert init --arch gfx942                # override GPU detection
+perfxpert init --provider openai            # pin the LLM provider
+perfxpert init --config-path /tmp/pxcfg.yaml --non-interactive   # sandbox
+```
+
+Sample transcript on an MI300X host with `ANTHROPIC_API_KEY` exported:
+
+```
+== perfxpert init — first-run wizard ==
+
+Step 1/4 — GPU detection
+  detected: gfx942 (MI300X, 304 CU)
+    peak FP32: 163.4 TFLOPS
+    peak HBM : 5.3 TB/s
+
+Step 2/4 — Framework detection
+  source dir: .
+  python deps: PyTorch importable ⇒ framework: PyTorch
+  source scan: 12 file(s), 3 kernel(s) ⇒ programming model: HIP
+  (both detected ⇒ mixed python+kernel workload)
+
+Step 3/4 — Config generation
+  provider  : anthropic
+  airgap    : false
+  max_tokens: 2048
+  target    : ~/.config/perfxpert/config.yaml
+
+Step 4/4 — Suggested first profiling command
+  primary : rocprofv3 --sys-trace -d ./profile_out -- python train.py
+  extra   : rocprofv3 --pmc SQ_WAVES GRBM_COUNT GRBM_GUI_ACTIVE -d ./profile_out_pmc -- python train.py
+  (--pc-sampling / --att are second-tier — run after Tier-1 identifies hot kernels)
+
+Then:
+  perfxpert analyze -i ./profile_out/*.db --source-dir . --format webview -o report
+
+Wizard complete. Your setup is ready.
+```
+
+`--non-interactive` never prompts; it always overwrites the config if
+one exists, so it's safe in CI. Provider detection order:
+`ANTHROPIC_API_KEY` → `OPENAI_API_KEY` →
+`PERFXPERT_LLM_PRIVATE_URL` → `OLLAMA_HOST` → bundled `opencode`
+(no key required).
+
 ## 4. First analysis (60 seconds)
 
 Profile a trivial HIP app, then analyze.
