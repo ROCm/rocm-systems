@@ -1,13 +1,18 @@
 // main.cpp — hip-bench driver.
 //
 // Runs a sweep of "submit N kernels + sync" and "launch graph of N nodes + sync"
-// segments, repeated 10 times. Emits CSV on stdout.
+// segments, repeated kIterations times. Emits per-iteration CSV plus a
+// stats footer (min/max/mean/stddev) on stdout.
 
 #include <hip/hip_runtime.h>
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
+#include <string>
 #include <vector>
 
 extern "C" __global__ void noop();
@@ -96,7 +101,7 @@ static uint64_t time_graph_segment(const GraphHolder& gh) {
 int main() {
     constexpr int kKernelCounts[] = {1, 10, 1000};
     constexpr int kGraphCounts[]  = {1, 10, 100, 1000};
-    constexpr int kIterations     = 10;
+    constexpr int kIterations     = 100;
 
     // Pre-build graphs once.
     std::vector<GraphHolder> graphs;
@@ -108,6 +113,10 @@ int main() {
     for (int n : kKernelCounts) (void)time_kernel_segment(n);
     for (auto& gh : graphs)     (void)time_graph_segment(gh);
 
+    // Per-segment sample storage so we can emit a stats footer at the end.
+    // Key: "<mode>,<count>" string; value: vector of ns samples (size kIterations).
+    std::map<std::string, std::vector<uint64_t>> samples;
+
     // CSV header.
     std::printf("iteration,mode,count,ns\n");
 
@@ -115,14 +124,49 @@ int main() {
         for (int n : kKernelCounts) {
             uint64_t ns = time_kernel_segment(n);
             std::printf("%d,kernel,%d,%llu\n", it, n, (unsigned long long)ns);
+            samples["kernel," + std::to_string(n)].push_back(ns);
         }
         for (auto& gh : graphs) {
             uint64_t ns = time_graph_segment(gh);
             std::printf("%d,graph,%d,%llu\n", it, gh.node_count, (unsigned long long)ns);
+            samples["graph," + std::to_string(gh.node_count)].push_back(ns);
         }
         std::fflush(stdout);
-        std::fprintf(stderr, "hipbench: iteration %d/%d done\n", it + 1, kIterations);
+        if ((it + 1) % 10 == 0 || it + 1 == kIterations)
+            std::fprintf(stderr, "hipbench: iteration %d/%d done\n", it + 1, kIterations);
     }
+
+    // Stats footer (separated by blank line + new header so consumers can split
+    // on the blank line, or grep for "stats," prefix). Emits min/max/mean/stddev
+    // per (mode,count) tuple.
+    std::printf("\n");
+    std::printf("section,mode,count,n,min_ns,max_ns,mean_ns,stddev_ns\n");
+    auto emit = [&](const std::string& key) {
+        auto& v = samples[key];
+        if (v.empty()) return;
+        uint64_t mn = v[0], mx = v[0];
+        long double sum = 0;
+        for (auto x : v) {
+            mn = std::min(mn, x);
+            mx = std::max(mx, x);
+            sum += static_cast<long double>(x);
+        }
+        long double mean = sum / v.size();
+        long double sq = 0;
+        for (auto x : v) {
+            long double d = static_cast<long double>(x) - mean;
+            sq += d * d;
+        }
+        long double stddev = (v.size() > 1) ? std::sqrt(sq / (v.size() - 1)) : 0;
+        std::printf("stats,%s,%zu,%llu,%llu,%llu,%llu\n",
+            key.c_str(), v.size(),
+            (unsigned long long)mn,
+            (unsigned long long)mx,
+            (unsigned long long)mean,
+            (unsigned long long)stddev);
+    };
+    for (int n : kKernelCounts) emit("kernel," + std::to_string(n));
+    for (auto& gh : graphs)     emit("graph,"  + std::to_string(gh.node_count));
 
     for (auto& gh : graphs) destroy_graph(gh);
     std::fprintf(stderr, "hipbench: complete\n");
