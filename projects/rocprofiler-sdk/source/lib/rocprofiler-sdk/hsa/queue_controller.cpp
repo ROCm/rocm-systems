@@ -265,16 +265,28 @@ compute_queue_k_factor()
                   << " kernel_dispatch_cb=" << has_kernel_cb
                   << " kernel_dispatch_buf=" << has_kernel_buf;
 
-        if(has_dispatch_counter || has_dispatch_tt)
+        if(!context_active)
         {
-            if(!context_active)
+            if(has_dispatch_counter || has_dispatch_tt)
             {
                 ROCP_WARNING << "[DIAG-HG-KFACTOR-INACTIVE-OVERRIDE] ctx=" << itr->context_idx
                              << " reason="
                              << (has_dispatch_counter ? "dispatch_counter_collection"
                                                       : "dispatch_thread_trace")
-                             << " active=" << context_active;
+                             << " active=false ignored=true";
             }
+            if(has_kernel_cb || has_kernel_buf)
+            {
+                ROCP_WARNING << "[DIAG-HG-KFACTOR-INACTIVE-KERNEL] ctx=" << itr->context_idx
+                             << " kernel_dispatch_cb=" << has_kernel_cb
+                             << " kernel_dispatch_buf=" << has_kernel_buf
+                             << " ignored=true";
+            }
+            continue;
+        }
+
+        if(has_dispatch_counter || has_dispatch_tt)
+        {
             ROCP_INFO << "[DIAG-HG-KFACTOR-FINAL] value=12 reason="
                       << (has_dispatch_counter ? "dispatch_counter_collection"
                                               : "dispatch_thread_trace")
@@ -283,12 +295,6 @@ compute_queue_k_factor()
         }
         if(has_kernel_cb || has_kernel_buf)
         {
-            if(!context_active)
-            {
-                ROCP_WARNING << "[DIAG-HG-KFACTOR-INACTIVE-KERNEL] ctx=" << itr->context_idx
-                             << " kernel_dispatch_cb=" << has_kernel_cb
-                             << " kernel_dispatch_buf=" << has_kernel_buf;
-            }
             k = std::max(k, uint64_t{3});
         }
     }

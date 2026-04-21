@@ -27,6 +27,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -48,27 +49,13 @@ get_doorbell_map()
     return *_v;
 }
 
-QueueState*
+queue_state_ptr_t
 lookup_queue_state(const hsa_queue_t* queue)
 {
-    QueueState* result = nullptr;
+    queue_state_ptr_t result = {};
     get_queue_registry().rlock([&](const auto& registry) {
         auto it = registry.find(queue);
         if(it != registry.end())
-        {
-            result = it->second.get();
-        }
-    });
-    return result;
-}
-
-QueueState*
-lookup_queue_state_by_doorbell(hsa_signal_t signal)
-{
-    QueueState* result = nullptr;
-    get_doorbell_map().rlock([&](const auto& doorbell_map) {
-        auto it = doorbell_map.find(signal.handle);
-        if(it != doorbell_map.end())
         {
             result = it->second;
         }
@@ -76,16 +63,36 @@ lookup_queue_state_by_doorbell(hsa_signal_t signal)
     return result;
 }
 
+queue_state_ptr_t
+lookup_queue_state_by_doorbell(hsa_signal_t signal)
+{
+    queue_state_ptr_t result = {};
+    bool              found  = false;
+    get_doorbell_map().rlock([&](const auto& doorbell_map) {
+        auto it = doorbell_map.find(signal.handle);
+        if(it != doorbell_map.end())
+        {
+            found  = true;
+            result = it->second.lock();
+        }
+    });
+    if(found && !result)
+    {
+        ROCP_WARNING << "[DIAG-HG-DOORBELL-LOOKUP-EXPIRED] doorbell=" << signal.handle;
+    }
+    return result;
+}
+
 void
 register_doorbell(const hsa_queue_t* queue, hsa_signal_t doorbell)
 {
-    QueueState* state = lookup_queue_state(queue);
+    auto state = lookup_queue_state(queue);
     if(state)
     {
         get_doorbell_map().wlock([&](auto& doorbell_map) {
             doorbell_map[doorbell.handle] = state;
             ROCP_INFO << "[DIAG-HG-DOORBELL-REGISTER] queue=" << queue
-                      << " doorbell=" << doorbell.handle << " state=" << state
+                      << " doorbell=" << doorbell.handle << " state=" << state.get()
                       << " map_size=" << doorbell_map.size();
         });
     }
@@ -221,53 +228,61 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
 }  // namespace
 
 void
-process_doorbell_impl(QueueState*          state,
+process_doorbell_impl(queue_state_ptr_t    state,
                       hsa_signal_value_t   value,
                       const doorbell_fn_t& ring_doorbell)
 {
+    if(!state)
+    {
+        ROCP_WARNING << "[DIAG-HG-DOORBELL-NOSTATE] value=" << value;
+        return;
+    }
+    auto* state_ptr = state.get();
+
     auto decode_packet_type = [](uint16_t header) -> uint16_t {
         constexpr auto type_mask = static_cast<uint16_t>(
             ((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u) << HSA_PACKET_HEADER_TYPE);
         return static_cast<uint16_t>((header & type_mask) >> HSA_PACKET_HEADER_TYPE);
     };
 
-    auto read_packet_header = [state](uint64_t pos) -> uint16_t {
-        auto* pkt = static_cast<const char*>(state->ring_buf) +
-                    ((pos & state->ring_mask) * state->pkt_size);
+    auto read_packet_header = [state_ptr](uint64_t pos) -> uint16_t {
+        auto* pkt = static_cast<const char*>(state_ptr->ring_buf) +
+                    ((pos & state_ptr->ring_mask) * state_ptr->pkt_size);
         return *reinterpret_cast<const uint16_t*>(pkt);
     };
 
     auto lock_start = std::chrono::steady_clock::now();
-    std::unique_lock<std::mutex> lock{state->gate_lock};
+    std::unique_lock<std::mutex> lock{state_ptr->gate_lock};
     auto lock_wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                             std::chrono::steady_clock::now() - lock_start)
                             .count();
     if(lock_wait_ns > 1000000)
     {
-        ROCP_WARNING << "[DIAG-HG-GATELOCK-WAIT] queue=" << state->hsa_queue
+        ROCP_WARNING << "[DIAG-HG-GATELOCK-WAIT] queue=" << state_ptr->hsa_queue
                      << " wait_ns=" << lock_wait_ns;
     }
     else
     {
-        ROCP_INFO << "[DIAG-HG-GATELOCK-WAIT] queue=" << state->hsa_queue
+        ROCP_INFO << "[DIAG-HG-GATELOCK-WAIT] queue=" << state_ptr->hsa_queue
                   << " wait_ns=" << lock_wait_ns;
     }
 
-    auto db_count = state->doorbell_count.fetch_add(1, std::memory_order_relaxed) + 1;
+    auto db_count = state_ptr->doorbell_count.fetch_add(1, std::memory_order_relaxed) + 1;
 
-    uint64_t scan_end = state->virtual_wptr.load(std::memory_order_acquire);
-    uint64_t scan_pos = state->next_scan_pos;
-    uint64_t stride   = 1 + state->k_factor;
-    auto     real_wdid = __atomic_load_n(state->real_wdid, __ATOMIC_ACQUIRE);
-    auto     real_rdid = __atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE);
-    ROCP_INFO << "[DIAG-HG-DOORBELL-ENTRY] count=" << db_count << " queue=" << state->hsa_queue
-              << " signal=" << state->doorbell_signal.handle << " value=" << value
+    uint64_t scan_end = state_ptr->virtual_wptr.load(std::memory_order_acquire);
+    uint64_t scan_pos = state_ptr->next_scan_pos;
+    uint64_t stride   = 1 + state_ptr->k_factor;
+    auto     real_wdid = __atomic_load_n(state_ptr->real_wdid, __ATOMIC_ACQUIRE);
+    auto     real_rdid = __atomic_load_n(state_ptr->real_rdid, __ATOMIC_ACQUIRE);
+    ROCP_INFO << "[DIAG-HG-DOORBELL-ENTRY] count=" << db_count << " queue=" << state_ptr->hsa_queue
+              << " signal=" << state_ptr->doorbell_signal.handle << " value=" << value
               << " scan_pos=" << scan_pos << " scan_end=" << scan_end
               << " real_wdid=" << real_wdid << " real_rdid=" << real_rdid
-              << " next_submit_pos=" << state->next_submit_pos
-              << " destroying=" << state->destroying.load(std::memory_order_relaxed);
+              << " next_submit_pos=" << state_ptr->next_submit_pos
+              << " destroying=" << state_ptr->destroying.load(std::memory_order_relaxed);
 
-    auto previous_doorbell = state->last_doorbell_value.exchange(value, std::memory_order_relaxed);
+    auto previous_doorbell =
+        state_ptr->last_doorbell_value.exchange(value, std::memory_order_relaxed);
     auto doorbell_delta =
         (previous_doorbell >= 0) ? (static_cast<int64_t>(value) - previous_doorbell) : 0;
     auto virtual_advance = static_cast<int64_t>(scan_end) - static_cast<int64_t>(scan_pos);
@@ -276,7 +291,7 @@ process_doorbell_impl(QueueState*          state,
     auto expected_doorbell =
         (scan_end > 0) ? static_cast<hsa_signal_value_t>(scan_end - 1) : hsa_signal_value_t{-1};
     auto matches_expected = (scan_end > 0 && value == expected_doorbell);
-    ROCP_INFO << "[DIAG-HG-DOORBELL-CHECK] queue=" << state->hsa_queue
+    ROCP_INFO << "[DIAG-HG-DOORBELL-CHECK] queue=" << state_ptr->hsa_queue
               << " prev_value=" << previous_doorbell << " curr_value=" << value
               << " delta=" << doorbell_delta << " stride=" << stride
               << " scan_pos=" << scan_pos << " scan_end=" << scan_end
@@ -286,40 +301,49 @@ process_doorbell_impl(QueueState*          state,
 
     if(scan_pos >= scan_end)
     {
-        ROCP_INFO << "[DIAG-HG-DOORBELL-NOOP] queue=" << state->hsa_queue
+        ROCP_INFO << "[DIAG-HG-DOORBELL-NOOP] queue=" << state_ptr->hsa_queue
                   << " scan_pos=" << scan_pos << " scan_end=" << scan_end;
-        ring_doorbell(state->doorbell_signal, value);
+        ring_doorbell(state_ptr->doorbell_signal, value);
         return;
     }
 
     uint64_t pkt_count = (scan_end - scan_pos) / stride;
     uint64_t remainder = (scan_end - scan_pos) % stride;
-    ROCP_INFO << "[DIAG-HG-PKTCOUNT] queue=" << state->hsa_queue << " scan_pos=" << scan_pos
+    ROCP_INFO << "[DIAG-HG-PKTCOUNT] queue=" << state_ptr->hsa_queue << " scan_pos=" << scan_pos
               << " scan_end=" << scan_end << " stride=" << stride << " pkt_count=" << pkt_count
               << " remainder=" << remainder;
     if(remainder != 0)
     {
-        auto rem_count = state->remainder_count.fetch_add(1, std::memory_order_relaxed) + 1;
-        ROCP_ERROR << "[DIAG-HG-REMAINDER-DROP] queue=" << state->hsa_queue
+        auto rem_count = state_ptr->remainder_count.fetch_add(1, std::memory_order_relaxed) + 1;
+        ROCP_ERROR << "[DIAG-HG-REMAINDER-DROP] queue=" << state_ptr->hsa_queue
                    << " remainder=" << remainder << " count=" << rem_count
                    << " scan_range=[" << scan_pos << "," << scan_end << ")";
     }
 
+    // Snapshot all app-visible source packets before writing any transformed output.
+    // Source packets are contiguous in application write order.
+    std::vector<char> source_snapshot(pkt_count * state_ptr->pkt_size);
+    for(uint64_t i = 0; i < pkt_count; ++i)
+    {
+        auto* src = static_cast<const char*>(state_ptr->ring_buf) +
+                    (((scan_pos + i) & state_ptr->ring_mask) * state_ptr->pkt_size);
+        memcpy(source_snapshot.data() + (i * state_ptr->pkt_size), src, state_ptr->pkt_size);
+    }
+
     // Set up TLS for ring_buffer_writer
-    tls_state      = state;
-    tls_submit_pos = state->next_submit_pos;
-    tls_pkt_size   = state->pkt_size;
+    tls_state      = state_ptr;
+    tls_submit_pos = state_ptr->next_submit_pos;
+    tls_pkt_size   = state_ptr->pkt_size;
 
     // Look up Queue* to invoke WriteInterceptor callback chain
     auto*        qc    = get_queue_controller();
-    const Queue* queue = (qc && state->hsa_queue) ? qc->get_queue(*state->hsa_queue) : nullptr;
-    ROCP_INFO << "[DIAG-HG-QUEUE-LOOKUP] queue=" << state->hsa_queue
+    const Queue* queue = (qc && state_ptr->hsa_queue) ? qc->get_queue(*state_ptr->hsa_queue) : nullptr;
+    ROCP_INFO << "[DIAG-HG-QUEUE-LOOKUP] queue=" << state_ptr->hsa_queue
               << " lookup_success=" << (queue != nullptr);
 
-    if(state->k_factor == 0)
+    if(state_ptr->k_factor == 0)
     {
-        auto* pkt =
-            static_cast<char*>(state->ring_buf) + ((scan_pos & state->ring_mask) * state->pkt_size);
+        const void* pkt = source_snapshot.data();
         if(queue)
         {
             queue->invoke_write_interceptor(pkt, pkt_count, ring_buffer_writer);
@@ -333,20 +357,21 @@ process_doorbell_impl(QueueState*          state,
     {
         for(uint64_t i = 0; i < pkt_count; i++)
         {
-            uint64_t pkt_pos = scan_pos + i * stride;
-            uint64_t contig_pos = scan_pos + i;
+            uint64_t source_pos = scan_pos + i;
+            uint64_t pkt_pos    = scan_pos + i * stride;
 
             auto stride_header = read_packet_header(pkt_pos);
             auto stride_type   = decode_packet_type(stride_header);
-            auto contig_header = read_packet_header(contig_pos);
-            auto contig_type   = decode_packet_type(contig_header);
-            ROCP_INFO << "[DIAG-HG-SLOT-COMPARE] queue=" << state->hsa_queue
+            auto source_header = *reinterpret_cast<const uint16_t*>(
+                source_snapshot.data() + (i * state_ptr->pkt_size));
+            auto source_type = decode_packet_type(source_header);
+            ROCP_INFO << "[DIAG-HG-SLOT-COMPARE] queue=" << state_ptr->hsa_queue
                       << " logical_idx=" << i << " stride=" << stride << " stride_pos=" << pkt_pos
-                      << " stride_slot=" << (pkt_pos & state->ring_mask)
+                      << " stride_slot=" << (pkt_pos & state_ptr->ring_mask)
                       << " stride_type=" << stride_type << " stride_header=" << stride_header
-                      << " contig_pos=" << contig_pos
-                      << " contig_slot=" << (contig_pos & state->ring_mask)
-                      << " contig_type=" << contig_type << " contig_header=" << contig_header;
+                      << " source_pos=" << source_pos
+                      << " source_slot=" << (source_pos & state_ptr->ring_mask)
+                      << " source_type=" << source_type << " source_header=" << source_header;
 
             for(uint64_t rel = 1; rel < stride; ++rel)
             {
@@ -358,25 +383,24 @@ process_doorbell_impl(QueueState*          state,
                                      (reserved_type != HSA_PACKET_TYPE_BARRIER_AND);
                 if(is_suspicious)
                 {
-                    ROCP_WARNING << "[DIAG-HG-RESERVED-SLOT-WRITTEN] queue=" << state->hsa_queue
+                    ROCP_WARNING << "[DIAG-HG-RESERVED-SLOT-WRITTEN] queue=" << state_ptr->hsa_queue
                                  << " logical_idx=" << i << " base_pkt_pos=" << pkt_pos
                                  << " reserved_rel=" << rel << " reserved_pos=" << reserved_pos
-                                 << " reserved_slot=" << (reserved_pos & state->ring_mask)
+                                 << " reserved_slot=" << (reserved_pos & state_ptr->ring_mask)
                                  << " reserved_type=" << reserved_type
                                  << " reserved_header=" << reserved_header;
                 }
                 if(reserved_type == HSA_PACKET_TYPE_KERNEL_DISPATCH)
                 {
-                    ROCP_ERROR << "[DIAG-HG-RESERVED-SLOT-KERNEL] queue=" << state->hsa_queue
+                    ROCP_ERROR << "[DIAG-HG-RESERVED-SLOT-KERNEL] queue=" << state_ptr->hsa_queue
                                << " logical_idx=" << i << " base_pkt_pos=" << pkt_pos
                                << " reserved_rel=" << rel << " reserved_pos=" << reserved_pos
-                               << " reserved_slot=" << (reserved_pos & state->ring_mask)
+                               << " reserved_slot=" << (reserved_pos & state_ptr->ring_mask)
                                << " reserved_header=" << reserved_header;
                 }
             }
 
-            auto*    pkt     = static_cast<char*>(state->ring_buf) +
-                        ((pkt_pos & state->ring_mask) * state->pkt_size);
+            auto*    pkt = source_snapshot.data() + (i * state_ptr->pkt_size);
             uint64_t start_submit = tls_submit_pos;
             if(queue)
             {
@@ -388,15 +412,18 @@ process_doorbell_impl(QueueState*          state,
             }
 
             uint64_t used = tls_submit_pos - start_submit;
-            ROCP_INFO << "[DIAG-HG-WI-USED] queue=" << state->hsa_queue << " pkt_pos=" << pkt_pos
-                      << " used=" << used << " stride=" << stride
-                      << " start_submit=" << start_submit << " end_submit=" << tls_submit_pos;
+            ROCP_INFO << "[DIAG-HG-WI-USED] queue=" << state_ptr->hsa_queue
+                      << " source_pos=" << source_pos << " base_pkt_pos=" << pkt_pos
+                      << " used=" << used << " stride=" << stride << " start_submit="
+                      << start_submit << " end_submit=" << tls_submit_pos;
 
             if(used > stride)
             {
-                auto over_count = state->over_stride_count.fetch_add(1, std::memory_order_relaxed) + 1;
-                ROCP_ERROR << "[DIAG-HG-OVER-STRIDE] queue=" << state->hsa_queue
-                           << " pkt_pos=" << pkt_pos << " used=" << used
+                auto over_count =
+                    state_ptr->over_stride_count.fetch_add(1, std::memory_order_relaxed) + 1;
+                ROCP_ERROR << "[DIAG-HG-OVER-STRIDE] queue=" << state_ptr->hsa_queue
+                           << " base_pkt_pos=" << pkt_pos << " source_pos=" << source_pos
+                           << " used=" << used
                            << " stride=" << stride << " count=" << over_count;
             }
 
@@ -405,9 +432,9 @@ process_doorbell_impl(QueueState*          state,
                 uint64_t remaining = stride - used;
                 for(uint64_t k = 0; k < remaining; k++)
                 {
-                    auto  kslot = tls_submit_pos & state->ring_mask;
-                    auto* kdst  = static_cast<char*>(state->ring_buf) + (kslot * state->pkt_size);
-                    memset(kdst, 0, state->pkt_size);
+                    auto  kslot = tls_submit_pos & state_ptr->ring_mask;
+                    auto* kdst = static_cast<char*>(state_ptr->ring_buf) + (kslot * state_ptr->pkt_size);
+                    memset(kdst, 0, state_ptr->pkt_size);
                     *reinterpret_cast<uint16_t*>(kdst) =
                         (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE);
                     tls_submit_pos++;
@@ -416,42 +443,39 @@ process_doorbell_impl(QueueState*          state,
         }
     }
 
-    state->next_scan_pos   = scan_end;
-    state->next_submit_pos = tls_submit_pos;
-    ROCP_INFO << "[DIAG-HG-DOORBELL-AFTER-WRITE] queue=" << state->hsa_queue
-              << " next_scan_pos=" << state->next_scan_pos
-              << " next_submit_pos=" << state->next_submit_pos;
+    state_ptr->next_scan_pos   = scan_end;
+    state_ptr->next_submit_pos = tls_submit_pos;
+    ROCP_INFO << "[DIAG-HG-DOORBELL-AFTER-WRITE] queue=" << state_ptr->hsa_queue
+              << " next_scan_pos=" << state_ptr->next_scan_pos
+              << " next_submit_pos=" << state_ptr->next_submit_pos;
 
     // Sync paired metadata queue (one sync per application packet)
-    if(state->metadata_state)
+    if(state_ptr->metadata_state)
     {
         for(uint64_t i = 0; i < pkt_count; i++)
         {
-            uint64_t    pkt_pos = scan_pos + i * stride;
-            const auto* pkt     = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
-                static_cast<char*>(state->ring_buf) +
-                ((pkt_pos & state->ring_mask) * state->pkt_size));
-            sync_metadata_impl(state, pkt, 0);
+            sync_metadata_impl(state_ptr, nullptr, 0);
         }
     }
 
-    auto doorbell_val = static_cast<hsa_signal_value_t>(state->next_submit_pos - 1);
-    real_rdid         = __atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE);
-    auto ring_used    = (state->next_submit_pos - real_rdid);
-    ROCP_INFO << "[DIAG-HG-DOORBELL-SUBMIT] queue=" << state->hsa_queue
-              << " real_wdid_submit=" << state->next_submit_pos << " doorbell_val=" << doorbell_val
-              << " real_rdid=" << real_rdid << " doorbell=" << state->doorbell_signal.handle
-              << " ring_used=" << ring_used << " ring_size=" << state->ring_size;
-    if(ring_used > state->ring_size)
+    auto doorbell_val = static_cast<hsa_signal_value_t>(state_ptr->next_submit_pos - 1);
+    real_rdid         = __atomic_load_n(state_ptr->real_rdid, __ATOMIC_ACQUIRE);
+    auto ring_used    = (state_ptr->next_submit_pos - real_rdid);
+    ROCP_INFO << "[DIAG-HG-DOORBELL-SUBMIT] queue=" << state_ptr->hsa_queue
+              << " real_wdid_submit=" << state_ptr->next_submit_pos
+              << " doorbell_val=" << doorbell_val << " real_rdid=" << real_rdid
+              << " doorbell=" << state_ptr->doorbell_signal.handle << " ring_used=" << ring_used
+              << " ring_size=" << state_ptr->ring_size;
+    if(ring_used > state_ptr->ring_size)
     {
-        ROCP_ERROR << "[DIAG-HG-RING-OVERFLOW-RISK] queue=" << state->hsa_queue
-                   << " ring_used=" << ring_used << " ring_size=" << state->ring_size;
+        ROCP_ERROR << "[DIAG-HG-RING-OVERFLOW-RISK] queue=" << state_ptr->hsa_queue
+                   << " ring_used=" << ring_used << " ring_size=" << state_ptr->ring_size;
     }
-    __atomic_store_n(state->real_wdid, state->next_submit_pos, __ATOMIC_RELEASE);
-    ring_doorbell(state->doorbell_signal, doorbell_val);
-    ROCP_INFO << "[DIAG-HG-DOORBELL-EXIT] queue=" << state->hsa_queue
-              << " next_scan_pos=" << state->next_scan_pos
-              << " next_submit_pos=" << state->next_submit_pos;
+    __atomic_store_n(state_ptr->real_wdid, state_ptr->next_submit_pos, __ATOMIC_RELEASE);
+    ring_doorbell(state_ptr->doorbell_signal, doorbell_val);
+    ROCP_INFO << "[DIAG-HG-DOORBELL-EXIT] queue=" << state_ptr->hsa_queue
+              << " next_scan_pos=" << state_ptr->next_scan_pos
+              << " next_submit_pos=" << state_ptr->next_submit_pos;
 }
 
 void
@@ -460,7 +484,7 @@ create_queue_state(const hsa_queue_t* queue,
                    volatile uint64_t* rdid_addr,
                    uint64_t           k_factor)
 {
-    auto     state         = std::make_unique<QueueState>();
+    auto     state         = std::make_shared<QueueState>();
     uint64_t current_wdid  = __atomic_load_n(wdid_addr, __ATOMIC_ACQUIRE);
     state->ring_buf        = queue->base_address;
     state->ring_size       = queue->size;
@@ -480,13 +504,12 @@ create_queue_state(const hsa_queue_t* queue,
               << " real_wdid_ptr=" << wdid_addr << " real_rdid_ptr=" << rdid_addr
               << " initial_wdid=" << current_wdid;
 
-    auto* raw_ptr = state.get();
     get_queue_registry().wlock([&](auto& map) {
-        map[queue] = std::move(state);
+        map[queue] = state;
         ROCP_INFO << "[DIAG-HG-QSTATE-CREATE-MAP] queue_registry_size=" << map.size();
     });
     get_doorbell_map().wlock([&](auto& map) {
-        map[queue->doorbell_signal.handle] = raw_ptr;
+        map[queue->doorbell_signal.handle] = state;
         ROCP_INFO << "[DIAG-HG-QSTATE-CREATE-MAP] doorbell_map_size=" << map.size();
     });
 }
@@ -496,20 +519,19 @@ destroy_queue_state(const hsa_queue_t* queue)
 {
     ROCP_INFO << "[DIAG-HG-QSTATE-DESTROY-BEGIN] queue=" << queue;
     hsa_signal_t doorbell = {0};
-    get_queue_registry().rlock([&](const auto& map) {
-        auto it = map.find(queue);
-        if(it != map.end() && it->second)
-        {
-            it->second->destroying.store(true, std::memory_order_relaxed);
-            ROCP_INFO << "[DIAG-HG-QSTATE-DESTROY-FLAG] queue=" << queue << " state="
-                      << it->second.get() << " doorbell=" << it->second->doorbell_signal.handle;
-        }
-    });
+    queue_state_ptr_t doomed = {};
     get_queue_registry().wlock([&](auto& map) {
         ROCP_INFO << "[DIAG-HG-QSTATE-DESTROY-MAP] queue_registry_size_before=" << map.size();
         auto it = map.find(queue);
         if(it == map.end()) return;
-        doorbell = it->second->doorbell_signal;
+        doomed = it->second;
+        if(doomed)
+        {
+            doomed->destroying.store(true, std::memory_order_relaxed);
+            doorbell = doomed->doorbell_signal;
+            ROCP_INFO << "[DIAG-HG-QSTATE-DESTROY-FLAG] queue=" << queue << " state="
+                      << doomed.get() << " doorbell=" << doorbell.handle;
+        }
         map.erase(it);
         ROCP_INFO << "[DIAG-HG-QSTATE-DESTROY-MAP] queue_registry_size_after=" << map.size();
     });
@@ -534,8 +556,8 @@ CoreApiTable s_next_table = {};
 uint64_t
 wrap_add_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
 {
-    auto* s = lookup_queue_state(q);
-    if(s) return add_write_index_impl(s, v);
+    auto s = lookup_queue_state(q);
+    if(s) return add_write_index_impl(s.get(), v);
     ROCP_WARNING << "[DIAG-HG-WPTR-PASSTHROUGH] op=add_relaxed queue=" << q << " value=" << v;
     return s_next_table.hsa_queue_add_write_index_relaxed_fn(q, v);
 }
@@ -543,8 +565,8 @@ wrap_add_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
 uint64_t
 wrap_add_write_index_scacq_screl(const hsa_queue_t* q, uint64_t v)
 {
-    auto* s = lookup_queue_state(q);
-    if(s) return add_write_index_impl(s, v);
+    auto s = lookup_queue_state(q);
+    if(s) return add_write_index_impl(s.get(), v);
     ROCP_WARNING << "[DIAG-HG-WPTR-PASSTHROUGH] op=add_scacq_screl queue=" << q
                  << " value=" << v;
     return s_next_table.hsa_queue_add_write_index_scacq_screl_fn(q, v);
@@ -553,8 +575,8 @@ wrap_add_write_index_scacq_screl(const hsa_queue_t* q, uint64_t v)
 uint64_t
 wrap_add_write_index_scacquire(const hsa_queue_t* q, uint64_t v)
 {
-    auto* s = lookup_queue_state(q);
-    if(s) return add_write_index_impl(s, v);
+    auto s = lookup_queue_state(q);
+    if(s) return add_write_index_impl(s.get(), v);
     ROCP_WARNING << "[DIAG-HG-WPTR-PASSTHROUGH] op=add_scacquire queue=" << q
                  << " value=" << v;
     return s_next_table.hsa_queue_add_write_index_scacquire_fn(q, v);
@@ -563,8 +585,8 @@ wrap_add_write_index_scacquire(const hsa_queue_t* q, uint64_t v)
 uint64_t
 wrap_add_write_index_screlease(const hsa_queue_t* q, uint64_t v)
 {
-    auto* s = lookup_queue_state(q);
-    if(s) return add_write_index_impl(s, v);
+    auto s = lookup_queue_state(q);
+    if(s) return add_write_index_impl(s.get(), v);
     ROCP_WARNING << "[DIAG-HG-WPTR-PASSTHROUGH] op=add_screlease queue=" << q
                  << " value=" << v;
     return s_next_table.hsa_queue_add_write_index_screlease_fn(q, v);
@@ -575,10 +597,10 @@ wrap_add_write_index_screlease(const hsa_queue_t* q, uint64_t v)
 void
 wrap_store_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
 {
-    auto* s = lookup_queue_state(q);
+    auto s = lookup_queue_state(q);
     if(s)
     {
-        store_write_index_impl(s, v);
+        store_write_index_impl(s.get(), v);
         return;
     }
     ROCP_WARNING << "[DIAG-HG-WPTR-PASSTHROUGH] op=store_relaxed queue=" << q
@@ -589,10 +611,10 @@ wrap_store_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
 void
 wrap_store_write_index_screlease(const hsa_queue_t* q, uint64_t v)
 {
-    auto* s = lookup_queue_state(q);
+    auto s = lookup_queue_state(q);
     if(s)
     {
-        store_write_index_impl(s, v);
+        store_write_index_impl(s.get(), v);
         return;
     }
     ROCP_WARNING << "[DIAG-HG-WPTR-PASSTHROUGH] op=store_screlease queue=" << q
@@ -605,8 +627,8 @@ wrap_store_write_index_screlease(const hsa_queue_t* q, uint64_t v)
 uint64_t
 wrap_cas_write_index_relaxed(const hsa_queue_t* q, uint64_t expected, uint64_t value)
 {
-    auto* s = lookup_queue_state(q);
-    if(s) return cas_write_index_impl(s, expected, value);
+    auto s = lookup_queue_state(q);
+    if(s) return cas_write_index_impl(s.get(), expected, value);
     ROCP_WARNING << "[DIAG-HG-WPTR-PASSTHROUGH] op=cas_relaxed queue=" << q
                  << " expected=" << expected << " value=" << value;
     return s_next_table.hsa_queue_cas_write_index_relaxed_fn(q, expected, value);
@@ -615,8 +637,8 @@ wrap_cas_write_index_relaxed(const hsa_queue_t* q, uint64_t expected, uint64_t v
 uint64_t
 wrap_cas_write_index_scacq_screl(const hsa_queue_t* q, uint64_t expected, uint64_t value)
 {
-    auto* s = lookup_queue_state(q);
-    if(s) return cas_write_index_impl(s, expected, value);
+    auto s = lookup_queue_state(q);
+    if(s) return cas_write_index_impl(s.get(), expected, value);
     ROCP_WARNING << "[DIAG-HG-WPTR-PASSTHROUGH] op=cas_scacq_screl queue=" << q
                  << " expected=" << expected << " value=" << value;
     return s_next_table.hsa_queue_cas_write_index_scacq_screl_fn(q, expected, value);
@@ -625,8 +647,8 @@ wrap_cas_write_index_scacq_screl(const hsa_queue_t* q, uint64_t expected, uint64
 uint64_t
 wrap_cas_write_index_scacquire(const hsa_queue_t* q, uint64_t expected, uint64_t value)
 {
-    auto* s = lookup_queue_state(q);
-    if(s) return cas_write_index_impl(s, expected, value);
+    auto s = lookup_queue_state(q);
+    if(s) return cas_write_index_impl(s.get(), expected, value);
     ROCP_WARNING << "[DIAG-HG-WPTR-PASSTHROUGH] op=cas_scacquire queue=" << q
                  << " expected=" << expected << " value=" << value;
     return s_next_table.hsa_queue_cas_write_index_scacquire_fn(q, expected, value);
@@ -635,8 +657,8 @@ wrap_cas_write_index_scacquire(const hsa_queue_t* q, uint64_t expected, uint64_t
 uint64_t
 wrap_cas_write_index_screlease(const hsa_queue_t* q, uint64_t expected, uint64_t value)
 {
-    auto* s = lookup_queue_state(q);
-    if(s) return cas_write_index_impl(s, expected, value);
+    auto s = lookup_queue_state(q);
+    if(s) return cas_write_index_impl(s.get(), expected, value);
     ROCP_WARNING << "[DIAG-HG-WPTR-PASSTHROUGH] op=cas_screlease queue=" << q
                  << " expected=" << expected << " value=" << value;
     return s_next_table.hsa_queue_cas_write_index_screlease_fn(q, expected, value);
@@ -647,8 +669,8 @@ wrap_cas_write_index_screlease(const hsa_queue_t* q, uint64_t expected, uint64_t
 uint64_t
 wrap_load_write_index_relaxed(const hsa_queue_t* q)
 {
-    auto* s = lookup_queue_state(q);
-    if(s) return load_write_index_impl(s);
+    auto s = lookup_queue_state(q);
+    if(s) return load_write_index_impl(s.get());
     ROCP_WARNING << "[DIAG-HG-WPTR-PASSTHROUGH] op=load_relaxed queue=" << q;
     return s_next_table.hsa_queue_load_write_index_relaxed_fn(q);
 }
@@ -656,8 +678,8 @@ wrap_load_write_index_relaxed(const hsa_queue_t* q)
 uint64_t
 wrap_load_write_index_scacquire(const hsa_queue_t* q)
 {
-    auto* s = lookup_queue_state(q);
-    if(s) return load_write_index_impl(s);
+    auto s = lookup_queue_state(q);
+    if(s) return load_write_index_impl(s.get());
     ROCP_WARNING << "[DIAG-HG-WPTR-PASSTHROUGH] op=load_scacquire queue=" << q;
     return s_next_table.hsa_queue_load_write_index_scacquire_fn(q);
 }
@@ -667,12 +689,12 @@ wrap_load_write_index_scacquire(const hsa_queue_t* q)
 void
 wrap_signal_store_relaxed(hsa_signal_t sig, hsa_signal_value_t val)
 {
-    auto* s = lookup_queue_state_by_doorbell(sig);
+    auto s = lookup_queue_state_by_doorbell(sig);
     if(s)
     {
         ROCP_INFO << "[DIAG-HG-DOORBELL-RELAXED] sig=" << sig.handle << " val=" << val
-                  << " state=" << s;
-        process_doorbell_impl(s, val, [](hsa_signal_t db, hsa_signal_value_t v) {
+                  << " state=" << s.get();
+        process_doorbell_impl(std::move(s), val, [](hsa_signal_t db, hsa_signal_value_t v) {
             s_next_table.hsa_signal_store_relaxed_fn(db, v);
         });
         return;
@@ -684,12 +706,12 @@ wrap_signal_store_relaxed(hsa_signal_t sig, hsa_signal_value_t val)
 void
 wrap_signal_store_screlease(hsa_signal_t sig, hsa_signal_value_t val)
 {
-    auto* s = lookup_queue_state_by_doorbell(sig);
+    auto s = lookup_queue_state_by_doorbell(sig);
     if(s)
     {
         ROCP_INFO << "[DIAG-HG-DOORBELL-SCRELEASE] sig=" << sig.handle << " val=" << val
-                  << " state=" << s;
-        process_doorbell_impl(s, val, [](hsa_signal_t db, hsa_signal_value_t v) {
+                  << " state=" << s.get();
+        process_doorbell_impl(std::move(s), val, [](hsa_signal_t db, hsa_signal_value_t v) {
             s_next_table.hsa_signal_store_screlease_fn(db, v);
         });
         return;
