@@ -44,6 +44,7 @@ class SdmaImpl {
  public:
   // Configuration (set from environment variables during init)
   bool sdmaEnabled{true};
+  uint64_t sdmaDirtyPEs{0};  // Bitmask: bit i set = PE i has pending SDMA ops (atomic)
   size_t sdmaThreshold{128};  // Use SDMA for transfers >= 128B
   int numChannels{1};
   int sdmaChannel{0};  // Per-context channel index (assigned at ctx creation)
@@ -68,12 +69,17 @@ class SdmaImpl {
     anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
     if (handle != nullptr) {
       anvil::put(*handle, dst, src, size);
+      __hip_atomic_fetch_or(&sdmaDirtyPEs, 1ULL << local_pe, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }
     return handle;
   }
 
   // Wait for SDMA completions for a specific PE (this context's channel)
+  // Atomically reads and clears the PE's dirty bit — no race with concurrent submits.
   __device__ void sdmaQuiet(int local_pe) {
+    uint64_t mask = 1ULL << local_pe;
+    if (!(__hip_atomic_fetch_and(&sdmaDirtyPEs, ~mask, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT) & mask))
+      return;
     int idx = local_pe * numChannels + sdmaChannel;
     anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
     if (handle != nullptr) {
@@ -81,14 +87,18 @@ class SdmaImpl {
     }
   }
 
-  // Wait for all SDMA completions (all PEs, this context's channel)
+  // Wait for all SDMA completions (only PEs with pending ops)
   __device__ void sdmaQuietAll() {
-    for (int pe = 0; pe < shm_size; pe++) {
+    uint64_t dirty = __hip_atomic_exchange(&sdmaDirtyPEs, 0ULL, __ATOMIC_RELAXED,
+                                           __HIP_MEMORY_SCOPE_AGENT);
+    while (dirty) {
+      int pe = __builtin_ffsll(dirty) - 1;
       int idx = pe * numChannels + sdmaChannel;
       anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
       if (handle != nullptr) {
         anvil::quiet(*handle);
       }
+      dirty &= ~(1ULL << pe);
     }
   }
 };
