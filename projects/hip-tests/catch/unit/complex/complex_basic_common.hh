@@ -7,6 +7,8 @@
 #pragma once
 
 #include <hip_test_common.hh>
+#include <catch2/generators/catch_generators_adapters.hpp> // For map() generator adapter
+#include <catch2/matchers/catch_matchers_floating_point.hpp> // For WithinRel, WithinAbs floating point matchers
 #include <resource_guards.hh>
 #include <hip/hip_complex.h>
 

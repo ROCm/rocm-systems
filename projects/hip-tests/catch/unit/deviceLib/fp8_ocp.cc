@@ -5,6 +5,7 @@
  */
 
 #include <hip_test_common.hh>
+#include <catch2/catch_approx.hpp> // For Catch::Approx
 #include <hip/hip_fp8.h>
 
 #include <type_traits>

@@ -5,6 +5,7 @@
  */
 
 #include <hip_test_common.hh>
+#include <catch2/matchers/catch_matchers_string.hpp> // For Catch::Matchers::Equals()
 #include <hip/hip_fp8.h>
 #include <cmath>
 #include <limits>

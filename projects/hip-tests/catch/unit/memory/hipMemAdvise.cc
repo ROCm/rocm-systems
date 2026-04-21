@@ -5,6 +5,8 @@
  */
 
 #include <hip_test_common.hh>
+#include <catch2/matchers/catch_matchers_string.hpp> // For Catch::Matchers::Equals()
+#include <catch2/matchers/catch_matchers_vector.hpp> // For Catch::Matchers::Equals() for ranges/vectors
 #include <hip/hip_runtime_api.h>
 #include <utils.hh>
 #include <resource_guards.hh>

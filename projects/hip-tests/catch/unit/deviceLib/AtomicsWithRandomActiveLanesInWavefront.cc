@@ -22,6 +22,7 @@
 //    atomic operation on different values)
 
 #include <hip_test_common.hh>
+#include <catch2/catch_approx.hpp> // For Catch::Approx
 
 using namespace std;
 

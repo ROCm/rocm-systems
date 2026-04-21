@@ -12,6 +12,7 @@
 #include <cmd_options.hh>
 #include <cpu_grid.h>
 #include <hip_test_common.hh>
+#include <catch2/catch_get_random_seed.hpp> // For Catch::getSeed()
 #include <hip/hip_cooperative_groups.h>
 #include <resource_guards.hh>
 #include <utils.hh>
@@ -654,7 +655,7 @@ void reduceForTypeAndOp()
                                                     kNumReduces * sizeof(unsigned long long));
   LinearAllocGuard<unsigned long long> h_extraMasks(LinearAllocs::malloc,
                                                     kNumReduces * sizeof(unsigned long long));
-  std::mt19937_64 gen(Catch::rngSeed());
+  std::mt19937_64 gen(Catch::getSeed());
   dim3 gridDim = { 1 };
   dim3 blockDim = { static_cast<unsigned short>(wavefrontSize) };
   hipError_t status;

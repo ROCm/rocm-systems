@@ -6,6 +6,7 @@
 
 #include <hip/hip_cooperative_groups.h>
 #include <hip_test_common.hh>
+#include <catch2/catch_approx.hpp> // For Catch::Approx
 
 static __global__ void wg_split_barrier(float *out, float *in) {
   namespace cg = cooperative_groups;

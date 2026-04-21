@@ -7,6 +7,8 @@
 #define CATCH_CONFIG_RUNNER
 #include <cmd_options.hh>
 #include <hip_test_common.hh>
+#include <catch2/catch_session.hpp>         // For Catch::Session
+#include <catch2/internal/catch_clara.hpp>  // For Catch::Clara command line parser
 #include <iostream>
 
 CmdOptions cmd_options;

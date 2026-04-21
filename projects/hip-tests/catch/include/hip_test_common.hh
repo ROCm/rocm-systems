@@ -8,7 +8,12 @@
 #pragma clang diagnostic ignored "-Wsign-compare"
 #include "hip_test_context.hh"
 
-#include <catch2/catch_all.hpp>
+// Catch2 core testing framework - minimal includes for faster compilation
+#include <catch2/catch_test_macros.hpp>           // TEST_CASE, REQUIRE, CHECK, FAIL, SECTION, DYNAMIC_SECTION
+#include <catch2/catch_template_test_macros.hpp>  // TEMPLATE_TEST_CASE
+#include <catch2/catch_message.hpp>               // INFO, WARN, CAPTURE
+#include <catch2/generators/catch_generators.hpp> // GENERATE and basic generators
+#include <catch2/generators/catch_generators_range.hpp> // range() generator
 #include <atomic>
 #include <chrono>
 #include <cstring>

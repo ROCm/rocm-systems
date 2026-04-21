@@ -26,6 +26,7 @@
  */
 
 #include <hip_test_common.hh>
+#include <catch2/catch_approx.hpp> // For Catch::Approx
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_gl_interop.h>
 

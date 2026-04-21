@@ -11,6 +11,8 @@
 #define HIP_ENABLE_EXTRA_WARP_SYNC_TYPES
 
 #include <hip_test_common.hh>
+#include <catch2/generators/catch_generators_adapters.hpp> // For map() generator adapter
+#include <catch2/matchers/catch_matchers_floating_point.hpp> // For WithinRel floating point matcher
 #include <resource_guards.hh>
 #include <hip/hip_cooperative_groups.h>
 #include <hip/hip_fp16.h>

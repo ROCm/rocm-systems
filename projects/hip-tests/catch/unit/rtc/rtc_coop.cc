@@ -1,4 +1,5 @@
 #include "warp_common.hh"
+#include <catch2/catch_get_random_seed.hpp> // For Catch::getSeed()
 #include <hip/hip_cooperative_groups.h>
 #include <hip/hip_runtime.h>
 #include <tuple>
@@ -76,7 +77,7 @@ void runReduce(hiprtcProgram& prog) {
   LinearAllocGuard<T> input(LinearAllocs::malloc, d_input.size_bytes());
   LinearAllocGuard<T> d_output(LinearAllocs::hipMalloc, wavefrontSize * sizeof(T) * tileSizes.size());
   LinearAllocGuard<T> output(LinearAllocs::malloc, d_output.size_bytes());
-  std::mt19937_64 gen(Catch::rngSeed());
+  std::mt19937_64 gen(Catch::getSeed());
   // for float16, we generate any random unsigned short, but cap the exponent later on
   // to keep it in the range (-8.0..8.0) (just to avoid overflows)
   // On the rest of the types, just use a bigger reduced range of numbers to avoid overflows too

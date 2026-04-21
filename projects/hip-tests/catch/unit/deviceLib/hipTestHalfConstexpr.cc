@@ -7,6 +7,7 @@
 
 #include <hip/hip_fp16.h>
 #include <hip_test_common.hh>
+#include <catch2/catch_approx.hpp> // For Catch::Approx
 #include <cmath>
 
 

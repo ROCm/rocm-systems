@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <cmath>
 #include <hip_test_common.hh>
+#include <catch2/catch_approx.hpp> // For Catch::Approx
+#include <catch2/generators/catch_generators_random.hpp> // For RandomFloatingGenerator
 #include <limits>
 
 __global__ void fp16_arith_gpu(float* a, float* b, float* c) {

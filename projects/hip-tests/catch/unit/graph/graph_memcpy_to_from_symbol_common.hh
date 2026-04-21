@@ -11,6 +11,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <resource_guards.hh>
+#include <catch2/matchers/catch_matchers_vector.hpp> // For Catch::Matchers::Equals() for vectors
 
 namespace {
 constexpr size_t kArraySize = 5;
