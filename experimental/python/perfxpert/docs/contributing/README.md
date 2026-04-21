@@ -17,6 +17,8 @@ from there.
 | New MCP tool | [mcp_tools.md](mcp_tools.md) |
 | New test fixture | [fixtures.md](fixtures.md) |
 | New GPU arch | [gpu_arch.md](gpu_arch.md) |
+| New output format (`--format csv`, etc.) | [output_formats.md](output_formats.md) |
+| Evolving / extending the schema | [schemas.md](schemas.md) |
 | External-tool dependency registration (`require_tool`, binaries / pylibs / shared libs) | [external-tools.md](external-tools.md) |
 
 ## Process and walkthroughs

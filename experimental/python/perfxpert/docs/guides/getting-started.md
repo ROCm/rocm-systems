@@ -901,7 +901,18 @@ The client's `PATH` is narrower than your login shell. Use the
 absolute path returned by `which perfxpert-mcp` when registering the
 server.
 
-## 14. Next steps
+## 14. Extending PerfXpert
+
+Want to add a new output format (say CSV for spreadsheet ingestion)
+or evolve the schema? See
+[Adding an output format](../contributing/output_formats.md) and
+[Evolving the schema](../contributing/schemas.md) for the end-to-end
+contribution walkthroughs — both live under `docs/contributing/` and
+are the canonical extension-point guides for the `--format` dispatcher
+and the three-layer schema stack (agent Pydantic / deterministic
+payload / public JSON).
+
+## 15. Next steps
 
 - `../architecture/agent-hierarchy.md` — 7-agent tier map + fence
   slices
