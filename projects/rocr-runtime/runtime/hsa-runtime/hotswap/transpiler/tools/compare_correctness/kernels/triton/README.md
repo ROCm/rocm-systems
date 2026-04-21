@@ -127,14 +127,33 @@ silently guess.
   "outputs":       [{"name":..., "dtype":..., "elems":"<expr>"}, ...],
   "comparator":    {"kind": "abs"|"rel", "tol": <float>},
   "metadata": {
-    "gfx942":  { "kernarg_segment_size": <int>,
-                 "group_segment_fixed_size": <int>,
-                 "max_flat_workgroup_size":  <int>,
+    "gfx942":  { "kernarg_segment_size":       <int>,
+                 "group_segment_fixed_size":   <int>,   # static LDS (always 0 for Triton)
+                 "private_segment_fixed_size": <int>,   # scratch; harness refuses launch if != 0
+                 "max_flat_workgroup_size":    <int>,
+                 "shared_mem_bytes":           <int>,   # dynamic LDS (compiled.metadata.shared)
                  "args": [{"offset":..., "size":..., "value_kind":...}, ...] },
     "gfx1250": { ... }
   }
 }
 ```
+
+`metadata.<arch>.shared_mem_bytes` is sourced from
+`compiled.metadata.shared` at AOT time — the per-block *dynamic* LDS
+(shared memory) Triton's AMD backend reserves for reductions, softmax
+scratch, and similar cross-wave accumulators.  It is **not** the same
+thing as `group_segment_fixed_size` (static LDS baked into the kernel
+descriptor, always 0 for Triton), and it is **not** discoverable from
+the HSACO alone; the dispatch must pass it verbatim as
+`hipModuleLaunchKernel`'s `dynamicSharedMemBytes` argument or any
+reduction-bearing kernel silently returns zero output (the reduction
+path stores into a non-existent LDS allocation).  Elementwise
+kernels like `vecadd_f16` naturally have `shared_mem_bytes = 0` and
+are unaffected; any future recipe with a cross-wave reduction
+(layer-norm, softmax, block-sum, …) will have `shared_mem_bytes > 0`
+and implicitly regression-test the plumbing — if dispatch ever
+reverts to passing 0 its native lane goes from `gold` to
+`WRONG`/`CRASH` on the first run.
 
 The `metadata.<arch>.args` list is the kernarg layout for that arch,
 copied verbatim from the code object's `.note.amdgpu_metadata`.  The

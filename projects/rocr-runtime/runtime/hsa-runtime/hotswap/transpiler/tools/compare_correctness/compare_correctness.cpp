@@ -1630,6 +1630,18 @@ struct TritonArchMeta {
   // into a loud error at sidecar load time.
   int privateSegmentFixedSize = 0;
   int maxFlatWorkgroupSize   = 256;
+  // Dynamic LDS (per-block shared-memory scratch) that Triton's AMD
+  // backend reserves for reductions / softmax / similar cross-wave
+  // accumulators.  Sourced from `compiled.metadata.shared` at AOT time
+  // (see kernels/triton/aot_compile.py), NOT from the HSACO ELF:
+  // `group_segment_fixed_size` covers *static* LDS only and is 0 for
+  // every Triton kernel we emit (Triton always uses the dynamic path).
+  // Passed as hipModuleLaunchKernel's `dynamicSharedMemBytes` argument;
+  // passing 0 when the kernel needs N bytes makes the reduction load/
+  // store to address 0 in LDS and silently return 0 (which is how
+  // layer-norm and softmax silently produced broken output before this
+  // field was plumbed through).
+  int sharedMemBytes         = 0;
   // ALL kernarg slots in offset order, including the implicit args Triton
   // appends past the user signature (typically `global_scratch_base` and
   // similar).  The dispatch only writes the first signature.size() slots
@@ -2256,6 +2268,18 @@ TritonArchMeta parseArchMeta(const JsonValue &v) {
   // sidecars don't get to silently skip the scratch check.
   m.privateSegmentFixedSize  = static_cast<int>(v.get("private_segment_fixed_size").asInt());
   m.maxFlatWorkgroupSize     = static_cast<int>(v.get("max_flat_workgroup_size").asInt());
+  // Required as of the post-#dyn-lds sidecar schema.  Same stale-sidecar
+  // contract as privateSegmentFixedSize above: a sidecar missing this
+  // field fails loudly rather than silently defaulting to 0, because
+  // "0" is exactly the wrong value for any Triton kernel with a
+  // reduction (layer-norm, softmax, ...) — the reduction would silently
+  // return 0 output instead of visibly crashing.  See
+  // TritonArchMeta::sharedMemBytes for the full provenance.
+  m.sharedMemBytes           = static_cast<int>(v.get("shared_mem_bytes").asInt());
+  if (m.sharedMemBytes < 0)
+    die("triton sidecar: shared_mem_bytes=%d is negative; the sidecar "
+        "is malformed (expected a non-negative byte count from "
+        "compiled.metadata.shared)", m.sharedMemBytes);
   for (const auto &a : v.get("args").asArray()) {
     TritonArchMeta::Arg arg;
     arg.offset    = static_cast<int>(a.get("offset").asInt());
@@ -3041,26 +3065,27 @@ tritonDispatch(const TritonRecipe &t, hipModule_t mod,
                  HIP_LAUNCH_PARAM_BUFFER_SIZE,   &kSize,
                  HIP_LAUNCH_PARAM_END};
   // Static LDS (group_segment_fixed_size) is allocated by HIP from the
-  // kernel descriptor automatically.  The 7th hipModuleLaunchKernel arg is
-  // *dynamic* LDS — what the kernel reads via `extern __shared__` — and is
-  // 0 for every Triton kernel we expect to see.  Passing the static size
-  // here would request that much extra dynamic LDS on top of the static
-  // allocation, which is a category error and may exceed per-CU LDS.
+  // kernel descriptor automatically; it is 0 for every Triton kernel we
+  // emit because Triton's AMD backend always routes shared memory
+  // through the *dynamic* LDS path instead.  The 7th
+  // hipModuleLaunchKernel arg is that dynamic LDS size, and Triton's
+  // own launcher passes `metadata.shared` there (see `pack_metadata` in
+  // triton/backends/amd/compiler.py).
   //
-  // TEST GAP: the only Triton recipe that exercises this path today
-  // (vecadd_f16) emits group_segment_fixed_size = 0, so this fix is
-  // correct-by-construction (any value vs 0 is identical) but isn't
-  // negatively tested.  When we add a kernel with non-zero static LDS
-  // (e.g. matmul_f16), expect compare_correctness to either pass — vs the
-  // pre-fix code which would have errored with "out of LDS" on
-  // legacy/salmon — or to surface a genuine regression.  Don't simplify
-  // this comment away before that recipe lands.
+  // We propagate the same value through the sidecar as
+  // `shared_mem_bytes`; see TritonArchMeta::sharedMemBytes for the full
+  // rationale.  Before this plumbing existed, passing 0 here caused
+  // layer-norm and softmax to silently produce zero output — the
+  // reduction path loads/stores to offset 0 inside the (non-existent)
+  // dynamic LDS allocation and the accumulator never sees any data.
+  // Elementwise kernels (add, asin) naturally have shared_mem_bytes=0
+  // and are unaffected.
   HIP_ASSERT(hipModuleLaunchKernel(fn,
                                    static_cast<unsigned>(gx),
                                    static_cast<unsigned>(gy),
                                    static_cast<unsigned>(gz),
                                    static_cast<unsigned>(wgSize), 1, 1,
-                                   /*dynamicSharedMemBytes=*/0,
+                                   static_cast<unsigned>(M.sharedMemBytes),
                                    nullptr, nullptr, cfg));
   HIP_ASSERT(hipDeviceSynchronize());
 

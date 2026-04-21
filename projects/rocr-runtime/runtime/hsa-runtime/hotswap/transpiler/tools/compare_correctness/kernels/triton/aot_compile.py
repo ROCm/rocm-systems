@@ -100,8 +100,27 @@ def load_kernel_module(path: str):
 
 
 def compile_for_target(kernel_fn, signature, constexprs, num_warps, arch, warp_size):
-    """AOT-compile one Triton kernel for one architecture.  Returns the raw
-    .hsaco bytes."""
+    """AOT-compile one Triton kernel for one architecture.
+
+    Returns a tuple ``(hsaco_bytes, shared_mem_bytes)``.
+
+    ``shared_mem_bytes`` comes from ``compiled.metadata.shared`` — the
+    per-block *dynamic* LDS (shared memory) Triton's backend reserves for
+    reductions, softmax scratch, and similar cross-wave accumulators.
+    This is NOT encoded in the HSACO's AMDGPU metadata (that field,
+    ``group_segment_fixed_size``, covers *static* LDS only), so the C++
+    dispatch has no way to discover it from the code object alone.
+    Triton's own launcher passes ``metadata.shared`` as the 7th arg to
+    ``hipModuleLaunchKernel`` (``dynamicSharedMemBytes``); we have to
+    propagate the same value through the sidecar or the reduction path
+    in the kernel silently loads/stores to address 0 in LDS and returns
+    zero output (which is how layer-norm / softmax failed on the AOT
+    path before this plumbing existed).
+
+    ``metadata.shared`` is a stable attribute on Triton's
+    ``KernelMetadata`` (see ``triton/backends/amd/compiler.py``'s
+    ``pack_metadata``; it's the same value Triton packs for its own
+    launcher)."""
     target = GPUTarget("hip", arch, warp_size)
     src = ASTSource(
         fn=kernel_fn,
@@ -118,8 +137,37 @@ def compile_for_target(kernel_fn, signature, constexprs, num_warps, arch, warp_s
         )
     if isinstance(hsaco, str):
         with open(hsaco, "rb") as f:
-            return f.read()
-    return bytes(hsaco)
+            data = f.read()
+    else:
+        data = bytes(hsaco)
+    if not hasattr(compiled.metadata, "shared"):
+        # Loud failure rather than a silent default: if Triton ever
+        # renames this field, we want the AOT build to break so we
+        # update the plumbing, not silently regress to passing 0 and
+        # re-breaking reductions.
+        #
+        # Triton's `compiled.metadata` is a `namedtuple` (see
+        # triton/compiler/compiler.py in CompiledKernel.__init__), so
+        # `vars()` raises TypeError — use `_fields` when available and
+        # fall back to a public-attr sweep via `dir()` so the error
+        # handler itself never masks the diagnostic.
+        fields = getattr(compiled.metadata, "_fields", None)
+        if fields is None:
+            fields = [n for n in dir(compiled.metadata) if not n.startswith("_")]
+        raise RuntimeError(
+            f"triton_compile metadata for {arch} has no 'shared' "
+            f"attribute (available: {list(fields)}). "
+            "The AMD backend's pack_metadata relies on this; update "
+            "aot_compile.py to follow the renamed field."
+        )
+    shared_mem_bytes = int(compiled.metadata.shared)
+    if shared_mem_bytes < 0:
+        raise RuntimeError(
+            f"triton_compile metadata for {arch} reports negative "
+            f"shared={shared_mem_bytes}; refusing to emit a sidecar "
+            "with a nonsense dynamic-LDS size."
+        )
+    return data, shared_mem_bytes
 
 
 def extract_metadata(co_bytes: bytes, kernel_symbol: str) -> dict:
@@ -255,7 +303,7 @@ def build_recipe(recipe: dict, out_dir: str, kernel_file: str) -> None:
 
     metadata = {}
     for arch, warp_size in TARGETS:
-        data = compile_for_target(
+        data, shared_mem_bytes = compile_for_target(
             recipe["kernel_fn"],
             recipe["signature"],
             recipe.get("constexprs", {}),
@@ -267,11 +315,18 @@ def build_recipe(recipe: dict, out_dir: str, kernel_file: str) -> None:
         with open(co_path, "wb") as f:
             f.write(data)
         md = extract_metadata(data, recipe["kernel_symbol"])
+        # Dynamic LDS, sourced from compiled.metadata.shared rather than
+        # the HSACO ELF (see compile_for_target's docstring for why the
+        # ELF field is insufficient).  Stored alongside the ELF-derived
+        # metadata so the C++ sidecar parser reads one consistent record
+        # per arch.
+        md["shared_mem_bytes"] = shared_mem_bytes
         metadata[arch] = md
         print(
             f"  [{arch:7s}] wrote {co_path} "
             f"({len(data):5d} bytes, kernarg={md['kernarg_segment_size']}, "
-            f"lds={md['group_segment_fixed_size']}, "
+            f"static_lds={md['group_segment_fixed_size']}, "
+            f"dyn_lds={md['shared_mem_bytes']}, "
             f"scratch={md['private_segment_fixed_size']}, "
             f"wg={md['max_flat_workgroup_size']})"
         )
