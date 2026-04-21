@@ -36,7 +36,7 @@ namespace rocshmem {
 
 #if defined(USE_SDMA)
 
-__host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, MPI_Comm comm) {
+__host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, MPI_Comm comm) {
   my_pe = pe;
 
   // Get local communicator for shared memory
@@ -103,7 +103,7 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, MPI_Comm comm) {
 }
 
 
-__host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, TcpBootstrap* bootstrap) {
+__host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, TcpBootstrap* bootstrap) {
   my_pe = pe;
   shm_size = bootstrap->getNranksPerNode();
   auto local_ranks = bootstrap->getLocalRanks();
