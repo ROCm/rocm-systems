@@ -699,9 +699,9 @@ WriteInterceptor(const void* packets,
             {
                 // Adding a barrier packet with the original packet's completion signal.
                 queue.create_signal(0, &interrupt_signal, false);
-                // Queue completion monitor is armed on EQ -1, so initialize to zero before
-                // dispatch.
-                get_core_table()->hsa_signal_store_screlease_fn(interrupt_signal, 0);
+                // Queue completion monitor is armed on LT 1, so keep signal in the "not-ready"
+                // state until the dispatch completes.
+                get_core_table()->hsa_signal_store_screlease_fn(interrupt_signal, 1);
                 completion_signal                                            = interrupt_signal;
                 transformed_packets.back().kernel_dispatch.completion_signal = interrupt_signal;
                 CreateBarrierPacket(&interrupt_signal, &interrupt_signal, transformed_packets);
@@ -709,7 +709,7 @@ WriteInterceptor(const void* packets,
             else
             {
                 completion_signal = kernel_packet.kernel_dispatch.completion_signal;
-                get_core_table()->hsa_signal_store_screlease_fn(completion_signal, 0);
+                get_core_table()->hsa_signal_store_screlease_fn(completion_signal, 1);
             }
 
             ROCP_FATAL_IF(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)

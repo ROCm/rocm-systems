@@ -97,7 +97,7 @@ QueueSignalSubscription::arm(Queue&                    queue,
                            signal.handle);
         return false;
     }
-    auto id = monitor->subscribe(signal, HSA_SIGNAL_CONDITION_EQ, -1, std::move(callback));
+    auto id = monitor->subscribe(signal, HSA_SIGNAL_CONDITION_LT, 1, std::move(callback));
     ROCP_ERROR_IF(queue_signal_diag_enabled()) << fmt::format(
         "DEBUG: QueueSignalSubscription::arm subscribed queue_id={} signal_handle={} "
         "subscription_id={} success={}",
