@@ -79,12 +79,16 @@ struct QueueState
     std::atomic<bool>     destroying{false};
 };
 
+using queue_state_ptr_t      = std::shared_ptr<QueueState>;
+using queue_state_weak_ptr_t = std::weak_ptr<QueueState>;
+
 /// Thread-safe map from HSA queue pointer to its QueueState
 using queue_registry_t =
-    common::Synchronized<std::unordered_map<const hsa_queue_t*, std::unique_ptr<QueueState>>>;
+    common::Synchronized<std::unordered_map<const hsa_queue_t*, queue_state_ptr_t>>;
 
-/// Thread-safe map from doorbell signal handle to QueueState pointer
-using doorbell_map_t = common::Synchronized<std::unordered_map<uint64_t, QueueState*>>;
+/// Thread-safe map from doorbell signal handle to weak QueueState reference
+using doorbell_map_t =
+    common::Synchronized<std::unordered_map<uint64_t, queue_state_weak_ptr_t>>;
 
 /**
  * @brief Get the global queue registry singleton
@@ -112,18 +116,18 @@ get_doorbell_map();
  * @brief Look up QueueState by HSA queue pointer
  *
  * @param queue The HSA queue to look up
- * @return Pointer to QueueState if found, nullptr otherwise
+ * @return Strong QueueState reference if found, empty otherwise
  */
-QueueState*
+queue_state_ptr_t
 lookup_queue_state(const hsa_queue_t* queue);
 
 /**
  * @brief Look up QueueState by doorbell signal
  *
  * @param signal The doorbell signal to look up
- * @return Pointer to QueueState if found, nullptr otherwise
+ * @return Strong QueueState reference if found and still alive, empty otherwise
  */
-QueueState*
+queue_state_ptr_t
 lookup_queue_state_by_doorbell(hsa_signal_t signal);
 
 /**
@@ -218,20 +222,22 @@ sync_metadata_impl(QueueState*                         compute_state,
                    uint64_t                            dest_pos);
 
 /**
- * @brief Process doorbell ring in trace-only mode (K=0)
+ * @brief Process doorbell ring for inline queue interposition
  *
  * This function scans the write-ahead zone (from next_scan_pos to virtual_wptr),
- * copies application packets to their submit positions, advances the real write
- * doorbell index, and calls the provided doorbell function.
+ * snapshots source packets in application-visible order, applies the queue
+ * WriteInterceptor chain, advances the real write doorbell index, and calls the
+ * provided doorbell function.
  *
- * For trace-only mode (k_factor=0), packets are copied in-place (src == dst).
+ * For k_factor=0, the callback chain is invoked over the full batch. For k_factor>0,
+ * packets are transformed one-by-one and padded to stride as needed.
  *
- * @param state Queue state
+ * @param state Strong queue-state reference for call lifetime
  * @param value Signal value to pass to doorbell
  * @param ring_doorbell Callback to ring the actual hardware doorbell
  */
 void
-process_doorbell_impl(QueueState*          state,
+process_doorbell_impl(queue_state_ptr_t    state,
                       hsa_signal_value_t   value,
                       const doorbell_fn_t& ring_doorbell);
 
