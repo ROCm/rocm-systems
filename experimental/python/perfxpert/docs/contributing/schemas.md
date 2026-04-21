@@ -253,13 +253,113 @@ The current tree:
   `_format_tier0_json`).
 - `0.3.0` — agentic brain (`narrative`, `primary_bottleneck`,
   `warnings`) + tier-0 separation + summary section.
-- `0.3.1` — current: additive `hotspots[i].source_locations` field
+- `0.3.1` — additive `hotspots[i].source_locations` field
   cross-referencing each hotspot with its Tier-0 definition +
   launch site (Confluence row #5) — each entry now also carries
   `severity` + `severity_label` (HIGH/MEDIUM/LOW/INFO;
   CRITICAL/HOT/WARM/COOL). Also additive: top-level `trace_diff`
   section emitted by `perfxpert diff` / `perfxpert analyze --baseline`
   (Confluence row #7).
+- `0.3.4` — current: additive top-level `roofline` section emitted by
+  `roofline.plot_points` (Phase 10 — Live Roofline chart). Shape:
+  ```json
+  "roofline": {
+    "schema_version": "0.3.x",
+    "arch": "gfx942",
+    "arch_peaks": {"fp32": 1.634e14, "fp16": 1.307e15, "bf16": 1.307e15,
+                    "fp64": 8.17e13, "fp8": 2.614e15, "int8": 2.614e15},
+    "hbm_bandwidth_bytes_per_s": 5.3e12,
+    "dtype": "bf16",
+    "dtype_confidence": "from_kernel_name",
+    "kernels": [
+      {
+        "name": "gemm_bf16_kernel",
+        "ai": 48.2,
+        "achieved_flops_per_s": 1.12e14,
+        "flops": 9.6e13,
+        "bytes": 2_000_000_000,
+        "duration_ns": 860_000,
+        "duration_pct": 94.3,
+        "fp_type": "bf16",
+        "bottleneck_class": "compute",
+        "confidence": "high"
+      }
+    ],
+    "ridge_point": {"ai": 30.8, "flops_per_s": 1.634e14}
+  }
+  ```
+  Populated only when Tier-2 hardware counters are available in the
+  trace DB. Drives the webview's **Live Roofline** `.scard` (log-log
+  inline SVG). `_format_as_json` bumps `schema_version` from `0.3.3`
+  -> `0.3.4` when the key is set. ATT (`0.4.0`) still trumps.
+- `0.3.3` — additive change-impact-prediction fields on each
+  recommendation (`predicted_impact_range`, `predicted_confidence`,
+  `predicted_rationale`, `source_citation`, `roofline_delta`). Emitted
+  by the Phase-10 Feature E pipeline
+  (`perfxpert.tools.predict_impact`) whenever the specialist-attached
+  or category-mapped technique matches an entry in
+  `knowledge/change_impact_models.yaml`. Shape of the recommendation
+  entry when a prediction fires:
+  ```json
+  {
+    "id": "ROCPD-COMPUTE-001",
+    "priority": "HIGH",
+    "category": "Compute-Bound Kernel",
+    "issue": "...",
+    "suggestion": "...",
+    "predicted_impact_range": [1.15, 1.45],
+    "predicted_confidence": 0.70,
+    "predicted_rationale": "Technique 'vgpr_reduction' applied to ...",
+    "source_citation": "knowledge/proven_optimizations.yaml#vgpr_reduction_compute_bound",
+    "roofline_delta": {"before": null, "after": null}
+  }
+  ```
+  Rules enforced by `predict_impact.predict_change_impact`: Amdahl
+  guard (kernel < 5% runtime ⇒ no emission), tier-2 gate (missing
+  counters ⇒ no emission), conservative bracket
+  (`hi = catalog_hi × 0.85`), and every rec cites the seed entry in
+  `knowledge/proven_optimizations.yaml` via `source_citation`.
+  `_format_as_json` bumps `schema_version` from `0.3.2` → `0.3.3` when
+  any rec in the document carries
+  `predicted_impact_range != null`. `0.3.4` (Live Roofline) and ATT
+  (`0.4.0`) still trump when their own fields are populated.
+- `0.3.2` — additive top-level `communication` section
+  emitted by `rccl_analysis.analyze_collectives` (Phase 10 — RCCL /
+  NIC analysis). Shape:
+  ```json
+  "communication": {
+    "collectives": [
+      {
+        "op_type": "AllReduce",
+        "msg_bytes": 1048576,
+        "duration_ns": 1000000,
+        "effective_bw_gbps": 1.57,
+        "peak_bw_gbps": 340.0,
+        "efficiency_pct": 0.46,
+        "efficiency_label": "poor",
+        "overlap_ratio": 48.5,
+        "algo_hint": "Ring",
+        "topology_hint": "intra-node",
+        "regime": "algo-dependent",
+        "ranks": 4
+      }
+    ],
+    "summary": {
+      "op_count": 1,
+      "ranks": 4,
+      "dominant_op": "AllReduce",
+      "peak_bw_gbps": 340.0,
+      "avg_bw_gbps": 1.57,
+      "avg_efficiency_pct": 0.46,
+      "overlap_pct": 48.5,
+      "capture_incomplete": false
+    }
+  }
+  ```
+  The key is absent (not `null`) when the trace contains no RCCL
+  spans. When set, `_format_as_json` bumps `schema_version` from
+  `0.3.1` -> `0.3.2`. ATT (`0.4.0`) still trumps: a trace with both
+  ATT + RCCL data pins `0.4.0`.
 - `0.4.0` — bumped automatically by `_format_as_json` when
   `att_analysis.has_att_data=True` (Tier-3 ATT).
 
@@ -320,6 +420,108 @@ Rendering invariants:
 
 See ``perfxpert/analysis/recommendations.py::build_pragma_recommendation``
 for the canonical constructor.
+
+## Phase-10 advanced-specialist tool shapes
+
+The Phase-10 MCP tools (A-D) each return a plain dict; none carry
+`schema_version` because they sit alongside — not inside — the
+analyze-report JSON. Consumers that want schema-stable outputs should
+pin the tool's release notes in `docs/integration/mcp-server.md`.
+
+### `kernel_fusion.find_fusion_candidates` (Feature A)
+
+Returns `List[Dict]` ranked by `est_speedup_hi` descending:
+
+```json
+{
+  "pair": ["add_kernel", "add_kernel"],
+  "signature": "9b7a2e4c1ff0",
+  "gap_ns": 120,
+  "est_speedup_lo": 1.08,
+  "est_speedup_hi": 1.25,
+  "confidence": 0.78
+}
+```
+
+### `gpu_runtime_monitor.*` (Feature B)
+
+`parse_amd_smi_json` / `parse_rocm_smi_json` return a normalised
+envelope:
+
+```json
+{
+  "source": "amd-smi",
+  "samples": [
+    {"gpu_id": 0, "temp_c": 72.5, "power_w": 410.0,
+     "sclk_mhz": 1950, "mclk_mhz": 1600, "gfx_busy_pct": 96}
+  ],
+  "gpu_count": 1
+}
+```
+
+`analyze_thermal` consumes the envelope and returns:
+
+```json
+{
+  "max_temp_c": 72.5,
+  "avg_temp_c": 71.2,
+  "p95_temp_c": 72.5,
+  "max_power_w": 410.0,
+  "throttle_events": 0,
+  "power_throttle_suspected": false,
+  "thermal_headroom_c": 32.5,
+  "verdict": "healthy"
+}
+```
+
+### `unified_memory.analyze_paging` (Feature C)
+
+```json
+{
+  "paging_events": 3,
+  "cross_die_bytes": 2147483648,
+  "page_faults": 0,
+  "estimated_penalty_ns": 1006632960,
+  "recommendations": ["Pin host-shared buffers ...", "..."]
+}
+```
+
+### `dependency_graph.reconstruct_dag` (Feature D)
+
+```json
+{
+  "nodes": [{"id":"k0","name":"matmul","start_ns":0,"end_ns":5000,"duration_ns":5000,"stream":0}],
+  "edges": [{"from":"k0","to":"k1","kind":"stream_order"}],
+  "critical_path": ["k0", "k1"],
+  "bubbles": [{"start":5000,"end":15000,"cause":"idle_gap_stream_0","duration_ns":10000}],
+  "total_bubble_ns": 10000,
+  "sync_event_count": 2
+}
+```
+
+## Roofline payload
+
+<a name="roofline-payload"></a>
+
+The `roofline` top-level key (added in `schema_version: 0.3.4`) carries
+the per-kernel live-roofline points produced by
+`perfxpert.tools.roofline.plot_points`. Full shape and
+bumping-semantics are documented in the Layer-C version-table above
+(see **0.3.4** under "Schema versioning policy"). Key points:
+
+- Populated only when Tier-2 hardware counters
+  (`SQ_INSTS_VALU` / `FETCH_SIZE` / `WRITE_SIZE`) are available.
+  Absent otherwise (formatters skip the section gracefully).
+- `arch_peaks` is in FLOPs/s (not TFLOPs) — the formatter divides.
+- `ridge_point.ai` = dominant-dtype peak / HBM bandwidth
+  (FLOPs/Byte); `ridge_point.flops_per_s` = dominant-dtype peak.
+- `kernels[i].confidence` is `"low"` when only one side of the byte
+  pair (FETCH_SIZE / WRITE_SIZE) was collected — the other is
+  assumed 0, so AI is an upper bound.
+- The webview formatter renders the Live Roofline as an inline SVG
+  `<section class="scard">`; the Markdown / text formats render a
+  table with columns (kernel, AI, achieved GFLOPs/s, regime, dtype,
+  confidence); the JSON format is a passthrough of this shape.
 
 ## Tier-0 carve-out
 

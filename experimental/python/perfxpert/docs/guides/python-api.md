@@ -9,7 +9,7 @@ tooling without running the MCP server.
 Cross-links:
 
 - [MCP server](../integration/mcp-server.md) — the same 8 agent tools
-  + 35 classifier / knowledge tools re-exposed over stdio JSON-RPC.
+  + 50 classifier / knowledge tools re-exposed over stdio JSON-RPC.
   **This API is the same surface as the MCP tools.**
 - [Agent hierarchy](../architecture/agent-hierarchy.md) — tier map,
   fence-slice pattern, and where each agent lives in source.
@@ -32,6 +32,8 @@ MCP registration):
 | `perfxpert_agent_latency_specialist` | `perfxpert.api.agent_latency_specialist` |
 | `perfxpert_agent_diff_specialist` | `perfxpert.api.agent_diff_specialist` |
 | `perfxpert_trace_diff_diff_runs` | `perfxpert.api.trace_diff_diff_runs` |
+| `perfxpert_rccl_analysis_analyze_collectives` | `perfxpert.tools.rccl_analysis.analyze_collectives` |
+| `perfxpert_interconnect_lookup_peaks` | `perfxpert.tools.interconnect.lookup_peaks` |
 
 Every agent callable honors `PERFXPERT_AIRGAP=1` and the full provider /
 fallback-chain ladder (`PERFXPERT_LLM_FALLBACK_CHAIN`) because the
@@ -42,6 +44,23 @@ two rocpd databases and produces a schema-0.3.1 diff dict (see
 [schemas.md][schemas] for the full contract). This is the same engine
 `perfxpert diff`, `perfxpert ci`, and `perfxpert analyze --baseline`
 use.
+
+The two Phase-10 communication-analysis tools are deterministic (no
+LLM, no credentials) and map 1:1 onto their module functions:
+
+```python
+# SKIP-SAMPLE — illustrative RCCL analysis call (requires a rocpd .db)
+from perfxpert.tools import rccl_analysis, interconnect
+
+peaks = interconnect.lookup_peaks("gfx942")       # MI300X XGMI spec
+peaks["achievable_gbps"]                           # -> 340.0
+
+result = rccl_analysis.analyze_collectives(
+    "merged.db", gfx_id="gfx942"
+)
+result["summary"]["dominant_op"]                   # -> "AllReduce"
+result["summary"]["overlap_pct"]                   # comm/compute overlap %
+```
 
 [schemas]: ../contributing/schemas.md
 
@@ -331,6 +350,54 @@ Output keys: `schema_version`, `baseline_db`, `new_db`, `wall_delta_ns`,
 `primary_improvements`, `narrative`. See
 [schemas.md](../contributing/schemas.md) for the `trace_diff` contract.
 
+### `roofline_plot_points` — per-kernel live-roofline points
+
+Builds the `(arithmetic_intensity, achieved_flops_per_s)` points used
+by the webview's **Live Roofline** chart. READ_ONLY against a rocpd
+database — no network, no writes, no LLM. The same payload is embedded
+under `"roofline"` in the agentic JSON output.
+
+```python
+# SKIP-SAMPLE — illustrative Python API call (requires a Tier-2 .db with
+# SQ_INSTS_VALU + FETCH_SIZE + WRITE_SIZE counters).
+from perfxpert.tools import roofline
+
+rf = roofline.plot_points("trace.db", top_k=10)
+# {'schema_version': '0.3.x',
+#  'arch': 'gfx942',
+#  'arch_peaks': {'fp32': 1.634e14, 'fp16': 1.307e15, ...},
+#  'dtype': 'bf16',
+#  'dtype_confidence': 'from_kernel_name',
+#  'kernels': [{'name': 'gemm_bf16_kernel',
+#               'ai': 48.2,
+#               'achieved_flops_per_s': 1.12e14,
+#               'bottleneck_class': 'compute',
+#               'fp_type': 'bf16',
+#               'confidence': 'high',
+#               'duration_pct': 94.3}],
+#  'ridge_point': {'ai': 30.8, 'flops_per_s': 1.634e14}}
+for k in rf["kernels"]:
+    print(f"{k['name']}: AI={k['ai']:.1f}, "
+          f"{k['achieved_flops_per_s']/1e12:.1f} TF/s, {k['bottleneck_class']}")
+```
+
+Formula — deterministic, no LLM involvement:
+
+```text
+flops = SQ_INSTS_VALU × 64 + SQ_INSTS_VALU_MFMA × mfma_flops_per_inst[dtype]
+bytes = (FETCH_SIZE + WRITE_SIZE) × 1024       # TCC KiB → bytes
+ai    = flops / bytes
+rate  = flops / (duration_ns / 1e9)
+```
+
+Dtype detection is a regex over the demangled kernel name
+(`_bf16`, `_fp16`, `_fp8`, `_int8`; falls back to `fp32` +
+`dtype_confidence: "default"`). Pass `dtype_hint="bf16"` to force a
+single dtype for every kernel — useful when your kernels don't follow
+the naming convention. See
+[schemas.md](../contributing/schemas.md#roofline-payload) for the full
+contract.
+
 ## Error handling
 
 All callables raise the standard provider taxonomy on LLM failure —
@@ -365,6 +432,28 @@ except QuotaExceededError:
         airgap=True,
     )
 ```
+
+## Phase-10 classifier / knowledge tools
+
+These are raw callables (not agent entry points) that specialists invoke
+internally; each is also exposed over the MCP wire.
+
+| Tool | Python import | Role |
+|------|---------------|------|
+| `kernel_fusion.find_fusion_candidates` | `from perfxpert.tools.kernel_fusion import find_fusion_candidates` | Feature A — adjacent-short-kernel fusion candidates. |
+| `gpu_runtime_monitor.parse_amd_smi_json` | `from perfxpert.tools.gpu_runtime_monitor import parse_amd_smi_json` | Feature B — parse captured amd-smi JSON. |
+| `gpu_runtime_monitor.parse_rocm_smi_json` | `from perfxpert.tools.gpu_runtime_monitor import parse_rocm_smi_json` | Feature B — parse captured rocm-smi JSON. |
+| `gpu_runtime_monitor.analyze_thermal` | `from perfxpert.tools.gpu_runtime_monitor import analyze_thermal` | Feature B — thermal envelope + throttle summary. |
+| `unified_memory.analyze_paging` | `from perfxpert.tools.unified_memory import analyze_paging` | Feature C — paging + MI300X cross-die penalty analysis. |
+| `dependency_graph.reconstruct_dag` | `from perfxpert.tools.dependency_graph import reconstruct_dag` | Feature D — DAG + critical path + bubble detection. |
+| `predict_impact.predict_change_impact` | `from perfxpert.tools.predict_impact import predict_change_impact` | Feature E — Change-Impact Prediction: return `{predicted_speedup_range, confidence, rationale, roofline_delta, assumptions, source_citation, prediction_id}` for a baseline DB + kernel + change_type. Amdahl + tier-2 gates enforced internally. |
+| `predict_impact.list_supported_changes` | `from perfxpert.tools.predict_impact import list_supported_changes` | Feature E — enumerate the change_type ids in `knowledge/change_impact_models.yaml`. Returns `[{id, applies_to, required_metrics}]`. |
+| `predict_impact.explain_prediction` | `from perfxpert.tools.predict_impact import explain_prediction` | Feature E — re-hydrate a prediction by its `prediction_id`. In-process only in Phase 10; durable store in Phase 11. |
+
+All nine are READ_ONLY (safe for external callers) and deterministic
+(no LLM, no sudo, no live device access). The runtime-monitor parsers
+ingest a user-supplied JSON log — set `PERFXPERT_GPU_MONITOR_LOG=<path>`
+to let specialists pick it up automatically.
 
 ## See also
 
