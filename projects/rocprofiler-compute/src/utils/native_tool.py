@@ -25,6 +25,10 @@ class NativeTool:
     def get_collector_library_path(
         self, compute_script_path: Path, rocprofiler_sdk_tool_path: Path
     ) -> Path | None:
+        console_debug("Searching for native collector.")
+        console_debug(f"Compute script path: {compute_script_path}")
+        console_debug(f"rocprofiler_sdk_tool_path: {rocprofiler_sdk_tool_path}")
+
         native_tool_path = self.__find_existing_collector(
             compute_script_path, rocprofiler_sdk_tool_path
         )
