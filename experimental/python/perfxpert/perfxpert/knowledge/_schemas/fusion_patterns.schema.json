@@ -9,13 +9,18 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "name", "description", "expected_impact", "effort_factor", "risk"],
+        "required": ["id", "name", "description", "expected_impact", "units", "effort_factor", "risk"],
         "properties": {
           "id": {"type": "string"},
           "name": {"type": "string"},
           "description": {"type": "string"},
           "trigger": {"type": "object"},
-          "expected_impact": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+          "expected_impact": {"type": "number", "minimum": 0.0},
+          "units": {
+            "type": "string",
+            "description": "Units for expected_impact. 'time_saved_fraction' = 0.25 means 25% of original runtime eliminated. 'speedup_multiplier' = 1.25 means 1.25x faster (20% faster). Disambiguates the reviewer-flagged ambiguity between fractional time saved and speedup x-factor.",
+            "enum": ["time_saved_fraction", "speedup_multiplier"]
+          },
           "effort_factor": {"type": "number", "minimum": 0.0},
           "risk": {"type": "string", "enum": ["low", "medium", "high"]},
           "verify_counters": {
