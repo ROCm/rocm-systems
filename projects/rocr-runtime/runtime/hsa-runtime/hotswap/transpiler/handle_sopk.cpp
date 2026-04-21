@@ -206,12 +206,36 @@ HandlerResult handleSOPK(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
-  // SOPK compares: s_cmpk_XX_i32 / s_cmpk_XX_u32
+  // SOPK compares: s_cmpk_XX_i32 / s_cmpk_XX_u32.
+  //
+  // Operand layout (SOPK_SCC class, SOPInstructions.td):
+  //   (outs)                          ; empty — no def
+  //   (ins SReg_32:$sdst,             ; operand 0: sdst as SOURCE
+  //        {s,u}16imm:$simm16)        ; operand 1: the immediate
+  //
+  // Both ins operands are sources. With `getNumDefs() == 0`,
+  // `buildSrcMap` (decode.cpp) keeps BOTH in srcMap:
+  //     srcMap[0] = 0 (the `$sdst` source register)
+  //     srcMap[1] = 1 (the `$simm16` immediate)
+  //
+  // Pre-fix bug: the handler read `op.src(0)` as the immediate,
+  // but `op.src(0)` is `$sdst` — same SGPR that `readReg32(op.dst())`
+  // already returned. So `icmp eq %sdst, %imm` reduced to
+  // `icmp eq %sdst, %sdst` = always true, writing a trivially-set
+  // SCC irrespective of the comparison's actual truth. Gfx12+
+  // dropped the `s_cmpk_*_i32/u32` mnemonics entirely (the
+  // SOPK_Real defm caps at gfx11), so gfx1250-source lifts cannot
+  // reach this arm and the bug only surfaces on gfx9xx-source
+  // kernels (AITER corpus). No AITER kernel in the currently-
+  // tested subset exercises it, which is why the bug survived.
+  //
+  // Fix: read the immediate from `op.src(1)`, matching the
+  // documented SOPK_SCC layout above.
   if (sop == SemOp::S_CMPK_EQ_I32 || sop == SemOp::S_CMPK_EQ_U32 ||
       sop == SemOp::S_CMPK_LG_I32 || sop == SemOp::S_CMPK_LG_U32 ||
       (sop >= SemOp::S_CMPK_GE_I32 && sop <= SemOp::S_CMPK_LT_U32)) {
     Value *sdst = ctx.regs.readReg32(ctx.B, op.dst());
-    Value *imm = op.src(0);
+    Value *imm = op.src(1);  // $simm16; op.src(0) aliases sdst
     Value *cmp = nullptr;
     if (sop == SemOp::S_CMPK_EQ_I32 || sop == SemOp::S_CMPK_EQ_U32)
       cmp = ctx.B.CreateICmpEQ(sdst, imm, "scmpk");

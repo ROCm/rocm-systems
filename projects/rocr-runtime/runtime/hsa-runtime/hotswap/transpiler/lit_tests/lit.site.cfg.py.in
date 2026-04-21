@@ -197,6 +197,19 @@ config.fixtures = {
     # to `op.src(0)` would pass every other test in the repo.
     "s_mulk_i32":
         r"@LIT_FIXTURE_S_MULK_I32_CO@",
+    # s_cmpk_eq_i32 (SOPK_SCC) — pins the operand-index contract
+    # for the compare-and-SCC SOPK family (S_CMPK_{EQ,LG,GT,GE,
+    # LT,LE}_{I,U}32). Single fixture covers all twelve variants
+    # by handler-shape identity (same `op.src(1)` read, only the
+    # icmp predicate differs).
+    #
+    # ISA gating: `s_cmpk_*_i32/u32` was dropped on gfx12, so
+    # gfx1250-source kernels cannot emit the opcode and the
+    # pre-fix bug only surfaced on gfx9xx-source kernels (AITER
+    # corpus). Fixture compiles for gfx950 and raises with
+    # `--isa=gfx950 --target-isa=gfx942`.
+    "s_cmpk_eq_i32":
+        r"@LIT_FIXTURE_S_CMPK_EQ_I32_CO@",
     # s_atomic_dec (SMEM, gfx8+ scalar-cache wrap-decrement) — pins the
     # `atomicrmw udec_wrap` lowering the handle_smem.cpp scalar-atomic
     # block emits for the AITER split-k barrier counter shape.  Closes
