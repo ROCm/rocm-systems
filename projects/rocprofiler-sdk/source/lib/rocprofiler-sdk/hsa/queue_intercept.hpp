@@ -221,23 +221,6 @@ void
 process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t ring_doorbell);
 
 /**
- * @brief Compute inflated ring size for K-factor metadata queues
- *
- * Given a requested queue size and K-factor, computes the actual ring buffer
- * size needed to accommodate both application packets and metadata packets.
- *
- * For K=0 (trace-only), returns the requested size unchanged.
- * For K>0, inflates by (1 + K) * 2 and rounds up to next power of two.
- * Maximum ring size is capped at 262144 packets.
- *
- * @param requested_size Application-requested queue size
- * @param k_factor Number of metadata packets per application packet
- * @return Inflated ring size (power of two)
- */
-uint32_t
-compute_inflated_ring_size(uint32_t requested_size, uint64_t k_factor);
-
-/**
  * @brief Create and register queue state
  *
  * Allocates a QueueState for the given queue and registers it in both the
