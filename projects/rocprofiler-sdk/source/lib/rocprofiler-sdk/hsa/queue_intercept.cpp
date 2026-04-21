@@ -28,6 +28,7 @@
 
 #include <cstring>
 #include <limits>
+#include <thread>
 #include <vector>
 
 namespace rocprofiler
@@ -120,8 +121,7 @@ store_write_index_impl(QueueState* state, uint64_t value)
     }
     state->virtual_wptr.store(value, std::memory_order_relaxed);
     ROCP_INFO << "[QI:store_write_index] queue=" << state->hsa_queue << ", app_value=" << app_v
-              << ", stride=" << stride << ", prev_virtual=" << prev
-              << ", stored_virtual=" << value;
+              << ", stride=" << stride << ", prev_virtual=" << prev << ", stored_virtual=" << value;
 }
 
 uint64_t
@@ -137,10 +137,9 @@ cas_write_index_impl(QueueState* state, uint64_t expected, uint64_t value)
     bool     success =
         state->virtual_wptr.compare_exchange_strong(prev, value, std::memory_order_relaxed);
     ROCP_INFO << "[QI:cas_write_index] queue=" << state->hsa_queue << ", expected=" << expected
-              << ", app_value=" << app_v << ", scaled_value=" << value
-              << ", observed_prev=" << prev << ", success=" << (success ? 1 : 0)
-              << ", current_virtual="
-              << state->virtual_wptr.load(std::memory_order_relaxed);
+              << ", app_value=" << app_v << ", scaled_value=" << value << ", observed_prev=" << prev
+              << ", success=" << (success ? 1 : 0)
+              << ", current_virtual=" << state->virtual_wptr.load(std::memory_order_relaxed);
     return prev;
 }
 
@@ -176,7 +175,43 @@ namespace
 thread_local QueueState* tls_state      = nullptr;
 thread_local uint64_t    tls_submit_pos = 0;
 thread_local uint32_t    tls_pkt_size   = 64;
+thread_local uint64_t    tls_call_id    = 0;
+thread_local const char* tls_phase      = "unknown";
 std::atomic<uint64_t>    s_doorbell_call_id{0};
+
+inline void
+wait_for_free_slot(QueueState* state, uint64_t submit_pos, const char* phase, uint64_t call_id)
+{
+    uint64_t wait_loops = 0;
+    while(true)
+    {
+        auto real_rdid = __atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE);
+        auto ring_used = submit_pos - real_rdid;
+        if(ring_used < state->ring_size)
+        {
+            if(wait_loops > 0)
+            {
+                ROCP_INFO << "[QI:backpressure_resume] id=" << call_id
+                          << ", queue=" << state->hsa_queue << ", phase=" << phase
+                          << ", wait_loops=" << wait_loops << ", submit_pos=" << submit_pos
+                          << ", real_rdid=" << real_rdid << ", ring_used=" << ring_used
+                          << ", ring_size=" << state->ring_size;
+            }
+            return;
+        }
+
+        if(wait_loops == 0 || (wait_loops % 1024) == 0)
+        {
+            ROCP_INFO << "[QI:backpressure_wait] id=" << call_id << ", queue=" << state->hsa_queue
+                      << ", phase=" << phase << ", wait_loops=" << wait_loops
+                      << ", submit_pos=" << submit_pos << ", real_rdid=" << real_rdid
+                      << ", ring_used=" << ring_used << ", ring_size=" << state->ring_size;
+        }
+
+        ++wait_loops;
+        std::this_thread::yield();
+    }
+}
 
 void
 ring_buffer_writer(const void* pkts, uint64_t pkt_count)
@@ -186,6 +221,7 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
     const auto* src      = static_cast<const char*>(pkts);
     for(uint64_t i = 0; i < pkt_count; i++)
     {
+        wait_for_free_slot(state, tls_submit_pos, tls_phase, tls_call_id);
         auto        slot = tls_submit_pos & state->ring_mask;
         auto*       dst  = static_cast<char*>(state->ring_buf) + (slot * pkt_size);
         const auto* s    = src + i * pkt_size;
@@ -210,22 +246,20 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     const uint64_t scan_end = state_ptr->virtual_wptr.load(std::memory_order_acquire);
     const uint64_t stride   = 1 + state_ptr->k_factor;
     const uint64_t call_id  = s_doorbell_call_id.fetch_add(1, std::memory_order_relaxed) + 1;
-    const uint64_t real_wdid_before =
-        __atomic_load_n(state_ptr->real_wdid, __ATOMIC_ACQUIRE);
-    const uint64_t real_rdid_before =
-        __atomic_load_n(state_ptr->real_rdid, __ATOMIC_ACQUIRE);
+    const uint64_t real_wdid_before = __atomic_load_n(state_ptr->real_wdid, __ATOMIC_ACQUIRE);
+    const uint64_t real_rdid_before = __atomic_load_n(state_ptr->real_rdid, __ATOMIC_ACQUIRE);
 
     ROCP_INFO << "[QI:doorbell_begin] id=" << call_id << ", queue=" << state_ptr->hsa_queue
               << ", signal_value=" << value << ", k_factor=" << state_ptr->k_factor
-              << ", stride=" << stride << ", scan_pos=" << scan_pos
-              << ", scan_end=" << scan_end << ", next_submit_pos=" << state_ptr->next_submit_pos
+              << ", stride=" << stride << ", scan_pos=" << scan_pos << ", scan_end=" << scan_end
+              << ", next_submit_pos=" << state_ptr->next_submit_pos
               << ", real_wdid=" << real_wdid_before << ", real_rdid=" << real_rdid_before
               << ", ring_size=" << state_ptr->ring_size;
 
     if(scan_pos >= scan_end)
     {
-        ROCP_INFO << "[QI:doorbell_passthrough] id=" << call_id << ", queue=" << state_ptr->hsa_queue
-                  << ", reason=scan_pos>=scan_end";
+        ROCP_INFO << "[QI:doorbell_passthrough] id=" << call_id
+                  << ", queue=" << state_ptr->hsa_queue << ", reason=scan_pos>=scan_end";
         ring_doorbell(state_ptr->doorbell_signal, value);
         return;
     }
@@ -262,9 +296,11 @@ process_doorbell_impl(const queue_state_ptr_t& state,
         memcpy(source_snapshot.data() + (i * state_ptr->pkt_size), src, state_ptr->pkt_size);
     }
 
-    tls_state      = state_ptr;
-    tls_submit_pos = state_ptr->next_submit_pos;
-    tls_pkt_size   = state_ptr->pkt_size;
+    tls_state                 = state_ptr;
+    tls_submit_pos            = state_ptr->next_submit_pos;
+    tls_pkt_size              = state_ptr->pkt_size;
+    tls_call_id               = call_id;
+    tls_phase                 = "rewrite";
     uint64_t start_submit_pos = tls_submit_pos;
 
     auto*        qc = get_queue_controller();
@@ -287,29 +323,30 @@ process_doorbell_impl(const queue_state_ptr_t& state,
                   << ", input_pkt_count=" << pkt_count << ", written_pkt_count=" << written
                   << ", expansion="
                   << ((written >= pkt_count) ? (written - pkt_count) : uint64_t{0})
-                  << ", shrink="
-                  << ((written < pkt_count) ? (pkt_count - written) : uint64_t{0});
+                  << ", shrink=" << ((written < pkt_count) ? (pkt_count - written) : uint64_t{0});
 
         if(written != pkt_count)
         {
-            ROCP_WARNING << "K=0 write-interceptor changed packet count without stride reservation. "
-                         << "queue=" << state_ptr->hsa_queue << ", input_pkt_count=" << pkt_count
-                         << ", written_pkt_count=" << written;
+            ROCP_WARNING
+                << "K=0 write-interceptor changed packet count without stride reservation. "
+                << "queue=" << state_ptr->hsa_queue << ", input_pkt_count=" << pkt_count
+                << ", written_pkt_count=" << written;
         }
     }
     else
     {
-        uint64_t min_used         = std::numeric_limits<uint64_t>::max();
-        uint64_t max_used         = 0;
-        uint64_t total_used       = 0;
-        uint64_t used_lt_stride   = 0;
-        uint64_t used_eq_stride   = 0;
-        uint64_t used_gt_stride   = 0;
-        uint64_t used_ne_one      = 0;
+        uint64_t min_used       = std::numeric_limits<uint64_t>::max();
+        uint64_t max_used       = 0;
+        uint64_t total_used     = 0;
+        uint64_t used_lt_stride = 0;
+        uint64_t used_eq_stride = 0;
+        uint64_t used_gt_stride = 0;
+        uint64_t used_ne_one    = 0;
         for(uint64_t i = 0; i < pkt_count; ++i)
         {
             auto*    pkt          = source_snapshot.data() + (i * state_ptr->pkt_size);
             uint64_t start_submit = tls_submit_pos;
+            tls_phase             = "rewrite";
 
             if(queue)
             {
@@ -336,6 +373,8 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 
             for(uint64_t n = used; n < stride; ++n)
             {
+                tls_phase = "padding";
+                wait_for_free_slot(state_ptr, tls_submit_pos, tls_phase, tls_call_id);
                 auto  slot = tls_submit_pos & state_ptr->ring_mask;
                 auto* dst  = static_cast<char*>(state_ptr->ring_buf) + (slot * state_ptr->pkt_size);
                 memset(dst, 0, state_ptr->pkt_size);
@@ -347,10 +386,11 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 
         ROCP_INFO << "[QI:kN_write_summary] id=" << call_id << ", queue=" << state_ptr->hsa_queue
                   << ", pkt_count=" << pkt_count << ", stride=" << stride
-                  << ", total_used=" << total_used << ", min_used="
-                  << ((pkt_count > 0) ? min_used : uint64_t{0}) << ", max_used=" << max_used
-                  << ", used_lt_stride=" << used_lt_stride << ", used_eq_stride=" << used_eq_stride
-                  << ", used_gt_stride=" << used_gt_stride << ", used_ne_one=" << used_ne_one;
+                  << ", total_used=" << total_used
+                  << ", min_used=" << ((pkt_count > 0) ? min_used : uint64_t{0})
+                  << ", max_used=" << max_used << ", used_lt_stride=" << used_lt_stride
+                  << ", used_eq_stride=" << used_eq_stride << ", used_gt_stride=" << used_gt_stride
+                  << ", used_ne_one=" << used_ne_one;
     }
 
     state_ptr->next_scan_pos   = scan_end;
@@ -362,9 +402,9 @@ process_doorbell_impl(const queue_state_ptr_t& state,
             sync_metadata_impl(state_ptr, nullptr, 0);
     }
 
-    auto doorbell_val = static_cast<hsa_signal_value_t>(state_ptr->next_submit_pos - 1);
-    auto real_rdid    = __atomic_load_n(state_ptr->real_rdid, __ATOMIC_ACQUIRE);
-    auto ring_used    = (state_ptr->next_submit_pos - real_rdid);
+    auto doorbell_val  = static_cast<hsa_signal_value_t>(state_ptr->next_submit_pos - 1);
+    auto real_rdid     = __atomic_load_n(state_ptr->real_rdid, __ATOMIC_ACQUIRE);
+    auto ring_used     = (state_ptr->next_submit_pos - real_rdid);
     auto written_total = state_ptr->next_submit_pos - start_submit_pos;
     ROCP_INFO << "[QI:doorbell_end] id=" << call_id << ", queue=" << state_ptr->hsa_queue
               << ", pkt_count=" << pkt_count << ", written_total=" << written_total
