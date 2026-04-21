@@ -550,6 +550,18 @@ void Device::tearDown() {
     return;
   }
 #endif  // _WIN32
+  // Skip Hsa::shut_down() when the C++ atexit chain is tearing the runtime
+  // down. Calling it from the atexit chain forces libhsa-runtime64 to release
+  // its internal arena while other rocclr and libhsa-runtime64 statics (e.g.
+  // Signal::ipcMap_ and the loader's leaked Executables vector) still hold
+  // pointers into that freed memory. Their later destructors UAF onto
+  // main_arena and corrupt adjacent free-bin chunks, which is then detected
+  // by glibc's malloc_consolidate when libgcc's FDE teardown frees a
+  // neighboring chunk. On explicit hsa_init/hsa_shut_down by the application
+  // we still take the call.
+  if (amd::Runtime::isLibraryDetached()) {
+    return;
+  }
   Hsa::shut_down();
 }
 

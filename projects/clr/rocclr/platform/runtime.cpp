@@ -126,6 +126,14 @@ RuntimeTearDown::~RuntimeTearDown() {
       ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "~RuntimeTearDown release external object: %p", it);
       it->release();
     }
+    // Mark the library as detached so that any downstream tearDown() path
+    // knows we are running in the C++ atexit chain, not in an explicit
+    // hsa_init/hsa_shut_down call. Device::tearDown() uses this to skip
+    // Hsa::shut_down() during _dl_fini, because the ordering between HSA's
+    // internal cleanup and true-static globals in libhsa-runtime64 (e.g.
+    // Signal::ipcMap_ and the loader's leaked Executables vector) is
+    // undefined and causes intermittent heap corruption at process exit.
+    Runtime::setLibraryDetached();
     Runtime::tearDown();
   }
 #endif
