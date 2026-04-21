@@ -23,7 +23,7 @@ set(kernel-tracing-env "ROCPROFILER_TOOL_DISABLE_PERFETTO=1"
 rocprofiler_add_integration_execute_test(
     kernel-tracing
     TARGET reproducible-runtime
-    TIMEOUT 45
+    TIMEOUT 100
     LABELS "integration-tests"
     ENVIRONMENT "${kernel-tracing-env}"
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"

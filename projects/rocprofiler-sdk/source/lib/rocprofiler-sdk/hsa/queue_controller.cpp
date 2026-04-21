@@ -21,14 +21,12 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
-#include "lib/common/environment.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_intercept.hpp"
-#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <hsa/amd_hsa_queue.h>
 
@@ -249,10 +247,8 @@ compute_queue_k_factor()
 
         const bool has_dispatch_counter = (itr->dispatch_counter_collection != nullptr);
         const bool has_dispatch_tt      = (itr->dispatch_thread_trace != nullptr);
-        const bool has_kernel_cb =
-            itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH);
-        const bool has_kernel_buf =
-            itr->is_tracing(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
+        const bool has_kernel_cb  = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH);
+        const bool has_kernel_buf = itr->is_tracing(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
 
         if(has_dispatch_counter || has_dispatch_tt)
         {
@@ -266,31 +262,6 @@ compute_queue_k_factor()
     return k;
 }
 
-QueueController::~QueueController()
-{
-    size_t queue_count     = 0;
-    size_t callback_count  = 0;
-    size_t serializer_sets = 0;
-
-    _queues.rlock([&](const auto& map) { queue_count = map.size(); });
-    _callback_cache.rlock([&](const auto& map) { callback_count = map.size(); });
-    _profiler_serializer.rlock([&](const auto& map) { serializer_sets = map.size(); });
-
-    ROCP_INFO << "[TEARDOWN-DIAG][QC-DTOR] this=" << this
-              << " fini_status=" << registration::get_fini_status()
-              << " queue_count=" << queue_count << " callback_count=" << callback_count
-              << " serializer_sets=" << serializer_sets;
-
-    _queues.rlock([&](const auto& map) {
-        for(const auto& [queue_id, queue_ptr] : map)
-        {
-            ROCP_INFO << "[TEARDOWN-DIAG][QC-DTOR-QUEUE] queue=" << queue_id
-                      << " queue_obj=" << queue_ptr.get();
-        }
-    });
-}
-
-void
 QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 {
     CHECK(queue);
@@ -298,7 +269,7 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 
     _callback_cache.wlock([&](auto& callbacks) {
         _queues.wlock([&](auto& map) {
-            map[id]             = std::move(queue);
+            map[id] = std::move(queue);
             for(const auto& [cbid, cb_data] : callbacks)
             {
                 auto& [agent, cb] = cb_data;
@@ -315,10 +286,6 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
     // TODO: queue_intercept currently captures k_factor once at queue-init.
     // Revisit to support dynamic k-factor updates during submission.
     auto k_factor = compute_queue_k_factor();
-    ROCP_INFO << "[DIAG-HG-QUEUE-ADD] queue=" << id << " agent="
-              << agent_id.handle << " k_factor=" << k_factor
-              << " write_dispatch_id_ptr=" << &amd_q->write_dispatch_id
-              << " read_dispatch_id_ptr=" << &amd_q->read_dispatch_id;
     queue_intercept::create_queue_state(
         id, &amd_q->write_dispatch_id, &amd_q->read_dispatch_id, k_factor);
 }
@@ -326,57 +293,17 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 void
 QueueController::destroy_queue(hsa_queue_t* id)
 {
-    if(!id)
-    {
-        ROCP_WARNING << "[TEARDOWN-DIAG][QC-DESTROY-NULL] fini_status="
-                     << registration::get_fini_status();
-        return;
-    }
+    if(!id) return;
 
     const auto* queue = get_queue(*id);
 
     // return if queue does not exist
-    if(!queue)
-    {
-        ROCP_WARNING << "[TEARDOWN-DIAG][QC-DESTROY-MISS] queue=" << id
-                     << " fini_status=" << registration::get_fini_status();
-        return;
-    }
-
-    auto state_before = queue_intercept::lookup_queue_state(id);
-
-    ROCP_INFO << "[TEARDOWN-DIAG][QC-DESTROY-BEGIN] queue=" << id
-              << " state_present=" << static_cast<bool>(state_before)
-              << " state_id=" << (state_before ? state_before->debug_id : 0)
-              << " doorbell=" << (state_before ? state_before->doorbell_signal.handle : 0)
-              << " fini_status=" << registration::get_fini_status();
+    if(!queue) return;
 
     queue_intercept::destroy_queue_state(id);
-
-    auto state_after = queue_intercept::lookup_queue_state(id);
-    ROCP_WARNING_IF(state_after != nullptr)
-        << "[TEARDOWN-DIAG][QC-DESTROY-STATE-STILL-PRESENT] queue=" << id
-        << " state_id=" << state_after->debug_id;
-
-    ROCP_INFO << "[TEARDOWN-DIAG][QC-DESTROY-SYNC-BEGIN] queue=" << id;
     queue->sync();
-    ROCP_INFO << "[TEARDOWN-DIAG][QC-DESTROY-SYNC-END] queue=" << id;
-
-    if(queue->block_signal.handle != 0)
-    {
-        auto status = get_core_table().hsa_signal_destroy_fn(queue->block_signal);
-        ROCP_INFO << "[TEARDOWN-DIAG][QC-DESTROY-BLOCK-SIGNAL] queue=" << id
-                  << " signal=" << queue->block_signal.handle
-                  << " status=" << static_cast<int>(status);
-    }
-
-    _queues.wlock([&](auto& map) {
-        auto erased = map.erase(id);
-        ROCP_INFO << "[TEARDOWN-DIAG][QC-DESTROY-MAP] queue=" << id << " erased=" << erased
-                  << " remaining=" << map.size();
-    });
-
-    ROCP_INFO << "[TEARDOWN-DIAG][QC-DESTROY-END] queue=" << id;
+    if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);
+    _queues.wlock([&](auto& map) { map.erase(id); });
 }
 
 ClientID
@@ -655,26 +582,11 @@ enable_queue_intercept()
         bool has_scratch_reporting = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY) ||
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
 
-        ROCP_INFO << "[DIAG-HG-INTERCEPT-CONTEXT] ctx=" << itr->context_idx
-                  << " dispatch_counter_collection=" << (itr->dispatch_counter_collection != nullptr)
-                  << " pc_sampler=" << (itr->pc_sampler != nullptr)
-                  << " has_kernel_tracing=" << has_kernel_tracing
-                  << " has_scratch_reporting=" << has_scratch_reporting
-                  << " device_counter_collection=" << (itr->device_counter_collection != nullptr)
-                  << " device_thread_trace=" << (itr->device_thread_trace != nullptr)
-                  << " dispatch_thread_trace=" << (itr->dispatch_thread_trace != nullptr);
-
         if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
            has_scratch_reporting || itr->device_counter_collection || itr->device_thread_trace ||
            itr->dispatch_thread_trace)
-        {
-            ROCP_INFO << "[DIAG-HG-INTERCEPT-REASON] ctx=" << itr->context_idx
-                      << " enabled=true";
             return true;
-        }
     }
-
-    ROCP_INFO << "[DIAG-HG-INTERCEPT-REASON] enabled=false";
     return false;
 }
 
@@ -696,33 +608,13 @@ queue_controller_sync()
 void
 queue_controller_fini()
 {
-    if(auto* controller = get_queue_controller(); controller != nullptr)
-    {
-        size_t queue_count = 0;
-        ROCP_INFO << "[TEARDOWN-DIAG][QC-FINI-BEGIN] fini_status="
-                  << registration::get_fini_status();
-        controller->iterate_queues([&](const Queue* _queue) {
-            ++queue_count;
-            _queue->sync();
-        });
-        ROCP_INFO << "[TEARDOWN-DIAG][QC-FINI-SYNCED] queue_count=" << queue_count;
-    }
+    if(get_queue_controller())
+        get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
 
     // finalize queue data (e.g. clean up signal pool)
-    if(enable_queue_intercept())
-    {
-        ROCP_INFO << "[TEARDOWN-DIAG][QC-FINI-QUEUE-FINI-BEGIN]";
-        queue_fini();
-        ROCP_INFO << "[TEARDOWN-DIAG][QC-FINI-QUEUE-FINI-END]";
-    }
+    if(enable_queue_intercept()) queue_fini();
 
-    const auto inline_intercept_active = queue_intercept::is_intercepting_inline();
-    ROCP_INFO << "[TEARDOWN-DIAG][QC-FINI-QI-SHUTDOWN-CHECK] inline_intercept_active="
-              << inline_intercept_active;
-
-    ROCP_INFO << "[TEARDOWN-DIAG][QC-FINI-QI-SHUTDOWN-BEGIN]";
     queue_intercept::shutdown_intercept();
-    ROCP_INFO << "[TEARDOWN-DIAG][QC-FINI-QI-SHUTDOWN-END]";
 }
 
 void
