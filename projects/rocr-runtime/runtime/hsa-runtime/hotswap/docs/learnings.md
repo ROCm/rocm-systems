@@ -8,6 +8,119 @@ Append-only. Newest on top.
 
 ---
 
+## 2026-04-21 — Matmul128x128 residual: narrowed to wave-3 + K-iter-0 (prologue) + A-data side
+
+**Context.** Follow-up to the "data-substitution bug, NOT a collect-stage
+defect" entry below. Two further diagnostic probes added to isolate the
+defect axis.
+
+**What was done.** Added `MatmulDataPattern::EvenRows` (A[i,·] = 1 iff i
+is even, B = 1) and `MatmulDataPattern::KStripedRow124` (A[124,k] striped
+per K-iter: 0.1 / 0.2 / 0.4 / 0.8 for k in [0,32)/[32,64)/[64,96)/[96,128)),
+wired each through `doTestMatmul` and registered as XFAIL.
+
+**What the evidence shows (in order of what each probe rules out).**
+
+1. **`EvenRows` — wave-3 specificity.** Errors appear ONLY at rows 125
+   and 127 of the output. Rows 12..15, 28..31, 44..47, 60..63, 76..79,
+   92..95, 108..111 — every OTHER "sub-tile-row-1 rows 12..15" band
+   across warps 0/1/2 — are correct. Under the kernel's `4-warp × 32-row`
+   tiling (`maxFlatWorkgroupSize=128` → 4 source Wave32s; 128 output
+   rows / 4 warps = 32 rows/warp; 32 rows = 2 sub-tile rows × 16), each
+   warp has a "sub-tile row 1 rows 12..15" band that a general
+   pass-2 / row-12..15 defect would affect. Only WARP 3's band
+   (= rows 124..127) does. Source wave 3 = target wave 1 lanes 32..63 =
+   pass-2 of `runGroupPass` on target wave 1; source wave 1 = target
+   wave 0 lanes 32..63 is ALSO "pass-2" and is CORRECT, so the defect
+   is NOT pass-2 in general.
+
+2. **`KStripedRow124` — K-iter 0 specificity.** With A[124,·] striped
+   so each K-iter contributes a unique amount (3.2 / 6.4 / 12.8 / 25.6,
+   summing to 48.0), the observed `C[124, ·] ≈ 44.8 = 48.0 - 3.2`
+   identifies the missing contribution as K-iter 0 (k in [0,32)).
+   This is the prologue 16-WMMA block in the disassembly (lines
+   1564..1649 of `matmul_f16_large_gfx1250.hsaco`), NOT the main
+   K-loop body. The prologue uses `s_set_vgpr_msb` to address the
+   upper VGPR bank (v[300:331] for A sources via `/*v[300:307]*/`
+   aliasing); the main loop uses the lower bank (v[128:159]). The
+   bug therefore implicates the upper-bank-loaded A path, not the
+   lower-bank path the main loop uses.
+
+**Refined defect statement.** "Warp 3's prologue WMMA output for rows
+12..15 of its sub-tile row 1 (= global rows 124..127) receives
+A-fragment contribution from warp 0's A-rows 0, 2, 4, 6 — a
+cross-warp, wave-3-specific, K-iter-0-specific data substitution on
+the A-fragment side of the WMMA chain, on the UPPER-VGPR-BANK path
+(`s_set_vgpr_msb` active)."
+
+**What NOT to waste time on.**
+
+- The substituted source rows (0, 2, 4, 6 in GLOBAL A-matrix, not
+  0, 2, 4, 6 intra-sub-tile) definitively rule out a local lane-map
+  defect in `wmma_lowering.cpp`. See RowIdA arithmetic: `3.968 =
+  4.000 - 32 * A[0] = 32 * (A[124] - A[0])` for row 124;
+  intra-sub-tile row 0 would be A[112] = 113/1000, which produces
+  `15.616`, not the observed `12.032`.
+- The bug is invariant under WaveNative vs ModuloReplication
+  projection (handoff confirmed, re-verified here: `EvenRows`
+  produces identical errors under both). So `WaveNativeProjection::
+  emitInitialExec` and the `init_whole_wave` hardware-EXEC path are
+  not implicated.
+
+**What to investigate next (sharpened from the earlier entry).**
+
+1. **The upper-VGPR-bank A load chain for source wave 3.** In the
+   prologue, `ds_load_tr16_b128 v[44:47] /*v[300:303]*/, v72 /*v328*/`
+   (and its 7 siblings at offsets 64/128/192/4608/4672/4736/4800)
+   writes A data into v[300:331] under `s_set_vgpr_msb 0x41` (dst +
+   src0 MSB=1). The LDS base address is in v72 (= v328 under MSB
+   adjust), computed per-lane from `s8 + v229 + v230` (`v_add3_u32`,
+   line 1534). Trace what warp 3 lanes see as v328 vs what warp 0
+   lanes see — the `A[0,·]` substitution implies warp 3 is reading
+   warp 0's LDS region for this specific load.
+
+2. **Wave-ID plumbing under cross-widening.** The matmul lifts
+   `s_bfe_u32 ttmp8, 0x50019` to `(workitem.id.x >> 5) & 0x1F`. For
+   a 128-thread workgroup on target Wave64 lanes 0..127, this gives
+   per-lane values `0,0,...,0 (×32) | 1,1,...,1 (×32)` on target
+   wave 0 and `2,2,...,2 (×32) | 3,3,...,3 (×32)` on target wave 1.
+   The source kernel MAY assume wave_id is WAVE-UNIFORM (one value
+   per hardware wave). Under modulo-replication, target wave 1 has
+   TWO different wave_id values (2 and 3) on its two halves. If
+   ANY downstream use of this per-lane value goes through a scalar
+   operation (readfirstlane, scalar spill/reload, or an SGPR-
+   constrained consumer the writelane/readlane rewrite's forward-
+   use-chain classifier didn't catch), the wave-3 lanes would see
+   wave_id=2 and read warp-0's LDS region via a derivation like
+   `s73 = s2 & 3` → LDS offset. But substituted = warp 0 (not warp 2),
+   so it's NOT wave-id-collapse-to-peer (which would give warp 2).
+   Check if there's a `readfirstlane` or similar on the wave_id-
+   derived SGPR chain that could collapse warp 3's value to WARP
+   0's (e.g. an SGPR broadcast from lane 0 under a narrow EXEC).
+
+3. **The 8 `ds_load_tr16_b128` instruction offsets.** They split
+   {0, 64, 128, 192} + {4608, 4672, 4736, 4800} into two groups of
+   4. The group of 4 with larger offsets is at +4608 = +0x1200 = +4K
+   into LDS — crosses into a second 4K LDS region. Check whether
+   wave 3's LDS stride for the prologue's first load causes it to
+   wrap around into wave 0's region.
+
+4. **The `compare_correctness` `makeSSetVgprMsbRecipe()` probe.**
+   It is already wired to exercise the upper-VGPR-bank path with a
+   non-WMMA kernel. Run it under the same
+   `--enable-writelane-rewrite + --enable-wave-native` config as
+   the matmul and check whether warp-3-specific data substitution
+   appears there too. Same result would confirm the bug is in
+   MSB-path lifting; a clean run would localise to the
+   LDS-side-of-WMMA interaction.
+
+**Files touched:**
+`tests/gfx1250_gpu_test.cpp` (`EvenRows`, `KStripedRow124` patterns
++ `TEST_F` registrations), `tests/xfail.cmake` (four `WILL_FAIL`
+entries + commentary), this doc.
+
+---
+
 ## 2026-04-21 — Matmul128x128 residual: data-substitution bug, NOT a collect-stage defect
 
 **Context.** Follow-up investigation of the `Gfx1250Gpu.Matmul128x128*`

@@ -236,7 +236,14 @@ static void doTestWmmaProbe(const char *kernelName, int numTiles,
 //               bug is masked.  When uniform passes but random fails,
 //               the remaining bug is isolated to the WMMA operand
 //               layout or accumulator redistribution.
-enum class MatmulDataPattern { Random, Uniform, RowIdA, RowOnly124 };
+enum class MatmulDataPattern {
+  Random,
+  Uniform,
+  RowIdA,
+  RowOnly124,
+  EvenRows,
+  KStripedRow124,  // row 124 tagged by K-strip; 0 elsewhere
+};
 
 static void doTestMatmul(const char *hsacoFile, int M, int N, int K,
                          const char *label,
@@ -245,6 +252,8 @@ static void doTestMatmul(const char *hsacoFile, int M, int N, int K,
   if (pattern == MatmulDataPattern::Uniform) patternStr = "uniform";
   else if (pattern == MatmulDataPattern::RowIdA) patternStr = "rowIdA";
   else if (pattern == MatmulDataPattern::RowOnly124) patternStr = "rowOnly124";
+  else if (pattern == MatmulDataPattern::EvenRows) patternStr = "evenRows";
+  else if (pattern == MatmulDataPattern::KStripedRow124) patternStr = "kStripedRow124";
   printf("--- matmul_kernel (%s, M=%d N=%d K=%d, pattern=%s) ---\n",
          label, M, N, K, patternStr);
   std::string path = std::string(GFX1250_DATA_DIR) + "/" + hsacoFile;
@@ -298,6 +307,50 @@ static void doTestMatmul(const char *hsacoFile, int M, int N, int K,
     for (int i = 0; i < M; i++)
       for (int k = 0; k < K; k++)
         hA[i * K + k] = __float2half((i == 124) ? 1.0f : 0.0f);
+    for (auto &h : hB) h = __float2half(1.0f);
+  } else if (pattern == MatmulDataPattern::EvenRows) {
+    // A[i,k] = 1 iff i is even, else 0. B = 1.
+    // Expected C[even row, j] = K; C[odd row, j] = 0.
+    //
+    // Diagnostic: if odd-row outputs are non-zero, the kernel is
+    // substituting EVEN source rows into ODD target rows (matches
+    // the `A[0], A[2], A[4], A[6]` substitution pattern observed
+    // in RowIdA for output rows 124..127). If ONLY rows 125, 127
+    // (not 60-63, 92-95) are non-zero, the defect is wave-3-
+    // specific; if ALL odd rows (12-15 → 0, 28-31 → 0, 44-47 → 0
+    // etc., 60-63, 92-95, 124-127) show substitution, the defect
+    // is a general pass-2 collect bug that is MASKED for rows 12-
+    // 15 etc. by some other factor.
+    for (int i = 0; i < M; i++)
+      for (int k = 0; k < K; k++)
+        hA[i * K + k] = __float2half((i & 1) == 0 ? 1.0f : 0.0f);
+    for (auto &h : hB) h = __float2half(1.0f);
+  } else if (pattern == MatmulDataPattern::KStripedRow124) {
+    // A[124, k] distinct per K-strip so each K-iter contributes a
+    // unique amount. A[other rows] = 0. B = 1.
+    //   k in [  0,  32): A[124,k] = 0.1  → ref contribution 3.2
+    //   k in [ 32,  64): A[124,k] = 0.2  → ref contribution 6.4
+    //   k in [ 64,  96): A[124,k] = 0.4  → ref contribution 12.8
+    //   k in [ 96, 128): A[124,k] = 0.8  → ref contribution 25.6
+    // Expected C[124, j] = 48.0. Other rows = 0.
+    //
+    // The bug drops one 32-k-step chunk; the arithmetic difference
+    // from 48.0 identifies WHICH K-iter is buggy:
+    //   got = 48.0 - 3.2   → K-iter 0 (k=  0.. 31)
+    //   got = 48.0 - 6.4   → K-iter 1 (k= 32.. 63)
+    //   got = 48.0 - 12.8  → K-iter 2 (k= 64.. 95)
+    //   got = 48.0 - 25.6  → K-iter 3 (k= 96..127)
+    for (int i = 0; i < M; i++)
+      for (int k = 0; k < K; k++) {
+        float v = 0.0f;
+        if (i == 124) {
+          if (k < 32)       v = 0.1f;
+          else if (k < 64)  v = 0.2f;
+          else if (k < 96)  v = 0.4f;
+          else              v = 0.8f;
+        }
+        hA[i * K + k] = __float2half(v);
+      }
     for (auto &h : hB) h = __float2half(1.0f);
   } else {
     std::mt19937 rng(123);
@@ -915,6 +968,16 @@ TEST_F(Gfx1250Gpu, Matmul128x128_1tile_RowOnly124) {
   doTestMatmul("matmul_f16_large_gfx1250.hsaco", 128, 128, 128,
                "128x128 tile 1-tile rowOnly124",
                MatmulDataPattern::RowOnly124);
+}
+TEST_F(Gfx1250Gpu, Matmul128x128_1tile_EvenRows) {
+  doTestMatmul("matmul_f16_large_gfx1250.hsaco", 128, 128, 128,
+               "128x128 tile 1-tile evenRows",
+               MatmulDataPattern::EvenRows);
+}
+TEST_F(Gfx1250Gpu, Matmul128x128_1tile_KStripedRow124) {
+  doTestMatmul("matmul_f16_large_gfx1250.hsaco", 128, 128, 128,
+               "128x128 tile 1-tile kStripedRow124",
+               MatmulDataPattern::KStripedRow124);
 }
 TEST_F(Gfx1250Gpu, Matmul128x128_1tile_UniformDiag) {
   doTestMatmul("matmul_f16_large_gfx1250.hsaco", 128, 128, 128,

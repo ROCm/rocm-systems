@@ -132,6 +132,45 @@ set_tests_properties(Gfx1250Gpu.Matmul128x128_1tile_RowOnly124 PROPERTIES
   LABELS "transpiler;xfail"
 )
 
+# Two further diagnostic probe patterns that narrow the Matmul128x128
+# defect further:
+#
+#   Matmul128x128_1tile_EvenRows: A[i,k] = 1 iff i is even, else 0,
+#     B = 1. Reference C[even row, j] = K, C[odd row, j] = 0.
+#     Failing runs show errors ONLY at rows 125 and 127 — NOT at
+#     rows 60-63, 92-95, or any other "sub-tile row 1 rows 12..15"
+#     for warps 0/1/2 (the other sub-tile-row-1 bands at rows
+#     12..15 / 28..31 / 44..47 / 76..79 / 108..111). This proves
+#     the defect is WAVE-3-SPECIFIC (source wave 3 = warp 3 =
+#     output rows 96..127 under the 4-warp × 32-row tiling), not a
+#     general "WMMA pass-2 collect on rows 12..15" defect that
+#     would affect every warp's sub-tile-row-1.
+#
+#   Matmul128x128_1tile_KStripedRow124: A[124,k] striped per K-
+#     iteration (0.1 / 0.2 / 0.4 / 0.8 for k in [0,32) / [32,64) /
+#     [64,96) / [96,128)); A[other] = 0, B = 1. Reference
+#     C[124,j] = 32*(0.1+0.2+0.4+0.8) = 48.0. The arithmetic
+#     difference from 48.0 identifies WHICH K-iter's 32 k-steps
+#     are missing. Failing runs show got ≈ 44.8 = 48.0 - 3.2 =
+#     missing K-iter 0 (the PROLOGUE k in [0,32)). Rules out
+#     main-loop K-iter as the culprit and pins the defect to the
+#     prologue 16-WMMA block.
+#
+# Combined, the four diagnostic probes identify the defect as:
+# "warp 3's prologue WMMA output for rows 12..15 of its sub-tile
+# row 1 (= global rows 124..127) receives A-data contribution from
+# warp 0's A-rows 0, 2, 4, 6 — a cross-warp, wave-3-specific,
+# K-iter-0-specific data substitution on the A-fragment side of the
+# WMMA chain".
+set_tests_properties(Gfx1250Gpu.Matmul128x128_1tile_EvenRows PROPERTIES
+  WILL_FAIL TRUE
+  LABELS "transpiler;xfail"
+)
+set_tests_properties(Gfx1250Gpu.Matmul128x128_1tile_KStripedRow124 PROPERTIES
+  WILL_FAIL TRUE
+  LABELS "transpiler;xfail"
+)
+
 # Gfx1250Gpu.Softmax graduated from XFAIL to expected-pass once
 # the P2 rewrite (v_permlane16 / v_permlanex16 emulation via
 # ds_bpermute_b32; see the permlane16/permlanex16 row of
