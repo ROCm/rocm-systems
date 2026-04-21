@@ -196,9 +196,196 @@ perfxpert analyze -i trace.db --format markdown -d ./out -o report
 perfxpert analyze -i trace.db --format webview -d ./out -o report
 ```
 
+<<<<<<< HEAD
 The webview format produces a self-contained HTML file (AMD dark
 theme, SVG gauges, collapsible recommendation cards) suitable for
 sharing over email.
+
+#### Source-line correlation
+
+When `--source-dir` is supplied alongside `-i`, every row of the
+**Top Kernel Hotspots** table grows a `▾` chevron next to the kernel
+name. Clicking the chevron expands an inline panel — same visual
+style as the Recommendation card drawer — showing the kernel's
+**Definition** (file:line where the `__global__` symbol is declared)
+and every detected **Launch site** (file:line of each
+`hipLaunchKernelGGL` / triple-angle dispatch). Each line renders with
+a `Copy` button and a launch-type badge (`__global__`,
+`HIP_KERNEL_LAUNCH`, `<<< >>>`), VTune/NSight-style.
+
+When `--source-dir` is **not** supplied the panel is still present
+but explains how to enable the correlation. When the scanner did run
+but no symbol matches the hotspot's basename, the panel shows
+"No matching source location detected" — useful signal that the
+profiled binary and the `--source-dir` tree may be out of sync.
+
+Source-line correlation is data, not advice, so the panel ships
+regardless of the Tier-0 instrumentation-advice gate (`has_profiling`).
+The markdown and text formats append a compact
+`Source: file.hip:42 (definition), file.hip:88 (launch)` line under
+each hotspot row; the JSON format emits
+`hotspots[i].source_locations: [{file, line, kind}]` (schema
+`0.3.1`).
+
+#### ATT flame graph
+
+When the input DB carries Advanced Thread Trace (ATT) data — i.e.
+`perfxpert analyze -i trace.db --att-dir <att/>` — the Thread Trace
+scard renders a dependency-free **inline SVG flame graph** directly
+below the per-kernel stall table. One horizontal row per kernel, one
+stacked rectangle per stall category (VMEM latency / LDS conflict /
+dependency chain / branch divergence), width proportional to the
+weighted stall bucket. Colors reuse the webview stall-category
+palette, wide rects carry an inline `<label> <pct>%` tag, narrow ones
+fall back to the shared hover-tooltip.
+
+Click any rectangle to jump straight to the matching recommendation
+card (`id="rec-<kernel>"`), which briefly flashes to help you trace
+the visual signal back to the structured advice. Wheel-zoom works on
+the SVG `viewBox` (double-click to reset). The whole element is a
+single self-contained `<svg>` — no Speedscope, no D3, no Chart.js,
+no external CSS — so the report still opens correctly from any
+`file://` path in an airgapped viewer.
+
+```html
+<!-- shape (truncated) inside the Thread Trace `.scard` -->
+<div class="att-flame">
+  <svg class="att-flame-svg" viewBox="0 0 960 …" …>
+    <rect class="att-flame-rect" data-k="kernel_foo"
+          onclick="…scrollIntoView('rec-kernel_foo')…" fill="#ff8c00"/>
+    …
+  </svg>
+</div>
+```
+
+The flame graph is webview-only; the Markdown / text / JSON formats
+already surface the same data via the per-kernel stall table and
+`thread_trace` key respectively, so no schema bump was required.
+
+### Report contents (every format)
+
+Every format — text, JSON, markdown, webview — carries the same
+dataset. The deterministic pass runs unconditionally (even with
+`--llm <prov>` or under airgap); the LLM supplies narrative +
+primary-bottleneck + recommendation prose on top. The four formats
+differ only in rendering, not in completeness. Every report
+contains:
+
+- **Agent narrative** — the LLM prose (or the airgap template in
+  deterministic mode), spliced at the top of the report under a
+  "Summary" heading.
+- **Primary bottleneck** — explicit label (compute / memory_transfer
+  / latency / mixed / data_insufficient).
+- **Time breakdown** — kernel / memcpy / API-overhead percentages
+  plus total runtime and kernel count.
+- **Hotspot list** — top-N kernels ranked by total duration, with
+  call count, avg / min / max duration, percent of total.
+- **Memory analysis** — H2D / D2H / D2D volumes, total duration, and
+  average bandwidth per direction.
+- **Hardware counters** — Tier-2 derived metrics (GPU utilization,
+  avg waves, HBM utilization) plus the raw collected counter table.
+  Shows a graceful "not collected" placeholder when the `.db` was
+  captured without `--pmc`.
+- **Kernel resources / occupancy** — VGPR / SGPR / LDS / scratch and
+  theoretical occupancy for each hotspot kernel when the trace
+  carries kernel-symbol metadata.
+- **API overhead breakdown** — top HIP / HSA API calls by total time
+  plus warmup outliers when detected.
+- **Thread-trace (Tier 3)** — included when `--att-dir` is set;
+  per-instruction stall ratio and bottleneck category (VMEM,
+  LDS-bank, dep-chain, branch-divergence).
+- **Tier-0 source findings** — included when `--source-dir` is set;
+  detected kernels, anti-patterns, suggested counters, and the
+  suggested first-profiling command.
+- **Recommendations (merged)** — LLM + deterministic recommendations
+  merged and deduped by target, each with category / issue /
+  suggestion / citation / code-snippet-before / code-snippet-after
+  (where available).
+- **Warnings** — alert block (empty when no warnings fire).
+- **Metadata** — GPU arch, DB path, kernel count, total runtime,
+  provider, model (footer).
+
+The JSON format exposes each section under a flat top-level key
+(`.time_breakdown`, `.hotspots`, `.memory_analysis`,
+`.hardware_counters`, `.kernel_resources`, `.api_overhead`,
+`.tier0_findings`, `.recommendations`, `.narrative`,
+`.primary_bottleneck`, `.warnings`, `.metadata`) — so `jq` pipelines
+can slice the report without reaching into nested schema shapes.
+
+### Report structure
+
+Every report renders the same top-level sections in a fixed order. The
+main take-away: **the Tier-0 source scan always lives in its own
+section — NEVER folded into the main recommendations table**.
+
+The webview emits the following 7 top-level sections, in order:
+
+1. **Overview** — bottleneck verdict, total runtime, kernel-time KPI,
+   analysis tier (all inside the first `.scard` card right after the
+   `<header>`).
+2. **Summary** — agent narrative (findings-derived: dominant kernel +
+   metric evidence + primary-bottleneck verdict). Never routing prose.
+   Emitted as a `.scard` labelled "Summary" with the primary bottleneck
+   surfaced as a header pill and warnings as a findings list.
+3. **Execution Breakdown** — stacked kernel / memcpy / API-overhead /
+   GPU-idle bar + per-row details.
+4. **Top Kernel Hotspots** — top-N kernels by total duration.
+5. **Hardware Counters** — Tier-2 gauges (GPU utilization, wave
+   occupancy) + raw counter table. Renders a Tier-1 placeholder when
+   counters are missing.
+6. **Optimization Recommendations** — merged LLM + deterministic
+   recommendations, deduped by target. **Only real perf-issue items**
+   (e.g. hot-kernel triage, cache-unfriendly access, synchronous
+   hipMemcpy patterns). Instrumentation advice (what counters to
+   collect, what rocprofv3 command to run first) is **NOT** in this
+   list.
+7. **Tier-0 Source Scan** — only when `--source-dir` is set. Emitted
+   as a single wrapper `.scard` (id `tier0-scan`) containing
+   `<h3>Profiling Plan</h3>` (suggested `rocprofv3 --sys-trace …`
+   command, suggested counters, other instrumentation actions) and a
+   **Detected Code Patterns** table with actual code-level perf issues
+   found by the scanner (these ALSO appear in the main Recommendations
+   list so they don't get overlooked).
+
+The Markdown format mirrors this exactly: `# PerfXpert AI Performance
+Analysis` → `## Summary` (narrative + warnings) → `---` horizontal rule
+→ `**Database:**` / `**Analysis Date:**` / `**Analysis Tier:**`
+metadata block → `## Time Breakdown` → `## Top Kernel Hotspots` → …
+→ `## Recommendations` → (if `--source-dir`) `---` →
+`## Tier 0 — Source Scan`.
+
+The Text format prepends a SUMMARY banner (with the primary bottleneck,
+narrative, and warnings) above the TIME BREAKDOWN table, keeps every
+other section in the same order as the webview, and ends with the
+TIER-0: PROFILING PLAN + DETECTED CODE PATTERNS banners when
+`--source-dir` is set.
+
+The JSON format exposes each section under a flat top-level key
+(`.time_breakdown`, `.hotspots`, `.memory_analysis`,
+`.hardware_counters`, `.kernel_resources`, `.api_overhead`,
+`.tier0_findings`, `.recommendations`, `.narrative`,
+`.primary_bottleneck`, `.warnings`, `.metadata`). The Tier-0 block
+lives under `.tier0_findings.profiling_plan` +
+`.tier0_findings.code_patterns`. The document carries
+`"schema_version": "0.3.0"` on every agentic run (bumps to `"0.3.1"`
+when `--source-dir` was supplied and at least one hotspot carries
+`source_locations`; bumps to `"0.4.0"` when ATT data is present).
+The legacy `.llm_enhanced_explanation` key mirrors `.narrative` for
+backwards compat; new consumers should read `.narrative` directly.
+
+### Severity legend — hotspot panel
+
+Each hotspot row (and expanded source panel) carries a severity
+class derived from its share of total runtime. The webview colors
+the left border + pill badge; the markdown / text formats emit a
+`[CRITICAL] / [HOT] / [WARM] / [COOL]` tag on the citation line.
+
+| Class | Threshold (% of total runtime) |
+|-------|-------------------------------|
+| CRITICAL | ≥ 20% |
+| HOT | 5% – 20% |
+| WARM | 1% – 5% |
+| COOL | < 1% |
 
 ## 5. Multi-GPU / MPI workflows
 
