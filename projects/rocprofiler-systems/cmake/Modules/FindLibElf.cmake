@@ -55,13 +55,13 @@ foreach(l ${LibElf_LIBRARIES})
 
     # The library version number is stored in CMAKE_MATCH_1
     set(_cur_ver ${CMAKE_MATCH_1})
-    if(NOT "x${_cur_ver}" STREQUAL "x")
-        if("${_cur_ver}" VERSION_GREATER "${_max_ver}")
-            set(_max_ver "${_cur_ver}")
+    if(NOT "x${_cur_ver}" STREQUAL "x" AND "${_cur_ver}" VERSION_GREATER "${_max_ver}")
+        set(_max_ver "${_cur_ver}")
+        set(_max_ver_lib "${l}")
+    else()
+        if("${_max_ver}" VERSION_EQUAL "0.0" AND "x${_max_ver_lib}" STREQUAL "x")
             set(_max_ver_lib "${l}")
         endif()
-    else()
-        set(_max_ver_lib "${l}")
     endif()
 endforeach()
 
@@ -86,6 +86,7 @@ if("${_max_ver}" VERSION_EQUAL "0.0" AND NOT "x${_version_file_path}" STREQUAL "
 endif()
 unset(_version_line)
 unset(_version)
+unset(_version_file_path)
 
 # Set the exported variables to the best match
 set(LibElf_LIBRARIES ${_max_ver_lib})
