@@ -73,12 +73,11 @@ create_queue(hsa_agent_t        agent,
                                                                                queue);
                 if(status != HSA_STATUS_SUCCESS) return status;
 
-                new_queue = std::make_unique<Queue>(
-                    agent_info,
-                    controller->get_core_table(),
-                    controller->get_ext_table(),
-                    *queue,
-                    [](write_interceptor_t, void*) {});
+                new_queue = std::make_unique<Queue>(agent_info,
+                                                    controller->get_core_table(),
+                                                    controller->get_ext_table(),
+                                                    *queue,
+                                                    [](write_interceptor_t, void*) {});
             }
             else
             {
@@ -252,7 +251,8 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 
     // Register queue state for SDK-level write pointer interception
     auto* amd_q = reinterpret_cast<amd_queue_t*>(id);
-    queue_intercept::create_queue_state(id, &amd_q->write_dispatch_id, &amd_q->read_dispatch_id, 0);
+    queue_intercept::create_queue_state(
+        id, &amd_q->write_dispatch_id, &amd_q->read_dispatch_id, compute_queue_k_factor());
 }
 
 void
@@ -560,6 +560,16 @@ enable_queue_intercept()
     }
 
     return false;
+}
+
+uint64_t
+compute_queue_k_factor()
+{
+    for(const auto& itr : context::get_registered_contexts())
+    {
+        if(itr->dispatch_counter_collection || itr->dispatch_thread_trace) return 7;
+    }
+    return 0;
 }
 
 void
