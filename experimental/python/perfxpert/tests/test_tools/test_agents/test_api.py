@@ -19,6 +19,7 @@ _AGENT_NAMES = (
     "agent_compute_specialist",
     "agent_memory_specialist",
     "agent_latency_specialist",
+    "agent_diff_specialist",
 )
 
 # Non-agent callables that live alongside the agent mirrors in
@@ -30,7 +31,7 @@ _NON_AGENT_API_NAMES = (
 
 
 def test_api_exports_exactly_the_agent_tools_plus_trace_diff() -> None:
-    """``api.__all__`` lists the 7 agent callables + the trace-diff mirror."""
+    """``api.__all__`` lists the 8 agent callables + the trace-diff mirror."""
     from perfxpert import api
 
     expected = tuple(sorted(_AGENT_NAMES + _NON_AGENT_API_NAMES))

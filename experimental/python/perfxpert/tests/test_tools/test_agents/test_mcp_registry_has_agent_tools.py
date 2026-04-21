@@ -1,4 +1,4 @@
-"""The MCP registry exposes the 7 agent tools as READ_ONLY.
+"""The MCP registry exposes the 8 agent tools as READ_ONLY.
 
 Regression guard for the agents-as-MCP-tools surface: the auto-discovery
 walker must recurse into ``perfxpert.tools.agents`` so every agent in
@@ -25,10 +25,11 @@ _EXPECTED_AGENT_TOOLS = {
     "agent_compute_specialist",
     "agent_memory_specialist",
     "agent_latency_specialist",
+    "agent_diff_specialist",
 }
 
 
-def test_registry_exposes_all_seven_agent_tools() -> None:
+def test_registry_exposes_all_eight_agent_tools() -> None:
     from mcp_server._registry import discover_read_only_tools
 
     reg = discover_read_only_tools()
@@ -66,15 +67,18 @@ def test_old_run_root_analysis_tool_is_gone() -> None:
     )
 
 
-def test_total_tool_count_is_42() -> None:
-    """After the trace_diff tool landed (Confluence row #7) the registry
-    should hold 35 non-agent tools plus 7 agent tools — 42 total."""
+def test_total_tool_count_is_43() -> None:
+    """After the diff_specialist agent landed (Confluence row #7 follow-on)
+    the registry should hold 35 non-agent tools plus 8 agent tools — 43
+    total (34 classifier/knowledge + 1 trace_diff + 8 agent hierarchy)."""
     from mcp_server._registry import discover_read_only_tools
 
     reg = discover_read_only_tools()
-    assert len(reg) == 42, (
-        f"expected 42 tools (35 non-agent + 7 agent); got {len(reg)}: "
+    assert len(reg) == 43, (
+        f"expected 43 tools (35 non-agent + 8 agent); got {len(reg)}: "
         f"{sorted(reg.keys())}"
     )
     # trace_diff lives alongside regression as a READ_ONLY tool.
     assert "trace_diff.diff_runs" in reg
+    # The 8th agent tool, exposed under the overridden ``__tool_name__``.
+    assert "agent_diff_specialist" in reg

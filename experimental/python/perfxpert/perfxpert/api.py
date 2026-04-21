@@ -26,6 +26,7 @@ agent tools defer to :func:`perfxpert.agents.runtime.build_session`.
 from perfxpert.tools.agents.analysis import agent_analysis
 from perfxpert.tools.agents.compute import agent_compute_specialist
 from perfxpert.tools.agents.correctness import agent_correctness
+from perfxpert.tools.agents.diff import agent_diff_specialist
 from perfxpert.tools.agents.latency import agent_latency_specialist
 from perfxpert.tools.agents.memory import agent_memory_specialist
 from perfxpert.tools.agents.recommendation import agent_recommendation
@@ -40,5 +41,6 @@ __all__ = [
     "agent_compute_specialist",
     "agent_memory_specialist",
     "agent_latency_specialist",
+    "agent_diff_specialist",
     "trace_diff_diff_runs",
 ]

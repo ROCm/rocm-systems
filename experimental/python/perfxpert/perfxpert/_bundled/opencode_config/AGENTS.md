@@ -95,11 +95,16 @@ Layer 0 — Root (delegates by intent)
   launch-overhead / short-kernel techniques. Same idea, for
   latency-bound work.
 
+- **`perfxpert_agent_diff_specialist`** — when the user wants to
+  compare two profiling runs, call this instead of running analyze
+  twice. Inputs: `baseline_db`, `new_db`. Output: regression /
+  improvement verdict + per-kernel delta + narrative.
+
 You choose. Pick the tool that matches the decision you need —
 don't over-use Root if the user already gave you the bottleneck.
 
-4. **Non-agent perfxpert tools.** In addition to the 7 agent tools
-   above, the MCP server also exposes 34 pure-Python analysis tools
+4. **Non-agent perfxpert tools.** In addition to the 8 agent tools
+   above, the MCP server also exposes 35 pure-Python analysis tools
    (architecture peaks, counter lookups, bottleneck classification,
    roofline, regression compare, trace fingerprint, etc.). Those are
    safe to call at any time; they don't make LLM calls and they don't

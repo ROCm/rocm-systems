@@ -1,4 +1,4 @@
-"""Smoke tests for the 7 agent MCP tool wrappers.
+"""Smoke tests for the 8 agent MCP tool wrappers.
 
 Each tool in ``perfxpert.tools.agents.*`` should:
   1. Be annotated with ``@tool_class(ToolClass.READ_ONLY)``.
@@ -8,6 +8,7 @@ Each tool in ``perfxpert.tools.agents.*`` should:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict
 
 import pytest
@@ -17,6 +18,7 @@ from perfxpert.tools.agents import (
     agent_analysis,
     agent_compute_specialist,
     agent_correctness,
+    agent_diff_specialist,
     agent_latency_specialist,
     agent_memory_specialist,
     agent_recommendation,
@@ -56,6 +58,7 @@ def _enable_airgap(monkeypatch):
         agent_compute_specialist,
         agent_memory_specialist,
         agent_latency_specialist,
+        agent_diff_specialist,
     ],
 )
 def test_tool_is_read_only(fn) -> None:
@@ -183,3 +186,40 @@ def test_specialist_airgap_returns_techniques_shape(
         assert key in result, f"{fn.__name__} missing {key!r}"
     assert isinstance(result["techniques"], list)
     assert isinstance(result["citations"], list)
+
+
+# ---------------------------------------------------------------------------
+# Diff specialist (8th agent) — end-to-end airgap happy path.
+# ---------------------------------------------------------------------------
+
+
+_FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures"
+_BASELINE_DB = _FIXTURES_DIR / "regression_baseline.db"
+_REGRESSED_DB = _FIXTURES_DIR / "regressed.db"
+
+
+def test_agent_diff_specialist_airgap_returns_expected_shape() -> None:
+    """Diff specialist airgap path returns the documented 6-key dict."""
+    assert _BASELINE_DB.exists(), _BASELINE_DB
+    assert _REGRESSED_DB.exists(), _REGRESSED_DB
+
+    result = agent_diff_specialist(
+        baseline_db=str(_BASELINE_DB),
+        new_db=str(_REGRESSED_DB),
+        airgap=True,
+    )
+    expected_keys = {
+        "wall_delta_pct",
+        "regressions",
+        "improvements",
+        "verdict",
+        "narrative",
+        "confidence",
+    }
+    missing = expected_keys - set(result)
+    assert not missing, f"agent_diff_specialist missing keys: {missing}"
+    assert result["verdict"] in {"improved", "regressed", "neutral"}
+    assert isinstance(result["regressions"], list)
+    assert isinstance(result["improvements"], list)
+    assert isinstance(result["narrative"], str) and result["narrative"]
+    assert 0.0 <= float(result["confidence"]) <= 1.0

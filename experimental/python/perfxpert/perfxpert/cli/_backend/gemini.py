@@ -66,6 +66,7 @@ _KNOWN_TOOLS: tuple[str, ...] = (
     "agent_compute_specialist",
     "agent_memory_specialist",
     "agent_latency_specialist",
+    "agent_diff_specialist",
 )
 
 
