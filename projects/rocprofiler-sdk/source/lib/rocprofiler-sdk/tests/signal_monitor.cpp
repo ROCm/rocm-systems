@@ -25,6 +25,12 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+
 namespace rocprofiler::hsa::test
 {
 TEST(signal_monitor, evaluate_condition_eq)
@@ -68,5 +74,98 @@ TEST(signal_monitor, parse_backend_env)
         EXPECT_EQ(parse_signal_monitor_backend_env(), SignalMonitorBackend::auto_select);
         env.pop();
     }
+}
+
+TEST(signal_monitor, polling_fires_once_for_eq)
+{
+    SignalMonitorConfig cfg{};
+    cfg.poll_interval_us = 1;
+    cfg.callback_threads = 1;
+
+    std::atomic<hsa_signal_value_t> value{0};
+    SignalMonitorOps ops{};
+    ops.load = [&](hsa_signal_t) { return value.load(); };
+
+    auto monitor = create_signal_monitor(SignalMonitorBackend::poll, cfg, ops);
+    ASSERT_NE(monitor, nullptr);
+
+    hsa_signal_t signal{};
+    signal.handle = 1;
+
+    std::mutex              mutex;
+    std::condition_variable cv;
+    int                     calls = 0;
+
+    monitor->subscribe(signal, HSA_SIGNAL_CONDITION_EQ, 1, [&](hsa_signal_value_t) {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            ++calls;
+        }
+        cv.notify_all();
+        return false;
+    });
+
+    monitor->start();
+    value.store(1);
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        ASSERT_TRUE(cv.wait_for(lock, std::chrono::milliseconds{50}, [&]() { return calls == 1; }));
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        EXPECT_EQ(calls, 1);
+    }
+
+    monitor->stop();
+}
+
+TEST(signal_monitor, polling_unsubscribe_prevents_callback)
+{
+    SignalMonitorConfig cfg{};
+    cfg.poll_interval_us = 1;
+    cfg.callback_threads = 1;
+
+    std::atomic<hsa_signal_value_t> value{0};
+    SignalMonitorOps ops{};
+    ops.load = [&](hsa_signal_t) { return value.load(); };
+
+    auto monitor = create_signal_monitor(SignalMonitorBackend::poll, cfg, ops);
+    ASSERT_NE(monitor, nullptr);
+
+    hsa_signal_t signal{};
+    signal.handle = 2;
+
+    std::mutex              mutex;
+    std::condition_variable cv;
+    int                     calls = 0;
+
+    auto id = monitor->subscribe(signal, HSA_SIGNAL_CONDITION_EQ, 1, [&](hsa_signal_value_t) {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            ++calls;
+        }
+        cv.notify_all();
+        return false;
+    });
+
+    ASSERT_TRUE(monitor->unsubscribe(id));
+
+    monitor->start();
+    value.store(1);
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait_for(lock, std::chrono::milliseconds{20}, [&]() { return calls != 0; });
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        EXPECT_EQ(calls, 0);
+    }
+
+    monitor->stop();
 }
 }  // namespace rocprofiler::hsa::test

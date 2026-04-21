@@ -12,7 +12,8 @@ set(ROCPROFILER_LIB_HSA_SOURCES
     queue_controller.cpp
     queue.cpp
     scratch_memory.cpp
-    signal_monitor.cpp)
+    signal_monitor.cpp
+    signal_monitor_polling.cpp)
 
 set(ROCPROFILER_LIB_HSA_HEADERS
     agent_cache.hpp

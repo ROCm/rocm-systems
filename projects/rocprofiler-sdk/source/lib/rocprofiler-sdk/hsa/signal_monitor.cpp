@@ -26,6 +26,9 @@
 
 namespace rocprofiler::hsa
 {
+std::shared_ptr<SignalMonitor>
+create_polling_signal_monitor(const SignalMonitorConfig& cfg, SignalMonitorOps ops);
+
 bool
 evaluate_signal_condition(hsa_signal_condition_t condition,
                           hsa_signal_value_t     current,
@@ -53,9 +56,11 @@ parse_signal_monitor_backend_env()
 std::shared_ptr<SignalMonitor>
 create_signal_monitor(SignalMonitorBackend backend, const SignalMonitorConfig& cfg, SignalMonitorOps ops)
 {
-    (void) backend;
-    (void) cfg;
-    (void) ops;
+    if(backend == SignalMonitorBackend::poll || backend == SignalMonitorBackend::auto_select)
+    {
+        return create_polling_signal_monitor(cfg, std::move(ops));
+    }
+
     return {};
 }
 }  // namespace rocprofiler::hsa
