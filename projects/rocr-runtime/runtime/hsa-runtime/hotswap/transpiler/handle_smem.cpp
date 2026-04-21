@@ -135,7 +135,7 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
       // kernarg_layout.cpp must keep that fixture's IR signature
       // and `phi i32 [ %arg{1,2}, ... ]` data-flow pins green.
       for (int d = 0; d < loadDwords; ++d) {
-        int dwordOffset = static_cast<int>(byteOffset) + d * 4;
+        int dwordOffset = (int)byteOffset + d * 4;
         std::string why;
         Value *v = extractKernargDword(ctx.kernargs, ctx.B, ctx.kernel,
                                        dwordOffset, &why);
@@ -356,14 +356,48 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
 
-  // s_atomic_swap: atomic exchange on memory through SGPR pair base pointer.
-  // HW only returns the old value when GLC=1; we always write it back,
-  // which is conservative (harmless when GLC=0 since the dest is dead).
-  if (sop == SemOp::S_ATOMIC_SWAP) {
+  // SMEM dword atomics: operate on memory through an SGPR-pair base
+  // pointer with an IMM / SGPR / SGPR_IMM offset.  HW only returns the
+  // pre-modification value when GLC=1; we always write it back, which is
+  // conservative (harmless when GLC=0 since the dest is dead).
+  //
+  // This block covers the atomics whose scalar-cache semantics map onto a
+  // single LLVM `atomicrmw` BinOp.  Each entry picks which one:
+  //   S_ATOMIC_SWAP -> Xchg        (pure exchange)
+  //   S_ATOMIC_DEC  -> UDecWrap    (AMDGPU HW wrap-at-zero decrement:
+  //                                 new = (old==0 || old>src) ? src
+  //                                                           : old - 1,
+  //                                 matching LLVM's UDecWrap binop)
+  //
+  // The returned-old-value write-back is the hot path: AITER split-k
+  // reductions (bf16gemm_*_splitk_clean) key the "last workgroup runs
+  // the epilogue" barrier on `old == 1`, so dropping the dst store
+  // would silently break the branch that follows.
+  AtomicRMWInst::BinOp rmwOp;
+  int opDwords = 1;
+  bool handledScalarAtomic = false;
+  switch (sop) {
+  case SemOp::S_ATOMIC_SWAP:
+    rmwOp = AtomicRMWInst::Xchg;
+    handledScalarAtomic = true;
+    break;
+  case SemOp::S_ATOMIC_DEC:
+    rmwOp = AtomicRMWInst::UDecWrap;
+    handledScalarAtomic = true;
+    break;
+  default:
+    break;
+  }
+  if (handledScalarAtomic) {
     assert(((di.tsFlags & SIInstrFlags::IsAtomicRet) != 0) == (di.numDefs > 0) &&
-           "s_atomic_swap: IsAtomicRet disagrees with numDefs");
+           "SMEM atomic: IsAtomicRet disagrees with numDefs");
     ParsedReg dataDst = op.dst();
     ParsedReg base = op.srcReg(0);
+    // For the `_RTN` form the dst register is tied to the input data
+    // slot (the disassembler emits only `(sdst, sbase, offset)` even
+    // though TableGen declares `$sdst_in` tied), so the input value of
+    // the atomic op — the xchg data for swap, the wrap-threshold for
+    // dec — comes from the *pre-instruction* value of the dst register.
     Value *data = ctx.regs.readReg32(ctx.B, dataDst);
 
     Value *baseAddr = ctx.regs.loadSGPR64(ctx.B, base.baseIdx);
@@ -375,17 +409,19 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
       if (off != 0)
         ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, ctx.B.getInt64(off));
     } else {
-      // S_ATOMIC_SWAP is a dword op, so `scale_offset` multiplies
-      // the SGPR offset by 4. Same rule as the other SMEM paths.
+      // Dword-width atomic, so the `scale_offset` (CPol::SCAL) bit
+      // scales the SGPR element-index by 4 to recover the byte
+      // offset — same rule as the other SMEM paths.
       Value *regOff = ctx.B.CreateZExt(op.src(1), ctx.i64Ty, "smem_at_roff");
       if (di.hasScaleOffset)
-        regOff = ctx.B.CreateMul(regOff, ConstantInt::get(ctx.i64Ty, 4),
+        regOff = ctx.B.CreateMul(regOff,
+                                 ConstantInt::get(ctx.i64Ty, 4 * opDwords),
                                  "smem_at_roff_scaled");
       ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, regOff);
     }
 
-    Value *old = ctx.B.CreateAtomicRMW(AtomicRMWInst::Xchg, ptr, data,
-                                       MaybeAlign(), AtomicOrdering::Monotonic);
+    Value *old = ctx.B.CreateAtomicRMW(rmwOp, ptr, data, MaybeAlign(),
+                                       AtomicOrdering::Monotonic);
     ctx.regs.storeSGPR32(ctx.B, dataDst.baseIdx, old);
     hr.handled = true;
     return hr;

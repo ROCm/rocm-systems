@@ -548,7 +548,23 @@ enum class SemOp : uint16_t {
   GLOBAL_ATOMIC_PK_ADD_BF16, GLOBAL_ATOMIC_PK_ADD_F16,
 
   // -- SMEM atomics --
+  // gfx8+ scalar-cache atomics.  Lifted to `atomicrmw` IR via handle_smem.cpp;
+  // the SCOPE/GLC bits fold into AtomicOrdering (monotonic) and whether the
+  // return-value slot is written back.
+  //
+  // S_ATOMIC_DEC has wrap-at-zero semantics that do NOT match a plain
+  // `atomicrmw sub` — the hardware computes
+  //   new = (old == 0 || old > src) ? src : old - 1
+  // which is exactly LLVM's `AtomicRMWInst::UDecWrap` binop (landed in
+  // LLVM 19).  The canonical split-k "last workgroup runs the epilogue"
+  // barrier counter is the overwhelming corpus use (every AITER
+  // `bf16gemm_*_splitk_clean.co` kernel), keyed on whether the returned
+  // pre-decrement value equals 1.  Like S_ATOMIC_SWAP this op is classed
+  // NonCommutative for the Class-3 wave-size obstruction classifier in
+  // wave_size_obstruction.cpp (a lane-id-derived decrement sequence's
+  // outcome is replica-order-dependent under modulo-replication).
   S_ATOMIC_SWAP,
+  S_ATOMIC_DEC,
 
   // -- DS --
   DS_LOAD_TR16_B128,

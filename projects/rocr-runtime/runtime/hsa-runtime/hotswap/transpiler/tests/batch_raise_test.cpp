@@ -164,15 +164,25 @@ struct ForkRaiseStats {
 
 // Passing `expectedFailures < 0` disables the regression check and turns the
 // test into a pure coverage report (used by the --test-all full sweep).
+//
+// `compilationTargetIsa` names the target we lower to; pass an empty string
+// to request the legacy round-trip (source == target) behaviour, or a
+// distinct ISA string (e.g. "gfx942") to model the real "race" pipeline where
+// source kernels are executed on a different ISA's hardware.  Threaded into
+// the fifth positional argument of `raiseToIR`; see raiser.cpp:80.
 static void runBatchRaiseIsolated(const std::vector<std::string> &coFiles,
                                   const std::string &isa,
+                                  const std::string &compilationTargetIsa,
                                   const std::string &label,
                                   int expectedFailures) {
   ASSERT_FALSE(coFiles.empty()) << "No .co files provided";
 
   printf("=== Batch LLVM IR Raiser Test (fork-isolated) ===\n");
   printf("Scope:  %s\n", label.c_str());
-  printf("Target ISA: %s\n", isa.c_str());
+  printf("Source ISA: %s\n", isa.c_str());
+  printf("Target ISA: %s\n",
+         compilationTargetIsa.empty() ? isa.c_str()
+                                      : compilationTargetIsa.c_str());
   if (expectedFailures < 0) {
     printf("Code objects: %zu (coverage-only; regression check disabled)\n\n",
            coFiles.size());
@@ -207,7 +217,9 @@ static void runBatchRaiseIsolated(const std::vector<std::string> &coFiles,
         int devnull = open("/dev/null", O_WRONLY);
         if (devnull >= 0) { dup2(devnull, STDERR_FILENO); close(devnull); }
         auto meta = transpiler::extractKernelMeta(coData, kName);
-        auto raised = transpiler::raiseToIR(text.bytes, isa, kName, meta);
+        auto raised = transpiler::raiseToIR(text.bytes, isa, kName, meta,
+                                            /*kernelOffset=*/0,
+                                            compilationTargetIsa);
         shm->success = raised.success;
         if (!raised.success) {
           strncpy(shm->failMnemonic, raised.failure.mnemonic.c_str(),
@@ -333,6 +345,15 @@ static std::vector<std::string> selectAiterRepresentativeSubset(
 // Fork-isolated so that report_fatal_error in one kernel doesn't kill the
 // test.
 //
+// Source → target shape: gfx950 source lifted against a gfx942 compilation
+// target.  This is the real "race" configuration the hotswap runtime runs
+// on an MI300 (gfx942) box — hand-off from the AITER corpus to the hotswap
+// pipeline.  A naive round-trip (gfx950 → gfx950) would hide every
+// target-capability branch (e.g. `ctx.targetIsa.hasWMMA12` in
+// handle_valu_vop3p.cpp — see hotswap/docs/target-capability-dispatch.md
+// §3) by always taking the native path, overstating what actually works on
+// the race box.
+//
 // By default, the test runs a deterministic *representative subset*
 // (~27 kernels, 2–3 per category; selection matches
 // hotswap/kernels/fetch_aiter_kernels.py's REPRESENTATIVE_SUBSET).  This
@@ -341,9 +362,13 @@ static std::vector<std::string> selectAiterRepresentativeSubset(
 //
 // Known-unsupported opcodes on the subset (tracked via expectedFailures):
 //   v_permlane32_swap_b32 — gfx950 cross-lane swap used by
-//     fmha_v3_fwd/fwd_hd128_bf16{,_causal,_causal_group}.co.  When raiser
-//     support lands, drop kSubsetExpectedFailures back to 0 (the test
-//     already warns when the actual count drops below the expectation).
+//     fmha_v3_fwd/fwd_hd128_bf16{,_causal,_causal_group}.co.  gfx942 has no
+//     native equivalent; a ds_bpermute-based cross-target emulation in
+//     handle_valu_cross_lane.cpp is pending (overlaps with the in-flight
+//     softmax / permlanex16 investigation, see
+//     hotswap/docs/triage-2026-04-20-softmax-matmul128.md §2).  When that
+//     lands, drop kSubsetExpectedFailures back to 0 (the test already warns
+//     when the actual count drops below the expectation).
 //
 // Pass `--test-all` to sweep the full corpus (1,300+ kernels today).  The
 // full sweep is a pure coverage report (regression check disabled) and is
@@ -375,19 +400,19 @@ TEST(BatchRaise, AiterGfx950) {
   int expectedFailures;
   if (g_config.testAll) {
     selected = allCoFiles;
-    label = "full AITER gfx950 corpus (--test-all, coverage-only)";
+    label = "full AITER gfx950 → gfx942 corpus (--test-all, coverage-only)";
     expectedFailures = -1;  // report only; don't enforce.
   } else {
     selected = selectAiterRepresentativeSubset(allCoFiles, path);
     ASSERT_FALSE(selected.empty())
         << "Representative subset is empty — check quota map vs. corpus "
            "layout at '" << path << "'";
-    label = "representative AITER gfx950 subset (pass --test-all for full "
-            "sweep)";
+    label = "representative AITER gfx950 → gfx942 subset (pass --test-all "
+            "for full sweep)";
     expectedFailures = kSubsetExpectedFailures;
   }
 
-  runBatchRaiseIsolated(selected, "gfx950", label, expectedFailures);
+  runBatchRaiseIsolated(selected, "gfx950", "gfx942", label, expectedFailures);
 }
 
 // Auto-detect ISA from a code-object path's filename (...gfx950...).
@@ -423,6 +448,11 @@ TEST(BatchRaise, CustomDir) {
     // first one's filename to pick one.
     std::string isa = isaFromCoPath(coFiles.front());
     std::string label = "--raise-dir=" + dir;
-    runBatchRaiseIsolated(coFiles, isa, label, /*expectedFailures=*/-1);
+    // CustomDir stays on the round-trip (source == target) shape: the
+    // caller's directory may contain a mix of ISAs and we have no way to
+    // know what compilation target they wanted.  AiterGfx950 above uses a
+    // fixed gfx950 → gfx942 pair because that's the canonical race config.
+    runBatchRaiseIsolated(coFiles, isa, /*compilationTargetIsa=*/"", label,
+                          /*expectedFailures=*/-1);
   }
 }

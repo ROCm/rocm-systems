@@ -175,6 +175,7 @@ const char *semOpName(SemOp op) {
     S(GLOBAL_ATOMIC_PK_ADD_BF16) S(GLOBAL_ATOMIC_PK_ADD_F16)
     // SMEM atomics
     S(S_ATOMIC_SWAP)
+    S(S_ATOMIC_DEC)
     // DS
     S(DS_LOAD_TR16_B128)
     S(DS_READ_B64_TR_B16)

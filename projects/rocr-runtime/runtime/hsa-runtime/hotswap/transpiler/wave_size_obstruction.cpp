@@ -719,13 +719,21 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
     // opcode_map.cpp + semop.cpp, not by adding a substring check
     // here. Atomics not yet modeled refuse via the existing Phase 5
     // unsupportedOpcode path.
+    // S_ATOMIC_DEC's wrap-at-zero decrement is non-commutative: two
+    // lanes in opposite source waves racing on the same counter produce
+    // different outcomes from the two possible orderings when `old`
+    // crosses the `0` or `> src` boundary on only one of them.  Every
+    // corpus producer (AITER split-k epilogue barriers) keys on the
+    // pre-decrement value being 1, so an ordering flip silently picks
+    // the wrong wave as the "last workgroup", corrupting the reduction.
     if (sop == SemOp::GLOBAL_ATOMIC_SWAP ||
         sop == SemOp::GLOBAL_ATOMIC_CMPSWAP ||
         sop == SemOp::FLAT_ATOMIC_SWAP ||
         sop == SemOp::FLAT_ATOMIC_CMPSWAP ||
         sop == SemOp::BUFFER_ATOMIC_SWAP ||
         sop == SemOp::BUFFER_ATOMIC_CMPSWAP ||
-        sop == SemOp::S_ATOMIC_SWAP) {
+        sop == SemOp::S_ATOMIC_SWAP ||
+        sop == SemOp::S_ATOMIC_DEC) {
       ObstructionSite site;
       site.inst = &di;
       site.kind = ObstructionKind::NonCommutativeAtomic;

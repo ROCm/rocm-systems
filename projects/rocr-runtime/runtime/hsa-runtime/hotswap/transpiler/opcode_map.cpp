@@ -627,6 +627,16 @@ static const Entry kCanonTable[] = {
     E(S_ATOMIC_SWAP_IMM, S_ATOMIC_SWAP),
     E(S_ATOMIC_SWAP_SGPR, S_ATOMIC_SWAP),
     E(S_ATOMIC_SWAP_SGPR_IMM, S_ATOMIC_SWAP),
+    // S_ATOMIC_DEC (scalar wrap-decrement) — the three addressing forms
+    // (IMM / SGPR / SGPR_IMM) share a SemOp.  The `_RTN` variants the
+    // disassembler emits for the GLC=1 returned-old-value form collapse
+    // onto these non-RTN pseudos via the `_RTN` alias rule below; the
+    // handler keys off `di.numDefs` (== MCInstrDesc::getNumDefs()) for
+    // the write-back decision, so a single lowering covers both halves
+    // of the contract.
+    E(S_ATOMIC_DEC_IMM, S_ATOMIC_DEC),
+    E(S_ATOMIC_DEC_SGPR, S_ATOMIC_DEC),
+    E(S_ATOMIC_DEC_SGPR_IMM, S_ATOMIC_DEC),
 
     // ---------------------------------------------------------------------
     // DS
