@@ -43,6 +43,7 @@ namespace rocshmem {
 class SdmaImpl {
  public:
   // Configuration (set from environment variables during init)
+  bool sdmaEnabled{true};
   size_t sdmaThreshold{128};  // Use SDMA for transfers >= 128B
   size_t minChunkPerChannel{4096};  // Minimum bytes per channel to avoid over-parallelization
   int numChannels{1};
@@ -58,21 +59,6 @@ class SdmaImpl {
   __host__ void sdmaHostInit(int pe, int num_pes, MPI_Comm comm);
   __host__ void sdmaHostInit(int pe, int num_pes, TcpBootstrap* bootstrap);
   __host__ void sdmaHostStop();
-
-  // Check SDMA availability for target PE
-  __device__ bool isSdmaAvailable([[maybe_unused]] int src_pe,
-                                  [[maybe_unused]] int target_pe) {
-    // SDMA is only available for local (same-node) PEs
-    // and when device handles have been initialized
-    if (deviceHandles_d == nullptr) {
-      LOGD_TRACE("anvil::isSdmaAvailable: src=%d target=%d -> false (no handles)\n",
-                 src_pe, target_pe);
-      return false;
-    }
-    LOGD_TRACE("anvil::isSdmaAvailable: src=%d target=%d -> true\n", src_pe, target_pe);
-    // For now, assume all local PEs can use SDMA
-    return true;
-  }
 
   // Device-side copy using a single channel (for single-thread operations)
   // Returns the handle used (for direct quietAll by caller).
