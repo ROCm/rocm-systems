@@ -201,35 +201,57 @@ process_doorbell_impl(QueueState*          state,
     auto*        qc    = get_queue_controller();
     const Queue* queue = (qc && state->hsa_queue) ? qc->get_queue(*state->hsa_queue) : nullptr;
 
-    // Packets are strided in the ring — process each one individually
-    for(uint64_t i = 0; i < pkt_count; i++)
+    if(state->k_factor == 0)
     {
-        uint64_t pkt_pos = scan_pos + i * stride;
-        auto*    pkt =
-            static_cast<char*>(state->ring_buf) + ((pkt_pos & state->ring_mask) * state->pkt_size);
-        uint64_t start_submit = tls_submit_pos;
+        // k_factor=0: pass entire batch to WriteInterceptor at once.
+        // WriteInterceptor may expand packets (e.g. adding completion signals,
+        // barrier packets for kernel tracing). With stride=1 there are no reserved
+        // expansion slots, so we let ring_buffer_writer write sequentially and
+        // update real_wdid to cover all output packets.
+        auto* pkt =
+            static_cast<char*>(state->ring_buf) + ((scan_pos & state->ring_mask) * state->pkt_size);
         if(queue)
         {
-            queue->invoke_write_interceptor(pkt, 1, ring_buffer_writer);
+            queue->invoke_write_interceptor(pkt, pkt_count, ring_buffer_writer);
         }
         else
         {
-            ring_buffer_writer(pkt, 1);
+            ring_buffer_writer(pkt, pkt_count);
         }
-
-        // Pad remaining slots in this stride with barrier_and (only when k_factor > 0)
-        uint64_t used = tls_submit_pos - start_submit;
-        if(state->k_factor > 0 && used < stride)
+    }
+    else
+    {
+        // k_factor>0: process each packet individually with stride padding.
+        // Each app packet occupies 1 slot, the remaining stride-1 slots are
+        // filled with barrier_and (or used by WriteInterceptor for profiling).
+        for(uint64_t i = 0; i < pkt_count; i++)
         {
-            uint64_t remaining = stride - used;
-            for(uint64_t k = 0; k < remaining; k++)
+            uint64_t pkt_pos = scan_pos + i * stride;
+            auto*    pkt     = static_cast<char*>(state->ring_buf) +
+                        ((pkt_pos & state->ring_mask) * state->pkt_size);
+            uint64_t start_submit = tls_submit_pos;
+            if(queue)
             {
-                auto  kslot = tls_submit_pos & state->ring_mask;
-                auto* kdst  = static_cast<char*>(state->ring_buf) + (kslot * state->pkt_size);
-                memset(kdst, 0, state->pkt_size);
-                *reinterpret_cast<uint16_t*>(kdst) =
-                    (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE);
-                tls_submit_pos++;
+                queue->invoke_write_interceptor(pkt, 1, ring_buffer_writer);
+            }
+            else
+            {
+                ring_buffer_writer(pkt, 1);
+            }
+
+            uint64_t used = tls_submit_pos - start_submit;
+            if(used < stride)
+            {
+                uint64_t remaining = stride - used;
+                for(uint64_t k = 0; k < remaining; k++)
+                {
+                    auto  kslot = tls_submit_pos & state->ring_mask;
+                    auto* kdst  = static_cast<char*>(state->ring_buf) + (kslot * state->pkt_size);
+                    memset(kdst, 0, state->pkt_size);
+                    *reinterpret_cast<uint16_t*>(kdst) =
+                        (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE);
+                    tls_submit_pos++;
+                }
             }
         }
     }
