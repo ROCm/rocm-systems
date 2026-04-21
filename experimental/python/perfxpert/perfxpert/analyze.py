@@ -1369,6 +1369,12 @@ _KNOWN_EXECUTE_KWARGS = frozenset({
     # Execution flags
     "verbose",
     "no_progress",
+    # ``perfxpert analyze --baseline <db>`` splice (Confluence row #7).
+    # The baseline DB is diffed via ``trace_diff.diff_runs`` after the
+    # agentic Root emits its report — the path here is plumbed through
+    # so ``_execute_agentic`` does not emit a RuntimeWarning about
+    # unused kwargs.
+    "baseline_db",
 })
 
 

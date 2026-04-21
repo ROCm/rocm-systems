@@ -50,6 +50,44 @@ from perfxpert.tools._class import ToolClass, tool_class
 _SCHEMA_VERSION = "0.3.1"
 
 
+def _resolve_verdict_threshold() -> float:
+    """Resolve the verdict threshold (% wall_delta_pct).
+
+    Mirrors ``perfxpert.cli.ci_cmd.resolve_ci_threshold`` — the same
+    ``PERFXPERT_CI_REGRESSION_THRESHOLD`` env var drives both the CI
+    gate and the ``trace_diff.verdict`` field so users get consistent
+    semantics across ``perfxpert ci``, ``perfxpert diff``, and
+    ``perfxpert analyze --baseline``. Defaults to 5.0.
+    """
+    import os
+    env = os.environ.get("PERFXPERT_CI_REGRESSION_THRESHOLD")
+    if env:
+        try:
+            return float(env)
+        except ValueError:
+            return 5.0
+    return 5.0
+
+
+def _classify_verdict(wall_delta_pct: float, threshold_pct: float) -> str:
+    """Bucket ``wall_delta_pct`` into regressed / improved / neutral.
+
+    * ``wall_delta_pct > +threshold`` → ``regressed``
+    * ``wall_delta_pct < -threshold`` → ``improved``
+    * within |threshold|               → ``neutral``
+    """
+    try:
+        pct = float(wall_delta_pct)
+    except (TypeError, ValueError):
+        pct = 0.0
+    thr = abs(float(threshold_pct))
+    if pct > thr:
+        return "regressed"
+    if pct < -thr:
+        return "improved"
+    return "neutral"
+
+
 def _safe_pct(delta: float, baseline: float) -> float:
     """Percentage change vs baseline, guarded against div-by-zero."""
     if baseline <= 0:
@@ -195,12 +233,23 @@ def diff_runs(
         key=lambda k: k["delta_pct"],
     )
 
+    # Verdict field — bucket the wall delta against the CI threshold so
+    # every downstream consumer (perfxpert analyze --baseline JSON output,
+    # perfxpert diff JSON output, MCP trace_diff_diff_runs) gets a single,
+    # consistent pass/fail signal. Threshold is resolved from
+    # ``PERFXPERT_CI_REGRESSION_THRESHOLD`` (default 5.0) to match
+    # ``perfxpert ci``.
+    _verdict_threshold = _resolve_verdict_threshold()
+    _verdict = _classify_verdict(wall_delta_pct, _verdict_threshold)
+
     result: Dict[str, Any] = {
         "schema_version": _SCHEMA_VERSION,
         "baseline_db": baseline_db,
         "new_db": new_db,
         "wall_delta_ns": int(wall_delta_ns),
         "wall_delta_pct": round(float(wall_delta_pct), 4),
+        "verdict": _verdict,
+        "verdict_threshold_pct": round(float(_verdict_threshold), 4),
         "per_kernel": per_kernel,
         "primary_regressions": regressions,
         "primary_improvements": improvements,
