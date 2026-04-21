@@ -27,6 +27,6 @@ Sleep 500ms
 Type "(perfxpert-mcp & MCP_PID=$!; sleep 3; kill $MCP_PID 2>/dev/null; wait 2>/dev/null) 2>&1 | head -5"
 Enter
 Sleep 5s
-Type "echo '# 41 tools = 7 agent-hierarchy + 34 classifier/knowledge'"
+Type "echo '# 43 tools = 8 agent-hierarchy + 34 classifier/knowledge + 1 trace_diff.diff_runs'"
 Enter
 Sleep 2s

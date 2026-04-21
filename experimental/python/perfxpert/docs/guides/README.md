@@ -34,7 +34,7 @@ GIFs under [assets/gifs/](assets/gifs/) — regenerate any of them with
 | 10 | Live progress spinner | [10-progress-spinner.gif](assets/gifs/10-progress-spinner.gif) |
 | 11 | Pre-flight auth error (clean rc=2) | [11-pre-flight-auth-error.gif](assets/gifs/11-pre-flight-auth-error.gif) |
 | 12 | Python API (`perfxpert.api`) | [12-python-api.gif](assets/gifs/12-python-api.gif) |
-| 13 | MCP server (41 tools) | [13-mcp-server.gif](assets/gifs/13-mcp-server.gif) |
+| 13 | MCP server (43 tools) | [13-mcp-server.gif](assets/gifs/13-mcp-server.gif) |
 | 14 | `perfxpert-code` interactive | [14-perfxpert-code.gif](assets/gifs/14-perfxpert-code.gif) |
 | 15 | All five `--llm` providers | [15-all-providers.gif](assets/gifs/15-all-providers.gif) |
 

@@ -198,14 +198,14 @@ perfxpert doctor
 ![doctor](assets/gifs/03-doctor.gif)
 
 *`perfxpert doctor` end-to-end: Python check, MCP server reachable
-(41 tools registered), 3/5 LLM providers configured, `ALL CLEAN`.*
+(43 tools registered), 3/5 LLM providers configured, `ALL CLEAN`.*
 
 Expected output ends with `ALL CLEAN` when everything is wired. The
 doctor checks:
 
 - `perfxpert` version + Python ≥ 3.10
 - openai-agents SDK
-- MCP server reachable (`perfxpert-mcp` boots + 41 tools registered — 7 agent-hierarchy + 34 classifier/knowledge)
+- MCP server reachable (`perfxpert-mcp` boots + 43 tools registered — 8 agent-hierarchy + 34 classifier/knowledge + 1 `trace_diff.diff_runs`)
 - task store (`~/.perfxpert` or `$PERFXPERT_TASK_ROOT`)
 - bundled opencode binary + bundled opencode config dir
 - LLM providers configured (counts `N/5` against
@@ -225,10 +225,11 @@ agent runtime.
   a rocprofv3 `.db`, emits a single report (text / JSON / markdown /
   webview HTML). Deterministic with `--llm` omitted; LLM-augmented
   with `--llm {anthropic,openai}`.
-- **`perfxpert-mcp`** — stdio MCP server that re-exposes the 41
-  READ-ONLY analysis tools over JSON-RPC (7 agent-hierarchy entry
-  points — Root, Analysis, Recommendation, Correctness, +3
-  specialists — plus 34 classifier / knowledge tools). Meant to be
+- **`perfxpert-mcp`** — stdio MCP server that re-exposes the 43
+  READ-ONLY analysis tools over JSON-RPC (8 agent-hierarchy entry
+  points — Root, Analysis, Recommendation, Correctness, +3 technique
+  specialists, + diff specialist — plus 34 classifier / knowledge
+  tools and 1 `trace_diff.diff_runs`). Meant to be
   spawned by an MCP client (Claude Desktop, Claude Code, Codex CLI,
   Gemini CLI, opencode). See `../integration/mcp-server.md`.
 - **`perfxpert-code`** — interactive TUI (the patched opencode
@@ -557,6 +558,20 @@ when `--source-dir` was supplied and at least one hotspot carries
 `source_locations`; bumps to `"0.4.0"` when ATT data is present).
 The legacy `.llm_enhanced_explanation` key mirrors `.narrative` for
 backwards compat; new consumers should read `.narrative` directly.
+
+### Severity legend — hotspot panel
+
+Each hotspot row (and expanded source panel) carries a severity
+class derived from its share of total runtime. The webview colors
+the left border + pill badge; the markdown / text formats emit a
+`[CRITICAL] / [HOT] / [WARM] / [COOL]` tag on the citation line.
+
+| Class | Threshold (% of total runtime) |
+|-------|-------------------------------|
+| CRITICAL | ≥ 20% |
+| HOT | 5% – 20% |
+| WARM | 1% – 5% |
+| COOL | < 1% |
 
 ## 5. Multi-GPU / MPI workflows
 
@@ -1034,9 +1049,9 @@ See `python-api.md` for the full surface.
 
 ## 13. Connecting other MCP clients
 
-Any MCP-compatible client can consume the 41 READ-ONLY tools exposed
-by `perfxpert-mcp` (7 agent-hierarchy entry points + 34
-classifier/knowledge tools). Configuration snippets for Claude Desktop,
+Any MCP-compatible client can consume the 43 READ-ONLY tools exposed
+by `perfxpert-mcp` (8 agent-hierarchy entry points + 34
+classifier/knowledge tools + 1 `trace_diff.diff_runs`). Configuration snippets for Claude Desktop,
 Claude Code, Codex CLI, Gemini CLI, and generic stdio clients live in
 `../integration/mcp-server.md` under §"Client integration". The
 bundled opencode inside `perfxpert-code` wires `perfxpert-mcp`
@@ -1045,8 +1060,8 @@ automatically — no client-side setup required.
 ![mcp server](assets/gifs/13-mcp-server.gif)
 
 *`perfxpert-mcp` launched in foreground — the stderr banner reports
-the 41 read-only tools it registers (7 agent-hierarchy + 34
-classifier / knowledge).*
+the 43 read-only tools it registers (8 agent-hierarchy + 34
+classifier / knowledge + 1 `trace_diff.diff_runs`).*
 
 ## 14. Troubleshooting
 

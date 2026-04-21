@@ -162,7 +162,7 @@ don't re-derive it.
    automatically via Pydantic, but the docstring / field table must
    be updated by hand.
 
-6. **MCP tool discovery is automatic.** The 7 agent tools
+6. **MCP tool discovery is automatic.** The 8 agent tools
    (`perfxpert_agent_<name>`) read their JSON schema from the Pydantic
    model via reflection — no manual MCP descriptor edit is needed.
    Verify with `perfxpert-mcp --describe` that the new field appears

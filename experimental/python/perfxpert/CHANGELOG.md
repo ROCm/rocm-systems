@@ -6,17 +6,19 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- **Agents-as-MCP-tools (7 new READ_ONLY tools).** The MCP server now
+- **Agents-as-MCP-tools (8 READ_ONLY agent tools).** The MCP server now
   exposes every agent in the hierarchy as its own tool:
   `perfxpert_agent_root`, `perfxpert_agent_analysis`,
   `perfxpert_agent_recommendation`, `perfxpert_agent_correctness`,
   `perfxpert_agent_compute_specialist`,
   `perfxpert_agent_memory_specialist`,
-  `perfxpert_agent_latency_specialist`. Backend TUIs (Claude Code,
+  `perfxpert_agent_latency_specialist`,
+  `perfxpert_agent_diff_specialist`. Backend TUIs (Claude Code,
   Gemini CLI, Codex CLI, opencode) read the agent hierarchy as
-  reference in `AGENTS.md` and freely pick whichever of the 41
-  tools matches the user's intent. MCP tool count is now **41**
-  (was 34). Schemas remain frozen per `perfxpert/agents/schemas.py`.
+  reference in `AGENTS.md` and freely pick whichever of the 43
+  tools matches the user's intent. MCP tool count is now **43**
+  (was 34) — 34 classifier/knowledge + 8 agent + 1 `trace_diff.diff_runs`.
+  Schemas remain frozen per `perfxpert/agents/schemas.py`.
 - **Public Python API (`perfxpert.api`).** 1:1 mirror of the 7 agent
   MCP tools (`api.agent_root`, `api.agent_analysis`, etc.) for
   in-process embedding without standing up an MCP server. The
@@ -42,7 +44,7 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   call a single `perfxpert_run_root_analysis` after
   `perfxpert_intent_classify`. The "MUST call
   `perfxpert_run_root_analysis`" contract is gone; backends choose
-  any of the 41 MCP tools based on intent. The tool-priority gate
+  any of the 43 MCP tools based on intent. The tool-priority gate
   still requires `perfxpert_intent_classify` as the first call.
 - **FallbackProvider exception taxonomy.** Documented the full
   typed-error set — `AuthError`, `RateLimitError`,
@@ -53,7 +55,7 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `docs/guides/agentic-mode.md` §"Fallback chain".
 
 ### Docs
-- `README.md` — MCP count 34→41, 5-provider list restored, pip
+- `README.md` — MCP count 34→43, 5-provider list restored, pip
   upgrade hint, fast-install wrapper surfaced.
 - `docs/guides/getting-started.md` — MCP count refreshed in 3
   places, §10 LLM Providers rebuilt for all 5 providers with

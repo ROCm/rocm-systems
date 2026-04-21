@@ -45,7 +45,7 @@ docs/
 │   └── assets/{gifs,tapes}/ ← VHS demo recordings
 ├── integration/
 │   ├── README.md
-│   └── mcp-server.md        ← the MCP wire surface (41 tools)
+│   └── mcp-server.md        ← the MCP wire surface (43 tools)
 ├── contributing/
 │   ├── README.md            ← per-surface extension guides
 │   ├── tools.md, knowledge.md, providers.md, agents.md, mcp_tools.md,

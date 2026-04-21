@@ -88,6 +88,14 @@ perfxpert-code uninstall claude   # reverses install (refuses on marker drift)
 # Air-gap mode (no LLM; deterministic rule-based analysis only)
 PERFXPERT_AIRGAP=1 perfxpert analyze -i trace.db --format markdown -o report.md
 
+# SKIP-SAMPLE — requires two rocprofv3 trace DBs (baseline + candidate)
+# Diff two runs (schema-0.3.1 trace_diff block — per-kernel deltas + verdict)
+perfxpert diff --baseline baseline.db --candidate candidate.db --format markdown
+
+# SKIP-SAMPLE — CI wrapper; rc=1 on regression, rc=0 otherwise
+# Regression gate for CI pipelines (wraps `diff` + fails the build if slower)
+perfxpert ci --baseline baseline.db --candidate candidate.db --threshold 0.05
+
 # Health check
 perfxpert doctor
 ```
@@ -113,7 +121,7 @@ perfxpert doctor
 │    Deterministic middleware (gate_cascade, intent router)    │
 │                          │                                   │
 │                          ▼                                   │
-│  41 READ_ONLY MCP tools (7 agent + 34 classifier/knowledge)  │
+│  43 READ_ONLY MCP tools (8 agent + 34 classifier + 1 diff)   │
 │            + ~22 knowledge YAMLs                             │
 │                                                              │
 └────────────────────────────────────────────────────────────┘
@@ -194,8 +202,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the removal history.
     - [BackendAdapter protocol (multi-backend launcher)](docs/architecture/backend-adapter.md)
 - **Integration**
   - [Integration index](docs/integration/README.md)
-    - [MCP server (`perfxpert-mcp`) — 41 READ_ONLY tools (7 agent-hierarchy + 34 knowledge/classifier)](docs/integration/mcp-server.md)
-    - [Python API (`perfxpert.api`) — 1:1 mirror of the 7 agent MCP tools](docs/guides/python-api.md)
+    - [MCP server (`perfxpert-mcp`) — 43 READ_ONLY tools (8 agent-hierarchy + 34 knowledge/classifier + 1 trace_diff)](docs/integration/mcp-server.md)
+    - [Python API (`perfxpert.api`) — 1:1 mirror of the 8 agent MCP tools](docs/guides/python-api.md)
 - **Contributing**
   - [CONTRIBUTING.md](CONTRIBUTING.md)
   - [Contributing index](docs/contributing/README.md)
