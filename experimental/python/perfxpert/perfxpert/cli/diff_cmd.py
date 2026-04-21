@@ -115,6 +115,15 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         metavar="N",
         help="How many kernels to include in the per-kernel table. Default: 20.",
     )
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        default=False,
+        help=(
+            "Suppress spinner / progress feedback (mirrors perfxpert analyze). "
+            "Off by default — diff is fast enough that progress rarely renders."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +281,14 @@ def run_diff(args: argparse.Namespace) -> int:
         out_name = "diff_report"
     if out_name is not None:
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / (out_name + ext_map[args.format])
+        # Strip the format-specific extension if the caller already included
+        # it in ``-o`` — prevents ``perfxpert diff -o diff.html --format
+        # webview`` from writing ``diff.html.html``. We only strip the
+        # extension for the CURRENT format; unrelated suffixes are left
+        # alone so users can still name a JSON stem ``diff.txt.foo``.
+        ext = ext_map[args.format]
+        stem = out_name[:-len(ext)] if out_name.endswith(ext) else out_name
+        out_path = out_dir / (stem + ext)
         out_path.write_text(rendered, encoding="utf-8")
         print(f"Wrote {args.format} diff report to {out_path}")
     else:
