@@ -630,9 +630,16 @@ The JSON format exposes each section under a flat top-level key
 `.primary_bottleneck`, `.warnings`, `.metadata`). The Tier-0 block
 lives under `.tier0_findings.profiling_plan` +
 `.tier0_findings.code_patterns`. The document carries
-`"schema_version": "0.3.0"` on every agentic run (bumps to `"0.3.1"`
-when `--source-dir` was supplied and at least one hotspot carries
-`source_locations`; bumps to `"0.4.0"` when ATT data is present).
+`"schema_version": "0.3.0"` on every agentic run. The version bumps
+additively along the chain **0.3.0 → 0.3.1 → 0.3.2 → 0.3.3 → 0.3.4
+→ 0.4.0** as richer data appears: `0.3.1` when `--source-dir` was
+supplied and at least one hotspot carries `source_locations`;
+`0.3.2` when RCCL / NIC `communication` data is present (from
+`rccl_analysis.analyze_collectives`); `0.3.3` when any rec carries a
+`predicted_impact_range` (Change-Impact Prediction); `0.3.4` when a
+top-level `roofline` key is emitted (Live Roofline, from
+`roofline.plot_points`); `0.4.0` when ATT data is present (ATT
+trumps the others).
 The legacy `.llm_enhanced_explanation` key mirrors `.narrative` for
 backwards compat; new consumers should read `.narrative` directly.
 
@@ -1228,10 +1235,11 @@ underlying opencode `session` subcommand).
 ## 12.5 Embedding: the Python API
 
 Everything the CLI does is reachable from Python via
-`perfxpert.api`. The 7 agent-hierarchy MCP tools map 1:1 to module
+`perfxpert.api`. The 8 agent-hierarchy MCP tools map 1:1 to module
 functions (`agent_root`, `agent_analysis`, `agent_recommendation`,
-`agent_correctness`, `specialist_compute`, `specialist_memory`,
-`specialist_latency`) so you can embed PerfXpert's analysis brain in
+`agent_correctness`, `agent_compute_specialist`,
+`agent_memory_specialist`, `agent_latency_specialist`,
+`agent_diff_specialist`) so you can embed PerfXpert's analysis brain in
 your own notebooks, CI, or internal tooling.
 
 ![python API](assets/gifs/12-python-api.gif)
@@ -1306,7 +1314,7 @@ payload / public JSON).
 
 ## 16. Next steps
 
-- `../architecture/agent-hierarchy.md` — 7-agent tier map + fence
+- `../architecture/agent-hierarchy.md` — 8-agent tier map + fence
   slices
 - `../architecture/gate-cascade.md` — 5-gate correctness/regression
   middleware

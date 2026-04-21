@@ -59,8 +59,12 @@ dict that every formatter consumes:
 
 `perfxpert/formatters/json_fmt.py::_format_as_json` serialises Layer B
 into the public JSON document, stamped with a top-level
-`schema_version` field (currently **`0.3.1`** — see `# CHANGES`
-below; Tier-3 ATT bumps to `0.4.0`). `perfxpert/analyze.py::_format_agentic_output`
+`schema_version` field. The full additive chain is
+**`0.3.0` → `0.3.1` → `0.3.2` → `0.3.3` → `0.3.4` → `0.4.0`** — each
+step advances as richer data becomes available (see `# CHANGES` below
+and the "Schema versioning policy" table). Tier-3 ATT pins to `0.4.0`
+regardless of which other sections are present.
+`perfxpert/analyze.py::_format_agentic_output`
 (~line 790) then overlays the agentic brain (`narrative`,
 `primary_bottleneck`, `warnings`, `tier0_findings`) and re-bumps the
 version if it was still at `0.1.0` / `0.2.0`.
