@@ -1,3 +1,5 @@
+# Formatting and static analysis for projects/rocprofiler-systems.
+# Align tool versions with projects/rocprofiler-systems/.pre-commit-config.yaml and CONTRIBUTING.md.
 
 name: rocprofiler-systems Formatting
 run-name: formatting
@@ -129,6 +131,7 @@ jobs:
         DISTRIB_CODENAME=$(cat /etc/lsb-release | grep DISTRIB_CODENAME | awk -F '=' '{print $NF}')
         sudo apt-get update
         sudo apt-get install -y software-properties-common wget curl clang-format-18
+
     - name: clang-format
       working-directory: projects/rocprofiler-systems/
       run: |
@@ -150,6 +153,7 @@ jobs:
     - uses: actions/checkout@v6
       with:
         sparse-checkout: projects/rocprofiler-systems
+
     - name: check-includes
       working-directory: projects/rocprofiler-systems/
       run: |
@@ -175,3 +179,90 @@ jobs:
       working-directory: projects/rocprofiler-systems/
       run: |
         bash scripts/check-fixedwidth-types.sh
+  
+  clang-tidy:
+    name: "clang-tidy (.clang-tidy)"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      ROCM_REPO_VER: "7.2"
+      DEBIAN_FRONTEND: noninteractive
+    defaults:
+      run:
+        working-directory: projects/rocprofiler-systems
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: projects/rocprofiler-systems
+          submodules: recursive
+
+      - name: Install build tools and LLVM 18 (clang-tidy / run-clang-tidy)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates curl gnupg wget \
+            build-essential ninja-build cmake git pkg-config \
+            libdrm-dev
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 18 all
+          sudo apt-get install -y --no-install-recommends clang-tools-18
+          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-18 100 || true
+
+      - name: Add ROCm apt repository and install ROCm dev packages
+        run: |
+          set -euxo pipefail
+          ROCM_VERSION="${ROCM_REPO_VER}"
+          ROCM_MAJOR=$(echo "${ROCM_VERSION}" | sed 's/\./ /g' | awk '{print $1}')
+          ROCM_MINOR=$(echo "${ROCM_VERSION}" | sed 's/\./ /g' | awk '{print $2}')
+          ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
+          echo "ROCM_MAJOR=${ROCM_MAJOR} ROCM_MINOR=${ROCM_MINOR} ROCM_VERSN=${ROCM_VERSN}"
+
+          DEB_BASE="https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/ubuntu/jammy/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb"
+          if [ -n "${AMDGPU_INSTALL_DEB_URL:-}" ]; then
+            DEB_BASE="${AMDGPU_INSTALL_DEB_URL}"
+          fi
+          wget -qO /tmp/amdgpu-install.deb "${DEB_BASE}"
+          sudo apt-get install -y /tmp/amdgpu-install.deb
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rocm-dev
+          sudo apt-get autoclean
+          # Same as rocprofiler-systems-ubuntu-jammy/noble: persist for all following steps in this job.
+          echo "/opt/rocm/bin" >> "${GITHUB_PATH}"
+          echo "ROCM_PATH=/opt/rocm" >> "${GITHUB_ENV}"
+          echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
+          echo "CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH:-}" >> "${GITHUB_ENV}"
+
+      - name: Configure CMake (compile_commands.json, no tidy-as-compile)
+        run: |
+          set -euxo pipefail
+          cmake -S . -B build-clang-tidy -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DROCPROFSYS_USE_CLANG_TIDY=OFF \
+            -DROCPROFSYS_BUILD_DYNINST=ON \
+            -DROCPROFSYS_BUILD_BOOST=ON \
+            -DROCPROFSYS_BUILD_TBB=ON \
+            -DROCPROFSYS_BUILD_ELFUTILS=ON \
+            -DROCPROFSYS_BUILD_LIBIBERTY=ON \
+            -DROCPROFSYS_BUILD_LIBUNWIND=ON \
+            -DROCPROFSYS_BUILD_NLOHMANN_JSON=ON \
+            -DROCPROFSYS_USE_PYTHON=OFF \
+            -DROCPROFSYS_BUILD_TESTING=OFF \
+            -DROCPROFSYS_BUILD_EXAMPLES=OFF \
+            -DROCPROFSYS_USE_MPI=OFF
+
+      - name: Run clang-tidy using .clang-tidy
+        run: |
+          set +e
+          FILES=$(find source examples tests -type f \
+            ! -path '*/external/*' \
+            ! -path '*/third_party/*' \
+            ! -path '*/build/*' \
+            \( -name '*.cpp' -o -name '*.cc' -o -name '*.cxx' \))
+          if [ -z "${FILES}" ]; then
+            echo "No C++ sources matched for clang-tidy."
+            exit 0
+          fi
+          run-clang-tidy-18 -p build-clang-tidy -j "$(nproc)" \
+            -warnings-as-errors='*' ${FILES}
