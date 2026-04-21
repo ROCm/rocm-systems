@@ -125,6 +125,7 @@ run(uint64_t                        devid,
     uint64_t kern_num = 0;
     for(uint64_t i = 0; i < nstream; ++i)
     {
+        log_message("capture begin (stream=" + std::to_string(i) + ")");
         checkHipErrors(hipStreamBeginCapture(streams.at(i), hipStreamCaptureModeGlobal));
 
         for(uint64_t j = 0; j < nkernel_per_stream; ++j)
@@ -132,6 +133,13 @@ run(uint64_t                        devid,
             auto kern_num_v      = kern_num++;
             auto glob_kern_num_v = global_kern_num++;
             auto kernel          = (j % 2 == 0) ? kernel_foo : kernel_bar;
+            if(j == 0 || j + 1 == nkernel_per_stream)
+            {
+                log_message("capture enqueue (stream=" + std::to_string(i) +
+                            ", kernel_idx=" + std::to_string(j) +
+                            ", kernel_id=" + std::to_string(kern_num_v) +
+                            ", kernel_global=" + std::to_string(glob_kern_num_v) + ")");
+            }
             hipLaunchKernelGGL(kernel,
                                dim3(1),
                                dim3(1),
@@ -144,27 +152,56 @@ run(uint64_t                        devid,
             checkHipErrors(hipGetLastError());
         }
 
+        log_message("capture end (stream=" + std::to_string(i) + ")");
         checkHipErrors(hipStreamEndCapture(streams.at(i), &graphs.at(i)));
+        log_message("graph instantiate begin (stream=" + std::to_string(i) + ")");
         checkHipErrors(hipGraphInstantiate(&execs.at(i), graphs.at(i), nullptr, nullptr, 0));
+        log_message("graph instantiate done (stream=" + std::to_string(i) +
+                    ", graph=" + std::to_string(reinterpret_cast<uint64_t>(graphs.at(i))) +
+                    ", exec=" + std::to_string(reinterpret_cast<uint64_t>(execs.at(i))) + ")");
     }
 
-    if(progress) progress->fetch_add(1);
+    if(progress)
+    {
+        auto ready_count = progress->fetch_add(1) + 1;
+        log_message("barrier reached (ready=" + std::to_string(ready_count) + ")");
+    }
+    log_message("waiting on launch barrier");
     future.wait();
+    log_message("launch barrier released");
 
     log_message("launching graph");
     for(uint64_t i = 0; i < nstream; ++i)
+    {
+        log_message("graph launch begin (stream=" + std::to_string(i) + ")");
         checkHipErrors(hipGraphLaunch(execs.at(i), streams.at(i)));
+        log_message("graph launch done (stream=" + std::to_string(i) + ")");
+    }
 
     for(uint64_t i = 0; i < nstream; ++i)
+    {
+        log_message("stream synchronize begin (stream=" + std::to_string(i) + ")");
         checkHipErrors(hipStreamSynchronize(streams.at(i)));
+        log_message("stream synchronize done (stream=" + std::to_string(i) + ")");
+    }
 
     log_message("destroying graph");
     for(uint64_t i = 0; i < nstream; ++i)
+    {
+        log_message("graph destroy (stream=" + std::to_string(i) +
+                    ", graph=" + std::to_string(reinterpret_cast<uint64_t>(graphs.at(i))) +
+                    ", exec=" + std::to_string(reinterpret_cast<uint64_t>(execs.at(i))) + ")");
         checkHipErrors(hipGraphDestroy(graphs.at(i)));
+    }
 
     log_message("freeing data");
-    for(auto& itr : stream_num)
+    for(uint64_t i = 0; i < stream_num.size(); ++i)
+    {
+        auto& itr = stream_num.at(i);
+        log_message("free data (stream=" + std::to_string(i) +
+                    ", ptr=" + std::to_string(reinterpret_cast<uint64_t>(itr)) + ")");
         checkHipErrors(hipFree(itr));
+    }
 
     log_message("returning");
 }
@@ -187,6 +224,10 @@ main(int argc, char* argv[])
 
     ndevice = std::min<uint64_t>(ndevice, ndevice_real);
 
+    std::cout << "[DIAG-HG-APP-CONFIG] pid=" << getpid() << " ndevice_real=" << ndevice_real
+              << " ndevice=" << ndevice << " nstream=" << nstream
+              << " nkernel_per_stream=" << nkernel_per_stream << std::endl;
+
     auto progress = std::atomic<uint64_t>{0};
     auto promise  = std::promise<void>{};
     auto future   = promise.get_future().share();
@@ -197,22 +238,48 @@ main(int argc, char* argv[])
         threads.emplace_back(run, i, nstream, nkernel_per_stream, &progress, future);
 
     // wait for all threads to reach designated progress point
+    auto wait_start  = std::chrono::steady_clock::now();
+    auto last_report = wait_start;
     while(progress < ndevice)
     {
         std::this_thread::yield();
         std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        auto now = std::chrono::steady_clock::now();
+        if(now - last_report > std::chrono::seconds{2})
+        {
+            std::cout << "[DIAG-HG-APP-PROGRESS] ready=" << progress.load()
+                      << " expected=" << ndevice
+                      << " wait_ms="
+                      << std::chrono::duration_cast<std::chrono::milliseconds>(now - wait_start)
+                             .count()
+                      << std::endl;
+            last_report = now;
+        }
     }
+
+    std::cout << "[DIAG-HG-APP-PROGRESS] all workers ready wait_ms="
+              << std::chrono::duration_cast<std::chrono::milliseconds>(
+                     std::chrono::steady_clock::now() - wait_start)
+                     .count()
+              << std::endl;
 
     // release the threads
     promise.set_value();
 
-    for(auto& itr : threads)
+    for(uint64_t i = 0; i < threads.size(); ++i)
+    {
+        std::cout << "[DIAG-HG-APP-JOIN] thread=" << i << " begin" << std::endl;
+        auto& itr = threads.at(i);
         itr.join();
+        std::cout << "[DIAG-HG-APP-JOIN] thread=" << i << " done" << std::endl;
+    }
 
     for(uint64_t i = 0; i < ndevice; ++i)
     {
+        std::cout << "[DIAG-HG-APP-SYNC] device=" << i << " begin" << std::endl;
         checkHipErrors(hipSetDevice(i));
         checkHipErrors(hipDeviceSynchronize());
+        std::cout << "[DIAG-HG-APP-SYNC] device=" << i << " done" << std::endl;
     }
 
     std::cout << "[" << basename(argv[0]) << "] complete" << std::endl;

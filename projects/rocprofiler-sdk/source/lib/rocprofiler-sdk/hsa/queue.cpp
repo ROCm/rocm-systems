@@ -330,11 +330,15 @@ WriteInterceptor(const void* packets,
     ROCP_FATAL_IF(data == nullptr) << "WriteInterceptor was not passed a pointer to the queue";
 
     auto& queue = *static_cast<Queue*>(data);
+    ROCP_INFO << "[DIAG-HG-WI-ENTRY] queue=" << queue.get_id().handle << " pkt_count=" << pkt_count
+              << " notifiers=" << queue.get_notifiers();
 
     // We have no packets or no one who needs to be notified, do nothing.
     if(pkt_count == 0 ||
        (queue.get_notifiers() == 0 && context::get_active_contexts(context_filter).empty()))
     {
+        ROCP_INFO << "[DIAG-HG-WI-PASSTHROUGH] queue=" << queue.get_id().handle
+                  << " reason=no-packets-or-no-active-contexts pkt_count=" << pkt_count;
         writer(packets, pkt_count);
         return;
     }
@@ -355,9 +359,13 @@ WriteInterceptor(const void* packets,
 
     if(num_dispatch_packets == 0)
     {
+        ROCP_INFO << "[DIAG-HG-WI-PASSTHROUGH] queue=" << queue.get_id().handle
+                  << " reason=no-dispatch-packets pkt_count=" << pkt_count;
         writer(packets, pkt_count);
         return;
     }
+    ROCP_INFO << "[DIAG-HG-WI-DISPATCH-COUNT] queue=" << queue.get_id().handle
+              << " dispatch_packets=" << num_dispatch_packets << " pkt_count=" << pkt_count;
 
     // these are for the services (dispatch counter collection, pc sampling, ATT) which use
     // the queue/queue_controller callback mechanism
@@ -413,6 +421,8 @@ WriteInterceptor(const void* packets,
                                     uint64_t                  _num_packets,
                                     const packet_writer_fn_t& _writer) {
         auto transformed_packets = packet_vector_t{};
+        ROCP_INFO << "[DIAG-HG-WI-BATCH-BEGIN] queue=" << queue.get_id().handle
+                  << " input_packets=" << _num_packets;
 
         auto thr_id           = (corr_id) ? corr_id->thread_idx : common::get_tid();
         auto internal_corr_id = (corr_id) ? corr_id->internal : 0;
@@ -434,6 +444,7 @@ WriteInterceptor(const void* packets,
         // Searching accross all the packets given during this write
         for(size_t i = 0; i < _num_packets; ++i)
         {
+            auto transformed_begin = transformed_packets.size();
             const auto& original_packet = _packets[i].kernel_dispatch;
             auto        packet_type =
                 bit_extract(original_packet.header,
@@ -506,6 +517,15 @@ WriteInterceptor(const void* packets,
                                                     kernel_packet.kernel_dispatch.grid_size_z},
                     .reserved_padding = {0}}};
 
+            size_t serializer_count               = 0;
+            size_t before_count                   = 0;
+            size_t after_count                    = 0;
+            size_t pc_marker_count                = 0;
+            size_t kernel_count                   = 0;
+            size_t orig_completion_barrier_count  = 0;
+            size_t final_interrupt_barrier_count  = 0;
+            size_t callback_instrumentation_count = 0;
+
             {
                 auto tracer_data = _packet_data.callback_record;
                 tracing::execute_phase_enter_callbacks(
@@ -544,10 +564,19 @@ WriteInterceptor(const void* packets,
                         &_packet_data.user_data,
                         _packet_data.tracing_data.external_correlation_ids,
                         corr_id);
+                    size_t before_sz = packet ? packet->before_krn_pkt.size() : 0;
+                    size_t after_sz  = packet ? packet->after_krn_pkt.size() : 0;
+                    ROCP_INFO << "[DIAG-HG-WI-CLIENT] queue=" << queue.get_id().handle
+                              << " dispatch_id=" << dispatch_id << " client_id=" << client_id
+                              << " serialize=" << bSerial << " packet_present=" << (packet != nullptr)
+                              << " before_sz=" << before_sz << " after_sz=" << after_sz;
                     _packet_data.is_serialized |= bSerial;
                     if(packet)
+                    {
+                        callback_instrumentation_count++;
                         _packet_data.instrumentation_packets.push_back(
                             std::make_pair(std::move(packet), client_id));
+                    }
                 }
             });
 
@@ -559,7 +588,10 @@ WriteInterceptor(const void* packets,
                     ->serializer(&queue)
                     .rlock([&](const auto& serializer) {
                         for(auto& s_pkt : serializer.kernel_dispatch(queue))
+                        {
                             transformed_packets.emplace_back(s_pkt.kernel_dispatch);
+                            serializer_count++;
+                        }
                     });
             }
 
@@ -569,6 +601,7 @@ WriteInterceptor(const void* packets,
                 {
                     inserted_before = true;
                     transformed_packets.emplace_back(pkt);
+                    before_count++;
                 }
             }
 
@@ -578,11 +611,13 @@ WriteInterceptor(const void* packets,
                 transformed_packets.emplace_back(
                     pc_sampling::hsa::generate_marker_packet_for_kernel(
                         corr_id, _packet_data.tracing_data.external_correlation_ids, dispatch_id));
+                pc_marker_count++;
             }
 #endif
 
             // emplace the kernel packet
             transformed_packets.emplace_back(kernel_packet);
+            kernel_count++;
 
             // If a profiling packet was inserted, wait for completion before executing the dispatch
             if(inserted_before)
@@ -596,6 +631,7 @@ WriteInterceptor(const void* packets,
                 barrier.header |= (1 << HSA_PACKET_HEADER_BARRIER);
                 barrier.completion_signal = original_completion_signal;
                 transformed_packets.emplace_back(barrier);
+                orig_completion_barrier_count++;
             }
 
             bool injected_end_pkt = false;
@@ -605,6 +641,7 @@ WriteInterceptor(const void* packets,
                 {
                     transformed_packets.emplace_back(pkt);
                     injected_end_pkt = true;
+                    after_count++;
                 }
             }
 
@@ -617,6 +654,7 @@ WriteInterceptor(const void* packets,
                 completion_signal                                            = interrupt_signal;
                 transformed_packets.back().kernel_dispatch.completion_signal = interrupt_signal;
                 CreateBarrierPacket(&interrupt_signal, &interrupt_signal, transformed_packets);
+                final_interrupt_barrier_count++;
             }
             else
             {
@@ -638,6 +676,21 @@ WriteInterceptor(const void* packets,
             }
 
             _info_session.packet_data.emplace_back(std::move(_packet_data));
+
+            auto transformed_end = transformed_packets.size();
+            ROCP_INFO << "[DIAG-HG-WI-DISPATCH-BREAKDOWN] queue=" << queue.get_id().handle
+                      << " dispatch_id=" << dispatch_id << " input_index=" << i
+                      << " callback_instrumentation_count=" << callback_instrumentation_count
+                      << " serializer_count=" << serializer_count << " before_count=" << before_count
+                      << " pc_marker_count=" << pc_marker_count << " kernel_count=" << kernel_count
+                      << " orig_completion_barrier_count=" << orig_completion_barrier_count
+                      << " after_count=" << after_count
+                      << " final_interrupt_barrier_count=" << final_interrupt_barrier_count
+                      << " per_dispatch_total=" << (transformed_end - transformed_begin)
+                      << " completion_signal_in=" << original_completion_signal.handle
+                      << " completion_signal_out=" << completion_signal.handle
+                      << " inserted_before=" << inserted_before
+                      << " injected_end_pkt=" << injected_end_pkt;
         }
 
         using info_session_t = queue_info_session_t;
@@ -660,20 +713,29 @@ WriteInterceptor(const void* packets,
                                   queue.get_id().handle,
                                   fmt::join(transformed_packets, fmt::format(" ")));
 
+        ROCP_INFO << "[DIAG-HG-WI-BATCH-END] queue=" << queue.get_id().handle
+                  << " output_packets=" << transformed_packets.size()
+                  << " tracked_dispatches=" << _info_session.packet_data.size();
+
         _writer(std::move(transformed_packets));
     };
 
     bool should_batch_packets = true;
     queue.signal_callback([&should_batch_packets](const auto& map) {
-        for(const auto& [_, cb_data] : map)
+        for(const auto& [client_id, cb_data] : map)
         {
-            if(!cb_data.batch_packets())
+            auto batch_for_client = cb_data.batch_packets();
+            ROCP_INFO << "[DIAG-HG-WI-BATCH-CHECK] queue_callback_client_id=" << client_id
+                      << " batch_packets=" << batch_for_client;
+            if(!batch_for_client)
             {
                 should_batch_packets = false;
                 break;
             }
         }
     });
+    ROCP_INFO << "[DIAG-HG-WI-BATCH-DECISION] queue=" << queue.get_id().handle
+              << " should_batch_packets=" << should_batch_packets << " input_pkt_count=" << pkt_count;
 
     if(should_batch_packets)
     {
@@ -807,7 +869,10 @@ Queue::Queue(
 , _agent(agent)
 , _intercept_queue(queue)
 {
-    ROCP_TRACE << "Queue ctor (inline path)";
+    ROCP_INFO << "[DIAG-HG-QUEUE-CTOR] queue=" << _intercept_queue
+              << " queue_id=" << _intercept_queue->id
+              << " doorbell=" << _intercept_queue->doorbell_signal.handle
+              << " inline_intercept=" << queue_intercept::is_intercepting_inline();
 
     if(!context::get_registered_contexts([](const context::context* ctx) {
             return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
@@ -838,7 +903,17 @@ Queue::Queue(
             });
     }
 
-    if(!queue_intercept::is_intercepting_inline()) set_write_interceptor(WriteInterceptor, this);
+    if(!queue_intercept::is_intercepting_inline())
+    {
+        ROCP_INFO << "[DIAG-HG-QUEUE-SET-WI] queue=" << _intercept_queue
+                  << " queue_id=" << _intercept_queue->id << " path=legacy-intercept-queue";
+        set_write_interceptor(WriteInterceptor, this);
+    }
+    else
+    {
+        ROCP_INFO << "[DIAG-HG-QUEUE-SET-WI] queue=" << _intercept_queue
+                  << " queue_id=" << _intercept_queue->id << " path=inline-intercept";
+    }
 
     create_signal(0, &ready_signal, false);
     create_signal(0, &block_signal, false);
@@ -854,13 +929,20 @@ Queue::invoke_write_interceptor(const void*                           packets,
                                 uint64_t                              pkt_count,
                                 hsa_amd_queue_intercept_packet_writer writer) const
 {
+    ROCP_INFO << "[DIAG-HG-QUEUE-INVOKE-WI] queue=" << _intercept_queue
+              << " queue_id=" << _intercept_queue->id << " pkt_count=" << pkt_count
+              << " notifiers=" << get_notifiers();
     WriteInterceptor(packets, pkt_count, 0, const_cast<Queue*>(this), writer);
 }
 
 Queue::~Queue()
 {
+    ROCP_INFO << "[DIAG-HG-QUEUE-DTOR-BEGIN] queue=" << _intercept_queue
+              << " block_signal=" << block_signal.handle
+              << " active_kernel_signal=" << _active_kernels.handle;
     sync();
     _core_api.hsa_signal_destroy_fn(_active_kernels);
+    ROCP_INFO << "[DIAG-HG-QUEUE-DTOR-END] queue=" << _intercept_queue;
 }
 
 void

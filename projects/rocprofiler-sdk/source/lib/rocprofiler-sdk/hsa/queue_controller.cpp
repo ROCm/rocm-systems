@@ -238,11 +238,30 @@ compute_queue_k_factor()
     uint64_t k = 0;
     for(const auto& itr : context::get_registered_contexts())
     {
-        if(itr->dispatch_counter_collection || itr->dispatch_thread_trace) return 12;
-        if(itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) ||
-           itr->is_tracing(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH))
+        const bool has_dispatch_counter = (itr->dispatch_counter_collection != nullptr);
+        const bool has_dispatch_tt      = (itr->dispatch_thread_trace != nullptr);
+        const bool has_kernel_cb =
+            itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH);
+        const bool has_kernel_buf =
+            itr->is_tracing(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
+
+        ROCP_INFO << "[DIAG-HG-KFACTOR-CONTEXT] ctx=" << itr->context_idx
+                  << " dispatch_counter=" << has_dispatch_counter
+                  << " dispatch_thread_trace=" << has_dispatch_tt
+                  << " kernel_dispatch_cb=" << has_kernel_cb
+                  << " kernel_dispatch_buf=" << has_kernel_buf;
+
+        if(has_dispatch_counter || has_dispatch_tt)
+        {
+            ROCP_INFO << "[DIAG-HG-KFACTOR-FINAL] value=12 reason="
+                      << (has_dispatch_counter ? "dispatch_counter_collection"
+                                              : "dispatch_thread_trace");
+            return 12;
+        }
+        if(has_kernel_cb || has_kernel_buf)
             k = std::max(k, uint64_t{3});
     }
+    ROCP_INFO << "[DIAG-HG-KFACTOR-FINAL] value=" << k << " reason=registered_contexts_scan";
     return k;
 }
 
@@ -250,9 +269,10 @@ void
 QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 {
     CHECK(queue);
+    const auto agent_id = queue->get_agent().get_rocp_agent()->id;
+
     _callback_cache.wlock([&](auto& callbacks) {
         _queues.wlock([&](auto& map) {
-            const auto agent_id = queue->get_agent().get_rocp_agent()->id;
             map[id]             = std::move(queue);
             for(const auto& [cbid, cb_data] : callbacks)
             {
@@ -267,8 +287,13 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 
     // Register queue state for SDK-level write pointer interception
     auto* amd_q = reinterpret_cast<amd_queue_t*>(id);
+    auto k_factor = compute_queue_k_factor();
+    ROCP_INFO << "[DIAG-HG-QUEUE-ADD] queue=" << id << " agent="
+              << agent_id.handle << " k_factor=" << k_factor
+              << " write_dispatch_id_ptr=" << &amd_q->write_dispatch_id
+              << " read_dispatch_id_ptr=" << &amd_q->read_dispatch_id;
     queue_intercept::create_queue_state(
-        id, &amd_q->write_dispatch_id, &amd_q->read_dispatch_id, compute_queue_k_factor());
+        id, &amd_q->write_dispatch_id, &amd_q->read_dispatch_id, k_factor);
 }
 
 void
@@ -281,15 +306,19 @@ QueueController::destroy_queue(hsa_queue_t* id)
     // return if queue does not exist
     if(!queue) return;
 
-    ROCP_INFO << "destroying queue...";
+    ROCP_INFO << "[DIAG-HG-QUEUE-DESTROY-BEGIN] queue=" << id;
 
     queue_intercept::destroy_queue_state(id);
 
     queue->sync();
     if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);
-    _queues.wlock([&](auto& map) { map.erase(id); });
+    _queues.wlock([&](auto& map) {
+        auto erased = map.erase(id);
+        ROCP_INFO << "[DIAG-HG-QUEUE-DESTROY-MAP] queue=" << id << " erased=" << erased
+                  << " remaining=" << map.size();
+    });
 
-    ROCP_INFO << "queue destroyed";
+    ROCP_INFO << "[DIAG-HG-QUEUE-DESTROY-END] queue=" << id;
 }
 
 ClientID
@@ -568,12 +597,26 @@ enable_queue_intercept()
         bool has_scratch_reporting = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY) ||
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
 
+        ROCP_INFO << "[DIAG-HG-INTERCEPT-CONTEXT] ctx=" << itr->context_idx
+                  << " dispatch_counter_collection=" << (itr->dispatch_counter_collection != nullptr)
+                  << " pc_sampler=" << (itr->pc_sampler != nullptr)
+                  << " has_kernel_tracing=" << has_kernel_tracing
+                  << " has_scratch_reporting=" << has_scratch_reporting
+                  << " device_counter_collection=" << (itr->device_counter_collection != nullptr)
+                  << " device_thread_trace=" << (itr->device_thread_trace != nullptr)
+                  << " dispatch_thread_trace=" << (itr->dispatch_thread_trace != nullptr);
+
         if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
            has_scratch_reporting || itr->device_counter_collection || itr->device_thread_trace ||
            itr->dispatch_thread_trace)
+        {
+            ROCP_INFO << "[DIAG-HG-INTERCEPT-REASON] ctx=" << itr->context_idx
+                      << " enabled=true";
             return true;
+        }
     }
 
+    ROCP_INFO << "[DIAG-HG-INTERCEPT-REASON] enabled=false";
     return false;
 }
 
