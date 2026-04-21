@@ -31,13 +31,18 @@
 
 include_guard(GLOBAL)
 
-if(NOT ROCPROFSYS_BUILD_ELFUTILS)
-    find_package(Elfutils)
-endif()
+# if(NOT ROCPROFSYS_BUILD_ELFUTILS)
+#     # Optional CMake package; typical distro installs only provide LibElf/LibDwarf.
+#     find_package(Elfutils QUIET)
+# endif()
 
-if(LibElf_FOUND AND LibDwarf_FOUND AND NOT ENABLE_DEBUGINFOD)
-    return()
-endif()
+# if(LibElf_FOUND AND LibDwarf_FOUND AND NOT ENABLE_DEBUGINFOD)
+#     rocprofiler_systems_message(STATUS "Elfutils found: ${Elfutils_FOUND}")
+#     rocprofiler_systems_message(STATUS "LibElf found: ${LibElf_FOUND}")
+#     rocprofiler_systems_message(STATUS "LibDwarf found: ${LibDwarf_FOUND}")
+#     rocprofiler_systems_message(STATUS "Returning early because Elfutils found and LibElf/LibDwarf found")
+#     return()
+# endif()
 
 if(NOT UNIX)
     return()
