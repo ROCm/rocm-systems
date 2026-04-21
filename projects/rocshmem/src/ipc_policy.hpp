@@ -108,6 +108,11 @@ class IpcOnImpl {
                                 detail::atomic::memory_order_acq_rel>();
   }
 
+  __device__ void ipcQuiet([[maybe_unused]] int local_pe) {
+    detail::atomic::threadfence<detail::atomic::memory_scope_system,
+                                detail::atomic::memory_order_acq_rel>();
+  }
+
   template <typename T>
   __device__ void ipcAMOAdd(T *val, T value) {
     __hip_atomic_fetch_add(val, value, __ATOMIC_SEQ_CST,
@@ -211,10 +216,10 @@ class IpcSdmaImpl : public IpcOnImpl {
                           bool blocking = false) {
     if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
       auto* handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
-      if (blocking && handle) {
-        handle->quietAll();
+      if (handle) {
+        if (blocking) handle->quietAll();
+        return;
       }
-      return;
     }
     memcpy_lane(dst, src, size);
   }
@@ -226,9 +231,13 @@ class IpcSdmaImpl : public IpcOnImpl {
       if (is_thread_zero_in_block()) {
         handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
       }
+      // Broadcast whether SDMA succeeded (thread 0 knows, others don't)
       __syncthreads();
-      if (blocking && handle) handle->quietAll();
-      return;
+      if (handle) {
+        if (blocking) handle->quietAll();
+        return;
+      }
+      // handle null (e.g. self PE) — fall through to memcpy on all threads
     }
     memcpy_wg(dst, src, size);
   }
@@ -240,14 +249,25 @@ class IpcSdmaImpl : public IpcOnImpl {
       if (is_thread_zero_in_wave()) {
         handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
       }
-      if (blocking && handle) handle->quietAll();
-      return;
+      // Broadcast handle to all lanes
+      handle = reinterpret_cast<anvil::SdmaQueueDeviceHandle*>(
+          __shfl(reinterpret_cast<uintptr_t>(handle), 0));
+      if (handle) {
+        if (blocking) handle->quietAll();
+        return;
+      }
     }
     memcpy_wave(dst, src, size);
   }
 
   __device__ void ipcQuiet() {
     if (sdmaImpl_.sdmaEnabled) sdmaImpl_.sdmaQuietAll();
+    detail::atomic::threadfence<detail::atomic::memory_scope_system,
+                                detail::atomic::memory_order_acq_rel>();
+  }
+
+  __device__ void ipcQuiet(int local_pe) {
+    if (sdmaImpl_.sdmaEnabled) sdmaImpl_.sdmaQuiet(local_pe);
     detail::atomic::threadfence<detail::atomic::memory_scope_system,
                                 detail::atomic::memory_order_acq_rel>();
   }
@@ -295,6 +315,8 @@ class IpcOffImpl {
                                bool blocking = false) {}
 
   __device__ void ipcQuiet() {}
+
+  __device__ void ipcQuiet(int) {}
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
             detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
