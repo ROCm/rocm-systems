@@ -2168,10 +2168,7 @@ static ncclResult_t updateCollCostTable(
         table[a][p] = NCCL_ALGO_PROTO_IGNORE;
         continue;
       }
-      float predictedCollectiveCost = 0;
-      NCCLCHECK(ncclTopoGetAlgoTime(comm, info->func, a, p, nBytes, numPipeOps, &predictedCollectiveCost));
-      INFO(NCCL_INIT,"For  Algo %d , Proto %d Predicted execution time is %f",a,p,predictedCollectiveCost);
-      table[a][p] = predictedCollectiveCost;
+      NCCLCHECK(ncclTopoGetAlgoTime(comm, info->func, a, p, nBytes, numPipeOps, &table[a][p]));
       // Relegate fp8 reduction trees of sufficient depth that they incur precision loss
       // to be least preferred.
       if (info->datatype == ncclFloat8e4m3 || info->datatype == ncclFloat8e5m2) {
@@ -2199,7 +2196,6 @@ static ncclResult_t topoGetAlgoInfo(
   int protocol = info->protocol = NCCL_PROTO_UNDEF;
   for (int a=0; a<NCCL_NUM_ALGORITHMS; a++) {
     for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
-      INFO(NCCL_INIT,"For  Algo %d , Proto %d Table is set to %f",a,p,table[a][p]);
       if (table[a][p] == NCCL_ALGO_PROTO_IGNORE) continue;
       if (table[a][p] >= 0.0 && table[a][p] < minTime) {
         algorithm = a;
