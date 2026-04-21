@@ -1282,7 +1282,13 @@ def _format_agentic_output(
         # scaffolding is stripped entirely.
         if tier0_findings is not None:
             tier0_ns = tier0_dict_to_ns(tier0_findings)
-            tier0_full = _format_tier0_webview(tier0_ns, has_profiling=True)
+            # Pass hotspots so the Detected GPU Kernels rows are colored
+            # by the matched Tier-1 % Total bucket. Source-only callers
+            # upstream (formatters/__init__.py source_only path) do not
+            # have hotspots and pass None → no severity coloring.
+            tier0_full = _format_tier0_webview(
+                tier0_ns, has_profiling=True, hotspots=hotspots
+            )
             tier0_wrapper = _build_tier0_wrapper_scard(tier0_full)
             html = _splice_before_wrap_end(html, tier0_wrapper)
         return html
