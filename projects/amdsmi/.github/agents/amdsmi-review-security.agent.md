@@ -12,7 +12,7 @@ You review security for the amd-smi project. All security issues are **❌ BLOCK
 
 ## Project Layout
 
-C/C++ → `src/`, `include/amd_smi/` | Python → `py-interface/`, `amdsmi_cli/`
+Read `.claude/project-map.md` for directory layout, critical files, and API cascade path. If missing or stale, load the `populate-project-map` skill to regenerate it.
 
 ## Your Job
 

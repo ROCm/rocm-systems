@@ -12,15 +12,11 @@ You review performance and efficiency for the amd-smi project.
 
 ## Project Layout
 
-C/C++ → `src/`, `include/amd_smi/` | Python → `py-interface/`, `amdsmi_cli/`
+Read `.claude/project-map.md` for directory layout, critical files, and API cascade path. If missing or stale, load the `populate-project-map` skill to regenerate it.
 
-## High-Churn Hotspots (watch for regressions)
+## High-Churn Hotspots
 
-| File | Risk |
-|------|------|
-| `src/amd_smi/amd_smi.cc` | Core C library — NIC/switch code, hot paths |
-| `py-interface/amdsmi_interface.py` | Python API — ctypes overhead, repeated calls |
-| `amdsmi_cli/amdsmi_commands.py` | CLI — output generation, device iteration |
+Read `.claude/project-map.md` for the current hotspots list. Key areas to watch: core C library hot paths, Python ctypes overhead, CLI device iteration.
 
 ## Your Job
 

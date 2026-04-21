@@ -11,22 +11,24 @@ user-invocable: false
 You review test coverage, quality, and patterns for the amd-smi project.
 
 **Load `amdsmi-python-style-guide` skill when reviewing Python test files.**
+**Load `amdsmi-test-runner` skill for test execution commands and expected outputs.**
 
 ## Test Validation
 
-**C++ (amdsmitst):** For C/C++ changes, build and run GTest:
+**C++ (amdsmitst):** The build subagent builds and installs first. To run GTest:
 ```bash
-cd build && make -j$(nproc) amdsmitst
-cd tests && source ../../tests/amd_smi_test/amdsmitst.exclude
-./amdsmitst --gtest_filter="-$(echo ${BLACKLIST_ALL_ASICS})"
+cd build/tests
+source ../../tests/amd_smi_test/amdsmitst.exclude
+source ../../tests/amd_smi_test/detect_asic_filter.sh
+./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}"
 ```
-Parse output: any `[  FAILED  ]` → ❌ BLOCKING. Build failure → ⚠️ IMPORTANT.
+Parse output: any `[  FAILED  ]` → ❌ BLOCKING.
 
 **Python:** See `amdsmi-python-style-guide` skill for Python testing rules. Tests must work with both system-installed and pip-installed amdsmi. CLI tests in `amdsmi_cli/`.
 
 ## Project Layout
 
-C/C++ → `src/`, `include/amd_smi/` | Python → `py-interface/`, `amdsmi_cli/` | CMake → root + `cmake_modules/` | Go → `goamdsmi_shim/` | Rust → `rust-interface/`
+Read `.claude/project-map.md` for directory layout, critical files, and API cascade path. If missing or stale, load the `populate-project-map` skill to regenerate it.
 
 ## Your Job
 
