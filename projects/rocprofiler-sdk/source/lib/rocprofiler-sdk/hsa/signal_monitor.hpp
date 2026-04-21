@@ -60,12 +60,14 @@ struct SignalMonitorConfig
     bool     allow_poll_fallback   = true;
 };
 
+class SignalMonitor;
+
 namespace detail
 {
-std::shared_ptr<class SignalMonitor>
+std::shared_ptr<SignalMonitor>
 create_polling_signal_monitor(const SignalMonitorConfig& cfg, SignalMonitorOps ops);
 
-std::shared_ptr<class SignalMonitor>
+std::shared_ptr<SignalMonitor>
 create_ioctl_signal_monitor(const SignalMonitorConfig& cfg, SignalMonitorOps ops);
 }  // namespace detail
 

@@ -39,6 +39,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <type_traits>
 
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -70,6 +71,17 @@ default_load_signal(hsa_signal_t signal)
     return hsa_signal_load_relaxed(signal);
 }
 
+template <typename TableT, typename = void>
+struct has_signal_get_event_id_fn : std::false_type
+{};
+
+template <typename TableT>
+struct has_signal_get_event_id_fn<
+    TableT,
+    std::void_t<decltype(std::declval<TableT*>()->hsa_amd_signal_get_event_id_fn)>>
+: std::true_type
+{};
+
 int
 get_kfd_wait_fd()
 {
@@ -92,8 +104,19 @@ bool
 default_get_event_id(hsa_signal_t signal, uint32_t& event_id)
 {
     auto* ext_api = get_amd_ext_table();
-    if(!ext_api || !ext_api->hsa_amd_signal_get_event_id_fn) return false;
-    return (ext_api->hsa_amd_signal_get_event_id_fn(signal, &event_id) == HSA_STATUS_SUCCESS);
+    if(!ext_api) return false;
+
+    if constexpr(has_signal_get_event_id_fn<hsa_amd_ext_table_t>::value)
+    {
+        if(!ext_api->hsa_amd_signal_get_event_id_fn) return false;
+        return (ext_api->hsa_amd_signal_get_event_id_fn(signal, &event_id) == HSA_STATUS_SUCCESS);
+    }
+    else
+    {
+        (void) signal;
+        (void) event_id;
+        return false;
+    }
 }
 
 bool
@@ -135,8 +158,17 @@ bool
 has_default_ioctl_support()
 {
     auto* ext_api = get_amd_ext_table();
-    if(!ext_api || !ext_api->hsa_amd_signal_get_event_id_fn) return false;
-    return (get_kfd_wait_fd() >= 0);
+    if(!ext_api) return false;
+
+    if constexpr(has_signal_get_event_id_fn<hsa_amd_ext_table_t>::value)
+    {
+        if(!ext_api->hsa_amd_signal_get_event_id_fn) return false;
+        return (get_kfd_wait_fd() >= 0);
+    }
+    else
+    {
+        return false;
+    }
 }
 
 class IoctlSignalMonitor final : public SignalMonitor
