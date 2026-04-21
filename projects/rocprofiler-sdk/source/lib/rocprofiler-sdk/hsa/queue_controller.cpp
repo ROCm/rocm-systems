@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -372,7 +373,8 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
             core_table.hsa_queue_create_fn  = hsa::create_queue;
             core_table.hsa_queue_destroy_fn = hsa::destroy_queue;
         }
-        queue_intercept::install_intercept(core_table);
+        if(common::get_env("ROCPROFILER_INLINE_INTERCEPT", true))
+            queue_intercept::install_intercept(core_table);
     }
 }
 
