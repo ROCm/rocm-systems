@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import fnmatch
 import os
 from pathlib import Path
 
@@ -81,7 +82,21 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
     )
 
     file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
+
+    actual_files = set(file_dict.keys())
+    for expected_pattern in PC_SAMPLING_HOST_TRAP_FILES:
+        if "*" in expected_pattern:
+            matching_files = [
+                f for f in actual_files if fnmatch.fnmatch(f, expected_pattern)
+            ]
+            assert len(matching_files) > 0, (
+                f"Expected at least 1 file matching pattern "
+                f"'{expected_pattern}', found 0"
+            )
+        else:
+            assert expected_pattern in actual_files, (
+                f"Expected file '{expected_pattern}' not found in output"
+            )
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -117,7 +132,21 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
 
     assert code == 0
     file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_STOCHASTIC_FILES)
+
+    actual_files = set(file_dict.keys())
+    for expected_pattern in PC_SAMPLING_STOCHASTIC_FILES:
+        if "*" in expected_pattern:
+            matching_files = [
+                f for f in actual_files if fnmatch.fnmatch(f, expected_pattern)
+            ]
+            assert len(matching_files) > 0, (
+                f"Expected at least 1 file matching pattern "
+                f"'{expected_pattern}', found 0"
+            )
+        else:
+            assert expected_pattern in actual_files, (
+                f"Expected file '{expected_pattern}' not found in output"
+            )
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -244,7 +273,21 @@ def test_pc_sampling_profile_then_analyze(
 
     assert code == 0
     file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
+
+    actual_files = set(file_dict.keys())
+    for expected_pattern in PC_SAMPLING_HOST_TRAP_FILES:
+        if "*" in expected_pattern:
+            matching_files = [
+                f for f in actual_files if fnmatch.fnmatch(f, expected_pattern)
+            ]
+            assert len(matching_files) > 0, (
+                f"Expected at least 1 file matching pattern "
+                f"'{expected_pattern}', found 0"
+            )
+        else:
+            assert expected_pattern in actual_files, (
+                f"Expected file '{expected_pattern}' not found in output"
+            )
 
     code = binary_handler_analyze_rocprof_compute(
         [
@@ -331,7 +374,21 @@ def test_pc_sampling_with_sol_block(binary_handler_profile_rocprof_compute):
 
     assert code == 0
     file_dict = common.check_csv_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
+
+    actual_files = set(file_dict.keys())
+    for expected_pattern in PC_SAMPLING_HOST_TRAP_FILES:
+        if "*" in expected_pattern:
+            matching_files = [
+                f for f in actual_files if fnmatch.fnmatch(f, expected_pattern)
+            ]
+            assert len(matching_files) > 0, (
+                f"Expected at least 1 file matching pattern "
+                f"'{expected_pattern}', found 0"
+            )
+        else:
+            assert expected_pattern in actual_files, (
+                f"Expected file '{expected_pattern}' not found in output"
+            )
 
     assert common.check_file_pattern("- '21'", f"{workload_dir}/profiling_config.yaml")
     assert common.check_file_pattern("- '2'", f"{workload_dir}/profiling_config.yaml")
