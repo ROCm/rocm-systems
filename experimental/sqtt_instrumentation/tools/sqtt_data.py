@@ -114,9 +114,16 @@ class FuncMap:
       "function" -- enter/exit scope marker (F: prefix)
       "user"     -- user scope marker (U: prefix)
       "point"    -- point marker: barriers, memory ops, user points (P: prefix)
+
+    source_locs holds the optional debug source location for F: / P: (addr
+    trace) entries.  For functions it's the definition site (file:line).
+    For address trace ops it's the call-site inline chain
+    "<inner>:<line> -> <outer>:<line>" matching rocprofiler-sdk's format.
     """
     markers: dict[int, tuple[str, str]] = field(default_factory=dict)
+    source_locs: dict[int, str] = field(default_factory=dict)
     kernels: list[str] = field(default_factory=list)
+    kernel_source_locs: dict[str, str] = field(default_factory=dict)
     wave_size: int = 0  # from W: entry (32 or 64), 0 if unknown
 
     def resolve(self, marker_id: int) -> tuple[str, str]:
@@ -126,14 +133,30 @@ class FuncMap:
         return (f"event#{marker_id}", "function")
 
 
+def _split_source_loc(s: str) -> tuple[str, str]:
+    """Split "name@file:line -> ..." into (name, source_loc).
+
+    Returns (s, "") if no '@' present.  Source location may itself contain
+    ' -> ' separators from inline chain expansion; those are preserved.
+    """
+    if "@" not in s:
+        return s, ""
+    name, loc = s.split("@", 1)
+    return name, loc
+
+
 def parse_funcmap(raw: str) -> FuncMap:
     """Parse raw .sqtt_funcmap content.
 
     Format v2 prefixes:
-        F:id:name  -- function (enter/exit scope)
-        U:id:name  -- user scope marker
-        P:id:name  -- point marker (barrier, memory op, user point)
-        K:name     -- kernel (for vaddr lookup, not instrumented)
+        F:id:name[@source_loc]  -- function (enter/exit scope)
+        U:id:name               -- user scope marker
+        P:id:name[@source_loc]  -- point marker; source_loc is set for
+                                   addr_trace_* point markers
+        K:name[@source_loc]     -- kernel (for vaddr lookup, not instrumented)
+
+    Source locations (when present) follow rocprofiler-sdk's inline chain
+    format: "<inner_file>:<line> -> <outer_file>:<line>".
     """
     fm = FuncMap()
     for line in raw.splitlines():
@@ -151,7 +174,10 @@ def parse_funcmap(raw: str) -> FuncMap:
             except ValueError:
                 pass
         elif prefix == "K":
-            fm.kernels.append(rest)
+            name, loc = _split_source_loc(rest)
+            fm.kernels.append(name)
+            if loc:
+                fm.kernel_source_locs[name] = loc
         elif prefix in ("F", "U", "P"):
             if ":" not in rest:
                 continue
@@ -161,7 +187,10 @@ def parse_funcmap(raw: str) -> FuncMap:
             except ValueError:
                 continue
             type_map = {"F": "function", "U": "user", "P": "point"}
+            name, loc = _split_source_loc(name)
             fm.markers[mid] = (name, type_map[prefix])
+            if loc:
+                fm.source_locs[mid] = loc
     return fm
 
 
@@ -430,17 +459,17 @@ _ADDR_TRACE_PREFIXES = [
 ]
 
 
-def _match_addr_trace(name: str) -> Optional[tuple[str, Optional[bool], str]]:
+def _match_addr_trace(name: str) -> Optional[tuple[str, Optional[bool]]]:
     """Match a funcmap name against address trace prefixes.
 
-    Returns (kind, is_64bit, source_loc) or None if not an addr trace.
+    Returns (kind, is_64bit) or None if not an addr trace.
     is_64bit is None for buffer ops (component-based protocol).
-    The source_loc is the part after '@', or "" if absent.
+    Source location lives separately on FuncMap.source_locs and is threaded
+    through parse_address_block by callers.
     """
     for prefix, kind, is_64bit in _ADDR_TRACE_PREFIXES:
-        if name == prefix or name.startswith(prefix + "@"):
-            source_loc = name[len(prefix) + 1:] if "@" in name else ""
-            return kind, is_64bit, source_loc
+        if name == prefix:
+            return kind, is_64bit
     return None
 
 
@@ -460,6 +489,7 @@ def parse_address_block(
     name: str,
     marker_id: int,
     wave_size: int,
+    source_loc: str = "",
 ) -> tuple[Optional[AddressTrace], int]:
     """Parse an address trace block starting at the header marker.
 
@@ -488,7 +518,7 @@ def parse_address_block(
     if match is None:
         return None, start_idx + 1
 
-    kind, is_64bit, source_loc = match
+    kind, is_64bit = match
     i = start_idx + 1  # skip header
 
     if wave_size not in (32, 64):
@@ -670,7 +700,8 @@ def preprocess_records(
 
             if _match_addr_trace(name) is not None:
                 trace, i = parse_address_block(
-                    wave_records, i, rec, name, marker_id, funcmap.wave_size)
+                    wave_records, i, rec, name, marker_id, funcmap.wave_size,
+                    funcmap.source_locs.get(marker_id, ""))
                 if trace:
                     addr_traces.append(trace)
             else:

@@ -70,15 +70,37 @@ Value* SQTTInstrumentPass::getMemOpPointer(Instruction* I)
 
 std::string SQTTInstrumentPass::getSourceLoc(Instruction* I)
 {
-    if (const auto& DL = I->getDebugLoc())
+    const DebugLoc& DL = I->getDebugLoc();
+    if (!DL) return "";
+
+    // Walk the inline chain innermost -> outermost.  At each level, getScope()
+    // gives the file the source line lives in; getLine() gives the line.
+    // getInlinedAt() walks one step outward (the call site).  Format matches
+    // rocprofiler-sdk codeobj's printer: "<inner>:<line> -> <outer>:<line>".
+    std::string out;
+    DILocation* L = DL.get();
+    while (L)
     {
-        std::string loc;
-        if (auto* Scope = DL->getScope()) { loc += Scope->getFilename().str(); }
-        loc += ':';
-        loc += std::to_string(DL.getLine());
-        return loc;
+        if (!out.empty()) out += " -> ";
+        if (auto* Scope = L->getScope()) out += Scope->getFilename().str();
+        out += ':';
+        out += std::to_string(L->getLine());
+        L = L->getInlinedAt();
     }
-    return "";
+    return out;
+}
+
+std::string SQTTInstrumentPass::getFunctionSourceLoc(Function& F)
+{
+    DISubprogram* SP = F.getSubprogram();
+    if (!SP) return "";
+    StringRef File = SP->getFilename();
+    unsigned Line = SP->getLine();
+    if (File.empty() && Line == 0) return "";
+    std::string out = File.str();
+    out += ':';
+    out += std::to_string(Line);
+    return out;
 }
 
 const char* SQTTInstrumentPass::addrTraceKindName(AddrTraceKind kind, bool isStore, bool isAtomic)

@@ -156,7 +156,7 @@ PreservedAnalyses SQTTInstrumentPass::runLate(Module& M)
 
         bool IsKernel = F.getCallingConv() == CallingConv::AMDGPU_KERNEL;
 
-        if (IsKernel) KernelNames.push_back(F.getName().str());
+        if (IsKernel) KernelNames.push_back({F.getName().str(), getFunctionSourceLoc(F)});
 
         if (Config.needsScopeCheck()) Changed |= wrapExistingMarkers(F, Gen);
 

@@ -124,7 +124,9 @@ def build_stacks(
     merged = FuncMap()
     for fm in per_co.values():
         merged.markers.update(fm.markers)
+        merged.source_locs.update(fm.source_locs)
         merged.kernels.extend(fm.kernels)
+        merged.kernel_source_locs.update(fm.kernel_source_locs)
         if fm.wave_size:
             merged.wave_size = fm.wave_size
 
@@ -559,7 +561,9 @@ def main():
     merged = FuncMap()
     for fm in per_co.values():
         merged.markers.update(fm.markers)
+        merged.source_locs.update(fm.source_locs)
         merged.kernels.extend(fm.kernels)
+        merged.kernel_source_locs.update(fm.kernel_source_locs)
         if fm.wave_size:
             merged.wave_size = fm.wave_size
 

@@ -73,8 +73,22 @@ private:
     SQTTConfig Config;
     Mode PassMode;
     uint32_t NextEventID = 1; // unified counter for all marker types
-    std::vector<std::pair<uint32_t, std::string>> FuncMap;
-    std::vector<std::string> KernelNames;
+    // Instrumented device functions.  SourceLoc is the function definition
+    // location (file:line) from DWARF, "" if no debug info.
+    struct FuncMapEntry
+    {
+        uint32_t ID;
+        std::string Name;
+        std::string SourceLoc;
+    };
+    std::vector<FuncMapEntry> FuncMap;
+    // Kernels (not instrumented, recorded for vaddr lookup).
+    struct KernelEntry
+    {
+        std::string Name;
+        std::string SourceLoc;
+    };
+    std::vector<KernelEntry> KernelNames;
     std::map<std::string, uint32_t> UserMarkerMap;
     // User markers: (id, name, is_point).  Scope markers use U: prefix,
     // point markers use P: prefix in the funcmap.
@@ -200,7 +214,15 @@ private:
         llvm::Function& F,
         GfxGen gen
     );
+    // Source location for an instruction.  Walks the inline chain via
+    // DILocation::getInlinedAt() and joins entries with " -> " (innermost
+    // first, then each outward call site).  Matches the format used by
+    // rocprofiler-sdk's codeobj DWARF inline chain printer.
+    // Returns "" if no debug info.
     static std::string getSourceLoc(llvm::Instruction* I);
+    // Source location for a function's definition (from DISubprogram).
+    // No inline chain — returns just "file:line", or "" if no debug info.
+    static std::string getFunctionSourceLoc(llvm::Function& F);
     static const char* addrTraceKindName(AddrTraceKind kind, bool isStore, bool isAtomic = false);
 
     // Buffer intrinsic operand extraction
