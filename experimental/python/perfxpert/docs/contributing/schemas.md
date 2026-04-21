@@ -53,11 +53,21 @@ dict that every formatter consumes:
 
 `perfxpert/formatters/json_fmt.py::_format_as_json` serialises Layer B
 into the public JSON document, stamped with a top-level
-`schema_version` field (currently **`0.3.0`**; Tier-3 ATT bumps to
-`0.4.0`). `perfxpert/analyze.py::_format_agentic_output` (~line 790)
-then overlays the agentic brain (`narrative`, `primary_bottleneck`,
-`warnings`, `tier0_findings`) and re-bumps the version if it was
-still at `0.1.0` / `0.2.0`.
+`schema_version` field (currently **`0.3.1`** — see `# CHANGES`
+below; Tier-3 ATT bumps to `0.4.0`). `perfxpert/analyze.py::_format_agentic_output`
+(~line 790) then overlays the agentic brain (`narrative`,
+`primary_bottleneck`, `warnings`, `tier0_findings`) and re-bumps the
+version if it was still at `0.1.0` / `0.2.0`.
+
+<!-- # CHANGES — 0.3.0 → 0.3.1
+     Additive: `hotspots[i].source_locations: list[{file, line, kind}]`
+     where `kind ∈ {"definition", "launch"}`. Emitted when
+     `--source-dir` was supplied and the Tier-0 scanner correlated
+     at least one hotspot with a detected kernel. Absent field when
+     no source scan was performed; empty list when the scanner ran
+     but no basename matched. See Confluence row #5 (Source Code
+     Line numbers) for the UI rollout details. -->
+
 
 The three layers form a pipeline:
 
@@ -184,17 +194,20 @@ The current tree:
 - `0.1.0` — pre-TraceLens baseline (trace-only reports).
 - `0.2.0` — tier-0 source-scanner addition (used by
   `_format_tier0_json`).
-- `0.3.0` — current: agentic brain (`narrative`,
-  `primary_bottleneck`, `warnings`) + tier-0 separation + summary
-  section.
+- `0.3.0` — agentic brain (`narrative`, `primary_bottleneck`,
+  `warnings`) + tier-0 separation + summary section.
+- `0.3.1` — current: additive `hotspots[i].source_locations` field
+  cross-referencing each hotspot with its Tier-0 definition +
+  launch site (Confluence row #5).
 - `0.4.0` — bumped automatically by `_format_as_json` when
   `att_analysis.has_att_data=True` (Tier-3 ATT).
 
 The bumps in `_format_as_json` live at the end of that function; the
 overlay in `_format_agentic_output` (`perfxpert/analyze.py` ~line 790)
-only upgrades `0.1.0` / `0.2.0` → `0.3.0`, so a later ATT-driven bump
-to `0.4.0` is preserved. Preserve that ordering when you add a new
-minor bump.
+only upgrades `0.1.0` / `0.2.0` → `0.3.0` by default and conditionally
+bumps to `0.3.1` when any hotspot carries `source_locations`, so a
+later ATT-driven bump to `0.4.0` is preserved. Preserve that ordering
+when you add a new minor / patch bump.
 
 ## Cross-format parity guarantee
 

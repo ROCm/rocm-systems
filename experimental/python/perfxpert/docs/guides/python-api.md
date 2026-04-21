@@ -57,6 +57,36 @@ under the hood — passing `database_path=<path>` + `user_query=<str>`
 gives you the equivalent of the CLI's end-to-end report in a Python
 dict.
 
+### Hotspot output shape
+
+Each entry in `out["hotspots"]` is a dict with `name`, `calls`,
+`total_duration`, `avg_duration`, `min_duration`, `max_duration`,
+and `percent_of_total`. When the caller supplied a `source_dir` to
+the root agent, every hotspot **also** carries a
+`source_locations: list[dict]` field:
+
+```python
+# SKIP-SAMPLE — illustrative output shape for hotspot source correlation
+{
+    "name": "ns::matmul<float>(float*, float*)",
+    "calls": 128,
+    "total_duration": 92_000_000,
+    "percent_of_total": 48.5,
+    "source_locations": [
+        {"file": "src/ops.hip",  "line": 42, "kind": "definition"},
+        {"file": "src/main.hip", "line": 88, "kind": "launch"},
+    ],
+}
+```
+
+`kind` is `"definition"` (the `__global__` symbol declaration) or
+`"launch"` (a detected `hipLaunchKernelGGL` / triple-angle dispatch
+site). The list is empty when the Tier-0 scanner ran but found no
+matching basename, and the field is absent entirely when no source
+scan was performed. The `source_locations` field is the same shape
+as `hotspots[i].source_locations` in the JSON report (schema
+`0.3.1`).
+
 ## Input schemas (one example per agent)
 
 Field names come from `perfxpert/agents/schemas.py` (Pydantic

@@ -421,6 +421,32 @@ fixed 7 top-level sections (Overview, Summary, Execution, Hotspots,
 Hardware Counters, Recommendations, Tier-0 when `--source-dir` is
 set). AMD dark theme, SVG gauges, collapsible cards — email-ready.*
 
+#### Source-line correlation
+
+When `--source-dir` is supplied alongside `-i`, every row of the
+**Top Kernel Hotspots** table grows a `▾` chevron next to the kernel
+name. Clicking the chevron expands an inline panel — same visual
+style as the Recommendation card drawer — showing the kernel's
+**Definition** (file:line where the `__global__` symbol is declared)
+and every detected **Launch site** (file:line of each
+`hipLaunchKernelGGL` / triple-angle dispatch). Each line renders with
+a `Copy` button and a launch-type badge (`__global__`,
+`HIP_KERNEL_LAUNCH`, `<<< >>>`), VTune/NSight-style.
+
+When `--source-dir` is **not** supplied the panel is still present
+but explains how to enable the correlation. When the scanner did run
+but no symbol matches the hotspot's basename, the panel shows
+"No matching source location detected" — useful signal that the
+profiled binary and the `--source-dir` tree may be out of sync.
+
+Source-line correlation is data, not advice, so the panel ships
+regardless of the Tier-0 instrumentation-advice gate (`has_profiling`).
+The markdown and text formats append a compact
+`Source: file.hip:42 (definition), file.hip:88 (launch)` line under
+each hotspot row; the JSON format emits
+`hotspots[i].source_locations: [{file, line, kind}]` (schema
+`0.3.1`).
+
 ### Report contents (every format)
 
 Every format — text, JSON, markdown, webview — carries the same
@@ -526,10 +552,11 @@ The JSON format exposes each section under a flat top-level key
 `.primary_bottleneck`, `.warnings`, `.metadata`). The Tier-0 block
 lives under `.tier0_findings.profiling_plan` +
 `.tier0_findings.code_patterns`. The document carries
-`"schema_version": "0.3.0"` on every agentic run (bumps to `"0.4.0"`
-when ATT data is present). The legacy `.llm_enhanced_explanation` key
-mirrors `.narrative` for backwards compat; new consumers should read
-`.narrative` directly.
+`"schema_version": "0.3.0"` on every agentic run (bumps to `"0.3.1"`
+when `--source-dir` was supplied and at least one hotspot carries
+`source_locations`; bumps to `"0.4.0"` when ATT data is present).
+The legacy `.llm_enhanced_explanation` key mirrors `.narrative` for
+backwards compat; new consumers should read `.narrative` directly.
 
 ## 5. Multi-GPU / MPI workflows
 

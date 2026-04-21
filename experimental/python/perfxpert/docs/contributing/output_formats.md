@@ -270,6 +270,7 @@ graceful-placeholder when a section is structurally empty):
 | 2 | Narrative | `narrative` (from `RootOutput`) |
 | 3 | Time breakdown | `time_breakdown` |
 | 4 | Hotspot list | `hotspots` |
+| 4a | Source-line correlation (conditional) | `hotspots[i].source_locations` (present when `--source-dir` supplied; list of `{file, line, kind}`) |
 | 5 | Memory analysis | `memory_analysis` |
 | 6 | Hardware counters | `hardware_counters` (placeholder when `has_counters=False`) |
 | 7 | Kernel resources | `kernel_resources` |
@@ -277,6 +278,37 @@ graceful-placeholder when a section is structurally empty):
 | 9 | Recommendations (merged LLM + deterministic) | `recommendations` |
 | 10 | Warnings | `warnings` (from `RootOutput`) |
 | 11 | Tier-0 findings (conditional) | `tier0_findings` (only when `--source-dir` supplied) |
+
+### Hotspot → source correlation (Confluence row #5)
+
+When `--source-dir` is supplied, the Tier-0 scanner populates
+`detected_kernels: [{name, file, line, launch_type}]`. The
+formatter-agnostic helper
+`perfxpert/formatters/_source_correlation.py::correlate_hotspots_with_source`
+canonicalises both names (strip namespace, template args, function-
+pointer decoration; match by basename, case-insensitive) and returns
+each hotspot with a `source_locations: list[{file, line, kind}]`
+field, sorted definitions-first, then launches.
+
+Every built-in format surfaces this data:
+
+- **webview** — expandable `▾` per-row panel (class `h-src-toggle`)
+  inside the Top Kernel Hotspots `.scard`; shows Definition +
+  Launch-site lines each with a Copy button and a launch-type badge.
+- **markdown** — appends a `- Source: file.hip:42 (definition), …`
+  line under each hotspot row in the `## Top Kernel Hotspots` table.
+- **text** — appends a `      Source: file.hip:42 (definition), …`
+  indented line under each hotspot row in the HOTSPOTS banner.
+- **json** — emits `hotspots[i].source_locations` verbatim (schema
+  `0.3.1`).
+
+**CSV authors**: when `--source-dir` was supplied, every hotspot row
+MUST include at minimum a `source_file` + `source_line` + `source_kind`
+triple (or repeat the hotspot row once per source-location, with a
+`rank.source_idx` column to preserve ordering). Omitting these in a
+new format creates cross-format drift — the JSON contract and the
+webview both surface the correlation, so a machine-oriented format
+that drops it is a regression.
 
 Empty sections render a placeholder, not an error — `memory_analysis`
 on a compute-only trace, `hardware_counters` on a Tier-1 (no-PMC) run,
