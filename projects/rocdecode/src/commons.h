@@ -34,13 +34,8 @@ THE SOFTWARE.
 #include <stdint.h>
 #include <sys/syscall.h>
 
-#if DBGINFO
 #define MSG(X) std::clog << X << std::endl;
 #define MSG_NO_NEWLINE(X) std::clog << X;
-#else
-#define MSG(X) ;
-#define MSG_NO_NEWLINE(X) ;
-#endif
 
 #define ROCDEC_TOSTR(X) std::to_string(X)
 #define ROCDEC_STR(X) std::string(X)
