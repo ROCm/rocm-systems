@@ -3,6 +3,7 @@
 
 #include "common/common_utils.hpp"
 
+#include "common/argument_registration.hpp"
 #include "common/env_vars.hpp"
 #include "common/json_config.hpp"
 
@@ -35,7 +36,7 @@ starts_with_rocprofsys(std::string_view entry) noexcept
     return entry.compare(0, rocprofsys_prefix.size(), rocprofsys_prefix) == 0;
 }
 
-std::string_view
+[[nodiscard]] std::string_view
 env_key(std::string_view entry) noexcept
 {
     const auto eq_pos = entry.find('=');
@@ -68,10 +69,12 @@ print_command(const std::vector<std::string>& argv, std::string_view prefix)
     std::cerr << prefix << "Executing '" << cmd << "'...\n" << std::flush;
 }
 
+namespace detail
+{
 void
-print_environment(const std::vector<std::string>&             env,
-                  const std::unordered_set<std::string_view>& updated_envs,
-                  bool include_general_vars, std::string_view prefix)
+print_environment_impl(const std::vector<std::string>&              env,
+                       const std::function<bool(std::string_view)>& is_updated_key,
+                       bool include_general_vars, std::string_view prefix)
 {
     std::vector<std::string_view> entries;
     entries.reserve(env.size());
@@ -80,7 +83,7 @@ print_environment(const std::vector<std::string>&             env,
     entries.erase(std::unique(entries.begin(), entries.end()), entries.end());
 
     auto is_updated = [&](std::string_view entry) {
-        return updated_envs.count(env_key(entry)) > 0;
+        return is_updated_key(env_key(entry));
     };
     auto is_general = [&](std::string_view entry) {
         return !is_updated(entry) && starts_with_rocprofsys(entry);
@@ -101,6 +104,7 @@ print_environment(const std::vector<std::string>&             env,
     emit_matching(is_updated);
     std::cerr << std::flush;
 }
+}  // namespace detail
 
 static std::string
 strip_flag_prefix(std::string_view name)
@@ -440,20 +444,19 @@ export_config(const std::vector<std::string>&        current_env,
 }
 
 void
-run_post_parse_validation(std::string_view tool_name, std::string_view preset_name,
-                          bool gpu_enabled, bool rocm_enabled, bool cpu_enabled,
-                          bool parallel_enabled, int verbose_level,
-                          preset_registry& registry)
+run_post_parse_validation(std::string_view tool_name, domain_flag_state& state,
+                          int verbose_level)
 {
-    if(!preset_name.empty() && verbose_level >= 1)
+    if(!state.active_preset_name.empty() && verbose_level >= 1)
     {
-        print_pre_execution_info(tool_name, preset_name, registry);
+        print_pre_execution_info(tool_name, state.active_preset_name, state.registry);
     }
 
     warn_if_output_not_writable(tool_name);
     validate_configuration();
-    validate_domain_flags(gpu_enabled, rocm_enabled, cpu_enabled, parallel_enabled,
-                          preset_name);
+    validate_domain_flags(state.gpu_domain_enabled, state.rocm_domain_enabled,
+                          state.cpu_domain_enabled, state.parallel_domain_enabled,
+                          state.active_preset_name);
 }
 
 // ============================================================================

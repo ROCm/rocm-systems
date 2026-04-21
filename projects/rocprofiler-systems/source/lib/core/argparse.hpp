@@ -3,13 +3,17 @@
 
 #pragma once
 
+#include "common/environment.hpp"
+
 #include <timemory/settings/vsettings.hpp>
 #include <timemory/utility/argparse.hpp>
 
 #include <functional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys
@@ -38,11 +42,25 @@ default_grouping_filter(std::string_view, const parser_data&);
 
 struct env_snapshot
 {
-    std::unordered_set<std::string>      initial      = {};
-    std::vector<std::string>             current      = {};
-    std::unordered_set<std::string_view> updated      = {};
-    std::string                          dl_libpath   = {};
-    std::string                          omni_libpath = {};
+    std::unordered_set<std::string> initial = {};
+    std::vector<std::string>        current = {};
+    // Owns its keys: callers may pass temporaries (e.g. std::string{key}) into
+    // update_env, so storing string_view here would dangle once they die.
+    std::unordered_set<std::string> updated      = {};
+    std::string                     dl_libpath   = {};
+    std::string                     omni_libpath = {};
+
+    // Convenience wrapper: hides the (current, updated, initial) plumbing
+    // and the join delimiter, so callers stop reaching into three fields.
+    template <typename Tp>
+    void set(
+        std::string_view key, Tp&& value,
+        rocprofsys::common::update_mode mode = rocprofsys::common::update_mode::REPLACE,
+        std::string_view                join_delim = ":")
+    {
+        rocprofsys::common::update_env(current, key, std::forward<Tp>(value), mode,
+                                       join_delim, updated, initial);
+    }
 };
 
 struct parse_outcome
@@ -51,6 +69,7 @@ struct parse_outcome
     std::string              launcher   = {};
     bool                     monochrome = false;
     bool                     debug      = false;
+    bool                     fork_exec  = false;
     int                      verbose    = 0;
 };
 

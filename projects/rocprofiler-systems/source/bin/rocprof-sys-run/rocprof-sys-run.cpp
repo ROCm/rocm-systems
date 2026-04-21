@@ -6,6 +6,6 @@
 int
 main(int argc, char** argv)
 {
-    return rocprofsys::common_utils::run_tool(
-        argc, argv, rocprofsys::common_utils::make_run_config());
+    return rocprofsys::common_utils::run_tool(argc, argv,
+                                              rocprofsys::common_utils::tool_mode::run);
 }

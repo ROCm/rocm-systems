@@ -7,5 +7,5 @@ int
 main(int argc, char** argv)
 {
     return rocprofsys::common_utils::run_tool(
-        argc, argv, rocprofsys::common_utils::make_sample_config());
+        argc, argv, rocprofsys::common_utils::tool_mode::sample);
 }

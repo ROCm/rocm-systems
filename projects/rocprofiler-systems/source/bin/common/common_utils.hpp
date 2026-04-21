@@ -5,6 +5,7 @@
 
 #include "common/preset_registry.hpp"
 
+#include <functional>
 #include <iostream>
 #include <map>
 #include <sstream>
@@ -56,10 +57,8 @@ export_config(const std::vector<std::string>&        current_env,
  * Called by both run and sample after argument parsing.
  */
 void
-run_post_parse_validation(std::string_view tool_name, std::string_view preset_name,
-                          bool gpu_enabled, bool rocm_enabled, bool cpu_enabled,
-                          bool parallel_enabled, int verbose_level,
-                          preset_registry& registry);
+run_post_parse_validation(std::string_view tool_name, struct domain_flag_state& state,
+                          int verbose_level);
 
 using help_group_names = std::vector<std::string>;
 using help_topic_map   = std::map<std::string, help_group_names>;
@@ -81,24 +80,51 @@ get_domain_help_map();
 void
 print_compact_help(std::string_view tool_name, std::ostream& out = std::cout);
 
-bool
+[[nodiscard]] bool
 print_help_for_topic(const std::string& captured_help, std::string_view topic,
                      std::string_view tool_name, std::ostream& out = std::cout);
 
-bool
+[[nodiscard]] bool
 print_help_for_domain(const std::string& captured_help, std::string_view domain,
                       std::string_view tool_name, std::ostream& out = std::cout);
 
+/**
+ * Build a NUL-terminated `char*` array suitable for execvpe() / argv-style APIs.
+ *
+ * Returned pointers are non-owning and reference the internal buffers of `src`
+ * via `std::string::data()`. The caller MUST keep `src` alive for the whole
+ * lifetime of the returned vector and MUST NOT mutate `src` (any push_back /
+ * resize that reallocates invalidates every pointer). Non-const reference is
+ * required because `data()` only returns a writable pointer on a non-const
+ * string.
+ */
 [[nodiscard]] std::vector<char*>
 to_c_argv(std::vector<std::string>& src);
 
 void
 print_command(const std::vector<std::string>& argv, std::string_view prefix = {});
 
+namespace detail
+{
 void
-print_environment(const std::vector<std::string>&             env,
-                  const std::unordered_set<std::string_view>& updated_envs,
-                  bool include_general_vars = false, std::string_view prefix = {});
+print_environment_impl(const std::vector<std::string>&              env,
+                       const std::function<bool(std::string_view)>& is_updated,
+                       bool include_general_vars, std::string_view prefix);
+}  // namespace detail
+
+template <typename UpdatedEnvsT>
+void
+print_environment(const std::vector<std::string>& env, const UpdatedEnvsT& updated_envs,
+                  bool include_general_vars = false, std::string_view prefix = {})
+{
+    detail::print_environment_impl(
+        env,
+        [&](std::string_view key) {
+            // Both std::string and std::string_view sets accept string_view in count().
+            return updated_envs.count(typename UpdatedEnvsT::key_type{ key }) > 0;
+        },
+        include_general_vars, prefix);
+}
 
 template <typename ParserT>
 std::string
@@ -116,7 +142,7 @@ capture_help_text(ParserT& parser)
  * Returns the exit code the caller should use to terminate the program.
  */
 template <typename ParserT>
-int
+[[nodiscard]] int
 dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
 {
     std::string topic;

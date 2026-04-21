@@ -367,14 +367,14 @@ to_env_string(Tp&& val)
         return std::to_string(val);
 }
 
-template <typename Tp>
+template <typename Tp, typename UpdatedEnvsT>
 inline void
 update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _env_val,
-           update_mode _mode, std::string_view _join_delim,
-           std::unordered_set<std::string_view>&  _updated_envs,
+           update_mode _mode, std::string_view _join_delim, UpdatedEnvsT& _updated_envs,
            const std::unordered_set<std::string>& _original_envs)
 {
-    _updated_envs.emplace(_env_var);
+    using updated_value_t = typename UpdatedEnvsT::value_type;
+    _updated_envs.emplace(updated_value_t{ _env_var });
 
     const auto _env_val_str = to_env_string(std::forward<Tp>(_env_val));
     const auto _key         = join("", _env_var, "=");
