@@ -340,13 +340,19 @@ def analyze_collectives(
             peak busBW so efficiency percentages can be reported.
 
     Returns:
-        ``{"collectives": [...], "summary": {...}}`` where each collective
-        entry carries ``op_type``, ``msg_bytes``, ``duration_ns``,
+        ``CommunicationBlock``-compatible dict (see
+        :class:`perfxpert.agents.schemas.CommunicationBlock`) —
+        ``{"collectives": [...], "summary": {...}, "capture_incomplete":
+        bool}`` where each collective entry carries the 12 fields typed
+        by :class:`perfxpert.agents.schemas.CollectiveEntry`
+        (``op_type``, ``msg_bytes``, ``duration_ns``,
         ``effective_bw_gbps``, ``peak_bw_gbps``, ``efficiency_pct``,
-        ``overlap_ratio``, ``algo_hint``, ``topology_hint``, ``ranks``.
+        ``efficiency_label``, ``overlap_ratio``, ``algo_hint``,
+        ``topology_hint``, ``regime``, ``ranks``).
 
         When the DB contains no RCCL data at all the result is
-        ``{"collectives": [], "summary": {"capture_incomplete": False, ...}}``.
+        ``{"collectives": [], "summary": {"capture_incomplete": False,
+        ...}, "capture_incomplete": False}``.
 
     Example:
         >>> from perfxpert.tools.rccl_analysis import analyze_collectives
@@ -420,7 +426,18 @@ def analyze_collectives(
 
         summary = _build_summary(collectives, n_ranks, peak, overlap_pct,
                                  capture_incomplete)
-        return {"collectives": collectives, "summary": summary}
+        # Validate at the boundary via the Pydantic CommunicationBlock
+        # model — downstream consumers (formatters, Latency specialist,
+        # MCP clients) then get a single source of truth for field names
+        # + types. ``model_dump()`` casts back to the dict shape the rest
+        # of the codebase already consumes.
+        from perfxpert.agents.schemas import CommunicationBlock
+        block = CommunicationBlock(
+            collectives=collectives,  # Pydantic validates each entry as CollectiveEntry
+            summary=summary,
+            capture_incomplete=capture_incomplete,
+        )
+        return block.model_dump()
     finally:
         conn.close()
 

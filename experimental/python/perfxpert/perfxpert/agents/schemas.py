@@ -217,6 +217,48 @@ class DiffSpecialistOutput(_FrozenModel):
     confidence: float = Field(..., ge=0.0, le=1.0)
 
 
+# -- Communication (RCCL payload block) -----------------------------------
+#
+# Leaf data models, not agent Input/Output — the ≤5-field cap does NOT
+# apply. These type the per-collective shape emitted by
+# ``perfxpert.tools.rccl_analysis.analyze_collectives`` so downstream
+# consumers (formatters, MCP clients, Latency specialist) get a single
+# source of truth for the field list. The top-level ``summary`` dict
+# stays untyped (less stable shape, best treated as free-form).
+
+
+class CollectiveEntry(_FrozenModel):
+    """One per-collective record inside ``payload["communication"]``.
+
+    Pydantic-validated at the ``analyze_collectives`` boundary so callers
+    can rely on field presence + basic types. The set of acceptable
+    ``efficiency_label`` values mirrors ``rccl_analysis._classify_efficiency``
+    (poor/fair/good) plus the ``unknown`` case emitted by the
+    kernel-name-regex fallback when ``capture_incomplete=True``.
+    """
+
+    op_type: str
+    msg_bytes: int = Field(..., ge=0)
+    duration_ns: int = Field(..., ge=0)
+    effective_bw_gbps: float
+    peak_bw_gbps: Optional[float] = None
+    efficiency_pct: float
+    efficiency_label: Literal["poor", "fair", "good", "unknown"]
+    overlap_ratio: float
+    algo_hint: Optional[str] = None
+    topology_hint: Optional[str] = None
+    regime: Optional[str] = None
+    ranks: int = Field(..., ge=1)
+
+
+class CommunicationBlock(_FrozenModel):
+    """Typed wrapper for ``payload["communication"]`` — 3 top-level keys."""
+
+    collectives: List[CollectiveEntry]
+    summary: Dict[str, Any]  # top-level aggregate is less stable — keep untyped
+    capture_incomplete: bool = False
+
+
 # -- Exports ---------------------------------------------------------------
 
 __all__ = [
@@ -238,4 +280,6 @@ __all__ = [
     "LatencySpecialistOutput",
     "DiffSpecialistInput",
     "DiffSpecialistOutput",
+    "CollectiveEntry",
+    "CommunicationBlock",
 ]
