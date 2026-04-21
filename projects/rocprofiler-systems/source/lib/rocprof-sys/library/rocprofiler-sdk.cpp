@@ -2693,25 +2693,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             counter_record_callback, _data));
     }
 
-    // --- SDK PMC Device Counting Service (polled hardware counters) ---
-    // Controlled by ROCPROFSYS_GPU_PERF_COUNTERS (independent from ROCM_EVENTS).
-    // Provider handles counter query, filtering, and SDK configuration internally.
-    auto _gpu_perf_counters_setting = get_gpu_perf_counters();
-    LOG_INFO("ROCPROFSYS_GPU_PERF_COUNTERS='{}', gpu_agents={}",
-             _gpu_perf_counters_setting, _data->gpu_agents.size());
-    if(!_gpu_perf_counters_setting.empty() && !_data->gpu_agents.empty())
+    const auto gpu_perf_counters_setting = get_gpu_perf_counters();
+    if(!gpu_perf_counters_setting.empty() && !_data->gpu_agents.empty())
     {
         ROCPROFILER_CALL(rocprofiler_create_context(&_data->gpu_perf_counter_ctx));
 
-        auto agent_handles =
-            std::vector<pmc::device_providers::rocprofiler_sdk::agent_handle>{};
-        for(const auto& itr : _data->gpu_agents)
-        {
-            agent_handles.push_back({ itr.agent->handle, itr.device_id });
-        }
-
-        pmc::register_gpu_perf_counter_source(_data->gpu_perf_counter_ctx.handle,
-                                              agent_handles);
+        pmc::register_gpu_perf_counter_source(
+            _data->gpu_perf_counter_ctx.handle,
+            get_agent_manager_instance().get_agents_by_type(agent_type::GPU));
     }
 
     for(const auto& itr : _data->get_buffers())
@@ -2733,7 +2722,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     gpu::add_device_metadata();
 
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    if(config::get_use_process_sampling())
     {
         LOG_DEBUG("Setting PMC sampler state to active...");
         pmc::set_state(State::Active);
@@ -2780,8 +2769,6 @@ finalize_sdk_common()
 
     flush();
     stop();
-
-    if(config::get_use_process_sampling() && config::get_use_amd_smi()) pmc::shutdown();
 
     if(get_counter_storage())
     {

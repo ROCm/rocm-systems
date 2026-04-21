@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <memory>
 
+#include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/counter_config.h>
 #include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/device_counting_service.h>
@@ -71,11 +72,11 @@ struct driver
                                                             user_data);
     }
 
-    static rocprofiler_status_t create_profile_config(
+    static rocprofiler_status_t create_counter_config(
         rocprofiler_agent_id_t agent_id, rocprofiler_counter_id_t* counters_list,
         size_t counters_count, rocprofiler_counter_config_id_t* config_id)
     {
-        return rocprofiler_create_profile_config(agent_id, counters_list, counters_count,
+        return rocprofiler_create_counter_config(agent_id, counters_list, counters_count,
                                                  config_id);
     }
 

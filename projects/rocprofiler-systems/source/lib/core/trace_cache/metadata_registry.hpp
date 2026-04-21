@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <map>
 #include <memory>
@@ -165,6 +166,7 @@ struct kernel_symbol_less
  */
 struct gpu_perf_counter_name_entry
 {
+    uint64_t    counter_id;     ///< SDK counter instance ID (counter_id_t)
     std::string pmc_info_name;  ///< Qualified counter name, e.g. "SQ_WAVES[WGP=0,SA=0]"
     std::string track_name;     ///< Perfetto track name, e.g. "GPU [0] SQ_WAVES (S)"
 };
@@ -219,26 +221,11 @@ struct metadata_registry
     rocprofiler::sdk::buffer_name_info_t<const char*>   get_buffer_name_info() const;
     rocprofiler::sdk::callback_name_info_t<const char*> get_callback_tracing_info() const;
 
-    /**
-     * @brief Set the ordered counter names for a device's batched PMC sample.
-     *
-     * Defines the mapping from sample value index to counter/track name
-     * for a given device. Called during config().
-     *
-     * @param device_id Device index.
-     * @param entries Ordered list of counter name entries matching sample value order.
-     */
     void set_gpu_perf_counter_counter_names(
         uint32_t device_id, std::vector<info::gpu_perf_counter_name_entry> entries);
 
-    /**
-     * @brief Get the ordered counter names for a device's batched PMC sample.
-     *
-     * @param device_id Device index.
-     * @return Pointer to the entry vector, or nullptr if not registered.
-     */
-    const std::vector<info::gpu_perf_counter_name_entry>*
-    get_gpu_perf_counter_counter_names(uint32_t device_id) const;
+    std::optional<std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
+    find_gpu_perf_counter_by_id(uint32_t device_id, uint64_t counter_id) const;
 
 private:
     common::synchronized<info::process> m_process{};

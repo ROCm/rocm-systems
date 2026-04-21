@@ -1479,34 +1479,18 @@ perfetto_processor_t::handle(
 
     const auto& track_info = track_it->second;
 
-    auto& name_lookup = m_gpu_perf_counter_name_lookup[_device_id];
-    if(name_lookup.empty())
-    {
-        const auto* name_entries =
-            m_metadata.get_gpu_perf_counter_counter_names(_device_id);
-        if(name_entries)
-        {
-            for(const auto& ne : *name_entries)
-                name_lookup.emplace(ne.pmc_info_name, ne.track_name);
-        }
-    }
-
     for(const auto& entry : _gpu_perf_counter.entries)
     {
-        const auto  entry_name = std::string(entry.name);
-        auto        lookup_it  = name_lookup.find(entry_name);
-        const auto& track_name =
-            (lookup_it != name_lookup.end()) ? lookup_it->second : entry_name;
+        auto name_info =
+            m_metadata.find_gpu_perf_counter_by_id(_device_id, entry.counter_id);
+        if(!name_info) continue;
 
-        auto track_key = std::hash<std::string>{}(track_name);
+        const auto& track_name = name_info->get().track_name;
+        auto        track_key  = std::hash<std::string>{}(track_name);
 
         if(!track_info.exists_fn(track_key))
         {
-            auto display_name =
-                (lookup_it != name_lookup.end())
-                    ? track_name
-                    : fmt::format("GPU [{}] {} (S)", _device_id, entry.name);
-            track_info.emplace_fn(track_key, display_name, track_info.default_units);
+            track_info.emplace_fn(track_key, track_name, track_info.default_units);
         }
         track_info.trace_fn(track_key, 0, _ts, entry.value);
     }

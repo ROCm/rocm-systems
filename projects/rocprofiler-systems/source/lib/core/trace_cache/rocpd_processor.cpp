@@ -542,30 +542,18 @@ rocpd_processor_t::handle(
             ->get_agent_by_type_index(_gpu_perf_counter.device_id, agent_type::GPU)
             .base_id;
 
-    auto& name_lookup = m_gpu_perf_counter_name_lookup[_gpu_perf_counter.device_id];
-    if(name_lookup.empty())
-    {
-        const auto* name_entries =
-            m_metadata->get_gpu_perf_counter_counter_names(_gpu_perf_counter.device_id);
-        if(name_entries)
-        {
-            for(const auto& ne : *name_entries)
-                name_lookup.emplace(ne.pmc_info_name, ne.track_name);
-        }
-    }
-
     for(const auto& entry : _gpu_perf_counter.entries)
     {
-        auto pmc_name  = std::string(entry.name);
-        auto lookup_it = name_lookup.find(pmc_name);
+        auto name_info = m_metadata->find_gpu_perf_counter_by_id(
+            _gpu_perf_counter.device_id, entry.counter_id);
+        if(!name_info) continue;
 
-        const auto& track_name =
-            (lookup_it != name_lookup.end()) ? lookup_it->second : pmc_name;
+        const auto& info = name_info->get();
 
-        m_data_processor->insert_pmc_event(event_id, base_id, pmc_name.c_str(),
+        m_data_processor->insert_pmc_event(event_id, base_id, info.pmc_info_name.c_str(),
                                            entry.value);
-        m_data_processor->insert_sample(track_name.c_str(), _gpu_perf_counter.timestamp,
-                                        event_id);
+        m_data_processor->insert_sample(info.track_name.c_str(),
+                                        _gpu_perf_counter.timestamp, event_id);
     }
 }
 

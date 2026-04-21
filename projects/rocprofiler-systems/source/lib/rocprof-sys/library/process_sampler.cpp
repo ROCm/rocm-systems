@@ -123,17 +123,14 @@ sampler::setup()
     // shutdown if already running
     shutdown();
 
-    if(get_use_amd_smi())
-    {
-        LOG_DEBUG("Setting up PMC sampling.");
-        auto& _pmc         = instances.emplace_back(std::make_unique<instance>());
-        _pmc->setup        = []() { pmc::setup(); };
-        _pmc->shutdown     = []() { pmc::shutdown(); };
-        _pmc->post_process = []() { pmc::post_process(); };
-        _pmc->config       = []() { pmc::config(); };
-        _pmc->sample       = []() { pmc::sample(); };
-        _pmc->pause        = []() { pmc::pause(); };
-    }
+    LOG_DEBUG("Setting up PMC sampling.");
+    auto& _pmc         = instances.emplace_back(std::make_unique<instance>());
+    _pmc->setup        = []() { pmc::setup(); };
+    _pmc->shutdown     = []() { pmc::shutdown(); };
+    _pmc->post_process = []() { pmc::post_process(); };
+    _pmc->config       = []() { pmc::config(); };
+    _pmc->sample       = []() { pmc::sample(); };
+    _pmc->pause        = []() { pmc::pause(); };
 
     for(auto& itr : instances)
         itr->setup();

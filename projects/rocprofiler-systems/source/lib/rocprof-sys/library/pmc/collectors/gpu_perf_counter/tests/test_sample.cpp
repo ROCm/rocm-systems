@@ -7,7 +7,6 @@
 
 #include <array>
 #include <cstdint>
-#include <string_view>
 
 using namespace rocprofsys::pmc::collectors::gpu_perf_counter;
 using namespace rocprofsys::trace_cache;
@@ -39,7 +38,7 @@ TEST_F(SdkPmcSampleTest, EmptySampleRoundTrip)
 
 TEST_F(SdkPmcSampleTest, SingleEntryRoundTrip)
 {
-    sample original{ 2, 5000, { sample_entry{ "SQ_WAVES", 42.0 } } };
+    sample original{ 2, 5000, { counter_value{ 10, 42.0 } } };
 
     serialize(buffer.data(), original);
 
@@ -49,7 +48,7 @@ TEST_F(SdkPmcSampleTest, SingleEntryRoundTrip)
     EXPECT_EQ(deserialized.device_id, 2U);
     EXPECT_EQ(deserialized.timestamp, 5000U);
     ASSERT_EQ(deserialized.entries.size(), 1U);
-    EXPECT_EQ(deserialized.entries[0].name, "SQ_WAVES");
+    EXPECT_EQ(deserialized.entries[0].counter_id, 10U);
     EXPECT_DOUBLE_EQ(deserialized.entries[0].value, 42.0);
 }
 
@@ -57,9 +56,8 @@ TEST_F(SdkPmcSampleTest, MultiEntryRoundTrip)
 {
     sample original{ 1,
                      99000,
-                     { sample_entry{ "SQC_ICACHE_HITS[WGP=0,SA=0,SE=0]", 10.0 },
-                       sample_entry{ "SQC_ICACHE_HITS[WGP=1,SA=0,SE=0]", 20.0 },
-                       sample_entry{ "SQC_ICACHE_HITS[WGP=2,SA=0,SE=0]", 30.0 } } };
+                     { counter_value{ 100, 10.0 }, counter_value{ 101, 20.0 },
+                       counter_value{ 102, 30.0 } } };
 
     serialize(buffer.data(), original);
 
@@ -70,13 +68,13 @@ TEST_F(SdkPmcSampleTest, MultiEntryRoundTrip)
     EXPECT_EQ(deserialized.timestamp, 99000U);
     ASSERT_EQ(deserialized.entries.size(), 3U);
 
-    EXPECT_EQ(deserialized.entries[0].name, "SQC_ICACHE_HITS[WGP=0,SA=0,SE=0]");
+    EXPECT_EQ(deserialized.entries[0].counter_id, 100U);
     EXPECT_DOUBLE_EQ(deserialized.entries[0].value, 10.0);
 
-    EXPECT_EQ(deserialized.entries[1].name, "SQC_ICACHE_HITS[WGP=1,SA=0,SE=0]");
+    EXPECT_EQ(deserialized.entries[1].counter_id, 101U);
     EXPECT_DOUBLE_EQ(deserialized.entries[1].value, 20.0);
 
-    EXPECT_EQ(deserialized.entries[2].name, "SQC_ICACHE_HITS[WGP=2,SA=0,SE=0]");
+    EXPECT_EQ(deserialized.entries[2].counter_id, 102U);
     EXPECT_DOUBLE_EQ(deserialized.entries[2].value, 30.0);
 }
 
@@ -91,25 +89,21 @@ TEST_F(SdkPmcSampleTest, GetSizeEmpty)
 
 TEST_F(SdkPmcSampleTest, GetSizeSingleEntry)
 {
-    sample test_sample{ 0, 0, { sample_entry{ "SQ_WAVES", 1.0 } } };
+    sample test_sample{ 0, 0, { counter_value{ 10, 1.0 } } };
 
     // header: 4 + 8 + 4 = 16
-    // entry: string (sizeof(size_t) + 8 chars) + double (8)
-    size_t expected = 16 + sizeof(size_t) + 8 + sizeof(double);
+    // entry: counter_id(8) + double(8) = 16
+    size_t expected = 16 + sizeof(counter_id_t) + sizeof(double);
     EXPECT_EQ(get_size(test_sample), expected);
 }
 
 TEST_F(SdkPmcSampleTest, GetSizeMatchesSerializedBytes)
 {
-    sample original{ 3,
-                     42000,
-                     { sample_entry{ "A", 1.0 },
-                       sample_entry{ "LONG_COUNTER_NAME[WGP=0,SA=0,SE=3]", 99.5 } } };
+    sample original{ 3, 42000, { counter_value{ 1, 1.0 }, counter_value{ 2, 99.5 } } };
 
     size_t computed_size = get_size(original);
     serialize(buffer.data(), original);
 
-    // Deserialize and check the buffer pointer advanced by exactly computed_size
     uint8_t* ptr = buffer.data();
     deserialize<sample>(ptr);
     size_t bytes_consumed = static_cast<size_t>(ptr - buffer.data());
@@ -119,9 +113,8 @@ TEST_F(SdkPmcSampleTest, GetSizeMatchesSerializedBytes)
 
 TEST_F(SdkPmcSampleTest, DeserializePreservesBufferPointerAdvancement)
 {
-    // Serialize two samples back-to-back (simulating buffer storage)
-    sample first{ 0, 1000, { sample_entry{ "A", 1.0 } } };
-    sample second{ 1, 2000, { sample_entry{ "B", 2.0 }, sample_entry{ "C", 3.0 } } };
+    sample first{ 0, 1000, { counter_value{ 1, 1.0 } } };
+    sample second{ 1, 2000, { counter_value{ 2, 2.0 }, counter_value{ 3, 3.0 } } };
 
     size_t first_size = get_size(first);
     serialize(buffer.data(), first);
@@ -132,13 +125,13 @@ TEST_F(SdkPmcSampleTest, DeserializePreservesBufferPointerAdvancement)
     auto first_result = deserialize<sample>(ptr);
     EXPECT_EQ(first_result.device_id, 0U);
     ASSERT_EQ(first_result.entries.size(), 1U);
-    EXPECT_EQ(first_result.entries[0].name, "A");
+    EXPECT_EQ(first_result.entries[0].counter_id, 1U);
 
     auto second_result = deserialize<sample>(ptr);
     EXPECT_EQ(second_result.device_id, 1U);
     ASSERT_EQ(second_result.entries.size(), 2U);
-    EXPECT_EQ(second_result.entries[0].name, "B");
-    EXPECT_EQ(second_result.entries[1].name, "C");
+    EXPECT_EQ(second_result.entries[0].counter_id, 2U);
+    EXPECT_EQ(second_result.entries[1].counter_id, 3U);
 }
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing

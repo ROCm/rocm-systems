@@ -3,11 +3,12 @@
 
 #pragma once
 
+#include "core/agent.hpp"
 #include "core/state.hpp"
-#include "library/pmc/device_providers/rocprofiler_sdk/provider.hpp"
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace rocprofsys::pmc
@@ -51,8 +52,7 @@ void
 postfork_child_reset_sampler_lock();
 
 void
-register_gpu_perf_counter_source(
-    uint64_t                                                            context_handle,
-    const std::vector<device_providers::rocprofiler_sdk::agent_handle>& agent_handles);
+register_gpu_perf_counter_source(uint64_t context_handle,
+                                 const std::vector<std::shared_ptr<agent>>& agent_list);
 
 }  // namespace rocprofsys::pmc

@@ -8,15 +8,20 @@
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
+#include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 #include <cstdint>
 
 #include <algorithm>
+#include <cstdint>
 #include <regex>
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace rocprofsys::pmc::collectors
 {
@@ -109,7 +114,7 @@ struct settings_policy
             return result;
         }
 
-        auto filter_str = filter.value();
+        const auto& filter_str = filter.value();
         if(filter_str == "all" || filter_str == "on")
         {
             nic::nic_device_filter result;
@@ -160,14 +165,6 @@ struct settings_policy
     }
 
     /**
-     * @brief Get SDK PMC device filter (reuses GPU device filter).
-     */
-    static gpu::device_filter get_gpu_perf_counter_device_filter() noexcept
-    {
-        return get_device_filter();
-    }
-
-    /**
      * @brief Get SDK PMC enabled metrics from ROCPROFSYS_GPU_PERF_COUNTERS.
      *
      * Parses the env var into a list of counter names. If unset, returns
@@ -183,8 +180,6 @@ struct settings_policy
             return gpu_perf_counter::enabled_metrics{};
         }
 
-        gpu_perf_counter::enabled_metrics result;
-
         std::string trimmed;
         trimmed.reserve(value_str.size());
         for(auto chr : value_str)
@@ -192,12 +187,7 @@ struct settings_policy
             if(chr != '\t' && chr != ' ') trimmed.push_back(chr);
         }
 
-        if(trimmed == "all" || trimmed == "ALL")
-        {
-            result.value       = 1;
-            result.collect_all = true;
-            return result;
-        }
+        std::vector<gpu_perf_counter::counter_definition> counters;
 
         constexpr auto device_qualifier = std::string_view{ ":device=" };
 
@@ -212,16 +202,15 @@ struct settings_policy
                 if(subtoken.empty()) continue;
                 auto pos = subtoken.find(device_qualifier);
                 if(pos != std::string::npos) subtoken = subtoken.substr(0, pos);
-                if(!subtoken.empty()) result.counter_names.push_back(subtoken);
+                if(!subtoken.empty())
+                {
+                    counters.push_back(
+                        gpu_perf_counter::counter_definition{ subtoken, 0 });
+                }
             }
         }
 
-        if(!result.counter_names.empty())
-        {
-            result.value = 1;
-            result.build_lookup();
-        }
-        return result;
+        return gpu_perf_counter::enabled_metrics{ std::move(counters) };
     }
 
 private:

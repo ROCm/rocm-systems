@@ -22,6 +22,7 @@
 #include "library/pmc/collectors/cpu/perfetto_policy.hpp"
 #include "library/pmc/device_providers/procfs/provider.hpp"
 
+#include "core/agent.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/state.hpp"
@@ -31,6 +32,8 @@
 
 #include "library/pmc/sampler.hpp"
 
+#include "logger/debug.hpp"
+
 #include <amd_smi/amdsmi.h>
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/timing/backends.hpp>
@@ -39,10 +42,13 @@
 #include <timemory/utility/delimit.hpp>
 #include <timemory/utility/locking.hpp>
 
+#include <atomic>
 #include <cassert>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <new>
+#include <stdexcept>
 #include <sys/resource.h>
 #include <vector>
 
@@ -189,29 +195,32 @@ setup()
 
     try
     {
-        // Create and inject device provider (shared between GPU and NIC collectors)
-        g_device_provider = provider_factory_t::create();
-
-        g_gpu_collector = std::make_unique<gpu_collector_t>(g_device_provider);
-#if defined(ROCPROFSYS_BUILD_AINIC)
-        g_nic_collector = std::make_unique<nic_collector_t>(g_device_provider);
-#endif
-
         g_cpu_provider  = cpu_provider_factory_t::create();
         g_cpu_collector = std::make_unique<cpu_collector_t>(g_cpu_provider);
 
-        g_collector_slices.clear();
-        g_collector_slices.emplace_back(*g_gpu_collector);
-#if defined(ROCPROFSYS_BUILD_AINIC)
-        g_collector_slices.emplace_back(*g_nic_collector);
-#endif
         g_collector_slices.emplace_back(*g_cpu_collector);
 
-        for(auto& slice : g_collector_slices)
+        if(config::get_use_amd_smi())
         {
-            slice.setup();
-        }
+            // Create and inject device provider (shared between GPU and NIC collectors)
+            g_device_provider = provider_factory_t::create();
 
+            g_gpu_collector = std::make_unique<gpu_collector_t>(g_device_provider);
+#if defined(ROCPROFSYS_BUILD_AINIC)
+            g_nic_collector = std::make_unique<nic_collector_t>(g_device_provider);
+#endif
+
+            g_collector_slices.clear();
+            g_collector_slices.emplace_back(*g_gpu_collector);
+#if defined(ROCPROFSYS_BUILD_AINIC)
+            g_collector_slices.emplace_back(*g_nic_collector);
+#endif
+
+            for(auto& slice : g_collector_slices)
+            {
+                slice.setup();
+            }
+        }
         is_initialized() = true;
     } catch(const std::runtime_error& _e)
     {
@@ -341,21 +350,18 @@ postfork_child_reset_sampler_lock()
     ::new(static_cast<void*>(&_m)) mutex_type{};
 }
 
-void
-register_gpu_perf_counter_source(
-    uint64_t                                                            context_handle,
-    const std::vector<device_providers::rocprofiler_sdk::agent_handle>& agent_handles)
+register_gpu_perf_counter_source(uint64_t context_handle,
+                                 const std::vector<std::shared_ptr<agent>>& agent_list)
 {
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
     try
     {
-        auto context = rocprofiler_context_id_t{ context_handle };
-        auto enabled =
+        const auto enabled_metrics =
             collectors::settings_policy::get_gpu_perf_counter_enabled_metrics();
 
         g_gpu_perf_counter_provider = std::make_shared<gpu_perf_counter_provider_t>(
-            context, agent_handles, enabled);
+            context_handle, agent_list, enabled_metrics);
         g_gpu_perf_counter_provider->start();
         g_gpu_perf_counter_collector =
             std::make_unique<gpu_perf_counter_collector_t>(g_gpu_perf_counter_provider);
@@ -364,11 +370,11 @@ register_gpu_perf_counter_source(
         g_gpu_perf_counter_collector->config();
         g_collector_slices.emplace_back(*g_gpu_perf_counter_collector);
 
-        LOG_DEBUG("Registered SDK PMC source, total slices={}",
+        LOG_DEBUG("Registered GPU Perf Counter PMC source, total slices={}",
                   g_collector_slices.size());
-    } catch(const std::runtime_error& _e)
+    } catch(const std::runtime_error& runtime_exception)
     {
-        LOG_ERROR("Failed to register SDK PMC source: {}", _e.what());
+        LOG_ERROR("Failed to register SDK PMC source: {}", runtime_exception.what());
     }
 }
 }  // namespace rocprofsys::pmc

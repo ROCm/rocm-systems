@@ -1025,6 +1025,12 @@ rocprofsys_finalize_hidden(void)
         component::vaapi_gotcha::shutdown();
     }
 
+    if(get_use_process_sampling())
+    {
+        LOG_DEBUG("Shutting down background sampler...");
+        process_sampler::shutdown();
+    }
+
     LOG_DEBUG("Shutting down ROCm...");
     rocprofiler_sdk::shutdown();
 
@@ -1067,12 +1073,6 @@ rocprofsys_finalize_hidden(void)
         LOG_DEBUG("Shutting down miscellaneous gotchas...");
         get_preinit_bundle()->stop();
         component::mpi_gotcha::shutdown();
-    }
-
-    if(get_use_process_sampling())
-    {
-        LOG_DEBUG("Shutting down background sampler...");
-        process_sampler::shutdown();
     }
 
     if(get_use_causal())
