@@ -355,6 +355,20 @@ subfields. Markdown / text / json keep the pre-existing stall table +
 top-instructions output (they don't rerender the SVG). Schema-wise,
 ATT presence bumps the top-level `schema_version` to `0.4.0`.
 
+### Multi-DB runtime accounting
+
+Multi-DB reports carry two runtime notions on purpose:
+
+- `total_runtime` / `execution_breakdown.total_runtime_ns` stay wall-clock.
+- `normalized_runtime` / `execution_breakdown.normalized_runtime_ns` represent
+  the summed shard envelope used for percentage math when shards overlap.
+
+Formatters MUST not mix these within a single breakdown table. If a formatter
+shows normalized percentages for kernel / memcpy / API overhead, its total row
+must also use normalized runtime and label that fact explicitly. Wall-clock
+runtime may still be shown elsewhere as metadata, but not as the denominator of
+the same normalized table.
+
 ### Live Roofline (`roofline.plot_points`)
 
 When Tier-2 counters (`SQ_INSTS_VALU` / `FETCH_SIZE` / `WRITE_SIZE`)

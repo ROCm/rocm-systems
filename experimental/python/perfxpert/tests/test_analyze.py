@@ -920,9 +920,11 @@ def test_format_output_markdown_shows_normalized_runtime_for_multidb():
     }
 
     out = format_analysis_output(td, [], {}, [], output_format="markdown")
+    assert "Wall-clock total runtime: 80.00 ms" in out
     assert "Normalized runtime for percentage math:" in out
     assert "| Kernel Execution |" in out
     assert "% normalized" in out
+    assert "| **Normalized Total** | **160.00** | **100% normalized** |" in out
 
 
 def test_format_json_hotspot_field_mapping():
