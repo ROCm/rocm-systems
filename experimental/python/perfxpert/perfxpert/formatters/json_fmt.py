@@ -163,6 +163,17 @@ def _format_as_json(
         doc["communication"] = communication
         doc["schema_version"] = "0.3.2"
         doc["metadata"]["analysis_version"] = "0.3.2"
+    # 0.3.3: Change-Impact Prediction (Phase 10 Feature E). Additive rec
+    # fields (predicted_impact_range, predicted_confidence,
+    # predicted_rationale, source_citation, roofline_delta) emitted by
+    # perfxpert.tools.predict_impact. ATT (0.4.0) + roofline (0.3.4)
+    # still trump below.
+    if any(
+        r.get("predicted_impact_range") is not None
+        for r in doc.get("recommendations", [])
+    ):
+        doc["schema_version"] = "0.3.3"
+        doc["metadata"]["analysis_version"] = "0.3.3"
     # 0.3.4: Live Roofline points (Phase 10 advanced-specialists). Additive
     # ``roofline`` key carrying the per-kernel (ai, achieved_flops_per_s,
     # bottleneck_class, fp_type, confidence) payload produced by
@@ -312,7 +323,19 @@ def _build_hw_counters_json(hw: Dict[str, Any]) -> Dict[str, Any]:
 def _build_recommendations_json(
     recommendations: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    """Map internal recommendation dicts to the schema v0.1.0 format."""
+    """Map internal recommendation dicts to the schema v0.1.0 format.
+
+    Phase 10 — when the specialist (or the analyze.py final-pass)
+    attaches a change-impact prediction, the following fields are
+    passed through verbatim so JSON consumers can render their own
+    "Predicted" surface without recomputing:
+
+        - predicted_impact_range: [lo, hi] | None
+        - predicted_confidence:   float in [0,1]
+        - predicted_rationale:    str
+        - source_citation:        str
+        - roofline_delta:         dict
+    """
     out = []
     seen_ids: Dict[str, int] = {}
     for rec in recommendations:
@@ -324,19 +347,30 @@ def _build_recommendations_json(
         seen_ids[base_id] = count
         rec_id = base_id if count == 1 else f"{base_id[:-3]}{count:03d}"
 
-        out.append(
-            {
-                "id": rec_id,
-                "priority": rec.get("priority", "INFO"),
-                "category": category,
-                "issue": rec.get("issue", ""),
-                "suggestion": rec.get("suggestion", ""),
-                "actions": rec.get("actions", []),
-                "estimated_impact": rec.get("estimated_impact", ""),
-                "confidence": rec.get("confidence"),
-                "commands": rec.get("commands", []),
-            }
-        )
+        entry: Dict[str, Any] = {
+            "id": rec_id,
+            "priority": rec.get("priority", "INFO"),
+            "category": category,
+            "issue": rec.get("issue", ""),
+            "suggestion": rec.get("suggestion", ""),
+            "actions": rec.get("actions", []),
+            "estimated_impact": rec.get("estimated_impact", ""),
+            "confidence": rec.get("confidence"),
+            "commands": rec.get("commands", []),
+        }
+        # Phase 10 — pass through prediction fields when present.
+        if "predicted_impact_range" in rec:
+            entry["predicted_impact_range"] = rec.get("predicted_impact_range")
+        _pconf = rec.get("predicted_confidence")
+        if _pconf is not None:
+            entry["predicted_confidence"] = _pconf
+        if rec.get("predicted_rationale"):
+            entry["predicted_rationale"] = rec["predicted_rationale"]
+        if rec.get("source_citation"):
+            entry["source_citation"] = rec["source_citation"]
+        if rec.get("roofline_delta"):
+            entry["roofline_delta"] = rec["roofline_delta"]
+        out.append(entry)
     return out
 
 

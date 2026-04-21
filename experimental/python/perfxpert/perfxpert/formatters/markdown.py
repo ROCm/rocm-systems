@@ -175,6 +175,24 @@ def _format_as_markdown(
             if estimated_impact:
                 lines.append("")
                 lines.append(f"**Estimated Impact:** {estimated_impact}")
+            # Phase 10 — Change-Impact Prediction. Only rendered when the
+            # specialist (or the analyze.py final-pass) attached
+            # predicted_impact_range on the rec.
+            pred_range = rec.get("predicted_impact_range")
+            if pred_range and len(pred_range) == 2:
+                lo, hi = pred_range
+                pred_conf = rec.get("predicted_confidence")
+                if pred_conf is None:
+                    pred_conf = rec.get("confidence")
+                conf_str = (
+                    f" (confidence {int(float(pred_conf) * 100)}%)"
+                    if pred_conf is not None
+                    else ""
+                )
+                lines.append("")
+                lines.append(
+                    f"**Predicted:** {float(lo):.2f}-{float(hi):.2f}\u00d7{conf_str}"
+                )
             commands = rec.get("commands", [])
             if commands:
                 lines.append("")
@@ -425,6 +443,22 @@ def _format_tier0_markdown(tier0_result: Any, has_profiling: bool = False) -> st
         if impact:
             lines.append("")
             lines.append(f"**Estimated Impact:** {impact}")
+        # Phase 10 — Change-Impact Prediction on Tier 0 rec cards.
+        pred_range = rec.get("predicted_impact_range")
+        if pred_range and len(pred_range) == 2:
+            lo, hi = pred_range
+            pred_conf = rec.get("predicted_confidence")
+            if pred_conf is None:
+                pred_conf = rec.get("confidence")
+            conf_str = (
+                f" (confidence {int(float(pred_conf) * 100)}%)"
+                if pred_conf is not None
+                else ""
+            )
+            lines.append("")
+            lines.append(
+                f"**Predicted:** {float(lo):.2f}-{float(hi):.2f}\u00d7{conf_str}"
+            )
         commands = rec.get("commands", [])
         if commands:
             lines.append("")

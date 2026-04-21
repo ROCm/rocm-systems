@@ -252,10 +252,18 @@ def test_json_has_all_required_keys_and_bumped_schema_version(
     missing = required - set(doc.keys())
     assert not missing, f"missing top-level keys: {missing}"
 
-    # Schema bumped to reflect the agentic pipeline contract.
-    assert doc["schema_version"] == "0.3.0", (
-        f"expected schema_version 0.3.0, got {doc['schema_version']!r}"
+    # Schema bumped to reflect the agentic pipeline contract. Phase 10
+    # additive fields bump the minor schema version further:
+    #   0.3.1 — hotspots[*].source_locations
+    #   0.3.2 — RCCL communication
+    #   0.3.3 — Change-Impact Prediction (rec.predicted_impact_range)
+    #   0.3.4 — Live Roofline
+    # ATT (0.4.0) still trumps.
+    sv = str(doc["schema_version"])
+    assert sv.startswith("0.3."), (
+        f"expected schema_version 0.3.x, got {doc['schema_version']!r}"
     )
+    assert sv >= "0.3.0"
 
     # Agent-brain fields are populated on airgap.
     assert doc["narrative"], "narrative must not be empty in airgap mode"

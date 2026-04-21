@@ -55,6 +55,23 @@ def _tier0_recommendations_text(
         if impact:
             lines.append(f"  Estimated Impact: {impact}")
             lines.append("")
+        # Phase 10 — Change-Impact Prediction, rendered on Tier 0 rec
+        # cards when the specialist attached predicted_impact_range.
+        pred_range = rec.get("predicted_impact_range")
+        if pred_range and len(pred_range) == 2:
+            lo, hi = pred_range
+            pred_conf = rec.get("predicted_confidence")
+            if pred_conf is None:
+                pred_conf = rec.get("confidence")
+            pconf_str = (
+                f" (conf {int(float(pred_conf) * 100)}%)"
+                if pred_conf is not None
+                else ""
+            )
+            lines.append(
+                f"  Predicted: {float(lo):.2f}-{float(hi):.2f}x{pconf_str}"
+            )
+            lines.append("")
         if commands:
             lines.append("  Recommended Commands:")
             for cmd in commands:

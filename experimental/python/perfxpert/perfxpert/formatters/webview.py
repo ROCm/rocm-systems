@@ -203,6 +203,25 @@ def _format_as_webview(
             if impact
             else ""
         )
+        # Phase 10 — Change-Impact Prediction. Only rendered when the
+        # specialist (or the analyze.py final-pass) attached
+        # predicted_impact_range on the rec.
+        predicted_html = ""
+        _pred_range = rec.get("predicted_impact_range")
+        if _pred_range and len(_pred_range) == 2:
+            _plo, _phi = _pred_range
+            _pconf = rec.get("predicted_confidence")
+            if _pconf is None:
+                _pconf = rec.get("confidence")
+            _pconf_txt = (
+                f" (confidence {int(float(_pconf) * 100)}%)"
+                if _pconf is not None
+                else ""
+            )
+            predicted_html = (
+                f'<p class="r-predicted"><strong>Predicted:</strong> '
+                f'{float(_plo):.2f}-{float(_phi):.2f}&#215;{_h(_pconf_txt)}</p>'
+            )
         cmds_parts = []
         for ci, cmd in enumerate(rec.get("commands", [])):
             fc = cmd.get("full_command", "")
@@ -238,7 +257,7 @@ def _format_as_webview(
             f'<div class="r-body">'
             f'<p class="r-issue"><strong>Issue:</strong> {_h(issue_txt)}</p>'
             f'<p class="r-suggest"><strong>What to do:</strong> {_h(suggest)}</p>'
-            f"{actions_html}{impact_html}{cmds_html}"
+            f"{actions_html}{impact_html}{predicted_html}{cmds_html}"
             f"</div></div>"
         )
     recs_html = (
@@ -1251,6 +1270,25 @@ def _format_tier0_webview(tier0_result: Any, has_profiling: bool = False) -> str
             if impact
             else ""
         )
+        # Phase 10 — Change-Impact Prediction. Only rendered when the
+        # specialist (or the analyze.py final-pass) attached
+        # predicted_impact_range on the rec.
+        predicted_html = ""
+        _pred_range = rec.get("predicted_impact_range")
+        if _pred_range and len(_pred_range) == 2:
+            _plo, _phi = _pred_range
+            _pconf = rec.get("predicted_confidence")
+            if _pconf is None:
+                _pconf = rec.get("confidence")
+            _pconf_txt = (
+                f" (confidence {int(float(_pconf) * 100)}%)"
+                if _pconf is not None
+                else ""
+            )
+            predicted_html = (
+                f'<p class="r-predicted"><strong>Predicted:</strong> '
+                f'{float(_plo):.2f}-{float(_phi):.2f}&#215;{_h(_pconf_txt)}</p>'
+            )
         cmds_parts = []
         for ci, cmd in enumerate(rec.get("commands", [])):
             fc = cmd.get("full_command", "")
@@ -1286,7 +1324,7 @@ def _format_tier0_webview(tier0_result: Any, has_profiling: bool = False) -> str
             f'<div class="r-body">'
             f'<p class="r-issue"><strong>Issue:</strong> {_h(issue_txt)}</p>'
             f'<p class="r-suggest"><strong>What to do:</strong> {_h(suggest)}</p>'
-            f"{actions_html}{impact_html}{cmds_html}"
+            f"{actions_html}{impact_html}{predicted_html}{cmds_html}"
             f"</div></div>"
         )
     recs_html = (
