@@ -147,6 +147,7 @@ __device__ void ROContext::fence() {
   build_queue_element(RO_NET_FENCE, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
                       nullptr, NULL, ro_net_win_id, block_handle,
                       true, get_status_flag(), is_default_ctx);
+  ipcImpl_.ipcFence();
 }
 
 __device__ void ROContext::fence([[maybe_unused]] int pe) {
@@ -154,12 +155,14 @@ __device__ void ROContext::fence([[maybe_unused]] int pe) {
   build_queue_element(RO_NET_FENCE, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
                       nullptr, NULL, ro_net_win_id, block_handle,
                       true, get_status_flag(), is_default_ctx);
+  ipcImpl_.ipcFence();
 }
 
 __device__ void ROContext::quiet() {
   build_queue_element(RO_NET_QUIET, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
                       nullptr, NULL, ro_net_win_id, block_handle,
                       true, get_status_flag(), is_default_ctx);
+  ipcImpl_.ipcQuiet();
 }
 
 __device__ void ROContext::pe_quiet([[maybe_unused]] size_t pe) {
