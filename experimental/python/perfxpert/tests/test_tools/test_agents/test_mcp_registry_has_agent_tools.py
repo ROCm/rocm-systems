@@ -67,10 +67,10 @@ def test_old_run_root_analysis_tool_is_gone() -> None:
     )
 
 
-def test_total_tool_count_is_58() -> None:
+def test_total_tool_count_is_57() -> None:
     """After the Phase-10 advanced-specialist work PLUS the RCCL / NIC
-    communication-analysis additions, the registry holds 50 non-agent
-    tools plus 8 agent tools -- 58 total.
+    communication-analysis additions, the registry holds 49 non-agent
+    tools plus 8 agent tools -- 57 total.
 
     Phase-10 advanced specialists (+9 over the prior baseline):
       +1 kernel_fusion.find_fusion_candidates
@@ -88,8 +88,8 @@ def test_total_tool_count_is_58() -> None:
     from mcp_server._registry import discover_read_only_tools
 
     reg = discover_read_only_tools()
-    assert len(reg) == 58, (
-        f"expected 58 tools (50 non-agent + 8 agent); got {len(reg)}: "
+    assert len(reg) == 57, (
+        f"expected 57 tools (49 non-agent + 8 agent); got {len(reg)}: "
         f"{sorted(reg.keys())}"
     )
     # trace_diff lives alongside regression as a READ_ONLY tool.

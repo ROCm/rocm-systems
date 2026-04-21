@@ -11,8 +11,8 @@ native TUI with `perfxpert-mcp` already attached.
 This guide covers the user-visible surface. For the architectural
 contract every adapter satisfies, see
 [../architecture/backend-adapter.md](../architecture/backend-adapter.md).
-For the underlying MCP server (58 READ_ONLY tools — 8 agent-hierarchy
-entry points + 49 classifier/knowledge tools + 1 `trace_diff.diff_runs`),
+For the underlying MCP server (57 READ_ONLY tools — 8 agent-hierarchy
+entry points + 48 classifier/knowledge tools + 1 `trace_diff.diff_runs`),
 see
 [../integration/mcp-server.md](../integration/mcp-server.md). The
 rationale for the Claude PreToolUse choice is captured in the local
@@ -405,7 +405,7 @@ here.
   — the `BackendAdapter` protocol + lifecycle contract (contributors)
 - [../integration/mcp-server.md](../integration/mcp-server.md) —
   underlying MCP server + 43 READ_ONLY tool list (8 agent-hierarchy
-  + 49 classifier/knowledge + 1 `trace_diff.diff_runs`)
+  + 48 classifier/knowledge + 1 `trace_diff.diff_runs`)
 - Local Claude hook-surface decision record — why Claude uses the
   native `PreToolUse` hook surface.
 - Local Codex hook-surface decision record — why Codex uses
