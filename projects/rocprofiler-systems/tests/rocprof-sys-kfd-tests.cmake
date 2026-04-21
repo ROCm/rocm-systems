@@ -19,7 +19,7 @@ if(NOT _VALID_GPU)
     return()
 endif()
 
-check_rocminfo("xnack" _XNACK_SUPPORTED)
+check_rocminfo("xnack[+]" _XNACK_SUPPORTED)
 if(NOT _XNACK_SUPPORTED)
     rocprofiler_systems_message(
         WARNING

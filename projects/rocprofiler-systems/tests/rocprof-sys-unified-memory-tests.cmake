@@ -3,9 +3,43 @@
 
 # -------------------------------------------------------------------------------------- #
 #
-# Unified memory profiling tests
+# Unified memory profiling tests (requires XNACK-capable GPU)
 #
 # -------------------------------------------------------------------------------------- #
+
+if(NOT TARGET unified-memory)
+    rocprofiler_systems_message(
+        WARNING "Unified memory tests disabled: unified-memory target not available"
+    )
+    return()
+endif()
+
+if(NOT _VALID_GPU)
+    rocprofiler_systems_message(
+        WARNING "Unified memory tests disabled: no valid GPU detected"
+    )
+    return()
+endif()
+
+# KFD page migration/fault events are only generated on XNACK-capable GPUs
+check_rocminfo("xnack[+]" _XNACK_SUPPORTED)
+if(NOT _XNACK_SUPPORTED)
+    rocprofiler_systems_message(
+        WARNING
+            "Unified memory tests disabled: GPU does not support XNACK (required for KFD page fault/migrate events)"
+    )
+    return()
+endif()
+
+# ROCprofiler-SDK version < 1.2.2 does not handle KFD_IOCTL_SVM_LOCATION_UNDEFINED
+# node IDs (0xFFFFFFFF), causing a fatal crash in the SDK's KFD parsing thread.
+if(rocprofiler-sdk_VERSION VERSION_LESS "1.2.2")
+    rocprofiler_systems_message(
+        WARNING
+            "Unified memory tests disabled: ROCm ${ROCPROFSYS_ROCM_VERSION} (rocprofiler-sdk ${rocprofiler-sdk_VERSION}) has a rocprofiler-sdk bug with undefined node IDs (fixed in ROCm >= 7.3.0)"
+    )
+    return()
+endif()
 
 set(_unified_memory_environment
     "${_base_environment}"
@@ -13,8 +47,7 @@ set(_unified_memory_environment
     "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON"
 )
 
-# Enable ROCPD for tests only if valid ROCm is installed and a valid GPU is detected
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+if(${ENABLE_ROCPD_TEST})
     list(APPEND _unified_memory_environment "ROCPROFSYS_USE_ROCPD=ON")
 endif()
 
@@ -59,19 +92,11 @@ endif()
 
 # -------------------------------------------------------------------------------------- #
 #
-# ROCpd validation tests (XNACK-capable GPUs only — KFD events require XNACK)
+# ROCpd validation
 #
 # -------------------------------------------------------------------------------------- #
 
-# KFD page migration/fault events are only generated on XNACK-capable GPUs
-check_rocminfo("xnack" _XNACK_SUPPORTED)
-
-if(
-    _XNACK_SUPPORTED
-    AND ${ENABLE_ROCPD_TEST}
-    AND ${_VALID_GPU}
-    AND TEST unified-memory-basic-output-sampling
-)
+if(${ENABLE_ROCPD_TEST} AND TEST unified-memory-basic-output-sampling)
     set_property(TEST unified-memory-basic-output-sampling APPEND PROPERTY LABELS rocpd)
 
     rocprofiler_systems_add_validation_test(
