@@ -22,6 +22,14 @@
 #include <EGL/eglext.h>
 #include <EGL/eglplatform.h>
 
+// X11/Xlib.h (pulled in by GL/glx.h) defines macros that collide with rocclr types:
+//   #define Status int   -- clobbers amd::Status::* (makes it amd::int::*)
+//   #define None 0L      -- clobbers any enumerator named None
+//   #define Success 0    -- clobbers any enumerator named Success
+#undef Status
+#undef None
+#undef Success
+
 #include "platform/context.hpp"
 #include "platform/command.hpp"
 
@@ -341,15 +349,6 @@ class GLFunctions {
 // Declare pointers to GL functions
 #include "gl_functions.hpp"
 };
-
-//! Functions for executing the GL related stuff.
-//! These return amd::Memory* (as void*) for use by both CL and HIP callers.
-void* clCreateFromGLBufferAMD(Context& amdContext, amd::MemFlags flags, GLuint bufobj,
-                               int* errcode_ret);
-void* clCreateFromGLTextureAMD(Context& amdContext, amd::MemFlags flags, GLenum target,
-                                GLint miplevel, GLuint texture, int* errcode_ret);
-void* clCreateFromGLRenderbufferAMD(Context& amdContext, amd::MemFlags flags, GLuint renderbuffer,
-                                     int* errcode_ret);
 
 bool getCLFormatFromGL(const Context& amdContext, GLint gliInternalFormat,
                        amd::ImageFormat* pclImageFormat, int* piBytesPerPixel,

@@ -122,8 +122,7 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLBuffer,
     return clMemObj;
   }
 
-  return static_cast<cl_mem>(amd::clCreateFromGLBufferAMD(
-      *as_amd(context), static_cast<amd::MemFlags>(flags), bufobj, errcode_ret));
+  return amd::clCreateFromGLBufferAMD(*as_amd(context), flags, bufobj, errcode_ret);
 }
 RUNTIME_EXIT
 
@@ -209,9 +208,8 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLTexture,
     return static_cast<cl_mem>(0);
   }
 
-  return static_cast<cl_mem>(amd::clCreateFromGLTextureAMD(
-      *as_amd(context), static_cast<amd::MemFlags>(flags), texture_target, miplevel, texture,
-      errcode_ret));
+  return amd::clCreateFromGLTextureAMD(*as_amd(context), flags, texture_target, miplevel, texture,
+                                       errcode_ret);
 }
 RUNTIME_EXIT
 
@@ -291,9 +289,8 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLTexture2D,
     return static_cast<cl_mem>(0);
   }
 
-  return static_cast<cl_mem>(amd::clCreateFromGLTextureAMD(
-      *as_amd(context), static_cast<amd::MemFlags>(flags), target, miplevel, texture,
-      errcode_ret));
+  return amd::clCreateFromGLTextureAMD(*as_amd(context), flags, target, miplevel, texture,
+                                       errcode_ret);
 }
 RUNTIME_EXIT
 
@@ -368,9 +365,8 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLTexture3D,
     return static_cast<cl_mem>(0);
   }
 
-  return static_cast<cl_mem>(amd::clCreateFromGLTextureAMD(
-      *as_amd(context), static_cast<amd::MemFlags>(flags), target, miplevel, texture,
-      errcode_ret));
+  return amd::clCreateFromGLTextureAMD(*as_amd(context), flags, target, miplevel, texture,
+                                       errcode_ret);
 }
 RUNTIME_EXIT
 
@@ -428,8 +424,7 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLRenderbuffer,
     return clMemObj;
   }
 
-  return static_cast<cl_mem>(amd::clCreateFromGLRenderbufferAMD(
-      *as_amd(context), static_cast<amd::MemFlags>(flags), renderbuffer, errcode_ret));
+  return amd::clCreateFromGLRenderbufferAMD(*as_amd(context), flags, renderbuffer, errcode_ret);
 }
 RUNTIME_EXIT
 
@@ -1038,8 +1033,9 @@ static GLenum glInternalFormatToGlFormat(GLenum internalFormat) {
 //
 //      clCreateFromGLBufferAMD
 //
-void* clCreateFromGLBufferAMD(Context& amdContext, amd::MemFlags flags, GLuint bufobj,
-                               int* errcode_ret) {
+cl_mem clCreateFromGLBufferAMD(Context& amdContext, cl_mem_flags flags, GLuint bufobj,
+                               cl_int* errcode_ret) {
+  amd::MemFlags amdFlags = static_cast<amd::MemFlags>(flags);
   BufferGL* pBufferGL = NULL;
   GLenum glErr;
   GLenum glTarget = GL_ARRAY_BUFFER;
@@ -1093,7 +1089,7 @@ void* clCreateFromGLBufferAMD(Context& amdContext, amd::MemFlags flags, GLuint b
     // Mapping will be done at acquire time (sync point)
 
     // Now create BufferGL object
-    pBufferGL = new (amdContext) BufferGL(amdContext, flags, gliSize, 0, bufobj);
+    pBufferGL = new (amdContext) BufferGL(amdContext, amdFlags, gliSize, 0, bufobj);
 
     if (!pBufferGL) {
       *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
@@ -1132,11 +1128,12 @@ void* clCreateFromGLBufferAMD(Context& amdContext, amd::MemFlags flags, GLuint b
   }
   mem->processGLResource(device::Memory::GLDecompressResource);
 
-  return static_cast<void*>(pBufferGL);
+  return (cl_mem)pBufferGL;
 }
 
-void* clCreateFromGLTextureAMD(Context& amdContext, amd::MemFlags clFlags, GLenum target,
-                                GLint miplevel, GLuint texture, int* errcode_ret) {
+cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenum target,
+                                 GLint miplevel, GLuint texture, cl_int* errcode_ret) {
+  amd::MemFlags amdFlags = static_cast<amd::MemFlags>(clFlags);
   ImageGL* pImageGL = NULL;
   GLenum glErr;
   GLenum glTarget = 0;
@@ -1314,7 +1311,7 @@ void* clCreateFromGLTextureAMD(Context& amdContext, amd::MemFlags clFlags, GLenu
       // Now get CL format from GL format and bytes per pixel
       int iBytesPerPixel = 0;
       if (!getCLFormatFromGL(amdContext, glInternalFormat, &clImageFormat, &iBytesPerPixel,
-                             clFlags)) {
+                             amdFlags)) {
         *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
         LogWarning("\"texture\" format does not map to an appropriate CL image format");
         return nullptr;
@@ -1384,7 +1381,7 @@ void* clCreateFromGLTextureAMD(Context& amdContext, amd::MemFlags clFlags, GLenu
       // Now get CL format from GL format and bytes per pixel
       int iBytesPerPixel = 0;
       if (!getCLFormatFromGL(amdContext, glInternalFormat, &clImageFormat, &iBytesPerPixel,
-                             clFlags)) {
+                             amdFlags)) {
         *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
         LogWarning("\"texture\" format does not map to an appropriate CL image format");
         return nullptr;
@@ -1418,12 +1415,12 @@ void* clCreateFromGLTextureAMD(Context& amdContext, amd::MemFlags clFlags, GLenu
 
     if (wholeMipmap) {
       pImageGL = new (amdContext) ImageGL(
-          amdContext, clType, clFlags, clImageFormat, static_cast<size_t>(gliTexWidth),
+          amdContext, clType, amdFlags, clImageFormat, static_cast<size_t>(gliTexWidth),
           static_cast<size_t>(gliTexHeight), static_cast<size_t>(gliTexDepth), glTarget, texture,
           miplevel, glInternalFormat, clGLType, numSamples, gliTexMaxLevel, target);
     } else {
       pImageGL = new (amdContext)
-          ImageGL(amdContext, clType, clFlags, clImageFormat, static_cast<size_t>(gliTexWidth),
+          ImageGL(amdContext, clType, amdFlags, clImageFormat, static_cast<size_t>(gliTexWidth),
                   static_cast<size_t>(gliTexHeight), static_cast<size_t>(gliTexDepth), glTarget,
                   texture, miplevel, glInternalFormat, clGLType, numSamples, target);
     }
@@ -1443,14 +1440,15 @@ void* clCreateFromGLTextureAMD(Context& amdContext, amd::MemFlags clFlags, GLenu
   }  // Release scoped lock
 
   *not_null(errcode_ret) = CL_SUCCESS;
-  return static_cast<void*>(pImageGL);
+  return (cl_mem)pImageGL;
 }
 
 //
 //      clCreateFromGLRenderbufferDAMD
 //
-void* clCreateFromGLRenderbufferAMD(Context& amdContext, amd::MemFlags clFlags, GLuint renderbuffer,
-                                     int* errcode_ret) {
+cl_mem clCreateFromGLRenderbufferAMD(Context& amdContext, cl_mem_flags clFlags, GLuint renderbuffer,
+                                      cl_int* errcode_ret) {
+  amd::MemFlags amdFlags = static_cast<amd::MemFlags>(clFlags);
   ImageGL* pImageGL = NULL;
   GLenum glErr;
 
@@ -1501,7 +1499,7 @@ void* clCreateFromGLRenderbufferAMD(Context& amdContext, amd::MemFlags clFlags, 
     // Now get CL format from GL format and bytes per pixel
     int iBytesPerPixel = 0;
     if (!getCLFormatFromGL(amdContext, glInternalFormat, &clImageFormat, &iBytesPerPixel,
-                           clFlags)) {
+                           amdFlags)) {
       *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
       LogWarning("\"renderbuffer\" format does not map to an appropriate CL image format");
       return nullptr;
@@ -1538,7 +1536,7 @@ void* clCreateFromGLRenderbufferAMD(Context& amdContext, amd::MemFlags clFlags, 
     // PBO and mapping will be done at "acquire" time (sync point)
 
     pImageGL = new (amdContext)
-        ImageGL(amdContext, amd::MemObjectType::Image2D, clFlags, clImageFormat,
+        ImageGL(amdContext, amd::MemObjectType::Image2D, amdFlags, clImageFormat,
                 (size_t)gliRbWidth, (size_t)gliRbHeight, 1, glTarget, renderbuffer,
                 0, glInternalFormat, amd::GlObjectType::Renderbuffer, 0);
 
@@ -1556,7 +1554,7 @@ void* clCreateFromGLRenderbufferAMD(Context& amdContext, amd::MemFlags clFlags, 
   }  // Release scoped lock
 
   *not_null(errcode_ret) = CL_SUCCESS;
-  return static_cast<void*>(pImageGL);
+  return (cl_mem)pImageGL;
 }
 
 //
