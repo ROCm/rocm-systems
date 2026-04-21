@@ -275,6 +275,16 @@ install_intercept(CoreApiTable& core_table);
 bool
 is_intercepting_inline();
 
+/**
+ * @brief Disable inline queue interception and clear tracked state
+ *
+ * This leaves the wrapped function pointers installed but removes all tracked
+ * queue state so wrappers always pass through to the next function table.
+ * Intended for finalization to avoid teardown-order hazards in static objects.
+ */
+void
+shutdown_intercept();
+
 }  // namespace queue_intercept
 }  // namespace hsa
 }  // namespace rocprofiler
