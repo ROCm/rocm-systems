@@ -439,6 +439,7 @@ install_intercept(CoreApiTable& core_table)
 
     s_intercept_installed = true;
     ROCP_INFO << "inline queue intercept installed (14 API wrappers)";
+}
 
 }  // namespace queue_intercept
 }  // namespace hsa

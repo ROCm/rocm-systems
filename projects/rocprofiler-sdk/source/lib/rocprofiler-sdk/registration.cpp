@@ -1241,7 +1241,7 @@ rocprofiler_set_api_table(const char* name,
         // sit outermost in core_ and chain through the tracing functors
         {
             auto inline_intercept =
-                common::get_env("ROCPROFILER_INLINE_INTERCEPT", true);
+                rocprofiler::common::get_env("ROCPROFILER_INLINE_INTERCEPT", true);
             ROCP_INFO << "ROCPROFILER_INLINE_INTERCEPT=" << inline_intercept;
             if(inline_intercept)
                 rocprofiler::hsa::queue_intercept::install_intercept(
