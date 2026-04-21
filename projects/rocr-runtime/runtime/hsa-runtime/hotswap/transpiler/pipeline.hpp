@@ -46,6 +46,31 @@ PipelineResult runPipelineAllKernels(const std::vector<uint8_t> &codeObjectData,
                                      const std::string &targetISA,
                                      bool enableWritelaneRewrite = false);
 
+/// Process-global "strict mode" toggle, controlled by the
+/// `HSA_SALMON_STRICT` environment variable. When set to a non-empty
+/// value the salmon transpiler promotes known silent-miscompile sites
+/// to honest refusals instead of warning-and-continue. Today this
+/// covers two sites flagged by the corpus runner's `INTEGRATION_GAP.md`
+/// investigation:
+///
+///   * `s_setreg_imm32_b32 mode, imm` writes to the MODE register
+///     (handle_sopk.cpp): silently dropped in non-strict mode but the
+///     kernel may rely on the FP rounding / denormal / IEEE / FTZ bits
+///     being set.
+///   * `llvm.amdgcn.implicitarg.ptr` lifts (handle_smem.cpp): emit
+///     `gep = implicitarg_ptr + sourceImplOffset; load i32, gep` which
+///     bakes the source ISA's hidden-arg byte layout into a load against
+///     the target ISA's hidden-arg block. Any mismatch in base or
+///     layout produces wrong values for `hidden_block_count_*`,
+///     `hidden_grid_dims`, etc.
+///
+/// Parsed once on first call (`std::getenv("HSA_SALMON_STRICT")`); the
+/// callers (handler implementations) read the flag without round-tripping
+/// through the OS allocator on every instruction. The runner sets
+/// `HSA_SALMON_STRICT=1` in its salmon `ModeSpec`; `compare_correctness`
+/// and the gtest binary do not, so existing GPU tests stay passing.
+bool isStrictMode();
+
 } // namespace transpiler
 
 #endif
