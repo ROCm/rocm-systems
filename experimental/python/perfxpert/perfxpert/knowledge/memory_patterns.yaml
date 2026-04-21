@@ -12,7 +12,7 @@ unified_memory:
       Repeated HtoD/DtoH transfers of the same buffer indicate the page is
       being kicked between CPU + GPU. Pin with hipHostMalloc (non-coherent)
       or promote to a persistent device allocation.
-    detector: kernel_fusion.unified_memory.analyze_paging
+    detector: unified_memory.analyze_paging
     threshold:
       paging_events_ge: 1
     recommend:
