@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/queue_intercept.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 
@@ -162,12 +163,15 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t
 
     if(scan_pos >= scan_end)
     {
+        ROCP_TRACE << "doorbell: no new packets (scan_pos=" << scan_pos << ")";
         ring_doorbell(state->doorbell_signal, value);
         return;
     }
 
     uint64_t pkt_count = scan_end - scan_pos;
-    auto*    first_pkt =
+    ROCP_TRACE << "doorbell: processing " << pkt_count << " packets [" << scan_pos << ".."
+               << scan_end << ") k_factor=" << state->k_factor;
+    auto* first_pkt =
         static_cast<char*>(state->ring_buf) + ((scan_pos & state->ring_mask) * state->pkt_size);
 
     // Set up TLS for ring_buffer_writer
@@ -190,6 +194,7 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t
 
     state->next_scan_pos   = scan_end;
     state->next_submit_pos = tls_submit_pos;
+    ROCP_TRACE << "doorbell: after interceptor submit_pos=" << state->next_submit_pos;
 
     // Sync paired metadata queue (one sync per application packet)
     if(state->metadata_state)
@@ -223,6 +228,9 @@ create_queue_state(const hsa_queue_t* queue,
     state->doorbell_signal = queue->doorbell_signal;
     state->k_factor        = k_factor;
 
+    ROCP_INFO << "create_queue_state: queue=" << queue << " ring_size=" << queue->size
+              << " k_factor=" << k_factor << " doorbell=" << queue->doorbell_signal.handle;
+
     auto* raw_ptr = state.get();
     get_queue_registry().wlock([&](auto& map) { map[queue] = std::move(state); });
     get_doorbell_map().wlock([&](auto& map) { map[queue->doorbell_signal.handle] = raw_ptr; });
@@ -231,6 +239,7 @@ create_queue_state(const hsa_queue_t* queue,
 void
 destroy_queue_state(const hsa_queue_t* queue)
 {
+    ROCP_INFO << "destroy_queue_state: queue=" << queue;
     hsa_signal_t doorbell = {0};
     get_queue_registry().wlock([&](auto& map) {
         auto it = map.find(queue);
@@ -426,6 +435,7 @@ install_intercept(CoreApiTable& core_table)
     core_table.hsa_signal_store_screlease_fn = wrap_signal_store_screlease;
 
     s_intercept_installed = true;
+    ROCP_INFO << "inline queue intercept installed (14 API wrappers)";
 }
 
 }  // namespace queue_intercept
