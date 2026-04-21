@@ -1186,6 +1186,9 @@ is_active(rocprofiler_context_id_t ctx)
 }
 
 void
+log_context_snapshot(std::string_view phase);
+
+void
 start();
 
 void
@@ -1300,6 +1303,37 @@ auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"KFD_QUEUE", &kfd_queue_records_ctx},
 };
 
+void
+log_context_snapshot(std::string_view phase)
+{
+    size_t null_count = 0;
+    for(const auto& itr : contexts)
+        if(itr.second == nullptr) ++null_count;
+
+    std::clog << "[DIAG-HG-TOOL-CONTEXT-SNAPSHOT] phase=" << phase
+              << " total=" << contexts.size() << " null=" << null_count << std::endl;
+
+    for(const auto& itr : contexts)
+    {
+        auto* ctx_ptr   = itr.second;
+        int   valid     = -1;
+        int   active    = -1;
+        int   valid_ec  = -1;
+        int   active_ec = -1;
+        if(ctx_ptr)
+        {
+            valid_ec = static_cast<int>(rocprofiler_context_is_valid(*ctx_ptr, &valid));
+            if(valid > 0)
+                active_ec = static_cast<int>(rocprofiler_context_is_active(*ctx_ptr, &active));
+        }
+
+        std::clog << "[DIAG-HG-TOOL-CONTEXT] phase=" << phase << " name=" << itr.first
+                  << " ptr=" << ctx_ptr << " handle=" << (ctx_ptr ? ctx_ptr->handle : 0)
+                  << " valid_ec=" << valid_ec << " valid=" << valid
+                  << " active_ec=" << active_ec << " active=" << active << std::endl;
+    }
+}
+
 auto buffers = std::array<rocprofiler_buffer_id_t*, 22>{&runtime_init_buffered_buffer,
                                                         &hsa_api_buffered_buffer,
                                                         &hip_api_buffered_buffer,
@@ -1337,6 +1371,17 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     rocprofiler_get_timestamp(&init_time);
     rocprofiler_get_thread_id(&main_tid);
 
+    std::clog << "[DIAG-HG-TOOL-INIT] pid=" << getpid() << " ppid=" << getppid()
+              << " tool_data=" << tool_data << " init_time=" << init_time
+              << " main_tid=" << main_tid << " ROCPROFILER_TOOL_CONTEXTS="
+              << (getenv("ROCPROFILER_TOOL_CONTEXTS") ? getenv("ROCPROFILER_TOOL_CONTEXTS")
+                                                      : "<unset>")
+              << " ROCPROFILER_TOOL_CONTEXTS_EXCLUDE="
+              << (getenv("ROCPROFILER_TOOL_CONTEXTS_EXCLUDE")
+                      ? getenv("ROCPROFILER_TOOL_CONTEXTS_EXCLUDE")
+                      : "<unset>")
+              << std::endl;
+
     assert(tool_data != nullptr);
 
     rocprofiler_query_available_agents_cb_t iterate_cb = [](rocprofiler_agent_version_t agents_ver,
@@ -1358,6 +1403,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                            const_cast<void*>(static_cast<const void*>(&agents))),
         "query available agents");
 
+    std::clog << "[DIAG-HG-TOOL-AGENTS] count=" << agents.size() << std::endl;
+    for(const auto& itr : agents)
+    {
+        std::clog << "[DIAG-HG-TOOL-AGENT] id=" << itr.id.handle << " type=" << itr.type
+                  << " node=" << itr.logical_node_id << " name=" << itr.name << std::endl;
+    }
+
     for(auto itr : agents)
         agents_map.emplace(itr.id, itr);
 
@@ -1369,11 +1421,17 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     for(auto itr : contexts)
     {
+        std::clog << "[DIAG-HG-TOOL-CREATE-CONTEXT] name=" << itr.first << " ptr=" << itr.second
+                  << " pre_handle=" << (itr.second ? itr.second->handle : 0) << std::endl;
         ROCPROFILER_CALL(rocprofiler_create_context(itr.second), "context creation");
+        std::clog << "[DIAG-HG-TOOL-CREATE-CONTEXT] name=" << itr.first
+                  << " post_handle=" << (itr.second ? itr.second->handle : 0) << std::endl;
         ROCPROFILER_CALL(rocprofiler_configure_external_correlation_id_request_service(
                              *itr.second, nullptr, 0, set_external_correlation_id, nullptr),
                          "external correlation id request service configure");
     }
+
+    log_context_snapshot("post-create");
 
     ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                          runtime_init_callback_ctx,
@@ -2040,8 +2098,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     for(auto itr : contexts)
     {
         int valid_ctx = 0;
+        std::clog << "[DIAG-HG-TOOL-CONTEXT-VALIDATE] name=" << itr.first
+                  << " ptr=" << itr.second << " handle=" << (itr.second ? itr.second->handle : 0)
+                  << std::endl;
         ROCPROFILER_CALL(rocprofiler_context_is_valid(*itr.second, &valid_ctx),
                          "context validity check");
+        std::clog << "[DIAG-HG-TOOL-CONTEXT-VALIDATE] name=" << itr.first
+                  << " valid=" << valid_ctx << std::endl;
         if(valid_ctx == 0)
         {
             // notify rocprofiler that initialization failed
@@ -2053,6 +2116,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     // environment variable to select which contexts to collect
     auto* context_settings_env = getenv("ROCPROFILER_TOOL_CONTEXTS");
+    std::clog << "[DIAG-HG-TOOL-FILTER-INCLUDE] raw="
+              << (context_settings_env ? context_settings_env : "<unset>") << std::endl;
     if(context_settings_env != nullptr && !std::string_view{context_settings_env}.empty())
     {
         auto context_settings = std::string{context_settings_env};
@@ -2069,11 +2134,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             auto pos = context_settings.find(itr.first);
             if(pos == std::string::npos)
             {
+                std::clog << "[DIAG-HG-TOOL-FILTER-INCLUDE] action=exclude name=" << itr.first
+                          << " handle=" << (itr.second ? itr.second->handle : 0) << std::endl;
                 std::cerr << "Excluding context: " << itr.first << std::endl;
                 itr.second = nullptr;
             }
             else
             {
+                std::clog << "[DIAG-HG-TOOL-FILTER-INCLUDE] action=enable name=" << itr.first
+                          << " handle=" << (itr.second ? itr.second->handle : 0) << std::endl;
                 std::cerr << "Enabling context: " << itr.first << std::endl;
                 context_settings.erase(pos, itr.first.length());
             }
@@ -2092,7 +2161,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         }
     }
 
+    log_context_snapshot("post-include-filter");
+
     auto* context_settings_excl_env = getenv("ROCPROFILER_TOOL_CONTEXTS_EXCLUDE");
+    std::clog << "[DIAG-HG-TOOL-FILTER-EXCLUDE] raw="
+              << (context_settings_excl_env ? context_settings_excl_env : "<unset>")
+              << std::endl;
     if(context_settings_excl_env != nullptr && !std::string_view{context_settings_excl_env}.empty())
     {
         auto context_settings = std::string{context_settings_excl_env};
@@ -2109,6 +2183,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             auto pos = context_settings.find(itr.first);
             if(pos != std::string::npos)
             {
+                std::clog << "[DIAG-HG-TOOL-FILTER-EXCLUDE] action=exclude name=" << itr.first
+                          << " handle=" << (itr.second ? itr.second->handle : 0) << std::endl;
                 std::cerr << "Excluding context: " << itr.first << std::endl;
                 itr.second = nullptr;
                 context_settings.erase(pos, itr.first.length());
@@ -2129,9 +2205,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         }
     }
 
+    log_context_snapshot("post-exclude-filter");
+
     push_external_correlation(getppid());
 
+    std::clog << "[DIAG-HG-TOOL-INIT] starting contexts..." << std::endl;
     start();
+    log_context_snapshot("post-start");
+    std::clog << "[DIAG-HG-TOOL-INIT] context start complete" << std::endl;
 
     // no errors
     return 0;
@@ -2149,7 +2230,11 @@ tool_fini(void* tool_data)
     static std::atomic_flag _once = ATOMIC_FLAG_INIT;
     if(_once.test_and_set()) return;
 
+    std::clog << "[DIAG-HG-TOOL-FINI] begin pid=" << getpid() << " tool_data=" << tool_data
+              << std::endl;
+    log_context_snapshot("pre-stop");
     stop();
+    log_context_snapshot("post-stop");
     flush();
 
     pop_external_correlation();
@@ -2943,30 +3028,76 @@ write_perfetto()
 void
 start()
 {
+    std::clog << "[DIAG-HG-TOOL-START] begin" << std::endl;
     for(auto itr : contexts)
     {
-        if(itr.second && !is_active(*itr.second))
+        if(!itr.second)
         {
-            if(itr.first == "COUNTER_COLLECTION")
-            {
-                auto* counters = getenv("ROCPROF_COUNTERS");
-                if(!counters) continue;
-            }
-            ROCPROFILER_CALL(rocprofiler_start_context(*itr.second), "context start");
+            std::clog << "[DIAG-HG-TOOL-START] name=" << itr.first << " action=skip-null"
+                      << std::endl;
+            continue;
         }
+
+        auto active_before = is_active(*itr.second);
+        std::clog << "[DIAG-HG-TOOL-START] name=" << itr.first
+                  << " handle=" << itr.second->handle << " active_before=" << active_before
+                  << std::endl;
+        if(active_before)
+        {
+            std::clog << "[DIAG-HG-TOOL-START] name=" << itr.first
+                      << " action=skip-already-active" << std::endl;
+            continue;
+        }
+
+        if(itr.first == "COUNTER_COLLECTION")
+        {
+            auto* counters = getenv("ROCPROF_COUNTERS");
+            if(!counters)
+            {
+                std::clog << "[DIAG-HG-TOOL-START] name=" << itr.first
+                          << " action=skip-no-counters-env" << std::endl;
+                continue;
+            }
+            std::clog << "[DIAG-HG-TOOL-START] name=" << itr.first
+                      << " counters_env=" << counters << std::endl;
+        }
+
+        ROCPROFILER_CALL(rocprofiler_start_context(*itr.second), "context start");
+        auto active_after = is_active(*itr.second);
+        std::clog << "[DIAG-HG-TOOL-START] name=" << itr.first << " handle=" << itr.second->handle
+                  << " active_after=" << active_after << std::endl;
     }
+    std::clog << "[DIAG-HG-TOOL-START] end" << std::endl;
 }
 
 void
 stop()
 {
+    std::clog << "[DIAG-HG-TOOL-STOP] begin" << std::endl;
     for(auto itr : contexts)
     {
-        if(itr.second && is_active(*itr.second))
+        if(!itr.second)
         {
-            ROCPROFILER_CALL(rocprofiler_stop_context(*itr.second), "context stop");
+            std::clog << "[DIAG-HG-TOOL-STOP] name=" << itr.first << " action=skip-null"
+                      << std::endl;
+            continue;
         }
+
+        auto active_before = is_active(*itr.second);
+        std::clog << "[DIAG-HG-TOOL-STOP] name=" << itr.first << " handle=" << itr.second->handle
+                  << " active_before=" << active_before << std::endl;
+        if(!active_before)
+        {
+            std::clog << "[DIAG-HG-TOOL-STOP] name=" << itr.first
+                      << " action=skip-not-active" << std::endl;
+            continue;
+        }
+        ROCPROFILER_CALL(rocprofiler_stop_context(*itr.second), "context stop");
+        auto active_after = is_active(*itr.second);
+        std::clog << "[DIAG-HG-TOOL-STOP] name=" << itr.first << " handle=" << itr.second->handle
+                  << " active_after=" << active_after << std::endl;
     }
+    std::clog << "[DIAG-HG-TOOL-STOP] end" << std::endl;
 }
 
 void
