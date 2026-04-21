@@ -245,8 +245,7 @@ read_file(rocpd_sql_engine_t                        engine,
           const char*                               schema_content,
           void*                                     user_data)
 {
-    common::consume_args(
-        engine, kind, options, schema_version, variables, schema_path);
+    common::consume_args(engine, kind, options, schema_version, variables, schema_path);
 
     auto* _db     = static_cast<rocpd_db*>(user_data);
     auto& _schema = _db->schemas[kind];
