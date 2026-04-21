@@ -6,6 +6,12 @@
 
 version: 1
 
+# CDNA2+ gate. MFMA ISA is a CDNA-only instruction family and the
+# thresholds below target CDNA2+ wavefront utilization. RDNA parts
+# (gfx10xx, gfx11xx) have no MFMA — skip. Legacy gfx908 (Arcturus, CDNA1)
+# has an older MFMA but the thresholds here are calibrated for CDNA2+.
+applies_to_gfx: [gfx90a, gfx942, gfx950]
+
 description: >
   Ratio of MFMA-emitted instructions to total VALU instructions. On
   matmul-heavy workloads this should be >= 0.20 for CDNA2 / >= 0.30 for
