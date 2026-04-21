@@ -6,8 +6,8 @@
 
 #pragma once
 
-#include <catch2/catch_all.hpp>
-#include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/matchers/catch_matchers.hpp> // For Catch::Matchers::MatcherBase
+#include <catch2/matchers/catch_matchers_floating_point.hpp> // For WithinUlp, WithinAbs, WithinRel
 
 #include <cstdint>
 #include <cstring>

@@ -10,7 +10,6 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
-#include <catch2/generators/catch_generators_adapters.hpp> // For map() generator adapter
 #include <resource_guards.hh>
 #include <utils.hh>
 

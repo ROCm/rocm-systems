@@ -9,7 +9,6 @@
 #include <variant>
 
 #include <hip_test_common.hh>
-#include <catch2/generators/catch_generators_adapters.hpp> // For map() generator adapter
 #include <hip/hip_runtime_api.h>
 #include <utils.hh>
 #include <resource_guards.hh>

@@ -9,6 +9,7 @@
 #include <optional>
 
 #include <hip_test_common.hh>
+#include <catch2/generators/catch_generators_adapters.hpp> // For map() generator adapter
 #include <hip/hip_runtime_api.h>
 
 struct CPUGrid {

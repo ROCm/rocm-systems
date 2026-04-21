@@ -7,8 +7,11 @@
 #define CATCH_CONFIG_RUNNER
 #include <cmd_options.hh>
 #include <hip_test_common.hh>
-#include <catch2/catch_session.hpp>         // For Catch::Session
-#include <catch2/internal/catch_clara.hpp>  // For Catch::Clara command line parser
+#include <catch2/catch_session.hpp>  // For Catch::Session
+// Note: Clara is internal API in Catch2 3.x but required for custom CLI options.
+// catch_session.hpp transitively includes the Clara types, so this include provides
+// the Opt/Parser functions needed for extending session.cli().
+#include <catch2/internal/catch_clara.hpp>
 #include <iostream>
 
 CmdOptions cmd_options;
