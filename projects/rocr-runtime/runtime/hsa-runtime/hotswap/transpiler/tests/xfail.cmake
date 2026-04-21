@@ -97,6 +97,41 @@ set_tests_properties(Gfx1250Gpu.Matmul128x128 PROPERTIES
   LABELS "transpiler;xfail"
 )
 
+# Two diagnostic probe patterns that sharpen the Matmul128x128 bug
+# shape. Both exercise the same WMMA → MFMA redistribute/collect
+# pipeline as the random-input variants above, but with inputs
+# designed to isolate exactly which rows/lanes are mis-routed.
+#
+#   Matmul128x128_1tile_RowIdA:  A[i,k] = (i+1) * 0.001 for all k;
+#     B = 1.0. Reference C[i,j] = 128 * (i+1) * 0.001, constant
+#     across columns. A failing run shows output rows 124..127
+#     getting contributions from A[0], A[2], A[4], A[6] for ~32
+#     of the 128 K-steps (roughly ONE WMMA-call-worth of mis-
+#     routed K-accumulation), arithmetic-identified as
+#     "source row used = 2*(output row - 124)".
+#
+#   Matmul128x128_1tile_RowOnly124: A[i,k] = (i == 124 ? 1 : 0);
+#     B = 1.0. Reference C[124,j] = 128 for all j; other rows = 0.
+#     Failing runs show C[124,j] = 96 across all columns — exactly
+#     one K-iter's contribution (32) missing for row 124. The
+#     missing contribution is silently replaced with a different
+#     row's A data that happens to be zero under this pattern,
+#     confirming the defect is a DATA SUBSTITUTION (not a drop).
+#
+# Both probes confirm the defect is IN the data path (lane routing
+# or A-fragment selection), not in the accumulator bookkeeping or
+# store-address computation. The per-row error histogram now
+# emitted by `doTestMatmul`'s error summary makes the row / column
+# locality trivially visible to the next investigation.
+set_tests_properties(Gfx1250Gpu.Matmul128x128_1tile_RowIdA PROPERTIES
+  WILL_FAIL TRUE
+  LABELS "transpiler;xfail"
+)
+set_tests_properties(Gfx1250Gpu.Matmul128x128_1tile_RowOnly124 PROPERTIES
+  WILL_FAIL TRUE
+  LABELS "transpiler;xfail"
+)
+
 # Gfx1250Gpu.Softmax graduated from XFAIL to expected-pass once
 # the P2 rewrite (v_permlane16 / v_permlanex16 emulation via
 # ds_bpermute_b32; see the permlane16/permlanex16 row of

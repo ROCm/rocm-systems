@@ -8,6 +8,133 @@ Append-only. Newest on top.
 
 ---
 
+## 2026-04-21 — Matmul128x128 residual: data-substitution bug, NOT a collect-stage defect
+
+**Context.** Follow-up investigation of the `Gfx1250Gpu.Matmul128x128*`
+residual documented in the previous entry. Handed-off with the primary
+hypothesis that the bug lives in the WMMA→MFMA "collect" stage of
+`wmma_lowering.cpp::runGroupPass`, specifically the `ds_bpermute`-based
+gather that maps a 4-VGPR MFMA output back into the 8-VGPR Wave32 C
+fragment.
+
+**What was done.** Added two diagnostic input patterns to `doTestMatmul`
+in `tests/gfx1250_gpu_test.cpp`:
+
+- `MatmulDataPattern::RowIdA`: `A[i,k] = (i+1) * 0.001` for all k, `B = 1`.
+  Reference `C[i,j] = 128 * (i+1) * 0.001`, constant across columns.
+  Every output row has a unique expected value — any per-row mis-routing
+  is immediately visible numerically.
+- `MatmulDataPattern::RowOnly124`: `A[i,k] = (i == 124 ? 1 : 0)`,
+  `B = 1`. Reference `C[124, j] = 128` for all j, every other row = 0.
+  If any of row 124's K-iters is lost, C[124,j] ≠ 128.
+
+Also added a per-row / per-column error histogram to the error-summary
+path.
+
+**What the evidence shows.**
+
+1. **RowOnly124 is the smoking gun.** Output row 124 comes out as
+   `96.0` across all 128 columns — EXACTLY 32 units short of the
+   reference 128.0. 32 is the K-dimension of a single WMMA call
+   (`v_wmma_f32_16x16x32_f16`). So ONE WMMA instance's contribution
+   to row 124 is being SILENTLY REPLACED with another row's data
+   (which happens to be 0 under this pattern, since every row
+   except 124 has A=0).
+
+2. **RowIdA pins the substitution pattern.** For random-free data
+   where `A[i] ∝ i`, output rows 124..127 come out with the missing
+   K-iter's contribution equal to `32 * A[2*(row - 124)]`:
+
+   | output row | expected    | got         | missing ctr | source row |
+   |------------|-------------|-------------|-------------|------------|
+   |      124   | 16.0        | 12.032      | 3.968       | A[0]       |
+   |      125   | 16.125      | 12.1898     | 3.935       | A[2]       |
+   |      126   | 16.25       | 12.3475     | 3.903       | A[4]       |
+   |      127   | 16.3906     | 12.5170     | 3.874       | A[6]       |
+
+   Equivalently, output row `(124 + r)` receives contribution from
+   row `2 * r` for `r ∈ {0, 1, 2, 3}` on one specific WMMA call.
+
+3. **Only output rows 124..127 are affected.** Rows 12..15, 28..31,
+   44..47, …, 108..111 — i.e., rows 12..15 of every OTHER 16-row
+   sub-tile row — are correct. If the defect were a general COLLECT-
+   stage bug affecting Wave32 lanes 16..31 GPRs 4..7 uniformly across
+   every WMMA, we would expect errors in ALL these rows. We don't.
+
+4. **Collect-stage math is correct.** Spent significant time
+   verifying the `srcLane = 32*(w32Lane>=16) + 16*(GPR_w>=4) +
+   (w32Lane & 15)` formula both in `wmma_lowering.cpp` and in the
+   `--emit-ir` dump (`/tmp/mm.ll`). For pass 2 at W64 lane 48
+   (w32Lane=16, the first failing lane), the formula produces
+   `srcLane = 48` for `gw ∈ {4..7}`, which reads MFMA `LG 3` at
+   the expected `mfmaDwords[0..3]` indices — exactly what the
+   file-header lane-layout equations prescribe. The emitted IR
+   matches the formula literally.
+
+5. **IR structure is correct.** Pass 1 and pass 2 of `runGroupPass`
+   produce independent `result0[]` / `result1[]` arrays, packed via
+   `select i1 is_group1` into the final `<8 x float>` result. No
+   SSA sharing, no cross-pass aliasing.
+
+**What this means.** The defect is NOT the hypothesised collect-stage
+lane-map bug. The collect math is correct AND uniformly applied across
+every WMMA. The rejection criterion: if it were a collect bug, it would
+affect EVERY sub-tile's rows 12..15, not just rows 124..127.
+
+**What the bug IS.** Under-specified. The data is: ONE specific
+WMMA-call-worth of contribution is dropped for rows 124..127, and the
+wrong data substituted in follows a very specific `2*(row - 124)`
+pattern in A-row indexing. The substitution crosses what would be
+sub-tile boundaries (rows 0..6 of the A matrix, not rows 112..118 of
+the failing sub-tile), which rules out intra-sub-tile mis-routing and
+suggests the defect is EITHER:
+
+- In a specific WMMA's A-fragment load (the `ds_load_tr16_b128`
+  emulation, or the raising of its VGPR-MSB-adjusted destination), OR
+- In a post-WMMA shuffle / reduce step (an LDS rearrangement
+  the Triton kernel does between WMMA accumulation and the final
+  store) that crosses warp boundaries, OR
+- In the interaction between `s_set_vgpr_msb` state and some handler
+  whose operand-index map doesn't consult `ctx.currentVGPRAdjust[]`.
+
+**What NOT to waste time on (next investigation).** Both `wmma_lowering.cpp`
+collect-stage math and `redistributeInput` / `redistributeAcc` math are
+verified correct against the documented lane-layout equations. The IR
+dump shows these formulas emitted literally. Do not re-derive them from
+first principles a third time.
+
+**What to investigate next.**
+
+1. Grep the disassembly for the specific WMMA whose dst is the
+   accumulator covering rows 124..127. Trace its A-fragment load
+   chain back through `ds_load_tr16_b128` and the s_set_vgpr_msb
+   state surrounding it. If the dst / src0 MSB adjustment on that
+   specific path is dropped somewhere, that would explain the
+   "wrong A row" substitution (reading from a lower-bank VGPR
+   instead of the upper-bank one).
+2. Write a minimal HIP reproducer that has 4 chained WMMAs across
+   2 source waves with `s_set_vgpr_msb` in the source kernel and
+   non-uniform A/B data. If it reproduces, the bug is
+   `s_set_vgpr_msb`-related; if it doesn't, suspect the Triton-
+   kernel-specific LDS shuffle path.
+3. The `compare_correctness` tool (tools/compare_correctness/)
+   already has a `makeSSetVgprMsbRecipe()` probe. Run it end-to-end
+   under the same `--enable-writelane-rewrite` + `--enable-wave-native`
+   configuration as the matmul gtest. A mismatch there isolates the
+   MSB path; a match rules it out.
+
+**Value landed anyway.** The two diagnostic input patterns (RowIdA,
+RowOnly124) and the per-row/per-column error histogram make the defect
+shape trivially visible without any manual scripting. The xfail entries
+for them are gated with the same `WILL_FAIL TRUE` pattern as the parent
+matmul tests, so CTest still validates that the defect is reproducible
+(a silent fix would flip them unexpected-pass and force a review).
+
+**Files touched:**
+`tests/gfx1250_gpu_test.cpp`, `tests/xfail.cmake`, this doc.
+
+---
+
 ## 2026-04-21 — WaveNative projection alone does not fix the Matmul128x128 residual
 
 **Context.** After the writelane/readlane symmetry fix (same day, below),

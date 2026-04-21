@@ -236,14 +236,17 @@ static void doTestWmmaProbe(const char *kernelName, int numTiles,
 //               bug is masked.  When uniform passes but random fails,
 //               the remaining bug is isolated to the WMMA operand
 //               layout or accumulator redistribution.
-enum class MatmulDataPattern { Random, Uniform };
+enum class MatmulDataPattern { Random, Uniform, RowIdA, RowOnly124 };
 
 static void doTestMatmul(const char *hsacoFile, int M, int N, int K,
                          const char *label,
                          MatmulDataPattern pattern = MatmulDataPattern::Random) {
+  const char *patternStr = "random";
+  if (pattern == MatmulDataPattern::Uniform) patternStr = "uniform";
+  else if (pattern == MatmulDataPattern::RowIdA) patternStr = "rowIdA";
+  else if (pattern == MatmulDataPattern::RowOnly124) patternStr = "rowOnly124";
   printf("--- matmul_kernel (%s, M=%d N=%d K=%d, pattern=%s) ---\n",
-         label, M, N, K,
-         pattern == MatmulDataPattern::Uniform ? "uniform" : "random");
+         label, M, N, K, patternStr);
   std::string path = std::string(GFX1250_DATA_DIR) + "/" + hsacoFile;
   auto data = transpiler::readFile(path);
   ASSERT_FALSE(data.empty()) << "Cannot read " << path;
@@ -281,6 +284,20 @@ static void doTestMatmul(const char *hsacoFile, int M, int N, int K,
   std::vector<float> hC(M * N, 0.0f);
   if (pattern == MatmulDataPattern::Uniform) {
     for (auto &h : hA) h = __float2half(1.0f);
+    for (auto &h : hB) h = __float2half(1.0f);
+  } else if (pattern == MatmulDataPattern::RowIdA) {
+    // A[i,k] = (i+1) * 0.001, B[k,j] = 1.0.
+    // Expected C[i,j] = K * (i+1) * 0.001 for every column j.
+    for (int i = 0; i < M; i++)
+      for (int k = 0; k < K; k++)
+        hA[i * K + k] = __float2half((i + 1) * 0.001f);
+    for (auto &h : hB) h = __float2half(1.0f);
+  } else if (pattern == MatmulDataPattern::RowOnly124) {
+    // A[i,k] = 1 only for i==124, else 0. B[k,j] = 1.
+    // Expected C[124,j] = K for all j, other rows = 0.
+    for (int i = 0; i < M; i++)
+      for (int k = 0; k < K; k++)
+        hA[i * K + k] = __float2half((i == 124) ? 1.0f : 0.0f);
     for (auto &h : hB) h = __float2half(1.0f);
   } else {
     std::mt19937 rng(123);
@@ -396,6 +413,8 @@ static void doTestMatmul(const char *hsacoFile, int M, int N, int K,
 
   int errors = 0;
   float maxErr = 0;
+  std::vector<int> rowErrors(M, 0);
+  std::vector<int> colErrors(N, 0);
   for (int i = 0; i < M * N; i++) {
     float diff = std::fabs(hC[i] - ref[i]);
     float denom = std::max(std::fabs(ref[i]), 1e-6f);
@@ -405,9 +424,41 @@ static void doTestMatmul(const char *hsacoFile, int M, int N, int K,
       if (errors < 3)
         fprintf(stderr, "  [%d] got=%f ref=%f diff=%e relErr=%e\n", i, hC[i], ref[i], diff, relErr);
       errors++;
+      rowErrors[i / N]++;
+      colErrors[i % N]++;
     }
   }
   (void)hipFree(dA); (void)hipFree(dB); (void)hipFree(dC); (void)hipModuleUnload(mod);
+  if (errors) {
+    printf("  Row histogram (rows with errors):\n   ");
+    int printed = 0;
+    for (int r = 0; r < M; r++) {
+      if (rowErrors[r] > 0) {
+        printf(" r%d:%d", r, rowErrors[r]);
+        if (++printed % 8 == 0) printf("\n   ");
+      }
+    }
+    printf("\n");
+    printf("  Col histogram (cols with errors): ");
+    printed = 0;
+    for (int c = 0; c < N; c++) {
+      if (colErrors[c] > 0) {
+        printf(" c%d:%d", c, colErrors[c]);
+        if (++printed > 16) { printf(" ..."); break; }
+      }
+    }
+    printf("\n");
+    for (int r = 0; r < M; r++) {
+      if (rowErrors[r] > 0) {
+        printf("  Row %d first 8 got|ref|diff:\n    ", r);
+        for (int c = 0; c < std::min(8, N); c++) {
+          float g = hC[r*N + c], rf = ref[r*N + c];
+          printf("[%d: %.4f|%.4f|%.4f] ", c, g, rf, g - rf);
+        }
+        printf("\n");
+      }
+    }
+  }
   printf("  Result: %d errors, maxErr=%e\n", errors, maxErr);
   EXPECT_EQ(errors, 0) << errors << " mismatches in matmul " << label;
 }
@@ -855,6 +906,16 @@ TEST_F(Gfx1250Gpu, Matmul128x128) {
 // work correctly end-to-end. The random-input XFAIL variants above
 // narrow the residual to the WMMA→MFMA redistribution — see the
 // xfail block and wave-size-translation.md §5.6.3.
+TEST_F(Gfx1250Gpu, Matmul128x128_1tile_RowIdA) {
+  doTestMatmul("matmul_f16_large_gfx1250.hsaco", 128, 128, 128,
+               "128x128 tile 1-tile rowIdA",
+               MatmulDataPattern::RowIdA);
+}
+TEST_F(Gfx1250Gpu, Matmul128x128_1tile_RowOnly124) {
+  doTestMatmul("matmul_f16_large_gfx1250.hsaco", 128, 128, 128,
+               "128x128 tile 1-tile rowOnly124",
+               MatmulDataPattern::RowOnly124);
+}
 TEST_F(Gfx1250Gpu, Matmul128x128_1tile_UniformDiag) {
   doTestMatmul("matmul_f16_large_gfx1250.hsaco", 128, 128, 128,
                "128x128 tile 1-tile uniform-diag",
