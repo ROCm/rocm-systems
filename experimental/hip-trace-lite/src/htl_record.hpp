@@ -10,6 +10,11 @@ inline constexpr char     kFileMagic[4]   = {'H', 'T', 'L', '0'};
 inline constexpr uint32_t kFileVersion    = 1;
 inline constexpr uint32_t kHeaderSize     = 64;
 
+// Sentinel for record_t.kernel_name_off when the record has no name.
+// Using UINT64_MAX avoids ambiguity with the legitimate offset 0 (which
+// is the byte offset of the first string in the string section).
+inline constexpr uint64_t kNoStringOffset = static_cast<uint64_t>(-1);
+
 #pragma pack(push, 1)
 struct file_header_t {
     char     magic[4];        // "HTL0"

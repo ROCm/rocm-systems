@@ -80,7 +80,7 @@ void Writer::run() {
                 batch[i].rec.kernel_name_off = string_cursor;
                 string_cursor += sizeof(uint32_t) + strings.back().size();
             } else {
-                batch[i].rec.kernel_name_off = 0;
+                batch[i].rec.kernel_name_off = kNoStringOffset;
             }
         }
         // writev only the record_t prefix of each slot.

@@ -73,13 +73,9 @@ int main(int argc, char** argv) {
     size_t n = (records_end - records_begin) / sizeof(htl::record_t);
     for (size_t i = 0; i < n; ++i) {
         const auto& r = rp[i];
-        // offset 0 is valid if strings exist; only treat 0 as "no string" if string section is empty
-        std::string k;
-        if (r.kernel_name_off == 0 && strings.empty()) {
-            k = "";
-        } else {
-            k = string_at(r.kernel_name_off);
-        }
+        std::string k = (r.kernel_name_off == htl::kNoStringOffset)
+            ? std::string{}
+            : string_at(r.kernel_name_off);
         std::printf("%u,%u,%llu,%llu,%llu,%u,%u,%d,%u,%llu,%s\n",
             r.domain, r.op,
             (unsigned long long)r.correlation_id,
