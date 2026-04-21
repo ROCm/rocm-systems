@@ -211,6 +211,30 @@ Example: `thread_trace` was added this way.
    `docs/guides/getting-started.md` "Report structure" subsection
    (§4 of that guide) so users know to look for it.
 
+### Pure-rendering derivatives (no schema change)
+
+Some webview visualisations render directly from an existing
+deterministic-payload key and do **NOT** introduce a new payload
+section. Examples:
+
+- **ATT flame graph** — `perfxpert/formatters/_att_flamegraph.py`
+  consumes the existing `payload["thread_trace"]` block (`kernels`,
+  `top_stalling_instructions`, `stall_category`) and produces an
+  inline SVG for the Thread Trace `.scard` in the webview. The
+  flame graph is webview-only; the Markdown / text / JSON formats
+  already surface the same data via the stall table and the
+  `thread_trace` JSON key, so no Layer-A / Layer-B / Layer-C
+  schema change is required. The renderer is a pure function of
+  the payload — no new MCP tool, no new agent, no new dependency.
+
+When adding a pure-rendering derivative, only wire the renderer
+into `webview.py::_format_as_webview` (via a new
+`%%…_SECTION%%` template slot inside the existing scard) and add a
+unit test under `tests/test_formatters/` that asserts the rendered
+fragment shape on a synthetic payload. Do NOT bump
+`schema_version` — the versioning policy below only applies to
+changes in the external JSON document (Layer C).
+
 ## Schema versioning policy (Layer C)
 
 The JSON doc carries a top-level `schema_version` field. Consumers

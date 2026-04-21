@@ -448,6 +448,41 @@ each hotspot row; the JSON format emits
 `hotspots[i].source_locations: [{file, line, kind}]` (schema
 `0.3.1`).
 
+#### ATT flame graph
+
+When the input DB carries Advanced Thread Trace (ATT) data — i.e.
+`perfxpert analyze -i trace.db --att-dir <att/>` — the Thread Trace
+scard renders a dependency-free **inline SVG flame graph** directly
+below the per-kernel stall table. One horizontal row per kernel, one
+stacked rectangle per stall category (VMEM latency / LDS conflict /
+dependency chain / branch divergence), width proportional to the
+weighted stall bucket. Colors reuse the webview stall-category
+palette, wide rects carry an inline `<label> <pct>%` tag, narrow ones
+fall back to the shared hover-tooltip.
+
+Click any rectangle to jump straight to the matching recommendation
+card (`id="rec-<kernel>"`), which briefly flashes to help you trace
+the visual signal back to the structured advice. Wheel-zoom works on
+the SVG `viewBox` (double-click to reset). The whole element is a
+single self-contained `<svg>` — no Speedscope, no D3, no Chart.js,
+no external CSS — so the report still opens correctly from any
+`file://` path in an airgapped viewer.
+
+```html
+<!-- shape (truncated) inside the Thread Trace `.scard` -->
+<div class="att-flame">
+  <svg class="att-flame-svg" viewBox="0 0 960 …" …>
+    <rect class="att-flame-rect" data-k="kernel_foo"
+          onclick="…scrollIntoView('rec-kernel_foo')…" fill="#ff8c00"/>
+    …
+  </svg>
+</div>
+```
+
+The flame graph is webview-only; the Markdown / text / JSON formats
+already surface the same data via the per-kernel stall table and
+`thread_trace` key respectively, so no schema bump was required.
+
 ### Report contents (every format)
 
 Every format — text, JSON, markdown, webview — carries the same
