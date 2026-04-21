@@ -36,10 +36,8 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Positive_Basic, uint8_t, uint16_t,
+HIP_TEMPLATE_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Positive_Basic, uint8_t, uint16_t,
                    uint32_t) {
-  CHECK_IMAGE_SUPPORT
-
   const auto f = [](hipMemsetParams* params) {
     hipGraph_t graph = nullptr;
     HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -107,7 +105,7 @@ TEMPLATE_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Positive_Basic, uint8_t, uin
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Negative_Parameters) {
   using namespace std::placeholders;
 
   hipGraph_t graph = nullptr;

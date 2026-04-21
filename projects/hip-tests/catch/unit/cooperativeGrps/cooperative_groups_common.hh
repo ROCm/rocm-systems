@@ -8,9 +8,9 @@
 
 #include <hip_test_common.hh>
 #include <hip/hip_cooperative_groups.h>
-
+#include <hip/cooperative_groups/hip_reduce.h>
 #include <cmd_options.hh>
-
+#include "../math/math_common.hh"
 namespace {
 constexpr int kMaxGPUs = 8;
 }  // namespace
@@ -50,5 +50,3 @@ template <class T> bool CheckDimensions(unsigned int device, T kernel, dim3 bloc
 
   return true;
 }
-
-inline double GetTestReductionFactor() { return cmd_options.cg_reduction_factor * 0.01; }

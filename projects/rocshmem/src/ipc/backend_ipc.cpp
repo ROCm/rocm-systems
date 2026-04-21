@@ -32,14 +32,14 @@
 #include "envvar.hpp"
 #include "ipc_team.hpp"
 #include "mpi_instance.hpp"
+#include "log.hpp"
 
 namespace rocshmem {
 
 #define NET_CHECK(cmd)                                       \
   {                                                          \
     if (cmd != MPI_SUCCESS) {                                \
-      fprintf(stderr, "Unrecoverable error: MPI Failure\n"); \
-      abort() ;                                              \
+      LOG_ERROR_ABORT("Unrecoverable error: MPI Failure");   \
     }                                                        \
   }
 
@@ -73,9 +73,8 @@ IPCBackend::IPCBackend(MPI_Comm comm):  Backend(comm) {
    * All the PEs must be with in a node for IPC conduit
    */
   if(num_pes != ipcImpl.shm_size) {
-    fprintf(stderr, "rocSHMEM: IPC Backend selected but some PEs are non-local. This is not a supported configuration.\n"
-                    "  The GDA and RO backends mix off-node -and- IPC on-node communication as needed.\n");
-    exit(1);
+    LOG_ERROR_EXIT("IPC Backend selected but some PEs are non-local. This is not a supported configuration. "
+                   "The GDA and RO backends mix off-node and IPC on-node communication as needed.");
   }
 
   /* Initialize the host interface */
@@ -136,6 +135,10 @@ IPCBackend::~IPCBackend() {
    */
   teams_destroy();
   cleanup_wrk_sync_buffer();
+
+  // Close IPC handles for remote heap bases
+  ipcImpl.ipcHostStop();
+
   auto *team_world{team_tracker.get_team_world()};
   team_world->~Team();
   CHECK_HIP(hipFree(team_world));
@@ -177,7 +180,7 @@ void IPCBackend::setup_ctxs() {
   }
 }
 
-__device__ bool IPCBackend::create_ctx(int64_t options, rocshmem_ctx_t *ctx) {
+__device__ bool IPCBackend::create_ctx([[maybe_unused]] int64_t options, rocshmem_ctx_t *ctx) {
   IPCContext *ctx_{nullptr};
 
   auto pop_result = ctx_free_list.get()->pop_front();
@@ -197,17 +200,8 @@ __device__ void IPCBackend::destroy_ctx(rocshmem_ctx_t *ctx) {
 }
 
 void IPCBackend::setup_team_world() {
-  TeamInfo *team_info_wrt_parent, *team_info_wrt_world;
-
-  /**
-   * Allocate device-side memory for team_world and construct a
-   * IPC team in it.
-   */
-  CHECK_HIP(hipMalloc(&team_info_wrt_parent, sizeof(TeamInfo)));
-  CHECK_HIP(hipMalloc(&team_info_wrt_world, sizeof(TeamInfo)));
-
-  new (team_info_wrt_parent) TeamInfo(nullptr, 0, 1, num_pes);
-  new (team_info_wrt_world) TeamInfo(nullptr, 0, 1, num_pes);
+  TeamInfo team_info_wrt_parent(nullptr, 0, 1, num_pes);
+  TeamInfo team_info_wrt_world(nullptr, 0, 1, num_pes);
 
   IPCTeam *team_world{nullptr};
   CHECK_HIP(hipMalloc(&team_world, sizeof(IPCTeam)));
@@ -252,11 +246,10 @@ void IPCBackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_byte
   if (num_pes == backend_bootstr->getNranks() ) {
     backend_bootstr->allGather(tmp_buffer, num_bytes);
   } else {
-    printf("IPCBackend::create_new_team: non-mpi version only supports parent_teams that contain all processes. Aborting.\n");
-    abort();
+    LOG_ERROR_ABORT("create_new_team: non-mpi version only supports parent_teams that contain all processes");
   }
 
-  for (int i = 0; i < num_bytes; i++) {
+  for (size_t i = 0; i < num_bytes; i++) {
     outbuf[i] = tmp_buffer[i];
     for (int j = 1; j < num_pes; j++) {
       outbuf[i] &= tmp_buffer[j * num_bytes + i];
@@ -267,9 +260,10 @@ void IPCBackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_byte
 }
 
 void IPCBackend::create_new_team([[maybe_unused]] Team *parent_team,
-                                TeamInfo *team_info_wrt_parent,
-                                TeamInfo *team_info_wrt_world, int num_pes,
-                                int my_pe_in_new_team, MPI_Comm team_comm,
+                                const TeamInfo& team_info_wrt_parent,
+                                const TeamInfo& team_info_wrt_world,
+                                int num_pes, int my_pe_in_new_team,
+                                MPI_Comm team_comm,
                                 rocshmem_team_t *new_team) {
   /**
    * Read the bit mask and find out a common index into
@@ -288,8 +282,7 @@ void IPCBackend::create_new_team([[maybe_unused]] Team *parent_team,
   int common_index = get_ls_non_zero_bit(team_reduced_bitmask_, max_num_teams);
   if (common_index < 0) {
     /* No team available */
-    printf("Could not create team, all bits in use. Aborting.\n");
-    abort();
+    LOG_ERROR_ABORT("Could not create team, all bits in use");
   }
 
   /* Mark the team as taken (by unsetting the bit in the pool bitmask) */
@@ -360,7 +353,7 @@ void IPCBackend::teams_destroy() {
 
 void IPCBackend::setup_wrk_sync_buffers() {
   /**
-   * calcualte work/sync buffer size
+   * calculate work/sync buffer size
    */
   auto max_num_teams{team_tracker.get_max_num_teams()};
 
@@ -426,9 +419,8 @@ void IPCBackend::setup_wrk_sync_buffers() {
    * Allocate device-side fine grained memory to hold IPC addresses of
    * work/sync buffers
    */
-  psync_allocator_->allocate(
-    reinterpret_cast<void**>(&wrk_sync_pool_bases_),
-    num_pes * sizeof(char*));
+  psync_allocator_->allocate(reinterpret_cast<void**>(&wrk_sync_pool_bases_),
+			     num_pes * sizeof(char*));
   assert(wrk_sync_pool_bases_);
 
   /*
@@ -478,7 +470,7 @@ void IPCBackend::rocshmem_collective_init() {
   /*
    * Initialize the barrier synchronization array with default values.
    */
-  for (int i = 0; i < ROCSHMEM_BARRIER_SYNC_SIZE; i++) {
+  for (size_t i = 0; i < ROCSHMEM_BARRIER_SYNC_SIZE; i++) {
     barrier_sync[i] = ROCSHMEM_SYNC_VALUE;
   }
 
@@ -495,7 +487,7 @@ void IPCBackend::rocshmem_collective_init() {
 
 void IPCBackend::teams_init() {
   /**
-   * Allocate pools for the teams sync and work arrary from the SHEAP.
+   * Allocate pools for the teams sync and work array from the SHEAP.
    */
   auto max_num_teams{team_tracker.get_max_num_teams()};
 
@@ -554,7 +546,7 @@ void IPCBackend::teams_init() {
    * Logical:
    * MSB..........................................................................LSB
    * Physical: MSB...1st least significant 8 bits...LSB  MSB...2nd least
-   * signifant 8 bits...LSB
+   * significant 8 bits...LSB
    *
    * Description shows only a 2-byte long mask but idea extends to any
    * arbitrary size.

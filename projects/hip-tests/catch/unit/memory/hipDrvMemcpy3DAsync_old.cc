@@ -307,7 +307,7 @@ void DrvMemcpy3DAsync<T>::HostDevice_DrvMemcpy3DAsync(bool device_context_change
   if (device_context_change) {
     HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1));
     if (!peerAccess) {
-      WARN("skipped the testcase as no peer access");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
       skip_test = true;
     } else {
       HIP_CHECK(hipSetDevice(1));
@@ -381,7 +381,7 @@ void DrvMemcpy3DAsync<T>::HostArray_DrvMemcpy3DAsync(bool device_context_change)
   if (device_context_change) {
     HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1));
     if (!peerAccess) {
-      WARN("skipped the testcase as no peer access");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
       skip_test = true;
     } else {
       HIP_CHECK(hipSetDevice(1));
@@ -446,7 +446,7 @@ template <typename T> void DrvMemcpy3DAsync<T>::DeAllocateMemory() {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE(Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange) {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -454,7 +454,8 @@ TEST_CASE(Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange) {
     DrvMemcpy3DAsync<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
     memcpy3d.HostDevice_DrvMemcpy3DAsync(true);
   } else {
-    SUCCEED("skipped testcase as Device count is < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 }
 
@@ -471,7 +472,7 @@ TEST_CASE(Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE(Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange) {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -479,7 +480,8 @@ TEST_CASE(Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange) {
     DrvMemcpy3DAsync<float> memcpy3d(10, 10, 10, HIP_AD_FORMAT_FLOAT);
     memcpy3d.HostArray_DrvMemcpy3DAsync(true);
   } else {
-    SUCCEED("skipped testcase as Device count is < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 }
 
@@ -499,7 +501,7 @@ TEST_CASE(Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE(Unit_hipDrvMemcpy3DAsync_multiDevice_Basic_Size_Test) {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_multiDevice_Basic_Size_Test) {
   CHECK_IMAGE_SUPPORT
   constexpr int size_128b = 128, size_256b = 256;
   int numDevices = 0;

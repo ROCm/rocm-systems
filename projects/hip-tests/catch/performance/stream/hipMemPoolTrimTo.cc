@@ -51,11 +51,9 @@ static void RunBenchmark(const size_t min_bytes_to_hold) {
  *  - Device supports memory pools
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipMemPoolTrimTo) {
+HIP_TEST_CASE(Performance_hipMemPoolTrimTo) {
   if (!AreMemPoolsSupported(0)) {
-    HipTest::HIP_SKIP_TEST(
-        "GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
     return;
   }
   size_t min_bytes_to_hold = GENERATE(4_KB, 4_MB, 16_MB);

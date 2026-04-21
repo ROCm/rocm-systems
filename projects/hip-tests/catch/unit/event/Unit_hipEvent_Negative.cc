@@ -36,7 +36,7 @@ incompatible flags are passed
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipEventCreate_NullCheck) {
+HIP_TEST_CASE(Unit_hipEventCreate_NullCheck) {
   auto res = hipEventCreate(nullptr);
   REQUIRE(res != hipSuccess);
 }
@@ -64,7 +64,7 @@ TEST_CASE(Unit_hipEventCreate_NullCheck) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipEventCreateWithFlags_NullCheck) {
+HIP_TEST_CASE(Unit_hipEventCreateWithFlags_NullCheck) {
   auto res = hipEventCreateWithFlags(nullptr, 0);
   REQUIRE(res != hipSuccess);
 }
@@ -82,7 +82,7 @@ TEST_CASE(Unit_hipEventCreateWithFlags_NullCheck) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipEventCreate_IncompatibleFlags) {
+HIP_TEST_CASE(Unit_hipEventCreate_IncompatibleFlags) {
   hipEvent_t event;
   HIP_CHECK_ERROR(hipEventCreateWithFlags(&event, hipEventInterprocess), hipErrorInvalidValue);
 
@@ -130,7 +130,7 @@ TEST_CASE(Unit_hipEventCreate_IncompatibleFlags) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipEventSynchronize_NullCheck) {
+HIP_TEST_CASE(Unit_hipEventSynchronize_NullCheck) {
   auto res = hipEventSynchronize(nullptr);
   REQUIRE(res != hipSuccess);
 }
@@ -158,7 +158,7 @@ TEST_CASE(Unit_hipEventSynchronize_NullCheck) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipEventQuery_NullCheck) {
+HIP_TEST_CASE(Unit_hipEventQuery_NullCheck) {
   auto res = hipEventQuery(nullptr);
   REQUIRE(res != hipSuccess);
 }

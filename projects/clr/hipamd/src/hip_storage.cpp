@@ -11,15 +11,25 @@
 
 hipError_t hipAmdFileRead(hipAmdFileHandle_t handle, void* devicePtr, uint64_t size, int64_t file_offset,
                        uint64_t* size_copied, int32_t* status) {
+  HIP_INIT_VOID();
+
   if (size == 0) {
     // Skip if nothing needs reading.
     return hipSuccess;
   }
-  amd::Device* device = hip::getCurrentDevice()->devices()[0];
-  if (device == nullptr) {
+
+  auto* currentContext = hip::getCurrentDevice();
+  amd::Device* device = nullptr;
+
+  if (currentContext && !currentContext->devices().empty()) {
+    device = currentContext->devices()[0];
+  }
+
+  if (!device) {
     LogError("Failed to get current device");
     return hipErrorInvalidDevice;
   }
+
 #if defined(_WIN32)
   amd::Os::FileDesc opaque = handle.handle;
 #else
@@ -34,15 +44,25 @@ hipError_t hipAmdFileRead(hipAmdFileHandle_t handle, void* devicePtr, uint64_t s
 
 hipError_t hipAmdFileWrite(hipAmdFileHandle_t handle, void* devicePtr, uint64_t size, int64_t file_offset,
                        uint64_t* size_copied, int32_t* status) {
+  HIP_INIT_VOID();
+
   if (size == 0) {
     // Skip if nothing needs writing.
     return hipSuccess;
   }
-  amd::Device* device = hip::getCurrentDevice()->devices()[0];
-  if (device == nullptr) {
+  
+  auto* currentContext = hip::getCurrentDevice();
+  amd::Device* device = nullptr;
+
+  if (currentContext && !currentContext->devices().empty()) {
+    device = currentContext->devices()[0];
+  }
+
+  if (!device) {
     LogError("Failed to get current device");
     return hipErrorInvalidDevice;
   }
+
 #if defined(_WIN32)
   amd::Os::FileDesc opaque = handle.handle;
 #else

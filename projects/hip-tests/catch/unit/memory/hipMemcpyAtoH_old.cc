@@ -30,7 +30,7 @@ Output:"B_h" host variable output of hipMemcpyAtoH API
         is then validated with "hData"
 */
 #if HT_AMD
-TEMPLATE_TEST_CASE(Unit_hipMemcpyAtoH_multiDevice_PeerDeviceContext, char, int, float) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAtoH_multiDevice_PeerDeviceContext, char, int, float) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -39,7 +39,7 @@ TEMPLATE_TEST_CASE(Unit_hipMemcpyAtoH_multiDevice_PeerDeviceContext, char, int, 
     int peerAccess = 0;
     HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 1, 0));
     if (!peerAccess) {
-      SUCCEED("Skipped the test as there is no peer access");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     } else {
       HIP_CHECK(hipSetDevice(0));
       hipArray_t A_d;
@@ -68,7 +68,8 @@ TEMPLATE_TEST_CASE(Unit_hipMemcpyAtoH_multiDevice_PeerDeviceContext, char, int, 
                                             false) == true);
     }
   } else {
-    SUCCEED("skipping the testcases as numDevices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 }
 #endif

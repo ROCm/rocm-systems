@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -37,7 +18,7 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <set>
-#include <sstream>
+#include <spdlog/fmt/ranges.h>
 #include <stdint.h>
 #include <string.h>
 #include <string>
@@ -61,18 +42,6 @@ struct process
     uint32_t    start;
     uint32_t    end;
 };
-
-template <typename Category>
-inline std::string
-annotate_category(std::optional<int> first_section  = std::nullopt,
-                  std::optional<int> second_section = std::nullopt)
-{
-    std::stringstream ss;
-    ss << std::string(tim::trait::name<Category>::value);
-    if(first_section) ss << "_" << std::to_string(*first_section);
-    if(second_section) ss << "_" << std::to_string(*second_section);
-    return ss.str();
-}
 
 struct pmc
 {
@@ -127,20 +96,22 @@ struct thread
     {
         return lhs.thread_id < rhs.thread_id;
     }
+
+    friend bool operator==(const thread& lhs, const thread& rhs)
+    {
+        return lhs.parent_process_id == rhs.parent_process_id &&
+               lhs.process_id == rhs.process_id && lhs.thread_id == rhs.thread_id;
+    }
 };
 
 template <typename Category>
 inline std::string
-annotate_with_device_id(uint32_t           device_id,
-                        std::optional<int> first_section  = std::nullopt,
-                        std::optional<int> second_section = std::nullopt)
+format_track_name(std::optional<int> first_section  = std::nullopt,
+                  std::optional<int> second_section = std::nullopt)
 {
-    std::stringstream ss;
-    ss << std::string(tim::trait::name<Category>::value) + " [" +
-              std::to_string(device_id) + "]";
-    if(first_section) ss << "_" << std::to_string(*first_section);
-    if(second_section) ss << "_" << std::to_string(*second_section);
-    return ss.str();
+    return fmt::format("{}{}{}", tim::trait::name<Category>::value,
+                       first_section ? fmt::format("_{}", *first_section) : "",
+                       second_section ? fmt::format("_{}", *second_section) : "");
 }
 
 template <typename Category>

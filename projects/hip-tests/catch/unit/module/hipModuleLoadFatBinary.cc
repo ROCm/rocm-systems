@@ -27,7 +27,7 @@
  * ------------------------
  * - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipModuleLoadFatBinary_NegativeTsts) {
+HIP_TEST_CASE(Unit_hipModuleLoadFatBinary_NegativeTsts) {
   CTX_CREATE();
   hipModule_t Module;
   SECTION("fatCubin as nullptr") {
@@ -106,7 +106,7 @@ void loadKernelData(hipFunction_t kernel) {
  * ------------------------
  * - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipModuleLoadFatBinary_PosiiveTsts) {
+HIP_TEST_CASE(Unit_hipModuleLoadFatBinary_PosiiveTsts) {
   hipModule_t Module;
   SECTION("Compiled module with regular target in compressed fatbin") {
     const auto loaded_module =

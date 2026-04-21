@@ -1,0 +1,362 @@
+{
+  "system_configurations": {
+    "name": "RCCL-Tests-NET-IB-Transport",
+    "description": "Comprehensive InfiniBand transport test config. Runs all NetIbMPITest tests including plugin API, physical device, and virtual device (vNIC) tests."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH}"
+  },
+  "auto_detect_hosts": true,
+  "mpi_args": {
+    "mellanox": "--mca oob_tcp_if_include eth1 --mca btl_tcp_if_include eth1 --mca btl ^vader,openib --bind-to none",
+    "ainic": "--mca oob_tcp_if_include eno0 --mca btl_tcp_if_include eno0 --mca btl ^vader,openib --bind-to none",
+    "thor2": "--oversubscribe --mca plm_rsh_agent srun --mca oob_tcp_if_include eno8303 --mca btl_tcp_if_include eno8303 --mca btl ^openib --bind-to none"
+  },
+  "env_variables": {
+    "NCCL_DEBUG": "INFO"
+  },
+  "system_env_variables": {
+    "mellanox": {
+      "HSA_NO_SCRATCH_RECLAIM": "1",
+      "NCCL_SOCKET_IFNAME": "eth0,eth1",
+      "NCCL_IB_HCA": "mlx_5_5,mlx_5_7,mlx5_2,mlx_5_1,mlx_5_7",
+      "NCCL_NET_FORCE_MERGE": "mlx5_0,mlx5_1;mlx5_5,mlx5_6"
+    },
+    "ainic": {
+      "NCCL_SOCKET_IFNAME": "eno0",
+      "NCCL_IB_HCA": "rdma0,rdma1,rdma2,rdma3",
+      "NCCL_NET_FORCE_MERGE": "rdma0,rdma1;rdma2,rdma3"
+    },
+    "thor2": {
+      "NCCL_SOCKET_IFNAME": "eno8303",
+      "NCCL_IB_HCA": "bnxt_re0,bnxt_re1,bnxt_re5,bnxt_re6",
+      "NCCL_NET_FORCE_MERGE": "bnxt_re0,bnxt_re1;bnxt_re5,bnxt_re6"
+    }
+  },
+  "build_configuration": {
+    "install_flags": ["--debug", "-t", "-l", "--log-trace", "--enable-code-coverage", "--enable-mpi-tests", "--no_clean"],
+    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+    "parallel_jobs": 64
+  },
+  "test_configurations": {
+    "default": {
+      "env_variables": {
+        "NCCL_LAUNCH_MODE": "GROUP"
+      }
+    },
+
+    "net_ib_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_MERGE_VFS": "1",
+        "NCCL_DMABUF_ENABLE": "1"
+      }
+    },
+
+    "net_ib_initialization": {
+      "extends": "net_ib_base",
+      "timeout": 60,
+      "tests": [
+        {
+          "name": "NetIB_Init_Plugin",
+          "description": "Initialize InfiniBand network plugin and verify basic setup",
+          "test_filter": "NetIbMPITest.InitializePlugin"
+        },
+        {
+          "name": "NetIB_Init_GetDeviceCount",
+          "description": "Query and validate InfiniBand device count",
+          "test_filter": "NetIbMPITest.GetDeviceCount"
+        }
+      ]
+    },
+
+    "net_ib_properties": {
+      "extends": "net_ib_base",
+      "timeout": 60,
+      "tests": [
+        {
+          "name": "NetIB_Props_GetProperties",
+          "description": "Query InfiniBand device properties and capabilities",
+          "test_filter": "NetIbMPITest.GetDeviceProperties"
+        },
+        {
+          "name": "NetIB_Props_InvalidDevice",
+          "description": "Error handling when querying properties of invalid InfiniBand device",
+          "test_filter": "NetIbMPITest.GetDevicePropertiesInvalidDevice"
+        }
+      ]
+    },
+
+    "net_ib_connection": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "NetIB_Conn_ListenAndConnect",
+          "description": "Basic listen/connect/accept handshake over IB",
+          "test_filter": "NetIbMPITest.ListenAndConnect"
+        },
+        {
+          "name": "NetIB_Conn_InvalidHandle",
+          "description": "Connect with invalid handle error handling",
+          "test_filter": "NetIbMPITest.ConnectWithInvalidHandle"
+        },
+        {
+          "name": "NetIB_Conn_CloseWithoutWaiting",
+          "description": "Close connection without waiting for transfer completion",
+          "test_filter": "NetIbMPITest.CloseWithoutWaitingForCompletion"
+        }
+      ]
+    },
+
+    "net_ib_memory": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "NetIB_Mem_RegisterHost",
+          "description": "Register host memory buffers for IB RDMA",
+          "test_filter": "NetIbMPITest.RegisterHostMemory"
+        },
+        {
+          "name": "NetIB_Mem_RegisterGpu",
+          "description": "Register GPU device memory buffers for IB RDMA",
+          "test_filter": "NetIbMPITest.RegisterGpuMemory"
+        },
+        {
+          "name": "NetIB_Mem_RegisterNull",
+          "description": "Register NULL pointer error handling",
+          "test_filter": "NetIbMPITest.RegisterMemoryNullPointer"
+        },
+        {
+          "name": "NetIB_Mem_DeregisterNull",
+          "description": "Deregister NULL handle error handling",
+          "test_filter": "NetIbMPITest.DeregisterNullHandle"
+        }
+      ]
+    },
+
+    "net_ib_transfer": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,INIT"
+      },
+      "tests": [
+        {
+          "name": "NetIB_Xfer_SimpleSendRecv",
+          "description": "Basic IB send/receive data transfer",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "NetIB_Xfer_MultipleSizes",
+          "description": "IB data transfer with multiple buffer sizes",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "NetIB_Xfer_ZeroSize",
+          "description": "IB zero-byte send/receive",
+          "test_filter": "NetIbMPITest.SendRecvZeroSize"
+        },
+        {
+          "name": "NetIB_Xfer_LargeTransfer",
+          "description": "IB large buffer data transfer",
+          "test_filter": "NetIbMPITest.LargeTransfer"
+        },
+        {
+          "name": "NetIB_Xfer_MultipleSequential",
+          "description": "Multiple sequential send/recv on the same connection",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        }
+      ]
+    },
+
+    "net_ib_flush": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "NetIB_Flush_AfterRecv",
+          "description": "GPU flush (iflush) after receive with GDR",
+          "test_filter": "NetIbMPITest.FlushAfterRecv"
+        }
+      ]
+    },
+
+    "net_ib_vdevice": {
+      "extends": "net_ib_base",
+      "timeout": 60,
+      "tests": [
+        {
+          "name": "NetIB_VDev_MakeVirtualDevice",
+          "description": "Create virtual device from 2 physical IB NICs via makeVDevice(ndevs=2)",
+          "test_filter": "NetIbMPITest.MakeVirtualDevice"
+        },
+        {
+          "name": "NetIB_VDev_InvalidProps",
+          "description": "Reject makeVDevice with ndevs=0 (ncclInvalidUsage)",
+          "test_filter": "NetIbMPITest.MakeVirtualDeviceInvalidProps"
+        }
+      ]
+    },
+
+    "net_ib_vnic_functional": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,INIT"
+      },
+      "tests": [
+        {
+          "name": "NetIB_VNic_ConnectAndTransfer",
+          "description": "End-to-end data transfer through fused vNIC (ndevs=2)",
+          "test_filter": "NetIbMPITest.ConnectAndTransfer_VNic"
+        }
+      ]
+    },
+
+    "net_ib_vnic_edge": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,INIT"
+      },
+      "tests": [
+        {
+          "name": "NetIB_VNic_AsymmetricMerge",
+          "description": "Connection with mismatched ndevs (vNIC ndevs=2 vs physical ndevs=1)",
+          "test_filter": "NetIbMPITest.AsymmetricMerge_VNic"
+        },
+        {
+          "name": "NetIB_VNic_CloseWithoutTransfer",
+          "description": "Clean teardown of never-used multi-PD/QP vNIC connection",
+          "test_filter": "NetIbMPITest.CloseWithoutTransfer_VNic"
+        },
+        {
+          "name": "NetIB_VNic_UnalignedSizeTransfer",
+          "description": "Data integrity at 128-byte QP striping alignment boundaries",
+          "test_filter": "NetIbMPITest.UnalignedSizeTransfer_VNic"
+        }
+      ]
+    },
+
+    "net_ib_vnic_stress": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,INIT"
+      },
+      "tests": [
+        {
+          "name": "NetIB_VNic_LargeTransfer",
+          "description": "64MB payload striped across doubled QPs on vNIC",
+          "test_filter": "NetIbMPITest.LargeTransfer_VNic"
+        },
+        {
+          "name": "NetIB_VNic_MixedSizes",
+          "description": "Rapid tiny/large size transitions on multi-QP vNIC path",
+          "test_filter": "NetIbMPITest.MixedSizes_VNic"
+        },
+        {
+          "name": "NetIB_VNic_Bidirectional",
+          "description": "Full-duplex concurrent send+recv through same fused device",
+          "test_filter": "NetIbMPITest.Bidirectional_VNic"
+        },
+        {
+          "name": "NetIB_VNic_FlushRepeated",
+          "description": "50x GPU flush QP stability under repeated invocation (requires GDR)",
+          "test_filter": "NetIbMPITest.FlushRepeated_VNic"
+        },
+        {
+          "name": "NetIB_VNic_SequentialTransfers",
+          "description": "100x send/recv reuse on same doubled QP pool",
+          "test_filter": "NetIbMPITest.SequentialTransfers_VNic"
+        },
+        {
+          "name": "NetIB_VNic_Reconnect",
+          "description": "10x connect/transfer/close cycles for resource leak detection",
+          "test_filter": "NetIbMPITest.Reconnect_VNic"
+        },
+        {
+          "name": "NetIB_VNic_RegDeregCycling",
+          "description": "50x regMr/deregMr cycles on multi-PD MR cache",
+          "test_filter": "NetIbMPITest.RegDeregCycling_VNic"
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "NET IB - Initialization",
+      "description": "InfiniBand plugin initialization and device enumeration",
+      "config": "net_ib_initialization",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Device Properties",
+      "description": "InfiniBand device property queries",
+      "config": "net_ib_properties",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Connection Setup",
+      "description": "InfiniBand listen/connect/accept and error handling",
+      "config": "net_ib_connection",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Memory Registration",
+      "description": "InfiniBand memory registration and deregistration",
+      "config": "net_ib_memory",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Data Transfer",
+      "description": "InfiniBand send/recv with various sizes",
+      "config": "net_ib_transfer",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Flush",
+      "description": "InfiniBand GPU flush (iflush) with GDR",
+      "config": "net_ib_flush",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Virtual Device API",
+      "description": "makeVDevice creation and error paths",
+      "config": "net_ib_vdevice",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - vNIC Functional",
+      "description": "Virtual NIC functional validation",
+      "config": "net_ib_vnic_functional",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - vNIC Edge",
+      "description": "Virtual NIC edge case and boundary condition tests",
+      "config": "net_ib_vnic_edge",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - vNIC Stress",
+      "description": "Virtual NIC stress, reconnect, and repeated-operation tests",
+      "config": "net_ib_vnic_stress",
+      "enabled": true
+    }
+  ]
+}

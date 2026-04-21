@@ -46,7 +46,7 @@ __global__ void test_gws(int* buf, size_t buf_size, unsigned long long* tmp_buf,
   }
 }
 
-TEST_CASE(Unit_hipLaunchCooperativeKernel_Basic) {
+HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Basic) {
   // Use default device for validating the test
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -55,7 +55,7 @@ TEST_CASE(Unit_hipLaunchCooperativeKernel_Basic) {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.cooperativeLaunch) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     return;
   }
 

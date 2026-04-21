@@ -35,11 +35,11 @@
                                long long int *start_time,
                                long long int *end_time, char *source,
                                char *dest, size_t size, TestType type,
-                               ShmemContextType ctx_type, int wf_size) {
+                               [[maybe_unused]] ShmemContextType ctx_type, int wf_size) {
    int wg_id = get_flat_grid_id();
    int t_id  = get_flat_block_id();
    int wf_id = t_id / wf_size;
- 
+
    /**
     * Shared array to capture the start time for each wavefront
    * Max threads per block = 1024, wavefront size = 64 or 32 depending
@@ -82,13 +82,13 @@
          rocshmem_putmem_nbi(dest, source, size, 1);
          break;
        case DefaultCTXPTestType:
-         for (int s = 0; s < size; s++) {
+         for (size_t s = 0; s < size; s++) {
            char val = source[s];
            rocshmem_char_p(&dest[s], val, 1);
          }
          break;
        case DefaultCTXGTestType:
-         for (int s = 0; s < size; s++) {
+         for (size_t s = 0; s < size; s++) {
            char ret = rocshmem_char_g(&source[s], 1);
            dest[s] = ret;
          }

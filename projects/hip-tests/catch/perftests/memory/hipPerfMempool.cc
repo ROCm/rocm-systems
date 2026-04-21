@@ -51,11 +51,11 @@ void getAndPrintMemoryDetails(const hipMemPool_t& pool) {
  * - HIP_VERSION >= 6.5
  */
 
-TEST_CASE(Perf_MempoolManager_hipMallocAsync_hipFreeAsync) {
+HIP_TEST_CASE(Perf_MempoolManager_hipMallocAsync_hipFreeAsync) {
   size_t free = 0, total = 0;
   HIP_CHECK(hipMemGetInfo(&free, &total));
   if (free < 30_GB) {
-    HipTest::HIP_SKIP_TEST("Test requires 30 GB of device memory, skipping");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNotEnoughFreeGpuMemory);
     return;
   }
 

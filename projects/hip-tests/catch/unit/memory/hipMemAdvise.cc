@@ -50,10 +50,10 @@ std::vector<int> GetDevicesWithAdviseSupport() {
   return supported_devices;
 }
 
-TEST_CASE(Unit_hipMemAdvise_Set_Unset_Basic) {
+HIP_TEST_CASE(Unit_hipMemAdvise_Set_Unset_Basic) {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
   supported_devices.push_back(hipCpuDeviceId);
@@ -80,10 +80,10 @@ TEST_CASE(Unit_hipMemAdvise_Set_Unset_Basic) {
   SECTION("hipMemAdviseSetPreferredLocation") { SetUnset(hipMemAdviseSetPreferredLocation); }
 }
 
-TEST_CASE(Unit_hipMemAdvise_No_Flag_Interference) {
+HIP_TEST_CASE(Unit_hipMemAdvise_No_Flag_Interference) {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
   supported_devices.push_back(hipCpuDeviceId);
@@ -108,10 +108,10 @@ TEST_CASE(Unit_hipMemAdvise_No_Flag_Interference) {
   }
 }
 
-TEST_CASE(Unit_hipMemAdvise_Rounding) {
+HIP_TEST_CASE(Unit_hipMemAdvise_Rounding) {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
   supported_devices.push_back(hipCpuDeviceId);
@@ -140,10 +140,10 @@ TEST_CASE(Unit_hipMemAdvise_Rounding) {
           static_cast<int>(attribute));
 }
 
-TEST_CASE(Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch) {
+HIP_TEST_CASE(Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch) {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
   supported_devices.push_back(hipCpuDeviceId);
@@ -167,10 +167,10 @@ TEST_CASE(Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch) {
 #endif
 }
 
-TEST_CASE(Unit_hipMemAdvise_Read_Write_After_Advise) {
+HIP_TEST_CASE(Unit_hipMemAdvise_Read_Write_After_Advise) {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
   LinearAllocGuard<int> alloc(LinearAllocs::hipMallocManaged, kPageSize);
@@ -212,10 +212,10 @@ TEST_CASE(Unit_hipMemAdvise_Read_Write_After_Advise) {
 #endif
 }
 
-TEST_CASE(Unit_hipMemAdvise_Prefetch_After_Advise) {
+HIP_TEST_CASE(Unit_hipMemAdvise_Prefetch_After_Advise) {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
   supported_devices.push_back(hipCpuDeviceId);
@@ -244,10 +244,10 @@ TEST_CASE(Unit_hipMemAdvise_Prefetch_After_Advise) {
   REQUIRE((advice == hipMemAdviseSetReadMostly ? 1 : device) == attribute);
 }
 
-TEST_CASE(Unit_hipMemAdvise_AccessedBy_All_Devices) {
+HIP_TEST_CASE(Unit_hipMemAdvise_AccessedBy_All_Devices) {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
   // Disabling this hipCpuDeviceId scenario as it fails due to ROCr issue
@@ -264,10 +264,10 @@ TEST_CASE(Unit_hipMemAdvise_AccessedBy_All_Devices) {
   REQUIRE_THAT(accessed_by, Catch::Matchers::Equals(supported_devices));
 }
 
-TEST_CASE(Unit_hipMemAdvise_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipMemAdvise_Negative_Parameters) {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
   const auto device = supported_devices.front();

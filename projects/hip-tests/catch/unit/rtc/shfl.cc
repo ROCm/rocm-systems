@@ -137,7 +137,7 @@ template <typename T> void runTestShfl(int option) {
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 }
 
-TEST_CASE(Unit_hiprtc_half_shuffle) {
+HIP_TEST_CASE(Unit_hiprtc_half_shuffle) {
   runTestShfl<__half>(1);
   runTestShfl<__half>(2);
   runTestShfl<__half>(3);

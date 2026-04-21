@@ -30,7 +30,7 @@
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipMemsetD2D16_BasicFunctional) {
+HIP_TEST_CASE(Unit_hipMemsetD2D16_BasicFunctional) {
   constexpr uint16_t memsetval = static_cast<uint16_t>(0xDEADBEEF);
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
@@ -66,7 +66,7 @@ TEST_CASE(Unit_hipMemsetD2D16_BasicFunctional) {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipMemsetD2D16_UnEvenRowsCols) {
+HIP_TEST_CASE(Unit_hipMemsetD2D16_UnEvenRowsCols) {
   hipDeviceptr_t A_d;
   constexpr uint16_t memsetVal = 5;
   int rows, cols;
@@ -104,7 +104,7 @@ TEST_CASE(Unit_hipMemsetD2D16_UnEvenRowsCols) {
  * ------------------------
  * - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipMemsetD2D16_NegTsts) {
+HIP_TEST_CASE(Unit_hipMemsetD2D16_NegTsts) {
   hipDeviceptr_t A_d;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;

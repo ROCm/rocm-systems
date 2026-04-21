@@ -113,7 +113,7 @@ void TeamBroadcastmemOnStreamTester::postLaunchKernel() {
   }
 
   // Get elapsed time for each work group from HIP events
-  for (int wg_id = 0; wg_id < num_teams && wg_id < num_timers; wg_id++) {
+  for (uint32_t wg_id = 0; wg_id < static_cast<uint32_t>(num_teams) && wg_id < static_cast<uint32_t>(num_timers); wg_id++) {
     float elapsed_time_ms = 0.0f;
     CHECK_HIP(hipEventElapsedTime(&elapsed_time_ms, start_events_timed[wg_id],
                                   stop_events_timed[wg_id]));
@@ -128,7 +128,7 @@ void TeamBroadcastmemOnStreamTester::postLaunchKernel() {
   }
 
   // Fill remaining timers with zero if num_timers > num_teams
-  for (int i = num_teams; i < num_timers; i++) {
+  for (uint32_t i = num_teams; i < static_cast<uint32_t>(num_timers); i++) {
     start_time[i] = 0;
     end_time[i] = 0;
   }
@@ -168,8 +168,8 @@ void TeamBroadcastmemOnStreamTester::resetBuffers(size_t size) {
   }
 }
 
-void TeamBroadcastmemOnStreamTester::launchKernel(dim3 gridSize,
-                                                  dim3 blockSize,
+void TeamBroadcastmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
+                                                  [[maybe_unused]] dim3 blockSize,
                                                   int loop,
                                                   size_t size) {
   // Execute warmup iterations (skip)

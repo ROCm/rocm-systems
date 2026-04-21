@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,9 @@
 #include "auxv.hpp"
 #include "symbol_lookup.hpp"
 
+#include "common/ptrace.hpp"
+#include "common/wait_for_atomic.hpp"
+
 #include "lib/common/logging.hpp"
 
 #include <fcntl.h>
@@ -44,75 +47,17 @@ namespace rocattach
 {
 namespace
 {
-// Very limited list of operations for logging only.
-constexpr const char*
-ptrace_op_name(__ptrace_request op)
-{
-    switch(op)
-    {
-        case PTRACE_SEIZE: return "PTRACE_SEIZE";
-        case PTRACE_DETACH: return "PTRACE_DETACH";
-        case PTRACE_POKEDATA: return "PTRACE_POKEDATA";
-        case PTRACE_PEEKDATA: return "PTRACE_PEEKDATA";
-        case PTRACE_INTERRUPT: return "PTRACE_INTERRUPT";
-        case PTRACE_GETREGS: return "PTRACE_GETREGS";
-        case PTRACE_SETREGS: return "PTRACE_SETREGS";
-        case PTRACE_CONT: return "PTRACE_CONT";
-        default: return "unknown op";
-    }
-}
-
-// Translates ptrace errno into rocattach status errors
-rocattach_status_t
-convert_ptrace_error(int error)
-{
-    switch(error)
-    {
-        case EPERM: return ROCATTACH_STATUS_ERROR_PTRACE_OPERATION_NOT_PERMITTED;
-        case ESRCH: return ROCATTACH_STATUS_ERROR_PTRACE_PROCESS_NOT_FOUND;
-        default: return ROCATTACH_STATUS_ERROR_PTRACE_ERROR;
-    }
-}
-
-// Boilerplate around ptrace calls.
-// If an error occurs, logs the error and returns an appropriate rocattach_status_t.
-#define PTRACE_CALL(op, pid, addr, data)                                                           \
-    ROCP_TRACE << "[rocprofiler-sdk-rocattach] ptrace call params(" << ptrace_op_name(op) << "("   \
-               << op << "), " << pid << ", " << (uint64_t) addr << ", " << (uint64_t) data << ")"; \
-    if(errno = 0, ptrace(op, pid, addr, data); errno != 0)                                         \
+// Boilerplate around in-class ptrace calls. Macro returns on error!
+#define PTRACE_CALL(op, addr, data)                                                                \
     {                                                                                              \
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] ptrace call failed. errno: " << errno << " - "  \
-                   << strerror(errno) << ". params(" << ptrace_op_name(op) << "(" << op << "), "   \
-                   << pid << ", " << (uint64_t) addr << ", " << (uint64_t) data << ")";            \
-        return convert_ptrace_error(errno);                                                        \
+        auto status = ptrace_call(op, addr, data);                                                 \
+        if(status != ROCATTACH_STATUS_SUCCESS)                                                     \
+        {                                                                                          \
+            return status;                                                                         \
+        }                                                                                          \
     }
 
-// Changes the order of parameters for PEEKDATA so it can be used like other operations.
-// value must be uint64_t
-#define PTRACE_PEEK(pid, addr, read_value)                                                         \
-    static_assert(std::is_same<decltype(read_value), uint64_t>::value);                            \
-    ROCP_TRACE << "[rocprofiler-sdk-rocattach] ptrace call params(PTRACE_PEEKDATA(2), " << pid     \
-               << ", " << (uint64_t) addr << ", 0)";                                               \
-    if(errno = 0, read_value = ptrace(PTRACE_PEEKDATA, pid, addr, NULL); errno != 0)               \
-    {                                                                                              \
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] ptrace call failed. errno: " << errno           \
-                   << ". params(PTRACE_PEEKDATA(2), " << pid << ", " << (uint64_t) addr << ", 0)"; \
-        return convert_ptrace_error(errno);                                                        \
-    }
-
-// Helper macro for the signal_handler where cont is called but will not return inside the macro
-// error is left in errno for processing
-#define PTRACE_CONT_NO_RETURN(pid, addr, data)                                                     \
-    ROCP_TRACE << "[rocprofiler-sdk-rocattach] ptrace call params(PTRACE_CONT(7), " << pid << ", " \
-               << (uint64_t) addr << ", " << (uint64_t) data << ")";                               \
-    if(errno = 0, ptrace(PTRACE_CONT, pid, addr, data); errno != 0)                                \
-    {                                                                                              \
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] ptrace call failed. errno: " << errno           \
-                   << ". params(PTRACE_CONT(7), " << pid << ", " << (uint64_t) addr << ", "        \
-                   << (uint64_t) data << ")";                                                      \
-    }
-
-// Helper macro for handling any rocattach_status returning call
+// Helper macro for handling any rocattach_status returning call. Macro returns on error!
 #define ROCATTACH_CALL(func)                                                                       \
     {                                                                                              \
         auto status = func;                                                                        \
@@ -130,26 +75,6 @@ convert_ptrace_error(int error)
 constexpr size_t PTRACE_BREAKPOINT_TIMEOUT_MS = 1800000;
 // How long to wait for the signal handler thread to start or stop
 constexpr size_t PTRACE_HANDLER_START_STOP_TIMEOUT_MS = 10000;
-
-template <typename T>
-bool
-wait_for_ne(std::atomic<T>& flag, T condition, size_t timeout_ms)
-{
-    auto start_time       = std::chrono::steady_clock::now();
-    auto timeout_duration = std::chrono::milliseconds(timeout_ms);
-    auto end_time         = start_time + timeout_duration;
-
-    while(std::chrono::steady_clock::now() < end_time)
-    {
-        if(flag.load() != condition)
-        {
-            return true;
-        }
-        std::this_thread::yield();
-    }
-    // Last chance check in case we were scheduled after timeout
-    return flag.load() != condition;
-}
 
 }  // namespace
 
@@ -174,6 +99,46 @@ PTraceSession::is_supported()
     return (arch_supported && word_size_supported);
 }
 
+// Performs a ptrace operation using the given parameters with this PTraceSession's pid and
+// PTraceRunner. All ptrace operations work the same EXCEPT PTRACE_PEEKDATA which has been changed
+// to provide the 64-bit read data at the address given in data, instead of by return value. Returns
+// a non-success status on operation timeout or nonzero errno from ptrace.
+rocattach_status_t
+PTraceSession::ptrace_call(__ptrace_request   op,
+                           ptrace_parameter_t addr,
+                           ptrace_parameter_t data) const
+{
+    uint64_t           retval      = 0;
+    int                local_errno = 0;
+    rocattach_status_t status      = ptrace_run(m_pid, op, addr, data, &retval, &local_errno);
+    if(status != ROCATTACH_STATUS_SUCCESS)
+    {
+        return status;
+    }
+    if(local_errno != 0)
+    {
+        return convert_ptrace_error(local_errno);
+    }
+
+    // As a special case, rearrange the return value of PEEKDATA to be written to the address given
+    // in data. This standardizes the PEEKDATA operation to how other read operations (e.g. GETREGS)
+    // work.
+    if(op == PTRACE_PEEKDATA)
+    {
+        if(!std::holds_alternative<void*>(data))
+        {
+            return ROCATTACH_STATUS_ERROR;
+        }
+        auto* data_as_ptr = reinterpret_cast<uint64_t*>(std::get<void*>(data));
+        if(!data_as_ptr)
+        {
+            return ROCATTACH_STATUS_ERROR;
+        }
+        *data_as_ptr = retval;
+    }
+    return ROCATTACH_STATUS_SUCCESS;
+}
+
 rocattach_status_t
 PTraceSession::attach()
 {
@@ -182,7 +147,7 @@ PTraceSession::attach()
         return ROCATTACH_STATUS_ERROR;
     }
     // SEIZE attaches without stopping the process
-    PTRACE_CALL(PTRACE_SEIZE, m_pid, NULL, NULL);
+    PTRACE_CALL(PTRACE_SEIZE, 0UL, 0UL);
     ROCP_INFO << "[rocprofiler-sdk-rocattach] Successfully attached to pid " << m_pid;
     ROCATTACH_CALL(start_signal_handler());
     m_state = PTRACE_SESSION_STATE_RUNNING;
@@ -204,7 +169,7 @@ PTraceSession::detach()
     }
 
     ROCATTACH_CALL(stop_signal_handler());
-    PTRACE_CALL(PTRACE_DETACH, m_pid, NULL, NULL);
+    PTRACE_CALL(PTRACE_DETACH, 0UL, 0UL);
     m_state = PTRACE_SESSION_STATE_DETACHED;
     ROCP_INFO << "[rocprofiler-sdk-rocattach] Detached from pid " << m_pid;
     return ROCATTACH_STATUS_SUCCESS;
@@ -344,10 +309,25 @@ PTraceSession::ptrace_signal_handler_func(
             }
             else
             {
-                PTRACE_CONT_NO_RETURN(_pid, NULL, sig);
-                if(errno)
+                // Not our signal, forward the signal to the app using CONT
+                ROCP_TRACE << "[rocprofiler-sdk-rocattach] ptrace call params(PTRACE_CONT(7), "
+                           << _pid << ", 0, " << sig << ")";
+                uint64_t           _retval = 0;
+                int                _errno  = 0;
+                rocattach_status_t _status = ptrace_run(
+                    _pid, PTRACE_CONT, nullptr, static_cast<uint64_t>(sig), &_retval, &_errno);
+                if(_status != ROCATTACH_STATUS_SUCCESS)
                 {
-                    _error.store(convert_ptrace_error(errno));
+                    _error.store(_status);
+                    _state.store(PTRACE_SIGNAL_HANDLER_STATE_FINAL);
+                    return;
+                }
+                if(_errno != 0)
+                {
+                    ROCP_ERROR << "[rocprofiler-sdk-rocattach] ptrace call failed. errno: "
+                               << _errno << " - " << strerror(_errno) << ". params(PTRACE_CONT(7), "
+                               << _pid << ", 0, " << sig << ")";
+                    _error.store(convert_ptrace_error(_errno));
                     _state.store(PTRACE_SIGNAL_HANDLER_STATE_FINAL);
                     return;
                 }
@@ -389,7 +369,7 @@ PTraceSession::write_internal(size_t addr, const std::vector<uint8_t>& data, siz
         const size_t offset = (word_iter * word_size);
         uint64_t     word;
         std::memcpy(&word, data.data() + offset, word_size);
-        PTRACE_CALL(PTRACE_POKEDATA, m_pid, addr + offset, word);
+        PTRACE_CALL(PTRACE_POKEDATA, addr + offset, word);
     }
 
     // If not evenly divisible, read the last word to do a masked partial write.
@@ -398,9 +378,9 @@ PTraceSession::write_internal(size_t addr, const std::vector<uint8_t>& data, siz
     {
         const size_t offset    = (word_iter * word_size);
         uint64_t     last_word = 0;
-        PTRACE_PEEK(m_pid, addr + offset, last_word);
+        PTRACE_CALL(PTRACE_PEEKDATA, addr + offset, &last_word);
         std::memcpy(&last_word, data.data() + offset, remainder);
-        PTRACE_CALL(PTRACE_POKEDATA, m_pid, addr + offset, last_word);
+        PTRACE_CALL(PTRACE_POKEDATA, addr + offset, last_word);
     }
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] ptrace wrote " << size << " bytes at " << addr;
     return ROCATTACH_STATUS_SUCCESS;
@@ -434,7 +414,7 @@ PTraceSession::read_internal(size_t addr, std::vector<uint8_t>& data, size_t siz
     {
         const size_t offset = (word_iter * word_size);
         uint64_t     word   = 0;
-        PTRACE_PEEK(m_pid, addr + offset, word);
+        PTRACE_CALL(PTRACE_PEEKDATA, addr + offset, &word);
         std::memcpy(data.data() + offset, &word, word_size);
     }
 
@@ -444,7 +424,7 @@ PTraceSession::read_internal(size_t addr, std::vector<uint8_t>& data, size_t siz
     {
         const size_t offset    = (word_iter * word_size);
         uint64_t     last_word = 0;
-        PTRACE_PEEK(m_pid, addr + offset, last_word);
+        PTRACE_CALL(PTRACE_PEEKDATA, addr + offset, &last_word);
         std::memcpy(data.data() + offset, &last_word, remainder);
     }
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] ptrace read " << size << " bytes at " << addr;
@@ -549,7 +529,7 @@ PTraceSession::wait_for_stop()
     }
 
     // Call interrupt and wait until process is stopped
-    PTRACE_CALL(PTRACE_INTERRUPT, m_pid, NULL, NULL);
+    PTRACE_CALL(PTRACE_INTERRUPT, 0UL, 0UL);
     if(!wait_for_ne(m_ptrace_signal_handler_state,
                     PTRACE_SIGNAL_HANDLER_STATE_WAITING_FOR_BREAKPOINT,
                     PTRACE_BREAKPOINT_TIMEOUT_MS))
@@ -598,13 +578,13 @@ PTraceSession::simple_mmap(void*& addr, size_t length)
 
     // Save current register file
     struct user_regs_struct oldregs;
-    PTRACE_CALL(PTRACE_GETREGS, m_pid, NULL, &oldregs);
+    PTRACE_CALL(PTRACE_GETREGS, 0UL, &oldregs);
     // Set register file for system call to mmap:
-    // mmap(addr=NULL, length, prot, flags, -1, 0);
+    // mmap(addr=nullptr, length, prot, flags, -1, 0);
     struct user_regs_struct newregs = oldregs;
 
     newregs.rax = 9;                            // calling convention: 9 is syscall ID for mmap
-    newregs.rdi = 0;                            // addr=NULL
+    newregs.rdi = 0;                            // addr=nullptr
     newregs.rsi = length;                       // length
     newregs.rdx = PROT_READ | PROT_WRITE;       // prot
     newregs.r10 = MAP_PRIVATE | MAP_ANONYMOUS;  // flags
@@ -615,7 +595,7 @@ PTraceSession::simple_mmap(void*& addr, size_t length)
     newregs.rsp = oldregs.rsp - 128;    // move sp by at least 128 to not clobber redlined functions
     newregs.rsp -= (newregs.rsp % 16);  // base sp should be on 16-byte boundary
     // Set syscall registers
-    PTRACE_CALL(PTRACE_SETREGS, m_pid, NULL, &newregs);
+    PTRACE_CALL(PTRACE_SETREGS, 0UL, &newregs);
 
     // x64 assembly to perform a syscall and breakpoint when done
     // 0f 05  syscall
@@ -632,13 +612,13 @@ PTraceSession::simple_mmap(void*& addr, size_t length)
 
     // Get registers to see mmap's return values
     struct user_regs_struct returnregs;
-    PTRACE_CALL(PTRACE_GETREGS, m_pid, NULL, &returnregs);
+    PTRACE_CALL(PTRACE_GETREGS, 0UL, &returnregs);
 
     // Write in old opcodes
     ROCATTACH_CALL(write_internal(reinterpret_cast<size_t>(entry_addr), old_code, 3));
 
     // Restore register file
-    PTRACE_CALL(PTRACE_SETREGS, m_pid, NULL, &oldregs);
+    PTRACE_CALL(PTRACE_SETREGS, 0UL, &oldregs);
 
     // Restart execution
     ROCATTACH_CALL(cont());
@@ -668,7 +648,7 @@ PTraceSession::simple_munmap(void*& addr, size_t length)
 
     // Save current register file
     struct user_regs_struct oldregs;
-    PTRACE_CALL(PTRACE_GETREGS, m_pid, NULL, &oldregs);
+    PTRACE_CALL(PTRACE_GETREGS, 0UL, &oldregs);
     // Set register file for system call to munmap:
     // munmap(addr, length);
     struct user_regs_struct newregs = oldregs;
@@ -681,7 +661,7 @@ PTraceSession::simple_munmap(void*& addr, size_t length)
     newregs.rsp = oldregs.rsp - 128;    // move sp by at least 128 to not clobber redlined functions
     newregs.rsp -= (newregs.rsp % 16);  // base sp should be on 16-byte boundary
     // Set syscall registers
-    PTRACE_CALL(PTRACE_SETREGS, m_pid, NULL, &newregs);
+    PTRACE_CALL(PTRACE_SETREGS, 0UL, &newregs);
 
     // x64 assembly to perform a syscall and breakpoint when done
     // 0f 05  syscall
@@ -698,13 +678,13 @@ PTraceSession::simple_munmap(void*& addr, size_t length)
 
     // Get registers to see mmap's return values
     struct user_regs_struct returnregs;
-    PTRACE_CALL(PTRACE_GETREGS, m_pid, NULL, &returnregs);
+    PTRACE_CALL(PTRACE_GETREGS, 0UL, &returnregs);
 
     // Write in old opcodes
     ROCATTACH_CALL(write_internal(reinterpret_cast<size_t>(entry_addr), old_code, 3));
 
     // Restore register file
-    PTRACE_CALL(PTRACE_SETREGS, m_pid, NULL, &oldregs);
+    PTRACE_CALL(PTRACE_SETREGS, 0UL, &oldregs);
 
     // Restart execution
     ROCATTACH_CALL(cont());
@@ -767,7 +747,7 @@ PTraceSession::call_function(const std::string& library,
 
     // Save current register file
     struct user_regs_struct oldregs;
-    PTRACE_CALL(PTRACE_GETREGS, m_pid, NULL, &oldregs);
+    PTRACE_CALL(PTRACE_GETREGS, 0UL, &oldregs);
 
     // Construct registers to call a function with 2 parameters
     // symbol(first_param, second_param)
@@ -781,7 +761,7 @@ PTraceSession::call_function(const std::string& library,
     newregs.rsp = oldregs.rsp - 128;    // move sp by at least 128 to not clobber redlined functions
     newregs.rsp -= (newregs.rsp % 16);  // base sp should be on 16-byte boundary
     // Set function  registers
-    PTRACE_CALL(PTRACE_SETREGS, m_pid, NULL, &newregs);
+    PTRACE_CALL(PTRACE_SETREGS, 0UL, &newregs);
 
     // x64 assembly to call a function by register and breakpoint when done
     // ff d0  call rax
@@ -799,13 +779,13 @@ PTraceSession::call_function(const std::string& library,
 
     // Get registers to see  return values
     struct user_regs_struct returnregs;
-    PTRACE_CALL(PTRACE_GETREGS, m_pid, NULL, &returnregs);
+    PTRACE_CALL(PTRACE_GETREGS, 0UL, &returnregs);
 
     // Write in old opcodes
     ROCATTACH_CALL(write_internal(reinterpret_cast<size_t>(entry_addr), old_code, 3));
 
     // Restore register file
-    PTRACE_CALL(PTRACE_SETREGS, m_pid, NULL, &oldregs);
+    PTRACE_CALL(PTRACE_SETREGS, 0UL, &oldregs);
 
     // Restart execution
     ROCATTACH_CALL(cont());
@@ -843,7 +823,7 @@ PTraceSession::cont()
         return ROCATTACH_STATUS_ERROR;
     }
 
-    PTRACE_CALL(PTRACE_CONT, m_pid, NULL, NULL);
+    PTRACE_CALL(PTRACE_CONT, 0UL, 0UL);
     m_state = PTRACE_SESSION_STATE_RUNNING;
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] ptrace resumed pid " << m_pid;
     return ROCATTACH_STATUS_SUCCESS;

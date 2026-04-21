@@ -204,7 +204,7 @@ __global__ void bf16_fma(float* in1, float* in2, float plus_y, float* out, size_
   }
 }
 
-TEST_CASE(Unit_bf16_basic) {
+HIP_TEST_CASE(Unit_bf16_basic) {
   auto f_in = getAllBF16();
   auto max_bf16_num = f_in.size();
 
@@ -463,7 +463,7 @@ template <typename Type> __global__ void bf16_cvt_to_integral(Type* in, float* o
   }
 }
 
-TEMPLATE_TEST_CASE(Unit_bf16_conversion_to_integral_type, unsigned short, short, int,
+HIP_TEMPLATE_TEST_CASE(Unit_bf16_conversion_to_integral_type, unsigned short, short, int,
                    unsigned int) {
   constexpr TestType start = std::is_unsigned<TestType>::value
                                  ? std::numeric_limits<unsigned short>::min()
@@ -526,7 +526,7 @@ __global__ void bf162_neq(float* in, char* out, size_t size) {
   }
 }
 
-TEST_CASE(Unit_bf162_basic) {
+HIP_TEST_CASE(Unit_bf162_basic) {
   auto f_in = getAllBF16();
   auto max_bf16_num = f_in.size();
 
@@ -572,7 +572,7 @@ TEST_CASE(Unit_bf162_basic) {
 }
 
 
-TEST_CASE(Unit_bf16_operators_host) {
+HIP_TEST_CASE(Unit_bf16_operators_host) {
   SECTION("Sanity with 1 and 0") {
     INFO("1+0 <-> 0+1");
     auto bf16_one = HIPRT_ONE_BF16;
@@ -638,7 +638,7 @@ TEST_CASE(Unit_bf16_operators_host) {
   }
 }
 
-TEST_CASE(Unit_bf162_operators_host) {
+HIP_TEST_CASE(Unit_bf162_operators_host) {
   SECTION("Sanity with 1 and 0") {
     INFO("1+0 <-> 0+1");
     __hip_bfloat162 bf162_one = {HIPRT_ONE_BF16, HIPRT_ONE_BF16};
@@ -688,7 +688,7 @@ TEST_CASE(Unit_bf162_operators_host) {
 
 // Bunch of tests which make sure we are packaging stuff correctly.
 // i.e. highs2bfloat lows2bfloat etc and its various combinations
-TEST_CASE(Unit_bf16_bf162_convert_tests) {
+HIP_TEST_CASE(Unit_bf16_bf162_convert_tests) {
   SECTION("float2->bfloat->float2") {
     float2 in = {3.0f, 4.0f};
     auto bf162 = __float22bfloat162_rn(in);
@@ -802,7 +802,7 @@ __global__ void bf16_shfl_sync(float* in, float* out, int size) {
   }
 }
 
-TEST_CASE(Unit_bf16_shfl) {
+HIP_TEST_CASE(Unit_bf16_shfl) {
   auto warp_size = getWarpSize();
   std::vector<float> in;
   for (size_t i = 1; i <= warp_size; i++) {
@@ -887,7 +887,7 @@ __global__ void bf162_shfl_sync(float2* in, float2* out, int size) {
   }
 }
 
-TEST_CASE(Unit_bf162_shfl) {
+HIP_TEST_CASE(Unit_bf162_shfl) {
   auto warp_size = getWarpSize();
   std::vector<float2> in;
   for (size_t i = 1; i <= warp_size; i++) {
@@ -1002,7 +1002,7 @@ __global__ void bf16_hrsqrt(float* in, float* out) {
   out[i] = hrsqrt(bf);
 }
 
-TEST_CASE(Unit_bf16_value_ops) {
+HIP_TEST_CASE(Unit_bf16_value_ops) {
   constexpr size_t size = 32;
   float *d_in, *d_out;
   HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
@@ -1155,7 +1155,7 @@ __global__ void bf16_htrunc(float* in, float* out) {
   out[i] = htrunc(bf);
 }
 
-TEST_CASE(Unit_bf16_floor_ceil) {
+HIP_TEST_CASE(Unit_bf16_floor_ceil) {
   constexpr size_t size = 32;
   float *d_in, *d_out;
   HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
@@ -1245,7 +1245,7 @@ __global__ void bf162_htrunc(float2* in, float2* out) {
   out[i] = h2trunc(bf);
 }
 
-TEST_CASE(Unit_bf162_floor_ceil) {
+HIP_TEST_CASE(Unit_bf162_floor_ceil) {
   constexpr size_t size = 32;
   float2 *d_in, *d_out;
   HIP_CHECK(hipMalloc(&d_in, sizeof(float2) * size));

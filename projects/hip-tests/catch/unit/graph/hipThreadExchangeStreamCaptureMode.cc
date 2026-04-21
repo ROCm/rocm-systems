@@ -85,7 +85,7 @@ void threadFuncCaptureMode(hipStream_t stream, hipStreamCaptureMode mode) {
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE(Unit_hipThreadExchangeStreamCaptureMode_Positive_Functional) {
+HIP_TEST_CASE(Unit_hipThreadExchangeStreamCaptureMode_Positive_Functional) {
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
 
@@ -115,7 +115,7 @@ TEST_CASE(Unit_hipThreadExchangeStreamCaptureMode_Positive_Functional) {
  *    - HIP_VERSION >= 5.3
  */
 #if HT_AMD  // getting error in Cuda Setup
-TEST_CASE(Unit_hipThreadExchangeStreamCaptureMode_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipThreadExchangeStreamCaptureMode_Negative_Parameters) {
   hipStreamCaptureMode mode;
 
   SECTION("Pass Mode as nullptr") {

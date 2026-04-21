@@ -47,7 +47,7 @@ static void RunBenchmark() {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipExtStreamCreateWithCUMask) { RunBenchmark(); }
+HIP_TEST_CASE(Performance_hipExtStreamCreateWithCUMask) { RunBenchmark(); }
 
 /**
  * End doxygen group PerformanceTest.

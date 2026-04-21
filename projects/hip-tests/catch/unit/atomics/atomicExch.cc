@@ -90,7 +90,7 @@ template <typename TestType> static void runAtomicExchMultiKernelTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_atomicExch_Positive_Same_Address_Compile_Time) {
+HIP_TEST_CASE(Unit_atomicExch_Positive_Same_Address_Compile_Time) {
   SECTION("int") { runAtomicExchSameAddressCompileTimeTest<int>(); }
   SECTION("unsigned int") { runAtomicExchSameAddressCompileTimeTest<unsigned int>(); }
 #ifndef HT_NVIDIA
@@ -129,7 +129,7 @@ TEST_CASE(Unit_atomicExch_Positive_Same_Address_Compile_Time) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_atomicExch_Positive) {
+HIP_TEST_CASE(Unit_atomicExch_Positive) {
   SECTION("int") { runAtomicExchTest<int>(); }
   SECTION("unsigned int") { runAtomicExchTest<unsigned int>(); }
 #ifndef HT_NVIDIA
@@ -167,7 +167,7 @@ TEST_CASE(Unit_atomicExch_Positive) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_atomicExch_Positive_Multi_Kernel) {
+HIP_TEST_CASE(Unit_atomicExch_Positive_Multi_Kernel) {
   SECTION("int") { runAtomicExchMultiKernelTest<int>(); }
   SECTION("unsigned int") { runAtomicExchMultiKernelTest<unsigned int>(); }
 #ifndef HT_NVIDIA
@@ -192,7 +192,7 @@ TEST_CASE(Unit_atomicExch_Positive_Multi_Kernel) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_atomicExch_Negative_Parameters_RTC) {
+HIP_TEST_CASE(Unit_atomicExch_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   const auto program_source = GENERATE(kAtomicExchInt, kAtomicExchUnsignedInt, kAtomicExchULL,

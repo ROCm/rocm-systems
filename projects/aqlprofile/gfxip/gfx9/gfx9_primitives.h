@@ -579,6 +579,7 @@ class gfx9_cntx_prim {
   static const uint32_t SQTT_TOKEN_WAVE_START = 1 << 3;
   static const uint32_t SQTT_TOKEN_REG_CS = 1 << 5;
   static const uint32_t SQTT_TOKEN_WAVE_END = 1 << 6;
+  static const uint32_t SQTT_TOKEN_EVENT_CS = 1 << 8;
   static const uint32_t SQTT_TOKEN_INST = 1 << 10;
   static const uint32_t SQTT_TOKEN_INST_PC = 1 << 11;
   static const uint32_t SQTT_TOKEN_USERDATA = 1 << 12;
@@ -590,7 +591,7 @@ class gfx9_cntx_prim {
     uint32_t sq_thread_trace_token_mask_token_mask =
         SQTT_TOKEN_MISC | SQTT_TOKEN_TIME | SQTT_TOKEN_REG | SQTT_TOKEN_WAVE_START |
         SQTT_TOKEN_WAVE_END | SQTT_TOKEN_INST | SQTT_TOKEN_INST_PC | SQTT_TOKEN_USERDATA |
-        SQTT_TOKEN_ISSUE | SQTT_TOKEN_REG_CS | SQTT_TOKEN_REG_CS_PRIV;
+        SQTT_TOKEN_ISSUE | SQTT_TOKEN_REG_CS | SQTT_TOKEN_REG_CS_PRIV | SQTT_TOKEN_EVENT_CS;
 
     sq_thread_trace_token_mask = SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_MASK, 0xF) |
                                  SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, TOKEN_MASK,
@@ -609,7 +610,8 @@ class gfx9_cntx_prim {
     uint32_t sq_thread_trace_token_mask;
     uint32_t sq_thread_trace_token_mask_token_mask =
         SQTT_TOKEN_MISC | SQTT_TOKEN_TIME | SQTT_TOKEN_REG | SQTT_TOKEN_WAVE_START |
-        SQTT_TOKEN_WAVE_END | SQTT_TOKEN_REG_CS_PRIV | SQTT_TOKEN_REG_CS | SQTT_TOKEN_USERDATA;
+        SQTT_TOKEN_WAVE_END | SQTT_TOKEN_REG_CS_PRIV | SQTT_TOKEN_REG_CS | SQTT_TOKEN_USERDATA |
+        SQTT_TOKEN_EVENT_CS;
 
     sq_thread_trace_token_mask = SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_MASK, 0xF) |
                                  SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, TOKEN_MASK,

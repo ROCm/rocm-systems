@@ -27,7 +27,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.5
  */
-TEST_CASE(Unit_hipPointerSetAttribute_Positive_SyncMemops) {
+HIP_TEST_CASE(Unit_hipPointerSetAttribute_Positive_SyncMemops) {
   LinearAllocGuard<int> src(LinearAllocs::hipMalloc, 1024);
   LinearAllocGuard<int> dst(LinearAllocs::hipMalloc, 1024);
 
@@ -58,7 +58,7 @@ TEST_CASE(Unit_hipPointerSetAttribute_Positive_SyncMemops) {
  * ------------------------
  *  - HIP_VERSION >= 5.5
  */
-TEST_CASE(Unit_hipPointerSetAttribute_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipPointerSetAttribute_Negative_Parameters) {
   LinearAllocGuard<int> mem(LinearAllocs::hipMalloc, 4);
   int value = 0;
 

@@ -135,7 +135,7 @@ class HipStreamCreateWithFlagsBenchmark : public Benchmark<HipStreamCreateWithFl
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipStreamCreate) {
+HIP_TEST_CASE(Performance_hipStreamCreate) {
   HipStreamCreateBenchmark benchmark;
   benchmark.Run();
 }
@@ -166,7 +166,7 @@ static void RunBenchmarkWithPriority(unsigned flag) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipStreamCreateWithFlags) {
+HIP_TEST_CASE(Performance_hipStreamCreateWithFlags) {
   const auto flag = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   RunBenchmark(flag);
 }
@@ -185,7 +185,7 @@ TEST_CASE(Performance_hipStreamCreateWithFlags) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipStreamCreateWithPriority) {
+HIP_TEST_CASE(Performance_hipStreamCreateWithPriority) {
   const auto flag = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   RunBenchmarkWithPriority(flag);
 }
@@ -201,7 +201,7 @@ TEST_CASE(Performance_hipStreamCreateWithPriority) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipStreamDestroy) {
+HIP_TEST_CASE(Performance_hipStreamDestroy) {
   HipStreamDestroyBenchmark benchmark;
   benchmark.Run();
 }
@@ -217,7 +217,7 @@ TEST_CASE(Performance_hipStreamDestroy) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipDeviceGetStreamPriorityRange) {
+HIP_TEST_CASE(Performance_hipDeviceGetStreamPriorityRange) {
   HipDeviceGetStreamPriorityRangeBenchmark benchmark;
   benchmark.Run();
 }
@@ -233,7 +233,7 @@ TEST_CASE(Performance_hipDeviceGetStreamPriorityRange) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipStreamQuery) {
+HIP_TEST_CASE(Performance_hipStreamQuery) {
   const auto perform_work = GENERATE(true, false);
   HipStreamQueryBenchmark benchmark;
   if (perform_work) {
@@ -255,7 +255,7 @@ TEST_CASE(Performance_hipStreamQuery) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipStreamSynchronize) {
+HIP_TEST_CASE(Performance_hipStreamSynchronize) {
   HipStreamSynchronizeBenchmark benchmark;
   benchmark.Run();
 }

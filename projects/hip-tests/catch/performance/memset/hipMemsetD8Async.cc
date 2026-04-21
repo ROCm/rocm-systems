@@ -59,7 +59,7 @@ static void RunBenchmark(LinearAllocs allocation_type, size_t size) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipMemsetD8Async) {
+HIP_TEST_CASE(Performance_hipMemsetD8Async) {
   const auto size = GENERATE(4_KB, 4_MB, 16_MB);
   const auto allocation_type = GENERATE(LinearAllocs::hipMalloc, LinearAllocs::hipHostMalloc,
                                         LinearAllocs::hipMallocManaged);

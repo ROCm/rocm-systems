@@ -77,7 +77,7 @@ static unsigned int cpu_funnelshift_rc(unsigned int lo, unsigned int hi, unsigne
   return val & 0xffffffff;
 }
 
-TEST_CASE(Unit_funnelshift) {
+HIP_TEST_CASE(Unit_funnelshift) {
   unsigned int* host_l_output;
   unsigned int* host_lc_output;
   unsigned int* host_r_output;

@@ -811,7 +811,7 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   }
 
   rdc_policy_t policy;
-  // constructure the policy
+  // construct the policy
   ::rdc::Policy p = request->policy();
 
   ::rdc::PolicyCondition cond = p.condition();

@@ -24,8 +24,6 @@
 
 #include "team.hpp"
 
-#include <cmath>
-
 #include "rocshmem/rocshmem.hpp"
 #include "backend_bc.hpp"
 #include "util.hpp"
@@ -74,18 +72,23 @@ __host__ __device__ TeamInfo::TeamInfo(Team* _parent_team, int _pe_start,
       pe_start(_pe_start),
       stride(_stride),
       size(_size) {
-  log_stride = log2(stride);
 }
 
-__host__ Team::Team(Backend* handle, TeamInfo* team_info_wrt_parent,
-                    TeamInfo* team_info_wrt_world, int _num_pes, int _my_pe,
-                    MPI_Comm _mpi_comm)
+__host__ Team::Team(Backend* handle, const TeamInfo& team_info_wrt_parent,
+                    const TeamInfo& team_info_wrt_world, int _num_pes,
+                    int _my_pe, MPI_Comm _mpi_comm)
     : world_size(handle->getNumPEs()),
       my_pe_in_world(handle->getMyPE()),
-      tinfo_wrt_parent(team_info_wrt_parent),
-      tinfo_wrt_world(team_info_wrt_world),
       num_pes(_num_pes),
       my_pe(_my_pe) {
+  TeamInfo* block = nullptr;
+  CHECK_HIP(hipMalloc(&block, 2 * sizeof(TeamInfo)));
+  team_info_block_ = block;
+  tinfo_wrt_parent = &team_info_block_[0];
+  tinfo_wrt_world  = &team_info_block_[1];
+  new (tinfo_wrt_parent) TeamInfo(team_info_wrt_parent);
+  new (tinfo_wrt_world) TeamInfo(team_info_wrt_world);
+
   if (_mpi_comm != MPI_COMM_NULL) {
     mpilib_ftable_.Comm_dup (_mpi_comm, &mpi_comm);
   }
@@ -119,8 +122,16 @@ __host__ __device__ int Team::get_pe_in_my_team(int pe_in_world) {
 }
 
 __host__ Team::~Team() {
-  if (mpi_comm != MPI_COMM_NULL)
+  if (team_info_block_) {
+    CHECK_HIP(hipFree(team_info_block_));
+    team_info_block_ = nullptr;
+    tinfo_wrt_parent = nullptr;
+    tinfo_wrt_world = nullptr;
+  }
+  if (mpi_comm != MPI_COMM_NULL) {
     mpilib_ftable_.Comm_free (&mpi_comm);
+    mpi_comm = MPI_COMM_NULL;
+  }
 }
 
 }  // namespace rocshmem

@@ -43,7 +43,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEST_CASE(Unit_hipHccModuleLaunchKernel_basic) {
+HIP_TEST_CASE(Unit_hipHccModuleLaunchKernel_basic) {
   size_t width = GENERATE(3, 4, 100);
   size_t widthInBytes = width * sizeof(int);
   int *A_d, *B_d;
@@ -85,7 +85,7 @@ TEST_CASE(Unit_hipHccModuleLaunchKernel_basic) {
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEST_CASE(Unit_hipHccModuleLaunchKernel_NegTst) {
+HIP_TEST_CASE(Unit_hipHccModuleLaunchKernel_NegTst) {
   size_t width = GENERATE(3, 4, 100);
   size_t widthInBytes = width * sizeof(int);
   int *A_d, *B_d;

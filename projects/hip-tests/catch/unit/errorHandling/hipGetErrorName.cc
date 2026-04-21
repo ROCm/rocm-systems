@@ -28,7 +28,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGetErrorName_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipGetErrorName_Positive_Basic) {
   const char* error_string = nullptr;
   const auto enumerator =
       GENERATE(from_range(std::begin(kErrorEnumerators), std::end(kErrorEnumerators)));
@@ -54,7 +54,7 @@ TEST_CASE(Unit_hipGetErrorName_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGetErrorName_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipGetErrorName_Negative_Parameters) {
   const char* error_string = hipGetErrorName(static_cast<hipError_t>(-1));
   REQUIRE(error_string != nullptr);
 #if HT_NVIDIA

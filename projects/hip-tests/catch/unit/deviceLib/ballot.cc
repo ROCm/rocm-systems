@@ -24,7 +24,7 @@ __global__ void gpu_ballot(unsigned int* device_ballot, unsigned Num_Warps_per_B
 #endif
 }
 
-TEST_CASE(Unit_ballot) {
+HIP_TEST_CASE(Unit_ballot) {
   unsigned warpSize, pshift;
   hipDeviceProp_t devProp;
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));

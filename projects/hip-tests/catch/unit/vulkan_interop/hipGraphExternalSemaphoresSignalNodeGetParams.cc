@@ -37,7 +37,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeGetParams_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeGetParams_Negative_Parameters) {
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 

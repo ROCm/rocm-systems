@@ -44,7 +44,7 @@ void device_cvt_bfloat16raw_to_e8m0(const std::vector<__hip_bfloat16>& in,
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
 }
 
-TEST_CASE(Unit__hip_cvt_bfloat16raw_to_e8m0) {
+HIP_TEST_CASE(Unit__hip_cvt_bfloat16raw_to_e8m0) {
   bool run_on_host = GENERATE(true, false);
   __hip_saturation_t saturation = GENERATE(__HIP_NOSAT, __HIP_SATFINITE);
   hipRoundMode rounding = GENERATE(hipRoundZero, hipRoundPosInf);
@@ -130,7 +130,7 @@ void device_cvt_float_to_e8m0(const std::vector<float>& in, std::vector<unsigned
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
 }
 
-TEST_CASE(Unit__hip_cvt_float_to_e8m0) {
+HIP_TEST_CASE(Unit__hip_cvt_float_to_e8m0) {
   bool run_on_host = GENERATE(true, false);
   __hip_saturation_t saturation = GENERATE(__HIP_NOSAT, __HIP_SATFINITE);
   hipRoundMode rounding = GENERATE(hipRoundZero, hipRoundPosInf);
@@ -217,7 +217,7 @@ void device_cvt_double_to_e8m0(const std::vector<double>& in, std::vector<unsign
 }
 
 
-TEST_CASE(Unit__hip_cvt_double_to_e8m0) {
+HIP_TEST_CASE(Unit__hip_cvt_double_to_e8m0) {
   bool run_on_host = GENERATE(true, false);
   __hip_saturation_t saturation = GENERATE(__HIP_NOSAT, __HIP_SATFINITE);
   hipRoundMode rounding = GENERATE(hipRoundZero, hipRoundPosInf);
@@ -321,7 +321,7 @@ void device_cvt_e8m0_to_bf16raw(const std::vector<unsigned char>& in, std::vecto
   HIP_CHECK(hipMemcpy(out.data(), out_d, sizeof(float) * out.size(), hipMemcpyDeviceToHost));
 }
 
-TEST_CASE(Unit__hip_cvt_e8m0_to_bf16raw) {
+HIP_TEST_CASE(Unit__hip_cvt_e8m0_to_bf16raw) {
   bool run_on_host = GENERATE(true, false);
 
   std::vector<unsigned char> in = {0x00u, 0x7EU, 0x81U, 0x82U, 0xFF};
@@ -345,4 +345,3 @@ TEST_CASE(Unit__hip_cvt_e8m0_to_bf16raw) {
     }
   }
 }
-

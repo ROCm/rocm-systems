@@ -1,0 +1,59 @@
+# TBD: Add customer test cases 
+name: TheRock Test Packages for media libs
+
+on:
+  workflow_call:
+    inputs:
+      amdgpu_families:
+        type: string
+      test_runs_on:
+        type: string
+      platform:
+        type: string
+      artifact_run_id:
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  test_rocdecode:
+    name: 'Test rocdecode'
+    if: ${{ inputs.platform == 'linux' }}
+    uses: './.github/workflows/therock-test-component.yml'
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      test_runs_on: ${{ inputs.test_runs_on }}
+      platform: "linux"
+      component: >-
+        {
+          "job_name": "rocdecode",
+          "fetch_artifact_args": "--rocdecode --tests",
+          "timeout_minutes": 10,
+          "test_script": "python build_tools/github_actions/test_executable_scripts/test_rocdecode.py",
+          "shard_arr": [1],
+          "total_shards": 1,
+          "test_type": "full"
+        }
+
+  test_rocjpeg:
+    name: 'Test rocjpeg'
+    if: ${{ inputs.platform == 'linux' }}
+    uses: './.github/workflows/therock-test-component.yml'
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      test_runs_on: ${{ inputs.test_runs_on }}
+      platform: "linux"
+      component: >-
+        {
+          "job_name": "rocjpeg",
+          "fetch_artifact_args": "--rocjpeg --tests",
+          "timeout_minutes": 10,
+          "test_script": "python build_tools/github_actions/test_executable_scripts/test_rocjpeg.py",
+          "shard_arr": [1],
+          "total_shards": 1,
+          "test_type": "full"
+        }

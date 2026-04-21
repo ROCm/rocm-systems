@@ -18,7 +18,7 @@ static constexpr auto kernel_src{
   )_KERN_EMBED_"};
 
 
-TEST_CASE(Unit_hipStreamCaptureRtc) {
+HIP_TEST_CASE(Unit_hipStreamCaptureRtc) {
   hipStream_t stream = nullptr;
   hipGraph_t graph = nullptr;
   hipGraphExec_t graph_exec = nullptr;

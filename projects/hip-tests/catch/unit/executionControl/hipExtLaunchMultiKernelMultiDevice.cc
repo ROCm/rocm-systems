@@ -11,7 +11,7 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE(Unit_hipExtLaunchMultiKernelMultiDevice_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipExtLaunchMultiKernelMultiDevice_Positive_Basic) {
   const auto device_count = HipTest::getDeviceCount();
 
   std::vector<hipLaunchParams> params_list(device_count);
@@ -38,7 +38,7 @@ TEST_CASE(Unit_hipExtLaunchMultiKernelMultiDevice_Positive_Basic) {
   }
 }
 
-TEST_CASE(Unit_hipExtLaunchMultiKernelMultiDevice_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipExtLaunchMultiKernelMultiDevice_Negative_Parameters) {
   const auto device_count = HipTest::getDeviceCount();
 
   std::vector<hipLaunchParams> params_list(device_count);
@@ -105,7 +105,7 @@ TEST_CASE(Unit_hipExtLaunchMultiKernelMultiDevice_Negative_Parameters) {
   }
 }
 
-TEST_CASE(Unit_hipExtLaunchMultiKernelMultiDevice_Negative_MultiKernelSameDevice) {
+HIP_TEST_CASE(Unit_hipExtLaunchMultiKernelMultiDevice_Negative_MultiKernelSameDevice) {
   HIP_CHECK(hipSetDevice(0));
 
   std::vector<hipLaunchParams> params_list(2);

@@ -45,7 +45,7 @@ again, then try to find the newly added graph node  from the cloned graph
  * - Finds a cloned version of a node.
  */
 
-TEST_CASE(Unit_hipGraphNodeFindInClone_Negative) {
+HIP_TEST_CASE(Unit_hipGraphNodeFindInClone_Negative) {
   hipGraph_t graph;
   hipGraph_t clonedgraph;
   hipGraphNode_t graphnode, newnode;
@@ -193,7 +193,7 @@ void hipGraphNodeFindInClone_Func(bool ModifyOrigGraph = false) {
   HIP_CHECK(hipGraphDestroy(clonedgraph));
 }
 
-TEST_CASE(Unit_hipGraphNodeFindInClone_Functional) {
+HIP_TEST_CASE(Unit_hipGraphNodeFindInClone_Functional) {
   SECTION("hipGraphNodeFindInClone Basic Functionality") { hipGraphNodeFindInClone_Func(); }
   SECTION("hipGraphNodeFindInClone Modify Original graph") { hipGraphNodeFindInClone_Func(true); }
 }
@@ -264,7 +264,7 @@ void hipGraphNodeFindInClone_DoubleClone(bool ModifyOrigGraph = false) {
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE(Unit_hipGraphNodeFindInClone_MultipleClone) {
+HIP_TEST_CASE(Unit_hipGraphNodeFindInClone_MultipleClone) {
   SECTION("hipGraphNodeFindInClone Back to Back clone") { hipGraphNodeFindInClone_DoubleClone(); }
   SECTION("hipGraphNodeFindInClone Modify Orig Graph After 2nd Clone") {
     hipGraphNodeFindInClone_DoubleClone(true);

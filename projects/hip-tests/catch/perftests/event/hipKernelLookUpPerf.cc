@@ -64,7 +64,7 @@ void thread_jobs(int dev, int virt) {
  * ------------------------
  * - HIP_VERSION >= 6.5
  */
-TEST_CASE(Unit_hipKernelLookUp_PerfTest) {
+HIP_TEST_CASE(Unit_hipKernelLookUp_PerfTest) {
   int mgpu = 0;
   HIP_CHECK_PERF(hipGetDeviceCount(&mgpu));
   stream_pools.resize(mgpu);

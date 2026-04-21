@@ -1,24 +1,5 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -31,6 +12,25 @@ if(NOT _VALID_GPU)
     message(
         STATUS
         "transferBench requires a GPU and no valid GPUs were found; skipping GPU connect tests"
+    )
+    return()
+endif()
+
+# Skip if system has fewer than 2 GPUs (transferBench tests GPU-to-GPU transfers)
+check_rocminfo("Name:[ \t]+gfx[0-9A-Fa-f][0-9A-Fa-f]+" _RAW_GPU_LIST GET_OUTPUT)
+set(_GPU_COUNT 0)
+if(_RAW_GPU_LIST)
+    foreach(_match IN LISTS _RAW_GPU_LIST)
+        string(REGEX MATCH "gfx[0-9A-Fa-f]+" _arch "${_match}")
+        if(_arch AND NOT _arch STREQUAL "gfx000")
+            math(EXPR _GPU_COUNT "${_GPU_COUNT} + 1")
+        endif()
+    endforeach()
+endif()
+if(_GPU_COUNT LESS 2)
+    rocprofiler_systems_message(
+        STATUS
+        "transferBench requires multiple GPUs (found ${_GPU_COUNT}); skipping GPU connect tests"
     )
     return()
 endif()

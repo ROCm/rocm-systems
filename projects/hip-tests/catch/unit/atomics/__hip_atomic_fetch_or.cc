@@ -111,7 +111,7 @@ static void runHipAtomicFetchOrWorkgroupScatteredAddressesTest() {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Wavefront_SameAddress) {
+HIP_TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Wavefront_SameAddress) {
   SECTION("int") { runHipAtomicFetchOrWavefrontSameAddressTest<int>(); }
   SECTION("unsigned int") { runHipAtomicFetchOrWavefrontSameAddressTest<unsigned int>(); }
   SECTION("unsigned long") { runHipAtomicFetchOrWavefrontSameAddressTest<unsigned long>(); }
@@ -131,7 +131,7 @@ TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Wavefront_SameAddress) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Wavefront_Adjacent_Addresses) {
+HIP_TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Wavefront_Adjacent_Addresses) {
   SECTION("int") { runHipAtomicFetchOrWavefrontAdjacentAddressesTest<int>(); }
   SECTION("unsigned int") { runHipAtomicFetchOrWavefrontAdjacentAddressesTest<unsigned int>(); }
   SECTION("unsigned long") { runHipAtomicFetchOrWavefrontAdjacentAddressesTest<unsigned long>(); }
@@ -151,7 +151,7 @@ TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Wavefront_Adjacent_Addresses) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Wavefront_Scattered_Addresses) {
+HIP_TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Wavefront_Scattered_Addresses) {
   SECTION("int") { runHipAtomicFetchOrWavefrontScatteredAddressesTest<int>(); }
   SECTION("unsigned int") { runHipAtomicFetchOrWavefrontScatteredAddressesTest<unsigned int>(); }
   SECTION("unsigned long") { runHipAtomicFetchOrWavefrontScatteredAddressesTest<unsigned long>(); }
@@ -171,7 +171,7 @@ TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Wavefront_Scattered_Addresses) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Workgroup_SameAddress) {
+HIP_TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Workgroup_SameAddress) {
   SECTION("int") { runHipAtomicFetchOrWorkgroupSameAddressTest<int>(); }
   SECTION("unsigned int") { runHipAtomicFetchOrWorkgroupSameAddressTest<unsigned int>(); }
   SECTION("unsigned long") { runHipAtomicFetchOrWorkgroupSameAddressTest<unsigned long>(); }
@@ -191,7 +191,7 @@ TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Workgroup_SameAddress) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Workgroup_Adjacent_Addresses) {
+HIP_TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Workgroup_Adjacent_Addresses) {
   SECTION("int") { runHipAtomicFetchOrWorkgroupAdjacentAddressesTest<int>(); }
   SECTION("unsigned int") { runHipAtomicFetchOrWorkgroupAdjacentAddressesTest<unsigned int>(); }
   SECTION("unsigned long") { runHipAtomicFetchOrWorkgroupAdjacentAddressesTest<unsigned long>(); }
@@ -211,7 +211,7 @@ TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Workgroup_Adjacent_Addresses) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Workgroup_Scattered_Addresses) {
+HIP_TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Workgroup_Scattered_Addresses) {
   SECTION("int") { runHipAtomicFetchOrWorkgroupScatteredAddressesTest<int>(); }
   SECTION("unsigned int") { runHipAtomicFetchOrWorkgroupScatteredAddressesTest<unsigned int>(); }
   SECTION("unsigned long") { runHipAtomicFetchOrWorkgroupScatteredAddressesTest<unsigned long>(); }

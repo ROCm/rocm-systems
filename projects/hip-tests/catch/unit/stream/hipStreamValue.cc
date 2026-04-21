@@ -71,7 +71,7 @@ bool streamWaitValueSupported() {
     auto getAttributeError = hipDeviceGetAttribute(
         &waitValueSupport, hipDeviceAttributeCanUseStreamWaitValue, device_id);
     if (getAttributeError != hipSuccess) {
-      HipTest::HIP_SKIP_TEST("attribute not supported");
+      HipTest::HIP_SKIP_TEST("required stream attribute is not supported.");
       return false;
     }
     if (waitValueSupport == 1) return true;
@@ -221,7 +221,7 @@ template <typename UIntT, PtrType ptrTypeValue> struct TestParams {
 };
 
 #if HT_AMD
-TEMPLATE_TEST_CASE(Unit_hipStreamValue_Write, (TestParams<uint32_t, PtrType::HostPtr>),
+HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Write, (TestParams<uint32_t, PtrType::HostPtr>),
                    (TestParams<uint32_t, PtrType::DevicePtr>),
                    (TestParams<uint32_t, PtrType::DevicePtrToHost>),
                    (TestParams<uint64_t, PtrType::HostPtr>),
@@ -229,7 +229,7 @@ TEMPLATE_TEST_CASE(Unit_hipStreamValue_Write, (TestParams<uint32_t, PtrType::Hos
                    (TestParams<uint64_t, PtrType::DevicePtrToHost>),
                    (TestParams<uint64_t, PtrType::Signal>)) {
 #else
-TEMPLATE_TEST_CASE(Unit_hipStreamValue_Write, (TestParams<uint32_t, PtrType::HostPtr>),
+HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Write, (TestParams<uint32_t, PtrType::HostPtr>),
                    (TestParams<uint32_t, PtrType::DevicePtr>),
                    (TestParams<uint32_t, PtrType::DevicePtrToHost>),
                    (TestParams<uint64_t, PtrType::HostPtr>),
@@ -237,7 +237,7 @@ TEMPLATE_TEST_CASE(Unit_hipStreamValue_Write, (TestParams<uint32_t, PtrType::Hos
                    (TestParams<uint64_t, PtrType::DevicePtrToHost>)) {
 #endif
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
     return;
   }
 
@@ -289,7 +289,7 @@ void syncAndCheckData(hipStream_t stream, UIntT* dataPtr, TestPtr signalPtr, siz
 template <typename TestType, bool isBlocking>
 void testWait(TEST_WAIT<typename TestType::UIntType> tc) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
     return;
   }
   using UIntT = typename TestType::UIntType;
@@ -343,9 +343,9 @@ void testWait(TEST_WAIT<typename TestType::UIntType> tc) {
 }
 
 // Combined blocking test case for both uint32_t and uint64_t
-TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
     return;
   }
 
@@ -354,20 +354,20 @@ TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
 
   SECTION("Mask_Gte") {
     TestWaitType testCase(hipStreamWaitValueGte, 0xF, 0x4, 0x3, 0x6);
-    
-    SECTION("HostPtr") { 
-      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
     }
-    SECTION("DevicePtr") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
     }
-    SECTION("DevicePtrToHost") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
     }
 #if HT_AMD
     if constexpr (std::is_same_v<UIntT, uint64_t>) {
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
     }
 #endif
@@ -375,20 +375,20 @@ TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
 
   if constexpr (std::is_same_v<UIntT, uint64_t>) {
     SECTION("Mask_Gte_1") {
-      TestWaitType testCase(hipStreamWaitValueGte, 0x0000FFFFFFFFFFFF, 0x000000007FFF0001, 
+      TestWaitType testCase(hipStreamWaitValueGte, 0x0000FFFFFFFFFFFF, 0x000000007FFF0001,
                             0x7FFF00007FFF0000, 0x000000007FFF0001);
-      SECTION("HostPtr") { 
-        testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+      SECTION("HostPtr") {
+        testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
       }
-      SECTION("DevicePtr") { 
-        testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+      SECTION("DevicePtr") {
+        testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
       }
-      SECTION("DevicePtrToHost") { 
-        testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+      SECTION("DevicePtrToHost") {
+        testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
       }
 #if HT_AMD
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
 #endif
     }
@@ -397,22 +397,22 @@ TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
   SECTION("Mask_Eq_1") {
     TestWaitType testCase = std::is_same_v<UIntT, uint32_t>
       ? TestWaitType(hipStreamWaitValueEq, 0x0000FFFF, 0x00000001, 0x0FFF0000, 0x0FFF0001)
-      : TestWaitType(hipStreamWaitValueEq, 0x0000FFFFFFFFFFFF, 0x000000000FFF0001, 
+      : TestWaitType(hipStreamWaitValueEq, 0x0000FFFFFFFFFFFF, 0x000000000FFF0001,
                      0x7FFF00000FFF0000, 0x7F0000000FFF0001);
-    
-    SECTION("HostPtr") { 
-      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
     }
-    SECTION("DevicePtr") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
     }
-    SECTION("DevicePtrToHost") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
     }
 #if HT_AMD
     if constexpr (std::is_same_v<UIntT, uint64_t>) {
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
     }
 #endif
@@ -420,20 +420,20 @@ TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
 
   SECTION("Mask_Eq_2") {
     TestWaitType testCase(hipStreamWaitValueEq, 0xFF, 0x11, 0x25, 0x11);
-    
-    SECTION("HostPtr") { 
-      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
     }
-    SECTION("DevicePtr") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
     }
-    SECTION("DevicePtrToHost") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
     }
 #if HT_AMD
     if constexpr (std::is_same_v<UIntT, uint64_t>) {
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
     }
 #endif
@@ -441,20 +441,20 @@ TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
 
   SECTION("Mask_And") {
     TestWaitType testCase(hipStreamWaitValueAnd, 0xFF, 0xF4A, 0xF35, 0X02);
-    
-    SECTION("HostPtr") { 
-      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
     }
-    SECTION("DevicePtr") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
     }
-    SECTION("DevicePtrToHost") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
     }
 #if HT_AMD
     if constexpr (std::is_same_v<UIntT, uint64_t>) {
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
     }
 #endif
@@ -464,20 +464,20 @@ TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
     TestWaitType testCase = std::is_same_v<UIntT, uint32_t>
       ? TestWaitType(hipStreamWaitValueEq, 0x7FFFFFFF, 0x7FFF0000, 0x7FFFFFFF)
       : TestWaitType(hipStreamWaitValueEq, 0x7FFFFFFFFFFFFFFF, 0x7FFFFFFF0FFF0000, 0x7FFFFFFFFFFFFFFF);
-    
-    SECTION("HostPtr") { 
-      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
     }
-    SECTION("DevicePtr") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
     }
-    SECTION("DevicePtrToHost") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
     }
 #if HT_AMD
     if constexpr (std::is_same_v<UIntT, uint64_t>) {
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
     }
 #endif
@@ -487,20 +487,20 @@ TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
     TestWaitType testCase = std::is_same_v<UIntT, uint32_t>
       ? TestWaitType(hipStreamWaitValueGte, 0x7FFF0001, 0x7FFF0000, 0x7FFF0010)
       : TestWaitType(hipStreamWaitValueGte, 0x7FFFFFFFFFFF0001, 0x7FFFFFFFFFFF0000, 0x7FFFFFFFFFFF0001);
-    
-    SECTION("HostPtr") { 
-      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
     }
-    SECTION("DevicePtr") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
     }
-    SECTION("DevicePtrToHost") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
     }
 #if HT_AMD
     if constexpr (std::is_same_v<UIntT, uint64_t>) {
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
     }
 #endif
@@ -510,20 +510,20 @@ TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
     TestWaitType testCase = std::is_same_v<UIntT, uint32_t>
       ? TestWaitType(hipStreamWaitValueAnd, 0x70F0F0F0, 0x0F0F0F0F, 0X1F0F0F0F)
       : TestWaitType(hipStreamWaitValueAnd, 0x70F0F0F0F0F0F0F0, 0x0F0F0F0F0F0F0F0F, 0X1F0F0F0F0F0F0F0F);
-    
-    SECTION("HostPtr") { 
-      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
     }
-    SECTION("DevicePtr") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
     }
-    SECTION("DevicePtrToHost") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
     }
 #if HT_AMD
     if constexpr (std::is_same_v<UIntT, uint64_t>) {
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
     }
 #endif
@@ -533,20 +533,20 @@ TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
     TestWaitType testCase = std::is_same_v<UIntT, uint32_t>
       ? TestWaitType(hipStreamWaitValueNor, 0x7AAAAAAA, 0x85555555, 0x9AAAAAAA)
       : TestWaitType(hipStreamWaitValueNor, 0x4724724747247247, 0xbddbddbdbddbddbd, 0xbddbddbdbddbddb3);
-    
-    SECTION("HostPtr") { 
-      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
     }
-    SECTION("DevicePtr") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
     }
-    SECTION("DevicePtrToHost") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
     }
 #if HT_AMD
     if constexpr (std::is_same_v<UIntT, uint64_t>) {
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
     }
 #endif
@@ -554,9 +554,9 @@ TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
 }
 
 // Negative Tests
-TEST_CASE(Unit_hipStreamValue_Negative_InvalidMemory) {
+HIP_TEST_CASE(Unit_hipStreamValue_Negative_InvalidMemory) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
     return;
   }
 
@@ -586,9 +586,9 @@ TEST_CASE(Unit_hipStreamValue_Negative_InvalidMemory) {
 }
 
 // Merge the two similar negative tests
-TEMPLATE_TEST_CASE(Unit_hipStreamValue_Negative_StreamAndFlag, uint32_t, uint64_t) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Negative_StreamAndFlag, uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
     return;
   }
 
@@ -641,9 +641,9 @@ TEMPLATE_TEST_CASE(Unit_hipStreamValue_Negative_StreamAndFlag, uint32_t, uint64_
   }
 }
 
-TEMPLATE_TEST_CASE(Unit_hipStreamWriteValue_Default, uint32_t, uint64_t) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipStreamWriteValue_Default, uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
     return;
   }
 
@@ -667,14 +667,156 @@ TEMPLATE_TEST_CASE(Unit_hipStreamWriteValue_Default, uint32_t, uint64_t) {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
+TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Increment_Default", "", uint32_t, uint64_t) {
+  if (!streamWaitValueSupported()) {
+    HipTest::HIP_SKIP_TEST("hipStreamWriteValue not supported on this device.");
+    return;
+  }
+
+  hipStream_t stream{nullptr};
+  HIP_CHECK(hipStreamCreate(&stream));
+  REQUIRE(stream != nullptr);
+
+  TestType initial_value = 10;
+  TestType* mem;
+  HIP_CHECK(hipHostMalloc(&mem, sizeof(TestType), hipMallocSignalMemory));
+  __atomic_store(mem, &initial_value, __ATOMIC_RELEASE);
+
+  const TestType increment_value = 2;
+  HIP_CHECK(writeFunc<TestType>(stream, mem, increment_value, hipExtStreamWriteValueIncrement));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  const TestType expected_value = initial_value + increment_value;
+  REQUIRE(*mem == expected_value);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipHostFree(mem));
+}
+
+TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Decrement_Default", "", uint32_t, uint64_t) {
+  if (!streamWaitValueSupported()) {
+    HipTest::HIP_SKIP_TEST("hipStreamWriteValue not supported on this device.");
+    return;
+  }
+
+  hipStream_t stream{nullptr};
+  HIP_CHECK(hipStreamCreate(&stream));
+  REQUIRE(stream != nullptr);
+
+  TestType initial_value = 0;
+  TestType* mem;
+  HIP_CHECK(hipHostMalloc(&mem, sizeof(TestType), hipMallocSignalMemory));
+  __atomic_store(mem, &initial_value, __ATOMIC_RELEASE);
+
+  const TestType decrement_value = 10;
+  HIP_CHECK(writeFunc<TestType>(stream, mem, decrement_value, hipExtStreamWriteValueDecrement));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  const TestType expected_value = initial_value - decrement_value;
+  REQUIRE(*mem == expected_value);
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipHostFree(mem));
+}
+
+template <typename TestType>
+void testIncrementDecrementMultiStreamMultiDevice(uint32_t operationFlag) {
+  if (!streamWaitValueSupported()) {
+    HipTest::HIP_SKIP_TEST("hipStreamWriteValue not supported on this device.");
+    return;
+  }
+
+  constexpr size_t streams_per_device = 2;
+  constexpr size_t iterations = 10;
+  constexpr TestType increment_value = 2;
+  TestType initial_value = 10;
+
+  int deviceCount = 0;
+  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+
+  std::vector<std::vector<hipStream_t>> streams(deviceCount);
+
+  TestType* mem;
+  HIP_CHECK(hipHostMalloc(&mem, sizeof(TestType), hipMallocSignalMemory));
+  __atomic_store(mem, &initial_value, __ATOMIC_RELEASE);
+
+  for (int stream_idx = 0; stream_idx < streams_per_device; ++stream_idx) {
+    for (int device_idx = 0; device_idx < deviceCount; ++device_idx) {
+      HIP_CHECK(hipSetDevice(device_idx));
+
+      hipStream_t stream{nullptr};
+      HIP_CHECK(hipStreamCreate(&stream));
+      REQUIRE(stream != nullptr);
+
+      streams[device_idx].push_back(stream);
+    }
+  }
+
+  for (int cur_iter = 0; cur_iter < iterations; ++cur_iter) {
+    for (int device_idx = 0; device_idx < deviceCount; ++device_idx) {
+      HIP_CHECK(hipSetDevice(device_idx));
+      for (int stream_idx = 0; stream_idx < streams_per_device; ++stream_idx) {
+        HIP_CHECK(writeFunc<TestType>(streams[device_idx][stream_idx], mem, increment_value,
+                                      operationFlag));
+      }
+    }
+  }
+
+  for (int device_idx = 0; device_idx < deviceCount; ++device_idx) {
+    HIP_CHECK(hipSetDevice(device_idx));
+    for (int stream_idx = 0; stream_idx < streams_per_device; ++stream_idx) {
+      HIP_CHECK(hipStreamSynchronize(streams[device_idx][stream_idx]));
+    }
+  }
+
+  TestType expected_value;
+  switch (operationFlag) {
+    case hipExtStreamWriteValueIncrement: {
+      expected_value =
+          initial_value + (increment_value * iterations * streams_per_device * deviceCount);
+      break;
+    }
+    case hipExtStreamWriteValueDecrement: {
+      expected_value =
+          initial_value - (increment_value * iterations * streams_per_device * deviceCount);
+      break;
+    }
+    default: {
+      assert(false);
+      break;
+    }
+  }
+
+  REQUIRE(*mem == expected_value);
+
+  for (int device_idx = 0; device_idx < deviceCount; ++device_idx) {
+    HIP_CHECK(hipSetDevice(device_idx));
+    for (int stream_idx = 0; stream_idx < streams_per_device; ++stream_idx) {
+      HIP_CHECK(hipStreamDestroy(streams[device_idx][stream_idx]));
+    }
+  }
+
+  HIP_CHECK(hipHostFree(mem));
+}
+
+TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Increment_MultiStream_MultiDevice", "", uint32_t,
+                   uint64_t) {
+  testIncrementDecrementMultiStreamMultiDevice<TestType>(hipExtStreamWriteValueIncrement);
+}
+
+
+TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Decrement_MultiStream_MultiDevice", "", uint32_t,
+                   uint64_t) {
+  testIncrementDecrementMultiStreamMultiDevice<TestType>(hipExtStreamWriteValueDecrement);
+}
+
 template <typename T> __global__ void add(T* a, T* b, T* c, size_t size) {
   size_t i = threadIdx.x;
   if (i < size) c[i] = a[i] + b[i];
 }
 
-TEMPLATE_TEST_CASE(Unit_hipStreamWaitValue_Default, uint32_t, uint64_t) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipStreamWaitValue_Default, uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
     return;
   }
 

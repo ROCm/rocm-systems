@@ -1,0 +1,52 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+# =============================================================================
+# Profiling counter grouping policy (same-bucket priority metric IDs)
+# =============================================================================
+# For each gpu_arch (see mi_gpu_spec.yaml), ``same_bucket_priority_metric_ids``
+# maps metric id token -> metadata. Keys are the metric ids used by the
+# allocator (e.g. filter strings like "2.1.3"); ``name`` matches the analysis
+# YAML metric label for that arch (documentation / review only — runtime uses
+# ids only).
+#
+# Semantics: listed metrics get coalescing tier 0 (packed before others).
+#
+# Use an empty mapping ``{}`` when an architecture has no extra policy.
+# =============================================================================
+
+architectures:
+  # CDNA / MI-class (no default same-bucket priority set here).
+  gfx908:
+    same_bucket_priority_metric_ids: {}
+
+  gfx90a:
+    same_bucket_priority_metric_ids: {}
+
+  gfx940:
+    same_bucket_priority_metric_ids: {}
+
+  gfx941:
+    same_bucket_priority_metric_ids: {}
+
+  gfx942:
+    same_bucket_priority_metric_ids: {}
+
+  gfx950:
+    same_bucket_priority_metric_ids: {}
+
+  # RDNA3.5 (gfx1151): throughput + cache hit-rate + GRBM utilization metrics
+  # that benefit from single-pass PMC grouping for stable formulas.
+  gfx1151:
+    same_bucket_priority_metric_ids:
+      # 2.1.3 = panel 200, table 201 (System Speed-of-Light), metric index 3.
+      "2.1.3":
+        name: "Wavefront Occupancy"
+      # 8.3.0 = panel 800, table 803 (TCP Cache Performance), metric index 0.
+      "8.3.0":
+        name: "Hit Rate (TCP Cache Performance)"
+      # 11.3.0 = panel 1100, table 1103 (GL1C Cache Performance), metric index 0.
+      "11.3.0":
+        name: "Hit Rate (GL1C Cache Performance)"
+      # 17.1.0 = panel 1700, table 1701 (GPU Utilization), metric index 0.
+      "17.1.0":
+        name: "GPU Busy"

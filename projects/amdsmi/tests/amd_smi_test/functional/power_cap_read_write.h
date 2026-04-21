@@ -23,6 +23,8 @@
 #ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_POWER_CAP_READ_WRITE_H_
 #define TESTS_AMD_SMI_TEST_FUNCTIONAL_POWER_CAP_READ_WRITE_H_
 
+#include <string>
+
 #include "../test_base.h"
 
 class TestPowerCapReadWrite : public TestBase {
@@ -41,7 +43,7 @@ class TestPowerCapReadWrite : public TestBase {
   // @Brief: Core measurement execution
   virtual void Run();
 
-  // @Brief: Clean up and retrive the resource
+  // @Brief: Clean up and retrieve the resource
   virtual void Close();
 
   // @Brief: Display  results

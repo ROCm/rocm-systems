@@ -130,6 +130,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       max_msg_size = 8;
       break;
     case PingPongTestType:
+    case PingAllTestType:
     case ShmemPtrTestType:
       min_msg_size = 4;
       max_msg_size = 4;
@@ -228,6 +229,8 @@ void TesterArguments::get_arguments() {
     // On-stream tests - support any number of PEs
     case TeamAlltoallmemOnStreamTestType:
     case BarrierAllOnStreamTestType:
+    case QuietOnStreamTestType:
+    case SyncAllOnStreamTestType:
     case TeamBroadcastmemOnStreamTestType:
     case GetmemOnStreamTestType:
     case PutmemOnStreamTestType:

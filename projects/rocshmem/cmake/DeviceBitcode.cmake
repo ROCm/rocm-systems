@@ -28,7 +28,12 @@ endfunction()
 
 # Resolve the default arch list: GPU_TARGETS if set, otherwise auto-detect local GPUs.
 if(GPU_TARGETS)
-  strip_arch_features("${GPU_TARGETS}" _BITCODE_DEFAULT_ARCHS)
+  # Convert comma-separated string to CMake list (semicolon-separated)
+  # This handles both -DGPU_TARGETS=gfx942,gfx950 and -DGPU_TARGETS="gfx942;gfx950"
+  string(REPLACE "," ";" _GPU_TARGETS_LIST "${GPU_TARGETS}")
+  # Ensure it's treated as a list even if already semicolon-separated
+  set(_GPU_TARGETS_LIST ${_GPU_TARGETS_LIST})
+  strip_arch_features("${_GPU_TARGETS_LIST}" _BITCODE_DEFAULT_ARCHS)
 elseif(COMMAND rocm_local_targets)
   rocm_local_targets(_LOCAL_GPUS)
   if(_LOCAL_GPUS)
@@ -45,17 +50,25 @@ set(BITCODE_GPU_ARCHS "${_BITCODE_DEFAULT_ARCHS}" CACHE STRING "GPU architecture
 # -fvisibility=default ensures extern "C" device API symbols remain
 # externally visible after llvm-link and llc.
 set(BITCODE_COMPILE_FLAGS_BASE
+    -Wall
+    -Wextra
     -x hip
     --cuda-device-only
-    -std=c++20
+    -std=c++17
     -emit-llvm
     -fvisibility=default
+    -Xclang -mcode-object-version=none
     -I${CMAKE_CURRENT_SOURCE_DIR}/include/rocshmem
     -I${CMAKE_CURRENT_SOURCE_DIR}/include
     -I${CMAKE_CURRENT_SOURCE_DIR}/src
     -I${CMAKE_BINARY_DIR}/include
     -I${CMAKE_BINARY_DIR}/include/rocshmem
 )
+
+if(${ROCM_MAJOR_VERSION} LESS 7)
+  # ROCm 6.x requires us to explicitly enable warp sync builtins
+  list(APPEND BITCODE_COMPILE_FLAGS_BASE -DHIP_ENABLE_WARP_SYNC_BUILTINS=1)
+endif()
 
 # Add MPI include directories — rocshmem_config.h defines HAVE_EXTERNAL_MPI
 # when MPI is found, causing rocshmem_mpi.hpp to #include <mpi.h> transitively.

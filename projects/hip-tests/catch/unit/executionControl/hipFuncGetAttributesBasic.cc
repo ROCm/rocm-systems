@@ -13,7 +13,7 @@ __constant__ char const_data[kConstSizeBytes];
 
 __global__ void attribute_test_kernel() {}
 
-TEST_CASE(Unit_hipFuncGetAttributes_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipFuncGetAttributes_Positive_Basic) {
   hipFuncAttributes attr;
   HIP_CHECK(hipFuncGetAttributes(&attr, reinterpret_cast<void*>(attribute_test_kernel)));
 
@@ -41,7 +41,7 @@ TEST_CASE(Unit_hipFuncGetAttributes_Positive_Basic) {
   }
 }
 
-TEST_CASE(Unit_hipFuncGetAttributes_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipFuncGetAttributes_Negative_Parameters) {
   SECTION("attr == nullptr") {
     HIP_CHECK_ERROR(hipFuncGetAttributes(nullptr, reinterpret_cast<void*>(attribute_test_kernel)),
                     hipErrorInvalidValue);

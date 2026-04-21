@@ -1,0 +1,41 @@
+name: AIS_nightly_build
+run-name: Create a nightly build of hipFile
+on:
+  workflow_call:
+    inputs:
+      platform:
+        required: true
+        type: string
+      rocm_version:
+        description: "Target ROCm MAJOR.MINOR.PATCH Version."
+        required: true
+        type: string
+    outputs:
+      ais_hipfile_pkg_dev_filename:
+        description: "Filename for the hipFile development DEB/RPM package."
+        value: ${{ jobs.build_hipFile.outputs.ais_hipfile_pkg_dev_filename }}
+      ais_hipfile_pkg_filename:
+        description: "Filename for the hipFile runtime DEB/RPM package."
+        value: ${{ jobs.build_hipFile.outputs.ais_hipfile_pkg_filename }}
+permissions:
+  contents: read
+  packages: write
+jobs:
+  get_AIS_CI_image:
+    # This runs on develop so will always use latest.
+    uses: ./.github/workflows/build-ais-ci-image.yml
+    with:
+      dockerfile_changed: false
+      platform: ${{ inputs.platform }}
+      rocm_version: ${{ inputs.rocm_version }}
+  build_hipFile:
+    if: ${{ !cancelled() && needs.get_AIS_CI_image.outputs.ci_image_build_satisfied == 'true' }}
+    needs: [get_AIS_CI_image]
+    uses: ./.github/workflows/build-ais.yml
+    with:
+      ci_image: ${{ needs.get_AIS_CI_image.outputs.ci_image }}
+      cxx_compiler: amdclang++
+      job_designator: "nightly."
+      platform: ${{ inputs.platform }}
+      upload_artifacts: true
+      rocm_version: ${{ inputs.rocm_version }}

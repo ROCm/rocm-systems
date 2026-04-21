@@ -86,7 +86,7 @@ struct amdgpu_gpuboard_temp_metrics_v1_0 {
   uint16_t label_version;
   uint16_t node_id;
   uint64_t accumulation_counter;
-  /* Encoded temperature in Celcius, 24:31 is sensor id 0:23 is temp value */
+  /* Encoded temperature in Celsius, 24:31 is sensor id 0:23 is temp value */
   uint32_t node_temp[AMDGPU_NODE_MAX_TEMP_ENTRIES];
   uint32_t vr_temp[AMDGPU_VR_MAX_TEMP_ENTRIES];
 };
@@ -96,7 +96,7 @@ struct amdgpu_baseboard_temp_metrics_v1_0 {
   uint16_t label_version;
   uint16_t node_id;
   uint64_t accumulation_counter;
-  /* Encoded temperature in Celcius, 24:31 is sensor id 0:23 is temp value */
+  /* Encoded temperature in Celsius, 24:31 is sensor id 0:23 is temp value */
   uint32_t system_temp[AMDGPU_SYSTEM_MAX_TEMP_ENTRIES];
 };
 

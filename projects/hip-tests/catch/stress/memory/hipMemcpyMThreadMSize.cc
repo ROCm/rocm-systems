@@ -228,7 +228,7 @@ template <typename TestType> void Memcpy_And_verify(int NUM_ELM) {
   }
 }
 
-TEMPLATE_TEST_CASE(Stress_hipMemcpy_multiDevice_AllAPIs, char, int, size_t, long double) {
+HIP_TEMPLATE_TEST_CASE(Stress_hipMemcpy_multiDevice_AllAPIs, char, int, size_t, long double) {
   auto diff_size = GENERATE(1, 5, 10, 100, 1024, 10 * 1024, 100 * 1024, 1024 * 1024,
                             10 * 1024 * 1024, 100 * 1024 * 1024, 1024 * 1024 * 1024);
   size_t free = 0, total = 0;

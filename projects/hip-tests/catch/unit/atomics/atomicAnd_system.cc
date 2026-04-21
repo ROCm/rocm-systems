@@ -69,7 +69,7 @@ static void runAtomicAndSystemScatteredAddressesTest() {
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_atomicAnd_system_Positive_Peer_GPUs_Same_Address) {
+HIP_TEST_CASE(Unit_atomicAnd_system_Positive_Peer_GPUs_Same_Address) {
   SECTION("int") { runAtomicAndSystemSameAddressTest<int>(); }
   SECTION("unsigned int") { runAtomicAndSystemSameAddressTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicAndSystemSameAddressTest<unsigned long>(); }
@@ -89,7 +89,7 @@ TEST_CASE(Unit_atomicAnd_system_Positive_Peer_GPUs_Same_Address) {
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_atomicAnd_system_Positive_Peer_GPUs_Adjacent_Addresses) {
+HIP_TEST_CASE(Unit_atomicAnd_system_Positive_Peer_GPUs_Adjacent_Addresses) {
   SECTION("int") { runAtomicAndSystemAdjacentAddressesTest<int>(); }
   SECTION("unsigned int") { runAtomicAndSystemAdjacentAddressesTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicAndSystemAdjacentAddressesTest<unsigned long>(); }
@@ -109,7 +109,7 @@ TEST_CASE(Unit_atomicAnd_system_Positive_Peer_GPUs_Adjacent_Addresses) {
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_atomicAnd_system_Positive_Peer_GPUs_Scattered_Addresses) {
+HIP_TEST_CASE(Unit_atomicAnd_system_Positive_Peer_GPUs_Scattered_Addresses) {
   SECTION("int") { runAtomicAndSystemScatteredAddressesTest<int>(); }
   SECTION("unsigned int") { runAtomicAndSystemScatteredAddressesTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicAndSystemScatteredAddressesTest<unsigned long>(); }

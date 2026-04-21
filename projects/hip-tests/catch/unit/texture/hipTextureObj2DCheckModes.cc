@@ -118,7 +118,7 @@ line1:
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipTextureObj2DCheckModes) {
+HIP_TEST_CASE(Unit_hipTextureObj2DCheckModes) {
   CHECK_IMAGE_SUPPORT
 
   SECTION("hipAddressModeClamp, hipFilterModePoint, regularCoords") {

@@ -41,8 +41,13 @@
 
 #include "core/commandbuffermgr.hpp"
 
+#ifdef _WIN32
+#define CONSTRUCTOR_API
+#define DESTRUCTOR_API
+#else
 #define CONSTRUCTOR_API __attribute__((constructor))
 #define DESTRUCTOR_API __attribute__((destructor))
+#endif
 #define ERR_CHECK(cond, err, msg) \
   {                               \
     if (cond) {                   \
@@ -815,3 +820,20 @@ PUBLIC_API hsa_status_t hsa_ven_amd_aqlprofile_att_marker(
 }
 
 }  // extern "C"
+
+#ifdef _WIN32
+#include <windows.h>
+extern "C" BOOL WINAPI DllMain(HINSTANCE /*hinstDLL*/, DWORD fdwReason, LPVOID /*lpvReserved*/) {
+  switch (fdwReason) {
+    case DLL_PROCESS_ATTACH:
+      aql_profile::constructor();
+      break;
+    case DLL_PROCESS_DETACH:
+      aql_profile::destructor();
+      break;
+    default:
+      break;
+  }
+  return TRUE;
+}
+#endif

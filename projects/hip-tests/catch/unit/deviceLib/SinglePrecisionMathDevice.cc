@@ -102,6 +102,6 @@ __device__ void single_precision_math_functions() {
 
 __global__ void compileSinglePrecisionMathOnDevice(int) { single_precision_math_functions(); }
 
-TEST_CASE(Unit_SinglePrecisionMathDevice) {
+HIP_TEST_CASE(Unit_SinglePrecisionMathDevice) {
   hipLaunchKernelGGL(compileSinglePrecisionMathOnDevice, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, 1);
 }

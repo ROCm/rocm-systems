@@ -11,6 +11,7 @@
 #include <cpu_grid.h>
 #include <resource_guards.hh>
 #include <utils.hh>
+#include "../math/math_common.hh"
 
 static bool operator==(__half x, __half y) {
   // __heq doesn't have a __host__ version
@@ -70,27 +71,27 @@ template <typename Derived, typename T> class WarpShflTest {
   void generate_input(T* input, bool random) {
     if (random) {
       std::generate(active_masks_.begin(), active_masks_.end(), [] {
-        return GenerateRandomInteger<unsigned long long>(0ul, std::numeric_limits<uint64_t>().max());
+        return GenRandomInteger<unsigned long long>(0ul, std::numeric_limits<uint64_t>().max());
       });
 
       if constexpr (std::is_same_v<float, T> || std::is_same_v<double, T>) {
         std::generate_n(input, grid_.thread_count_, [] {
           return static_cast<T>(
-              GenerateRandomReal(std::numeric_limits<T>().min(), std::numeric_limits<T>().max()));
+              GenRandomReal(std::numeric_limits<T>().min(), std::numeric_limits<T>().max()));
         });
       } else if constexpr (std::is_same_v<__half, T>) {
         std::generate_n(input, grid_.thread_count_, [] {
-          return __float2half(GenerateRandomReal(std::numeric_limits<float>().min(),
+          return __float2half(GenRandomReal(std::numeric_limits<float>().min(),
                                                  std::numeric_limits<float>().max()));
         });
       } else if constexpr (std::is_same_v<__half2, T>) {
         std::generate_n(input, grid_.thread_count_, [] {
-          return __float2half2_rn(GenerateRandomReal(std::numeric_limits<float>().min(),
+          return __float2half2_rn(GenRandomReal(std::numeric_limits<float>().min(),
                                                      std::numeric_limits<float>().max()));
         });
       } else {
         std::generate_n(input, grid_.thread_count_, [] {
-          return static_cast<T>(GenerateRandomInteger(std::numeric_limits<T>().min(),
+          return static_cast<T>(GenRandomInteger(std::numeric_limits<T>().min(),
                                                       std::numeric_limits<T>().max()));
         });
       }

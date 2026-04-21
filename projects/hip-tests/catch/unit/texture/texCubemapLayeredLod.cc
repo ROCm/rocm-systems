@@ -32,10 +32,10 @@
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE(Unit_texCubemapLayeredLod_Positive_ReadModeElementType, char,
+HIP_TEMPLATE_TEST_CASE(Unit_texCubemapLayeredLod_Positive_ReadModeElementType, char,
                    unsigned char, short, unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
-  INFO("texCubemap isn't supported. Skipped.");
+  HipTest::HIP_SKIP_TEST("texCubemap isn't supported.");
   return;
   TextureTestParams<TestType> params = {};
   params.extent = make_hipExtent(2, 2, 6);
@@ -118,10 +118,10 @@ TEMPLATE_TEST_CASE(Unit_texCubemapLayeredLod_Positive_ReadModeElementType, char,
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE(Unit_texCubemapLayeredLod_Positive_ReadModeNormalizedFloat, char,
+HIP_TEMPLATE_TEST_CASE(Unit_texCubemapLayeredLod_Positive_ReadModeNormalizedFloat, char,
                    unsigned char, short, unsigned short) {
   CHECK_IMAGE_SUPPORT;
-  INFO("texCubemap isn't supported. Skipped.");
+  HipTest::HIP_SKIP_TEST("texCubemap isn't supported.");
   return;
   TextureTestParams<TestType> params = {};
   params.extent = make_hipExtent(2, 2, 6);

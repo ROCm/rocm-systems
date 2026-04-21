@@ -31,7 +31,7 @@ __global__ static void DotFunctions(bool* result) {
 #endif
 }
 
-TEST_CASE(Unit_hipTestDotFunctions) {
+HIP_TEST_CASE(Unit_hipTestDotFunctions) {
   bool* result{nullptr};
   HIP_CHECK(hipHostMalloc(&result, 1));
   result[0] = true;

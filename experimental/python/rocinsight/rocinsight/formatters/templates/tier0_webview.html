@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ROCInsight AI Profiling Plan &#8212; Tier 0 Source Analysis</title>
+<style>
+:root {
+  --bg:#0d0d14; --bg2:#14141f; --bg3:#1c1c2c; --bg4:#242438;
+  --bdr:#2c2c48; --bdr2:#3a3a58;
+  --text:#e0e3f2; --sub:#a8aace; --dim:#6868a0;
+  --amd:#e01a22;
+  --blue:#4d8ef2; --green:#3acc66; --orange:#f08432;
+  --purple:#9866cc; --teal:#28bca8; --yellow:#caa828;
+  --c-ok:#3acc66;   --c-ok-bg:rgba(58,204,102,.13);
+  --c-warn:#f08432; --c-warn-bg:rgba(240,132,50,.13);
+  --c-crit:#e84040; --c-crit-bg:rgba(232,64,64,.13);
+  --c-info:#4d8ef2; --c-info-bg:rgba(77,142,242,.13);
+  --r:10px; --r-sm:6px;
+  --font:-apple-system,"Segoe UI",system-ui,Ubuntu,sans-serif;
+  --mono:"JetBrains Mono","Cascadia Code","Fira Code",ui-monospace,monospace;
+  --shadow:0 4px 18px rgba(0,0,0,.42);
+  --shadow-lg:0 8px 36px rgba(0,0,0,.55);
+  --trans:all 0.22s cubic-bezier(0.4,0,0.2,1);
+}
+[data-theme="light"] {
+  --bg:#f2f2f8; --bg2:#ffffff; --bg3:#eaeaf2; --bg4:#dddde8;
+  --bdr:#c8c8dc; --bdr2:#b4b4cc;
+  --text:#181828; --sub:#444468; --dim:#6868a0;
+  --c-ok-bg:rgba(58,204,102,.10); --c-warn-bg:rgba(240,132,50,.10);
+  --c-crit-bg:rgba(232,64,64,.10); --c-info-bg:rgba(77,142,242,.10);
+  --shadow:0 2px 12px rgba(0,0,0,.10);
+  --shadow-lg:0 4px 20px rgba(0,0,0,.14);
+}
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+html { scroll-behavior:smooth; }
+body { font-family:var(--font); background:var(--bg); color:var(--text);
+       line-height:1.65; font-size:15px; min-height:100vh;
+       transition:background .25s,color .25s; }
+a { color:var(--blue); }
+code { font-family:var(--mono); font-size:.87em; }
+.hdr {
+  background:linear-gradient(135deg,#080810 0%,#120e1c 100%);
+  border-bottom:3px solid var(--amd); padding:.9rem 0;
+  position:sticky; top:0; z-index:100;
+  box-shadow:0 2px 16px rgba(0,0,0,.55);
+}
+[data-theme="light"] .hdr { background:linear-gradient(135deg,#1a0a10 0%,#280e18 100%); }
+.hdr-inner { max-width:1140px; margin:0 auto; padding:0 1.25rem;
+              display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
+.hdr-brand { display:flex; align-items:baseline; gap:.6rem; }
+.logo { font-size:1.6rem; font-weight:900; color:var(--amd);
+         letter-spacing:-.04em; line-height:1; }
+.logo em { color:#f0f0ff; font-style:normal; }
+.hdr-subtitle { font-size:.88rem; color:rgba(255,255,255,.55); font-weight:500; }
+.hdr-badges { display:flex; gap:.4rem; flex-wrap:wrap; margin-left:auto; }
+.hbadge { font-size:.7rem; font-weight:800; padding:.2em .65em;
+           border-radius:100px; letter-spacing:.04em;
+           display:inline-flex; align-items:center; gap:.25em; }
+.hbadge-crit { background:var(--c-crit-bg); color:var(--c-crit); border:1px solid rgba(232,64,64,.4); }
+.hbadge-warn { background:var(--c-warn-bg); color:var(--c-warn); border:1px solid rgba(240,132,50,.4); }
+.hbadge-ok   { background:var(--c-ok-bg);   color:var(--c-ok);   border:1px solid rgba(58,204,102,.4); }
+.hbadge-info { background:var(--c-info-bg);  color:var(--c-info); border:1px solid rgba(77,142,242,.4); }
+.hdr-controls { display:flex; gap:.5rem; align-items:center; }
+.hdr-btn { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.15);
+            color:rgba(255,255,255,.7); border-radius:var(--r-sm);
+            padding:.3em .75em; font-size:.79rem; cursor:pointer;
+            font-family:var(--font); transition:var(--trans);
+            display:flex; align-items:center; gap:.3em; }
+.hdr-btn:hover { background:rgba(255,255,255,.14); color:#fff; }
+.hdr-pills { max-width:1140px; margin:.55rem auto 0; padding:.5rem 1.25rem 0;
+              display:flex; gap:.45rem; flex-wrap:wrap;
+              border-top:1px solid rgba(255,255,255,.07); }
+.hpill { font-size:.72rem; background:rgba(255,255,255,.06);
+          border:1px solid rgba(255,255,255,.1); border-radius:5px;
+          padding:.12em .55em; display:flex; align-items:center; gap:.3em; }
+.hpill-label { color:rgba(255,255,255,.4); }
+.hpill-value { font-family:var(--mono); font-weight:600; color:rgba(255,255,255,.75); }
+.wrap { max-width:1140px; margin:0 auto; padding:1.5rem 1.25rem 5rem; }
+.scard { background:var(--bg2); border:1px solid var(--bdr); border-radius:var(--r);
+          margin-bottom:1.5rem; box-shadow:var(--shadow); overflow:hidden;
+          animation:fadeInUp .35s ease both; }
+.scard:nth-child(1) { animation-delay:.04s; }
+.scard:nth-child(2) { animation-delay:.08s; }
+.scard:nth-child(3) { animation-delay:.12s; }
+.scard:nth-child(4) { animation-delay:.16s; }
+.scard:nth-child(5) { animation-delay:.20s; }
+.scard:nth-child(6) { animation-delay:.24s; }
+.scard:nth-child(7) { animation-delay:.28s; }
+.scard:nth-child(8) { animation-delay:.32s; }
+.shdr { display:flex; align-items:center; gap:.6rem;
+         padding:.85rem 1.4rem; border-bottom:1px solid var(--bdr);
+         background:var(--bg3); }
+.shdr-icon { font-size:1.1rem; flex-shrink:0; }
+.shdr h2 { font-size:.97rem; font-weight:700; letter-spacing:.02em; flex:1; color:var(--text); }
+.shdr-badge { font-size:.69rem; font-weight:800; padding:.15em .55em;
+               border-radius:100px; letter-spacing:.04em; flex-shrink:0; }
+.sbadge-crit { background:var(--c-crit-bg); color:var(--c-crit); }
+.sbadge-warn { background:var(--c-warn-bg); color:var(--c-warn); }
+.sbadge-ok   { background:var(--c-ok-bg);   color:var(--c-ok); }
+.sbadge-info { background:var(--c-info-bg);  color:var(--c-info); }
+.sbody { padding:1.25rem 1.4rem; }
+.dim { color:var(--dim); }
+.hint { font-size:.85rem; color:var(--dim); }
+.assess { font-style:italic; color:var(--sub); font-size:.92rem; line-height:1.7;
+           padding:.7rem 1rem; border-left:3px solid var(--blue);
+           background:var(--c-info-bg); border-radius:0 var(--r-sm) var(--r-sm) 0;
+           margin-bottom:1.25rem; }
+.kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(185px,1fr));
+             gap:1rem; margin-bottom:1.25rem; }
+.kpi { border:1px solid var(--bdr); border-radius:var(--r); padding:1rem;
+        position:relative; overflow:hidden; transition:var(--trans); cursor:help; }
+.kpi:hover { transform:translateY(-2px); box-shadow:var(--shadow); }
+.kpi::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; }
+.kpi-ok   { background:var(--c-ok-bg); }   .kpi-ok::before   { background:var(--c-ok); }
+.kpi-warn { background:var(--c-warn-bg); }  .kpi-warn::before { background:var(--c-warn); }
+.kpi-crit { background:var(--c-crit-bg); }  .kpi-crit::before { background:var(--c-crit); }
+.kpi-info { background:var(--c-info-bg); }  .kpi-info::before { background:var(--c-info); }
+.kpi-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:.4rem; }
+.kpi-icon { font-size:1.25rem; }
+.kpi-status { font-size:.68rem; font-weight:800; padding:.14em .5em; border-radius:100px; }
+.kpi-ok   .kpi-status { background:rgba(58,204,102,.2);  color:var(--c-ok); }
+.kpi-warn .kpi-status { background:rgba(240,132,50,.2);  color:var(--c-warn); }
+.kpi-crit .kpi-status { background:rgba(232,64,64,.2);   color:var(--c-crit); }
+.kpi-info .kpi-status { background:rgba(77,142,242,.2);  color:var(--c-info); }
+.kpi-label { font-size:.69rem; text-transform:uppercase; letter-spacing:.1em; color:var(--dim); margin-bottom:.2rem; }
+.kpi-value { font-size:1.55rem; font-weight:800; line-height:1.1; font-family:var(--mono); margin-bottom:.15rem; }
+.kpi-ok   .kpi-value { color:var(--c-ok); }
+.kpi-warn .kpi-value { color:var(--c-warn); }
+.kpi-crit .kpi-value { color:var(--c-crit); }
+.kpi-info .kpi-value { color:var(--c-info); }
+.kpi-sub { font-size:.77rem; color:var(--dim); }
+.findings { list-style:none; margin-top:.85rem; border-top:1px solid var(--bdr); padding-top:.75rem; }
+.findings li { font-size:.87rem; color:var(--sub); padding:.28rem 0 .28rem 1.3rem;
+                position:relative; border-bottom:1px solid rgba(44,44,72,.3); }
+.findings li:last-child { border-bottom:none; }
+.findings li::before { content:'\26A0'; position:absolute; left:0; color:var(--c-warn); font-weight:700; }
+.r-card { border-left:4px solid; border-radius:0 var(--r) var(--r) 0;
+           background:var(--bg3); margin-bottom:.6rem; overflow:hidden;
+           transition:background .15s; }
+.r-card:hover { background:var(--bg4); }
+.r-hdr { display:flex; align-items:center; gap:.55rem; padding:.8rem 1rem;
+          cursor:pointer; user-select:none; }
+.r-priority-icon { font-size:.9rem; flex-shrink:0; }
+.r-badge { padding:.14em .55em; border-radius:4px; font-size:.69rem;
+            font-weight:800; letter-spacing:.06em; flex-shrink:0; }
+.r-cat { font-weight:600; font-size:.9rem; flex:1; color:var(--text); }
+.r-chev { color:var(--dim); font-size:.7rem; transition:transform .2s; flex-shrink:0; }
+.r-card.open .r-chev { transform:rotate(180deg); }
+.r-body { display:none; padding:.85rem 1rem 1rem; border-top:1px solid var(--bdr); }
+.r-card.open .r-body { display:block; }
+.r-issue { margin-bottom:.5rem; font-size:.9rem; }
+.r-suggest { font-size:.9rem; margin-bottom:.5rem; }
+.r-actions { padding-left:1.5rem; margin:.5rem 0; color:var(--sub); font-size:.87rem; }
+.r-actions li { margin-bottom:.22rem; }
+.r-impact { color:var(--c-ok); font-size:.84rem; margin-top:.65rem;
+             padding:.35rem .65rem; background:var(--c-ok-bg);
+             border-radius:var(--r-sm); display:inline-block; }
+.cmd-blk { margin-top:.85rem; }
+.tool-tag { color:var(--blue); font-weight:700; font-size:.83rem; }
+.cmd-desc { color:var(--dim); font-size:.81rem; margin-left:.4rem; }
+.cmd-row { display:flex; align-items:center; justify-content:space-between;
+            gap:.5rem; background:var(--bg); border:1px solid var(--bdr);
+            border-radius:var(--r-sm); padding:.55rem .85rem; margin-top:.35rem;
+            overflow-x:auto; }
+.cmd-row code { color:#a0e870; white-space:nowrap; font-size:.84rem; }
+.cp-btn { flex-shrink:0; background:var(--bg3); border:1px solid var(--bdr);
+           color:var(--dim); padding:.2em .6em; border-radius:4px;
+           cursor:pointer; font-size:.73rem; font-family:var(--font); transition:var(--trans); }
+.cp-btn:hover { color:var(--text); border-color:var(--blue); }
+.tbl-wrap { overflow-x:auto; }
+.dtable { width:100%; border-collapse:collapse; font-size:.85rem; }
+.dtable th { background:var(--bg3); color:var(--dim); font-weight:700; font-size:.76rem;
+              text-transform:uppercase; letter-spacing:.06em;
+              text-align:left; padding:.55rem .75rem; border-bottom:2px solid var(--bdr);
+              cursor:pointer; user-select:none; white-space:nowrap; transition:color .15s; }
+.dtable th:hover { color:var(--text); }
+.dtable td { padding:.5rem .75rem; border-bottom:1px solid rgba(44,44,72,.4); vertical-align:middle; }
+.dtable tr:last-child td { border-bottom:none; }
+.dtable tr:hover td { background:rgba(255,255,255,.02); }
+.kname { max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#tt {
+  position:fixed; z-index:9999; pointer-events:none; max-width:320px;
+  padding:.7rem 1rem; background:#0e0e1c; border:1px solid #3a3a5c;
+  border-radius:10px; box-shadow:0 10px 40px rgba(0,0,0,.7);
+  font-size:.8rem; line-height:1.65; color:#dde0f2;
+  opacity:0; transition:opacity .12s; white-space:normal;
+}
+#tt.show { opacity:1; }
+#tt strong { color:var(--blue); display:block; margin-bottom:.2rem; font-size:.85rem; }
+#tt code { font-size:.78rem; background:rgba(255,255,255,.08); padding:.05em .3em; border-radius:3px; }
+#tt em { color:var(--dim); font-size:.77rem; display:block; margin-top:.3rem; }
+[data-tip] { cursor:help; }
+.fab { position:fixed; bottom:1.5rem; right:1.5rem; width:46px; height:46px;
+        border-radius:50%; background:linear-gradient(135deg,var(--blue) 0%,var(--purple) 100%);
+        color:#fff; border:none; font-size:1.25rem; box-shadow:var(--shadow-lg);
+        cursor:pointer; display:flex; align-items:center; justify-content:center;
+        transition:var(--trans); z-index:200; opacity:0; pointer-events:none; }
+.fab.visible { opacity:1; pointer-events:all; }
+.fab:hover { transform:scale(1.1) translateY(-2px); }
+footer { border-top:1px solid var(--bdr); padding:1.25rem 1.25rem; max-width:1140px; margin:0 auto; }
+footer p { color:var(--dim); font-size:.77rem; text-align:center; }
+@keyframes fadeInUp {
+  from { opacity:0; transform:translateY(14px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+::-webkit-scrollbar { width:7px; height:7px; }
+::-webkit-scrollbar-track { background:var(--bg); }
+::-webkit-scrollbar-thumb { background:var(--bdr2); border-radius:4px; }
+::-webkit-scrollbar-thumb:hover { background:var(--dim); }
+@media (max-width:640px) {
+  .kpi-value { font-size:1.3rem; }
+  .hdr-subtitle { display:none; }
+}
+</style>
+</head>
+<body>
+
+<div id="tt"></div>
+
+<header class="hdr">
+  <div class="hdr-inner">
+    <div class="hdr-brand">
+      <span class="logo">ROC<em>pd</em></span>
+      <span class="hdr-subtitle">AI Profiling Plan</span>
+    </div>
+    <div class="hdr-badges">%%HEADER_BADGES%%</div>
+    <div class="hdr-controls">
+      <button class="hdr-btn" id="theme-btn" onclick="toggleTheme()">&#9728; Light</button>
+    </div>
+  </div>
+  <div class="hdr-pills">
+    <div class="hpill"><span class="hpill-label">Source:</span><span class="hpill-value" title="%%SRC_DIR%%">%%SRC_DISPLAY%%</span></div>
+    <div class="hpill"><span class="hpill-label">Kernels:</span><span class="hpill-value">%%KERNEL_COUNT%%</span></div>
+    <div class="hpill"><span class="hpill-label">Tier:</span><span class="hpill-value">0 (Source)</span></div>
+    <div class="hpill"><span class="hpill-label">Generated:</span><span class="hpill-value">%%ANALYSIS_DATE%%</span></div>
+    <div class="hpill"><span class="hpill-label">Model:</span><span class="hpill-value">%%PROG_MODEL%%</span></div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section class="scard">
+  <div class="shdr">
+    <span class="shdr-icon">&#128202;</span>
+    <h2>Overview</h2>
+    <span class="shdr-badge sbadge-info">Tier 0</span>
+  </div>
+  <div class="sbody">
+    <p class="assess">%%ASSESSMENT%%</p>
+    <div class="kpi-grid">
+      <div class="kpi kpi-info" data-tip='<strong>GPU Kernels Detected</strong>Number of GPU kernel functions found in the source directory by static analysis. Each __global__ (HIP/CUDA) or kernel (OpenCL) function is counted.'>
+        <div class="kpi-head"><span class="kpi-icon">&#128187;</span><span class="kpi-status">Detected</span></div>
+        <div class="kpi-label">GPU Kernels</div>
+        <div class="kpi-value">%%KERNEL_COUNT%%</div>
+        <div class="kpi-sub">%%FILES_SCANNED%% file(s) scanned</div>
+      </div>
+      <div class="kpi kpi-info" data-tip='<strong>Programming Model</strong>GPU programming model detected in source files. HIP is AMD&#39;s primary GPU programming interface, compatible with CUDA syntax.'>
+        <div class="kpi-head"><span class="kpi-icon">&#129520;</span><span class="kpi-status">Model</span></div>
+        <div class="kpi-label">Programming Model</div>
+        <div class="kpi-value" style="font-size:1.2rem">%%MODEL_UPPER%%</div>
+        <div class="kpi-sub">%%FILES_SCANNED%% files &bull; %%FILES_SKIPPED%% skipped</div>
+      </div>
+      <div class="kpi kpi-info" data-tip='<strong>Performance Patterns</strong>Anti-patterns and potential bottlenecks detected by static source analysis. Patterns are classified by severity (HIGH, MEDIUM, LOW).'>
+        <div class="kpi-head"><span class="kpi-icon">&#128202;</span><span class="kpi-status">Found</span></div>
+        <div class="kpi-label">Patterns Detected</div>
+        <div class="kpi-value">%%N_PATTERNS%%</div>
+        <div class="kpi-sub">potential issues identified</div>
+      </div>
+      <div class="kpi %%RISK_KPI_CLS%%" data-tip='<strong>Risk Areas</strong>High-level risk categories identified in the source code that may cause performance issues at runtime. Run profiling to confirm and quantify each risk.'>
+        <div class="kpi-head"><span class="kpi-icon">&#9888;</span><span class="kpi-status">%%RISK_KPI_LABEL%%</span></div>
+        <div class="kpi-label">Risk Areas</div>
+        <div class="kpi-value">%%N_RISKS%%</div>
+        <div class="kpi-sub">%%RISK_KPI_SUB%%</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="scard">
+  <div class="shdr">
+    <span class="shdr-icon">&#128161;</span>
+    <h2>Profiling Recommendations</h2>
+    %%RECS_BADGE%%
+  </div>
+  <div class="sbody">
+    %%RECS_HTML%%
+  </div>
+</section>
+
+%%KERNELS_SECTION%%
+%%PATTERNS_SECTION%%
+%%RISK_SECTION%%
+%%COUNTERS_SECTION%%
+%%START_HERE_SECTION%%
+%%LLM_SECTION%%
+
+</div>
+
+<footer>
+  <p>Generated by <strong>ROCInsight analyze</strong> (Tier 0) &mdash; AMD ROCm GPU Performance Analysis &bull; %%ANALYSIS_DATE%%</p>
+</footer>
+
+<button class="fab" id="fab-top" title="Back to top" onclick="window.scrollTo({top:0,behavior:'smooth'})">&#8679;</button>
+
+<script>
+var TIER0 = %%PAYLOAD%%;
+
+var htmlEl = document.documentElement;
+var themeBtn = document.getElementById('theme-btn');
+var _saved = localStorage.getItem('rocinsight-theme') || 'dark';
+if (_saved === 'light') { htmlEl.setAttribute('data-theme','light'); themeBtn.textContent = '\uD83C\uDF19 Dark'; }
+function toggleTheme() {
+  var isLight = htmlEl.getAttribute('data-theme') === 'light';
+  htmlEl.setAttribute('data-theme', isLight ? 'dark' : 'light');
+  themeBtn.textContent = isLight ? '\u2600 Light' : '\uD83C\uDF19 Dark';
+  localStorage.setItem('rocinsight-theme', isLight ? 'dark' : 'light');
+}
+
+var fabEl = document.getElementById('fab-top');
+window.addEventListener('scroll', function() {
+  if (window.scrollY > 250) { fabEl.classList.add('visible'); }
+  else { fabEl.classList.remove('visible'); }
+});
+
+function toggleR(hdr) {
+  hdr.closest('.r-card').classList.toggle('open');
+}
+document.querySelectorAll('.r-card[data-p="HIGH"]').forEach(function(c) {
+  c.classList.add('open');
+});
+
+function cpCmd(id) {
+  var el = document.getElementById(id);
+  var txt = el.querySelector('code').textContent;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(txt).then(function() {
+      var btn = el.querySelector('.cp-btn');
+      var orig = btn.textContent;
+      btn.textContent = '\u2713 Copied!';
+      btn.style.color = 'var(--c-ok)';
+      setTimeout(function() { btn.textContent = orig; btn.style.color = ''; }, 1600);
+    });
+  }
+}
+
+document.querySelectorAll('.sortable thead th').forEach(function(th) {
+  th.addEventListener('click', function() {
+    var tbl   = th.closest('table');
+    var tbody = tbl.querySelector('tbody');
+    var col   = Array.prototype.indexOf.call(th.parentElement.children, th);
+    var dir   = th.dataset.dir === '1' ? -1 : 1;
+    tbl.querySelectorAll('thead th').forEach(function(t) {
+      delete t.dataset.dir;
+      t.textContent = t.textContent.replace(/ [\u25b2\u25bc]$/, '');
+    });
+    th.dataset.dir = String(dir);
+    th.textContent += dir === 1 ? ' \u25b2' : ' \u25bc';
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b) {
+      var av = a.cells[col].dataset.v || a.cells[col].textContent.trim();
+      var bv = b.cells[col].dataset.v || b.cells[col].textContent.trim();
+      var an = parseFloat(av), bn = parseFloat(bv);
+      if (!isNaN(an) && !isNaN(bn)) return (an - bn) * dir;
+      return av < bv ? -dir : av > bv ? dir : 0;
+    });
+    rows.forEach(function(r) { tbody.appendChild(r); });
+  });
+});
+
+var ttEl = document.getElementById('tt');
+function showTip(e, c) {
+  ttEl.textContent = ''; ttEl.insertAdjacentHTML('afterbegin', c); ttEl.classList.add('show'); moveTip(e);
+}
+function moveTip(e) {
+  var x = e.clientX + 16, y = e.clientY - 12;
+  var w = ttEl.offsetWidth || 320;
+  if (x + w + 10 > window.innerWidth) { x = e.clientX - w - 14; }
+  if (y + ttEl.offsetHeight + 10 > window.innerHeight) { y = e.clientY - ttEl.offsetHeight - 10; }
+  ttEl.style.left = x + 'px'; ttEl.style.top = y + 'px';
+}
+function hideTip() { ttEl.classList.remove('show'); }
+document.querySelectorAll('[data-tip]').forEach(function(el) {
+  el.addEventListener('mouseenter', function(e) { showTip(e, el.dataset.tip); });
+  el.addEventListener('mousemove',  moveTip);
+  el.addEventListener('mouseleave', hideTip);
+});
+</script>
+</body>
+</html>

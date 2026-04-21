@@ -141,7 +141,7 @@ bool getPciBusId(int deviceCount, char** hipDeviceList) {
 /**
  * Scenario: Validate behavior of hipDeviceGetPCIBusId for masked devices.
  */
-TEST_CASE(Unit_hipDeviceGetPCIBusId_MaskedDevices) {
+HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_MaskedDevices) {
   int count = -1;
   constexpr int ReqGPUs = 2;
   bool ret;
@@ -152,7 +152,7 @@ TEST_CASE(Unit_hipDeviceGetPCIBusId_MaskedDevices) {
     ret = hipDeviceGetPCIBusIdTests::testWithMaskedDevices(count);
     REQUIRE(ret == true);
   } else {
-    SUCCEED("Not enough GPUs to run the masked GPU tests");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 
@@ -160,7 +160,7 @@ TEST_CASE(Unit_hipDeviceGetPCIBusId_MaskedDevices) {
  * hipDeviceGetPCIBusId vs lspci
  */
 
-TEST_CASE(Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci) {
+HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci) {
   auto are_devices_hidden = []() -> bool {
 #if HT_AMD
     auto env_res = std::getenv("HIP_VISIBLE_DEVICES");
@@ -198,7 +198,7 @@ TEST_CASE(Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci) {
     pclose(fpipe);
 
     if (lspciCheck == nullptr) {
-      WARN("Skipping test as lspci is not found in system");
+      HipTest::HIP_SKIP_TEST("lspci is not available on this system.");
       return;
     }
   }

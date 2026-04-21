@@ -61,13 +61,13 @@ Ensure ROCm is installed and follow the steps:
 
 2. Check the Python environment.
 
-.. code-block:: shell-session
+   .. code-block:: shell-session
 
-   python3 --version   # Requires Python 3.8+
+      python3 --version   # Requires Python 3.8+
 
 3. Check the installation dependencies.
 
-.. code-block:: shell-session
+   .. code-block:: shell-session
 
       pip install -r <ROCM_PATH>/libexec/rocprofiler-compute/requirements.txt
 
@@ -126,7 +126,10 @@ After profiling, the generated files can be found inside:
 
 For detailed information on all profiling options, refer to :doc:`../how-to/profile/mode`.
 
-During the profiling phase, roofline analysis also executes multiple iterations to collect the necessary performance data. For detailed information on roofline analysis, refer to :ref:`Standalone roofline <standalone-roofline>`.
+During the profiling phase, roofline microbenchmarks also run to collect
+hardware peak data (saved as ``roofline.csv``). To generate roofline HTML
+charts from this data, run ``rocprof-compute analyze`` on the output directory.
+For detailed information on roofline analysis, refer to :ref:`Standalone roofline <standalone-roofline>`.
 
 For more details and options, run:
 
@@ -139,12 +142,16 @@ Profiling examples
 
 Common use cases when profiling a workload are:
 
-Collect only roofline data for performance analysis
-++++++++++++++++++++++++++++++++++++++++++++++++++++
+Collect roofline data and generate HTML charts
+++++++++++++++++++++++++++++++++++++++++++++++++
+
+Profile mode collects roofline microbenchmark data (``roofline.csv``). To
+generate interactive HTML roofline charts, run analyze mode on the output:
 
 .. code-block:: shell-session
 
     $ rocprof-compute profile --name vcopy --roof-only -- ./vcopy -n 1048576 -b 256
+    $ rocprof-compute analyze -p workloads/vcopy/MI200/ --roofline-data-type FP32
 
 
 Collect the counters to compute the metric for compute throughput utilization, skipping roofline
@@ -153,7 +160,7 @@ Collect the counters to compute the metric for compute throughput utilization, s
 
     $ rocprof-compute profile --name vcopy --set compute_thruput_util --no-roof -- ./vcopy -n 1048576 -b 256
 
-List the available blocks/metrics for profiling 
+List the available blocks/metrics for profiling
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 The blocks/metrics are listed by page, because the list is long. Note the index for each section.

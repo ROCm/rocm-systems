@@ -8,10 +8,12 @@ Handles test execution, build processes, and result tracking
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import time
 import datetime
+import copy
 from enum import IntEnum, Enum
 from pathlib import Path
 
@@ -39,6 +41,17 @@ class TestExecutor:
     Executes tests and manages build/test workflows
     """
 
+    MPI_IMPL_CONFIG = {
+        "openmpi": {
+            "env_format": "-x {key}='{value}'",
+            "default_args": "--mca btl ^vader,openib --mca pml ucx --bind-to none",
+        },
+        "mpich": {
+            "env_format": "-env {key} '{value}'",
+            "default_args": "-bind-to none",
+        },
+    }
+
     def __init__(self, config_processor, args):
         """
         Initialize TestExecutor
@@ -51,7 +64,17 @@ class TestExecutor:
         self.args = args
         self.system_config = config_processor.get_system_config()
         self.paths = config_processor.get_paths()
-        self.global_env = config_processor.get_env_variables()
+        self.global_env = dict(config_processor.get_env_variables())
+
+        # Merge system-specific env overrides if --system is specified
+        system = getattr(args, 'system', '') or ''
+        if system:
+            system_env = config_processor.config.get("system_env_variables", {})
+            if isinstance(system_env, dict) and system in system_env:
+                self.global_env.update(system_env[system])
+            elif system_env and system not in system_env:
+                available = list(system_env.keys()) if isinstance(system_env, dict) else []
+                print(f"WARNING: No system_env_variables for '{system}'. Available: {available}")
         self.build_config = config_processor.get_build_config()
 
         # Setup directories
@@ -61,11 +84,24 @@ class TestExecutor:
         self._mpi_hostfile = None
         self._mpi_hostfile_detected = False
 
+        # MPI implementation: openmpi (default) or mpich (via --mpich flag)
+        self.mpi_impl = "mpich" if getattr(args, 'mpich', False) else "openmpi"
+        self.mpi_config = self.MPI_IMPL_CONFIG[self.mpi_impl]
+
+        # Detect MPI hosts: auto-detect from SLURM if "auto_detect_hosts" is true in config, otherwise use hostfile
+        self.mpi_hosts = self._detect_mpi_hosts()
+
         # Test tracking
         self.test_results = []
         self.test_names = []
         self.test_durations = []
         self.test_suites = []
+
+        # Rerun tracking
+        self.failed_test_info = []  # Store info needed to rerun failed tests
+        self.rerun_results = []
+        self.rerun_names = []
+        self.rerun_durations = []
 
     def setup_directories(self):
         """Setup build and log directories"""
@@ -154,6 +190,39 @@ class TestExecutor:
             print("No MPI hostfile found (checked RCCL_TEST_MPI_HOSTFILE env var and ~/.mpi_hostfile)")
         return None
 
+    def _detect_mpi_hosts(self):
+        """
+        Detect MPI host list once during initialization.
+
+        If "auto_detect_hosts" is true in the system profile (or top-level config)
+        and a SLURM allocation is active, uses scontrol to get the host list.
+        Otherwise falls back to the hostfile detected by mpi_hostfile property.
+
+        Returns:
+            dict with 'host_list', 'hostfile', or empty dict
+        """
+        system = getattr(self.args, 'system', '') or ''
+        auto_detect = self.config_processor.config.get("auto_detect_hosts", False)
+
+        if auto_detect and os.environ.get('SLURM_JOB_ID'):
+            try:
+                result = subprocess.run(
+                    ['scontrol', 'show', 'hostnames'],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    hosts = ','.join(result.stdout.strip().split('\n'))
+                    print(f"Using SLURM hosts: {hosts}")
+                    return {'host_list': hosts}
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+
+        hostfile = self.mpi_hostfile
+        if hostfile:
+            return {'hostfile': hostfile}
+
+        return {}
+
     def check_environment(self):
         """
         Check that required environment and tools are available
@@ -168,13 +237,16 @@ class TestExecutor:
         if not os.path.isdir(rocm_path):
             errors.append(f"ROCm not found at {rocm_path}")
 
-        # Check MPI
-        mpi_path = self.paths.get("mpi_path")
-        if mpi_path:
-            if not os.path.isdir(mpi_path):
-                print(f"WARNING: MPI path not found: {mpi_path}")
-            elif not os.path.isfile(os.path.join(mpi_path, "bin", "mpirun")):
-                print(f"WARNING: mpirun not found in {mpi_path}/bin/")
+        # Check MPI (unless --skip-mpi-check is set)
+        if not self.args.skip_mpi_check:
+            mpi_path = self.paths.get("mpi_path")
+            if mpi_path:
+                if not os.path.isdir(mpi_path):
+                    print(f"WARNING: MPI path not found: {mpi_path}")
+                elif not os.path.isfile(os.path.join(mpi_path, "bin", "mpirun")):
+                    print(f"WARNING: mpirun not found in {mpi_path}/bin/")
+        elif self.args.verbose:
+            print("SKIP: MPI check skipped (--skip-mpi-check)")
 
         # Check RCCL library (if not building or using custom lib)
         if self.args.no_build or self.using_custom_lib:
@@ -226,14 +298,24 @@ class TestExecutor:
         rocm_path = self.paths.get("rocm_path", "/opt/rocm")
         mpi_path = self.paths.get("mpi_path", "")
 
-        install_flags = self.build_config.get("install_flags", [])
+        install_flags = list(self.build_config.get("install_flags", []))
         cmake_options = self.build_config.get("cmake_options", "")
         build_env_vars = self.build_config.get("env_variables", {})
         parallel_jobs = self.build_config.get("parallel_jobs")
 
+        if self.args.skip_mpi_check:
+            if "--enable-mpi-tests" in install_flags:
+                install_flags.remove("--enable-mpi-tests")
+            # Explicitly disable to override any cached CMake value from prior builds
+            if cmake_options:
+                cmake_options += " -DENABLE_MPI_TESTS=OFF"
+            else:
+                cmake_options = "-DENABLE_MPI_TESTS=OFF"
+            print("NOTE: MPI tests disabled in build (--skip-mpi-check)")
+
         # Build install.sh command
         install_script = os.path.join(workdir, "install.sh")
-        cmd = [install_script] + list(install_flags)
+        cmd = [install_script] + install_flags
 
         if parallel_jobs:
             cmd.extend(["-j", str(parallel_jobs)])
@@ -413,6 +495,14 @@ class TestExecutor:
             print(f"  Binary path: {test_binary_path}")
 
         if not os.path.isfile(test_binary_path):
+            if num_ranks > 1:
+                print(f"SKIP: MPI test binary not found: {test_binary_path} (build may not have --enable-mpi-tests)")
+                return {
+                    "name": test_name,
+                    "result": TestResult.RESULT_SKIPPED.value,
+                    "duration": 0,
+                    "error": f"MPI binary not found: {test_binary_path}"
+                }
             print(f"ERROR: Test binary not found: {test_binary_path}")
             return {
                 "name": test_name,
@@ -420,6 +510,21 @@ class TestExecutor:
                 "duration": 0,
                 "error": f"Binary not found: {test_binary_path}"
             }
+
+        # For MPI tests, verify mpirun is available
+        if num_ranks > 1:
+            mpi_path = self.paths.get("mpi_path", "")
+            mpirun = os.path.join(mpi_path, "bin", "mpirun") if mpi_path else shutil.which("mpirun")
+            if mpi_path and not os.path.isfile(os.path.join(mpi_path, "bin", "mpirun")):
+                mpirun = None
+            if not mpirun:
+                print(f"SKIP: mpirun not found, cannot run MPI test '{test_name}'")
+                return {
+                    "name": test_name,
+                    "result": TestResult.RESULT_SKIPPED.value,
+                    "duration": 0,
+                    "error": "mpirun not available"
+                }
 
         # Setup environment
         env = os.environ.copy()
@@ -468,43 +573,64 @@ class TestExecutor:
             mpi_path = self.paths.get("mpi_path", "")
             mpi_cmd = f"{mpi_path}/bin/mpirun" if mpi_path else "mpirun"
 
-            # Use cached hostfile detected during initialization
-            hostfile = self.mpi_hostfile
+            # Allow running as root (common in Docker containers)
+            if os.getuid() == 0:
+                mpi_cmd += " --allow-run-as-root"
 
-            # Warn if multi-node test without hostfile
-            if hostfile is None and num_nodes > 1:
-                print("WARNING: Multi-node test without hostfile")
-
-            hostfile_arg = f"--hostfile {hostfile} " if hostfile else ""
-
-            # Determine mapping strategy based on num_gpus and num_nodes
-            # Use PPR (processes per resource) to place num_gpus ranks per node
-            # This ignores the slots specification in the hostfile
-            if num_nodes > 1:
-                # Multi-node test: use ppr to control ranks per node
-                map_by_arg = f"--map-by ppr:{num_gpus}:node "
-            else:
-                # Single node: use default mapping (no need for ppr)
+            # Use cached host detection from initialization
+            if 'host_list' in self.mpi_hosts:
+                # SLURM mode: use --host with slot counts instead of --map-by ppr
+                # Repeat each host num_gpus times to place that many ranks per node
+                hosts = self.mpi_hosts['host_list'].split(',')
+                expanded = ','.join(f"{h}:{num_gpus}" for h in hosts)
+                host_arg = f"--host {expanded} "
                 map_by_arg = ""
+            elif 'hostfile' in self.mpi_hosts:
+                host_arg = f"--hostfile {self.mpi_hosts['hostfile']} "
+                # Use PPR to control ranks per node with hostfile
+                map_by_arg = f"--map-by ppr:{num_gpus}:node " if num_nodes > 1 else ""
+            else:
+                if num_nodes > 1:
+                    print("WARNING: Multi-node test without hostfile or SLURM allocation")
+                host_arg = ""
+                map_by_arg = ""
+
+            # MCA params priority: --system profile lookup > test-level "mpi_args" string > default
+            default_mca = self.mpi_config["default_args"]
+            system = getattr(self.args, 'system', '') or ''
+            mpi_args_config = self.config_processor.config.get("mpi_args", {})
+
+            if system:
+                if isinstance(mpi_args_config, dict) and system in mpi_args_config:
+                    mca_params = mpi_args_config[system]
+                else:
+                    mca_params = default_mca
+            elif isinstance(mpi_args_config, str) and mpi_args_config:
+                mca_params = mpi_args_config
+            else:
+                config_mpi_args = test_config.get("mpi_args", "")
+                mca_params = config_mpi_args if config_mpi_args else default_mca
 
             mpi_args = (
                 f"-np {num_ranks} "
-                f"{hostfile_arg}"
+                f"{host_arg}"
                 f"{map_by_arg}"
-                f"--mca btl ^vader,openib "
-                f"--mca pml ucx "
-                f"--bind-to none"
+                f"{mca_params}"
             )
 
-            # Add environment variables for MPI
+            # Add environment variables for MPI (quote values to handle shell metacharacters like ;)
+            env_fmt = self.mpi_config["env_format"]
             for key, value in merged_env.items():
-                mpi_args += f" -x {key}={value}"
+                mpi_args += " " + env_fmt.format(key=key, value=value)
 
-            # Pass the LD_LIBRARY_PATH
-            mpi_args += f" -x LD_LIBRARY_PATH={env['LD_LIBRARY_PATH']}"
+            mpi_args += " " + env_fmt.format(key="LD_LIBRARY_PATH", value=env['LD_LIBRARY_PATH'])
+            mpi_args += " " + env_fmt.format(key="LLVM_PROFILE_FILE", value="rccl_tests_%p_%m.profraw")
 
-            # Pass LLVM_PROFILE_FILE to MPI ranks for code coverage (prevents default.profraw collision)
-            mpi_args += f" -x LLVM_PROFILE_FILE=rccl_tests_%p_%m.profraw"
+            # Forward LD_PRELOAD so UCX core libraries are preloaded with
+            # global visibility on remote ranks (required for UCX PML)
+            ld_preload = os.environ.get("LD_PRELOAD", "")
+            if ld_preload:
+                mpi_args += " " + env_fmt.format(key="LD_PRELOAD", value=ld_preload)
 
             # Build test command based on type
             if is_gtest:
@@ -612,11 +738,27 @@ class TestExecutor:
 
         results = []
         skipped_count = 0
+        should_stop = False  # Track if we should stop due to rerun failure
+
         for test in tests:
+            # Check if we should stop due to previous rerun failure
+            if should_stop:
+                if self.args.verbose:
+                    print(f"\nStopping test suite execution due to rerun failure (--stop-on-rerun-failure)")
+                break
+
             # Filter by test name if specified
             test_name = test.get("name")
             if self.args.test_name and test_name != self.args.test_name:
                 skipped_count += 1
+                continue
+
+            # Skip MPI tests when --skip-mpi-check is set
+            test_ranks = test.get("num_ranks", suite_config.get("num_ranks", 1))
+            if self.args.skip_mpi_check and test_ranks > 1:
+                skipped_count += 1
+                if self.args.verbose:
+                    print(f"  SKIP: '{test_name}' requires {test_ranks} ranks (--skip-mpi-check)")
                 continue
 
             result = self.run_test(test, suite_config)
@@ -627,10 +769,86 @@ class TestExecutor:
             self.test_durations.append(result["duration"])
             self.test_suites.append(suite_name)
 
+            # If test failed and rerun flag is set, rerun immediately
+            if self.args.rerun_failed and result["result"] in [TestResult.RESULT_FAILED.value, TestResult.RESULT_TIMEOUT.value]:
+                # Get rerun_env_variables from suite config or test config
+                rerun_env = suite_config.get("rerun_env_variables", {})
+                test_rerun_env = test.get("rerun_env_variables", {})
+
+                # Merge rerun environments (test-level overrides suite-level)
+                merged_rerun_env = {**rerun_env, **test_rerun_env}
+
+                if merged_rerun_env:
+                    print(f"\n{'='*80}")
+                    print(f"RERUNNING FAILED TEST IMMEDIATELY")
+                    print(f"{'='*80}")
+
+                    # Create a modified test config with merged environment variables
+                    rerun_test_config = copy.deepcopy(test)
+
+                    # Merge original env_variables with rerun_env_variables
+                    original_env = test.get("env_variables", {})
+                    rerun_test_config["env_variables"] = {**original_env, **merged_rerun_env}
+
+                    print(f"\nRerunning test: {test_name}")
+                    print(f"  Original result: {result['result']}")
+                    print(f"  Additional env variables:")
+                    for key, value in merged_rerun_env.items():
+                        print(f"    {key}={value}")
+                    if self.args.verbose:
+                        print(f"  Final merged env_variables for rerun:")
+                        for key, value in rerun_test_config["env_variables"].items():
+                            print(f"    {key}={value}")
+
+                    # Run the test with merged environment
+                    rerun_result = self.run_test(rerun_test_config, suite_config)
+
+                    # Track rerun results
+                    self.rerun_names.append(test_name)
+                    self.rerun_results.append(rerun_result["result"])
+                    self.rerun_durations.append(rerun_result["duration"])
+
+                    print(f"  Rerun result: {rerun_result['result']}")
+                    if "exit_code" in rerun_result:
+                        print(f"  Rerun exit code: {rerun_result['exit_code']}")
+                    print(f"{'='*80}\n")
+
+                    # Check if rerun also failed and we should stop
+                    if self.args.stop_on_rerun_failure and rerun_result["result"] in [TestResult.RESULT_FAILED.value, TestResult.RESULT_TIMEOUT.value]:
+                        print(f"\nERROR: Rerun failed for test '{test_name}'")
+                        print(f"Stopping test execution (--stop-on-rerun-failure)")
+                        should_stop = True
+                    # Otherwise continue to next test regardless of rerun result
+                else:
+                    if self.args.verbose:
+                        print(f"SKIP: No rerun_env_variables defined for failed test '{test_name}'")
+
         if self.args.verbose and skipped_count > 0:
-            print(f"  Skipped {skipped_count} test(s) due to --test-name filter")
+            print(f"  Skipped {skipped_count} test(s) due to filters")
 
         return results
+
+    def _format_duration(self, seconds):
+        """
+        Format duration in a human-readable format
+
+        Args:
+            seconds: Duration in seconds
+
+        Returns:
+            str: Formatted duration string
+        """
+        if seconds < 60:
+            return f"{seconds:.2f} seconds"
+        elif seconds < 3600:
+            minutes = int(seconds // 60)
+            secs = seconds % 60
+            return f"{minutes} min {secs:.2f} sec"
+        else:
+            hours = int(seconds // 3600)
+            minutes = int((seconds % 3600) // 60)
+            secs = seconds % 60
+            return f"{hours} hr {minutes} min {secs:.2f} sec"
 
     def print_summary(self):
         """Print test execution summary"""
@@ -638,6 +856,10 @@ class TestExecutor:
         passed = self.test_results.count(TestResult.RESULT_PASSED.value)
         failed = self.test_results.count(TestResult.RESULT_FAILED.value)
         timeout = self.test_results.count(TestResult.RESULT_TIMEOUT.value)
+        skipped = self.test_results.count(TestResult.RESULT_SKIPPED.value)
+
+        # Calculate total test time
+        total_time_seconds = sum(self.test_durations) if self.test_durations else 0
 
         # Get unique test suites that were run
         unique_suites = sorted(set(self.test_suites)) if self.test_suites else []
@@ -659,6 +881,35 @@ class TestExecutor:
             print(f"Passed:        {passed}")
             print(f"Failed:        {failed}")
             print(f"Timeout:       {timeout}")
+            if skipped > 0:
+                print(f"Skipped:       {skipped}")
+            print(f"Total Time:    {self._format_duration(total_time_seconds)}")
+            print("="*120)
+
+        # Print rerun results if any
+        if self.rerun_results:
+            total_reruns = len(self.rerun_results)
+            rerun_passed = self.rerun_results.count(TestResult.RESULT_PASSED.value)
+            rerun_failed = self.rerun_results.count(TestResult.RESULT_FAILED.value)
+            rerun_timeout = self.rerun_results.count(TestResult.RESULT_TIMEOUT.value)
+            rerun_time_seconds = sum(self.rerun_durations) if self.rerun_durations else 0
+
+            print("\nRerun Results (with additional environment variables):")
+            print("-"*120)
+            print(f"{'Test Name':<60} {'Result':<10} {'Duration'}")
+            print("-"*120)
+            for i in range(total_reruns):
+                print(
+                    f"{self.rerun_names[i]:<60} "
+                    f"{self.rerun_results[i]:<10} "
+                    f"{self.rerun_durations[i]:.3f} seconds"
+                )
+            print("-"*120)
+            print(f"Total Reruns:  {total_reruns}")
+            print(f"Passed:        {rerun_passed}")
+            print(f"Failed:        {rerun_failed}")
+            print(f"Timeout:       {rerun_timeout}")
+            print(f"Total Time:    {self._format_duration(rerun_time_seconds)}")
             print("="*120)
 
     def generate_coverage_report(self):

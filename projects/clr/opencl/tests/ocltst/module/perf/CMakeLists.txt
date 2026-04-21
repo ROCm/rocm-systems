@@ -99,14 +99,7 @@ target_include_directories(oclperf
     PRIVATE
         $<TARGET_PROPERTY:Common,INTERFACE_INCLUDE_DIRECTORIES>)
 
-if(TARGET OpenCL)
-  target_link_libraries(oclperf PRIVATE OpenCL)
-else()
-  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../../../cmake")
-  find_package(AMD_ICD)
-  find_library(AMD_ICD_LIBRARY OpenCL HINTS "${AMD_ICD_LIBRARY_DIR}")
-  target_link_libraries(oclperf PRIVATE ${AMD_ICD_LIBRARY})
-endif()
+target_link_libraries(oclperf PRIVATE ${OPENCL_ICD_LIB})
 if (NOT WIN32)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
   find_package(Threads REQUIRED)
@@ -143,4 +136,3 @@ endforeach()
 
 INSTALL(TARGETS oclperf DESTINATION ${OCLTST_INSTALL_DIR} COMPONENT ocltst)
 INSTALL(FILES oclperf.exclude DESTINATION ${OCLTST_INSTALL_DIR} COMPONENT ocltst)
-

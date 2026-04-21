@@ -1,6 +1,8 @@
-# Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 ROCM_PATH ?= /opt/rocm
 HIPCC = $(ROCM_PATH)/bin/hipcc
+HIPIFY_PL_EXE ?= $(ROCM_PATH)/bin/hipify-perl
+HIPIFY_PL_FLAGS = -inplace -quiet-warnings
 
 # Detect ROCm version using CMake (reads from rocm-core package or .info/version file)
 ROCM_VERSION_STRING := $(shell cmake -DROCM_PATH='$(ROCM_PATH)' -P get_rocm_version.cmake 2>&1 | tail -1)
@@ -15,11 +17,35 @@ ROCM_VERSION := $(shell echo $$((10000 * $(ROCM_MAJOR) + 100 * $(ROCM_MINOR) + $
 .DEFAULT_GOAL := all
 
 EXE = topo_expl
-CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION) -Wl,--gc-sections -fgpu-rdc -Iinclude -Ihipify_rccl/include -Ihipify_rccl/include/plugin -Ihipify_rccl/src/device/include  -Ihipify_rccl/graph -I/opt/rocm/include/ -DTOPO_EXPL -DENABLE_TRACE -DENABLE_LL128 -DNVTX_NO_IMPL -DRCCL_EXPOSE_STATIC -lpthread
 
-files = $(EXE).cpp model.cpp utils.cpp stubs.cc hipify_rccl/graph/topo.cc hipify_rccl/graph/rings.cc hipify_rccl/graph/paths.cc hipify_rccl/graph/trees.cc ../../src/misc/param.cc \
-	hipify_rccl/graph/search.cc hipify_rccl/graph/connect.cc hipify_rccl/graph/tuning.cc hipify_rccl/graph/xml.cc ../../src/misc/nvmlwrap_stub.cc hipify_rccl/graph/rome_models.cc hipify_rccl/graph/archinfo.cc \
-	hipify_rccl/collectives.cc hipify_rccl/register.cc hipify_rccl/enqueue.cc ../../src/rccl_wrap.cc
+CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION) \
+           -std=c++17 \
+           -Wl,--gc-sections -fgpu-rdc \
+           -Iinclude -Itest -Ihipify_rccl/include -Ihipify_rccl/include/plugin \
+           -Ihipify_rccl/src/device/include -Ihipify_rccl/graph -I/opt/rocm/include/ \
+           -DTOPO_EXPL -DENABLE_TRACE -DENABLE_LL128 -DNVTX_NO_IMPL -DRCCL_EXPOSE_STATIC \
+           -lpthread
+
+TOPO_EXPL_FILES = src/$(EXE).cpp src/topo_expl_api.cpp src/model.cpp src/topo_expl_impl.cpp src/utils.cpp src/stubs.cc test/topo_expl_tests.cpp
+
+RCCL_FILES = hipify_rccl/graph/topo.cc \
+			hipify_rccl/graph/rings.cc \
+			hipify_rccl/graph/paths.cc \
+			hipify_rccl/graph/trees.cc \
+			hipify_rccl/graph/search.cc \
+			hipify_rccl/graph/connect.cc \
+			hipify_rccl/graph/tuning.cc \
+			hipify_rccl/graph/xml.cc \
+			hipify_rccl/graph/rome_models.cc \
+			hipify_rccl/graph/archinfo.cc \
+			../../src/misc/param.cc \
+			../../src/misc/nvmlwrap_stub.cc \
+			../../src/rccl_wrap.cc \
+			hipify_rccl/collectives.cc \
+			hipify_rccl/register.cc \
+			hipify_rccl/enqueue.cc
+
+files = $(TOPO_EXPL_FILES) $(RCCL_FILES)
 
 FMT_DIR     := third_party/fmt
 FMT_INCLUDE := $(FMT_DIR)/include
@@ -44,9 +70,6 @@ $(FMT_HEADER):
 else
 $(FMT_HEADER):
 endif
-# ---------------------------------------------------------------------------
-
-
 
 all: $(FMT_HEADER) hipify $(EXE)
 	@echo "Built with ROCm version: $(ROCM_MAJOR).$(ROCM_MINOR).$(ROCM_PATCH) (ROCM_VERSION=$(ROCM_VERSION))"
@@ -70,20 +93,22 @@ hipify:
 	cp -a ../../src/collectives.cc hipify_rccl/
 	cp -a ../../src/misc/archinfo.cc hipify_rccl/graph/
 	# Hipify all header and source files (CUDA -> HIP)
-	hipify-perl -inplace -quiet-warnings hipify_rccl/include/*.h
-	hipify-perl -inplace -quiet-warnings hipify_rccl/include/latency_profiler/*.h
-	hipify-perl -inplace -quiet-warnings hipify_rccl/include/plugin/*.h
-	hipify-perl -inplace -quiet-warnings hipify_rccl/include/latency_profiler/*.h
-	hipify-perl -inplace -quiet-warnings hipify_rccl/src/device/include/*.h
+	@echo ">>> Hipifying RCCL header files..."
+	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/include/*.h
+	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/include/latency_profiler/*.h
+	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/include/plugin/*.h
+	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/src/device/include/*.h
 	# PATCH 1: Fix device includes - remove "device/" prefix since files are in same directory
 	sed -i 's|#include "device/|#include "|g' hipify_rccl/src/device/include/*.h
 	sed -i 's|#include "device/|#include "|g' hipify_rccl/include/*.h
+	sed -i 's|#include "device/|#include "|g' hipify_rccl/*.cc
 	# PATCH 2: Use NVTX stubs - topo_expl doesn't need full NVTX implementation
 	cp hipify_rccl/include/nvtx_stub.h hipify_rccl/include/nvtx.h
 	bash ../../cmake/scripts/add_unroll.sh "hipify_rccl/src/device/include/common.h"
-	hipify-perl -inplace -quiet-warnings hipify_rccl/graph/*
-	hipify-perl -inplace -quiet-warnings hipify_rccl/include/network/unpack/*
-	hipify-perl -inplace -quiet-warnings hipify_rccl/*.cc
+	@echo ">>> Hipifying RCCL source files..."
+	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/graph/*
+	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/include/network/unpack/*
+	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/*.cc
 	# PATCH 3: Generate *_tmp.h files - these are build-time generated headers in rccl
 	cp hipify_rccl/include/nccl_device/core.h hipify_rccl/include/nccl_device/core_tmp.h
 	cp hipify_rccl/include/nccl_device/comm.h hipify_rccl/include/nccl_device/comm_tmp.h
@@ -92,7 +117,12 @@ hipify:
 	echo 'inline void initNvtxRegisteredEnums() {}' >> hipify_rccl/include/nvtx.h
 	# PATCH 5: Add nccl_tuner.h include to get NCCL_NUM_ALGORITHMS and NCCL_NUM_PROTOCOLS macros
 	sed -i '/#include "core.h"/a #include "plugin/nccl_tuner.h"' hipify_rccl/include/rccl_common.h
+	# PATCH 6: Guard RCCL_EXPOSE_STATIC so -DRCCL_EXPOSE_STATIC from CXXFLAGS does not trigger redefinition warning
+	sed -i 's|^#define RCCL_EXPOSE_STATIC \(.*\)|#ifndef RCCL_EXPOSE_STATIC\n#define RCCL_EXPOSE_STATIC \1\n#endif|' hipify_rccl/include/rccl_vars.h
+	@echo ">>> Hipify complete."
 
 clean:
 	rm -rf hipify_rccl third_party include/nccl.h
 	rm -f *.o $(EXE)
+
+.PHONY: all clean hipify

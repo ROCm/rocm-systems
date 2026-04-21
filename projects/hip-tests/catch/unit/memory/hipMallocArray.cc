@@ -16,6 +16,7 @@ hipMallocArray API test scenarios
 #include <hip_array_common.hh>
 #include <limits>
 #include <numeric>
+#include <string>
 #include "hipArrayCommon.hh"
 
 static constexpr size_t NUM_W{4};
@@ -55,7 +56,7 @@ static void MallocArray_DiffSizes(int gpu) {
   }
 }
 
-TEST_CASE(Unit_hipMallocArray_DiffSizes) {
+HIP_TEST_CASE(Unit_hipMallocArray_DiffSizes) {
   CHECK_IMAGE_SUPPORT
 
   MallocArray_DiffSizes(0);
@@ -67,7 +68,7 @@ This testcase verifies the hipMallocArray API in multithreaded
 scenario by launching threads in parallel on multiple GPUs
 and verifies the hipMallocArray API with small and big chunks data
 */
-TEST_CASE(Unit_hipMallocArray_MultiThread) {
+HIP_TEST_CASE(Unit_hipMallocArray_MultiThread) {
   CHECK_IMAGE_SUPPORT
 
   std::vector<std::thread> threadlist;
@@ -363,7 +364,7 @@ void testArrayAsSurface(hipArray_t arrayPtr, const size_t width, const size_t he
 
 // The happy path of a default array and a SurfaceLoadStore array should work
 // Selection of types chosen to reduce compile times
-TEMPLATE_TEST_CASE(Unit_hipMallocArray_happy, uint, int, int4, ushort, short2, char, uchar2,
+HIP_TEMPLATE_TEST_CASE(Unit_hipMallocArray_happy, uint, int, int4, ushort, short2, char, uchar2,
                    char4, float, float2, float4) {
   CHECK_IMAGE_SUPPORT
 
@@ -405,10 +406,12 @@ TEMPLATE_TEST_CASE(Unit_hipMallocArray_happy, uint, int, int4, ushort, short2, c
       HIP_CHECK(hipMallocArray(&arrayPtr, &desc, width, height, hipArrayTextureGather));
       testArrayAsTextureWithGather<TestType>(arrayPtr, width, height);
     } else {
-      SUCCEED(
+      std::string const skip_msg = std::string(
           "tex2Dgather is not supported for gfx90a, Hence"
-          "skipping the testcase for this device "
-          << device);
+          "skipping the testcase for this device ") +
+          std::to_string(device);
+      WARN(skip_msg.c_str());
+      return;
     }
   }
 #endif
@@ -418,7 +421,7 @@ TEMPLATE_TEST_CASE(Unit_hipMallocArray_happy, uint, int, int4, ushort, short2, c
 
 // Arrays can be up to the size of maxTexture* but no bigger
 // EXSWCPHIPT-71 - no equivalent value for maxSurface and maxTexture2DGather.
-TEMPLATE_TEST_CASE(Unit_hipMallocArray_MaxTexture_Default, uint, int4, ushort, short2, char,
+HIP_TEMPLATE_TEST_CASE(Unit_hipMallocArray_MaxTexture_Default, uint, int4, ushort, short2, char,
                    char4, float2, float4) {
   CHECK_IMAGE_SUPPORT
 
@@ -478,7 +481,7 @@ TEMPLATE_TEST_CASE(Unit_hipMallocArray_MaxTexture_Default, uint, int4, ushort, s
 
 
 // Arrays with channels of different size are not allowed.
-TEST_CASE(Unit_hipMallocArray_Negative_DifferentChannelSizes) {
+HIP_TEST_CASE(Unit_hipMallocArray_Negative_DifferentChannelSizes) {
   CHECK_IMAGE_SUPPORT
 
   const int bitsX = GENERATE(8, 16, 32);
@@ -519,7 +522,7 @@ TEST_CASE(Unit_hipMallocArray_Negative_DifferentChannelSizes) {
 }
 
 // Zero-width array is not supported
-TEST_CASE(Unit_hipMallocArray_Negative_ZeroWidth) {
+HIP_TEST_CASE(Unit_hipMallocArray_Negative_ZeroWidth) {
   CHECK_IMAGE_SUPPORT
 
   hipChannelFormatDesc desc = hipCreateChannelDesc<float4>();
@@ -535,7 +538,7 @@ TEST_CASE(Unit_hipMallocArray_Negative_ZeroWidth) {
 }
 
 // Providing the array pointer as nullptr should return an error
-TEST_CASE(Unit_hipMallocArray_Negative_NullArrayPtr) {
+HIP_TEST_CASE(Unit_hipMallocArray_Negative_NullArrayPtr) {
   CHECK_IMAGE_SUPPORT
 
   hipChannelFormatDesc desc = hipCreateChannelDesc<float4>();
@@ -544,7 +547,7 @@ TEST_CASE(Unit_hipMallocArray_Negative_NullArrayPtr) {
 }
 
 // Providing the desc pointer as nullptr should return an error
-TEST_CASE(Unit_hipMallocArray_Negative_NullDescPtr) {
+HIP_TEST_CASE(Unit_hipMallocArray_Negative_NullDescPtr) {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t arrayPtr;
@@ -553,7 +556,7 @@ TEST_CASE(Unit_hipMallocArray_Negative_NullDescPtr) {
 }
 
 // Inappropriate but related flags should still return an error
-TEST_CASE(Unit_hipMallocArray_Negative_BadFlags) {
+HIP_TEST_CASE(Unit_hipMallocArray_Negative_BadFlags) {
   CHECK_IMAGE_SUPPORT
 
   hipChannelFormatDesc desc = hipCreateChannelDesc<float4>();
@@ -581,7 +584,7 @@ TEST_CASE(Unit_hipMallocArray_Negative_BadFlags) {
 }
 
 // 8-bit float channels are not supported
-TEMPLATE_TEST_CASE(Unit_hipMallocArray_Negative_8bitFloat, float, float2, float4) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipMallocArray_Negative_8bitFloat, float, float2, float4) {
   CHECK_IMAGE_SUPPORT
 
   hipChannelFormatDesc desc = GENERATE(hipCreateChannelDesc(8, 0, 0, 0, hipChannelFormatKindFloat),
@@ -602,7 +605,7 @@ TEMPLATE_TEST_CASE(Unit_hipMallocArray_Negative_8bitFloat, float, float2, float4
 }
 
 // Only 8, 16, and 32 bit channels are supported
-TEST_CASE(Unit_hipMallocArray_Negative_BadNumberOfBits) {
+HIP_TEST_CASE(Unit_hipMallocArray_Negative_BadNumberOfBits) {
   CHECK_IMAGE_SUPPORT
 
   const int badBits = GENERATE(-1, 0, 10, 100);
@@ -631,7 +634,7 @@ TEST_CASE(Unit_hipMallocArray_Negative_BadNumberOfBits) {
 }
 
 // creating elements with 3 channels is not supported.
-TEST_CASE(Unit_hipMallocArray_Negative_3ChannelElement) {
+HIP_TEST_CASE(Unit_hipMallocArray_Negative_3ChannelElement) {
   CHECK_IMAGE_SUPPORT
 
   const int bits = GENERATE(8, 16, 32);
@@ -660,7 +663,7 @@ TEST_CASE(Unit_hipMallocArray_Negative_3ChannelElement) {
 }
 
 // The bit channel description should not allow any channels after a zero channel
-TEST_CASE(Unit_hipMallocArray_Negative_ChannelAfterZeroChannel) {
+HIP_TEST_CASE(Unit_hipMallocArray_Negative_ChannelAfterZeroChannel) {
   CHECK_IMAGE_SUPPORT
 
   const int bits = GENERATE(8, 16, 32);
@@ -690,7 +693,7 @@ TEST_CASE(Unit_hipMallocArray_Negative_ChannelAfterZeroChannel) {
 }
 
 // The channel format should be one of the defined formats
-TEST_CASE(Unit_hipMallocArray_Negative_InvalidChannelFormat) {
+HIP_TEST_CASE(Unit_hipMallocArray_Negative_InvalidChannelFormat) {
   CHECK_IMAGE_SUPPORT
 
   const int bits = 32;
@@ -717,7 +720,7 @@ TEST_CASE(Unit_hipMallocArray_Negative_InvalidChannelFormat) {
 
 
 // hipMallocArray should handle the max numeric value gracefully.
-TEST_CASE(Unit_hipMallocArray_Negative_NumericLimit) {
+HIP_TEST_CASE(Unit_hipMallocArray_Negative_NumericLimit) {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t arrayPtr;

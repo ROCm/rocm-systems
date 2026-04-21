@@ -38,6 +38,7 @@
 #include "default_ctx_primitive_tester.hpp"
 #include "barrier_all_tester.hpp"
 #include "barrier_all_on_stream_tester.hpp"
+#include "quiet_on_stream_tester.hpp"
 #include "empty_tester.hpp"
 #include "getmem_on_stream_tester.hpp"
 #include "putmem_on_stream_tester.hpp"
@@ -68,6 +69,7 @@
 #include "flood_amo_tester.hpp"
 #include "hipmodule_init_tester.hpp"
 #include "device_bitcode_tester.hpp"
+#include "library_info_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -132,8 +134,6 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WGPutNBITestType:
       case WGPutSignalTestType:
       case WGPutSignalNBITestType:
-      case PingPongTestType:
-      case PingAllTestType:
         max_msg_size = args.max_volume_size / args.num_wgs;
         break;
       case TeamBroadcastTestType:
@@ -310,6 +310,16 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0)
         std::cout << "Barrier_All_On_Stream ###" << std::endl;
       testers.push_back(new BarrierAllOnStreamTester(args));
+      return testers;
+    case QuietOnStreamTestType:
+      if (rank == 0)
+        std::cout << "Quiet_On_Stream ###" << std::endl;
+      testers.push_back(new QuietOnStreamTester(args));
+      return testers;
+    case SyncAllOnStreamTestType:
+      if (rank == 0)
+        std::cout << "Sync_All_On_Stream ###" << std::endl;
+      testers.push_back(new BarrierAllOnStreamTester(args, SYNC_ALL_OP));
       return testers;
     case TeamBroadcastmemOnStreamTestType:
       if (rank == 0)
@@ -641,6 +651,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "Device Bitcode Test ###" << std::endl;
       testers.push_back(new DeviceBitcodeTester(args));
       return testers;
+    case LibraryInfoTestType:
+      if (rank == 0) std::cout << "Library Info Test ###" << std::endl;
+      testers.push_back(new LibraryInfoTester(args));
+      return testers;
     default:
       if (rank == 0) std::cout << "Empty Test ###" << std::endl;
       return testers;
@@ -659,12 +673,14 @@ void Tester::execute() {
    */
   for (size_t size = args.min_msg_size; size <= max_msg_size;
        size <<= 1) {
-    resetBuffers(size);
-
     /**
      * Restricts the number of iterations of really large messages.
      */
     if (size > args.large_message_size) num_loops = args.loop_large;
+
+    // Reset after num_loops is set so subclasses can size their
+    // buffers to the actual iteration count for this message size.
+    resetBuffers(size);
 
     barrier();
 
@@ -752,6 +768,8 @@ bool Tester::peLaunchesKernel() {
     case TeamWGBarrierTestType:
     case TeamAlltoallmemOnStreamTestType:
     case BarrierAllOnStreamTestType:
+    case QuietOnStreamTestType:
+    case SyncAllOnStreamTestType:
     case TeamBroadcastmemOnStreamTestType:
     case GetmemOnStreamTestType:
     case PutmemOnStreamTestType:
@@ -783,16 +801,16 @@ void Tester::print(uint64_t size) {
   }
 
   /**
-   * Calculate total amount of data transfered
+   * Calculate total amount of data transferred
    */
   size_t total_size = size_factor * size * num_timed_msgs;
   size_t volume = total_size / num_loops;
 
-  double timer_avg = timerAvgInMicroseconds();
+  [[maybe_unused]] double timer_avg = timerAvgInMicroseconds();
   double time_us = gpuCyclesToMicroseconds(max_end_time - min_start_time);
   double time_s = time_us / 1e6;
 
-  double latency = time_us / num_loops;
+  double latency = time_us / num_loops / rtt_factor;
 
   double msg_rate = num_timed_msgs / time_s;
 
@@ -801,7 +819,7 @@ void Tester::print(uint64_t size) {
 
   float total_kern_time_ms;
   CHECK_HIP(hipEventElapsedTime(&total_kern_time_ms, start_event, stop_event));
-  float total_kern_time_s = total_kern_time_ms / 1000;
+  [[maybe_unused]] float total_kern_time_s = total_kern_time_ms / 1000;
 
   int field_width = 20;
   int float_precision = 2;

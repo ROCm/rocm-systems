@@ -121,7 +121,7 @@ __global__ void test_gws(uint* buf, uint buf_size, unsigned long long* tmp_buf,
   }
 }
 
-TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Basic) {
+HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Basic) {
   constexpr uint num_kernel_args = 4;
 
   int device_num = 0;
@@ -134,7 +134,7 @@ TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Basic) {
     // Calculate the device occupancy to know how many blocks can be run concurrently
     HIP_CHECK(hipGetDeviceProperties(&device_properties[i], 0));
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
-      HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
       return;
     }
   }

@@ -26,8 +26,8 @@ using namespace rocshmem;
 
 /* Declare the template with a generic implementation */
 template <typename T, ROCSHMEM_OP Op>
-__device__ int wg_team_reduce(rocshmem_ctx_t ctx, rocshmem_team_t, T *dest,
-                               const T *source, int nreduce) {
+__device__ int wg_team_reduce([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unused]] rocshmem_team_t, [[maybe_unused]] T *dest,
+                               [[maybe_unused]] const T *source, [[maybe_unused]] int nreduce) {
   return ROCSHMEM_SUCCESS;
 }
 
@@ -77,7 +77,7 @@ rocshmem_team_t team_reduce_world_dup;
 template <typename T1, ROCSHMEM_OP T2>
 __global__ void TeamReductionTest(int loop, int skip, long long int *start_time,
                                   long long int *end_time, T1 *s_buf, T1 *r_buf,
-                                  size_t size, TestType type,
+                                  size_t size, [[maybe_unused]] TestType type,
                                   ShmemContextType ctx_type,
                                   rocshmem_team_t team) {
   __shared__ rocshmem_ctx_t ctx;
@@ -153,7 +153,7 @@ void TeamReductionTester<T1, T2>::postLaunchKernel() {
 }
 
 template <typename T1, ROCSHMEM_OP T2>
-void TeamReductionTester<T1, T2>::resetBuffers(size_t size) {
+void TeamReductionTester<T1, T2>::resetBuffers([[maybe_unused]] size_t size) {
   for (uint64_t i = 0; i < max_msg_size; i++) {
     init_buf(s_buf[i], r_buf[i]);
   }

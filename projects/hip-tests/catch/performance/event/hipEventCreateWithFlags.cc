@@ -62,7 +62,7 @@ static void RunBenchmark(unsigned flag) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipEventCreateWithFlags) {
+HIP_TEST_CASE(Performance_hipEventCreateWithFlags) {
   const auto flag = GENERATE(
       hipEventDefault, hipEventBlockingSync,
       hipEventDisableTiming /*, hipEventInterprocess  disabled until fixed (EXSWHTEC-25) */);

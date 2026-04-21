@@ -57,7 +57,7 @@ __device__ static inline int __clz(int input) {
 }
 
 __device__ static inline int __clzll(long long int input) {
-  return input == 0u ? 64 : __builtin_clzl((__hip_uint64_t)input);
+  return input == 0u ? 64 : __builtin_clzll((__hip_uint64_t)input);
 }
 
 __device__ static inline int __ffs(unsigned int input) {
@@ -274,10 +274,10 @@ __device__ static inline long long __mul64hi(long long int x, long long int y) {
   return x1 * y1 + z2 + (z1 >> 32);
 }
 
-__device__ static inline int __mulhi(int x, int y) { return __ockl_mul_hi_i32(x, y); }
+__device__ static inline int __mulhi(int x, int y) { return (int)(((long)x * (long)y) >> 32); }
 
 __device__ static inline int __rhadd(int x, int y) {
-  return ((long long)x + (long long)y + 1) >> 1;
+  return ((__hip_int64_t)x + (__hip_int64_t)y + 1) >> 1;
 }
 
 __device__ static inline unsigned int __sad(int x, int y, unsigned int z) {
@@ -307,7 +307,7 @@ __device__ static inline unsigned long long __umul64hi(unsigned long long int x,
 }
 
 __device__ static inline unsigned int __umulhi(unsigned int x, unsigned int y) {
-  return __ockl_mul_hi_u32(x, y);
+  return (unsigned int)(((__hip_uint64_t)x * (__hip_uint64_t)y) >> 32);
 }
 
 __device__ static inline unsigned int __urhadd(unsigned int x, unsigned int y) {
@@ -662,20 +662,6 @@ __device__ inline __hip_uint64_t __lanemask_eq() {
   return mask;
 }
 
-
-__device__ inline void* __local_to_generic(void* p) { return p; }
-
-#ifdef __HIP_DEVICE_COMPILE__
-__device__ inline void* __get_dynamicgroupbaseptr() {
-  // Get group segment base pointer.
-  return (char*)__local_to_generic((void*)__to_local(__builtin_amdgcn_groupstaticsize()));
-}
-#else
-__device__ void* __get_dynamicgroupbaseptr();
-#endif  // __HIP_DEVICE_COMPILE__
-
-__device__ inline void* __amdgcn_get_dynamicgroupbaseptr() { return __get_dynamicgroupbaseptr(); }
-
 // Memory Fence Functions
 __device__ inline static void __threadfence() { __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "agent"); }
 
@@ -888,65 +874,23 @@ unsigned __smid(void)
 
 #endif  // defined(__clang__) && defined(__HIP__)
 
-
-// loop unrolling
+// rely on `__builtin_* functions for memcpy/memset
 static inline __device__ void* __hip_hc_memcpy(void* dst, const void* src, size_t size) {
-  auto dstPtr = static_cast<unsigned char*>(dst);
-  auto srcPtr = static_cast<const unsigned char*>(src);
-
-  while (size >= 4u) {
-    dstPtr[0] = srcPtr[0];
-    dstPtr[1] = srcPtr[1];
-    dstPtr[2] = srcPtr[2];
-    dstPtr[3] = srcPtr[3];
-
-    size -= 4u;
-    srcPtr += 4u;
-    dstPtr += 4u;
-  }
-  switch (size) {
-    case 3:
-      dstPtr[2] = srcPtr[2];
-    case 2:
-      dstPtr[1] = srcPtr[1];
-    case 1:
-      dstPtr[0] = srcPtr[0];
-  }
-
-  return dst;
+  return __builtin_memcpy(dst, src, size);
 }
 
-static inline __device__ void* __hip_hc_memset(void* dst, unsigned char val, size_t size) {
-  auto dstPtr = static_cast<unsigned char*>(dst);
-
-  while (size >= 4u) {
-    dstPtr[0] = val;
-    dstPtr[1] = val;
-    dstPtr[2] = val;
-    dstPtr[3] = val;
-
-    size -= 4u;
-    dstPtr += 4u;
-  }
-  switch (size) {
-    case 3:
-      dstPtr[2] = val;
-    case 2:
-      dstPtr[1] = val;
-    case 1:
-      dstPtr[0] = val;
-  }
-
-  return dst;
+// change the value from unsigned char to int, what a builtin expects.
+static inline __device__ void* __hip_hc_memset(void* dst, int val, size_t size) {
+  return __builtin_memset(dst, val, size);
 }
+
 #ifndef __OPENMP_AMDGCN__
 static inline __device__ void* memcpy(void* dst, const void* src, size_t size) {
   return __hip_hc_memcpy(dst, src, size);
 }
 
 static inline __device__ void* memset(void* ptr, int val, size_t size) {
-  unsigned char val8 = static_cast<unsigned char>(val);
-  return __hip_hc_memset(ptr, val8, size);
+  return __hip_hc_memset(ptr, val, size);
 }
 #endif  // !__OPENMP_AMDGCN__
 

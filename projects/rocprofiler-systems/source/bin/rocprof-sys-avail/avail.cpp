@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "avail.hpp"
 #include "common.hpp"
@@ -515,6 +496,22 @@ main(int argc, char** argv)
         .max_count(1)
         .action(
             [&fmt_opts](parser_t& p) { fmt_opts.force_config = p.get<bool>("force"); });
+    parser
+        .add_argument({ "--preset-name" },
+                      "Set the preset name in metadata (used with -F json)")
+        .max_count(1)
+        .dtype("string")
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.preset_name = p.get<std::string>("preset-name");
+        });
+    parser
+        .add_argument({ "--preset-description" },
+                      "Set the preset description in metadata (used with -F json)")
+        .max_count(1)
+        .dtype("string")
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.preset_description = p.get<std::string>("preset-description");
+        });
 
     parser.end_group();
 
@@ -549,15 +546,6 @@ main(int argc, char** argv)
     _parser_set_if_exists(include_components, "components");
     _parser_set_if_exists(include_settings, "settings");
     _parser_set_if_exists(include_hw_counters, "hw-counters");
-
-    // Always register ROCm/SMI settings so they appear in settings queries
-    // (e.g., rocprof-sys-avail -bd -r ROCM). These functions query the
-    // rocprofiler-sdk and AMD SMI to discover available domains and metrics.
-    {
-        const auto& _config = tim::settings::shared_instance();
-        rocprofsys::rocprofiler_sdk::config_settings(_config);
-        rocprofsys::amd_smi::config_settings(_config);
-    }
 
     // Only query GPU devices and hardware counters when they are actually
     // requested. This avoids initializing the ROCm runtime for settings-only

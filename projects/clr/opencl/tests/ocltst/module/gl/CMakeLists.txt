@@ -54,14 +54,7 @@ target_link_libraries(oclgl
         GLEW::GLEW
         ${OPENGL_LIBRARIES})
 
-if(TARGET OpenCL)
-  target_link_libraries(oclgl PRIVATE OpenCL)
-else()
-  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../../../cmake")
-  find_package(AMD_ICD)
-  find_library(AMD_ICD_LIBRARY OpenCL HINTS "${AMD_ICD_LIBRARY_DIR}")
-  target_link_libraries(oclgl PRIVATE ${AMD_ICD_LIBRARY})
-endif()
+target_link_libraries(oclgl PRIVATE ${OPENCL_ICD_LIB})
 
 if (NOT WIN32)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -99,4 +92,3 @@ endforeach()
 
 INSTALL(TARGETS oclgl DESTINATION ${OCLTST_INSTALL_DIR} COMPONENT ocltst)
 INSTALL(FILES oclgl.exclude DESTINATION ${OCLTST_INSTALL_DIR} COMPONENT ocltst)
-

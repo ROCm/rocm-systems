@@ -225,7 +225,7 @@ template <typename V, typename... Vs> bool run_CheckSharedVectorTypes() {
   return run_CheckSharedVectorType<V>() && run_CheckSharedVectorTypes<Vs...>();
 }
 
-TEST_CASE(Unit_hipVectorTypes_test_on_device) {
+HIP_TEST_CASE(Unit_hipVectorTypes_test_on_device) {
   static_assert(sizeof(float1) == 4, "");
   static_assert(sizeof(float2) >= 8, "");
   static_assert(sizeof(float3) >= 12, "");

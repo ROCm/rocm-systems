@@ -31,7 +31,7 @@
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipGetDriverEntryPoint_Positive) {
+HIP_TEST_CASE(Unit_hipGetDriverEntryPoint_Positive) {
   void* funcPtr = nullptr;
   hipDriverEntryPointQueryResult status;
 
@@ -77,7 +77,7 @@ TEST_CASE(Unit_hipGetDriverEntryPoint_Positive) {
  *  - HIP_VERSION >= 7.1
  */
 
-TEST_CASE(Unit_hipGetDriverEntryPoint_Negative) {
+HIP_TEST_CASE(Unit_hipGetDriverEntryPoint_Negative) {
   void* funcPtr = nullptr;
   hipDriverEntryPointQueryResult status;
 
@@ -123,7 +123,7 @@ TEST_CASE(Unit_hipGetDriverEntryPoint_Negative) {
  *  - HIP_VERSION >= 7.1
  */
 
-TEST_CASE(Unit_hipGetDriverEntryPoint_spt_Positive) {
+HIP_TEST_CASE(Unit_hipGetDriverEntryPoint_spt_Positive) {
   void* funcPtr = nullptr;
   hipDriverEntryPointQueryResult status;
 
@@ -169,7 +169,7 @@ TEST_CASE(Unit_hipGetDriverEntryPoint_spt_Positive) {
  *  - HIP_VERSION >= 7.1
  */
 
-TEST_CASE(Unit_hipGetDriverEntryPoint_spt_Negative) {
+HIP_TEST_CASE(Unit_hipGetDriverEntryPoint_spt_Negative) {
   void* funcPtr = nullptr;
   hipDriverEntryPointQueryResult status;
 

@@ -32,7 +32,8 @@ RUN zypper --non-interactive update -y && \
         openmpi3-devel papi-devel python3-devel python3-pip rpm-build \
         sqlite3-devel vim wget libucp-devel libuct-devel && \
     zypper --non-interactive clean --all && \
-    python3 -m pip install 'cmake==3.21' perfetto
+    python3 -m pip install --upgrade pip && \
+    python3 -m pip install 'cmake==3.25' perfetto
 
 ARG PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
 

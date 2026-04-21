@@ -11,7 +11,7 @@ Unit_hipDeviceGetStreamPriorityRange_Default - Check if device stream piority ra
 
 #include <hip_test_common.hh>
 
-TEST_CASE(Unit_hipDeviceGetStreamPriorityRange_Default) {
+HIP_TEST_CASE(Unit_hipDeviceGetStreamPriorityRange_Default) {
   int priority_low = 0;
   int priority_high = 0;
   int devID = GENERATE(range(0, HipTest::getDeviceCount()));

@@ -35,7 +35,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_Positive_Basic) {
   constexpr auto f = [](void* dst, void* src, size_t count, hipMemcpyKind direction) {
     hipGraph_t graph = nullptr;
     HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -136,7 +136,7 @@ TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_Positive_Basic) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -202,7 +202,7 @@ TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_Negative_Parameters) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_Negative_Changing_Memcpy_Direction) {
+HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_Negative_Changing_Memcpy_Direction) {
   int *host1, *host2, *dev1, *dev2;
   HIP_CHECK(hipHostMalloc(&host1, sizeof(int)));
   HIP_CHECK(hipHostMalloc(&host2, sizeof(int)));

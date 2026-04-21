@@ -185,7 +185,7 @@ template <typename T> void DeviceMemcpyCommon(kernel_sig<T> memcpy_kernel) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(Unit_Device_memcpy_Positive, char, int, unsigned int, long, unsigned long,
+HIP_TEMPLATE_TEST_CASE(Unit_Device_memcpy_Positive, char, int, unsigned int, long, unsigned long,
                    long long, unsigned long long, float, double) {
   SECTION("Memcpy whole buffer in one thread") {
     DeviceMemcpyCommon<TestType>(memcpy_at_once_kernel);
@@ -206,7 +206,7 @@ TEMPLATE_TEST_CASE(Unit_Device_memcpy_Positive, char, int, unsigned int, long, u
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Device_memcpy_Negative_Parameters_RTC) {
+HIP_TEST_CASE(Unit_Device_memcpy_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   const auto program_source = kMemcpyParam;

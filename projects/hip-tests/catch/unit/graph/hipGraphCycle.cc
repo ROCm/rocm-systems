@@ -21,7 +21,7 @@ Testcase Scenarios :
  * Adding manual empty nodes
  * Cyclic graph, cycle formation first, then adding more nodes
  */
-TEST_CASE(Unit_hipGraph_BasicCyclic1) {
+HIP_TEST_CASE(Unit_hipGraph_BasicCyclic1) {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -51,7 +51,7 @@ TEST_CASE(Unit_hipGraph_BasicCyclic1) {
  * Adding manual empty nodes
  * Cyclic graph, cycle formation first, Remove edge to resolve cycle
  */
-TEST_CASE(Unit_hipGraph_BasicCyclic2) {
+HIP_TEST_CASE(Unit_hipGraph_BasicCyclic2) {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -82,7 +82,7 @@ TEST_CASE(Unit_hipGraph_BasicCyclic2) {
  * Cyclic graph, cycle formation first, Remove edge causes disconnected graph which is still
  * cyclic
  */
-TEST_CASE(Unit_hipGraph_BasicCyclic3) {
+HIP_TEST_CASE(Unit_hipGraph_BasicCyclic3) {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -113,7 +113,7 @@ TEST_CASE(Unit_hipGraph_BasicCyclic3) {
  * Adding manual empty nodes
  * Uncyclic graph, removing edge from middle of linear graph
  */
-TEST_CASE(Unit_hipGraph_BasicCyclic4) {
+HIP_TEST_CASE(Unit_hipGraph_BasicCyclic4) {
   int N = 1024 * 1024;
   int Nbytes = N * sizeof(int);
   hipGraph_t graph;
@@ -172,7 +172,7 @@ TEST_CASE(Unit_hipGraph_BasicCyclic4) {
  * Adding manual empty nodes
  * cyclic graph, removing edge to resolve cycle and remove edge from middle of graph
  */
-TEST_CASE(Unit_hipGraph_BasicCyclic5) {
+HIP_TEST_CASE(Unit_hipGraph_BasicCyclic5) {
   int N = 1024 * 1024;
   int Nbytes = N * sizeof(int);
   hipGraph_t graph;

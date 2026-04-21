@@ -93,26 +93,12 @@ class AieAqlQueue : public core::Queue,
   uint64_t AddWriteIndexAcqRel(uint64_t value) override;
   void StoreRelaxed(hsa_signal_value_t value) override;
   void StoreRelease(hsa_signal_value_t value) override;
-
-  /// @brief Provide information about the queue.
   hsa_status_t GetInfo(hsa_queue_info_attribute_t attribute,
                        void *value) override;
-
-  // AIE-specific API
-
-  /// @brief Returns the agent associated with this queue.
-  AieAgent& GetAgent() { return agent_; }
-
-  // GPU-specific queue functions are unsupported.
-
-  hsa_status_t GetCUMasking(uint32_t num_cu_mask_count,
-                            uint32_t *cu_mask) override;
-  hsa_status_t SetCUMasking(uint32_t num_cu_mask_count,
-                            const uint32_t *cu_mask) override;
-  void ExecutePM4(uint32_t *cmd_data, size_t cmd_size_b,
-                  hsa_fence_scope_t acquireFence = HSA_FENCE_SCOPE_NONE,
-                  hsa_fence_scope_t releaseFence = HSA_FENCE_SCOPE_NONE,
-                  hsa_signal_t *signal = NULL) override;
+  hsa_status_t GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mask) override;
+  hsa_status_t SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* cu_mask) override;
+  void ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope_t acquireFence,
+                  hsa_fence_scope_t releaseFence, hsa_signal_t* signal) override;
 
  private:
   HSA_QUEUEID queue_id_ = INVALID_QUEUEID;

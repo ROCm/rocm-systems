@@ -48,7 +48,7 @@ THE SOFTWARE.
 // The following need to be made configurable (e.g., from YAML):
 //  * location of ssl keys and certificates
 //  * which method of authentication to use (with root CA or not)
-//  * wether server accepts only unauthenticated connections or only
+//  * whether server accepts only unauthenticated connections or only
 //    authenticated
 //  * rsmi_init flags
 //  * which RDC grpc services to start
@@ -416,7 +416,7 @@ static void MakeDaemon(bool is_root) {
   // Instead rely on serviced to make it a daemon.
 #if 0
   pid_t pid;
-  // We want to dissassociate with calling process, so fork, and let
+  // We want to disassociate with calling process, so fork, and let
   // daemon live in child process. Parent will exit.
   if ((pid = fork()) < 0) {
     std::cerr << "Failed to fork rdcd daemon." << std::endl;
@@ -591,7 +591,7 @@ int main(int argc, char** argv) {
   auto result = ProcessCmdline(&cmd_line_opts, argc, argv);
 
   if (result != 0) {
-    std::cerr << "Error occured during ProcessCmdline." << std::endl;
+    std::cerr << "Error occurred during ProcessCmdline." << std::endl;
     return 1;
   }
 

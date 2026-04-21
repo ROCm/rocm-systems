@@ -24,7 +24,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEST_CASE(Unit_hipMipmappedArrayCreate_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipMipmappedArrayCreate_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT;
 
   hipmipmappedArray array;

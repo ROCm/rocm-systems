@@ -37,6 +37,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 #define dbgapi_log(level, format, ...)                                        \
   do                                                                          \
@@ -82,8 +83,19 @@ to_string (T v)
     if (v == nullptr)
       return "nullptr";
 
+  /* Handle function pointers explicitly to avoid
+
+       error: implicit conversion between pointer-to-function and
+       pointer-to-object is a Microsoft extension
+       [-Werror,-Wmicrosoft-cast]
+
+     with clang++.
+  */
   std::ostringstream ss;
-  ss << v;
+  if constexpr (std::is_function_v<std::remove_pointer_t<T>>)
+    ss << reinterpret_cast<const void *> (v);
+  else
+    ss << v;
   return ss.str ();
 }
 
@@ -94,6 +106,13 @@ to_string (std::optional<T> v)
   if (v.has_value ())
     return std::string ("{") + to_string (*v) + "}";
   return "{}";
+}
+
+template <typename... Ts>
+inline std::string
+to_string (std::variant<Ts...> var)
+{
+  return std::visit ([] (auto &&v) { return to_string (v); }, var);
 }
 
 template <>

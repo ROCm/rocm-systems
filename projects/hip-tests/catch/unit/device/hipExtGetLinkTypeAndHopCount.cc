@@ -29,7 +29,7 @@
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipExtGetLinkTypeAndHopCount_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipExtGetLinkTypeAndHopCount_Positive_Basic) {
   const auto device1 = GENERATE(range(0, HipTest::getDeviceCount()));
   const auto device2 = GENERATE(range(0, HipTest::getDeviceCount()));
 
@@ -40,10 +40,7 @@ TEST_CASE(Unit_hipExtGetLinkTypeAndHopCount_Positive_Basic) {
   int can_access_peer = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, device1, device2));
   if (!can_access_peer) {
-    std::string msg =
-        "Skipped as peer access is not supported between devices : " + std::to_string(device1) +
-        " " + std::to_string(device2);
-    HipTest::HIP_SKIP_TEST(msg.c_str());
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     return;
   }
 
@@ -91,7 +88,7 @@ TEST_CASE(Unit_hipExtGetLinkTypeAndHopCount_Positive_Basic) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipExtGetLinkTypeAndHopCount_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipExtGetLinkTypeAndHopCount_Negative_Parameters) {
   uint32_t link_type, hop_count;
   SECTION("same device") {
     HIP_CHECK_ERROR(hipExtGetLinkTypeAndHopCount(0, 0, &link_type, &hop_count),

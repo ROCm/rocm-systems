@@ -170,19 +170,21 @@ bool testMultiTargArchCodeObj() {
     return true;
   }
   btestPassed = testCodeObjFile(CODE_OBJ_MULTIARCH);
-#else
-  INFO("This test is skipped due to non linux environment.\n");
 #endif
   return btestPassed;
 }
 
-TEST_CASE(Unit_hipModule_Functional) {
+HIP_TEST_CASE(Unit_hipModule_Functional) {
   bool TestPassed = true;
   SECTION("Code object file test on current GPU") {
     TestPassed &= testCodeObjFile(CODE_OBJ_SINGLEARCH);
     REQUIRE(TestPassed == true);
   }
   SECTION("Code object file test on multiple GPUs") {
+#ifndef __linux__
+    WARN("Skipping section: " << HipTest::SkipReason::kRequiresLinux);
+    return;
+#endif
     TestPassed &= testMultiTargArchCodeObj();
     REQUIRE(TestPassed == true);
   }

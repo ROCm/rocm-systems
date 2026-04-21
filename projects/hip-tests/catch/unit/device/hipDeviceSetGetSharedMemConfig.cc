@@ -33,7 +33,7 @@ constexpr std::array<hipSharedMemConfig, 3> kMemConfigs{
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceSetSharedMemConfig_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipDeviceSetSharedMemConfig_Positive_Basic) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   const auto mem_config = GENERATE(from_range(std::begin(kMemConfigs), std::end(kMemConfigs)));
   HIP_CHECK(hipSetDevice(device));
@@ -56,7 +56,7 @@ TEST_CASE(Unit_hipDeviceSetSharedMemConfig_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceSetSharedMemConfig_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipDeviceSetSharedMemConfig_Negative_Parameters) {
   HIP_CHECK_ERROR(hipDeviceSetSharedMemConfig(static_cast<hipSharedMemConfig>(-1)),
                   hipErrorInvalidValue);
 }
@@ -85,7 +85,7 @@ TEST_CASE(Unit_hipDeviceSetSharedMemConfig_Negative_Parameters) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceGetSharedMemConfig_Positive_Default) {
+HIP_TEST_CASE(Unit_hipDeviceGetSharedMemConfig_Positive_Default) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
   INFO("Current device is " << device);
@@ -107,7 +107,7 @@ TEST_CASE(Unit_hipDeviceGetSharedMemConfig_Positive_Default) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceGetSharedMemConfig_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipDeviceGetSharedMemConfig_Positive_Basic) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   const auto mem_config = GENERATE(from_range(std::begin(kMemConfigs), std::end(kMemConfigs)));
   HIP_CHECK(hipSetDevice(device));
@@ -141,7 +141,7 @@ TEST_CASE(Unit_hipDeviceGetSharedMemConfig_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceGetSharedMemConfig_Positive_Threaded) {
+HIP_TEST_CASE(Unit_hipDeviceGetSharedMemConfig_Positive_Threaded) {
   class HipDeviceGetSharedMemConfigTest
       : public ThreadedZigZagTest<HipDeviceGetSharedMemConfigTest> {
    public:
@@ -187,6 +187,6 @@ TEST_CASE(Unit_hipDeviceGetSharedMemConfig_Positive_Threaded) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceGetSharedMemConfig_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipDeviceGetSharedMemConfig_Negative_Parameters) {
   HIP_CHECK_ERROR(hipDeviceGetSharedMemConfig(nullptr), hipErrorInvalidValue);
 }

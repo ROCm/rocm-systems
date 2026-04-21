@@ -25,7 +25,7 @@ size for source and destination ptr, api should return error code.
 
 /* Test verifies hipGraphMemcpyNodeSetParams1D API Negative scenarios.
  */
-TEST_CASE(Unit_hipGraphMemcpyNodeSetParams1D_Negative) {
+HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams1D_Negative) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   int *A_d, *A_h;
@@ -94,7 +94,7 @@ TEST_CASE(Unit_hipGraphMemcpyNodeSetParams1D_Negative) {
 
 /* Test verifies hipGraphMemcpyNodeSetParams1D API Functional scenarios.
  */
-TEST_CASE(Unit_hipGraphMemcpyNodeSetParams1D_Functional) {
+HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams1D_Functional) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency

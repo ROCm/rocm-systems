@@ -44,7 +44,7 @@ static void callbackfunc_setparams(void* B_h) {
 This test case verifies the negative scenarios of
 hipGraphHostNodeSetParams API
 */
-TEST_CASE(Unit_hipGraphHostNodeSetParams_Negative) {
+HIP_TEST_CASE(Unit_hipGraphHostNodeSetParams_Negative) {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   int *A_d{nullptr}, *C_d{nullptr};
@@ -95,7 +95,7 @@ Creates graph, Add graph nodes and clone the graph
 Add HostNode to the cloned graph,update the host params using
 hipGraphHostNodeSetParams API and validates the result
 */
-TEST_CASE(Unit_hipGraphHostNodeSetParams_ClonedGraphWithHostNode) {
+HIP_TEST_CASE(Unit_hipGraphHostNodeSetParams_ClonedGraphWithHostNode) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph;
@@ -155,7 +155,7 @@ Create graph, Adds host node to the graph,
 updates the host params using hipGraphHostNodeSetParams API
 and validates the result
 */
-TEST_CASE(Unit_hipGraphHostNodeSetParams_BasicFunc) {
+HIP_TEST_CASE(Unit_hipGraphHostNodeSetParams_BasicFunc) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph;

@@ -87,7 +87,7 @@ This testcase verifies the following scenarios
 4. Device context change
 5. H2D-D2D-D2H peer GPU
 */
-TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, float, double) {
   TestType *A_d{nullptr}, *B_d{nullptr};
   TestType *A_h{nullptr}, *B_h{nullptr};
   TestType *A_Ph{nullptr}, *B_Ph{nullptr};
@@ -128,7 +128,7 @@ TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, float, d
     int deviceCount = 0;
     HIP_CHECK(hipGetDeviceCount(&deviceCount));
     if (deviceCount < 2) {
-      SUCCEED("deviceCount less then 2");
+      WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);
     } else {
       int canAccessPeer = 0;
       HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
@@ -144,7 +144,7 @@ TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, float, d
         HipTest::checkTest(A_h, B_h, NUM_ELM);
 
       } else {
-        SUCCEED("P2P capability is not present");
+        WARN("Skipping section: " << HipTest::SkipReason::kPeerAccessUnavailable);
       }
     }
   }
@@ -153,7 +153,7 @@ TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, float, d
     int deviceCount = 0;
     HIP_CHECK(hipGetDeviceCount(&deviceCount));
     if (deviceCount < 2) {
-      SUCCEED("deviceCount less then 2");
+      WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);
     } else {
       int canAccessPeer = 0;
       HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
@@ -173,7 +173,7 @@ TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, float, d
         HIP_CHECK(hipFree(C_d));
 
       } else {
-        SUCCEED("P2P capability is not present");
+        WARN("Skipping section: " << HipTest::SkipReason::kPeerAccessUnavailable);
       }
     }
   }
@@ -188,7 +188,7 @@ TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, float, d
 // and also launch hipMemcpyAsync() api. This test case is simulate the scenario
 // reported in SWDEV-181598
 
-TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_hipMultiMemcpyMultiThread, int, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_hipMultiMemcpyMultiThread, int, float, double) {
   size_t Nbytes = N_ELMTS * sizeof(TestType);
 
   int Data_mismatch = 0;
@@ -228,7 +228,7 @@ TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_hipMultiMemcpyMultiThread, int, float, do
   Thread_count.exchange(0);
 }
 
-TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_hipMultiMemcpyMultiThreadMultiStream, int, float,
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_hipMultiMemcpyMultiThreadMultiStream, int, float,
                    double) {
   std::thread T[NUM_THREADS];
   for (int i = 0; i < NUM_THREADS; i++) {
@@ -251,12 +251,14 @@ This testcase verifies hipMemcpy API with pinnedMemory and hostRegister
 along with kernel launches
 */
 
-TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_PinnedRegMemWithKernelLaunch, int, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_PinnedRegMemWithKernelLaunch, int, float, double) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    SUCCEED("No of devices are less than 2");
-  } else {
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
+  }
+  {
     // 1 refers to pinned Memory
     // 2 refers to register Memory
     int MallocPinType = GENERATE(0, 1);

@@ -10,6 +10,7 @@
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 #include "DeviceBufferHelpers.hpp"
+#include "HostBufferHelpers.hpp"
 #include "nccl.h"
 #include "net.h"
 #include <vector>
@@ -293,6 +294,37 @@ protected:
                 return static_cast<uint8_t>((pattern + i) % kBytePatternModulo);
             }
         );
+    }
+
+    // Helper: Fill host buffer with pattern using HostBufferHelpers
+    void FillHostBuffer(void* buffer, size_t size, int seed) {
+        fillHostBufferWithPattern<uint8_t>(
+            buffer, size,
+            [seed](size_t i) { return static_cast<uint8_t>((seed + i) % kBytePatternModulo); }
+        );
+    }
+
+    // Helper: Verify host buffer pattern using HostBufferHelpers
+    bool VerifyHostBuffer(const void* buffer, size_t size, int seed) {
+        return verifyHostBufferData<uint8_t>(
+            buffer, size,
+            [seed](size_t i) { return static_cast<uint8_t>((seed + i) % kBytePatternModulo); }
+        );
+    }
+
+    // Helper: Retry until the receiver's FIFO slot is ready.
+    void PostSendWithRetry(void* sendComm, void* data, size_t size, int tag,
+                           void* mhandle, void** request) {
+        int attempts = 0;
+        do {
+            ncclResult_t result = PostSend(sendComm, data, size, tag, mhandle, request);
+            ASSERT_EQ(result, ncclSuccess);
+            if (*request != nullptr) break;
+            if (++attempts >= kMaxRetryAttempts) {
+                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
+            }
+            usleep(kPollIntervalUs);
+        } while (*request == nullptr);
     }
 
     // Helper: Wait for request completion with timeout
@@ -658,24 +690,10 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
         ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
                           recvHandles, &request), ncclSuccess);
     } else {
-        // Sender - initialize host buffer directly
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        for (size_t i = 0; i < bufferSize; i++) {
-            hostBuffer[i] = static_cast<uint8_t>((rank + i) % kBytePatternModulo);
-        }
+        // Sender
+        FillHostBuffer(buffer, bufferSize, rank);
 
-        // NET IB isend can return success with NULL request if FIFO isn't ready
-        // (receiver's irecv RDMA write hasn't reached sender yet) — retry until ready
-        int attempts = 0;
-        do {
-            ncclResult_t result = PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
-            ASSERT_EQ(result, ncclSuccess);
-            if (request != nullptr) break;
-            if (++attempts >= kMaxRetryAttempts) {
-                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-            }
-            usleep(kPollIntervalUs);
-        } while (request == nullptr);
+        PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -689,16 +707,8 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
         EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
 
         // Verify received data
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        bool dataValid = true;
         int senderRank = 1;  // Data was sent by rank 1
-        for (size_t i = 0; i < bufferSize && dataValid; i++) {
-            uint8_t expected = static_cast<uint8_t>((senderRank + i) % kBytePatternModulo);
-            if (hostBuffer[i] != expected) {
-                dataValid = false;
-            }
-        }
-        EXPECT_TRUE(dataValid) << "Data validation failed";
+        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, senderRank)) << "Data validation failed";
     }
 
     // NetMHandleGuard will automatically deregister memory when test scope ends
@@ -764,29 +774,9 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
                               recvHandles, &request), ncclSuccess);
             ASSERT_NE(request, nullptr) << "Recv request should never be NULL";
         } else {
-            // Initialize host buffer directly (not using InitializeBuffer which expects device memory)
-            uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-            for (size_t i = 0; i < size; i++) {
-                hostBuffer[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-            }
+            FillHostBuffer(buffer, size, seed);
 
-            // NET IB isend can return success with NULL request if FIFO isn't ready
-            // This means the receiver hasn't posted recv yet - retry until ready
-            int attempts = 0;
-            do {
-                ncclResult_t result = PostSend(pair.sendComm, buffer, size, tag, mhandle, &request);
-                ASSERT_EQ(result, ncclSuccess);
-
-                if (request != nullptr) {
-                    break;
-                }
-
-                // NULL request means "not ready yet", wait and retry
-                if (++attempts >= kMaxRetryAttempts) {
-                    FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-                }
-                usleep(kPollIntervalUs);
-            } while (request == nullptr);
+            PostSendWithRetry(pair.sendComm, buffer, size, tag, mhandle, &request);
         }
 
         // Barrier 1: Ensure both ranks have posted their operations before waiting
@@ -804,16 +794,7 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
         if (rank == 0) {
             EXPECT_EQ(sizes[0], size) << "Size mismatch for transfer of " << size << " bytes";
 
-            // Validate received data matches expected pattern (host buffer verification)
-            uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-            bool dataValid = true;
-            for (size_t j = 0; j < size && dataValid; j++) {
-                uint8_t expected = static_cast<uint8_t>((seed + j) % kBytePatternModulo);
-                if (hostBuffer[j] != expected) {
-                    dataValid = false;
-                }
-            }
-            EXPECT_TRUE(dataValid) << "Data validation failed for size " << size;
+            EXPECT_TRUE(VerifyHostBuffer(buffer, size, seed)) << "Data validation failed for size " << size;
         }
 
         // NetMHandleGuard will automatically deregister at end of loop iteration
@@ -870,17 +851,8 @@ TEST_F(NetIbMPITest, SendRecvZeroSize) {
         ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
                           recvHandles, &request), ncclSuccess);
     } else {
-        // Sender - send zero bytes (retry on NULL request — FIFO may not be ready)
-        int attempts = 0;
-        do {
-            ncclResult_t result = PostSend(pair.sendComm, buffer, 0, tag, mhandle, &request);
-            ASSERT_EQ(result, ncclSuccess);
-            if (request != nullptr) break;
-            if (++attempts >= kMaxRetryAttempts) {
-                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-            }
-            usleep(kPollIntervalUs);
-        } while (request == nullptr);
+        // Sender - send zero bytes
+        PostSendWithRetry(pair.sendComm, buffer, 0, tag, mhandle, &request);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -956,27 +928,9 @@ TEST_F(NetIbMPITest, FlushAfterRecv) {
                           recvHandles, &request), ncclSuccess);
     } else {
         // Sender
-        void* hostBuffer = malloc(bufferSize);
-        ASSERT_NE(hostBuffer, nullptr);
-        auto hostBufferGuard = makeHostBufferAutoGuard(hostBuffer);
+        ASSERT_EQ(InitializeBuffer(buffer, bufferSize, rank), hipSuccess);
 
-        // Initialize host buffer directly (not using InitializeBuffer which expects device memory)
-        uint8_t* hostBuf = static_cast<uint8_t*>(hostBuffer);
-        for (size_t i = 0; i < bufferSize; i++) {
-            hostBuf[i] = static_cast<uint8_t>((rank + i) % kBytePatternModulo);
-        }
-        HIP_TEST_CHECK_GTEST_FAIL(hipMemcpy(buffer, hostBuffer, bufferSize, hipMemcpyHostToDevice));
-
-        int attempts = 0;
-        do {
-            ncclResult_t result = PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
-            ASSERT_EQ(result, ncclSuccess);
-            if (request != nullptr) break;
-            if (++attempts >= kMaxRetryAttempts) {
-                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-            }
-            usleep(kPollIntervalUs);
-        } while (request == nullptr);
+        PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -1149,29 +1103,9 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
                               recvHandles, &request), ncclSuccess);
             ASSERT_NE(request, nullptr) << "Recv request should never be NULL";
         } else {
-            // Initialize host buffer directly (not using InitializeBuffer which expects device memory)
-            uint8_t* hostBuffer = static_cast<uint8_t*>(sendBuffer);
-            for (size_t j = 0; j < bufferSize; j++) {
-                hostBuffer[j] = static_cast<uint8_t>((seed + j) % kBytePatternModulo);
-            }
+            FillHostBuffer(sendBuffer, bufferSize, seed);
 
-            // NET IB isend can return success with NULL request if FIFO isn't ready
-            // This means the receiver hasn't posted recv yet - retry until ready
-            int attempts = 0;
-            do {
-                ncclResult_t result = PostSend(pair.sendComm, sendBuffer, bufferSize, tag, mhandle, &request);
-                ASSERT_EQ(result, ncclSuccess);
-
-                if (request != nullptr) {
-                    break;
-                }
-
-                // NULL request means "not ready yet", wait and retry
-                if (++attempts >= kMaxRetryAttempts) {
-                    FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-                }
-                usleep(kPollIntervalUs);
-            } while (request == nullptr);
+            PostSendWithRetry(pair.sendComm, sendBuffer, bufferSize, tag, mhandle, &request);
         }
 
         // Barrier 1: Ensure both ranks have posted their operations before waiting
@@ -1189,27 +1123,7 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
         if (rank == 0) {
             EXPECT_EQ(sizes[0], bufferSize) << "Transfer " << i << " size mismatch";
 
-            // Validate received data matches expected pattern (host buffer verification)
-            uint8_t* hostBuffer = static_cast<uint8_t*>(recvBuffer);
-            bool dataValid = true;
-            for (size_t j = 0; j < bufferSize && dataValid; j++) {
-                uint8_t expected = static_cast<uint8_t>((seed + j) % kBytePatternModulo);
-                if (hostBuffer[j] != expected) {
-                    dataValid = false;
-                }
-            }
-            EXPECT_TRUE(dataValid) << "Transfer " << i << " data validation failed (seed=" << seed << ")";
-
-            if (!dataValid) {
-                // Print first few mismatched values for debugging
-                TEST_WARN("Rank %d: Transfer %d data mismatch. First %d values:", rank, i, kNumDebugSamples);
-                for (size_t j = 0; j < kNumDebugSamples && j < bufferSize; j++) {
-                    uint8_t expected = static_cast<uint8_t>((seed + j) % kBytePatternModulo);
-                    TEST_WARN("  [%zu] expected=%u, got=%u %s",
-                           j, expected, hostBuffer[j],
-                           (hostBuffer[j] == expected) ? "PASS" : "FAIL");
-                }
-            }
+            EXPECT_TRUE(VerifyHostBuffer(recvBuffer, bufferSize, seed)) << "Transfer " << i << " data validation failed (seed=" << seed << ")";
 
             // NOTE: Flush is NOT called for host memory transfers
             // Flush (iflush) is only needed for GPU Direct RDMA to ensure data visibility on GPU.
@@ -1272,22 +1186,10 @@ TEST_F(NetIbMPITest, LargeTransfer) {
         ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
                           recvHandles, &request), ncclSuccess);
     } else {
-        // Sender - Initialize host buffer directly (not using InitializeBuffer which expects device memory)
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        for (size_t i = 0; i < bufferSize; i++) {
-            hostBuffer[i] = static_cast<uint8_t>((rank + i) % kBytePatternModulo);
-        }
+        // Sender
+        FillHostBuffer(buffer, bufferSize, rank);
 
-        int attempts = 0;
-        do {
-            ncclResult_t result = PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
-            ASSERT_EQ(result, ncclSuccess);
-            if (request != nullptr) break;
-            if (++attempts >= kMaxRetryAttempts) {
-                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-            }
-            usleep(kPollIntervalUs);
-        } while (request == nullptr);
+        PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -1301,29 +1203,8 @@ TEST_F(NetIbMPITest, LargeTransfer) {
         EXPECT_EQ(sizes[0], bufferSize) << "Large transfer size mismatch";
 
         // Verify received data
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        bool dataValid = true;
         int senderRank = 1;  // Data was sent by rank 1
-        size_t errorsFound = 0;
-        const size_t maxErrorsToReport = 10;
-
-        for (size_t i = 0; i < bufferSize && errorsFound < maxErrorsToReport; i++) {
-            uint8_t expected = static_cast<uint8_t>((senderRank + i) % kBytePatternModulo);
-            if (hostBuffer[i] != expected) {
-                if (errorsFound == 0) {
-                    TEST_WARN("Rank %d: Data validation errors found in large transfer:", rank);
-                }
-                TEST_WARN("  Index %zu: expected=%u, got=%u", i, expected, hostBuffer[i]);
-                dataValid = false;
-                errorsFound++;
-            }
-        }
-
-        if (!dataValid && errorsFound >= maxErrorsToReport) {
-            TEST_WARN("  ... (showing first %zu errors only)", maxErrorsToReport);
-        }
-
-        EXPECT_TRUE(dataValid) << "Large transfer data validation failed";
+        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, senderRank)) << "Large transfer data validation failed";
     }
 
     // NetMHandleGuard will automatically deregister at scope end
@@ -1353,6 +1234,1133 @@ TEST_F(NetIbMPITest, CloseWithoutWaitingForCompletion) {
         connGuard.setListenComm(pair.listenComm);
     } else {
         connGuard.setSendComm(pair.sendComm);
+    }
+}
+
+TEST_F(NetIbMPITest, ConnectAndTransfer_VNic) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+
+    if (ndev < 2) {
+        GTEST_SKIP() << "Need at least 2 IB devices for NIC fusion tests";
+    }
+
+    // Create a fused vNIC from physical devices 0 and 1.
+    ncclNetVDeviceProps_t vProps;
+    vProps.ndevs = 2;
+    vProps.devs[0] = 0;
+    vProps.devs[1] = 1;
+
+    int vdev = -1;
+    ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
+        << "Failed to create fused vNIC from devices 0 and 1";
+    ASSERT_GE(vdev, 0);
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    // Connect through the vNIC
+    ConnectionPair pair;
+    ASSERT_EQ(SetupConnection(vdev, pair, rank, peerRank), ncclSuccess);
+
+    NetConnectionGuard connGuard(net_);
+    if (rank == 0) {
+        connGuard.setRecvComm(pair.recvComm);
+        connGuard.setListenComm(pair.listenComm);
+    } else {
+        connGuard.setSendComm(pair.sendComm);
+    }
+
+    const size_t bufferSize = kSmallBufferSize;
+    const int tag = 500;
+    const int seed = 5000;
+
+    void* buffer = malloc(bufferSize);
+    ASSERT_NE(buffer, nullptr);
+    auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+    // Register the buffer on each sub-device's PD.
+    void* mhandle = nullptr;
+    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+    ASSERT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+    NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
+
+    void* request = nullptr;
+
+    if (rank == 0) {
+        memset(buffer, 0, bufferSize);
+
+        void* recvBuffers[1] = {buffer};
+        size_t recvSizes[1] = {bufferSize};
+        int recvTags[1] = {tag};
+        void* recvHandles[1] = {mhandle};
+
+        ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
+                          recvHandles, &request), ncclSuccess);
+    } else {
+        FillHostBuffer(buffer, bufferSize, seed);
+
+        PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    int sizes[1] = {0};
+    ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
+
+    // Verify data integrity.
+    if (rank == 0) {
+        EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
+
+        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Data validation failed on vNIC transfer";
+    }
+
+}
+
+TEST_F(NetIbMPITest, AsymmetricMerge_VNic) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+
+    if (ndev < 2) {
+        GTEST_SKIP() << "Need at least 2 IB devices for NIC fusion tests";
+    }
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    // Rank 0: create a fused vNIC (ndevs=2). Rank 1: use physical device 0 (ndevs=1).
+    int vdev = -1;
+    if (rank == 0) {
+        ncclNetVDeviceProps_t vProps;
+        vProps.ndevs = 2;
+        vProps.devs[0] = 0;
+        vProps.devs[1] = 1;
+        ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
+            << "Failed to create fused vNIC from devices 0 and 1";
+        ASSERT_GE(vdev, 0);
+    }
+
+    // Inline connection setup: each rank uses a different device ID.
+    // Rank 0 (receiver): listen on vdev (ndevs=2, 2 PDs, doubled QPs)
+    // Rank 1 (sender):   connect on physical dev 0 (ndevs=1, 1 PD)
+    // ncclIbCalculateNqps uses max(local, remote) so both sides get the same QP count.
+    ConnectionPair pair;
+    if (rank == 0) {
+        ASSERT_EQ(CreateListenComm(vdev, &pair.handle, &pair.listenComm), ncclSuccess);
+        MPI_Send(&pair.handle, sizeof(ncclNetHandle_t), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
+
+        int done = 0;
+        while (!done) {
+            ncclResult_t result = AcceptConnection(pair.listenComm, &pair.recvComm);
+            if (result == ncclSuccess && pair.recvComm != nullptr) {
+                done = 1;
+            }
+        }
+    } else {
+        MPI_Recv(&pair.handle, sizeof(ncclNetHandle_t), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        // Connect using physical device 0 (ndevs=1)
+        int done = 0;
+        while (!done) {
+            ncclResult_t result = ConnectToRemote(0, &pair.handle, &pair.sendComm);
+            if (result == ncclSuccess && pair.sendComm != nullptr) {
+                done = 1;
+            }
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    NetConnectionGuard connGuard(net_);
+    if (rank == 0) {
+        connGuard.setRecvComm(pair.recvComm);
+        connGuard.setListenComm(pair.listenComm);
+    } else {
+        connGuard.setSendComm(pair.sendComm);
+    }
+
+    const size_t bufferSize = kSmallBufferSize;
+    const int tag = 510;
+    const int seed = 5100;
+
+    void* buffer = malloc(bufferSize);
+    ASSERT_NE(buffer, nullptr);
+    auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+    // Rank 0 registers on 2 PDs (vNIC), rank 1 registers on 1 PD (physical dev).
+    void* mhandle = nullptr;
+    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+    ASSERT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+    NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
+
+    void* request = nullptr;
+
+    if (rank == 0) {
+        memset(buffer, 0, bufferSize);
+
+        void* recvBuffers[1] = {buffer};
+        size_t recvSizes[1] = {bufferSize};
+        int recvTags[1] = {tag};
+        void* recvHandles[1] = {mhandle};
+
+        ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
+                          recvHandles, &request), ncclSuccess);
+    } else {
+        FillHostBuffer(buffer, bufferSize, seed);
+
+        PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    int sizes[1] = {0};
+    ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
+
+    // Verify data integrity across the asymmetric connection.
+    if (rank == 0) {
+        EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
+
+        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Data validation failed on asymmetric vNIC transfer";
+    }
+}
+
+TEST_F(NetIbMPITest, CloseWithoutTransfer_VNic) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+
+    if (ndev < 2) {
+        GTEST_SKIP() << "Need at least 2 IB devices for NIC fusion tests";
+    }
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    // Create a fused vNIC from physical devices 0 and 1.
+    ncclNetVDeviceProps_t vProps;
+    vProps.ndevs = 2;
+    vProps.devs[0] = 0;
+    vProps.devs[1] = 1;
+
+    int vdev = -1;
+    ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
+        << "Failed to create fused vNIC from devices 0 and 1";
+    ASSERT_GE(vdev, 0);
+
+    // Phase 1: connect through the vNIC, then close immediately without any transfer.
+    // Scoped block ensures RAII teardown happens before phase 2.
+    {
+        ConnectionPair pair;
+        ASSERT_EQ(SetupConnection(vdev, pair, rank, peerRank), ncclSuccess);
+
+        // Guard triggers closeSend/closeRecv/closeListen on a connection that
+        // never had regMr, isend, or irecv called.
+        NetConnectionGuard connGuard(net_);
+        if (rank == 0) {
+            connGuard.setRecvComm(pair.recvComm);
+            connGuard.setListenComm(pair.listenComm);
+        } else {
+            connGuard.setSendComm(pair.sendComm);
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // Phase 2: reconnect on the same vdev and do a transfer to verify no corruption.
+    ConnectionPair pair2;
+    ASSERT_EQ(SetupConnection(vdev, pair2, rank, peerRank), ncclSuccess);
+
+    NetConnectionGuard connGuard2(net_);
+    if (rank == 0) {
+        connGuard2.setRecvComm(pair2.recvComm);
+        connGuard2.setListenComm(pair2.listenComm);
+    } else {
+        connGuard2.setSendComm(pair2.sendComm);
+    }
+
+    const size_t bufferSize = kSmallBufferSize;
+    const int tag = 520;
+    const int seed = 5200;
+
+    void* buffer = malloc(bufferSize);
+    ASSERT_NE(buffer, nullptr);
+    auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+    void* mhandle = nullptr;
+    void* comm = (rank == 0) ? pair2.recvComm : pair2.sendComm;
+    ASSERT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+    NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
+
+    void* request = nullptr;
+
+    if (rank == 0) {
+        memset(buffer, 0, bufferSize);
+
+        void* recvBuffers[1] = {buffer};
+        size_t recvSizes[1] = {bufferSize};
+        int recvTags[1] = {tag};
+        void* recvHandles[1] = {mhandle};
+
+        ASSERT_EQ(PostRecv(pair2.recvComm, 1, recvBuffers, recvSizes, recvTags,
+                          recvHandles, &request), ncclSuccess);
+    } else {
+        FillHostBuffer(buffer, bufferSize, seed);
+
+        PostSendWithRetry(pair2.sendComm, buffer, bufferSize, tag, mhandle, &request);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    int sizes[1] = {0};
+    ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
+
+    // Verify the vNIC is still functional after the no-transfer teardown.
+    if (rank == 0) {
+        EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
+
+        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Data validation failed after no-transfer teardown reconnect";
+    }
+}
+
+TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+
+    if (ndev < 2) {
+        GTEST_SKIP() << "Need at least 2 IB devices for NIC fusion tests";
+    }
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    // Create a fused vNIC from physical devices 0 and 1.
+    ncclNetVDeviceProps_t vProps;
+    vProps.ndevs = 2;
+    vProps.devs[0] = 0;
+    vProps.devs[1] = 1;
+
+    int vdev = -1;
+    ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
+        << "Failed to create fused vNIC from devices 0 and 1";
+    ASSERT_GE(vdev, 0);
+
+    ConnectionPair pair;
+    ASSERT_EQ(SetupConnection(vdev, pair, rank, peerRank), ncclSuccess);
+
+    NetConnectionGuard connGuard(net_);
+    if (rank == 0) {
+        connGuard.setRecvComm(pair.recvComm);
+        connGuard.setListenComm(pair.listenComm);
+    } else {
+        connGuard.setSendComm(pair.sendComm);
+    }
+
+    const size_t bufferSize = kSmallBufferSize;
+    void* buffer = malloc(bufferSize);
+    ASSERT_NE(buffer, nullptr);
+    auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+
+    // Cycle 50× regMr→deregMr on the same buffer to stress multi-PD MR cache.
+    const int kCycles = 50;
+    for (int i = 0; i < kCycles; i++) {
+        void* mhandle = nullptr;
+        ASSERT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess)
+            << "regMr failed on cycle " << i;
+        ASSERT_NE(mhandle, nullptr);
+        ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess)
+            << "deregMr failed on cycle " << i;
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // Verify the connection is still functional after 50 reg/dereg cycles.
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+    NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
+
+    const int tag = 530;
+    const int seed = 5300;
+    void* request = nullptr;
+
+    // Send/recv to verify the connection works after MR cache stress.
+    if (rank == 0) {
+        memset(buffer, 0, bufferSize);
+
+        void* recvBuffers[1] = {buffer};
+        size_t recvSizes[1] = {bufferSize};
+        int recvTags[1] = {tag};
+        void* recvHandles[1] = {mhandle};
+
+        ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
+                          recvHandles, &request), ncclSuccess);
+    } else {
+        FillHostBuffer(buffer, bufferSize, seed);
+
+        PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    int sizes[1] = {0};
+    ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
+
+    // Data integrity check after MR cache cycling.
+    if (rank == 0) {
+        EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
+
+        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Data validation failed after reg/dereg cycling";
+    }
+}
+
+TEST_F(NetIbMPITest, LargeTransfer_VNic) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+
+    if (ndev < 2) {
+        GTEST_SKIP() << "Need at least 2 IB devices for NIC fusion tests";
+    }
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    // Create a fused vNIC from physical devices 0 and 1.
+    ncclNetVDeviceProps_t vProps;
+    vProps.ndevs = 2;
+    vProps.devs[0] = 0;
+    vProps.devs[1] = 1;
+
+    int vdev = -1;
+    ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
+        << "Failed to create fused vNIC from devices 0 and 1";
+    ASSERT_GE(vdev, 0);
+
+    ConnectionPair pair;
+    ASSERT_EQ(SetupConnection(vdev, pair, rank, peerRank), ncclSuccess);
+
+    NetConnectionGuard connGuard(net_);
+    if (rank == 0) {
+        connGuard.setRecvComm(pair.recvComm);
+        connGuard.setListenComm(pair.listenComm);
+    } else {
+        connGuard.setSendComm(pair.sendComm);
+    }
+
+    // 64MB buffer — ncclIbMultiSend stripes this across the doubled QPs.
+    const size_t bufferSize = 64 * 1024 * 1024;
+    const int tag = 540;
+    const int seed = 5400;
+
+    void* buffer = malloc(bufferSize);
+    ASSERT_NE(buffer, nullptr);
+    auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+    void* mhandle = nullptr;
+    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+    ASSERT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+    NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
+
+    void* request = nullptr;
+
+    if (rank == 0) {
+        memset(buffer, 0, bufferSize);
+
+        void* recvBuffers[1] = {buffer};
+        size_t recvSizes[1] = {bufferSize};
+        int recvTags[1] = {tag};
+        void* recvHandles[1] = {mhandle};
+
+        ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
+                          recvHandles, &request), ncclSuccess);
+    } else {
+        FillHostBuffer(buffer, bufferSize, seed);
+
+        PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // Extended timeout for 16MB transfer across doubled QPs.
+    int sizes[1] = {0};
+    ASSERT_EQ(WaitForCompletion(request, sizes, kLargeTransferTimeout), ncclSuccess);
+
+    // Full 64MB byte-by-byte verification
+    // ncclIbMultiSend would corrupt data at QP split points.
+    if (rank == 0) {
+        EXPECT_EQ(sizes[0], bufferSize) << "Large transfer size mismatch";
+
+        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Large vNIC transfer data validation failed";
+    }
+}
+
+TEST_F(NetIbMPITest, MixedSizes_VNic) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+
+    if (ndev < 2) {
+        GTEST_SKIP() << "Need at least 2 IB devices for NIC fusion tests";
+    }
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    // Create a fused vNIC from physical devices 0 and 1.
+    ncclNetVDeviceProps_t vProps;
+    vProps.ndevs = 2;
+    vProps.devs[0] = 0;
+    vProps.devs[1] = 1;
+
+    int vdev = -1;
+    ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
+        << "Failed to create fused vNIC from devices 0 and 1";
+    ASSERT_GE(vdev, 0);
+
+    ConnectionPair pair;
+    ASSERT_EQ(SetupConnection(vdev, pair, rank, peerRank), ncclSuccess);
+
+    NetConnectionGuard connGuard(net_);
+    if (rank == 0) {
+        connGuard.setRecvComm(pair.recvComm);
+        connGuard.setListenComm(pair.listenComm);
+    } else {
+        connGuard.setSendComm(pair.sendComm);
+    }
+
+    // Sizes: 1B, 3MB, 3B, 5MB, 7B, 7MB, 64B, 16MB, 1B, 11MB, 4MB, 1B.
+    // Tiny sizes may use only one QP, large ones stripe across both.
+    // Odd MB sizes (3, 5, 7, 11) produce uneven QP splits.
+    std::vector<size_t> testSizes = {
+        1, 3*1024*1024, 3, 5*1024*1024, 7, 7*1024*1024,
+        64, 16*1024*1024, 1, 11*1024*1024, 4*1024*1024, 1
+    };
+
+    for (size_t idx = 0; idx < testSizes.size(); idx++) {
+        size_t size = testSizes[idx];
+        const int tag = 550;
+        const int seed = 5500 + static_cast<int>(idx);
+
+        void* buffer = malloc(size);
+        ASSERT_NE(buffer, nullptr) << "malloc failed for size " << size;
+        auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+        void* mhandle = nullptr;
+        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        ASSERT_EQ(RegisterMemory(comm, buffer, size, NCCL_PTR_HOST, &mhandle), ncclSuccess)
+            << "regMr failed for size " << size;
+        NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
+
+        void* request = nullptr;
+
+        if (rank == 0) {
+            memset(buffer, 0, size);
+
+            void* recvBuffers[1] = {buffer};
+            size_t recvSizes[1] = {size};
+            int recvTags[1] = {tag};
+            void* recvHandles[1] = {mhandle};
+
+            ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
+                              recvHandles, &request), ncclSuccess);
+        } else {
+            FillHostBuffer(buffer, size, seed);
+
+            PostSendWithRetry(pair.sendComm, buffer, size, tag, mhandle, &request);
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        int sizes[1] = {0};
+        int timeout = (size > 1024 * 1024) ? kLargeTransferTimeout : kDefaultTimeoutMs;
+        ASSERT_EQ(WaitForCompletion(request, sizes, timeout), ncclSuccess);
+
+        // Prevent request reuse race between iterations.
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        if (rank == 0) {
+            EXPECT_EQ(sizes[0], size) << "Size mismatch for transfer of " << size << " bytes";
+
+            EXPECT_TRUE(VerifyHostBuffer(buffer, size, seed)) << "Data validation failed for size " << size;
+        }
+    }
+}
+
+TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+
+    if (ndev < 2) {
+        GTEST_SKIP() << "Need at least 2 IB devices for NIC fusion tests";
+    }
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    ncclNetVDeviceProps_t vProps;
+    vProps.ndevs = 2;
+    vProps.devs[0] = 0;
+    vProps.devs[1] = 1;
+
+    int vdev = -1;
+    ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
+        << "Failed to create fused vNIC from devices 0 and 1";
+    ASSERT_GE(vdev, 0);
+
+    ConnectionPair pair;
+    ASSERT_EQ(SetupConnection(vdev, pair, rank, peerRank), ncclSuccess);
+
+    NetConnectionGuard connGuard(net_);
+    if (rank == 0) {
+        connGuard.setRecvComm(pair.recvComm);
+        connGuard.setListenComm(pair.listenComm);
+    } else {
+        connGuard.setSendComm(pair.sendComm);
+    }
+
+    // Sizes around 128-byte QP striping alignment boundaries.
+    // ncclIbMultiSend computes chunkSize = DIVUP(DIVUP(size, nqps), 128) * 128.
+    // These sizes produce uneven QP splits where one QP gets more data than the other.
+    // 127: all on QP 0, QP 1 posts zero-sge. 129: 128B on QP 0, 1B on QP 1.
+    // 255: 128B each, QP 1 gets 127B. 257: 256B on QP 0, 1B remainder on QP 1.
+    std::vector<size_t> testSizes = {127, 129, 255, 257, 511, 513};
+
+    for (size_t idx = 0; idx < testSizes.size(); idx++) {
+        size_t size = testSizes[idx];
+        const int tag = 560;
+        const int seed = 5600 + static_cast<int>(idx);
+
+        // Per-iteration buffer and MR registration on 2 PDs.
+        void* buffer = malloc(size);
+        ASSERT_NE(buffer, nullptr) << "malloc failed for size " << size;
+        auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+        void* mhandle = nullptr;
+        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        ASSERT_EQ(RegisterMemory(comm, buffer, size, NCCL_PTR_HOST, &mhandle), ncclSuccess)
+            << "regMr failed for size " << size;
+        NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
+
+        void* request = nullptr;
+
+        if (rank == 0) {
+            memset(buffer, 0, size);
+
+            void* recvBuffers[1] = {buffer};
+            size_t recvSizes[1] = {size};
+            int recvTags[1] = {tag};
+            void* recvHandles[1] = {mhandle};
+
+            ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
+                              recvHandles, &request), ncclSuccess);
+        } else {
+            FillHostBuffer(buffer, size, seed);
+
+            PostSendWithRetry(pair.sendComm, buffer, size, tag, mhandle, &request);
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        int sizes[1] = {0};
+        ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
+
+        // Prevent request reuse race between iterations.
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // Byte level verification at the striping boundary.
+        if (rank == 0) {
+            EXPECT_EQ(sizes[0], size) << "Size mismatch for transfer of " << size << " bytes";
+
+            EXPECT_TRUE(VerifyHostBuffer(buffer, size, seed)) << "Data validation failed for size " << size;
+        }
+    }
+}
+
+TEST_F(NetIbMPITest, Bidirectional_VNic) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+
+    if (ndev < 2) {
+        GTEST_SKIP() << "Need at least 2 IB devices for NIC fusion tests";
+    }
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    // Both ranks create a fused vNIC.
+    ncclNetVDeviceProps_t vProps;
+    vProps.ndevs = 2;
+    vProps.devs[0] = 0;
+    vProps.devs[1] = 1;
+
+    int vdev = -1;
+    ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
+        << "Failed to create fused vNIC from devices 0 and 1";
+    ASSERT_GE(vdev, 0);
+
+    // Two connections through the same vNIC with reversed roles.
+    // ConnA: rank 0 receives, rank 1 sends (tag 0 for MPI handle exchange).
+    // ConnB: rank 1 receives, rank 0 sends (tag 1 for MPI handle exchange).
+    ConnectionPair connA, connB;
+
+    // Phase 1: Both ranks create their listener, then exchange handles via MPI.
+    // Rank 0 receives on ConnA, rank 1 receives on ConnB.
+    if (rank == 0) {
+        ASSERT_EQ(CreateListenComm(vdev, &connA.handle, &connA.listenComm), ncclSuccess);
+    } else {
+        ASSERT_EQ(CreateListenComm(vdev, &connB.handle, &connB.listenComm), ncclSuccess);
+    }
+
+    // Exchange: rank 0 sends connA handle, rank 1 sends connB handle.
+    if (rank == 0) {
+        MPI_Send(&connA.handle, sizeof(ncclNetHandle_t), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
+        MPI_Recv(&connB.handle, sizeof(ncclNetHandle_t), MPI_BYTE, peerRank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    } else {
+        MPI_Recv(&connA.handle, sizeof(ncclNetHandle_t), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Send(&connB.handle, sizeof(ncclNetHandle_t), MPI_BYTE, peerRank, 1, MPI_COMM_WORLD);
+    }
+
+    // Phase 2: Connect and accept interleaved to avoid deadlock.
+    // Rank 0: connect on ConnB (sender), accept on ConnA (receiver).
+    // Rank 1: connect on ConnA (sender), accept on ConnB (receiver).
+    ncclNetHandle_t* connectHandle = (rank == 0) ? &connB.handle : &connA.handle;
+    void** connectSendComm = (rank == 0) ? &connB.sendComm : &connA.sendComm;
+    void*  myListenComm    = (rank == 0) ? connA.listenComm : connB.listenComm;
+    void** acceptRecvComm  = (rank == 0) ? &connA.recvComm : &connB.recvComm;
+
+    while (*connectSendComm == nullptr || *acceptRecvComm == nullptr) {
+        if (*connectSendComm == nullptr) {
+            ConnectToRemote(vdev, connectHandle, connectSendComm);
+        }
+        if (*acceptRecvComm == nullptr) {
+            AcceptConnection(myListenComm, acceptRecvComm);
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // RAII guards for both connections.
+    NetConnectionGuard guardA(net_);
+    NetConnectionGuard guardB(net_);
+    if (rank == 0) {
+        guardA.setRecvComm(connA.recvComm);
+        guardA.setListenComm(connA.listenComm);
+        guardB.setSendComm(connB.sendComm);
+    } else {
+        guardA.setSendComm(connA.sendComm);
+        guardB.setRecvComm(connB.recvComm);
+        guardB.setListenComm(connB.listenComm);
+    }
+
+    const size_t bufferSize = kSmallBufferSize;
+
+    // Each rank has a send buffer and a recv buffer.
+    void* sendBuf = malloc(bufferSize);
+    ASSERT_NE(sendBuf, nullptr);
+    auto sendGuard = makeHostBufferAutoGuard(sendBuf);
+
+    void* recvBuf = malloc(bufferSize);
+    ASSERT_NE(recvBuf, nullptr);
+    auto recvGuard = makeHostBufferAutoGuard(recvBuf);
+    memset(recvBuf, 0, bufferSize);
+
+    // Register send buffer on the send comm, recv buffer on the recv comm.
+    void* sendComm = (rank == 0) ? connB.sendComm : connA.sendComm;
+    void* recvComm = (rank == 0) ? connA.recvComm : connB.recvComm;
+
+    void* sendMhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(sendComm, sendBuf, bufferSize, NCCL_PTR_HOST, &sendMhandle), ncclSuccess);
+    NetMHandleGuard sendMhGuard(sendMhandle, NetMHandleDeleter(net_, sendComm));
+
+    void* recvMhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(recvComm, recvBuf, bufferSize, NCCL_PTR_HOST, &recvMhandle), ncclSuccess);
+    NetMHandleGuard recvMhGuard(recvMhandle, NetMHandleDeleter(net_, recvComm));
+
+    const int sendTag = 570;
+    const int recvTag = 570;
+    const int sendSeed = 5700 + rank;
+
+    // Fill send buffer with rank-specific pattern.
+    FillHostBuffer(sendBuf, bufferSize, sendSeed);
+
+    // Post recv and send simultaneously on both connections.
+    void* recvRequest = nullptr;
+    void* sendRequest = nullptr;
+
+    void* recvBuffers[1] = {recvBuf};
+    size_t recvSizes[1] = {bufferSize};
+    int recvTags[1] = {recvTag};
+    void* recvHandles[1] = {recvMhandle};
+
+    ASSERT_EQ(PostRecv(recvComm, 1, recvBuffers, recvSizes, recvTags,
+                      recvHandles, &recvRequest), ncclSuccess);
+
+    PostSendWithRetry(sendComm, sendBuf, bufferSize, sendTag, sendMhandle, &sendRequest);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // Wait for both completions.
+    int recvSizesOut[1] = {0};
+    ASSERT_EQ(WaitForCompletion(recvRequest, recvSizesOut), ncclSuccess);
+
+    int sendSizesOut[1] = {0};
+    ASSERT_EQ(WaitForCompletion(sendRequest, sendSizesOut), ncclSuccess);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // Verify received data matches the peer's send pattern.
+    int peerSeed = 5700 + peerRank;
+    EXPECT_EQ(recvSizesOut[0], bufferSize) << "Received size mismatch";
+
+    EXPECT_TRUE(VerifyHostBuffer(recvBuf, bufferSize, peerSeed)) << "Bidirectional vNIC transfer data validation failed";
+}
+
+TEST_F(NetIbMPITest, FlushRepeated_VNic) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+
+    if (ndev < 2) {
+        GTEST_SKIP() << "Need at least 2 IB devices for NIC fusion tests";
+    }
+
+    // Check GDR support on device 0 before creating the vNIC.
+    ncclNetProperties_t props;
+    ASSERT_EQ(GetDeviceProperties(0, &props), ncclSuccess);
+    if (!(props.ptrSupport & NCCL_PTR_CUDA)) {
+        GTEST_SKIP() << "GDR not supported, skipping flush test";
+    }
+
+    // Create a fused vNIC from physical devices 0 and 1.
+    ncclNetVDeviceProps_t vProps;
+    vProps.ndevs = 2;
+    vProps.devs[0] = 0;
+    vProps.devs[1] = 1;
+
+    int vdev = -1;
+    ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess);
+    ASSERT_GE(vdev, 0);
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    ConnectionPair pair;
+    ASSERT_EQ(SetupConnection(vdev, pair, rank, peerRank), ncclSuccess);
+
+    NetConnectionGuard connGuard(net_);
+    if (rank == 0) {
+        connGuard.setRecvComm(pair.recvComm);
+        connGuard.setListenComm(pair.listenComm);
+    } else {
+        connGuard.setSendComm(pair.sendComm);
+    }
+
+    const size_t bufferSize = kSmallBufferSize;
+    const int tag = 600;
+    const int numIterations = 50;
+
+    // Allocate GPU buffer and register with NCCL_PTR_CUDA on the vNIC connection.
+    void* gpuBuffer = nullptr;
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&gpuBuffer, bufferSize));
+    auto gpuGuard = makeDeviceBufferAutoGuard(gpuBuffer);
+
+    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, gpuBuffer, bufferSize, NCCL_PTR_CUDA, &mhandle), ncclSuccess);
+    NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
+
+    for (int iter = 0; iter < numIterations; iter++) {
+        const int seed = 6000 + iter;
+        void* request = nullptr;
+
+        if (rank == 1) {
+            // Fill GPU buffer via DeviceBufferHelpers (host vector → hipMemcpy in one call).
+            ASSERT_EQ(InitializeBuffer(gpuBuffer, bufferSize, seed), hipSuccess);
+
+            PostSendWithRetry(pair.sendComm, gpuBuffer, bufferSize, tag, mhandle, &request);
+        } else {
+            // Rank 0: post recv on GPU buffer.
+            void* recvBuffers[1] = {gpuBuffer};
+            size_t recvSizes[1] = {bufferSize};
+            int recvTags[1] = {tag};
+            void* recvHandles[1] = {mhandle};
+
+            ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
+                              recvHandles, &request), ncclSuccess);
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        int sizes[1] = {0};
+        ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
+
+        if (rank == 0) {
+            ASSERT_EQ(sizes[0], bufferSize) << "Iter " << iter << ": received size mismatch";
+
+            // Flush GPU memory to ensure RDMA write is visible on GPU.
+            void* flushBuffers[1] = {gpuBuffer};
+            int flushSizes[1] = {static_cast<int>(bufferSize)};
+            void* flushHandles[1] = {mhandle};
+            void* flushRequest = nullptr;
+
+            ncclResult_t flushResult = FlushRecv(pair.recvComm, 1, flushBuffers, flushSizes,
+                                                 flushHandles, &flushRequest);
+            if (flushResult == ncclSuccess && flushRequest != nullptr) {
+                ASSERT_EQ(WaitForCompletion(flushRequest, nullptr), ncclSuccess);
+            }
+
+            // Verify GPU buffer via DeviceBufferHelpers (hipMemcpy + compare in one call).
+            ASSERT_TRUE(VerifyBuffer(gpuBuffer, bufferSize, seed))
+                << "Iter " << iter << ": data verification failed after flush";
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+}
+
+TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+
+    if (ndev < 2) {
+        GTEST_SKIP() << "Need at least 2 IB devices for NIC fusion tests";
+    }
+
+    // Create a fused vNIC from physical devices 0 and 1.
+    ncclNetVDeviceProps_t vProps;
+    vProps.ndevs = 2;
+    vProps.devs[0] = 0;
+    vProps.devs[1] = 1;
+
+    int vdev = -1;
+    ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess);
+    ASSERT_GE(vdev, 0);
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    // Single connection through the vNIC, reused across all 100 iterations.
+    ConnectionPair pair;
+    ASSERT_EQ(SetupConnection(vdev, pair, rank, peerRank), ncclSuccess);
+
+    NetConnectionGuard connGuard(net_);
+    if (rank == 0) {
+        connGuard.setRecvComm(pair.recvComm);
+        connGuard.setListenComm(pair.listenComm);
+    } else {
+        connGuard.setSendComm(pair.sendComm);
+    }
+
+    const size_t bufferSize = kSmallBufferSize;
+    const int tag = 700;
+    const int numIterations = 100;
+
+    // Single buffer registered once on both sub-device PDs, reused every iteration.
+    void* buffer = malloc(bufferSize);
+    ASSERT_NE(buffer, nullptr);
+    auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+    NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
+
+    for (int iter = 0; iter < numIterations; iter++) {
+        // Unique seed per iteration to detect stale data from prior rounds.
+        const int seed = 7000 + iter;
+        void* request = nullptr;
+
+        if (rank == 1) {
+            // Fill buffer with per-iteration pattern.
+            FillHostBuffer(buffer, bufferSize, seed);
+
+            PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
+        } else {
+            // Zero buffer before recv to ensure verification catches stale data.
+            memset(buffer, 0, bufferSize);
+
+            void* recvBuffers[1] = {buffer};
+            size_t recvSizes[1] = {bufferSize};
+            int recvTags[1] = {tag};
+            void* recvHandles[1] = {mhandle};
+
+            ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
+                              recvHandles, &request), ncclSuccess);
+        }
+
+        // Sync both ranks before polling for completion.
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        int sizes[1] = {0};
+        ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
+
+        // Verify received data matches the iteration-specific pattern.
+        if (rank == 0) {
+            ASSERT_EQ(sizes[0], bufferSize) << "Iter " << iter << ": received size mismatch";
+
+            ASSERT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Iter " << iter << ": data verification failed";
+        }
+
+        // Sync before next iteration to prevent request reuse races.
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+}
+
+TEST_F(NetIbMPITest, Reconnect_VNic) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+
+    if (ndev < 2) {
+        GTEST_SKIP() << "Need at least 2 IB devices for NIC fusion tests";
+    }
+
+    // Create a fused vNIC once, reuse across all reconnect cycles.
+    ncclNetVDeviceProps_t vProps;
+    vProps.ndevs = 2;
+    vProps.devs[0] = 0;
+    vProps.devs[1] = 1;
+
+    int vdev = -1;
+    ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess);
+    ASSERT_GE(vdev, 0);
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    const size_t bufferSize = kSmallBufferSize;
+    const int tag = 800;
+    const int numCycles = 10;
+
+    for (int cycle = 0; cycle < numCycles; cycle++) {
+        const int seed = 8000 + cycle;
+
+        // Each cycle creates a fresh connection through the same vNIC.
+        ConnectionPair pair;
+        ASSERT_EQ(SetupConnection(vdev, pair, rank, peerRank), ncclSuccess)
+            << "Cycle " << cycle << ": SetupConnection failed";
+
+        // Allocate and register a fresh buffer per cycle.
+        void* buffer = malloc(bufferSize);
+        ASSERT_NE(buffer, nullptr);
+
+        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        void* mhandle = nullptr;
+        ASSERT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess)
+            << "Cycle " << cycle << ": regMr failed";
+
+        void* request = nullptr;
+
+        if (rank == 1) {
+            // Fill with cycle-specific pattern.
+            FillHostBuffer(buffer, bufferSize, seed);
+
+            PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
+        } else {
+            memset(buffer, 0, bufferSize);
+
+            void* recvBuffers[1] = {buffer};
+            size_t recvSizes[1] = {bufferSize};
+            int recvTags[1] = {tag};
+            void* recvHandles[1] = {mhandle};
+
+            ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
+                              recvHandles, &request), ncclSuccess);
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        int sizes[1] = {0};
+        ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
+
+        // Verify received data matches the cycle-specific pattern.
+        if (rank == 0) {
+            ASSERT_EQ(sizes[0], bufferSize) << "Cycle " << cycle << ": received size mismatch";
+
+            ASSERT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Cycle " << cycle << ": data verification failed";
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // Manually deregister and close all resources for this cycle.
+        // deregMr iterates ndevs=2, removing MR cache entries for each sub-device.
+        ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess)
+            << "Cycle " << cycle << ": deregMr failed";
+
+        // closeSend/closeRecv destroy per-sub-device QPs, PDs, FIFO MRs, and sockets.
+        if (rank == 0) {
+            ASSERT_EQ(CloseRecvComm(pair.recvComm), ncclSuccess);
+            ASSERT_EQ(CloseListenComm(pair.listenComm), ncclSuccess);
+        } else {
+            ASSERT_EQ(CloseSendComm(pair.sendComm), ncclSuccess);
+        }
+
+        free(buffer);
+
+        // Sync before next cycle to ensure both ranks have fully torn down.
+        MPI_Barrier(MPI_COMM_WORLD);
     }
 }
 

@@ -23,18 +23,18 @@ import json
 
 
 AMDSMI_ERROR_MESSAGES = {
-    0: "Sucess",
+    0: "Success",
     1: "Invalid parameters",
     2: "Command not supported",
     3: "Command not yet implemented",
     4: "Failed load module",
-    5: "Failed load symbole",
+    5: "Failed load symbol",
     6: "Drm error",
     7: "API call failed",
     8: "Timeout in API call",
     9: "Retry operation",
     10: "Permission Denied",
-    11: "Interrupt ocurred during execution",
+    11: "Interrupt occurred during execution",
     12: "I/O Error",
     13: "Address fault",
     14: "Error opening file",
@@ -179,7 +179,7 @@ class AmdSmiInvalidFilePathException(AmdSmiException):
 
 
 class AmdSmiInvalidParameterValueException(AmdSmiException):
-    def __init__(self, command, arg, outputformat: str):
+    def __init__(self, command, arg, outputformat: str, hint: str = None):
         super().__init__()
         self.value = -5
         self.command = command
@@ -187,6 +187,8 @@ class AmdSmiInvalidParameterValueException(AmdSmiException):
         self.output_format = outputformat
 
         common_message = f"Value '{self.arg}' is not of valid type or format. Run 'amd-smi {self.command} -h' for more info."
+        if hint:
+            common_message += f" {hint}"
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value

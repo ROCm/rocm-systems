@@ -352,7 +352,7 @@ __global__ void testFunctions(bool* result, float* Af, double* A) {
                check_rnorm(A) && check_sincospif() && check_sincospi() && check_nextafter();
 }
 
-TEST_CASE(Unit_TestDevice_DoublePrecisionMathFunc) {
+HIP_TEST_CASE(Unit_TestDevice_DoublePrecisionMathFunc) {
   float* Af = new float[N];
   double* A = new double[N];
   for (int i = 0; i < N; i++) {

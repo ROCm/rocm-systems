@@ -38,7 +38,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: a5ed8195057dbd8f06888236b1c78ccf41ed326e # 2026-03-11 commit
+          ref: 702d15844f84a3a8401a24185bd4131008f0e640 # 2026-04-16 commit
 
       - name: Install python deps
         run: |
@@ -53,7 +53,7 @@ jobs:
       - name: Setup ccache
         run: |
           ./TheRock/build_tools/setup_ccache.py \
-            --config-preset "github-oss-presubmit" \
+            --config-preset "github-oss-dev" \
             --dir "$(dirname $CCACHE_CONFIGPATH)" \
             --local-path "$CACHE_DIR/ccache"
 
@@ -68,7 +68,7 @@ jobs:
       - name: Patch rocm-systems
         run: |
           # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
-          rm ./TheRock/patches/amd-mainline/rocm-systems/0003-Use-is_versioned-true-consistently-in-both-Comgr-Loa.patch
+          # rm ./TheRock/patches/amd-mainline/rocm-systems/0003-Use-is_versioned-true-consistently-in-both-Comgr-Loa.patch
 
       - name: Configure Projects
         env:
@@ -135,12 +135,11 @@ jobs:
   therock-test-linux-single-node:
     name: "Test single-node"
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    # Due to migrating MI325s, we have lost capacity as of 3/13/2026 11:41am PST
-    if: ${{ inputs.amdgpu_families != 'gfx94X-dcgpu' && inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-packages-single-node.yml
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
-      test_runs_on: linux-mi325-8gpu-ossci-rocm
+      test_runs_on: linux-gfx942-8gpu-ossci-rocm
       artifact_run_id: ${{ github.run_id }}

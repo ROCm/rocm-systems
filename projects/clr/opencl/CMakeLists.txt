@@ -40,11 +40,27 @@ set(OPENCL_ICD_LOADER_HEADERS_DIR "${CMAKE_CURRENT_LIST_DIR}/khronos/headers/ope
 if(BUILD_ICD)
   add_subdirectory(khronos/icd)
 endif()
+
+# Resolve OpenCL ICD link library once for tools and tests.
+# If OPENCL_ICD_LIB is empty, targets that need the ICD loader are skipped.
+if(TARGET OpenCL)
+  set(OPENCL_ICD_LIB OpenCL)
+else()
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+  find_package(AMD_ICD QUIET)
+  find_library(OPENCL_ICD_LIB OpenCL HINTS "${AMD_ICD_LIBRARY_DIR}")
+  if(NOT OPENCL_ICD_LIB)
+    message(WARNING "OpenCL ICD loader not found. clinfo and ocltst will not be built.")
+  endif()
+endif()
+
 add_subdirectory(amdocl)
-add_subdirectory(tools/clinfo)
 add_subdirectory(tools/cltrace)
-if(BUILD_TESTS)
-  add_subdirectory(tests/ocltst)
+if(OPENCL_ICD_LIB)
+  add_subdirectory(tools/clinfo)
+  if(BUILD_TESTS)
+    add_subdirectory(tests/ocltst)
+  endif()
 endif()
 
 ###--- Packaging ------------------------------------------------------------###
@@ -110,6 +126,13 @@ configure_file(
   ${CMAKE_BINARY_DIR}/opencl/packages/opencl/${OPENCL_AMD_ICD_FILE}
   COPYONLY
 )
+# support legacy rocm-ci
+install(
+  FILES ${CMAKE_BINARY_DIR}/opencl/packages/opencl/${OPENCL_AMD_ICD_FILE}
+  DESTINATION /${CMAKE_INSTALL_SYSCONFDIR}/OpenCL/vendors
+  COMPONENT binary
+  EXCLUDE_FROM_ALL
+)
 
 configure_file(
   packaging/rocm-opencl.conf
@@ -117,6 +140,13 @@ configure_file(
   COPYONLY
 )
 
+# support legacy rocm-ci
+install(
+  FILES ${CMAKE_BINARY_DIR}/opencl/packages/opencl/10-rocm-opencl.conf
+  DESTINATION /${CMAKE_INSTALL_SYSCONFDIR}/ld.so.conf.d
+  COMPONENT binary
+  EXCLUDE_FROM_ALL
+)
 
 #Package: rocm-opencl,rocm-opencl-dev/devel,rocm-ocl-icd
 

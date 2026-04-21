@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <future>
 #include "hsakmt/hsakmt.h"
+#include "hsakmt/hsakmtctx.h"
 #include "OSWrapper.hpp"
 #include "KFDTestUtil.hpp"
 #include "Assemble.hpp"
@@ -60,7 +61,7 @@ typedef struct _KFDTESTGPU_PARAMETERS
 //  @class KFDBaseComponentTest
 class KFDBaseComponentTest : public testing::Test {
  public:
-    KFDBaseComponentTest(void) { m_MemoryFlags.Value = 0; }
+    KFDBaseComponentTest(void) { m_MemoryFlags.Value = 0; m_hsakmt_current_ctx = NULL; }
     ~KFDBaseComponentTest(void) {}
 
     HSAuint64 GetSysMemSize();
@@ -116,7 +117,12 @@ class KFDBaseComponentTest : public testing::Test {
 
     HSAKMT_STATUS KFDTestLaunch(std::function<void(int)> test_func);
 
+    HsaKFDContext *m_hsakmt_current_ctx;
+
  protected:
+    HsaKFDContext *m_hsakmt_primary_ctx;
+    HsaKFDContext *m_hsakmt_secondary_ctx;
+
     HsaVersionInfo  m_VersionInfo;
     HsaSystemProperties m_SystemProperties;
     unsigned int m_FamilyId;
@@ -160,7 +166,7 @@ class KFDBaseComponentTest : public testing::Test {
             return;
         }
         m_xnack = -1;
-        HSAKMT_STATUS ret = hsaKmtGetXNACKMode(&m_xnack);
+        HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtGetXNACKMode, m_hsakmt_current_ctx, &m_xnack);
         if (ret != HSAKMT_STATUS_SUCCESS) {
             LOG() << "Failed " << ret << " to get XNACK mode" << std::endl;
             return;
@@ -181,7 +187,7 @@ class KFDBaseComponentTest : public testing::Test {
         if (xnack_on == m_xnack)
             return;
 
-        ret = hsaKmtSetXNACKMode(xnack_on);
+        ret = HSAKMT_CALL(hsaKmtSetXNACKMode, m_hsakmt_current_ctx, xnack_on);
         if (ret != HSAKMT_STATUS_SUCCESS)
             LOG() << "Failed " << ret << " to set XNACK mode " << xnack_on << std::endl;
         else
@@ -195,7 +201,7 @@ class KFDBaseComponentTest : public testing::Test {
         if (m_xnack == -1)
             return;
 
-        hsaKmtSetXNACKMode(m_xnack);
+        HSAKMT_CALL(hsaKmtSetXNACKMode, m_hsakmt_current_ctx, m_xnack);
     }
 };
 

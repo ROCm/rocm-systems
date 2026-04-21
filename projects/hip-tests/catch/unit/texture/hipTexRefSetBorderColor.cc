@@ -13,7 +13,7 @@ texture<float, 1, hipReadModeElementType> tex;
 
 // It will be added for HIP in ROCm7.0
 #if HT_NVIDIA
-TEST_CASE(Unit_hipTexRefSetBorderColor_Positive) {
+HIP_TEST_CASE(Unit_hipTexRefSetBorderColor_Positive) {
   float set_border_color[3] = {1, 2, 3};
   float get_border_color[3] = {0, 0, 0};
   hipModule_t module = nullptr;
@@ -33,7 +33,7 @@ TEST_CASE(Unit_hipTexRefSetBorderColor_Positive) {
 }
 #endif
 
-TEST_CASE(Unit_hipTexRefSetBorderColor_Negative) {
+HIP_TEST_CASE(Unit_hipTexRefSetBorderColor_Negative) {
   CHECK_IMAGE_SUPPORT
   float border_color[3] = {0, 0, 0};
   hipModule_t module = nullptr;

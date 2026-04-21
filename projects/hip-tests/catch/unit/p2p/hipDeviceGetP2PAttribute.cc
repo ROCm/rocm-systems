@@ -47,15 +47,15 @@
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE(Unit_hipDeviceGetP2PAttribute_Basic) {
+HIP_TEST_CASE(Unit_hipDeviceGetP2PAttribute_Basic) {
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-119");
+  HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-119.");
   return;
 #else
 
   int deviceCount = HipTest::getGeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 
@@ -107,15 +107,15 @@ TEST_CASE(Unit_hipDeviceGetP2PAttribute_Basic) {
  *  - HIP_VERSION >= 5.2
  */
 
-TEST_CASE(Unit_hipDeviceGetP2PAttribute_Negative) {
+HIP_TEST_CASE(Unit_hipDeviceGetP2PAttribute_Negative) {
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-122");
+  HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-122.");
   return;
 #else
 
   int deviceCount = HipTest::getGeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 

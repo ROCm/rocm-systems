@@ -8,7 +8,7 @@
 
 constexpr bool enable_validation = false;
 
-TEST_CASE(Unit_hipDestroyExternalSemaphore_Vulkan_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipDestroyExternalSemaphore_Vulkan_Negative_Parameters) {
   SECTION("extSem == nullptr") {
     HIP_CHECK_ERROR(hipDestroyExternalSemaphore(nullptr), hipErrorInvalidValue);
   }
@@ -35,7 +35,7 @@ TEST_CASE(Unit_hipDestroyExternalSemaphore_Vulkan_Negative_Parameters) {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipDestroyExternalSemaphore_Vulkan_Capture) {
+HIP_TEST_CASE(Unit_hipDestroyExternalSemaphore_Vulkan_Capture) {
   VulkanTest vkt(enable_validation);
   const auto semaphore = vkt.CreateExternalSemaphore(VK_SEMAPHORE_TYPE_BINARY);
   auto handle_desc = vkt.BuildSemaphoreDescriptor(semaphore, VK_SEMAPHORE_TYPE_BINARY);

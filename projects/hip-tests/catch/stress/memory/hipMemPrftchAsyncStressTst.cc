@@ -49,7 +49,7 @@ static void ReleaseResource(int* Hmm, hipStream_t* strm) {
 /* The following test allocates a managed memory and prefetch it in
    one-to-all and all-to-one fahsion followed by kernel launch within available
    devices*/
-TEST_CASE(Stress_hipMemPrefetchAsyncOneToAll) {
+HIP_TEST_CASE(Stress_hipMemPrefetchAsyncOneToAll) {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     int *Hmm1 = nullptr, NumDevs, MemSz = (4096 * 4);
@@ -110,8 +110,6 @@ TEST_CASE(Stress_hipMemPrefetchAsyncOneToAll) {
     // Releasing the resources in case all the scenarios passed
     HIP_CHECK(hipFree(Hmm1));
   } else {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
