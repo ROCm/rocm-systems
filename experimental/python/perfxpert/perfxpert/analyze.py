@@ -36,7 +36,7 @@ thin orchestration and CLI layer.
 import argparse
 import os
 import sys
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     from importlib.metadata import version as _pkg_version
@@ -207,6 +207,21 @@ def add_args(parser: argparse.ArgumentParser):
         help="Minimum kernel duration threshold in microseconds (filter out short kernels)",
     )
 
+    analysis_options.add_argument(
+        "--advanced",
+        action="store_true",
+        default=False,
+        dest="advanced",
+        help=(
+            "Include advanced specialist recommendations (currently: LLVM "
+            "loop-hint pragma advice). Default is OFF — pragma recs are "
+            "filtered out of the report. Can also be enabled via the "
+            "PERFXPERT_ADVANCED_RECS=1 environment variable. Each "
+            "pragma rec carries a `[advanced]` badge and requires a "
+            "Tier-0 source anchor."
+        ),
+    )
+
     # LLM Enhancement Options
     llm_options = parser.add_argument_group(
         "LLM enhancement options (optional)",
@@ -359,6 +374,7 @@ def add_args(parser: argparse.ArgumentParser):
             "llm_local_model",
             "no_progress",
             "baseline_db",
+            "advanced",
         ]
         # Argparse defaults argparse emits for flags not passed by the
         # user; we skip these so kwargs do not carry noise that the
@@ -372,6 +388,7 @@ def add_args(parser: argparse.ArgumentParser):
             "top_kernels": 10,
             "min_duration": 0.0,
             "no_progress": False,
+            "advanced": False,
         }
         ret = {}
         for itr in valid_args:
@@ -732,12 +749,51 @@ def _build_tier0_wrapper_scard(tier0_full_html: str) -> str:
     )
 
 
+def _resolve_advanced_flag(advanced_arg: Optional[bool]) -> bool:
+    """Resolve the effective ``--advanced`` gate.
+
+    Precedence (highest first):
+
+    1. Explicit CLI ``--advanced`` (``advanced_arg=True``).
+    2. ``PERFXPERT_ADVANCED_RECS`` env var — truthy values ``1``,
+       ``true``, ``yes``, ``on`` (case-insensitive).
+    3. Default OFF.
+
+    Returns ``True`` when advanced recommendations (currently: LLVM
+    loop-hint pragma advice emitted via ``subtype: "pragma"``) should
+    appear in the report.
+    """
+    if advanced_arg is True:
+        return True
+    env_val = os.environ.get("PERFXPERT_ADVANCED_RECS", "")
+    return env_val.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _filter_advanced_recs(
+    recs: List[Dict[str, Any]],
+    *,
+    advanced: bool,
+) -> List[Dict[str, Any]]:
+    """Strip ``subtype="pragma"`` entries when the advanced gate is OFF.
+
+    The Compute Specialist may emit pragma recs regardless of the
+    gate state; the gate decides whether they *render*. This keeps
+    the agentic pipeline stateless and lets the same payload drive
+    both a default-mode report and an ``--advanced`` report without
+    re-running the LLM.
+    """
+    if advanced:
+        return list(recs)
+    return [r for r in recs if r.get("subtype") != "pragma"]
+
+
 def _format_agentic_output(
     root_output: Any,
     output_format: str,
     *,
     database_path: str = "",
     analysis_payload: Optional[Dict[str, Any]] = None,
+    advanced: bool = False,
 ) -> str:
     """Render an agentic RootOutput + deterministic analysis payload.
 
@@ -783,12 +839,20 @@ def _format_agentic_output(
     api_overhead = payload.get("api_overhead") or {}
     thread_trace = payload.get("thread_trace")
     tier0_findings = payload.get("tier0_findings")
+    roofline_points = payload.get("roofline")
+    communication = payload.get("communication")  # Phase 10 RCCL / NIC
     det_recs = list(payload.get("recommendations_deterministic") or [])
 
     # Merge LLM + deterministic recommendations (dedupe by (type,target) or
     # (category,issue)). LLM recs keep their verdict; deterministic citations
     # / code snippets are carried across when they disambiguate the same rec.
     merged_recs = merge_recommendations(llm_recs, det_recs)
+
+    # Phase 10: advanced-gate filter. When --advanced (or
+    # PERFXPERT_ADVANCED_RECS=1) is OFF, pragma recs never render —
+    # keeping default output clean while the pipeline itself stays
+    # stateless. See docs/guides/getting-started.md §4.1.
+    merged_recs = _filter_advanced_recs(merged_recs, advanced=advanced)
 
     # Source-only path: dispatch entirely to the tier-0 formatters when
     # there is no DB-side data at all.
@@ -901,6 +965,8 @@ def _format_agentic_output(
             kernel_resources=kernel_resources,
             api_overhead=api_overhead,
             detected_kernels=_json_detected_kernels,
+            communication=communication,
+            roofline=roofline_points,
         )
         import json as _json
         try:
@@ -977,6 +1043,8 @@ def _format_agentic_output(
             hardware_counters=hardware_counters,
             database_path=database_path,
             detected_kernels=_md_detected_kernels,
+            communication=communication,
+            roofline=roofline_points,
         )
         # Splice the agent Summary in between the H1 and the metadata
         # block (``**Database:**`` / ``**Analysis Date:**`` /
@@ -1064,6 +1132,8 @@ def _format_agentic_output(
             database_path=database_path,
             att_analysis=thread_trace,
             detected_kernels=_detected_kernels,
+            roofline=roofline_points,
+            communication=communication,
         )
         # Splice the narrative as a standard `.scard` Summary section at the
         # TOP of the report (right after the Overview card inside
@@ -1105,6 +1175,8 @@ def _format_agentic_output(
         tier0_result=tier0_dict_to_ns(tier0_findings) if tier0_findings else None,
         source_only=False,
         output_format="text",
+        communication=communication,
+        roofline=roofline_points,
     )
 
     # Prepend a Summary block with narrative + primary_bottleneck so the
@@ -1375,6 +1447,11 @@ _KNOWN_EXECUTE_KWARGS = frozenset({
     # so ``_execute_agentic`` does not emit a RuntimeWarning about
     # unused kwargs.
     "baseline_db",
+    # ``--advanced`` (Phase 10): include advanced specialist recs
+    # (currently pragma loop-hint advice) in the report. When False
+    # pragma recs are filtered out before formatting. Also honours
+    # the ``PERFXPERT_ADVANCED_RECS=1`` env var.
+    "advanced",
 })
 
 
@@ -1556,11 +1633,13 @@ def _execute_agentic(
     # real Markdown (not raw narrative prose) and `--format webview`
     # emits a real HTML report (not a plaintext narrative).
     output_format = kwargs.get("output_format", "text")
+    advanced_effective = _resolve_advanced_flag(kwargs.get("advanced"))
     output = _format_agentic_output(
         root_output,
         output_format,
         database_path=database_path,
         analysis_payload=analysis_payload,
+        advanced=advanced_effective,
     )
 
     # ``--baseline <db>`` splice (Confluence row #7 end-of-session recap).
