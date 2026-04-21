@@ -18,7 +18,9 @@ patterns:
       adjacent_short_kernels: true
       same_tensor_signature: true
       ops: [add, sub, mul, div, relu, gelu, tanh, sigmoid]
-    expected_impact: 0.25    # typical 15-35% speedup on elementwise-bound regions
+    expected_impact: 0.25    # typical 15-35% time-saved on elementwise-bound regions
+    units: time_saved_fraction
+    # source: https://rocm.docs.amd.com/en/latest/how_to/kernel_fusion.html
     effort_factor: 1.0
     risk: low
     verify_counters: [SQ_INSTS_VALU, TCP_TCC_READ_REQ_sum]
@@ -33,6 +35,7 @@ patterns:
       adjacent_short_kernels: true
       last_op_is_reduce: true
     expected_impact: 0.30
+    units: time_saved_fraction
     effort_factor: 1.2
     risk: low
     verify_counters: [SQ_INSTS_VALU, TCC_WRITE_sum]
@@ -47,6 +50,7 @@ patterns:
       ops: [layer_norm, rms_norm, batch_norm]
       followed_by: [add, residual]
     expected_impact: 0.35
+    units: time_saved_fraction
     effort_factor: 1.5
     risk: medium
     verify_counters: [TCC_HIT_sum, TCC_MISS_sum, TCC_EA_RDREQ_sum]
@@ -61,6 +65,8 @@ patterns:
       adjacent_short_kernels: true
       ops_sequence: [gemm, bias_add, activation]
     expected_impact: 0.45
+    units: time_saved_fraction
+    # source: https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/design/extension-api.html
     effort_factor: 2.0
     risk: medium
     verify_counters: [SQ_INSTS_VALU_MFMA, TCC_EA_RDREQ_sum]

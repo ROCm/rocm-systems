@@ -200,8 +200,18 @@ def find_fusion_candidates(
               "gap_ns": int,
               "est_speedup_lo": float,
               "est_speedup_hi": float,
+              "expected_impact_units": "speedup_multiplier",
               "confidence": float,  # 0..1
             }
+
+        ``expected_impact_units`` disambiguates the numeric meaning of
+        the ``est_speedup_*`` bounds the way
+        :func:`perfxpert.knowledge.fusion_patterns` entries carry a
+        ``units`` field for their ``expected_impact`` value.
+        ``est_speedup_{lo,hi}`` here are always
+        ``speedup_multiplier`` (``1.0 + overhead_saved / total``), never
+        a time-saved fraction; surfacing the label prevents
+        downstream consumers from re-interpreting the number.
 
         Empty list if the DB has no short-adjacent kernels meeting both
         duration (< 10 us each) and gap (``< max_gap_ns``) thresholds.
@@ -233,6 +243,11 @@ def find_fusion_candidates(
             "gap_ns": int(gap),
             "est_speedup_lo": lo,
             "est_speedup_hi": hi,
+            # Propagate the same ``units`` vocabulary that
+            # knowledge/fusion_patterns.yaml uses so downstream consumers
+            # never have to guess whether a number is a fractional time
+            # saved or a multiplicative speedup.
+            "expected_impact_units": "speedup_multiplier",
             "confidence": _confidence(gap, max_gap_ns),
         })
 
