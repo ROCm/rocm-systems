@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/common/container/pool.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
@@ -77,6 +78,35 @@ namespace hsa
 namespace
 {
 constexpr auto null_hsa_signal = hsa_signal_t{.handle = 0};
+
+bool
+queue_async_diag_enabled()
+{
+    static auto _v = common::get_env("ROCPROF_QUEUE_ASYNC_DIAG", false);
+    return _v;
+}
+
+void
+log_corr_state(const char* stage, const context::correlation_id* corr_id)
+{
+    if(!queue_async_diag_enabled()) return;
+
+    if(!corr_id)
+    {
+        ROCP_ERROR << fmt::format("DEBUG: {} corr_id=null", stage);
+        return;
+    }
+
+    ROCP_ERROR << fmt::format("DEBUG: {} corr_ptr={} internal={} thread_idx={} ancestor={} "
+                              "ref_count={} kern_count={}",
+                              stage,
+                              static_cast<const void*>(corr_id),
+                              corr_id->internal,
+                              corr_id->thread_idx,
+                              corr_id->ancestor,
+                              corr_id->get_ref_count(),
+                              corr_id->get_kern_count());
+}
 
 template <typename DomainT, typename... Args>
 inline bool
@@ -140,9 +170,15 @@ get_signal_pool()
 }
 
 bool
-AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
+AsyncSignalHandler(hsa_signal_value_t signal_v, void* data)
 {
     using session_info_t = std::shared_ptr<queue_info_session_t>;
+
+    ROCP_ERROR_IF(queue_async_diag_enabled())
+        << fmt::format("DEBUG: AsyncSignalHandler enter signal_value={} data={} tid={}",
+                       signal_v,
+                       data,
+                       common::get_tid());
 
     if(!data)
     {
@@ -155,6 +191,8 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     // if we have fully finalized, delete the data and return
     if(registration::get_fini_status() > 0)
     {
+        ROCP_ERROR_IF(queue_async_diag_enabled()) << fmt::format(
+            "DEBUG: AsyncSignalHandler finalization path data={} tid={}", data, common::get_tid());
         _session_ptr->reset();
         delete _session_ptr;
         return false;
@@ -176,9 +214,29 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     }
 
     auto& queue_info_session = *_session;
+    ROCP_ERROR_IF(queue_async_diag_enabled()) << fmt::format(
+        "DEBUG: AsyncSignalHandler session queue_id={} session_ptr={} packet_count={} "
+        "signal_value={} tid={} corr_ptr={}",
+        queue_info_session.queue.get_id(),
+        static_cast<const void*>(_session.get()),
+        queue_info_session.packet_data.size(),
+        signal_v,
+        queue_info_session.tid,
+        static_cast<const void*>(queue_info_session.correlation_id));
+    log_corr_state("AsyncSignalHandler pre-loop", queue_info_session.correlation_id);
 
     for(auto& packet : queue_info_session.packet_data)
     {
+        ROCP_ERROR_IF(queue_async_diag_enabled())
+            << fmt::format("DEBUG: AsyncSignalHandler packet-begin queue_id={} dispatch_id={} "
+                           "interrupt_signal={} completion_signal={} pooled_signal={} tid={}",
+                           queue_info_session.queue.get_id(),
+                           packet.callback_record.dispatch_info.dispatch_id,
+                           packet.interrupt_signal.handle,
+                           packet.completion_signal.handle,
+                           static_cast<void*>(packet.pooled_signal),
+                           common::get_tid());
+
         auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session, packet);
         kernel_dispatch::dispatch_complete(queue_info_session, packet, dispatch_time);
 
@@ -251,15 +309,21 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         auto* _corr_id = queue_info_session.correlation_id;
         if(_corr_id)
         {
+            log_corr_state("AsyncSignalHandler pre-decrement", _corr_id);
             ROCP_FATAL_IF(_corr_id->get_ref_count() == 0)
                 << "reference counter for correlation id " << _corr_id->internal << " from thread "
                 << _corr_id->thread_idx << " has no reference count";
             _corr_id->sub_kern_count();
             _corr_id->sub_ref_count();
+            log_corr_state("AsyncSignalHandler post-decrement", _corr_id);
         }
     }
 
     queue_info_session.queue.async_complete();
+    ROCP_ERROR_IF(queue_async_diag_enabled())
+        << fmt::format("DEBUG: AsyncSignalHandler async_complete queue_id={} tid={}",
+                       queue_info_session.queue.get_id(),
+                       common::get_tid());
 
     return false;
 }
@@ -386,6 +450,7 @@ WriteInterceptor(const void* packets,
         constexpr auto ref_count = 1;
         corr_id                  = context::correlation_tracing_service::construct(ref_count);
         _corr_id_pop             = corr_id;
+        log_corr_state("WriteInterceptor constructed corr_id", corr_id);
     }
 
     // During finalization, correlation tracing service will not construct a correlation id so
@@ -395,6 +460,7 @@ WriteInterceptor(const void* packets,
         writer(packets, pkt_count);
         return;
     }
+    log_corr_state("WriteInterceptor using corr_id", corr_id);
 
     // if we constructed a correlation id, this decrements the reference count after the
     // underlying function returns
@@ -447,8 +513,18 @@ WriteInterceptor(const void* packets,
 
             // increase the reference count to denote that this correlation id is being used in a
             // kernel
-            corr_id->add_ref_count();
-            corr_id->add_kern_count();
+            auto ref_count_after  = corr_id->add_ref_count();
+            auto kern_count_after = corr_id->add_kern_count();
+            ROCP_ERROR_IF(queue_async_diag_enabled())
+                << fmt::format("DEBUG: WriteInterceptor corr increment queue_id={} dispatch_idx={} "
+                               "corr_ptr={} corr_internal={} ref_count={} kern_count={} tid={}",
+                               queue.get_id(),
+                               i,
+                               static_cast<const void*>(corr_id),
+                               corr_id->internal,
+                               ref_count_after,
+                               kern_count_after,
+                               common::get_tid());
 
             auto _packet_data = packet_data_t{};
 
@@ -505,6 +581,15 @@ WriteInterceptor(const void* packets,
                                                     kernel_packet.kernel_dispatch.grid_size_y,
                                                     kernel_packet.kernel_dispatch.grid_size_z},
                     .reserved_padding = {0}}};
+            ROCP_ERROR_IF(queue_async_diag_enabled()) << fmt::format(
+                "DEBUG: WriteInterceptor dispatch prepared queue_id={} dispatch_id={} "
+                "corr_ptr={} signal_handle={} existing_completion_signal={} tid={}",
+                queue.get_id(),
+                dispatch_id,
+                static_cast<const void*>(corr_id),
+                kernel_packet.kernel_dispatch.completion_signal.handle,
+                existing_completion_signal,
+                common::get_tid());
 
             {
                 auto tracer_data = _packet_data.callback_record;
@@ -614,7 +699,8 @@ WriteInterceptor(const void* packets,
             {
                 // Adding a barrier packet with the original packet's completion signal.
                 queue.create_signal(0, &interrupt_signal, false);
-                // Queue completion monitor is armed on EQ -1, so initialize to zero before dispatch.
+                // Queue completion monitor is armed on EQ -1, so initialize to zero before
+                // dispatch.
                 get_core_table()->hsa_signal_store_screlease_fn(interrupt_signal, 0);
                 completion_signal                                            = interrupt_signal;
                 transformed_packets.back().kernel_dispatch.completion_signal = interrupt_signal;
@@ -870,11 +956,28 @@ Queue::signal_async_handler(pooled_signal_t* signal, hsa_signal_t raw_signal, vo
         return AsyncSignalHandler(signal_value, data);
     };
 
-    auto armed =
-        QueueSignalSubscription::arm(const_cast<Queue&>(*this), raw_signal, std::move(callback), data);
+    ROCP_ERROR_IF(queue_async_diag_enabled())
+        << fmt::format("DEBUG: Queue::signal_async_handler arm queue_id={} raw_signal={} data={} "
+                       "pooled_signal={} tid={}",
+                       get_id(),
+                       raw_signal.handle,
+                       data,
+                       static_cast<void*>(signal),
+                       common::get_tid());
 
-    ROCP_FATAL_IF(!armed)
-        << fmt::format("QueueSignalSubscription failed for signal={{.handle={}}}", raw_signal.handle);
+    auto armed = QueueSignalSubscription::arm(
+        const_cast<Queue&>(*this), raw_signal, std::move(callback), data);
+
+    ROCP_ERROR_IF(queue_async_diag_enabled())
+        << fmt::format("DEBUG: Queue::signal_async_handler arm result queue_id={} raw_signal={} "
+                       "armed={} tid={}",
+                       get_id(),
+                       raw_signal.handle,
+                       armed,
+                       common::get_tid());
+
+    ROCP_FATAL_IF(!armed) << fmt::format("QueueSignalSubscription failed for signal={{.handle={}}}",
+                                         raw_signal.handle);
 }
 
 Queue::pooled_signal_t*
