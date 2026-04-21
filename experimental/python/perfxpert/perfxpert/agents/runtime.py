@@ -12,8 +12,8 @@ Responsibilities:
 - Generate session_id if missing
 - Expose run_root / run_correctness / run_analysis / run_recommendation
   plus run_compute_specialist / run_memory_specialist / run_latency_specialist
-  (one session method per agent in the hierarchy — used by the MCP
-  tool wrappers under perfxpert.tools.agents.*)
+  / run_diff_specialist (one session method per agent in the hierarchy —
+  used by the MCP tool wrappers under perfxpert.tools.agents.*)
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from perfxpert.agents import (
     analysis,
     compute_specialist,
     correctness,
+    diff_specialist,
     latency_specialist,
     memory_specialist,
     recommendation,
@@ -461,6 +462,27 @@ class AnalysisSession:
             )
         finally:
             self._emit(progress_callback, "Latency specialist done")
+
+    def run_diff_specialist(
+        self,
+        payload: schemas.DiffSpecialistInput,
+        *,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> schemas.DiffSpecialistOutput:
+        """Trace-Diff specialist (Layer 2) via the session cascade."""
+        self._emit(progress_callback, "Consulting diff specialist")
+        try:
+            if self.airgap:
+                return diff_specialist.run_diff_specialist(payload, airgap=True)
+            return self._cascade(
+                lambda prov: diff_specialist.run_diff_specialist(
+                    payload, provider=prov
+                ),
+                op_name="run_diff_specialist",
+                progress_callback=progress_callback,
+            )
+        finally:
+            self._emit(progress_callback, "Diff specialist done")
 
 
 def _ensure_nonempty_llm_output(output: Any, *, provider: str) -> None:

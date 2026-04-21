@@ -13,6 +13,7 @@ INPUT_SCHEMAS = [
     "ComputeSpecialistInput",
     "MemorySpecialistInput",
     "LatencySpecialistInput",
+    "DiffSpecialistInput",
 ]
 
 OUTPUT_SCHEMAS = [
@@ -23,6 +24,7 @@ OUTPUT_SCHEMAS = [
     "ComputeSpecialistOutput",
     "MemorySpecialistOutput",
     "LatencySpecialistOutput",
+    "DiffSpecialistOutput",
 ]
 
 

@@ -190,6 +190,33 @@ class LatencySpecialistOutput(_FrozenModel):
     citations: List[str] = Field(default_factory=list)
 
 
+# -- Diff specialist (Layer 2) --------------------------------------------
+#
+# Wraps :func:`perfxpert.tools.trace_diff.diff_runs` + a narrative.
+# Output cap is 5 fields, so ``regressions`` and ``improvements`` are
+# nested under a single ``kernel_deltas`` dict ({"regressions":[...],
+# "improvements":[...]}) — the MCP tool wrapper flattens them back to
+# top-level keys for the public return shape documented in
+# agent-hierarchy.md.
+
+class DiffSpecialistInput(_FrozenModel):
+    baseline_db: str = Field(..., description="Path to baseline rocprofiler-sdk .db")
+    new_db: str = Field(..., description="Path to new run's rocprofiler-sdk .db")
+    top_kernels: int = Field(default=20, ge=1, le=100)
+    user_intent: str = Field(default="summarize the diff")
+
+
+class DiffSpecialistOutput(_FrozenModel):
+    wall_delta_pct: float
+    kernel_deltas: Dict[str, List[Dict[str, Any]]] = Field(
+        default_factory=lambda: {"regressions": [], "improvements": []},
+        description="Per-kernel deltas, keyed by 'regressions' / 'improvements'.",
+    )
+    verdict: Literal["improved", "regressed", "neutral"]
+    narrative: str
+    confidence: float = Field(..., ge=0.0, le=1.0)
+
+
 # -- Exports ---------------------------------------------------------------
 
 __all__ = [
@@ -209,4 +236,6 @@ __all__ = [
     "MemorySpecialistOutput",
     "LatencySpecialistInput",
     "LatencySpecialistOutput",
+    "DiffSpecialistInput",
+    "DiffSpecialistOutput",
 ]
