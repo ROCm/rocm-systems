@@ -82,6 +82,39 @@ struct has_signal_get_event_id_fn<
 : std::true_type
 {};
 
+template <typename TableT>
+bool
+get_event_id_via_table(TableT* ext_api, hsa_signal_t signal, uint32_t& event_id)
+{
+    if constexpr(has_signal_get_event_id_fn<TableT>::value)
+    {
+        if(!ext_api->hsa_amd_signal_get_event_id_fn) return false;
+        return (ext_api->hsa_amd_signal_get_event_id_fn(signal, &event_id) == HSA_STATUS_SUCCESS);
+    }
+    else
+    {
+        (void) ext_api;
+        (void) signal;
+        (void) event_id;
+        return false;
+    }
+}
+
+template <typename TableT>
+bool
+has_event_id_support(TableT* ext_api)
+{
+    if constexpr(has_signal_get_event_id_fn<TableT>::value)
+    {
+        return (ext_api != nullptr && ext_api->hsa_amd_signal_get_event_id_fn != nullptr);
+    }
+    else
+    {
+        (void) ext_api;
+        return false;
+    }
+}
+
 int
 get_kfd_wait_fd()
 {
@@ -105,18 +138,7 @@ default_get_event_id(hsa_signal_t signal, uint32_t& event_id)
 {
     auto* ext_api = get_amd_ext_table();
     if(!ext_api) return false;
-
-    if constexpr(has_signal_get_event_id_fn<hsa_amd_ext_table_t>::value)
-    {
-        if(!ext_api->hsa_amd_signal_get_event_id_fn) return false;
-        return (ext_api->hsa_amd_signal_get_event_id_fn(signal, &event_id) == HSA_STATUS_SUCCESS);
-    }
-    else
-    {
-        (void) signal;
-        (void) event_id;
-        return false;
-    }
+    return get_event_id_via_table(ext_api, signal, event_id);
 }
 
 bool
@@ -158,17 +180,8 @@ bool
 has_default_ioctl_support()
 {
     auto* ext_api = get_amd_ext_table();
-    if(!ext_api) return false;
-
-    if constexpr(has_signal_get_event_id_fn<hsa_amd_ext_table_t>::value)
-    {
-        if(!ext_api->hsa_amd_signal_get_event_id_fn) return false;
-        return (get_kfd_wait_fd() >= 0);
-    }
-    else
-    {
-        return false;
-    }
+    if(!has_event_id_support(ext_api)) return false;
+    return (get_kfd_wait_fd() >= 0);
 }
 
 class IoctlSignalMonitor final : public SignalMonitor
