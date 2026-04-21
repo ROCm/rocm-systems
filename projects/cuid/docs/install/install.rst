@@ -13,17 +13,12 @@ This topic explains how to build and install the CUID library from source.
 System requirements
 ====================
 
-To build CUID from source, the following softwares are required:
+To build CUID from source, the following dependencies are required:
 
 - CMake v3.14 or later
 - G++ v5.0 or later
 - For Ubuntu or Debian: OpenSSL v1.1 or later
 - For Microsoft Windows: Bcrypt (Windows Native crypto library)
-
-Additionally, to build the documentation, the following softwares are required:
-
-- Doxygen 1.9.1 and later
-- Python 3.12
 
 Building and installing CUID library
 =====================================
@@ -60,10 +55,3 @@ To build and install the CUID library from source, follow these steps:
 
     make install
     <install prefix>/share/amdcuid/amdcuid_postinst.sh
-
-5. Optionally, you can also build the documentation.
-
-   .. code-block:: shell
-
-    pip install -r docs/sphinx/requirements.txt
-    sphinx-build docs docs/_build/html

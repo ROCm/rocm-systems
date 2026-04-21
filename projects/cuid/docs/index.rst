@@ -1,6 +1,6 @@
 .. meta::
   :description: The Component Unified ID (CUID) generates a deterministic unique ID for various devices such as GPUs, CPUs, NICs, and platforms in a data center environment.
-  :keywords: CUID docs, Data center standardization, GPU index, Data center device management
+  :keywords: CUID docs, Data center standardization, GPU index, Data center device management, CUUID
 
 .. _cuid-index:
 
