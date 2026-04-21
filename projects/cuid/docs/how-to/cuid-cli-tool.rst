@@ -154,7 +154,7 @@ Note that a new key will create new derived CUIDs for all the devices, while the
 Getting CUIDs
 --------------
 
-- Once CUIDs are generated for devices using the daemon or the CLI tool, you can query CUIDs for specific or all devices.
+- Once CUIDs are generated for devices using the daemon or the CLI tool, you can query a specific device for its CUID or list all devices with their CUIDs.
 
   To list the CUIDs for all the devices on the system, use the ``--list`` option:
 
