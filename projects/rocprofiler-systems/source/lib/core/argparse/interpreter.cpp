@@ -13,6 +13,7 @@
 #include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <set>
 #include <string>
 #include <vector>
@@ -32,11 +33,19 @@ strip_dashes(std::string_view name) noexcept
 }
 
 std::string
-key_from(const flag_descriptor& descriptor)
+parser_key_from(const flag_descriptor& descriptor)
 {
     if(descriptor.names.empty())
         throw exception<std::runtime_error>("flag_descriptor has no names");
     return std::string{ strip_dashes(descriptor.names.back()) };
+}
+
+std::string
+env_key_from(const std::string& parser_key)
+{
+    auto result = parser_key;
+    std::replace(result.begin(), result.end(), '-', '_');
+    return result;
 }
 
 std::vector<std::string>
@@ -80,6 +89,10 @@ read_value(parser_t& parser, const std::string& key, const flag_descriptor& desc
 
         case value_kind::scalar: return parser.get<std::string>(key);
 
+        case value_kind::scalar_int: return std::to_string(parser.get<int64_t>(key));
+
+        case value_kind::scalar_double: return std::to_string(parser.get<double>(key));
+
         case value_kind::list:
         {
             auto values = parser.get<std::vector<std::string>>(key);
@@ -121,8 +134,9 @@ apply_count(parser_t::argument& arg, const count_spec& count) noexcept
 void
 register_flag(parser_t& parser, parser_data& data, const flag_descriptor& descriptor)
 {
-    auto key = key_from(descriptor);
-    if(!data.reg.environ_filter(key, data)) return;
+    auto parser_key = parser_key_from(descriptor);
+    auto env_key    = env_key_from(parser_key);
+    if(!data.reg.environ_filter(env_key, data)) return;
 
     auto& arg =
         parser.add_argument(to_strvec(descriptor.names), std::string{ descriptor.help });
@@ -133,16 +147,16 @@ register_flag(parser_t& parser, parser_data& data, const flag_descriptor& descri
     if(!descriptor.conflicts.empty()) arg.conflicts(to_strset(descriptor.conflicts));
     if(!descriptor.requires_.empty()) arg.required(to_strvec(descriptor.requires_));
 
-    arg.action([&data, descriptor, key](parser_t& parser_ref) {
+    arg.action([&data, descriptor, parser_key](parser_t& parser_ref) {
         if(descriptor.custom != nullptr)
         {
             descriptor.custom(parser_ref, data);
             return;
         }
-        emit_env(data, descriptor, read_value(parser_ref, key, descriptor));
+        emit_env(data, descriptor, read_value(parser_ref, parser_key, descriptor));
     });
 
-    remember_processed(data, key, descriptor);
+    remember_processed(data, env_key, descriptor);
 }
 
 void

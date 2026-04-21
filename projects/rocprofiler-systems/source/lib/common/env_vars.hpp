@@ -52,7 +52,10 @@ constexpr std::string_view SAMPLING_AINICS   = "ROCPROFSYS_SAMPLING_AINICS";
 constexpr std::string_view SAMPLING_TIDS     = "ROCPROFSYS_SAMPLING_TIDS";
 constexpr std::string_view SAMPLING_INCLUDE_INLINES =
     "ROCPROFSYS_SAMPLING_INCLUDE_INLINES";
+constexpr std::string_view SAMPLING_OVERFLOW       = "ROCPROFSYS_SAMPLING_OVERFLOW";
 constexpr std::string_view SAMPLING_OVERFLOW_EVENT = "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT";
+constexpr std::string_view SAMPLING_OVERFLOW_FREQ  = "ROCPROFSYS_SAMPLING_OVERFLOW_FREQ";
+constexpr std::string_view SAMPLING_OVERFLOW_TIDS  = "ROCPROFSYS_SAMPLING_OVERFLOW_TIDS";
 
 // --- Sampling: cputime timer ---
 constexpr std::string_view SAMPLING_CPUTIME       = "ROCPROFSYS_SAMPLING_CPUTIME";
@@ -90,6 +93,10 @@ constexpr std::string_view USE_RCCLP   = "ROCPROFSYS_USE_RCCLP";
 constexpr std::string_view USE_AINIC   = "ROCPROFSYS_USE_AINIC";
 constexpr std::string_view USE_SHMEM   = "ROCPROFSYS_USE_SHMEM";
 constexpr std::string_view USE_UCX     = "ROCPROFSYS_USE_UCX";
+
+// --- MPI ---
+constexpr std::string_view RANK_FILTER_ID     = "ROCPROFSYS_RANK_FILTER_ID";
+constexpr std::string_view RANK_FILTER_OUTPUT = "ROCPROFSYS_RANK_FILTER_OUTPUT";
 
 // --- Output ---
 constexpr std::string_view OUTPUT_PATH   = "ROCPROFSYS_OUTPUT_PATH";
@@ -145,8 +152,8 @@ constexpr std::string_view TRACE_DELAY           = "ROCPROFSYS_TRACE_DELAY";
 constexpr std::string_view TRACE_DURATION        = "ROCPROFSYS_TRACE_DURATION";
 constexpr std::string_view TRACE_PERIODS         = "ROCPROFSYS_TRACE_PERIODS";
 constexpr std::string_view TRACE_PERIOD_CLOCK_ID = "ROCPROFSYS_TRACE_PERIOD_CLOCK_ID";
-constexpr std::string_view VERBOSE               = "ROCPROFSYS_VERBOSE";
-constexpr std::string_view DEBUG                 = "ROCPROFSYS_DEBUG";
+constexpr std::string_view VERBOSE_OUTPUT        = "ROCPROFSYS_VERBOSE";
+constexpr std::string_view DEBUG_OUTPUT          = "ROCPROFSYS_DEBUG";
 // well above the highest verbose threshold (3) so debug mode enables all verbose output
 constexpr int              DEBUG_VERBOSE_BOOST = 8;
 constexpr std::string_view TIMEMORY_COMPONENTS = "ROCPROFSYS_TIMEMORY_COMPONENTS";

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "argparse.hpp"
+#include "argparse/core_flags.hpp"
+#include "argparse/interpreter.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
 #include "config.hpp"
@@ -77,6 +79,36 @@ update_env(parser_data& _data, std::string_view _env_var, Tp&& _env_val,
                                    _data.env.updated, _data.env.initial);
 }
 
+void
+apply_papi_choice_filter(const std::shared_ptr<tim::vsettings>& setting)
+{
+    if(setting->get_name() != "papi_events") return;
+    auto choices = setting->get_choices();
+    choices.erase(
+        std::remove_if(choices.begin(), choices.end(),
+                       [](const auto& choice) {
+                           return std::regex_search(
+                                      choice, std::regex{ "[A-Za-z0-9]:([A-Za-z_]+)" }) ||
+                                  std::regex_search(choice, std::regex{ "io:::" });
+                       }),
+        choices.end());
+    choices.emplace_back("... run `rocprof-sys-avail -H -c CPU` for full list ...");
+    setting->set_choices(choices);
+}
+
+void
+sort_settings_by_name_length(std::vector<std::shared_ptr<tim::vsettings>>& settings)
+{
+    std::sort(settings.begin(), settings.end(), [](const auto& lhs, const auto& rhs) {
+        const auto& lhs_name = lhs->get_name();
+        const auto& rhs_name = rhs->get_name();
+        if(lhs_name.length() > 4 && rhs_name.length() > 4 &&
+           lhs_name.substr(0, 4) == rhs_name.substr(0, 4))
+            return lhs_name < rhs_name;
+        return lhs_name.length() < rhs_name.length();
+    });
+}
+
 }  // namespace
 
 bool
@@ -150,389 +182,12 @@ add_torch_library_path(parser_data& _data, bool verbose)
 parser_data&
 add_core_arguments(parser_t& _parser, parser_data& _data)
 {
-    const auto* _cputime_desc =
-        R"(Sample based on a CPU-clock timer (default). Accepts zero or more arguments:
-    %{INDENT}%0. Enables sampling based on CPU-clock timer.
-    %{INDENT}%1. Interrupts per second. E.g., 100 == sample every 10 milliseconds of CPU-time.
-    %{INDENT}%2. Delay (in seconds of CPU-clock time). I.e., how long each thread should wait before taking first sample.
-    %{INDENT}%3+ Thread IDs to target for sampling, starting at 0 (the main thread).
-    %{INDENT}%   May be specified as index or range, e.g., '0 2-4' will be interpreted as:
-    %{INDENT}%      sample the main thread (0), do not sample the first child thread but sample the 2nd, 3rd, and 4th child threads)";
-
-    const auto* _realtime_desc =
-        R"(Sample based on a real-clock timer. Accepts zero or more arguments:
-    %{INDENT}%0. Enables sampling based on real-clock timer.
-    %{INDENT}%1. Interrupts per second. E.g., 100 == sample every 10 milliseconds of realtime.
-    %{INDENT}%2. Delay (in seconds of real-clock time). I.e., how long each thread should wait before taking first sample.
-    %{INDENT}%3+ Thread IDs to target for sampling, starting at 0 (the main thread).
-    %{INDENT}%   May be specified as index or range, e.g., '0 2-4' will be interpreted as:
-    %{INDENT}%      sample the main thread (0), do not sample the first child thread but sample the 2nd, 3rd, and 4th child threads
-    %{INDENT}%   When sampling with a real-clock timer, please note that enabling this will cause threads which are typically "idle"
-    %{INDENT}%   to consume more resources since, while idle, the real-clock time increases (and therefore triggers taking samples)
-    %{INDENT}%   whereas the CPU-clock time does not.)";
-
-    const auto* _overflow_desc =
-        R"(Sample based on an overflow event. Accepts zero or more arguments:
-    %{INDENT}%0. Enables sampling based on overflow.
-    %{INDENT}%1. Overflow metric, e.g. PERF_COUNT_HW_INSTRUCTIONS
-    %{INDENT}%2. Overflow value. E.g., if metric == PERF_COUNT_HW_INSTRUCTIONS, then 10000000 == sample every 10,000,000 instructions.
-    %{INDENT}%3+ Thread IDs to target for sampling, starting at 0 (the main thread).
-    %{INDENT}%   May be specified as index or range, e.g., '0 2-4' will be interpreted as:
-    %{INDENT}%      sample the main thread (0), do not sample the first child thread but sample the 2nd, 3rd, and 4th child threads)";
-
-    const auto* _hsa_interrupt_desc =
-        R"(Set the value of the HSA_ENABLE_INTERRUPT environment variable.
-%{INDENT}%  ROCm version 5.2 and older have a bug which will cause a deadlock if a sample is taken while waiting for the signal
-%{INDENT}%  that a kernel completed -- which happens when sampling with a real-clock timer. We require this option to be set to
-%{INDENT}%  when --realtime is specified to make users aware that, while this may fix the bug, it can have a negative impact on
-%{INDENT}%  performance.
-%{INDENT}%  Values:
-%{INDENT}%    0     avoid triggering the bug, potentially at the cost of reduced performance
-%{INDENT}%    1     do not modify how ROCm is notified about kernel completion)";
-
-    const auto* _trace_policy_desc =
-        R"(Policy for new data when the buffer size limit is reached:
-    %{INDENT}%- discard     : new data is ignored
-    %{INDENT}%- ring_buffer : new data overwrites oldest data)";
-
-    _parser.start_group("DEBUG OPTIONS", "");
-
-    if(_data.reg.environ_filter("log_level", _data))
-    {
-        _parser.add_argument({ "--log-level" }, "Log level")
-            .max_count(1)
-            .dtype("string")
-            .choices({ "trace", "debug", "info", "warn", "error", "critical", "off" })
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_LOG_LEVEL",
-                           p.get<std::string>("log-level"));
-            });
-
-        _data.reg.processed_environs.emplace("log_level");
-    }
-
-    if(_data.reg.environ_filter("monochrome", _data))
-    {
-        _parser.add_argument({ "--monochrome" }, "Disable colorized output")
-            .max_count(1)
-            .dtype("bool")
-            .action([&](parser_t& p) {
-                auto _monochrome     = p.get<bool>("monochrome");
-                _data.out.monochrome = _monochrome;
-                p.set_use_color(!_monochrome);
-                update_env(_data, "ROCPROFSYS_MONOCHROME", (_monochrome) ? "1" : "0");
-                update_env(_data, "MONOCHROME", (_monochrome) ? "1" : "0");
-            });
-
-        _data.reg.processed_environs.emplace("monochrome");
-    }
-
-    if(_data.reg.environ_filter("debug", _data))
-    {
-        _parser
-            .add_argument({ "--debug" },
-                          "[DEPRECATED Use --log-level=debug] Debug output")
-            .max_count(1)
-            .action(
-                [&](parser_t&) { update_env(_data, "ROCPROFSYS_LOG_LEVEL", "debug"); });
-
-        _data.reg.processed_environs.emplace("debug");
-    }
-
-    if(_data.reg.environ_filter("verbose", _data))
-    {
-        _parser
-            .add_argument({ "-v", "--verbose" },
-                          "[DEPRECATED Use --log-level=trace] Verbose output")
-            .count(1)
-            .dtype("integral")
-            .action([&](parser_t& p) {
-                auto _v           = p.get<int>("verbose");
-                _data.out.verbose = _v;
-                update_env(_data, "ROCPROFSYS_VERBOSE", _v);
-
-                constexpr std::array<const char*, 5> log_levels = { "off", "info",
-                                                                    "debug", "debug",
-                                                                    "trace" };
-
-                auto index =
-                    std::clamp(_v + 1, 0, static_cast<int>(log_levels.size() - 1));
-                update_env(_data, "ROCPROFSYS_LOG_LEVEL", log_levels[index]);
-            });
-
-        _data.reg.processed_environs.emplace("verbose");
-    }
+    register_group(_parser, _data, debug_group());
 
     add_group_arguments(_parser, "debugging", _data);
     add_group_arguments(_parser, "mode", _data, true);
 
-    _parser.start_group("GENERAL OPTIONS",
-                        "These are options which are ubiquitously applied");
-
-    if(_data.reg.environ_filter("config", _data))
-    {
-        _parser.add_argument({ "-c", "--config" }, "Configuration file")
-            .min_count(1)
-            .dtype("filepath")
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_CONFIG_FILE",
-                           fmt::format("{}", fmt::join(p.get<strvec_t>("config"), ":")));
-            });
-
-        _data.reg.processed_environs.emplace("config");
-        _data.reg.processed_environs.emplace("config_file");
-    }
-
-    if(_data.reg.environ_filter("output", _data))
-    {
-        _parser
-            .add_argument(
-                { "-o", "--output" },
-                "Output path. Accepts 1-2 parameters corresponding to the output "
-                "path and the output prefix")
-            .min_count(1)
-            .max_count(2)
-            .dtype("path [prefix]")
-            .action([&](parser_t& p) {
-                auto _v = p.get<strvec_t>("output");
-                update_env(_data, "ROCPROFSYS_OUTPUT_PATH", _v.at(0));
-                if(_v.size() > 1) update_env(_data, "ROCPROFSYS_OUTPUT_PREFIX", _v.at(1));
-            });
-
-        _data.reg.processed_environs.emplace("output");
-        _data.reg.processed_environs.emplace("output_path");
-        _data.reg.processed_environs.emplace("output_prefix");
-    }
-
-    if(_data.reg.environ_filter("trace", _data))
-    {
-        _parser
-            .add_argument({ "-T", "--trace" },
-                          "Generate a detailed trace (perfetto output)")
-            .max_count(1)
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_TRACE", p.get<bool>("trace"));
-            });
-
-        _parser
-            .add_argument({ "-L", "--trace-legacy" },
-                          "Use legacy direct mode for tracing instead of deferred trace "
-                          "generation (higher overhead)")
-            .max_count(1)
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_TRACE_LEGACY", p.get<bool>("trace-legacy"));
-            });
-
-        _data.reg.processed_environs.emplace("trace");
-        _data.reg.processed_environs.emplace("trace_legacy");
-    }
-
-    if(_data.reg.environ_filter("profile", _data))
-    {
-        _parser
-            .add_argument(
-                { "-P", "--profile" },
-                "Generate a call-stack-based profile (conflicts with --flat-profile)")
-            .max_count(1)
-            .conflicts({ "flat-profile" })
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_PROFILE", p.get<bool>("profile"));
-            });
-
-        _data.reg.processed_environs.emplace("profile");
-    }
-
-    if(_data.reg.environ_filter("flat_profile", _data))
-    {
-        _parser
-            .add_argument({ "-F", "--flat-profile" },
-                          "Generate a flat profile (conflicts with --profile)")
-            .max_count(1)
-            .conflicts({ "profile" })
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_PROFILE", p.get<bool>("flat-profile"));
-                update_env(_data, "ROCPROFSYS_FLAT_PROFILE", p.get<bool>("flat-profile"));
-            });
-
-        _data.reg.processed_environs.emplace("flat_profile");
-    }
-
-    if(_data.reg.environ_filter("sampling", _data))
-    {
-        _parser
-            .add_argument({ "-S", "--sample" },
-                          "Enable statistical sampling of call-stack")
-            .min_count(0)
-            .max_count(2)
-            .dtype("timer-type")
-            .choices({ "cputime", "realtime" })
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_USE_SAMPLING", true);
-                auto _modes = p.get<strset_t>("sample");
-                if(!_modes.empty())
-                {
-                    update_env(_data, "ROCPROFSYS_SAMPLING_CPUTIME",
-                               _modes.count("cputime") > 0, update_mode::WEAK);
-                    update_env(_data, "ROCPROFSYS_SAMPLING_REALTIME",
-                               _modes.count("realtime") > 0, update_mode::WEAK);
-                }
-            });
-
-        _data.reg.processed_environs.emplace("cpu_freq");
-    }
-
-    if(_data.reg.environ_filter("host", _data))
-    {
-        _parser
-            .add_argument({ "-H", "--host" },
-                          "Enable sampling host-based metrics for the process. E.g. CPU "
-                          "frequency, memory usage, etc.")
-            .max_count(1)
-            .action([&](parser_t& p) {
-                auto _h = p.get<bool>("host");
-                auto _d = p.get<bool>("device");
-                update_env(_data, "ROCPROFSYS_USE_PROCESS_SAMPLING", _h || _d);
-                update_env(_data, "ROCPROFSYS_CPU_FREQ_ENABLED", _h);
-                if(_h) update_env(_data, "ROCPROFSYS_USE_AMD_SMI", _d);
-            });
-
-        _data.reg.processed_environs.emplace("host");
-        _data.reg.processed_environs.emplace("cpu_freq");
-    }
-
-    if(_data.reg.environ_filter("device", _data))
-    {
-        _parser
-            .add_argument(
-                { "-D", "--device" },
-                "Enable sampling device-based metrics for the process. E.g. GPU "
-                "temperature, memory usage, etc.")
-            .max_count(1)
-            .action([&](parser_t& p) {
-                auto _h = p.get<bool>("host");
-                auto _d = p.get<bool>("device");
-                update_env(_data, "ROCPROFSYS_USE_PROCESS_SAMPLING", _h || _d);
-                update_env(_data, "ROCPROFSYS_USE_AMD_SMI", _d);
-                if(_d) update_env(_data, "ROCPROFSYS_CPU_FREQ_ENABLED", _h);
-            });
-
-        _data.reg.processed_environs.emplace("device");
-        _data.reg.processed_environs.emplace("amd_smi");
-    }
-
-    if(_data.reg.environ_filter("wait", _data))
-    {
-        _parser
-            .add_argument(
-                { "-w", "--wait" },
-                "This option is a combination of '--trace-wait' and "
-                "'--sampling-wait'. See the descriptions for those two options.")
-            .count(1)
-            .dtype("seconds")
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_TRACE_DELAY", p.get<double>("wait"),
-                           update_mode::WEAK);
-                update_env(_data, "ROCPROFSYS_SAMPLING_DELAY", p.get<double>("wait"),
-                           update_mode::WEAK);
-                update_env(_data, "ROCPROFSYS_CAUSAL_DELAY", p.get<double>("wait"),
-                           update_mode::WEAK);
-            });
-
-        _data.reg.processed_environs.emplace("wait");
-    }
-
-    if(_data.reg.environ_filter("duration", _data))
-    {
-        _parser
-            .add_argument(
-                { "-d", "--duration" },
-                "This option is a combination of '--trace-duration' and "
-                "'--sampling-duration'. See the descriptions for those two options.")
-            .count(1)
-            .dtype("seconds")
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_TRACE_DURATION", p.get<double>("duration"),
-                           update_mode::WEAK);
-                update_env(_data, "ROCPROFSYS_SAMPLING_DURATION",
-                           p.get<double>("duration"), update_mode::WEAK);
-                update_env(_data, "ROCPROFSYS_CAUSAL_DURATION", p.get<double>("duration"),
-                           update_mode::WEAK);
-            });
-
-        _data.reg.processed_environs.emplace("duration");
-    }
-
-    if(_data.reg.environ_filter("periods", _data))
-    {
-        _parser
-            .add_argument({ "--periods" },
-                          "Similar to specifying delay and/or duration except in "
-                          "the form <DELAY>:<DURATION>, <DELAY>:<DURATION>:<REPEAT>, "
-                          "and/or <DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>")
-            .min_count(1)
-            .dtype("period-spec(s)")
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_TRACE_PERIODS",
-                           fmt::format("{}", fmt::join(p.get<strvec_t>("periods"), " ")),
-                           update_mode::WEAK);
-            });
-
-        _data.reg.processed_environs.emplace("periods");
-    }
-
-    if(_data.reg.environ_filter("selected_regions", _data))
-    {
-        _parser
-            .add_argument(
-                { "--selected-regions" },
-                "Comma-separated list of roctx region names. When set, only "
-                "activity inside matching roctx regions is traced (matched against "
-                "roctxRangeStartA message)")
-            .count(1)
-            .dtype("string")
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_SELECTED_REGIONS",
-                           p.get<std::string>("selected-regions"));
-            });
-
-        _data.reg.processed_environs.emplace("selected_regions");
-    }
-
-    if(_data.reg.environ_filter("rank_filter_id", _data))
-    {
-        _parser
-            .add_argument({ "--rank-filter-id" },
-                          "Sets the name of environment variable to read rank from for "
-                          "MPI output filtering")
-            .max_count(1)
-            .dtype("string")
-            .required({ "rank-filter-output" })
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_RANK_FILTER_ID",
-                           p.get<std::string>("rank-filter-id"));
-            });
-
-        _data.reg.processed_environs.emplace("rank_filter_id");
-    }
-
-    if(_data.reg.environ_filter("rank_filter_output", _data))
-    {
-        _parser
-            .add_argument({ "--rank-filter-output" },
-                          "Ranks for which file output is generated. Values should be "
-                          "separated by commas and can be explicit or ranges, e.g. "
-                          "0,1,5-8. An empty value enables output for all ranks")
-            .max_count(1)
-            .dtype("int and/or range")
-            .action([&](parser_t& p) {
-                update_env(
-                    _data, "ROCPROFSYS_RANK_FILTER_OUTPUT",
-                    fmt::format("{}",
-                                fmt::join(p.get<strvec_t>("rank-filter-output"), ",")));
-            });
-
-        _data.reg.processed_environs.emplace("rank_filter_output");
-    }
+    register_group(_parser, _data, general_group());
 
     strset_t _backend_choices = { "all",        "kokkosp", "mpip", "ompt",
                                   "rcclp",      "amd-smi", "rocm", "mutex-locks",
@@ -644,113 +299,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.reg.processed_environs.emplace("launcher");
     }
 
-    _parser.start_group("TRACING OPTIONS", "Specific options controlling tracing (i.e. "
-                                           "deterministic measurements of every event)");
-
-    if(_data.reg.environ_filter("trace_file", _data))
-    {
-        _parser
-            .add_argument(
-                { "--trace-file" },
-                "Specify the trace output filename. Relative filepath will be with "
-                "respect to output path and output prefix.")
-            .count(1)
-            .dtype("filepath")
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_PERFETTO_FILE",
-                           p.get<std::string>("trace-file"));
-            });
-
-        _data.reg.processed_environs.emplace("trace_file");
-        _data.reg.processed_environs.emplace("perfetto_file");
-    }
-
-    if(_data.reg.environ_filter("trace_buffer_size", _data))
-    {
-        _parser
-            .add_argument({ "--trace-buffer-size" },
-                          "Size limit for the trace output (in KB)")
-            .count(1)
-            .dtype("KB")
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB",
-                           p.get<std::int64_t>("trace-buffer-size"));
-            });
-
-        _data.reg.processed_environs.emplace("trace_buffer_size");
-        _data.reg.processed_environs.emplace("perfetto_buffer_size_kb");
-    }
-
-    if(_data.reg.environ_filter("trace_fill_policy", _data))
-    {
-        _parser.add_argument({ "--trace-fill-policy" }, _trace_policy_desc)
-            .count(1)
-            .dtype("policy")
-            .choices({ "discard", "ring_buffer" })
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_PERFETTO_FILL_POLICY",
-                           p.get<std::string>("trace-fill-policy"));
-            });
-
-        _data.reg.processed_environs.emplace("trace_fill_policy");
-        _data.reg.processed_environs.emplace("perfetto_fill_policy");
-    }
-
-    if(_data.reg.environ_filter("trace_wait", _data))
-    {
-        _parser
-            .add_argument(
-                { "--trace-wait" },
-                "Set the wait time (in seconds) "
-                "before collecting trace and/or profiling data"
-                "(in seconds). By default, the duration is in seconds of realtime "
-                "but that can changed via --trace-clock-id.")
-            .count(1)
-            .dtype("seconds")
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_TRACE_DELAY", p.get<double>("trace-wait"));
-            });
-
-        _data.reg.processed_environs.emplace("trace_delay");
-    }
-
-    if(_data.reg.environ_filter("trace_duration", _data))
-    {
-        _parser
-            .add_argument(
-                { "--trace-duration" },
-                "Set the duration of the trace and/or profile data collection (in "
-                "seconds). By default, the duration is in seconds of realtime but "
-                "that can changed via --trace-clock-id.")
-            .count(1)
-            .dtype("seconds")
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_TRACE_DURATION",
-                           p.get<double>("trace-duration"));
-            });
-
-        _data.reg.processed_environs.emplace("trace_duration");
-    }
-
-    if(_data.reg.environ_filter("trace_periods", _data))
-    {
-        _parser
-            .add_argument(
-                { "--trace-periods" },
-                "More powerful version of specifying trace delay and/or duration. Format "
-                "is one or more groups of: <DELAY>:<DURATION>, "
-                "<DELAY>:<DURATION>:<REPEAT>, "
-                "and/or <DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>.")
-            .min_count(1)
-            .dtype("period-spec(s)")
-            .action([&](parser_t& p) {
-                update_env(
-                    _data, "ROCPROFSYS_TRACE_PERIODS",
-                    fmt::format("{}", fmt::join(p.get<strvec_t>("trace-periods"), ",")));
-            });
-
-        _data.reg.processed_environs.emplace("trace_periods");
-    }
+    register_group(_parser, _data, tracing_group());
 
     if(_data.reg.environ_filter("trace_clock_id", _data))
     {
@@ -780,337 +329,10 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.reg.processed_environs.emplace("trace_period_clock_id");
     }
 
-    _parser.start_group("PROFILE OPTIONS",
-                        "Specific options controlling profiling (i.e. deterministic "
-                        "measurements which are aggregated into a summary)");
-
-    if(_data.reg.environ_filter("profile_format", _data))
-    {
-        _parser.add_argument({ "--profile-format" }, "Data formats for profiling results")
-            .min_count(1)
-            .max_count(3)
-            .dtype("string")
-            .required({ "profile|flat-profile" })
-            .choices({ "text", "json", "console" })
-            .action([&](parser_t& p) {
-                auto _v = p.get<strset_t>("profile-format");
-                update_env(_data, "ROCPROFSYS_PROFILE", true);
-                if(!_v.empty())
-                {
-                    update_env(_data, "ROCPROFSYS_TEXT_OUTPUT", _v.count("text") != 0);
-                    update_env(_data, "ROCPROFSYS_JSON_OUTPUT", _v.count("json") != 0);
-                    update_env(_data, "ROCPROFSYS_COUT_OUTPUT", _v.count("console") != 0);
-                }
-            });
-
-        _data.reg.processed_environs.emplace("profile_format");
-        _data.reg.processed_environs.emplace("text_output");
-        _data.reg.processed_environs.emplace("json_output");
-        _data.reg.processed_environs.emplace("cout_output");
-    }
-
-    if(_data.reg.environ_filter("profile_diff", _data))
-    {
-        _parser
-            .add_argument(
-                { "--profile-diff" },
-                "Generate a diff output b/t the profile collected and an existing "
-                "profile from another run Accepts 1-2 parameters corresponding to "
-                "the input path and the input prefix")
-            .min_count(1)
-            .max_count(2)
-            .dtype("path [prefix]")
-            .action([&](parser_t& p) {
-                auto _v = p.get<strvec_t>("profile-diff");
-                update_env(_data, "ROCPROFSYS_DIFF_OUTPUT", true);
-                update_env(_data, "ROCPROFSYS_INPUT_PATH", _v.at(0));
-                if(_v.size() > 1) update_env(_data, "ROCPROFSYS_INPUT_PREFIX", _v.at(1));
-            });
-
-        _data.reg.processed_environs.emplace("profile_diff");
-        _data.reg.processed_environs.emplace("diff_output");
-        _data.reg.processed_environs.emplace("input_path");
-        _data.reg.processed_environs.emplace("input_prefix");
-    }
-
-    _parser.start_group(
-        "HOST/DEVICE (PROCESS SAMPLING) OPTIONS",
-        "Process sampling is background measurements for resources available to the "
-        "entire process. These samples are not tied to specific lines/regions of code");
-
-    if(_data.reg.environ_filter("process_freq", _data))
-    {
-        _parser
-            .add_argument({ "--process-freq" },
-                          "Set the default host/device sampling frequency "
-                          "(number of interrupts per second)")
-            .count(1)
-            .dtype("floating-point")
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_PROCESS_SAMPLING_FREQ",
-                           p.get<double>("process-freq"));
-            });
-
-        _data.reg.processed_environs.emplace("process_freq");
-        _data.reg.processed_environs.emplace("process_sampling_freq");
-    }
-
-    if(_data.reg.environ_filter("process_wait", _data))
-    {
-        _parser
-            .add_argument({ "--process-wait" }, "Set the default wait time (i.e. delay) "
-                                                "before taking first host/device sample "
-                                                "(in seconds of realtime)")
-            .count(1)
-            .dtype("seconds")
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_PROCESS_SAMPLING_DELAY",
-                           p.get<double>("process-wait"));
-            });
-
-        _data.reg.processed_environs.emplace("process_wait");
-        _data.reg.processed_environs.emplace("process_sampling_delay");
-    }
-
-    if(_data.reg.environ_filter("process_duration", _data))
-    {
-        _parser
-            .add_argument(
-                { "--process-duration" },
-                "Set the duration of the host/device sampling (in seconds of realtime)")
-            .count(1)
-            .dtype("seconds")
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_SAMPLING_PROCESS_DURATION",
-                           p.get<double>("process-duration"));
-            });
-
-        _data.reg.processed_environs.emplace("process_duration");
-        _data.reg.processed_environs.emplace("process_sampling_duration");
-    }
-
-    if(_data.reg.environ_filter("cpus", _data))
-    {
-        _parser
-            .add_argument(
-                { "--cpus" },
-                "CPU IDs for frequency sampling. Supports integers and/or ranges")
-            .dtype("int and/or range")
-            .required({ "host" })
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_SAMPLING_CPUS",
-                           fmt::format("{}", fmt::join(p.get<strvec_t>("cpus"), ",")));
-            });
-
-        _data.reg.processed_environs.emplace("cpus");
-        _data.reg.processed_environs.emplace("sampling_cpus");
-    }
-
-    if(_data.reg.environ_filter("gpus", _data))
-    {
-        _parser
-            .add_argument({ "--gpus" },
-                          "GPU IDs for SMI queries. Supports integers and/or ranges")
-            .dtype("int and/or range")
-            .required({ "device" })
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_SAMPLING_GPUS",
-                           fmt::format("{}", fmt::join(p.get<strvec_t>("gpus"), ",")));
-            });
-
-        _data.reg.processed_environs.emplace("gpus");
-        _data.reg.processed_environs.emplace("sampling_gpus");
-    }
-
-    if(_data.reg.environ_filter("ai-nics", _data))
-    {
-        _parser
-            .add_argument({ "--ai-nics" },
-                          "AI NIC IDs for SMI queries. Supports comma-separated list")
-            .dtype("list of strings")
-            .required({ "device" })
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_SAMPLING_AINICS",
-                           fmt::format("{}", fmt::join(p.get<strvec_t>("ai-nics"), ",")));
-            });
-
-        _data.reg.processed_environs.emplace("ai-nics");
-        _data.reg.processed_environs.emplace("sampling_ai-nics");
-    }
-
-    _parser.start_group("GENERAL SAMPLING OPTIONS",
-                        "General options for timer-based sampling per-thread");
-
-    if(_data.reg.environ_filter("sampling_freq", _data))
-    {
-        _parser
-            .add_argument({ "-f", "--sampling-freq" },
-                          "Set the default sampling frequency "
-                          "(number of interrupts per second)")
-            .count(1)
-            .dtype("floating-point")
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_SAMPLING_FREQ",
-                           p.get<double>("sampling-freq"));
-            });
-
-        _data.reg.processed_environs.emplace("sampling_freq");
-    }
-
-    if(_data.reg.environ_filter("tids", _data))
-    {
-        _parser
-            .add_argument(
-                { "-t", "--tids" },
-                "Specify the default thread IDs for sampling, where 0 (zero) is "
-                "the main thread and each thread created by the target application "
-                "is assigned an atomically incrementing value.")
-            .min_count(1)
-            .dtype("int and/or range")
-            .action([&](parser_t& p) {
-                update_env(
-                    _data, "ROCPROFSYS_SAMPLING_TIDS",
-                    fmt::format(
-                        "{}", fmt::join(p.get<std::vector<std::int64_t>>("tids"), ", ")));
-            });
-
-        _data.reg.processed_environs.emplace("tids");
-        _data.reg.processed_environs.emplace("sampling_tids");
-    }
-
-    if(_data.reg.environ_filter("sampling_wait", _data))
-    {
-        _parser
-            .add_argument(
-                { "--sampling-wait" },
-                "Set the default wait time (i.e. delay) before taking first sample "
-                "(in seconds). This delay time is based on the clock of the sampler, "
-                "i.e., a "
-                "delay of 1 second for CPU-clock sampler may not equal 1 second of "
-                "realtime")
-            .count(1)
-            .dtype("seconds")
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_SAMPLING_DELAY",
-                           p.get<double>("sampling-wait"));
-            });
-
-        _data.reg.processed_environs.emplace("sampling_wait");
-        _data.reg.processed_environs.emplace("sampling_delay");
-    }
-
-    if(_data.reg.environ_filter("sampling_duration", _data))
-    {
-        _parser
-            .add_argument(
-                { "--sampling-duration" },
-                "Set the duration of the sampling (in seconds of realtime). I.e., it is "
-                "possible (currently) to set a CPU-clock time delay that exceeds the "
-                "real-time duration... resulting in zero samples being taken")
-            .count(1)
-            .dtype("seconds")
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_SAMPLING_DURATION",
-                           p.get<double>("sampling-duration"));
-            });
-
-        _data.reg.processed_environs.emplace("sampling_duration");
-    }
-
-    _parser.start_group(
-        "SAMPLING TIMER OPTIONS",
-        "These options determine the heuristic for deciding when to take a sample");
-
-    if(_data.reg.environ_filter("sampling_cputime", _data))
-    {
-        _parser.add_argument({ "--sample-cputime" }, _cputime_desc)
-            .min_count(0)
-            .dtype("[freq] [delay] [tids...]")
-            .action([&](parser_t& p) {
-                auto _v = p.get<std::deque<std::string>>("sample-cputime");
-                update_env(_data, "ROCPROFSYS_SAMPLING_CPUTIME", true);
-                if(!_v.empty())
-                {
-                    update_env(_data, "ROCPROFSYS_SAMPLING_CPUTIME_FREQ", _v.front());
-                    _v.pop_front();
-                }
-                if(!_v.empty())
-                {
-                    update_env(_data, "ROCPROFSYS_SAMPLING_CPUTIME_DELAY", _v.front());
-                    _v.pop_front();
-                }
-                if(!_v.empty())
-                {
-                    update_env(_data, "ROCPROFSYS_SAMPLING_CPUTIME_TIDS",
-                               fmt::format("{}", fmt::join(_v, ",")));
-                }
-            });
-
-        _data.reg.processed_environs.emplace("sampling_cputime");
-    }
-
-    if(_data.reg.environ_filter("sampling_realtime", _data))
-    {
-        _parser.add_argument({ "--sample-realtime" }, _realtime_desc)
-            .min_count(0)
-            .dtype("[freq] [delay] [tids...]")
-            .action([&](parser_t& p) {
-                auto _v = p.get<std::deque<std::string>>("sample-realtime");
-                update_env(_data, "ROCPROFSYS_SAMPLING_REALTIME", true);
-                if(!_v.empty())
-                {
-                    update_env(_data, "ROCPROFSYS_SAMPLING_REALTIME_FREQ", _v.front());
-                    _v.pop_front();
-                }
-                if(!_v.empty())
-                {
-                    update_env(_data, "ROCPROFSYS_SAMPLING_REALTIME_DELAY", _v.front());
-                    _v.pop_front();
-                }
-                if(!_v.empty())
-                {
-                    update_env(_data, "ROCPROFSYS_SAMPLING_REALTIME_TIDS",
-                               fmt::format("{}", fmt::join(_v, ",")));
-                }
-            });
-
-        _data.reg.processed_environs.emplace("sampling_realtime");
-    }
-
-    if(_data.reg.environ_filter("sampling_overflow", _data))
-    {
-        _parser.add_argument({ "--sample-overflow" }, _overflow_desc)
-            .min_count(0)
-            .dtype("[event] [freq] [tids...]")
-            .action([&](parser_t& p) {
-                auto _v = p.get<std::deque<std::string>>("sample-overflow");
-                update_env(_data, "ROCPROFSYS_SAMPLING_OVERFLOW", true);
-
-                if(!_v.empty())
-                {
-                    if(p.exists("sampling-overflow-event") &&
-                       _v.front() != p.get<std::string>("sampling-overflow-event"))
-                        throw exception<std::runtime_error>(fmt::format(
-                            "'--sample-overflow {} ...' conflicts with "
-                            "'--sampling-overflow-event {}' option",
-                            _v.front(), p.get<std::string>("sampling-overflow-event")));
-                    update_env(_data, "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT", _v.front());
-                    _v.pop_front();
-                }
-                if(!_v.empty())
-                {
-                    update_env(_data, "ROCPROFSYS_SAMPLING_OVERFLOW_FREQ", _v.front());
-                    _v.pop_front();
-                }
-                if(!_v.empty())
-                {
-                    update_env(_data, "ROCPROFSYS_SAMPLING_OVERFLOW_TIDS",
-                               fmt::format("{}", fmt::join(_v, ",")));
-                }
-            });
-
-        _data.reg.processed_environs.emplace("sampling_overflow");
-    }
+    register_group(_parser, _data, profile_group());
+    register_group(_parser, _data, process_sampling_group());
+    register_group(_parser, _data, general_sampling_group());
+    register_group(_parser, _data, sampling_timer_group());
 
     _parser.start_group(
         "ADVANCED SAMPLING OPTIONS",
@@ -1118,43 +340,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
 
     add_group_arguments(_parser, "sampling", _data);
 
-    _parser.start_group("HARDWARE COUNTER OPTIONS", "See also: rocprof-sys-avail -H");
-
-    if(_data.reg.environ_filter("cpu_events", _data))
-    {
-        _parser
-            .add_argument({ "-C", "--cpu-events" },
-                          "Set the CPU hardware counter events to record (ref: "
-                          "`rocprof-sys-avail -H -c CPU`)")
-            .min_count(1)
-            .dtype("[EVENT ...]")
-            .action([&](parser_t& p) {
-                auto _events =
-                    fmt::format("{}", fmt::join(p.get<strvec_t>("cpu-events"), ","));
-                update_env(_data, "ROCPROFSYS_PAPI_EVENTS", _events);
-            });
-
-        _data.reg.processed_environs.emplace("cpu_events");
-        _data.reg.processed_environs.emplace("papi_events");
-    }
-
-    if(_data.reg.environ_filter("gpu_events", _data))
-    {
-        _parser
-            .add_argument({ "-G", "--gpu-events" },
-                          "Set the GPU hardware counter events to record (ref: "
-                          "`rocprof-sys-avail -H -c GPU`)")
-            .min_count(1)
-            .dtype("[EVENT ...]")
-            .action([&](parser_t& p) {
-                auto _events =
-                    fmt::format("{}", fmt::join(p.get<strvec_t>("gpu-events"), ","));
-                update_env(_data, "ROCPROFSYS_ROCM_EVENTS", _events);
-            });
-
-        _data.reg.processed_environs.emplace("gpu_events");
-        _data.reg.processed_environs.emplace("rocm_events");
-    }
+    register_group(_parser, _data, hw_counter_group());
 
     add_group_arguments(_parser, "category", _data, true);
     add_group_arguments(_parser, "io", _data, true);
@@ -1162,35 +348,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
     add_group_arguments(_parser, "timemory", _data, true);
     add_group_arguments(_parser, "rocm", _data, true);
 
-    _parser.start_group("MISCELLANEOUS OPTIONS", "");
-
-    if(_data.reg.environ_filter("inlines", _data))
-    {
-        _parser
-            .add_argument({ "-i", "--inlines" },
-                          "Include inline info in output when available")
-            .max_count(1)
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_SAMPLING_INCLUDE_INLINES",
-                           p.get<bool>("inlines"));
-            });
-
-        _data.reg.processed_environs.emplace("inlines");
-        _data.reg.processed_environs.emplace("sampling_include_inlines");
-    }
-
-    if(_data.reg.environ_filter("hsa_interrupt", _data))
-    {
-        _parser.add_argument({ "--hsa-interrupt" }, _hsa_interrupt_desc)
-            .count(1)
-            .dtype("int")
-            .choices({ 0, 1 })
-            .action([&](parser_t& p) {
-                update_env(_data, "HSA_ENABLE_INTERRUPT", p.get<int>("hsa-interrupt"));
-            });
-
-        _data.reg.processed_environs.emplace("hsa_interrupt");
-    }
+    register_group(_parser, _data, misc_group());
 
     _parser.end_group();
 
@@ -1263,33 +421,10 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
 
         itr.second->set_enabled(true);
         _settings.emplace_back(itr.second);
-
-        if(itr.second->get_name() == "papi_events")
-        {
-            auto _choices = itr.second->get_choices();
-            _choices.erase(
-                std::remove_if(_choices.begin(), _choices.end(),
-                               [](const auto& citr) {
-                                   return std::regex_search(
-                                              citr,
-                                              std::regex{ "[A-Za-z0-9]:([A-Za-z_]+)" }) ||
-                                          std::regex_search(citr, std::regex{ "io:::" });
-                               }),
-                _choices.end());
-            _choices.emplace_back(
-                "... run `rocprof-sys-avail -H -c CPU` for full list ...");
-            itr.second->set_choices(_choices);
-        }
+        apply_papi_choice_filter(itr.second);
     }
 
-    std::sort(_settings.begin(), _settings.end(), [](const auto& _lhs, const auto& _rhs) {
-        auto _lhs_v = _lhs->get_name();
-        auto _rhs_v = _rhs->get_name();
-        if(_lhs_v.length() > 4 && _rhs_v.length() > 4 &&
-           _lhs_v.substr(0, 4) == _rhs_v.substr(0, 4))
-            return _lhs_v < _rhs_v;
-        return _lhs_v.length() < _rhs_v.length();
-    });
+    sort_settings_by_name_length(_settings);
 
     if(_add_group)
     {
@@ -1324,23 +459,7 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
 
         itr.second->set_enabled(true);
         _settings.emplace_back(itr.second);
-
-        if(itr.second->get_name() == "papi_events")
-        {
-            auto _choices = itr.second->get_choices();
-            _choices.erase(
-                std::remove_if(_choices.begin(), _choices.end(),
-                               [](const auto& citr) {
-                                   return std::regex_search(
-                                              citr,
-                                              std::regex{ "[A-Za-z0-9]:([A-Za-z_]+)" }) ||
-                                          std::regex_search(citr, std::regex{ "io:::" });
-                               }),
-                _choices.end());
-            _choices.emplace_back(
-                "... run `rocprof-sys-avail -H -c CPU` for full list ...");
-            itr.second->set_choices(_choices);
-        }
+        apply_papi_choice_filter(itr.second);
 
         for(const auto& citr : itr.second->get_categories())
         {

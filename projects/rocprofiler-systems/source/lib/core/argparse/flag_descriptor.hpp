@@ -18,6 +18,8 @@ enum class value_kind
 {
     flag,
     scalar,
+    scalar_int,
+    scalar_double,
     list,
 };
 

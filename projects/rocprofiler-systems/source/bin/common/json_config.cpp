@@ -415,9 +415,9 @@ resolve_schema_config(const nlohmann::json& config)
         resolve_value(result, adv, "max_depth", env_vars::MAX_DEPTH);
         resolve_value(result, adv, "trace_delay_sec", env_vars::TRACE_DELAY);
         resolve_value(result, adv, "trace_duration_sec", env_vars::TRACE_DURATION);
-        resolve_value(result, adv, "verbose", env_vars::VERBOSE);
+        resolve_value(result, adv, "verbose", env_vars::VERBOSE_OUTPUT);
         if(adv.contains("debug"))
-            resolve_enabled(result, adv["debug"], "enabled", env_vars::DEBUG);
+            resolve_enabled(result, adv["debug"], "enabled", env_vars::DEBUG_OUTPUT);
         resolve_value(result, adv, "timemory_components", env_vars::TIMEMORY_COMPONENTS);
         resolve_value(result, adv, "network_interface", env_vars::NETWORK_INTERFACE);
         resolve_value(result, adv, "trace_periods", env_vars::TRACE_PERIODS);
@@ -911,8 +911,8 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
                      "random_seed");
 
     // --- Advanced ---
-    export_int_value(config, env_map, env_vars::VERBOSE, "advanced", "verbose");
-    export_enabled(config, env_map, env_vars::DEBUG, "advanced", "debug");
+    export_int_value(config, env_map, env_vars::VERBOSE_OUTPUT, "advanced", "verbose");
+    export_enabled(config, env_map, env_vars::DEBUG_OUTPUT, "advanced", "debug");
     export_int_value(config, env_map, env_vars::MAX_DEPTH, "advanced", "max_depth");
     export_double_value(config, env_map, env_vars::TRACE_DELAY, "advanced",
                         "trace_delay_sec");

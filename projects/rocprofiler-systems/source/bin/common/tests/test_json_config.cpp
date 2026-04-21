@@ -407,5 +407,5 @@ TEST_F(json_config_test, validate_env_var_constants)
     EXPECT_EQ(rocprofsys::env_vars::USE_MPIP, "ROCPROFSYS_USE_MPIP");
     EXPECT_EQ(rocprofsys::env_vars::OUTPUT_PATH, "ROCPROFSYS_OUTPUT_PATH");
     EXPECT_EQ(rocprofsys::env_vars::USE_CAUSAL, "ROCPROFSYS_USE_CAUSAL");
-    EXPECT_EQ(rocprofsys::env_vars::VERBOSE, "ROCPROFSYS_VERBOSE");
+    EXPECT_EQ(rocprofsys::env_vars::VERBOSE_OUTPUT, "ROCPROFSYS_VERBOSE");
 }
