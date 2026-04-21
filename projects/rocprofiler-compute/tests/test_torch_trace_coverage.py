@@ -563,13 +563,13 @@ def _workload_emit_tensor_cumsum_offsets_setup(
     shape: Tuple[Any, ...],
     segment_length: int,
 ) -> List[str]:
-    """Emit ``[0, k, 2k, ..., n*k]`` int64 offsets (length ``n+1``) for nested / jagged ops.
+    """Emit ``[0, k, 2k, ..., n*k]`` int64 offsets (length ``n+1``).
 
-    Nested-tensor APIs require the offsets tensor to end at ``values.numel()``
-    along the ragged dim (see the skip notes on ``_jagged_to_padded_dense_forward``
-    / ``_padded_dense_to_jagged_forward`` in ``torch_trace_coverage_op_specs.py``),
-    so the emitter includes the terminal ``n*k`` entry and matches the
-    ``_CoverageTensorArg`` docstring.
+    Used for nested / jagged ops, whose APIs require the offsets tensor to
+    end at ``values.numel()`` along the ragged dim (see the skip notes on
+    ``_jagged_to_padded_dense_forward`` / ``_padded_dense_to_jagged_forward``
+    in ``torch_trace_coverage_op_specs.py``). The emitter therefore includes
+    the terminal ``n*k`` entry and matches the ``_CoverageTensorArg`` docstring.
     """
     if len(shape) != 1:
         raise ValueError(
@@ -2043,8 +2043,8 @@ def run_ground_truth_torch_profiler_subprocess(
     workload_script_path: str,
     ground_truth_json_path: str,
     *,
-    coverage_seed: int | None = None,
-    coverage_sample_budget: int | None = None,
+    coverage_seed: Optional[int] = None,
+    coverage_sample_budget: Optional[int] = None,
 ) -> None:
     """Run ``coverage_ground_truth_runner.py`` (torch.profiler + JSON write)."""
     repro = ""
