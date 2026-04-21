@@ -37,7 +37,7 @@ jobs:
         gpu: [ 'gfx94X', 'gfx950', 'gfx110X', 'gfx120X' ]
     steps:
       - name: Checkout (shallow)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           sparse-checkout: |
             projects/rocprofiler-sdk/requirements.txt

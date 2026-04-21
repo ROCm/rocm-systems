@@ -120,7 +120,7 @@ jobs:
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           sparse-checkout: |
             projects/rocprofiler-sdk
@@ -160,7 +160,7 @@ jobs:
         run: git submodule update --init --recursive --jobs 16
 
       - name: Clone ROCDecode
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: 'ROCm/rocDecode'
           ref: 'release/rocm-rel-7.0'
@@ -168,7 +168,7 @@ jobs:
           path: 'rocDecode'
 
       - name: Clone ROCJPEG
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: 'ROCm/rocJPEG'
           ref: 'release/rocm-rel-7.0'
@@ -448,7 +448,7 @@ jobs:
 
       - name: Archive production artifacts
         if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: installers-deb
           path: |
@@ -484,7 +484,7 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
     steps:
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           sparse-checkout: |
             projects/rocprofiler-sdk
@@ -753,7 +753,7 @@ jobs:
     - *install_latest_nightly_rocm
 
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         sparse-checkout: |
           projects/rocprofiler-sdk

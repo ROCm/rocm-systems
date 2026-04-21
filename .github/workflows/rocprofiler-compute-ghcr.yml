@@ -35,7 +35,7 @@ jobs:
       gpu_list: ${{ steps.generate_gpu_list.outputs.gpu_list }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-compute/docker
 
@@ -71,7 +71,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-compute
           submodules: recursive
