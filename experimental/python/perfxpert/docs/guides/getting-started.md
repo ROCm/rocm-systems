@@ -198,14 +198,14 @@ perfxpert doctor
 ![doctor](assets/gifs/03-doctor.gif)
 
 *`perfxpert doctor` end-to-end: Python check, MCP server reachable
-(58 tools registered), 3/5 LLM providers configured, `ALL CLEAN`.*
+(56 tools registered), 3/5 LLM providers configured, `ALL CLEAN`.*
 
 Expected output ends with `ALL CLEAN` when everything is wired. The
 doctor checks:
 
 - `perfxpert` version + Python ≥ 3.10
 - openai-agents SDK
-- MCP server reachable (`perfxpert-mcp` boots + 58 tools registered — 8 agent-hierarchy + 49 classifier/knowledge + 1 `trace_diff.diff_runs`)
+- MCP server reachable (`perfxpert-mcp` boots + 56 tools registered — 8 agent-hierarchy + 47 classifier/knowledge + 1 `trace_diff.diff_runs`)
 - task store (`~/.perfxpert` or `$PERFXPERT_TASK_ROOT`)
 - bundled opencode binary + bundled opencode config dir
 - LLM providers configured (counts `N/5` against
@@ -225,10 +225,10 @@ agent runtime.
   a rocprofv3 `.db`, emits a single report (text / JSON / markdown /
   webview HTML). Deterministic with `--llm` omitted; LLM-augmented
   with `--llm {anthropic,openai}`.
-- **`perfxpert-mcp`** — stdio MCP server that re-exposes the 58
+- **`perfxpert-mcp`** — stdio MCP server that re-exposes the 56
   READ-ONLY analysis tools over JSON-RPC (8 agent-hierarchy entry
   points — Root, Analysis, Recommendation, Correctness, +3 technique
-  specialists, + diff specialist — plus 49 classifier / knowledge
+  specialists, + diff specialist — plus 47 classifier / knowledge
   tools and 1 `trace_diff.diff_runs`). Meant to be
   spawned by an MCP client (Claude Desktop, Claude Code, Codex CLI,
   Gemini CLI, opencode). See `../integration/mcp-server.md`.
@@ -1245,8 +1245,8 @@ See `python-api.md` for the full surface.
 
 ## 13. Connecting other MCP clients
 
-Any MCP-compatible client can consume the 58 READ-ONLY tools exposed
-by `perfxpert-mcp` (8 agent-hierarchy entry points + 49
+Any MCP-compatible client can consume the 56 READ-ONLY tools exposed
+by `perfxpert-mcp` (8 agent-hierarchy entry points + 47
 classifier/knowledge tools + 1 `trace_diff.diff_runs`). Configuration snippets for Claude Desktop,
 Claude Code, Codex CLI, Gemini CLI, and generic stdio clients live in
 `../integration/mcp-server.md` under §"Client integration". The
@@ -1256,7 +1256,7 @@ automatically — no client-side setup required.
 ![mcp server](assets/gifs/13-mcp-server.gif)
 
 *`perfxpert-mcp` launched in foreground — the stderr banner reports
-the 58 read-only tools it registers (8 agent-hierarchy + 49
+the 56 read-only tools it registers (8 agent-hierarchy + 47
 classifier / knowledge + 1 `trace_diff.diff_runs`).*
 
 ## 14. Troubleshooting
