@@ -60,8 +60,9 @@ create_queue(hsa_agent_t        agent,
             if(queue_intercept::is_active())
             {
                 // SDK-level interposition is active — create a regular HSA queue
-                // and skip hsa_amd_queue_intercept_create. process_doorbell_impl
-                // calls WriteInterceptor directly.
+                // instead of an intercept queue. process_doorbell_impl calls
+                // WriteInterceptor directly; the Queue constructor skips
+                // set_write_interceptor when is_active().
                 auto status = controller->get_core_table().hsa_queue_create_fn(agent,
                                                                                size,
                                                                                type,
@@ -72,12 +73,12 @@ create_queue(hsa_agent_t        agent,
                                                                                queue);
                 if(status != HSA_STATUS_SUCCESS) return status;
 
-                auto noop_set_wi = [](write_interceptor_t, void*) {};
-                new_queue        = std::make_unique<Queue>(agent_info,
-                                                    controller->get_core_table(),
-                                                    controller->get_ext_table(),
-                                                    *queue,
-                                                    noop_set_wi);
+                new_queue = std::make_unique<Queue>(
+                    agent_info,
+                    controller->get_core_table(),
+                    controller->get_ext_table(),
+                    *queue,
+                    [](write_interceptor_t, void*) {});
             }
             else
             {
@@ -188,10 +189,6 @@ queue_controller_iterate_attach_queue(hsa_queue_t* queue, hsa_agent_t agent, voi
     bool  registration_consumed = false;
 
     auto set_write_interceptor = [&queue](write_interceptor_t wi, void* data) {
-        // When SDK-level write pointer interposition is active, skip registering
-        // WriteInterceptor via the attach table — process_doorbell_impl calls it
-        // directly via Queue::invoke_write_interceptor instead.
-        if(queue_intercept::is_active()) return;
         CHECK_NOTNULL(*(get_attach_table()))
             ->rocprofiler_attach_set_write_interceptor(queue, wi, data);
     };

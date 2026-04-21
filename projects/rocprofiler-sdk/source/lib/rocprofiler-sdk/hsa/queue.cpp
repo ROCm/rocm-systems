@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_intercept.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
@@ -833,7 +834,7 @@ Queue::Queue(
             });
     }
 
-    set_write_interceptor(WriteInterceptor, this);
+    if(!queue_intercept::is_active()) set_write_interceptor(WriteInterceptor, this);
 
     create_signal(0, &ready_signal, false);
     create_signal(0, &block_signal, false);
