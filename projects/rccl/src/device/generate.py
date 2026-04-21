@@ -77,7 +77,7 @@ def paste(sep, *args):
 
 is_ifc             = 1 if sys.argv[2] == "ON" else 0
 is_colltrace       = 1 if sys.argv[3] == "ON" else 0
-is_msccl_kernels   = 1 if sys.argv[4] == "ON" else 0
+# sys.argv[4] reserved (was ENABLE_MSCCL_KERNEL; MSCCL device kernels removed)
 is_local_arch_only = 1 if sys.argv[5] == "ON" else 0
 is_rocshmem        = 1 if sys.argv[6] == "ON" else 0
 
@@ -610,17 +610,3 @@ for name in name_to_funcs.keys():
       if guard: 
         out("#endif\n")
 
-# Generate each <gensrc>/<msccl_impl>.cpp
-if is_msccl_kernels:
-  for redop in all_redops:
-    if redop in ("Sum", "Prod", "MinMax"):
-      for ty in all_tys:
-        with open(os.path.join(gensrc, f"msccl_kernel_{redop}_{ty}.cpp"), "w") as f:
-          print("-- Generating %s" % os.path.join(gensrc, f"msccl_kernel_{redop}_{ty}.cpp"))
-
-          out = f.write
-          out('#include "msccl_kernel_impl.h"\n#include "nccl_common.h"\n')
-          out(
-            "MSCCL_IMPL_KERNEL_ENTRY_FUNC_DEVREDOP_TYPE({redop}, {ty_cxx}, false);\n"
-            .format(redop=redop, ty_cxx=ty_to_cxx[ty])
-          )

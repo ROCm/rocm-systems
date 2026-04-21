@@ -100,7 +100,25 @@ struct mlx5dv_cq {
 	uint64_t		comp_mask;
 };
 
-struct mlx5_wqe_av;
+struct mlx5_wqe_av {
+  union {
+    struct {
+      __be32  qkey;
+      __be32  reserved;
+    } qkey;
+    __be64    dc_key;
+  } key;
+  __be32      dqp_dct;
+  uint8_t     stat_rate_sl;
+  uint8_t     fl_mlid;
+  __be16      rlid;
+  uint8_t     reserved0[4];
+  uint8_t     rmac[ETHERNET_LL_SIZE];
+  uint8_t     tclass;
+  uint8_t     hop_limit;
+  __be32      grh_gid_fl;
+  uint8_t     rgid[16];
+};
 
 struct mlx5dv_ah {
 	struct mlx5_wqe_av      *av;

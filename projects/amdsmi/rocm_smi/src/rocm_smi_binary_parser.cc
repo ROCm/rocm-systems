@@ -113,6 +113,7 @@ int present_pmmetrics(const char* fname, rsmi_name_value_t** kv, uint32_t* kvnum
 
   buf1 = reinterpret_cast<uint8_t*>(calloc(1, 65536));
   if (!buf1) {
+    fclose(infile);
     return -1;
   }
 
@@ -127,6 +128,8 @@ int present_pmmetrics(const char* fname, rsmi_name_value_t** kv, uint32_t* kvnum
       break;
     default:
       fprintf(stderr, "Metrics version %d not supported\n", pmmetrics_version);
+      fclose(infile);
+      free(buf1);
       return -1;
   }
   r = parse_pmmetric_table(buf1, table, len, kv, kvnum);

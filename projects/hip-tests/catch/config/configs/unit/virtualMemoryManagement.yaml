@@ -93,6 +93,7 @@ virtualMemoryManagement:
     disabled: [amd_windows, amd_wsl]
   Unit_hipMemSetAccess_MultDevSetGet:
     <<: *level_2
+    tags: [multigpu]
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
@@ -167,7 +168,9 @@ virtualMemoryManagement:
     <<: *level_2
     # SWDEV-555665
     disabled: [amd_windows]
-  Unit_hipMemSetAccessHost_devicealloc: *level_2
+  Unit_hipMemSetAccessHost_devicealloc:
+    <<: *level_2
+    disabled: [amd_windows]
   Unit_hipMemGetAllocationPropertiesFromHandle_functional:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
@@ -230,6 +233,7 @@ virtualMemoryManagement:
   Unit_hipMemUnmap_Capture: *level_2
   Unit_hipMemMapArrayAsync_Positive_Basic:
     <<: *level_2
+    tags: [image]
     # Below tests are failing PSDB
     disabled: [nvidia_linux, nvidia_windows]
   Unit_hipMemSetAccess_SegmentsAccess: *level_2

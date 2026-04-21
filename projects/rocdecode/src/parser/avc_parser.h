@@ -292,7 +292,6 @@ protected:
      */
     ParserResult FlushDpb();
 
-#if DBGINFO
     /*! \brief Function to log out parsed SPS content for debug.
     */
     void PrintSps(AvcSeqParameterSet *p_sps);
@@ -312,5 +311,4 @@ protected:
     /*! \brief Function to log out buffer info in VAAPI decode params
      */
     void PrintVappiBufInfo();
-#endif // DBGINFO
 };

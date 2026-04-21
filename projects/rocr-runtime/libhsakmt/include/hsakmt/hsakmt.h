@@ -374,6 +374,26 @@ hsaKmtCreateQueueExt(
     );
 
 /**
+  Creates a GPU queue with user-mode access rights
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtCreateQueueV2(
+    HSAuint32           NodeId,                           //IN
+    HSA_QUEUE_TYPE      Type,                             //IN
+    HSAuint32           QueuePercentage,                  //IN
+    HSA_QUEUE_PRIORITY  Priority,                         //IN
+    HSAuint32           SdmaEngineId,                     //IN
+    void*               QueueAddress,                     //IN
+    HSAuint64           QueueSizeInBytes,                 //IN
+    HSAuint64           MetaDataPrefetchSizeInBytes,      //IN
+    HsaEvent*           Event,                            //IN
+    HsaQueueResource*   QueueResource                     //OUT
+    );
+
+
+/**
   Updates a queue
 */
 

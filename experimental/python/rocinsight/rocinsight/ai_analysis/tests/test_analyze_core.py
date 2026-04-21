@@ -529,9 +529,9 @@ class TestGenerateRecommendations:
         recs = generate_recommendations(breakdown, hotspots, {})
         categories = [r["category"] for r in recs]
         priorities = [r["priority"] for r in recs]
-        assert "Compute Bottleneck" in categories
-        compute_recs = [r for r in recs if r["category"] == "Compute Bottleneck"]
-        assert compute_recs[0]["priority"] == "HIGH"
+        assert "Kernel Hotspot" in categories
+        kernel_recs = [r for r in recs if r["category"] == "Kernel Hotspot"]
+        assert kernel_recs[0]["priority"] == "HIGH"
 
     def test_kernel_below_50pct_no_compute_bottleneck(self):
         breakdown = self._make_breakdown(kernel_pct=40, memcpy_pct=10, overhead_pct=50)
@@ -548,7 +548,7 @@ class TestGenerateRecommendations:
         ]
         recs = generate_recommendations(breakdown, hotspots, {})
         categories = [r["category"] for r in recs]
-        assert "Compute Bottleneck" not in categories
+        assert "Kernel Hotspot" not in categories
 
     def test_high_api_overhead_generates_medium_priority_rec(self):
         breakdown = self._make_breakdown(kernel_pct=60, memcpy_pct=10, overhead_pct=30)

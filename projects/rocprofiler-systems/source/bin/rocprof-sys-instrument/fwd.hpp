@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -358,10 +339,16 @@ insert_instr(address_space_t* mutatee, Tp traceFunc, procedure_loc_t traceLoc,
              basic_block_t* basicBlock, bool allow_traps = instr_traps);
 
 procedure_t*
-find_function(image_t* appImage, const string_t& functionName, const strset_t& = {});
+find_function(const std::vector<module_t*>& modules, const string_t& functionName,
+              const strset_t& = {});
+
+procedure_t*
+find_function(const std::vector<object_t*>& objects, const string_t& functionName,
+              const strset_t& = {});
 
 symtab_symbol_t*
-find_undefined_function_symbol(image_t* app_image, const std::string& _name);
+find_undefined_function_symbol(const std::unordered_set<object_t*>& objects,
+                               const std::string&                   _name);
 
 void
 error_func_real(error_level_t level, int num, const char* const* params);
@@ -377,6 +364,13 @@ get_name(module_t*);
 
 symtab_func_t*
 get_symtab_function(procedure_t*);
+
+std::vector<module_t*>
+filter_modules(std::vector<module_t*>* app_modules);
+
+std::vector<procedure_t*>*
+get_procedures(image_t* app_image, std::vector<module_t*>* app_modules,
+               bool include_uninstrumentable);
 
 namespace std
 {

@@ -302,6 +302,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   virtual hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                                    HsaEventCallback event_callback, void* data,
                                    uint32_t private_segment_size, uint32_t group_segment_size,
+                                   bool metadata_prefetch,
                                    Queue** queue) = 0;
 
   // @brief Query the value of an attribute.

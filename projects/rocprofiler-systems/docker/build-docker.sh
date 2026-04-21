@@ -6,7 +6,7 @@ set-user-defaults()
     : ${ROCM_VERSIONS:="6.3"}
     : ${DISTRO:=ubuntu}
     : ${VERSIONS:=22.04}
-    : ${PYTHON_VERSIONS:="6 7 8 9 10 11 12 13"}
+    : ${PYTHON_VERSIONS:="8 9 10 11 12 13"}
     : ${BUILD_CI:=""}
     : ${PUSH:=0}
     : ${PULL:=--pull}
@@ -310,8 +310,9 @@ if [ "${RETRY}" -lt 1 ]; then
 fi
 
 if [ -n "${BUILD_CI}" ]; then DOCKER_FILE="${DOCKER_FILE}.ci"; fi
-cd docker # Forced since PWD is parent dir
-if [ ! -f ${DOCKER_FILE} ]; then send-error "File \"${DOCKER_FILE}\" not found"; fi
+# Build context is projects/rocprofiler-systems/ so that
+# requirements.txt is reachable.
+if [ ! -f docker/${DOCKER_FILE} ]; then send-error "File \"docker/${DOCKER_FILE}\" not found"; fi
 
 for VERSION in ${VERSIONS}
 do
@@ -353,11 +354,11 @@ do
                 *)
                     ;;
             esac
-            verbose-build docker build . ${PULL} --progress plain -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_MAJOR=${ROCM_MAJOR} --build-arg ROCM_MINOR=${ROCM_MINOR} --build-arg ROCM_PATCH=${ROCM_PATCH} --build-arg ROCM_VERSION_URL=${ROCM_VERSION_URL} --build-arg ROCM_VERSN=${ROCM_VERSN} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-build docker build . ${PULL} --progress plain -f docker/${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_MAJOR=${ROCM_MAJOR} --build-arg ROCM_MINOR=${ROCM_MINOR} --build-arg ROCM_PATCH=${ROCM_PATCH} --build-arg ROCM_VERSION_URL=${ROCM_VERSION_URL} --build-arg ROCM_VERSN=${ROCM_VERSN} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "rhel" ]; then
             # use Rocky Linux as a base image for RHEL builds
             DISTRO_BASE_IMAGE=rockylinux/rockylinux
-            verbose-build docker build . ${PULL} --progress plain -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_BASE_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_MAJOR=${ROCM_MAJOR} --build-arg ROCM_MINOR=${ROCM_MINOR} --build-arg ROCM_PATCH=${ROCM_PATCH} --build-arg ROCM_VERSION_URL=${ROCM_VERSION_URL} --build-arg ROCM_VERSN=${ROCM_VERSN} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-build docker build . ${PULL} --progress plain -f docker/${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_BASE_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_MAJOR=${ROCM_MAJOR} --build-arg ROCM_MINOR=${ROCM_MINOR} --build-arg ROCM_PATCH=${ROCM_PATCH} --build-arg ROCM_VERSION_URL=${ROCM_VERSION_URL} --build-arg ROCM_VERSN=${ROCM_VERSN} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "opensuse" ]; then
             DISTRO_IMAGE="opensuse/leap"
             if [[ "${VERSION_MAJOR}" -le 15 && "${VERSION_MINOR}" -le 5 ]]; then
@@ -365,7 +366,7 @@ do
             else
                 PERL_REPO="${VERSION_MAJOR}.${VERSION_MINOR}"
             fi
-            verbose-build docker build . ${PULL} --progress plain -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_MAJOR=${ROCM_MAJOR} --build-arg ROCM_MINOR=${ROCM_MINOR} --build-arg ROCM_PATCH=${ROCM_PATCH} --build-arg ROCM_VERSION_URL=${ROCM_VERSION_URL} --build-arg ROCM_VERSN=${ROCM_VERSN} --build-arg PERL_REPO=${PERL_REPO} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-build docker build . ${PULL} --progress plain -f docker/${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_MAJOR=${ROCM_MAJOR} --build-arg ROCM_MINOR=${ROCM_MINOR} --build-arg ROCM_PATCH=${ROCM_PATCH} --build-arg ROCM_VERSION_URL=${ROCM_VERSION_URL} --build-arg ROCM_VERSN=${ROCM_VERSN} --build-arg PERL_REPO=${PERL_REPO} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         fi
         if [ "${PUSH}" -ne 0 ]; then
             docker push ${CONTAINER}

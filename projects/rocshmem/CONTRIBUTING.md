@@ -33,7 +33,7 @@ and apply your changes there.
 
 - Ensure the PR is based on the `dev` branch of the rocSHMEM GitHub repository.
 
-- rocSHMEM requires new commits to include a "Signed-off-by" token in the commit message (typically enabled via the `git commit -s` option), indicating your agreement to the projects's [Developer's Certificate of Origin](https://developercertificate.org/) and compatability with the project [LICENSE](https://github.com/ROCm/rocSHMEM/blob/main/LICENSE):
+- rocSHMEM requires new commits to include a "Signed-off-by" token in the commit message (typically enabled via the `git commit -s` option), indicating your agreement to the project's [Developer's Certificate of Origin](https://developercertificate.org/) and compatibility with the project [LICENSE](https://github.com/ROCm/rocSHMEM/blob/main/LICENSE):
 
 
 > (a) The contribution was created in whole or in part by me and I
@@ -57,3 +57,36 @@ and apply your changes there.
 > personal information I submit with it, including my sign-off) is
 > maintained indefinitely and may be redistributed consistent with
 > this project or the open source license(s) involved.
+
+### Logging
+
+rocSHMEM provides leveled logging macros defined in `src/log.hpp`. Use the appropriate level for your messages:
+
+**Host macros** (for `__host__` code):
+| Macro | Use for |
+|---|---|
+| `LOG_ERROR(fmt, ...)` | Non-fatal errors (always compiled) |
+| `LOG_ERROR_EXIT(fmt, ...)` | Fatal errors, calls `exit()` (always compiled) |
+| `LOG_ERROR_ABORT(fmt, ...)` | Fatal errors, calls `abort()` (always compiled) |
+| `LOG_WARN(fmt, ...)` | Warnings (always compiled, runtime-gated) |
+| `LOG_INFO(fmt, ...)` | Informational messages (always compiled, runtime-gated) |
+| `LOG_API(fmt, ...)` | API call tracing (compile-gated by `BUILD_DEBUG_TRACE_HOST`) |
+| `LOG_TRACE(fmt, ...)` | Internal traces (compile-gated by `BUILD_DEBUG_TRACE_HOST`) |
+
+**Device macros** (for `__device__`/`__global__` code):
+| Macro | Use for |
+|---|---|
+| `LOGD_ERROR(fmt, ...)` | Non-fatal errors (always compiled) |
+| `LOGD_ERROR_ABORT(fmt, ...)` | Fatal errors, calls `abort()` (always compiled) |
+| `LOGD_WARN(fmt, ...)` | Warnings (compile-gated by `BUILD_DEBUG_DEVICE`) |
+| `LOGD_INFO(fmt, ...)` | Informational messages (compile-gated by `BUILD_DEBUG_DEVICE`) |
+| `LOGD_API(fmt, ...)` | API call tracing (compile-gated by `BUILD_DEBUG_TRACE_DEVICE`) |
+| `LOGD_TRACE(fmt, ...)` | Internal traces (compile-gated by `BUILD_DEBUG_TRACE_DEVICE`) |
+
+**Guidelines:**
+- Do not include trailing `\n` in format strings — the macros append it.
+- Use `host::funcname (param=%p, pe=%d)` format for host API tracing.
+- Use `device::funcname (ctx=%zd, dest=%p, pe=%d)` format for device API tracing.
+- The `LOG_` macros produce a compile error if used in device code (and vice versa for `LOGD_`).
+- Runtime verbosity is controlled by `ROCSHMEM_DEBUG_LEVEL` environment variable (default: `WARN`).
+
