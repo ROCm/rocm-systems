@@ -216,10 +216,8 @@ class IpcSdmaImpl : public IpcOnImpl {
                           bool blocking = false) {
     if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
       auto* handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
-      if (handle) {
-        if (blocking) handle->quietAll();
-        return;
-      }
+      if (blocking) handle->quietAll();
+      return;
     }
     memcpy_lane(dst, src, size);
   }
@@ -230,14 +228,9 @@ class IpcSdmaImpl : public IpcOnImpl {
       anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_block()) {
         handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
-      }
-      // Broadcast whether SDMA succeeded (thread 0 knows, others don't)
-      __syncthreads();
-      if (handle) {
         if (blocking) handle->quietAll();
-        return;
       }
-      // handle null (e.g. self PE) — fall through to memcpy on all threads
+      return;
     }
     memcpy_wg(dst, src, size);
   }
@@ -248,14 +241,9 @@ class IpcSdmaImpl : public IpcOnImpl {
       anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_wave()) {
         handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
-      }
-      // Broadcast handle to all lanes
-      handle = reinterpret_cast<anvil::SdmaQueueDeviceHandle*>(
-          __shfl(reinterpret_cast<uintptr_t>(handle), 0));
-      if (handle) {
         if (blocking) handle->quietAll();
-        return;
       }
+      return;
     }
     memcpy_wave(dst, src, size);
   }
