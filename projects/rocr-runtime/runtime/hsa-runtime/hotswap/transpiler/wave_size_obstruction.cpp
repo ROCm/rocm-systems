@@ -714,33 +714,66 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
     // --- §3 Class 3: replica races on shared state ------------------
     // The SemOp set here is the complete enumeration of
     // non-commutative atomics modeled in semop.hpp today. New
-    // non-commutative atomic encodings (e.g. SCRATCH_ATOMIC_SWAP if
-    // we ever model it) should be added by extending the enum +
+    // non-commutative atomic encodings (e.g. SCRATCH_ATOMIC_SWAP if we
+    // ever model it) should be added by extending the enum +
     // opcode_map.cpp + semop.cpp, not by adding a substring check
     // here. Atomics not yet modeled refuse via the existing Phase 5
     // unsupportedOpcode path.
-    // S_ATOMIC_DEC's wrap-at-zero decrement is non-commutative: two
-    // lanes in opposite source waves racing on the same counter produce
-    // different outcomes from the two possible orderings when `old`
-    // crosses the `0` or `> src` boundary on only one of them.  Every
-    // corpus producer (AITER split-k epilogue barriers) keys on the
-    // pre-decrement value being 1, so an ordering flip silently picks
-    // the wrong wave as the "last workgroup", corrupting the reduction.
+    //
+    // Vector atomics (GLOBAL / FLAT / BUFFER _SWAP / _CMPSWAP): the
+    // race is *lane-level* — under modulo-replication the wave64
+    // source is projected onto two wave32 sub-waves, so lanes `i` and
+    // `i + W_s` issue concurrently against the same target slot. For
+    // non-commutative binops the two possible orderings produce
+    // different terminal values, and the source program has no way to
+    // restore the intended single-wave ordering.
     if (sop == SemOp::GLOBAL_ATOMIC_SWAP ||
         sop == SemOp::GLOBAL_ATOMIC_CMPSWAP ||
         sop == SemOp::FLAT_ATOMIC_SWAP ||
         sop == SemOp::FLAT_ATOMIC_CMPSWAP ||
         sop == SemOp::BUFFER_ATOMIC_SWAP ||
-        sop == SemOp::BUFFER_ATOMIC_CMPSWAP ||
-        sop == SemOp::S_ATOMIC_SWAP ||
-        sop == SemOp::S_ATOMIC_DEC) {
+        sop == SemOp::BUFFER_ATOMIC_CMPSWAP) {
       ObstructionSite site;
       site.inst = &di;
       site.kind = ObstructionKind::NonCommutativeAtomic;
       site.rewrite = RewriteId::None;
       site.rewriteImplemented = false;
-      site.detail = "non-commutative atomic races target lanes "
+      site.detail = "non-commutative vector atomic races target lanes "
                     "i and i+W_s under modulo-replication";
+      report.sites.push_back(std::move(site));
+      continue;
+    }
+    // Scalar atomics (S_ATOMIC_*): the race is *wave-level*, not
+    // lane-level. The scalar unit executes the atomic exactly once per
+    // wave, so there is no lane-i/lane-i+W_s race by construction; the
+    // failure mode is that each source wave becomes two target
+    // sub-waves under wave64 -> 2 x wave32 projection and each
+    // sub-wave's scalar unit issues the atomic independently, so the
+    // counter receives two updates per source wave instead of one.
+    //
+    //   * S_ATOMIC_SWAP under double-issue writes the intended value
+    //     twice (idempotent in value, but the returned `old` the
+    //     second sub-wave sees is the data the first wrote, not the
+    //     pre-instruction memory value).
+    //   * S_ATOMIC_DEC under double-issue decrements twice, and both
+    //     sub-waves see pre-decrement values that are off-by-one from
+    //     what the source program computed — fatal for the AITER
+    //     split-k "am I the last workgroup?" barrier idiom keyed on
+    //     `old == 1`, which is the dominant corpus consumer today.
+    //
+    // A genuine rewrite would need to mask the atomic to one of the
+    // two sub-waves (EXEC-gated single issuance); we haven't
+    // implemented that, so refuse.
+    if (sop == SemOp::S_ATOMIC_SWAP || sop == SemOp::S_ATOMIC_DEC) {
+      ObstructionSite site;
+      site.inst = &di;
+      site.kind = ObstructionKind::NonCommutativeAtomic;
+      site.rewrite = RewriteId::None;
+      site.rewriteImplemented = false;
+      site.detail = "non-commutative scalar atomic double-issues under "
+                    "wave64 -> 2 x wave32 modulo-replication (each "
+                    "target sub-wave's scalar unit fires the atomic "
+                    "independently)";
       report.sites.push_back(std::move(site));
       continue;
     }

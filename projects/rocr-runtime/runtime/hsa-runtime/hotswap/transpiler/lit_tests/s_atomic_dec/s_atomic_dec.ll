@@ -11,7 +11,7 @@
 ;   new = (old == 0 || old > src) ? src : old - 1
 ; which landed as a first-class binop in LLVM 19.
 ;
-; Source → target shape: gfx950 (AITER corpus source ISA) → gfx942
+; Source -> target shape: gfx950 (AITER corpus source ISA) -> gfx942
 ; (the hotswap race box).  Mirrors what
 ; BatchRaise.AiterGfx950 now threads through to `raiseToIR` via the
 ; newly-added `compilationTargetIsa` parameter, so that a change
@@ -32,7 +32,7 @@
 ;      `atomicrmw sub`, `atomicrmw add`, or any
 ;      `@llvm.amdgcn.s.atomic.*` intrinsic. The sub/add shapes would
 ;      silently miscompile the wrap-at-zero semantics into a regular
-;      decrement (the AITER barrier value wraps from 1 → 0 and back
+;      decrement (the AITER barrier value wraps from 1 -> 0 and back
 ;      to the source threshold; a plain `sub` would underflow to
 ;      0xFFFFFFFF on the next decrement and break the `old == 1`
 ;      "am I last?" check).

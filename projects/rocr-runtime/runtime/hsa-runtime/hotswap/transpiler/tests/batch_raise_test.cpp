@@ -345,10 +345,10 @@ static std::vector<std::string> selectAiterRepresentativeSubset(
 // Fork-isolated so that report_fatal_error in one kernel doesn't kill the
 // test.
 //
-// Source → target shape: gfx950 source lifted against a gfx942 compilation
+// Source -> target shape: gfx950 source lifted against a gfx942 compilation
 // target.  This is the real "race" configuration the hotswap runtime runs
 // on an MI300 (gfx942) box — hand-off from the AITER corpus to the hotswap
-// pipeline.  A naive round-trip (gfx950 → gfx950) would hide every
+// pipeline.  A naive round-trip (gfx950 -> gfx950) would hide every
 // target-capability branch (e.g. `ctx.targetIsa.hasWMMA12` in
 // handle_valu_vop3p.cpp — see hotswap/docs/target-capability-dispatch.md
 // §3) by always taking the native path, overstating what actually works on
@@ -400,14 +400,14 @@ TEST(BatchRaise, AiterGfx950) {
   int expectedFailures;
   if (g_config.testAll) {
     selected = allCoFiles;
-    label = "full AITER gfx950 → gfx942 corpus (--test-all, coverage-only)";
+    label = "full AITER gfx950 -> gfx942 corpus (--test-all, coverage-only)";
     expectedFailures = -1;  // report only; don't enforce.
   } else {
     selected = selectAiterRepresentativeSubset(allCoFiles, path);
     ASSERT_FALSE(selected.empty())
         << "Representative subset is empty — check quota map vs. corpus "
            "layout at '" << path << "'";
-    label = "representative AITER gfx950 → gfx942 subset (pass --test-all "
+    label = "representative AITER gfx950 -> gfx942 subset (pass --test-all "
             "for full sweep)";
     expectedFailures = kSubsetExpectedFailures;
   }
@@ -451,7 +451,7 @@ TEST(BatchRaise, CustomDir) {
     // CustomDir stays on the round-trip (source == target) shape: the
     // caller's directory may contain a mix of ISAs and we have no way to
     // know what compilation target they wanted.  AiterGfx950 above uses a
-    // fixed gfx950 → gfx942 pair because that's the canonical race config.
+    // fixed gfx950 -> gfx942 pair because that's the canonical race config.
     runBatchRaiseIsolated(coFiles, isa, /*compilationTargetIsa=*/"", label,
                           /*expectedFailures=*/-1);
   }

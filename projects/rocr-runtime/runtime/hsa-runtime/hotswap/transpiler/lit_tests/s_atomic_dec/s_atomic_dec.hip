@@ -11,7 +11,7 @@
 // We compile for gfx950 — the source ISA of the AITER corpus this
 // handler unblocks — and the companion .ll raises under
 // `--isa=gfx950 --target-isa=gfx942`, matching the canonical race
-// pipeline (gfx950 workload → gfx942 box) that BatchRaise.AiterGfx950
+// pipeline (gfx950 workload -> gfx942 box) that BatchRaise.AiterGfx950
 // now exercises end-to-end.
 //
 // Producer shape: the AITER split-k reduction barrier (every
@@ -29,7 +29,7 @@
 //     This is the disassembler's (sdst, sbase, soffset) shape where
 //     TableGen declares `$sdst_in` tied (see decode.cpp's
 //     `kKnownTiedIn` comment).
-//   * `"s"(counter)` — 64-bit pointer → SGPR pair base.
+//   * `"s"(counter)` — 64-bit pointer -> SGPR pair base.
 //   * `"s"(offset)`  — 32-bit SGPR offset (the `_SGPR` addressing
 //     form; matches the AITER producer above verbatim).
 //

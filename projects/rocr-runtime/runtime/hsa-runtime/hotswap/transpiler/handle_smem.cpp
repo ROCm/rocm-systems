@@ -356,77 +356,105 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
 
-  // SMEM dword atomics: operate on memory through an SGPR-pair base
-  // pointer with an IMM / SGPR / SGPR_IMM offset.  HW only returns the
-  // pre-modification value when GLC=1; we always write it back, which is
-  // conservative (harmless when GLC=0 since the dest is dead).
+  // SMEM dword atomics (returned-old-value / GLC=1 / `_RTN` form only):
+  // operate on memory through an SGPR-pair base pointer with an IMM /
+  // SGPR / SGPR_IMM offset, and publish the pre-modification value into
+  // the sdst (== tied sdst_in) SGPR slot.
   //
-  // This block covers the atomics whose scalar-cache semantics map onto a
-  // single LLVM `atomicrmw` BinOp.  Each entry picks which one:
-  //   S_ATOMIC_SWAP -> Xchg        (pure exchange)
-  //   S_ATOMIC_DEC  -> UDecWrap    (AMDGPU HW wrap-at-zero decrement:
-  //                                 new = (old==0 || old>src) ? src
-  //                                                           : old - 1,
-  //                                 matching LLVM's UDecWrap binop)
+  // Dispatch is keyed on the SemOp; each arm picks the `atomicrmw`
+  // BinOp that matches the hardware's scalar-cache semantics exactly:
+  //   S_ATOMIC_SWAP -> Xchg      (pure exchange)
+  //   S_ATOMIC_DEC  -> UDecWrap  (AMDGPU HW wrap-at-zero decrement:
+  //                               new = (old == 0 || old > src) ? src
+  //                                                             : old - 1;
+  //                               NOT `atomicrmw sub`, which would
+  //                               silently underflow past zero)
   //
   // The returned-old-value write-back is the hot path: AITER split-k
   // reductions (bf16gemm_*_splitk_clean) key the "last workgroup runs
   // the epilogue" barrier on `old == 1`, so dropping the dst store
   // would silently break the branch that follows.
+  //
+  // Non-matching SemOps fall through the `default:` arm without the
+  // `hr.handled` flip, so the raiser's Phase-5 unsupportedOpcode path
+  // reports the missing lowering.
   AtomicRMWInst::BinOp rmwOp;
-  int opDwords = 1;
-  bool handledScalarAtomic = false;
   switch (sop) {
   case SemOp::S_ATOMIC_SWAP:
     rmwOp = AtomicRMWInst::Xchg;
-    handledScalarAtomic = true;
     break;
   case SemOp::S_ATOMIC_DEC:
     rmwOp = AtomicRMWInst::UDecWrap;
-    handledScalarAtomic = true;
     break;
   default:
-    break;
-  }
-  if (handledScalarAtomic) {
-    assert(((di.tsFlags & SIInstrFlags::IsAtomicRet) != 0) == (di.numDefs > 0) &&
-           "SMEM atomic: IsAtomicRet disagrees with numDefs");
-    ParsedReg dataDst = op.dst();
-    ParsedReg base = op.srcReg(0);
-    // For the `_RTN` form the dst register is tied to the input data
-    // slot (the disassembler emits only `(sdst, sbase, offset)` even
-    // though TableGen declares `$sdst_in` tied), so the input value of
-    // the atomic op — the xchg data for swap, the wrap-threshold for
-    // dec — comes from the *pre-instruction* value of the dst register.
-    Value *data = ctx.regs.readReg32(ctx.B, dataDst);
-
-    Value *baseAddr = ctx.regs.loadSGPR64(ctx.B, base.baseIdx);
-    Value *ptr = ctx.B.CreateIntToPtr(baseAddr, ctx.ptrGlobalTy);
-
-    unsigned offIdx = op.srcIdx(1);
-    if (di.isImm(offIdx)) {
-      int64_t off = op.srcImm(1);
-      if (off != 0)
-        ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, ctx.B.getInt64(off));
-    } else {
-      // Dword-width atomic, so the `scale_offset` (CPol::SCAL) bit
-      // scales the SGPR element-index by 4 to recover the byte
-      // offset — same rule as the other SMEM paths.
-      Value *regOff = ctx.B.CreateZExt(op.src(1), ctx.i64Ty, "smem_at_roff");
-      if (di.hasScaleOffset)
-        regOff = ctx.B.CreateMul(regOff,
-                                 ConstantInt::get(ctx.i64Ty, 4 * opDwords),
-                                 "smem_at_roff_scaled");
-      ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, regOff);
-    }
-
-    Value *old = ctx.B.CreateAtomicRMW(rmwOp, ptr, data, MaybeAlign(),
-                                       AtomicOrdering::Monotonic);
-    ctx.regs.storeSGPR32(ctx.B, dataDst.baseIdx, old);
-    hr.handled = true;
     return hr;
   }
 
+  // Non-RTN (GLC=0) variant: the disassembler emits
+  // `(sdata, sbase, offset)` with numDefs == 0 instead of the tied-sdst
+  // `(sdst, sbase, offset)` shape the RTN handler decodes below. The
+  // AITER corpus only ever emits the RTN form (the split-k barrier
+  // needs `old` for the "am I last?" branch), so refuse the non-RTN
+  // shape loudly rather than silently mis-decode by calling `op.dst()`
+  // on a zero-def instruction. When a real non-RTN producer shows up,
+  // add a sibling arm that reads data from `op.srcReg(0)` and drops the
+  // write-back; the `_RTN` collapse rule in opcode_map.cpp
+  // (`atomicRetToNoRet`) already pins the numDefs contract at init
+  // time, so this runtime check is a belt-and-suspenders guard against
+  // a corpus encountering the non-RTN pseudo directly.
+  if (di.numDefs == 0) {
+    llvm::errs() << "transpiler: " << di.mnemonic
+                 << ": non-RTN (GLC=0) SMEM atomic form is not lifted yet "
+                    "(disassembler shape is (sdata, sbase, offset) with "
+                    "no def, not the (sdst, sbase, offset) shape this "
+                    "handler decodes)\n";
+    hr.failure = RaiseFailure::unsupportedShape(
+        di, "SMEM",
+        "non-RTN (GLC=0) SMEM atomic: operand shape is "
+        "(sdata, sbase, offset) with no def; only the returned-old-value "
+        "(GLC=1, _RTN) form is lifted today");
+    return hr;
+  }
+
+  ParsedReg dataDst = op.dst();
+  ParsedReg base = op.srcReg(0);
+  // For the `_RTN` form the dst register is tied to the input data slot
+  // (the disassembler emits only `(sdst, sbase, offset)` even though
+  // TableGen declares `$sdst_in` tied), so the input value of the
+  // atomic op — the xchg data for swap, the wrap-threshold for dec —
+  // comes from the *pre-instruction* value of the dst register.
+  Value *data = ctx.regs.readReg32(ctx.B, dataDst);
+
+  Value *baseAddr = ctx.regs.loadSGPR64(ctx.B, base.baseIdx);
+  Value *ptr = ctx.B.CreateIntToPtr(baseAddr, ctx.ptrGlobalTy);
+
+  unsigned offIdx = op.srcIdx(1);
+  if (di.isImm(offIdx)) {
+    int64_t off = op.srcImm(1);
+    if (off != 0)
+      ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, ctx.B.getInt64(off));
+  } else {
+    // Dword-width atomic, so the `scale_offset` (CPol::SCAL) bit scales
+    // the SGPR element-index by 4 to recover the byte offset — same
+    // rule as the other SMEM paths.
+    Value *regOff = ctx.B.CreateZExt(op.src(1), ctx.i64Ty, "smem_at_roff");
+    if (di.hasScaleOffset)
+      regOff = ctx.B.CreateMul(regOff, ConstantInt::get(ctx.i64Ty, 4),
+                               "smem_at_roff_scaled");
+    ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, regOff);
+  }
+
+  // Pin `Align(4)` explicitly instead of letting the IRBuilder infer
+  // ABI alignment. Matches the explicit-Align convention the narrow
+  // SMEM load block above sets (see its "Alignment:" design bullet);
+  // relying on ABI inference happens to produce `align 4` for i32 on
+  // AS(1) today, but inferred alignment is fragile against future LLVM
+  // default-alignment changes and masks pointer-alignment bugs from
+  // callers.
+  Value *old = ctx.B.CreateAtomicRMW(rmwOp, ptr, data, Align(4),
+                                     AtomicOrdering::Monotonic);
+  ctx.regs.storeSGPR32(ctx.B, dataDst.baseIdx, old);
+  hr.handled = true;
   return hr;
 }
 
