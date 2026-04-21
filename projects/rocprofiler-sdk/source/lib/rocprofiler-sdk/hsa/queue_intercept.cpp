@@ -225,6 +225,18 @@ process_doorbell_impl(QueueState*          state,
                       hsa_signal_value_t   value,
                       const doorbell_fn_t& ring_doorbell)
 {
+    auto decode_packet_type = [](uint16_t header) -> uint16_t {
+        constexpr auto type_mask = static_cast<uint16_t>(
+            ((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u) << HSA_PACKET_HEADER_TYPE);
+        return static_cast<uint16_t>((header & type_mask) >> HSA_PACKET_HEADER_TYPE);
+    };
+
+    auto read_packet_header = [state](uint64_t pos) -> uint16_t {
+        auto* pkt = static_cast<const char*>(state->ring_buf) +
+                    ((pos & state->ring_mask) * state->pkt_size);
+        return *reinterpret_cast<const uint16_t*>(pkt);
+    };
+
     auto lock_start = std::chrono::steady_clock::now();
     std::unique_lock<std::mutex> lock{state->gate_lock};
     auto lock_wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -245,6 +257,7 @@ process_doorbell_impl(QueueState*          state,
 
     uint64_t scan_end = state->virtual_wptr.load(std::memory_order_acquire);
     uint64_t scan_pos = state->next_scan_pos;
+    uint64_t stride   = 1 + state->k_factor;
     auto     real_wdid = __atomic_load_n(state->real_wdid, __ATOMIC_ACQUIRE);
     auto     real_rdid = __atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE);
     ROCP_INFO << "[DIAG-HG-DOORBELL-ENTRY] count=" << db_count << " queue=" << state->hsa_queue
@@ -254,6 +267,23 @@ process_doorbell_impl(QueueState*          state,
               << " next_submit_pos=" << state->next_submit_pos
               << " destroying=" << state->destroying.load(std::memory_order_relaxed);
 
+    auto previous_doorbell = state->last_doorbell_value.exchange(value, std::memory_order_relaxed);
+    auto doorbell_delta =
+        (previous_doorbell >= 0) ? (static_cast<int64_t>(value) - previous_doorbell) : 0;
+    auto virtual_advance = static_cast<int64_t>(scan_end) - static_cast<int64_t>(scan_pos);
+    auto logical_advance =
+        static_cast<int64_t>((stride > 0) ? ((scan_end - scan_pos) / stride) : (scan_end - scan_pos));
+    auto expected_doorbell =
+        (scan_end > 0) ? static_cast<hsa_signal_value_t>(scan_end - 1) : hsa_signal_value_t{-1};
+    auto matches_expected = (scan_end > 0 && value == expected_doorbell);
+    ROCP_INFO << "[DIAG-HG-DOORBELL-CHECK] queue=" << state->hsa_queue
+              << " prev_value=" << previous_doorbell << " curr_value=" << value
+              << " delta=" << doorbell_delta << " stride=" << stride
+              << " scan_pos=" << scan_pos << " scan_end=" << scan_end
+              << " virtual_advance=" << virtual_advance << " logical_advance=" << logical_advance
+              << " expected_curr_value=" << expected_doorbell
+              << " matches_expected=" << matches_expected;
+
     if(scan_pos >= scan_end)
     {
         ROCP_INFO << "[DIAG-HG-DOORBELL-NOOP] queue=" << state->hsa_queue
@@ -262,7 +292,6 @@ process_doorbell_impl(QueueState*          state,
         return;
     }
 
-    uint64_t stride    = 1 + state->k_factor;
     uint64_t pkt_count = (scan_end - scan_pos) / stride;
     uint64_t remainder = (scan_end - scan_pos) % stride;
     ROCP_INFO << "[DIAG-HG-PKTCOUNT] queue=" << state->hsa_queue << " scan_pos=" << scan_pos
@@ -305,6 +334,47 @@ process_doorbell_impl(QueueState*          state,
         for(uint64_t i = 0; i < pkt_count; i++)
         {
             uint64_t pkt_pos = scan_pos + i * stride;
+            uint64_t contig_pos = scan_pos + i;
+
+            auto stride_header = read_packet_header(pkt_pos);
+            auto stride_type   = decode_packet_type(stride_header);
+            auto contig_header = read_packet_header(contig_pos);
+            auto contig_type   = decode_packet_type(contig_header);
+            ROCP_INFO << "[DIAG-HG-SLOT-COMPARE] queue=" << state->hsa_queue
+                      << " logical_idx=" << i << " stride=" << stride << " stride_pos=" << pkt_pos
+                      << " stride_slot=" << (pkt_pos & state->ring_mask)
+                      << " stride_type=" << stride_type << " stride_header=" << stride_header
+                      << " contig_pos=" << contig_pos
+                      << " contig_slot=" << (contig_pos & state->ring_mask)
+                      << " contig_type=" << contig_type << " contig_header=" << contig_header;
+
+            for(uint64_t rel = 1; rel < stride; ++rel)
+            {
+                auto reserved_pos    = pkt_pos + rel;
+                auto reserved_header = read_packet_header(reserved_pos);
+                auto reserved_type   = decode_packet_type(reserved_header);
+                auto is_suspicious   = (reserved_header != 0) &&
+                                     (reserved_type != HSA_PACKET_TYPE_INVALID) &&
+                                     (reserved_type != HSA_PACKET_TYPE_BARRIER_AND);
+                if(is_suspicious)
+                {
+                    ROCP_WARNING << "[DIAG-HG-RESERVED-SLOT-WRITTEN] queue=" << state->hsa_queue
+                                 << " logical_idx=" << i << " base_pkt_pos=" << pkt_pos
+                                 << " reserved_rel=" << rel << " reserved_pos=" << reserved_pos
+                                 << " reserved_slot=" << (reserved_pos & state->ring_mask)
+                                 << " reserved_type=" << reserved_type
+                                 << " reserved_header=" << reserved_header;
+                }
+                if(reserved_type == HSA_PACKET_TYPE_KERNEL_DISPATCH)
+                {
+                    ROCP_ERROR << "[DIAG-HG-RESERVED-SLOT-KERNEL] queue=" << state->hsa_queue
+                               << " logical_idx=" << i << " base_pkt_pos=" << pkt_pos
+                               << " reserved_rel=" << rel << " reserved_pos=" << reserved_pos
+                               << " reserved_slot=" << (reserved_pos & state->ring_mask)
+                               << " reserved_header=" << reserved_header;
+                }
+            }
+
             auto*    pkt     = static_cast<char*>(state->ring_buf) +
                         ((pkt_pos & state->ring_mask) * state->pkt_size);
             uint64_t start_submit = tls_submit_pos;
