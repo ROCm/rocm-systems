@@ -74,7 +74,7 @@ in the narrative and both bounds in `expected_speedup_range`.
 
 Derive `mfma_vs_valu_ratio = SQ_INSTS_VALU_MFMA / SQ_INSTS_VALU` via the
 existing `metrics.*` helpers (no new tool). Apply thresholds from
-`knowledge/sol_metrics.yaml::mfma_vs_valu_ratio_classification`:
+`knowledge/matrix_meter.yaml`:
 
 - `>= 0.30` — healthy MFMA utilization.
 - `0.10..0.30` — borderline; recommend MFMA intrinsics or rocBLAS /
