@@ -1499,6 +1499,9 @@ OD_SCLK:
 1:       1837Mhz
 OD_MCLK:
 1:       1000Mhz
+OD_FCLK:
+0:       1200Mhz
+1:       1300Mhz
 OD_VDDC_CURVE:
 0:        872Mhz        736mV
 1:       1354Mhz        860mV
@@ -1506,6 +1509,7 @@ OD_VDDC_CURVE:
 OD_RANGE:
 SCLK:     872Mhz       1900Mhz
 MCLK:     168Mhz       1200Mhz
+FCLK:     1200Mhz      1400Mhz
 VDDC_CURVE_SCLK[0]:     872Mhz       1900Mhz
 VDDC_CURVE_VOLT[0]:     737mV        1137mV
 VDDC_CURVE_SCLK[1]:     872Mhz       1900Mhz
@@ -1523,6 +1527,9 @@ MCLK:
 1: 700Mhz
 2: 1200Mhz
 3: 1600Mhz *
+FCLK:
+0: 1200Mhz
+1: 1300Mhz *
 
 For the new format, GFXCLK field will show min and max values(0/1). If the current
 frequency in neither min/max but lies within the range, this is indicated by
@@ -1544,6 +1551,8 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
   p->curr_sclk_range.upper_bound = UINT64_MAX;
   p->curr_mclk_range.lower_bound = UINT64_MAX;
   p->curr_mclk_range.upper_bound = UINT64_MAX;
+  p->curr_fclk_range.lower_bound = UINT64_MAX;
+  p->curr_fclk_range.upper_bound = UINT64_MAX;
 
   ret = GetDevValueVec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -1559,9 +1568,11 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
   // Tags expected in this file
   const std::string kTAG_OD_SCLK{"OD_SCLK:"};
   const std::string KTAG_OD_MCLK{"OD_MCLK:"};
+  const std::string kTAG_OD_FCLK{"OD_FCLK:"};
   const std::string kTAG_GFXCLK{"GFXCLK:"};
   const std::string KTAG_MCLK{"MCLK:"};
   const std::string KTAG_SCLK{"SCLK:"};
+  const std::string KTAG_FCLK{"FCLK:"};
   const std::string KTAG_OD_RANGE{"OD_RANGE:"};
   const std::string KTAG_FIRST_FREQ_IDX{"0:"};
 
@@ -1589,7 +1600,7 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
 
   // track the number of keys found, if this goes down to 0 then that means that there is no valid
   // data
-  const uint8_t kNumStructuredKeysToCheck = 6;
+  const uint8_t kNumStructuredKeysToCheck = 9;
   uint8_t structured_key_counter = kNumStructuredKeysToCheck;
   // Validates 'OD_SCLK' is in the structure
   if (txt_power_dev_od_voltage.contains_structured_key(kTAG_OD_SCLK, KTAG_FIRST_FREQ_IDX)) {
@@ -1607,6 +1618,14 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
         freq_string_to_int(build_upper_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
   } else
     structured_key_counter--;
+  // Validates 'OD_FCLK' is in the structure
+  if (txt_power_dev_od_voltage.contains_structured_key(kTAG_OD_FCLK, KTAG_FIRST_FREQ_IDX)) {
+    p->curr_fclk_range.lower_bound =
+        freq_string_to_int(build_lower_bound(kTAG_OD_FCLK), nullptr, nullptr, 0);
+    p->curr_fclk_range.upper_bound =
+        freq_string_to_int(build_upper_bound(kTAG_OD_FCLK), nullptr, nullptr, 0);
+  } else
+    structured_key_counter--;
 
   // Validates 'OD_RANGE' is in the structure
   if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE, KTAG_SCLK)) {
@@ -1619,6 +1638,12 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
     od_value_pair_str_to_range(
         txt_power_dev_od_voltage.get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_MCLK),
         &p->mclk_freq_limits);
+  } else
+    structured_key_counter--;
+  if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE, KTAG_FCLK)) {
+    od_value_pair_str_to_range(
+        txt_power_dev_od_voltage.get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_FCLK),
+        &p->fclk_freq_limits);
   } else
     structured_key_counter--;
   // Validates 'GFXCLK' is in the structure
@@ -1635,6 +1660,14 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
         freq_string_to_int(build_lower_bound(KTAG_MCLK), nullptr, nullptr, 0);
     p->curr_mclk_range.upper_bound =
         freq_string_to_int(build_upper_bound(KTAG_MCLK), nullptr, nullptr, 0);
+  } else
+    structured_key_counter--;
+  // Validates 'FCLK' is in the structure
+  if (txt_power_dev_od_voltage.contains_structured_key(KTAG_FCLK, KTAG_FIRST_FREQ_IDX)) {
+    p->curr_fclk_range.lower_bound =
+        freq_string_to_int(build_lower_bound(KTAG_FCLK), nullptr, nullptr, 0);
+    p->curr_fclk_range.upper_bound =
+        freq_string_to_int(build_upper_bound(KTAG_FCLK), nullptr, nullptr, 0);
   } else
     structured_key_counter--;
 
@@ -1656,7 +1689,7 @@ rsmi_status_t rsmi_dev_clk_extremum_set(uint32_t dv_ind, rsmi_freq_ind_t level, 
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
-  if (clkType != RSMI_CLK_TYPE_SYS && clkType != RSMI_CLK_TYPE_MEM) {
+  if (clkType != RSMI_CLK_TYPE_SYS && clkType != RSMI_CLK_TYPE_MEM && clkType != RSMI_CLK_TYPE_DF) {
     return RSMI_STATUS_INVALID_ARGS;
   }
   if (level != RSMI_FREQ_IND_MIN && level != RSMI_FREQ_IND_MAX) {
@@ -1666,6 +1699,7 @@ rsmi_status_t rsmi_dev_clk_extremum_set(uint32_t dv_ind, rsmi_freq_ind_t level, 
   std::map<rsmi_clk_type_t, std::string> clk_char_map = {
       {RSMI_CLK_TYPE_SYS, "s"},
       {RSMI_CLK_TYPE_MEM, "m"},
+      {RSMI_CLK_TYPE_DF, "f"},
   };
   DEVICE_MUTEX
 
@@ -2086,6 +2120,14 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
     return RSMI_STATUS_INVALID_ARGS;
   }
 
+  amd::smi::DevInfoTypes dev_type;
+  const auto& clk_type_it = kClkTypeMap.find(clk_type);
+  if (clk_type_it != kClkTypeMap.end()) {
+    dev_type = clk_type_it->second;
+  } else {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
   ret = rsmi_dev_gpu_clk_freq_get(dv_ind, clk_type, &freqs);
 
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -2097,16 +2139,46 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
     return RSMI_STATUS_UNEXPECTED_SIZE;
   }
 
+  // Deep sleep entry (index 0 in pp_dpm_sclk marked with 'S') is not a real
+  // DPM level; subtract it from the valid count so the bitmask only covers
+  // actual DPM levels.  Bitmask bit i maps to sysfs DPM level i, which
+  // corresponds to freqs.frequency[i] when has_deep_sleep is false, or
+  // freqs.frequency[i+1] when has_deep_sleep is true.
+  if (freqs.num_supported > 0) {
+    uint32_t max_levels = freqs.num_supported;
+    if (freqs.has_deep_sleep) {
+      max_levels--;
+    }
+    uint64_t valid_mask = (max_levels > 0) ? (1ULL << max_levels) - 1 : 0;
+    if (freq_bitmask == 0 || (freq_bitmask & ~valid_mask)) {
+      return RSMI_STATUS_INVALID_ARGS;
+    }
+  }
+
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
   // Above call to rsmi_dev_get_gpu_clk_freq should have emitted an error if
   // assert below is not true
   assert(dv_ind < smi.devices().size());
 
-  std::string freq_enable_str = bitfield_to_freq_string(freq_bitmask, freqs.num_supported);
-
   std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind];
   assert(dev != nullptr);
+
+  // If the sysfs node is read-only, force DPM level is not supported
+  std::string sysfs_path = dev->get_sys_file_path_by_type(dev_type, true);
+  bool read_only = false;
+  int ro_ret = amd::smi::isReadOnlyForAll(sysfs_path, &read_only);
+  if (ro_ret != 0) {
+    return amd::smi::ErrnoToRsmiStatus(ro_ret);
+  }
+  if (read_only) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  // bitfield_to_freq_string iterates [0, num_supported), but the validation
+  // above already guarantees no bits are set beyond the valid DPM range, so
+  // the extra iteration over the deep sleep index (if present) is harmless.
+  std::string freq_enable_str = bitfield_to_freq_string(freq_bitmask, freqs.num_supported);
 
   ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -2114,24 +2186,12 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
   }
 
   rsmi_status_t status;
-  amd::smi::DevInfoTypes dev_type;
-
-  const auto& clk_type_it = kClkTypeMap.find(clk_type);
-  if (clk_type_it != kClkTypeMap.end()) {
-    dev_type = clk_type_it->second;
-  } else {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
   status = amd::smi::ErrnoToRsmiStatus(dev->writeDevInfo(dev_type, freq_enable_str));
 
-  // If an operation is not supported, the dev file, ie /sys/class/drm/card1/device/pp_dpm_pcie
-  // will have read-only perms, and the OS will deny access, before the request hits the driver
-  // level
   if (status == RSMI_STATUS_PERMISSION) {
-    bool read_only = false;
-    amd::smi::isReadOnlyForAll(dev->path(), &read_only);
-    if (read_only) {
+    bool post_read_only = false;
+    amd::smi::isReadOnlyForAll(sysfs_path, &post_read_only);
+    if (post_read_only) {
       return RSMI_STATUS_NOT_SUPPORTED;
     }
   }
@@ -3904,10 +3964,19 @@ rsmi_status_t rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t* power, float*
     return RSMI_STATUS_INVALID_ARGS;
   }
 
+  GET_DEV_FROM_INDX
+
   rsmi_status_t ret;
   rsmi_gpu_metrics_t gpu_metrics;
   ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
   if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Failed "
+       << " | Device #: " << dv_ind
+       << " | Read SYSFS file: " << dev->get_sys_file_path_by_type(amd::smi::kDevGpuMetrics, true)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevGpuMetrics)
+       << " | Returning: " << amd::smi::getRSMIStatusString(ret, false) << " |";
+    LOG_WARN(ss);
     return ret;
   }
 
@@ -3916,6 +3985,16 @@ rsmi_status_t rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t* power, float*
   // hard-coded for now since all ASICs have same resolution. If it ASIC
   // dependent then this information should come from Kernel
   if (counter_resolution) *counter_resolution = kEnergyCounterResolution;
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+     << " | Success "
+     << " | Device #: " << dv_ind
+     << " | Read SYSFS file: " << dev->get_sys_file_path_by_type(amd::smi::kDevGpuMetrics, true)
+     << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevGpuMetrics)
+     << " | Data: " << *power << " | Timestamp: " << *timestamp << " | Counter Resolution: "
+     << (counter_resolution ? std::to_string(*counter_resolution) : "N/A")
+     << " | Returning: " << amd::smi::getRSMIStatusString(ret, false) << " |";
+  LOG_INFO(ss);
 
   return ret;
   CATCH
@@ -7018,17 +7097,32 @@ rsmi_status_t rsmi_event_notification_init(uint32_t dv_ind) {
 
   int ret = ioctl(smi.kfd_notif_evt_fh(), AMDKFD_IOC_SMI_EVENTS, &args);
   if (ret < 0) {
-    return amd::smi::ErrnoToRsmiStatus(errno);
+    rsmi_status_t err = amd::smi::ErrnoToRsmiStatus(errno);
+    if (smi.kfd_notif_evt_fh_refcnt_dec() == 0) {
+      close(smi.kfd_notif_evt_fh());
+      smi.set_kfd_notif_evt_fh(-1);
+    }
+    return err;
   }
   if (args.anon_fd < 1) {
+    if (smi.kfd_notif_evt_fh_refcnt_dec() == 0) {
+      close(smi.kfd_notif_evt_fh());
+      smi.set_kfd_notif_evt_fh(-1);
+    }
     return RSMI_STATUS_NO_DATA;
   }
 
   dev->set_evt_notif_anon_fd(args.anon_fd);
   FILE* anon_file_ptr = fdopen(static_cast<int>(args.anon_fd), "r");
   if (anon_file_ptr == nullptr) {
+    rsmi_status_t err = amd::smi::ErrnoToRsmiStatus(errno);
     close(dev->evt_notif_anon_fd());
-    return amd::smi::ErrnoToRsmiStatus(errno);
+    dev->set_evt_notif_anon_fd(-1);
+    if (smi.kfd_notif_evt_fh_refcnt_dec() == 0) {
+      close(smi.kfd_notif_evt_fh());
+      smi.set_kfd_notif_evt_fh(-1);
+    }
+    return err;
   }
   dev->set_evt_notif_anon_file_ptr(anon_file_ptr);
 
@@ -7143,7 +7237,7 @@ rsmi_status_t rsmi_event_notification_get(int timeout_ms, uint32_t* num_elem,
             char task_name[MAX_EVENT_NOTIFICATION_MSG_SIZE];
             memset(task_name, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
 
-            sscanf(message, "%x:%s\n", &pid, task_name);
+            sscanf(message, "%x:%255s\n", &pid, task_name);
             std::stringstream final_message;
             final_message << "PID: " << std::to_string(pid).c_str() << "  task name: " << task_name;
 
@@ -7167,7 +7261,7 @@ rsmi_status_t rsmi_event_notification_get(int timeout_ms, uint32_t* num_elem,
             char reset_cause[MAX_EVENT_NOTIFICATION_MSG_SIZE];
             memset(reset_cause, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
 
-            sscanf(message, "%x %[^\n]\n", &reset_seq_num, reset_cause);
+            sscanf(message, "%x %255[^\n]\n", &reset_seq_num, reset_cause);
             std::stringstream final_message;
             final_message << "reset sequence number: " << std::to_string(reset_seq_num).c_str()
                           << "  reset cause: " << reset_cause;
@@ -7179,7 +7273,7 @@ rsmi_status_t rsmi_event_notification_get(int timeout_ms, uint32_t* num_elem,
             uint32_t reset_seq_num;
 
             char tmp[MAX_EVENT_NOTIFICATION_MSG_SIZE];
-            sscanf(message, "%x %[^\n]\n", &reset_seq_num, tmp);
+            sscanf(message, "%x %255[^\n]\n", &reset_seq_num, tmp);
             std::stringstream final_message;
             final_message << "reset sequence number: " << std::to_string(reset_seq_num).c_str();
 
@@ -7322,7 +7416,7 @@ rsmi_status_t rsmi_event_notification_get(int timeout_ms, uint32_t* num_elem,
           case RSMI_EVT_NOTIF_EVENT_PROCESS_END: {
             uint32_t pid;
             char task[MAX_EVENT_NOTIFICATION_MSG_SIZE];
-            int rc = sscanf(message, "%x %s", &pid, task);
+            int rc = sscanf(message, "%x %255s", &pid, task);
             std::stringstream msg;
             if (rc == 2) {
               msg << "PID: " << pid << "  task: " << task;

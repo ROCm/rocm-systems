@@ -18,7 +18,7 @@ namespace detail {
 class LuiInst : public UType {
 public:
   explicit LuiInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -28,7 +28,7 @@ private:
 class AuipcInst : public UType {
 public:
   explicit AuipcInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -40,7 +40,7 @@ private:
 class JalInst : public JType {
 public:
   explicit JalInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -52,7 +52,7 @@ private:
 class JalrInst : public IType {
 public:
   explicit JalrInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -65,7 +65,7 @@ private:
 class BeqInst : public BType {
 public:
   explicit BeqInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rs1_op;
@@ -76,7 +76,7 @@ private:
 class BneInst : public BType {
 public:
   explicit BneInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rs1_op;
@@ -87,7 +87,7 @@ private:
 class BltInst : public BType {
 public:
   explicit BltInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rs1_op;
@@ -98,7 +98,7 @@ private:
 class BgeInst : public BType {
 public:
   explicit BgeInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rs1_op;
@@ -109,7 +109,7 @@ private:
 class BltuInst : public BType {
 public:
   explicit BltuInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rs1_op;
@@ -120,7 +120,7 @@ private:
 class BgeuInst : public BType {
 public:
   explicit BgeuInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rs1_op;
@@ -133,7 +133,7 @@ private:
 class LbInst : public IType {
 public:
   explicit LbInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -144,7 +144,7 @@ private:
 class LhInst : public IType {
 public:
   explicit LhInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -155,7 +155,7 @@ private:
 class LwInst : public IType {
 public:
   explicit LwInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -166,7 +166,7 @@ private:
 class LdInst : public IType {
 public:
   explicit LdInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -177,7 +177,7 @@ private:
 class LbuInst : public IType {
 public:
   explicit LbuInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -188,7 +188,7 @@ private:
 class LhuInst : public IType {
 public:
   explicit LhuInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -199,7 +199,7 @@ private:
 class LwuInst : public IType {
 public:
   explicit LwuInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -212,7 +212,7 @@ private:
 class SbInst : public SType {
 public:
   explicit SbInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rs2_op;
@@ -223,7 +223,7 @@ private:
 class ShInst : public SType {
 public:
   explicit ShInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rs2_op;
@@ -234,7 +234,7 @@ private:
 class SwInst : public SType {
 public:
   explicit SwInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rs2_op;
@@ -245,7 +245,7 @@ private:
 class SdInst : public SType {
 public:
   explicit SdInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rs2_op;
@@ -258,7 +258,7 @@ private:
 class AddiInst : public IType {
 public:
   explicit AddiInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -269,7 +269,7 @@ private:
 class SltiInst : public IType {
 public:
   explicit SltiInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -280,7 +280,7 @@ private:
 class SltiuInst : public IType {
 public:
   explicit SltiuInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -291,7 +291,7 @@ private:
 class XoriInst : public IType {
 public:
   explicit XoriInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -302,7 +302,7 @@ private:
 class OriInst : public IType {
 public:
   explicit OriInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -313,7 +313,7 @@ private:
 class AndiInst : public IType {
 public:
   explicit AndiInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -326,7 +326,7 @@ private:
 class SlliInst : public IType {
 public:
   explicit SlliInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -337,7 +337,7 @@ private:
 class SrliInst : public IType {
 public:
   explicit SrliInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -348,7 +348,7 @@ private:
 class SraiInst : public IType {
 public:
   explicit SraiInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -361,7 +361,7 @@ private:
 class AddInst : public RType {
 public:
   explicit AddInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -372,7 +372,7 @@ private:
 class SubInst : public RType {
 public:
   explicit SubInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -383,7 +383,7 @@ private:
 class SllInst : public RType {
 public:
   explicit SllInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -394,7 +394,7 @@ private:
 class SltInst : public RType {
 public:
   explicit SltInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -405,7 +405,7 @@ private:
 class SltuInst : public RType {
 public:
   explicit SltuInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -416,7 +416,7 @@ private:
 class XorInst : public RType {
 public:
   explicit XorInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -427,7 +427,7 @@ private:
 class SrlInst : public RType {
 public:
   explicit SrlInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -438,7 +438,7 @@ private:
 class SraInst : public RType {
 public:
   explicit SraInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -449,7 +449,7 @@ private:
 class OrInst : public RType {
 public:
   explicit OrInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -460,7 +460,7 @@ private:
 class AndInst : public RType {
 public:
   explicit AndInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -473,7 +473,7 @@ private:
 class AddiwInst : public IType {
 public:
   explicit AddiwInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -484,7 +484,7 @@ private:
 class SlliwInst : public IType {
 public:
   explicit SlliwInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -495,7 +495,7 @@ private:
 class SrliwInst : public IType {
 public:
   explicit SrliwInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -506,7 +506,7 @@ private:
 class SraiwInst : public IType {
 public:
   explicit SraiwInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -519,7 +519,7 @@ private:
 class AddwInst : public RType {
 public:
   explicit AddwInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -530,7 +530,7 @@ private:
 class SubwInst : public RType {
 public:
   explicit SubwInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -541,7 +541,7 @@ private:
 class SllwInst : public RType {
 public:
   explicit SllwInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -552,7 +552,7 @@ private:
 class SrlwInst : public RType {
 public:
   explicit SrlwInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -563,7 +563,7 @@ private:
 class SrawInst : public RType {
 public:
   explicit SrawInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -576,7 +576,7 @@ private:
 class FenceInst : public IType {
 public:
   explicit FenceInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand imm_op;
@@ -587,13 +587,13 @@ private:
 class EcallInst : public IType {
 public:
   explicit EcallInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 };
 
 class EbreakInst : public IType {
 public:
   explicit EbreakInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 };
 
 } // namespace detail

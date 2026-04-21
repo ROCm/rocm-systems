@@ -22,7 +22,17 @@
 
 *.swp
 .vscode
-__pycache__
 build
 third_party
 Testing
+
+# python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+
+# agents
+.claude

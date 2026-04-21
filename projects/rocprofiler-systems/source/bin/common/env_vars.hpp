@@ -1,8 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
+#include <cctype>
 #include <string_view>
 
 namespace rocprofsys
@@ -30,7 +31,7 @@ constexpr std::string_view PERFETTO_BUFFER_SIZE_KB = "ROCPROFSYS_PERFETTO_BUFFER
 constexpr std::string_view PERFETTO_FILL_POLICY    = "ROCPROFSYS_PERFETTO_FILL_POLICY";
 constexpr std::string_view PERFETTO_BACKEND        = "ROCPROFSYS_PERFETTO_BACKEND";
 constexpr std::string_view PERFETTO_FLUSH_PERIOD = "ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS";
-constexpr std::string_view TRACE_REGION          = "ROCPROFSYS_TRACE_REGION";
+constexpr std::string_view SELECTED_REGIONS      = "ROCPROFSYS_SELECTED_REGIONS";
 constexpr std::string_view TRACE_THREAD_LOCKS    = "ROCPROFSYS_TRACE_THREAD_LOCKS";
 constexpr std::string_view TRACE_THREAD_RW_LOCKS = "ROCPROFSYS_TRACE_THREAD_RW_LOCKS";
 constexpr std::string_view TRACE_THREAD_SPIN_LOCKS = "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS";
@@ -142,8 +143,27 @@ constexpr std::string_view TRACE_PERIODS         = "ROCPROFSYS_TRACE_PERIODS";
 constexpr std::string_view TRACE_PERIOD_CLOCK_ID = "ROCPROFSYS_TRACE_PERIOD_CLOCK_ID";
 constexpr std::string_view VERBOSE               = "ROCPROFSYS_VERBOSE";
 constexpr std::string_view DEBUG                 = "ROCPROFSYS_DEBUG";
-constexpr std::string_view TIMEMORY_COMPONENTS   = "ROCPROFSYS_TIMEMORY_COMPONENTS";
-constexpr std::string_view NETWORK_INTERFACE     = "ROCPROFSYS_NETWORK_INTERFACE";
+// well above the highest verbose threshold (3) so debug mode enables all verbose output
+constexpr int              DEBUG_VERBOSE_BOOST = 8;
+constexpr std::string_view TIMEMORY_COMPONENTS = "ROCPROFSYS_TIMEMORY_COMPONENTS";
+constexpr std::string_view NETWORK_INTERFACE   = "ROCPROFSYS_NETWORK_INTERFACE";
+
+[[nodiscard]] inline int
+log_level_to_verbose(std::string_view level) noexcept
+{
+    auto eq = [](std::string_view a, std::string_view b) noexcept {
+        if(a.size() != b.size()) return false;
+        for(std::size_t i = 0; i < a.size(); ++i)
+            if(std::tolower(static_cast<unsigned char>(a[i])) !=
+               std::tolower(static_cast<unsigned char>(b[i])))
+                return false;
+        return true;
+    };
+    if(eq(level, "trace")) return 2;
+    if(eq(level, "debug")) return 1;
+    if(eq(level, "info")) return 0;
+    return -1;
+}
 
 }  // namespace env_vars
 }  // namespace rocprofsys

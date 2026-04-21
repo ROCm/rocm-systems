@@ -2,7 +2,7 @@
 name: amdsmi-review-performance
 description: "Performance review subagent. Checks efficiency, scaling, resource usage, hot paths. Use when: performance review, optimization check."
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory
-model: "Claude Sonnet 4"
+model: "Claude Sonnet 4.6"
 user-invocable: false
 ---
 

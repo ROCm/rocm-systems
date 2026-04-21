@@ -346,7 +346,7 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
 }
 
 // ================================================================================================
-bool DmaBlitManager::copyBufferBatch(std::vector<amd::BatchCopyOp>& copyOps) const {
+bool DmaBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOps) const {
   if (copyOps.empty()) {
     return true;
   }
@@ -672,6 +672,9 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
   std::vector<hsa_amd_memory_copy_op_t> hsaCopyOps;
   hsaCopyOps.reserve(copyOps.size());
 
+  hsa_agent_t cpuAgent = dev().getCpuAgent();
+  hsa_agent_t backendDevice = dev().getBackendDevice();
+
   for (const auto& op : copyOps) {
     const Memory& srcMem = gpuMem(*op.srcMemory->getDeviceMemory(
         *op.srcMemory->getContext().devices()[0]));
@@ -684,6 +687,17 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
     hsa_agent_t srcAgent;
     hsa_agent_t dstAgent;
     resolveAgents(srcMem, dstMem, src, dst, srcAgent, dstAgent);
+
+    // Normalize agents to ensure the calling device's SDMA engines are used,
+    // matching the rocrCopyBuffer agent selection logic.
+    if (srcAgent.handle != dstAgent.handle &&
+        srcAgent.handle != cpuAgent.handle && dstAgent.handle != cpuAgent.handle) {
+      // P2P: force calling device's backend as src_agent, peer as dst_agent.
+      // ROCr selects copy_agent from src_agent, so this ensures the calling
+      // device's SDMA engines are used.
+      dstAgent = (srcAgent.handle == backendDevice.handle) ? dstAgent : srcAgent;
+      srcAgent = backendDevice;
+    }
 
     hsa_amd_memory_copy_op_t hsaOp = {};
     hsaOp.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
@@ -1151,8 +1165,7 @@ bool KernelBlitManager::createProgram(Device& device) {
     }
   }
 
-  std::vector<amd::Device*> devices;
-  devices.push_back(&device);
+  std::vector<amd::Device*> devices{&device};
 
   // Save context and program for this device
   context_ = device.blitProgram()->context_;
@@ -2580,7 +2593,7 @@ bool KernelBlitManager::shaderCopyBuffer(address dst, address src, const amd::Co
 }
 
 // ================================================================================================
-bool KernelBlitManager::copyBufferBatch(std::vector<amd::BatchCopyOp>& copyOps) const {
+bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOps) const {
   if (copyOps.empty()) {
     return true;
   }
@@ -2598,7 +2611,7 @@ bool KernelBlitManager::copyBufferBatch(std::vector<amd::BatchCopyOp>& copyOps) 
   std::vector<amd::BatchCopyOp> d2dCopyOps;
   std::vector<amd::BatchCopyOp> p2pCopyOps;
 
-  for (auto& op : copyOps) {
+  for (const auto& op : copyOps) {
     device::Memory* srcDevMem = op.srcMemory->getDeviceMemory(
         *op.srcMemory->getContext().devices()[0]);
     device::Memory* dstDevMem = op.dstMemory->getDeviceMemory(
@@ -2652,7 +2665,7 @@ bool KernelBlitManager::copyBufferBatch(std::vector<amd::BatchCopyOp>& copyOps) 
       gpu().Barriers().AddExternalSignal(priorSignal);
     }
 
-    for (auto& op : d2dCopyOps) {
+    for (const auto& op : d2dCopyOps) {
       device::Memory* srcDevMem = op.srcMemory->getDeviceMemory(
           *op.srcMemory->getContext().devices()[0]);
       device::Memory* dstDevMem = op.dstMemory->getDeviceMemory(
@@ -2945,11 +2958,12 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
 }
 
 // ================================================================================================
-bool KernelBlitManager::streamOpsWrite(device::Memory& memory, uint64_t value, size_t offset,
-                                       size_t sizeBytes) const {
+bool KernelBlitManager::streamOpsUpdate(uint blitType, device::Memory& memory, uint64_t value,
+                                        size_t offset, size_t sizeBytes) const {
+  assert(blitType == StreamOpsWrite || blitType == StreamOpsIncrement ||
+         blitType == StreamOpsDecrement);
   std::scoped_lock k(lockXferOps_);
   bool result = false;
-  uint blitType = StreamOpsWrite;
   size_t dim = 1;
   size_t globalWorkOffset[1] = {0};
   size_t globalWorkSize[1] = {1};
@@ -2975,6 +2989,24 @@ bool KernelBlitManager::streamOpsWrite(device::Memory& memory, uint64_t value, s
   releaseArguments(parameters);
   synchronize();
   return result;
+}
+
+// ================================================================================================
+bool KernelBlitManager::streamOpsWrite(device::Memory& memory, uint64_t value, size_t offset,
+                                       size_t sizeBytes) const {
+  return streamOpsUpdate(StreamOpsWrite, memory, value, offset, sizeBytes);
+}
+
+// ================================================================================================
+bool KernelBlitManager::streamOpsIncrement(device::Memory& memory, uint64_t value, size_t offset,
+                                           size_t sizeBytes) const {
+  return streamOpsUpdate(StreamOpsIncrement, memory, value, offset, sizeBytes);
+}
+
+// ================================================================================================
+bool KernelBlitManager::streamOpsDecrement(device::Memory& memory, uint64_t value, size_t offset,
+                                           size_t sizeBytes) const {
+  return streamOpsUpdate(StreamOpsDecrement, memory, value, offset, sizeBytes);
 }
 
 // ================================================================================================

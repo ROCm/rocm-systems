@@ -1,7 +1,7 @@
 ---
 description: "Review the current local branch using the AMD-SMI Review Agent"
 agent: "AMD-SMI Review Agent"
-argument-hint: "[review-type ...] — style, tests, docs, architecture, security, performance, build, skeptic (or blank for comprehensive). Add 'fast' to skip rebuttal. Add 'no-build' to skip build step."
+argument-hint: "[review-type ...] — style, tests, docs, architecture, security, performance, build, skeptic (or blank for comprehensive). Add 'fast' to skip rebuttal. Add 'no-build' to skip build step. Add 'inherit' to use the orchestrator's model for subagents instead of the default (Sonnet 4.6)."
 tools: [execute, read, edit, search, agent, todo]
 ---
 
@@ -13,6 +13,7 @@ Review the current local branch using the AMD-SMI Review Agent.
 - Valid types: `style`, `tests`, `docs`, `architecture`, `security`, `performance`, `build`, `skeptic`
 - Special modifier: `fast` — skips the rebuttal round (comprehensive mode only)
 - Special modifier: `no-build` — skips the build & install step
+- Special modifier: `inherit` — makes all subagents inherit the orchestrator's model (the model you selected in the VS Code model picker) instead of their default (Sonnet 4.6)
 - If no types specified, perform a **comprehensive** review (all subagents, with rebuttal)
 
 ## Process
@@ -43,6 +44,7 @@ Invoke the **AMD-SMI Review Agent** with:
 - The diff
 - The review type(s) from `$ARGUMENTS` (or "comprehensive" if none)
 - Any CI evidence gathered
+- If `inherit` was specified, tell the agent to have subagents inherit the orchestrator's model (ignore their frontmatter `model` field)
 
 The agent will dispatch to the appropriate subagent(s) and produce a formatted review.
 By default, comprehensive reviews include a rebuttal round (Round 2) with the skeptic subagent. If `fast` was specified, the rebuttal round is skipped.
@@ -63,4 +65,6 @@ By default, comprehensive reviews include a rebuttal round (Round 2) with the sk
 /amdsmi-review-branch build
 /amdsmi-review-branch fast
 /amdsmi-review-branch skeptic
+/amdsmi-review-branch inherit
+/amdsmi-review-branch fast inherit
 ```

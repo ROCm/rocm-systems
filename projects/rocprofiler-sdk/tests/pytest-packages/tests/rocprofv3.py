@@ -518,6 +518,65 @@ def test_csv_data(
             _perform_csv_json_match(a, b, keys_mapping[category], json_data)
 
 
+def test_summary_region_category_filtering(
+    summary_dir, expected_categories=None, allow_none=False
+):
+    """
+    Test that summary output contains ONLY the expected categories.
+
+    Args:
+        summary_dir: Path to directory containing summary CSV files
+        expected_categories: List of category names that should be present (e.g., ['kernel', 'hip'])
+        allow_none: If True, allows no region summaries (for --region-categories NONE test)
+    """
+    import os
+    import glob
+
+    if not os.path.exists(summary_dir):
+        raise FileNotFoundError(f"Summary directory not found: {summary_dir}")
+
+    # Get all CSV files
+    csv_files = glob.glob(os.path.join(summary_dir, "*.csv"))
+    basenames = [os.path.basename(f) for f in csv_files]
+
+    assert len(basenames) > 0, f"No summary files found in {summary_dir}"
+
+    print(f"\nFound {len(basenames)} summary files in {summary_dir}:")
+    for name in sorted(basenames):
+        print(f"  - {name}")
+
+    # For NONE test: ensure no region-based summaries are generated
+    if allow_none:
+        # Region summaries have filenames like "rocm_hip_*.csv", "rocm_hsa_*.csv"
+        region_files = [f for f in basenames if f.lower().startswith("rocm_")]
+        assert len(region_files) == 0, (
+            f"--region-categories NONE should not generate region summaries, "
+            f"but found: {region_files}"
+        )
+
+    # Check that expected categories are present and ONLY those categories exist
+    if expected_categories:
+        # 1. Check all expected categories are present
+        for category in expected_categories:
+            category_lower = category.lower()
+            matching_files = [f for f in basenames if category_lower in f.lower()]
+            assert len(matching_files) > 0, (
+                f"Expected category '{category}' not found. "
+                f"No files matching '{category_lower}' in {basenames}"
+            )
+
+        # 2. Check no unexpected categories exist
+        for filename in basenames:
+            filename_lower = filename.lower()
+            matches_expected = any(
+                cat.lower() in filename_lower for cat in expected_categories
+            )
+            assert matches_expected, (
+                f"Unexpected file '{filename}' found. "
+                f"Does not match any expected category: {expected_categories}"
+            )
+
+
 def test_perfetto_arg_annotations(pftrace_reader):
     """
     Test that function argument annotations are available in perfetto with --annotate-args.

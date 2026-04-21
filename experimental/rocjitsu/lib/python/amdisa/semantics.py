@@ -186,8 +186,19 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'endpgm')
     if name == 'S_WAITCNT':
         return InstructionSemantics(name, 'waitcnt')
-    # RDNA4 split-wait instructions: each waits on a single counter whose
-    # threshold is the immediate operand directly (no bit-packing).
+    # RDNA3/3.5 named per-counter wait instructions (GFX11 — these coexist with
+    # S_WAITCNT; each waits on a single counter via its immediate operand).
+    _NAMED_WAIT = {
+        'S_WAITCNT_VSCNT': 'waitcnt_vscnt',
+        'S_WAITCNT_VMCNT': 'waitcnt_vmcnt',
+        'S_WAITCNT_LGKMCNT': 'waitcnt_lgkmcnt',
+        'S_WAITCNT_EXPCNT': 'waitcnt_expcnt',
+    }
+    if name in _NAMED_WAIT:
+        return InstructionSemantics(name, 'wait_counter',
+                                   operation=_NAMED_WAIT[name])
+    # RDNA4 split-wait instructions (GFX12 — no S_WAITCNT; each waits on a
+    # single counter whose threshold is the immediate operand directly).
     _SPLIT_WAIT = {
         'S_WAIT_LOADCNT', 'S_WAIT_STORECNT', 'S_WAIT_KMCNT',
         'S_WAIT_DSCNT', 'S_WAIT_EXPCNT', 'S_WAIT_SAMPLECNT',
@@ -197,7 +208,13 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
     if name in _SPLIT_WAIT:
         return InstructionSemantics(name, 'wait_counter',
                                    operation=name[2:].lower())
-    # Everything else in SOPP is a nop (system, debug, sync instructions).
+    # S_BARRIER: workgroup synchronization. Set WfState::BARRIER.
+    if name == 'S_BARRIER':
+        return InstructionSemantics(name, 'barrier')
+
+    # S_NOP, S_SLEEP, S_SETHALT, S_SETPRIO, S_SENDMSG, S_ICACHE_INV,
+    # S_INCPERFLEVEL, S_DECPERFLEVEL — all are either no-ops or system/debug
+    # instructions that don't affect compute simulation correctness.
     return InstructionSemantics(name, 'nop')
 
 # Mnemonic stems (after stripping dtype) → (semantic_class, operation).
@@ -232,21 +249,47 @@ _SOP1_SPECIAL = {
     'S_BITREPLICATE': ('nop', None),
     'S_CBRANCH_JOIN': ('nop', None),
     'S_BITREPL_B64_B32': ('nop', None),
+    # RDNA4-exclusive SOP1 instructions:
+    'S_CTZ_I32': ('scalar_unary', 'ctz'),
+    'S_CLZ_I32_U32': ('scalar_unary', 'clz'),
+    'S_CLZ_I32_U64': ('scalar_unary', 'clz64'),
+    'S_CLS_I32': ('scalar_unary', 'cls'),
+    'S_CLS_I32_I64': ('scalar_unary', 'cls64'),
+    'S_MOVRELSD2': ('nop', None),
+    'S_MOVRELSD2_B32': ('nop', None),
+    'S_MOVRELSD_2': ('nop', None),
+    'S_MOVRELSD_2_B32': ('nop', None),
+    'S_SENDMSG_RTN': ('nop', None),
+    'S_BARRIER_SIGNAL': ('nop', None),
+    'S_BARRIER_SIGNAL_ISFIRST': ('nop', None),
+    'S_ALLOC_VGPR': ('nop', None),
+    'S_SLEEP_VAR': ('nop', None),
+    'S_CEIL': ('scalar_unary', 'ceil'),
+    'S_FLOOR': ('scalar_unary', 'floor'),
+    'S_TRUNC': ('scalar_unary', 'trunc'),
+    'S_RNDNE': ('scalar_unary', 'rndne'),
+    'S_CVT_F32_I32': ('scalar_unary', 'cvt_f32_i32'),
+    'S_CVT_F32_U32': ('scalar_unary', 'cvt_f32_u32'),
+    'S_CVT_I32_F32': ('scalar_unary', 'cvt_i32_f32'),
+    'S_CVT_U32_F32': ('scalar_unary', 'cvt_u32_f32'),
+    'S_CVT_F16_F32': ('scalar_unary', 'cvt_f16_f32'),
+    'S_CVT_F32_F16': ('scalar_unary', 'cvt_f32_f16'),
+    'S_CVT_HI_F32_F16': ('scalar_unary', 'cvt_hi_f32_f16'),
 }
 
 def _derive_sop1(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SOP1 (Scalar ALU One-operand) instruction."""
-    # SAVEEXEC / WREXEC patterns
-    m = re.match(r'S_(\w+)_SAVEEXEC_B64', name)
+    # SAVEEXEC / WREXEC patterns (B64 on CDNA/Wave64, B32 on RDNA/Wave32)
+    m = re.match(r'S_(\w+)_SAVEEXEC_(B32|B64)', name)
     if m:
         op = m.group(1).lower()
         return InstructionSemantics(name, 'scalar_saveexec',
-                                   operation=op, data_type='b64')
-    m = re.match(r'S_(\w+)_WREXEC_B64', name)
+                                   operation=op, data_type=m.group(2).lower())
+    m = re.match(r'S_(\w+)_WREXEC_(B32|B64)', name)
     if m:
         op = m.group(1).lower()
         return InstructionSemantics(name, 'scalar_wrexec',
-                                   operation=op, data_type='b64')
+                                   operation=op, data_type=m.group(2).lower())
 
     # S_FLBIT_I32 (the one without further suffix) is a special case
     if name == 'S_FLBIT_I32':
@@ -404,11 +447,12 @@ _VOP1_OP_MAP = {
     'V_CLREXCP': ('nop', None),
     'V_SAT_PK_U8_I16': ('nop', None),
     'V_SCREEN_PARTITION_4SE': ('nop', None),
-    'V_ACCVGPR_MOV': ('nop', None),
-    'V_CVT_F32_FP8': ('nop', None),
-    'V_CVT_F32_BF8': ('nop', None),
-    'V_CVT_PK_F32_FP8': ('nop', None),
-    'V_CVT_PK_F32_BF8': ('nop', None),
+    'V_ACCVGPR_MOV': ('vector_mov', None),
+    'V_CVT_F32_FP8': ('vector_unary', 'cvt_f32_fp8'),
+    'V_CVT_F32_BF8': ('vector_unary', 'cvt_f32_bf8'),
+    'V_CVT_F32_BF16': ('vector_unary', 'cvt_f32_bf16'),
+    'V_CVT_PK_F32_FP8': ('nop', None),  # TODO: needs dual-VGPR write
+    'V_CVT_PK_F32_BF8': ('nop', None),  # TODO: needs dual-VGPR write
     'V_CVT_OFF_F32_I4': ('nop', None),
     'V_CVT_NORM_I16': ('nop', None),
     'V_CVT_NORM_U16': ('nop', None),
@@ -431,7 +475,18 @@ _VOP1_OP_MAP = {
     'V_SIN': ('vector_unary', 'sin'),
     'V_COS': ('vector_unary', 'cos'),
     'V_LOG': ('vector_unary', 'log2'),
+    'V_LOG_LEGACY': ('vector_unary', 'log2'),
     'V_EXP': ('vector_unary', 'exp2'),
+    'V_EXP_LEGACY': ('vector_unary', 'exp2'),
+    'V_PRNG': ('nop', None),  # PRNG not simulated
+    'V_PERMLANE16_SWAP': ('nop', None),
+    'V_PERMLANE32_SWAP': ('nop', None),
+    'V_SWAPREL': ('nop', None),
+    'V_S_EXP': ('vector_unary', 'exp2'),
+    'V_S_LOG': ('vector_unary', 'log2'),
+    'V_S_RCP': ('vector_unary', 'rcp'),
+    'V_S_RSQ': ('vector_unary', 'rsq'),
+    'V_S_SQRT': ('vector_unary', 'sqrt'),
     'V_FREXP_EXP_I32': ('vector_unary', 'frexp_exp_f32'),
     'V_FREXP_EXP_I16': ('vector_unary', 'frexp_exp_f16'),
     'V_FREXP_MANT': ('vector_unary', 'frexp_mant_f32'),
@@ -442,6 +497,25 @@ _VOP1_OP_MAP = {
     'V_CVT_F32_UBYTE1': ('vector_unary', 'cvt'),
     'V_CVT_F32_UBYTE2': ('vector_unary', 'cvt'),
     'V_CVT_F32_UBYTE3': ('vector_unary', 'cvt'),
+    # RDNA4 renamed conversions (same semantics as FLR/RPI):
+    'V_CVT_NEAREST': ('vector_unary', 'cvt'),
+    'V_CVT_FLOOR': ('vector_unary', 'cvt'),
+    # RDNA4 renamed bit-counting ops:
+    'V_CLZ_I32_U32': ('vector_unary', 'ffbh_u32'),
+    'V_CTZ_I32_B32': ('vector_unary', 'ffbl'),
+    'V_CLS_I32': ('vector_unary', 'ffbh_i32'),
+    # Pipeline / system (nop in simulation):
+    'V_PIPEFLUSH': ('nop', None),
+    # Relative addressing (nop — wave-level register indexing):
+    'V_MOVRELD': ('nop', None),
+    'V_MOVRELS': ('nop', None),
+    'V_MOVRELSD': ('nop', None),
+    'V_MOVRELSD2': ('nop', None),
+    'V_MOVRELSD2_B32': ('nop', None),
+    'V_MOVRELSD_2': ('nop', None),
+    'V_MOVRELSD_2_B32': ('nop', None),
+    'V_SWAP_REL': ('nop', None),
+    'V_PERMLANE64': ('nop', None),
 }
 
 def _derive_vop1(name: str) -> InstructionSemantics | None:
@@ -476,9 +550,16 @@ _VOP2_OP_MAP = {
     'V_AND': 'and', 'V_OR': 'or', 'V_XOR': 'xor', 'V_XNOR': 'xnor',
     'V_LSHLREV': 'shl', 'V_LSHRREV': 'shr', 'V_ASHRREV': 'ashr',
     'V_MIN': 'min', 'V_MAX': 'max',
+    # RDNA4 renamed min/max with IEEE 754 NaN semantics:
+    'V_MIN_NUM': 'min', 'V_MAX_NUM': 'max',
+    # RDNA4 renamed no-carry add/sub:
+    'V_ADD_NC': 'add', 'V_SUB_NC': 'sub', 'V_SUBREV_NC': 'rsub',
     'V_FMAC': 'fmac', 'V_LDEXP': 'ldexp',
     'V_BFM': 'bfm',
     'V_CNDMASK': None,  # special class
+    # RDNA4 V_MUL_DX9_ZERO variant (same as mul_legacy for zero*anything=0):
+    'V_MUL_DX9_ZERO': 'mul_legacy',
+    'V_MAC_LEGACY': 'fmac', 'V_FMAC_LEGACY': 'fmac', 'V_FMAC_DX9_ZERO': 'fmac',
 }
 
 def _derive_vop2(name: str) -> InstructionSemantics | None:
@@ -487,7 +568,15 @@ def _derive_vop2(name: str) -> InstructionSemantics | None:
         _, dtype = _split_dtype(name)
         return InstructionSemantics(name, 'vector_cndmask', data_type=dtype)
 
-    # ADD_CO / SUB_CO / etc. → vector_add_co
+    # RDNA carry-in variants: V_ADD_CO_CI_U32 = V_ADDC_CO_U32 equivalent.
+    # Check _CO_CI_ BEFORE the generic _CO_ pattern to avoid greedy match.
+    m = re.match(r'V_(ADD|SUB|SUBREV)_CO_CI_(\w+)', name)
+    if m:
+        ci_map = {'ADD': 'addc', 'SUB': 'subbc', 'SUBREV': 'subbrevco'}
+        return InstructionSemantics(name, 'vector_add_co',
+                                   operation=ci_map[m.group(1)],
+                                   data_type=_DTYPE_MAP.get(m.group(2)))
+    # ADD_CO / SUB_CO / ADDC_CO etc. → vector_add_co
     m = re.match(r'V_(ADD|SUB|SUBREV|ADDC|SUBB|SUBBREV)_CO_(\w+)', name)
     if m:
         op_raw, dt_raw = m.group(1), m.group(2)
@@ -523,6 +612,10 @@ def _derive_vop2(name: str) -> InstructionSemantics | None:
     if name == 'V_MUL_LO_U16':
         return InstructionSemantics(name, 'vector_binop',
                                    operation='mul', data_type='u16')
+
+    # Packed FP16 FMA and DOT2ACC VOP2 forms (nop; VOP3P forms are functional)
+    if name in ('V_PK_FMAC_F16', 'V_DOT2ACC_F32_F16'):
+        return InstructionSemantics(name, 'nop')
 
     # DOT product instructions
     if name == 'V_DOT2C_F32_F16':
@@ -707,7 +800,111 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     if name == 'V_TRIG_PREOP_F64':
         return InstructionSemantics(name, 'nop')
 
-    # FP8/BF8 pack/convert → nop (specialized format)
+    # ── CDNA4 / RDNA4 new conversions ─────────────────────────────────
+    if name == 'V_CVT_F32_BF16':
+        return InstructionSemantics(name, 'vector_unary',
+                                   operation='cvt_f32_bf16', data_type='f32')
+    if name == 'V_CVT_PK_F16_F32':
+        return InstructionSemantics(name, 'vector_cvt_pk_f16_f32')
+    if name == 'V_CVT_PK_BF16_F32':
+        return InstructionSemantics(name, 'vector_cvt_pk_bf16_f32')
+    if name == 'V_CVT_SR_F16_F32':
+        return InstructionSemantics(name, 'vector_cvt_sr_f16_f32')
+    if name == 'V_CVT_SR_BF16_F32':
+        return InstructionSemantics(name, 'vector_cvt_sr_bf16_f32')
+    if name == 'V_DOT2C_F32_BF16':
+        return InstructionSemantics(name, 'vector_dot2c_bf16')
+    if name == 'V_MINIMUM3_F32':
+        return InstructionSemantics(name, 'vector_ternary',
+                                   operation='minimum3', data_type='f32')
+    if name == 'V_MAXIMUM3_F32':
+        return InstructionSemantics(name, 'vector_ternary',
+                                   operation='maximum3', data_type='f32')
+    if name in ('V_BITOP3_B32', 'V_BITOP3_B16'):
+        return InstructionSemantics(name, 'nop')  # TODO: needs truth table from VOP3 encoding
+    if name in ('V_ASHR_PK_I8_I32', 'V_ASHR_PK_U8_I32'):
+        return InstructionSemantics(name, 'nop')  # TODO: packed shift-right
+    # V_PK_MINIMUM3/MAXIMUM3 are VOP3P, handled in _derive_vop3p.
+
+    # ── Additional VOP3 ternary instructions ───────────────────────────
+    if name == 'V_XOR3_B32':
+        return InstructionSemantics(name, 'vector_ternary',
+                                   operation='xor3', data_type='b32')
+    if name == 'V_FMA_DX9_ZERO_F32':
+        return InstructionSemantics(name, 'vector_ternary',
+                                   operation='fma', data_type='f32')
+    if name == 'V_MULLIT_F32':
+        return InstructionSemantics(name, 'nop')
+
+    # MAXMIN/MINMAX/MINIMUMMAXIMUM/MAXIMUMMINIMUM variants (all types)
+    _CLAMP_TERNARY = {
+        'V_MAXMIN': 'maxmin', 'V_MINMAX': 'minmax',
+        'V_MINIMUMMAXIMUM': 'minimummaximum',
+        'V_MAXIMUMMINIMUM': 'maximumminimum',
+        'V_MAXMIN_NUM': 'maxmin_num', 'V_MINMAX_NUM': 'minmax_num',
+    }
+    for prefix, op in _CLAMP_TERNARY.items():
+        for suffix in ('_B32', '_U32', '_I32', '_F32', '_F16', '_F64'):
+            if name == f'{prefix}{suffix}':
+                _, dt = _split_dtype(name)
+                return InstructionSemantics(name, 'vector_ternary',
+                                           operation=op, data_type=dt)
+
+    # MIN3/MAX3/MED3 F16 and NUM variants
+    if name == 'V_MINIMUM3_F16':
+        return InstructionSemantics(name, 'vector_ternary',
+                                   operation='minimum3', data_type='f16')
+    if name == 'V_MAXIMUM3_F16':
+        return InstructionSemantics(name, 'vector_ternary',
+                                   operation='maximum3', data_type='f16')
+    for op in ('MIN3', 'MAX3', 'MED3'):
+        for suffix in ('_F32', '_F16'):
+            if name == f'V_{op}_NUM{suffix}':
+                _, dt = _split_dtype(name)
+                return InstructionSemantics(name, 'vector_ternary',
+                                           operation=op.lower(), data_type=dt)
+
+    # IEEE 754-2019 binary min/max (VOP3 forms)
+    if name.startswith('V_MINIMUM_') or name.startswith('V_MAXIMUM_'):
+        _, dt = _split_dtype(name)
+        op = 'fmin' if 'MINIMUM' in name else 'fmax'
+        return InstructionSemantics(name, 'vector_binop',
+                                   operation=op, data_type=dt)
+
+    # Dot product with F16/BF16 output
+    if name in ('V_DOT2_F16_F16', 'V_DOT2_BF16_BF16'):
+        return InstructionSemantics(name, 'nop')
+
+    # Pack/convert variants
+    if name == 'V_CVT_PK_I16_F32':
+        return InstructionSemantics(name, 'vector_cvt_pk',
+                                   operation='i16_f32')
+    if name == 'V_CVT_PK_U16_F32':
+        return InstructionSemantics(name, 'vector_cvt_pk',
+                                   operation='u16_f32')
+    if name == 'V_CVT_PK_RTZ_F16_F32':
+        return InstructionSemantics(name, 'vector_cvt_pkrtz_f16_f32')
+    for norm_suffix in ('_I16_F16', '_U16_F16', '_I16_F32', '_U16_F32'):
+        if name == f'V_CVT_PK_NORM{norm_suffix}':
+            op = norm_suffix[1:3].lower() + '16'  # i16 or u16
+            return InstructionSemantics(name, 'vector_cvt_pknorm',
+                                       operation=op[:3],
+                                       data_type=norm_suffix[-3:].lower())
+
+    # 64-bit multiply-add with carry
+    if name == 'V_MAD_CO_U64_U32':
+        return InstructionSemantics(name, 'vector_mad_64_32',
+                                   data_type='u64')
+    if name == 'V_MAD_CO_I64_I32':
+        return InstructionSemantics(name, 'vector_mad_64_32',
+                                   data_type='i64')
+
+    # Permlane variants (nop — wave-level register indexing)
+    if name in ('V_PERMLANE16_B32', 'V_PERMLANEX16_B32',
+                'V_PERMLANE16_VAR_B32', 'V_PERMLANEX16_VAR_B32'):
+        return InstructionSemantics(name, 'nop')
+
+    # FP8/BF8 pack/convert (non-scaled, CDNA3/4)
     _FP8_PATTERNS = (
         'V_CVT_PK_FP8_F32', 'V_CVT_PK_BF8_F32',
         'V_CVT_SR_FP8_F32', 'V_CVT_SR_BF8_F32',
@@ -717,8 +914,20 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     if name in _FP8_PATTERNS:
         return InstructionSemantics(name, 'nop')
 
-    # PK_FMAC → nop (packed FP16 FMA)
+    # CDNA4 scaled FP8/BF8/FP6/FP4 conversions
+    if 'CVT_SCALEF32' in name.upper():
+        return InstructionSemantics(name, 'nop')  # TODO: Phase 3 scaled conversions
+
+    # V_PK_FMAC_F16 VOP2 form — the VOP3P form is handled via _VOP3P_PK16_MAP.
     if name == 'V_PK_FMAC_F16':
+        return InstructionSemantics(name, 'nop')
+
+    # Legacy interpolation (CDNA1, RDNA1/2) — niche, not simulated
+    if name.startswith('V_INTERP_P1') or name.startswith('V_INTERP_P2'):
+        return InstructionSemantics(name, 'nop')
+
+    # V_DOT2ACC VOP2 form
+    if name == 'V_DOT2ACC_F32_F16':
         return InstructionSemantics(name, 'nop')
 
     # 64-bit shift/add (VOP3-only)
@@ -780,6 +989,11 @@ _VOP3P_PK16_MAP = {
     'V_PK_MUL_F16': ('pk_binop', 'mul', 'f16'),
     'V_PK_MIN_F16': ('pk_binop', 'min', 'f16'),
     'V_PK_MAX_F16': ('pk_binop', 'max', 'f16'),
+    'V_PK_MIN_NUM_F16': ('pk_binop', 'min', 'f16'),
+    'V_PK_MAX_NUM_F16': ('pk_binop', 'max', 'f16'),
+    'V_PK_MINIMUM_F16': ('pk_binop', 'min', 'f16'),
+    'V_PK_MAXIMUM_F16': ('pk_binop', 'max', 'f16'),
+    'V_PK_FMAC_F16': ('pk_ternary', 'fmac', 'f16'),
 }
 
 def _derive_vop3p(name: str) -> InstructionSemantics | None:
@@ -789,6 +1003,10 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
     if pk16 is not None:
         cls, op, dt = pk16
         return InstructionSemantics(name, cls, operation=op, data_type=dt)
+
+    # DOT2ACC with F32 output and F16 input
+    if name == 'V_DOT2ACC_F32_F16':
+        return InstructionSemantics(name, 'dot2_f32_f16')
 
     # Packed F32 ops (VGPR pairs)
     if name == 'V_PK_FMA_F32':
@@ -802,6 +1020,12 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
                                    operation='add', data_type='f32')
     if name == 'V_PK_MOV_B32':
         return InstructionSemantics(name, 'pk_mov_b32')
+
+    # Packed min3/max3 (CDNA4 / RDNA4)
+    if name in ('V_PK_MINIMUM3_F16', 'V_PK_MAXIMUM3_F16'):
+        op = 'minimum3' if 'MINIMUM' in name else 'maximum3'
+        return InstructionSemantics(name, 'pk_ternary',
+                                   operation=op, data_type='f16')
 
     # Mixed-precision MAD_MIX
     if name == 'V_MAD_MIX_F32':
@@ -822,6 +1046,10 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'dot4_i32_i8')
     if name == 'V_DOT4_U32_U8':
         return InstructionSemantics(name, 'dot4_u32_u8')
+    # FP8 dot products (RDNA4)
+    if name in ('V_DOT4_F32_FP8_FP8', 'V_DOT4_F32_FP8_BF8',
+                'V_DOT4_F32_BF8_FP8', 'V_DOT4_F32_BF8_BF8'):
+        return InstructionSemantics(name, 'dot4_f32_fp8')
     if name == 'V_DOT8_I32_I4':
         return InstructionSemantics(name, 'dot8_i32_i4')
     if name == 'V_DOT8_U32_U4':
@@ -833,14 +1061,45 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
     if name == 'V_ACCVGPR_WRITE':
         return InstructionSemantics(name, 'accvgpr_write')
 
+    # Additional dot product variants (RDNA3/4 naming)
+    if name == 'V_DOT2_F32_BF16':
+        return InstructionSemantics(name, 'dot2_f32_f16')  # BF16 uses same dot2 pattern
+    if name == 'V_DOT4_I32_IU8':
+        return InstructionSemantics(name, 'dot4_i32_i8')   # IU8 = signed/unsigned mixed
+    if name == 'V_DOT8_I32_IU4':
+        return InstructionSemantics(name, 'dot8_i32_i4')   # IU4 = signed/unsigned mixed
+
+    # FMA_MIX variants (RDNA3/4 renamed from MAD_MIX)
+    if name == 'V_FMA_MIX_F32':
+        return InstructionSemantics(name, 'mad_mix_f32')
+    if name == 'V_FMA_MIXLO_F16':
+        return InstructionSemantics(name, 'mad_mixlo_f16')
+    if name == 'V_FMA_MIXHI_F16':
+        return InstructionSemantics(name, 'mad_mixhi_f16')
+
     # MFMA / SMFMAC - all map to 'mfma' semantic class
     if name.startswith('V_MFMA_') or name.startswith('V_SMFMAC_'):
+        return InstructionSemantics(name, 'mfma')
+
+    # WMMA (Wave Matrix Multiply-Accumulate) — RDNA3/3.5/4
+    import re
+    m = re.match(r'V_(?:S?WMMA[C]?)_(F32|F16|BF16|I32|FP8|BF8)_'
+                 r'(\d+)X(\d+)X(\d+)_?(F16|BF16|IU8|IU4|FP8|BF8'
+                 r'|FP8_FP8|FP8_BF8|BF8_FP8|BF8_BF8'
+                 r'|F16_FP8|F16_BF8|BF16_FP8|BF16_BF8)?$', name)
+    if m:
+        return InstructionSemantics(name, 'mfma')  # Reuse MFMA semantic class — same matrix pattern
+
+    # SWMMAC variants
+    if name.startswith('V_SWMMAC_'):
         return InstructionSemantics(name, 'mfma')
 
     return None
 
 _SMEM_DWORD_MAP = {
     'DWORD': 1, 'DWORDX2': 2, 'DWORDX4': 4, 'DWORDX8': 8, 'DWORDX16': 16,
+    # RDNA4 (GFX12) byte-width naming:
+    'B32': 1, 'B64': 2, 'B128': 4, 'B256': 8, 'B512': 16,
 }
 
 def _derive_smem(name: str) -> InstructionSemantics | None:
@@ -859,11 +1118,19 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
                                        'S_ATC_PROBE_BUFFER'):
         return InstructionSemantics(name, 'nop')
 
+    # S_ATOMIC_* are scalar atomics — not currently simulated.
+    if '_ATOMIC_' in upper:
+        return InstructionSemantics(name, 'nop')
+
     is_store = '_STORE_' in upper or '_SCRATCH_STORE_' in upper
     for suffix, ndw in _SMEM_DWORD_MAP.items():
         if upper.endswith(suffix):
             cls = 'smem_store' if is_store else 'smem_load'
             return InstructionSemantics(name, cls, num_elems=ndw)
+    # BUFFER_WBL2, BUFFER_INV, etc. — cache control for SMEM buffer paths.
+    if upper in ('BUFFER_WBL2', 'BUFFER_INV', 'BUFFER_GL0_INV', 'BUFFER_GL1_INV',
+                 'S_BUFFER_GL0_INV', 'S_BUFFER_GL1_INV'):
+        return InstructionSemantics(name, 'dcache_inv')
     return InstructionSemantics(name, 'nop')
 
 _FLAT_DATA_MAP: dict[str, tuple[int, int, bool]] = {
@@ -899,6 +1166,7 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
     # Integer atomics.
     'SWAP': ('swap', 1),
     'CMPSWAP': ('cmpswap', 2),  # src + cmp
+    'FCMPSWAP': ('cmpswap', 2),  # FP compare-and-swap
     'ADD': ('add', 1),
     'SUB': ('sub', 1),
     'SMIN': ('smin', 1),
@@ -910,6 +1178,8 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
     'XOR': ('xor', 1),
     'INC': ('inc', 1),
     'DEC': ('dec', 1),
+    'CSUB': ('sub', 1),
+    'SUB_CLAMP': ('sub', 1),
     # Floating-point atomics.
     'ADD_F32': ('fadd', 1),
     'ADD_F64': ('fadd', 2),
@@ -917,6 +1187,17 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
     'MAX_F64': ('fmax', 2),
     'FMIN': ('fmin', 1),
     'FMAX': ('fmax', 1),
+    'MIN_F32': ('fmin', 1), 'MAX_F32': ('fmax', 1),
+    'MIN_F64': ('fmin', 2), 'MAX_F64': ('fmax', 2),
+    'MIN_NUM_F32': ('fmin', 1), 'MAX_NUM_F32': ('fmax', 1),
+    'MIN_NUM_F64': ('fmin', 2), 'MAX_NUM_F64': ('fmax', 2),
+    'COND_SUB': ('sub', 1),
+    'ORDERED_ADD': ('add', 2),
+    # RDNA3+ typed MIN/MAX (suffix stripped from the full instruction name).
+    'MIN_I32': ('smin', 1), 'MIN_U32': ('umin', 1),
+    'MAX_I32': ('smax', 1), 'MAX_U32': ('umax', 1),
+    'MIN_I64': ('smin', 2), 'MIN_U64': ('umin', 2),
+    'MAX_I64': ('smax', 2), 'MAX_U64': ('umax', 2),
     # Packed FP atomics (treated as 32-bit fadd for now).
     'PK_ADD_F16': ('fadd', 1),
     'PK_ADD_BF16': ('fadd', 1),
@@ -926,14 +1207,23 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
     """Derive semantics for a FLAT (Flat/Global/Scratch memory) instruction."""
     upper = name.upper()
     if '_ATOMIC_' in upper:
-        # Extract the operation suffix after _ATOMIC_ (strip prefix and _X2 suffix).
+        # Extract the operation suffix after _ATOMIC_.
+        # Strip _X2 (64-bit variant) and type suffixes (_B32, _U32, _I32, etc.).
         for prefix in ('FLAT_ATOMIC_', 'GLOBAL_ATOMIC_', 'SCRATCH_ATOMIC_'):
             if upper.startswith(prefix):
                 suffix = upper[len(prefix):]
                 is_x2 = suffix.endswith('_X2')
                 if is_x2:
                     suffix = suffix[:-3]
+                # Try exact match first (handles ADD_F32, PK_ADD_F16, etc.).
                 info = _FLAT_ATOMIC_OPS.get(suffix)
+                if not info:
+                    # Strip type suffix (_B32, _U32, _I32, _F32, _B64, etc.).
+                    for tsuf in ('_B32', '_U32', '_I32', '_F32', '_B64',
+                                 '_U64', '_I64', '_F64'):
+                        if suffix.endswith(tsuf):
+                            info = _FLAT_ATOMIC_OPS.get(suffix[:len(suffix) - len(tsuf)])
+                            break
                 if info:
                     op, data_dw = info
                     elem_size = 8 if is_x2 else 4
@@ -959,9 +1249,20 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
                                             num_elems=ne, sign_extend=se)
     return InstructionSemantics(name, 'nop')
 
+_BUFFER_FORMAT_MAP: dict[str, tuple[int, int]] = {
+    'FORMAT_X': (4, 1), 'FORMAT_XY': (4, 2),
+    'FORMAT_XYZ': (4, 3), 'FORMAT_XYZW': (4, 4),
+    'FORMAT_D16_X': (2, 1), 'FORMAT_D16_XY': (2, 2),
+    'FORMAT_D16_XYZ': (2, 3), 'FORMAT_D16_XYZW': (2, 4),
+}
+
 def _derive_mubuf(name: str) -> InstructionSemantics | None:
     """Derive semantics for a MUBUF (Untyped Buffer memory) instruction."""
     upper = name.upper()
+    # Buffer cache control instructions.
+    if upper in ('BUFFER_WBINVL1', 'BUFFER_WBINVL1_SC', 'BUFFER_WBINVL1_VOL',
+                 'BUFFER_GL0_INV', 'BUFFER_GL1_INV'):
+        return InstructionSemantics(name, 'dcache_inv')
     if '_ATOMIC_' in upper:
         for prefix in ('BUFFER_ATOMIC_',):
             if upper.startswith(prefix):
@@ -970,6 +1271,12 @@ def _derive_mubuf(name: str) -> InstructionSemantics | None:
                 if is_x2:
                     suffix = suffix[:-3]
                 info = _FLAT_ATOMIC_OPS.get(suffix)
+                if not info:
+                    for tsuf in ('_B32', '_U32', '_I32', '_F32', '_B64',
+                                 '_U64', '_I64', '_F64'):
+                        if suffix.endswith(tsuf):
+                            info = _FLAT_ATOMIC_OPS.get(suffix[:len(suffix) - len(tsuf)])
+                            break
                 if info:
                     op, data_dw = info
                     elem_size = 8 if is_x2 else 4
@@ -992,6 +1299,17 @@ def _derive_mubuf(name: str) -> InstructionSemantics | None:
                                             num_elems=ne, sign_extend=se)
     return InstructionSemantics(name, 'nop')
 
+_MTBUF_FORMAT_MAP: dict[str, tuple[int, int, bool]] = {
+    'FORMAT_X':    (4, 1, False),
+    'FORMAT_XY':   (4, 2, False),
+    'FORMAT_XYZ':  (4, 3, False),
+    'FORMAT_XYZW': (4, 4, False),
+    'FORMAT_D16_X':    (2, 1, False),
+    'FORMAT_D16_XY':   (2, 2, False),
+    'FORMAT_D16_XYZ':  (2, 3, False),
+    'FORMAT_D16_XYZW': (2, 4, False),
+}
+
 def _derive_mtbuf(name: str) -> InstructionSemantics | None:
     """Derive semantics for an MTBUF (Typed Buffer memory) instruction."""
     upper = name.upper()
@@ -999,7 +1317,7 @@ def _derive_mtbuf(name: str) -> InstructionSemantics | None:
     for prefix in ('TBUFFER_LOAD_', 'TBUFFER_STORE_'):
         if upper.startswith(prefix):
             suffix = upper[len(prefix):]
-            info = _FLAT_DATA_MAP.get(suffix)
+            info = _FLAT_DATA_MAP.get(suffix) or _MTBUF_FORMAT_MAP.get(suffix)
             if info:
                 esz, ne, se = info
                 cls = 'tbuffer_store' if is_store else 'tbuffer_load'
@@ -1031,9 +1349,9 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
     (was ``DS_CMPST``), which are handled by the atomic fallthrough.
     """
     upper = name.upper()
-    is_write = ('_WRITE_' in upper or '_WRITE2_' in upper
+    is_write = ('_WRITE_' in upper or '_WRITE2' in upper
                 or 'DS_STORE_' in upper or 'DS_STORE_2ADDR' in upper)
-    is_read = ('_READ_' in upper or '_READ2_' in upper
+    is_read = ('_READ_' in upper or '_READ2' in upper
                or 'DS_LOAD_' in upper or 'DS_LOAD_2ADDR' in upper)
     if is_write:
         for suffix, (esz, ne) in _DS_DATA_MAP.items():
@@ -1052,36 +1370,98 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
                                             num_elems=ne, sign_extend=bool(se))
         return InstructionSemantics(name, 'ds_read', elem_size=4, num_elems=1)
     # DS atomic operations — extract the specific op and data width.
+    # RTN variants use the same operation; the codegen sets is_load based
+    # on whether vdst is an explicit destination (num_dst_ > 0).
     _DS_ATOMIC_MAP: dict[str, tuple[str, int, int]] = {
         # keyword -> (operation, elem_size, data_dwords)
         '_ADD_U32': ('add', 4, 1), '_ADD_U64': ('add', 8, 2),
+        '_ADD_RTN_U32': ('add', 4, 1), '_ADD_RTN_U64': ('add', 8, 2),
         '_SUB_U32': ('sub', 4, 1), '_SUB_U64': ('sub', 8, 2),
-        '_RSUB_U32': ('sub', 4, 1), '_RSUB_U64': ('sub', 8, 2),
+        '_SUB_RTN_U32': ('sub', 4, 1), '_SUB_RTN_U64': ('sub', 8, 2),
+        '_RSUB_U32': ('rsub', 4, 1), '_RSUB_U64': ('rsub', 8, 2),
+        '_RSUB_RTN_U32': ('rsub', 4, 1), '_RSUB_RTN_U64': ('rsub', 8, 2),
         '_MIN_I32': ('smin', 4, 1), '_MIN_I64': ('smin', 8, 2),
+        '_MIN_RTN_I32': ('smin', 4, 1), '_MIN_RTN_I64': ('smin', 8, 2),
         '_MIN_U32': ('umin', 4, 1), '_MIN_U64': ('umin', 8, 2),
+        '_MIN_RTN_U32': ('umin', 4, 1), '_MIN_RTN_U64': ('umin', 8, 2),
         '_MAX_I32': ('smax', 4, 1), '_MAX_I64': ('smax', 8, 2),
+        '_MAX_RTN_I32': ('smax', 4, 1), '_MAX_RTN_I64': ('smax', 8, 2),
         '_MAX_U32': ('umax', 4, 1), '_MAX_U64': ('umax', 8, 2),
+        '_MAX_RTN_U32': ('umax', 4, 1), '_MAX_RTN_U64': ('umax', 8, 2),
         '_AND_B32': ('and', 4, 1), '_AND_B64': ('and', 8, 2),
+        '_AND_RTN_B32': ('and', 4, 1), '_AND_RTN_B64': ('and', 8, 2),
         '_OR_B32': ('or', 4, 1), '_OR_B64': ('or', 8, 2),
+        '_OR_RTN_B32': ('or', 4, 1), '_OR_RTN_B64': ('or', 8, 2),
         '_XOR_B32': ('xor', 4, 1), '_XOR_B64': ('xor', 8, 2),
+        '_XOR_RTN_B32': ('xor', 4, 1), '_XOR_RTN_B64': ('xor', 8, 2),
         '_INC_U32': ('inc', 4, 1), '_INC_U64': ('inc', 8, 2),
+        '_INC_RTN_U32': ('inc', 4, 1), '_INC_RTN_U64': ('inc', 8, 2),
         '_DEC_U32': ('dec', 4, 1), '_DEC_U64': ('dec', 8, 2),
+        '_DEC_RTN_U32': ('dec', 4, 1), '_DEC_RTN_U64': ('dec', 8, 2),
         '_SWAP_B32': ('swap', 4, 1), '_SWAP_B64': ('swap', 8, 2),
+        '_SWAP_RTN_B32': ('swap', 4, 1), '_SWAP_RTN_B64': ('swap', 8, 2),
         '_WRXCHG_RTN_B32': ('swap', 4, 1), '_WRXCHG_RTN_B64': ('swap', 8, 2),
         '_WRXCHG2_RTN_B32': ('swap', 4, 1), '_WRXCHG2_RTN_B64': ('swap', 8, 2),
         '_STOREXCHG_RTN_B32': ('swap', 4, 1), '_STOREXCHG_RTN_B64': ('swap', 8, 2),
         '_CMPST_B32': ('cmpswap', 4, 2), '_CMPST_B64': ('cmpswap', 8, 4),
         '_CMPST_RTN_B32': ('cmpswap', 4, 2), '_CMPST_RTN_B64': ('cmpswap', 8, 4),
+        '_CMPST_F32': ('cmpswap', 4, 2), '_CMPST_F64': ('cmpswap', 8, 4),
+        '_CMPST_RTN_F32': ('cmpswap', 4, 2), '_CMPST_RTN_F64': ('cmpswap', 8, 4),
         '_CMPSTORE_B32': ('cmpswap', 4, 2), '_CMPSTORE_B64': ('cmpswap', 8, 4),
         '_CMPSTORE_RTN_B32': ('cmpswap', 4, 2), '_CMPSTORE_RTN_B64': ('cmpswap', 8, 4),
-        '_ADD_F32': ('fadd', 4, 1),
+        '_CONDXCHG32_RTN_B64': ('cmpswap', 8, 4),
+        '_ADD_F32': ('fadd', 4, 1), '_ADD_RTN_F32': ('fadd', 4, 1),
+        '_ADD_F64': ('fadd', 8, 2), '_ADD_RTN_F64': ('fadd', 8, 2),
         '_MIN_F32': ('fmin', 4, 1), '_MIN_F64': ('fmin', 8, 2),
+        '_MIN_RTN_F32': ('fmin', 4, 1), '_MIN_RTN_F64': ('fmin', 8, 2),
         '_MAX_F32': ('fmax', 4, 1), '_MAX_F64': ('fmax', 8, 2),
+        '_MAX_RTN_F32': ('fmax', 4, 1), '_MAX_RTN_F64': ('fmax', 8, 2),
+        '_MIN_NUM_F32': ('fmin', 4, 1), '_MIN_NUM_RTN_F32': ('fmin', 4, 1),
+        '_MAX_NUM_F32': ('fmax', 4, 1), '_MAX_NUM_RTN_F32': ('fmax', 4, 1),
+        '_MIN_NUM_F64': ('fmin', 8, 2), '_MIN_NUM_RTN_F64': ('fmin', 8, 2),
+        '_MAX_NUM_F64': ('fmax', 8, 2), '_MAX_NUM_RTN_F64': ('fmax', 8, 2),
+        '_SUB_CLAMP_U32': ('sub', 4, 1), '_SUB_CLAMP_RTN_U32': ('sub', 4, 1),
+        '_CMPSTORE_F32': ('cmpswap', 4, 2), '_CMPSTORE_RTN_F32': ('cmpswap', 4, 2),
+        '_CMPSTORE_F64': ('cmpswap', 8, 4), '_CMPSTORE_RTN_F64': ('cmpswap', 8, 4),
+        '_WRXCHG2ST64_RTN_B32': ('swap', 4, 1), '_WRXCHG2ST64_RTN_B64': ('swap', 8, 2),
+        '_STOREXCHG2ADDR_RTN_B32': ('swap', 4, 1),
+        '_STOREXCHG2ADDR_STRIDE64_RTN_B32': ('swap', 4, 1),
+        '_STOREXCHG2ADDR_RTN_B64': ('swap', 8, 2),
+        '_STOREXCHG2ADDR_STRIDE64_RTN_B64': ('swap', 8, 2),
+        '_STOREXCHG_2ADDR_RTN_B32': ('swap', 4, 1),
+        '_STOREXCHG_2ADDR_STRIDE64_RTN_B32': ('swap', 4, 1),
+        '_STOREXCHG_2ADDR_RTN_B64': ('swap', 8, 2),
+        '_STOREXCHG_2ADDR_STRIDE64_RTN_B64': ('swap', 8, 2),
+        '_PK_ADD_F16': ('fadd', 4, 1), '_PK_ADD_RTN_F16': ('fadd', 4, 1),
+        '_PK_ADD_BF16': ('fadd', 4, 1), '_PK_ADD_RTN_BF16': ('fadd', 4, 1),
     }
     for suffix, (op, esz, dw) in _DS_ATOMIC_MAP.items():
         if suffix in upper:
             return InstructionSemantics(name, 'ds_atomic', operation=op,
                                         elem_size=esz, num_elems=dw)
+    # ── Lane permutation / swizzle ──────────────────────────────────────
+    if upper in ('DS_PERMUTE_B32', 'DS_BPERMUTE_B32'):
+        return InstructionSemantics(name, 'ds_permute')
+    if upper == 'DS_SWIZZLE_B32':
+        return InstructionSemantics(name, 'ds_swizzle')
+    # ── Explicitly classified as nop (not simulated) ────────────────────
+    # GS register operations — must precede the atomic fallback because
+    # DS_ADD_GS_REG_RTN / DS_SUB_GS_REG_RTN contain _ADD / _SUB.
+    if upper in ('DS_ADD_GS_REG_RTN', 'DS_SUB_GS_REG_RTN'):
+        return InstructionSemantics(name, 'nop')
+    # GWS (Global Wave Sync) — hardware scheduling primitive, not needed
+    # for compute simulation.
+    if upper.startswith('DS_GWS_'):
+        return InstructionSemantics(name, 'nop')
+    # GDS append/consume counters — GDS not simulated.
+    if upper in ('DS_CONSUME', 'DS_APPEND'):
+        return InstructionSemantics(name, 'nop')
+    # GDS ordered count.
+    if upper == 'DS_ORDERED_COUNT':
+        return InstructionSemantics(name, 'nop')
+    # Explicit DS no-op.
+    if upper == 'DS_NOP':
+        return InstructionSemantics(name, 'nop')
     # Fallback for unrecognized DS atomics.
     if '_ADD' in upper or '_SUB' in upper or '_RSUB' in upper or \
        '_MIN' in upper or '_MAX' in upper or '_AND' in upper or \
@@ -1090,6 +1470,7 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
        '_CONDXCHG' in upper or '_WRXCHG' in upper or \
        '_STOREXCHG' in upper or '_CMPSTORE' in upper:
         return InstructionSemantics(name, 'ds_atomic')
+    # Unrecognized DS instruction — fallthrough to nop.
     return InstructionSemantics(name, 'nop')
 
 def _derive_mimg(name: str) -> InstructionSemantics | None:
@@ -1134,6 +1515,8 @@ _ENC_DERIVE = {
     'VOP2': _derive_vop2,
     'VOPC': _derive_vopc,
     'VOP3': _derive_vop3,
+    'VOP3_SDST': _derive_vop3,
+    'VOP3_SDST_ENC': _derive_vop3,
     'VOP3P': _derive_vop3p,
     'VOP3P_MFM': _derive_vop3p,  # VOP3P_MFMA after trailing A strip
     'SMEM': _derive_smem,
@@ -1191,8 +1574,8 @@ def derive_semantics(name: str, enc_name: str) -> InstructionSemantics | None:
         return None
     sem = derive_fn(name)
 
-    # VOP3 can re-encode VOP1/VOP2/VOPC instructions - try those too
-    if sem is None and base_enc == 'VOP3':
+    # VOP3 (and VOP3_SDST_ENC) can re-encode VOP1/VOP2/VOPC instructions.
+    if sem is None and base_enc.startswith('VOP3'):
         for fallback in (_derive_vop1, _derive_vop2, _derive_vopc):
             sem = fallback(name)
             if sem is not None:

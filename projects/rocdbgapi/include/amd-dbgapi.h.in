@@ -290,6 +290,7 @@
  * - gfx1151
  * - gfx1200
  * - gfx1201
+ * - gfx1250
  *
  * The following generic AMD GPU architectures are supported:
  *
@@ -496,6 +497,8 @@
 #  define AMD_DBGAPI_EXPORT_DECORATOR __declspec(dllexport)
 # elif defined(__GNUC__)
 #  define AMD_DBGAPI_EXPORT_DECORATOR __attribute__ ((visibility ("default")))
+# else
+#  define AMD_DBGAPI_EXPORT_DECORATOR
 # endif
 #endif /* !defined (AMD_DBGAPI_EXPORT_DECORATOR) */
 
@@ -507,15 +510,19 @@
 # endif
 #endif /* !defined (AMD_DBGAPI_IMPORT_DECORATOR) */
 
-#define AMD_DBGAPI_EXPORT AMD_DBGAPI_EXPORT_DECORATOR AMD_DBGAPI_CALL
-#define AMD_DBGAPI_IMPORT AMD_DBGAPI_IMPORT_DECORATOR AMD_DBGAPI_CALL
+/* True if dbgapi was built as a static library.  */
+#define AMD_DBGAPI_STATIC_LIB @AMD_DBGAPI_STATIC_LIB@
 
 #if !defined(AMD_DBGAPI)
-#if defined(AMD_DBGAPI_EXPORTS)
-#define AMD_DBGAPI AMD_DBGAPI_EXPORT
-#else /* !defined (AMD_DBGAPI_EXPORTS) */
-#define AMD_DBGAPI AMD_DBGAPI_IMPORT
-#endif /* !defined (AMD_DBGAPI_EXPORTS) */
+# if AMD_DBGAPI_STATIC_LIB
+#  define AMD_DBGAPI AMD_DBGAPI_CALL
+# else
+#  if defined(AMD_DBGAPI_EXPORTS)
+#   define AMD_DBGAPI AMD_DBGAPI_EXPORT_DECORATOR AMD_DBGAPI_CALL
+#  else
+#   define AMD_DBGAPI AMD_DBGAPI_IMPORT_DECORATOR AMD_DBGAPI_CALL
+#  endif
+# endif
 #endif /* !defined (AMD_DBGAPI) */
 
 /* By default, MSVC reports 199711L (C++98) for the __cplusplus macro,
@@ -1630,7 +1637,17 @@ typedef enum
    * that may send interrupts, and so forth.  The instruction has no
    * information.
    */
-  AMD_DBGAPI_INSTRUCTION_KIND_SPECIAL = 13
+  AMD_DBGAPI_INSTRUCTION_KIND_SPECIAL = 13,
+  /**
+   * The instruction unconditionally branches to "PC + offset".  The "PC" is
+   * the address of the next instruction, while the "offset" is held in a
+   * register pair.  This offset is a signed 64-bit value.  The instruction
+   * information is of type ::amd_dbgapi_register_id_t[2] with the value of
+   * the register IDs for the registers.  The first register holds the least
+   * significant address bits, and the second register holds the most
+   * significant address bits.
+   */
+  AMD_DBGAPI_INSTRUCTION_KIND_RELATIVE_BRANCH_REGISTER_PAIR = 14
 } amd_dbgapi_instruction_kind_t;
 
 /**

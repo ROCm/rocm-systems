@@ -25,6 +25,8 @@ You are an automated code review orchestrator for the **amd-smi** project (AMD S
 
 ### Orchestration
 
+**Model selection:** By default, each subagent specifies `model: "Claude Sonnet 4.6"` in its frontmatter and runs on that model. If the user passes the `inherit` modifier, ignore the subagents' frontmatter `model` field and let them inherit whatever model the orchestrator is running on (i.e., whatever you selected in the VS Code model picker).
+
 **Focused reviews:** Dispatch to the single matching subagent, then format its findings into the standard template. Still run the build step first unless the user says "no-build" or only style/docs are requested.
 
 **Comprehensive reviews (default — includes rebuttal):**

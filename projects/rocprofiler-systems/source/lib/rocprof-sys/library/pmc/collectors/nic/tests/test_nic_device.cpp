@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #include "library/pmc/collectors/nic/device.hpp"
 #include "library/pmc/device_providers/amd_smi/drivers/tests/mock_driver.hpp"

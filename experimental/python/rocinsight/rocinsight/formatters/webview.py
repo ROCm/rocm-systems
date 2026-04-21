@@ -204,12 +204,15 @@ def _format_as_webview(
         cmds_html = "".join(cmds_parts)
         issue_txt = rec.get("issue", "")
         suggest = rec.get("suggestion", "")
+        conf = rec.get("confidence")
+        conf_html = f'<span class="r-conf" style="margin-left:8px;opacity:0.7;font-size:0.85em">Confidence: {int(conf * 100)}%</span>' if conf is not None else ""
         recs_parts.append(
             f'<div class="r-card" style="border-left-color:{fg}" data-p="{_h(p)}">'
             f'<div class="r-hdr" onclick="toggleR(this)">'
             f'<span class="r-priority-icon">{picon}</span>'
             f'<span class="r-badge" style="background:{fg};color:#fff">{_h(p)}</span>'
             f'<span class="r-cat">{_h(cat)}</span>'
+            f'{conf_html}'
             f'<span class="r-chev">&#9660;</span>'
             f"</div>"
             f'<div class="r-body">'
@@ -945,12 +948,15 @@ def _format_tier0_webview(tier0_result: Any) -> str:
         cmds_html = "".join(cmds_parts)
         issue_txt = rec.get("issue", "")
         suggest = rec.get("suggestion", "")
+        conf = rec.get("confidence")
+        conf_html = f'<span class="r-conf" style="margin-left:8px;opacity:0.7;font-size:0.85em">Confidence: {int(conf * 100)}%</span>' if conf is not None else ""
         recs_parts.append(
             f'<div class="r-card" style="border-left-color:{fg}" data-p="{_h(p)}">'
             f'<div class="r-hdr" onclick="toggleR(this)">'
             f'<span class="r-priority-icon">{picon}</span>'
             f'<span class="r-badge" style="background:{fg};color:#fff">{_h(p)}</span>'
             f'<span class="r-cat">{_h(cat)}</span>'
+            f'{conf_html}'
             f'<span class="r-chev">&#9660;</span>'
             f"</div>"
             f'<div class="r-body">'
