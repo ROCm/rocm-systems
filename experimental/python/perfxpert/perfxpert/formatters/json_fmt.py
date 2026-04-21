@@ -47,6 +47,8 @@ def _format_as_json(
     kernel_resources: Optional[Dict[str, Any]] = None,
     api_overhead: Optional[Dict[str, Any]] = None,
     detected_kernels: Optional[List[Dict[str, Any]]] = None,
+    communication: Optional[Dict[str, Any]] = None,
+    roofline: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Serialize analysis results to JSON conforming to the current schema version (v0.3.0 when TraceLens fields are present, v0.1.0 otherwise).
 
@@ -154,6 +156,21 @@ def _format_as_json(
     ):
         doc["schema_version"] = "0.3.1"
         doc["metadata"]["analysis_version"] = "0.3.1"
+    # 0.3.2: RCCL / NIC ``communication`` section (Phase 10). Additive —
+    # bumps over 0.3.1 but ATT (0.4.0) still trumps below so a trace with
+    # both ATT data + RCCL data pins schema_version = 0.4.0.
+    if communication and communication.get("collectives"):
+        doc["communication"] = communication
+        doc["schema_version"] = "0.3.2"
+        doc["metadata"]["analysis_version"] = "0.3.2"
+    # 0.3.4: Live Roofline points (Phase 10 advanced-specialists). Additive
+    # ``roofline`` key carrying the per-kernel (ai, achieved_flops_per_s,
+    # bottleneck_class, fp_type, confidence) payload produced by
+    # ``perfxpert.tools.roofline.plot_points``. ATT (0.4.0) still trumps.
+    if roofline and roofline.get("kernels"):
+        doc["roofline"] = roofline
+        doc["schema_version"] = "0.3.4"
+        doc["metadata"]["analysis_version"] = "0.3.4"
     if att_analysis and att_analysis.get("has_att_data"):
         doc["schema_version"] = "0.4.0"
         doc["metadata"]["analysis_version"] = "0.4.0"

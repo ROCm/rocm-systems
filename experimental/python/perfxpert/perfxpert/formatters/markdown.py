@@ -46,6 +46,7 @@ def _format_as_markdown(
     kernel_categories=None,
     short_kernels=None,
     detected_kernels: Optional[List[Dict[str, Any]]] = None,
+    communication: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Format analysis results as Markdown."""
     breakdown = time_breakdown or {}
@@ -196,6 +197,57 @@ def _format_as_markdown(
                         lines.append(f"```bash\n{full_command}\n```")
                     lines.append("")
             lines.append("")
+
+    if communication and communication.get("collectives"):
+        lines.append("## Communication")
+        lines.append("")
+        summary = communication.get("summary", {}) or {}
+        op_count = summary.get("op_count", 0)
+        dominant = summary.get("dominant_op") or "n/a"
+        avg_eff = summary.get("avg_efficiency_pct", 0.0) or 0.0
+        overlap = summary.get("overlap_pct", 0.0) or 0.0
+        peak = summary.get("peak_bw_gbps")
+        peak_s = f"{peak:.0f} GB/s" if peak else "n/a"
+        lines.append(
+            f"**{op_count} collective(s)** - dominant: **{dominant}** - "
+            f"avg efficiency: {avg_eff:.1f}% - peak: {peak_s} - "
+            f"comm/compute overlap: {overlap:.1f}%"
+        )
+        if summary.get("capture_incomplete"):
+            lines.append("")
+            lines.append(
+                "*Capture incomplete: fell back to kernel-name regex "
+                "(no `category='RCCL'` spans in DB).*"
+            )
+        lines.append("")
+        lines.append(
+            "| Op | Bytes | Duration | Bus BW | Peak | Efficiency% | Overlap% |"
+        )
+        lines.append(
+            "|----|-------|----------|--------|------|-------------|----------|"
+        )
+        for c in communication["collectives"]:
+            mb = c.get("msg_bytes", 0) or 0
+            if mb >= 1e9:
+                mb_s = f"{mb / 1e9:.2f} GB"
+            elif mb >= 1e6:
+                mb_s = f"{mb / 1e6:.1f} MB"
+            elif mb >= 1e3:
+                mb_s = f"{mb / 1e3:.1f} KB"
+            else:
+                mb_s = f"{mb} B"
+            dur_ns = c.get("duration_ns", 0) or 0
+            dur_ms = dur_ns / 1e6
+            bw = c.get("effective_bw_gbps", 0) or 0
+            pk = c.get("peak_bw_gbps")
+            pk_s = f"{pk:.0f}" if pk else "-"
+            eff = c.get("efficiency_pct", 0) or 0
+            ov = c.get("overlap_ratio", 0) or 0
+            lines.append(
+                f"| {c.get('op_type', '?')} | {mb_s} | {dur_ms:.3f} ms | "
+                f"{bw:.2f} GB/s | {pk_s} | {eff:.1f}% | {ov:.1f}% |"
+            )
+        lines.append("")
 
     if kernel_categories:
         lines.append("## Kernel Category Breakdown")
