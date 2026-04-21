@@ -226,17 +226,20 @@ __host__ void IpcOnImpl::ipcHostStop() {
 }
 
 __device__ void IpcOnImpl::ipcCopy(void *dst, void *src, size_t size,
-                                   [[maybe_unused]] int local_pe) {
+                                   [[maybe_unused]] int local_pe,
+                                   [[maybe_unused]] bool blocking) {
   memcpy_lane(dst, src, size);
 }
 
 __device__ void IpcOnImpl::ipcCopy_wave(void *dst, void *src, size_t size,
-                                        [[maybe_unused]] int local_pe) {
+                                        [[maybe_unused]] int local_pe,
+                                        [[maybe_unused]] bool blocking) {
   memcpy_wave(dst, src, size);
 }
 
 __device__ void IpcOnImpl::ipcCopy_wg(void *dst, void *src, size_t size,
-                                      [[maybe_unused]] int local_pe) {
+                                      [[maybe_unused]] int local_pe,
+                                      [[maybe_unused]] bool blocking) {
   memcpy_wg(dst, src, size);
 }
 

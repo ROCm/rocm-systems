@@ -75,22 +75,26 @@ class SdmaImpl {
   }
 
   // Device-side copy using a single channel (for single-thread operations)
-  __device__ void sdmaCopy(void* dst, void* src, size_t size, int local_pe) {
-    // Use channel 0 for single-thread operations
+  // Returns the handle used (for direct quietAll by caller).
+  __device__ anvil::SdmaQueueDeviceHandle* sdmaCopy(void* dst, void* src,
+                                                     size_t size, int local_pe) {
     int idx = local_pe * numChannels;
     anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
     if (handle != nullptr) {
       anvil::put(*handle, dst, src, size);
     }
+    return handle;
   }
 
   // Wave-level copy: split transfer across multiple channels
-  // Each participating lane handles a different channel concurrently
-  __device__ void sdmaCopy_wave(void* dst, void* src, size_t size, int local_pe) {
+  // Each participating lane handles a different channel concurrently.
+  // Returns the handle used by this lane (nullptr if lane did not participate).
+  __device__ anvil::SdmaQueueDeviceHandle* sdmaCopy_wave(void* dst, void* src,
+                                                          size_t size, int local_pe) {
     int lane_id = get_flat_block_id() % WF_SIZE;
     int num_lanes = wave_SZ();
+    anvil::SdmaQueueDeviceHandle* handle = nullptr;
 
-    // Determine how many channels to use based on transfer size
     int channels_to_use = (size / minChunkPerChannel);
     if (channels_to_use < 1) channels_to_use = 1;
     if (channels_to_use > numChannels) channels_to_use = numChannels;
@@ -101,27 +105,29 @@ class SdmaImpl {
       size_t chunk_size = size / channels_to_use;
       size_t offset = lane_id * chunk_size;
 
-      // Last participating lane handles remainder
       if (lane_id == channels_to_use - 1) {
         chunk_size = size - offset;
       }
 
       int idx = local_pe * numChannels + channel_idx;
-      anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
+      handle = deviceHandles_d[idx];
       if (handle != nullptr && chunk_size > 0) {
         char* dst_chunk = static_cast<char*>(dst) + offset;
         char* src_chunk = static_cast<char*>(src) + offset;
         anvil::put(*handle, dst_chunk, src_chunk, chunk_size);
       }
     }
+    return handle;
   }
 
   // Workgroup-level copy: split transfer across multiple channels
-  // Multiple threads prepare and submit packets concurrently
-  __device__ void sdmaCopy_wg(void* dst, void* src, size_t size, int local_pe) {
+  // Multiple threads prepare and submit packets concurrently.
+  // Returns the handle used by this thread (nullptr if thread did not participate).
+  __device__ anvil::SdmaQueueDeviceHandle* sdmaCopy_wg(void* dst, void* src,
+                                                        size_t size, int local_pe) {
     int thread_id = get_flat_block_id();
+    anvil::SdmaQueueDeviceHandle* handle = nullptr;
 
-    // Determine how many channels to use based on transfer size
     int channels_to_use = (size / minChunkPerChannel);
     if (channels_to_use < 1) channels_to_use = 1;
     if (channels_to_use > numChannels) channels_to_use = numChannels;
@@ -131,13 +137,12 @@ class SdmaImpl {
       size_t chunk_size = size / channels_to_use;
       size_t offset = thread_id * chunk_size;
 
-      // Last participating thread handles remainder
       if (thread_id == channels_to_use - 1) {
         chunk_size = size - offset;
       }
 
       int idx = local_pe * numChannels + channel_idx;
-      anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
+      handle = deviceHandles_d[idx];
       if (handle != nullptr && chunk_size > 0) {
         char* dst_chunk = static_cast<char*>(dst) + offset;
         char* src_chunk = static_cast<char*>(src) + offset;
@@ -145,6 +150,7 @@ class SdmaImpl {
       }
     }
     __syncthreads();
+    return handle;
   }
 
   // Wait for SDMA completions for a specific PE (all channels)
