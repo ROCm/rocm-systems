@@ -99,32 +99,18 @@ unregister_doorbell(hsa_signal_t doorbell)
 uint64_t
 add_write_index_impl(QueueState* state, uint64_t value)
 {
-    uint64_t stride = 1 + state->k_factor;
-    uint64_t delta  = value * stride;
-    uint64_t prev   = state->virtual_wptr.fetch_add(delta, std::memory_order_relaxed);
-    return prev;
+    return state->virtual_wptr.fetch_add(value, std::memory_order_relaxed);
 }
 
 void
 store_write_index_impl(QueueState* state, uint64_t value)
 {
-    uint64_t stride = 1 + state->k_factor;
-    auto     prev   = state->virtual_wptr.load(std::memory_order_relaxed);
-    if(stride > 1)
-    {
-        value = prev + ((value - prev) * stride);
-    }
     state->virtual_wptr.store(value, std::memory_order_relaxed);
 }
 
 uint64_t
 cas_write_index_impl(QueueState* state, uint64_t expected, uint64_t value)
 {
-    uint64_t stride = 1 + state->k_factor;
-    if(stride > 1)
-    {
-        value = expected + ((value - expected) * stride);
-    }
     uint64_t prev = expected;
     state->virtual_wptr.compare_exchange_strong(prev, value, std::memory_order_relaxed);
     return prev;
@@ -134,19 +120,6 @@ uint64_t
 load_write_index_impl(const QueueState* state)
 {
     return state->virtual_wptr.load(std::memory_order_relaxed);
-}
-
-void
-sync_metadata_impl(QueueState* compute_state,
-                   const hsa_kernel_dispatch_packet_t* /*pkt*/,
-                   uint64_t /*dest_pos*/)
-{
-    auto* meta = compute_state->metadata_state;
-    if(!meta) return;
-
-    uint64_t meta_dest    = meta->next_submit_pos;
-    meta->next_submit_pos = meta_dest + 1 + compute_state->k_factor;
-    __atomic_store_n(meta->real_wdid, meta->next_submit_pos, __ATOMIC_RELEASE);
 }
 
 namespace
@@ -218,7 +191,6 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 
     const uint64_t scan_pos = state_ptr->next_scan_pos;
     const uint64_t scan_end = state_ptr->virtual_wptr.load(std::memory_order_acquire);
-    const uint64_t stride   = 1 + state_ptr->k_factor;
 
     if(scan_pos >= scan_end)
     {
@@ -226,21 +198,7 @@ process_doorbell_impl(const queue_state_ptr_t& state,
         return;
     }
 
-    const uint64_t total     = scan_end - scan_pos;
-    const uint64_t pkt_count = total / stride;
-    if(pkt_count == 0)
-    {
-        state_ptr->next_scan_pos = scan_end;
-        ring_doorbell(state_ptr->doorbell_signal, value);
-        return;
-    }
-
-    if((total % stride) != 0)
-    {
-        ROCP_WARNING << "Dropped partial strided write window in queue-intercept. queue="
-                     << state_ptr->hsa_queue << ", scan_pos=" << scan_pos
-                     << ", scan_end=" << scan_end << ", stride=" << stride;
-    }
+    const uint64_t pkt_count = scan_end - scan_pos;
 
     std::vector<char> source_snapshot(pkt_count * state_ptr->pkt_size);
     for(uint64_t i = 0; i < pkt_count; ++i)
@@ -261,70 +219,25 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     const Queue* queue =
         (qc && state_ptr->hsa_queue) ? qc->get_queue(*state_ptr->hsa_queue) : nullptr;
 
-    if(state_ptr->k_factor == 0)
+    if(queue)
     {
-        if(queue)
-        {
-            queue->invoke_write_interceptor(source_snapshot.data(), pkt_count, ring_buffer_writer);
-        }
-        else
-        {
-            ring_buffer_writer(source_snapshot.data(), pkt_count);
-        }
-
-        uint64_t written = tls_submit_pos - start_submit_pos;
-        if(written != pkt_count)
-        {
-            ROCP_WARNING
-                << "K=0 write-interceptor changed packet count without stride reservation. "
-                << "queue=" << state_ptr->hsa_queue << ", input_pkt_count=" << pkt_count
-                << ", written_pkt_count=" << written;
-        }
+        queue->invoke_write_interceptor(source_snapshot.data(), pkt_count, ring_buffer_writer);
     }
     else
     {
-        for(uint64_t i = 0; i < pkt_count; ++i)
-        {
-            auto*    pkt          = source_snapshot.data() + (i * state_ptr->pkt_size);
-            uint64_t start_submit = tls_submit_pos;
+        ring_buffer_writer(source_snapshot.data(), pkt_count);
+    }
 
-            if(queue)
-            {
-                queue->invoke_write_interceptor(pkt, 1, ring_buffer_writer);
-            }
-            else
-            {
-                ring_buffer_writer(pkt, 1);
-            }
-
-            const uint64_t used = tls_submit_pos - start_submit;
-            if(used > stride)
-            {
-                ROCP_WARNING << "WriteInterceptor packet expansion exceeded reserved stride. queue="
-                             << state_ptr->hsa_queue << ", used=" << used << ", stride=" << stride;
-            }
-
-            for(uint64_t n = used; n < stride; ++n)
-            {
-                wait_for_free_slot(state_ptr, tls_submit_pos);
-                auto  slot = tls_submit_pos & state_ptr->ring_mask;
-                auto* dst  = static_cast<char*>(state_ptr->ring_buf) + (slot * state_ptr->pkt_size);
-                memset(dst, 0, state_ptr->pkt_size);
-                *reinterpret_cast<uint16_t*>(dst) =
-                    (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE);
-                ++tls_submit_pos;
-            }
-        }
+    uint64_t written = tls_submit_pos - start_submit_pos;
+    if(written != pkt_count)
+    {
+        ROCP_WARNING << "Write-interceptor changed packet count. "
+                     << "queue=" << state_ptr->hsa_queue << ", input_pkt_count=" << pkt_count
+                     << ", written_pkt_count=" << written;
     }
 
     state_ptr->next_scan_pos   = scan_end;
     state_ptr->next_submit_pos = tls_submit_pos;
-
-    if(state_ptr->metadata_state)
-    {
-        for(uint64_t i = 0; i < pkt_count; ++i)
-            sync_metadata_impl(state_ptr, nullptr, 0);
-    }
 
     auto doorbell_val = static_cast<hsa_signal_value_t>(state_ptr->next_submit_pos - 1);
     auto real_rdid    = __atomic_load_n(state_ptr->real_rdid, __ATOMIC_ACQUIRE);
@@ -348,8 +261,7 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 void
 create_queue_state(const hsa_queue_t* queue,
                    volatile uint64_t* wdid_addr,
-                   volatile uint64_t* rdid_addr,
-                   uint64_t           k_factor)
+                   volatile uint64_t* rdid_addr)
 {
     auto     state         = std::make_shared<QueueState>();
     uint64_t current_wdid  = __atomic_load_n(wdid_addr, __ATOMIC_ACQUIRE);
@@ -360,7 +272,6 @@ create_queue_state(const hsa_queue_t* queue,
     state->real_rdid       = rdid_addr;
     state->hsa_queue       = queue;
     state->doorbell_signal = queue->doorbell_signal;
-    state->k_factor        = k_factor;
     state->virtual_wptr.store(current_wdid, std::memory_order_relaxed);
     state->next_scan_pos   = current_wdid;
     state->next_submit_pos = current_wdid;

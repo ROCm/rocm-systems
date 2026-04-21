@@ -230,38 +230,6 @@ queue_controller_load_attach_queues()
 
 }  // namespace
 
-uint64_t
-compute_queue_k_factor()
-{
-    // NOTE: This is currently used when queue state is created and therefore
-    // effectively latches the k-factor for the queue lifetime.
-    //
-    // TODO: Allow dynamic k-factor evaluation during packet submission so
-    // contexts enabled/disabled after queue creation can update behavior.
-    auto registered_contexts = context::get_registered_contexts();
-
-    uint64_t k = 0;
-    for(const auto& itr : registered_contexts)
-    {
-        if(!itr) continue;
-
-        const bool has_dispatch_counter = (itr->dispatch_counter_collection != nullptr);
-        const bool has_dispatch_tt      = (itr->dispatch_thread_trace != nullptr);
-        const bool has_kernel_cb  = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH);
-        const bool has_kernel_buf = itr->is_tracing(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
-
-        if(has_dispatch_counter || has_dispatch_tt)
-        {
-            return 12;
-        }
-        if(has_kernel_cb || has_kernel_buf)
-        {
-            k = std::max(k, uint64_t{3});
-        }
-    }
-    return k;
-}
-
 void
 QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 {
@@ -284,11 +252,7 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 
     // Register queue state for SDK-level write pointer interception
     auto* amd_q = reinterpret_cast<amd_queue_t*>(id);
-    // TODO: queue_intercept currently captures k_factor once at queue-init.
-    // Revisit to support dynamic k-factor updates during submission.
-    auto k_factor = compute_queue_k_factor();
-    queue_intercept::create_queue_state(
-        id, &amd_q->write_dispatch_id, &amd_q->read_dispatch_id, k_factor);
+    queue_intercept::create_queue_state(id, &amd_q->write_dispatch_id, &amd_q->read_dispatch_id);
 }
 
 void

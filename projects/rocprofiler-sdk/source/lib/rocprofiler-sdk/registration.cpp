@@ -1243,7 +1243,15 @@ rocprofiler_set_api_table(const char* name,
             auto inline_intercept =
                 rocprofiler::common::get_env("ROCPROFILER_INLINE_INTERCEPT", true);
             if(inline_intercept)
-                rocprofiler::hsa::queue_intercept::install_intercept(*hsa_api_table->core_);
+            {
+                auto counter_att_contexts =
+                    context::get_registered_contexts([](const context::context* ctx) {
+                        return (ctx->dispatch_counter_collection != nullptr ||
+                                ctx->dispatch_thread_trace != nullptr);
+                    });
+                if(counter_att_contexts.empty())
+                    rocprofiler::hsa::queue_intercept::install_intercept(*hsa_api_table->core_);
+            }
         }
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
