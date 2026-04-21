@@ -86,11 +86,14 @@ class IpcOnImpl {
 
   __device__ void ipcGpuInit(Backend *gpu_backend, Context *ctx, int thread_id);
 
-  __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe);
+  __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe,
+                          bool blocking = false);
 
-  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe);
+  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe,
+                             bool blocking = false);
 
-  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe);
+  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe,
+                               bool blocking = false);
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
             detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
@@ -98,7 +101,10 @@ class IpcOnImpl {
     detail::atomic::threadfence<scope, order>();
   }
 
-  __device__ void ipcQuiet() {}
+  __device__ void ipcQuiet() {
+    detail::atomic::threadfence<detail::atomic::memory_scope_system,
+                                detail::atomic::memory_order_acq_rel>();
+  }
 
   template <typename T>
   __device__ void ipcAMOAdd(T *val, T value) {
@@ -193,25 +199,37 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   __host__ void ipcHostStop();
 
-  __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe) {
+  __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe,
+                          bool blocking = false) {
     if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, local_pe)) {
-      sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
+      auto* handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
+      if (blocking && handle) {
+        handle->quietAll();
+      }
       return;
     }
     memcpy_lane(dst, src, size);
   }
 
-  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe) {
+  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe,
+                             bool blocking = false) {
     if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, local_pe)) {
-      sdmaImpl_.sdmaCopy_wg(dst, src, size, local_pe);
+      auto* handle = sdmaImpl_.sdmaCopy_wg(dst, src, size, local_pe);
+      if (blocking && handle) {
+        handle->quietAll();
+      }
       return;
     }
     memcpy_wg(dst, src, size);
   }
 
-  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe) {
+  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe,
+                               bool blocking = false) {
     if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, local_pe)) {
-      sdmaImpl_.sdmaCopy_wave(dst, src, size, local_pe);
+      auto* handle = sdmaImpl_.sdmaCopy_wave(dst, src, size, local_pe);
+      if (blocking && handle) {
+        handle->quietAll();
+      }
       return;
     }
     memcpy_wave(dst, src, size);
@@ -219,6 +237,8 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   __device__ void ipcQuiet() {
     sdmaImpl_.sdmaQuietAll();
+    detail::atomic::threadfence<detail::atomic::memory_scope_system,
+                                detail::atomic::memory_order_acq_rel>();
   }
 };
 #endif  // USE_SDMA
@@ -252,11 +272,14 @@ class IpcOffImpl {
   __device__ void ipcGpuInit(Backend *rocshmem_handle, Context *ctx,
                              int thread_id) {}
 
-  __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe = 0) {}
+  __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe = 0,
+                          bool blocking = false) {}
 
-  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe = 0) {}
+  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe = 0,
+                             bool blocking = false) {}
 
-  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe = 0) {}
+  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe = 0,
+                               bool blocking = false) {}
 
   __device__ void ipcQuiet() {}
 

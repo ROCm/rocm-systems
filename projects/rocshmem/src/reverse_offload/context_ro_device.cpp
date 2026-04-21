@@ -72,7 +72,7 @@ __device__ void ROContext::putmem(void *dest, const void *source, size_t nelems,
     uint64_t L_offset =
         reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
     ipcImpl_.ipcCopy(ipcImpl_.ipc_bases[local_pe] + L_offset,
-                     const_cast<void *>(source), nelems, local_pe);
+                     const_cast<void *>(source), nelems, local_pe, /*blocking=*/true);
   } else {
     bool must_send_message = wf_coal_.coalesce(pe, source, dest, &nelems);
     if (!must_send_message) {
@@ -92,7 +92,7 @@ __device__ void ROContext::getmem(void *dest, const void *source, size_t nelems,
     const char *src_typed = reinterpret_cast<const char *>(source);
     uint64_t L_offset =
         const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
-    ipcImpl_.ipcCopy(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems, local_pe);
+    ipcImpl_.ipcCopy(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems, local_pe, /*blocking=*/true);
   } else {
     bool must_send_message = wf_coal_.coalesce(pe, source, dest, &nelems);
     if (!must_send_message) {
@@ -284,7 +284,7 @@ __device__ void ROContext::putmem_wg(void *dest, const void *source,
     uint64_t L_offset =
         reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
     ipcImpl_.ipcCopy_wg(ipcImpl_.ipc_bases[local_pe] + L_offset,
-                        const_cast<void *>(source), nelems, local_pe);
+                        const_cast<void *>(source), nelems, local_pe, /*blocking=*/true);
   } else {
     if (is_thread_zero_in_block()) {
       build_queue_element(RO_NET_PUT, dest, const_cast<void *>(source), nelems,
@@ -303,7 +303,7 @@ __device__ void ROContext::getmem_wg(void *dest, const void *source,
     const char *src_typed = reinterpret_cast<const char *>(source);
     uint64_t L_offset =
         const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
-    ipcImpl_.ipcCopy_wg(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems, local_pe);
+    ipcImpl_.ipcCopy_wg(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems, local_pe, /*blocking=*/true);
   } else {
     if (is_thread_zero_in_block()) {
       build_queue_element(RO_NET_GET, dest, const_cast<void *>(source), nelems,
@@ -358,7 +358,7 @@ __device__ void ROContext::putmem_wave(void *dest, const void *source,
     uint64_t L_offset =
         reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
     ipcImpl_.ipcCopy_wave(ipcImpl_.ipc_bases[local_pe] + L_offset,
-                          const_cast<void *>(source), nelems, local_pe);
+                          const_cast<void *>(source), nelems, local_pe, /*blocking=*/true);
   } else {
     if (is_thread_zero_in_wave()) {
       build_queue_element(RO_NET_PUT, dest, const_cast<void *>(source), nelems,
@@ -376,7 +376,7 @@ __device__ void ROContext::getmem_wave(void *dest, const void *source,
     const char *src_typed = reinterpret_cast<const char *>(source);
     uint64_t L_offset =
         const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
-    ipcImpl_.ipcCopy_wave(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems, local_pe);
+    ipcImpl_.ipcCopy_wave(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems, local_pe, /*blocking=*/true);
   } else {
     if (is_thread_zero_in_wave()) {
       build_queue_element(RO_NET_GET, dest, const_cast<void *>(source), nelems,
