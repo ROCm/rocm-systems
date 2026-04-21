@@ -573,7 +573,7 @@ struct ibv_qp_init_attr_ex {
 	uint32_t    create_flags;
 	uint16_t		max_tso_header;
 	struct ibv_rwq_ind_table       *rwq_ind_tbl;
-	struct ibv_rx_hash_conf    rx_hash_conf;
+	struct ibv_rx_hash_conf	rx_hash_conf;
 	uint32_t		source_qpn;
 	/* See enum ibv_qp_create_send_ops_flags */
 	uint64_t send_ops_flags;
