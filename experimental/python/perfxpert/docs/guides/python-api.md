@@ -30,10 +30,19 @@ MCP registration):
 | `perfxpert_agent_compute_specialist` | `perfxpert.api.agent_compute_specialist` |
 | `perfxpert_agent_memory_specialist` | `perfxpert.api.agent_memory_specialist` |
 | `perfxpert_agent_latency_specialist` | `perfxpert.api.agent_latency_specialist` |
+| `perfxpert_trace_diff_diff_runs` | `perfxpert.api.trace_diff_diff_runs` |
 
-Every callable honors `PERFXPERT_AIRGAP=1` and the full provider /
+Every agent callable honors `PERFXPERT_AIRGAP=1` and the full provider /
 fallback-chain ladder (`PERFXPERT_LLM_FALLBACK_CHAIN`) because the
 agent tools defer to `perfxpert.agents.runtime.build_session`.
+
+`trace_diff_diff_runs` is deterministic and credential-free — it reads
+two rocpd databases and produces a schema-0.3.1 diff dict (see
+[schemas.md][schemas] for the full contract). This is the same engine
+`perfxpert diff`, `perfxpert ci`, and `perfxpert analyze --baseline`
+use.
+
+[schemas]: ../contributing/schemas.md
 
 ## Quickstart
 
@@ -259,6 +268,31 @@ out = api.agent_latency_specialist(
 ```
 
 Output: same shape — `techniques`, `confidence`, `citations`.
+
+### `trace_diff_diff_runs` — compare two rocpd databases
+
+Deterministic, credential-free — no LLM required. Same engine as
+`perfxpert diff`, `perfxpert ci`, and the `--baseline` splice.
+
+```python
+# SKIP-SAMPLE — illustrative Python API call (requires two real .db files)
+from perfxpert import api
+
+diff = api.trace_diff_diff_runs(
+    baseline_db="baseline.db",
+    new_db="new.db",
+    top_kernels=20,
+)
+# schema_version == "0.3.1"
+print(f"wall delta: {diff['wall_delta_pct']:+.2f}%")
+for k in diff["primary_regressions"]:
+    print(f"  REGRESSED {k['name']}: {k['delta_pct']:+.1f}%")
+```
+
+Output keys: `schema_version`, `baseline_db`, `new_db`, `wall_delta_ns`,
+`wall_delta_pct`, `per_kernel`, `primary_regressions`,
+`primary_improvements`, `narrative`. See
+[schemas.md](../contributing/schemas.md) for the `trace_diff` contract.
 
 ## Error handling
 

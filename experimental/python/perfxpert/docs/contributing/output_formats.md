@@ -270,7 +270,7 @@ graceful-placeholder when a section is structurally empty):
 | 2 | Narrative | `narrative` (from `RootOutput`) |
 | 3 | Time breakdown | `time_breakdown` |
 | 4 | Hotspot list | `hotspots` |
-| 4a | Source-line correlation (conditional) | `hotspots[i].source_locations` (present when `--source-dir` supplied; list of `{file, line, kind}`) |
+| 4a | Source-line correlation (conditional) | `hotspots[i].source_locations` (present when `--source-dir` supplied; list of `{file, line, kind, severity, severity_label}`) |
 | 5 | Memory analysis | `memory_analysis` |
 | 6 | Hardware counters | `hardware_counters` (placeholder when `has_counters=False`) |
 | 7 | Kernel resources | `kernel_resources` |
@@ -278,6 +278,7 @@ graceful-placeholder when a section is structurally empty):
 | 9 | Recommendations (merged LLM + deterministic) | `recommendations` |
 | 10 | Warnings | `warnings` (from `RootOutput`) |
 | 11 | Tier-0 findings (conditional) | `tier0_findings` (only when `--source-dir` supplied) |
+| 12 | Changed-vs-baseline (conditional) | `trace_diff` top-level (only when `--baseline <db>` supplied OR when rendering a standalone `perfxpert diff` report) |
 
 ### Hotspot → source correlation (Confluence row #5)
 
@@ -314,6 +315,53 @@ Empty sections render a placeholder, not an error — `memory_analysis`
 on a compute-only trace, `hardware_counters` on a Tier-1 (no-PMC) run,
 etc. Missing sections DO crash: if `build_analysis_payload` would have
 set the key, the formatter must handle it.
+
+### Severity coloring (Confluence row #5 refinement)
+
+Each entry in `hotspots[i].source_locations` carries a `severity` and
+`severity_label` pair derived from the owning hotspot's
+`percent_of_total` (VTune / NSight-style buckets):
+
+| Bucket | Threshold (`percent_of_total`) | `severity` | `severity_label` | Hex |
+|---|---|---|---|---|
+| Critical | ≥ 20% | HIGH | CRITICAL | `#e84040` |
+| Hot | ≥ 5% | MEDIUM | HOT | `#f08432` |
+| Warm | ≥ 1% | LOW | WARM | `#caa828` |
+| Cool | < 1% | INFO | COOL | `#4d8ef2` |
+
+Every format must propagate severity visually:
+
+- **webview** — the `.h-src-row` panel has a `border-left:3px solid
+  <hex>` + a pill-shaped `CRITICAL / HOT / WARM / COOL` badge. The hex
+  palette matches the existing `.r-card[data-p=…]` recommendation-card
+  palette; do not invent a new palette.
+- **markdown / text** — citation line ends with `[CRITICAL]` /
+  `[HOT]` / `[WARM]` / `[COOL]`.
+- **json** — emits `severity` + `severity_label` verbatim inside each
+  `source_locations` entry (in addition to `severity_color`).
+
+### Diff reports (`perfxpert diff`, `perfxpert ci`, `analyze --baseline`)
+
+Diff reports are a separate top-level surface. Every format that
+participates in the diff surface MUST render, at a minimum:
+
+1. An overview block (wall-delta %, regression count, improvement count).
+2. A per-kernel regression-vs-improvement table (kernel name, baseline
+   ns, new ns, delta %, hot-kernel flag).
+3. A narrative paragraph.
+
+The webview diff adds stacked delta bars (red for regressions, green
+for improvements) as the VTune-style visual cue. Formats that cannot
+render bars (text / markdown / json) MUST still surface the
+regression-vs-improvement split — e.g. text puts primary regressions
+and improvements in separate bullet lists within the narrative;
+markdown uses a sortable GFM table + a fenced-code narrative block.
+
+This is a HARD contract: a diff format that only shows "5 kernels
+changed" without telling the reader which way is a regression gate
+escape. The gate cascade consumes these same numbers via
+`runtime.gate_cascade.trace_diff_regression_rule`, so a diff format
+that hides direction also blinds the gate.
 
 ## Do not
 

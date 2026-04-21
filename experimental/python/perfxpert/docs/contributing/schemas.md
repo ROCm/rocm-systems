@@ -60,13 +60,40 @@ below; Tier-3 ATT bumps to `0.4.0`). `perfxpert/analyze.py::_format_agentic_outp
 version if it was still at `0.1.0` / `0.2.0`.
 
 <!-- # CHANGES — 0.3.0 → 0.3.1
-     Additive: `hotspots[i].source_locations: list[{file, line, kind}]`
-     where `kind ∈ {"definition", "launch"}`. Emitted when
-     `--source-dir` was supplied and the Tier-0 scanner correlated
-     at least one hotspot with a detected kernel. Absent field when
-     no source scan was performed; empty list when the scanner ran
-     but no basename matched. See Confluence row #5 (Source Code
-     Line numbers) for the UI rollout details. -->
+     Additive: `hotspots[i].source_locations: list[{file, line, kind,
+     severity, severity_label}]` where `kind ∈ {"definition", "launch"}`
+     and `severity ∈ {"HIGH","MEDIUM","LOW","INFO"}` (label
+     CRITICAL/HOT/WARM/COOL). Emitted when `--source-dir` was supplied
+     and the Tier-0 scanner correlated at least one hotspot with a
+     detected kernel. Absent field when no source scan was performed;
+     empty list when the scanner ran but no basename matched. See
+     Confluence row #5 (Source Code Line numbers) for the UI rollout
+     details.
+
+     Additive: top-level `trace_diff` key (Confluence row #7). Emitted
+     by `perfxpert analyze -i new.db --baseline baseline.db --format json`
+     and by the standalone `perfxpert diff --format json` command.
+     Shape:
+
+       "trace_diff": {
+         "schema_version": "0.3.1",
+         "baseline_db": str, "new_db": str,
+         "wall_delta_ns": int, "wall_delta_pct": float,
+         "per_kernel": [
+           {"name": str,
+            "baseline_ns": int, "new_ns": int,
+            "delta_ns": int, "delta_pct": float,
+            "regressed": bool, "was_hot": bool}, ...
+         ],
+         "primary_regressions": [<per_kernel entries with delta_pct > +3%>],
+         "primary_improvements": [<per_kernel entries with delta_pct < -3%>],
+         "narrative": str
+       }
+
+     The `trace_diff` section carries its OWN `schema_version` so
+     downstream consumers can parse it independently when it arrives
+     as the top-level payload of `perfxpert diff --format json` (no
+     enclosing analyze report). -->
 
 
 The three layers form a pipeline:
@@ -198,7 +225,11 @@ The current tree:
   `warnings`) + tier-0 separation + summary section.
 - `0.3.1` — current: additive `hotspots[i].source_locations` field
   cross-referencing each hotspot with its Tier-0 definition +
-  launch site (Confluence row #5).
+  launch site (Confluence row #5) — each entry now also carries
+  `severity` + `severity_label` (HIGH/MEDIUM/LOW/INFO;
+  CRITICAL/HOT/WARM/COOL). Also additive: top-level `trace_diff`
+  section emitted by `perfxpert diff` / `perfxpert analyze --baseline`
+  (Confluence row #7).
 - `0.4.0` — bumped automatically by `_format_as_json` when
   `att_analysis.has_att_data=True` (Tier-3 ATT).
 

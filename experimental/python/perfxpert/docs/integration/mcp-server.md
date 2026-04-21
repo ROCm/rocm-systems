@@ -74,7 +74,7 @@ with **dotted** names because that's what `discover_read_only_tools()`
 returns; the equivalent wire names have the dots replaced by
 underscores.
 
-## Tools exposed (41)
+## Tools exposed (42)
 
 Auto-discovered by `mcp_server._registry.discover_read_only_tools()`
 every boot. The registry walks `perfxpert.tools.*` modules but skips
@@ -114,7 +114,7 @@ convention"). Input/output schemas for each agent are defined in
 [../guides/python-api.md](../guides/python-api.md) for field-level
 examples.
 
-### Snapshot: classifier / knowledge tools (34)
+### Snapshot: classifier / knowledge tools (35)
 
 Lower-level building blocks the agents themselves compose. External
 clients can call these directly when they want the raw classifier
@@ -151,11 +151,18 @@ sol.classify_utilization
 sol.lookup_peaks
 sol.sanity_check
 topdown.classify_overhead
+trace_diff.diff_runs
 trace_fingerprint.fingerprint
 tracelens.classify_overhead
 tracelens.lookup_metrics
 workflow.next_step
 ```
+
+`trace_diff.diff_runs` is the newest READ_ONLY tool (Confluence row
+#7): compares two rocpd databases and returns a schema-0.3.1 diff dict.
+Same engine powers the `perfxpert diff` + `perfxpert ci` CLI
+subcommands, the `perfxpert analyze --baseline <db>` splice, and the
+gate-cascade `trace_diff_regression_rule` — one brain, one number.
 
 ## Protocol examples
 
@@ -278,7 +285,7 @@ load-bearing for the security posture in spec §5.8.
 ## Client integration
 
 `perfxpert-mcp` speaks stdio MCP (JSON-RPC, protocol `2024-11-05`), so
-any MCP-compatible client can consume the 41 READ_ONLY tools. The
+any MCP-compatible client can consume the 42 READ_ONLY tools. The
 `command` field in every example below must resolve on the client's
 `PATH` — run `which perfxpert-mcp` to get an absolute path if your
 client launches with a narrower env than your login shell.
@@ -302,7 +309,7 @@ add a `perfxpert` entry under `mcpServers`:
 }
 ```
 
-Restart Claude Desktop. The 41 tools appear under the 🔌 panel with
+Restart Claude Desktop. The 42 tools appear under the 🔌 panel with
 `perfxpert_` name prefixes (underscored-on-the-wire — see §"Naming
 convention").
 

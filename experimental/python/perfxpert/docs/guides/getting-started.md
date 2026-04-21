@@ -652,7 +652,7 @@ spinner degrades automatically to plain `[perfxpert] <phase>` status
 lines, with no ANSI escapes.
 
 For the full provider matrix, model-selection ladder, and fallback
-chain, see §10 LLM Providers below.
+chain, see §11 LLM Providers below.
 
 ### Credentials
 
@@ -698,7 +698,82 @@ No empty HTML / markdown file is left behind — the previous
 
 ---
 
-## 7. Tier 0: Source Code Scanning
+## 7. Compare runs + CI gating (`perfxpert diff` / `perfxpert ci`)
+
+Compare two rocpd databases — baseline vs new — and surface per-kernel
+deltas, wall-time delta, and a narrative summary. Two shapes:
+
+* **`perfxpert diff <baseline.db> <new.db>`** — informational. Always
+  returns `rc=0`. Four formats: `text` / `markdown` / `json` / `webview`.
+* **`perfxpert ci <baseline.db> <new.db>`** — gating wrapper. Returns
+  `rc=1` when `wall_delta_pct > --threshold` (default 5%; env override
+  `PERFXPERT_CI_REGRESSION_THRESHOLD`). Designed for CI systems.
+
+Both route through the same `trace_diff.diff_runs` engine under the
+hood — MCP clients, the `perfxpert analyze --baseline <db>` splice,
+and the agentic correctness gate all see the same numbers.
+
+```bash
+# SKIP-SAMPLE — requires two rocpd .db files
+# Informational diff (rc=0 always)
+perfxpert diff baseline.db new.db --format text
+perfxpert diff baseline.db new.db --format webview -d ./out -o diff
+perfxpert diff baseline.db new.db --format json > diff.json
+
+# CI-gating wrapper — rc=1 when wall regression > --threshold
+perfxpert ci baseline.db new.db --threshold 3.0 --format json > diff.json
+```
+
+The `--baseline` splice into `perfxpert analyze` produces a regular
+report plus a "Changed vs baseline" section at the bottom (or a
+top-level `trace_diff` key for `--format json`, schema `0.3.1`):
+
+```bash
+# SKIP-SAMPLE — requires an original baseline .db and a new .db
+perfxpert analyze -i new.db --baseline baseline.db --format webview \
+    -d ./out -o optimized_vs_baseline
+```
+
+### CI integration snippets
+
+**GitHub Actions:**
+
+```yaml
+# .github/workflows/perf.yml
+- name: Profile baseline
+  run: rocprofv3 --sys-trace -o baseline ./app && mv baseline_results.db baseline.db
+- name: Profile candidate
+  run: rocprofv3 --sys-trace -o new ./app && mv new_results.db new.db
+- name: PerfXpert regression gate
+  run: perfxpert ci baseline.db new.db --threshold 3.0 --format json > diff.json
+```
+
+**GitLab CI:**
+
+```yaml
+# .gitlab-ci.yml
+perf-gate:
+  script:
+    - rocprofv3 --sys-trace -o baseline ./app && mv baseline_results.db baseline.db
+    - rocprofv3 --sys-trace -o new ./app && mv new_results.db new.db
+    - perfxpert ci baseline.db new.db --threshold 3.0 --format json > diff.json
+  artifacts:
+    when: always
+    paths:
+      - diff.json
+```
+
+**Environment override** (same binary, different policy per branch):
+
+```bash
+# SKIP-SAMPLE — environment knob
+export PERFXPERT_CI_REGRESSION_THRESHOLD=1.5   # stricter for main; loose for topic branches
+perfxpert ci baseline.db new.db    # no --threshold needed
+```
+
+---
+
+## 8. Tier 0: Source Code Scanning
 
 Analyze your source code before profiling — no GPU or trace database needed.
 
@@ -736,7 +811,7 @@ The output includes a profiling plan with the exact `rocprofv3` command to run, 
 
 ---
 
-## 8. Agentic TUI Workflow (The Star Feature)
+## 9. Agentic TUI Workflow (The Star Feature)
 
 The agentic TUI automates the full optimization loop: profile, analyze,
 AI-edit code, recompile, re-profile, compare. As of v0.2.0 this is the
@@ -798,7 +873,7 @@ change automatically; see `docs/architecture/gate-cascade.md` for the full
 
 ---
 
-## 9. MPI Multi-GPU Profiling (detailed)
+## 10. MPI Multi-GPU Profiling (detailed)
 
 PerfXpert auto-detects MPI launchers and restructures the profiling command so each rank gets its own profiler instance.
 
@@ -826,7 +901,7 @@ The tool:
 
 ---
 
-## 10. LLM Providers
+## 11. LLM Providers
 
 ![all providers](assets/gifs/15-all-providers.gif)
 
@@ -900,7 +975,7 @@ retry so the fallback chain takes over on the first 429. See
 `../guides/agentic-mode.md` for the full provider-resolution contract
 and the recursion-guard rules.
 
-## 11. Interactive sessions via `perfxpert-code`
+## 12. Interactive sessions via `perfxpert-code`
 
 One-shot non-interactive:
 
@@ -939,7 +1014,7 @@ Session state is auto-saved. List / resume with `perfxpert-code
 session list` and `perfxpert-code session <id>` (pass-through to the
 underlying opencode `session` subcommand).
 
-## 11.5 Embedding: the Python API
+## 12.5 Embedding: the Python API
 
 Everything the CLI does is reachable from Python via
 `perfxpert.api`. The 7 agent-hierarchy MCP tools map 1:1 to module
@@ -957,7 +1032,7 @@ emits under `--format json`.*
 
 See `python-api.md` for the full surface.
 
-## 12. Connecting other MCP clients
+## 13. Connecting other MCP clients
 
 Any MCP-compatible client can consume the 41 READ-ONLY tools exposed
 by `perfxpert-mcp` (7 agent-hierarchy entry points + 34
@@ -973,7 +1048,7 @@ automatically — no client-side setup required.
 the 41 read-only tools it registers (7 agent-hierarchy + 34
 classifier / knowledge).*
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 **`perfxpert-code` launches the unpatched upstream binary.**
 Check that `PERFXPERT_OPENCODE_PATH` is either unset or points at the
@@ -1007,7 +1082,7 @@ The client's `PATH` is narrower than your login shell. Use the
 absolute path returned by `which perfxpert-mcp` when registering the
 server.
 
-## 14. Extending PerfXpert
+## 15. Extending PerfXpert
 
 Want to add a new output format (say CSV for spreadsheet ingestion)
 or evolve the schema? See
@@ -1018,7 +1093,7 @@ are the canonical extension-point guides for the `--format` dispatcher
 and the three-layer schema stack (agent Pydantic / deterministic
 payload / public JSON).
 
-## 15. Next steps
+## 16. Next steps
 
 - `../architecture/agent-hierarchy.md` — 7-agent tier map + fence
   slices
