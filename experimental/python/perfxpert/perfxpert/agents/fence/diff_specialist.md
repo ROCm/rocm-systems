@@ -60,6 +60,23 @@ You MAY NOT call compute / memory / latency specialists. If the user
 asks "what should I change next?", return a narrative that points at
 the regressed kernels and hand control back to Recommendation.
 
+## Verdict rules
+
+Emit `verdict` deterministically from the raw tool output — LLM tone
+never overrides the threshold:
+
+- Any entry in `trace_diff.diff_runs → primary_regressions` →
+  `verdict = "regressed"`.
+- `wall_delta_pct > +0.5%` (new is slower by more than half a
+  percent) → `verdict = "regressed"`.
+- `wall_delta_pct < -0.5%` (new is faster by more than half a
+  percent) → `verdict = "improved"`.
+- Otherwise → `verdict = "neutral"`.
+
+`confidence` follows from apples-to-apples kernel coverage: raise it
+(→ 0.9) when baseline and new share the same hot-kernel set; lower
+it (→ 0.55) when kernels appeared or disappeared between runs.
+
 ## Deterministic procedure
 
 1. Call `trace_diff.diff_runs(baseline_db, new_db, top_kernels)`.
