@@ -172,7 +172,7 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
 }  // namespace
 
 void
-process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t ring_doorbell)
+process_doorbell_impl(QueueState* state, hsa_signal_value_t value, const doorbell_fn_t& ring_doorbell)
 {
     std::lock_guard<std::mutex> lock(state->gate_lock);
 
@@ -240,7 +240,7 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t
         for(uint64_t i = 0; i < pkt_count; i++)
         {
             uint64_t pkt_pos = scan_pos + i * stride;
-            auto*    pkt     = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
+            const auto* pkt  = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
                 static_cast<char*>(state->ring_buf) +
                 ((pkt_pos & state->ring_mask) * state->pkt_size));
             sync_metadata_impl(state, pkt, 0);
@@ -304,12 +304,12 @@ destroy_queue_state(const hsa_queue_t* queue)
 
 namespace
 {
-static bool s_intercept_installed = false;
+bool s_intercept_installed = false;
 
 // Saved next-in-chain function pointers (tracing functors or raw HSA, depending on
 // when install_intercept is called). Our wrappers chain through these for untracked
 // queues and for the final doorbell ring on tracked queues.
-static CoreApiTable s_next_table = {};
+CoreApiTable s_next_table = {};
 
 // --- add_write_index wrappers (4) ---
 
