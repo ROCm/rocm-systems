@@ -35,7 +35,9 @@ evaluate_signal_condition(hsa_signal_condition_t condition,
     {
         case HSA_SIGNAL_CONDITION_EQ: return current == compare_value;
         case HSA_SIGNAL_CONDITION_LT: return current < compare_value;
-        default: return false;
+        default:
+            // Phase 1 intentionally supports only EQ/LT; other conditions are treated as false.
+            return false;
     }
 }
 
@@ -46,5 +48,14 @@ parse_signal_monitor_backend_env()
     if(backend == "poll") return SignalMonitorBackend::poll;
     if(backend == "ioctl") return SignalMonitorBackend::ioctl;
     return SignalMonitorBackend::auto_select;
+}
+
+std::shared_ptr<SignalMonitor>
+create_signal_monitor(SignalMonitorBackend backend, const SignalMonitorConfig& cfg, SignalMonitorOps ops)
+{
+    (void) backend;
+    (void) cfg;
+    (void) ops;
+    return {};
 }
 }  // namespace rocprofiler::hsa

@@ -41,9 +41,32 @@ TEST(signal_monitor, evaluate_condition_lt)
 
 TEST(signal_monitor, parse_backend_env)
 {
-    common::env_store env{{{"ROCPROF_SIGNAL_MONITOR_BACKEND", "poll", 1}}};
-    env.push();
-    EXPECT_EQ(parse_signal_monitor_backend_env(), SignalMonitorBackend::poll);
-    env.pop();
+    {
+        common::env_store env{{{"ROCPROF_SIGNAL_MONITOR_BACKEND", "poll", 1}}};
+        env.push();
+        EXPECT_EQ(parse_signal_monitor_backend_env(), SignalMonitorBackend::poll);
+        env.pop();
+    }
+
+    {
+        common::env_store env{{{"ROCPROF_SIGNAL_MONITOR_BACKEND", "ioctl", 1}}};
+        env.push();
+        EXPECT_EQ(parse_signal_monitor_backend_env(), SignalMonitorBackend::ioctl);
+        env.pop();
+    }
+
+    {
+        common::env_store env{{{"ROCPROF_SIGNAL_MONITOR_BACKEND", "invalid", 1}}};
+        env.push();
+        EXPECT_EQ(parse_signal_monitor_backend_env(), SignalMonitorBackend::auto_select);
+        env.pop();
+    }
+
+    {
+        common::env_store env{{{"ROCPROF_SIGNAL_MONITOR_BACKEND", "", 1}}};
+        env.push();
+        EXPECT_EQ(parse_signal_monitor_backend_env(), SignalMonitorBackend::auto_select);
+        env.pop();
+    }
 }
 }  // namespace rocprofiler::hsa::test
