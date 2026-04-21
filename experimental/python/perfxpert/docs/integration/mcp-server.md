@@ -74,7 +74,7 @@ with **dotted** names because that's what `discover_read_only_tools()`
 returns; the equivalent wire names have the dots replaced by
 underscores.
 
-## Tools exposed (58)
+## Tools exposed (57)
 
 Auto-discovered by `mcp_server._registry.discover_read_only_tools()`
 every boot. The registry walks `perfxpert.tools.*` modules but skips
@@ -123,7 +123,7 @@ Call it conversationally from any TUI backend ("diff this run against
 baseline.db", "what got slower since yesterday's trace?") instead of
 running `analyze` twice.
 
-### Snapshot: classifier / knowledge tools (50)
+### Snapshot: classifier / knowledge tools (49)
 
 Lower-level building blocks the agents themselves compose. External
 clients can call these directly when they want the raw classifier
@@ -169,7 +169,6 @@ regression.extract_kernel_runtimes_from_db
 regression.identify_hot_kernels
 roofline.classify
 roofline.lookup_peaks
-roofline.plot_points
 sol.classify_utilization
 sol.lookup_peaks
 sol.sanity_check
@@ -377,7 +376,7 @@ load-bearing for the security posture in spec §5.8.
 ## Client integration
 
 `perfxpert-mcp` speaks stdio MCP (JSON-RPC, protocol `2024-11-05`), so
-any MCP-compatible client can consume the 58 READ_ONLY tools. The
+any MCP-compatible client can consume the 57 READ_ONLY tools. The
 `command` field in every example below must resolve on the client's
 `PATH` — run `which perfxpert-mcp` to get an absolute path if your
 client launches with a narrower env than your login shell.
@@ -401,7 +400,7 @@ add a `perfxpert` entry under `mcpServers`:
 }
 ```
 
-Restart Claude Desktop. The 58 tools appear under the 🔌 panel with
+Restart Claude Desktop. The 57 tools appear under the 🔌 panel with
 `perfxpert_` name prefixes (underscored-on-the-wire — see §"Naming
 convention").
 
