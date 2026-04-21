@@ -76,7 +76,7 @@ class TestNativeTool:
 
     @pytest.fixture()
     def installed_sdk_path(self, rocm_path: Path) -> Path:
-        return self.__create_file(rocm_path, Path("bin/librocprofiler-sdk-tool"))
+        return self.__create_file(rocm_path, Path("lib/bin/librocprofiler-sdk-tool"))
 
     @pytest.fixture()
     def installed_compute_path(self, rocm_path: Path) -> Path:

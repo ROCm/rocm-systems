@@ -56,8 +56,8 @@ class NativeTool:
     def __get_installed_rocm_root_path(self, rocprofiler_sdk_tool_path: Path) -> Path:
         assert rocprofiler_sdk_tool_path.stem == "librocprofiler-sdk-tool"
         native_tool_base_path = (
-            rocprofiler_sdk_tool_path.parents[1]
-            if len(rocprofiler_sdk_tool_path.parents) > 1
+            rocprofiler_sdk_tool_path.parents[2]
+            if len(rocprofiler_sdk_tool_path.parents) > 2
             else Path()
         )
         return native_tool_base_path
