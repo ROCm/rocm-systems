@@ -132,11 +132,18 @@ Value *ModuloReplicationProjection::extractLaneBitFromWaveMask(
   else if (v->getType() != targetTy)
     v = B.CreateBitCast(v, targetTy);
   Value *laneIdx = emitLaneIdx(B);
-  Value *laneIdxExt = B.CreateZExtOrTrunc(laneIdx, targetTy, "vcc_lane_idx");
-  Value *shifted = B.CreateLShr(v, laneIdxExt, "vcc_at_lane");
+  // Twine names are neutral (`mask_*`) rather than `vcc_*`: the helper
+  // is called from every consumer that reads a wave mask as a per-lane
+  // predicate — the VCC consumer path via `readVCCAsWaveMask` AND the
+  // SGPR-source `V_CNDMASK_B32_e64` consumer path in
+  // `handle_valu_vop3p.cpp`. Keeping the old `vcc_` prefix would make
+  // raised-IR dumps for e.g. the corpus_asin_fp32 kernel print
+  // `%vcc_lane_idx` for reads of `s6`, which misleads.
+  Value *laneIdxExt = B.CreateZExtOrTrunc(laneIdx, targetTy, "mask_lane_idx");
+  Value *shifted = B.CreateLShr(v, laneIdxExt, "mask_at_lane");
   Value *bit = B.CreateAnd(shifted, ConstantInt::get(targetTy, 1),
-                            "vcc_lane_bit");
-  return B.CreateICmpNE(bit, ConstantInt::get(targetTy, 0), "vcc_i1");
+                            "mask_lane_bit");
+  return B.CreateICmpNE(bit, ConstantInt::get(targetTy, 0), "mask_lane_i1");
 }
 
 // ----------------------------------------------------------------------------
@@ -304,11 +311,16 @@ Value *WaveNativeProjection::extractLaneBitFromWaveMask(IRBuilder<> &B,
     v = B.CreateBitCast(v, targetTy);
   }
   Value *laneIdx = emitLaneIdx(B);
-  Value *laneIdxExt = B.CreateZExtOrTrunc(laneIdx, targetTy, "wn_vcc_lane_idx");
-  Value *shifted = B.CreateLShr(v, laneIdxExt, "wn_vcc_at_lane");
+  // Neutral `mask_*` naming parity with the ModRep variant above —
+  // same two-caller story (VCC consumer + SGPR-source V_CNDMASK_B32
+  // consumer), same reason to avoid the old `wn_vcc_*` identifiers
+  // surfacing in raised-IR dumps for kernels whose mask source is a
+  // plain SGPR.
+  Value *laneIdxExt = B.CreateZExtOrTrunc(laneIdx, targetTy, "wn_mask_lane_idx");
+  Value *shifted = B.CreateLShr(v, laneIdxExt, "wn_mask_at_lane");
   Value *bit = B.CreateAnd(shifted, ConstantInt::get(targetTy, 1),
-                            "wn_vcc_lane_bit");
-  return B.CreateICmpNE(bit, ConstantInt::get(targetTy, 0), "wn_vcc_i1");
+                            "wn_mask_lane_bit");
+  return B.CreateICmpNE(bit, ConstantInt::get(targetTy, 0), "wn_mask_lane_i1");
 }
 
 // ----------------------------------------------------------------------------

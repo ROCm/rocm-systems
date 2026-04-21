@@ -608,6 +608,26 @@ config.fixtures = {
     # already pinned by v_cmpx_ballot.
     "v_cmp_class_f32":
         r"@LIT_FIXTURE_V_CMP_CLASS_F32_CO@",
+    # v_cmp_cndmask_sgpr — the canonical V_CMP_*_e64 -> SGPR ->
+    # V_CNDMASK_B32_e64 per-lane-predication idiom. Pins the post-
+    # fix IR shape in handle_valu_vop3p.cpp's V_CNDMASK_B32 arm:
+    # the SGPR-source branch routes through the WaveProjection's
+    # `extractLaneBitFromWaveMask` (mask widen if needed -> lshr by
+    # lane_id -> and 1 -> icmp ne 0) instead of the pre-fix
+    # `icmp ne <sgpr>, 0` that folded the entire wave mask into one
+    # uniform `i1`, making every lane of a data-dependent compare
+    # take the same side of the select. This is the shape every
+    # libdevice math branch (asin / acos / atan / log / exp) and
+    # every Triton epilogue that survives an e64 compare across a
+    # basic-block boundary reaches for — pre-fix, asin ran at ~87%
+    # wrong lanes; the fix drops it to ~44% (residual = the
+    # separate wave-native V_CMP -> SGPR narrow-write-and-replicate
+    # path documented in handle_valu_vcmp.cpp and left to the
+    # obstruction classifier follow-up). See the
+    # tools/compare_correctness regression probe of the same name
+    # for the runtime evidence.
+    "v_cmp_cndmask_sgpr":
+        r"@LIT_FIXTURE_V_CMP_CNDMASK_SGPR_CO@",
     # v_pk_int_b16 (VOP3P packed `<2 x i16>` int family) — pins both
     # opcodes the kerneldex corpus exercises today (V_PK_LSHLREV_B16
     # + V_PK_ADD_U16) under one fixture so the shared

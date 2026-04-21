@@ -742,11 +742,19 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
       ParsedReg condReg =
           ctx.parseReg(di.getReg(op.srcIdx(2)), op.srcIdx(2));
       if (condReg.kind == ParsedReg::SGPR) {
+        // The SGPR holds a source-width wave mask: lane `i` selects
+        // src1 iff bit `i` of the mask is set. The old lowering
+        // (`ICmpNE condVal, 0`) collapsed the mask to a single
+        // wave-uniform `i1` and made every lane pick the same side,
+        // silently miscompiling any data-dependent predication idiom
+        // (`v_cmp_*_e64 sDST, ...` + `v_cndmask_b32_e64 r, a, b, sDST`
+        // — the canonical libdevice math / fp-range-branch shape).
+        // Route through the projection's per-lane extractor, same as
+        // `readVCCAsWaveMask`'s consumer symmetry.
         Value *condVal = ctx.isa.isWave32()
                              ? ctx.regs.loadSGPR32(ctx.B, condReg.baseIdx)
                              : ctx.regs.loadSGPR64(ctx.B, condReg.baseIdx);
-        cond = ctx.B.CreateICmpNE(condVal,
-                                   Constant::getNullValue(condVal->getType()));
+        cond = ctx.projection.extractLaneBitFromWaveMask(ctx.B, condVal);
       } else {
         cond = ctx.regs.loadVCC(ctx.B);
       }
