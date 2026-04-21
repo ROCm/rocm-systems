@@ -172,7 +172,7 @@ def main(argv=None):
         "ci",
         help=(
             "CI wrapper: rc=1 when runtime regresses above --threshold "
-            "(default 5%; env: PERFXPERT_CI_REGRESSION_THRESHOLD)."
+            "(default 5%%; env: PERFXPERT_CI_REGRESSION_THRESHOLD)."
         ),
         description=(
             "Thin gating wrapper over ``perfxpert diff``. Produces the same\n"
