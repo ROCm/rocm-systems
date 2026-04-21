@@ -3972,6 +3972,9 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
   }
 }
 
+void* Device::getOrCreateHostcallBuffer() {
+  return xferQueue()->getOrCreateHostcallBuffer();
+}
 // ================================================================================================
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)

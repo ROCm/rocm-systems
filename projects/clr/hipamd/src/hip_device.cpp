@@ -148,6 +148,11 @@ void Device::Reset() {
   // Clear hostcall allocations to avoid ~Device() accessing freed Memory objects later.
   auto* dev = devices()[0];
   dev->ClearHostcallMemories();
+
+  // Disable all hostcalls
+  auto hostcallBuffer = dev->getOrCreateHostcallBuffer();
+  amd::disableHostcalls(hostcallBuffer);
+
   amd::MemObjMap::Purge(dev);
   Create();
 }
