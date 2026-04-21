@@ -47,6 +47,11 @@ def _format_as_markdown(
     short_kernels=None,
     detected_kernels: Optional[List[Dict[str, Any]]] = None,
     communication: Optional[Dict[str, Any]] = None,
+    # Phase 10 Live Roofline: accepted + ignored. The webview + JSON
+    # renderers surface the live-roofline payload; markdown is kept
+    # minimal to stay paste-friendly. Signature-compatible with
+    # analyze._format_agentic_output so the unified call site works.
+    roofline: Optional[Dict[str, Any]] = None,  # noqa: ARG001
 ) -> str:
     """Format analysis results as Markdown."""
     breakdown = time_breakdown or {}
