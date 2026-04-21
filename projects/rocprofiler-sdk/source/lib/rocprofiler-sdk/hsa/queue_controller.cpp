@@ -57,12 +57,12 @@ create_queue(hsa_agent_t        agent,
         if(agent_info.get_hsa_agent().handle == agent.handle)
         {
             std::unique_ptr<Queue> new_queue;
-            if(queue_intercept::is_active())
+            if(queue_intercept::is_intercepting_inline())
             {
                 // SDK-level interposition is active — create a regular HSA queue
                 // instead of an intercept queue. process_doorbell_impl calls
                 // WriteInterceptor directly; the Queue constructor skips
-                // set_write_interceptor when is_active().
+                // set_write_interceptor when is_intercepting_inline().
                 auto status = controller->get_core_table().hsa_queue_create_fn(agent,
                                                                                size,
                                                                                type,
