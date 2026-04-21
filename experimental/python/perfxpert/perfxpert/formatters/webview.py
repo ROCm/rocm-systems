@@ -33,8 +33,23 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from ._att_flamegraph import _slug as _rec_slug
+from ._att_flamegraph import render_att_flamegraph
+from ._roofline_svg import render_roofline_svg
 from ._source_correlation import correlate_hotspots_with_source
 from .json_fmt import _build_summary, _format_as_json, _tier0_to_dict
+
+
+def _rec_anchor_id(rec: Dict[str, Any], idx: int) -> str:
+    """Stable ``id="rec-<slug>"`` anchor for a rec card.
+
+    Prefers the rec's ``target`` (typically the kernel basename) so the
+    ATT flame-graph can jump straight to the matching recommendation.
+    Falls back to a slug of ``issue`` then to ``rec-<idx>`` so every card
+    always carries an anchor for testability.
+    """
+    key = rec.get("target") or rec.get("issue") or f"idx_{idx}"
+    return f"rec-{_rec_slug(str(key))}"
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
@@ -58,6 +73,8 @@ def _format_as_webview(
     short_kernels=None,
     att_analysis: Optional[Dict[str, Any]] = None,
     detected_kernels: Optional[List[Dict[str, Any]]] = None,
+    communication: Optional[Dict[str, Any]] = None,
+    roofline: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Generate a self-contained interactive HTML report.
@@ -208,8 +225,9 @@ def _format_as_webview(
         suggest = rec.get("suggestion", "")
         conf = rec.get("confidence")
         conf_html = f'<span class="r-conf" style="margin-left:8px;opacity:0.7;font-size:0.85em">Confidence: {int(conf * 100)}%</span>' if conf is not None else ""
+        r_anchor = _rec_anchor_id(rec, ri)
         recs_parts.append(
-            f'<div class="r-card" style="border-left-color:{fg}" data-p="{_h(p)}">'
+            f'<div class="r-card" id="{r_anchor}" style="border-left-color:{fg}" data-p="{_h(p)}">'
             f'<div class="r-hdr" onclick="toggleR(this)">'
             f'<span class="r-priority-icon">{picon}</span>'
             f'<span class="r-badge" style="background:{fg};color:#fff">{_h(p)}</span>'
@@ -790,6 +808,7 @@ def _format_as_webview(
         "%%HW_INNER%%": hw_inner,
         "%%RECS_BADGE%%": _recs_badge_html,
         "%%RECS_HTML%%": recs_html,
+        "%%ROOFLINE_SECTION%%": render_roofline_svg(roofline),
         "%%JSON_EMBEDDED%%": json_embedded,
     }
 
@@ -925,6 +944,22 @@ def _format_as_webview(
             "</table></div>"
         )
 
+        # Inline-SVG flame graph — rendered below the per-kernel stall
+        # table as an alternative visualisation. Pure-Python helper, no
+        # external JS/CSS libs; empty string when no ATT data.
+        att_flame_svg = render_att_flamegraph(att_analysis)
+        att_flame_block = (
+            (
+                '\n<div class="att-flame-wrap" style="margin-top:1.1rem">'
+                '\n<h3 style="margin:0 0 .4rem 0;font-size:1rem">'
+                "Stall flame graph</h3>"
+                f"\n{att_flame_svg}"
+                "\n</div>"
+            )
+            if att_flame_svg
+            else ""
+        )
+
         att_section = (
             '\n<section class="scard">'
             '\n<div class="shdr">'
@@ -935,11 +970,15 @@ def _format_as_webview(
             '\n<div class="sbody">'
             f"\n{att_kpi}"
             f"\n{att_table}"
+            "\n%%ATT_FLAMEGRAPH_SECTION%%"
             '\n<p class="dim" style="margin-top:1rem;font-size:.82rem">'
             "Sub-rows show the top 5 stalling instructions per kernel (indented). "
             "Weighted stall = stall_cycles &times; hitcount &mdash; the primary ranking metric."
             "</p>"
             "\n</div>\n</section>"
+        )
+        att_section = att_section.replace(
+            "%%ATT_FLAMEGRAPH_SECTION%%", att_flame_block
         )
         html = html.replace("<!-- ATT_SECTION_PLACEHOLDER -->", att_section)
     else:
@@ -1093,8 +1132,9 @@ def _format_tier0_webview(tier0_result: Any, has_profiling: bool = False) -> str
         suggest = rec.get("suggestion", "")
         conf = rec.get("confidence")
         conf_html = f'<span class="r-conf" style="margin-left:8px;opacity:0.7;font-size:0.85em">Confidence: {int(conf * 100)}%</span>' if conf is not None else ""
+        r_anchor = _rec_anchor_id(rec, ri)
         recs_parts.append(
-            f'<div class="r-card" style="border-left-color:{fg}" data-p="{_h(p)}">'
+            f'<div class="r-card" id="{r_anchor}" style="border-left-color:{fg}" data-p="{_h(p)}">'
             f'<div class="r-hdr" onclick="toggleR(this)">'
             f'<span class="r-priority-icon">{picon}</span>'
             f'<span class="r-badge" style="background:{fg};color:#fff">{_h(p)}</span>'

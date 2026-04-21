@@ -271,6 +271,11 @@ footer p { color:var(--dim); font-size:.77rem; text-align:center; }
   .kpi-value { font-size:1.3rem; }
   .hdr-subtitle { display:none; }
 }
+.att-flame { overflow-x:auto; border:1px solid var(--bdr); border-radius:var(--r-sm); padding:.4rem; }
+.att-flame-svg { display:block; user-select:none; }
+.att-flame-rect { transition:opacity .15s; }
+.att-flame-rect:hover { opacity:.85; stroke:#fff; stroke-width:1; }
+.rec-flash { box-shadow:0 0 0 3px #ffaa33, 0 0 18px rgba(255,170,51,.55); transition:box-shadow .3s; }
 </style>
 </head>
 <body>
@@ -393,10 +398,12 @@ footer p { color:var(--dim); font-size:.77rem; text-align:center; }
     %%HW_INNER%%
   </div>
 </section>
-
+%%ROOFLINE_SECTION%%
 <!-- ATT_SECTION_PLACEHOLDER -->
 
 <!-- CAT_SECTION_PLACEHOLDER -->
+
+<!-- COMM_SECTION_PLACEHOLDER -->
 
 <section class="scard">
   <div class="shdr">
@@ -527,6 +534,32 @@ var COUNTER_TIPS = {
   'FETCH_SIZE': '<strong>FETCH_SIZE</strong>Total kilobytes fetched from the L2 cache to the compute units.<em>Compare against theoretical L2 bandwidth to assess cache pressure.</em>',
   'WRITE_SIZE': '<strong>WRITE_SIZE</strong>Total kilobytes written back to the L2 cache from compute units.<em>Check if writes can be reduced or deferred.</em>'
 };
+
+// ATT flame-graph: wheel-zoom + pan on the SVG viewBox. One shared
+// handler services every .att-flame-svg on the page (usually a single
+// element). Kept intentionally small so we stay under the 80-LOC
+// inline-JS invariant.
+document.querySelectorAll('.att-flame-svg').forEach(function(svg) {
+  var vb = (svg.getAttribute('viewBox') || '').split(/\s+/).map(parseFloat);
+  if (vb.length !== 4) { return; }
+  var ox = vb[0], oy = vb[1], ow = vb[2], oh = vb[3];
+  var x = ox, y = oy, w = ow, h = oh;
+  function apply() { svg.setAttribute('viewBox', x+' '+y+' '+w+' '+h); }
+  svg.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    var k = e.deltaY < 0 ? 0.85 : 1.18;
+    var rect = svg.getBoundingClientRect();
+    var mx = x + (e.clientX - rect.left) / rect.width * w;
+    var my = y + (e.clientY - rect.top) / rect.height * h;
+    var nw = Math.max(ow * 0.05, Math.min(ow * 4, w * k));
+    var nh = Math.max(oh * 0.05, Math.min(oh * 4, h * k));
+    x = mx - (mx - x) * (nw / w); y = my - (my - y) * (nh / h);
+    w = nw; h = nh; apply();
+  }, { passive: false });
+  svg.addEventListener('dblclick', function() {
+    x = ox; y = oy; w = ow; h = oh; apply();
+  });
+});
 
 document.querySelectorAll('.ctr-row').forEach(function(tr) {
   var name = tr.dataset.ctr;
