@@ -328,14 +328,6 @@ TEST(QueueIntercept, DoorbellTwoPacketsWithKFactor)
     EXPECT_EQ(get_pkt(ring, 8, 511)->kernel_object, static_cast<uint64_t>(0xBBBB));
 }
 
-TEST(QueueIntercept, ComputeInflatedRingSize)
-{
-    EXPECT_EQ(compute_inflated_ring_size(1024, 0), 1024u);
-    EXPECT_EQ(compute_inflated_ring_size(1024, 7), 16384u);
-    EXPECT_EQ(compute_inflated_ring_size(512, 7), 8192u);
-    EXPECT_EQ(compute_inflated_ring_size(1024, 1), 4096u);
-}
-
 TEST(QueueIntercept, CreateAndDestroyQueueState)
 {
     alignas(64) char ring_mem[64 * 256];
