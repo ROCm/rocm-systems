@@ -2,23 +2,6 @@
 
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
-## Unreleased
-
-### Added
-
-### Changed
-
-### Removed
-
-### Optimized
-
-### Resolved issues
-
-### Upcoming changes
-
-* Intermediate CSV generation (`results_*.csv`) from rocpd databases during profiling is deprecated and will be removed in a future release. The analyze step will read `.db` files directly.
-* `--retain-rocpd-output` is deprecated and will be removed in a future release. `.db` files will be retained by default.
-
 ## ROCm Compute Profiler 3.6.0 for ROCm 7.13.0
 
 ### Added
@@ -66,6 +49,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Upcoming changes
 
 * `--path` and `--subpath` options will be removed as they are already deprecated
+* Intermediate CSV generation (`results_*.csv`) from rocpd databases during profiling is deprecated and will be removed in a future release. The analyze step will read `.db` files directly.
+* `--retain-rocpd-output` is deprecated and will be removed in a future release. `.db` files will be retained by default.
 
 ### Known issues
 
