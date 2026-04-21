@@ -47,6 +47,7 @@ TEST(QueueIntercept, QueueStateDefaultInit)
     EXPECT_EQ(state.real_rdid, nullptr);
     EXPECT_EQ(state.next_scan_pos, 0UL);
     EXPECT_EQ(state.next_submit_pos, 0UL);
+    EXPECT_EQ(state.hsa_queue, nullptr);
     EXPECT_EQ(state.doorbell_signal.handle, 0UL);
     EXPECT_EQ(state.k_factor, 0UL);
     EXPECT_EQ(state.metadata_state, nullptr);

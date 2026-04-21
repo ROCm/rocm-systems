@@ -59,10 +59,11 @@ struct QueueState
     uint64_t              next_scan_pos   = 0;        ///< Next packet index to scan
     uint64_t              next_submit_pos = 0;        ///< Next packet index to submit
 
-    hsa_signal_t doorbell_signal = {0};      ///< The queue's doorbell signal
-    uint64_t     k_factor        = 0;        ///< K-factor for metadata queue sync
-    QueueState*  metadata_state  = nullptr;  ///< Pointer to metadata queue state if present
-    std::mutex   gate_lock;                  ///< Lock for packet submission gating
+    const hsa_queue_t* hsa_queue       = nullptr;  ///< HSA queue pointer for Queue* lookup
+    hsa_signal_t       doorbell_signal = {0};      ///< The queue's doorbell signal
+    uint64_t           k_factor        = 0;        ///< K-factor for metadata queue sync
+    QueueState*        metadata_state  = nullptr;  ///< Pointer to metadata queue state if present
+    std::mutex         gate_lock;                  ///< Lock for packet submission gating
 };
 
 /// Thread-safe map from HSA queue pointer to its QueueState
@@ -276,6 +277,9 @@ destroy_queue_state(const hsa_queue_t* queue);
  */
 void
 install_intercept(CoreApiTable& core_table);
+
+bool
+is_active();
 
 }  // namespace queue_intercept
 }  // namespace hsa

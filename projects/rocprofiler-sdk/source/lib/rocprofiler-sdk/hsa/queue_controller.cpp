@@ -56,16 +56,42 @@ create_queue(hsa_agent_t        agent,
     {
         if(agent_info.get_hsa_agent().handle == agent.handle)
         {
-            auto new_queue = std::make_unique<Queue>(agent_info,
-                                                     size,
-                                                     type,
-                                                     callback,
-                                                     data,
-                                                     private_segment_size,
-                                                     group_segment_size,
-                                                     controller->get_core_table(),
-                                                     controller->get_ext_table(),
-                                                     queue);
+            std::unique_ptr<Queue> new_queue;
+            if(queue_intercept::is_active())
+            {
+                // SDK-level interposition is active — create a regular HSA queue
+                // and skip hsa_amd_queue_intercept_create. process_doorbell_impl
+                // calls WriteInterceptor directly.
+                auto status = controller->get_core_table().hsa_queue_create_fn(agent,
+                                                                               size,
+                                                                               type,
+                                                                               callback,
+                                                                               data,
+                                                                               private_segment_size,
+                                                                               group_segment_size,
+                                                                               queue);
+                if(status != HSA_STATUS_SUCCESS) return status;
+
+                auto noop_set_wi = [](write_interceptor_t, void*) {};
+                new_queue        = std::make_unique<Queue>(agent_info,
+                                                    controller->get_core_table(),
+                                                    controller->get_ext_table(),
+                                                    *queue,
+                                                    noop_set_wi);
+            }
+            else
+            {
+                new_queue = std::make_unique<Queue>(agent_info,
+                                                    size,
+                                                    type,
+                                                    callback,
+                                                    data,
+                                                    private_segment_size,
+                                                    group_segment_size,
+                                                    controller->get_core_table(),
+                                                    controller->get_ext_table(),
+                                                    queue);
+            }
 
             controller->serializer(new_queue.get()).wlock([&](auto& serializer) {
                 serializer.add_queue(queue, *new_queue);
@@ -162,6 +188,10 @@ queue_controller_iterate_attach_queue(hsa_queue_t* queue, hsa_agent_t agent, voi
     bool  registration_consumed = false;
 
     auto set_write_interceptor = [&queue](write_interceptor_t wi, void* data) {
+        // When SDK-level write pointer interposition is active, skip registering
+        // WriteInterceptor via the attach table — process_doorbell_impl calls it
+        // directly via Queue::invoke_write_interceptor instead.
+        if(queue_intercept::is_active()) return;
         CHECK_NOTNULL(*(get_attach_table()))
             ->rocprofiler_attach_set_write_interceptor(queue, wi, data);
     };
