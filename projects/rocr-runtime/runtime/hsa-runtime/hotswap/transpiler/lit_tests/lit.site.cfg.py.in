@@ -48,6 +48,27 @@ config.fixtures = {
     # §6 / §7 Class-1 table (rescue vs. refuse).
     "c1_ttmp_wave_id_lift":
         r"@LIT_FIXTURE_C1_TTMP_WAVE_ID_LIFT_CO@",
+    # c1_wave_id_lift_scalarized — the refusal companion to
+    # c1_ttmp_wave_id_lift. Pins the three-way co-occurrence
+    # (canonical `s_bfe_u32 sDST, ttmp8, 0x50019` lift +
+    # v_writelane/v_readlane + v_wmma_*) that forces the classifier in
+    # `wave_size_obstruction.cpp::buildObstructionReport` to emit
+    # ObstructionKind::WaveIdLiftScalarized sites. The handle_sop2.cpp
+    # lift still fires for the BFE, but its per-lane divergent VGPR
+    # value is scalarised by the backend's implicit readfirstlane on
+    # entry to the cross-lane primitive's scalar source operand,
+    # collapsing source_wave[0]'s wave_id=0 and source_wave[1]'s
+    # wave_id=1 into one uniform value and miscompiling every
+    # wave_id-keyed tile-column address. WMMA forecloses the
+    # ThreadLoopProjection escape hatch (§5.2 requires the full target
+    # wave simultaneously), so no correct projection is available and
+    # the principled outcome is a loud refusal rather than a silent
+    # miscompile. Together with c1_ttmp_wave_id_lift this pair pins
+    # both terminal outcomes of the canonical wave_id-extraction
+    # pattern under cross-widening — rescue when safe, refuse when
+    # the downstream shape forecloses the lift's benefit.
+    "c1_wave_id_lift_scalarized":
+        r"@LIT_FIXTURE_C1_WAVE_ID_LIFT_SCALARIZED_CO@",
     "c2_permlane_swap": r"@LIT_FIXTURE_C2_PERMLANE_SWAP_CO@",
     "c2_permlane16": r"@LIT_FIXTURE_C2_PERMLANE16_CO@",
     "c2_dpp_quad_perm": r"@LIT_FIXTURE_C2_DPP_QUAD_PERM_CO@",

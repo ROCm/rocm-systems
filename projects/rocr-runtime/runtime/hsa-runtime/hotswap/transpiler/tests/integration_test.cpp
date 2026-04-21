@@ -103,6 +103,50 @@ static void doTestVecaddAllKernels() {
 // Raises .co files from GFX1250_TEST_DATA_DIR with runPipelineAllKernels,
 // then verifies the merged HSACO loads with HIP.
 // ============================================================================
+// Known classifier-refusal inputs in the GFX1250_TEST_DATA_DIR corpus.
+//
+// Each entry is a (basename, reason) pair identifying a code object we
+// expect runPipelineAllKernels to REFUSE (not raise) for principled
+// reasons documented in wave-size-translation.md §6 / §7. The
+// integration test treats a refusal on one of these as the expected
+// outcome and asserts the corresponding ObstructionKind anchor is
+// present in the pipeline's diagnostic stream.
+//
+// Add a new entry here whenever a corpus code object starts refusing
+// at raise time because it hits a known-unrewritable obstruction
+// class. REMOVE an entry when the underlying obstruction is lifted in
+// the classifier — leaving a stale entry in place would convert a
+// newly-supported raise into a test failure.
+struct ExpectedRefusal {
+  const char *basename;
+  const char *diagnosticAnchor;  // stable substring the pipeline prints
+  const char *reason;            // short human-readable note for the log
+};
+
+static constexpr ExpectedRefusal kExpectedRefusals[] = {
+    // matmul_f16_large_gfx1250 — the 128x128-tile HIP matmul. Carries
+    // the three-way co-occurrence pinned by the
+    // lit_tests/c1_wave_id_lift_scalarized refusal fixture (canonical
+    // `s_bfe_u32 sDST, ttmp8, 0x50019` + v_writelane/v_readlane for
+    // register spills + v_wmma_* accumulator). See the long comment
+    // on the matching Gfx1250Gpu.Matmul128x128* entries in
+    // tests/xfail.cmake for the principled justification.
+    {"matmul_f16_large_gfx1250.hsaco", "WaveIdLiftScalarized",
+     "128x128-tile matmul: canonical wave_id BFE lift scalarised "
+     "through v_writelane/v_readlane under WMMA (Class 1 refuse)"},
+};
+
+// Returns a pointer to the ExpectedRefusal entry matching `path`'s
+// basename, or nullptr if the file is not on the refusal allowlist.
+static const ExpectedRefusal *findExpectedRefusal(const std::string &path) {
+  auto slash = path.find_last_of('/');
+  std::string base = (slash == std::string::npos) ? path : path.substr(slash + 1);
+  for (const auto &er : kExpectedRefusals) {
+    if (base == er.basename) return &er;
+  }
+  return nullptr;
+}
+
 static void doTestMultiKernelRaise() {
   printf("=== Test 2: Multi-kernel raise test ===\n");
   std::string coDir = INTEG_DATA_DIR;
@@ -126,7 +170,7 @@ static void doTestMultiKernelRaise() {
   if (files.empty())
     GTEST_SKIP() << "No .co/.hsaco files found in " << coDir;
 
-  int passed = 0, failed = 0;
+  int passed = 0, failed = 0, refused = 0;
   for (auto &f : files) {
     auto data = transpiler::readFile(f);
     if (data.empty()) continue;
@@ -135,8 +179,28 @@ static void doTestMultiKernelRaise() {
     printf("  [%zu kernels] %-50s ", kernelNames.size(), f.c_str());
     fflush(stdout);
 
+    const ExpectedRefusal *er = findExpectedRefusal(f);
+
     auto result = transpiler::runPipelineAllKernels(data, isa, "gfx942");
     if (result.success) {
+      if (er) {
+        // An entry in the expected-refusal allowlist that raised
+        // anyway is a signal that the classifier's refusal logic has
+        // been weakened or the corpus binary has been regenerated
+        // with a shape that no longer triggers it. Either way the
+        // allowlist is now stale — fail loudly so the entry gets
+        // removed or the regression investigated.
+        printf("UNEXPECTED OK (on classifier-refusal allowlist)\n");
+        failed++;
+        ADD_FAILURE()
+            << f << " raised successfully but is on the expected-refusal "
+            << "allowlist (reason: " << er->reason << "). Remove the entry "
+            << "in kExpectedRefusals if the underlying obstruction has been "
+            << "lifted; otherwise investigate why the refusal no longer "
+            << "fires on this binary.";
+        continue;
+      }
+
       printf("OK (%d/%d insts, %zu bytes)\n",
              result.liftedCount, result.totalCount, result.hsaco.size());
 
@@ -153,6 +217,11 @@ static void doTestMultiKernelRaise() {
         continue;
       }
       passed++;
+    } else if (er) {
+      // Expected classifier refusal. Count separately so the summary
+      // line shows it as a distinct category, not a pipeline bug.
+      printf("REFUSED (expected: %s)\n", er->diagnosticAnchor);
+      refused++;
     } else {
       printf("FAILED\n");
       failed++;
@@ -160,8 +229,8 @@ static void doTestMultiKernelRaise() {
     }
   }
 
-  printf("\n  Summary: %d passed, %d failed out of %zu files\n\n",
-         passed, failed, files.size());
+  printf("\n  Summary: %d passed, %d expected-refused, %d failed out of %zu files\n\n",
+         passed, refused, failed, files.size());
 }
 
 class Integration : public GpuTest {};

@@ -118,6 +118,21 @@ enum class ObstructionKind : uint8_t {
                             // address / EXEC mask / wave-uniform SGPR is a
                             // Class 1 leak under modulo-replication and a
                             // wave-id collision under wave-native. No rewrite.
+  WaveIdLiftScalarized,     // the canonical `s_bfe_u32 sDST, ttmp8, 0x50019`
+                            // wave_id extraction (normally rescued by the
+                            // handle_sop2.cpp pattern-lift into a per-lane
+                            // divergent VGPR value) flows into a
+                            // v_writelane_b32 / v_readlane_b32 scalar-source
+                            // operand in a kernel that ALSO contains WMMA.
+                            // The cross-lane primitives scalarise their
+                            // scalar operand via backend readfirstlane, which
+                            // collapses the per-source-wave distinction the
+                            // lift introduced (source_wave[k]'s wave_id=k
+                            // becomes uniform across the target wave = 0).
+                            // WMMA forecloses the ThreadLoopProjection escape
+                            // hatch (§5.2 requires the full target wave
+                            // simultaneously), so there is no correct
+                            // projection today. No rewrite.
 
   // ── Class 2 (wave-size-translation.md §6): cross-lane shuffles whose
   //                                            semantics bake in the wave width ──

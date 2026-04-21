@@ -40,6 +40,8 @@ const char *obstructionKindName(ObstructionKind k) {
     return "OutOfRangeLaneOperand (\u00a73 Class 1: readlane/writelane operand >= W_s)";
   case ObstructionKind::TtmpWaveIdLeak:
     return "TtmpWaveIdLeak (\u00a73 Class 1: source read of ttmp8 under cross-widening — wave_id_in_wg field)";
+  case ObstructionKind::WaveIdLiftScalarized:
+    return "WaveIdLiftScalarized (\u00a73 Class 1: canonical wave_id BFE lift + v_writelane/v_readlane + WMMA — cross-lane primitive scalarises the divergent lift, collapsing per-source-wave distinction)";
   case ObstructionKind::FullWaveRotate:
     return "FullWaveRotate (\u00a73 Class 2: unrewritable v_permlane64)";
   case ObstructionKind::LaneGroupShuffle:
@@ -391,6 +393,38 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
   // full target wave simultaneously and cannot be TLP-split.
   llvm::SmallVector<const DecodedInst *> ttmp8ReadSites;
 
+  // Co-occurrence tracking for the WaveIdLiftScalarized refusal below.
+  //
+  //   - `canonicalWaveIdBfeSites`: every occurrence of the canonical
+  //     `s_bfe_u32 sDST, ttmp8, 0x50019` pattern that the handle_sop2.cpp
+  //     lift rescues by making sDST a per-lane divergent VGPR value
+  //     (workitem.id.x >> log2(W_s)). That rescue is only semantically
+  //     valid if the per-lane divergent value never feeds a source-ISA
+  //     construct that enforces scalar-in-source semantics at the
+  //     hardware level. `v_writelane_b32` / `v_readlane_b32` enforce
+  //     exactly that scalar-in rule (the `src0` operand is an SGPR in
+  //     the encoding), and the backend materialises that by inserting
+  //     a readfirstlane on a divergent input — which collapses target
+  //     lanes 0..31 (source_wave[0]) with 32..63 (source_wave[1]) back
+  //     to a single value. That collapse silently miscompiles every
+  //     wave_id-dependent tile address the matmul encoded.
+  //
+  //   - `crossLaneScalarSites`: every `v_writelane_b32` / `v_readlane_b32`
+  //     in the kernel. The refusal fires once per site so the diagnostic
+  //     trace points at the precise instructions where the collapse
+  //     happens, not just at the BFE where the divergent value was
+  //     manufactured.
+  //
+  // Both buffers are emptied into `ObstructionReport::sites` after the
+  // walk completes, gated on `haveWMMA` — the non-WMMA case has a
+  // future ThreadLoopProjection escape hatch (§2.2; iterate the body
+  // R = W_t / W_s times with a synthetic per-source-wave wave_id in
+  // ttmp8) and must not be refused preemptively here. WMMA kernels
+  // cannot use TLP because §5.2 WMMA lane layout requires the full
+  // target wave simultaneously, so the refusal is terminal.
+  llvm::SmallVector<const DecodedInst *> canonicalWaveIdBfeSites;
+  llvm::SmallVector<const DecodedInst *> crossLaneScalarSites;
+
   for (const DecodedInst &di : insts) {
     const SemOp sop = di.semOp;
 
@@ -419,6 +453,19 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
     // lane layout requires the full target wave) and we refuse.
     if (readsTtmp8Source(di, MRI) && !isCanonicalWaveIdBfe(di, MRI))
       ttmp8ReadSites.push_back(&di);
+
+    // Track canonical wave_id BFE sites for the WaveIdLiftScalarized
+    // post-loop check. The lift in handle_sop2.cpp makes this BFE's
+    // destination SGPR carry a per-lane divergent value (wave_id mod W_s)
+    // instead of the backend's scalar BFE result; that rescue is
+    // correct in isolation but collapses back to uniform when the
+    // divergent value is consumed by any construct the source-ISA
+    // encodes with scalar-in semantics (writelane src, readlane src).
+    // The post-loop join below pairs these sites with the
+    // crossLaneScalarSites + haveWMMA co-occurrence to decide the
+    // refusal.
+    if (isCanonicalWaveIdBfe(di, MRI))
+      canonicalWaveIdBfeSites.push_back(&di);
 
     // WMMA-family detection. If any of these show up in the kernel,
     // the WMMA → MFMA lowering (matrix-translation.md) is going to be
@@ -463,6 +510,15 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
       continue;
     }
     if (sop == SemOp::V_READLANE_B32 || sop == SemOp::V_WRITELANE_B32) {
+      // Track every readlane/writelane — in-bounds or otherwise — for
+      // the WaveIdLiftScalarized post-loop check. Out-of-range static
+      // lane operands additionally emit an OutOfRangeLaneOperand site
+      // in the block below; the two conditions are independent (a
+      // kernel could have a well-formed writelane whose `val` operand
+      // carries a wave_id-derived divergent value, and that refusal
+      // must fire even when every lane operand is in-bounds).
+      crossLaneScalarSites.push_back(&di);
+
       auto imm = extractLaneOperandImm(di);
       // Negative-value guard: an int64_t imm cast to uint64_t for the
       // bounds compare wraps around to a value > waveSize for any
@@ -722,6 +778,70 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
     }
   }
 
+  // WaveIdLiftScalarized — the canonical-BFE rescue collapses inside a
+  // cross-lane scalar primitive under WMMA.
+  //
+  // This is the Matmul128x128 / `matmul_f16_large_gfx1250` pattern:
+  //
+  //     s_bfe_u32 s2, ttmp8, 0x50019          ; lifted → divergent wave_id
+  //     s_and_b32 s73, s2, 3                  ; tainted (SGPR but divergent)
+  //     s_lshl_b32 s18, s2, 5                 ; tainted
+  //     v_writelane_b32 vgpr256, s18, 4       ; backend readfirstlane(s18)
+  //                                           ; collapses target lanes
+  //                                           ; 0..31 with 32..63 to a
+  //                                           ; single value → per-
+  //                                           ; source-wave tile offset
+  //                                           ; LOST.
+  //     …
+  //     v_wmma_f32_16x16x32_f16 …             ; WMMA → TLP not available.
+  //     …
+  //     v_readlane_b32 sDST, vgpr256, 4       ; reads the collapsed value.
+  //     v_or_b32 v_col, sDST, v_col_within    ; per-source-wave column
+  //                                           ; base is now uniform,
+  //                                           ; writing the wrong tile.
+  //
+  // The refusal is syntactic (three-way co-occurrence over the kernel)
+  // and therefore a sound-not-complete over-approximation, same as the
+  // CmpxFromLaneId / SaveExecFromLaneId co-occurrence heuristic above.
+  // Kernels that happen to contain all three constructs but do NOT
+  // route the wave_id value into the cross-lane scalar source would be
+  // over-refused — benign (false positive). Kernels that are missing
+  // any of the three would not be refused here but ALSO cannot express
+  // the matmul-shaped wave_id-dependent tile column bug (no canonical
+  // BFE means ttmp8 is only read via other shapes, which fall to the
+  // ttmp8ReadSites + WMMA refusal above; no cross-lane scalar means
+  // the divergent value has no scalar-semantics consumer to collapse
+  // into; no WMMA means TLP is available for the class-4 escape). The
+  // implications chain is safe by construction.
+  //
+  // TODO(dataflow-upgrade): replace the syntactic co-occurrence with a
+  // precise check that the BFE's destination SGPR flows (through the
+  // raised IR's SSA uses) into a v_writelane / v_readlane scalar
+  // source operand. The LLVM Uniformity Analysis on the raised IR
+  // (post-Phase-2) is the natural place to land this — see
+  // wave_size_obstruction.hpp's TODO block.
+  if (haveWMMA && !canonicalWaveIdBfeSites.empty() &&
+      !crossLaneScalarSites.empty()) {
+    for (const DecodedInst *di : crossLaneScalarSites) {
+      ObstructionSite site;
+      site.inst = di;
+      site.kind = ObstructionKind::WaveIdLiftScalarized;
+      site.rewrite = RewriteId::None;
+      site.rewriteImplemented = false;
+      site.detail =
+          "kernel also contains the canonical `s_bfe_u32 sDST, ttmp8, "
+          "0x50019` wave_id lift and v_wmma_* — the lift's per-lane "
+          "divergent result is scalarised by the backend on entry to "
+          "this cross-lane primitive's scalar source operand, "
+          "collapsing source_wave[0]'s and source_wave[1]'s distinct "
+          "values into a single uniform. WMMA forecloses the "
+          "ThreadLoopProjection escape hatch (§5.2 requires the full "
+          "target wave simultaneously), so no correct projection is "
+          "available.";
+      report.sites.push_back(std::move(site));
+    }
+  }
+
   // Second pass: for each pending EXEC writer, apply the syntactic
   // co-occurrence heuristic. If the kernel contains ANY mbcnt (lo or
   // hi), treat the writer as lane-predicated and unrewritable.
@@ -827,6 +947,7 @@ RaiseFailure selectFailureFromReport(const ObstructionReport &report) {
     case ObstructionKind::MbcntHiLaneIdLeak:
     case ObstructionKind::OutOfRangeLaneOperand:
     case ObstructionKind::TtmpWaveIdLeak:
+    case ObstructionKind::WaveIdLiftScalarized:
       return RaiseFailure::crossWaveLaneIdLeak(
           *site->inst,
           Twine(obstructionKindName(site->kind)) + " [" + site->detail + "]");

@@ -522,7 +522,18 @@ position beyond `lane_id mod W_s`:
 - `s_bfe_u32 sDST, ttmp8, 0x50019` — `wave_id_in_workgroup` read
   from the CP-seeded ttmp8[29:25] field. Rescued in place by the
   §5.6.2 wave_id lift; any *other* ttmp8 source read still
-  refuses via `TtmpWaveIdLeak`.
+  refuses via `TtmpWaveIdLeak`. The rescue itself also refuses
+  via `WaveIdLiftScalarized` in the specific shape where the lift's
+  per-lane divergent VGPR value flows into a `v_writelane_b32` /
+  `v_readlane_b32` *scalar source operand* **and** the kernel also
+  contains a `v_wmma_*` op — the backend's implicit
+  `v_readfirstlane_b32` on the cross-lane primitive's scalar operand
+  collapses the per-source-wave distinction the lift introduced
+  (source_wave[0]'s `wave_id=0` and source_wave[1]'s `wave_id=1`
+  both become a uniform 0 in the target wave's scalar operand),
+  and WMMA forecloses the `ThreadLoopProjection` escape hatch
+  (§5.2 requires the full target wave simultaneously) so no
+  correct projection is available today.
 
 **Class 2 — cross-lane ops with wave-size-dependent semantics.**
 - `v_permlane64_b32` (full-wave rotate; no wave32 analogue).
@@ -602,6 +613,7 @@ their handlers:
 | `v_mbcnt_hi_u32_b32` read (C1). `mbcnt_hi` against target `EXEC_HI` produces 32..63 in the upper half; no rewrite without dataflow. | `MbcntHiLaneIdLeak` | `CrossWaveLaneIdLeak` |
 | `v_readlane` / `v_writelane` with static const operand outside `[0, W_s)` (C1). | `OutOfRangeLaneOperand` | `CrossWaveLaneIdLeak` |
 | Non-canonical `ttmp8` source read co-occurring with a WMMA op (C1). Canonical `s_bfe_u32 sDST, ttmp8, 0x50019` is rescued in §5.6.2 and filtered out by `isCanonicalWaveIdBfe`; the classifier only refuses shapes where the raiser's `ttmp8[29:25]` model of `wave_id` can't be soundly reused (other BFE immediates, non-BFE consumers, 64-bit base-pointer loads). | `TtmpWaveIdLeak` | `CrossWaveLaneIdLeak` |
+| Canonical `s_bfe_u32 sDST, ttmp8, 0x50019` co-occurring with `v_writelane_b32` / `v_readlane_b32` **and** with a `v_wmma_*` op (C1). The §5.6.2 lift emits a per-lane divergent VGPR for `wave_id`, but the backend inserts an implicit `v_readfirstlane_b32` when that SGPR-shaped value feeds the cross-lane primitive's scalar source operand; the scalarisation erases the per-source-wave distinction and miscompiles every `wave_id`-keyed tile-column address. WMMA rules out the `ThreadLoopProjection` escape hatch (§5.2 wants the full target wave simultaneously), so the principled outcome is a loud refusal. Pinned by `lit_tests/c1_wave_id_lift_scalarized`. | `WaveIdLiftScalarized` | `CrossWaveLaneIdLeak` |
 | `v_permlane64_b32` (C2). No wave32 analogue — a wave32 source can't meaningfully encode a 64-lane rotate. | `FullWaveRotate` | `CrossWaveUnrewritableShuffle` |
 | Non-commutative atomics (C3): `GLOBAL_ / FLAT_ / BUFFER_ATOMIC_{SWAP, CMPSWAP}`, `S_ATOMIC_SWAP`. Lanes `i` and `i + W_s` race on the same address; no rewrite preserves the single-participant invariant. | `NonCommutativeAtomic` | `CrossWaveReplicaRace` |
 | `v_cmpx` / `s_*_saveexec_b32` co-located with any `v_mbcnt_*` in the same kernel (C4). Syntactic over-approximation of "gating expression flows from an absolute lane id"; see §10. | `CmpxFromLaneId` / `SaveExecFromLaneId` | `CrossWaveLanePredicatedExec` |
