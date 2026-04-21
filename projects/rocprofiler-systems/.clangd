@@ -72,7 +72,6 @@ Diagnostics:
       readability-identifier-naming.MemberCase: lower_case
       readability-identifier-naming.PrivateMemberPrefix: m_
       readability-identifier-naming.ProtectedMemberPrefix: m_
-      readability-identifier-naming.PublicMemberPrefix: m_
       readability-identifier-naming.GlobalConstantCase: UPPER_CASE
       readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
       readability-identifier-naming.TemplateParameterCase: CamelCase

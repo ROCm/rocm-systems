@@ -402,7 +402,7 @@
   v_or_b32          v2, \s_scratch1, v2                       // OR the new SE_ID bits into v2
 
   // Construct and store chiplet_and_wave_id bitfield
-  // Bitfield layout: wave_in_wg[5:0] | reserved[7:6] | chiplet[10:8] | reserved[31:11]
+  // Bitfield layout: wave_in_wg[5:0] | reserved_wg[7:6] | chiplet[10:8] | reserved[31:11]
   s_sendmsg_rtn_b32 \s_scratch1, sendmsg(MSG_RTN_GET_SE_AID_ID)
   
   // Extract wave_in_wg while waiting for sendmsg

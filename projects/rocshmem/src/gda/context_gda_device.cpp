@@ -44,15 +44,15 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id, int gda_provide
 
   ctx_id_ = ctx_id;
   num_qps_per_pe = ctx_id_?
-      envvar::gda::num_qps_per_pe_usr_ctx.get_value() :
-      envvar::gda::num_qps_per_pe_default_ctx.get_value();
+      backend->qps_per_pe_usr_ctx_ :
+      backend->qps_per_pe_default_ctx_;
 
   num_qps = num_qps_per_pe * num_pes;
 
   // Calculate offset into the backend's GPU QP array
   int offset = (ctx_id_ > 0) *
-    (envvar::gda::num_qps_per_pe_default_ctx.get_value() +
-     envvar::gda::num_qps_per_pe_usr_ctx.get_value() * (ctx_id_ - 1));
+    (backend->qps_per_pe_default_ctx_ +
+     backend->qps_per_pe_usr_ctx_ * (ctx_id_ - 1));
   offset *= num_pes;
 
   CHECK_HIP(hipMalloc(&qp_counter, sizeof(uint32_t) * num_pes));

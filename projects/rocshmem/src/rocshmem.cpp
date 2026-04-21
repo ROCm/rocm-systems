@@ -479,6 +479,29 @@ static void setFilesLimit() {
   return -1;
 }
 
+[[maybe_unused]] __host__ void rocshmem_info_get_version(int *major,
+                                                         int *minor) {
+  *major = ROCSHMEM_MAJOR_VERSION;
+  *minor = ROCSHMEM_MINOR_VERSION;
+}
+
+[[maybe_unused]] __host__ void rocshmem_info_get_name(char *name) {
+  size_t i = 0;
+  for (; i < ROCSHMEM_MAX_NAME_LEN - 1 && ROCSHMEM_VENDOR_STRING[i] != '\0';
+       ++i) {
+    name[i] = ROCSHMEM_VENDOR_STRING[i];
+  }
+  name[i] = '\0';
+}
+
+[[maybe_unused]] __host__ void rocshmem_vendor_get_version_info(int *major,
+                                                                int *minor,
+                                                                int *patch) {
+  *major = ROCSHMEM_VENDOR_MAJOR_VERSION;
+  *minor = ROCSHMEM_VENDOR_MINOR_VERSION;
+  *patch = ROCSHMEM_VENDOR_PATCH_VERSION;
+}
+
 [[maybe_unused]] __host__ void *rocshmem_malloc(size_t size) {
   VERIFY_BACKEND();
 
@@ -1073,6 +1096,18 @@ __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream) {
   LOG_API("host::barrier_all_on_stream ()");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->barrier_all_on_stream(stream);
+}
+
+__host__ void rocshmem_quiet_on_stream(hipStream_t stream) {
+  LOG_API("rocshmem_quiet_on_stream");
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->quiet_on_stream(stream);
+}
+
+__host__ void rocshmem_sync_all_on_stream(hipStream_t stream) {
+  LOG_API("rocshmem_sync_all_on_stream");
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->sync_all_on_stream(stream);
 }
 
 __host__ void rocshmem_alltoallmem_on_stream(rocshmem_team_t team, void *dest,

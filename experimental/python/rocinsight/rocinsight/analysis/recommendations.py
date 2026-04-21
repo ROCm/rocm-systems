@@ -137,7 +137,7 @@ def _filter_rec_commands(
       are dropped entirely.
     - If after stripping, a rocprofv3 command has no remaining flags AND
       its args contain only output-path or scope-filter entries (-d / -o /
-      --kernel-names / etc.), the command adds no new data and is dropped.
+      --kernel-include-regex / etc.), the command adds no new data and is dropped.
     - ``rocprof-sys --trace`` alone is equivalent to ``rocprofv3 --sys-trace``
       (same HIP/HSA API data, just in Perfetto format instead of rocpd format)
       and is dropped when sys-trace data is already present.  ``rocprof-sys``
@@ -158,7 +158,7 @@ def _filter_rec_commands(
     # data collection on their own.
     _NON_DATA_ARGS = _OUTPUT_ONLY_ARGS | frozenset(
         {
-            "--kernel-names",
+            "--kernel-include-regex",
             "--include-names",
             "--exclude-names",
         }
@@ -221,7 +221,7 @@ def _filter_rec_commands(
             continue
 
         # Meaningful args: anything that isn't an output path or a scope filter.
-        # --kernel-names scopes collection but doesn't collect new data itself.
+        # --kernel-include-regex scopes collection but doesn't collect new data itself.
         meaningful_args = [a for a in new_args if a.get("name", "") not in _NON_DATA_ARGS]
         if not new_flags and not meaningful_args:
             continue  # nothing new to collect -- drop the command entirely
@@ -260,6 +260,33 @@ def _filter_rec_commands(
     return filtered
 
 
+def _build_api_overhead_issue(
+    overhead_percent: float, api_overhead: Optional[Dict[str, Any]]
+) -> str:
+    """Build the API overhead issue text with optional per-API breakdown."""
+    if api_overhead and api_overhead.get("has_api_data"):
+        top_calls = api_overhead["api_calls"][:3]
+        parts = []
+        for ac in top_calls:
+            ms = ac["total_ns"] / 1e6
+            parts.append(f"{ac['name']} x{ac['calls']} ({ms:.1f}ms)")
+        top_api_str = ", ".join(parts)
+
+        launch_ms = api_overhead["launch_overhead_ns"] / 1e6
+        total_api = max(api_overhead["total_api_ns"], 1)
+        launch_pct = api_overhead["launch_overhead_ns"] / total_api * 100
+
+        issue = (
+            f"HIP API overhead is {overhead_percent:.1f}% of total time. "
+            f"Kernel launch overhead (hipLaunchKernel) is {launch_ms:.1f}ms "
+            f"({launch_pct:.1f}% of API time)"
+        )
+        if top_api_str:
+            issue += f"\n    \u2192 top: {top_api_str}"
+        return issue
+    return f"API and launch overhead is {overhead_percent:.1f}% of total time"
+
+
 def generate_recommendations(
     time_breakdown: Dict[str, Any],
     hotspots: List[Dict[str, Any]],
@@ -270,6 +297,7 @@ def generate_recommendations(
     interval_timeline: Optional[Dict[str, Any]] = None,  # TraceLens
     att_analysis: Optional[Dict[str, Any]] = None,  # Tier 3 ATT
     warmup_issues: Optional[Dict[str, Any]] = None,  # Warmup detection
+    api_overhead: Optional[Dict[str, Any]] = None,  # Per-API breakdown
 ) -> List[Dict[str, Any]]:
     """
     Generate performance recommendations based on analysis results.
@@ -587,7 +615,7 @@ def generate_recommendations(
             {
                 "priority": "MEDIUM",
                 "category": "API Overhead",
-                "issue": f"API and launch overhead is {overhead_percent:.1f}% of total time",
+                "issue": _build_api_overhead_issue(overhead_percent, api_overhead),
                 "suggestion": "Reduce the number of API calls and kernel launches",
                 "actions": [
                     "Fuse multiple small kernels into fewer larger launches",
@@ -601,7 +629,7 @@ def generate_recommendations(
                     {
                         "tool": "rocprofv3",
                         "description": "Trace all HIP runtime API calls to identify highest-frequency calls",
-                        "flags": ["--hip-api-trace", "--hsa-trace"],
+                        "flags": ["--hip-trace", "--hsa-trace"],
                         "args": [
                             {"name": "-d", "value": "./api_output"},
                             {"name": "-o", "value": "profile"},
@@ -700,15 +728,15 @@ def generate_recommendations(
                                     "value": "GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES",
                                 },
                                 {
-                                    "name": "--kernel-names",
-                                    "value": kernel_name,
+                                    "name": "--kernel-include-regex",
+                                    "value": f"^{re.escape(kernel_name)}$",
                                 },  # display only; full_command uses shlex.quote
                                 {"name": "-d", "value": "./kernel_output"},
                                 {"name": "-o", "value": "profile"},
                             ],
                             "full_command": (
                                 f"rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES"
-                                f" --kernel-names {shlex.quote(kernel_name)}"
+                                f" --kernel-include-regex {shlex.quote(f'^{re.escape(kernel_name)}$')}"
                                 f" -d ./kernel_output -o profile -- ./app"
                             ),
                         },

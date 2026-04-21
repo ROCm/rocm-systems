@@ -1081,8 +1081,11 @@ int Device::readDevInfoLine(DevInfoTypes type, std::string* line) {
   }
 
   std::getline(fs, *line);
-  ss << "Successfully read DevInfoLine for DevInfoType (" << get_type_string(type)
-     << "), returning *line = " << *line;
+
+  ss << __PRETTY_FUNCTION__
+     << " | Success | Read SYSFS file: " << get_sys_file_path_by_type(type, true)
+     << " | Type: " << get_type_string(type) << " | Data: " << *line
+     << " | Returning: " << std::to_string(ret) << " | ";
   LOG_INFO(ss);
   fs.close();
   return 0;
@@ -1778,7 +1781,7 @@ rsmi_status_t Device::isRestartInProgress(bool* isRestartInProgress, bool* isAMD
   if ((success == true) && (!out.empty())) {
     isSystemAMDGPUModuleLive = containsString(out, "live");
   }
-  if (*isAMDGPUModuleLive) {
+  if (isSystemAMDGPUModuleLive) {
     deviceRestartInProgress = false;
   }
   *isRestartInProgress = deviceRestartInProgress;

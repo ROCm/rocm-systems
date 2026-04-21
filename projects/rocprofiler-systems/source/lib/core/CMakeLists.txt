@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/agent_manager.cpp

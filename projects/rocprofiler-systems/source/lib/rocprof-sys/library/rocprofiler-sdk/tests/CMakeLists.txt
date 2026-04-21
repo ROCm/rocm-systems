@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 set(rocprofiler_sdk_components_unit_tests_sources
     test_rccl_unit.cpp

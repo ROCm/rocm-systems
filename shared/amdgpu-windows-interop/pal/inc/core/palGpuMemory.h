@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -209,7 +209,12 @@ union GpuMemoryCreateFlags
                                                   ///  private VA.
         uint64 videoEncoder                 :  1; ///< Video encoder output butffer stream.
         uint64 videoDecoder                 :  1; ///< Video decoder input butffer stream.
-        uint64 reserved                     : 26; ///< Reserved for future use.
+        uint64 notifyResidency              :  1; ///< Request KMD residency notification (WDDM NotifyResidency).
+                                                  ///  KMD will callback with the MC ADDRESS after MakeResident
+                                                  ///  completes. Required for ISP camera capture surfaces
+                                                  ///  (D3D11_DDI_BIND_CAPTURE) and any other allocation that
+                                                  ///  needs post-residency MC address notification.
+        uint64 reserved                     : 25; ///< Reserved for future use.
     };
     uint64     u64All;                            ///< Flags packed as 64-bit uint.
 };

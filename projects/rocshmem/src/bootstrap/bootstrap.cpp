@@ -35,6 +35,8 @@
 #include "utils.hpp"
 #include "util.hpp"
 #include "socket.hpp"
+#include "memfabric/amdsmi_loader.hpp"
+#include "memfabric/pod_detection.hpp"
 
 namespace rocshmem {
 
@@ -177,6 +179,7 @@ class TcpBootstrap::Impl {
   int getNranks();
   int getNranksPerNode();
   std::vector<int> getLocalRanks();
+  std::vector<int> getIpcCapableRanks();
   void allGather(void* allData, int size);
   void send(void* data, int size, int peer, int tag);
   void recv(void* data, int size, int peer, int tag);
@@ -202,6 +205,7 @@ class TcpBootstrap::Impl {
   std::unordered_map<std::pair<int, int>, std::shared_ptr<Socket>, PairHash> peerSendSockets_;
   std::unordered_map<std::pair<int, int>, std::shared_ptr<Socket>, PairHash> peerRecvSockets_;
   std::vector<int> localRanks_;
+  std::vector<int> ipcCapableRanks_;
 
   void netSend(Socket* sock, const void* data, int size);
   void netRecv(Socket* sock, void* data, int size);
@@ -211,6 +215,7 @@ class TcpBootstrap::Impl {
 
   static void assignPortToUniqueId(UniqueIdInternal& uniqueId);
   static void netInit(std::string ipPortPair, std::string interface, SocketAddress& netIfAddr);
+  std::vector<int> detectIpcCapableRanks();
 
   void bootstrapCreateRoot();
   void bootstrapRoot();
@@ -252,7 +257,29 @@ int TcpBootstrap::Impl::getRank() { return rank_; }
 
 int TcpBootstrap::Impl::getNranks() { return nRanks_; }
 
-std::vector<int>  TcpBootstrap::Impl::getLocalRanks() { return localRanks_; }
+std::vector<int>  TcpBootstrap::Impl::getLocalRanks() {
+  // Ensure localRanks_ is populated
+  if (localRanks_.empty() && nRanksPerNode_ == 0) {
+    getNranksPerNode();  // This populates localRanks_
+  }
+  return localRanks_;
+}
+
+std::vector<int>  TcpBootstrap::Impl::getIpcCapableRanks() {
+#ifdef HAVE_AMDSMI_GPU_FABRIC_INFO
+  // Lazy initialization: detect IPC-capable ranks on first call
+  if (ipcCapableRanks_.empty()) {
+    ipcCapableRanks_ = detectIpcCapableRanks();
+  }
+  return ipcCapableRanks_;
+#else
+  // This function should not be called without HAVE_AMDSMI_GPU_FABRIC_INFO
+  // Callers should check allocator type and call getLocalRanks() instead
+  fprintf(stderr, "ROCSHMEM_ERROR: getIpcCapableRanks() called but HAVE_AMDSMI_GPU_FABRIC_INFO is not defined.\n"
+                  "This is a programming error. Use getLocalRanks() instead.\n");
+  abort();
+#endif
+}
 
 void TcpBootstrap::Impl::initialize(const rocshmem_uniqueid_t& uniqueId, int64_t timeoutSec) {
   if (!netInitialized) {
@@ -555,6 +582,37 @@ int TcpBootstrap::Impl::getNranksPerNode() {
   return nRanksPerNode_;
 }
 
+std::vector<int> TcpBootstrap::Impl::detectIpcCapableRanks() {
+  std::vector<int> ipcCapableRanks;
+
+  // Detect local pod IDs using the shared utility function
+  PodIds localPodIds = detectLocalPodIds();
+  if (IS_PODIDS_ZERO(localPodIds)) {
+    // Detection failed, return empty (will fallback to localRanks_)
+    LOG_TRACE("Rank %d: Pod detection failed, returning empty", rank_);
+    return ipcCapableRanks;
+  }
+
+  LOG_TRACE("Rank %d: ppod_id[0-3]=%02x%02x%02x%02x, vpod_id=%u",
+            rank_, localPodIds.physicalPodId[0], localPodIds.physicalPodId[1],
+            localPodIds.physicalPodId[2], localPodIds.physicalPodId[3],
+            localPodIds.virtualPodId);
+
+  // AllGather pod IDs across all ranks using Bootstrap's allGather
+  std::vector<PodIds> allPodIds(nRanks_);
+  allPodIds[rank_] = localPodIds;
+  allGather(allPodIds.data(), sizeof(PodIds));
+
+  LOG_TRACE("Rank %d completed allGather of PodIds", rank_);
+
+  // Match IPC-capable ranks using the shared utility function
+  ipcCapableRanks = matchIpcCapableRanks(rank_, allPodIds);
+
+  LOG_TRACE("Rank %d found %zu IPC-capable ranks", rank_, ipcCapableRanks.size());
+
+  return ipcCapableRanks;
+}
+
 void TcpBootstrap::Impl::allGather(void* allData, int size) {
   char* data = static_cast<char*>(allData);
   int rank = rank_;
@@ -661,6 +719,8 @@ void TcpBootstrap::Impl::close() {
  int TcpBootstrap::getNranksPerNode() { return pimpl_->getNranksPerNode(); }
 
  std::vector<int> TcpBootstrap::getLocalRanks() { return pimpl_->getLocalRanks(); }
+
+ std::vector<int> TcpBootstrap::getIpcCapableRanks() { return pimpl_->getIpcCapableRanks(); }
 
  void TcpBootstrap::send(void* data, int size, int peer, int tag) {
   pimpl_->send(data, size, peer, tag);
