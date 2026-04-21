@@ -285,25 +285,8 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
   assert(!IsVirtual() && NumChunks() > 0);
 
   const auto num_allocations = NumChunks();
-  void *priv_drv_data;
-  void *priv_alloc_data;
-  int priv_drv_data_size;
-  int priv_alloc_data_size;
-
-  thunk_proxy::GetAllocPrivDataSize(&priv_drv_data_size, &priv_alloc_data_size);
-  int total_size = priv_drv_data_size +
-    num_allocations * priv_alloc_data_size +
-    num_allocations * sizeof(D3DDDI_ALLOCATIONINFO2);
-  priv_drv_data = malloc(total_size);
-  if (!priv_drv_data)
-    return ErrorCode::OutOfMemory;
-
-  memset(priv_drv_data, 0, total_size);
-  thunk_proxy::FillinAllocPrivDrvData(priv_drv_data, priv_alloc_data_size);
-
-  priv_alloc_data = static_cast<unsigned char*>(priv_drv_data) + priv_drv_data_size;
-  auto alloc_info = reinterpret_cast<D3DDDI_ALLOCATIONINFO2*>(
-       static_cast<unsigned char*>(priv_alloc_data) + priv_alloc_data_size * num_allocations);
+  auto alloc_priv = thunk_proxy::MakeAllocPrivData(num_allocations);
+  auto alloc_info = new D3DDDI_ALLOCATIONINFO2[num_allocations]();
 
   size_t size = desc_.size;
   uint64_t addr = desc_.gpu_addr;
@@ -312,7 +295,7 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
 
   for (size_t i = 0; i < num_allocations; i++) {
 
-    void* priv_data = (void*)((char*)priv_alloc_data + priv_alloc_data_size * i);
+    void* priv_data = alloc_priv.alloc_data_at(i);
     size_t block_size = std::min(size, WDDMDevice::GpuMemoryChunkSize);
 
     if (IsUserMemory() || IsSystem()) {
@@ -327,14 +310,14 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
     addr += block_size;
 
     alloc_info[i].pPrivateDriverData = priv_data;
-    alloc_info[i].PrivateDriverDataSize = priv_alloc_data_size;
+    alloc_info[i].PrivateDriverDataSize = alloc_priv.per_alloc_size;
     alloc_info[i].VidPnSourceId = D3DDDI_ID_UNINITIALIZED;
   }
 
   D3DKMT_CREATEALLOCATION args = {};
   args.hDevice = device_->DeviceHandle();
-  args.pPrivateDriverData = priv_drv_data;
-  args.PrivateDriverDataSize = priv_drv_data_size;
+  args.pPrivateDriverData = alloc_priv.drv_data();
+  args.PrivateDriverDataSize = alloc_priv.drv_data_size;
   args.NumAllocations = num_allocations;
   args.pAllocationInfo2 = alloc_info;
 
@@ -366,7 +349,7 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
 
     resource_ = args.hResource;
   }
-  free(priv_drv_data);
+  delete[] alloc_info;
   return status;
 }
 
@@ -432,7 +415,7 @@ ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info
   int dmabuf_fd = create_info.dmabuf_fd;
 
   if (dmabuf_fd <= 0)
-    return ErrorCode::InvalidateParams;
+    return ErrorCode::InvalidParams;
 
   if(create_info.flags.sysmem_ipc_sig_importer) {
     // the ipc signal sys mem fd will be closed in Runtime::IPCClientImport, dup to hold a reference
@@ -499,7 +482,7 @@ ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info
     auto ret = d3dthunk::QueryResourceInfoFromNtHandle(&query_args);
     if (ret != ErrorCode::Success) {
       pr_err("query resource info from nt handle failed %d\n", static_cast<int>(ret));
-      return ErrorCode::InvalidateParams;
+      return ErrorCode::InvalidParams;
     }
     pr_debug("wsl-thunk: import from nt handle %d, get allocation number %d,"
              " runtime data size %#x total driver data size %#x resource data size=%#x\n",
@@ -549,7 +532,7 @@ ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info
 
     ret = d3dthunk::OpenResourceFromNtHandle(&open_args);
     if (ret != ErrorCode::Success) {
-      ret = ErrorCode::InvalidateParams;
+      ret = ErrorCode::InvalidParams;
       pr_err("open resource failed %d\n", static_cast<int>(ret));
       return ret;
     }

@@ -38,7 +38,7 @@
 #include <unistd.h>
 #include <sys/sysinfo.h>
 
-#include "impl/wddm/types.h"
+#include "d3dkmt_types.h"
 #include "impl/wddm/device.h"
 #include "util/utils.h"
 

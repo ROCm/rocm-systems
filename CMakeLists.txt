@@ -116,7 +116,6 @@ set ( ROCDXG_SRC "src/debug.cpp"
                  "src/svm.cpp"
                  "src/pc_sampling.cpp"
                  "src/hsakmtmodel.cpp"
-                 "src/dxcore_loader.cpp"
                  "src/ais.cpp"
                  "src/wddm/device.cpp"
                  "src/wddm/gpu_memory.cpp"
@@ -145,8 +144,8 @@ add_compile_definitions(LINUX __AMD64__ LITTLEENDIAN_CPU HSA_LARGE_MODEL)
 # Ensure version macro is defined for this target
 target_compile_definitions(${ROCDXG_TARGET} PRIVATE ROCDXG_VERSION="${ROCDXG_VERSION}")
 
-target_link_directories(${ROCDXG_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/thunk_proxy)
-target_link_libraries(${ROCDXG_TARGET} PRIVATE thunk_proxy)
+add_subdirectory(shared)
+target_link_libraries(${ROCDXG_TARGET} PRIVATE thunk_proxy dxg_shared)
 
 set_property(TARGET ${ROCDXG_TARGET} PROPERTY LINK_FLAGS ${ROCDXG_LINK_FLAGS})
 

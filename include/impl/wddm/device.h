@@ -50,11 +50,11 @@
 #include <memory>
 #include <vector>
 
-#include "impl/wddm/types.h"
-#include "impl/thunk_proxy/thunk_proxy.h"
+#include "d3dkmt_types.h"
+#include "thunk_proxy/thunk_proxy.h"
 #include "impl/wddm/va_mgr.h"
-#include "impl/wddm/status.h"
-#include "impl/wddm/types.h"
+#include "status.h"
+#include "d3dkmt_types.h"
 #include "impl/wddm/gpu_memory.h"
 #include "impl/wddm/cmd_util.h"
 
@@ -186,7 +186,7 @@ public:
   bool AllocUserQueueMemFromUMD(void) const { return false; }
 
   bool IsHwsEnabled(int engine) {
-    return thunk_proxy::GetHwsEnabled(engine, &device_info_);
+    return device_info_.IsHwsEnabled(engine);
   }
 
   void UpdatePageFence(uint64_t fence_value);
