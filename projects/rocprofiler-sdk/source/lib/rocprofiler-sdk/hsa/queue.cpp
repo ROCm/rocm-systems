@@ -949,12 +949,34 @@ Queue::invoke_write_interceptor(const void*                           packets,
 
 Queue::~Queue()
 {
-    ROCP_INFO << "[DIAG-HG-QUEUE-DTOR-BEGIN] queue=" << _intercept_queue
+    ROCP_INFO << "[TEARDOWN-DIAG][QUEUE-DTOR-BEGIN] queue=" << _intercept_queue
+              << " queue_id=" << (_intercept_queue ? _intercept_queue->id : 0)
               << " block_signal=" << block_signal.handle
-              << " active_kernel_signal=" << _active_kernels.handle;
+              << " active_kernel_signal=" << _active_kernels.handle
+              << " fini_status=" << registration::get_fini_status()
+              << " destroy_fn_set=" << static_cast<bool>(_core_api.hsa_signal_destroy_fn);
+
+    ROCP_INFO << "[TEARDOWN-DIAG][QUEUE-DTOR-SYNC-BEGIN] queue=" << _intercept_queue;
     sync();
-    _core_api.hsa_signal_destroy_fn(_active_kernels);
-    ROCP_INFO << "[DIAG-HG-QUEUE-DTOR-END] queue=" << _intercept_queue;
+    ROCP_INFO << "[TEARDOWN-DIAG][QUEUE-DTOR-SYNC-END] queue=" << _intercept_queue;
+
+    if(_active_kernels.handle != 0 && _core_api.hsa_signal_destroy_fn != nullptr)
+    {
+        ROCP_INFO << "[TEARDOWN-DIAG][QUEUE-DTOR-DESTROY-ACTIVE-BEGIN] queue=" << _intercept_queue
+                  << " signal=" << _active_kernels.handle;
+        auto status = _core_api.hsa_signal_destroy_fn(_active_kernels);
+        ROCP_INFO << "[TEARDOWN-DIAG][QUEUE-DTOR-DESTROY-ACTIVE-END] queue=" << _intercept_queue
+                  << " signal=" << _active_kernels.handle
+                  << " status=" << static_cast<int>(status);
+    }
+    else
+    {
+        ROCP_WARNING << "[TEARDOWN-DIAG][QUEUE-DTOR-DESTROY-ACTIVE-SKIP] queue="
+                     << _intercept_queue << " signal=" << _active_kernels.handle
+                     << " destroy_fn_set=" << static_cast<bool>(_core_api.hsa_signal_destroy_fn);
+    }
+
+    ROCP_INFO << "[TEARDOWN-DIAG][QUEUE-DTOR-END] queue=" << _intercept_queue;
 }
 
 void
