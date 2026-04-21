@@ -201,7 +201,7 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe,
                           bool blocking = false) {
-    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, local_pe)) {
+    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
       auto* handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
       if (blocking && handle) {
         handle->quietAll();
@@ -213,7 +213,7 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe,
                              bool blocking = false) {
-    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, local_pe)) {
+    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
       auto* handle = sdmaImpl_.sdmaCopy_wg(dst, src, size, local_pe);
       if (blocking && handle) {
         handle->quietAll();
@@ -225,7 +225,7 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe,
                                bool blocking = false) {
-    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, local_pe)) {
+    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
       auto* handle = sdmaImpl_.sdmaCopy_wave(dst, src, size, local_pe);
       if (blocking && handle) {
         handle->quietAll();
@@ -236,7 +236,7 @@ class IpcSdmaImpl : public IpcOnImpl {
   }
 
   __device__ void ipcQuiet() {
-    sdmaImpl_.sdmaQuietAll();
+    if (sdmaImpl_.sdmaEnabled) sdmaImpl_.sdmaQuietAll();
     detail::atomic::threadfence<detail::atomic::memory_scope_system,
                                 detail::atomic::memory_order_acq_rel>();
   }

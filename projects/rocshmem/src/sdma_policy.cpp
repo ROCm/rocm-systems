@@ -50,9 +50,15 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, MPI_C
   mpilib_ftable_.Comm_rank(shmcomm, &local_rank);
 
   // Read configuration from environment variables
+  sdmaEnabled = static_cast<bool>(envvar::sdma::enabled);
   sdmaThreshold = static_cast<size_t>(envvar::sdma::threshold);
   numChannels = static_cast<int>(envvar::sdma::num_channels);
   minChunkPerChannel = static_cast<size_t>(envvar::sdma::min_chunk_per_channel);
+
+  if (!sdmaEnabled) {
+    LOG_INFO("SDMA disabled at runtime (ROCSHMEM_SDMA_ENABLED=0)");
+    return;
+  }
 
   LOG_INFO("SDMA init with threshold=%zu, channels=%d, "
            "min_chunk=%zu, local_size=%d",
@@ -110,9 +116,15 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, TcpBo
   local_rank = std::find(local_ranks.begin(), local_ranks.end(), pe) - local_ranks.begin();
 
   // Read configuration from environment variables
+  sdmaEnabled = static_cast<bool>(envvar::sdma::enabled);
   sdmaThreshold = static_cast<size_t>(envvar::sdma::threshold);
   numChannels = static_cast<int>(envvar::sdma::num_channels);
   minChunkPerChannel = static_cast<size_t>(envvar::sdma::min_chunk_per_channel);
+
+  if (!sdmaEnabled) {
+    LOG_INFO("SDMA disabled at runtime (ROCSHMEM_SDMA_ENABLED=0)");
+    return;
+  }
 
   LOG_INFO("SDMA init with threshold=%zu, channels=%d, "
            "min_chunk=%zu, local_size=%d",
