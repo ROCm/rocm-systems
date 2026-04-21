@@ -103,6 +103,12 @@ class IpcOnImpl {
     detail::atomic::threadfence<scope, order>();
   }
 
+  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
+  __device__ __forceinline__ void ipcFence([[maybe_unused]] int local_pe) {
+    detail::atomic::threadfence<scope, order>();
+  }
+
   __device__ void ipcQuiet() {
     detail::atomic::threadfence<detail::atomic::memory_scope_system,
                                 detail::atomic::memory_order_acq_rel>();
@@ -248,6 +254,20 @@ class IpcSdmaImpl : public IpcOnImpl {
     memcpy_wave(dst, src, size);
   }
 
+  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
+  __device__ __forceinline__ void ipcFence() {
+    if (sdmaImpl_.sdmaEnabled) sdmaImpl_.sdmaQuietAll();
+    detail::atomic::threadfence<scope, order>();
+  }
+
+  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
+  __device__ __forceinline__ void ipcFence(int local_pe) {
+    if (sdmaImpl_.sdmaEnabled) sdmaImpl_.sdmaQuiet(local_pe);
+    detail::atomic::threadfence<scope, order>();
+  }
+
   __device__ void ipcQuiet() {
     if (sdmaImpl_.sdmaEnabled) sdmaImpl_.sdmaQuietAll();
     detail::atomic::threadfence<detail::atomic::memory_scope_system,
@@ -309,6 +329,10 @@ class IpcOffImpl {
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
             detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
   __device__ __forceinline__ void ipcFence() {}
+
+  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
+  __device__ __forceinline__ void ipcFence(int) {}
 
   template <typename T>
   __device__ T ipcAMOFetchAdd(T *val, T value) {

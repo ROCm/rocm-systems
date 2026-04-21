@@ -77,22 +77,21 @@ __device__ void IPCContext::getmem_nbi(void *dest, const void *source,
 }
 
 __device__ void IPCContext::fence() {
-  for (int i{0}, j{tinfo->pe_start}; i < tinfo->size; i++, j += tinfo->stride) {
-    detail::atomic::store<int, detail::atomic::memory_scope_system>(&fence_pool[j], 1, orders_);
-  }
+  ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
+                    detail::atomic::memory_order_release>();
 }
 
 __device__ void IPCContext::fence(int pe) {
-  detail::atomic::store<int, detail::atomic::memory_scope_system>(&fence_pool[pe], 1, orders_);
+  ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
+                    detail::atomic::memory_order_release>(pe);
 }
 
 __device__ void IPCContext::quiet() {
-  fence();
   ipcImpl_.ipcQuiet();
 }
 
 __device__ void IPCContext::pe_quiet(size_t pe) {
-  fence(pe);
+  ipcImpl_.ipcQuiet(pe);
 }
 
 __device__ void *IPCContext::shmem_ptr(const void *dest, int pe) {
