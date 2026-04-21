@@ -68,7 +68,6 @@ __host__ IpcGpuBarrier::IpcGpuBarrier(
     return {nullptr, IpcGpuBarrier{}};
   }
 
-  //ncclResult_t result = ncclSuccess;
   auto memHandler =
       std::make_unique<ncclIpcMemHandler>(bootstrap, selfRank, nRanks);
   
@@ -112,8 +111,6 @@ __host__ IpcGpuBarrier::IpcGpuBarrier(
   resources->selfMailboxBuf = std::move(selfMboxBuf);
   return {std::move(resources), barrier};
 
-/*fail:
-  return {nullptr, IpcGpuBarrier{}};*/
 }
 
 } // namespace meta::comms
