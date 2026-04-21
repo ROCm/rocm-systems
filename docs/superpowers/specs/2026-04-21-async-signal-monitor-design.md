@@ -234,3 +234,24 @@ Operational rules:
 - Backend comparison benchmarks complete with reproducible results.
 - Default-backend decision documented and justified by selection rule.
 - No observed queue completion regressions in functional validation.
+
+## Backend Decision Addendum (Phase 1)
+
+- Date: 2026-04-21
+- Environment: `banff-ccs-aus-g05-05.cs-aus.dcgpu`, container `bewelton_remove_handler`
+- Data set: `/tmp/signal-monitor-poll-W*.json`, `/tmp/signal-monitor-ioctl-W*.json` (generated in fresh clone run)
+- Correctness summary: `poll=pass`, `ioctl=pass` (`missed_callbacks=0`, `duplicate_callbacks=0` across W1-W5)
+- Latency summary (`avg p99.9`, `avg max`):
+  - `poll=(7.7 us, 9.7 us)`
+  - `ioctl=(6.7 us, 8.7 us)`
+- Throughput summary (`avg callbacks/s`):
+  - `poll=225555.0`
+  - `ioctl=312127.2`
+- Winner by selection rule: `ioctl`
+- Decision rationale:
+  1. Both backends pass correctness across all workloads.
+  2. `ioctl` has lower `p99.9` latency than `poll` (6.7 vs 7.7 us), with >5% separation.
+  3. Rule 2 decides winner without tie-breaker escalation.
+- Default change action:
+  - Keep runtime selector behavior (`ROCPROF_SIGNAL_MONITOR_BACKEND=auto|poll|ioctl`) in this patch.
+  - Set concrete default/backend policy in follow-up once broader non-mock hardware runs are recorded.
