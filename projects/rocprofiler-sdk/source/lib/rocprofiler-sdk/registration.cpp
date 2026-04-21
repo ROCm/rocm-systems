@@ -41,6 +41,7 @@
 #include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_intercept.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
@@ -1235,6 +1236,17 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::update_table(hsa_api_table->image_ext_, lib_instance);
         rocprofiler::hsa::update_table(hsa_api_table->finalizer_ext_, lib_instance);
         rocprofiler::hsa::update_table(hsa_api_table->tools_, lib_instance);
+
+        // install inline queue intercept AFTER update_table so our wrappers
+        // sit outermost in core_ and chain through the tracing functors
+        {
+            auto inline_intercept =
+                common::get_env("ROCPROFILER_INLINE_INTERCEPT", true);
+            ROCP_INFO << "ROCPROFILER_INLINE_INTERCEPT=" << inline_intercept;
+            if(inline_intercept)
+                rocprofiler::hsa::queue_intercept::install_intercept(
+                    *hsa_api_table->core_);
+        }
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         // Initialize PC sampling service if configured
