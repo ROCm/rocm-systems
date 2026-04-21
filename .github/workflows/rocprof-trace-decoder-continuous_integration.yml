@@ -54,7 +54,7 @@ jobs:
         tar -xf "rocm-gfx94X.tar.gz" -C "${{ env.ROCM_PATH }}"
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
       with:
         sparse-checkout: projects/rocprof-trace-decoder
         set-safe-directory: true

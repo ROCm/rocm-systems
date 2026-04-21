@@ -91,7 +91,7 @@ jobs:
 
     - name: Install ROCm Packages
       timeout-minutes: 30
-      uses: nick-fields/retry@v3
+      uses: nick-fields/retry@v4
       with:
         retry_wait_seconds: 30
         timeout_minutes: 30
