@@ -65,6 +65,8 @@ def format_analysis_output(
     custom_prompt: Optional[str] = None,
     kernel_resources: Optional[Dict[str, Any]] = None,
     api_overhead: Optional[Dict[str, Any]] = None,
+    communication: Optional[Dict[str, Any]] = None,  # Phase 10 RCCL / NIC
+    roofline: Optional[Dict[str, Any]] = None,       # Phase 10 Live Roofline
 ) -> str:
     """
     Format analysis results for display.
@@ -107,6 +109,8 @@ def format_analysis_output(
             custom_prompt=custom_prompt,
             kernel_resources=kernel_resources,
             api_overhead=api_overhead,
+            communication=communication,
+            roofline=roofline,
         )
         # Combined mode: embed tier0 into JSON document
         if tier0_result is not None:
@@ -114,13 +118,18 @@ def format_analysis_output(
 
             try:
                 doc = _json.loads(output)
-                doc["tier0"] = _tier0_to_dict(tier0_result)
+                doc["tier0"] = _tier0_to_dict(tier0_result, has_profiling=bool(database_path))
                 output = _json.dumps(doc, indent=2)
             except Exception:
                 pass  # Tier0 embedding into combined JSON is non-fatal; return Tier1/2 output unchanged
         return output
 
     if output_format == "markdown":
+        _detected_kernels = (
+            getattr(tier0_result, "detected_kernels", None)
+            if tier0_result is not None
+            else None
+        )
         output = _format_as_markdown(
             time_breakdown=time_breakdown,
             hotspots=hotspots,
@@ -131,13 +140,21 @@ def format_analysis_output(
             interval_timeline=interval_timeline,
             kernel_categories=kernel_categories,
             short_kernels=short_kernels,
+            detected_kernels=_detected_kernels,
+            communication=communication,
+            roofline=roofline,
         )
         if tier0_result is not None:
             output += "\n\n---\n\n## Tier 0: Source Code Analysis\n\n"
-            output += _format_tier0_markdown(tier0_result)
+            output += _format_tier0_markdown(tier0_result, has_profiling=bool(database_path))
         return output
 
     if output_format == "webview":
+        # Surface Tier-0 detected_kernels (if any) so the Top Kernel
+        # Hotspots table can correlate each row with its source location.
+        _detected_kernels = None
+        if tier0_result is not None:
+            _detected_kernels = getattr(tier0_result, "detected_kernels", None)
         return _format_as_webview(
             time_breakdown=time_breakdown,
             hotspots=hotspots,
@@ -149,6 +166,9 @@ def format_analysis_output(
             kernel_categories=kernel_categories,
             short_kernels=short_kernels,
             att_analysis=att_analysis,
+            detected_kernels=_detected_kernels,
+            communication=communication,
+            roofline=roofline,
         )
 
     # Default: text
@@ -226,8 +246,21 @@ def format_analysis_output(
         )
         lines.append("\u2500" * width)
 
+        # Cross-reference hotspots with Tier-0 source locations so each row
+        # can carry a one-line "Source: file.hip:42 (definition)" annotation.
+        from ._source_correlation import (
+            correlate_hotspots_with_source as _corr_hs,
+            format_source_citation_inline as _cite_hs,
+        )
+        _text_detected = (
+            getattr(tier0_result, "detected_kernels", None)
+            if tier0_result is not None
+            else None
+        )
+        _text_annotated = _corr_hs(hotspots, _text_detected)
+
         # Table rows
-        for i, kernel in enumerate(hotspots, 1):
+        for i, kernel in enumerate(_text_annotated, 1):
             name = kernel.get("name", "unknown")
             if len(name) > 30:
                 name = name[:27] + "..."
@@ -240,6 +273,9 @@ def format_analysis_output(
             lines.append(
                 f"{i:2}  {name:<30}  {calls:6}  {total_ms:10,.2f}  {avg_us:9,.1f}  {percent:6.1f}%"
             )
+            _cite = _cite_hs(kernel.get("source_locations"))
+            if _cite:
+                lines.append(f"      Source: {_cite}")
 
         lines.append("")
 
@@ -371,6 +407,37 @@ def format_analysis_output(
 
             lines.append("")
 
+    # Phase 10: Live Roofline text table
+    if roofline and roofline.get("kernels"):
+        lines.append("\u2501" * width)
+        lines.append("LIVE ROOFLINE".center(width))
+        lines.append("\u2501" * width)
+        lines.append("")
+        ridge_ai = float((roofline.get("ridge_point") or {}).get("ai", 0.0))
+        arch = roofline.get("arch", "unknown")
+        dtype = str(roofline.get("dtype", "fp32")).upper()
+        lines.append(
+            f"  Arch: {arch}   dominant dtype: {dtype}   "
+            f"ridge @ {ridge_ai:.1f} FLOPs/Byte"
+        )
+        lines.append("")
+        lines.append(
+            f"  {'Kernel':<40}  {'AI':>8}  {'GFLOPs/s':>10}  {'Regime':<9}  {'dtype':<5}"
+        )
+        lines.append("\u2500" * width)
+        for k in roofline["kernels"]:
+            name = str(k.get("name", "unknown"))
+            if len(name) > 40:
+                name = name[:37] + "..."
+            ai = float(k.get("ai", 0))
+            gflops = float(k.get("achieved_flops_per_s", 0)) / 1e9
+            regime = str(k.get("bottleneck_class", "-"))
+            ftype = str(k.get("fp_type", "-"))
+            lines.append(
+                f"  {name:<40}  {ai:8.2f}  {gflops:10,.1f}  {regime:<9}  {ftype:<5}"
+            )
+        lines.append("")
+
     # TraceLens: Kernel Category Breakdown
     if kernel_categories:
         lines.append("")
@@ -415,6 +482,64 @@ def format_analysis_output(
                 )
         lines.append("")
 
+    # Communication (RCCL / NIC) — Phase 10
+    if communication and communication.get("collectives"):
+        lines.append("\u2501" * width)
+        lines.append("COMMUNICATION (RCCL)".center(width))
+        lines.append("\u2501" * width)
+        lines.append("")
+        _summary = communication.get("summary", {}) or {}
+        _op_count = _summary.get("op_count", 0)
+        _dominant = _summary.get("dominant_op") or "n/a"
+        _avg_eff = _summary.get("avg_efficiency_pct", 0.0) or 0.0
+        _overlap = _summary.get("overlap_pct", 0.0) or 0.0
+        _peak = _summary.get("peak_bw_gbps")
+        _peak_s = f"{_peak:.0f} GB/s" if _peak else "n/a"
+        _ranks = _summary.get("ranks", 0)
+        lines.append(
+            f"  {_op_count} collective(s)  \u2014  dominant: {_dominant}  "
+            f"\u2014  ranks: {_ranks}"
+        )
+        lines.append(
+            f"  Peak busBW: {_peak_s}   Avg efficiency: {_avg_eff:.1f}%   "
+            f"Comm/Compute overlap: {_overlap:.1f}%"
+        )
+        if _summary.get("capture_incomplete"):
+            lines.append(
+                "  [note] Capture incomplete \u2014 fell back to kernel-name regex."
+            )
+        lines.append("")
+        # Box-drawn table.
+        hdr = (
+            f" {'Op':<16}  {'Bytes':>10}  {'Duration':>10}  "
+            f"{'Bus BW':>12}  {'Peak':>10}  {'Eff%':>6}  {'Ovlp%':>6}"
+        )
+        lines.append(hdr)
+        lines.append("\u2500" * width)
+        for c in communication["collectives"]:
+            mb = c.get("msg_bytes", 0) or 0
+            if mb >= 1e9:
+                mb_s = f"{mb / 1e9:.2f}GB"
+            elif mb >= 1e6:
+                mb_s = f"{mb / 1e6:.1f}MB"
+            elif mb >= 1e3:
+                mb_s = f"{mb / 1e3:.1f}KB"
+            else:
+                mb_s = f"{mb}B"
+            dur_ns = c.get("duration_ns", 0) or 0
+            dur_ms = dur_ns / 1e6
+            bw = c.get("effective_bw_gbps", 0) or 0
+            pk = c.get("peak_bw_gbps")
+            pk_s = f"{pk:.0f}" if pk else "-"
+            eff = c.get("efficiency_pct", 0) or 0
+            ov = c.get("overlap_ratio", 0) or 0
+            op_s = str(c.get("op_type", "?"))[:16]
+            lines.append(
+                f" {op_s:<16}  {mb_s:>10}  {dur_ms:>8.2f}ms  "
+                f"{bw:>9.2f}GB/s  {pk_s:>10}  {eff:>5.1f}%  {ov:>5.1f}%"
+            )
+        lines.append("")
+
     # Recommendations
     lines.append("\u2501" * width)
     lines.append("RECOMMENDATIONS".center(width))
@@ -432,7 +557,9 @@ def format_analysis_output(
 
         confidence = rec.get("confidence")
         conf_str = f"  (Confidence: {int(confidence * 100)}%)" if confidence is not None else ""
-        lines.append(f"[{priority}] {category}{conf_str}")
+        # Phase 10: [advanced] badge next to priority for pragma recs.
+        adv_badge = " [advanced]" if rec.get("subtype") == "pragma" else ""
+        lines.append(f"[{priority}]{adv_badge} {category}{conf_str}")
         lines.append("\u2500" * width)
         lines.append(f"  Issue: {issue}")
         lines.append("")
@@ -444,6 +571,23 @@ def format_analysis_output(
             lines.append("")
         if estimated_impact:
             lines.append(f"  Estimated Impact: {estimated_impact}")
+            lines.append("")
+        # Phase 10 — Change-Impact Prediction. Only rendered when the
+        # specialist attached predicted_impact_range on this rec.
+        pred_range = rec.get("predicted_impact_range")
+        if pred_range and len(pred_range) == 2:
+            lo, hi = pred_range
+            pred_conf = rec.get("predicted_confidence")
+            if pred_conf is None:
+                pred_conf = rec.get("confidence")
+            pconf_str = (
+                f" (conf {int(float(pred_conf) * 100)}%)"
+                if pred_conf is not None
+                else ""
+            )
+            lines.append(
+                f"  Predicted: {float(lo):.2f}-{float(hi):.2f}x{pconf_str}"
+            )
             lines.append("")
         if commands:
             lines.append("  Recommended Commands:")

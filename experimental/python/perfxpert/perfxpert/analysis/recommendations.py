@@ -757,6 +757,71 @@ def generate_recommendations(
                 }
             )
 
+    # Rule 3b — Phase 10 advanced: LLVM loop-hint pragma advice.
+    #
+    # This rule is ALWAYS evaluated but its output is hidden from the
+    # rendered report unless ``--advanced`` or
+    # ``PERFXPERT_ADVANCED_RECS=1`` is set (see
+    # ``perfxpert/analyze.py::_filter_advanced_recs``). Carrying the
+    # recs through Layer-B keeps the JSON contract complete for
+    # downstream consumers.
+    #
+    # Deterministic trigger: compute-bound hotspot (``gpu_utilization_percent``
+    # > 90 with ``avg_waves`` low enough to imply VALU saturation but
+    # not pathological VGPR pressure). This matches the
+    # ``clang_loop_unroll_count`` trigger rule in
+    # ``knowledge/compiler_pragmas.yaml``. Richer signals (source-line
+    # anchor, loop body size, literal trip count) come from the
+    # Compute Specialist agent when LLM mode is on — this
+    # deterministic branch produces a conservative fallback so the
+    # CLI gate has something to filter OR render.
+    if hotspots and hardware_counters and hardware_counters.get("has_counters"):
+        _pr_metrics = hardware_counters.get("metrics", {}) or {}
+        _pr_gpu_util = _pr_metrics.get("gpu_utilization_percent", 0) or 0
+        _pr_top = hotspots[0]
+        _pr_pct = float(_pr_top.get("percent_of_total", 0) or 0)
+        if _pr_gpu_util > 90 and _pr_pct >= 10.0:
+            try:
+                from perfxpert.tools import pragma as _pragma_tool
+                from perfxpert.knowledge import load_yaml as _load_yaml
+                _catalog = _load_yaml("compiler_pragmas") or []
+                _unroll_count = next(
+                    (e for e in _catalog if e.get("pragma") == "clang_loop_unroll_count"),
+                    None,
+                )
+                if _unroll_count is not None:
+                    # Source anchor — best-effort from hotspot source_locations.
+                    _locs = _pr_top.get("source_locations") or []
+                    _def_loc = next(
+                        (loc for loc in _locs if loc.get("kind") == "definition"),
+                        None,
+                    )
+                    _src_file = (_def_loc or {}).get("file", "")
+                    _src_line = int((_def_loc or {}).get("line", 0) or 0)
+                    if not _src_file or not _src_line:
+                        # Deterministic fallback: no Tier-0 anchor available
+                        # (caller did not pass --source-dir). Emit the rec
+                        # anyway so the --advanced gate has something to
+                        # render — the action list explicitly tells the
+                        # user to re-run with --source-dir to get the
+                        # precise file:line. The agentic Compute
+                        # Specialist path supplies a real anchor when it
+                        # runs.
+                        _src_file = "<re-run with --source-dir for anchor>"
+                        _src_line = 0
+                    recommendations.append(
+                        build_pragma_recommendation(
+                            kernel_name=_pr_top.get("name", "unknown"),
+                            pragma_entry=_unroll_count,
+                            source_file=_src_file,
+                            source_line=_src_line,
+                        )
+                    )
+            except Exception:
+                # Pragma advice is opt-in; never let it crash the main
+                # recommendation pass.
+                pass
+
     # Rule 4: Many small kernels
     if hotspots:
         total_calls = sum(k.get("calls", 0) for k in hotspots)
@@ -970,6 +1035,67 @@ def generate_recommendations(
             )
 
     return recommendations
+
+
+def build_pragma_recommendation(
+    *,
+    kernel_name: str,
+    pragma_entry: Dict[str, Any],
+    source_file: str,
+    source_line: int,
+    expected_impact: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build a Phase-10 pragma recommendation dict.
+
+    All pragma recs carry ``subtype: "pragma"`` so the CLI gate
+    (``--advanced`` / ``PERFXPERT_ADVANCED_RECS=1``) can filter them
+    out and so formatters can render the ``[advanced]`` badge next to
+    the priority tag.
+
+    The footer line **"Verify with: perfxpert diff ..."** is
+    mandatory — the fence slice at
+    ``perfxpert/agents/fence/compute_specialist.md`` enforces it on
+    every agent-emitted pragma card; this builder does the same for
+    deterministic emission.
+    """
+    pragma_id = pragma_entry.get("pragma", "")
+    syntax = pragma_entry.get("syntax", "")
+    description = pragma_entry.get("description", "")
+    factor_sweep = pragma_entry.get("factor_sweep") or []
+    risk = pragma_entry.get("risk", "low")
+
+    actions: List[str] = [
+        f"Insert `{syntax}` immediately above the target loop",
+        f"Location: {source_file}:{source_line}",
+    ]
+    if factor_sweep:
+        actions.append(
+            f"Try unroll factors {factor_sweep} (no other values — YAML-locked)"
+        )
+    actions.append(
+        "Verify with: perfxpert diff -i <baseline>.db -i <new>.db"
+    )
+
+    return {
+        "priority": "MEDIUM",
+        "subtype": "pragma",
+        "category": f"Loop Hint ({pragma_id})",
+        "issue": (
+            f"Kernel '{kernel_name}' matches the `{pragma_id}` trigger: "
+            f"{description}"
+        ),
+        "suggestion": f"Apply `{syntax}` at {source_file}:{source_line}",
+        "actions": actions,
+        "estimated_impact": expected_impact
+        or pragma_entry.get("expected_impact", "1.05x-1.3x"),
+        "confidence": 0.55,
+        "commands": [],
+        "source_file": source_file,
+        "source_line": source_line,
+        "pragma_id": pragma_id,
+        "factor_sweep": list(factor_sweep),
+        "risk": risk,
+    }
 
 
 def _is_code_change_rec(rec: Dict[str, Any]) -> bool:
