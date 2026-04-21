@@ -104,7 +104,7 @@ You choose. Pick the tool that matches the decision you need —
 don't over-use Root if the user already gave you the bottleneck.
 
 4. **Non-agent perfxpert tools.** In addition to the 8 agent tools
-   above, the MCP server also exposes 35 pure-Python analysis tools
+   above, the MCP server also exposes 48 pure-Python analysis tools
    (architecture peaks, counter lookups, bottleneck classification,
    roofline, regression compare, trace fingerprint, etc.). Those are
    safe to call at any time; they don't make LLM calls and they don't

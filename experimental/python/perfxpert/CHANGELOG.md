@@ -6,6 +6,54 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Advanced specialist tools — 8 new READ_ONLY MCP tools.** The
+  specialist fences now consume eight additional deterministic
+  tools surfaced on the MCP wire:
+  `kernel_fusion.find_fusion_candidates` (adjacent-short-kernel
+  fusion),
+  `gpu_runtime_monitor.parse_amd_smi_json` /
+  `parse_rocm_smi_json` / `analyze_thermal` (thermal / throttle
+  envelope),
+  `unified_memory.analyze_paging` (MI300X paging + cross-die),
+  `dependency_graph.reconstruct_dag` (critical-path + GPU bubbles),
+  `pragma.lookup_pragmas` / `explain_pragma` /
+  `suggest_pragmas_for_kernel` (LLVM loop-hint advanced
+  recommendations, gated behind `--advanced`).
+- **Change-Impact Prediction — 3 new MCP tools.**
+  `predict_impact.predict_change_impact`,
+  `predict_impact.list_supported_changes`,
+  `predict_impact.explain_prediction`. Returns a conservative
+  speedup bracket (`hi × 0.85`), confidence, rationale, and a
+  `source_citation` back into `knowledge/proven_optimizations.yaml`.
+  Amdahl + tier-2 gates enforced internally. Bumps
+  `schema_version` to `0.3.3` when any rec fires a prediction.
+- **Live Roofline — `roofline.plot_points` MCP tool.** Emits a
+  per-kernel `(ai, achieved_flops_per_s, bottleneck_class,
+  fp_type, confidence)` list + arch ridge point; webview renders
+  an inline-SVG log-log plot. Populating the top-level `roofline`
+  key bumps `schema_version` to `0.3.4`.
+- **Communication / RCCL analysis —
+  `rccl_analysis.analyze_collectives` +
+  `interconnect.lookup_peaks` MCP tools.** Per-collective
+  `effective_bw_gbps` / `efficiency_pct` / `efficiency_label` +
+  rollup `summary`. Validated at the module boundary via the
+  `CommunicationBlock` + `CollectiveEntry` Pydantic models
+  (`perfxpert/agents/schemas.py`). Bumps `schema_version` to
+  `0.3.2`.
+- **ATT Flamegraph (webview-only pure-rendering derivative).**
+  `perfxpert/formatters/_att_flamegraph.py` renders an inline-SVG
+  flamegraph under the Thread Trace `.scard` when
+  `thread_trace.has_att_data` is true. No new payload key — pure
+  function of the existing `thread_trace.kernels` +
+  `top_stalling_instructions` subfields.
+- **Knowledge YAML conventions.** `applies_to_gfx` arch gate on
+  `matrix_meter.yaml` + `attention_patterns.yaml` (plus selective
+  entries in `proven_optimizations.yaml` /
+  `compiler_pragmas.yaml`); `units` field on every
+  `expected_impact` entry in `fusion_patterns.yaml`.
+- **Fence template consolidation.** `diff_specialist.md` is now
+  the canonical per-agent fence template; `root.md` and
+  `recommendation.md` were re-aligned to that layout.
 - **Agents-as-MCP-tools (8 READ_ONLY agent tools).** The MCP server now
   exposes every agent in the hierarchy as its own tool:
   `perfxpert_agent_root`, `perfxpert_agent_analysis`,
@@ -15,11 +63,12 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `perfxpert_agent_latency_specialist`,
   `perfxpert_agent_diff_specialist`. Backend TUIs (Claude Code,
   Gemini CLI, Codex CLI, opencode) read the agent hierarchy as
-  reference in `AGENTS.md` and freely pick whichever of the 43
-  tools matches the user's intent. MCP tool count is now **43**
-  (was 34) — 34 classifier/knowledge + 8 agent + 1 `trace_diff.diff_runs`.
-  Schemas remain frozen per `perfxpert/agents/schemas.py`.
-- **Public Python API (`perfxpert.api`).** 1:1 mirror of the 7 agent
+  reference in `AGENTS.md` and freely pick whichever of the **56**
+  MCP tools matches the user's intent. Current MCP tool
+  inventory: **56** (8 agent-hierarchy + 48 classifier / knowledge
+  / advanced-specialist / trace_diff). Schemas remain frozen per
+  `perfxpert/agents/schemas.py`.
+- **Public Python API (`perfxpert.api`).** 1:1 mirror of the 8 agent
   MCP tools (`api.agent_root`, `api.agent_analysis`, etc.) for
   in-process embedding without standing up an MCP server. The
   `perfxpert analyze` CLI now calls `perfxpert.api.agent_root(...)`
@@ -44,7 +93,7 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   call a single `perfxpert_run_root_analysis` after
   `perfxpert_intent_classify`. The "MUST call
   `perfxpert_run_root_analysis`" contract is gone; backends choose
-  any of the 43 MCP tools based on intent. The tool-priority gate
+  any of the 56 MCP tools based on intent. The tool-priority gate
   still requires `perfxpert_intent_classify` as the first call.
 - **FallbackProvider exception taxonomy.** Documented the full
   typed-error set — `AuthError`, `RateLimitError`,

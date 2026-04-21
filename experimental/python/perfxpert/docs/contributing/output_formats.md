@@ -279,6 +279,9 @@ graceful-placeholder when a section is structurally empty):
 | 10 | Warnings | `warnings` (from `RootOutput`) |
 | 11 | Tier-0 findings (conditional) | `tier0_findings` (only when `--source-dir` supplied) |
 | 12 | Changed-vs-baseline (conditional) | `trace_diff` top-level (only when `--baseline <db>` supplied OR when rendering a standalone `perfxpert diff` report) |
+| 13 | Thread Trace + ATT Flamegraph (conditional) | `thread_trace` top-level + inline-SVG flamegraph rendered in webview from `thread_trace.kernels`/`top_stalling_instructions` (only when ATT data is present — schema pins `0.4.0`) |
+| 14 | Live Roofline (conditional) | `roofline` top-level from `roofline.plot_points`: per-kernel `(ai, achieved_flops_per_s, bottleneck_class, fp_type, confidence)` + `ridge_point`; webview renders inline-SVG log-log plot, markdown/text render a table (schema pins `0.3.4`) |
+| 15 | Communication (conditional) | `communication` top-level from `rccl_analysis.analyze_collectives`: per-collective `effective_bw_gbps`/`efficiency_pct`/`efficiency_label`/`overlap_ratio` + rollup `summary` (schema pins `0.3.2`) |
 
 ### Hotspot → source correlation (Confluence row #5)
 
@@ -339,6 +342,47 @@ Every format must propagate severity visually:
   `[HOT]` / `[WARM]` / `[COOL]`.
 - **json** — emits `severity` + `severity_label` verbatim inside each
   `source_locations` entry (in addition to `severity_color`).
+
+### ATT Flamegraph (Thread Trace)
+
+When `thread_trace.has_att_data == True`, the webview renders an
+inline-SVG flamegraph directly under the Thread Trace `.scard`
+(`perfxpert/formatters/_att_flamegraph.py`) — hot basic-blocks widen
+proportionally to stall ns, coloured by `stall_category`. No new
+payload key: the flamegraph is a pure-rendering derivative of the
+existing `thread_trace.kernels` + `top_stalling_instructions`
+subfields. Markdown / text / json keep the pre-existing stall table +
+top-instructions output (they don't rerender the SVG). Schema-wise,
+ATT presence bumps the top-level `schema_version` to `0.4.0`.
+
+### Live Roofline (`roofline.plot_points`)
+
+When Tier-2 counters (`SQ_INSTS_VALU` / `FETCH_SIZE` / `WRITE_SIZE`)
+are present, `perfxpert.tools.roofline.plot_points` produces a
+top-level `roofline` key with per-kernel `(ai,
+achieved_flops_per_s, bottleneck_class, fp_type, confidence)` plus
+`arch_peaks` + `ridge_point`. The webview renders a log-log inline
+SVG (no external JS/CSS — the SVG string is embedded directly into
+the template). Markdown / text emit a per-kernel table with columns
+`(kernel, AI, achieved GFLOPs/s, regime, dtype, confidence)`; json
+is a passthrough. Populating the key bumps `schema_version` to
+`0.3.4`; ATT still trumps.
+
+### Communication (`rccl_analysis.analyze_collectives`)
+
+When the trace contains RCCL collective spans,
+`perfxpert.tools.rccl_analysis.analyze_collectives` produces a
+top-level `communication` key with a per-collective list
+(`op_type`, `msg_bytes`, `duration_ns`, `effective_bw_gbps`,
+`peak_bw_gbps`, `efficiency_pct`, `efficiency_label`,
+`overlap_ratio`, `algo_hint`, `topology_hint`, `regime`, `ranks`)
+and a rollup `summary`. Validation at the boundary goes through
+the Pydantic `CommunicationBlock` + `CollectiveEntry` models in
+`perfxpert/agents/schemas.py`. Webview renders a table + stacked
+efficiency bars; markdown emits a GFM table; text emits a
+fixed-width banner + rows; json is a passthrough. Populating the
+key bumps `schema_version` to `0.3.2` (ATT `0.4.0` + roofline
+`0.3.4` still trump when their fields are also set).
 
 ### Diff reports (`perfxpert diff`, `perfxpert ci`, `analyze --baseline`)
 

@@ -115,7 +115,7 @@ perfxpert doctor
 │                          ▼                                   │
 │             OpenAI Agents SDK hierarchy                      │
 │   (Root → Analysis → Recommendation → Specialists)           │
-│   — all 7 agents callable via MCP + perfxpert.api            │
+│   — all 8 agents callable via MCP + perfxpert.api            │
 │                          │                                   │
 │                          ▼                                   │
 │    Deterministic middleware (gate_cascade, intent router)    │
