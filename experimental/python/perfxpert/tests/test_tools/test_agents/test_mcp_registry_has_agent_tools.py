@@ -67,18 +67,51 @@ def test_old_run_root_analysis_tool_is_gone() -> None:
     )
 
 
-def test_total_tool_count_is_43() -> None:
-    """After the diff_specialist agent landed (Confluence row #7 follow-on)
-    the registry should hold 35 non-agent tools plus 8 agent tools — 43
-    total (34 classifier/knowledge + 1 trace_diff + 8 agent hierarchy)."""
+def test_total_tool_count_is_58() -> None:
+    """After the Phase-10 advanced-specialist work PLUS the RCCL / NIC
+    communication-analysis additions, the registry holds 50 non-agent
+    tools plus 8 agent tools -- 58 total.
+
+    Phase-10 advanced specialists (+9 over the prior baseline):
+      +1 kernel_fusion.find_fusion_candidates
+      +3 gpu_runtime_monitor.{parse_amd_smi_json, parse_rocm_smi_json,
+                              analyze_thermal}
+      +1 unified_memory.analyze_paging
+      +1 dependency_graph.reconstruct_dag
+      +3 predict_impact.{predict_change_impact, list_supported_changes,
+                          explain_prediction}
+
+    RCCL / NIC communication analysis (+2 on top of the above):
+      +1 rccl_analysis.analyze_collectives
+      +1 interconnect.lookup_peaks
+    """
     from mcp_server._registry import discover_read_only_tools
 
     reg = discover_read_only_tools()
-    assert len(reg) == 43, (
-        f"expected 43 tools (35 non-agent + 8 agent); got {len(reg)}: "
+    assert len(reg) == 58, (
+        f"expected 58 tools (50 non-agent + 8 agent); got {len(reg)}: "
         f"{sorted(reg.keys())}"
     )
     # trace_diff lives alongside regression as a READ_ONLY tool.
     assert "trace_diff.diff_runs" in reg
     # The 8th agent tool, exposed under the overridden ``__tool_name__``.
     assert "agent_diff_specialist" in reg
+    # Phase-10 advanced-specialist additions must all be present.
+    for k in (
+        "kernel_fusion.find_fusion_candidates",
+        "gpu_runtime_monitor.parse_amd_smi_json",
+        "gpu_runtime_monitor.parse_rocm_smi_json",
+        "gpu_runtime_monitor.analyze_thermal",
+        "unified_memory.analyze_paging",
+        "dependency_graph.reconstruct_dag",
+        "predict_impact.predict_change_impact",
+        "predict_impact.list_supported_changes",
+        "predict_impact.explain_prediction",
+    ):
+        assert k in reg, f"phase-10 tool {k} missing from registry"
+    # RCCL / NIC communication-analysis additions.
+    for k in (
+        "rccl_analysis.analyze_collectives",
+        "interconnect.lookup_peaks",
+    ):
+        assert k in reg, f"phase-10 comm tool {k} missing from registry"
