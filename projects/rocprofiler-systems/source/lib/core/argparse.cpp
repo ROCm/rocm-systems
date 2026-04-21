@@ -4,6 +4,7 @@
 #include "argparse.hpp"
 #include "argparse/core_flags.hpp"
 #include "argparse/interpreter.hpp"
+#include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
 #include "config.hpp"
@@ -29,6 +30,7 @@ namespace
 {
 namespace filepath = ::tim::filepath;
 namespace path     = rocprofsys::common::path;
+namespace env      = rocprofsys::env_vars;
 using rocprofsys::common::remove_env;
 
 auto
@@ -146,10 +148,10 @@ init_parser(parser_data& _data)
         path::realpath(path::get_internal_libpath("librocprof-sys.so").c_str());
 
     auto _libexecpath = path::realpath(path::get_internal_script_path());
-    update_env(_data, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, update_mode::REPLACE);
+    update_env(_data, env::SCRIPT_PATH, _libexecpath, update_mode::REPLACE);
 
     auto _rootpath = path::realpath(path::get_rocprofsys_root());
-    update_env(_data, "ROCPROFSYS_ROOT", _rootpath, update_mode::REPLACE);
+    update_env(_data, env::ROOT, _rootpath, update_mode::REPLACE);
 
     return _data;
 }
@@ -209,7 +211,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _backend_choices.erase("amd-smi");
         _backend_choices.erase("rocm");
 
-        update_env(_data, "ROCPROFSYS_USE_AMD_SMI", false);
+        update_env(_data, env::USE_AMD_SMI, false);
     }
 
     _parser.start_group("BACKEND OPTIONS",
@@ -228,14 +230,14 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 auto _update = [&](const auto& _opt, bool _cond) {
                     if(_cond || _v.count("all") > 0) update_env(_data, _opt, true);
                 };
-                _update("ROCPROFSYS_USE_KOKKOSP", _v.count("kokkosp") > 0);
-                _update("ROCPROFSYS_USE_MPIP", _v.count("mpip") > 0);
-                _update("ROCPROFSYS_USE_OMPT", _v.count("ompt") > 0);
-                _update("ROCPROFSYS_USE_RCCLP", _v.count("rcclp") > 0);
-                _update("ROCPROFSYS_USE_AMD_SMI", _v.count("amd-smi") > 0);
-                _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
-                _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
-                _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
+                _update(env::USE_KOKKOSP, _v.count("kokkosp") > 0);
+                _update(env::USE_MPIP, _v.count("mpip") > 0);
+                _update(env::USE_OMPT, _v.count("ompt") > 0);
+                _update(env::USE_RCCLP, _v.count("rcclp") > 0);
+                _update(env::USE_AMD_SMI, _v.count("amd-smi") > 0);
+                _update(env::TRACE_THREAD_LOCKS, _v.count("mutex-locks") > 0);
+                _update(env::TRACE_THREAD_RW_LOCKS, _v.count("rw-locks") > 0);
+                _update(env::TRACE_THREAD_SPIN_LOCKS, _v.count("spin-locks") > 0);
 
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
                     update_env(_data, "KOKKOS_TOOLS_LIBS", _data.env.omni_libpath,
@@ -257,14 +259,14 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 auto _update = [&](const auto& _opt, bool _cond) {
                     if(_cond || _v.count("all") > 0) update_env(_data, _opt, false);
                 };
-                _update("ROCPROFSYS_USE_KOKKOSP", _v.count("kokkosp") > 0);
-                _update("ROCPROFSYS_USE_MPIP", _v.count("mpip") > 0);
-                _update("ROCPROFSYS_USE_OMPT", _v.count("ompt") > 0);
-                _update("ROCPROFSYS_USE_RCCLP", _v.count("rcclp") > 0);
-                _update("ROCPROFSYS_USE_AMD_SMI", _v.count("amd-smi") > 0);
-                _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
-                _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
-                _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
+                _update(env::USE_KOKKOSP, _v.count("kokkosp") > 0);
+                _update(env::USE_MPIP, _v.count("mpip") > 0);
+                _update(env::USE_OMPT, _v.count("ompt") > 0);
+                _update(env::USE_RCCLP, _v.count("rcclp") > 0);
+                _update(env::USE_AMD_SMI, _v.count("amd-smi") > 0);
+                _update(env::TRACE_THREAD_LOCKS, _v.count("mutex-locks") > 0);
+                _update(env::TRACE_THREAD_RW_LOCKS, _v.count("rw-locks") > 0);
+                _update(env::TRACE_THREAD_SPIN_LOCKS, _v.count("spin-locks") > 0);
 
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
                     remove_env(_data.env.current, "KOKKOS_TOOLS_LIBS", _data.env.initial);
@@ -319,7 +321,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .count(1)
             .dtype("clock-id")
             .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_TRACE_PERIOD_CLOCK_ID",
+                update_env(_data, env::TRACE_PERIOD_CLOCK_ID,
                            p.get<double>("trace-clock-id"));
             })
             .choices(_clock_id_choices.first)
