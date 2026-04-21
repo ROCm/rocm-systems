@@ -238,17 +238,18 @@ struct record_t {
     uint8_t  domain;          // activity_domain_t
     uint8_t  op;              // hip_op_id_t (or HIP_API id)
     uint16_t flags;
-    uint32_t correlation_id;
+    uint32_t reserved0;       // padding for 8-byte alignment of correlation_id
+    uint64_t correlation_id;  // matches CLR's activity_correlation_id_t (u64)
     uint64_t begin_ns;
     uint64_t end_ns;
-    uint32_t process_id;
-    uint32_t thread_id;
-    int32_t  device_id;
-    uint32_t queue_id;        // truncated low 32 bits of CLR's uint64_t queue_id
-    uint64_t bytes;           // for copies; 0 otherwise
+    uint32_t process_id;      // valid for HIP_API records
+    uint32_t thread_id;       // valid for HIP_API records (or cached gettid for HIP_OPS)
+    int32_t  device_id;       // valid for HIP_OPS records (-1 otherwise)
+    uint32_t queue_id;        // valid for HIP_OPS records; truncated low 32 bits of CLR's uint64_t
+    uint64_t bytes;           // valid for HIP_OPS COPY ops; 0 otherwise
     uint64_t kernel_name_off; // byte offset into trailing string section; 0 if none
 };
-static_assert(sizeof(record_t) == 56, "record_t must stay 56 bytes");
+static_assert(sizeof(record_t) == 64, "record_t must stay 64 bytes");
 #pragma pack(pop)
 
 // Footer (written after the string section; lets the decoder report drops):
@@ -279,7 +280,7 @@ int main() {
     hdr.header_size = htl::kHeaderSize;
 
     assert(sizeof(hdr) == 64);
-    assert(sizeof(htl::record_t) == 56);
+    assert(sizeof(htl::record_t) == 64);
     assert(std::memcmp(hdr.magic, "HTL0", 4) == 0);
     std::printf("test_record: ok\n");
     return 0;
@@ -743,28 +744,36 @@ extern "C" int htl_tracer_callback(uint32_t domain, uint32_t op, void* data) {
     s.rec.domain         = static_cast<uint8_t>(domain & 0xff);
     s.rec.op             = static_cast<uint8_t>(op & 0xff);
     s.rec.flags          = 0;
+    s.rec.reserved0      = 0;
     s.rec.correlation_id = rec->correlation_id;
     s.rec.begin_ns       = rec->begin_ns;
     s.rec.end_ns         = rec->end_ns;
-    s.rec.process_id     = rec->process_id;
-    s.rec.thread_id      = rec->thread_id ? rec->thread_id : gettid_cached();
 
-    if (domain == ACTIVITY_DOMAIN_HIP_OPS && op == HIP_OP_ID_DISPATCH) {
-        s.rec.device_id = rec->device_id;
-        s.rec.queue_id  = static_cast<uint32_t>(rec->queue_id & 0xffffffffu);
-        s.rec.bytes     = 0;
-        if (rec->kernel_name) {
-            std::strncpy(s.name, rec->kernel_name, sizeof(s.name) - 1);
-            s.name[sizeof(s.name) - 1] = '\0';
+    // The upstream activity_record_t uses a tagged union for
+    //   {device_id, queue_id} (HIP_OPS) vs {process_id, thread_id} (HIP_API).
+    // We must read only the union arm that matches the domain.
+    if (domain == ACTIVITY_DOMAIN_HIP_OPS) {
+        s.rec.process_id = static_cast<uint32_t>(::getpid());
+        s.rec.thread_id  = gettid_cached();
+        s.rec.device_id  = rec->device_id;
+        s.rec.queue_id   = static_cast<uint32_t>(rec->queue_id & 0xffffffffu);
+        if (op == HIP_OP_ID_DISPATCH) {
+            s.rec.bytes = 0;
+            if (rec->kernel_name) {
+                std::strncpy(s.name, rec->kernel_name, sizeof(s.name) - 1);
+                s.name[sizeof(s.name) - 1] = '\0';
+            }
+        } else if (op == HIP_OP_ID_COPY) {
+            s.rec.bytes = rec->bytes;
+        } else {
+            s.rec.bytes = 0;
         }
-    } else if (domain == ACTIVITY_DOMAIN_HIP_OPS && op == HIP_OP_ID_COPY) {
-        s.rec.device_id = rec->device_id;
-        s.rec.queue_id  = static_cast<uint32_t>(rec->queue_id & 0xffffffffu);
-        s.rec.bytes     = rec->bytes;
-    } else {
-        s.rec.device_id = -1;
-        s.rec.queue_id  = 0;
-        s.rec.bytes     = 0;
+    } else {  // ACTIVITY_DOMAIN_HIP_API
+        s.rec.process_id = rec->process_id;
+        s.rec.thread_id  = rec->thread_id ? rec->thread_id : gettid_cached();
+        s.rec.device_id  = -1;
+        s.rec.queue_id   = 0;
+        s.rec.bytes      = 0;
     }
 
     g_writer->enqueue(s);
