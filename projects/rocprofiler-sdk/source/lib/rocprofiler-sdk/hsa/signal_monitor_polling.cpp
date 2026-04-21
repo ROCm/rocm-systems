@@ -266,9 +266,12 @@ private:
 };
 }  // namespace
 
+namespace detail
+{
 std::shared_ptr<SignalMonitor>
 create_polling_signal_monitor(const SignalMonitorConfig& cfg, SignalMonitorOps ops)
 {
     return std::make_shared<PollingSignalMonitor>(cfg, std::move(ops));
 }
+}  // namespace detail
 }  // namespace rocprofiler::hsa
