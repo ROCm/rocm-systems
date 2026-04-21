@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "description": "Phase-10 Feature A kernel-fusion recipes. Consumed by the Compute Specialist when kernel_fusion.find_fusion_candidates returns candidate pairs.",
+  "required": ["version", "patterns"],
+  "properties": {
+    "version": {"type": "integer", "minimum": 1},
+    "patterns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "description", "expected_impact", "effort_factor", "risk"],
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "trigger": {"type": "object"},
+          "expected_impact": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+          "effort_factor": {"type": "number", "minimum": 0.0},
+          "risk": {"type": "string", "enum": ["low", "medium", "high"]},
+          "verify_counters": {
+            "type": "array",
+            "items": {"type": "string"}
+          }
+        }
+      }
+    },
+    "notes": {"type": "string"}
+  }
+}

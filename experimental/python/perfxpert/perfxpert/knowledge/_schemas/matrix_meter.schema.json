@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "description": "Phase-10 Feature F MFMA vs VALU ratio classification. Consumed by the Compute Specialist via fence/compute_specialist.md.",
+  "required": ["version", "description", "derivation", "thresholds"],
+  "properties": {
+    "version": {"type": "integer", "minimum": 1},
+    "description": {"type": "string"},
+    "derivation": {"type": "string"},
+    "thresholds": {
+      "type": "object",
+      "required": ["healthy", "borderline", "degraded"],
+      "properties": {
+        "healthy": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "borderline": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "degraded": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+      }
+    },
+    "recommend_when_degraded": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "verify_counters": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}
