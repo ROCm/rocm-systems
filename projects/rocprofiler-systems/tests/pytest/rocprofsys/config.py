@@ -40,6 +40,7 @@ class RocprofsysConfig:
         - mpiexec: Path to MPI launcher executable
         - julia: Path to Julia executable
         - rocm_version: Tuple of (major, minor, patch) of the installed ROCm version
+        - rocprofiler_sdk_version: Parsed rocprofiler-sdk version (else None)
         - is_installed: Whether this is an installed configuration
         - python_versions: List of python versions available
         - python_executables: List of python executables available
@@ -64,6 +65,7 @@ class RocprofsysConfig:
     julia: Optional[Path] = None
     is_installed: bool = False
     rocm_version: Optional[tuple[int, int, int]] = None
+    rocprofiler_sdk_version: Optional[tuple[int, int, int]] = None
     python_versions: Optional[list[str]] = None
     python_executables: Optional[list[str]] = None
     python_module_path: Optional[Path] = None
@@ -359,6 +361,49 @@ def _get_rocm_version() -> Optional[tuple[int, int, int]]:
     return None
 
 
+def get_rocprofiler_sdk_version() -> Optional[tuple[int, int, int]]:
+    """Installed rocprofiler-sdk version via ``rocprofiler_get_version()`` (ctypes + find_library).
+    Returns ``None`` when ``find_library`` cannot locate the SDK, ``CDLL`` fails, or the call does
+    not succeed (pytest gates skip instead of failing collection).
+    """
+    import ctypes
+    from ctypes.util import find_library
+
+    lib_path = find_library("rocprofiler-sdk")
+    if not lib_path:
+        return None
+
+    try:
+        lib = ctypes.CDLL(lib_path)
+    except OSError:
+        return None
+
+    lib.rocprofiler_get_version.argtypes = [
+        ctypes.POINTER(ctypes.c_uint32),
+        ctypes.POINTER(ctypes.c_uint32),
+        ctypes.POINTER(ctypes.c_uint32),
+    ]
+    lib.rocprofiler_get_version.restype = ctypes.c_int
+
+    major = ctypes.c_uint32()
+    minor = ctypes.c_uint32()
+    patch = ctypes.c_uint32()
+
+    try:
+        result = lib.rocprofiler_get_version(
+            ctypes.byref(major),
+            ctypes.byref(minor),
+            ctypes.byref(patch),
+        )
+    except OSError:
+        return None
+
+    if result != 0:
+        return None
+
+    return (int(major.value), int(minor.value), int(patch.value))
+
+
 def _find_mpiexec() -> Optional[Path]:
     """Find MPI launcher executable."""
     for candidate in ["mpiexec", "mpirun"]:
@@ -617,6 +662,7 @@ def discover_install_config(
         mpiexec=mpiexec,
         julia=_find_julia(),
         rocm_version=_get_rocm_version(),
+        rocprofiler_sdk_version=get_rocprofiler_sdk_version(),
         is_installed=True,
         python_versions=found_python_versions,
         python_executables=found_python_executables,
@@ -712,6 +758,7 @@ def discover_build_config(
         mpiexec=mpiexec,
         julia=_find_julia(),
         rocm_version=_get_rocm_version(),
+        rocprofiler_sdk_version=get_rocprofiler_sdk_version(),
         is_installed=False,
         python_versions=found_python_versions,
         python_executables=found_python_executables,

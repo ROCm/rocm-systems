@@ -15,6 +15,7 @@ from .config import (
     RocprofsysConfig,
     discover_install_config,
     discover_build_config,
+    get_rocprofiler_sdk_version,
 )
 
 from .runners import (
@@ -53,6 +54,7 @@ __all__ = [
     "RocprofsysConfig",
     "discover_build_config",
     "discover_install_config",
+    "get_rocprofiler_sdk_version",
     # Runners
     "TestResult",
     "BaselineRunner",
@@ -78,4 +80,5 @@ __all__ = [
     "lookup_gpu_category",
     "get_target_gpu_arch",
     "get_offload_extractor",
+    "get_xnack_support",
 ]

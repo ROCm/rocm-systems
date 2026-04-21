@@ -530,6 +530,28 @@ def pytest_collection_modifyitems(config, items) -> None:
             item.add_marker(skip_julia)
         if "xnack" in item.keywords and not xnack_available:
             item.add_marker(skip_xnack)
+        if "kfd" in item.keywords:
+            min_kfd_sdk = (1, 2, 2)
+            sdk_ver = rocprof_config.rocprofiler_sdk_version
+            if sdk_ver is None:
+                item.add_marker(
+                    pytest.mark.skip(
+                        reason=(
+                            "KFD tests require rocprofiler-sdk >= 1.2.2; version not detected "
+                            "(ensure librocprofiler-sdk is discoverable via ctypes.util.find_library, "
+                            "e.g. LD_LIBRARY_PATH or ROCm library layout)"
+                        )
+                    )
+                )
+            elif sdk_ver < min_kfd_sdk:
+                item.add_marker(
+                    pytest.mark.skip(
+                        reason=(
+                            f"KFD tests require rocprofiler-sdk >= 1.2.2 "
+                            f"(found {'.'.join(map(str, sdk_ver))}; undefined KFD node ID bug)"
+                        )
+                    )
+                )
         if "rocm_min_version" in item.keywords:
             req_version = item.get_closest_marker("rocm_min_version").args[0]
             system_version = rocprof_config.rocm_version
@@ -780,6 +802,12 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
 
     gpu_info = get_gpu_info()
 
+    sdk_version = (
+        ".".join(map(str, rocprof_config.rocprofiler_sdk_version))
+        if rocprof_config.rocprofiler_sdk_version
+        else "Not found"
+    )
+
     if rocprof_config.rocm_path:
         # Rocm version
         rocm_version = (
@@ -824,6 +852,7 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
         "Test Configuration:",
         "=" * 70,
         f"  ROCm version:         {rocm_version}",
+        f"  rocprofiler-sdk:      {sdk_version}",
         f"  ROCm path:            {rocprof_config.rocm_path}",
         f"  Is installed:         {rocprof_config.is_installed}",
         f"  Output dir:           {rocprof_config.test_output_dir}",
