@@ -84,10 +84,6 @@ jobs:
             wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
             chmod +x /opt/trace_processor/bin/trace_processor_shell
           fi
-          python3 -m pip install --upgrade pip &&
-          python3 -m pip install --upgrade numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.25' &&
-          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done
 
     - name: Install ROCm Packages
       timeout-minutes: 30
@@ -147,7 +143,7 @@ jobs:
           -DROCPROFSYS_MAX_THREADS=64
           -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
-          -DROCPROFSYS_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
+          -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11"
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload"
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           --
@@ -188,6 +184,9 @@ jobs:
       run: |
         set -v
         source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
+        # System python on RHEL 8 is 3.6, which does not work with test suite
+        export PYTHON_EXECUTABLE=/opt/conda/envs/py3.8/bin/python
+        export PATH=/opt/conda/envs/py3.8/bin:${PATH}
         ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,rewrite,runtime,python}=1
 
     - name: Test User API

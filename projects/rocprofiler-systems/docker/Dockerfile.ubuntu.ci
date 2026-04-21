@@ -46,19 +46,34 @@ RUN if ! pip show perfetto 2>&1 | tee pip_output.log | grep -q "WARNING"; then \
         exit 1; \
     fi
 
-ARG PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
+ARG PYTHON_VERSIONS="8 9 10 11 12 13"
 
+# Install pytest test dependencies into each conda env
+COPY requirements.txt /tmp/requirements.txt
 RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O miniforge.sh && \
     bash miniforge.sh -b -p /opt/conda && \
     export PATH="/opt/conda/bin:${PATH}" && \
     conda config --set always_yes yes --set changeps1 no --set solver classic && \
     conda update -c conda-forge -n base conda && \
-    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c conda-forge python=3.${i} pip numpy; done && \
-    for i in ${PYTHON_VERSIONS}; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done && \
-    conda clean -a -y && \
-    cd /tmp && \
-    shopt -s dotglob extglob && \
-    rm -rf *
+    for i in ${PYTHON_VERSIONS}; do \
+        conda create -n py3.${i} -c conda-forge python=3.${i} pip && \
+        /opt/conda/envs/py3.${i}/bin/python -m pip install -r /tmp/requirements.txt; \
+    done && \
+    conda clean -a -y
+
+# Install pytest test dependencies for system python
+RUN if python3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)"; then \
+        OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
+        OS_ID=$(grep '^ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
+        if [ "${OS_ID}" == "ubuntu" ] && [ "${OS_VERSION}" == "22.04" ]; then \
+            python3 -m pip install -r /tmp/requirements.txt; \
+        else \
+            python3 -m pip install --break-system-packages -r /tmp/requirements.txt; \
+        fi; \
+    else \
+        echo "Skipping system Python install: $(python3 --version 2>&1) is too old (rocprofiler-systems test suite requires >=3.8)"; \
+    fi && \
+    rm -f /tmp/requirements.txt
 
 # The Rock Tarball
 ARG GPU_TYPE=""
