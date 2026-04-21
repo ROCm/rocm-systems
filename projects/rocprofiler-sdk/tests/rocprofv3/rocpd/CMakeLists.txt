@@ -27,10 +27,6 @@ else()
     set(MULTIPROC_LAUNCHER)
 endif()
 
-if(ROCPROFILER_DISABLE_UNSTABLE_CTESTS)
-
-endif()
-
 #########################################################################################
 #
 # generate rocpd database and the old-way outputs csv, otf2, perfetto to compare
