@@ -66,6 +66,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <unordered_map>
 #include <memory>
 #include <optional>
 #include <random>
@@ -1477,6 +1478,399 @@ Recipe makeSBitset0B64Recipe() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Recipe: v_bfi_b32 — V_BFI_B32 handler
+// Bit-field insert: out = (mask & one_src) | (~mask & zero_src).
+// Forced with inline asm because hipcc lowers the ternary pattern to
+// and/andn2/or rather than emitting the fused opcode.  Pins the real
+// libdevice-asin coverage gap (see kernels/v_bfi_b32.hip comment) to a
+// one-instruction reproducer.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeVBfiB32Recipe() {
+  Recipe r;
+  r.name = "v_bfi_b32";
+  r.defaultNs     = {16, 64, 256, 1024, 4096};
+  r.defaultBlocks = {64, 128, 256};
+  r.outputElemBytes = sizeof(uint32_t);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    // Three u32 arrays packed back-to-back: [mask | one_src | zero_src].
+    // Random coverage of the ternary input space; a fixed seed per N
+    // makes the sweep reproducible.
+    std::vector<uint8_t> buf(3 * N * sizeof(uint32_t));
+    auto *u = reinterpret_cast<uint32_t *>(buf.data());
+    std::mt19937 rng(0xBF1u + N);
+    for (int i = 0; i < 3 * N; ++i) u[i] = rng();
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int) {
+    const uint32_t *m = reinterpret_cast<const uint32_t *>(input.data());
+    const uint32_t *o = m + N;
+    const uint32_t *z = o + N;
+    std::vector<uint8_t> out(N * sizeof(uint32_t));
+    auto *c = reinterpret_cast<uint32_t *>(out.data());
+    for (int i = 0; i < N; ++i) c[i] = (m[i] & o[i]) | (~m[i] & z[i]);
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "v_bfi_b32"));
+    uint32_t *dM, *dO, *dZ, *dC;
+    size_t bytes = N * sizeof(uint32_t);
+    HIP_ASSERT(hipMalloc(&dM, bytes));
+    HIP_ASSERT(hipMalloc(&dO, bytes));
+    HIP_ASSERT(hipMalloc(&dZ, bytes));
+    HIP_ASSERT(hipMalloc(&dC, bytes));
+    HIP_ASSERT(hipMemset(dC, 0xA5, bytes));
+    HIP_ASSERT(hipMemcpy(dM, input.data() + 0 * bytes, bytes,
+                         hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dO, input.data() + 1 * bytes, bytes,
+                         hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dZ, input.data() + 2 * bytes, bytes,
+                         hipMemcpyHostToDevice));
+    struct alignas(8) Args {
+      const uint32_t *m; const uint32_t *o; const uint32_t *z;
+      uint32_t *c; int n;
+    } args = {dM, dO, dZ, dC, N};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(bytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dC, bytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dM)); HIP_ASSERT(hipFree(dO));
+    HIP_ASSERT(hipFree(dZ)); HIP_ASSERT(hipFree(dC));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int n) {
+    return compareU32Exact(gold, actual, n);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recipe: v_cmp_cndmask_sgpr — V_CMP_GE_F32_e64 -> SGPR -> V_CNDMASK_B32_e64
+//
+// Single-instruction runtime probe for the per-lane-predication
+// idiom every libdevice math branch (asin / acos / atan / log /
+// exp) and every Triton e64-compare-across-BB epilogue lowers to.
+// Forced via inline asm so hipcc cannot substitute an e32 -> VCC
+// form that would route through a different handler path
+// (`loadVCC` — which was never broken).
+//
+// Pre-fix, the SGPR arm of `V_CNDMASK_B32` in
+// handle_valu_vop3p.cpp folded the entire source SGPR into one
+// wave-uniform `i1` via `icmp ne <sgpr>, 0`, making every lane of
+// a wave pick the same side of the select. Reducer shape here
+// (random floats in [-1, 1] -> +1.0f if |x|>=0.5 else -1.0f)
+// produced ~50% wrong elements on a 128-thread block. Post-fix
+// the handler routes through the WaveProjection's
+// `extractLaneBitFromWaveMask`, mirroring the consumer symmetry of
+// VCC's `readVCCAsWaveMask`, and the same-wave / modulo-
+// replication paths are bit-exact against the CPU reference. The
+// wave-native cross-widening direction has a separate residual
+// (V_CMP -> SGPR narrow-write-and-replicate, documented in
+// handle_valu_vcmp.cpp) that surfaces as ~25% residual errors; the
+// obstruction-classifier follow-up is meant to refuse that shape.
+// See `lit_tests/v_cmp_cndmask_sgpr/` for the lifted-IR shape
+// fixture companion.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeVCmpCndmaskSgprRecipe() {
+  Recipe r;
+  r.name = "v_cmp_cndmask_sgpr";
+  // Full block-size sweep. The shadow map in `RaiseContext::
+  // lastSgprWaveMaskI1` (see hotswap/docs/sgpr-wave-mask-translation.md
+  // section 3.1) makes the V_CMP -> V_CNDMASK_B32 per-lane dataflow
+  // correct under cross-widening for every block size, because the
+  // consumer reads the full-fidelity per-lane `i1` directly from the
+  // producer without going through the narrow-ballot round-trip.
+  // A historical narrower sweep (`defaultBlocks = {16, 32}`, capped at
+  // single-wave-32-slice) was used as a probe before the shadow landed;
+  // the full sweep is restored now because every configuration below
+  // matches bit-exactly under the fix, and any regression on the V_CMP
+  // writer's shadow-record or the V_CNDMASK consumer's shadow-lookup
+  // fails this recipe loudly on the first WRONG row.
+  r.defaultNs     = {16, 64, 256, 1024, 4096};
+  r.defaultBlocks = {16, 32, 64, 128, 256};
+  r.outputElemBytes = sizeof(uint32_t);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    // Floats uniform in [-1, 1] reinterpret-cast to u32 bytes; fixed
+    // seed per N keeps the sweep reproducible. The range is picked so
+    // that |x|>=0.5 splits roughly 50/50 across lanes — the pre-fix
+    // wave-uniform-collapse bug was most visible (and this probe is
+    // most sensitive) when the compare result is genuinely data-
+    // dependent per lane.
+    std::vector<uint8_t> buf(N * sizeof(float));
+    auto *f = reinterpret_cast<float *>(buf.data());
+    std::mt19937 rng(0xC9Du + N);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    for (int i = 0; i < N; ++i) f[i] = dist(rng);
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int) {
+    const float *x = reinterpret_cast<const float *>(input.data());
+    std::vector<uint8_t> out(N * sizeof(float));
+    auto *o = reinterpret_cast<float *>(out.data());
+    // Match the kernel's rule exactly: `|x| >= 0.5 ? +1.0f : -1.0f`.
+    // Both sides of the select are exactly representable in fp32 so
+    // the bit patterns 0x3f800000 / 0xbf800000 are stable and can be
+    // compared with compareU32Exact (no rounding slack needed).
+    for (int i = 0; i < N; ++i)
+      o[i] = (std::fabs(x[i]) >= 0.5f) ? 1.0f : -1.0f;
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "v_cmp_cndmask_sgpr"));
+    float *dX, *dOut;
+    size_t bytes = N * sizeof(float);
+    HIP_ASSERT(hipMalloc(&dX, bytes));
+    HIP_ASSERT(hipMalloc(&dOut, bytes));
+    // Distinctive poison pattern so an untouched lane reads back as
+    // neither +1.0f nor -1.0f and surfaces as a bit-exact mismatch
+    // against the CPU reference.
+    HIP_ASSERT(hipMemset(dOut, 0xA5, bytes));
+    HIP_ASSERT(hipMemcpy(dX, input.data(), bytes, hipMemcpyHostToDevice));
+    struct alignas(8) Args {
+      const float *x; float *out; int n;
+    } args = {dX, dOut, N};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(bytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dOut, bytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dX));
+    HIP_ASSERT(hipFree(dOut));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int n) {
+    // Bit-exact: the two selectable values (+1.0f / -1.0f) are
+    // exactly representable and independent of wave-size reordering,
+    // so any elementwise difference is a real finding.
+    return compareU32Exact(gold, actual, n);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recipe: v_cmpx_gt_i32 — V_CMPX_GT_I32 handler (compare-and-write-exec)
+// Each thread: out[tid] = (a[tid] > b[tid]) ? 1 : 0 via a predicated
+// store.  The predicate source is data-dependent, not lane-position-
+// dependent, so the wave-size classifier passes the kernel and salmon
+// has to actually lower the opcode.  Reduces the `lane_swap` "unsupported
+// instruction: v_cmpx_gt_i32" failure to one opcode.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeVCmpxGtI32Recipe() {
+  Recipe r;
+  r.name = "v_cmpx_gt_i32";
+  r.defaultNs     = {16, 64, 256, 1024, 4096};
+  r.defaultBlocks = {64, 128, 256};
+  r.outputElemBytes = sizeof(uint32_t);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    // Two i32 arrays packed back-to-back: [a | b].  Inputs in a small
+    // signed range force an interesting mix of > / <= outcomes without
+    // biasing one way.
+    std::vector<uint8_t> buf(2 * N * sizeof(int32_t));
+    auto *s = reinterpret_cast<int32_t *>(buf.data());
+    std::mt19937 rng(0xC1Fu + N);
+    std::uniform_int_distribution<int32_t> dist(-1024, 1024);
+    for (int i = 0; i < 2 * N; ++i) s[i] = dist(rng);
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int) {
+    const int32_t *a = reinterpret_cast<const int32_t *>(input.data());
+    const int32_t *b = a + N;
+    std::vector<uint8_t> out(N * sizeof(uint32_t));
+    auto *o = reinterpret_cast<uint32_t *>(out.data());
+    for (int i = 0; i < N; ++i) o[i] = (a[i] > b[i]) ? 1u : 0u;
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "v_cmpx_gt_i32"));
+    int32_t *dA, *dB;
+    uint32_t *dOut;
+    size_t inBytes = N * sizeof(int32_t);
+    size_t outBytes = N * sizeof(uint32_t);
+    HIP_ASSERT(hipMalloc(&dA, inBytes));
+    HIP_ASSERT(hipMalloc(&dB, inBytes));
+    HIP_ASSERT(hipMalloc(&dOut, outBytes));
+    // hipMemset to 0 so untouched lanes read back as the "not greater"
+    // sentinel the CPU reference expects.
+    HIP_ASSERT(hipMemset(dOut, 0x00, outBytes));
+    HIP_ASSERT(hipMemcpy(dA, input.data(),           inBytes,
+                         hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dB, input.data() + inBytes, inBytes,
+                         hipMemcpyHostToDevice));
+    struct alignas(8) Args {
+      const int32_t *a; const int32_t *b; uint32_t *out; int n;
+    } args = {dA, dB, dOut, N};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(outBytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dOut, outBytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dA)); HIP_ASSERT(hipFree(dB));
+    HIP_ASSERT(hipFree(dOut));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int n) {
+    return compareU32Exact(gold, actual, n);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recipe: s_and_saveexec_b32 — scalar exec save/restore handler
+// Kernel uses inline asm to force the fused `s_and_saveexec_b32`
+// opcode on gfx1250 (current hipcc prefers the decomposed
+// `s_mov_b32 sX,exec_lo` + `v_cmpx_*` + `s_or_b32 exec_lo,…,sX`
+// form for simple branches — covered by the v_cmpx_gt_i32 probe).
+//
+// Inputs: a per-block u32 `mask_in` (packed as the first N-values-
+// long slice) and a per-thread u32 `pred` (second N slice).  `mask_in`
+// is placed in an SGPR via `readfirstlane`; the opcode narrows
+// exec_lo to `exec_lo & mask`, the body stores `body(pred[tid])`
+// from each surviving lane, and exec_lo is restored.  A masked-off
+// lane keeps its init-zero sentinel.  The CPU reference mirrors the
+// wave-relative-lane semantics exactly (see kernel file comment).
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeSAndSaveexecB32Recipe() {
+  Recipe r;
+  r.name = "s_and_saveexec_b32";
+  r.defaultNs     = {16, 64, 256, 1024, 4096};
+  r.defaultBlocks = {64, 128, 256};
+  r.outputElemBytes = sizeof(uint32_t);
+  r.outputElems = [](int N, int) { return N; };
+
+  auto body = [](uint32_t p) -> uint32_t {
+    uint32_t acc = p;
+    acc ^= 0xDEADBEEFu;
+    acc = acc * 2654435761u;
+    acc ^= acc >> 13;
+    return acc;
+  };
+
+  r.makeInput = [](int N) {
+    // Layout: [mask_in (N u32, per-block value repeated) | pred (N u32)].
+    // We store one mask per block to keep makeInput block-shape-agnostic:
+    // the kernel reads mask_in[blockIdx.x], so only the first ceil(N/B)
+    // entries actually matter.  We fill all N to keep the buffer a
+    // round 2N u32.  Predicates are arbitrary non-zero u32s.
+    std::vector<uint8_t> buf(2 * N * sizeof(uint32_t));
+    auto *u = reinterpret_cast<uint32_t *>(buf.data());
+    std::mt19937 rng(0x5AEu + N);
+    for (int i = 0; i < N; ++i) u[i]       = rng();  // mask_in
+    for (int i = 0; i < N; ++i) u[N + i]   = rng();  // pred
+    return buf;
+  };
+
+  r.cpuReference = [body](const std::vector<uint8_t> &input, int N,
+                           int blockSize) {
+    const uint32_t *m = reinterpret_cast<const uint32_t *>(input.data());
+    const uint32_t *p = m + N;
+    std::vector<uint8_t> out(N * sizeof(uint32_t), 0);
+    auto *o = reinterpret_cast<uint32_t *>(out.data());
+    for (int tid = 0; tid < N; ++tid) {
+      int bi = tid / blockSize;
+      int laneInBlock = tid - bi * blockSize;
+      // On gfx1250 wave32 the exec mask is 32 bits per wave — each
+      // thread's wave-relative lane (0..31) checks the corresponding
+      // bit of the block-uniform mask.  Inside a 64- or 256-wide block
+      // the pattern repeats for every wave.  Our reference uses
+      // laneInBlock & 31, which matches the gfx942 fallback in the
+      // kernel (wave64 lanes 0..63 all fold to the 32-bit mask).
+      uint32_t mask = m[bi];
+      if ((mask >> (laneInBlock & 31)) & 1u) {
+        o[tid] = body(p[tid]);
+      }
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "s_and_saveexec_b32"));
+    uint32_t *dMask, *dPred, *dOut;
+    size_t bytes = N * sizeof(uint32_t);
+    HIP_ASSERT(hipMalloc(&dMask, bytes));
+    HIP_ASSERT(hipMalloc(&dPred, bytes));
+    HIP_ASSERT(hipMalloc(&dOut, bytes));
+    // Zero-init — masked-off lanes must read back as the sentinel the
+    // CPU reference expects (0 for "store skipped").
+    HIP_ASSERT(hipMemset(dOut, 0x00, bytes));
+    HIP_ASSERT(hipMemcpy(dMask, input.data(),         bytes,
+                         hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dPred, input.data() + bytes, bytes,
+                         hipMemcpyHostToDevice));
+    struct alignas(8) Args {
+      const uint32_t *mask; const uint32_t *pred; uint32_t *out; int n;
+    } args = {dMask, dPred, dOut, N};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(bytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dOut, bytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dMask)); HIP_ASSERT(hipFree(dPred));
+    HIP_ASSERT(hipFree(dOut));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int n) {
+    return compareU32Exact(gold, actual, n);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Recipe: c4_lane_dep_cmpx — runtime evidence for Class 4 (lane-
 // position-dependent EXEC writes) per hotswap/docs/wave-size-
 // translation.md §6.
@@ -1590,6 +1984,380 @@ Recipe makeC4LaneDepCmpxRecipe() {
           "block<64: fewer than one full wave64 makes the probe's "
           "wave-relative lane comparison degenerate on native gfx942");
     return std::nullopt;
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recipe: wmma_f32_16x16x4_gemm — numerical probe for the
+// gfx1250 WMMA -> gfx942 MFMA cross-target lowering.
+//
+// Each block computes one independent 16x16x4 f32 GEMM tile:
+//
+//   D[i][j] = sum_{k=0..3} A[i][k] * B[k][j] + C[i][j]
+//
+// `N` is the tile count. Block size is pinned at 32 (one Wave32 on
+// gfx1250; on gfx942 wave64 the kernel launches a half-masked wave
+// and uses a scalar shared-memory fallback — see the kernel's file
+// comment for the gather layout).
+//
+// The CPU reference is straight scalar matmul with double-precision
+// accumulation; at K=4 with inputs in [-1, 1] the worst case per
+// output element is ~4 f32 rounding errors on the kernel side, so the
+// tolerance is set to a loose f32 ulp budget (1e-5 absolute).
+//
+// This is the direct numerical counterpart to the
+// lit_tests/wmma_f32_16x16x4_f32 IR-shape fixture: together they
+// cover "Salmon raises the right IR" (lit) and "the raised IR
+// computes the right answer on real hardware" (this recipe).
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeWmmaF32_16x16x4_GemmRecipe() {
+  Recipe r;
+  r.name = "wmma_f32_16x16x4_gemm";
+  r.goldSource = GoldSource::CpuReference;
+  // One tile is the smallest meaningful N (isolates the single WMMA);
+  // larger Ns stress the grid-level launch path and catch any
+  // per-tile state leak between Salmon-translated waves.
+  r.defaultNs     = {1, 4, 16, 64};
+  r.defaultBlocks = {32};
+
+  r.validate = [](int /*N*/, int blockSize) -> std::optional<std::string> {
+    if (blockSize != 32)
+      return std::string(
+          "blockSize must be 32: WMMA is a wave-32 collective and the "
+          "kernel maps exactly one 16x16x4 tile to one wavefront; "
+          "other block sizes violate the per-tile layout assumption");
+    return std::nullopt;
+  };
+
+  r.outputElemBytes = sizeof(float);
+  r.outputElems = [](int N, int) { return N * 16 * 16; };
+
+  // Input buffer layout (packed): [A | B | C]
+  //   A: N * 16 * 4 floats
+  //   B: N *  4 *16 floats
+  //   C: N * 16 *16 floats
+  // The same PRNG seed family as other recipes (a fixed offset added
+  // to N) makes every per-shape input deterministic across runs.
+  r.makeInput = [](int N) {
+    size_t szA = size_t(N) * 16 * 4;
+    size_t szB = size_t(N) * 4 * 16;
+    size_t szC = size_t(N) * 16 * 16;
+    std::vector<uint8_t> buf((szA + szB + szC) * sizeof(float));
+    auto *f = reinterpret_cast<float *>(buf.data());
+    std::mt19937 rng(24680u + static_cast<unsigned>(N));
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    for (size_t i = 0, n = szA + szB + szC; i < n; ++i) f[i] = dist(rng);
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int) {
+    const float *a = reinterpret_cast<const float *>(input.data());
+    const float *b = a + size_t(N) * 16 * 4;
+    const float *c = b + size_t(N) * 4 * 16;
+    size_t outBytes = size_t(N) * 16 * 16 * sizeof(float);
+    std::vector<uint8_t> out(outBytes);
+    float *d = reinterpret_cast<float *>(out.data());
+    for (int t = 0; t < N; ++t) {
+      const float *tA = a + size_t(t) * 16 * 4;
+      const float *tB = b + size_t(t) * 4 * 16;
+      const float *tC = c + size_t(t) * 16 * 16;
+      float *tD = d + size_t(t) * 16 * 16;
+      for (int i = 0; i < 16; ++i)
+        for (int j = 0; j < 16; ++j) {
+          // Double accumulator for reproducibility; the kernel (WMMA
+          // or the scalar gfx942 fallback) uses f32 accumulation, so
+          // the tolerance in `compare` below absorbs the K=4
+          // rounding-order delta.
+          double acc = static_cast<double>(tC[i * 16 + j]);
+          for (int k = 0; k < 4; ++k)
+            acc += static_cast<double>(tA[i * 4 + k]) *
+                   static_cast<double>(tB[k * 16 + j]);
+          tD[i * 16 + j] = static_cast<float>(acc);
+        }
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int /*blockSize*/) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "wmma_f32_16x16x4_gemm"));
+
+    size_t bytesA = size_t(N) * 16 * 4 * sizeof(float);
+    size_t bytesB = size_t(N) * 4 * 16 * sizeof(float);
+    size_t bytesC = size_t(N) * 16 * 16 * sizeof(float);
+    size_t bytesD = bytesC;
+
+    float *dA, *dB, *dC, *dD;
+    HIP_ASSERT(hipMalloc(&dA, bytesA));
+    HIP_ASSERT(hipMalloc(&dB, bytesB));
+    HIP_ASSERT(hipMalloc(&dC, bytesC));
+    HIP_ASSERT(hipMalloc(&dD, bytesD));
+    // Sentinel so unwritten D slots are visible in the comparison.
+    HIP_ASSERT(hipMemset(dD, 0xA5, bytesD));
+
+    HIP_ASSERT(hipMemcpy(dA, input.data(),
+                         bytesA, hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dB, input.data() + bytesA,
+                         bytesB, hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dC, input.data() + bytesA + bytesB,
+                         bytesC, hipMemcpyHostToDevice));
+
+    struct alignas(8) Args {
+      const float *a;
+      const float *b;
+      const float *c;
+      float *d;
+    } args = {dA, dB, dC, dD};
+    size_t argSize = sizeof(args);
+    void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                      HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                      HIP_LAUNCH_PARAM_END};
+    // One block per tile; block = one Wave32 (32 threads).
+    HIP_ASSERT(hipModuleLaunchKernel(fn, N, 1, 1, 32, 1, 1, 0,
+                                     nullptr, nullptr, config));
+    HIP_ASSERT(hipDeviceSynchronize());
+
+    std::vector<uint8_t> out(bytesD);
+    HIP_ASSERT(hipMemcpy(out.data(), dD, bytesD, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dA));
+    HIP_ASSERT(hipFree(dB));
+    HIP_ASSERT(hipFree(dC));
+    HIP_ASSERT(hipFree(dD));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int outElems) {
+    const float *g = reinterpret_cast<const float *>(gold.data());
+    const float *a = reinterpret_cast<const float *>(actual.data());
+    double maxAbs = 0.0;
+    int mismatches = 0, firstIdx = -1;
+    double firstG = 0.0, firstA = 0.0;
+    // K=4 with inputs in [-1, 1]: worst-case kernel accumulation
+    // error is a handful of f32 ulps against the double-accumulated
+    // CPU gold. 1e-5 is tight enough to flag a genuinely-wrong
+    // lowering while absorbing the legitimate rounding delta.
+    const double tol = 1e-5;
+    for (int i = 0; i < outElems; ++i) {
+      double d = std::fabs(static_cast<double>(a[i]) -
+                           static_cast<double>(g[i]));
+      if (d > maxAbs) maxAbs = d;
+      if (d > tol) {
+        if (mismatches++ == 0) {
+          firstIdx = i;
+          firstG = g[i];
+          firstA = a[i];
+        }
+      }
+    }
+    return std::make_tuple(mismatches, maxAbs, firstIdx, firstG, firstA);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recipe: mubuf_store_b32 — isolate the raw buffer_store_b32 lowering.
+//
+// Authored 2026-04-20 to bisect Gfx1250Gpu.Softmax (which writes nothing on
+// the salmon path). Softmax is the only currently-failing kernel that stores
+// through MUBUF raw buffer ops; every passing kernel stores through global
+// addressing. This probe keeps MUBUF as the only differentiator: one
+// global_load, one pointwise op, one buffer_store_b32 via
+// __builtin_amdgcn_raw_buffer_store_b32. If this recipe passes on salmon,
+// MUBUF storing is exonerated and the Softmax failure is in the cross-wave
+// reduction / MODE-register / WaveNativeProjection path upstream of the
+// store. If it fails, buildMubufSRD() or handle_mubuf.cpp is the fix site.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeMubufStoreB32Recipe() {
+  Recipe r;
+  r.name = "mubuf_store_b32";
+  r.defaultNs     = {16, 64, 256, 1024, 4096};
+  r.defaultBlocks = {64, 128, 256};
+  r.outputElemBytes = sizeof(float);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    std::vector<uint8_t> buf(N * sizeof(float));
+    auto *f = reinterpret_cast<float *>(buf.data());
+    std::mt19937 rng(0xB0FFACEu + N);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    for (int i = 0; i < N; ++i) f[i] = dist(rng);
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int) {
+    const float *in = reinterpret_cast<const float *>(input.data());
+    std::vector<uint8_t> out(N * sizeof(float));
+    auto *o = reinterpret_cast<float *>(out.data());
+    for (int i = 0; i < N; ++i) o[i] = in[i] * 2.0f + 1.0f;
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "mubuf_store_b32"));
+    float *dIn, *dOut;
+    size_t bytes = N * sizeof(float);
+    HIP_ASSERT(hipMalloc(&dIn, bytes));
+    HIP_ASSERT(hipMalloc(&dOut, bytes));
+    // Sentinel 0xA5A5A5A5 as float ≈ -1.5e-16 — if the kernel writes
+    // nothing, the comparator sees a wildly wrong value and the probe
+    // fails loudly rather than silently passing on a zero output.
+    HIP_ASSERT(hipMemset(dOut, 0xA5, bytes));
+    HIP_ASSERT(hipMemcpy(dIn, input.data(), bytes, hipMemcpyHostToDevice));
+    struct alignas(8) Args { const float *in; float *out; int n; }
+        args = {dIn, dOut, N};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(bytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dOut, bytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dIn)); HIP_ASSERT(hipFree(dOut));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int outElems) {
+    const float *g = reinterpret_cast<const float *>(gold.data());
+    const float *a = reinterpret_cast<const float *>(actual.data());
+    double maxAbs = 0.0;
+    int mismatches = 0, firstIdx = -1;
+    double firstG = 0.0, firstA = 0.0;
+    const double tol = 1e-5;
+    for (int i = 0; i < outElems; ++i) {
+      double d = std::fabs(static_cast<double>(a[i]) -
+                           static_cast<double>(g[i]));
+      if (d > maxAbs) maxAbs = d;
+      if (d > tol) {
+        if (mismatches++ == 0) { firstIdx = i; firstG = g[i]; firstA = a[i]; }
+      }
+    }
+    return std::make_tuple(mismatches, maxAbs, firstIdx, firstG, firstA);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recipe: s_set_vgpr_msb_probe — force gfx1250 VGPR-bank MSB emission.
+//
+// Authored 2026-04-20 to bisect Gfx1250Gpu.Matmul128x128_1tile (16 238
+// numerical mismatches on salmon; Matmul64x64 passes). An instruction diff
+// of the two HSACOs shows s_set_vgpr_msb present 3× in the 128 kernel and
+// absent in the 64 kernel — it is the distinguishing feature. This probe
+// pressures the allocator with 64 live f32 values carried across a
+// non-collapsible pointwise chain, so the compiler names VGPRs ≥ 256 on
+// gfx1250 and emits s_set_vgpr_msb between blocks. No WMMA, no cross-lane,
+// no LDS: the MSB handling in handle_sopp.cpp + computeVGPRAdjust() is the
+// only axis under test.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeSSetVgprMsbRecipe() {
+  Recipe r;
+  r.name = "s_set_vgpr_msb";
+  r.defaultNs     = {128, 1024, 4096};
+  // Small blocks keep per-wave VGPR pressure high; the kernel body carries
+  // 64 live f32s regardless of block size, and the per-wave allocator
+  // decides its VGPR count per-wave, not per-block. Mirror the Matmul128
+  // launch geometry (blockSize=128) explicitly.
+  r.defaultBlocks = {64, 128, 256};
+  r.outputElemBytes = sizeof(float);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    std::vector<uint8_t> buf(N * sizeof(float));
+    auto *f = reinterpret_cast<float *>(buf.data());
+    std::mt19937 rng(0x5E7C0DEu + N);
+    // Inputs in [-1, 1] keep the 64-step chain numerically bounded
+    // (|v_i| stays < ~2 across the whole chain), so mismatches point at
+    // compute error rather than overflow.
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    for (int i = 0; i < N; ++i) f[i] = dist(rng);
+    return buf;
+  };
+
+  // Mirror the kernel's dependency chain exactly. Any drift here would
+  // make the recipe catch its own CPU/kernel divergence instead of a real
+  // transpiler bug, so keep this in lock-step with kernels/s_set_vgpr_msb.hip.
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int) {
+    const float *in = reinterpret_cast<const float *>(input.data());
+    std::vector<uint8_t> out(N * sizeof(float));
+    auto *o = reinterpret_cast<float *>(out.data());
+    for (int tid = 0; tid < N; ++tid) {
+      float v[64];
+      v[0] = in[tid];
+      for (int i = 1; i < 64; ++i) {
+        float prev = v[i - 1];
+        float step = static_cast<float>(i);
+        v[i] = ((i & 1) ? -prev : prev) * 1.001f + step * 1e-3f;
+      }
+      float sum = 0.0f;
+      for (int i = 0; i < 32; ++i) sum += v[i] * v[63 - i];
+      o[tid] = sum;
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "s_set_vgpr_msb_probe"));
+    float *dIn, *dOut;
+    size_t bytes = N * sizeof(float);
+    HIP_ASSERT(hipMalloc(&dIn, bytes));
+    HIP_ASSERT(hipMalloc(&dOut, bytes));
+    HIP_ASSERT(hipMemset(dOut, 0xA5, bytes));
+    HIP_ASSERT(hipMemcpy(dIn, input.data(), bytes, hipMemcpyHostToDevice));
+    struct alignas(8) Args { const float *in; float *out; int n; }
+        args = {dIn, dOut, N};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(bytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dOut, bytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dIn)); HIP_ASSERT(hipFree(dOut));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int outElems) {
+    const float *g = reinterpret_cast<const float *>(gold.data());
+    const float *a = reinterpret_cast<const float *>(actual.data());
+    double maxAbs = 0.0;
+    int mismatches = 0, firstIdx = -1;
+    double firstG = 0.0, firstA = 0.0;
+    // 64-step chain with |step|<2 and 32-term inner product: absolute
+    // error budget is ~128 f32 ulps at the output magnitude, which at
+    // worst is ~1e-4. Keep the tolerance tight enough to flag a real
+    // MSB-handling bug (those are order-of-magnitude errors) while
+    // absorbing legitimate rounding.
+    const double tol = 1e-4;
+    for (int i = 0; i < outElems; ++i) {
+      double d = std::fabs(static_cast<double>(a[i]) -
+                           static_cast<double>(g[i]));
+      if (d > maxAbs) maxAbs = d;
+      if (d > tol) {
+        if (mismatches++ == 0) { firstIdx = i; firstG = g[i]; firstA = a[i]; }
+      }
+    }
+    return std::make_tuple(mismatches, maxAbs, firstIdx, firstG, firstA);
   };
   return r;
 }
@@ -3427,7 +4195,14 @@ const std::vector<Recipe> &allRecipes() {
         makeSBfeI32Recipe(),
         makeSBitset0B32Recipe(),
         makeSBitset0B64Recipe(),
+        makeVBfiB32Recipe(),
+        makeVCmpCndmaskSgprRecipe(),
+        makeVCmpxGtI32Recipe(),
+        makeSAndSaveexecB32Recipe(),
         makeC4LaneDepCmpxRecipe(),
+        makeWmmaF32_16x16x4_GemmRecipe(),
+        makeMubufStoreB32Recipe(),
+        makeSSetVgprMsbRecipe(),
     };
     for (const auto &t : allTritonRecipes())
       r.push_back(tritonToRecipe(t));
@@ -4072,9 +4847,19 @@ void printHelp(const char *argv0) {
       "Usage: %s [options]\n"
       "\n"
       "  --recipe=<name>   run only the named recipe\n"
-      "  --shape=<N>       restrict N values (repeatable). Cross-product\n"
-      "                    with --block.  If omitted, the recipe's default\n"
-      "                    N list is used.\n"
+      "  --shape=<N>       restrict shape VALUES to the listed Ns (repeatable;\n"
+      "                    cross-product with --block).  For non-Triton recipes\n"
+      "                    N is the raw shape integer consumed by the kernel.\n"
+      "                    For Triton (native-as-gold) recipes N is matched\n"
+      "                    against the recipe's declared `defaultShapeValues`;\n"
+      "                    e.g. `--shape=1024` picks the N=1024 point on a\n"
+      "                    recipe that declares a 1024-column row (recipe\n"
+      "                    sweep index mapping is resolved internally).  If a\n"
+      "                    recipe does not declare the requested value the\n"
+      "                    recipe contributes no runs; the harness then\n"
+      "                    surfaces `no runs matched` if all recipes drop to\n"
+      "                    empty.  If omitted, every recipe uses its own\n"
+      "                    default shape list.\n"
       "  --block=<B>       restrict block sizes (repeatable). Cross-product\n"
       "                    with --shape.  If omitted, the recipe's default\n"
       "                    block list is used.\n"
@@ -4166,10 +4951,92 @@ int main(int argc, char **argv) {
          std::getenv("LD_LIBRARY_PATH") ? std::getenv("LD_LIBRARY_PATH") : "(unset)");
 
   std::vector<RunResult> all;
+  // Precompute a fast name -> TritonRecipe* map so the shape-filter
+  // translation below is O(1) per Triton recipe (and avoids another
+  // linear scan of `allTritonRecipes()` nested inside the cross-product
+  // loop below).
+  std::unordered_map<std::string, const TritonRecipe *> tritonByName;
+  for (const auto &t : allTritonRecipes()) tritonByName[t.name] = &t;
+
   for (const auto &r : allRecipes()) {
     if (!opt.recipeFilter.empty() && r.name != opt.recipeFilter) continue;
+    // Resolve `--shape=<X>` to the recipe's internal N representation.
+    //
+    // Historically this harness plumbed two independent "shape"
+    // notions through the same `int N` slot on Recipe::dispatch etc.:
+    //
+    //   * Non-Triton recipes (vecadd_f32, block_sum, … — all
+    //     `GoldSource::CpuReference`): `N` IS the shape value
+    //     passed straight through to the kernel (and equal to the
+    //     integer stored in `defaultNs`).
+    //   * Triton recipes (`GoldSource::NativeExecution`): `N` is an
+    //     *index* into `TritonRecipe::defaultShapeValues`, and
+    //     `tritonToRecipe` explicitly populates `defaultNs` with
+    //     `[0, 1, ..., defaultShapeValues.size()-1]`.  Every
+    //     Triton-side closure (`dispatch`, `makeInput`, `compare`,
+    //     `outputElems`) turns the N back into the value via
+    //     `defaultShapeValues.at(N)`.
+    //
+    // That dual meaning leaked through the CLI: typing
+    // `compare_correctness --shape=128` was ambiguous — a literal
+    // value on non-Triton recipes, but interpreted as an index on
+    // Triton recipes (and blew up with
+    // `vector::_M_range_check: __n (which is 128) >= this->size()
+    // (which is 4)` when the Triton recipe's defaults had fewer
+    // than 128 entries).  There is no realistic user who wants
+    // "index 128 into whatever shape list"; the shape the user
+    // cares about IS the value.
+    //
+    // Fix: `--shape=<X>` is uniformly the shape *value*.  For
+    // Triton recipes we translate each filter value to the matching
+    // position in `defaultShapeValues` here, so the downstream
+    // closures keep seeing the index they already expect.  Values
+    // that no current recipe supports silently drop out of the
+    // per-recipe `effectiveNs` — the harness-wide "no runs matched
+    // your filter" gate below still fires if every recipe drops
+    // everything.  No silent fallback to a different value; if a
+    // Triton recipe's `defaultShapeValues` is `{256, 512, 1024}`
+    // and the user asks for `--shape=128`, that recipe contributes
+    // zero runs rather than rounding up / down to a neighbour.
+    //
+    // Backwards-compat note: the original index-based semantics on
+    // Triton recipes is not preserved under a separate flag.  Any
+    // user who genuinely wanted "index N" was relying on an
+    // implementation detail of `tritonToRecipe` that is expressly
+    // internal (the defaultShapeValues ordering itself is not
+    // promised to be stable across refactors); replacing an
+    // implementation-detail interface with the principled value-
+    // based one is the whole point of this change.
+    std::vector<int> shapeFilterForRecipe;
+    if (!opt.shapeFilter.empty() && r.goldSource == GoldSource::NativeExecution) {
+      auto it = tritonByName.find(r.name);
+      if (it != tritonByName.end()) {
+        const TritonRecipe *tp = it->second;
+        for (int wanted : opt.shapeFilter) {
+          for (size_t i = 0; i < tp->defaultShapeValues.size(); ++i) {
+            if (tp->defaultShapeValues[i] == wanted) {
+              shapeFilterForRecipe.push_back(static_cast<int>(i));
+              break;
+            }
+          }
+        }
+      }
+    } else if (!opt.shapeFilter.empty()) {
+      // Non-Triton recipe: filter values are literal Ns.  Intersect
+      // with `defaultNs` so that passing a value the recipe does not
+      // declare as a supported default contributes zero runs (same
+      // silent-drop behaviour as the Triton branch above — any user
+      // who wanted a value the recipe does not support would be
+      // launching a shape the recipe's `makeInput` / `compare` may
+      // not handle correctly, which is the expensive half of the
+      // cross-product to silence at the CLI layer).
+      for (int v : opt.shapeFilter)
+        if (std::find(r.defaultNs.begin(), r.defaultNs.end(), v) !=
+            r.defaultNs.end())
+          shapeFilterForRecipe.push_back(v);
+    }
     const std::vector<int> &ns =
-        opt.shapeFilter.empty() ? r.defaultNs : opt.shapeFilter;
+        opt.shapeFilter.empty() ? r.defaultNs : shapeFilterForRecipe;
     const std::vector<int> &blocks =
         opt.blockFilter.empty() ? r.defaultBlocks : opt.blockFilter;
     // For Triton recipes (native-as-gold) print the resolved shape label
