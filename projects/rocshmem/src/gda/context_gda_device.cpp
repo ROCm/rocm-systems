@@ -145,7 +145,7 @@ __device__ void GDAContext::fence() { //TODO: optimize
   for (uint32_t i = 0; i < num_qps; i++) {
     qps[i].quiet(wf_info);
   }
-  __threadfence_system();
+  ipcImpl_.ipcFence();
 }
 
 __device__ void GDAContext::fence([[maybe_unused]] int pe) {
@@ -155,6 +155,7 @@ __device__ void GDAContext::fence([[maybe_unused]] int pe) {
     int qp_index = i * num_pes + pe;
     qps[qp_index].quiet(wf_info);
   }
+  ipcImpl_.ipcFence();
 }
 
 __device__ void GDAContext::quiet() {
@@ -166,6 +167,7 @@ __device__ void GDAContext::internal_quiet(ActiveWFInfo &wf_info) {
   for (uint32_t i = 0; i < num_qps; i++) {
     qps[i].quiet(wf_info);
   }
+  ipcImpl_.ipcQuiet();
 }
 
 __device__ void GDAContext::pe_quiet(size_t pe) {
@@ -174,6 +176,7 @@ __device__ void GDAContext::pe_quiet(size_t pe) {
     int qp_index = i * num_pes + pe;
     qps[qp_index].quiet(wf_info);
   }
+  ipcImpl_.ipcQuiet();
 }
 
 __device__ void *GDAContext::shmem_ptr(const void *dest, int pe) {
