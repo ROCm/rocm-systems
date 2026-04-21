@@ -464,6 +464,7 @@ private:
         const auto poll_interval   = std::chrono::microseconds{cfg_.poll_interval_us};
         const auto spin_window     = std::chrono::microseconds{cfg_.active_spin_window_us};
         const auto wait_timeout_ms = std::max<uint32_t>((cfg_.poll_interval_us + 999u) / 1000u, 1u);
+        uint64_t   idle_sleep_cycles = 0;
         ROCP_ERROR_IF(ioctl_monitor_diag_enabled()) << fmt::format(
             "DEBUG: ioctl monitor detector loop start monitor={} poll_interval_us={} "
             "active_spin_window_us={} wait_timeout_ms={} tid={}",
@@ -479,6 +480,7 @@ private:
             collect_ready(ready, nullptr);
             if(!ready.empty())
             {
+                idle_sleep_cycles = 0;
                 enqueue_ready(ready);
                 continue;
             }
@@ -496,6 +498,7 @@ private:
 
                 if(!ready.empty())
                 {
+                    idle_sleep_cycles = 0;
                     enqueue_ready(ready);
                     continue;
                 }
@@ -506,6 +509,7 @@ private:
             collect_ready(ready, &event_ids);
             if(!ready.empty())
             {
+                idle_sleep_cycles = 0;
                 enqueue_ready(ready);
                 continue;
             }
@@ -514,6 +518,7 @@ private:
 
             if(!event_ids.empty() && ops_.wait_events)
             {
+                idle_sleep_cycles = 0;
                 auto _wait_result = ops_.wait_events(event_ids, wait_timeout_ms);
                 ROCP_ERROR_IF(ioctl_monitor_diag_enabled())
                     << fmt::format("DEBUG: ioctl monitor detector waited via ioctl monitor={} "
@@ -525,14 +530,17 @@ private:
             }
             else if(poll_interval.count() > 0)
             {
-                ROCP_ERROR_IF(ioctl_monitor_diag_enabled())
+                ++idle_sleep_cycles;
+                ROCP_ERROR_IF(ioctl_monitor_diag_enabled() &&
+                              (idle_sleep_cycles == 1 || (idle_sleep_cycles % 10000) == 0))
                     << fmt::format("DEBUG: ioctl monitor detector timed sleep monitor={} "
                                    "poll_interval_us={} event_count={} wait_events_supported={} "
-                                   "tid={}",
+                                   "idle_sleep_cycles={} tid={}",
                                    static_cast<void*>(this),
                                    cfg_.poll_interval_us,
                                    event_ids.size(),
                                    static_cast<bool>(ops_.wait_events),
+                                   idle_sleep_cycles,
                                    common::get_tid());
                 std::this_thread::sleep_for(poll_interval);
             }
