@@ -107,17 +107,7 @@ jobs:
         --env-file /etc/podinfo/gha-gpu-isolation-settings
 
     steps:
-      - name: Install baseline OS dependencies
-        run: |
-          apt-get update
-          apt-get install -y software-properties-common
-          add-apt-repository ppa:git-core/ppa
-          apt-get update
-          apt-get install -y git
-          apt-get install -y python3-pip
-          apt-get install -y cmake
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
         with:
           submodules: true
           sparse-checkout: |
