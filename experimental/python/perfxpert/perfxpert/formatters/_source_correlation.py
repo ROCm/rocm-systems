@@ -31,13 +31,26 @@ namespace-qualified, possibly template-decorated) with Tier-0
 hotspot row can carry an optional ``source_locations`` list describing
 the definition line and, when detected, the launch site.
 
+Each source-location entry also carries a ``severity`` + ``severity_label``
+pair derived from the owning hotspot's ``percent_of_total``. The buckets
+(VTune / NSight-style) are:
+
+    >= 20%  → HIGH    (CRITICAL, red)
+    >= 5%   → MEDIUM  (HOT,      orange)
+    >= 1%   → LOW     (WARM,     yellow)
+    <  1%   → INFO    (COOL,     blue)
+
+The exact hex codes mirror the ``PRIORITY`` dict the webview already uses
+for the ``.r-card[data-p=...]`` recommendation cards, so source-panel
+coloring matches the rest of the report palette.
+
 This is a pure-data helper — no formatter-specific logic lives here.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
 # Classification of launch_type entries to the user-facing ``kind`` field.
@@ -46,6 +59,40 @@ _LAUNCH_KIND = {
     "HIP_KERNEL_LAUNCH": "launch",
     "TRIPLE_ANGLE_LAUNCH": "launch",
 }
+
+
+# Severity buckets (matches the ``PRIORITY`` palette in webview.py).
+# Tuple: (severity_id, severity_label, hex_color)
+_SEVERITY_HIGH = ("HIGH", "CRITICAL", "#e84040")
+_SEVERITY_MEDIUM = ("MEDIUM", "HOT", "#f08432")
+_SEVERITY_LOW = ("LOW", "WARM", "#caa828")
+_SEVERITY_INFO = ("INFO", "COOL", "#4d8ef2")
+
+
+def _classify_severity(percent_of_total: float) -> Tuple[str, str, str]:
+    """Bucket ``percent_of_total`` into one of 4 severities.
+
+    Returns ``(severity_id, severity_label, hex_color)`` where:
+      * ``severity_id`` is ``HIGH`` / ``MEDIUM`` / ``LOW`` / ``INFO`` — the
+        machine-readable key that mirrors ``r-card[data-p=...]``.
+      * ``severity_label`` is the user-facing ``CRITICAL`` / ``HOT`` /
+        ``WARM`` / ``COOL`` string.
+      * ``hex_color`` is the canonical hex color for webview
+        ``border-left`` + badge rendering.
+
+    Thresholds (inclusive lower bound): >=20, >=5, >=1, else <1.
+    """
+    try:
+        p = float(percent_of_total or 0.0)
+    except (TypeError, ValueError):
+        p = 0.0
+    if p >= 20.0:
+        return _SEVERITY_HIGH
+    if p >= 5.0:
+        return _SEVERITY_MEDIUM
+    if p >= 1.0:
+        return _SEVERITY_LOW
+    return _SEVERITY_INFO
 
 
 def _demangle_basename(name: str) -> str:
@@ -151,6 +198,13 @@ def correlate_hotspots_with_source(
         hname = out.get("name") or ""
         key = _demangle_basename(hname)
         locs = index.get(key, []) if key else []
+        # Severity flows from the OWNING hotspot's pct_of_total — one
+        # severity per row, not per source-location. We still stamp each
+        # location with it so downstream formatters (markdown/text/webview)
+        # don't have to recompute the bucket.
+        sev_id, sev_label, sev_color = _classify_severity(
+            out.get("percent_of_total", 0.0)
+        )
         # Stable order: definitions first (useful for UI — "where is it
         # defined?" is more load-bearing than "where was it launched?"),
         # then launch sites.
@@ -159,6 +213,10 @@ def correlate_hotspots_with_source(
             (dict(loc) for loc in locs),
             key=lambda lo: (kind_rank.get(lo.get("kind"), 9), lo.get("file", ""), lo.get("line", 0)),
         )
+        for lo in locs:
+            lo["severity"] = sev_id
+            lo["severity_label"] = sev_label
+            lo["severity_color"] = sev_color
         out["source_locations"] = locs
         annotated.append(out)
     return annotated
@@ -169,6 +227,10 @@ def format_source_citation_inline(locations: Optional[List[Dict[str, Any]]]) -> 
 
     Returns ``""`` when ``locations`` is falsy. Used by the Markdown and
     text formatters to append a one-line citation to hotspot rows.
+
+    When the first location carries a ``severity_label`` the return value
+    is suffixed with ``[CRITICAL]`` / ``[HOT]`` / ``[WARM]`` / ``[COOL]``
+    so severity travels through the plain-text formats too.
     """
     if not locations:
         return ""
@@ -178,11 +240,23 @@ def format_source_citation_inline(locations: Optional[List[Dict[str, Any]]]) -> 
         line = lo.get("line", "?")
         kind = lo.get("kind", "definition")
         parts.append(f"{f}:{line} ({kind})")
-    return ", ".join(parts)
+    rendered = ", ".join(parts)
+    # All locations for a single hotspot share the same severity — take
+    # the first. Keep the suffix trailing so existing tests that check
+    # for ``"file:line (kind)"`` substrings still pass.
+    label = None
+    for lo in locations:
+        label = lo.get("severity_label")
+        if label:
+            break
+    if label:
+        rendered = f"{rendered} [{label}]"
+    return rendered
 
 
 __all__ = [
     "correlate_hotspots_with_source",
     "format_source_citation_inline",
+    "_classify_severity",
     "_demangle_basename",
 ]

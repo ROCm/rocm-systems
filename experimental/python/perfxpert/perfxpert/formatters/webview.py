@@ -242,11 +242,28 @@ def _format_as_webview(
         "TRIPLE_ANGLE_LAUNCH": ("&lt;&lt;&lt; &gt;&gt;&gt;", "var(--purple)"),
     }
 
-    def _render_source_panel(idx: int, locs: List[Dict[str, Any]]) -> str:
-        """Inner cell body for the expandable Source-location panel."""
+    def _render_source_panel(
+        idx: int, locs: List[Dict[str, Any]], pct: float = 0.0
+    ) -> str:
+        """Inner cell body for the expandable Source-location panel.
+
+        ``pct`` is the owning hotspot's ``percent_of_total`` — used to
+        drive the VTune / NSight-style severity coloring (red/orange/
+        yellow/blue) even when ``locs`` is empty (matching panels still
+        get framed so the user sees an at-a-glance cue that a hot row
+        lacks a source reference).
+        """
+        # Classify once — shared by the panel frame AND the per-row items.
+        from ._source_correlation import _classify_severity
+
+        sev_id, sev_label, sev_color = _classify_severity(pct)
+        border_style = f"border-left:3px solid {sev_color}"
+
         if not _have_source_scan:
             return (
-                '<div class="h-src-panel h-src-empty">'
+                f'<div class="h-src-panel h-src-empty" '
+                f'data-severity="{sev_id}" '
+                f'style="{border_style}">'
                 "<em>No source scan available.</em> "
                 "Pass <code>--source-dir &lt;path&gt;</code> to analyze so PerfXpert can "
                 "correlate each hotspot with its definition + launch site."
@@ -254,13 +271,22 @@ def _format_as_webview(
             )
         if not locs:
             return (
-                '<div class="h-src-panel h-src-empty">'
+                f'<div class="h-src-panel h-src-empty" '
+                f'data-severity="{sev_id}" '
+                f'style="{border_style}">'
                 "<em>No matching source location detected.</em> "
                 "The scanned <code>--source-dir</code> did not contain a symbol matching "
                 "this kernel's basename."
                 "</div>"
             )
         rows = []
+        sev_badge = (
+            f'<span class="h-src-sev-badge" '
+            f'style="background:{sev_color};color:#fff;'
+            f'padding:2px 6px;border-radius:3px;'
+            f'font-size:0.75em;font-weight:600;margin-right:6px">'
+            f"{sev_label}</span>"
+        )
         for j, lo in enumerate(locs):
             cite_id = f"h-src-cite-{idx}-{j}"
             kind = lo.get("kind", "definition")
@@ -274,6 +300,7 @@ def _format_as_webview(
             cite = f"{file_}:{line}"
             rows.append(
                 f'<div class="h-src-item">'
+                f"{sev_badge if j == 0 else ''}"
                 f'<span class="h-src-kind">{_h(kind_label)}:</span> '
                 f'<span class="cmd-row" id="{cite_id}">'
                 f"<code>{cite}</code>"
@@ -282,7 +309,13 @@ def _format_as_webview(
                 f'<span class="h-src-badge" style="background:{badge_color}">{badge_text}</span>'
                 f"</div>"
             )
-        return '<div class="h-src-panel">' + "".join(rows) + "</div>"
+        return (
+            f'<div class="h-src-panel" '
+            f'data-severity="{sev_id}" '
+            f'style="{border_style}">'
+            + "".join(rows)
+            + "</div>"
+        )
 
     hotspot_rows = []
     for i, k in enumerate(_annotated_hotspots):
@@ -324,11 +357,13 @@ def _format_as_webview(
             f"<span>{pct:.1f}%</span></div>"
             f"</td></tr>"
         )
-        # Hidden sibling row with the source-location panel.
+        # Hidden sibling row with the source-location panel (colored
+        # by severity so the expanded panel carries the same red/orange/
+        # yellow/blue cue as the surrounding recommendation cards).
         hotspot_rows.append(
             f'<tr class="h-src-row" hidden>'
             f'<td colspan="7">'
-            + _render_source_panel(i, locs)
+            + _render_source_panel(i, locs, pct)
             + "</td></tr>"
         )
     hotspots_html = ""
