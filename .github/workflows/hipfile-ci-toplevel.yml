@@ -8,11 +8,30 @@ run-name: Kicks off several hipFile CI workflows for various platforms
 # We can consider moving the Pre-Checks here and passing them into
 # the CI as an input.
 on:
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/hipfile/**'
+      - '.github/workflows/hipfile-build-nvidia.yml'
+      - '.github/workflows/hipfile-build.yml'
+      - '.github/workflows/hipfile-ci-system.yml'
+      - '.github/workflows/hipfile-ci-toplevel.yml'
+      - '.github/workflows/hipfile-ci.yml'
+      - '.github/workflows/hipfile-image-build.yml'
+      - '.github/workflows/hipfile-image-update.yml'
+      - '!**/*.md'
+      - '!**/*.rst'
   pull_request:
     types: [opened, synchronize, reopened] # Defaults
     paths:
       - 'projects/hipfile/**'
-      - '.github/workflows/hipfile-*.yml'
+      - '.github/workflows/hipfile-build-nvidia.yml'
+      - '.github/workflows/hipfile-build.yml'
+      - '.github/workflows/hipfile-ci-system.yml'
+      - '.github/workflows/hipfile-ci-toplevel.yml'
+      - '.github/workflows/hipfile-ci.yml'
+      - '.github/workflows/hipfile-image-build.yml'
+      - '.github/workflows/hipfile-image-update.yml'
       - '!**/*.md'
       - '!**/*.rst'
 
