@@ -19,6 +19,7 @@
 #include "wave_projection.hpp"
 #include "wave_size_obstruction.hpp"
 #include "handlers.hpp"
+#include "rewrite_cross_lane_divergent.hpp"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -65,7 +66,8 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
                       const std::string &kernelName,
                       const KernelMeta &meta,
                       uint64_t kernelOffset,
-                      const std::string &compilationTargetISA) {
+                      const std::string &compilationTargetISA,
+                      bool enableWritelaneRewrite) {
   RaiseResult result;
 
   MCState mc;
@@ -655,6 +657,25 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
     SmallVector<AllocaInst *, 512> allocas;
     regs.collectAllocas(allocas);
     PromoteMemToReg(allocas, DT, &AC);
+  }
+
+  // ==== Phase 6.5: Cross-widen writelane/readlane rewrite ====
+  //
+  // Opt-in rewrite of `v_writelane_b32` / `v_readlane_b32` sites whose
+  // scalar operand is cross-widen-divergent. Disabled by default; the
+  // caller (raise_cli's `--enable-writelane-rewrite`, PipelineConfig's
+  // `enableWritelaneRewrite`) must ask for it explicitly. See
+  // `rewrite_cross_lane_divergent.{hpp,cpp}` and wave-size-translation.md
+  // §5.6.3 for the principled derivation. Runs AFTER `PromoteMemToReg`
+  // by construction — the divergence oracle in
+  // `cross_widen_divergence.{hpp,cpp}` requires post-mem2reg SSA so
+  // scratch-addrspace round-trips don't obscure lane-divergent leaves.
+  // No behavioural change on same-wave / narrowing directions (the
+  // rewrite pass short-circuits internally on
+  // `targetWaveSize <= sourceWaveSize`), so it is safe to invoke
+  // unconditionally when the flag is on.
+  if (enableWritelaneRewrite) {
+    (void)rewriteCrossLaneDivergent(*F, isa.waveSize, targetIsa.waveSize);
   }
 
   // ==== Phase 7: Verify IR ====

@@ -65,6 +65,8 @@ add_library(hotswap-transpiler STATIC
   decode.cpp
   wave_projection.cpp
   wave_size_obstruction.cpp
+  cross_widen_divergence.cpp
+  rewrite_cross_lane_divergent.cpp
   sem_op_attrs.cpp
   raise_failure.cpp
   mc_state.cpp

@@ -69,6 +69,47 @@ config.fixtures = {
     # the downstream shape forecloses the lift's benefit.
     "c1_wave_id_lift_scalarized":
         r"@LIT_FIXTURE_C1_WAVE_ID_LIFT_SCALARIZED_CO@",
+    # writelane_divergent_rewrite / readlane_divergent_rewrite /
+    # writelane_uniform_noop — three-fixture trilogy pinning the IR-shape
+    # contract of the `rewriteCrossLaneDivergent` pass (see
+    # `rewrite_cross_lane_divergent.{hpp,cpp}` + wave-size-translation.md
+    # §5.6.3).  The pass runs only under `--enable-writelane-rewrite`
+    # (default off on first landing, graduating per-caller during the
+    # Matmul128x128 rollout).
+    #
+    # * writelane_divergent_rewrite — pins the
+    #   `v_writelane_b32 -> select` rewrite when the scalar `val` / `old`
+    #   operand is flagged divergent by the oracle in
+    #   `cross_widen_divergence.{hpp,cpp}`. Uses the canonical
+    #   `s_bfe_u32 sDST, ttmp8, 0x50019` BFE rescue as the divergent
+    #   seed; NO WMMA in the kernel so the `WaveIdLiftScalarized`
+    #   classifier does NOT refuse the lift, giving the rewrite a
+    #   chance to run and leaving a stable anchor on the rewritten IR.
+    #   Two RUN lines cover both sides of the flag's contract:
+    #     - REWRITE (flag on) -> writelane gone, `mbcnt_{lo,hi}` +
+    #       `select` present.
+    #     - UNCHANGED (flag off) -> writelane intrinsic survives
+    #       verbatim; the mbcnt helper is NOT materialised (commit 1
+    #       "no behaviour change when flag is off" invariant).
+    # * readlane_divergent_rewrite — pins the
+    #   `v_readlane_b32 -> ds_bpermute` rewrite when the VGPR source is
+    #   divergent. Companion to the writelane fixture; the two together
+    #   pin both halves of the cross-lane primitive rewrite catalogue
+    #   the pass acts on today. Same two-RUN-line flag-contract shape.
+    # * writelane_uniform_noop — pins the correctness counterpart:
+    #   when BOTH `val` (= `workgroup.id.x`) AND `old` (= constant 0
+    #   forced via the `+v` tied constraint) are uniform, the rewrite
+    #   pass MUST NOT convert the site (would regress codegen with no
+    #   correctness benefit) AND MUST NOT materialise the mbcnt lane_id
+    #   helper (lazy materialisation contract: no divergent site -> no
+    #   helper). Single RUN line — flag on, writelane intrinsic
+    #   survives, no mbcnt/ds_bpermute from the rewrite pass.
+    "writelane_divergent_rewrite":
+        r"@LIT_FIXTURE_WRITELANE_DIVERGENT_REWRITE_CO@",
+    "readlane_divergent_rewrite":
+        r"@LIT_FIXTURE_READLANE_DIVERGENT_REWRITE_CO@",
+    "writelane_uniform_noop":
+        r"@LIT_FIXTURE_WRITELANE_UNIFORM_NOOP_CO@",
     "c2_permlane_swap": r"@LIT_FIXTURE_C2_PERMLANE_SWAP_CO@",
     "c2_permlane16": r"@LIT_FIXTURE_C2_PERMLANE16_CO@",
     "c2_dpp_quad_perm": r"@LIT_FIXTURE_C2_DPP_QUAD_PERM_CO@",

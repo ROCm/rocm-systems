@@ -28,12 +28,20 @@ struct RaiseResult {
   bool hasDivergentExec = false;
 };
 
+// `enableWritelaneRewrite` toggles the post-raise rewrite pass that
+// replaces cross-widen-divergent `v_writelane_b32` / `v_readlane_b32`
+// sites with a per-source-wave `select` / `ds_bpermute` pair (see
+// `rewrite_cross_lane_divergent.{hpp,cpp}` and wave-size-translation.md
+// §5.6.3). Default off — opt-in per call during the graduation
+// rollout; the classifier's `WaveIdLiftScalarized` refusal keeps the
+// silent-miscompile gate closed on callers that do not set the flag.
 RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
                       const std::string &sourceISA,
                       const std::string &kernelName,
                       const KernelMeta &meta,
                       uint64_t kernelOffset = 0,
-                      const std::string &compilationTargetISA = "");
+                      const std::string &compilationTargetISA = "",
+                      bool enableWritelaneRewrite = false);
 
 } // namespace transpiler
 

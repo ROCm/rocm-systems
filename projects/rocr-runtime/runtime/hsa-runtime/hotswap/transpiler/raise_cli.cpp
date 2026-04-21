@@ -33,6 +33,16 @@
 // lowers for; defaults to the source ISA (same-wave translation). Use
 // to exercise cross-wave paths from a single CO (e.g. a gfx1250 CO
 // compiled for a wave64 target).
+//
+// --enable-writelane-rewrite. Optional; default off. Turns on the
+// post-raise rewrite of cross-widen-divergent `v_writelane_b32` /
+// `v_readlane_b32` sites into per-source-wave `select` / `ds_bpermute`
+// primitives — see `rewrite_cross_lane_divergent.{hpp,cpp}` and
+// hotswap/docs/wave-size-translation.md §5.6.3. Provided as an
+// explicit flag during the graduation rollout: lit fixtures that
+// exercise the rewrite opt in per RUN line, while the
+// `c1_wave_id_lift_scalarized` refusal fixture keeps the honest
+// silent-miscompile gate with the flag off.
 
 #include "code_object_utils.hpp"
 #include "raiser.hpp"
@@ -89,15 +99,19 @@ int usage() {
       stderr,
       "usage:\n"
       "  raise_cli <code-object.co|.hsaco> [--isa=<arch>] "
-      "[--target-isa=<arch>]\n"
+      "[--target-isa=<arch>] [--enable-writelane-rewrite]\n"
       "  raise_cli <code-object.co|.hsaco> --emit-ir[=<kernel>] "
-      "[--isa=<arch>] [--target-isa=<arch>]\n"
+      "[--isa=<arch>] [--target-isa=<arch>] "
+      "[--enable-writelane-rewrite]\n"
       "\n"
       "Default mode: emits per-kernel OK/FAIL lines on stdout in the format\n"
       "  kerneldex coverage expects. Exits 0 iff every kernel raises.\n"
       "--emit-ir mode: dumps raised LLVM IR for a single kernel on stdout.\n"
       "  No fork; stderr left alone for FileCheck.\n"
       "--target-isa: overrides the target ISA (default: same as --isa).\n"
+      "--enable-writelane-rewrite: turn on the cross-widen-divergent\n"
+      "  writelane/readlane rewrite (default off; see wave-size-\n"
+      "  translation.md \u00a75.6.3).\n"
       "ISA is inferred from the filename when --isa is not given.\n");
   return 2;
 }
@@ -109,6 +123,7 @@ int main(int argc, char **argv) {
   std::string isa;
   std::string targetIsa;
   bool emitIr = false;
+  bool enableWritelaneRewrite = false;
   std::string emitIrKernel;
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
@@ -129,6 +144,8 @@ int main(int argc, char **argv) {
     } else if (a.rfind("--emit-ir=", 0) == 0) {
       emitIr = true;
       emitIrKernel = a.substr(10);
+    } else if (a == "--enable-writelane-rewrite") {
+      enableWritelaneRewrite = true;
     } else if (!a.empty() && a[0] == '-') {
       std::fprintf(stderr, "raise_cli: unknown flag: %s\n", a.c_str());
       return usage();
@@ -211,7 +228,8 @@ int main(int argc, char **argv) {
     uint64_t kernelOffset =
         transpiler::findKernelSymbolOffset(coData, target);
     auto raised = transpiler::raiseToIR(text.bytes, isa, target, meta,
-                                        kernelOffset, targetIsa);
+                                        kernelOffset, targetIsa,
+                                        enableWritelaneRewrite);
     if (!raised.success) {
       // Contract: raiseToIR only populates RaiseResult::irText on the
       // success path (the last write before setting `success = true`),
@@ -264,7 +282,8 @@ int main(int argc, char **argv) {
       }
       auto meta = transpiler::extractKernelMeta(coData, kName);
       auto raised = transpiler::raiseToIR(text.bytes, isa, kName, meta,
-                                          /*kernelOffset=*/0, targetIsa);
+                                          /*kernelOffset=*/0, targetIsa,
+                                          enableWritelaneRewrite);
       shm->done = true;
       shm->success = raised.success;
       shm->lifted = raised.liftedCount;
