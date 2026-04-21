@@ -2,6 +2,7 @@
     "required_tables": [
         {
             "commit": "HIP graph bubbles: kernel count must match RUN_ARGS in rocprof-sys-hip-graph-bubbles-tests.cmake and _HIP_GRAPH_BUBBLES_* in test_hip_graph_bubbles.py; if those change, update min_rows, expected_result, and descriptions below.",
+            "min_rows": 384,
             "name": "kernels",
             "required_columns": [
                 "id",
@@ -12,13 +13,12 @@
                 "queue",
                 "stream"
             ],
-            "min_rows": 20000,
             "validation_queries": [
                 {
                     "comparison": "equals",
-                    "description": "Kernel row count equals num_kernels * num_iterations from RUN_ARGS (2000*10 here); change with RUN_ARGS and CMake/pytest.",
-                    "error_message": "Kernel count does not match 2000 * 10 graph executions",
-                    "expected_result": 20000,
+                    "description": "Kernel row count equals num_kernels * num_iterations from RUN_ARGS (64*6 here); change with RUN_ARGS and CMake/pytest.",
+                    "error_message": "Kernel count does not match 64 * 6 graph executions",
+                    "expected_result": 384,
                     "query": "SELECT COUNT(*) AS count FROM kernels"
                 },
                 {
@@ -39,6 +39,7 @@
         },
         {
             "commit": "HIP graph bubbles:  PMC rows present when ROCPROFSYS_ROCM_EVENTS is set (raw COUNT rocpd_pmc_event % COUNT kernels).",
+            "min_rows": 1,
             "name": "rocpd_pmc_event",
             "required_columns": [
                 "id",
@@ -48,7 +49,6 @@
                 "value",
                 "extdata"
             ],
-            "min_rows": 1,
             "validation_queries": [
                 {
                     "comparison": "equals",
@@ -82,6 +82,7 @@
         },
         {
             "commit": "HIP graph bubbles: graph_launch region count must match num_iterations RUN_ARG; keep in sync with CMake/pytest when RUN_ARGS change.",
+            "min_rows": 1,
             "name": "regions",
             "required_columns": [
                 "id",
@@ -92,13 +93,12 @@
                 "start",
                 "end"
             ],
-            "min_rows": 1,
             "validation_queries": [
                 {
                     "comparison": "equals",
-                    "description": "roctxRangePush(graph_launch) once per iteration (10 here); must match num_iterations RUN_ARG.",
-                    "error_message": "Expected 10 roctx marker regions for graph_launch",
-                    "expected_result": 10,
+                    "description": "roctxRangePush(graph_launch) once per iteration (6 here); must match num_iterations RUN_ARG.",
+                    "error_message": "Expected 6 roctx marker regions for graph_launch",
+                    "expected_result": 6,
                     "query": "SELECT COUNT(*) AS count FROM regions WHERE category = 'rocm_marker_api' AND name LIKE '%graph_launch%'"
                 },
                 {
