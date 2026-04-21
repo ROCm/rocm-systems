@@ -170,7 +170,7 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
 }  // namespace
 
 void
-process_doorbell_impl(queue_state_ptr_t    state,
+process_doorbell_impl(const queue_state_ptr_t&    state,
                       hsa_signal_value_t   value,
                       const doorbell_fn_t& ring_doorbell)
 {
@@ -209,7 +209,7 @@ process_doorbell_impl(queue_state_ptr_t    state,
     std::vector<char> source_snapshot(pkt_count * state_ptr->pkt_size);
     for(uint64_t i = 0; i < pkt_count; ++i)
     {
-        auto* src = static_cast<const char*>(state_ptr->ring_buf) +
+        const auto* src = static_cast<const char*>(state_ptr->ring_buf) +
                     (((scan_pos + i) & state_ptr->ring_mask) * state_ptr->pkt_size);
         memcpy(source_snapshot.data() + (i * state_ptr->pkt_size), src, state_ptr->pkt_size);
     }
