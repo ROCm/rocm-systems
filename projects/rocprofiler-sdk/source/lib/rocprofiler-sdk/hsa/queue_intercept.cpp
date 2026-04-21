@@ -166,16 +166,6 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
         if(dst != s) memcpy(dst, s, pkt_size);
         ROCP_TRACE << "  pkt[" << i << "] -> slot=" << slot << " submit_pos=" << tls_submit_pos;
         tls_submit_pos++;
-
-        for(uint64_t k = 0; k < state->k_factor; k++)
-        {
-            auto  kslot = tls_submit_pos & state->ring_mask;
-            auto* kdst  = static_cast<char*>(state->ring_buf) + (kslot * pkt_size);
-            memset(kdst, 0, pkt_size);
-            *reinterpret_cast<uint16_t*>(kdst) =
-                (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE);
-            tls_submit_pos++;
-        }
     }
     ROCP_TRACE << "ring_buffer_writer done: final submit_pos=" << tls_submit_pos;
 }
@@ -213,9 +203,10 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t
     // Packets are strided in the ring — process each one individually
     for(uint64_t i = 0; i < pkt_count; i++)
     {
-        uint64_t pkt_pos = scan_pos + i * stride;
-        auto*    pkt     = static_cast<char*>(state->ring_buf) +
+        uint64_t pkt_pos        = scan_pos + i * stride;
+        auto*    pkt            = static_cast<char*>(state->ring_buf) +
                        ((pkt_pos & state->ring_mask) * state->pkt_size);
+        uint64_t start_submit = tls_submit_pos;
         if(queue)
         {
             queue->invoke_write_interceptor(pkt, 1, ring_buffer_writer);
@@ -223,6 +214,19 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t
         else
         {
             ring_buffer_writer(pkt, 1);
+        }
+
+        // Pad remaining slots in this stride with barrier_and
+        uint64_t used      = tls_submit_pos - start_submit;
+        uint64_t remaining = stride - used;
+        for(uint64_t k = 0; k < remaining; k++)
+        {
+            auto  kslot = tls_submit_pos & state->ring_mask;
+            auto* kdst  = static_cast<char*>(state->ring_buf) + (kslot * state->pkt_size);
+            memset(kdst, 0, state->pkt_size);
+            *reinterpret_cast<uint16_t*>(kdst) =
+                (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE);
+            tls_submit_pos++;
         }
     }
 
