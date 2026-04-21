@@ -6,9 +6,8 @@ Zero runtime cost when disabled.
 
 ## Prerequisites
 
-- ROCm 7.x with hipcc
-- CMake 3.20+
-- Target: gfx906+ (CDNA/GCN) or gfx10+ (RDNA)
+- Rocm 7.13 or
+- Rocprofiler-sdk built from develop.
 
 ## Building the pass plugin
 
@@ -398,7 +397,29 @@ The flamegraph tool:
 - Generates interactive SVG with search and hover tooltips
 - Point markers (barriers, memory ops, user points) are dropped from the
   flamegraph -- they have no meaningful cycle attribution. Inspect them via
-  `sqtt_decode_funcmap.py` or the raw shaderdata records.
+  `sqtt_decode_funcmap.py`, the raw shaderdata records, or the Perfetto
+  exporter below.
+
+## Exporting to Perfetto
+
+For a per-wave timeline view that keeps point markers as instant events
+(barriers, memory ops, user points), export to Perfetto / Chrome JSON:
+
+```bash
+# One *.perfetto.json per ui_* directory, written next to each one
+python3 tools/sqtt_perfetto.py trace_output/ --demangle
+
+# Collect all outputs into one directory
+python3 tools/sqtt_perfetto.py trace_output/ -o /tmp/perfetto_out
+
+# Convert SQTT cycles to nanoseconds using a known clock rate
+python3 tools/sqtt_perfetto.py trace_output/ --clock-rate-ghz 2.1
+```
+
+Open the resulting JSON files at <https://ui.perfetto.dev> (drag & drop).
+Each dispatch becomes a "process" track; each `(CU, SIMD, wave_id, instance)`
+becomes a thread. Function entry/exit pairs render as duration slices, point
+markers as instant events on the same track.
 
 ## Decoding the function map
 

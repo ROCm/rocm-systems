@@ -56,6 +56,7 @@ void SQTTInstrumentPass::storeFuncMetadata(Function& F, uint32_t id, LLVMContext
     F.setMetadata("sqtt.func.id", MD);
 
     unsigned preOptSize = computeFunctionSize(F, Config.Mode);
+    std::string srcLoc = getFunctionSourceLoc(F);
 
     Module* M = F.getParent();
     NamedMDNode* NMD = M->getOrInsertNamedMetadata("sqtt.funcmap.early");
@@ -63,7 +64,8 @@ void SQTTInstrumentPass::storeFuncMetadata(Function& F, uint32_t id, LLVMContext
         Ctx,
         {ConstantAsMetadata::get(ConstantInt::get(I32, id)),
          MDString::get(Ctx, F.getName()),
-         ConstantAsMetadata::get(ConstantInt::get(I32, preOptSize))}
+         ConstantAsMetadata::get(ConstantInt::get(I32, preOptSize)),
+         MDString::get(Ctx, srcLoc)}
     ));
 }
 
@@ -114,6 +116,7 @@ bool SQTTInstrumentPass::filterInstrumentedFunctions(Module& M)
     {
         std::string Name;
         unsigned PreOptSize;
+        std::string SourceLoc;
     };
     std::map<uint32_t, EarlyEntry> EarlyMap;
     if (NamedMDNode* NMD = M.getNamedMetadata("sqtt.funcmap.early"))
@@ -131,7 +134,12 @@ bool SQTTInstrumentPass::filterInstrumentedFunctions(Module& M)
             {
                 if (auto* SzC = mdconst::dyn_extract<ConstantInt>(Op->getOperand(2))) preOptSize = SzC->getZExtValue();
             }
-            EarlyMap[IdC->getZExtValue()] = {NameS->getString().str(), preOptSize};
+            std::string srcLoc;
+            if (Op->getNumOperands() >= 4)
+            {
+                if (auto* LocS = dyn_cast<MDString>(Op->getOperand(3))) srcLoc = LocS->getString().str();
+            }
+            EarlyMap[IdC->getZExtValue()] = {NameS->getString().str(), preOptSize, srcLoc};
         }
         NMD->eraseFromParent();
     }
@@ -154,7 +162,12 @@ bool SQTTInstrumentPass::filterInstrumentedFunctions(Module& M)
             auto it = EarlyMap.find(id);
             if (it != EarlyMap.end())
             {
-                FuncMap.push_back({id, it->second.Name});
+                // Prefer the live function's current source loc (debug info
+                // may have been updated by optimization passes); fall back
+                // to the value stashed pre-inline.
+                std::string loc = getFunctionSourceLoc(F);
+                if (loc.empty()) loc = it->second.SourceLoc;
+                FuncMap.push_back({id, it->second.Name, loc});
                 EarlyMap.erase(it);
             }
         }
@@ -172,7 +185,7 @@ bool SQTTInstrumentPass::filterInstrumentedFunctions(Module& M)
         auto& [id, entry] = *it;
         if (entry.PreOptSize > Config.FunctionThreshold)
         {
-            FuncMap.push_back({id, entry.Name});
+            FuncMap.push_back({id, entry.Name, entry.SourceLoc});
             ++it;
         }
         else
@@ -224,7 +237,7 @@ uint32_t SQTTInstrumentPass::compactFuncIDs(Module& M)
 
     // Build candidate set: every ID that has a record (user marker or func).
     std::set<uint32_t> Candidates;
-    for (auto& [id, name] : FuncMap) Candidates.insert(id);
+    for (auto& entry : FuncMap) Candidates.insert(entry.ID);
     for (auto& entry : UserMarkers) Candidates.insert(entry.ID);
 
     // Sort by descending emission count, ties broken by old ID for stability.
@@ -255,10 +268,10 @@ uint32_t SQTTInstrumentPass::compactFuncIDs(Module& M)
     }
 
     // Update internal records.
-    for (auto& [id, name] : FuncMap)
+    for (auto& entry : FuncMap)
     {
-        auto it = IDMap.find(id);
-        if (it != IDMap.end()) id = it->second;
+        auto it = IDMap.find(entry.ID);
+        if (it != IDMap.end()) entry.ID = it->second;
     }
     for (auto& entry : UserMarkers)
     {
@@ -272,7 +285,7 @@ uint32_t SQTTInstrumentPass::compactFuncIDs(Module& M)
     }
 
     // Keep FuncMap sorted by new ID for deterministic .sqtt_funcmap output.
-    std::sort(FuncMap.begin(), FuncMap.end());
+    std::sort(FuncMap.begin(), FuncMap.end(), [](const FuncMapEntry& a, const FuncMapEntry& b) { return a.ID < b.ID; });
     return nextID;
 }
 
@@ -423,7 +436,7 @@ bool SQTTInstrumentPass::instrumentFunctionDirect(Function& F, GfxGen gen)
     if (size <= Config.FunctionThreshold) return false;
 
     uint32_t id = NextEventID++;
-    FuncMap.push_back({id, F.getName().str()});
+    FuncMap.push_back({id, F.getName().str(), getFunctionSourceLoc(F)});
 
     BasicBlock& EntryBB = F.getEntryBlock();
     Instruction* InsertPt =

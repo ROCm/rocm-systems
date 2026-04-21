@@ -130,9 +130,18 @@ def demangle(name: str) -> str:
     return name
 
 
-# Entry: (id_or_none, symbol_name, entry_type)
-# entry_type: "kernel", "func", "user"
-Entry = tuple[int | None, str, str]
+# Entry: (id_or_none, symbol_name, entry_type, source_loc)
+# entry_type: "kernel", "func", "user", "point"
+# source_loc may be empty
+Entry = tuple[int | None, str, str, str]
+
+
+def _split_source_loc(s: str) -> tuple[str, str]:
+    """Split "name@file:line -> ..." into (name, source_loc)."""
+    if "@" not in s:
+        return s, ""
+    name, loc = s.split("@", 1)
+    return name, loc
 
 
 def parse_funcmap(output: str) -> list[Entry]:
@@ -163,9 +172,10 @@ def parse_funcmap(output: str) -> list[Entry]:
             continue
 
         if prefix == "K":
-            entries.append((None, rest, "kernel"))
+            name, loc = _split_source_loc(rest)
+            entries.append((None, name, "kernel", loc))
         elif prefix in ("F", "U", "P"):
-            # Funcmap v2: "F:ID:name", "U:ID:name", "P:ID:name"
+            # Funcmap v2: "F:ID:name[@source_loc]", "U:ID:name", "P:ID:name[@source_loc]"
             if ":" not in rest:
                 continue
             id_str, name = rest.split(":", 1)
@@ -174,7 +184,8 @@ def parse_funcmap(output: str) -> list[Entry]:
             except ValueError:
                 continue
             type_map = {"F": "func", "U": "user", "P": "point"}
-            entries.append((mid, name, type_map[prefix]))
+            name, loc = _split_source_loc(name)
+            entries.append((mid, name, type_map[prefix], loc))
 
     return entries
 
@@ -209,14 +220,16 @@ def main():
     type_order = {"kernel": 0, "func": 1, "point": 2, "user": 3}
 
     def sort_key(e: Entry):
-        fid, name, etype = e
+        fid, name, etype, _loc = e
         return (type_order.get(etype, 3), fid if fid is not None else -1, name)
 
-    for fid, name, etype in sorted(entries, key=sort_key):
+    for fid, name, etype, loc in sorted(entries, key=sort_key):
         id_str = "-" if fid is None else str(fid)
         addr = sym_addrs.get(name)
         addr_str = f"0x{addr:016x}" if addr is not None else "-"
         display = demangle(name) if args.demangle else name
+        if loc:
+            display = f"{display}  @ {loc}"
         print(f"{etype:>6}  {id_str:>8}  {addr_str:>18}  {display}")
 
 

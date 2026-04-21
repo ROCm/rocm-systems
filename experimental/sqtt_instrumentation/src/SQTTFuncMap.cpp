@@ -29,20 +29,30 @@ using namespace llvm;
 void SQTTInstrumentPass::emitFuncMap(Module& M)
 {
     std::string mapData;
-    // Instrumented device functions: "F:ID:name"
-    for (auto& [id, name] : FuncMap)
+    // Instrumented device functions: "F:ID:name" (+ "@source_loc" if known)
+    for (auto& entry : FuncMap)
     {
         mapData += "F:";
-        mapData += std::to_string(id);
+        mapData += std::to_string(entry.ID);
         mapData += ':';
-        mapData += name;
+        mapData += entry.Name;
+        if (!entry.SourceLoc.empty())
+        {
+            mapData += '@';
+            mapData += entry.SourceLoc;
+        }
         mapData += '\n';
     }
-    // Kernels (not instrumented, for name/vaddr lookup): "K:name"
-    for (auto& name : KernelNames)
+    // Kernels (not instrumented, for name/vaddr lookup): "K:name" (+ "@loc")
+    for (auto& kentry : KernelNames)
     {
         mapData += "K:";
-        mapData += name;
+        mapData += kentry.Name;
+        if (!kentry.SourceLoc.empty())
+        {
+            mapData += '@';
+            mapData += kentry.SourceLoc;
+        }
         mapData += '\n';
     }
     // Named user markers: "U:ID:name" for scope, "P:ID:name" for points

@@ -14,6 +14,8 @@ The system consists of:
 - **`sqtt_trace.hpp`** -- Device-side header for user markers
 - **`sqtt_flamegraph.py`** -- Post-processing tool: reads SQTT traces and
   `.sqtt_funcmap` sections to generate flamegraphs
+- **`sqtt_perfetto.py`** -- Post-processing tool: exports SQTT traces as
+  Chrome JSON for viewing in the Perfetto UI (per-wave timelines)
 - **`sqtt_decode_funcmap.py`** -- Post-build tool to extract the ID-to-name map
 
 ## Building
@@ -148,13 +150,19 @@ Function and user marker IDs are allocated first and compacted to enable
 The `.sqtt_funcmap` ELF section uses type prefixes to distinguish marker types:
 
 ```
-F:id:name          — function (enter/exit scope marker)
-K:name             — kernel (for vaddr lookup, not instrumented)
-U:id:name          — user scope marker (enter/exit)
-P:id:name          — point marker (barrier, memory op, user point)
-P:id:name@file:line — point marker with source location (addr trace ops)
-W:N                — wave size (32 or 64), present when address tracing is enabled
+F:id:name[@source_loc]  — function (enter/exit scope marker)
+K:name[@source_loc]     — kernel (for vaddr lookup, not instrumented)
+U:id:name               — user scope marker (enter/exit)
+P:id:name               — point marker (barrier, memory op, user point)
+P:id:name@source_loc    — point marker with source location (addr trace ops)
+W:N                     — wave size (32 or 64), present when address tracing is enabled
 ```
+
+`source_loc`, when present, follows rocprofiler-sdk's inline-chain format:
+`<innermost_file>:<line> -> <next_outer_file>:<line> -> ...`. For `F:` and
+`K:` entries the chain has one element (the function/kernel definition
+site). For `P:` address-trace entries the chain reflects how the memory
+op got to its eventual call site through any inlining.
 
 The decoder uses the funcmap type to determine behavior:
 - `F:` and `U:` markers use enter/exit scope semantics
@@ -162,6 +170,9 @@ The decoder uses the funcmap type to determine behavior:
 - `P:` markers with `addr_trace_` prefix trigger address block parsing
 - `K:` entries are not instrumented; they provide vaddr lookup for kernels
 - `W:` entries communicate the wave size from the compiler to the decoder
+- User markers (`U:`) and the deduplicated point markers for barriers /
+  vmem are intentionally source-loc-less: their IDs are shared across all
+  call sites so any single source loc would be misleading.
 
 ### Barrier marker placement
 
@@ -426,12 +437,13 @@ The pass embeds a `.sqtt_funcmap` section in each AMDGPU code object. This
 section contains a null-terminated string with newline-delimited entries:
 
 ```
-F:ID:mangled_function_name           -- auto-instrumented function (enter/exit scope)
-K:mangled_kernel_name                -- kernel entry point (for vaddr lookup)
-U:ID:marker_name                     -- named user scope marker (enter/exit)
-P:ID:marker_name                     -- point marker (barrier, memory op, user point)
-P:ID:addr_trace_load@file.hip:42     -- address trace op with source location
-W:64                                 -- wave size (present when address tracing is enabled)
+F:ID:mangled_function_name@file.hip:42         -- auto-instrumented function (enter/exit scope)
+K:mangled_kernel_name@file.hip:80              -- kernel entry point (for vaddr lookup)
+U:ID:marker_name                               -- named user scope marker (enter/exit)
+P:ID:marker_name                               -- point marker (barrier, memory op, user point)
+P:ID:addr_trace_load@kernel.hip:59 -> hip_runtime.h:264
+                                               -- address trace op with inline chain source location
+W:64                                           -- wave size (present when address tracing is enabled)
 ```
 
 The section is added to `llvm.used` to prevent linker stripping.
@@ -454,11 +466,11 @@ Output:
 ```
   Type        ID               Vaddr  Name
   ----       ---               -----  ----
-kernel         -  0x0000000000001000  _Z8kernelAi
+kernel         -  0x0000000000001000  _Z8kernelAi  @ kernel.hip:80
   user         1                   -  load_input
   user         2                   -  compute_start
-  func         3  0x0000000000001200  _Z4syncv
-  func         4                   -  _Z12helper_funcv  (inlined)
+  func         3  0x0000000000001200  _Z4syncv  @ kernel.hip:42
+  func         4                   -  _Z12helper_funcv  @ helper.hpp:17  (inlined)
  point         5                   -  barrier_signal
  point         6                   -  barrier_wait
  point         7                   -  barrier
@@ -466,16 +478,18 @@ kernel         -  0x0000000000001000  _Z8kernelAi
  point         9                   -  vmem_store
 ```
 
-With address tracing, each memory op has its own entry with source location:
+With address tracing, each memory op has its own entry with source location.
+When the op is reached through inlining, the source location is an inline
+chain (innermost first, then outward call sites separated by ` -> `):
 ```
   wave_size: 64
- point         1                   -  addr_trace_load@hip_runtime.h:264
- point         2                   -  addr_trace_load@kernel.hip:59
- point         3                   -  addr_trace_lds_store@kernel.hip:59
- point         4                   -  addr_trace_lds_load@kernel.hip:45
- point         5                   -  addr_trace_lds_store@kernel.hip:45
- point         6                   -  addr_trace_lds_load@kernel.hip:49
- point         7                   -  addr_trace_store@kernel.hip:62
+ point         1                   -  addr_trace_load  @ hip_runtime.h:264 -> kernel.hip:59
+ point         2                   -  addr_trace_load  @ kernel.hip:59
+ point         3                   -  addr_trace_lds_store  @ kernel.hip:59
+ point         4                   -  addr_trace_lds_load  @ kernel.hip:45
+ point         5                   -  addr_trace_lds_store  @ kernel.hip:45
+ point         6                   -  addr_trace_lds_load  @ kernel.hip:49
+ point         7                   -  addr_trace_store  @ kernel.hip:62
 ```
 
 The script uses `llvm-objcopy --dump-section` (preferred) or `llvm-readelf -p`
@@ -513,8 +527,36 @@ The flamegraph shows:
 - Auto-instrumented function entry/exit
 
 Point markers (barriers, memory ops, user points) are **not** rendered --
-they have no meaningful cycle attribution. Use `sqtt_decode_funcmap.py` or
-the raw shaderdata records to inspect them.
+they have no meaningful cycle attribution. Use `sqtt_decode_funcmap.py`,
+the raw shaderdata records, or the Perfetto exporter (next section) to
+inspect them.
+
+### Exporting traces to Perfetto
+
+**`sqtt_perfetto.py`** converts SQTT shaderdata into the Chrome JSON
+Trace Event Format, viewable at <https://ui.perfetto.dev>:
+
+```bash
+# One *.perfetto.json per ui_* (sibling-of-source by default)
+python3 tools/sqtt_perfetto.py trace_output/ --demangle
+
+# Collect outputs into one directory; convert cycles to ns
+python3 tools/sqtt_perfetto.py trace_output/ -o /tmp/perfetto_out \
+    --clock-rate-ghz 2.1
+```
+
+Each `ui_*` directory becomes a separate file -- each is its own SQTT
+time domain and we don't fake offsets across collections. Inside a file:
+
+- `pid` = `dispatch_id` -- one Perfetto "process" per dispatch
+- `tid` = `(cu << 20) | (simd << 16) | (wave_id << 8) | instance` --
+  one thread per wave instance, named `CU{cu}/SIMD{simd}/W{wid}#{inst}`
+- Function entry/exit pairs render as duration slices (`B`/`E`)
+- Point markers render as instant events (`i`) with thread scope
+- Categories: `sqtt.function`, `sqtt.user`, `sqtt.point`
+
+Without `--clock-rate-ghz`, timestamps are SQTT cycles labelled as ns --
+proportions and orderings are correct but absolute values are nominal.
 
 ### Decoding markers from SQTT trace data
 
@@ -540,7 +582,8 @@ in the funcmap, not from encoding bits.
 1. **Compile** with the pass plugin and desired env vars
 2. **Capture** an SQTT trace (via `rocprofv3 --att`)
 3. **Generate** flamegraph: `python3 tools/sqtt_flamegraph.py trace_dir/ --demangle`
-4. Or: **Extract** the code object, **read** `.sqtt_funcmap`, and **decode**
+4. Or **export to Perfetto**: `python3 tools/sqtt_perfetto.py trace_dir/ --demangle`
+5. Or: **Extract** the code object, **read** `.sqtt_funcmap`, and **decode**
    trace tokens manually using the bit layout above
 
 ---
