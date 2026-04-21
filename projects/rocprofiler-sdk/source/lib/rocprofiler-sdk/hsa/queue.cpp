@@ -920,6 +920,14 @@ Queue::Queue(
     (void) get_signal_pool();  // ensure the signal pool is constructed for this queue
 }
 
+void
+Queue::invoke_write_interceptor(const void*                           packets,
+                                uint64_t                              pkt_count,
+                                hsa_amd_queue_intercept_packet_writer writer) const
+{
+    WriteInterceptor(packets, pkt_count, 0, const_cast<Queue*>(this), writer);
+}
+
 Queue::~Queue()
 {
     sync();
