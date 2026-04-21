@@ -88,7 +88,6 @@ find_program(
     PATHS ${_PYTHON_USER_BIN}
     HINTS ${_PYTHON_USER_BIN}
     PATH_SUFFIXES bin)
-
 _rocprofiler_check_clang_format_version(_IS_VALID_CLANG_FMT
                                         "${ROCPROFILER_CLANG_FORMAT_EXE}")
 if(NOT _IS_VALID_CLANG_FMT)
@@ -202,11 +201,6 @@ if(ROCPROFILER_CLANG_FORMAT_EXE
         if(TARGET format-rocprofiler-${_TYPE})
             add_dependencies(format-rocprofiler format-rocprofiler-${_TYPE})
             add_dependencies(format-${_TYPE} format-rocprofiler-${_TYPE})
-        endif()
-    endforeach()
-
-    foreach(_TYPE source python cmake)
-        if(TARGET format-rocprofiler-${_TYPE})
             add_dependencies(format format-rocprofiler-${_TYPE})
         endif()
     endforeach()
