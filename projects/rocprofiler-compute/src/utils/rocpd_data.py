@@ -3,6 +3,7 @@
 
 import csv
 import sqlite3
+from collections.abc import Generator, Iterable
 from contextlib import ExitStack, closing
 
 from utils.logger import console_error
@@ -57,45 +58,60 @@ TABLE_NAME_PREFIX_QUERY = (
 INSERT_QUERY = "INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
 
 
-def convert_dbs_to_csv(
+def export_rocpd_csvs(
     db_paths: list[str],
     counter_collection_csv_path: str,
     marker_trace_csv_path: str,
-) -> None:
-    queries = {
-        counter_collection_csv_path: COUNTERS_COLLECTION_QUERY,
-        marker_trace_csv_path: MARKER_API_TRACE_QUERY,
-    }
-    header_written = {path: False for path in queries}
+    results_csv_path: str,
+) -> int:
+    """Export rocpd DBs to the counter, marker, and results CSVs.
+
+    Streams the counters_collection view from each DB, assigns final
+    Dispatch_ID and Kernel_ID on the fly, drops PID, and writes directly
+    to the output CSVs in a single pass per DB. Returns the total number
+    of counter rows written across all DBs.
+    """
+    # IDs are assigned globally so the same dispatch/kernel keeps the same
+    # ID across DBs in a multi-pass workload.
+    dispatch_groups: dict[tuple, int] = {}
+    kernel_groups: dict[tuple, int] = {}
+    # Track header-written state across DBs so an empty or failed first DB
+    # does not leave subsequent DBs writing data without a header.
+    counter_header_written = False
+    marker_header_written = False
+    total_rows = 0
 
     with ExitStack() as stack:
-        writers = {
-            path: csv.writer(stack.enter_context(open(path, "w", newline="")))
-            for path in queries
-        }
+        counter_writer = csv.writer(
+            stack.enter_context(open(counter_collection_csv_path, "w", newline=""))
+        )
+        results_writer = csv.writer(
+            stack.enter_context(open(results_csv_path, "w", newline=""))
+        )
+        marker_writer = csv.writer(
+            stack.enter_context(open(marker_trace_csv_path, "w", newline=""))
+        )
+        counter_writers = [counter_writer, results_writer]
+
         for db_path in db_paths:
             with closing(sqlite3.connect(db_path)) as conn:
-                for file_path, query in queries.items():
-                    try:
-                        with closing(conn.execute(query)) as cursor:
-                            if cursor.description is None:
-                                continue
-                            if not header_written[file_path]:
-                                writers[file_path].writerow([
-                                    desc[0] for desc in cursor.description
-                                ])
-                                header_written[file_path] = True
-                            writers[file_path].writerows(cursor)
-                    except OSError as e:
-                        console_error(
-                            f"Database error while extracting {file_path} "
-                            f"from {db_path}: {e}"
-                        )
-                    except Exception as e:
-                        console_error(
-                            f"Unexpected error while extracting {file_path} "
-                            f"from {db_path}: {e}"
-                        )
+                marker_header_written = _stream_db_marker_trace(
+                    conn,
+                    marker_writer,
+                    marker_header_written,
+                    db_path,
+                )
+                rows_written, counter_header_written = _stream_db_counters(
+                    conn,
+                    counter_writers,
+                    counter_header_written,
+                    dispatch_groups,
+                    kernel_groups,
+                    db_path,
+                )
+                total_rows += rows_written
+
+    return total_rows
 
 
 def update_rocpd_pmc_events(counter_info: list[dict], rocpd_db_path: str) -> None:
@@ -164,3 +180,159 @@ def update_rocpd_pmc_events(counter_info: list[dict], rocpd_db_path: str) -> Non
         console_error(f"Database error while updating pmc_event table: {e}")
     except Exception as e:
         console_error(f"Unexpected error updating pmc_event table: {e}")
+
+
+def _assign_counter_ids(
+    row: tuple,
+    column_positions: dict[str, int],
+    dispatch_groups: dict[tuple, int],
+    kernel_groups: dict[tuple, int],
+) -> tuple[int, int]:
+    """Return sequential (dispatch_id, kernel_id) for a counter row.
+
+    IDs are assigned in first-seen order: the first unique combination
+    of grouping columns gets ID 0, the next unseen combination gets 1,
+    and so on.
+    """
+    # Dispatch uniqueness includes PID and timestamps because the same
+    # kernel can be dispatched multiple times.
+    dispatch_key = (
+        row[column_positions["PID"]],
+        row[column_positions["Kernel_Name"]],
+        row[column_positions["Grid_Size"]],
+        row[column_positions["Workgroup_Size"]],
+        row[column_positions["LDS_Per_Workgroup"]],
+        row[column_positions["Start_Timestamp"]],
+        row[column_positions["End_Timestamp"]],
+    )
+    dispatch_id = dispatch_groups.setdefault(dispatch_key, len(dispatch_groups))
+    kernel_key = (
+        row[column_positions["Kernel_Name"]],
+        row[column_positions["Grid_Size"]],
+        row[column_positions["Workgroup_Size"]],
+        row[column_positions["LDS_Per_Workgroup"]],
+    )
+    kernel_id = kernel_groups.setdefault(kernel_key, len(kernel_groups))
+    return dispatch_id, kernel_id
+
+
+def _compose_output_row(
+    row: tuple,
+    column_positions: dict[str, int],
+    dispatch_id: int,
+    kernel_id: int,
+) -> tuple:
+    """Return the output row tuple: PID dropped, IDs substituted in place."""
+    pid_position = column_positions["PID"]
+    dispatch_position = column_positions["Dispatch_ID"]
+    kernel_position = column_positions["Kernel_ID"]
+    output_values = []
+    for position, value in enumerate(row):
+        if position == pid_position:
+            continue
+        if position == dispatch_position:
+            output_values.append(dispatch_id)
+        elif position == kernel_position:
+            output_values.append(kernel_id)
+        else:
+            output_values.append(value)
+    return tuple(output_values)
+
+
+def _regroup_counter_rows(
+    cursor: sqlite3.Cursor,
+    column_positions: dict[str, int],
+    dispatch_groups: dict[tuple, int],
+    kernel_groups: dict[tuple, int],
+) -> Generator[tuple, None, None]:
+    """Yield counter rows with final IDs assigned and PID removed."""
+    for row in cursor:
+        dispatch_id, kernel_id = _assign_counter_ids(
+            row,
+            column_positions,
+            dispatch_groups,
+            kernel_groups,
+        )
+        yield _compose_output_row(
+            row,
+            column_positions,
+            dispatch_id,
+            kernel_id,
+        )
+
+
+def _write_rows_to_csv_writers(
+    row_iterator: Iterable[tuple],
+    writers: list[csv.writer],
+) -> int:
+    """Write each row to all writers. Return total rows written."""
+    count = 0
+    for row in row_iterator:
+        for writer in writers:
+            writer.writerow(row)
+        count += 1
+    return count
+
+
+def _stream_db_marker_trace(
+    conn: sqlite3.Connection,
+    writer: csv.writer,
+    header_written: bool,
+    db_path: str,
+) -> bool:
+    """Stream marker_api_trace results from one DB into a CSV writer.
+
+    Writes the CSV header on the first call that produces a valid cursor.
+    Returns the updated header_written state.
+    """
+    try:
+        with closing(conn.execute(MARKER_API_TRACE_QUERY)) as cursor:
+            if cursor.description is None:
+                return header_written
+            if not header_written:
+                writer.writerow([desc[0] for desc in cursor.description])
+                header_written = True
+            writer.writerows(cursor)
+    except Exception as exc:
+        console_error(f"Error extracting marker trace from {db_path}: {exc}")
+    return header_written
+
+
+def _stream_db_counters(
+    conn: sqlite3.Connection,
+    writers: list[csv.writer],
+    header_written: bool,
+    dispatch_groups: dict[tuple, int],
+    kernel_groups: dict[tuple, int],
+    db_path: str,
+) -> tuple[int, bool]:
+    """Stream regrouped counter rows from one DB into the writers.
+
+    Writes the CSV header to each writer on the first call that produces
+    a valid cursor. Returns (rows_written, updated header_written state).
+    """
+    try:
+        with closing(conn.execute(COUNTERS_COLLECTION_QUERY)) as cursor:
+            if cursor.description is None:
+                return 0, header_written
+            column_positions = {
+                desc[0]: idx for idx, desc in enumerate(cursor.description)
+            }
+            if not header_written:
+                # PID is used for dispatch grouping but excluded from output.
+                output_header = [name for name in column_positions if name != "PID"]
+                for writer in writers:
+                    writer.writerow(output_header)
+                header_written = True
+            regrouped = _regroup_counter_rows(
+                cursor,
+                column_positions,
+                dispatch_groups,
+                kernel_groups,
+            )
+            return _write_rows_to_csv_writers(regrouped, writers), header_written
+    except OSError as exc:
+        console_error(f"Database error extracting counters from {db_path}: {exc}")
+    except Exception as exc:
+        console_error(f"Unexpected error extracting counters from {db_path}: {exc}")
+    return 0, header_written
