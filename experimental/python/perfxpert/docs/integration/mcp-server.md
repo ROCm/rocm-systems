@@ -198,7 +198,7 @@ pragma recs in `perfxpert analyze` output is gated behind the
 `--advanced` CLI flag (or `PERFXPERT_ADVANCED_RECS=1` env var) — see
 the getting-started guide "Advanced recommendations" section.
 
-Phase 10 advanced-specialist additions (+6 tools over the prior 52-tool
+Phase 10 advanced-specialist additions (+9 tools over the prior 52-tool
 baseline):
 
 - `kernel_fusion.find_fusion_candidates` (Feature A) — scans the kernel
@@ -222,10 +222,39 @@ baseline):
   `critical_path`, `bubbles`, `total_bubble_ns`, and `sync_event_count`
   so the Latency Specialist can distinguish over-synchronisation from
   inherent dependencies. Bound into the Latency Specialist allowlist.
+- `predict_impact.predict_change_impact` / `list_supported_changes` /
+  `explain_prediction` (Feature E — Change-Impact Prediction) — for a
+  given baseline DB + kernel + named change_type, return a
+  conservative speedup bracket (`hi × 0.85`), confidence, rationale,
+  and `source_citation` back to the seed entry in
+  `knowledge/proven_optimizations.yaml`. Seeded with 5 techniques
+  (`vgpr_reduction`, `lds_tiling`, `mfma_enablement`, `fast_math_flag`,
+  `hip_stream_overlap`); Amdahl (< 5%) + tier-2 (no counters) gates
+  enforced internally. Bound into the Memory Specialist allowlist; the
+  Compute + Latency Specialists attach predictions via a post-hook
+  helper after the agent tool loop returns. Rendering on rec cards is
+  always-on (no CLI gate) and bumps the JSON `schema_version` to
+  `0.3.3`.
 
-Features E-H (multi-level memory chain, matrix meter, attention scope)
-did not add new tools — they extend specialist fences with new
-signatures drawn from existing `metrics.*` + `tracelens_port` helpers.
+Features F-H (matrix meter, attention scope, live roofline) did not
+add new MCP tools — they extend specialist fences + pipeline with
+signatures drawn from existing `metrics.*` + `tracelens_port` +
+`roofline.plot_points` helpers.
+
+### Live Roofline (+1 tool)
+
+The Phase-10 Live Roofline work adds one more READ_ONLY tool on top of
+the advanced-specialist additions above:
+
+- `roofline.plot_points` — reads a rocpd database's `pmc_events` view,
+  aggregates per-kernel `SQ_INSTS_VALU` / `SQ_INSTS_VALU_MFMA` /
+  `FETCH_SIZE` / `WRITE_SIZE`, and returns a per-kernel `(ai,
+  achieved_flops_per_s, bottleneck_class)` list plus the arch ridge
+  point. The webview formatter uses this payload to draw the inline
+  SVG roofline (no external JS / CSS). Also surfaced in the JSON
+  format under the top-level `roofline` key, bumping `schema_version`
+  to `0.3.4`. See `perfxpert/tools/roofline.py::plot_points` and
+  the python-api guide entry for the full shape.
 
 ## Protocol examples
 
@@ -348,7 +377,7 @@ load-bearing for the security posture in spec §5.8.
 ## Client integration
 
 `perfxpert-mcp` speaks stdio MCP (JSON-RPC, protocol `2024-11-05`), so
-any MCP-compatible client can consume the 46 READ_ONLY tools. The
+any MCP-compatible client can consume the 58 READ_ONLY tools. The
 `command` field in every example below must resolve on the client's
 `PATH` — run `which perfxpert-mcp` to get an absolute path if your
 client launches with a narrower env than your login shell.

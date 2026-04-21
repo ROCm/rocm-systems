@@ -6,11 +6,33 @@ is the authoritative reference for how the agents relate, how the
 fence-slice pattern keeps each agent's system prompt narrow, and where
 to look in source.
 
+**Each of the 8 agents is callable from two surfaces:**
+
+- **MCP:** `perfxpert_agent_root`, `perfxpert_agent_analysis`,
+  `perfxpert_agent_recommendation`, `perfxpert_agent_correctness`,
+  `perfxpert_agent_compute_specialist`,
+  `perfxpert_agent_memory_specialist`,
+  `perfxpert_agent_latency_specialist`,
+  `perfxpert_agent_diff_specialist` (READ_ONLY, auto-registered
+  from `perfxpert.tools.agents.*`).
+- **Python API:** `perfxpert.api.agent_root(...)`,
+  `perfxpert.api.agent_analysis(...)`, etc. — **1:1 mirror** of the
+  MCP tools (same function, same schema).
+
+The two surfaces resolve to the same underlying Python function; the
+MCP registration is a thin wrapper around the `perfxpert.api.*`
+callable. Agents are reachable from any entry point — the Root is NOT
+the only way into the hierarchy. Backend TUIs (Claude Code, Gemini
+CLI, Codex CLI, opencode) pick whichever agent matches the user's
+intent based on the `AGENTS.md` reference.
+
 Cross-links:
 - [Gate cascade](gate-cascade.md) — the 5 deterministic correctness
   gates that sit between agents
 - [MCP server](../integration/mcp-server.md) — how READ_ONLY tools are
   re-exposed to external clients
+- [Python API](../guides/python-api.md) — in-process embedding with
+  the same schemas as the MCP tools
 - [Agentic mode guide](../guides/agentic-mode.md) — end-user provider
   ladder and air-gap behavior
 
@@ -29,12 +51,12 @@ Cross-links:
             │                                    │
             └───────────────┬────────────────────┘
                             ▼
-              ┌─────────────┼──────────────┐
-              ▼             ▼              ▼
-       ┌──────────┐ ┌──────────────┐ ┌─────────────┐
-       │ Compute  │ │    Memory    │ │   Latency   │   Tier 2
-       │ special. │ │  specialist  │ │ specialist  │
-       └──────────┘ └──────────────┘ └─────────────┘
+              ┌─────────┬────┴────┬────────────┐
+              ▼         ▼         ▼            ▼
+       ┌──────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+       │ Compute  │ │ Memory │ │Latency │ │  Diff  │  Tier 2
+       │ special. │ │ spec.  │ │ spec.  │ │ spec.  │
+       └──────────┘ └────────┘ └────────┘ └────────┘
 ```
 
 - **Tier 0 (Root)** — classifies the user's natural-language query
@@ -53,12 +75,37 @@ Cross-links:
     [gate-cascade.md](gate-cascade.md).
   - **Recommendation** — converts findings into proposed code changes,
     delegates to specialists when needed.
-- **Tier 2 (Specialists)** — three narrow experts invoked by
-  Recommendation when the primary bottleneck falls in their domain:
-  - `compute_specialist` — VALU occupancy, waves-per-EU, VGPR pressure
-  - `memory_specialist` — HBM bandwidth, cache miss rate, LDS conflicts
+- **Tier 2 (Specialists)** — four narrow experts invoked by
+  Recommendation (or directly from a TUI backend) when the user's
+  intent falls in their domain:
+  - `compute_specialist` — VALU occupancy, waves-per-EU, VGPR pressure.
+    **Phase 10 A** — now also consumes
+    `kernel_fusion.find_fusion_candidates` to surface adjacent-short-
+    kernel fusion recipes (elementwise+elementwise, GEMM+bias+act, ...)
+    drawn from `knowledge/fusion_patterns.yaml`.
+    **Phase 10 F** — MFMA vs VALU ratio classifier (`mfma_vs_valu_
+    ratio_classification` in `knowledge/sol_metrics.yaml`) derived from
+    existing `metrics.*` helpers.
+    **Phase 10 G** — attention-scope patterns (Flash / naive SDPA /
+    KV-cache amplification) from `knowledge/attention_patterns.yaml`.
+  - `memory_specialist` — HBM bandwidth, cache miss rate, LDS conflicts.
+    **Phase 10 C** — now binds `unified_memory.analyze_paging` for
+    MI300X cross-die + paging detection.
+    **Phase 10 E** — multi-level bandwidth chain (HBM → L2 → L1 → LDS)
+    with per-level classifier + recommendation in
+    `knowledge/memory_patterns.yaml`.
   - `latency_specialist` — dependency chains, kernel launch overhead,
-    async-stream gaps
+    async-stream gaps.
+    **Phase 10 D** — binds `dependency_graph.reconstruct_dag` for
+    critical-path + GPU-bubble attribution.
+    **Phase 10 B** — reads `gpu_runtime_monitor.*` outputs from the
+    user-supplied `PERFXPERT_GPU_MONITOR_LOG` to flag thermal /
+    power throttle (MCP surface only — not in the cap-5 allowlist
+    because thermal analysis is diagnostic / out-of-band).
+  - `diff_specialist` — run-to-run comparison; wraps
+    `trace_diff.diff_runs` + `regression.compare_runs` +
+    `roofline.classify` and returns an
+    `improved` / `regressed` / `neutral` verdict with per-kernel deltas.
 
 ## Fence-slice pattern
 
@@ -77,7 +124,8 @@ perfxpert/agents/fence/
 ├── recommendation.md      # tier 1
 ├── compute_specialist.md  # tier 2
 ├── memory_specialist.md   # tier 2
-└── latency_specialist.md  # tier 2
+├── latency_specialist.md  # tier 2
+└── diff_specialist.md     # tier 2
 ```
 
 Why fence-slicing:
@@ -121,7 +169,7 @@ integrations that already know the routing decision.
 | Session handle + agent runner | `perfxpert/agents/runtime.py` |
 | Schemas (Root/Analysis/Correctness/Recommendation I/O) | `perfxpert/agents/schemas.py` |
 | Per-agent definitions | `perfxpert/agents/{root,analysis,correctness,recommendation}.py` |
-| Specialists | `perfxpert/agents/{compute,memory,latency}_specialist.py` |
+| Specialists | `perfxpert/agents/{compute,memory,latency,diff}_specialist.py` |
 | Fence slices (system prompts) | `perfxpert/agents/fence/*.md` |
 | Agent framework + framework-level helpers | `perfxpert/agents/framework.py` |
 | Gate cascade (middleware between agents) | `perfxpert/runtime/gate_cascade.py` |

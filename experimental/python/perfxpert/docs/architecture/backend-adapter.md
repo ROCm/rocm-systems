@@ -131,8 +131,8 @@ therefore cannot satisfy rule-3. The adapter catches the exception
 before MCP registration runs (I-N1), records
 `gate_hook_installed=False`, and leans on the rejection-language
 stanza inside the staged `.perfxpert/AGENTS.md` for enforcement.
-If Codex expands `PreToolUse` beyond Bash interception, revisit
-native hook installation here.
+Full rationale + the Codex re-visit checklist are captured in the
+local Codex hook-surface decision record.
 
 Two Codex-specific state-handling conventions worth naming here:
 
@@ -192,7 +192,15 @@ Steps to add a fifth backend (example: `aider`):
 - [../guides/backends.md](../guides/backends.md) — user-facing
   install/uninstall recipes
 - [../integration/mcp-server.md](../integration/mcp-server.md) —
-  the 34 READ_ONLY tools every adapter exposes to its backend
+  the 58 READ_ONLY tools every adapter exposes to its backend
+  (8 agent-hierarchy entry points + 49 classifier/knowledge tools
+  + 1 `trace_diff.diff_runs`)
+- Local Claude hook-surface decision record — why the Claude adapter
+  uses the native `PreToolUse` hook instead of `permissions.deny`.
+- Local multi-backend implementation plan — the 14-task PR 1 + PR 2
+  breakdown.
+- Local Codex hook-surface decision record — why the Codex adapter
+  degrades to prompt-layer-only (native `PreToolUse` is Bash-only).
 - Source: `perfxpert/cli/_backend/protocol.py`,
   `perfxpert/cli/_backend/{claude,gemini,codex}.py`,
   `perfxpert/cli/_gate_hooks/{claude,gemini,codex,opencode}.py`,
