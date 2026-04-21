@@ -80,6 +80,9 @@ const char *rewriteIdName(RewriteId r) {
     return "P6 (llvm.amdgcn.ds.swizzle)";
   case RewriteId::LaneOpBoundsValidator:
     return "raise-time readlane/writelane bounds validator";
+  case RewriteId::PostRaiseCrossLaneRewrite:
+    return "post-raise cross-lane rewrite (writelane -> select, "
+           "readlane -> ds.bpermute)";
   }
   return "UnknownRewriteId";
 }
@@ -348,7 +351,8 @@ bool isCanonicalWaveIdBfe(const DecodedInst &di,
 ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
                                           const MCState &mc,
                                           const ISAProfile &src,
-                                          const ISAProfile &tgt) {
+                                          const ISAProfile &tgt,
+                                          bool enableWritelaneRewrite) {
   ObstructionReport report;
   if (src.waveSize == tgt.waveSize)
     return report;
@@ -826,8 +830,24 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
       ObstructionSite site;
       site.inst = di;
       site.kind = ObstructionKind::WaveIdLiftScalarized;
-      site.rewrite = RewriteId::None;
-      site.rewriteImplemented = false;
+      // When `enableWritelaneRewrite` is on, the site has an
+      // implemented rewrite (the post-mem2reg pass in
+      // `rewrite_cross_lane_divergent.{hpp,cpp}` replaces the
+      // collapsing cross-lane primitive with a per-source-wave
+      // `select` / `ds.bpermute`). Tag it accordingly so the
+      // pre-translation abort below does NOT fire — the rewrite
+      // discharges the obstruction during Phase 6.5 of raiser.cpp.
+      // Paired with a post-raise safety net in raiser.cpp that
+      // verifies the rewrite pass actually rewrote at least one
+      // site (guards against an oracle false-negative disagreeing
+      // with this syntactic co-occurrence classifier).
+      if (enableWritelaneRewrite) {
+        site.rewrite = RewriteId::PostRaiseCrossLaneRewrite;
+        site.rewriteImplemented = true;
+      } else {
+        site.rewrite = RewriteId::None;
+        site.rewriteImplemented = false;
+      }
       site.detail =
           "kernel also contains the canonical `s_bfe_u32 sDST, ttmp8, "
           "0x50019` wave_id lift and v_wmma_* — the lift's per-lane "

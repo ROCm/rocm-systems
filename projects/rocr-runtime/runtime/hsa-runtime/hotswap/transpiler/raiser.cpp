@@ -182,9 +182,21 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   // full per-site trace is routed through LLVM_DEBUG so operators can
   // inspect the oblivious/pass path under `-debug-only=wave-projection`
   // without recompiling.
+  // Number of `WaveIdLiftScalarized` sites the classifier matched.
+  // Needed after Phase 6.5 for the rewrite-pass safety net (see
+  // below): when this is > 0, the rewrite pass is *expected* to have
+  // rewritten at least one divergent writelane/readlane site; if it
+  // rewrote zero, the oracle disagrees with the syntactic
+  // classifier and we refuse post-raise rather than emit silently
+  // unchanged IR that scalarises the divergent wave_id lift.
+  unsigned classifierWaveIdLiftScalarizedSites = 0;
   {
     ObstructionReport report =
-        buildObstructionReport(insts, mc, isa, targetIsa);
+        buildObstructionReport(insts, mc, isa, targetIsa,
+                               enableWritelaneRewrite);
+    for (const auto &s : report.sites)
+      if (s.kind == ObstructionKind::WaveIdLiftScalarized)
+        ++classifierWaveIdLiftScalarizedSites;
     std::string trace = renderObstructionTrace(
         report, kernelName, sourceISA,
         compilationTargetISA.empty() ? sourceISA : compilationTargetISA,
@@ -675,7 +687,38 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   // `targetWaveSize <= sourceWaveSize`), so it is safe to invoke
   // unconditionally when the flag is on.
   if (enableWritelaneRewrite) {
-    (void)rewriteCrossLaneDivergent(*F, isa.waveSize, targetIsa.waveSize);
+    CrossLaneDivergentRewriteReport rewriteReport =
+        rewriteCrossLaneDivergent(*F, isa.waveSize, targetIsa.waveSize);
+
+    // Safety-net: the syntactic Phase 1.4.5 classifier matched the
+    // three-way co-occurrence (canonical ttmp8 wave_id BFE + cross-
+    // lane scalar primitive + WMMA) but the post-mem2reg oracle
+    // rewrote nothing. Without a precise dataflow check we cannot
+    // tell whether the classifier over-approximated (benign false
+    // positive) or the oracle missed a divergent scalar feed (false
+    // negative, silent miscompile). Refuse on the safe side. Fires
+    // only on `--enable-writelane-rewrite` because the flag-off path
+    // still refuses at Phase 1.4.5 above.
+    if (classifierWaveIdLiftScalarizedSites > 0 &&
+        rewriteReport.totalRewritten() == 0) {
+      std::string msg;
+      raw_string_ostream os(msg);
+      os << "classifier matched WaveIdLiftScalarized on "
+         << classifierWaveIdLiftScalarizedSites
+         << " site(s) but rewriteCrossLaneDivergent rewrote 0 \u2014 oracle "
+            "disagrees with the syntactic classifier. "
+         << "uniformPreserved=" << rewriteReport.uniformPreserved
+         << ", writelaneRewritten=" << rewriteReport.writelaneRewritten
+         << ", readlaneRewritten=" << rewriteReport.readlaneRewritten
+         << ". Refusing rather than risk a silent miscompile (see "
+            "wave-size-translation.md \u00a75.6.3 safety-net contract).";
+      RaiseFailure f = RaiseFailure::crossWaveRewriteOracleDisagreement(
+          kernelName, os.str());
+      errs() << "transpiler: post-raise abort: " << f.format << " on '"
+             << f.mnemonic << "' \u2014 " << f.detail << "\n";
+      result.failure = std::move(f);
+      return result;
+    }
   }
 
   // ==== Phase 7: Verify IR ====

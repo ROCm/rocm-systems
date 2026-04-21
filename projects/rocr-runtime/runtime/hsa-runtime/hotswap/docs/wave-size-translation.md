@@ -497,6 +497,127 @@ and the matmul gpu-level suite (`tests/gfx1250_gpu_test.cpp`,
 `Gfx1250Gpu.Matmul{64,128}x*`) asserts end-to-end numerical
 correctness across the cross-wave boundary.
 
+The rescue is correct in isolation but insufficient when the lifted
+VGPR value feeds a cross-lane primitive's scalar source operand in
+the presence of WMMA — see §5.6.3 below for the post-mem2reg rewrite
+that unblocks that shape, and the `WaveIdLiftScalarized` row in §7
+for the three-outcome decision the classifier makes today
+(rescue → refuse → rewrite).
+
+### 5.6.3 Cross-widen `writelane` / `readlane` rewrite — Class 1 rewrite for implicitly-scalarised scalar feeds
+
+The §5.6.2 rescue is a necessary-but-not-sufficient precondition for
+`wave_id`-keyed matmul tile assignment. Even with the BFE rewritten
+to a divergent `(workitem.id.x >> log2(W_s)) & 0x1F` leaf, any
+downstream `v_writelane_b32` or `v_readlane_b32` whose scalar
+operand transitively consumes that value re-enters the implicit-
+scalarisation trap from the backend side: both intrinsics have
+scalar-class scalar sources, and the AMDGPU backend inserts a
+`v_readfirstlane_b32` on any divergent value that reaches one.
+source_wave[0]'s `wave_id = 0` and source_wave[1]'s `wave_id = 1`
+collapse into a single uniform scalar in the target wave, and every
+tile-column address keyed on `wave_id` writes into the wrong
+target-wave half. WMMA forecloses the `ThreadLoopProjection`
+escape hatch (§5.2 requires the full target wave simultaneously —
+TLP's one-source-wave-at-a-time iteration cannot stage the WMMA
+operand matrix correctly), which is why the pre-rewrite §7 row for
+this shape is a loud refusal.
+
+Rewrite: a post-mem2reg function-level pass — `rewriteCrossLaneDivergent`
+in `rewrite_cross_lane_divergent.{hpp,cpp}` — replaces each
+`@llvm.amdgcn.writelane` / `@llvm.amdgcn.readlane` call whose scalar
+feed is cross-widen-divergent with a principled per-lane shape that
+bypasses the backend's implicit `readfirstlane`:
+
+```llvm
+    ; entry-block preamble (materialised once per function, lazy)
+    %cwd_lane_id_lo = call i32 @llvm.amdgcn.mbcnt.lo(i32 -1, i32 0)
+    %cwd_lane_id    = call i32 @llvm.amdgcn.mbcnt.hi(i32 -1, i32 %cwd_lane_id_lo)
+
+    ; v_writelane_b32 %dst, %val, %lane_idx  -- scalar feed %val divergent
+    %cwd_wl_mask           = icmp eq i32 (%cwd_lane_id & (W_s - 1)), %lane_idx
+    %cwd_writelane_rewritten = select i1 %cwd_wl_mask, i32 %val, i32 %old
+
+    ; v_readlane_b32 %sdst, %vsrc, %lane_idx  -- return a divergent i32
+    %cwd_readlane_rewritten = call i32 @llvm.amdgcn.ds.bpermute(
+        i32 ((%cwd_lane_id & ~(W_s - 1)) | %lane_idx) * 4, i32 %vsrc)
+```
+
+The `writelane` rewrite replaces the cross-lane "read scalar, write
+per-lane" semantics with a purely-per-lane `select` over the
+pre-existing destination VGPR; the `readlane` rewrite replaces the
+"broadcast lane K to every lane" semantics with a `ds_bpermute`
+whose per-lane source index falls inside the same target-wave
+half as `lane_id`. Both rewrites preserve the wave32 source's
+intended semantics exactly when the source had been executed on a
+true wave32 (`%cwd_lane_id & (W_s - 1)` recovers the source lane-id
+modulo the source wave width). Divergence analysis —
+`CrossWidenDivergenceAnalysis` in `cross_widen_divergence.{hpp,cpp}`
+— is a forward closure from the per-target-wave-divergent leaves
+(`workitem.id.x`, `mbcnt_hi` against target `EXEC_HI`, `ds_bpermute`,
+any existing `readlane` / `writelane` result) augmented with the
+canonical `s_bfe_u32 sDST, ttmp8, 0x50019` lift output — the
+semantic handle the §5.6.2 rescue exposes as divergent. Sites whose
+scalar feed is provably uniform (e.g. constant `lane_idx`, uniform
+`val` derived from a kernarg, the `v_writelane %d, workgroup.id.x,
+0` idiom inside a uniform wave-zero prologue) are preserved intact
+— the pass is a no-op on every site that does NOT need rewriting,
+which keeps the source's codegen quality for the common case.
+
+The pass runs **only** when `--enable-writelane-rewrite` is passed
+on the `raise_cli` command line, plumbed through
+`PipelineConfig::enableWritelaneRewrite` / `raiseToIR`'s opt-in
+parameter. Default off. This gating is deliberate: the rewrite was
+designed around the Matmul128x128 failure mode and a narrow
+divergence-oracle contract; landing it as a *default* would
+pre-empt the empirical verification that the oracle and
+classifier stay in lockstep across the full kerneldex corpus. The
+flag exists to let callers graduate individual test surfaces
+(`tests/gfx1250_gpu_test.cpp::doTestMatmul`,
+`tests/integration_test.cpp`'s MultiKernelRaise + VecaddAllKernels
+paths) opt-in first, validate the full regression sweep under the
+new path, then flip the default globally once the oracle-classifier
+agreement is empirically established across the corpus.
+
+Classifier coupling: under the flag, `buildObstructionReport` in
+`wave_size_obstruction.cpp` tags `WaveIdLiftScalarized` sites with
+`RewriteId::PostRaiseCrossLaneRewrite` and
+`rewriteImplemented = true`, letting them pass the Phase 1.4.5
+refusal gate rather than refusing outright. Phase 6.5 then invokes
+the rewrite pass on the post-mem2reg SSA IR — mem2reg is a hard
+prerequisite because the oracle needs to see the post-scratch-alloca
+SSA form; divergent values threading through `addrspace(5)` round
+trips would appear uniform to a pre-mem2reg forward closure and
+silently miscompile every site the pass skipped.
+
+Safety net: after the rewrite runs, `raiser.cpp` compares the
+classifier's `WaveIdLiftScalarized` site count with the rewrite
+pass's `CrossLaneDivergentRewriteReport::totalRewritten()`. If the
+syntactic classifier matched but the post-mem2reg oracle rewrote
+nothing we cannot distinguish benign over-approximation (harmless)
+from an oracle false-negative (silent miscompile), so the raiser
+refuses on the safe side via
+`RaiseFailure::crossWaveRewriteOracleDisagreement`. The refusal
+only fires under `--enable-writelane-rewrite`; the flag-off path
+retains the pre-rewrite refusal at Phase 1.4.5.
+
+Hooks: `rewrite_cross_lane_divergent.{hpp,cpp}` (the rewrite pass
++ its `CrossLaneDivergentRewriteReport`), `cross_widen_divergence.
+{hpp,cpp}` (the divergence oracle), `raiser.cpp` (Phase 6.5 invocation
++ the safety-net diagnostic), `wave_size_obstruction.{hpp,cpp}`
+(`RewriteId::PostRaiseCrossLaneRewrite` tagging under the flag), and
+`raise_cli.cpp` / `pipeline.{hpp,cpp}` (CLI + PipelineConfig flag
+plumbing). Regression fences:
+`lit_tests/writelane_divergent_rewrite` (rewrite pins the `cwd_*`
+IR shape under the flag and asserts the flag-off path is a pure
+no-op), `lit_tests/readlane_divergent_rewrite` (sibling coverage
+for the `readlane → ds_bpermute` half), `lit_tests/writelane_uniform_noop`
+(asserts no rewrite fires on provably-uniform sites), and
+`lit_tests/c1_wave_id_lift_scalarized` — the REFUSE / REWRITTEN
+siblings of that last fixture are the principled two-outcome
+regression fence for the flag's `off -> refuse` and
+`on -> rewrite` contracts respectively.
+
 ## 6. Obstructions to wave-size-obliviousness
 
 A wave32 → wave64 raise under modulo-replication is correct iff the
@@ -522,18 +643,23 @@ position beyond `lane_id mod W_s`:
 - `s_bfe_u32 sDST, ttmp8, 0x50019` — `wave_id_in_workgroup` read
   from the CP-seeded ttmp8[29:25] field. Rescued in place by the
   §5.6.2 wave_id lift; any *other* ttmp8 source read still
-  refuses via `TtmpWaveIdLeak`. The rescue itself also refuses
-  via `WaveIdLiftScalarized` in the specific shape where the lift's
+  refuses via `TtmpWaveIdLeak`. The rescue itself also triggers
+  `WaveIdLiftScalarized` in the specific shape where the lift's
   per-lane divergent VGPR value flows into a `v_writelane_b32` /
   `v_readlane_b32` *scalar source operand* **and** the kernel also
   contains a `v_wmma_*` op — the backend's implicit
   `v_readfirstlane_b32` on the cross-lane primitive's scalar operand
-  collapses the per-source-wave distinction the lift introduced
+  would collapse the per-source-wave distinction the lift introduced
   (source_wave[0]'s `wave_id=0` and source_wave[1]'s `wave_id=1`
   both become a uniform 0 in the target wave's scalar operand),
   and WMMA forecloses the `ThreadLoopProjection` escape hatch
-  (§5.2 requires the full target wave simultaneously) so no
-  correct projection is available today.
+  (§5.2 requires the full target wave simultaneously). Default
+  behaviour is a loud refusal; under `--enable-writelane-rewrite`
+  the Phase 6.5 rewrite in §5.6.3 replaces every divergent-feed
+  `writelane` with a per-lane `select` and every divergent-feed
+  `readlane` with a `ds_bpermute`, preserving the source's per-
+  source-wave `wave_id` distinction through the rewritten call and
+  unblocking end-to-end 128×128 matmul correctness.
 
 **Class 2 — cross-lane ops with wave-size-dependent semantics.**
 - `v_permlane64_b32` (full-wave rotate; no wave32 analogue).
@@ -604,6 +730,7 @@ their handlers:
 | `permlane16_swap` (C2) | Paired `ds_bpermute`, partner `lane_id XOR 16`. | `LaneGroupShuffle` / `P4_PermLaneSwap` |
 | DPP16 modifiers (C2) | `llvm.amdgcn.update.dpp`. DPP8 is pending below. | `DppCrossLane` / `P5_DppModifier` |
 | `ds_swizzle_b32` with QUAD_PERM / BITMASK_PERM / valid FFT_MODE / valid ROTATE_MODE (C2) | `llvm.amdgcn.ds.swizzle` with validated imm. | `DsSwizzle` / `P6_DsSwizzle` |
+| Canonical `s_bfe_u32 sDST, ttmp8, 0x50019` + `v_writelane_b32` / `v_readlane_b32` with a cross-widen-divergent scalar feed + `v_wmma_*` (C1). **Opt-in rewrite**, gated on `--enable-writelane-rewrite`. Post-mem2reg pass (§5.6.3) replaces the divergent-feed writelane with a per-lane `select` and the divergent-feed readlane with a `ds_bpermute`; preserves the per-source-wave `wave_id` distinction that the backend's implicit `v_readfirstlane_b32` would otherwise collapse. Without the flag the same shape is refused below as `WaveIdLiftScalarized`. | `select` on per-lane `lane_id` equality (writelane half); `ds_bpermute` with target-wave-half-scoped index (readlane half). §5.6.3. | `WaveIdLiftScalarized` / `PostRaiseCrossLaneRewrite` |
 
 **Unrewritable — principled refusal** (`rewrite = None` → kind-specific
 `CrossWave*` diagnostic):
@@ -613,7 +740,7 @@ their handlers:
 | `v_mbcnt_hi_u32_b32` read (C1). `mbcnt_hi` against target `EXEC_HI` produces 32..63 in the upper half; no rewrite without dataflow. | `MbcntHiLaneIdLeak` | `CrossWaveLaneIdLeak` |
 | `v_readlane` / `v_writelane` with static const operand outside `[0, W_s)` (C1). | `OutOfRangeLaneOperand` | `CrossWaveLaneIdLeak` |
 | Non-canonical `ttmp8` source read co-occurring with a WMMA op (C1). Canonical `s_bfe_u32 sDST, ttmp8, 0x50019` is rescued in §5.6.2 and filtered out by `isCanonicalWaveIdBfe`; the classifier only refuses shapes where the raiser's `ttmp8[29:25]` model of `wave_id` can't be soundly reused (other BFE immediates, non-BFE consumers, 64-bit base-pointer loads). | `TtmpWaveIdLeak` | `CrossWaveLaneIdLeak` |
-| Canonical `s_bfe_u32 sDST, ttmp8, 0x50019` co-occurring with `v_writelane_b32` / `v_readlane_b32` **and** with a `v_wmma_*` op (C1). The §5.6.2 lift emits a per-lane divergent VGPR for `wave_id`, but the backend inserts an implicit `v_readfirstlane_b32` when that SGPR-shaped value feeds the cross-lane primitive's scalar source operand; the scalarisation erases the per-source-wave distinction and miscompiles every `wave_id`-keyed tile-column address. WMMA rules out the `ThreadLoopProjection` escape hatch (§5.2 wants the full target wave simultaneously), so the principled outcome is a loud refusal. Pinned by `lit_tests/c1_wave_id_lift_scalarized`. | `WaveIdLiftScalarized` | `CrossWaveLaneIdLeak` |
+| Canonical `s_bfe_u32 sDST, ttmp8, 0x50019` co-occurring with `v_writelane_b32` / `v_readlane_b32` **and** with a `v_wmma_*` op (C1) **when `--enable-writelane-rewrite` is OFF**. The §5.6.2 lift emits a per-lane divergent VGPR for `wave_id`, but the backend inserts an implicit `v_readfirstlane_b32` when that SGPR-shaped value feeds the cross-lane primitive's scalar source operand; the scalarisation erases the per-source-wave distinction and miscompiles every `wave_id`-keyed tile-column address. WMMA rules out the `ThreadLoopProjection` escape hatch (§5.2 wants the full target wave simultaneously). Under the flag, §5.6.3's Phase 6.5 rewrite replaces the divergent-feed cross-lane primitive with a principled `select` / `ds_bpermute` pair and the site graduates to the **Landed** table above. Pinned by `lit_tests/c1_wave_id_lift_scalarized` (REFUSE RUN line — the REWRITTEN RUN line pins the Landed path). | `WaveIdLiftScalarized` | `CrossWaveLaneIdLeak` |
 | `v_permlane64_b32` (C2). No wave32 analogue — a wave32 source can't meaningfully encode a 64-lane rotate. | `FullWaveRotate` | `CrossWaveUnrewritableShuffle` |
 | Non-commutative atomics (C3): `GLOBAL_ / FLAT_ / BUFFER_ATOMIC_{SWAP, CMPSWAP}`, `S_ATOMIC_SWAP`. Lanes `i` and `i + W_s` race on the same address; no rewrite preserves the single-participant invariant. | `NonCommutativeAtomic` | `CrossWaveReplicaRace` |
 | `v_cmpx` / `s_*_saveexec_b32` co-located with any `v_mbcnt_*` in the same kernel (C4). Syntactic over-approximation of "gating expression flows from an absolute lane id"; see §10. | `CmpxFromLaneId` / `SaveExecFromLaneId` | `CrossWaveLanePredicatedExec` |

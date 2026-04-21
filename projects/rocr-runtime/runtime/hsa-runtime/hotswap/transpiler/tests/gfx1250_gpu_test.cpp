@@ -225,24 +225,56 @@ static void doTestWmmaProbe(const char *kernelName, int numTiles,
 // ============================================================================
 // Matmul: C = A @ B, A/B fp16, C fp32
 // ============================================================================
+// Diagnostic data pattern for A / B inputs.
+//
+//   Random    — default, stresses the full lane-layout pipeline.
+//   Uniform   — A = B = 1.0 everywhere ⇒ reference C[i,j] = K for every
+//               (i, j).  This isolates the kernel's control-flow /
+//               address-generation from the WMMA per-lane layout /
+//               ds_bpermute redistribution: a uniform input produces
+//               the SAME output on every lane so any lane-permutation
+//               bug is masked.  When uniform passes but random fails,
+//               the remaining bug is isolated to the WMMA operand
+//               layout or accumulator redistribution.
+enum class MatmulDataPattern { Random, Uniform };
+
 static void doTestMatmul(const char *hsacoFile, int M, int N, int K,
-                         const char *label) {
-  printf("--- matmul_kernel (%s, M=%d N=%d K=%d) ---\n", label, M, N, K);
+                         const char *label,
+                         MatmulDataPattern pattern = MatmulDataPattern::Random) {
+  printf("--- matmul_kernel (%s, M=%d N=%d K=%d, pattern=%s) ---\n",
+         label, M, N, K,
+         pattern == MatmulDataPattern::Uniform ? "uniform" : "random");
   std::string path = std::string(GFX1250_DATA_DIR) + "/" + hsacoFile;
   auto data = transpiler::readFile(path);
   ASSERT_FALSE(data.empty()) << "Cannot read " << path;
 
-  auto result = transpiler::runPipeline(data, "gfx1250", "gfx942", "matmul_kernel");
+  // Matmul is the pre-eminent opt-in consumer of the Phase 6.5
+  // writelane/readlane rewrite: the 128x128-tile variant is the exact
+  // kernel the rewrite was designed to unblock (canonical `s_bfe_u32
+  // ttmp8, 0x50019` wave_id extraction + v_writelane/v_readlane
+  // register spills + v_wmma_* accumulator → implicit scalarisation
+  // via v_readfirstlane, see wave-size-translation.md §5.6.3). The
+  // 64x64-tile sibling does not trigger the rewrite (no divergent
+  // writelane sites) and is unaffected — the flag is only observed at
+  // sites where the oracle flags a lane-divergent scalar feed.
+  auto result = transpiler::runPipeline(data, "gfx1250", "gfx942",
+                                        "matmul_kernel",
+                                        /*enableWritelaneRewrite=*/true);
   ASSERT_TRUE(result.success) << "Pipeline failed for matmul " << label;
   printf("  Pipeline: raised %d/%d insts, HSACO=%zu bytes\n",
          result.liftedCount, result.totalCount, result.hsaco.size());
 
   std::vector<__half> hA(M * K), hB(K * N);
   std::vector<float> hC(M * N, 0.0f);
-  std::mt19937 rng(123);
-  std::uniform_real_distribution<float> dist(-0.5f, 0.5f);
-  for (int i = 0; i < M * K; i++) hA[i] = __float2half(dist(rng));
-  for (int i = 0; i < K * N; i++) hB[i] = __float2half(dist(rng));
+  if (pattern == MatmulDataPattern::Uniform) {
+    for (auto &h : hA) h = __float2half(1.0f);
+    for (auto &h : hB) h = __float2half(1.0f);
+  } else {
+    std::mt19937 rng(123);
+    std::uniform_real_distribution<float> dist(-0.5f, 0.5f);
+    for (int i = 0; i < M * K; i++) hA[i] = __float2half(dist(rng));
+    for (int i = 0; i < K * N; i++) hB[i] = __float2half(dist(rng));
+  }
 
   __half *dA, *dB; float *dC;
   HIP_ASSERT(hipMalloc(&dA, M * K * sizeof(__half)));
@@ -320,6 +352,34 @@ static void doTestMatmul(const char *hsacoFile, int M, int N, int K,
   for (int i = 0; i < M * N; i++)
     if (hC[i] == 0.0f) zeroCount++;
   printf("  Zero elements: %d / %d\n", zeroCount, M*N);
+
+  // Sentinel-write map: coarse 16x16-tile view of which output tiles
+  // received a store vs. retained the 42.0 sentinel. Helps localise
+  // wave-size-translation regressions where only a subset of source
+  // waves end up writing their outputs.
+  if (pattern == MatmulDataPattern::Uniform) {
+    int tileCols = (N + 15) / 16;
+    int tileRows = (M + 15) / 16;
+    if (tileRows <= 16 && tileCols <= 16) {
+      printf("  Tile write map (W=written, s=sentinel-42, ?=mixed):\n");
+      for (int tr = 0; tr < tileRows; tr++) {
+        printf("    [row %3d]: ", tr * 16);
+        for (int tc = 0; tc < tileCols; tc++) {
+          int written = 0, sentinel = 0;
+          for (int dr = 0; dr < 16 && tr*16+dr < M; dr++)
+            for (int dc = 0; dc < 16 && tc*16+dc < N; dc++) {
+              float v = hC[(tr*16+dr)*N + (tc*16+dc)];
+              if (v == 42.0f) sentinel++;
+              else written++;
+            }
+          if (sentinel == 0) printf("W ");
+          else if (written == 0) printf("s ");
+          else printf("? ");
+        }
+        printf("\n");
+      }
+    }
+  }
 
   int errors = 0;
   float maxErr = 0;
@@ -765,4 +825,15 @@ TEST_F(Gfx1250Gpu, Matmul128x128_1tile) {
 TEST_F(Gfx1250Gpu, Matmul128x128) {
   doTestMatmul("matmul_f16_large_gfx1250.hsaco", 256, 256, 128,
                "128x128 tile");
+}
+
+// Uniform-input diagnostic: A = B = 1.0 ⇒ ref C[i,j] = K = 128 everywhere.
+// If this PASSES while the random-input `Matmul128x128_1tile` FAILS, the
+// remaining bug is confined to the WMMA per-lane layout / accumulator
+// redistribution (ds_bpermute), not to kernel control-flow, LDS traffic,
+// or address generation (which both paths exercise identically).
+TEST_F(Gfx1250Gpu, Matmul128x128_1tile_UniformDiag) {
+  doTestMatmul("matmul_f16_large_gfx1250.hsaco", 128, 128, 128,
+               "128x128 tile 1-tile uniform-diag",
+               MatmulDataPattern::Uniform);
 }

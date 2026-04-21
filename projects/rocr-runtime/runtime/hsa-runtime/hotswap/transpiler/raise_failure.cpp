@@ -138,4 +138,15 @@ RaiseFailure RaiseFailure::crossWaveLanePredicatedExec(
       RaiseFailureReason::CrossWaveLanePredicatedExec, di, kindDetail);
 }
 
+RaiseFailure RaiseFailure::crossWaveRewriteOracleDisagreement(
+    llvm::StringRef kernelName, const llvm::Twine &detail) {
+  RaiseFailure f;
+  f.reason = RaiseFailureReason::CrossWaveLaneIdLeak;
+  f.mnemonic = "writelane/readlane-post-raise-safety-net";
+  f.format = reasonString(RaiseFailureReason::CrossWaveLaneIdLeak);
+  f.offset = 0;
+  f.detail = ("kernel '" + kernelName + "': " + detail).str();
+  return f;
+}
+
 } // namespace transpiler

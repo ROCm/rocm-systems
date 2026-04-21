@@ -13,6 +13,7 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -38,7 +39,16 @@ static void doTestVecaddAllKernels() {
   for (auto &k : kernelNames)
     printf("    - %s\n", k.c_str());
 
-  auto result = transpiler::runPipelineAllKernels(data, "gfx1250", "gfx942");
+  // cross-widen gfx1250 (wave32) -> gfx942 (wave64) opts into the Phase
+  // 6.5 writelane/readlane rewrite (see wave-size-translation.md §5.6.3
+  // and rewrite_cross_lane_divergent.{hpp,cpp}). vecadd itself doesn't
+  // hit the rewrite (no WMMA, no scalar v_writelane feeds), but we flip
+  // the flag on here for coherence with MultiKernelRaise below — both
+  // paths run the same end-to-end raise-then-lower pipeline and should
+  // share the same flag policy so a future corpus addition cannot
+  // silently diverge between the two tests.
+  auto result = transpiler::runPipelineAllKernels(
+      data, "gfx1250", "gfx942", /*enableWritelaneRewrite=*/true);
   ASSERT_TRUE(result.success) << "runPipelineAllKernels FAILED";
   printf("  Raised %d/%d instructions, HSACO=%zu bytes\n",
          result.liftedCount, result.totalCount, result.hsaco.size());
@@ -123,18 +133,20 @@ struct ExpectedRefusal {
   const char *reason;            // short human-readable note for the log
 };
 
-static constexpr ExpectedRefusal kExpectedRefusals[] = {
-    // matmul_f16_large_gfx1250 — the 128x128-tile HIP matmul. Carries
-    // the three-way co-occurrence pinned by the
-    // lit_tests/c1_wave_id_lift_scalarized refusal fixture (canonical
-    // `s_bfe_u32 sDST, ttmp8, 0x50019` + v_writelane/v_readlane for
-    // register spills + v_wmma_* accumulator). See the long comment
-    // on the matching Gfx1250Gpu.Matmul128x128* entries in
-    // tests/xfail.cmake for the principled justification.
-    {"matmul_f16_large_gfx1250.hsaco", "WaveIdLiftScalarized",
-     "128x128-tile matmul: canonical wave_id BFE lift scalarised "
-     "through v_writelane/v_readlane under WMMA (Class 1 refuse)"},
-};
+// Empty today — matmul_f16_large_gfx1250.hsaco graduated off this
+// allowlist when the --enable-writelane-rewrite path landed; the
+// MultiKernelRaise test opts into the rewrite above and now expects
+// the 128x128 matmul to raise successfully. Re-add entries here only
+// for code objects that remain syntactic refusals under the
+// fully-enabled pipeline, i.e. hit a principled obstruction class
+// that no current rewrite resolves.
+//
+// Using `std::array` (rather than a C array with a placeholder entry)
+// lets the list be legitimately empty without sentinel rows that
+// `findExpectedRefusal` would have to skip. ISO C++ does not allow a
+// zero-length C array initializer, so we pay one template level to
+// say "no exceptions today".
+static constexpr std::array<ExpectedRefusal, 0> kExpectedRefusals{};
 
 // Returns a pointer to the ExpectedRefusal entry matching `path`'s
 // basename, or nullptr if the file is not on the refusal allowlist.
@@ -181,7 +193,15 @@ static void doTestMultiKernelRaise() {
 
     const ExpectedRefusal *er = findExpectedRefusal(f);
 
-    auto result = transpiler::runPipelineAllKernels(data, isa, "gfx942");
+    // cross-widen gfx1250 (wave32) -> gfx942 (wave64) opts into the
+    // Phase 6.5 writelane/readlane rewrite. This is the *runtime
+    // verification* point for matmul_f16_large_gfx1250.hsaco: once the
+    // rewrite graduates past its lit fixtures and into this end-to-end
+    // harness, the 128x128-tile matmul must raise here rather than
+    // refuse at Phase 1.4.5 (see c2_xfail_integration_cleanup in the
+    // commit 2 plan and wave-size-translation.md §5.6.3).
+    auto result = transpiler::runPipelineAllKernels(
+        data, isa, "gfx942", /*enableWritelaneRewrite=*/true);
     if (result.success) {
       if (er) {
         // An entry in the expected-refusal allowlist that raised

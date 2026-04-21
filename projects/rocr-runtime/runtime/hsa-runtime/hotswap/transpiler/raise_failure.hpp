@@ -151,6 +151,25 @@ struct RaiseFailure {
   static RaiseFailure crossWaveLanePredicatedExec(const DecodedInst &di,
                                                    const llvm::Twine &kindDetail);
 
+  // Post-raise safety net for the cross-lane writelane/readlane
+  // rewrite path. Fires when the syntactic classifier (Phase 1.4.5)
+  // matched the `WaveIdLiftScalarized` three-way co-occurrence (the
+  // kernel contains the canonical ttmp8 wave_id BFE rescue + a
+  // `v_writelane_b32` / `v_readlane_b32` site + a WMMA intrinsic)
+  // AND the post-mem2reg rewrite pass rewrote zero sites. The
+  // oracle disagreeing with the classifier means either the
+  // classifier is over-approximating (false positive, benign-
+  // looking) or the oracle is under-approximating (false negative,
+  // which would let a silent miscompile through). We cannot
+  // distinguish these two without a precise dataflow check, so we
+  // refuse on the safe side. Uses the `CrossWaveLaneIdLeak` bucket
+  // so corpus-level regression dashboards see it as "Class 1
+  // refusal" alongside the other wave-id-leak kinds. No
+  // `DecodedInst` because this is an IR-level decision, not tied to
+  // one specific MC site.
+  static RaiseFailure crossWaveRewriteOracleDisagreement(
+      llvm::StringRef kernelName, const llvm::Twine &detail);
+
   // `HSA_SALMON_STRICT=1` refusal. `site` is a short stable label
   // (e.g. `"HWREG_MODE_write"`, `"implicitarg.ptr"`) that
   // `batch_raise_test` / `corpus_test` can bucket on without parsing

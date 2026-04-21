@@ -169,6 +169,13 @@ enum class RewriteId : uint8_t {
   P5_DppModifier,           // llvm.amdgcn.update.dpp lift.
   P6_DsSwizzle,             // llvm.amdgcn.ds.swizzle lift.
   LaneOpBoundsValidator,    // raise-time operand-range check for readlane/writelane.
+  PostRaiseCrossLaneRewrite,// post-mem2reg rewrite of cross-widen-divergent
+                            // writelane/readlane sites into select / ds.bpermute
+                            // (rewrite_cross_lane_divergent.{hpp,cpp}, flagged on
+                            // via `--enable-writelane-rewrite`). Tags the
+                            // WaveIdLiftScalarized site as "implemented rewrite
+                            // available" instead of "refuse outright" so the
+                            // classifier lets the kernel through to Phase 6.5.
 };
 
 // Human-readable short label for an `ObstructionKind` — used in the
@@ -246,10 +253,18 @@ struct ObstructionReport {
 // phase before any LLVM module construction.
 // ----------------------------------------------------------------------------
 
+// `enableWritelaneRewrite` opts the classifier into treating the
+// `WaveIdLiftScalarized` three-way co-occurrence as a site with an
+// *implemented* post-raise rewrite (RewriteId::PostRaiseCrossLaneRewrite),
+// not an unrewritable refusal. Default false so existing corpus
+// callers stay on the honest-refusal path while the rewrite
+// graduates per-caller. See wave-size-translation.md §5.6.3 for the
+// flag's contract.
 ObstructionReport buildObstructionReport(llvm::ArrayRef<DecodedInst> insts,
                                           const MCState &mc,
                                           const ISAProfile &src,
-                                          const ISAProfile &tgt);
+                                          const ISAProfile &tgt,
+                                          bool enableWritelaneRewrite = false);
 
 // ----------------------------------------------------------------------------
 // Render the report into a human-readable trace. Intended for

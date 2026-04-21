@@ -7,60 +7,22 @@
 # When you fix one of these, remove the corresponding set_tests_properties
 # line so the test is expected to pass again.
 
-# 128x128-tile matmul family — all three variants refuse at raise time
-# with ObstructionKind::WaveIdLiftScalarized (see
-# wave_size_obstruction.cpp::buildObstructionReport and the
-# lit_tests/c1_wave_id_lift_scalarized refusal fixture).
-#
-# The generated amdgcn contains the three-way co-occurrence pinned by
-# the classifier:
-#   1. `s_bfe_u32 sDST, ttmp8, 0x50019` — wave_id_in_workgroup
-#      extraction that every Tensile/rocBLAS matmul emits.
-#   2. v_writelane_b32 / v_readlane_b32 — hipcc's register allocator
-#      chooses these for spill/reload around the 128x128-tile shape
-#      (the 64x64-tile sibling Matmul64x64 does NOT trigger them, so
-#      stays on the intrinsic-lift rescue path and passes).
-#   3. v_wmma_* — the core matmul accumulator opcode.
-#
-# The handle_sop2.cpp lift for the canonical BFE still fires and
-# produces a per-lane divergent VGPR value for the wave_id, but when
-# that SGPR-shaped value feeds a v_writelane scalar source operand
-# the backend inserts an implicit v_readfirstlane that collapses
-# source_wave[0]'s wave_id=0 and source_wave[1]'s wave_id=1 into one
-# uniform. WMMA forecloses ThreadLoopProjection (§5.2 needs the full
-# target wave simultaneously), so the only correct outcome is the
-# loud refusal — exactly what the classifier now emits.
-#
-# These tests currently assert end-to-end numerical correctness, and
-# the raise step aborts before any dispatch happens. Until the raise
-# step gains a principled ThreadLoopProjection variant that survives
-# WMMA (or the BFE lift is reworked to forward the divergent value
-# through the writelane scalar operand in a shape the backend won't
-# scalarise) the numerical assertion cannot succeed.
-#
-# See docs/wave-size-translation.md §6 Class-1 refuse row + §5.2
-# ThreadLoopProjection exclusion note for the principled justification.
-set_tests_properties(Gfx1250Gpu.Matmul128x128_1tile PROPERTIES
-  WILL_FAIL TRUE
-  LABELS "transpiler;xfail"
-)
-
-set_tests_properties(Gfx1250Gpu.Matmul128x128 PROPERTIES
-  WILL_FAIL TRUE
-  TIMEOUT 30
-  LABELS "transpiler;xfail"
-)
-
-# UniformDiag variant of the 128x128 matmul — same refusal path as the
-# two above; the uniform-diagonal input pattern was added as a
-# debugging probe for the numerical miscompile that the
-# WaveIdLiftScalarized refusal now intercepts at raise time. Shares
-# the same failure mode until the classifier's underlying issue is
-# resolved (see the long comment above).
-set_tests_properties(Gfx1250Gpu.Matmul128x128_1tile_UniformDiag PROPERTIES
-  WILL_FAIL TRUE
-  LABELS "transpiler;xfail"
-)
+# 128x128-tile matmul family — GRADUATED to expected-pass in commit 2
+# of the --enable-writelane-rewrite rollout (see
+# wave-size-translation.md §5.6.3 and rewrite_cross_lane_divergent.
+# {hpp,cpp}). doTestMatmul in gfx1250_gpu_test.cpp now opts in to the
+# rewrite, which replaces the scalar-source v_writelane with a
+# per-lane `select` and the scalar-source v_readlane with an
+# `llvm.amdgcn.ds.bpermute`, keeping the divergent wave_id value in a
+# per-target-lane dword rather than letting the backend's implicit
+# v_readfirstlane collapse source_wave[0]/source_wave[1] into one
+# uniform. The previous WILL_FAIL annotations for
+# Gfx1250Gpu.Matmul128x128_1tile, Gfx1250Gpu.Matmul128x128, and
+# Gfx1250Gpu.Matmul128x128_1tile_UniformDiag were deleted as part of
+# that cleanup — re-add them only if you intentionally turn the flag
+# off in doTestMatmul, in which case the classifier will refuse the
+# raise again and every Matmul128x128* test will go back to failing
+# with ObstructionKind::WaveIdLiftScalarized.
 
 # Gfx1250Gpu.Softmax graduated from XFAIL to expected-pass once
 # the P2 rewrite (v_permlane16 / v_permlanex16 emulation via
