@@ -59,11 +59,19 @@ endif()
 
 # -------------------------------------------------------------------------------------- #
 #
-# ROCpd validation tests
+# ROCpd validation tests (XNACK-capable GPUs only — KFD events require XNACK)
 #
 # -------------------------------------------------------------------------------------- #
 
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST unified-memory-basic-output-sampling)
+# KFD page migration/fault events are only generated on XNACK-capable GPUs
+check_rocminfo("xnack" _XNACK_SUPPORTED)
+
+if(
+    _XNACK_SUPPORTED
+    AND ${ENABLE_ROCPD_TEST}
+    AND ${_VALID_GPU}
+    AND TEST unified-memory-basic-output-sampling
+)
     set_property(TEST unified-memory-basic-output-sampling APPEND PROPERTY LABELS rocpd)
 
     rocprofiler_systems_add_validation_test(

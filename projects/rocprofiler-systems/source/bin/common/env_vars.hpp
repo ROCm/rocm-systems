@@ -71,6 +71,8 @@ constexpr std::string_view USE_PROCESS_SAMPLING = "ROCPROFSYS_USE_PROCESS_SAMPLI
 constexpr std::string_view AMD_SMI_METRICS      = "ROCPROFSYS_AMD_SMI_METRICS";
 constexpr std::string_view AMD_SMI_FREQ         = "ROCPROFSYS_AMD_SMI_FREQ";
 constexpr std::string_view CPU_FREQ_ENABLED     = "ROCPROFSYS_CPU_FREQ_ENABLED";
+constexpr std::string_view USE_UNIFIED_MEMORY_PROFILING =
+    "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING";
 
 // --- Domains: ROCm ---
 constexpr std::string_view ROCM_DOMAINS        = "ROCPROFSYS_ROCM_DOMAINS";

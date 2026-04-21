@@ -200,6 +200,9 @@ resolve_schema_config(const nlohmann::json& config)
                               env_vars::PROCESS_SAMPLING_DURATION);
                 if(gpu.contains("ainic"))
                     resolve_enabled(result, gpu["ainic"], "enabled", env_vars::USE_AINIC);
+                if(gpu.contains("unified_memory_profiling"))
+                    resolve_enabled(result, gpu["unified_memory_profiling"], "enabled",
+                                    env_vars::USE_UNIFIED_MEMORY_PROFILING);
             }
         }
 
@@ -738,6 +741,9 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
                 config["domains"]["gpu"]["process_sampling_duration"]["value"], *dur);
         if(auto v = get_val(env_vars::USE_AINIC))
             config["domains"]["gpu"]["ainic"]["enabled"] = is_truthy(*v);
+        if(auto v = get_val(env_vars::USE_UNIFIED_MEMORY_PROFILING))
+            config["domains"]["gpu"]["unified_memory_profiling"]["enabled"] =
+                is_truthy(*v);
     }
 
     // --- Domains: ROCm ---
