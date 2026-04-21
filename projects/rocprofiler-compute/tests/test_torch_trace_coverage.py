@@ -2009,8 +2009,8 @@ def _extract_device_fault_banner(stderr_text: str) -> str:
     if not stderr_text:
         return ""
     dead: List[str] = []
-    last_start: str | None = None
-    last_terminal_label: str | None = None
+    last_start: Optional[str] = None
+    last_terminal_label: Optional[str] = None
     for line in stderr_text.splitlines():
         if "[torch-trace-cov] DEVICE_DEAD" in line:
             dead.append(line.strip())
