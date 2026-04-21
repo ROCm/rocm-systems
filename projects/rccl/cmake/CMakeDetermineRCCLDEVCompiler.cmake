@@ -20,10 +20,17 @@ set(CMAKE_RCCLDEV_COMPILER_ID "RCCLDEV")
 set(CMAKE_RCCLDEV_COMPILER_LOADED 1)
 set(CMAKE_RCCLDEV_COMPILER_ENV_VAR "RCCLDEV")
 
+# RCCLDEV wraps amdclang++ (the CXX compiler), so it shares the same implicit
+# include directories.  Declaring them here lets CMake automatically suppress
+# paths like /usr/include from -isystem flags, avoiding #include_next breakage
+# in the GCC C++ standard library headers.
+set(CMAKE_RCCLDEV_IMPLICIT_INCLUDE_DIRECTORIES "${CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES}")
+
 # Write the compiler identification file for subsequent cmake runs.
 file(WRITE "${CMAKE_PLATFORM_INFO_DIR}/CMakeRCCLDEVCompiler.cmake"
   "set(CMAKE_RCCLDEV_COMPILER \"${CMAKE_RCCLDEV_COMPILER}\")\n"
   "set(CMAKE_RCCLDEV_COMPILER_LOADED 1)\n"
   "set(CMAKE_RCCLDEV_COMPILER_ID \"RCCLDEV\")\n"
   "set(CMAKE_RCCLDEV_COMPILER_ENV_VAR \"RCCLDEV\")\n"
+  "set(CMAKE_RCCLDEV_IMPLICIT_INCLUDE_DIRECTORIES \"${CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES}\")\n"
 )
