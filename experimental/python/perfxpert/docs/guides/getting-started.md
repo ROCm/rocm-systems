@@ -778,6 +778,19 @@ Rules (all enforced by `perfxpert.tools.predict_impact`):
 - **Provenance** — the `source_citation` field on the rec points back
   to the seed entry in `knowledge/proven_optimizations.yaml`.
 
+Representative optimization examples include:
+
+| Technique | Typical trigger | Example recommendation shape |
+|-----------|------------------|------------------------------|
+| `vgpr_reduction` | high VALU pressure + low occupancy | add `__launch_bounds__`, trim live ranges, re-check occupancy |
+| `lds_tiling` | memory-bound kernel with reusable neighborhood loads | tile into LDS, reduce redundant global reads |
+| `mfma_enablement` | GEMM-like math dominated by VALU instead of MFMA | switch to MFMA-friendly data/layout path |
+| `fast_math_flag` | transcendental-heavy kernel with acceptable precision slack | test `-ffast-math` or narrower math flags |
+| `hip_stream_overlap` | high memcpy/API-overhead share with serialized transfers | move copies to async streams and synchronize only at the true dependency |
+
+For contributor-facing examples of how those cases are recorded, see
+`../contributing/proven_optimizations.md`.
+
 The prediction is always on when a technique is surfaced — there is no
 CLI gate. The JSON schema bumps to `0.3.3` when at least one rec
 carries `predicted_impact_range`; the Live Roofline payload
@@ -1092,6 +1105,15 @@ truncation on large files and makes the diff easy to review:
                  hipMemcpyHostToDevice, stream1));
 >>>>>>> REPLACE
 ```
+
+Typical examples the TUI is designed to propose when the trace evidence matches:
+
+- replace serialized `hipMemcpy` calls with `hipMemcpyAsync` on dedicated
+  streams when the trace shows transfer-heavy idle gaps
+- add `__launch_bounds__` or reduce temporary live ranges when a hot kernel is
+  occupancy-limited by VGPR pressure
+- suggest LDS tiling when a memory-bound stencil or GEMM-like kernel reloads
+  the same neighborhood repeatedly from global memory
 
 If the edit causes compilation errors, the Correctness agent reverts the
 change automatically; see `docs/architecture/gate-cascade.md` for the full
