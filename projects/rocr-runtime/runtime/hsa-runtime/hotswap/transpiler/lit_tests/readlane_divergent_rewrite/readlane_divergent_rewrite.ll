@@ -4,6 +4,7 @@
 ; RUN:   | %FileCheck %s --check-prefix=REWRITE
 ;
 ; RUN: %raise_cli %readlane_divergent_rewrite_co --isa=gfx1250 --target-isa=gfx942 \
+; RUN:     --disable-writelane-rewrite \
 ; RUN:     --emit-ir=readlane_divergent_rewrite_kernel 2>/dev/null \
 ; RUN:   | %FileCheck %s --check-prefix=UNCHANGED
 ;

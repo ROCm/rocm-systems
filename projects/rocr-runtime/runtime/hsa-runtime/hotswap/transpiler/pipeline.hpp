@@ -24,7 +24,12 @@ struct PipelineResult {
 /// `raiseToIR(..., enableWritelaneRewrite)` — see raiser.hpp and
 /// `rewrite_cross_lane_divergent.{hpp,cpp}` for the rewrite contract
 /// and wave-size-translation.md §5.6.3 for the principled derivation.
-/// Default off.
+/// Default **on** (post-Triton-corpus graduation; the rewrite's
+/// §5.6.3 symmetry contract makes it correctness-preserving on every
+/// cross-widening kernel, and corpus_layernorm_fp32 /
+/// corpus_softmax_fp32 in compare_correctness are the corpus-wide
+/// bit-exactness regression gates).  Callers that specifically want
+/// the pre-rewrite path pass `false`.
 ///
 /// `enableWaveNative` opt-in selects `WaveNativeProjection` for
 /// wave32 → wave64 cross-widening (see `wave_projection.{hpp,cpp}`
@@ -34,7 +39,7 @@ struct PipelineResult {
 PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
                            const std::string &targetISA,
                            const std::string &kernelName,
-                           bool enableWritelaneRewrite = false,
+                           bool enableWritelaneRewrite = true,
                            bool enableWaveNative = false);
 
 /// Cross-architecture pipeline: raises using sourceISA, lowers to targetISA.
@@ -42,7 +47,7 @@ PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
                            const std::string &sourceISA,
                            const std::string &targetISA,
                            const std::string &kernelName,
-                           bool enableWritelaneRewrite = false,
+                           bool enableWritelaneRewrite = true,
                            bool enableWaveNative = false);
 
 /// Raise and lower ALL kernels in a code object, producing a single merged
@@ -52,7 +57,7 @@ PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
 PipelineResult runPipelineAllKernels(const std::vector<uint8_t> &codeObjectData,
                                      const std::string &sourceISA,
                                      const std::string &targetISA,
-                                     bool enableWritelaneRewrite = false,
+                                     bool enableWritelaneRewrite = true,
                                      bool enableWaveNative = false);
 
 /// Process-global "strict mode" toggle, controlled by the

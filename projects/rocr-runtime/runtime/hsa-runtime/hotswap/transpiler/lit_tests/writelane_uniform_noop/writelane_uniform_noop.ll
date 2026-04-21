@@ -4,6 +4,7 @@
 ; RUN:   | %FileCheck %s --check-prefix=REWRITE
 ;
 ; RUN: %raise_cli %writelane_uniform_noop_co --isa=gfx1250 --target-isa=gfx942 \
+; RUN:     --disable-writelane-rewrite \
 ; RUN:     --emit-ir=writelane_uniform_noop_kernel 2>/dev/null \
 ; RUN:   | %FileCheck %s --check-prefix=UNCHANGED
 ;

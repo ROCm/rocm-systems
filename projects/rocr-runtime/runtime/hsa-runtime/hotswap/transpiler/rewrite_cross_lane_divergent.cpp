@@ -129,6 +129,121 @@ bool isIntrinsicVGPRSafePropagator(Intrinsic::ID id) {
   case Intrinsic::amdgcn_writelane:
   case Intrinsic::amdgcn_readlane:
     return true;
+  // Generic LLVM intrinsics that the AMDGPU backend lowers to per-lane
+  // VALU opcodes with no SGPR-forced operand position in any codegen
+  // path.  The audit here is tight: only add intrinsics whose AMDGPU
+  // lowering is a single VALU instruction (or a VALU-only expansion)
+  // accepting all-VGPR operands — same bar as the `amdgcn_*` cases
+  // above.  Unknown generic intrinsics stay SGPR-forced via the default
+  // arm below, consistent with the "refuse when uncertain" rule in
+  // hotswap/docs/wave-size-translation.md §5.6.3.
+  //
+  // Why these specifically, and why now: Triton's AMD backend emits
+  // these in the fast-reciprocal / rsqrt Newton-iteration expansion
+  // surrounding `@llvm.amdgcn.div_fixup` / `div_fmas` / `div_scale`
+  // (already whitelisted above) and in the reduction post-processing
+  // of layer-norm / softmax (rstd = `1 / sqrt(var + eps)`, softmax
+  // normaliser `x / sum`).  All appear on every reduction-bearing
+  // Triton kernel's readlane-result use chain.  Pre-audit, the
+  // classifier over-approximated them as SGPR-forced, which disabled
+  // the rewrite pass on the entire function (all-or-nothing per
+  // §5.6.3's "mix of rewritten and preserved sites recreates the
+  // Matmul128x128 asymmetric-rewrite fault" rule).  The AMDGPU
+  // lowerings are:
+  //
+  //   * `@llvm.fma.f32`     → `v_fma_f32` (VOP3, three VGPR sources,
+  //     VGPR destination; no SGPR-forced operand).  VALU, per-lane.
+  //   * `@llvm.fmuladd.f32` → `v_fma_f32` / `v_mac_f32` (relaxed-
+  //     precision fused-or-split multiply-add; backend chooses per
+  //     target and `contract` metadata).  Operand shapes identical to
+  //     `fma` — all VGPR, per-lane.
+  //   * `@llvm.sqrt.f32`    → `v_sqrt_f32` (VOP1, one VGPR source,
+  //     VGPR destination).  VALU, per-lane.
+  //   * `@llvm.maxnum.f32`  → `v_max_f32` (VOP2, two VGPR sources,
+  //     VGPR destination; IEEE max-num with NaN-propagation rules
+  //     handled in the VALU expansion).  VALU, per-lane.  Appears on
+  //     every softmax reduction (`m_i = max(m_i-1, x)`) — the same
+  //     position `fma` occupies in layer-norm.
+  //   * `@llvm.minnum.f32`  → `v_min_f32`.  Symmetric with maxnum;
+  //     audited for parity so any future min-reducing kernel isn't
+  //     blocked on a one-intrinsic gap.
+  //   * `@llvm.fabs.f32`    → `v_and_b32` with a `0x7fffffff` mask
+  //     (the backend's preferred `fabs` lowering on modern AMDGPU;
+  //     see AMDGPUCombinerHelper.cpp).  Per-lane, all-VGPR.  Shows
+  //     up in Triton's reduction prologues when the source is the
+  //     absolute-value form of a norm.
+  //   * `@llvm.exp2.f32` / `@llvm.log2.f32` → `v_exp_f32` /
+  //     `v_log_f32` (VOP1).  Softmax's exponentiation and the
+  //     `pow` / `log` decomposition both route here.  Per-lane,
+  //     all-VGPR.
+  //   * `@llvm.floor.f32` / `@llvm.ceil.f32` / `@llvm.trunc.f32` /
+  //     `@llvm.rint.f32` / `@llvm.round.f32` / `@llvm.nearbyint.f32`
+  //     → `v_floor_f32` / `v_ceil_f32` / `v_trunc_f32` /
+  //     `v_rndne_f32` (VOP1).  Per-lane, all-VGPR.  Triton emits
+  //     these from integer-float conversions and `tl.cdiv`-style
+  //     ceiling division.
+  //   * `@llvm.copysign.f32` → `v_bfi_b32` with a sign-bit selector
+  //     (backend-canonical).  Per-lane, all-VGPR.
+  //   * `@llvm.smin.i32` / `@llvm.smax.i32` / `@llvm.umin.i32` /
+  //     `@llvm.umax.i32` → `v_min_i32` / `v_max_i32` / `v_min_u32` /
+  //     `v_max_u32`.  Integer lane-parallel min/max; per-lane,
+  //     all-VGPR.
+  //   * `@llvm.abs.i32` → `v_sub_i32` / `v_max_i32` pair (backend
+  //     expansion).  Per-lane, all-VGPR.
+  //   * `@llvm.ctpop.i32` / `@llvm.ctlz.i32` / `@llvm.cttz.i32` /
+  //     `@llvm.bitreverse.i32` → per-lane bit-counting / bit-reverse
+  //     VALU instructions.  All-VGPR.
+  //   * `@llvm.fshl.i32` / `@llvm.fshr.i32` → `v_alignbit_b32`
+  //     (funnel shift).  Per-lane, all-VGPR.
+  //
+  // All carry per-source-wave state through unchanged (SIMT per-lane
+  // math), so the forward walk must continue past them — hence
+  // `VGPRSafePropagator` rather than `VGPRSafeSink`.  When LLVM ever
+  // routes one of these operands through an SGPR-constrained form
+  // (none exists today), extending `operandForcesSGPR` above would
+  // shadow the per-operand entry back to SGPR-forced without having
+  // to remove the intrinsic from this list.
+  //
+  // Intrinsics deliberately NOT whitelisted (require additional
+  // audit / may decompose through an SGPR-forced helper): trig
+  // functions (`sin` / `cos`), vector-reduction intrinsics
+  // (`vector.reduce.*`), `experimental.constrained.*` variants,
+  // anything that lowers to a library call.  Add here only after
+  // confirming the AMDGPU lowering is a single per-lane VALU
+  // instruction (or a VALU-only expansion) with no SGPR-forced
+  // operand in any codegen path.
+  case Intrinsic::fma:
+  case Intrinsic::fmuladd:
+  case Intrinsic::sqrt:
+  case Intrinsic::maxnum:
+  case Intrinsic::minnum:
+  case Intrinsic::fabs:
+  case Intrinsic::exp2:
+  case Intrinsic::log2:
+  // `@llvm.ldexp.f32.i32` → `v_ldexp_f32` (VOP2; `x * 2^n` with an
+  // integer exponent).  Softmax's normalisation routes through ldexp
+  // when the backend's exp2/pow decomposition picks it (LLVM r202+
+  // converts `exp(x) * 2^k` patterns there).  Per-lane, all-VGPR.
+  case Intrinsic::ldexp:
+  case Intrinsic::floor:
+  case Intrinsic::ceil:
+  case Intrinsic::trunc:
+  case Intrinsic::rint:
+  case Intrinsic::round:
+  case Intrinsic::nearbyint:
+  case Intrinsic::copysign:
+  case Intrinsic::smin:
+  case Intrinsic::smax:
+  case Intrinsic::umin:
+  case Intrinsic::umax:
+  case Intrinsic::abs:
+  case Intrinsic::ctpop:
+  case Intrinsic::ctlz:
+  case Intrinsic::cttz:
+  case Intrinsic::bitreverse:
+  case Intrinsic::fshl:
+  case Intrinsic::fshr:
+    return true;
   default:
     return false;
   }

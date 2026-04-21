@@ -73,9 +73,9 @@ config.fixtures = {
     # writelane_uniform_noop — three-fixture trilogy pinning the IR-shape
     # contract of the `rewriteCrossLaneDivergent` pass (see
     # `rewrite_cross_lane_divergent.{hpp,cpp}` + wave-size-translation.md
-    # §5.6.3).  The pass runs only under `--enable-writelane-rewrite`
-    # (default off on first landing, graduating per-caller during the
-    # Matmul128x128 rollout).
+    # §5.6.3).  The pass runs by default as of the Triton-corpus
+    # graduation; the `--disable-writelane-rewrite` flag pins the
+    # pre-rewrite path for the `UNCHANGED` / `REFUSE` sibling RUN lines.
     #
     # * writelane_divergent_rewrite — pins the
     #   `v_writelane_b32 -> select` rewrite. The fixture's writelane
@@ -89,10 +89,11 @@ config.fixtures = {
     #   giving the rewrite a chance to run and leaving a stable
     #   anchor on the rewritten IR. Two RUN lines cover both sides
     #   of the flag's contract:
-    #     - REWRITE (flag on) -> writelane gone, `mbcnt_{lo,hi}` +
-    #       `select` present.
-    #     - UNCHANGED (flag off) -> writelane intrinsic survives
-    #       verbatim; the mbcnt helper is NOT materialised.
+    #     - REWRITE (--enable-writelane-rewrite, also the default) ->
+    #       writelane gone, `mbcnt_{lo,hi}` + `select` present.
+    #     - UNCHANGED (--disable-writelane-rewrite) -> writelane
+    #       intrinsic survives verbatim; the mbcnt helper is NOT
+    #       materialised.
     # * readlane_divergent_rewrite — pins the
     #   `v_readlane_b32 -> ds_bpermute` rewrite. Companion to the
     #   writelane fixture; the two together pin both halves of the

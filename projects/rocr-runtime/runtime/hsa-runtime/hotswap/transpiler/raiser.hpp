@@ -32,9 +32,20 @@ struct RaiseResult {
 // replaces cross-widen-divergent `v_writelane_b32` / `v_readlane_b32`
 // sites with a per-source-wave `select` / `ds_bpermute` pair (see
 // `rewrite_cross_lane_divergent.{hpp,cpp}` and wave-size-translation.md
-// §5.6.3). Default off — opt-in per call during the graduation
-// rollout; the classifier's `WaveIdLiftScalarized` refusal keeps the
-// silent-miscompile gate closed on callers that do not set the flag.
+// §5.6.3).
+//
+// Default **on** as of the Triton-corpus graduation: the rewrite pass
+// is correct-by-construction under the §5.6.3 symmetry contract
+// (every cross-lane site rewritten together under cross-widening), and
+// the reduction-bearing recipes in the compare_correctness Triton
+// corpus (`corpus_layernorm_fp32`, `corpus_softmax_fp32`) are the
+// corpus-wide bit-exactness evidence the graduation plan asked for —
+// their salmon lane miscompiles silently under the pre-rewrite path
+// (the `v_readlane_b32 ..., 31` fan-in idiom only extracts one of the
+// two source-wave partials on wave64 target) and lands `gold` /
+// `match` under the rewrite.  Callers that specifically need to pin
+// the pre-rewrite path (lit fixtures that assert the `UNCHANGED` /
+// `REFUSE` sibling contract) pass `false` explicitly.
 //
 // `enableWaveNative` toggles `WaveNativeProjection` for wave32 source
 // → wave64 target cross-widening. Default off; under the default,
@@ -57,7 +68,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
                       const KernelMeta &meta,
                       uint64_t kernelOffset = 0,
                       const std::string &compilationTargetISA = "",
-                      bool enableWritelaneRewrite = false,
+                      bool enableWritelaneRewrite = true,
                       bool enableWaveNative = false);
 
 } // namespace transpiler

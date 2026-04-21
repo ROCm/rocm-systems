@@ -256,15 +256,16 @@ struct ObstructionReport {
 // `enableWritelaneRewrite` opts the classifier into treating the
 // `WaveIdLiftScalarized` three-way co-occurrence as a site with an
 // *implemented* post-raise rewrite (RewriteId::PostRaiseCrossLaneRewrite),
-// not an unrewritable refusal. Default false so existing corpus
-// callers stay on the honest-refusal path while the rewrite
-// graduates per-caller. See wave-size-translation.md §5.6.3 for the
-// flag's contract.
+// not an unrewritable refusal. Default **true** as of the Triton-
+// corpus graduation (see raiser.hpp for the full rationale); callers
+// that want to pin the pre-rewrite REFUSE contract (lit fixtures for
+// the `c1_wave_id_lift_scalarized` REFUSE sibling, etc.) pass `false`
+// explicitly. See wave-size-translation.md §5.6.3.
 ObstructionReport buildObstructionReport(llvm::ArrayRef<DecodedInst> insts,
                                           const MCState &mc,
                                           const ISAProfile &src,
                                           const ISAProfile &tgt,
-                                          bool enableWritelaneRewrite = false);
+                                          bool enableWritelaneRewrite = true);
 
 // ----------------------------------------------------------------------------
 // Render the report into a human-readable trace. Intended for

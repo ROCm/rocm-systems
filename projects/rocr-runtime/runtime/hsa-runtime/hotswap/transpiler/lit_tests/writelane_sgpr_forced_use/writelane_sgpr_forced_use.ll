@@ -4,6 +4,7 @@
 ; RUN:   | %FileCheck %s --check-prefix=REFUSE
 ;
 ; RUN: %raise_cli %writelane_sgpr_forced_use_co --isa=gfx1250 --target-isa=gfx942 \
+; RUN:     --disable-writelane-rewrite \
 ; RUN:     --emit-ir=writelane_sgpr_forced_use_kernel 2>/dev/null \
 ; RUN:   | %FileCheck %s --check-prefix=UNCHANGED
 ;

@@ -1,4 +1,5 @@
 ; RUN: %not %raise_cli %c1_wave_id_lift_scalarized_co --isa=gfx1250 --target-isa=gfx942 \
+; RUN:     --disable-writelane-rewrite \
 ; RUN:     --emit-ir=c1_wave_id_lift_scalarized_kernel 2>&1 \
 ; RUN:   | %FileCheck %s --check-prefix=REFUSE
 ;
@@ -40,7 +41,8 @@
 ; separate vectors and emits one ObstructionKind::WaveIdLiftScalarized
 ; site per v_writelane / v_readlane once all three are non-empty.
 ;
-; REFUSE path (--enable-writelane-rewrite OFF):
+; REFUSE path (--disable-writelane-rewrite — default is now ON, so
+; the REFUSE sibling explicitly opts out of the rewrite):
 ;   We assert the three stable anchors the classifier + raise_cli
 ;   surface at the refusal boundary:
 ;

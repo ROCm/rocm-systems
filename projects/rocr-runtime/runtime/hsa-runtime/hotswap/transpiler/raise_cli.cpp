@@ -34,15 +34,21 @@
 // to exercise cross-wave paths from a single CO (e.g. a gfx1250 CO
 // compiled for a wave64 target).
 //
-// --enable-writelane-rewrite. Optional; default off. Turns on the
-// post-raise rewrite of cross-widen-divergent `v_writelane_b32` /
-// `v_readlane_b32` sites into per-source-wave `select` / `ds_bpermute`
-// primitives — see `rewrite_cross_lane_divergent.{hpp,cpp}` and
-// hotswap/docs/wave-size-translation.md §5.6.3. Provided as an
-// explicit flag during the graduation rollout: lit fixtures that
-// exercise the rewrite opt in per RUN line, while the
-// `c1_wave_id_lift_scalarized` refusal fixture keeps the honest
-// silent-miscompile gate with the flag off.
+// --enable-writelane-rewrite / --disable-writelane-rewrite. Default
+// **on** (post-Triton-corpus graduation; see raiser.hpp for the full
+// rationale).  Controls the post-raise rewrite of cross-widen-divergent
+// `v_writelane_b32` / `v_readlane_b32` sites into per-source-wave
+// `select` / `ds_bpermute` primitives — see
+// `rewrite_cross_lane_divergent.{hpp,cpp}` and
+// hotswap/docs/wave-size-translation.md §5.6.3.
+//
+// `--enable-writelane-rewrite` is accepted for backward compatibility
+// (the canonical flag name used by existing lit fixtures) and is a
+// no-op since the default is already on; `--disable-writelane-rewrite`
+// forces the pre-rewrite path and is used by the `REFUSE` / `UNCHANGED`
+// sibling RUN lines in the writelane/readlane regression fixtures to
+// pin the pre-rewrite contract.  Later-wins between the two flags is
+// by command-line order (last occurrence decides).
 //
 // --enable-wave-native. Optional; default off. Selects
 // `WaveNativeProjection` instead of `ModuloReplicationProjection`
@@ -114,14 +120,14 @@ int usage() {
       stderr,
       "usage:\n"
       "  raise_cli <code-object.co|.hsaco> [--isa=<arch>] "
-      "[--target-isa=<arch>] [--enable-writelane-rewrite] "
+      "[--target-isa=<arch>] [--disable-writelane-rewrite] "
       "[--enable-wave-native]\n"
       "  raise_cli <code-object.co|.hsaco> --emit-ir[=<kernel>] "
       "[--isa=<arch>] [--target-isa=<arch>] "
-      "[--enable-writelane-rewrite] [--enable-wave-native]\n"
+      "[--disable-writelane-rewrite] [--enable-wave-native]\n"
       "  raise_cli <code-object.co|.hsaco> --write-hsaco=<path> "
       "[--kernel=<name>] [--isa=<arch>] [--target-isa=<arch>] "
-      "[--enable-writelane-rewrite] [--enable-wave-native]\n"
+      "[--disable-writelane-rewrite] [--enable-wave-native]\n"
       "\n"
       "Default mode: emits per-kernel OK/FAIL lines on stdout in the format\n"
       "  kerneldex coverage expects. Exits 0 iff every kernel raises.\n"
@@ -132,9 +138,12 @@ int usage() {
       "  Intended for post-rewrite disassembly triage (see\n"
       "  hotswap/docs/wave-size-translation.md \u00a75.6.3).\n"
       "--target-isa: overrides the target ISA (default: same as --isa).\n"
-      "--enable-writelane-rewrite: turn on the cross-widen-divergent\n"
-      "  writelane/readlane rewrite (default off; see wave-size-\n"
-      "  translation.md \u00a75.6.3).\n"
+      "--enable-writelane-rewrite / --disable-writelane-rewrite: controls\n"
+      "  the cross-widen-divergent writelane/readlane rewrite (default on;\n"
+      "  see wave-size-translation.md \u00a75.6.3). The `--enable-` form is\n"
+      "  kept for backward compatibility (existing REWRITE lit RUN lines);\n"
+      "  `--disable-` pins the pre-rewrite REFUSE / UNCHANGED path for the\n"
+      "  sibling RUN lines. Later-wins on the command line.\n"
       "--enable-wave-native: select WaveNativeProjection for wave32\n"
       "  source \u2192 wave64 target cross-widening (default off; see\n"
       "  wave-size-translation.md \u00a72.2).\n"
@@ -149,7 +158,12 @@ int main(int argc, char **argv) {
   std::string isa;
   std::string targetIsa;
   bool emitIr = false;
-  bool enableWritelaneRewrite = false;
+  // Default on as of the Triton-corpus graduation (see this file's
+  // top-of-file comment and raiser.hpp for the rationale).  The
+  // `--disable-writelane-rewrite` flag (parsed below) forces the
+  // pre-rewrite path for the lit fixtures that pin the
+  // REFUSE / UNCHANGED sibling contracts.
+  bool enableWritelaneRewrite = true;
   bool enableWaveNative = false;
   std::string emitIrKernel;
   std::string writeHsacoPath;
@@ -179,6 +193,12 @@ int main(int argc, char **argv) {
       writeHsacoKernel = a.substr(9);
     } else if (a == "--enable-writelane-rewrite") {
       enableWritelaneRewrite = true;
+    } else if (a == "--disable-writelane-rewrite") {
+      // Later-wins on the command line: the last occurrence of an
+      // --enable- / --disable- pair decides the effective value.  This
+      // matches the behaviour every lit fixture's REFUSE / REWRITE RUN
+      // lines implicitly rely on (one flag per RUN line).
+      enableWritelaneRewrite = false;
     } else if (a == "--enable-wave-native") {
       enableWaveNative = true;
     } else if (!a.empty() && a[0] == '-') {
