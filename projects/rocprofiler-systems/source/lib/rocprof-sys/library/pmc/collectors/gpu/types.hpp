@@ -19,7 +19,8 @@ namespace collectors
 namespace gpu
 {
 
-// Sentinel value used by AMD SMI to indicate unsupported/unavailable 64-bit metrics
+// Sentinel values used by AMD SMI to indicate unsupported/unavailable metrics
+constexpr uint16_t METRIC_VALUE_NOT_SUPPORTED_16 = 0xffff;
 constexpr uint64_t METRIC_VALUE_NOT_SUPPORTED_64 = 0xffffffffffffffff;
 
 /**
