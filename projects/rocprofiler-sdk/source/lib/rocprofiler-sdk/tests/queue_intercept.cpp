@@ -197,7 +197,8 @@ TEST(QueueIntercept, DoorbellTraceOnlyCopiesPacket)
     pkt->kernel_object = 0xDEADBEEF;
 
     bool doorbell_rang = false;
-    process_doorbell_impl(state, 0, [&](hsa_signal_t, hsa_signal_value_t) { doorbell_rang = true; });
+    process_doorbell_impl(
+        state, 0, [&](hsa_signal_t, hsa_signal_value_t) { doorbell_rang = true; });
 
     EXPECT_TRUE(doorbell_rang);
     EXPECT_EQ(real_wdid, 1u);
@@ -258,7 +259,8 @@ TEST(QueueIntercept, DoorbellNoNewPackets)
 
     state->virtual_wptr.store(0);
     bool doorbell_rang = false;
-    process_doorbell_impl(state, 0, [&](hsa_signal_t, hsa_signal_value_t) { doorbell_rang = true; });
+    process_doorbell_impl(
+        state, 0, [&](hsa_signal_t, hsa_signal_value_t) { doorbell_rang = true; });
 
     EXPECT_TRUE(doorbell_rang);
     EXPECT_EQ(real_wdid, 0u);
@@ -313,9 +315,9 @@ TEST(QueueIntercept, DoorbellTwoPacketsWithKFactor)
 
     // 2 packets * stride(8) = 16
     state->virtual_wptr.store(16);
-    get_pkt(ring, 0, 511)->header        = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    get_pkt(ring, 0, 511)->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
     get_pkt(ring, 0, 511)->kernel_object = 0xAAAA;
-    get_pkt(ring, 1, 511)->header        = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    get_pkt(ring, 1, 511)->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
     get_pkt(ring, 1, 511)->kernel_object = 0xBBBB;
 
     process_doorbell_impl(state, 0, [](hsa_signal_t, hsa_signal_value_t) {});
