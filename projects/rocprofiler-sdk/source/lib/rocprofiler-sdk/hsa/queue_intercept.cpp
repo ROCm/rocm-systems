@@ -147,20 +147,24 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
         auto* dst =
             static_cast<char*>(state->ring_buf) + ((tls_submit_pos & state->ring_mask) * pkt_size);
         memcpy(dst, src + i * pkt_size, pkt_size);
-        tls_submit_pos++;
+        tls_submit_pos += 1 + state->k_factor;
     }
 }
 }  // namespace
 
 void
-process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t ring_doorbell)
+process_doorbell_impl(QueueState* state, hsa_signal_value_t /*value*/, doorbell_fn_t ring_doorbell)
 {
     std::lock_guard<std::mutex> lock(state->gate_lock);
 
     uint64_t scan_end = state->virtual_wptr.load(std::memory_order_acquire);
     uint64_t scan_pos = state->next_scan_pos;
 
-    if(scan_pos >= scan_end) return;
+    if(scan_pos >= scan_end)
+    {
+        ring_doorbell(state->doorbell_signal, value);
+        return;
+    }
 
     uint64_t pkt_count = scan_end - scan_pos;
     auto*    first_pkt =
@@ -186,6 +190,18 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t
 
     state->next_scan_pos   = scan_end;
     state->next_submit_pos = tls_submit_pos;
+
+    // Sync paired metadata queue (one sync per application packet)
+    if(state->metadata_state)
+    {
+        for(uint64_t i = 0; i < pkt_count; i++)
+        {
+            auto* pkt = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
+                static_cast<char*>(state->ring_buf) +
+                (((scan_pos + i) & state->ring_mask) * state->pkt_size));
+            sync_metadata_impl(state, pkt, 0);
+        }
+    }
 
     __atomic_store_n(state->real_wdid, state->next_submit_pos, __ATOMIC_RELEASE);
     ring_doorbell(state->doorbell_signal, static_cast<hsa_signal_value_t>(state->next_submit_pos));
