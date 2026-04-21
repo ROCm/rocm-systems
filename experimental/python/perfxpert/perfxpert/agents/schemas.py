@@ -62,7 +62,9 @@ class RootInput(_FrozenModel):
     user_query: str
     database_path: Optional[str] = None
     source_dir: Optional[str] = None
-    provider: Optional[Literal["anthropic", "openai", "ollama", "private", "opencode"]] = None
+    provider: Optional[
+        Literal["anthropic", "openai", "ollama", "private", "opencode"]
+    ] = None
     airgap: bool = False
     session_id: Optional[str] = None
     intent_hint: Optional[str] = None  # populated by intent.classify upstream
@@ -86,8 +88,6 @@ class AnalysisInput(_FrozenModel):
     database_path: str
     top_kernels: int = 10
     att_dir: Optional[str] = None  # auto-detected; not required
-    min_duration: float = 0.0
-    analysis_options: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AnalysisOutput(_FrozenModel):
@@ -190,6 +190,75 @@ class LatencySpecialistOutput(_FrozenModel):
     citations: List[str] = Field(default_factory=list)
 
 
+# -- Diff specialist (Layer 2) --------------------------------------------
+#
+# Wraps :func:`perfxpert.tools.trace_diff.diff_runs` + a narrative.
+# Output cap is 5 fields, so ``regressions`` and ``improvements`` are
+# nested under a single ``kernel_deltas`` dict ({"regressions":[...],
+# "improvements":[...]}) — the MCP tool wrapper flattens them back to
+# top-level keys for the public return shape documented in
+# agent-hierarchy.md.
+
+class DiffSpecialistInput(_FrozenModel):
+    baseline_db: str = Field(..., description="Path to baseline rocprofiler-sdk .db")
+    new_db: str = Field(..., description="Path to new run's rocprofiler-sdk .db")
+    top_kernels: int = Field(default=20, ge=1, le=100)
+    user_intent: str = Field(default="summarize the diff")
+
+
+class DiffSpecialistOutput(_FrozenModel):
+    wall_delta_pct: float
+    kernel_deltas: Dict[str, List[Dict[str, Any]]] = Field(
+        default_factory=lambda: {"regressions": [], "improvements": []},
+        description="Per-kernel deltas, keyed by 'regressions' / 'improvements'.",
+    )
+    verdict: Literal["improved", "regressed", "neutral"]
+    narrative: str
+    confidence: float = Field(..., ge=0.0, le=1.0)
+
+
+# -- Communication (RCCL payload block) -----------------------------------
+#
+# Leaf data models, not agent Input/Output — the ≤5-field cap does NOT
+# apply. These type the per-collective shape emitted by
+# ``perfxpert.tools.rccl_analysis.analyze_collectives`` so downstream
+# consumers (formatters, MCP clients, Latency specialist) get a single
+# source of truth for the field list. The top-level ``summary`` dict
+# stays untyped (less stable shape, best treated as free-form).
+
+
+class CollectiveEntry(_FrozenModel):
+    """One per-collective record inside ``payload["communication"]``.
+
+    Pydantic-validated at the ``analyze_collectives`` boundary so callers
+    can rely on field presence + basic types. The set of acceptable
+    ``efficiency_label`` values mirrors ``rccl_analysis._classify_efficiency``
+    (poor/fair/good) plus the ``unknown`` case emitted by the
+    kernel-name-regex fallback when ``capture_incomplete=True``.
+    """
+
+    op_type: str
+    msg_bytes: int = Field(..., ge=0)
+    duration_ns: int = Field(..., ge=0)
+    effective_bw_gbps: float
+    peak_bw_gbps: Optional[float] = None
+    efficiency_pct: float
+    efficiency_label: Literal["poor", "fair", "good", "unknown"]
+    overlap_ratio: float
+    algo_hint: Optional[str] = None
+    topology_hint: Optional[str] = None
+    regime: Optional[str] = None
+    ranks: int = Field(..., ge=1)
+
+
+class CommunicationBlock(_FrozenModel):
+    """Typed wrapper for ``payload["communication"]`` — 3 top-level keys."""
+
+    collectives: List[CollectiveEntry]
+    summary: Dict[str, Any]  # top-level aggregate is less stable — keep untyped
+    capture_incomplete: bool = False
+
+
 # -- Exports ---------------------------------------------------------------
 
 __all__ = [
@@ -209,4 +278,8 @@ __all__ = [
     "MemorySpecialistOutput",
     "LatencySpecialistInput",
     "LatencySpecialistOutput",
+    "DiffSpecialistInput",
+    "DiffSpecialistOutput",
+    "CollectiveEntry",
+    "CommunicationBlock",
 ]
