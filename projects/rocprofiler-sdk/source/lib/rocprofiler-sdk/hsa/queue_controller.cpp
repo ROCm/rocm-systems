@@ -35,7 +35,6 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <algorithm>
 #include <memory>
-#include <unordered_set>
 
 namespace rocprofiler
 {
@@ -236,61 +235,22 @@ queue_controller_load_attach_queues()
 uint64_t
 compute_queue_k_factor()
 {
-    auto registered_contexts = context::get_registered_contexts();
     auto active_contexts     = context::get_active_contexts();
 
-    auto active_context_ids = std::unordered_set<uint64_t>{};
-    active_context_ids.reserve(active_contexts.size());
-    for(const auto* actx : active_contexts)
-        if(actx) active_context_ids.emplace(actx->context_idx);
-
-    ROCP_INFO << "[DIAG-HG-KFACTOR-CONTEXT-SUMMARY] registered=" << registered_contexts.size()
-              << " active=" << active_context_ids.size();
-
     uint64_t k = 0;
-    for(const auto& itr : registered_contexts)
+    for(const auto* itr : active_contexts)
     {
+        if(!itr) continue;
+
         const bool has_dispatch_counter = (itr->dispatch_counter_collection != nullptr);
         const bool has_dispatch_tt      = (itr->dispatch_thread_trace != nullptr);
         const bool has_kernel_cb =
             itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH);
         const bool has_kernel_buf =
             itr->is_tracing(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
-        const bool context_active = (active_context_ids.count(itr->context_idx) > 0);
-
-        ROCP_INFO << "[DIAG-HG-KFACTOR-CONTEXT] ctx=" << itr->context_idx
-                  << " active=" << context_active
-                  << " dispatch_counter=" << has_dispatch_counter
-                  << " dispatch_thread_trace=" << has_dispatch_tt
-                  << " kernel_dispatch_cb=" << has_kernel_cb
-                  << " kernel_dispatch_buf=" << has_kernel_buf;
-
-        if(!context_active)
-        {
-            if(has_dispatch_counter || has_dispatch_tt)
-            {
-                ROCP_WARNING << "[DIAG-HG-KFACTOR-INACTIVE-OVERRIDE] ctx=" << itr->context_idx
-                             << " reason="
-                             << (has_dispatch_counter ? "dispatch_counter_collection"
-                                                      : "dispatch_thread_trace")
-                             << " active=false ignored=true";
-            }
-            if(has_kernel_cb || has_kernel_buf)
-            {
-                ROCP_WARNING << "[DIAG-HG-KFACTOR-INACTIVE-KERNEL] ctx=" << itr->context_idx
-                             << " kernel_dispatch_cb=" << has_kernel_cb
-                             << " kernel_dispatch_buf=" << has_kernel_buf
-                             << " ignored=true";
-            }
-            continue;
-        }
 
         if(has_dispatch_counter || has_dispatch_tt)
         {
-            ROCP_INFO << "[DIAG-HG-KFACTOR-FINAL] value=12 reason="
-                      << (has_dispatch_counter ? "dispatch_counter_collection"
-                                              : "dispatch_thread_trace")
-                      << " ctx=" << itr->context_idx << " active=" << context_active;
             return 12;
         }
         if(has_kernel_cb || has_kernel_buf)
@@ -298,7 +258,6 @@ compute_queue_k_factor()
             k = std::max(k, uint64_t{3});
         }
     }
-    ROCP_INFO << "[DIAG-HG-KFACTOR-FINAL] value=" << k << " reason=registered_contexts_scan";
     return k;
 }
 
