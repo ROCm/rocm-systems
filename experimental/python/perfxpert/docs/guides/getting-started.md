@@ -490,7 +490,9 @@ contains:
 - **Primary bottleneck** — explicit label (compute / memory_transfer
   / latency / mixed / data_insufficient).
 - **Time breakdown** — kernel / memcpy / API-overhead percentages
-  plus total runtime and kernel count.
+  plus total runtime and kernel count. Multi-DB reports also surface a
+  normalized runtime for overlap-safe percentage math while preserving the
+  wall-clock total runtime separately.
 - **Hotspot list** — top-N kernels ranked by total duration, with
   call count, avg / min / max duration, percent of total.
 - **Memory analysis** — H2D / D2H / D2D volumes, total duration, and
@@ -536,6 +538,12 @@ The JSON format exposes each section under a flat top-level key
 `.tier0_findings`, `.recommendations`, `.narrative`,
 `.primary_bottleneck`, `.warnings`, `.metadata`) — so `jq` pipelines
 can slice the report without reaching into nested schema shapes.
+
+For multi-DB inputs, `time_breakdown.total_runtime` remains the wall-clock
+runtime of the merged trace window. `execution_breakdown.normalized_runtime_ns`
+and the markdown/text "Normalized runtime" labels are the summed shard envelope
+used for percentage math so overlapping shards do not under-report API
+overhead or idle time.
 
 ### Report structure
 
@@ -1197,6 +1205,15 @@ Set `PERFXPERT_LLM_FALLBACK_CHAIN` to a comma-separated provider
 list, e.g. `export PERFXPERT_LLM_FALLBACK_CHAIN="openai,anthropic"`.
 Combine with `PERFXPERT_DISABLE_RATE_LIMIT_RETRY=1` to skip the
 client-side retry entirely and fall through on first 429.
+
+**ATT says the decoder is missing even though the Python package imports fine.**
+PerfXpert gates ATT on the ROCprof Trace Decoder shared library that the
+runtime loads, not on whether `rocprof_trace_decoder` happens to be importable
+from the current Python environment. Install `librocprof-trace-decoder.so`
+under `/opt/rocm/lib*`, point `PERFXPERT_ROCPROF_TRACE_DECODER_PATH` at the
+library or its parent directory, or install the ROCm decoder package into a
+standard search path. See `../contributing/external-tools.md` for the exact
+lookup order.
 
 **PMC counter collection fails with a per-block limit error.**
 `FETCH_SIZE` and `WRITE_SIZE` each consume the full TCC budget — each
