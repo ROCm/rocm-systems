@@ -834,7 +834,7 @@ Queue::Queue(
             });
     }
 
-    if(!queue_intercept::is_active()) set_write_interceptor(WriteInterceptor, this);
+    if(!queue_intercept::is_intercepting_inline()) set_write_interceptor(WriteInterceptor, this);
 
     create_signal(0, &ready_signal, false);
     create_signal(0, &block_signal, false);
