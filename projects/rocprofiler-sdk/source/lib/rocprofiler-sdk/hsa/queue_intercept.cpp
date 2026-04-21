@@ -95,13 +95,19 @@ unregister_doorbell(hsa_signal_t doorbell)
 uint64_t
 add_write_index_impl(QueueState* state, uint64_t value)
 {
-    return state->virtual_wptr.fetch_add(value, std::memory_order_relaxed);
+    auto prev = state->virtual_wptr.fetch_add(value, std::memory_order_relaxed);
+    ROCP_TRACE << "add_write_index: queue=" << state->hsa_queue << " +=" << value
+               << " prev=" << prev << " new=" << (prev + value);
+    return prev;
 }
 
 void
 store_write_index_impl(QueueState* state, uint64_t value)
 {
+    auto prev = state->virtual_wptr.load(std::memory_order_relaxed);
     state->virtual_wptr.store(value, std::memory_order_relaxed);
+    ROCP_TRACE << "store_write_index: queue=" << state->hsa_queue << " prev=" << prev
+               << " new=" << value;
 }
 
 uint64_t
@@ -109,13 +115,18 @@ cas_write_index_impl(QueueState* state, uint64_t expected, uint64_t value)
 {
     uint64_t prev = expected;
     state->virtual_wptr.compare_exchange_strong(prev, value, std::memory_order_relaxed);
+    ROCP_TRACE << "cas_write_index: queue=" << state->hsa_queue << " expected=" << expected
+               << " value=" << value << " prev=" << prev
+               << (prev == expected ? " (swapped)" : " (failed)");
     return prev;
 }
 
 uint64_t
 load_write_index_impl(const QueueState* state)
 {
-    return state->virtual_wptr.load(std::memory_order_relaxed);
+    auto v = state->virtual_wptr.load(std::memory_order_relaxed);
+    ROCP_TRACE << "load_write_index: queue=" << state->hsa_queue << " val=" << v;
+    return v;
 }
 
 void
@@ -143,13 +154,17 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
     auto*       state    = tls_state;
     auto        pkt_size = tls_pkt_size;
     const auto* src      = static_cast<const char*>(pkts);
+    ROCP_TRACE << "ring_buffer_writer: pkt_count=" << pkt_count
+               << " submit_pos=" << tls_submit_pos << " k_factor=" << state->k_factor;
     for(uint64_t i = 0; i < pkt_count; i++)
     {
-        auto* dst =
-            static_cast<char*>(state->ring_buf) + ((tls_submit_pos & state->ring_mask) * pkt_size);
+        auto  slot = tls_submit_pos & state->ring_mask;
+        auto* dst  = static_cast<char*>(state->ring_buf) + (slot * pkt_size);
         memcpy(dst, src + i * pkt_size, pkt_size);
+        ROCP_TRACE << "  pkt[" << i << "] -> slot=" << slot << " submit_pos=" << tls_submit_pos;
         tls_submit_pos += 1 + state->k_factor;
     }
+    ROCP_TRACE << "ring_buffer_writer done: final submit_pos=" << tls_submit_pos;
 }
 }  // namespace
 
@@ -208,8 +223,14 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t
         }
     }
 
+    auto real_rdid = __atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE);
+    ROCP_TRACE << "doorbell: submitting real_wdid=" << state->next_submit_pos
+               << " real_rdid=" << real_rdid << " doorbell=" << state->doorbell_signal.handle
+               << " ring_used=" << (state->next_submit_pos - real_rdid)
+               << " ring_size=" << state->ring_size;
     __atomic_store_n(state->real_wdid, state->next_submit_pos, __ATOMIC_RELEASE);
     ring_doorbell(state->doorbell_signal, static_cast<hsa_signal_value_t>(state->next_submit_pos));
+    ROCP_TRACE << "doorbell: ring_doorbell returned";
 }
 
 void
@@ -266,6 +287,7 @@ wrap_add_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
 {
     auto* s = lookup_queue_state(q);
     if(s) return add_write_index_impl(s, v);
+    ROCP_TRACE << "add_write_index_relaxed PASSTHROUGH: queue=" << q << " v=" << v;
     return s_next_table.hsa_queue_add_write_index_relaxed_fn(q, v);
 }
 
