@@ -31,6 +31,13 @@ amd::Memory* getMemoryObject(const void* ptr, size_t& offset, size_t size) {
     memObj = (device->asContext()->svmDevices()[0])->GetArenaMemObj(ptr, offset, size);
   }
 
+  if (memObj == nullptr) {
+    // If memObj is still not found, then HMM is disabled. It could be host memory that has
+    // been registered with a device pointer obtained with hipHostGetDevicePointer. Try to find it
+    // in the device memory map.
+    memObj = currentDev->FindDevMemObj(ptr, &offset);
+  }
+
   // On Windows, when using hipHostRegister, the map may contain a single memory object for
   // multiple devices. This is because device addresses can overlap.
   // The offset needs to be calculated relative to the memory of the current device.

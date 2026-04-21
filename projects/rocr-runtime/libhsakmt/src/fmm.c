@@ -4352,59 +4352,63 @@ err_import:
 	return err;
 }
 
-HSAKMT_STATUS hsakmt_fmm_deregister_memory(HsaKFDContext *ctx, void *address)
-{
-	manageable_aperture_t *aperture;
-	vm_object_t *object;
-	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
+HSAKMT_STATUS hsakmt_fmm_deregister_memory(HsaKFDContext* ctx, void* address) {
+  manageable_aperture_t* aperture;
+  vm_object_t* object;
+  struct hsa_kfd_fmm_context* fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
 
-	object = vm_find_object(fmm_ctx, address, 0, &aperture);
-	if (!object)
-		/* On APUs we assume it's a random system memory address
-		 * where registration and dergistration is a no-op
-		 */
-		return (!hsakmt_is_dgpu || ctx->hsakmt_is_svm_api_supported) ?
-			HSAKMT_STATUS_SUCCESS :
-			HSAKMT_STATUS_MEMORY_NOT_REGISTERED;
-	/* Successful vm_find_object returns with aperture locked */
+  /* Unknown addresses are a no-op when not using dGPUs or when using SVM. */
+  bool require_registered_mem = hsakmt_is_dgpu && !ctx->hsakmt_is_svm_api_supported;
 
-	if (aperture == &fmm_ctx->cpuvm_aperture) {
-		/* API-allocated system memory on APUs, deregistration
-		 * is a no-op
-		 */
-		pthread_mutex_unlock(&aperture->fmm_mutex);
-		return HSAKMT_STATUS_SUCCESS;
-	}
+  object = vm_find_object(fmm_ctx, address, 0, &aperture);
+  if (!object && require_registered_mem) {
+    /* The size=0 lookup rejects an address with more than one userptr
+     * node (e.g. a single host VA registered with different pinAllocSize).
+     * The HSA deregister API only takes an address, so fall back to the
+     * range-based lookup which tolerates duplicates and releases any one
+     * node whose range contains that address.
+     */
+    object = vm_find_object(fmm_ctx, address, UINT64_MAX, &aperture);
+  }
+  if (!object)
+    return require_registered_mem ? HSAKMT_STATUS_MEMORY_NOT_REGISTERED : HSAKMT_STATUS_SUCCESS;
+  /* Successful vm_find_object returns with aperture locked */
 
-	if (object->metadata || object->userptr || object->is_imported_kfd_bo) {
-		/* An object with metadata is an imported graphics
-		 * buffer. Deregistering imported graphics buffers or
-		 * userptrs means releasing the BO.
-		 */
-		pthread_mutex_unlock(&aperture->fmm_mutex);
-		__fmm_release(ctx, object, aperture);
-		return HSAKMT_STATUS_SUCCESS;
-	}
+  if (aperture == &fmm_ctx->cpuvm_aperture) {
+    /* API-allocated system memory on APUs, deregistration
+     * is a no-op
+     */
+    pthread_mutex_unlock(&aperture->fmm_mutex);
+    return HSAKMT_STATUS_SUCCESS;
+  }
 
-	if (!object->registered_device_id_array ||
-		object->registered_device_id_array_size <= 0) {
-		pthread_mutex_unlock(&aperture->fmm_mutex);
-		return HSAKMT_STATUS_MEMORY_NOT_REGISTERED;
-	}
+  if (object->metadata || object->userptr || object->is_imported_kfd_bo) {
+    /* An object with metadata is an imported graphics
+     * buffer. Deregistering imported graphics buffers or
+     * userptrs means releasing the BO.
+     */
+    pthread_mutex_unlock(&aperture->fmm_mutex);
+    __fmm_release(ctx, object, aperture);
+    return HSAKMT_STATUS_SUCCESS;
+  }
 
-	if (object->registered_device_id_array) {
-		free(object->registered_device_id_array);
-		object->registered_device_id_array = NULL;
-		object->registered_device_id_array_size = 0;
-	}
-	if (object->registered_node_id_array)
-		free(object->registered_node_id_array);
-	object->registered_node_id_array = NULL;
-	object->registration_count = 0;
+  if (!object->registered_device_id_array || object->registered_device_id_array_size <= 0) {
+    pthread_mutex_unlock(&aperture->fmm_mutex);
+    return HSAKMT_STATUS_MEMORY_NOT_REGISTERED;
+  }
 
-	pthread_mutex_unlock(&aperture->fmm_mutex);
+  if (object->registered_device_id_array) {
+    free(object->registered_device_id_array);
+    object->registered_device_id_array = NULL;
+    object->registered_device_id_array_size = 0;
+  }
+  if (object->registered_node_id_array) free(object->registered_node_id_array);
+  object->registered_node_id_array = NULL;
+  object->registration_count = 0;
 
-	return HSAKMT_STATUS_SUCCESS;
+  pthread_mutex_unlock(&aperture->fmm_mutex);
+
+  return HSAKMT_STATUS_SUCCESS;
 }
 
 /*
