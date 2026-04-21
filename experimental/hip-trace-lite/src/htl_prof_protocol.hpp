@@ -23,10 +23,11 @@ enum hip_op_id_t : uint32_t {
     HIP_OP_ID_BARRIER  = 2,
 };
 
-// CLR enablement-probe sentinel. CLR calls the callback with op == sentinel
-// and data == nullptr to ask "is this op enabled?". Returning non-zero
-// signals enabled.
-inline constexpr uint32_t kEnablementProbeOp = 0x1;
+// CLR's CommitRecord sentinel: when CLR commits a record, it passes
+// data = (void*)0x1 with the actual op. A real record is passed with
+// data = pointer to a real activity_record_t.  See
+// projects/clr/rocclr/platform/activity.cpp:22 (kCommitRecordSentinel).
+inline constexpr uintptr_t kCommitRecordSentinelValue = 0x1;
 
 // Layout of activity_record_t prefix that we read. Any fields beyond
 // kernel_name we ignore. DO NOT add fields without verifying against
