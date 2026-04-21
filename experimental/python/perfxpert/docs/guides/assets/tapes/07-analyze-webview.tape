@@ -1,6 +1,11 @@
 # perfxpert getting-started demo — scenario 07-analyze-webview
 # Generated via: vhs 07-analyze-webview.tape
 # See docs/guides/getting-started.md
+#
+# Generates analysis.html and prints the count of `<h2>` section
+# headings it contains (Overview, Execution Breakdown, Top Kernel
+# Hotspots, Hardware Counters, Optimization Recommendations,
+# Summary = 6).
 
 Output ../gifs/07-analyze-webview.gif
 
@@ -19,6 +24,18 @@ Sleep 200ms
 Type "rm -f analysis.html"
 Enter
 Sleep 100ms
+Type `cat > _section_count.sh <<'EOF'`
+Enter
+Type "#!/usr/bin/env bash"
+Enter
+Type `printf 'sections: '; grep -c '<h2>' analysis.html`
+Enter
+Type `printf 'headings:\n'; grep -oE '<h2>[^<]+</h2>' analysis.html | sed 's|<[^>]*>||g' | sed 's/^/  • /'`
+Enter
+Type "EOF"
+Enter
+Type "chmod +x _section_count.sh"
+Enter
 Type "clear"
 Enter
 Sleep 200ms
@@ -35,7 +52,4 @@ Enter
 Sleep 1500ms
 Type "bash _section_count.sh"
 Enter
-Sleep 1500ms
-Type "echo '# 7 sections: Overview, Summary, Execution, Hotspots, Counters, Recs, Tier-0'"
-Enter
-Sleep 2s
+Sleep 4s

@@ -5,9 +5,9 @@
 Output ../gifs/15-all-providers.gif
 
 Set Shell "bash"
-Set FontSize 14
+Set FontSize 13
 Set Width 1200
-Set Height 500
+Set Height 700
 Set Theme "TokyoNight"
 Set TypingSpeed 25ms
 Set Padding 20
@@ -24,6 +24,6 @@ Show
 Type "# 5 LLM providers, one flag: --llm {anthropic,openai,ollama,private,opencode}"
 Enter
 Sleep 500ms
-Type "perfxpert analyze --help 2>&1 | grep -A 10 -- '--llm '"
+Type "perfxpert analyze --help 2>&1 | grep -A 10 -- '--llm ' | head -12"
 Enter
-Sleep 6s
+Sleep 7s

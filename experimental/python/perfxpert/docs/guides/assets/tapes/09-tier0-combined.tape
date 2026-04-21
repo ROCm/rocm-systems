@@ -33,6 +33,9 @@ Sleep 3s
 Type "ls -lh combined.html"
 Enter
 Sleep 1500ms
-Type "grep -A1 'Tier-0 Source Scan' combined.html | head -4"
+Type `grep -oE '<h2>[^<]+</h2>' combined.html | sed 's|<[^>]*>||g' | sed 's/^/  • /'`
+Enter
+Sleep 2s
+Type "grep -c -i 'Tier-0' combined.html"
 Enter
 Sleep 3s
