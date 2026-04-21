@@ -787,6 +787,119 @@ def _filter_advanced_recs(
     return [r for r in recs if r.get("subtype") != "pragma"]
 
 
+# Phase 10 — Change-Impact Prediction final-pass.
+# Maps deterministic rec categories / titles onto the change_type ids in
+# ``knowledge/change_impact_models.yaml`` so the Predicted line appears on
+# the rec cards even when the specialist catalog modules are absent. The
+# specialist-driven path (agents._predict_attach) runs FIRST and already
+# handles the LLM / airgap-with-catalog case; this is the safety net for
+# deterministic rec cards surfaced by the static classifier.
+_CATEGORY_TO_CHANGE_TYPE: Dict[str, str] = {
+    "compute-bound kernel": "vgpr_reduction",
+    "launch overhead": "hip_stream_overlap",
+    "memory transfer": "hip_stream_overlap",
+    "memory bandwidth": "lds_tiling",
+    "api overhead": "hip_stream_overlap",
+    "memory-bound kernel": "lds_tiling",
+    "mixed bottleneck kernel": "mfma_enablement",
+    "low occupancy": "vgpr_reduction",
+}
+
+
+def _attach_predictions_by_category(
+    recs: List[Dict[str, Any]],
+    *,
+    hotspots: List[Dict[str, Any]],
+    primary_bottleneck: str,
+    counter_data_available: bool,
+) -> List[Dict[str, Any]]:
+    """Attach predicted_impact_range / confidence / source_citation to recs
+    whose category matches a known technique in the change-impact catalog.
+
+    Hard rules (spec §6) are all enforced by
+    ``predict_impact.predict_change_impact`` itself — so when a gate
+    fires the rec is returned unchanged.
+    """
+    if not recs or not hotspots:
+        return list(recs or [])
+    from perfxpert.tools import predict_impact
+
+    top = hotspots[0]
+    kernel_name = str(top.get("name") or "")
+    if not kernel_name:
+        return list(recs)
+    kernel_time_pct = top.get("percent_of_total")
+    if isinstance(kernel_time_pct, (int, float)) and kernel_time_pct > 1.0:
+        kernel_time_pct = float(kernel_time_pct) / 100.0
+
+    # Prefer the rec matching the workload's primary bottleneck — predicting
+    # API-overlap speedup on a compute-bound report misrepresents gain.
+    def _rec_primary_rank(rec: Dict[str, Any]) -> int:
+        cat = str(rec.get("category") or "").strip().lower()
+        primary = (primary_bottleneck or "").lower()
+        if primary == "compute" and cat in (
+            "compute-bound kernel",
+            "mixed bottleneck kernel",
+            "low occupancy",
+        ):
+            return 0
+        if primary in ("memory", "memory_transfer") and cat in (
+            "memory-bound kernel",
+            "memory transfer",
+            "memory bandwidth",
+        ):
+            return 0
+        if primary in ("latency", "api_overhead") and cat in (
+            "launch overhead",
+            "api overhead",
+        ):
+            return 0
+        return 1
+
+    ordered_indices = sorted(range(len(recs)), key=lambda i: _rec_primary_rank(recs[i]))
+    target_idx: Optional[int] = None
+    target_change_type: Optional[str] = None
+    for i in ordered_indices:
+        cat = str(recs[i].get("category") or "").strip().lower()
+        ct = _CATEGORY_TO_CHANGE_TYPE.get(cat)
+        if ct is not None and recs[i].get("predicted_impact_range") is None:
+            target_idx = i
+            target_change_type = ct
+            break
+
+    out: List[Dict[str, Any]] = []
+    for idx, rec in enumerate(recs):
+        if idx != target_idx:
+            out.append(dict(rec))
+            continue
+        try:
+            prediction = predict_impact.predict_change_impact(
+                baseline_db="",
+                kernel_name=kernel_name,
+                change_type=target_change_type,
+                change_params={
+                    "kernel_time_pct": kernel_time_pct,
+                    "counter_data_available": counter_data_available,
+                },
+            )
+        except Exception:
+            out.append(dict(rec))
+            continue
+        rng = prediction.get("predicted_speedup_range")
+        if rng is None or prediction.get("confidence", 0.0) <= 0.0:
+            out.append(dict(rec))
+            continue
+        copy = dict(rec)
+        copy["predicted_impact_range"] = list(rng)
+        copy["predicted_confidence"] = float(prediction["confidence"])
+        copy["predicted_rationale"] = prediction.get("rationale", "")
+        copy["source_citation"] = prediction.get("source_citation", "")
+        copy["roofline_delta"] = prediction.get("roofline_delta") or {}
+        copy["prediction_id"] = prediction.get("prediction_id", "")
+        out.append(copy)
+    return out
+
+
 def _format_agentic_output(
     root_output: Any,
     output_format: str,
@@ -853,6 +966,21 @@ def _format_agentic_output(
     # keeping default output clean while the pipeline itself stays
     # stateless. See docs/guides/getting-started.md §4.1.
     merged_recs = _filter_advanced_recs(merged_recs, advanced=advanced)
+
+    # Phase 10 — Change-Impact Prediction final-pass. Attach predicted
+    # speedup + confidence + source citation to the rec card whose
+    # category matches a named optimization technique in
+    # ``knowledge/change_impact_models.yaml``. See
+    # docs/guides/getting-started.md §4 "Predicted impact on
+    # recommendations".
+    merged_recs = _attach_predictions_by_category(
+        merged_recs,
+        hotspots=hotspots,
+        primary_bottleneck=primary_bottleneck,
+        counter_data_available=bool(
+            (hardware_counters or {}).get("has_counters")
+        ),
+    )
 
     # Source-only path: dispatch entirely to the tier-0 formatters when
     # there is no DB-side data at all.
