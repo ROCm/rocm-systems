@@ -812,26 +812,36 @@ TEST_F(Gfx1250Gpu, WmmaProbe_Parallel16_Chain4) {
                    /*chainDepth=*/4, /*numABuffers=*/4, /*numBBuffers=*/4);
 }
 
-// Matmul (XFAIL block, see tests/xfail.cmake).
+// Matmul gradation ladder. 64x64 and the uniform-diag variant are
+// expected to PASS; the two random-input 128x128 variants are XFAIL
+// pending the WMMA→MFMA redistribution fix — see tests/xfail.cmake.
 TEST_F(Gfx1250Gpu, Matmul64x64) {
   doTestMatmul("matmul_f16_gfx1250.hsaco", 128, 128, 64, "64x64 tile");
 }
-// XFAIL: see tests/xfail.cmake (hipError 700 in large-tile matmul)
+// XFAIL: see tests/xfail.cmake — numerical errors localised to source
+// wave 3's output sub-tile (rows 124–127) after the asymmetric-rewrite
+// fix; memory-aperture-violation path is closed.
 TEST_F(Gfx1250Gpu, Matmul128x128_1tile) {
   doTestMatmul("matmul_f16_large_gfx1250.hsaco", 128, 128, 128,
                "128x128 tile 1-tile");
 }
-// XFAIL: see tests/xfail.cmake (hipError 700 / hang in large-tile matmul)
+// XFAIL: see tests/xfail.cmake — same residual as above, scaled to
+// the 2×2 workgroup grid (rows 252–255 of the 256×256 output).
 TEST_F(Gfx1250Gpu, Matmul128x128) {
   doTestMatmul("matmul_f16_large_gfx1250.hsaco", 256, 256, 128,
                "128x128 tile");
 }
 
-// Uniform-input diagnostic: A = B = 1.0 ⇒ ref C[i,j] = K = 128 everywhere.
-// If this PASSES while the random-input `Matmul128x128_1tile` FAILS, the
-// remaining bug is confined to the WMMA per-lane layout / accumulator
-// redistribution (ds_bpermute), not to kernel control-flow, LDS traffic,
-// or address generation (which both paths exercise identically).
+// Uniform-input diagnostic: A = B = 1.0 ⇒ ref C[i,j] = K = 128
+// everywhere. This pattern is position-invariant: any per-source-wave
+// layout bug that moves data between lanes/tiles still produces 128.0
+// at every output position. Under the symmetric writelane/readlane
+// rewrite (rewrite_cross_lane_divergent.{hpp,cpp}) the kernel now
+// passes bit-exact, which is the positive signal that address
+// generation, tile write coverage, and accumulator initialisation
+// work correctly end-to-end. The random-input XFAIL variants above
+// narrow the residual to the WMMA→MFMA redistribution — see the
+// xfail block and wave-size-translation.md §5.6.3.
 TEST_F(Gfx1250Gpu, Matmul128x128_1tile_UniformDiag) {
   doTestMatmul("matmul_f16_large_gfx1250.hsaco", 128, 128, 128,
                "128x128 tile 1-tile uniform-diag",

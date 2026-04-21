@@ -78,38 +78,55 @@ config.fixtures = {
     # Matmul128x128 rollout).
     #
     # * writelane_divergent_rewrite — pins the
-    #   `v_writelane_b32 -> select` rewrite when the scalar `val` / `old`
-    #   operand is flagged divergent by the oracle in
-    #   `cross_widen_divergence.{hpp,cpp}`. Uses the canonical
-    #   `s_bfe_u32 sDST, ttmp8, 0x50019` BFE rescue as the divergent
-    #   seed; NO WMMA in the kernel so the `WaveIdLiftScalarized`
-    #   classifier does NOT refuse the lift, giving the rewrite a
-    #   chance to run and leaving a stable anchor on the rewritten IR.
-    #   Two RUN lines cover both sides of the flag's contract:
+    #   `v_writelane_b32 -> select` rewrite. The fixture's writelane
+    #   has a divergent scalar operand (canonical `s_bfe_u32 ttmp8,
+    #   0x50019` wave_id seed), but under the symmetry rule in the
+    #   rewrite pass every writelane is rewritten regardless of
+    #   operand divergence, so the divergent seed here just keeps the
+    #   fixture tightly representative of the original Matmul128x128
+    #   failure mode. NO WMMA in the kernel so the
+    #   `WaveIdLiftScalarized` classifier does NOT refuse the lift,
+    #   giving the rewrite a chance to run and leaving a stable
+    #   anchor on the rewritten IR. Two RUN lines cover both sides
+    #   of the flag's contract:
     #     - REWRITE (flag on) -> writelane gone, `mbcnt_{lo,hi}` +
     #       `select` present.
     #     - UNCHANGED (flag off) -> writelane intrinsic survives
-    #       verbatim; the mbcnt helper is NOT materialised (commit 1
-    #       "no behaviour change when flag is off" invariant).
+    #       verbatim; the mbcnt helper is NOT materialised.
     # * readlane_divergent_rewrite — pins the
-    #   `v_readlane_b32 -> ds_bpermute` rewrite when the VGPR source is
-    #   divergent. Companion to the writelane fixture; the two together
-    #   pin both halves of the cross-lane primitive rewrite catalogue
-    #   the pass acts on today. Same two-RUN-line flag-contract shape.
-    # * writelane_uniform_noop — pins the correctness counterpart:
-    #   when BOTH `val` (= `workgroup.id.x`) AND `old` (= constant 0
-    #   forced via the `+v` tied constraint) are uniform, the rewrite
-    #   pass MUST NOT convert the site (would regress codegen with no
-    #   correctness benefit) AND MUST NOT materialise the mbcnt lane_id
-    #   helper (lazy materialisation contract: no divergent site -> no
-    #   helper). Single RUN line — flag on, writelane intrinsic
-    #   survives, no mbcnt/ds_bpermute from the rewrite pass.
+    #   `v_readlane_b32 -> ds_bpermute` rewrite. Companion to the
+    #   writelane fixture; the two together pin both halves of the
+    #   cross-lane primitive rewrite catalogue the pass acts on
+    #   today. Same two-RUN-line flag-contract shape.
+    # * writelane_uniform_noop — pins the symmetry contract with
+    #   uniform operands: under the rewrite pass's unconditional-
+    #   rewrite rule, even uniform `val` / `old` sites are rewritten
+    #   to `select`. The directory keeps the historical `_noop`
+    #   suffix for grep stability — see the fixture's .ll / .hip
+    #   header for the inverted contract and the Matmul128x128
+    #   asymmetric-rewrite triage that motivated it.
     "writelane_divergent_rewrite":
         r"@LIT_FIXTURE_WRITELANE_DIVERGENT_REWRITE_CO@",
     "readlane_divergent_rewrite":
         r"@LIT_FIXTURE_READLANE_DIVERGENT_REWRITE_CO@",
     "writelane_uniform_noop":
         r"@LIT_FIXTURE_WRITELANE_UNIFORM_NOOP_CO@",
+    # writelane_sgpr_forced_use — pins the forward use-chain
+    # classifier's SGPR-forced refusal path. The fixture's kernel
+    # chains writelane -> v_readfirstlane_b32, so the rewrite pass's
+    # `classifyForwardUseChain` walks from the writelane's result
+    # into `llvm.amdgcn.readfirstlane` (enumerated in
+    # `operandForcesSGPR`) and returns SGPRForced. Under
+    # `--enable-writelane-rewrite` the raiser surfaces that verdict
+    # as `crossWaveRewriteOracleDisagreement` — principled refusal
+    # instead of a best-effort rewrite that would re-introduce the
+    # scalar-source collapse. Without this fixture the classifier
+    # has a silent failure mode; with it, any regression that makes
+    # the walk accept an SGPR-forced sink (e.g. adding readfirstlane
+    # to the VGPR-safe propagator list by mistake) fails the lit
+    # suite immediately.
+    "writelane_sgpr_forced_use":
+        r"@LIT_FIXTURE_WRITELANE_SGPR_FORCED_USE_CO@",
     "c2_permlane_swap": r"@LIT_FIXTURE_C2_PERMLANE_SWAP_CO@",
     "c2_permlane16": r"@LIT_FIXTURE_C2_PERMLANE16_CO@",
     "c2_dpp_quad_perm": r"@LIT_FIXTURE_C2_DPP_QUAD_PERM_CO@",

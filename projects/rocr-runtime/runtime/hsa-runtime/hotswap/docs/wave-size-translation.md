@@ -551,18 +551,67 @@ whose per-lane source index falls inside the same target-wave
 half as `lane_id`. Both rewrites preserve the wave32 source's
 intended semantics exactly when the source had been executed on a
 true wave32 (`%cwd_lane_id & (W_s - 1)` recovers the source lane-id
-modulo the source wave width). Divergence analysis —
-`CrossWidenDivergenceAnalysis` in `cross_widen_divergence.{hpp,cpp}`
-— is a forward closure from the per-target-wave-divergent leaves
-(`workitem.id.x`, `mbcnt_hi` against target `EXEC_HI`, `ds_bpermute`,
-any existing `readlane` / `writelane` result) augmented with the
-canonical `s_bfe_u32 sDST, ttmp8, 0x50019` lift output — the
-semantic handle the §5.6.2 rescue exposes as divergent. Sites whose
-scalar feed is provably uniform (e.g. constant `lane_idx`, uniform
-`val` derived from a kernarg, the `v_writelane %d, workgroup.id.x,
-0` idiom inside a uniform wave-zero prologue) are preserved intact
-— the pass is a no-op on every site that does NOT need rewriting,
-which keeps the source's codegen quality for the common case.
+modulo the source wave width).
+
+**Symmetry contract (writelane/readlane unconditional rewrite).**
+Under cross-widening the pass rewrites **every** `writelane` and
+**every** `readlane` site in the function, independent of the
+divergence oracle's `val` / `old` / `src` classification. The
+`select`-based `writelane` shape and the `ds_bpermute`-based
+`readlane` shape are semantically equivalent to the source
+`v_writelane_b32` / `v_readlane_b32` opcodes on every combination
+of operand divergence (uniform operands agree trivially on lanes
+`N` and `N + W_s`; divergent operands carry per-source-wave values
+between them), so unconditional rewriting is correctness-preserving
+on every site.
+
+The earlier "uniform operand → preserve the native opcode" rule
+dropped out because it was asymmetric: the native `v_writelane_b32`
+writes hardware lane `N` only, leaving lane `N + W_s` at whatever
+value it held (typically undef for a fresh spill slot), while a
+sibling `ds_bpermute`-rewritten readlane on the same VGPR reads
+BOTH `N` and `N + W_s` expecting valid data. On the Matmul128x128
+kernel this manifested as `HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION`
+at dispatch after the asymmetric-rewrite site populated half of an
+`i64` global pointer with undef. Rewriting every site as a single
+rule makes the writelane/readlane pair trivially self-consistent on
+any shared VGPR and keeps the per-source-wave shape a one-location
+invariant maintained by the pass.
+
+**Use-chain classifier (pre-rewrite gate).** The rewrite is
+correct for any kernel whose writelane / readlane results flow only
+into VGPR-safe consumers — VGPR-addressed memory ops (addrspace 0 /
+1 / 3 / 5 / 7), VALU arithmetic, other rewritten cross-lane
+primitives, terminators. If any site's result transitively reaches
+an SGPR-constrained consumer (`llvm.amdgcn.s.buffer.load` rsrc,
+`llvm.amdgcn.s.sendmsg` message, `llvm.amdgcn.readfirstlane`, a load
+from addrspace(4), inline asm with `"s"` constraint, or any unknown
+sink the classifier cannot prove safe), the backend will insert
+`v_readfirstlane` on the `ds_bpermute` result and re-introduce the
+source-wave collapse the rewrite was designed to eliminate.
+
+`rewrite_cross_lane_divergent.cpp`'s `classifyForwardUseChain`
+walks the transitive uses of each call's result and over-
+approximates to SGPR-forced on every user it does not recognise
+(conservative direction per the project's "refuse when uncertain"
+rule). If any site's verdict is SGPR-forced, the rewrite pass
+performs zero rewrites and populates
+`CrossLaneDivergentRewriteReport::sgprForcedDetail`; the raiser
+surfaces that detail as `crossWaveRewriteOracleDisagreement`. The
+refusal is all-or-nothing because a mix of rewritten and preserved
+sites on a shared VGPR recreates the Matmul128x128 asymmetric-
+rewrite fault pattern described above.
+
+Extending the classifier is a mechanical task: a new intrinsic that
+is SGPR-forced in some operand position goes into
+`operandForcesSGPR` or the explicit `raw_buffer_load` /
+`raw_buffer_store` per-operand mask; a new intrinsic that accepts
+VGPRs and should not block the walk goes into
+`isIntrinsicVGPRSafePropagator` (if its result carries per-source-
+wave state forward) or `isIntrinsicVGPRSafeSink` (if its result is
+effectively terminal for the classifier's purposes, e.g. an MFMA
+accumulator or a memory store). Unknown intrinsics remain SGPR-
+forced until explicitly audited.
 
 The pass runs **only** when `--enable-writelane-rewrite` is passed
 on the `raise_cli` command line, plumbed through
@@ -585,29 +634,29 @@ Classifier coupling: under the flag, `buildObstructionReport` in
 `rewriteImplemented = true`, letting them pass the Phase 1.4.5
 refusal gate rather than refusing outright. Phase 6.5 then invokes
 the rewrite pass on the post-mem2reg SSA IR — mem2reg is a hard
-prerequisite because the oracle needs to see the post-scratch-alloca
-SSA form; divergent values threading through `addrspace(5)` round
-trips would appear uniform to a pre-mem2reg forward closure and
-silently miscompile every site the pass skipped.
+prerequisite because the use-chain classifier needs to see the
+post-scratch-alloca SSA form; a value threading through an
+`addrspace(5)` round trip would hide its downstream consumer from
+a pre-mem2reg forward walk.
 
-Safety net: after the rewrite runs, `raiser.cpp` compares the
-classifier's `WaveIdLiftScalarized` site count with the rewrite
-pass's `CrossLaneDivergentRewriteReport::totalRewritten()`. If the
-syntactic classifier matched but the post-mem2reg oracle rewrote
-nothing we cannot distinguish benign over-approximation (harmless)
-from an oracle false-negative (silent miscompile), so the raiser
-refuses on the safe side via
-`RaiseFailure::crossWaveRewriteOracleDisagreement`. The refusal
-only fires under `--enable-writelane-rewrite`; the flag-off path
-retains the pre-rewrite refusal at Phase 1.4.5.
+Raiser refusal handling: if the rewrite pass's classifier rejects
+any site, `raiser.cpp` surfaces
+`CrossLaneDivergentRewriteReport::sgprForcedDetail` as a
+`RaiseFailure::crossWaveRewriteOracleDisagreement` — principled
+refusal instead of a best-effort rewrite. A second-order
+classifier-vs-emission invariant (classifier matched
+`WaveIdLiftScalarized` ⇒ rewrite pass must have rewritten at least
+one site) guards against a handler silently dropping an intrinsic
+emission; violating it is a handler regression, not a rewrite
+disagreement, and refuses with a precise diagnostic.
 
 Hooks: `rewrite_cross_lane_divergent.{hpp,cpp}` (the rewrite pass
-+ its `CrossLaneDivergentRewriteReport`), `cross_widen_divergence.
-{hpp,cpp}` (the divergence oracle), `raiser.cpp` (Phase 6.5 invocation
-+ the safety-net diagnostic), `wave_size_obstruction.{hpp,cpp}`
-(`RewriteId::PostRaiseCrossLaneRewrite` tagging under the flag), and
-`raise_cli.cpp` / `pipeline.{hpp,cpp}` (CLI + PipelineConfig flag
-plumbing). Regression fences:
++ its forward use-chain classifier +
+`CrossLaneDivergentRewriteReport`), `raiser.cpp` (Phase 6.5
+invocation + refusal handling), `wave_size_obstruction.{hpp,cpp}`
+(`RewriteId::PostRaiseCrossLaneRewrite` tagging under the flag),
+and `raise_cli.cpp` / `pipeline.{hpp,cpp}` (CLI + PipelineConfig
+flag plumbing). Regression fences:
 `lit_tests/writelane_divergent_rewrite` (rewrite pins the `cwd_*`
 IR shape under the flag and asserts the flag-off path is a pure
 no-op), `lit_tests/readlane_divergent_rewrite` (sibling coverage

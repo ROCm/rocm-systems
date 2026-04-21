@@ -2,10 +2,9 @@
 //
 // Fixture for the cross-widen-divergent `v_writelane_b32` rewrite
 // (lit_tests/writelane_divergent_rewrite). Pins the IR shape that
-// `rewrite_cross_lane_divergent.cpp` emits when the scalar operand
-// feeding `llvm.amdgcn.writelane` is flagged divergent by the
-// `cross_widen_divergence.cpp` oracle under `gfx1250 → gfx942`
-// cross-widening.
+// `rewrite_cross_lane_divergent.cpp` emits when the rewrite pass's
+// forward use-chain classifier clears a writelane site for symmetric
+// rewriting under `gfx1250 → gfx942` cross-widening.
 //
 // The kernel deliberately exercises BFE-only + writelane — NO WMMA —
 // so the `WaveIdLiftScalarized` classifier in
@@ -35,9 +34,11 @@ extern "C" __global__ void writelane_divergent_rewrite_kernel(int *out) {
   // (1) Canonical `wave_id_in_workgroup` extraction, bits [29:25] of
   //     ttmp8. `handle_sop2.cpp::handleSOP2` rescues this exact shape
   //     into `(workitem.id.x >> 5) & 0x1F`, so the destination SGPR
-  //     carries a divergent VGPR-backed value in the raised IR (the
-  //     oracle in `cross_widen_divergence.cpp` then flags it
-  //     divergent through `amdgcn.workitem.id.x` -> `lshr` -> `and`).
+  //     carries a divergent VGPR-backed value in the raised IR. Under
+  //     the symmetric-rewrite rule the rewrite pass rewrites every
+  //     writelane regardless of operand divergence, but this fixture's
+  //     writelane is divergent in both operands anyway so the pre-
+  //     symmetry anchor points still hold.
   int wave_id;
   asm volatile("s_bfe_u32 %[wid], ttmp8, 0x50019\n\t"
                : [wid] "=s"(wave_id));

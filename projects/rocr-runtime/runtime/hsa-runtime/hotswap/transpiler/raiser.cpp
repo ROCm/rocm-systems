@@ -673,45 +673,69 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
 
   // ==== Phase 6.5: Cross-widen writelane/readlane rewrite ====
   //
-  // Opt-in rewrite of `v_writelane_b32` / `v_readlane_b32` sites whose
-  // scalar operand is cross-widen-divergent. Disabled by default; the
-  // caller (raise_cli's `--enable-writelane-rewrite`, PipelineConfig's
+  // Opt-in symmetric rewrite of `v_writelane_b32` / `v_readlane_b32`
+  // sites under cross-widening. Disabled by default; the caller
+  // (raise_cli's `--enable-writelane-rewrite`, PipelineConfig's
   // `enableWritelaneRewrite`) must ask for it explicitly. See
-  // `rewrite_cross_lane_divergent.{hpp,cpp}` and wave-size-translation.md
-  // §5.6.3 for the principled derivation. Runs AFTER `PromoteMemToReg`
-  // by construction — the divergence oracle in
-  // `cross_widen_divergence.{hpp,cpp}` requires post-mem2reg SSA so
-  // scratch-addrspace round-trips don't obscure lane-divergent leaves.
-  // No behavioural change on same-wave / narrowing directions (the
-  // rewrite pass short-circuits internally on
-  // `targetWaveSize <= sourceWaveSize`), so it is safe to invoke
-  // unconditionally when the flag is on.
+  // `rewrite_cross_lane_divergent.{hpp,cpp}` and
+  // wave-size-translation.md §5.6.3 for the principled derivation,
+  // and hotswap/docs/learnings.md for the asymmetric-rewrite bug
+  // that motivated the symmetry-plus-use-chain design.
+  //
+  // Runs AFTER `PromoteMemToReg` by construction: the rewrite pass's
+  // forward use-chain classifier needs post-mem2reg SSA so a
+  // scratch-addrspace round-trip (load / store through an alloca) does
+  // not obscure the fact that a writelane / readlane result eventually
+  // reaches an SGPR-constrained consumer. No behavioural change on
+  // same-wave / narrowing directions — the rewrite pass short-
+  // circuits internally on `targetWaveSize <= sourceWaveSize`.
+  //
+  // Refusal path. If any writelane / readlane site's forward use chain
+  // reaches an SGPR-forced consumer that the classifier cannot prove
+  // safe (`s_buffer_load` rsrc, `s_sendmsg` message, `readfirstlane`,
+  // addrspace(4) load, inline asm with `"s"` constraint, or any
+  // unaudited intrinsic / instruction), the rewrite pass performs
+  // zero rewrites and populates `report.sgprForcedDetail`. The raiser
+  // surfaces that detail as a `crossWaveRewriteOracleDisagreement`
+  // refusal — principled per the no-silent-miscompile contract:
+  // rewriting the ds_bpermute output into an SGPR-forced consumer
+  // would re-introduce `v_readfirstlane_b32` at the SGPR boundary and
+  // recreate the source-wave collapse the rewrite exists to avoid.
   if (enableWritelaneRewrite) {
     CrossLaneDivergentRewriteReport rewriteReport =
         rewriteCrossLaneDivergent(*F, isa.waveSize, targetIsa.waveSize);
 
-    // Safety-net: the syntactic Phase 1.4.5 classifier matched the
-    // three-way co-occurrence (canonical ttmp8 wave_id BFE + cross-
-    // lane scalar primitive + WMMA) but the post-mem2reg oracle
-    // rewrote nothing. Without a precise dataflow check we cannot
-    // tell whether the classifier over-approximated (benign false
-    // positive) or the oracle missed a divergent scalar feed (false
-    // negative, silent miscompile). Refuse on the safe side. Fires
-    // only on `--enable-writelane-rewrite` because the flag-off path
-    // still refuses at Phase 1.4.5 above.
+    if (rewriteReport.refusedSgprForced()) {
+      RaiseFailure f = RaiseFailure::crossWaveRewriteOracleDisagreement(
+          kernelName, rewriteReport.sgprForcedDetail);
+      errs() << "transpiler: post-raise abort: " << f.format << " on '"
+             << f.mnemonic << "' \u2014 " << f.detail << "\n";
+      result.failure = std::move(f);
+      return result;
+    }
+
+    // Second-order invariant: the syntactic Phase 1.4.5 classifier
+    // matched `WaveIdLiftScalarized` iff the decoded instruction
+    // stream contains at least one `v_writelane_b32` /
+    // `v_readlane_b32`. Under the symmetry rule every such intrinsic
+    // is rewritten (or the whole function refuses above), so a non-
+    // zero classifier count MUST coincide with a non-zero
+    // `totalRewritten()`. If it does not, a handler is silently
+    // dropping an intrinsic emission and the classifier is seeing
+    // source-level writelane sites the raised IR lost — a
+    // miscompile-by-omission the safety net catches.
     if (classifierWaveIdLiftScalarizedSites > 0 &&
         rewriteReport.totalRewritten() == 0) {
       std::string msg;
       raw_string_ostream os(msg);
       os << "classifier matched WaveIdLiftScalarized on "
          << classifierWaveIdLiftScalarizedSites
-         << " site(s) but rewriteCrossLaneDivergent rewrote 0 \u2014 oracle "
-            "disagrees with the syntactic classifier. "
-         << "uniformPreserved=" << rewriteReport.uniformPreserved
-         << ", writelaneRewritten=" << rewriteReport.writelaneRewritten
-         << ", readlaneRewritten=" << rewriteReport.readlaneRewritten
-         << ". Refusing rather than risk a silent miscompile (see "
-            "wave-size-translation.md \u00a75.6.3 safety-net contract).";
+         << " site(s) but rewriteCrossLaneDivergent rewrote 0 \u2014 the "
+            "raised IR is missing the writelane/readlane intrinsic(s) "
+            "that the decoded instruction stream contained. This is a "
+            "handler-emission regression, not a classifier/rewrite "
+            "disagreement. Refusing rather than risk a silent "
+            "miscompile (see wave-size-translation.md \u00a75.6.3).";
       RaiseFailure f = RaiseFailure::crossWaveRewriteOracleDisagreement(
           kernelName, os.str());
       errs() << "transpiler: post-raise abort: " << f.format << " on '"

@@ -2,10 +2,9 @@
 //
 // Fixture for the cross-widen-divergent `v_readlane_b32` rewrite
 // (lit_tests/readlane_divergent_rewrite). Pins the IR shape
-// `rewrite_cross_lane_divergent.cpp` emits when the VGPR source
-// feeding `llvm.amdgcn.readlane` is flagged divergent by the
-// `cross_widen_divergence.cpp` oracle under `gfx1250 → gfx942`
-// cross-widening.
+// `rewrite_cross_lane_divergent.cpp` emits when the rewrite pass's
+// forward use-chain classifier clears a readlane site for symmetric
+// rewriting under `gfx1250 → gfx942` cross-widening.
 //
 // Companion to the writelane_divergent_rewrite fixture — the two
 // together pin both halves of the cross-lane primitive rewrite

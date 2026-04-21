@@ -1,25 +1,37 @@
 // ARCH: gfx1250
 //
-// Fixture for the uniform-operand `v_writelane_b32` no-op (lit_tests/
-// writelane_uniform_noop). Pins the half of
-// `rewrite_cross_lane_divergent.cpp` that LEAVES a writelane site
-// untouched when both the scalar `val` operand AND the `old` operand
-// are provably wave-uniform — the dominant Tensile / rocBLAS
-// writelane shape.
+// Fixture for the uniform-operand `v_writelane_b32` symmetry
+// contract (lit_tests/writelane_uniform_noop). Pins the half of
+// `rewrite_cross_lane_divergent.cpp` that REWRITES a writelane site
+// even when both the scalar `val` operand AND the `old` operand are
+// provably wave-uniform — the dominant Tensile / rocBLAS writelane
+// shape.
 //
-// This fixture is the correctness counterpart to
-// `writelane_divergent_rewrite`: without a uniform no-op guard the
-// rewrite pass would unnecessarily convert every well-behaved
-// writelane in the corpus into a per-lane `select` + `mbcnt` helper,
-// regressing codegen quality on every kernel that does not actually
-// leak cross-widen-divergent state.
+// Naming: the directory keeps the historical `_noop` suffix because
+// renaming lit fixtures churns the CMake glob and references in
+// docs, but the checked contract has inverted: the pass is no longer
+// a no-op on uniform operands. See the regenerated `.ll` companion
+// for the full rationale, or hotswap/docs/wave-size-translation.md
+// §5.6.3 "symmetry contract" for the cross-reference into the design
+// doc.
+//
+// Why the contract changed. The original rule ("preserve uniform
+// writelanes") left hardware lane N + W_s unpopulated, which paired
+// unsoundly with any `ds_bpermute`-rewritten readlane on the same
+// VGPR (readlane reads BOTH N and N+W_s, sees undef on the upper
+// half, feeds it into i64 address math, faults at dispatch). The
+// symmetry contract rewrites every writelane site unconditionally.
+// Uniform operands still produce identical values at lanes N and
+// N+W_s, so the rewrite is correctness-preserving — the only cost
+// is a trivial codegen tax (one extra `select`).
 //
 // Shape. `val` = `blockIdx.x` (uniform — `llvm.amdgcn.workgroup.id.x`
 // is workgroup-invariant, therefore wave-uniform). `old` = literal
 // integer 0 forced via `+v` tied constraint so hipcc emits
 // `v_mov_b32 v<n>, 0` before the writelane; under cross-widening the
 // raiser sees a `ConstantInt 0` stored into the output VGPR before
-// the writelane lifts, keeping `old` uniform in the oracle's view.
+// the writelane lifts. Both operands are uniform; the rewrite fires
+// anyway.
 
 #include <hip/hip_runtime.h>
 

@@ -45,6 +45,7 @@
 // silent-miscompile gate with the flag off.
 
 #include "code_object_utils.hpp"
+#include "pipeline.hpp"
 #include "raiser.hpp"
 
 // raiser.hpp forward-declares llvm::LLVMContext and llvm::Module but
@@ -103,11 +104,18 @@ int usage() {
       "  raise_cli <code-object.co|.hsaco> --emit-ir[=<kernel>] "
       "[--isa=<arch>] [--target-isa=<arch>] "
       "[--enable-writelane-rewrite]\n"
+      "  raise_cli <code-object.co|.hsaco> --write-hsaco=<path> "
+      "[--kernel=<name>] [--isa=<arch>] [--target-isa=<arch>] "
+      "[--enable-writelane-rewrite]\n"
       "\n"
       "Default mode: emits per-kernel OK/FAIL lines on stdout in the format\n"
       "  kerneldex coverage expects. Exits 0 iff every kernel raises.\n"
       "--emit-ir mode: dumps raised LLVM IR for a single kernel on stdout.\n"
       "  No fork; stderr left alone for FileCheck.\n"
+      "--write-hsaco mode: runs the full pipeline (raise + llc + lld)\n"
+      "  for a single kernel and writes the produced HSACO to <path>.\n"
+      "  Intended for post-rewrite disassembly triage (see\n"
+      "  hotswap/docs/wave-size-translation.md \u00a75.6.3).\n"
       "--target-isa: overrides the target ISA (default: same as --isa).\n"
       "--enable-writelane-rewrite: turn on the cross-widen-divergent\n"
       "  writelane/readlane rewrite (default off; see wave-size-\n"
@@ -125,6 +133,8 @@ int main(int argc, char **argv) {
   bool emitIr = false;
   bool enableWritelaneRewrite = false;
   std::string emitIrKernel;
+  std::string writeHsacoPath;
+  std::string writeHsacoKernel;
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
     if (a.rfind("--isa=", 0) == 0) {
@@ -144,6 +154,10 @@ int main(int argc, char **argv) {
     } else if (a.rfind("--emit-ir=", 0) == 0) {
       emitIr = true;
       emitIrKernel = a.substr(10);
+    } else if (a.rfind("--write-hsaco=", 0) == 0) {
+      writeHsacoPath = a.substr(14);
+    } else if (a.rfind("--kernel=", 0) == 0) {
+      writeHsacoKernel = a.substr(9);
     } else if (a == "--enable-writelane-rewrite") {
       enableWritelaneRewrite = true;
     } else if (!a.empty() && a[0] == '-') {
@@ -254,6 +268,71 @@ int main(int argc, char **argv) {
       return 1;
     }
     std::fwrite(raised.irText.data(), 1, raised.irText.size(), stdout);
+    return 0;
+  }
+
+  // --write-hsaco path — runs the full pipeline (raise + llc + lld)
+  // for a single kernel and writes the resulting HSACO to disk.
+  // Triage-mode only: lets downstream tools (llvm-objdump) inspect the
+  // exact bytes the gtest harness would launch, so we can walk the
+  // Phase 6.5 rewrite end-to-end through the final ISA.
+  if (!writeHsacoPath.empty()) {
+    std::string target;
+    if (writeHsacoKernel.empty()) {
+      if (kernelNames.size() != 1) {
+        std::fprintf(stderr,
+                     "raise_cli: --write-hsaco requires --kernel=<name> when "
+                     "the code object has %zu kernels\n",
+                     kernelNames.size());
+        return 2;
+      }
+      target = kernelNames.front();
+    } else {
+      bool found = false;
+      for (const auto &kn : kernelNames)
+        if (kn == writeHsacoKernel) {
+          target = kn;
+          found = true;
+          break;
+        }
+      if (!found) {
+        std::fprintf(stderr,
+                     "raise_cli: kernel '%s' not found in %s\n",
+                     writeHsacoKernel.c_str(), coPath.c_str());
+        return 2;
+      }
+    }
+    std::string effectiveTargetIsa = targetIsa.empty() ? isa : targetIsa;
+    auto pipe = transpiler::runPipeline(coData, isa, effectiveTargetIsa,
+                                        target, enableWritelaneRewrite);
+    if (!pipe.success) {
+      std::fprintf(stderr,
+                   "raise_cli: pipeline failed for kernel '%s' (lifted=%d/%d, "
+                   "failMnemonic='%s')\n",
+                   target.c_str(), pipe.liftedCount, pipe.totalCount,
+                   pipe.failMnemonic.c_str());
+      return 1;
+    }
+    FILE *fp = std::fopen(writeHsacoPath.c_str(), "wb");
+    if (!fp) {
+      std::fprintf(stderr, "raise_cli: cannot open %s for writing\n",
+                   writeHsacoPath.c_str());
+      return 2;
+    }
+    size_t wrote =
+        std::fwrite(pipe.hsaco.data(), 1, pipe.hsaco.size(), fp);
+    std::fclose(fp);
+    if (wrote != pipe.hsaco.size()) {
+      std::fprintf(stderr,
+                   "raise_cli: short write to %s (%zu of %zu bytes)\n",
+                   writeHsacoPath.c_str(), wrote, pipe.hsaco.size());
+      return 2;
+    }
+    std::fprintf(stderr,
+                 "raise_cli: wrote %zu byte HSACO for kernel '%s' to %s "
+                 "(lifted %d/%d)\n",
+                 pipe.hsaco.size(), target.c_str(), writeHsacoPath.c_str(),
+                 pipe.liftedCount, pipe.totalCount);
     return 0;
   }
 
