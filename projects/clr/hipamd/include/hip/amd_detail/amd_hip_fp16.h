@@ -867,8 +867,8 @@ inline __HOST_DEVICE__ __half2 __h2div(__half2 x, __half2 y) {
 // Device specific functions
 #if defined(__clang__) && defined(__HIP__)
 inline __device__ __half atomicAdd(__half* const address, const __half value) {
-  return static_cast<__half>(
-      __atomic_fetch_add((_Float16*)address, static_cast<_Float16>(value), __ATOMIC_SEQ_CST));
+  return static_cast<__half>(__scoped_atomic_fetch_add(
+      (_Float16*)address, static_cast<_Float16>(value), __ATOMIC_ACQ_REL, __MEMORY_SCOPE_DEVICE));
 }
 
 inline __device__ __half2 atomicAdd(__half2* const address, const __half2 value) {
@@ -879,12 +879,13 @@ inline __device__ __half2 atomicAdd(__half2* const address, const __half2 value)
   } expected, desired;
 
   unsigned int* atomic_ptr = (unsigned int*)address;
-  expected.u32 = __atomic_load_n(atomic_ptr, __ATOMIC_RELAXED);
+  expected.u32 = __scoped_atomic_load_n(atomic_ptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 
   do {
     desired.vec = expected.vec + static_cast<_Float16_2>(value);
-  } while (!__atomic_compare_exchange_n(atomic_ptr, &expected.u32, desired.u32, 0, __ATOMIC_ACQ_REL,
-                                        __ATOMIC_ACQUIRE));
+  } while (!__scoped_atomic_compare_exchange_n(atomic_ptr, &expected.u32, desired.u32, 0,
+                                               __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE,
+                                               __MEMORY_SCOPE_DEVICE));
   return static_cast<__half2>(expected.vec);
 }
 

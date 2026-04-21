@@ -1900,8 +1900,8 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 h2trunc(const __hip_bfloat162 h) {
  * \brief Atomic add bfloat16
  */
 inline __device__ __hip_bfloat16 atomicAdd(__hip_bfloat16* address, __hip_bfloat16 value) {
-  return static_cast<__hip_bfloat16>(
-      __atomic_fetch_add((__bf16*)address, static_cast<__bf16>(value), __ATOMIC_SEQ_CST));
+  return static_cast<__hip_bfloat16>(__scoped_atomic_fetch_add(
+      (__bf16*)address, static_cast<__bf16>(value), __ATOMIC_ACQ_REL, __MEMORY_SCOPE_DEVICE));
 }
 
 /**
@@ -1918,12 +1918,13 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 atomicAdd(__hip_bfloat162* address, __hip
   } expected, desired;
 
   unsigned int* atomic_ptr = (unsigned int*)address;
-  expected.u32 = __atomic_load_n(atomic_ptr, __ATOMIC_RELAXED);
+  expected.u32 = __scoped_atomic_load_n(atomic_ptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 
   do {
     desired.vec = expected.vec + static_cast<__bf16_2>(value);
-  } while (!__atomic_compare_exchange_n(atomic_ptr, &expected.u32, desired.u32, 0, __ATOMIC_ACQ_REL,
-                                        __ATOMIC_ACQUIRE));
+  } while (!__scoped_atomic_compare_exchange_n(atomic_ptr, &expected.u32, desired.u32, 0,
+                                               __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE,
+                                               __MEMORY_SCOPE_DEVICE));
   return static_cast<__hip_bfloat162>(expected.vec);
 }
 
