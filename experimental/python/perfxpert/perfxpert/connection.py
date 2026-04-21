@@ -99,6 +99,46 @@ class PerfxpertConnection:
     def close(self):
         self.connection.close()
 
+    @property
+    def db_count(self) -> int:
+        return len(self._paths)
+
+    def sum_shard_runtime_envelopes(self, sources: List[str]) -> int:
+        """Sum per-shard runtime envelopes across the requested sources.
+
+        This keeps multi-DB aliasing details inside the connection layer so
+        analysis code can normalize percentages without depending on ATTACH
+        schema internals.
+        """
+        if len(self._paths) <= 1:
+            return 0
+
+        total_runtime = 0
+        for idx in range(len(self._paths)):
+            alias = f"db{idx}"
+            shard_sources = []
+            for source in sources:
+                check = self.connection.execute(
+                    f"SELECT COUNT(*) FROM {alias}.sqlite_master "
+                    f"WHERE (type='table' OR type='view') AND name=?",
+                    (source,),
+                ).fetchone()
+                if check and check[0] > 0:
+                    shard_sources.append(f"SELECT start, end FROM {alias}.[{source}]")
+
+            if not shard_sources:
+                continue
+
+            shard_query = (
+                "SELECT COALESCE(MAX(end) - MIN(start), 0) FROM ("
+                + " UNION ALL ".join(shard_sources)
+                + ")"
+            )
+            shard_runtime = self.connection.execute(shard_query).fetchone()
+            total_runtime += shard_runtime[0] or 0
+
+        return total_runtime
+
     def __enter__(self):
         return self
 
