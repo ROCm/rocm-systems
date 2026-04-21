@@ -12,7 +12,7 @@ Out of scope (what is NOT checked):
   - External HTTP/HTTPS URLs — skipped entirely (see is_external_url).
   - Anchor fragments (`#section-id`) — stripped before file-existence
     check. A broken anchor inside a valid file will NOT be flagged.
-  See docs/known-issues.md for the rationale.
+  External URLs + anchors are out of scope by design (speed + false-positive trade-off).
 
 `--strict` flag:
   - Changes OUTPUT FORMAT only: in strict mode no human-readable

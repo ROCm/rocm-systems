@@ -15,7 +15,8 @@ This module tests the *weaker-variant* tool-gate ships in cycle-4:
      the retry protocol and the `PERFXPERT_DISABLE_TOOL_GATE=1` escape.
 
 These are structural / static-content checks — a real runtime tool-gate
-hook is tracked as a follow-up in ``docs/known-issues.md``. The tests
+    hook is backend-specific (see docs/guides/backends.md §Gate hook surface).
+    The tests
 here are the contract for the weaker variant; if any of the literal
 strings below change, the gate's behaviour regresses silently.
 """

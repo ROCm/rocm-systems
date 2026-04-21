@@ -202,7 +202,6 @@ See [CHANGELOG.md](CHANGELOG.md) for the removal history.
     - [External-tool dependencies (`require_tool`)](docs/contributing/external-tools.md)
 - **Other**
   - [Historical migration notes](docs/archive/migration-to-agentic.md)
-  - [Known issues and scanner scope limitations](docs/known-issues.md)
 
 ## Licensing
 

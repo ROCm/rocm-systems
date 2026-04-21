@@ -91,7 +91,7 @@ non-perfxpert tool call — an adversarial or ignorant LLM can still call
 `bash` first. The live-scenario validation shows the prompt+bracket
 combo moves the needle (perfxpert-ratio up from 0/17), but does not
 guarantee 100% compliance. A real pre-/post-turn gate at the opencode
-TypeScript layer is tracked as a follow-up (see `docs/known-issues.md`).
+TypeScript layer is a future follow-up.
 
 **Coverage note (I1 fix):** opencode ships 8 *imported* primary model prompts
 (anthropic, default, beast, codex, gemini, gpt, kimi, trinity) selected by
@@ -154,8 +154,8 @@ that toolchain is in place, the apply step is manual.** Document the
 manual step in the README / developer runbook; do NOT ship a built
 wheel without patches applied.
 
-Tracking: `docs/known-issues.md` — "apply-opencode-patches.sh is not
-yet wired into the wheel build".
+Follow-up: wiring `apply-opencode-patches.sh` into the wheel build
+remains deferred (setup.py currently applies patches at editable-install time).
 
 ## Reverting
 

@@ -57,7 +57,7 @@ VIOLATION_COUNT=0
 
 # Scan all .md files (excluding audit directories and git directories).
 # Exclusion list is documented in experimental/python/perfxpert/docs/
-# known-issues.md under "Scanner scope limitations → scripts/lint.sh".
+# (excluded paths + the "removed in Phase 7.1" allowlist are the scanner's entire scope.)
 # Rationale for each path:
 #   - docs/confluence: Confluence-amendment audit artifacts that
 #     describe what was removed / renamed (must reference the old
