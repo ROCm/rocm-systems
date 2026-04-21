@@ -223,16 +223,16 @@ amd::Status Program::compile(const std::vector<Device*>& devices, size_t numHead
     if (sourceCode_.empty()) {
       return amd::Status::InvalidOperation;
     }
-    int32_t result =
-        devProgram->compile(sourceCode_, headers, headerIncludeNames, options, &parsedOptions);
+    amd::Status result = static_cast<amd::Status>(
+        devProgram->compile(sourceCode_, headers, headerIncludeNames, options, &parsedOptions));
 
     // Check if the previous device failed a build
-    if ((result != static_cast<int32_t>(amd::Status::Success)) && (retval != amd::Status::Success)) {
+    if ((result != amd::Status::Success) && (retval != amd::Status::Success)) {
       retval = amd::Status::InvalidOperation;
     }
     // Update the returned value with a build error
-    else if (result != static_cast<int32_t>(amd::Status::Success)) {
-      retval = static_cast<amd::Status>(result);
+    else if (result != amd::Status::Success) {
+      retval = result;
     }
   }
 
@@ -313,15 +313,16 @@ amd::Status Program::link(const std::vector<Device*>& devices, size_t numInputs,
     if (devProgram->buildStatus() != static_cast<int32_t>(amd::BuildStatus::BuildNone)) {
       continue;
     }
-    int32_t result = devProgram->link(inputDevPrograms, options, &parsedOptions);
+    amd::Status result =
+        static_cast<amd::Status>(devProgram->link(inputDevPrograms, options, &parsedOptions));
 
     // Check if the previous device failed a build
-    if ((result != static_cast<int32_t>(amd::Status::Success)) && (retval != amd::Status::Success)) {
+    if ((result != amd::Status::Success) && (retval != amd::Status::Success)) {
       retval = amd::Status::InvalidOperation;
     }
     // Update the returned value with a build error
-    else if (result != static_cast<int32_t>(amd::Status::Success)) {
-      retval = static_cast<amd::Status>(result);
+    else if (result != amd::Status::Success) {
+      retval = result;
     }
   }
 
@@ -459,15 +460,16 @@ amd::Status Program::build(const std::vector<Device*>& devices, const char* opti
     if (devProgram->buildStatus() != static_cast<int32_t>(amd::BuildStatus::BuildNone)) {
       continue;
     }
-    int32_t result = devProgram->build(sourceCode_, options, &parsedOptions);
+    amd::Status result =
+        static_cast<amd::Status>(devProgram->build(sourceCode_, options, &parsedOptions));
 
     // Check if the previous device failed a build
-    if ((result != static_cast<int32_t>(amd::Status::Success)) && (retval != amd::Status::Success)) {
+    if ((result != amd::Status::Success) && (retval != amd::Status::Success)) {
       retval = amd::Status::InvalidOperation;
     }
     // Update the returned value with a build error
-    else if (result != static_cast<int32_t>(amd::Status::Success)) {
-      retval = static_cast<amd::Status>(result);
+    else if (result != amd::Status::Success) {
+      retval = result;
     }
   }
 
