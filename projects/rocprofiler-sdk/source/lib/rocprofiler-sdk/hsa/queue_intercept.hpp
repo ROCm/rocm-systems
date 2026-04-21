@@ -263,7 +263,7 @@ void
 install_intercept(CoreApiTable& core_table);
 
 bool
-is_active();
+is_intercepting_inline();
 
 }  // namespace queue_intercept
 }  // namespace hsa

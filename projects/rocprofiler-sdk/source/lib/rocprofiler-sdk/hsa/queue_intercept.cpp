@@ -153,7 +153,7 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
 }  // namespace
 
 void
-process_doorbell_impl(QueueState* state, hsa_signal_value_t /*value*/, doorbell_fn_t ring_doorbell)
+process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t ring_doorbell)
 {
     std::lock_guard<std::mutex> lock(state->gate_lock);
 
@@ -396,7 +396,7 @@ wrap_signal_store_screlease(hsa_signal_t sig, hsa_signal_value_t val)
 }  // namespace
 
 bool
-is_active()
+is_intercepting_inline()
 {
     return s_intercept_installed;
 }
