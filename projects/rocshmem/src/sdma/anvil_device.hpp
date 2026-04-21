@@ -258,6 +258,32 @@ struct SdmaQueueDeviceHandle {
       uint64_t val = __hip_atomic_load(committedWptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
       if (val == base) {
+        // All stores inside the loop to avoid SIMD reconvergence deadlock:
+        // the committedWptr update must complete before this lane becomes
+        // inactive, so that other lanes in the same wavefront can proceed.
+        __builtin_amdgcn_s_waitcnt(0);
+        __builtin_amdgcn_wave_barrier();
+        __atomic_signal_fence(__ATOMIC_SEQ_CST);
+
+        __hip_atomic_store(wptr, pendingWptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+
+        __builtin_amdgcn_s_waitcnt(0);
+        __builtin_amdgcn_wave_barrier();
+        __atomic_signal_fence(__ATOMIC_SEQ_CST);
+
+        __hip_atomic_store(doorbell, pendingWptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+
+        __builtin_amdgcn_s_waitcnt(0);
+        __builtin_amdgcn_wave_barrier();
+        __atomic_signal_fence(__ATOMIC_SEQ_CST);
+
+        __hip_atomic_store(committedWptr, pendingWptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+
+        __builtin_amdgcn_s_waitcnt(0);
+        __builtin_amdgcn_wave_barrier();
+        __atomic_signal_fence(__ATOMIC_SEQ_CST);
+
+        maxWritePtr = pendingWptr;
         break;
       }
       __builtin_amdgcn_s_sleep(1);
@@ -269,28 +295,6 @@ struct SdmaQueueDeviceHandle {
         }
       }
     }
-    __builtin_amdgcn_s_waitcnt(0);
-    __builtin_amdgcn_wave_barrier();
-    __atomic_signal_fence(__ATOMIC_SEQ_CST);
-
-    __hip_atomic_store(wptr, pendingWptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-
-    __builtin_amdgcn_s_waitcnt(0);
-    __builtin_amdgcn_wave_barrier();
-    __atomic_signal_fence(__ATOMIC_SEQ_CST);
-
-    __hip_atomic_store(doorbell, pendingWptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
-
-    __builtin_amdgcn_s_waitcnt(0);
-    __builtin_amdgcn_wave_barrier();
-    __atomic_signal_fence(__ATOMIC_SEQ_CST);
-    __hip_atomic_store(committedWptr, pendingWptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-
-    __builtin_amdgcn_s_waitcnt(0);
-    __builtin_amdgcn_wave_barrier();
-    __atomic_signal_fence(__ATOMIC_SEQ_CST);
-
-    maxWritePtr = pendingWptr;
   }
 
   // Spin-poll rptr until HW has consumed packets up to upToIndex
