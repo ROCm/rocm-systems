@@ -196,7 +196,7 @@ def test_otf2_system_tree_node(otf2_data):
                 ), f"SystemTreeNode {node['name']} with class {node['class_name']} validation failed: domain is {node['domain']}, expected 'ACCELERATOR_DEVICE'"
 
     # Each OTF2 file should have at least 1 node with SystemTreeNodeDomain == ACCELERATOR_DEVICE
-    assert count > 0, f"No ACCELERATOR_DEVICE nodes found in OTF2 file\n"
+    assert count > 0, "No ACCELERATOR_DEVICE nodes found in OTF2 file\n"
 
 
 def test_rocpd_data(
@@ -595,7 +595,6 @@ def test_perfetto_event_id_annotations(pftrace_reader):
     destroys = event_ops[event_ops["operation"] == "hipEventDestroy"]
 
     # Get unique event IDs for each operation
-    created_ids = set(creates["event_id"].unique())
     recorded_ids = set(records["event_id"].unique())
     destroyed_ids = set(destroys["event_id"].unique())
 
@@ -603,9 +602,6 @@ def test_perfetto_event_id_annotations(pftrace_reader):
     num_creates = len(creates)
     num_records = len(records)
     num_destroys = len(destroys)
-    num_unique_created = len(created_ids)
-    num_unique_recorded = len(recorded_ids)
-    num_unique_destroyed = len(destroyed_ids)
 
     assert num_creates > 0, "No hipEventCreate operations found"
     assert num_records > 0, "No hipEventRecord operations found"

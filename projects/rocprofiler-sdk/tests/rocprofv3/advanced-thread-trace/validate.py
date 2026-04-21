@@ -215,10 +215,12 @@ def test_code_object_memory(code_object_file_path, json_data, output_path):
     tool_memory_load = data["strings"]["code_object_snapshot_filenames"]
     gfx_pattern = "gfx[a-z0-9]+"
     match = re.search(gfx_pattern, tool_memory_load[1])
-    assert match != None
+    assert match is not None
     gpu_name = match.group(0)
 
-    read_bytes = lambda filename: open(os.path.join(output_path, filename), "rb").read()
+    def read_bytes(filename):
+        return open(os.path.join(output_path, filename), "rb").read()
+
     # Loads all saved code objects
     tool_memory = [read_bytes(saved) for saved in tool_memory_load[1:]]
 
@@ -226,7 +228,7 @@ def test_code_object_memory(code_object_file_path, json_data, output_path):
     for hsa_file in code_object_file_path["hsa_memory_load"]:
 
         m = re.search(gfx_pattern, hsa_file)
-        assert m != None
+        assert m is not None
         gpu = m.group(0)
 
         if gpu == gpu_name:
@@ -235,7 +237,7 @@ def test_code_object_memory(code_object_file_path, json_data, output_path):
             # Checks if hsa_file is one of the saved code objects
             assert any([hsa_memory_bytes == fs for fs in tool_memory])
             break
-    assert found == True
+    assert found is True
 
 
 def test_perfcounter_target_cu(output_path, request):
@@ -302,7 +304,7 @@ def test_occupancy_event_tracing_fields(att_occupancy_event_trace_out_dir_path):
             assert records, f"events[{se}] is empty in {occupancy_file}"
 
             for record in records:
-                assert isinstance(record, dict), f"event record must be an object"
+                assert isinstance(record, dict), "event record must be an object"
                 kind = record.get("kind")
                 if kind == "event":
                     validate_trace_event(record, occupancy_file)
@@ -438,86 +440,6 @@ def test_other_simd_data(att_other_simd_out_dir_path):
                     last_known_time + last_known_duration
                     == other_simd_file_data["end_time"]
                 )
-
-
-def test_shaderdata(att_shaderdata_out_dir_path):
-    expected_value = 3735928559  # m0 value from kernel_lds.cpp (0xDEADBEEF)
-
-    def find_ui_output_dirs(att_out_dir_path):
-        matches = [
-            p for p in Path(att_out_dir_path).glob("ui_output_agent_*") if p.is_dir()
-        ]
-        return matches
-
-    def find_shaderdata_files(shaderdata_files_path):
-        root = Path(shaderdata_files_path)
-        if not root.is_dir():
-            return []
-        matches = [p for p in root.glob("shaderdata_*") if p.is_file()]
-        return matches
-
-    att_ui_dispatch_dirs = find_ui_output_dirs(att_shaderdata_out_dir_path)
-    assert len(att_ui_dispatch_dirs) > 0, "ui_output_agent_* dirs not found."
-
-    found_shaderdata = False
-    for ui_dispatch_dir in att_ui_dispatch_dirs:
-        with open(ui_dispatch_dir / "filenames.json", "r") as inp:
-            filenames_json = json.load(inp)
-
-        listed_file_names = filenames_json.get("shaderdata_filenames", {})
-        if not listed_file_names:
-            continue
-
-        found_shaderdata = True
-        shaderdata_files_found = find_shaderdata_files(ui_dispatch_dir)
-        listed_count = sum(len(files) for files in listed_file_names.values())
-
-        assert (
-            len(shaderdata_files_found) == listed_count
-        ), "shaderdata files mismatch between filenames.json and files present in dir."
-
-        for files in listed_file_names.values():
-            for file in files:
-                with open(ui_dispatch_dir / file[0], "r") as inp:
-                    shaderdata_file_data = json.load(inp)
-
-                assert (
-                    file[1] == shaderdata_file_data["begin_time"]
-                ), "begin time mismatch filenames.json and shaderdata_*.json"
-
-                assert (
-                    file[2] == shaderdata_file_data["end_time"]
-                ), "end time mismatch filenames.json and shaderdata_*.json"
-
-                assert (
-                    shaderdata_file_data["records_count"] > 0
-                ), "shaderdata records are empty."
-
-                shaderdata_records = shaderdata_file_data["records"]
-
-                assert len(shaderdata_records) == shaderdata_file_data["records_count"]
-
-                # Validate ordering and sentinel value in records.
-                last_known_time = shaderdata_records[0][0]
-                assert last_known_time == shaderdata_file_data["begin_time"]
-
-                for record in shaderdata_records:
-                    assert (
-                        record[1] == expected_value
-                    ), "shaderdata record value mismatch."
-
-                for record in shaderdata_records[1:]:
-                    assert (
-                        record[0] >= last_known_time
-                    ), "data from shaderdata file is not in increasing time."
-                    last_known_time = record[0]
-
-                assert (
-                    last_known_time == shaderdata_file_data["end_time"]
-                ), "end time mismatch between records and shaderdata_*.json"
-
-    # Require at least one ui_output_agent_* directory with shaderdata data.
-    assert found_shaderdata, "No ui_output_agent_* directory contains shaderdata data."
 
 
 def test_shaderdata(att_shaderdata_out_dir_path):

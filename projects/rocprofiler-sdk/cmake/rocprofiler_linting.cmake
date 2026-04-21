@@ -140,7 +140,7 @@ if(ROCPROFILER_FLAKE8_EXE)
     add_custom_target(
         lint-rocprofiler-python
         COMMAND ${ROCPROFILER_FLAKE8_EXE} --config ${PROJECT_SOURCE_DIR}/.flake8
-                --show-source --statistics ${PROJECT_SOURCE_DIR}/source
+                --show-source --statistics ${PROJECT_SOURCE_DIR}
         COMMENT "[rocprofiler] Running python linter ${ROCPROFILER_FLAKE8_EXE}...")
     add_dependencies(lint-rocprofiler lint-rocprofiler-python)
     add_dependencies(lint-python lint-rocprofiler-python)

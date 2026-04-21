@@ -57,7 +57,7 @@ def validate_dgemm_matrix_instructions_stalled(samples):
         samples["Instruction"].apply(lambda x: x.startswith("v_mfma_f64"))
     ]
     v_mfma_f64_stalled = v_mfma_f64_samples[
-        v_mfma_f64_samples["Wave_Issued_Instruction"] == False
+        v_mfma_f64_samples["Wave_Issued_Instruction"] is False
     ]
 
     assert (
@@ -79,7 +79,7 @@ def validate_sgemm_matrix_instructions_stalled(samples):
         samples["Instruction"].apply(lambda x: x.startswith("v_mfma_f32"))
     ]
     v_mfma_f32_stalled = v_mfma_f32_samples[
-        v_mfma_f32_samples["Wave_Issued_Instruction"] == False
+        v_mfma_f32_samples["Wave_Issued_Instruction"] is False
     ]
     assert (
         v_mfma_f32_stalled["Stall_Reason"]

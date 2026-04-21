@@ -106,7 +106,7 @@ def s_branch_not_issued(stalled_samples):
 
 
 def validate_stalled_branches(samples):
-    stalled_samples = samples[samples["Wave_Issued_Instruction"] == False]
+    stalled_samples = samples[samples["Wave_Issued_Instruction"] is False]
 
     assert (
         stalled_samples["Stall_Reason"]

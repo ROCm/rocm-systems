@@ -114,7 +114,7 @@ def test_stream_ids_monotonically_increase(json_data, pointer_data):
     for i in range(1, len(stream_ids)):
         assert stream_ids[i] > stream_ids[i - 1], (
             f"Stream IDs should be monotonically increasing but "
-            f"stream_id[{i}]={stream_ids[i]} <= stream_id[{i-1}]={stream_ids[i-1]}"
+            f"stream_id[{i}]={stream_ids[i]} <= stream_id[{i - 1}]={stream_ids[i - 1]}"
         )
 
 

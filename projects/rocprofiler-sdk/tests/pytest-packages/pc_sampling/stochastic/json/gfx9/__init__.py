@@ -23,8 +23,6 @@
 
 from __future__ import absolute_import
 
-import numpy as np
-import pandas as pd
 from collections import defaultdict
 from .arbiter_state import validate_arbiter_state
 from .other_instructions import (
@@ -134,7 +132,7 @@ def validate_stochastic_samples_json(data_json):
         prefix_tree.insert(prefix, instruction_type)
 
     instructions = data_json["strings"]["pc_sample_instructions"]
-    comments = data_json["strings"]["pc_sample_comments"]
+    # comments = data_json["strings"]["pc_sample_comments"]
 
     insts_per_prefix_type = defaultdict(list)
 

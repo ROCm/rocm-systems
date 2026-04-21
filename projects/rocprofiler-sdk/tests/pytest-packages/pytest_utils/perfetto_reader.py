@@ -349,10 +349,10 @@ class PerfettoReader:
                      counter_track.name as track_name,
                      ROW_NUMBER() OVER window AS rn
                   FROM counter JOIN counter_track ON counter.track_id = counter_track.id
-                  WHERE counter_track.name LIKE '%SCRATCH MEMORY%' 
+                  WHERE counter_track.name LIKE '%SCRATCH MEMORY%'
                   WINDOW window AS (PARTITION BY counter.value, track_id ORDER BY counter.ts)
             )
-            SELECT 
+            SELECT
                slice_id,
                track_id,
                'scratch_memory' as category,

@@ -25,7 +25,7 @@ from __future__ import absolute_import
 
 
 def validate_internal_instructions(all_samples, internal_samples):
-    assert (internal_samples["Wave_Issued_Instruction"] == False).all()
+    assert (internal_samples["Wave_Issued_Instruction"] is False).all()
     assert (
         internal_samples["Stall_Reason"]
         .apply(

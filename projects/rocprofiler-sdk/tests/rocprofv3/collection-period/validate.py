@@ -22,10 +22,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import re
 import sys
 import pytest
-import json
 
 
 class TimeWindow(object):
@@ -38,7 +36,7 @@ class TimeWindow(object):
         return val >= self.offset and val <= (self.offset + self.duration)
 
     def __repr__(self):
-        return f"[{self.offset}:{self.offset+self.duration}]"
+        return f"[{self.offset}:{self.offset + self.duration}]"
 
 
 def check_traces(data, valid_regions, invalid_regions, corrid_records=None):
