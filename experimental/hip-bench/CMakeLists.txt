@@ -17,6 +17,6 @@ add_executable(hipbench
     src/kernels.hip
 )
 
-set_source_files_properties(src/kernels.hip PROPERTIES LANGUAGE HIP)
+set_source_files_properties(src/kernels.hip src/main.cpp PROPERTIES LANGUAGE HIP)
 target_link_libraries(hipbench PRIVATE hip::host)
 target_compile_options(hipbench PRIVATE -Wall -Wextra)
