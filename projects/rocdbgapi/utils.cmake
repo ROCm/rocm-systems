@@ -1,5 +1,10 @@
 ## Configure Copyright File for Debian Package
 function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTAINER_NM_T MAINTAINER_EMAIL_T)
+    if("${COMPONENT_NAME_T}" STREQUAL "asan")
+        set(LINTIAN_DOCS_DIR "${CMAKE_INSTALL_DOCDIR}-asan")
+    else()
+        set(LINTIAN_DOCS_DIR ${CMAKE_INSTALL_DOCDIR})
+    endif()
     # Check If Debian Platform
     find_file (DEBIAN debian_version debconf.conf PATHS /etc)
     if(DEBIAN)
@@ -19,7 +24,7 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
 
       # Install copyright file
       install ( FILES "${CMAKE_BINARY_DIR}/DEBIAN/copyright"
-	        DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+	        DESTINATION "${LINTIAN_DOCS_DIR}"
 	        COMPONENT ${COMPONENT_NAME_T} )
 
       # Configure the changelog file
@@ -29,7 +34,7 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
         @ONLY
       )
 
-      # Install Change Log 
+      # Install Change Log
       find_program ( DEB_GZIP_EXEC gzip )
       if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/CHANGELOG.md" )
         execute_process(
@@ -43,39 +48,51 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
           message(FATAL_ERROR "Failed to compress: ${error}")
         endif()
         install ( FILES "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
-                  DESTINATION ${CMAKE_INSTALL_DOCDIR}
+                  DESTINATION ${LINTIAN_DOCS_DIR}
                   COMPONENT ${COMPONENT_NAME_T})
       endif()
-
-    else()
-        # License file
-        install ( FILES ${LICENSE_FILE}
-            DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME LICENSE.txt
-            COMPONENT ${COMPONENT_NAME_T})
     endif()
 endfunction()
 
 # Set variables for changelog and copyright
-# For Debian specific Packages 
+# For Debian specific Packages
 function( set_debian_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DEB_MAINTAINER_NM_T DEB_MAINTAINER_EMAIL_T )
     # Setting configure flags
     set( DEB_PACKAGE_NAME             "${DEB_PACKAGE_NAME_T}" CACHE STRING "Debian Package Name" )
     set( DEB_PACKAGE_VERSION          "${DEB_PACKAGE_VERSION_T}" CACHE STRING "Debian Package Version String" )
     set( DEB_MAINTAINER_NAME          "${DEB_MAINTAINER_NM_T}" CACHE STRING "Debian Package Maintainer Name" )
     set( DEB_MAINTAINER_EMAIL         "${DEB_MAINTAINER_EMAIL_T}" CACHE STRING "Debian Package Maintainer Email" )
-    set( DEB_COPYRIGHT_YEAR           "2025" CACHE STRING "Debian Package Copyright Year" )
     set( DEB_LICENSE                  "MIT" CACHE STRING "Debian Package License Type" )
-    set( DEB_CHANGELOG_INSTALL_FILENM "CHANGELOG.md.gz" CACHE STRING "Debian Package ChangeLog File Name" ) 
+    set( DEB_CHANGELOG_INSTALL_FILENM "CHANGELOG.md.gz" CACHE STRING "Debian Package ChangeLog File Name" )
 
     # Get TimeStamp
     find_program( DEB_DATE_TIMESTAMP_EXEC date )
+    if(NOT DEB_DATE_TIMESTAMP_EXEC)
+        message(
+            FATAL_ERROR
+            "date command not found: Failed to Configure the timestamp for Copyright/Changelog."
+        )
+    endif()
     set ( DEB_TIMESTAMP_FORMAT_OPTION "-R" )
     execute_process (
         COMMAND ${DEB_DATE_TIMESTAMP_EXEC} ${DEB_TIMESTAMP_FORMAT_OPTION}
         OUTPUT_VARIABLE TIMESTAMP_T
+        OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    set( DEB_TIMESTAMP                "${TIMESTAMP_T}" CACHE STRING "Current Time Stamp for Copyright/Changelog" )
+    set( DEB_TIMESTAMP "${TIMESTAMP_T}" CACHE STRING "Current Time Stamp for Copyright/Changelog" )
 
+    # Get Copyright Year
+    set(DEB_YEAR_FORMAT_OPTION "+%Y")
+    execute_process(
+        COMMAND ${DEB_DATE_TIMESTAMP_EXEC} ${DEB_YEAR_FORMAT_OPTION}
+        OUTPUT_VARIABLE DEB_COPYRIGHT_YEAR_T
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    set(DEB_COPYRIGHT_YEAR
+        "${DEB_COPYRIGHT_YEAR_T}"
+        CACHE STRING
+        "Debian Package Copyright Year"
+    )
     message(STATUS "DEB_PACKAGE_NAME             : ${DEB_PACKAGE_NAME}" )
     message(STATUS "DEB_PACKAGE_VERSION          : ${DEB_PACKAGE_VERSION}" )
     message(STATUS "DEB_MAINTAINER_NAME          : ${DEB_MAINTAINER_NAME}" )

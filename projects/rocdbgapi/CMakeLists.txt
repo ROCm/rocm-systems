@@ -71,8 +71,10 @@ include(CheckCXXSourceCompiles)
 
 set(CPACK_PACKAGE_NAME rocm-dbgapi)
 include( utils.cmake )
-set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
-set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
+# LINTIAN-CPACK interferes with inbox packaging, add an option to disable it but don't disable by default
+option(DISABLE_LINTIAN_SUPPORT "disable LINTIAN Support from building" OFF)
+set( BUILD_ENABLE_LINTIAN_OVERRIDES OFF CACHE BOOL "Enable/Disable Lintian Overrides" )
+set( BUILD_DEBIAN_PKGING_FLAG OFF CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
 
 # Convert the project's name to uppercase and replace '-' with '_'.
 string(TOUPPER "${PROJECT_NAME}" AMD_DBGAPI_NAME)
@@ -621,7 +623,10 @@ if(NOT CPack_CMake_INCLUDED)
   include(CPack)
 endif()
 
-configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+if(NOT DISABLE_LINTIAN_SUPPORT)
+  # Configure Lintian Specific Package Data
+  configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+endif()
 
 cpack_add_component(
   dev

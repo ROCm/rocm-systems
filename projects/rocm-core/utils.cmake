@@ -235,7 +235,6 @@ function( set_debian_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DE
     set( DEB_PACKAGE_VERSION          "${DEB_PACKAGE_VERSION_T}" CACHE STRING "Debian Package Version String" )
     set( DEB_MAINTAINER_NAME          "${DEB_MAINTAINER_NM_T}" CACHE STRING "Debian Package Maintainer Name" )
     set( DEB_MAINTAINER_EMAIL         "${DEB_MAINTAINER_EMAIL_T}" CACHE STRING "Debian Package Maintainer Email" )
-    set( DEB_COPYRIGHT_YEAR           "2025" CACHE STRING "Debian Package Copyright Year" )
     set( DEB_LICENSE                  "MIT" CACHE STRING "Debian Package License Type" )
     set( DEB_CHANGELOG_INSTALL_FILENM "changelog.Debian.gz" CACHE STRING "Debian Package ChangeLog File Name" )
 
@@ -250,9 +249,22 @@ function( set_debian_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DE
     execute_process (
         COMMAND ${DEB_DATE_TIMESTAMP_EXEC} ${DEB_TIMESTAMP_FORMAT_OPTION}
         OUTPUT_VARIABLE TIMESTAMP_T
+        OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    set( DEB_TIMESTAMP                "${TIMESTAMP_T}" CACHE STRING "Current Time Stamp for Copyright/Changelog" )
+    set( DEB_TIMESTAMP "${TIMESTAMP_T}" CACHE STRING "Current Time Stamp for Copyright/Changelog" )
 
+    # Get Copyright Year
+    set(DEB_YEAR_FORMAT_OPTION "+%Y")
+    execute_process(
+        COMMAND ${DEB_DATE_TIMESTAMP_EXEC} ${DEB_YEAR_FORMAT_OPTION}
+        OUTPUT_VARIABLE DEB_COPYRIGHT_YEAR_T
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    set(DEB_COPYRIGHT_YEAR
+        "${DEB_COPYRIGHT_YEAR_T}"
+        CACHE STRING
+        "Debian Package Copyright Year"
+    )
     message(STATUS "DEB_PACKAGE_NAME             : ${DEB_PACKAGE_NAME}" )
     message(STATUS "DEB_PACKAGE_VERSION          : ${DEB_PACKAGE_VERSION}" )
     message(STATUS "DEB_MAINTAINER_NAME          : ${DEB_MAINTAINER_NAME}" )

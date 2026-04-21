@@ -239,6 +239,7 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
     else()
         set(LINTIAN_DOCS_DIR ${CMAKE_INSTALL_DOCDIR})
     endif()
+
     # Check If Debian Platform
     find_file (DEBIAN debian_version debconf.conf PATHS /etc)
     if(DEBIAN)
@@ -285,13 +286,7 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
                     DESTINATION ${LINTIAN_DOCS_DIR}
                     COMPONENT ${COMPONENT_NAME_T})
         endif()
-
-    else()
-        # License file
-        install ( FILES ${LICENSE_FILE}
-            DESTINATION ${LINTIAN_DOCS_DIR} RENAME LICENSE.txt
-            COMPONENT ${COMPONENT_NAME_T})
-endif()
+    endif()
 endfunction()
 
 # Set variables for changelog and copyright
@@ -302,7 +297,6 @@ function( set_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DEB_MAINT
     set( DEB_PACKAGE_VERSION          "${DEB_PACKAGE_VERSION_T}" CACHE STRING "Debian Package Version String" )
     set( DEB_MAINTAINER_NAME          "${DEB_MAINTAINER_NM_T}" CACHE STRING "Debian Package Maintainer Name" )
     set( DEB_MAINTAINER_EMAIL         "${DEB_MAINTAINER_EMAIL_T}" CACHE STRING "Debian Package Maintainer Email" )
-    set( DEB_COPYRIGHT_YEAR           "2025" CACHE STRING "Debian Package Copyright Year" )
     set( DEB_LICENSE                  "NSCA" CACHE STRING "Debian Package License Type" )
     set( DEB_CHANGELOG_INSTALL_FILENM "changelog.Debian.gz" CACHE STRING "Debian Package ChangeLog File Name" )
 
@@ -316,6 +310,18 @@ function( set_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DEB_MAINT
     )
     set( DEB_TIMESTAMP                "${TIMESTAMP_T}" CACHE STRING "Current Time Stamp for Copyright/Changelog" )
 
+    # Get Copyright Year
+    set(DEB_YEAR_FORMAT_OPTION "+%Y")
+    execute_process(
+        COMMAND ${DEB_DATE_TIMESTAMP_EXEC} ${DEB_YEAR_FORMAT_OPTION}
+        OUTPUT_VARIABLE DEB_COPYRIGHT_YEAR_T
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    set(DEB_COPYRIGHT_YEAR
+        "${DEB_COPYRIGHT_YEAR_T}"
+        CACHE STRING
+        "Debian Package Copyright Year"
+    )
     message(STATUS "DEB_PACKAGE_NAME             : ${DEB_PACKAGE_NAME}" )
     message(STATUS "DEB_PACKAGE_VERSION          : ${DEB_PACKAGE_VERSION}" )
     message(STATUS "DEB_MAINTAINER_NAME          : ${DEB_MAINTAINER_NAME}" )

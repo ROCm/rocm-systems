@@ -193,11 +193,6 @@ function(
                 DESTINATION ${LINTIAN_DOCS_DIR}
                 COMPONENT ${COMPONENT_NAME_T})
         endif()
-    else()
-        # License file
-        install ( FILES ${LICENSE_FILE}
-            DESTINATION ${LINTIAN_DOCS_DIR} RENAME LICENSE.txt
-            COMPONENT ${COMPONENT_NAME_T})
     endif()
 endfunction()
 

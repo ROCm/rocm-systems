@@ -299,7 +299,6 @@ function(
         CACHE STRING
         "Debian Package Maintainer Email"
     )
-    set(DEB_COPYRIGHT_YEAR "2025" CACHE STRING "Debian Package Copyright Year")
     set(DEB_LICENSE "NCSA" CACHE STRING "Debian Package License Type")
     set(DEB_CHANGELOG_INSTALL_FILENM
         "changelog.Debian.gz"
@@ -340,6 +339,18 @@ function(
         "Current Time Stamp for Copyright/Changelog"
     )
 
+    # Get Copyright Year
+    set(DEB_YEAR_FORMAT_OPTION "+%Y")
+    execute_process(
+        COMMAND ${DEB_DATE_TIMESTAMP_EXEC} ${DEB_YEAR_FORMAT_OPTION}
+        OUTPUT_VARIABLE DEB_COPYRIGHT_YEAR_T
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    set(DEB_COPYRIGHT_YEAR
+        "${DEB_COPYRIGHT_YEAR_T}"
+        CACHE STRING
+        "Debian Package Copyright Year"
+    )
     message(STATUS "DEB_PACKAGE_NAME             : ${DEB_PACKAGE_NAME}")
     message(STATUS "DEB_PACKAGE_VERSION          : ${DEB_PACKAGE_VERSION}")
     message(STATUS "DEB_MAINTAINER_NAME          : ${DEB_MAINTAINER_NAME}")

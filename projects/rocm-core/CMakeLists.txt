@@ -51,6 +51,8 @@ set( EXTENDED_PACKAGE_DESCRIPTION
      component on which all of ROCm can depend, to make it easy to remove
      all of ROCm with a package manager." )
 
+# LINTIAN-CPACK interferes with inbox packaging, add an option to disable it but don't disable by default
+option(DISABLE_LINTIAN_SUPPORT "disable LINTIAN Support from building" OFF)
 set( BUILD_ENABLE_LINTIAN_OVERRIDES OFF CACHE BOOL "Enable/Disable Lintian Overrides" )
 set( BUILD_DEBIAN_PKGING_FLAG OFF CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
 
@@ -268,10 +270,12 @@ message ( STATUS "Using CPACK_DEBIAN_PACKAGE_RELEASE ${CPACK_DEBIAN_PACKAGE_RELE
 set ( CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT" )
 
 # Debian specific packaging configuration
-if(COMP_TYPE)
-  configure_debian_pkg( ${CORE_TARGET} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
-elseif(STATIC_COMP_TYPE)
-  configure_debian_pkg( ${CORE_TARGET} ${STATIC_COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+if(NOT DISABLE_LINTIAN_SUPPORT)
+  if(COMP_TYPE)
+    configure_debian_pkg( ${CORE_TARGET} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+  elseif(STATIC_COMP_TYPE)
+    configure_debian_pkg( ${CORE_TARGET} ${STATIC_COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+  endif()
 endif()
 
 ## RPM package specific variables

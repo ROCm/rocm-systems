@@ -239,6 +239,11 @@ function(
     MAINTAINER_NM_T
     MAINTAINER_EMAIL_T
 )
+    if("${COMPONENT_NAME_T}" STREQUAL "asan")
+        set(LINTIAN_DOCS_DIR "${CMAKE_INSTALL_DATADIR}/doc/${PACKAGE_NAME_T}-asan")
+    else()
+        set(LINTIAN_DOCS_DIR "${CMAKE_INSTALL_DATADIR}/doc/${PACKAGE_NAME_T}")
+    endif()
     # Check If Debian Platform
     find_file(DEBIAN debian_version debconf.conf PATHS /etc)
     if(DEBIAN)
@@ -278,7 +283,7 @@ function(
             endif()
             install(
                 FILES "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
-                DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${PACKAGE_NAME_T}
+                DESTINATION ${LINTIAN_DOCS_DIR}
                 COMPONENT ${COMPONENT_NAME_T}
             )
         endif()

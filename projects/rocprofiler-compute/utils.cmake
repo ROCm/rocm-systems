@@ -8,9 +8,9 @@ function(
     MAINTAINER_EMAIL_T
 )
     if("${COMPONENT_NAME_T}" STREQUAL "asan")
-        set(LINTIAN_DOCS_DIR "${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}-asan")
+        set(LINTIAN_DOCS_DIR "${CMAKE_INSTALL_DOCDIR}-asan")
     else()
-        set(LINTIAN_DOCS_DIR "${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}")
+        set(LINTIAN_DOCS_DIR ${CMAKE_INSTALL_DOCDIR})
     endif()
     # Check If Debian Platform
     find_file(DEBIAN debian_version debconf.conf PATHS /etc)
@@ -77,14 +77,6 @@ function(
                 COMPONENT ${COMPONENT_NAME_T}
             )
         endif()
-    else()
-        # License file
-        install(
-            FILES ${LICENSE_FILE}
-	    DESTINATION ${LINTIAN_DOCS_DIR}
-            RENAME LICENSE.txt
-            COMPONENT ${COMPONENT_NAME_T}
-        )
     endif()
 endfunction()
 
@@ -121,7 +113,7 @@ function(
         "Debian Package ChangeLog File Name"
     )
     # BUILD_ENABLE_LINTIAN_OVERRIDES not supported
-    
+
     # Get TimeStamp
     find_program(DEB_DATE_TIMESTAMP_EXEC date)
     if(NOT DEB_DATE_TIMESTAMP_EXEC)
