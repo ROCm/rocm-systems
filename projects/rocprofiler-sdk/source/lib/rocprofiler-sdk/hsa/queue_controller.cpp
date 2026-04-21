@@ -235,10 +235,15 @@ queue_controller_load_attach_queues()
 uint64_t
 compute_queue_k_factor()
 {
-    auto active_contexts     = context::get_active_contexts();
+    // NOTE: This is currently used when queue state is created and therefore
+    // effectively latches the k-factor for the queue lifetime.
+    //
+    // TODO: Allow dynamic k-factor evaluation during packet submission so
+    // contexts enabled/disabled after queue creation can update behavior.
+    auto registered_contexts = context::get_registered_contexts();
 
     uint64_t k = 0;
-    for(const auto* itr : active_contexts)
+    for(const auto& itr : registered_contexts)
     {
         if(!itr) continue;
 
@@ -283,6 +288,8 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 
     // Register queue state for SDK-level write pointer interception
     auto* amd_q = reinterpret_cast<amd_queue_t*>(id);
+    // TODO: queue_intercept currently captures k_factor once at queue-init.
+    // Revisit to support dynamic k-factor updates during submission.
     auto k_factor = compute_queue_k_factor();
     ROCP_INFO << "[DIAG-HG-QUEUE-ADD] queue=" << id << " agent="
               << agent_id.handle << " k_factor=" << k_factor
