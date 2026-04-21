@@ -219,7 +219,7 @@ sync_metadata_impl(QueueState*                         compute_state,
  * @param ring_doorbell Callback to ring the actual hardware doorbell
  */
 void
-process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t ring_doorbell);
+process_doorbell_impl(QueueState* state, hsa_signal_value_t value, const doorbell_fn_t& ring_doorbell);
 
 /**
  * @brief Create and register queue state
