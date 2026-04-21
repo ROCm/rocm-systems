@@ -1,17 +1,6 @@
 name: "PerfXpert Nightly Benchmarks"
 
 on:
-  pull_request:
-    paths:
-      - 'experimental/python/perfxpert/**'
-      - '.github/workflows/perfxpert-nightly.yml'
-  push:
-    branches:
-      - develop
-      - users/aelwazir/perfxpert-agentic-refactor
-    paths:
-      - 'experimental/python/perfxpert/**'
-      - '.github/workflows/perfxpert-nightly.yml'
   schedule:
     # Run nightly at 2 AM UTC
     - cron: "0 2 * * *"
@@ -35,7 +24,7 @@ jobs:
 
   benchmarks:
     name: TritonBench + KernelBench geomean gate
-    runs-on: [self-hosted, rocm-mi300x]
+    runs-on: linux-gfx942-1gpu-ossci-rocm
     timeout-minutes: 240
     needs: [provider-smoke]
     steps:
