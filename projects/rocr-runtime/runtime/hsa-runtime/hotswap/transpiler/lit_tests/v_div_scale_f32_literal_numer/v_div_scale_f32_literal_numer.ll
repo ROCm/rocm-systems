@@ -59,17 +59,25 @@
 ;     regressions on either side.
 ; CHECK: call float @llvm.amdgcn.div.fixup.f32(float %{{[^,]+}}, float %{{[^,]+}}, float 1.000000e+00)
 
-; (c) Negative: neither scale call should carry a VGPR-sourced
-;     numer duplicated into both src0 and src1 — the pre-fix
-;     `(d, d, ...)` shape that collapsed the whole expansion to
-;     rstd = 1.0 bit-exact.  Match on the `div.scale.f32` call
-;     prefix followed by a `%<name>, float %<same-name>,` pattern
-;     where the same VGPR-derived SSA name appears in both operand
-;     positions.  LLVM's IR printer renders both operands with
-;     their SSA name, so the literal match here is `float %X, float
-;     %X` for any `X`; a single back-reference via
-;     `{{[^,]+}}, float %{{[^,]+}}` cannot assert equality, so we
-;     spell out the forbidden pattern with an explicit register-
-;     dominated shape.  `1.000000e+00, float %` passes (one side
-;     literal, one side register); `float %foo, float %foo` fails.
-; CHECK-NOT: call { float, i1 } @llvm.amdgcn.div.scale.f32(float %[[X:[^,]+]], float %[[X]],
+; (c) Negative: in this fixture the only fdiv is `1.0 / sqrt(x)`,
+;     so EVERY `div.scale.f32` call the kernel raises MUST carry
+;     the literal `1.000000e+00` as its first argument.  The pre-
+;     fix bug made both scale calls route the numerator through a
+;     register (`(d, d, ...)` for scale-denom and `(n, d, false)`-
+;     without-the-true-flag for scale-numer — the exact failure
+;     mode the `(c)` negative assertion needs to rule out is "the
+;     first argument to `div.scale.f32` is a register" for any call
+;     site in this kernel).  The back-reference shape `float %[[X]],
+;     float %[[X]]` that an earlier revision of this fixture used
+;     would NOT catch the specific buggy IR this fixture guards
+;     against — the pre-fix handler emitted `(%1414, %1415, ...)`
+;     with two DIFFERENT SSA names that both `bitcast`ed the same
+;     underlying VGPR value, so the two operand SSA names did not
+;     literally match.  The stronger assertion below forbids ANY
+;     register-first-arg `div.scale.f32` anywhere in this fixture's
+;     IR — the correct regression guard for the literal-numer audit
+;     in `handle_valu.cpp::V_DIV_SCALE_F32`.  If the fixture ever
+;     grows a non-`1.0/x` divide (e.g. adds an `a/b` operation), this
+;     assertion needs to be re-scoped (CHECK-NOT on the specific
+;     kernel region, not the whole function).
+; CHECK-NOT: call { float, i1 } @llvm.amdgcn.div.scale.f32(float %{{[^,)]+}},

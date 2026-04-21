@@ -671,14 +671,20 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     // Detecting the literal-matching shape closes that gap without
     // changing the flag convention for the all-register case.
     //
-    // Canonical `(numer, denom)` extraction from the hardware triple:
-    // the numerator is always `src2` (in both shapes above), the
-    // denominator is always `src1`.  The all-register case preserves
-    // the old `(s0, s1)` operand identities modulo alias — since
-    // src0 == src2 in the scale-numer shape, `srcF(2)` is equivalent
-    // to the old code's `srcF(0)` there; in the scale-denom shape
-    // the new code correctly routes the numer through src2 rather
-    // than silently duplicating the denom through s0/s1.
+    // Canonical `(numer, denom)` extraction from the hardware triple.
+    // The denom always lives in src1.  The numer lives wherever the
+    // matched shape identifies it: src0 in scale-numer (where
+    // src0 == src2), src2 in scale-denom (where src0 == src1 and
+    // src2 is the lone numer-bearing slot).  We pull the numer from
+    // the slot that lexically exists in the matched shape — src0
+    // for scale-numer to keep IR identity with the pre-audit all-
+    // register handler, src2 for scale-denom to route the numer
+    // correctly rather than silently duplicating the denom through
+    // s0/s1 (the pre-audit shape).  Modifier symmetry on the
+    // matched-identity pair is asserted below before either pick
+    // becomes observable: asymmetric modifiers on the duplicated
+    // slot are an emitter-ambiguity shape the lifted IR cannot
+    // represent faithfully, and we refuse rather than guess.
     auto sameOperand = [&](unsigned a, unsigned b) -> bool {
       bool aIsReg = op.isSrcReg(a), bIsReg = op.isSrcReg(b);
       if (aIsReg != bIsReg) return false;
@@ -692,6 +698,22 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
       // are not carried through the OpResolver as literals today and
       // the `isSrcReg` check above would have returned true for
       // them, so reaching here guarantees the isImm check is safe.
+      //
+      // Literal identity is compared via `MCOperand::getImm`, which
+      // returns AMDGPU's raw encoded bit pattern — inline constants
+      // come through their special-index encoding (246 for `1.0`,
+      // etc.) and 32-bit literals come through their IEEE bit
+      // pattern.  Two representations of the same value (e.g. `1.0`
+      // as inline-const vs as a 32-bit literal `0x3f800000`) would
+      // compare as UNEQUAL at this layer.  That is a pre-condition
+      // refuse, not a silent miscompile — the handler falls through
+      // to the three-arm match's `else` arm below and surfaces a
+      // diagnostic.  In practice every corpus emitter (Triton's
+      // AMDGPU backend, hipcc, libdevice) uses the canonical
+      // inline-const encoding for the `1.0 / x` fdiv expansion, so
+      // this representation assumption doesn't trip anywhere today;
+      // tightening to semantic-value equality is the follow-up if a
+      // future emitter surfaces the long-literal form.
       unsigned ai = op.srcIdx(a), bi = op.srcIdx(b);
       if (!op.di.isImm(ai) || !op.di.isImm(bi)) return false;
       return op.di.getImm(ai) == op.di.getImm(bi);
@@ -722,8 +744,54 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
       return hr;
     }
 
-    // Canonical (numer, denom) regardless of shape.
-    Value *numer = ctx.B.CreateBitCast(op.srcF(2), ctx.f32Ty);
+    // FP-modifier symmetry check on the matched-identity pair.  The
+    // hardware's operand-identity protocol makes `src0 == src<M>`
+    // (for M = 1 in scale-denom, M = 2 in scale-numer) tell the
+    // scale unit "these two slots carry the same operand value."
+    // But VOP3 modifiers (abs/neg bits in the `modMap` entry per
+    // source index) can be set independently on each slot, which
+    // would make the two slots semantically different operands (one
+    // `v`, the other `-v` or `abs(v)`).  The hardware's behaviour
+    // in that case is undocumented / effectively undefined for the
+    // divide protocol — no known codegen emitter (Triton AMD
+    // backend, hipcc, libdevice) produces asymmetric modifiers on
+    // the duplicated slot — and the lifted IR would silently drop
+    // one modifier set because we can only thread a single
+    // `(numer, denom)` pair through `@llvm.amdgcn.div.scale.f32`.
+    // Refuse loudly rather than guess.
+    unsigned peer = scaleNumerator ? 2u : 1u;
+    if (op.srcMod(0) != op.srcMod(peer)) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "VOP3",
+          scaleNumerator
+              ? "v_div_scale_f32 scale-numerator shape (src0 == src2) "
+                "has asymmetric FP modifiers on src0 and src2; the "
+                "hardware's operand-identity protocol treats both as "
+                "the same numerator operand, but the lifted IR can "
+                "only carry one modifier set.  No known codegen "
+                "emitter produces this shape; refusing rather than "
+                "dropping a modifier silently."
+              : "v_div_scale_f32 scale-denominator shape (src0 == src1) "
+                "has asymmetric FP modifiers on src0 and src1; the "
+                "hardware's operand-identity protocol treats both as "
+                "the same denominator operand, but the lifted IR can "
+                "only carry one modifier set.  No known codegen "
+                "emitter produces this shape; refusing rather than "
+                "dropping a modifier silently.");
+      return hr;
+    }
+
+    // Canonical (numer, denom) sourced from the operand slot that
+    // holds each value in the matched shape.  Modifier symmetry was
+    // just asserted above, so for scale-numer picking src0 or src2
+    // is equivalent — we take src0 to keep the all-register scale-
+    // numer case IR-identical to the pre-fix handler (which also
+    // used srcF(0) for numer); for scale-denom, src2 is the only
+    // slot that carries the numer at all, so there is no choice.
+    // The denom always lives in src1 (src0 aliases it in the
+    // scale-denom shape, and src1 is the natural anchor in both).
+    Value *numer = ctx.B.CreateBitCast(
+        scaleNumerator ? op.srcF(0) : op.srcF(2), ctx.f32Ty);
     Value *denom = ctx.B.CreateBitCast(op.srcF(1), ctx.f32Ty);
     Function *fn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::amdgcn_div_scale,
                                                      {ctx.f32Ty});
