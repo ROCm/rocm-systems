@@ -24,7 +24,11 @@ TEST_F(IrGpu, VecaddRoundtrip) {
 
   printf("\n[2] Running LLVM IR raise + compile pipeline...\n");
   auto pipeResult =
-      transpiler::runPipeline(coData, "gfx942", "_Z6vecaddPfS_S_i");
+      // Single-ISA lift: ISA passed twice (source == target).  See
+      // pipeline.hpp for the removed 3-string convenience overload
+      // and its silent-capture failure mode.
+      transpiler::runPipeline(coData, "gfx942", "gfx942",
+                              "_Z6vecaddPfS_S_i");
   ASSERT_TRUE(pipeResult.success) << "Pipeline failed";
   printf("    Raised %d/%d instructions to LLVM IR\n", pipeResult.liftedCount,
          pipeResult.totalCount);

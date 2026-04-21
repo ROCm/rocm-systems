@@ -18,7 +18,9 @@ struct PipelineResult {
 };
 
 /// End-to-end pipeline: HSACO binary → raise to LLVM IR → llc → HSACO.
-/// Single-ISA: raises and lowers using the same ISA.
+/// Raises using `sourceISA` and lowers to `targetISA`.  Single-ISA
+/// callers pass the same string for both — see the single-ISA note
+/// below for why there is no separate 3-string overload.
 ///
 /// `enableWritelaneRewrite` opt-in plumbs through to
 /// `raiseToIR(..., enableWritelaneRewrite)` — see raiser.hpp and
@@ -36,13 +38,30 @@ struct PipelineResult {
 /// and wave-size-translation.md §2.2 projection ladder). Default off
 /// — `ModuloReplicationProjection` remains the canonical choice
 /// until the corpus sweep under wave-native confirms no regressions.
-PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
-                           const std::string &targetISA,
-                           const std::string &kernelName,
-                           bool enableWritelaneRewrite = true,
-                           bool enableWaveNative = false);
-
-/// Cross-architecture pipeline: raises using sourceISA, lowers to targetISA.
+///
+/// Single-ISA convention: pass the same ISA string for both
+/// `sourceISA` and `targetISA` (e.g. `runPipeline(data, "gfx942",
+/// "gfx942", "kernel", ...)`).  Earlier revisions exposed a separate
+/// 3-string overload `(data, targetISA, kernel, ...)` to elide the
+/// repetition, but that overload silently misbehaved under C++
+/// overload resolution: a cross-arch call `runPipeline(data,
+/// "gfx1250", "gfx942", "kernel_name")` with four `const char *`
+/// literals picked up the 3-string overload (because `const char *
+/// → bool` is a *standard* pointer-to-bool conversion that outranks
+/// the user-defined `const char * → std::string` conversion needed
+/// for the 4-string cross-arch overload).  The 4th literal was then
+/// bound to `enableWritelaneRewrite` as `true` and `kernelName`
+/// silently became `"gfx942"`, which downstream surfaced as
+/// `UserSgprLayout::fromKernelMeta: kernel 'gfx942' has no parsed
+/// kernel descriptor` — an easy-to-miss silent miscompile of the
+/// API contract itself.  Removing the 3-string overload and
+/// requiring the canonical 4-string form is the only way to make
+/// the ambiguity unrepresentable (SFINAE / `string_view`-typed
+/// alternatives were evaluated and rejected: every candidate
+/// preserved some path where `const char *` beats `std::string`
+/// under standard conversions).  Callers repeat the ISA string
+/// instead; the ~5 single-ISA call sites that did this pre-fix are
+/// all updated to the two-string form.
 PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
                            const std::string &sourceISA,
                            const std::string &targetISA,

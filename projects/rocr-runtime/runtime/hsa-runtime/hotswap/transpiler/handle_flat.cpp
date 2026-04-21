@@ -469,19 +469,46 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
 
-  // flat_load/flat_store — same structure as global but uses flat address space
+  // flat_load/flat_store — same structure as global but uses flat address
+  // space on the plain-VGPR64 form (gfx9/10/11) and global address space
+  // on the gfx12+ SADDR form.  Detection is by operand shape, matching
+  // `decodeGlobalLoadAddr`'s discriminator but with address-space
+  // semantics preserved per case (the shared decoder unconditionally
+  // casts to `ctx.ptrGlobalTy` which is addrspace(1); we route through
+  // it only for the SADDR form where that cast is hardware-correct).
   if (sop == SemOp::FLAT_LOAD_USHORT || sop == SemOp::FLAT_LOAD_SSHORT ||
       sop == SemOp::FLAT_LOAD_UBYTE || sop == SemOp::FLAT_LOAD_SBYTE) {
     ParsedReg dest = op.dst();
-    Value *addr = ctx.regs.readReg64(ctx.B, op.srcReg(0));
-    Type *ptrFlatTy = PointerType::get(ctx.C, 0);
-    if (addr->getType() != ptrFlatTy) addr = ctx.B.CreateIntToPtr(addr, ptrFlatTy);
-    int64_t memOffset = 0;
-    for (unsigned k = 1; k < op.nSrcs(); k++)
-      if (di.isImm(op.srcIdx(k)) && di.getImm(op.srcIdx(k)) != 0)
-        memOffset = di.getImm(op.srcIdx(k));
-    if (memOffset != 0) addr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, addr, ctx.B.getInt64(memOffset));
     bool isByte = sop == SemOp::FLAT_LOAD_UBYTE || sop == SemOp::FLAT_LOAD_SBYTE;
+    Value *addr = nullptr;
+    // SADDR form: saddr(SGPR64), vaddr(VGPR32), [scale_offset] [offset:imm]
+    // — semantically a global_load (SGPR base + per-lane VGPR offset),
+    // so delegate to the shared decoder and accept its addrspace(1)
+    // conversion.
+    if (op.nSrcs() >= 2 && op.isSrcReg(0) && op.isSrcReg(1) &&
+        op.srcReg(0).kind == ParsedReg::SGPR &&
+        op.srcReg(1).kind == ParsedReg::VGPR) {
+      FlatAddr fa = decodeGlobalLoadAddr(ctx, di, op, isByte ? 1 : 2,
+                                          "FLAT_LOAD sub-dword (SADDR)");
+      addr = fa.ptr;
+    } else {
+      // Plain-flat form: VGPR64 holds the full per-lane flat address.
+      // Preserve addrspace(0) so the backend re-emits `flat_load_*` on
+      // targets where plain-flat may legitimately reach LDS or private
+      // (gfx9/10/11 AMDGPU lowering keys off the AS to choose between
+      // flat/global/ds/scratch load classes).
+      addr = ctx.regs.readReg64(ctx.B, op.srcReg(0));
+      Type *ptrFlatTy = PointerType::get(ctx.C, 0);
+      if (addr->getType() != ptrFlatTy)
+        addr = ctx.B.CreateIntToPtr(addr, ptrFlatTy);
+      int64_t memOffset = 0;
+      for (unsigned k = 1; k < op.nSrcs(); k++)
+        if (di.isImm(op.srcIdx(k)) && di.getImm(op.srcIdx(k)) != 0)
+          memOffset = di.getImm(op.srcIdx(k));
+      if (memOffset != 0)
+        addr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, addr,
+                                        ctx.B.getInt64(memOffset));
+    }
     Type *loadTy = isByte ? ctx.i8Ty : Type::getInt16Ty(ctx.C);
     Value *loaded = ctx.B.CreateLoad(loadTy, addr, "flat_load_sub");
     bool isUnsigned = sop == SemOp::FLAT_LOAD_UBYTE || sop == SemOp::FLAT_LOAD_USHORT;
@@ -498,16 +525,60 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
     else if (sop == SemOp::FLAT_LOAD_DWORDX4) loadDwords = 4;
     else if (sop == SemOp::FLAT_LOAD_DWORDX3) loadDwords = 3;
 
-    ParsedReg dest = op.dst();
-    Value *addr = ctx.regs.readReg64(ctx.B, op.srcReg(0));
-    Type *ptrFlatTy = PointerType::get(ctx.C, 0);
-    if (addr->getType() != ptrFlatTy) addr = ctx.B.CreateIntToPtr(addr, ptrFlatTy);
-    int64_t memOffset = 0;
-    for (unsigned k = 1; k < op.nSrcs(); k++)
-      if (di.isImm(op.srcIdx(k)) && di.getImm(op.srcIdx(k)) != 0)
-        memOffset = di.getImm(op.srcIdx(k));
-    if (memOffset != 0) addr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, addr, ctx.B.getInt64(memOffset));
+    // Two operand-shape variants, with distinct address-space semantics:
+    //
+    //   (plain)  vaddr:VGPR64, [imms]
+    //              — gfx9/10/11 `flat_load_dword`: VGPR64 holds a full
+    //              per-lane flat address that may legitimately reach
+    //              LDS or private; lift as addrspace(0) so the target
+    //              backend can re-emit `flat_load_*`.
+    //
+    //   (SADDR)  saddr:SGPR64, vaddr:VGPR32, [scale_offset] [offset:imm]
+    //              — gfx12+ `flat_load_b32 … scale_offset`: uniform
+    //              SGPR64 base + per-lane VGPR32 offset, semantically
+    //              identical to `global_load_dword`'s SADDR form (the
+    //              hardware's scale-offset + signed-imm arithmetic can
+    //              only reach globally-allocated memory, which the
+    //              compiler encodes by choosing this variant).  Lift
+    //              as addrspace(1) via the shared `decodeGlobalLoadAddr`
+    //              helper so the target backend re-emits
+    //              `global_load_*` with matching scale-offset arithmetic.
+    //
+    // Before the SADDR arm was added, the handler took `op.srcReg(0)`
+    // as a 64-bit pointer unconditionally.  On the SADDR form that
+    // silently picked up the saddr SGPR pair as the full address and
+    // DROPPED the per-lane VGPR offset, producing a kernel where every
+    // lane addresses the same memory location (observable on the
+    // `rcp_sqrt_kernel` gfx1250 fixture: 256 output lanes all reading
+    // `in[0x206/4] = in[518]` regardless of tid — see the
+    // `Gfx1250Gpu.RcpSqrt` regression gate in `tests/gfx1250_gpu_test.cpp`).
+    // The shape discriminator below (`op.srcReg(0).kind == SGPR` AND
+    // `op.srcReg(1).kind == VGPR`) matches `decodeGlobalLoadAddr`'s
+    // inner predicate but keeps the plain-form AS choice local — the
+    // shared helper unconditionally casts its result to addrspace(1),
+    // which is correct for SADDR and wrong for plain-flat on pre-gfx12.
+    Value *addr = nullptr;
+    if (op.nSrcs() >= 2 && op.isSrcReg(0) && op.isSrcReg(1) &&
+        op.srcReg(0).kind == ParsedReg::SGPR &&
+        op.srcReg(1).kind == ParsedReg::VGPR) {
+      FlatAddr fa = decodeGlobalLoadAddr(ctx, di, op, loadDwords * 4,
+                                          "FLAT_LOAD dword (SADDR)");
+      addr = fa.ptr;
+    } else {
+      addr = ctx.regs.readReg64(ctx.B, op.srcReg(0));
+      Type *ptrFlatTy = PointerType::get(ctx.C, 0);
+      if (addr->getType() != ptrFlatTy)
+        addr = ctx.B.CreateIntToPtr(addr, ptrFlatTy);
+      int64_t memOffset = 0;
+      for (unsigned k = 1; k < op.nSrcs(); k++)
+        if (di.isImm(op.srcIdx(k)) && di.getImm(op.srcIdx(k)) != 0)
+          memOffset = di.getImm(op.srcIdx(k));
+      if (memOffset != 0)
+        addr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, addr,
+                                        ctx.B.getInt64(memOffset));
+    }
 
+    ParsedReg dest = op.dst();
     if (loadDwords == 1) {
       ctx.writeReg32(dest, ctx.B.CreateBitCast(ctx.B.CreateLoad(ctx.f32Ty, addr, "flat_load"), ctx.i32Ty));
     } else {
@@ -536,16 +607,41 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
              sop == SemOp::FLAT_STORE_SHORT_D16_HI) { storeBits = 16; storeDwords = 0; }
     else if (sop == SemOp::FLAT_STORE_BYTE) { storeBits = 8; storeDwords = 0; }
 
-    Value *addr = ctx.regs.readReg64(ctx.B, op.srcReg(0));
-    Type *ptrFlatTy = PointerType::get(ctx.C, 0);
-    if (addr->getType() != ptrFlatTy) addr = ctx.B.CreateIntToPtr(addr, ptrFlatTy);
-    int64_t memOffset = 0;
-    for (unsigned k = 2; k < op.nSrcs(); k++)
-      if (di.isImm(op.srcIdx(k)) && di.getImm(op.srcIdx(k)) != 0)
-        memOffset = di.getImm(op.srcIdx(k));
-    if (memOffset != 0) addr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, addr, ctx.B.getInt64(memOffset));
-
-    ParsedReg stData = op.srcReg(1);
+    // Two operand-shape variants with distinct AS semantics; mirror
+    // the FLAT_LOAD_DWORD handler's case split.  For stores:
+    //
+    //   (plain)  vaddr:VGPR64, vdata:VGPR*, [imms]            → addrspace(0)
+    //   (SADDR)  vaddr:VGPR32, vdata:VGPR*, saddr:SGPR64, ... → addrspace(1)
+    //
+    // See the FLAT_LOAD_DWORD comment block above for the full
+    // derivation and rcp_sqrt_kernel regression anchor.
+    int elemBytes = storeBits < 32 ? (storeBits / 8)
+                                    : std::max(storeDwords, 1) * 4;
+    Value *addr = nullptr;
+    ParsedReg stData;
+    if (op.nSrcs() >= 3 && op.isSrcReg(0) && op.isSrcReg(1) &&
+        op.isSrcReg(2) &&
+        op.srcReg(0).kind == ParsedReg::VGPR &&
+        op.srcReg(1).kind == ParsedReg::VGPR &&
+        op.srcReg(2).kind == ParsedReg::SGPR) {
+      FlatAddr fa = decodeGlobalStoreAddr(ctx, di, op, elemBytes,
+                                           "FLAT_STORE (SADDR)");
+      addr = fa.ptr;
+      stData = fa.stData;
+    } else {
+      addr = ctx.regs.readReg64(ctx.B, op.srcReg(0));
+      Type *ptrFlatTy = PointerType::get(ctx.C, 0);
+      if (addr->getType() != ptrFlatTy)
+        addr = ctx.B.CreateIntToPtr(addr, ptrFlatTy);
+      int64_t memOffset = 0;
+      for (unsigned k = 2; k < op.nSrcs(); k++)
+        if (di.isImm(op.srcIdx(k)) && di.getImm(op.srcIdx(k)) != 0)
+          memOffset = di.getImm(op.srcIdx(k));
+      if (memOffset != 0)
+        addr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, addr,
+                                        ctx.B.getInt64(memOffset));
+      stData = op.srcReg(1);
+    }
     if (storeDwords == 0) {
       Type *memTy = Type::getIntNTy(ctx.C, storeBits);
       Value *val = ctx.B.CreateTrunc(ctx.regs.readReg32(ctx.B, stData), memTy);

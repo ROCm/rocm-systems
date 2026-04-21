@@ -152,7 +152,14 @@ TEST_F(DivergentExecGpu, TwoCmpxGatedStores) {
   }
 
   // --- Pipeline: raise + reassemble, then run raised version. ---
-  auto pipeResult = transpiler::runPipeline(coData, "gfx942", symbol);
+  // Single-ISA lift: pass the ISA twice (source == target).  The
+  // previous 3-string convenience overload was removed after it
+  // was shown to silently capture 4-string cross-arch calls under
+  // C++ overload resolution (pointer-to-bool standard conversion
+  // outranking user-defined const char*→std::string); see
+  // pipeline.hpp for the full derivation.
+  auto pipeResult =
+      transpiler::runPipeline(coData, "gfx942", "gfx942", symbol);
   ASSERT_TRUE(pipeResult.success) << "Pipeline failed for " << symbol;
   printf("  Raised %d/%d instructions\n", pipeResult.liftedCount,
          pipeResult.totalCount);

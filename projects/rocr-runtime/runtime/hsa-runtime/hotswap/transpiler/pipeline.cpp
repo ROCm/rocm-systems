@@ -183,15 +183,6 @@ bool isStrictMode() {
   return s_strict;
 }
 
-PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
-                           const std::string &targetISA,
-                           const std::string &kernelName,
-                           bool enableWritelaneRewrite,
-                           bool enableWaveNative) {
-  return runPipeline(codeObjectData, targetISA, targetISA, kernelName,
-                     enableWritelaneRewrite, enableWaveNative);
-}
-
 // Raise one kernel to IR, compile to a relocatable .o via llc + llvm-mc.
 // On success, writes the .o to objPath and returns true.
 static bool raiseAndCompileKernel(const TextSection &text,

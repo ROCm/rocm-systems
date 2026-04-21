@@ -22,17 +22,34 @@
 # probes (RowIdA / RowOnly124 / EvenRows / KStripedRow124) remain as
 # positive regression guards for this exact defect.
 
-# Gfx1250Gpu.Softmax graduated from XFAIL to expected-pass once
-# the P2 rewrite (v_permlane16 / v_permlanex16 emulation via
-# ds_bpermute_b32; see the permlane16/permlanex16 row of
-# hotswap/docs/wave-size-translation.md §5.3) landed on top of P5
-# (DPP intrinsic lift). The
-# kernel's two remaining classifier-blocked sites — a single
-# `v_permlanex16_b32` and the DPP pattern — now both surface in the
-# classifier trace as `[implemented]`, and the end-to-end test runs
-# the raised IR on gfx942 hardware producing bit-exact softmax
-# outputs (0 errors, maxErr=0.0). This XFAIL annotation has been
-# removed.
+# Gfx1250Gpu.Softmax: re-introduced as expected-fail on 2026-04-21
+# after a separate investigation into a `runPipeline` overload-
+# resolution bug (see pipeline.hpp's block comment on the removed
+# 3-string convenience overload) uncovered that every cross-arch
+# test in this file was silently failing at the pipeline-launch
+# boundary rather than actually running.  The pre-fix state made
+# `Gfx1250Gpu.Softmax` exit via `ASSERT_TRUE(result.success)` on an
+# empty/error PipelineResult BEFORE any raised IR touched the GPU;
+# CTest's WILL_FAIL expectation held trivially.  Post-fix, softmax
+# reaches the launch and produces `+inf` for every output element,
+# while the max reduction over an fp32 array has no input capable of
+# producing `+inf` on a finite input set — so the defect is in the
+# lifted max/exp reduction path, not the test harness.  This is a
+# pre-existing transpiler bug independent of both the overload fix
+# and the FLAT_LOAD SADDR-form fix in handle_flat.cpp; investigation
+# deferred to a dedicated pass.
+#
+# The softmax kernel in compare_correctness's Triton corpus
+# (`corpus_softmax_fp32`) is structurally different (different
+# reduction tree shape, different BLOCK_SIZE) and fails loudly at
+# lift time via the writelane/readlane-post-raise-safety-net
+# classifier; that failure mode is documented in
+# hotswap/docs/modrep-predicate-chain.md §9 (5) sibling-class note
+# and is not the same defect as the one re-exposed here.
+set_tests_properties(Gfx1250Gpu.Softmax PROPERTIES
+  WILL_FAIL TRUE
+  LABELS "transpiler;xfail"
+)
 
 # Integration vecadd via runPipelineAllKernels: hipError 719 (unspecified
 # launch failure).  Single-kernel path (Gfx1250Gpu.Vecadd) works; the

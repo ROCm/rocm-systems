@@ -76,7 +76,12 @@ static void testMfmaKernel(const char *kernelSymbol, int M, int N, int K) {
          hRef[1], M * N - 1, hRef[M * N - 1]);
 
   // Run translated kernel
-  auto pipeResult = transpiler::runPipeline(coData, "gfx942", kernelSymbol);
+  // Single-ISA lift: pass the ISA twice (source == target).  See
+  // pipeline.hpp for why the 3-string convenience overload was
+  // removed (silent capture of 4-string cross-arch calls under
+  // standard pointer-to-bool conversion).
+  auto pipeResult = transpiler::runPipeline(coData, "gfx942", "gfx942",
+                                            kernelSymbol);
   ASSERT_TRUE(pipeResult.success) << "Pipeline failed for " << kernelSymbol;
   printf("  Raised %d/%d instructions\n", pipeResult.liftedCount,
          pipeResult.totalCount);

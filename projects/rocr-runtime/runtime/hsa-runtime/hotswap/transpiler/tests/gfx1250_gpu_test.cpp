@@ -96,6 +96,132 @@ static void doTestVecadd() {
 }
 
 // ============================================================================
+// rcp_sqrt: per-thread `out[i] = 1.0f / sqrtf(in[i])`, fp32.
+//
+// End-to-end runtime gate on the v_div_scale_f32-literal-numer decoder
+// fix in `handle_valu.cpp::V_DIV_SCALE_F32` (commit 52ccf893aa +
+// follow-up 46f6acdb88).  Pair with the lit fixture
+// `lit_tests/v_div_scale_f32_literal_numer/` which pins the IR-level
+// call shape; this GPU test pins the numerical result after re-
+// lowering onto gfx942 and execution on-device.
+//
+// Pure per-thread elementwise — no reductions, no cross-lane ops, no
+// wave-size-sensitive idioms — so cross-widening has no observable
+// effect and the only thing this test actually exercises is whether
+// the IEEE-conformant div_scale+Newton+div_fixup chain round-trips
+// from gfx1250's literal-numer encoding through salmon's raise, back
+// through the gfx942 backend's lowering of the lifted
+// `@llvm.amdgcn.div.scale.f32(1.0, ...)` intrinsic, into a correct
+// runtime result.  Pre-fix, both scale calls decoded to
+// `(<vgpr>, <vgpr>, false)` and the backend's div_fixup collapsed
+// every output to 1.0 bit-exact; this test's ULP-envelope assertion
+// catches that regression as a max-relative-error well beyond the
+// 2-ULP tolerance.
+//
+// Input sweep: 256 positive normalized fp32 values in [1e-4, 1e4].
+// No subnormals, no zeros, no negatives — keeping the input domain
+// inside IEEE-happy-path avoids NaN / inf / -0 edge cases that would
+// put the ULP envelope at the mercy of host vs device rounding-mode
+// drift rather than testing the div-scale decoder.
+// ============================================================================
+static void doTestRcpSqrt() {
+  printf("--- rcp_sqrt_kernel (fp32, per-thread 1/sqrt(x)) ---\n");
+  std::string path = std::string(GFX1250_DATA_DIR) + "/rcp_sqrt_gfx1250.hsaco";
+  auto data = transpiler::readFile(path);
+  ASSERT_FALSE(data.empty()) << "Cannot read " << path;
+
+  auto result = transpiler::runPipeline(data, "gfx1250", "gfx942",
+                                         "rcp_sqrt_kernel");
+  ASSERT_TRUE(result.success) << "Pipeline failed for rcp_sqrt";
+  printf("  Pipeline: raised %d/%d insts, HSACO=%zu bytes\n",
+         result.liftedCount, result.totalCount, result.hsaco.size());
+
+  const int N = 256;
+  std::vector<float> hIn(N), hOut(N), hRef(N);
+  std::mt19937 rng(42);
+  // Positive normalized range [1e-4, 1e4]; sqrt domain trivially
+  // satisfies IEEE's "well-conditioned" precondition for the divide
+  // that follows.  Picked to cover small / medium / large magnitudes
+  // without dipping into subnormal / zero / infinity territory.
+  std::uniform_real_distribution<float> dist(1e-4f, 1e4f);
+  for (int i = 0; i < N; i++) {
+    hIn[i] = dist(rng);
+    hRef[i] = 1.0f / std::sqrt(hIn[i]);
+  }
+
+  float *dIn, *dOut;
+  HIP_ASSERT(hipMalloc(&dIn, N * sizeof(float)));
+  HIP_ASSERT(hipMalloc(&dOut, N * sizeof(float)));
+  HIP_ASSERT(hipMemcpy(dIn, hIn.data(), N * sizeof(float),
+                       hipMemcpyHostToDevice));
+  HIP_ASSERT(hipMemset(dOut, 0, N * sizeof(float)));
+
+  hipModule_t mod;
+  HIP_ASSERT(hipModuleLoadData(&mod, result.hsaco.data()));
+  hipFunction_t func;
+  HIP_ASSERT(hipModuleGetFunction(&func, mod, "rcp_sqrt_kernel"));
+
+  auto meta = transpiler::extractKernelMeta(data, "rcp_sqrt_kernel");
+
+  // Kernel signature: `rcp_sqrt_kernel(float *out, const float *in)`.
+  // First 8 bytes = out pointer, next 8 = in pointer.  hipcc lays
+  // hidden args (workgroup dims / implicit args) after the explicit
+  // args; kernargSegmentSize reflects the full padded layout and is
+  // what we size argBuf to.
+  std::vector<uint8_t> argBuf(meta.kernargSegmentSize, 0);
+  memcpy(argBuf.data() + 0, &dOut, 8);
+  memcpy(argBuf.data() + 8, &dIn, 8);
+  size_t argSz = argBuf.size();
+  void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, argBuf.data(),
+                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSz,
+                    HIP_LAUNCH_PARAM_END};
+  int wgSize = meta.maxFlatWorkgroupSize > 0 ? meta.maxFlatWorkgroupSize : 256;
+  // Cap at N — the kernel uses `blockIdx.x * blockDim.x + threadIdx.x`
+  // as its global index without a bounds check, so N must be an exact
+  // multiple of wgSize (or we must ensure the launch covers exactly N
+  // threads).  Clamping wgSize to N and using gridX = 1 guarantees
+  // the latter for any N ≤ hipcc's default work-group limit.
+  if (wgSize > N) wgSize = N;
+  int gridX = (N + wgSize - 1) / wgSize;
+  HIP_ASSERT(hipModuleLaunchKernel(func, gridX, 1, 1, wgSize, 1, 1,
+                                   meta.groupSegmentFixedSize, nullptr,
+                                   nullptr, config));
+  HIP_ASSERT(hipDeviceSynchronize());
+  HIP_ASSERT(hipMemcpy(hOut.data(), dOut, N * sizeof(float),
+                       hipMemcpyDeviceToHost));
+
+  int errors = 0;
+  float maxRelErr = 0.0f;
+  // 2 ULP at fp32's 1.0 = ~2.4e-7; the AMDGPU div_scale+Newton+div_fixup
+  // chain is IEEE-conformant on normalized positive inputs (correctly-
+  // rounded up to the last bit), and `std::sqrt` on the host is the
+  // same correctly-rounded primitive, so a strict < 2 ULP relative-
+  // error envelope is the tightest band that also tolerates any
+  // host/device rounding-mode configuration drift without false
+  // positives.  The pre-fix bug produces max-rel-err ≈ 1 (output
+  // collapses to 1.0 bit-exact regardless of input), so the test's
+  // signal margin is enormous compared to this envelope.
+  const float kTolRel = 2.0e-7f;
+  for (int i = 0; i < N; i++) {
+    float diff = std::fabs(hOut[i] - hRef[i]);
+    float rel = diff / std::fabs(hRef[i]);
+    if (rel > maxRelErr) maxRelErr = rel;
+    if (rel > kTolRel) {
+      if (errors < 3)
+        fprintf(stderr, "  [%d] in=%g got=%g ref=%g rel_err=%e\n",
+                i, hIn[i], hOut[i], hRef[i], rel);
+      errors++;
+    }
+  }
+
+  (void)hipFree(dIn);
+  (void)hipFree(dOut);
+  (void)hipModuleUnload(mod);
+  printf("  Result: %d errors, max_rel_err=%e\n", errors, maxRelErr);
+  EXPECT_EQ(errors, 0) << errors << " element mismatches in rcp_sqrt";
+}
+
+// ============================================================================
 // WMMA probe: scaled-down chained/parallel WMMA matmul probes.
 //
 // Ladder probes for isolating the gfx1250 → gfx942 `v_wmma_f32_16x16x32_f16`
@@ -895,6 +1021,9 @@ TEST_F(Gfx1250Gpu, DsSwizzle)      { doTestDsSwizzle(); }      // P6 explicit
 
 // Elementwise.
 TEST_F(Gfx1250Gpu, Vecadd)         { doTestVecadd(); }
+// `1.0f / sqrtf(x)` — IEEE fdiv expansion end-to-end gate; pairs with
+// `lit_tests/v_div_scale_f32_literal_numer/` at the IR layer.
+TEST_F(Gfx1250Gpu, RcpSqrt)        { doTestRcpSqrt(); }
 
 // WMMA probe ladder (see doTestWmmaProbe / wmma_chain_probe_kernel.hip).
 // One probe per (tiles × chain) combination; first failing probe localizes

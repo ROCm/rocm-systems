@@ -84,6 +84,7 @@ other two fixtures. Verify with `llvm-objdump -d --mcpu=gfx1250
 | `permlane16_swap_gfx1250.hsaco` | P4 hand-crafted regression (XOR-16 swap) | hipcc inline-asm | cross-lane unit | No | `v_permlane16_swap_b32_e32` | `Gfx1250Gpu.Permlane16Swap` |
 | `dpp_quad_perm_gfx1250.hsaco` | P5 hand-crafted regression (XOR-1 quad swap) | hipcc inline-asm | cross-lane unit | No | `v_mov_b32_dpp ... quad_perm:[1,0,3,2]` | `Gfx1250Gpu.DppQuadPerm` |
 | `ds_swizzle_gfx1250.hsaco` | P6 hand-crafted regression (XOR-2 BITMASK_PERM swizzle) | hipcc inline-asm | cross-lane unit | No | `ds_swizzle_b32 offset:swizzle(SWAP,2)` | `Gfx1250Gpu.DsSwizzle` |
+| `rcp_sqrt_gfx1250.hsaco` | `1.0f / sqrtf(x)` literal-numer div-scale fixture | hipcc | elementwise | No | `v_sqrt_f32`, `v_div_scale_f32 .., 1.0`, `v_div_fixup_f32 .., 1.0` | `Gfx1250Gpu.RcpSqrt` |
 
 ## What these exercise (and what they don't)
 
