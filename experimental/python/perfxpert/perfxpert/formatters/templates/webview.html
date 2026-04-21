@@ -207,6 +207,12 @@ code { font-family:var(--mono); font-size:.87em; }
 .h-src-toggle .h-src-chev { display:inline-block; transition:transform .2s ease; }
 .h-src-toggle.open .h-src-chev { transform:rotate(180deg); }
 .h-src-row td { background:var(--bg2); padding:.75rem 1.1rem !important; }
+/* Severity tint on the expandable source panel row — mirrors the
+   classify_severity() buckets (>=20 / >=5 / >=1 / <1 % of total). */
+.h-src-row.h-src-critical td { border-left:3px solid #e84040; }
+.h-src-row.h-src-hot      td { border-left:3px solid #f08432; }
+.h-src-row.h-src-warm     td { border-left:3px solid #caa828; }
+.h-src-row.h-src-cool     td { border-left:3px solid #4d8ef2; }
 .h-src-panel { display:flex; flex-direction:column; gap:.5rem; }
 .h-src-panel.h-src-empty { color:var(--sub); font-size:.88rem; }
 .h-src-item { display:flex; align-items:center; flex-wrap:wrap; gap:.55rem;

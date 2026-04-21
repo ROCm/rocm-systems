@@ -341,6 +341,23 @@ def _format_as_webview(
             f'<span class="h-src-chev">&#9662;</span>'
             f"</button>"
         )
+        # Severity class on the expandable source panel row mirrors the
+        # ``_classify_severity`` buckets used by the source-panel frame and
+        # the recommendation cards. Spec three-reviewer consolidation
+        # (2026-04): the ``h-src-*`` prefix is already a stable convention
+        # (``h-src-toggle``, ``h-src-row``, ``h-src-item``, ``h-src-badge``,
+        # ``h-src-kind``, ``h-src-panel``); adding ``h-src-critical``,
+        # ``h-src-hot``, ``h-src-warm``, ``h-src-cool`` keeps the naming
+        # consistent and makes the severity tier queryable from CSS.
+        from ._source_correlation import _classify_severity as _cls_sev
+        _sev_id_for_row, _, _ = _cls_sev(pct)
+        _H_SRC_SEV_CLASS = {
+            "HIGH": "h-src-critical",
+            "MEDIUM": "h-src-hot",
+            "LOW": "h-src-warm",
+            "INFO": "h-src-cool",
+        }
+        _h_src_sev_cls = _H_SRC_SEV_CLASS.get(_sev_id_for_row, "h-src-cool")
         hotspot_rows.append(
             f"<tr{hot} data-h-src-row>"
             f"<td>{i + 1}</td>"
@@ -361,7 +378,7 @@ def _format_as_webview(
         # by severity so the expanded panel carries the same red/orange/
         # yellow/blue cue as the surrounding recommendation cards).
         hotspot_rows.append(
-            f'<tr class="h-src-row" hidden>'
+            f'<tr class="h-src-row {_h_src_sev_cls}" hidden>'
             f'<td colspan="7">'
             + _render_source_panel(i, locs, pct)
             + "</td></tr>"

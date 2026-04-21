@@ -119,9 +119,13 @@ def test_webview_hotspot_row_has_source_chevron(airgap, matching_hip_src, tmp_pa
     assert 'class="card"' not in html
     # Top Kernel Hotspots still renders as an scard.
     assert "<h2>Top Kernel Hotspots</h2>" in html
-    # Chevron toggle button + sibling source row exist.
+    # Chevron toggle button + sibling source row exist. The h-src-row
+    # ``<tr>`` now also carries a severity class (h-src-critical / hot /
+    # warm / cool) so the expandable panel tints to match the hotspot's
+    # percent_of_total bucket — assert on the class prefix rather than
+    # the full equality to allow the severity suffix.
     assert 'class="h-src-toggle"' in html
-    assert 'class="h-src-row"' in html
+    assert 'class="h-src-row ' in html or 'class="h-src-row"' in html
     # Toggle helper wired in.
     assert "toggleHSrc(" in html
 
@@ -205,5 +209,7 @@ def test_webview_source_panel_inside_hotspots_scard():
     assert m is not None, "could not locate Top Kernel Hotspots scard"
     scard_html = m.group(0)
     assert 'class="h-src-toggle"' in scard_html
-    assert 'class="h-src-row"' in scard_html
+    # h-src-row now carries a severity suffix (critical / hot / warm /
+    # cool) so allow either the bare legacy class OR the suffixed variant.
+    assert 'class="h-src-row ' in scard_html or 'class="h-src-row"' in scard_html
     assert "src/k.hip:12" in scard_html
