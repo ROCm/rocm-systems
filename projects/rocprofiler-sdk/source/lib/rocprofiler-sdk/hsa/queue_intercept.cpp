@@ -169,7 +169,8 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
             auto  kslot = tls_submit_pos & state->ring_mask;
             auto* kdst  = static_cast<char*>(state->ring_buf) + (kslot * pkt_size);
             memset(kdst, 0, pkt_size);
-            *reinterpret_cast<uint16_t*>(kdst) = (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE);
+            *reinterpret_cast<uint16_t*>(kdst) =
+                (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE);
             tls_submit_pos++;
         }
     }
