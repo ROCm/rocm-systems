@@ -57,18 +57,22 @@ def _format_as_json(
     breakdown = time_breakdown or {}
     hw = hardware_counters or {}
     total_runtime_ns = int(breakdown.get("total_runtime", 0))
+    normalized_runtime_ns = int(breakdown.get("normalized_runtime", total_runtime_ns))
     kernel_time_ns = int(breakdown.get("total_kernel_time", 0))
     memcpy_time_ns = int(breakdown.get("total_memcpy_time", 0))
     kernel_pct = float(breakdown.get("kernel_percent", 0))
     memcpy_pct = float(breakdown.get("memcpy_percent", 0))
     overhead_pct = float(breakdown.get("overhead_percent", 0))
-    # Derive api_overhead_ns from the percentage; clamp negative values to 0
-    api_overhead_ns = max(0, int(total_runtime_ns * overhead_pct / 100.0))
+    # Derive API/idle time from the same denominator that produced the
+    # percentages so multi-DB overlap reports stay internally consistent.
+    api_overhead_ns = max(0, int(normalized_runtime_ns * overhead_pct / 100.0))
     idle_time_ns = max(
-        0, total_runtime_ns - kernel_time_ns - memcpy_time_ns - api_overhead_ns
+        0, normalized_runtime_ns - kernel_time_ns - memcpy_time_ns - api_overhead_ns
     )
     idle_pct = (
-        float(idle_time_ns / total_runtime_ns * 100.0) if total_runtime_ns > 0 else 0.0
+        float(idle_time_ns / normalized_runtime_ns * 100.0)
+        if normalized_runtime_ns > 0
+        else 0.0
     )
 
     # --- metadata ---
@@ -97,6 +101,7 @@ def _format_as_json(
         # --- execution_breakdown ---
         "execution_breakdown": {
             "total_runtime_ns": total_runtime_ns,
+            "normalized_runtime_ns": normalized_runtime_ns,
             "kernel_time_ns": kernel_time_ns,
             "kernel_time_pct": round(kernel_pct, 2),
             "memcpy_time_ns": memcpy_time_ns,
@@ -208,8 +213,8 @@ def _build_summary(
 
     top_kernel = hotspots[0].get("name", "N/A") if hotspots else "N/A"
     key_findings = [
-        f"Kernel execution: {kernel_pct:.1f}% of total runtime",
-        f"Memory copy overhead: {memcpy_pct:.1f}% of total runtime",
+        f"Kernel execution: {kernel_pct:.1f}% of normalized runtime share",
+        f"Memory copy overhead: {memcpy_pct:.1f}% of normalized runtime share",
         f"Top kernel: {top_kernel}",
     ]
     if has_counters:

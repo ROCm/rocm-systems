@@ -89,7 +89,7 @@ def compute_time_breakdown(connection: RocpdImportData) -> Dict[str, Any]:
                 "overhead_percent": 0,
             }
 
-        return {
+        breakdown = {
             "total_kernel_time": result[0] or 0,
             "total_memcpy_time": result[1] or 0,
             "total_runtime": result[2] or 0,
@@ -97,6 +97,31 @@ def compute_time_breakdown(connection: RocpdImportData) -> Dict[str, Any]:
             "memcpy_percent": result[4] or 0,
             "overhead_percent": max(0.0, result[5] or 0),
         }
+
+        if getattr(connection, "db_count", 1) > 1:
+            normalized_runtime = connection.sum_shard_runtime_envelopes(
+                ["kernels", "memory_copies"]
+            )
+            if normalized_runtime > 0:
+                breakdown["normalized_runtime"] = normalized_runtime
+                breakdown["kernel_percent"] = (
+                    breakdown["total_kernel_time"] * 100.0 / normalized_runtime
+                )
+                breakdown["memcpy_percent"] = (
+                    breakdown["total_memcpy_time"] * 100.0 / normalized_runtime
+                )
+                breakdown["overhead_percent"] = max(
+                    0.0,
+                    (
+                        normalized_runtime
+                        - breakdown["total_kernel_time"]
+                        - breakdown["total_memcpy_time"]
+                    )
+                    * 100.0
+                    / normalized_runtime,
+                )
+
+        return breakdown
 
     except Exception as e:
         print(f"Warning: Could not compute time breakdown: {e}", file=sys.stderr)

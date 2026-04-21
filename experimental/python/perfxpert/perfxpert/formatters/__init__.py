@@ -165,6 +165,9 @@ def format_analysis_output(
 
     total_runtime_ms = time_breakdown.get("total_runtime", 0) / 1e6
     lines.append(f"Total Runtime: {total_runtime_ms:,.2f} ms")
+    if "normalized_runtime" in time_breakdown:
+        normalized_runtime_ms = time_breakdown.get("normalized_runtime", 0) / 1e6
+        lines.append(f"Normalized Runtime: {normalized_runtime_ms:,.2f} ms")
     lines.append("")
 
     # Time Breakdown
@@ -184,20 +187,23 @@ def format_analysis_output(
 
     kernel_time_ms = time_breakdown.get("total_kernel_time", 0) / 1e6
     memcpy_time_ms = time_breakdown.get("total_memcpy_time", 0) / 1e6
+    runtime_for_breakdown_ms = (
+        time_breakdown.get("normalized_runtime", time_breakdown.get("total_runtime", 0)) / 1e6
+    )
     overhead_time_ms = (
-        max(0.0, total_runtime_ms - kernel_time_ms - memcpy_time_ms)
-        if total_runtime_ms > 0
+        max(0.0, runtime_for_breakdown_ms - kernel_time_ms - memcpy_time_ms)
+        if runtime_for_breakdown_ms > 0
         else 0
     )
 
     lines.append(
-        f"  Kernel Execution:  {kernel_time_ms:10,.2f} ms  ({kernel_pct:5.1f}%)  {make_bar(kernel_pct)}"
+        f"  Kernel Execution:  {kernel_time_ms:10,.2f} ms  ({kernel_pct:5.1f}% normalized)  {make_bar(kernel_pct)}"
     )
     lines.append(
-        f"  Memory Copies:     {memcpy_time_ms:10,.2f} ms  ({memcpy_pct:5.1f}%)  {make_bar(memcpy_pct)}"
+        f"  Memory Copies:     {memcpy_time_ms:10,.2f} ms  ({memcpy_pct:5.1f}% normalized)  {make_bar(memcpy_pct)}"
     )
     lines.append(
-        f"  API Overhead:      {overhead_time_ms:10,.2f} ms  ({overhead_pct:5.1f}%)  {make_bar(overhead_pct)}"
+        f"  API Overhead:      {overhead_time_ms:10,.2f} ms  ({overhead_pct:5.1f}% normalized)  {make_bar(overhead_pct)}"
     )
     # Per-API annotation (ROCM-21553 C2)
     if api_overhead and api_overhead.get("has_api_data"):

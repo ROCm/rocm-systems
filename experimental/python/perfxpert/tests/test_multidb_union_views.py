@@ -56,6 +56,107 @@ def _create_test_db(path, kernel_name, kernel_duration):
 
 
 class TestMultiFileUnionViews:
+    def test_time_breakdown_percentages_do_not_exceed_100_for_multidb_overlap(
+        self, tmp_path
+    ):
+        """Multi-DB breakdown must preserve wall-clock runtime and expose a
+        separate normalization runtime for overlap-safe percentages."""
+        db0 = tmp_path / "shard0.db"
+        db1 = tmp_path / "shard1.db"
+        _create_test_db(db0, "kernel_A", 80)
+        _create_test_db(db1, "kernel_B", 80)
+
+        from perfxpert.analyze import compute_time_breakdown
+        from perfxpert.connection import PerfxpertConnection
+
+        breakdown = compute_time_breakdown(PerfxpertConnection([str(db0), str(db1)]))
+
+        assert breakdown["total_kernel_time"] == 160
+        assert breakdown["total_runtime"] == 80
+        assert breakdown["normalized_runtime"] == 160
+        assert breakdown["kernel_percent"] == 100.0
+        assert breakdown["memcpy_percent"] == 0.0
+        assert breakdown["overhead_percent"] == 0.0
+
+    def test_time_breakdown_uses_memcpy_runtime_for_multidb_overlap(self, tmp_path):
+        db0 = tmp_path / "shard0.db"
+        db1 = tmp_path / "shard1.db"
+        _create_test_db(db0, "kernel_A", 0)
+        _create_test_db(db1, "kernel_B", 0)
+
+        for path, name in [(db0, "copy0"), (db1, "copy1")]:
+            conn = sqlite3.connect(str(path))
+            conn.execute("DELETE FROM kernels")
+            conn.execute(
+                "INSERT INTO memory_copies VALUES (?, 100, 180, 80, 1024)",
+                (name,),
+            )
+            conn.commit()
+            conn.close()
+
+        from perfxpert.analyze import compute_time_breakdown
+        from perfxpert.connection import PerfxpertConnection
+
+        breakdown = compute_time_breakdown(PerfxpertConnection([str(db0), str(db1)]))
+
+        assert breakdown["total_kernel_time"] == 0
+        assert breakdown["total_memcpy_time"] == 160
+        assert breakdown["total_runtime"] == 80
+        assert breakdown["normalized_runtime"] == 160
+        assert breakdown["kernel_percent"] == 0.0
+        assert breakdown["memcpy_percent"] == 100.0
+        assert breakdown["overhead_percent"] == 0.0
+
+    def test_time_breakdown_counts_shards_with_only_one_activity_source(self, tmp_path):
+        db0 = tmp_path / "shard0.db"
+        db1 = tmp_path / "shard1.db"
+        _create_test_db(db0, "kernel_A", 80)
+        _create_test_db(db1, "kernel_B", 0)
+
+        conn = sqlite3.connect(str(db1))
+        conn.execute("DELETE FROM kernels")
+        conn.execute(
+            "INSERT INTO memory_copies VALUES ('copy_B', 100, 120, 20, 1024)"
+        )
+        conn.commit()
+        conn.close()
+
+        from perfxpert.analyze import compute_time_breakdown
+        from perfxpert.connection import PerfxpertConnection
+
+        breakdown = compute_time_breakdown(PerfxpertConnection([str(db0), str(db1)]))
+
+        assert breakdown["total_kernel_time"] == 80
+        assert breakdown["total_memcpy_time"] == 20
+        assert breakdown["total_runtime"] == 80
+        assert breakdown["normalized_runtime"] == 100
+        assert breakdown["kernel_percent"] == 80.0
+        assert breakdown["memcpy_percent"] == 20.0
+        assert breakdown["overhead_percent"] == 0.0
+
+    def test_time_breakdown_uses_one_envelope_per_shard_across_sources(self, tmp_path):
+        db0 = tmp_path / "shard0.db"
+        db1 = tmp_path / "shard1.db"
+        _create_test_db(db0, "kernel_A", 80)
+        _create_test_db(db1, "kernel_B", 20)
+
+        conn = sqlite3.connect(str(db0))
+        conn.execute(
+            "INSERT INTO memory_copies VALUES ('copy_A', 300, 340, 40, 1024)"
+        )
+        conn.commit()
+        conn.close()
+
+        from perfxpert.analyze import compute_time_breakdown
+        from perfxpert.connection import PerfxpertConnection
+
+        breakdown = compute_time_breakdown(PerfxpertConnection([str(db0), str(db1)]))
+
+        assert breakdown["total_runtime"] == 240
+        assert breakdown["normalized_runtime"] == 260
+        assert breakdown["total_kernel_time"] == 100
+        assert breakdown["total_memcpy_time"] == 40
+
     def test_kernels_visible_from_both_dbs(self, tmp_path):
         db0 = tmp_path / "shard0.db"
         db1 = tmp_path / "shard1.db"
