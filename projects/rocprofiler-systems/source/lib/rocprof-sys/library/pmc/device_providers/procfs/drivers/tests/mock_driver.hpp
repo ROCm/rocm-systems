@@ -7,12 +7,39 @@
 
 #include <gmock/gmock.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <utility>
 
 namespace rocprofsys::pmc::drivers::procfs::testing
 {
+
+static constexpr std::size_t DEFAULT_CPU_COUNT    = 4;
+static constexpr std::size_t DEFAULT_SOCKET_COUNT = 2;
+static constexpr float       DEFAULT_CPU_FREQ_MHZ = 2000.0F;
+
+static constexpr std::int64_t KB_TO_BYTES = 1024;
+static constexpr std::int64_t MB_TO_BYTES = KB_TO_BYTES * KB_TO_BYTES;
+
+static constexpr cpu_jiffies DEFAULT_JIFFIES{ /* user    */ std::uint64_t{ 200 },
+                                              /* nice    */ std::uint64_t{ 10 },
+                                              /* system  */ std::uint64_t{ 150 },
+                                              /* idle    */ std::uint64_t{ 9500 },
+                                              /* iowait  */ std::uint64_t{ 50 },
+                                              /* irq     */ std::uint64_t{ 30 },
+                                              /* softirq */ std::uint64_t{ 60 } };
+
+static constexpr rusage_snapshot DEFAULT_RUSAGE{
+    /* page_rss         */ std::int64_t{ 50 } * MB_TO_BYTES,
+    /* virt_mem         */ std::int64_t{ 200 } * MB_TO_BYTES,
+    /* peak_rss         */ std::int64_t{ 60 } * MB_TO_BYTES,
+    /* context_switches */ std::int64_t{ 1000 },
+    /* page_faults      */ std::int64_t{ 500 },
+    /* user_mode_time   */ std::int64_t{ 5'000'000 },
+    /* kernel_mode_time */ std::int64_t{ 1'000'000 },
+};
 
 /**
  * @brief Mock implementation of procfs driver for unit testing.
@@ -26,7 +53,6 @@ public:
     MOCK_METHOD((std::map<size_t, cpu_jiffies>), read_proc_stat, ());
     MOCK_METHOD((std::map<size_t, float>), read_cpu_frequencies, ());
     MOCK_METHOD(rusage_snapshot, read_rusage, ());
-    MOCK_METHOD(size_t, get_cpu_count, ());
     MOCK_METHOD((const socket_topology_t&), get_socket_topology, (), (const));
     MOCK_METHOD(size_t, get_socket_count, (), (const));
 
@@ -39,44 +65,22 @@ public:
     {
         using ::testing::Return;
 
-        ON_CALL(*this, get_cpu_count()).WillByDefault(Return(4));
-
-        std::map<size_t, cpu_jiffies> default_jiffies;
-        for(size_t i = 0; i < 4; ++i)
+        std::map<std::size_t, cpu_jiffies> default_jiffies;
+        std::map<std::size_t, float>       default_freqs;
+        for(std::size_t i = 0; i < DEFAULT_CPU_COUNT; ++i)
         {
-            cpu_jiffies j;
-            j.user             = 200;
-            j.nice             = 10;
-            j.system           = 150;
-            j.idle             = 9500;
-            j.iowait           = 50;
-            j.irq              = 30;
-            j.softirq          = 60;
-            default_jiffies[i] = j;
+            default_jiffies[i] = DEFAULT_JIFFIES;
+            default_freqs[i]   = DEFAULT_CPU_FREQ_MHZ;
         }
+
         ON_CALL(*this, read_proc_stat()).WillByDefault(Return(default_jiffies));
-
-        std::map<size_t, float> default_freqs;
-        for(size_t i = 0; i < 4; ++i)
-        {
-            default_freqs[i] = 2000.0f;
-        }
         ON_CALL(*this, read_cpu_frequencies()).WillByDefault(Return(default_freqs));
-
-        rusage_snapshot default_rusage;
-        default_rusage.page_rss         = 50 * 1024 * 1024;
-        default_rusage.virt_mem         = 200 * 1024 * 1024;
-        default_rusage.peak_rss         = 60 * 1024 * 1024;
-        default_rusage.context_switches = 1000;
-        default_rusage.page_faults      = 500;
-        default_rusage.user_mode_time   = 5000000;
-        default_rusage.kernel_mode_time = 1000000;
-        ON_CALL(*this, read_rusage()).WillByDefault(Return(default_rusage));
+        ON_CALL(*this, read_rusage()).WillByDefault(Return(DEFAULT_RUSAGE));
 
         static socket_topology_t default_topology = { { 0, { 0, 1 } }, { 1, { 2, 3 } } };
         ON_CALL(*this, get_socket_topology())
             .WillByDefault(::testing::ReturnRef(default_topology));
-        ON_CALL(*this, get_socket_count()).WillByDefault(Return(2));
+        ON_CALL(*this, get_socket_count()).WillByDefault(Return(DEFAULT_SOCKET_COUNT));
     }
 };
 

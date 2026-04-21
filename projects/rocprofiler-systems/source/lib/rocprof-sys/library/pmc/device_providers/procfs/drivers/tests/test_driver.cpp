@@ -38,13 +38,6 @@ TEST_F(procfs_driver_test, reads_rusage)
     EXPECT_GT(snap.virt_mem, 0);
 }
 
-TEST_F(procfs_driver_test, cpu_count_stored)
-{
-    driver drv(cpu_count);
-
-    EXPECT_EQ(drv.get_cpu_count(), cpu_count);
-}
-
 TEST_F(procfs_driver_test, socket_topology_nonempty)
 {
     driver drv(cpu_count);

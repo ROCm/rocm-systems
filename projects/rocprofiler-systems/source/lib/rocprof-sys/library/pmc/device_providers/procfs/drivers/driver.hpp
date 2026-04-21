@@ -31,7 +31,7 @@ static constexpr size_t STATM_BUFFER_SIZE = 256;
 // Approximate bytes per /proc/stat CPU line (for dynamic sizing).
 static constexpr size_t BYTES_PER_STAT_LINE = 120;
 // sysfs frequency file: value in kHz, always < 32 bytes.
-static constexpr size_t SYSFS_FREQ_BUFFER_SIZE = 32;
+static constexpr uint8_t SYSFS_FREQ_BUFFER_SIZE = 32;
 // ru_maxrss is in KB on Linux.
 static constexpr int64_t KB_TO_BYTES = 1024;
 // Microseconds per second (for timeval conversion).
@@ -41,7 +41,7 @@ static constexpr float KHZ_TO_MHZ = 0.001f;
 // /proc/stat per-CPU line prefix.
 static constexpr std::string_view PROC_STAT_CPU_PREFIX = "cpu";
 // Number of jiffies fields per CPU line in /proc/stat.
-static constexpr size_t JIFFIES_FIELD_COUNT = 7;
+static constexpr uint8_t JIFFIES_FIELD_COUNT = 7;
 
 struct file_closer
 {
@@ -122,7 +122,7 @@ struct statm_data
 using socket_topology_t = std::map<size_t, std::set<size_t>>;
 
 // sysfs topology file: value is a small integer, always < 16 bytes.
-static constexpr size_t SYSFS_TOPOLOGY_BUFFER_SIZE = 16;
+static constexpr uint8_t SYSFS_TOPOLOGY_BUFFER_SIZE = 16;
 
 /**
  * @brief Discover CPU socket topology from sysfs.
@@ -251,8 +251,7 @@ public:
      *        per-CPU sysfs file handles for frequency reading.
      */
     explicit driver(size_t cpu_count)
-    : m_cpu_count(cpu_count)
-    , m_stat_buffer(
+    : m_stat_buffer(
           std::max(DEFAULT_STAT_BUFFER_SIZE, (cpu_count * BYTES_PER_STAT_LINE) + 256))
     , m_statm_buffer(STATM_BUFFER_SIZE)
     , m_freq_buffer(SYSFS_FREQ_BUFFER_SIZE)
@@ -324,8 +323,6 @@ public:
         return snap;
     }
 
-    [[nodiscard]] size_t get_cpu_count() const noexcept { return m_cpu_count; }
-
 private:
     [[nodiscard]] static std::string_view read_file(unique_file& fd, const char* path,
                                                     std::vector<char>& buffer)
@@ -365,7 +362,6 @@ private:
         return result;
     }
 
-    size_t                        m_cpu_count = 0;
     unique_file                   m_proc_stat_fd;
     unique_file                   m_proc_statm_fd;
     std::map<size_t, unique_file> m_sysfs_freq_fds;
