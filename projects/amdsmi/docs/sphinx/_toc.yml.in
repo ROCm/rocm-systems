@@ -59,7 +59,7 @@ subtrees:
 
 - caption: Tutorials
   entries:
-  - url: https://github.com/ROCm/amdsmi/tree/${branch}/example
+  - url: https://github.com/ROCm/rocm-systems/tree/${branch}/projects/amdsmi/example
     title: AMD SMI examples (GitHub)
   - url: https://rocm.blogs.amd.com/software-tools-optimization/amd-smi-overview/README.html
     title: AMD SMI CLI walkthrough
