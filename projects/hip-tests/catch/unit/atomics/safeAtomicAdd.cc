@@ -14,6 +14,53 @@
  * @ingroup AtomicsTest
  */
 
+// Helper function to run safeAtomicAdd tests (single kernel)
+template <typename TestType>
+static void runSafeAtomicAddTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSafeAdd>(1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSafeAdd>(warp_size,
+                                                                        sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSafeAdd>(warp_size, cache_line_size);
+    }
+  }
+}
+
+// Helper function to run safeAtomicAdd tests (multiple kernels)
+template <typename TestType>
+static void runSafeAtomicAddMultiKernelTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSafeAdd>(2, 1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSafeAdd>(2, warp_size,
+                                                                          sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSafeAdd>(2, warp_size,
+                                                                          cache_line_size);
+    }
+  }
+}
+
 /**
  * Test Description
  * ------------------------
@@ -39,25 +86,9 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_safeAtomicAdd_Positive, float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSafeAdd>(1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSafeAdd>(warp_size,
-                                                                        sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSafeAdd>(warp_size, cache_line_size);
-    }
-  }
+HIP_TEST_CASE(Unit_safeAtomicAdd_Positive) {
+  SECTION("float") { runSafeAtomicAddTest<float>(); }
+  SECTION("double") { runSafeAtomicAddTest<double>(); }
 }
 
 /**
@@ -84,26 +115,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_safeAtomicAdd_Positive, float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_safeAtomicAdd_Positive_Multi_Kernel, float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSafeAdd>(2, 1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSafeAdd>(2, warp_size,
-                                                                          sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSafeAdd>(2, warp_size,
-                                                                          cache_line_size);
-    }
-  }
+HIP_TEST_CASE(Unit_safeAtomicAdd_Positive_Multi_Kernel) {
+  SECTION("float") { runSafeAtomicAddMultiKernelTest<float>(); }
+  SECTION("double") { runSafeAtomicAddMultiKernelTest<double>(); }
 }
 
 /**

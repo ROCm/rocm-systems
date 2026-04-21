@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #include "library/rocprofiler-sdk/rccl.hpp"
 #include "library/rocprofiler-sdk/rccl_internal.hpp"
@@ -83,7 +83,7 @@ struct production_pmc_registrar
                 { agent_type::GPU, rccl_device_idx, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
                   label.c_str(), description,
                   trait::name<category::comm_data>::description, LONG_DESCRIPTION,
-                  COMPONENT, MSG, trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+                  COMPONENT, MSG, trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
         };
 
         register_rccl_info(rccl_send::label,

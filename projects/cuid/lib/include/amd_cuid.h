@@ -141,7 +141,8 @@ typedef enum {
     AMDCUID_DEVICE_TYPE_CPU       = 0x2,        ///< CPU core
     AMDCUID_DEVICE_TYPE_GPU       = 0x3,        ///< GPU
     AMDCUID_DEVICE_TYPE_NIC       = 0x4,        ///< NIC (Network Interface Controller)
-    AMDCUID_DEVICE_TYPE_LAST      = 0x4         ///< Last valid device type
+    AMDCUID_DEVICE_TYPE_NPU       = 0x5,        ///< NPU (Neural Processing Unit, e.g. RyzenAI)
+    AMDCUID_DEVICE_TYPE_LAST      = 0x5         ///< Last valid device type
 } amdcuid_device_type_t;
 
 /**

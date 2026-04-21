@@ -162,6 +162,7 @@ class AMDSMICommands:
             "sys": amdsmi_interface.AmdSmiClkType.SYS,
             "mem": amdsmi_interface.AmdSmiClkType.MEM,
             "df": amdsmi_interface.AmdSmiClkType.DF,
+            "fclk": amdsmi_interface.AmdSmiClkType.DF,
             "soc": amdsmi_interface.AmdSmiClkType.SOC,
             "dcef": amdsmi_interface.AmdSmiClkType.DCEF,
             # vclk and dclk currently do not support levels so average clk is given for frequency levels
@@ -3017,7 +3018,7 @@ class AMDSMICommands:
                     "current_bandwidth_sent": "N/A",
                     "current_bandwidth_received": "N/A",
                     "max_packet_size": "N/A",
-                    "lc_perf_other_end_recovery": "N/A",
+                    "lc_perf_other_end_recovery_count": "N/A",
                 }
 
                 try:
@@ -3053,7 +3054,7 @@ class AMDSMICommands:
                     pcie_dict["replay_roll_over_count"] = pcie_metric["pcie_replay_roll_over_count"]
                     pcie_dict["nak_received_count"] = pcie_metric["pcie_nak_received_count"]
                     pcie_dict["nak_sent_count"] = pcie_metric["pcie_nak_sent_count"]
-                    pcie_dict["lc_perf_other_end_recovery"] = pcie_metric[
+                    pcie_dict["lc_perf_other_end_recovery_count"] = pcie_metric[
                         "pcie_lc_perf_other_end_recovery_count"
                     ]
 
@@ -3314,6 +3315,9 @@ class AMDSMICommands:
                     "deep_sleep": "N/A",
                 }
 
+                clocks["uclk_aid"] = "N/A"
+                clocks["socclks_mid"] = "N/A"
+
                 clock_unit = "MHz"
 
                 # Populate clock values from gpu_metrics_info
@@ -3408,6 +3412,30 @@ class AMDSMICommands:
                         )
                 except KeyError as e:
                     logging.debug("Failed to get current_socclk for gpu %s | %s", gpu_id, e)
+
+                try:
+                    current_uclk_aid = gpu_metric.get("current_uclk_aid", "N/A")
+                    if current_uclk_aid != "N/A":
+                        clocks["uclk_aid"] = {
+                            f"AID_{index}": self.helpers.unit_format(self.logger, clk, clock_unit)
+                            if clk != "N/A"
+                            else "N/A"
+                            for index, clk in enumerate(current_uclk_aid)
+                        }
+                except Exception as e:
+                    logging.debug("Failed to get current_uclk_aid for gpu %s | %s", gpu_id, e)
+
+                try:
+                    current_socclks_mid = gpu_metric.get("current_socclks_mid", "N/A")
+                    if current_socclks_mid != "N/A":
+                        clocks["socclks_mid"] = {
+                            f"MID_{index}": self.helpers.unit_format(self.logger, clk, clock_unit)
+                            if clk != "N/A"
+                            else "N/A"
+                            for index, clk in enumerate(current_socclks_mid)
+                        }
+                except Exception as e:
+                    logging.debug("Failed to get current_socclks_mid for gpu %s | %s", gpu_id, e)
 
                 # Populate the max and min clock values from sysfs.
                 # Min and Max values are per clock type, not per clock engine.
@@ -3650,12 +3678,74 @@ class AMDSMICommands:
                     "edge": temperature_edge_current,
                     "hotspot": temperature_hotspot_current,
                     "mem": temperature_vram_current,
+                    "hbm_stacks": gpu_metric.get("temperature_hbm_stacks", "N/A"),
+                    "mid": gpu_metric.get("temperature_mid", "N/A"),
+                    "aid": gpu_metric.get("temperature_aid", "N/A"),
+                    "xcd": "N/A",
                 }
+
+                if temperatures["hbm_stacks"] != "N/A":
+                    temperatures["hbm_stacks"] = list(temperatures["hbm_stacks"])
+                if temperatures["mid"] != "N/A":
+                    temperatures["mid"] = list(temperatures["mid"])
+                if temperatures["aid"] != "N/A":
+                    temperatures["aid"] = list(temperatures["aid"])
+
+                if num_partition != "N/A":
+                    xcp_temp_xcd = gpu_metric.get("xcp_stats.temperature_xcd", "N/A")
+                    if xcp_temp_xcd != "N/A":
+                        available_partition = min(num_partition, len(xcp_temp_xcd))
+                        temperatures["xcd"] = {
+                            f"XCP_{current_xcp}": xcp_temp_xcd[current_xcp]
+                            for current_xcp in range(available_partition)
+                        }
 
                 temp_unit_human_readable = "\N{DEGREE SIGN}C"
                 temp_unit_json = "C"
                 for temperature_key, temperature_value in temperatures.items():
-                    if "N/A" not in str(temperature_value):
+                    if isinstance(temperature_value, list):
+                        if self.logger.is_human_readable_format():
+                            formatted_values = [
+                                f"{value} {temp_unit_human_readable}" if value != "N/A" else "N/A"
+                                for value in temperature_value
+                            ]
+                            temperatures[temperature_key] = "[" + ", ".join(formatted_values) + "]"
+                        if self.logger.is_json_format():
+                            temperatures[temperature_key] = [
+                                {"value": value, "unit": temp_unit_json}
+                                if value != "N/A"
+                                else "N/A"
+                                for value in temperature_value
+                            ]
+                    elif isinstance(temperature_value, dict):
+                        for key, value in temperature_value.items():
+                            if isinstance(value, list):
+                                if self.logger.is_human_readable_format():
+                                    formatted_values = [
+                                        f"{item} {temp_unit_human_readable}"
+                                        if item != "N/A"
+                                        else "N/A"
+                                        for item in value
+                                    ]
+                                    temperature_value[key] = "[" + ", ".join(formatted_values) + "]"
+                                if self.logger.is_json_format():
+                                    temperature_value[key] = [
+                                        {"value": item, "unit": temp_unit_json}
+                                        if item != "N/A"
+                                        else "N/A"
+                                        for item in value
+                                    ]
+                            elif value != "N/A":
+                                if self.logger.is_human_readable_format():
+                                    temperature_value[key] = f"{value} {temp_unit_human_readable}"
+                                if self.logger.is_json_format():
+                                    temperature_value[key] = {
+                                        "value": value,
+                                        "unit": temp_unit_json,
+                                    }
+                    else:
+                        if temperature_value == "N/A":
+                            continue
                         if self.logger.is_human_readable_format():
                             temperatures[temperature_key] = (
                                 f"{temperature_value} {temp_unit_human_readable}"
@@ -4485,6 +4575,7 @@ class AMDSMICommands:
                     "cpu_dimm_pow_consumption",
                     "cpu_dimm_thermal_sensor",
                     "cpu_dimm_sb_reg",
+                    "cpu_svi3_vr_controller_temp",
                 ):
                     setattr(args, arg, True)
 
@@ -4659,7 +4750,7 @@ class AMDSMICommands:
                 # Only show util and ppt_limit for modes 4 and 5
                 if mode in [4, 5]:
                     static_dict["pwr_eff_mode"]["util"] = f"{util}%"
-                    static_dict["pwr_eff_mode"]["ppt_limit"] = f"{ppt_limit:.3f} Watts"
+                    static_dict["pwr_eff_mode"]["ppt_limit"] = f"{ppt_limit} Watts"
                 else:
                     # For modes 0-3, util and ppt_limit are not displayed
                     pass
@@ -5076,7 +5167,7 @@ class AMDSMICommands:
             static_dict["ccd_power"] = {}
             try:
                 power = amdsmi_interface.amdsmi_get_cpu_core_ccd_power(args.core)
-                static_dict["ccd_power"]["value"] = f"{power:.3f} Watts"
+                static_dict["ccd_power"]["value"] = f"{power} Watts"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["ccd_power"]["value"] = "N/A"
                 logging.debug(
@@ -7849,7 +7940,7 @@ class AMDSMICommands:
                 if mode in [4, 5]:
                     ppt_limit_watts = updated_ppt_limit / 1000.0  # Convert milliwatts to watts
                     static_dict["pwr_eff_mode"]["util"] = f"{updated_util}%"
-                    static_dict["pwr_eff_mode"]["ppt_limit"] = f"{ppt_limit_watts:.3f} Watts"
+                    static_dict["pwr_eff_mode"]["ppt_limit"] = f"{ppt_limit_watts} Watts"
                 else:
                     # For modes 0-3, util and ppt_limit are not displayed
                     pass
@@ -8983,22 +9074,22 @@ class AMDSMICommands:
 
             # Validate the value against the extremum
             try:
-                # Parser only allows two options sclk or mclk
+                # Parser only allows three options sclk, mclk or fclk
                 if clk_type == "sclk":
                     amdsmi_clk_type = amdsmi_interface.AmdSmiClkType.GFX
                 elif clk_type == "mclk":
                     amdsmi_clk_type = amdsmi_interface.AmdSmiClkType.MEM
+                elif clk_type == "fclk":
+                    amdsmi_clk_type = amdsmi_interface.AmdSmiClkType.DF
                 else:
-                    print(f"Valid clock types are: sclk, mclk\n")
+                    print(f"Valid clock types are: sclk, mclk, fclk\n")
                     self.logger.store_output(
                         args.gpu, "clk_limit", f"Invalid clock type {args.clk_limit.clk_type}"
                     )
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     return
-
                 clk_tuple = amdsmi_interface.amdsmi_get_clock_info(args.gpu, amdsmi_clk_type)
-
                 if lim_type == "min":
                     amdsmi_lim_type = amdsmi_interface.AmdSmiClkLimitType.MIN
                     if val > clk_tuple["max_clk"]:
@@ -9937,10 +10028,7 @@ class AMDSMICommands:
                 self.logger.clear_multiple_devices_output()
                 return
             if args.power_cap:
-                final_output = {
-                    "ppt0": "[AMDSMI_STATUS_NOT_SUPPORTED] Unable to reset to default power cap",
-                    "ppt1": "[AMDSMI_STATUS_NOT_SUPPORTED] Unable to reset to default power cap",
-                }
+                final_output = {"ppt0": "N/A", "ppt1": "N/A"}
                 power_limit_types = {}
                 for power_type in amdsmi_interface.AmdSmiPowerCapType:
                     # Strip 'AMDSMI_POWER_CAP_TYPE_' prefix and convert to lowercase

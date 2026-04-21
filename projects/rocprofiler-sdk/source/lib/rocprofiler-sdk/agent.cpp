@@ -635,8 +635,9 @@ read_topology()
 
     if(!fs::exists(sysfs_nodes_path))
     {
-        ROCP_CI_LOG(WARNING) << fmt::format("sysfs nodes path '{}' does not exist",
-                                            sysfs_nodes_path.string());
+        ROCP_WARNING << fmt::format("sysfs nodes path '{}' does not exist",
+                                    sysfs_nodes_path.string());
+
         return data;
     }
 

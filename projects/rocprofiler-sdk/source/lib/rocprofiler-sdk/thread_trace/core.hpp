@@ -144,13 +144,15 @@ public:
         params[agent] = std::move(pack);
     }
 
-    hsa::Queue::pkt_and_serialize_t pre_kernel_call(const hsa::Queue&              queue,
-                                                    uint64_t                       kernel_id,
-                                                    rocprofiler_dispatch_id_t      dispatch_id,
-                                                    rocprofiler_user_data_t*       user_data,
-                                                    const context::correlation_id* corr_id);
+    hsa::write_packet_t pre_kernel_call(const hsa::Queue&              queue,
+                                        uint64_t                       kernel_id,
+                                        rocprofiler_dispatch_id_t      dispatch_id,
+                                        rocprofiler_user_data_t*       user_data,
+                                        const context::correlation_id* corr_id);
 
-    void        post_kernel_call(inst_pkt_t& aql, const hsa::queue_info_session& session);
+    void        post_kernel_call(inst_pkt_t&                      aql,
+                                 const hsa::queue_info_session_t& session,
+                                 const hsa::packet_data_t&        packet_data);
     const auto& get_agents() const { return agents; }
 
 private:

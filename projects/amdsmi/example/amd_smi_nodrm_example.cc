@@ -64,7 +64,7 @@ int main() {
   // Allocate the memory for the sockets
   std::vector<amdsmi_socket_handle> sockets(socket_count);
   // Get the sockets of the system
-  ret = amdsmi_get_socket_handles(&socket_count, &sockets[0]);
+  ret = amdsmi_get_socket_handles(&socket_count, sockets.data());
   CHK_AMDSMI_RET(ret)
 
   std::cout << "Total Socket: " << socket_count << std::endl;
@@ -85,7 +85,7 @@ int main() {
     // Allocate the memory for the device handlers on the socket
     std::vector<amdsmi_processor_handle> processor_handles(device_count);
     // Get all devices of the socket
-    ret = amdsmi_get_processor_handles(sockets[i], &device_count, &processor_handles[0]);
+    ret = amdsmi_get_processor_handles(sockets[i], &device_count, processor_handles.data());
     CHK_AMDSMI_RET(ret)
 
     // For each device of the socket, get name and temperature.
