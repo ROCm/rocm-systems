@@ -107,4 +107,4 @@ See [CHANGELOG.md](CHANGELOG.md) for the removal history.
 
 ## Licensing
 
-MIT. opencode (system dependency, not bundled in this release) is also MIT.
+MIT. opencode is also MIT — bundled into the wheel via the build hook (`setup.py`) from the pinned upstream submodule.

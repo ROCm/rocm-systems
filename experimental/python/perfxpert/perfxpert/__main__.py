@@ -147,6 +147,20 @@ def main(argv=None):
 
         input_data = None
         if has_input:
+            # Pre-flight: every -i path must exist. Catch the missing-file
+            # case early so the user gets a clean one-liner instead of a
+            # FileNotFoundError traceback from inside PerfxpertConnection.
+            import os as _os
+            _missing = [p for p in args.input if not _os.path.exists(p)]
+            if _missing:
+                for p in _missing:
+                    print(f"⚠ Database not found: {p}", file=sys.stderr)
+                print(
+                    "Hint: pass an existing rocprofiler-sdk .db path to -i, "
+                    "or use --source-dir for source-only Tier-0 analysis.",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
             input_data = PerfxpertConnection(args.input)
 
         # Build output config from -o / -d flags
