@@ -123,6 +123,28 @@ def main(argv=None):
         help="Health check: verify MCP server, LLM providers, and dependencies",
     )
 
+    # ------------------------------------------------------------------
+    # init subcommand — guided first-run wizard (Confluence row #29)
+    # ------------------------------------------------------------------
+    from perfxpert.cli import init_cmd as _init_cmd  # local import keeps startup cheap
+
+    init_parser = subparsers.add_parser(
+        "init",
+        help=(
+            "First-run wizard: detect GPU + framework, generate "
+            "~/.config/perfxpert/config.yaml, print a suggested rocprofv3 command."
+        ),
+        description=(
+            "Guided first-run wizard. Chains four existing building blocks:\n"
+            "  1. GPU detection via rocm-smi --json (fallback: rocminfo)\n"
+            "  2. Framework detection (Tier-0 source scan + Python import probe)\n"
+            "  3. Config generation at ~/.config/perfxpert/config.yaml\n"
+            "  4. Suggested rocprofv3 first command (cost-ordered ladder)\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _init_cmd.add_args(init_parser)
+
     if argv is None:
         argv = sys.argv[1:]
 
@@ -218,6 +240,8 @@ def main(argv=None):
             return 0
     elif args.subcommand == "doctor":
         sys.exit(_run_doctor())
+    elif args.subcommand == "init":
+        return _init_cmd.run_init(args)
     else:
         parser.print_help()
         sys.exit(1)
