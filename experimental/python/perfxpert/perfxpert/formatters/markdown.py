@@ -79,14 +79,24 @@ def _format_as_markdown(
 
     lines.append("## Time Breakdown")
     lines.append("")
+    if "normalized_runtime" in breakdown:
+        lines.append(
+            f"Normalized runtime for percentage math: {breakdown['normalized_runtime'] / 1e6:,.2f} ms"
+        )
+        lines.append("")
     lines.append("| Category | Time (ms) | Percentage |")
     lines.append("|----------|-----------|------------|")
-    lines.append(f"| Kernel Execution | {kernel_ms:,.2f} | {kernel_pct:.1f}% |")
-    lines.append(f"| Memory Copies | {memcpy_ms:,.2f} | {memcpy_pct:.1f}% |")
-    overhead_ms = (
-        max(0.0, total_runtime_ms - kernel_ms - memcpy_ms) if total_runtime_ms > 0 else 0
+    lines.append(f"| Kernel Execution | {kernel_ms:,.2f} | {kernel_pct:.1f}% normalized |")
+    lines.append(f"| Memory Copies | {memcpy_ms:,.2f} | {memcpy_pct:.1f}% normalized |")
+    runtime_for_breakdown_ms = (
+        breakdown.get("normalized_runtime", breakdown.get("total_runtime", 0)) / 1e6
     )
-    lines.append(f"| API Overhead | {overhead_ms:,.2f} | {overhead_pct:.1f}% |")
+    overhead_ms = (
+        max(0.0, runtime_for_breakdown_ms - kernel_ms - memcpy_ms)
+        if runtime_for_breakdown_ms > 0
+        else 0
+    )
+    lines.append(f"| API Overhead | {overhead_ms:,.2f} | {overhead_pct:.1f}% normalized |")
     lines.append(f"| **Total** | **{total_runtime_ms:,.2f}** | **100%** |")
     lines.append("")
 
