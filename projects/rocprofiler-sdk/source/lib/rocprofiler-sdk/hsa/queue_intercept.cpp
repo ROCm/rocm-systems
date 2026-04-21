@@ -98,8 +98,7 @@ add_write_index_impl(QueueState* state, uint64_t value)
     uint64_t stride = 1 + state->k_factor;
     auto     prev   = state->virtual_wptr.fetch_add(value * stride, std::memory_order_relaxed);
     ROCP_TRACE << "add_write_index: queue=" << state->hsa_queue << " +=" << value
-               << " stride=" << stride << " prev=" << prev
-               << " new=" << (prev + value * stride);
+               << " stride=" << stride << " prev=" << prev << " new=" << (prev + value * stride);
     return prev;
 }
 
@@ -156,8 +155,8 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
     auto*       state    = tls_state;
     auto        pkt_size = tls_pkt_size;
     const auto* src      = static_cast<const char*>(pkts);
-    ROCP_TRACE << "ring_buffer_writer: pkt_count=" << pkt_count
-               << " submit_pos=" << tls_submit_pos << " k_factor=" << state->k_factor;
+    ROCP_TRACE << "ring_buffer_writer: pkt_count=" << pkt_count << " submit_pos=" << tls_submit_pos
+               << " k_factor=" << state->k_factor;
     for(uint64_t i = 0; i < pkt_count; i++)
     {
         auto        slot = tls_submit_pos & state->ring_mask;
@@ -172,7 +171,9 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
 }  // namespace
 
 void
-process_doorbell_impl(QueueState* state, hsa_signal_value_t value, const doorbell_fn_t& ring_doorbell)
+process_doorbell_impl(QueueState*          state,
+                      hsa_signal_value_t   value,
+                      const doorbell_fn_t& ring_doorbell)
 {
     std::lock_guard<std::mutex> lock(state->gate_lock);
 
@@ -203,9 +204,9 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, const doorbel
     // Packets are strided in the ring — process each one individually
     for(uint64_t i = 0; i < pkt_count; i++)
     {
-        uint64_t pkt_pos        = scan_pos + i * stride;
-        auto*    pkt            = static_cast<char*>(state->ring_buf) +
-                       ((pkt_pos & state->ring_mask) * state->pkt_size);
+        uint64_t pkt_pos = scan_pos + i * stride;
+        auto*    pkt =
+            static_cast<char*>(state->ring_buf) + ((pkt_pos & state->ring_mask) * state->pkt_size);
         uint64_t start_submit = tls_submit_pos;
         if(queue)
         {
@@ -216,17 +217,20 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, const doorbel
             ring_buffer_writer(pkt, 1);
         }
 
-        // Pad remaining slots in this stride with barrier_and
-        uint64_t used      = tls_submit_pos - start_submit;
-        uint64_t remaining = stride - used;
-        for(uint64_t k = 0; k < remaining; k++)
+        // Pad remaining slots in this stride with barrier_and (only when k_factor > 0)
+        uint64_t used = tls_submit_pos - start_submit;
+        if(state->k_factor > 0 && used < stride)
         {
-            auto  kslot = tls_submit_pos & state->ring_mask;
-            auto* kdst  = static_cast<char*>(state->ring_buf) + (kslot * state->pkt_size);
-            memset(kdst, 0, state->pkt_size);
-            *reinterpret_cast<uint16_t*>(kdst) =
-                (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE);
-            tls_submit_pos++;
+            uint64_t remaining = stride - used;
+            for(uint64_t k = 0; k < remaining; k++)
+            {
+                auto  kslot = tls_submit_pos & state->ring_mask;
+                auto* kdst  = static_cast<char*>(state->ring_buf) + (kslot * state->pkt_size);
+                memset(kdst, 0, state->pkt_size);
+                *reinterpret_cast<uint16_t*>(kdst) =
+                    (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE);
+                tls_submit_pos++;
+            }
         }
     }
 
@@ -239,8 +243,8 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, const doorbel
     {
         for(uint64_t i = 0; i < pkt_count; i++)
         {
-            uint64_t pkt_pos = scan_pos + i * stride;
-            const auto* pkt  = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
+            uint64_t    pkt_pos = scan_pos + i * stride;
+            const auto* pkt     = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
                 static_cast<char*>(state->ring_buf) +
                 ((pkt_pos & state->ring_mask) * state->pkt_size));
             sync_metadata_impl(state, pkt, 0);
