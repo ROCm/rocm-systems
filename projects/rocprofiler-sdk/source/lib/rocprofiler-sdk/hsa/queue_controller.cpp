@@ -33,6 +33,7 @@
 #include <hsa/amd_hsa_queue.h>
 
 #include <rocprofiler-sdk/fwd.h>
+#include <algorithm>
 #include <memory>
 
 namespace rocprofiler
@@ -234,11 +235,15 @@ queue_controller_load_attach_queues()
 uint64_t
 compute_queue_k_factor()
 {
+    uint64_t k = 0;
     for(const auto& itr : context::get_registered_contexts())
     {
         if(itr->dispatch_counter_collection || itr->dispatch_thread_trace) return 12;
+        if(itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) ||
+           itr->is_tracing(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH))
+            k = std::max(k, uint64_t{3});
     }
-    return 0;
+    return k;
 }
 
 void
