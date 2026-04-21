@@ -638,21 +638,97 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
 
   // ---- Division helpers (VOP3) ----
   if (sop == SemOp::V_DIV_SCALE_F32) {
-    // amdgcn_div_scale(Numerator, Denominator, i1 select_quotient)
-    // src2 in the HW instruction equals either src0 or src1 to indicate
-    // which is selected. We determine select_quotient by checking if
-    // src2 and src0 refer to the same register operand.
-    Value *s0 = ctx.B.CreateBitCast(op.srcF(0), ctx.f32Ty);
-    Value *s1 = ctx.B.CreateBitCast(op.srcF(1), ctx.f32Ty);
-    bool selectNumerator = false;
-    if (op.isSrcReg(2) && op.isSrcReg(0)) {
-      ParsedReg r2 = op.srcReg(2), r0 = op.srcReg(0);
-      selectNumerator = (r2.kind == r0.kind && r2.baseIdx == r0.baseIdx);
+    // `v_div_scale_f32 dst, vcc, src0, src1, src2` scales one operand
+    // of a numerator/denominator pair for a subsequent IEEE-conformant
+    // divide (rcp + Newton + div_fixup).  The hardware encodes the
+    // divide via operand-identity equality in the (src0, src1, src2)
+    // triple — src2 duplicates either src0 or src1 to name which
+    // operand is being scaled:
+    //
+    //   (n, d, n)  — src0 == src2, both carry the numerator       → scale numerator.
+    //   (d, d, n)  — src0 == src1, both carry the denominator     → scale denominator.
+    //
+    // The LLVM intrinsic `@llvm.amdgcn.div.scale.f32(numer, denom, flag)`
+    // takes canonical (numer, denom) and an i1 flag whose convention is
+    // documented in `include/llvm/IR/IntrinsicsAMDGPU.td`:
+    //   `0 = Denominator, 1 = Numerator`
+    // — the flag selects which of (numer, denom) is the scaling target,
+    // and the corresponding bit-pattern is what the hardware backend
+    // re-emits as src2 of the lowered instruction.
+    //
+    // Identity is at the operand level (same register slot, or same
+    // literal bit pattern), not at the runtime-value level — Triton's
+    // AMDGPU codegen emits the literal-numerator variant of `1.0 / x`
+    // as `(x, x, 1.0) + (1.0, x, 1.0)`, two scale calls whose
+    // numerator is a `1.0` inline constant in src2.  Before this
+    // handler knew about literal equality, both scale calls fell
+    // through the register-only `isSrcReg(2) && isSrcReg(0)` check,
+    // decoded as `selectNumerator = false`, and the backend's
+    // re-lowering chain collapsed every `1.0 / sqrt(...)` in the
+    // translated HSACO to a constant 1.0 via div_fixup's undefined-
+    // scale-flag special-case (observable as layer-norm's rstd
+    // deterministically reading `0x3f800000` regardless of input).
+    // Detecting the literal-matching shape closes that gap without
+    // changing the flag convention for the all-register case.
+    //
+    // Canonical `(numer, denom)` extraction from the hardware triple:
+    // the numerator is always `src2` (in both shapes above), the
+    // denominator is always `src1`.  The all-register case preserves
+    // the old `(s0, s1)` operand identities modulo alias — since
+    // src0 == src2 in the scale-numer shape, `srcF(2)` is equivalent
+    // to the old code's `srcF(0)` there; in the scale-denom shape
+    // the new code correctly routes the numer through src2 rather
+    // than silently duplicating the denom through s0/s1.
+    auto sameOperand = [&](unsigned a, unsigned b) -> bool {
+      bool aIsReg = op.isSrcReg(a), bIsReg = op.isSrcReg(b);
+      if (aIsReg != bIsReg) return false;
+      if (aIsReg) {
+        ParsedReg ra = op.srcReg(a), rb = op.srcReg(b);
+        return ra.kind == rb.kind && ra.baseIdx == rb.baseIdx;
+      }
+      // Both are non-register operands.  Only compare when both
+      // are plain immediates — other non-register kinds (special
+      // encodings that parseReg would map to VCC / EXEC / SRC_*)
+      // are not carried through the OpResolver as literals today and
+      // the `isSrcReg` check above would have returned true for
+      // them, so reaching here guarantees the isImm check is safe.
+      unsigned ai = op.srcIdx(a), bi = op.srcIdx(b);
+      if (!op.di.isImm(ai) || !op.di.isImm(bi)) return false;
+      return op.di.getImm(ai) == op.di.getImm(bi);
+    };
+
+    bool src0EqSrc2 = sameOperand(0, 2);
+    bool src0EqSrc1 = sameOperand(0, 1);
+    bool scaleNumerator;
+    if (src0EqSrc2 && !src0EqSrc1) {
+      scaleNumerator = true;    // (n, d, n)
+    } else if (src0EqSrc1 && !src0EqSrc2) {
+      scaleNumerator = false;   // (d, d, n)
+    } else {
+      // All three sources matching is the degenerate `x/x` shape
+      // (ambiguous between scale-numer and scale-denom); src2 not
+      // matching either of src0/src1 would break the hardware's own
+      // divide-protocol and is unreachable from any known codegen
+      // emitter.  Refuse loudly rather than guess — consistent with
+      // the "refuse when uncertain" rule in
+      // hotswap/docs/wave-size-translation.md.
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "VOP3",
+          "v_div_scale_f32 operand triple does not match a known "
+          "divide-scaling shape: expected (numer, denom, numer) with "
+          "src0 == src2 for scale-numerator, or (denom, denom, numer) "
+          "with src0 == src1 for scale-denominator.  See handle_valu.cpp "
+          "for the decode rule.");
+      return hr;
     }
+
+    // Canonical (numer, denom) regardless of shape.
+    Value *numer = ctx.B.CreateBitCast(op.srcF(2), ctx.f32Ty);
+    Value *denom = ctx.B.CreateBitCast(op.srcF(1), ctx.f32Ty);
     Function *fn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::amdgcn_div_scale,
                                                      {ctx.f32Ty});
-    Value *r = ctx.B.CreateCall(fn, {s0, s1,
-                 selectNumerator ? ctx.B.getTrue() : ctx.B.getFalse()}, "divscale");
+    Value *r = ctx.B.CreateCall(fn, {numer, denom,
+                 scaleNumerator ? ctx.B.getTrue() : ctx.B.getFalse()}, "divscale");
     ctx.writeReg32(op.dst(0), ctx.B.CreateBitCast(ctx.B.CreateExtractValue(r, 0), ctx.i32Ty));
     // Write the boolean flag to the actual SDST destination (operand 1):
     // vcc_lo, sN, or null. The kernel saves flags to SGPRs and later

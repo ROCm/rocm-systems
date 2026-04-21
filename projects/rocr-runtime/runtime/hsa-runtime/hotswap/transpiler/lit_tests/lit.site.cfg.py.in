@@ -138,6 +138,28 @@ config.fixtures = {
     "decoder_madmk_v_fmamk_f32":
         r"@LIT_FIXTURE_DECODER_MADMK_V_FMAMK_F32_CO@",
     "v_rcp_f64": r"@LIT_FIXTURE_V_RCP_F64_CO@",
+    # v_div_scale_f32 (VOP3, IEEE-conformant fdiv scaling step) —
+    # pins the three-arm operand decoder in
+    # `handle_valu.cpp::V_DIV_SCALE_F32`.  The hardware encodes the
+    # divide via operand-identity equality in the (src0, src1, src2)
+    # triple: src0 == src2 is the scale-NUMERATOR shape and src0 ==
+    # src1 is the scale-DENOMINATOR shape.  Equality is checked at
+    # the OPERAND level (register identity for VGPR/SGPR operands,
+    # immediate-bit-pattern equality for inline constants), because
+    # the Triton AMDGPU backend emits the `1.0 / x` fdiv expansion
+    # with a literal `1.0` numerator in src2 — the register-only
+    # gate in the old code fell through for both scale calls and
+    # the downstream div_fmas / div_fixup chain collapsed every
+    # such divide in the translated HSACO to a constant 1.0
+    # bit-exact (observable as `layer_norm`'s rstd reading
+    # `0x3f800000` regardless of input).  This fixture pins the
+    # post-fix canonical `(1.0, vgpr, flag)` shape for both the
+    # scale-numer and scale-denom calls, and asserts the forbidden
+    # pre-fix `(vgpr, vgpr, ...)` shape via a negative CHECK so a
+    # future regression on either arm fails the lit suite before
+    # reaching end-to-end.
+    "v_div_scale_f32_literal_numer":
+        r"@LIT_FIXTURE_V_DIV_SCALE_F32_LITERAL_NUMER_CO@",
     "s_cmov_b32": r"@LIT_FIXTURE_S_CMOV_B32_CO@",
     "s_mul_hi_i32": r"@LIT_FIXTURE_S_MUL_HI_I32_CO@",
     "s_sub_nc_u64": r"@LIT_FIXTURE_S_SUB_NC_U64_CO@",
