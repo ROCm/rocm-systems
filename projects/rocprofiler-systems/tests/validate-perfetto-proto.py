@@ -112,7 +112,7 @@ def validate_perfetto_by_expected_entry(
     For each expected label, find matching slice rows in ``data`` by label (exact or
     substring). Matching slice counts are summed **across all depths** so stack depth is
     not part of validation. Trace rows whose names do not match any expected label are
-    ignored (e.g. LLVM-generated helper kernels).
+    ignored.
 
     If ``counts`` is empty: require **at least one** matching slice per label (presence).
 
