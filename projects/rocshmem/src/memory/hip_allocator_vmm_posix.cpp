@@ -24,6 +24,7 @@
 
 #include "hip_allocator.hpp"
 #include "log.hpp"
+#include "hip_allocator_vmm_common.hpp"
 
 #if HIP_VERSION >= 70000000
 
@@ -42,78 +43,19 @@ std::map<void*, HIPAllocatorVMMPosixFd::VMMAllocationInfo> HIPAllocatorVMMPosixF
 
 hipError_t HIPAllocatorVMMPosixFd::VMMAlloc(void** ptr, size_t size)
 {
-  hipError_t err;
-  hipMemGenericAllocationHandle_t handle;
-  hipMemAllocationProp prop = {};
-#if HIP_VERSION < 7020000
-  prop.type = hipMemAllocationTypePinned;
-#else
-  prop.type = hipMemAllocationTypeUncached;
-#endif
-  prop.location.type = hipMemLocationTypeDevice;
-
-  // Get current device ID
-  int device_id;
-  err = hipGetDevice(&device_id);
-  if (err != hipSuccess) return err;
-
-  prop.location.id = device_id;
-  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
-
-  // Get allocation granularity
-  size_t granularity;
-  err = hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum);
-  if (err != hipSuccess) return err;
-
-  // Round up size to granularity
-  size_t alloc_size = ((size + granularity - 1) / granularity) * granularity;
-
-  // Create memory handle
-  err = hipMemCreate(&handle, alloc_size, &prop, 0);
-  if (err != hipSuccess) return err;
-
-  // Reserve address space
-  void* dev_ptr = nullptr;
-  err = hipMemAddressReserve(&dev_ptr, alloc_size, 0, 0, 0);
+  VMMCommonAllocationInfo common_info;
+  hipError_t err = VMMAllocCommon(ptr, size, hipMemHandleTypePosixFileDescriptor, &common_info);
   if (err != hipSuccess) {
-    (void)hipMemRelease(handle);
     return err;
   }
 
-  // Map memory
-  err = hipMemMap(dev_ptr, alloc_size, 0, handle, 0);
-  if (err != hipSuccess) {
-    (void)hipMemAddressFree(dev_ptr, alloc_size);
-    (void)hipMemRelease(handle);
-    return err;
-  }
-
-  // Set access permissions
-  hipMemAccessDesc accessDesc[2];
-  accessDesc[0].location.type = hipMemLocationTypeDevice;
-  accessDesc[0].location.id = device_id;
-  accessDesc[0].flags = hipMemAccessFlagsProtReadWrite;
-
-  accessDesc[1].location.type = hipMemLocationTypeHost;
-  accessDesc[1].location.id = 0;
-  accessDesc[1].flags = hipMemAccessFlagsProtReadWrite;
-
-  err = hipMemSetAccess(dev_ptr, alloc_size, accessDesc, 2);
-  if (err != hipSuccess) {
-    (void)hipMemUnmap(dev_ptr, alloc_size);
-    (void)hipMemAddressFree(dev_ptr, alloc_size);
-    (void)hipMemRelease(handle);
-    return err;
-  }
-
-  // Success - store allocation info and set output pointer
+  // Store allocator-specific metadata
   VMMAllocationInfo info;
-  info.handle = handle;
-  info.size = alloc_size;
+  info.handle = common_info.handle;
+  info.size = common_info.size;
   info.exported_fd = -1;  // Not yet exported
-  allocations_[dev_ptr] = info;
+  allocations_[*ptr] = info;
 
-  *ptr = dev_ptr;
   return hipSuccess;
 }
 
@@ -130,27 +72,19 @@ hipError_t HIPAllocatorVMMPosixFd::VMMFree(void* ptr)
   }
 
   VMMAllocationInfo& info = it->second;
-  hipError_t err;
 
   // Close exported fd if it was exported for IPC
   if (info.exported_fd != -1) {
     close(info.exported_fd);
   }
 
-  // Unmap memory
-  err = hipMemUnmap(ptr, info.size);
-  if (err != hipSuccess) {
-    return err;
-  }
+  // Convert to common allocation info
+  VMMCommonAllocationInfo common_info;
+  common_info.handle = info.handle;
+  common_info.size = info.size;
 
-  // Free address space
-  err = hipMemAddressFree(ptr, info.size);
-  if (err != hipSuccess) {
-    return err;
-  }
-
-  // Release handle
-  err = hipMemRelease(info.handle);
+  // Use common free function
+  hipError_t err = VMMFreeCommon(ptr, &common_info);
   if (err != hipSuccess) {
     return err;
   }
@@ -162,7 +96,7 @@ hipError_t HIPAllocatorVMMPosixFd::VMMFree(void* ptr)
 }
 
 HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFree) {
-  type = AllocatorTypeVMM;
+  type = AllocatorTypeVMMPosix;
 
   // Check Linux kernel version (recommends >= 6.8)
   struct utsname kernel_info;
@@ -219,7 +153,7 @@ hipError_t HIPAllocatorVMMPosixFd::GetIpcHandle(void *dev_ptr, void *handle)
     return hipErrorInvalidValue;
   }
 
-  hipIpcMemHandlePosix_t* posix_handle = reinterpret_cast<hipIpcMemHandlePosix_t*>(handle);
+  HIPIpcMemHandlePosix_t* posix_handle = reinterpret_cast<HIPIpcMemHandlePosix_t*>(handle);
   hipError_t err;
 
   // Check if we already exported this allocation
@@ -252,7 +186,7 @@ hipError_t HIPAllocatorVMMPosixFd::OpenIpcHandle(void **dev_ptr, void *handle)
     return hipErrorInvalidValue;
   }
 
-  hipIpcMemHandlePosix_t* posix_handle = reinterpret_cast<hipIpcMemHandlePosix_t*>(handle);
+  HIPIpcMemHandlePosix_t* posix_handle = reinterpret_cast<HIPIpcMemHandlePosix_t*>(handle);
   int fd = static_cast<int>(posix_handle->fd);
   int pid = static_cast<int>(posix_handle->pid);
   size_t size = posix_handle->size;
@@ -398,7 +332,7 @@ hipError_t HIPAllocatorVMMPosixFd::CloseIpcHandle(void *dev_ptr)
 
 size_t HIPAllocatorVMMPosixFd::GetIpcHandleSize()
 {
-  return sizeof(hipIpcMemHandlePosix_t);
+  return sizeof(HIPIpcMemHandlePosix_t);
 }
 
 HIPIpcHandleVec* HIPAllocatorVMMPosixFd::AllocateIpcHandleVec(int num_elems)
@@ -410,34 +344,19 @@ HIPIpcHandleVec* HIPAllocatorVMMPosixFd::AllocateIpcHandleVec(int num_elems)
 
 hipError_t HIPAllocatorVMMPosixFd::GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset)
 {
-  if (dev_ptr == nullptr || dmabuf_fd == nullptr || dmabuf_offset == nullptr) {
-    return hipErrorInvalidValue;
-  }
-
   // Find allocation info
   auto it = allocations_.find(dev_ptr);
   if (it == allocations_.end()) {
     return hipErrorInvalidValue;
   }
 
-  // Verify size doesn't exceed allocation size
-  if (size > it->second.size) {
-    return hipErrorInvalidValue;
-  }
+  // Convert to common allocation info
+  VMMCommonAllocationInfo common_info;
+  common_info.handle = it->second.handle;
+  common_info.size = it->second.size;
 
-  // Export the VMM handle to a shareable file descriptor (dmabuf)
-  int fd;
-  hipError_t err = hipMemExportToShareableHandle(&fd, it->second.handle,
-                                                 hipMemHandleTypePosixFileDescriptor, 0);
-  if (err != hipSuccess) {
-    return err;
-  }
-
-  // For VMM allocations, the offset is always 0 since we're exporting the base allocation
-  *dmabuf_fd = fd;
-  *dmabuf_offset = 0;
-
-  return hipSuccess;
+  // Use common dmabuf export function
+  return VMMGetDmabufHandleCommon(dev_ptr, size, &common_info, dmabuf_fd, dmabuf_offset);
 }
 
 }  // namespace rocshmem

@@ -93,9 +93,15 @@ perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
     }
     auto        _index     = _track_data.size();
     auto&       _name      = _name_data.emplace_back(std::make_unique<std::string>(_v));
-    const char* _unit_name = (_units && strlen(_units) > 0) ? _units : nullptr;
+    const char* _name_cstr = _name->c_str();
+    const char* _unit_name = nullptr;
+    if(_units && strlen(_units) > 0)
+    {
+        auto& _unit_str = _name_data.emplace_back(std::make_unique<std::string>(_units));
+        _unit_name      = _unit_str->c_str();
+    }
     _track_data.emplace_back(
-        ::perfetto::CounterTrack{ ::perfetto::DynamicString{ _name->c_str() } }
+        ::perfetto::CounterTrack{ ::perfetto::DynamicString{ _name_cstr } }
             .set_unit_name(_unit_name)
             .set_category(_category)
             .set_unit_multiplier(_mult)

@@ -1278,6 +1278,21 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   //! Return the physical device for this virtual device.
   const amd::Device& device() const { return device_(); }
   virtual uint64_t getQueueID() = 0;
+
+  //! Snapshot the current HW queue as preferred for future re-acquisition (used by graph launch)
+  virtual void SetPreferredQueue() {}
+  //! Acquire a HW queue using the preferred hint, then clear the hint
+  virtual void AcquireQueueWithPreference() {}
+
+  //! Pin the current HW queue so ReleaseHwQueue() becomes a no-op (used by graph internal streams)
+  virtual void PinQueue() {}
+  //! Unpin the HW queue, allowing ReleaseHwQueue() to release it again
+  virtual void UnpinQueue() {}
+  //! Release current HW queue and acquire a new one, avoiding queues with IDs in the excluded set
+  virtual bool ReacquireQueueExcluding(const std::unordered_set<uint64_t>& excluded_ids) {
+    return false;
+  }
+
   virtual void submitReadMemory(amd::ReadMemoryCommand& cmd) = 0;
   virtual void submitWriteMemory(amd::WriteMemoryCommand& cmd) = 0;
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
@@ -2066,10 +2081,13 @@ class Device : public RuntimeObject {
   virtual void DestroyHwEvent(void* hw_event) const {}
 
   struct HwEventPatch {
+    static constexpr int kCompletionSignal = -1;
+    static constexpr int kExtDispatchDepSignal = -2;
+
     uint8_t* packet;      // original dispatchPackets pointer (for UpdateAQLPacket matching)
     uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
     int hw_event_index;
-    int dep_slot;  // -1 = completion_signal, 0-4 = dep_signal[slot]
+    int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
   };
 
   virtual uint8_t* CreateBarrierPacket() const { return nullptr; }

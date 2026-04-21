@@ -150,6 +150,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Skipped setting asic_serial when kfd node unique_id is 0.
   - Python interface will validate against max uint64 to display N/A.
 
+- **Made `libdrm` a required runtime dependency** ([#3349](https://github.com/ROCm/rocm-systems/pull/3349)).  
+  - Debian: `libdrm-dev` moved from `Recommends` to `Depends` on the `amd-smi-lib` package; `libdrm-amdgpu-dev` remains in `Recommends` (not shipped by Debian 10).
+  - RPM: `libdrm-devel` moved from `Suggests` to `Requires`; `libdrm-amdgpu-devel` remains in `Suggests` (not shipped by Azure Linux).
+  - Building from source now requires `libdrm-dev` / `libdrm-devel`; the project `Dockerfile` was updated accordingly.
+  - Removed the "libdrm is optional" note from `docs/install/install.md` — firmware and hardware-IP queries previously gated on libdrm are now always available.
+
 ### Removed
 
 - **Removed `amd-smi reset --reload-driver` and `amd-smi reset -r` option from CLI only**.  

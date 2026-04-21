@@ -33,7 +33,7 @@ namespace
 {
 struct annotation_entry
 {
-    const char*                                                             key;
+    std::string                                                             key;
     std::variant<std::string, uint64_t, int64_t, double, int32_t, uint32_t> value;
 };
 

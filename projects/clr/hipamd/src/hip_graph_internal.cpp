@@ -440,33 +440,57 @@ void GraphExec::BuildSyncPlan() {
 
     auto& firstBatch = segBatch.packet_batches[0];
 
-    // Prepend barrier packets for segments with dependencies
+    // Prepend barrier packets for segments with dependencies.
+    // Optimization: when there is exactly 1 dependency and the first captured
+    // packet is an ext kernel dispatch, embed the dep_signal directly into
+    // that packet instead of creating a separate barrier.
     if (!info.barrier_dep_indices.empty()) {
       int num_deps = static_cast<int>(info.barrier_dep_indices.size());
-      int barrier_count = (num_deps + 4) / 5;
+      bool use_ext_dep = false;
+      if (num_deps == 1 && !firstBatch.dispatchPackets.empty()) {
+        const uint8_t* pkt = firstBatch.dispatchPackets[0];
+        uint16_t first_hdr;
+        memcpy(&first_hdr, pkt, sizeof(first_hdr));
+        constexpr uint16_t kPktTypeMask = 0xFF;
+        constexpr uint16_t kVendorSpecificType = 0;
+        constexpr uint8_t kExtKernelDispatchFormat = 3;
+        uint8_t amd_format = pkt[2];
+        use_ext_dep = ((first_hdr & kPktTypeMask) == kVendorSpecificType)
+                      && (first_hdr != 0)
+                      && (amd_format == kExtKernelDispatchFormat);
+      }
 
-      for (int b = 0; b < barrier_count; ++b) {
-        uint8_t* barrier_pkt = device->CreateBarrierPacket();
-        sync_plan_.barrier_packets.push_back(barrier_pkt);
+      if (use_ext_dep) {
+        uint8_t* first_dispatch = firstBatch.dispatchPackets[0];
+        int dep_segment_id = info.barrier_dep_indices[0];
+        sync_plan_.patch_list.push_back(
+            {first_dispatch, nullptr, dep_segment_id,
+             amd::Device::HwEventPatch::kExtDispatchDepSignal});
+      } else {
+        int barrier_count = (num_deps + 4) / 5;
 
-        int start_dep = b * 5;
-        int end_dep = std::min(start_dep + 5, num_deps);
-        for (int d = start_dep; d < end_dep; ++d) {
-          int dep_segment_id = info.barrier_dep_indices[d];
-          sync_plan_.patch_list.push_back({barrier_pkt, nullptr, dep_segment_id, d - start_dep});
+        for (int b = 0; b < barrier_count; ++b) {
+          uint8_t* barrier_pkt = device->CreateBarrierPacket();
+          sync_plan_.barrier_packets.push_back(barrier_pkt);
+
+          int start_dep = b * 5;
+          int end_dep = std::min(start_dep + 5, num_deps);
+          for (int d = start_dep; d < end_dep; ++d) {
+            int dep_segment_id = info.barrier_dep_indices[d];
+            sync_plan_.patch_list.push_back({barrier_pkt, nullptr, dep_segment_id, d - start_dep});
+          }
+
+          firstBatch.dispatchPackets.insert(firstBatch.dispatchPackets.begin(), barrier_pkt);
+          firstBatch.dispatchKernelNames.insert(firstBatch.dispatchKernelNames.begin(),
+                                                &kBarrierKernelName);
         }
 
-        firstBatch.dispatchPackets.insert(firstBatch.dispatchPackets.begin(), barrier_pkt);
-        firstBatch.dispatchKernelNames.insert(firstBatch.dispatchKernelNames.begin(),
-                                              &kBarrierKernelName);
+        // nodeRanges[i].startIndex was recorded before barrier packets were prepended.
+        // Update all node range indices in firstBatch to account for the inserted barriers.
+        for (auto& nodeRange : firstBatch.nodeRanges) {
+          nodeRange.startIndex += static_cast<size_t>(barrier_count);
+        }
       }
-
-      // nodeRanges[i].startIndex was recorded before barrier packets were prepended.
-      // Update all node range indices in firstBatch to account for the inserted barriers.
-      for (auto& nodeRange : firstBatch.nodeRanges) {
-        nodeRange.startIndex += static_cast<size_t>(barrier_count);
-      }
-
     }
 
     // Patch the completion signal:
@@ -483,10 +507,14 @@ void GraphExec::BuildSyncPlan() {
       lastBatch.dispatchPackets.push_back(completion_barrier);
       lastBatch.dispatchKernelNames.push_back(&kBarrierKernelName);
 
-      sync_plan_.patch_list.push_back({completion_barrier, nullptr, segment.id, -1});
+      sync_plan_.patch_list.push_back(
+          {completion_barrier, nullptr, segment.id,
+           amd::Device::HwEventPatch::kCompletionSignal});
     } else if (!lastBatch.dispatchPackets.empty()) {
       uint8_t* last_pkt = lastBatch.dispatchPackets.back();
-      sync_plan_.patch_list.push_back({last_pkt, nullptr, segment.id, -1});
+      sync_plan_.patch_list.push_back(
+          {last_pkt, nullptr, segment.id,
+           amd::Device::HwEventPatch::kCompletionSignal});
     }
 
     if (segment.segment_ids_edges.empty()) {
@@ -922,6 +950,9 @@ hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
   ClPrint(amd::LOG_INFO, amd::LOG_CODE, "[hipGraph] Creating %u parallel streams for device %d",
     max_streams, devId);
   parallel_streams_[devId].reserve(max_streams);
+  // Track queue IDs already assigned to earlier internal streams so each new
+  // stream avoids colliding with them at creation time.
+  std::unordered_set<uint64_t> used_qids;
   for (uint32_t i = 0; i < max_streams; ++i) {
     auto stream = new hip::Stream(g_devices[devId], hip::Stream::Priority::Normal,
                                   hipStreamNonBlocking);
@@ -930,13 +961,22 @@ hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to create stream %u for device %d",
               i, devId);
       hip::Stream::Destroy(stream);
-      // Clean up any previously created streams for this device
       for (auto& created_stream : parallel_streams_[devId]) {
+        created_stream->vdev()->UnpinQueue();
         hip::Stream::Destroy(created_stream);
       }
       parallel_streams_[devId].clear();
       return hipErrorOutOfMemory;
     }
+
+    // Pin the queue so dynamic queue management won't release it between launches
+    stream->vdev()->PinQueue();
+    // Acquire a queue that doesn't collide with previously created internal streams.
+    // On the first stream (used_qids empty) this is a normal acquisition.
+    if (!used_qids.empty()) {
+      stream->vdev()->ReacquireQueueExcluding(used_qids);
+    }
+    used_qids.insert(stream->getQueueID());
 
     parallel_streams_[devId].push_back(stream);
   }
@@ -1918,31 +1958,34 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
 // ================================================================================================
 void GraphExec::UpdateStreams(hip::Stream* launch_stream) {
   int devId = launch_stream->vdev()->device().index();
-  // Clear any previous stream assignments
   streams_.clear();
-  // Current stream is the default in the assignment
   streams_.push_back(launch_stream);
   if (parallel_streams_.find(devId) == parallel_streams_.end()) {
     LogPrintfError("UpdateStreams failed for device id:%d", devId);
     return;
   }
-  auto parallel_streams = parallel_streams_[devId];
-  std::unordered_map<int, int> unique_stream_ids;
-  unique_stream_ids[launch_stream->getQueueID()] = 1;
-  std::vector<hip::Stream*> collided_streams;
-  // Assign streams that are unique in parallel_streams and doesnt collide with launch stream
-  for (uint32_t i = 0; i < parallel_streams.size(); i++) {
-    auto qid = parallel_streams[i]->getQueueID();
-    if (unique_stream_ids[qid] == 0) {
-      streams_.push_back(parallel_streams[i]);
-    } else {
-      collided_streams.push_back(parallel_streams[i]);
+  auto& parallel_streams = parallel_streams_[devId];
+
+  // Collect queue IDs already in use, starting with the launch stream
+  std::unordered_set<uint64_t> used_qids;
+  used_qids.insert(launch_stream->getQueueID());
+
+  for (auto stream : parallel_streams) {
+    uint64_t qid = stream->getQueueID();
+    if (used_qids.count(qid) > 0) {
+      // Collision: this stream shares a HW queue with the launch stream or another
+      // internal stream. Re-acquire a different queue, avoiding all used ones.
+      if (stream->vdev()->ReacquireQueueExcluding(used_qids)) {
+        qid = stream->getQueueID();
+        ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+                "[hipGraph] Resolved queue collision: stream reassigned to queueID %lu", qid);
+      } else {
+        ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
+                "[hipGraph] Could not resolve queue collision for stream (best-effort)");
+      }
     }
-    unique_stream_ids[qid]++;
-  }
-  // Assign the remaining streams for execution.
-  for (int i = streams_.size(), j = 0; i < max_streams_ && j < collided_streams.size(); i++, j++) {
-    streams_.push_back(collided_streams[j]);
+    used_qids.insert(qid);
+    streams_.push_back(stream);
   }
 }
 
@@ -2170,6 +2213,14 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
   ClPrint(amd::LOG_DEBUG, amd::LOG_CODE, "GraphExec::Run max_streams: %d, on device: %d",
           max_streams_, launch_stream->DeviceId());
 
+  // If the launch stream lost its HW queue due to dynamic queue management,
+  // try to re-acquire the same one it used last time.
+  // Then run collision detection to ensure graph-internal streams don't share
+  // a HW queue with the launch stream.
+  launch_stream->vdev()->SetPreferredQueue();
+  launch_stream->vdev()->AcquireQueueWithPreference();
+  UpdateStreams(launch_stream);
+
   if (use_segment_scheduling_ && instantiateDeviceId_ == launch_stream->DeviceId()) {
     // If the graph has kernels that does device side allocation,  during packet capture, heap is
     // allocated because heap pointer has to be added to the AQL packet, and initialized during
@@ -2179,11 +2230,6 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
     if (!initialized && HasHiddenHeap()) {
       launch_stream->vdev()->HiddenHeapInit();
       initialized = true;
-    }
-    // Update streams for the graph execution only if launch stream changed
-    if (lastLaunchStream_ != launch_stream) {
-      UpdateStreams(launch_stream);
-      lastLaunchStream_ = launch_stream;
     }
     amd::Command* last_cmd = nullptr;
     if (max_streams_dev_.size() == 1) {
@@ -2205,11 +2251,6 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
       topoOrder_[i]->EnqueueCommands(launch_stream);
     }
   } else {
-    // Update streams for the graph execution only if launch stream changed
-    if (lastLaunchStream_ != launch_stream) {
-      UpdateStreams(launch_stream);
-      lastLaunchStream_ = launch_stream;
-    }
     // Execute all nodes in the graph
     if (!RunNodes()) {
       LogError("Failed to launch nodes!");
