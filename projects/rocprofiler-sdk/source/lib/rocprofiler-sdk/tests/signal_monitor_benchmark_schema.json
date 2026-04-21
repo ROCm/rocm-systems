@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "required": [
+    "backend",
+    "workload",
+    "iterations",
+    "callbacks_total",
+    "missed_callbacks",
+    "duplicate_callbacks",
+    "p50_us",
+    "p90_us",
+    "p99_us",
+    "p99_9_us",
+    "max_us",
+    "throughput_cps"
+  ]
+}

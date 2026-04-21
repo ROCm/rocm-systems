@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/signal_monitor.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_signal_subscription.hpp"
+#include "signal_monitor_benchmark_runner.hpp"
 #include "lib/common/environment.hpp"
 
 #include <gtest/gtest.h>
@@ -30,6 +31,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -76,6 +78,16 @@ TEST(signal_monitor, parse_backend_env)
         EXPECT_EQ(parse_signal_monitor_backend_env(), SignalMonitorBackend::auto_select);
         env.pop();
     }
+}
+
+TEST(signal_monitor, benchmark_result_has_required_keys)
+{
+    auto json = run_signal_monitor_benchmark_for_test("poll", "W1", 5000);
+
+    EXPECT_NE(json.find("\"backend\""), std::string::npos);
+    EXPECT_NE(json.find("\"p99_9_us\""), std::string::npos);
+    EXPECT_NE(json.find("\"missed_callbacks\""), std::string::npos);
+    EXPECT_NE(json.find("\"throughput_cps\""), std::string::npos);
 }
 
 TEST(signal_monitor, polling_fires_once_for_eq)
