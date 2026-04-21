@@ -495,7 +495,7 @@ struct ibv_srq_init_attr_ex {
  * Receive Work Queue Indirection Table.
  * It's used in order to distribute incoming packets between different
  * Receive Work Queues. Associating Receive WQs with different CPU cores
- * allows one to workload the traffic between different CPU cores.
+ * allows one to distribute the traffic load across different CPU cores.
  * The Indirection Table can contain only WQs of type IBV_WQT_RQ.
 */
 struct ibv_rwq_ind_table {
