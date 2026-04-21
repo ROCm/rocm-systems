@@ -169,6 +169,25 @@ config.fixtures = {
     "v_med3_i32": r"@LIT_FIXTURE_V_MED3_I32_CO@",
     "v_mul_u64": r"@LIT_FIXTURE_V_MUL_U64_CO@",
     "c3_atomic_cas": r"@LIT_FIXTURE_C3_ATOMIC_CAS_CO@",
+    # s_addk_i32 (SOPK_32TIE, renamed to `s_addk_co_i32` in gfx12+
+    # assembly) — pins the correct operand-index contract for the
+    # handler in `handle_sopk.cpp`. The MC opcode has a tied-def
+    # `$src0` that the disassembler materialises as a distinct
+    # MCOperand, which the decoder's `buildSrcMap` keeps in srcMap
+    # (per the audit in `decode.cpp::kKnownTiedIn`). So for the
+    # handler, `op.src(0)` is the tied SGPR (same physical reg as
+    # sdst), and `op.src(1)` is the `$simm16` immediate — NOT the
+    # other way around. A prior revision of the handler read
+    # `op.src(0)` thinking it was the immediate; the resulting
+    # `add %dst, %dst` doubling hung Triton-compiled layer-norm
+    # (whose loop-counter increment is `s_addk_co_i32 sN, 0x400`)
+    # in all three of its reduction loops. Companion `S_MULK_I32`
+    # uses the same TableGen class and was fixed in the same
+    # commit; no corpus kernel currently exercises it so a
+    # dedicated fixture is intentionally omitted (no producer, no
+    # fixture).
+    "s_addk_i32":
+        r"@LIT_FIXTURE_S_ADDK_I32_CO@",
     # s_atomic_dec (SMEM, gfx8+ scalar-cache wrap-decrement) — pins the
     # `atomicrmw udec_wrap` lowering the handle_smem.cpp scalar-atomic
     # block emits for the AITER split-k barrier counter shape.  Closes

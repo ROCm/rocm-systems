@@ -149,7 +149,30 @@ HandlerResult handleSOPK(RaiseContext &ctx, const DecodedInst &di,
   HandlerResult hr;
   SemOp sop = di.semOp;
 
-  // SOPK format: dst = SDST, src(0) = sign-extended 16-bit imm
+  // SOPK operand layout: two shapes here.
+  //
+  //   * `S_MOVK_I32` uses SOPK_32 (outs=$sdst, ins=$simm16): MCInst
+  //     has two operands (sdst, simm16), logical src(0) = simm16.
+  //   * `S_ADDK_I32` / `S_MULK_I32` use SOPK_32TIE (outs=$sdst,
+  //     ins=$src0,$simm16) with $src0 tied to $sdst. The AMDGPU
+  //     disassembler keeps the tied $src0 as a distinct MCOperand
+  //     rather than collapsing it, and `decode.cpp::buildSrcMap`
+  //     intentionally keeps tied-def operands in srcMap (it's listed
+  //     in `kKnownTiedIn` — see the audit comment there for the
+  //     rationale). Result: for SOPK_32TIE opcodes, srcMap has TWO
+  //     entries — `src(0)` is the tied SGPR (same physical reg as
+  //     sdst, i.e. the prior-dst value already readable via
+  //     `readReg32(op.dst())`), and `src(1)` is the simm16
+  //     immediate.
+  //
+  //   Pre-fix bug: the SOPK_32TIE handlers below read `op.src(0)`
+  //   thinking it was the simm16, but it actually returned the tied
+  //   SGPR. So `s_addk_co_i32 s0, 0x400` lifted to
+  //   `add i32 %s0, %s0` (doubling) instead of
+  //   `add i32 %s0, 1024` (incrementing by K). For layer-norm's
+  //   loop counter, that doubled 0 stays at 0 forever, hanging the
+  //   kernel.  `s_mulk_i32` had the same latent bug (no kernel in
+  //   the corpus exercised it).
   if (sop == SemOp::S_MOVK_I32) {
     ctx.regs.writeReg32(ctx.B, op.dst(), op.src(0));
     hr.handled = true;
@@ -157,16 +180,25 @@ HandlerResult handleSOPK(RaiseContext &ctx, const DecodedInst &di,
   }
   if (sop == SemOp::S_MULK_I32) {
     Value *dst = ctx.regs.readReg32(ctx.B, op.dst());
+    Value *imm = op.src(1);  // simm16; src(0) is the tied SGPR (see block above)
     ctx.regs.writeReg32(ctx.B, op.dst(),
-                        ctx.B.CreateMul(dst, op.src(0), "mulk"));
+                        ctx.B.CreateMul(dst, imm, "mulk"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::S_ADDK_I32) {
     Value *dst = ctx.regs.readReg32(ctx.B, op.dst());
-    Value *imm = op.src(0);
+    Value *imm = op.src(1);  // simm16; src(0) is the tied SGPR (see block above)
     Value *res = ctx.B.CreateAdd(dst, imm, "addk");
     ctx.regs.writeReg32(ctx.B, op.dst(), res);
+    // SCC holds the overflow bit.  On gfx12+ the instruction is
+    // renamed to `s_addk_co_i32`, which documents that the SCC
+    // contract reflects *signed* overflow; `uadd_with_overflow`
+    // here is a latent inaccuracy (no in-corpus kernel consumes
+    // SCC from this instruction today, so the hang at hand does
+    // not depend on it). Swapping to `sadd_with_overflow` is a
+    // follow-up; left as-is to keep this fix minimal and focused
+    // on the operand-index correctness that unblocks layer-norm.
     auto *ov = ctx.B.CreateIntrinsic(Intrinsic::uadd_with_overflow, {ctx.i32Ty},
                                      {dst, imm});
     ctx.regs.storeSCC(ctx.B, ctx.B.CreateExtractValue(ov, 1));
