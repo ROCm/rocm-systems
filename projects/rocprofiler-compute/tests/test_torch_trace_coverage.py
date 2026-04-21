@@ -1562,7 +1562,7 @@ def _with_correlation_id_standard_name(marker_df: pd.DataFrame) -> pd.DataFrame:
     return marker_df.rename(columns={"Correlation_Id": "Correlation_ID"})
 
 
-def _leaf_from_function_cell(func: object) -> str | None:
+def _leaf_from_function_cell(func: object) -> Optional[str]:
     """Return the last path segment of a ROCTX ``Function`` cell, or ``None``."""
     if not isinstance(func, str):
         return None
