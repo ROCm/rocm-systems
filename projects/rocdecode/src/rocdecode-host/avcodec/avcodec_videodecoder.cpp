@@ -63,7 +63,7 @@ static inline rocDecVideoChromaFormat AVPixelFormat2rocDecVideoChromaFormat(AVPi
         case AV_PIX_FMT_YUVJ444P : 
             return rocDecVideoChromaFormat_444;
         default :
-            std::cerr << "ERROR: " << av_get_pix_fmt_name(av_pixel_format) << " pixel_format is not supported!" << std::endl;          
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("ERROR: ") + av_get_pix_fmt_name(av_pixel_format) + " pixel_format is not supported!");
             return rocDecVideoChromaFormat_420;       // for sanity
     }
 }
@@ -88,8 +88,8 @@ static inline int BitDepthFromPixelFormat(AVPixelFormat av_pixel_format) {
         case AV_PIX_FMT_YUVJ444P : 
             return 16;
         default :
-            std::cerr << "ERROR: " << av_get_pix_fmt_name(av_pixel_format) << " pixel_format is not supported!" << std::endl;          
-            return AV_PIX_FMT_YUV420P;       // for sanity
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("ERROR: ") + av_get_pix_fmt_name(av_pixel_format) + " pixel_format is not supported!");
+            return 8;       // for sanity
     }
 }
 
@@ -111,7 +111,7 @@ static inline rocDecVideoSurfaceFormat AVPixelFormat2rocDecVideoSurfaceFormat(AV
         case AV_PIX_FMT_YUV420P12LE :
             return rocDecVideoSurfaceFormat_YUV420_16Bit;
         default :
-            std::cerr << "ERROR: " << av_get_pix_fmt_name(av_pixel_format) << " pixel_format is not supported!" << std::endl;
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("ERROR: ") + av_get_pix_fmt_name(av_pixel_format) + " pixel_format is not supported!");
             return rocDecVideoSurfaceFormat_NV12;      // for sanity
     }
 }

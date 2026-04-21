@@ -3964,10 +3964,19 @@ rsmi_status_t rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t* power, float*
     return RSMI_STATUS_INVALID_ARGS;
   }
 
+  GET_DEV_FROM_INDX
+
   rsmi_status_t ret;
   rsmi_gpu_metrics_t gpu_metrics;
   ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
   if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Failed "
+       << " | Device #: " << dv_ind
+       << " | Read SYSFS file: " << dev->get_sys_file_path_by_type(amd::smi::kDevGpuMetrics, true)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevGpuMetrics)
+       << " | Returning: " << amd::smi::getRSMIStatusString(ret, false) << " |";
+    LOG_WARN(ss);
     return ret;
   }
 
@@ -3976,6 +3985,16 @@ rsmi_status_t rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t* power, float*
   // hard-coded for now since all ASICs have same resolution. If it ASIC
   // dependent then this information should come from Kernel
   if (counter_resolution) *counter_resolution = kEnergyCounterResolution;
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+     << " | Success "
+     << " | Device #: " << dv_ind
+     << " | Read SYSFS file: " << dev->get_sys_file_path_by_type(amd::smi::kDevGpuMetrics, true)
+     << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevGpuMetrics)
+     << " | Data: " << *power << " | Timestamp: " << *timestamp << " | Counter Resolution: "
+     << (counter_resolution ? std::to_string(*counter_resolution) : "N/A")
+     << " | Returning: " << amd::smi::getRSMIStatusString(ret, false) << " |";
+  LOG_INFO(ss);
 
   return ret;
   CATCH

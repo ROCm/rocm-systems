@@ -69,6 +69,7 @@
 #include "flood_amo_tester.hpp"
 #include "hipmodule_init_tester.hpp"
 #include "device_bitcode_tester.hpp"
+#include "library_info_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -649,6 +650,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case DeviceBitcodeTestType:
       if (rank == 0) std::cout << "Device Bitcode Test ###" << std::endl;
       testers.push_back(new DeviceBitcodeTester(args));
+      return testers;
+    case LibraryInfoTestType:
+      if (rank == 0) std::cout << "Library Info Test ###" << std::endl;
+      testers.push_back(new LibraryInfoTester(args));
       return testers;
     default:
       if (rank == 0) std::cout << "Empty Test ###" << std::endl;

@@ -191,7 +191,7 @@ The build script passes configuration options to CMake to set up a canonical bui
 
 .. note::
 
- This builds rocSHMEM with all backends. You can select IPC, RO, GDA, or any combination at runtime by setting an environment variable (see :doc:`Environment variables <./api/env_variables>` for more details). However, this portability can reduce performance, so the other build scripts are recommended if you need maximum performance. If no specific backend is requested by the user, the library will use the IPC backend if all PEs are on a single node. If the job spans multiple nodes, rocSHMEM will try to use the various GDA backends first, and fall back to the RO backend if neither of the GDA backends can be used.
+ This builds rocSHMEM with all backends. You can select IPC, RO, GDA, or any combination at runtime by setting an environment variable (see :doc:`Environment variables <./env_variables>` for more details). However, this portability can reduce performance, so the other build scripts are recommended if you need maximum performance. If no specific backend is requested by the user, the library will use the IPC backend if all PEs are on a single node. If the job spans multiple nodes, rocSHMEM will try to use the various GDA backends first, and fall back to the RO backend if neither of the GDA backends can be used.
 
 GDA backend build
 ^^^^^^^^^^^^^^^^^
