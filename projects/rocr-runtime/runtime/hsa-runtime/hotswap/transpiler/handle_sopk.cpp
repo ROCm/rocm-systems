@@ -1,4 +1,5 @@
 #include "handlers.hpp"
+#include "pipeline.hpp" // isStrictMode()
 
 #include "SIDefines.h" // AMDGPU::Hwreg::Id
 #include "llvm/IR/Intrinsics.h"
@@ -251,6 +252,27 @@ HandlerResult handleSOPK(RaiseContext &ctx, const DecodedInst &di,
       return hr;
     }
     if (policy.write == HwregWrite::WarnDrop) {
+      // Strict mode (`HSA_SALMON_STRICT=1`, see pipeline.hpp) refuses
+      // these writes structurally instead of warn-and-continue. The
+      // refusal is the honest answer for any caller (e.g. the corpus
+      // runner) that wants UNSUPPORTED verdicts in place of latent
+      // wrong-result hazards. The non-strict path stays unchanged so
+      // existing GPU tests that emit `s_setreg_imm32_b32 mode, imm`
+      // and pass bit-exactly continue to pass.
+      if (isStrictMode()) {
+        errs() << "transpiler: " << di.mnemonic
+               << " writes HWREG id=" << hwregId
+               << " (MODE / FP-state-bearing register) — refusing under "
+                  "HSA_SALMON_STRICT. Dropping the write would silently "
+                  "change FP rounding / denormal / IEEE / FTZ semantics if "
+                  "downstream compute consumes those bits.\n";
+        hr.failure = RaiseFailure::strictUnsafeLowering(
+            di, "HWREG_MODE_write",
+            "salmon (strict): MODE-register write would be silently "
+            "dropped; kernel may rely on FP rounding / denormal / IEEE / "
+            "FTZ bits being changed");
+        return hr;
+      }
       errs() << "transpiler: WARNING: " << di.mnemonic
              << " writes HWREG id=" << hwregId
              << " (MODE or similar FP-state-bearing register). Dropping "
