@@ -303,8 +303,11 @@ bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
   amd_comgr_status_t status = createAction(langver, options, &action, &hasAction);
 
   if (status == AMD_COMGR_STATUS_SUCCESS) {
-    hasOutput = true;
     status = amd::Comgr::create_data_set(&output);
+  }
+
+  if (status == AMD_COMGR_STATUS_SUCCESS) {
+    hasOutput = true;
   }
 
   // Preprocess the source
