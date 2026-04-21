@@ -125,6 +125,39 @@ SRSRCDwords readSRSRCDwords(RaiseContext &ctx, ParsedReg srsrc) {
 // three SRSRC dwords. Each word is routed through
 // `amdgcn.readfirstlane` so it lands in an SGPR — the backend would
 // otherwise emit a waterfall loop around the intrinsic call.
+//
+// dw3 (RSRC3) is synthesised rather than read from the source SGPRs:
+// the gfx1250 source V# layout does not carry the gfx942 DATA_FORMAT /
+// NUM_FORMAT bits in the same positions, so pass-through would put
+// junk (or, more often, zero) into gfx942's format field.
+//
+// Why dw3 must not be zero on gfx942: empirically
+// `buffer_store_dword` (and the other MUBUF raw-store flavours) on
+// CDNA3 silently drops every lane's write when dw3's DATA_FORMAT
+// field is BUF_DATA_FORMAT_INVALID (0). The ISA manual advertises
+// these ops as untyped, but the MI300 MUBUF engine still checks
+// DATA_FORMAT != 0 before committing the store. This manifests as
+// Softmax (the only corpus kernel that reaches us through MUBUF
+// stores — vecadd / add_fp32 use FLAT/GLOBAL) leaving its output
+// buffer at sentinel after a salmon run, with no HIP error, no GPU
+// fault, and no stderr output from the runtime.
+//
+// Bisected with kernels/build/mubuf_store_b32 + inline-asm V#
+// probes (see hotswap/docs/triage-2026-04-20-softmax-matmul128.md):
+//
+//   dw3=0x00020000  MATCH   DATA_FORMAT=32 alone (minimum working)
+//   dw3=0x00024000  MATCH   DATA_FORMAT=32 + NUM_FORMAT=UINT
+//   dw3=0x00027000  MATCH   Triton's native-gfx942 shape (FORMAT_32 + FLOAT)
+//   dw3=0x00007000  DROP    NUM_FORMAT=FLOAT alone, DATA_FORMAT=0
+//   dw3=0x00000004  DROP    DST_SEL_X identity, DATA_FORMAT=0
+//   dw3=0x00000000  DROP    (what we used to emit)
+//
+// We pick 0x00020000 (DATA_FORMAT=32, NUM_FORMAT=0=UNORM) as the
+// minimum value that unblocks raw stores: it does not set NUM_FORMAT,
+// so a latent raised typed-read would fail loudly (NUM_FORMAT=UNORM
+// on a read would return integer-as-unorm garbage and the per-op
+// CPU-ref comparator would catch it) rather than silently compute
+// the wrong answer.
 Value *buildMubufSRD(RaiseContext &ctx, const SRSRCDwords &dw) {
   Function *readfirstlane = Intrinsic::getOrInsertDeclaration(
       &ctx.M, Intrinsic::amdgcn_readfirstlane, {ctx.i32Ty});
@@ -133,7 +166,7 @@ Value *buildMubufSRD(RaiseContext &ctx, const SRSRCDwords &dw) {
   Value *srdW0 = ctx.B.CreateCall(readfirstlane, {dw.dw0}, "srd_w0");
   Value *srdW1 = ctx.B.CreateCall(readfirstlane, {cleanDw1}, "srd_w1");
   Value *srdW2 = ctx.B.CreateCall(readfirstlane, {dw.dw2}, "srd_w2");
-  Value *word3 = ConstantInt::get(ctx.i32Ty, 0);
+  Value *word3 = ConstantInt::get(ctx.i32Ty, 0x00020000);
   Value *srd = UndefValue::get(FixedVectorType::get(ctx.i32Ty, 4));
   srd = ctx.B.CreateInsertElement(srd, srdW0, static_cast<uint64_t>(0));
   srd = ctx.B.CreateInsertElement(srd, srdW1, static_cast<uint64_t>(1));
