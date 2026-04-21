@@ -25,8 +25,9 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa_api_intercept.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue_intercept.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_state_registry.hpp"
 
 #include <hsa/amd_hsa_queue.h>
 
@@ -301,6 +302,9 @@ QueueController::destroy_queue(hsa_queue_t* id)
     // return if queue does not exist
     if(!queue) return;
 
+    // Order is load-bearing: destroy_queue_state must run before _queues.erase.
+    // It drains any in-flight process_doorbell_impl (via gate_lock), so no scan
+    // can hold a raw Queue* past this point; the erase below is safe.
     queue_intercept::destroy_queue_state(id);
     queue->sync();
     if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);

@@ -22,16 +22,17 @@
 
 #pragma once
 
-#include "lib/common/synchronized.hpp"
+#include "lib/rocprofiler-sdk/hsa/ring_buffer.hpp"
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
-#include <unordered_map>
 
 namespace rocprofiler
 {
@@ -40,184 +41,160 @@ namespace hsa
 namespace queue_intercept
 {
 /**
+ * @brief Explicit per-claim record (Step 12' — Option A).
+ *
+ * Each `add_write_index` call records one `PendingClaim`. The consumer
+ * (`process_doorbell_impl`) drains these in `claim_index` order and only
+ * processes a claim once every slot it owns holds a non-INVALID header.
+ * This replaces the Step 9' ring-scan + layout-heuristic approach and
+ * structurally fixes bug #1 (INVALID-header race) and bug #2 (strided vs
+ * contiguous layout ambiguity).
+ */
+struct PendingClaim
+{
+    uint64_t claim_index = 0;   ///< What add_write_index returned — the start ring slot
+    uint32_t packet_count = 0;  ///< Value the caller passed to add_write_index
+    uint32_t stride = 1;        ///< Stride at claim time (1 + k_factor when claimed)
+};
+
+/**
  * @brief Per-queue state for SDK-level write pointer virtualization
  *
  * This structure maintains the state needed to intercept and virtualize
  * write-index updates and doorbell signals for an HSA queue. It enables
  * the SDK to scan and potentially modify packets before they are submitted
  * to the GPU.
+ *
+ * Cursor model (Shape B):
+ *   - `claim_pos` is the SDK's authoritative atomic cursor that advances
+ *     whenever the application claims packet slots (via add_write_index).
+ *     It is measured in ring-slot (stride-scaled) units.
+ *   - `published_pos` is the cursor advanced inside `process_doorbell_impl`
+ *     as packets are scanned from the write-ahead zone and published to
+ *     the ring. It is guarded by `gate_lock`. After each doorbell it must
+ *     equal `claim_pos` (modulo partial/strided writes).
+ *   - `*real_wdid` is the HSA-side hardware shadow; the SDK writes through
+ *     to it after rewriting packets.
+ *
+ * Explicit pending-claim tracking (Step 12'):
+ *   - Every `add_write_index` inserts a `PendingClaim` keyed by the returned
+ *     `claim_index`. `process_doorbell_impl` pops ready claims in order.
+ *   - `store_write_index`/`cas_write_index` (on success) clear `pending`
+ *     because the caller has re-synchronized the wptr directly.
  */
 struct QueueState
 {
-    void*    ring_buf  = nullptr;  ///< Pointer to the queue's packet ring buffer
-    uint32_t ring_size = 0;        ///< Number of packets the ring can hold
-    uint32_t ring_mask = 0;        ///< Mask for ring index wrapping (ring_size - 1)
-    uint32_t pkt_size  = 64;       ///< Packet size in bytes (64 for AQL, 256 for metadata)
+    RingView ring_view = {};  ///< Ring geometry (set at creation, never changes)
+    uint32_t stride    = 1;   ///< Per-packet ring advance = 1 + k_factor
 
-    std::atomic<uint64_t> virtual_wptr{0};            ///< SDK-visible write index (virtualized)
-    volatile uint64_t*    real_wdid       = nullptr;  ///< Pointer to actual queue write index
-    volatile uint64_t*    real_rdid       = nullptr;  ///< Pointer to actual queue read index
-    uint64_t              next_scan_pos   = 0;        ///< Next packet index to scan
-    uint64_t              next_submit_pos = 0;        ///< Next packet index to submit
+    std::atomic<uint64_t>    claim_pos{0};        ///< Authoritative SDK cursor (claim side)
+    volatile uint64_t*       real_wdid = nullptr; ///< Pointer to actual queue write index
+    volatile const uint64_t* real_rdid = nullptr; ///< Pointer to actual queue read index
 
     const hsa_queue_t* hsa_queue       = nullptr;  ///< HSA queue pointer for Queue* lookup
     hsa_signal_t       doorbell_signal = {0};      ///< The queue's doorbell signal
-    uint64_t           k_factor        = 0;        ///< K-factor for metadata queue sync
-    QueueState*        metadata_state  = nullptr;  ///< Pointer to metadata queue state if present
-    std::mutex         gate_lock;                  ///< Lock for packet submission gating
+
+    std::mutex gate_lock;                  ///< Lock for packet submission gating
+    uint64_t   published_pos = 0;          ///< Cursor up to which packets have been published
+
+    /// HSA_QUEUE_TYPE_SINGLE flag. When true, forwarded doorbell values must be
+    /// monotonically non-decreasing (spec requirement). See bug #9.
+    bool is_single = false;
+
+    /// Highest doorbell value we have rung on this queue so far. Used only
+    /// when `is_single` to clamp a smaller forwarded value up to the last
+    /// published high-water mark. Stored relaxed because gate_lock serializes
+    /// the only writer (process_doorbell_impl).
+    std::atomic<uint64_t> last_doorbell_val{0};
+
+    /// Ordered map of in-flight claims, keyed by `claim_index`. Producers
+    /// race on `claim_pos.fetch_add`, so insertion order into this map does
+    /// not match claim-index order; std::map gives us O(log N) sorted-by-key
+    /// insert/iterate. N is small (bounded by concurrent in-flight claims).
+    std::mutex                        pending_lock;
+    std::map<uint64_t, PendingClaim>  pending;   ///< key = claim_index
 };
 
 using queue_state_ptr_t      = std::shared_ptr<QueueState>;
 using queue_state_weak_ptr_t = std::weak_ptr<QueueState>;
 
-/// Thread-safe map from HSA queue pointer to its QueueState
-using queue_registry_t =
-    common::Synchronized<std::unordered_map<const hsa_queue_t*, queue_state_ptr_t>>;
-
-/// Thread-safe map from doorbell signal handle to weak QueueState reference
-using doorbell_map_t = common::Synchronized<std::unordered_map<uint64_t, queue_state_weak_ptr_t>>;
-
 /**
- * @brief Get the global queue registry singleton
+ * @brief Atomically add to claim_pos
  *
- * The registry maps HSA queue pointers to their corresponding QueueState.
- * This is the primary lookup mechanism for queue state.
- *
- * @return Reference to the queue registry
- */
-queue_registry_t&
-get_queue_registry();
-
-/**
- * @brief Get the global doorbell map singleton
- *
- * The doorbell map allows looking up QueueState by doorbell signal handle,
- * which is needed when intercepting signal store operations.
- *
- * @return Reference to the doorbell map
- */
-doorbell_map_t&
-get_doorbell_map();
-
-/**
- * @brief Look up QueueState by HSA queue pointer
- *
- * @param queue The HSA queue to look up
- * @return Strong QueueState reference if found, empty otherwise
- */
-queue_state_ptr_t
-lookup_queue_state(const hsa_queue_t* queue);
-
-/**
- * @brief Look up QueueState by doorbell signal
- *
- * @param signal The doorbell signal to look up
- * @return Strong QueueState reference if found and still alive, empty otherwise
- */
-queue_state_ptr_t
-lookup_queue_state_by_doorbell(hsa_signal_t signal);
-
-/**
- * @brief Register a doorbell signal for a queue
- *
- * This creates an association between the queue's doorbell signal and its
- * QueueState, enabling lookup by signal handle in intercepted signal stores.
- *
- * @param queue The HSA queue whose doorbell to register
- * @param doorbell The doorbell signal to register
- */
-void
-register_doorbell(const hsa_queue_t* queue, hsa_signal_t doorbell);
-
-/**
- * @brief Unregister a doorbell signal
- *
- * Removes the doorbell-to-QueueState mapping when a queue is destroyed.
- *
- * @param doorbell The doorbell signal to unregister
- */
-bool
-unregister_doorbell(hsa_signal_t doorbell);
-
-/**
- * @brief Atomically add to virtual write pointer
- *
- * Increments the virtual write pointer by the given value and returns
- * the previous value. This is used to claim packet slots in the queue.
+ * Advances claim_pos by (value * stride) so callers that pass
+ * packet-count units advance the cursor in ring-slot units.
  *
  * @param state Queue state
- * @param value Amount to add
- * @return Previous value of virtual_wptr
+ * @param value Amount to add (in packet-count units)
+ * @param mo    Memory order corresponding to the HSA variant called
+ *              (relaxed/acquire/release/acq_rel)
+ * @return Previous value of claim_pos
  */
 uint64_t
-add_write_index_impl(QueueState* state, uint64_t value);
+add_write_index_impl(QueueState* state, uint64_t value, std::memory_order mo);
 
 /**
- * @brief Store a new value to virtual write pointer
+ * @brief Store a new value to claim_pos
  *
- * Sets the virtual write pointer to the given value. This is typically
- * used for queue resets or initialization.
+ * Sets claim_pos to the given value verbatim. No stride scaling is
+ * performed because the caller's argument is already in claim_pos units
+ * (e.g., a value previously loaded/CASed via this same interface).
+ *
+ * HSA's store API only exposes `_relaxed` and `_screlease`; `mo` must be
+ * either `std::memory_order_relaxed` or `std::memory_order_release`.
  *
  * @param state Queue state
  * @param value New value to store
+ * @param mo    Memory order (relaxed or release)
  */
 void
-store_write_index_impl(QueueState* state, uint64_t value);
+store_write_index_impl(QueueState* state, uint64_t value, std::memory_order mo);
 
 /**
- * @brief Compare-and-swap on virtual write pointer
+ * @brief Compare-and-swap on claim_pos
  *
- * Atomically compares the virtual write pointer to expected and, if equal,
- * replaces it with value. Returns the previous value.
+ * Atomically compares claim_pos to expected and, if equal, replaces it
+ * with value. Both expected and value are in claim_pos units; no stride
+ * scaling is applied.
+ *
+ * The success memory order is `mo`; the failure order is derived to be no
+ * stronger than success and to exclude release/acq_rel.
  *
  * @param state Queue state
  * @param expected Expected current value
  * @param value New value to store if comparison succeeds
- * @return Previous value of virtual_wptr
+ * @param mo    Success memory order corresponding to the HSA variant called
+ * @return Previous value of claim_pos
  */
 uint64_t
-cas_write_index_impl(QueueState* state, uint64_t expected, uint64_t value);
+cas_write_index_impl(QueueState* state, uint64_t expected, uint64_t value, std::memory_order mo);
 
 /**
- * @brief Load virtual write pointer
+ * @brief Load claim_pos
  *
- * Returns the current value of the virtual write pointer.
+ * HSA's load API only exposes `_relaxed` and `_scacquire`; `mo` is expected
+ * to be either `std::memory_order_relaxed` or `std::memory_order_acquire`.
  *
  * @param state Queue state
- * @return Current value of virtual_wptr
+ * @param mo    Memory order (relaxed or acquire)
+ * @return Current value of claim_pos
  */
 uint64_t
-load_write_index_impl(const QueueState* state);
+load_write_index_impl(const QueueState* state, std::memory_order mo);
 
 /// Type alias for doorbell function callback
 using doorbell_fn_t = std::function<void(hsa_signal_t, hsa_signal_value_t)>;
 
 /**
- * @brief Synchronize metadata queue entries with compute queue
- *
- * When a compute queue has a paired metadata queue (metadata_state != nullptr),
- * this function writes corresponding metadata entries in lock-step with compute
- * packets. It advances the metadata queue's write pointer by 1 + k_factor.
- *
- * @param compute_state Compute queue state
- * @param pkt The kernel dispatch packet being submitted
- * @param dest_pos Destination position in compute queue
- */
-void
-sync_metadata_impl(QueueState*                         compute_state,
-                   const hsa_kernel_dispatch_packet_t* pkt,
-                   uint64_t                            dest_pos);
-
-/**
  * @brief Process doorbell ring for inline queue interposition
  *
- * This function scans the write-ahead zone (from next_scan_pos to virtual_wptr),
+ * This function scans the write-ahead zone (from published_pos to claim_pos),
  * snapshots source packets in application-visible order, applies the queue
  * WriteInterceptor chain, advances the real write doorbell index, and calls the
  * provided doorbell function.
  *
- * For k_factor=0, the callback chain is invoked over the full batch. For k_factor>0,
- * packets are transformed one-by-one and padded to stride as needed.
+ * For stride==1 (k_factor=0), the callback chain is invoked over the full batch.
+ * For stride>1, packets are transformed one-by-one and padded to stride as needed.
  *
  * @param state Strong queue-state reference for call lifetime
  * @param value Signal value to pass to doorbell
@@ -227,60 +204,6 @@ void
 process_doorbell_impl(const queue_state_ptr_t& state,
                       hsa_signal_value_t       value,
                       const doorbell_fn_t&     ring_doorbell);
-
-/**
- * @brief Create and register queue state
- *
- * Allocates a QueueState for the given queue and registers it in both the
- * queue registry and doorbell map. This should be called when a queue is
- * created by the application.
- *
- * @param queue The HSA queue to create state for
- * @param wdid_addr Pointer to the queue's real write doorbell index
- * @param rdid_addr Pointer to the queue's real read doorbell index
- * @param k_factor K-factor for metadata queue synchronization
- */
-void
-create_queue_state(const hsa_queue_t* queue,
-                   volatile uint64_t* wdid_addr,
-                   volatile uint64_t* rdid_addr,
-                   uint64_t           k_factor);
-
-/**
- * @brief Destroy and unregister queue state
- *
- * Removes the queue's state from the registry and doorbell map.
- * This should be called when a queue is destroyed by the application.
- *
- * @param queue The HSA queue to destroy state for
- */
-void
-destroy_queue_state(const hsa_queue_t* queue);
-
-/**
- * @brief Install interposition wrappers into the HSA core API table
- *
- * Saves original function pointers and replaces them with wrappers that
- * route through the SDK's write-pointer virtualization when the queue is
- * tracked, or fall through to the original HSA implementation otherwise.
- *
- * @param core_table The HSA core API table to intercept
- */
-void
-install_intercept(CoreApiTable& core_table);
-
-bool
-is_intercepting_inline();
-
-/**
- * @brief Disable inline queue interception and clear tracked state
- *
- * This leaves the wrapped function pointers installed but removes all tracked
- * queue state so wrappers always pass through to the next function table.
- * Intended for finalization to avoid teardown-order hazards in static objects.
- */
-void
-shutdown_intercept();
 
 }  // namespace queue_intercept
 }  // namespace hsa

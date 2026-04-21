@@ -22,12 +22,12 @@
 
 #include "lib/rocprofiler-sdk/hsa/queue_intercept.hpp"
 #include "lib/common/logging.hpp"
-#include "lib/common/static_object.hpp"
+#include "lib/rocprofiler-sdk/hsa/packet_transformer.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
-#include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/hsa/ring_buffer.hpp"
 
+#include <cassert>
 #include <cstring>
-#include <thread>
 #include <vector>
 
 namespace rocprofiler
@@ -36,155 +36,94 @@ namespace hsa
 {
 namespace queue_intercept
 {
-queue_registry_t&
-get_queue_registry()
-{
-    static auto*& _v = common::static_object<queue_registry_t>::construct();
-    return *_v;
-}
-
-doorbell_map_t&
-get_doorbell_map()
-{
-    static auto*& _v = common::static_object<doorbell_map_t>::construct();
-    return *_v;
-}
-
-queue_state_ptr_t
-lookup_queue_state(const hsa_queue_t* queue)
-{
-    queue_state_ptr_t result = {};
-    get_queue_registry().rlock([&](const auto& registry) {
-        auto it = registry.find(queue);
-        if(it != registry.end())
-        {
-            result = it->second;
-        }
-    });
-    return result;
-}
-
-queue_state_ptr_t
-lookup_queue_state_by_doorbell(hsa_signal_t signal)
-{
-    queue_state_ptr_t result = {};
-    get_doorbell_map().rlock([&](const auto& doorbell_map) {
-        auto it = doorbell_map.find(signal.handle);
-        if(it != doorbell_map.end())
-        {
-            result = it->second.lock();
-        }
-    });
-    return result;
-}
-
-void
-register_doorbell(const hsa_queue_t* queue, hsa_signal_t doorbell)
-{
-    auto state = lookup_queue_state(queue);
-    if(!state) return;
-
-    get_doorbell_map().wlock([&](auto& doorbell_map) { doorbell_map[doorbell.handle] = state; });
-}
-
-bool
-unregister_doorbell(hsa_signal_t doorbell)
-{
-    bool erased = false;
-    get_doorbell_map().wlock(
-        [&](auto& doorbell_map) { erased = (doorbell_map.erase(doorbell.handle) > 0); });
-    return erased;
-}
-
 uint64_t
-add_write_index_impl(QueueState* state, uint64_t value)
+add_write_index_impl(QueueState* state, uint64_t value, std::memory_order mo)
 {
-    uint64_t stride = 1 + state->k_factor;
-    uint64_t delta  = value * stride;
-    uint64_t prev   = state->virtual_wptr.fetch_add(delta, std::memory_order_relaxed);
+    // stride baked into delta; claim_pos is authoritative
+    const uint64_t prev = state->claim_pos.fetch_add(value * state->stride, mo);
+    {
+        std::lock_guard<std::mutex> lk{state->pending_lock};
+        state->pending.emplace(
+            prev, PendingClaim{prev, static_cast<uint32_t>(value), state->stride});
+    }
     return prev;
 }
 
 void
-store_write_index_impl(QueueState* state, uint64_t value)
+store_write_index_impl(QueueState* state, uint64_t value, std::memory_order mo)
 {
-    uint64_t stride = 1 + state->k_factor;
-    auto     prev   = state->virtual_wptr.load(std::memory_order_relaxed);
-    if(stride > 1)
+    // HSA only exposes _relaxed and _screlease variants for store_write_index.
+    // Any other order would be invalid for std::atomic::store.
+    assert(mo == std::memory_order_relaxed || mo == std::memory_order_release);
+    // The caller is resynchronizing the wptr directly, which invalidates any
+    // in-flight bookkeeping we had for previously-claimed slots. Drop all
+    // pending claims. `published_pos` is intentionally NOT touched here —
+    // it is guarded by `gate_lock` which we do not hold. The next
+    // `process_doorbell_impl` call will observe an empty pending list and
+    // forward the doorbell verbatim; `published_pos` catches up naturally on
+    // the next real claim.
     {
-        value = prev + ((value - prev) * stride);
+        std::lock_guard<std::mutex> lk{state->pending_lock};
+        state->pending.clear();
     }
-    state->virtual_wptr.store(value, std::memory_order_relaxed);
+    // no rescaling; value is already in claim_pos units
+    state->claim_pos.store(value, mo);
 }
 
 uint64_t
-cas_write_index_impl(QueueState* state, uint64_t expected, uint64_t value)
+cas_write_index_impl(QueueState* state, uint64_t expected, uint64_t value, std::memory_order mo)
 {
-    uint64_t stride = 1 + state->k_factor;
-    if(stride > 1)
-    {
-        value = expected + ((value - expected) * stride);
-    }
+    // Failure order must be no stronger than success and must not be release/acq_rel.
+    auto fail_mo = (mo == std::memory_order_release)  ? std::memory_order_relaxed
+                 : (mo == std::memory_order_acq_rel)  ? std::memory_order_acquire
+                                                      : mo;
+    // no rescaling; value is already in claim_pos units
     uint64_t prev = expected;
-    state->virtual_wptr.compare_exchange_strong(prev, value, std::memory_order_relaxed);
+    const bool ok = state->claim_pos.compare_exchange_strong(prev, value, mo, fail_mo);
+    if(ok)
+    {
+        // Successful CAS means the caller resynchronized the wptr.
+        // Drop pending bookkeeping (see store_write_index_impl for the same
+        // reasoning about published_pos).
+        std::lock_guard<std::mutex> lk{state->pending_lock};
+        state->pending.clear();
+    }
     return prev;
 }
 
 uint64_t
-load_write_index_impl(const QueueState* state)
+load_write_index_impl(const QueueState* state, std::memory_order mo)
 {
-    return state->virtual_wptr.load(std::memory_order_relaxed);
-}
-
-void
-sync_metadata_impl(QueueState* compute_state,
-                   const hsa_kernel_dispatch_packet_t* /*pkt*/,
-                   uint64_t /*dest_pos*/)
-{
-    auto* meta = compute_state->metadata_state;
-    if(!meta) return;
-
-    uint64_t meta_dest    = meta->next_submit_pos;
-    meta->next_submit_pos = meta_dest + 1 + compute_state->k_factor;
-    __atomic_store_n(meta->real_wdid, meta->next_submit_pos, __ATOMIC_RELEASE);
+    // HSA only exposes _relaxed and _scacquire variants for load_write_index.
+    assert(mo == std::memory_order_relaxed || mo == std::memory_order_acquire);
+    return state->claim_pos.load(mo);
 }
 
 namespace
 {
-thread_local QueueState* tls_state      = nullptr;
-thread_local uint64_t    tls_submit_pos = 0;
-thread_local uint32_t    tls_pkt_size   = 64;
-
-inline void
-wait_for_free_slot(QueueState* state, uint64_t submit_pos)
+/// A claim is ready to publish only when every slot it owns has been
+/// written by the application (i.e. no slot is still INVALID). Acquire-load
+/// the 16-bit header to pair with the application's release-store of its
+/// packet header (the standard AQL ordering pattern).
+///
+/// Within a single claim, packets are always laid out contiguously starting
+/// at `claim_index`: a caller that passes `packet_count=N` to
+/// `add_write_index` writes slots `claim_index + 0..N-1`. The `stride` field
+/// only affects the claim's reservation_end (where the next claim begins),
+/// not the intra-claim slot layout. This is what structurally fixes bug #2.
+bool
+claim_is_ready(const RingView& view, const PendingClaim& c)
 {
-    while(true)
+    for(uint32_t i = 0; i < c.packet_count; ++i)
     {
-        auto real_rdid = __atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE);
-        auto ring_used = submit_pos - real_rdid;
-        if(ring_used < state->ring_size)
-        {
-            return;
-        }
-        std::this_thread::yield();
+        const auto* slot = view.read_slot(c.claim_index + i);
+        const auto  hdr =
+            __atomic_load_n(reinterpret_cast<const uint16_t*>(slot), __ATOMIC_ACQUIRE);
+        const uint16_t pt = (hdr >> HSA_PACKET_HEADER_TYPE)
+                            & ((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u);
+        if(pt == HSA_PACKET_TYPE_INVALID) return false;
     }
-}
-
-void
-ring_buffer_writer(const void* pkts, uint64_t pkt_count)
-{
-    auto*       state    = tls_state;
-    auto        pkt_size = tls_pkt_size;
-    const auto* src      = static_cast<const char*>(pkts);
-    for(uint64_t i = 0; i < pkt_count; i++)
-    {
-        wait_for_free_slot(state, tls_submit_pos);
-        auto        slot = tls_submit_pos & state->ring_mask;
-        auto*       dst  = static_cast<char*>(state->ring_buf) + (slot * pkt_size);
-        const auto* s    = src + i * pkt_size;
-        if(dst != s) memcpy(dst, s, pkt_size);
-        tls_submit_pos++;
-    }
+    return true;
 }
 }  // namespace
 
@@ -194,435 +133,125 @@ process_doorbell_impl(const queue_state_ptr_t& state,
                       const doorbell_fn_t&     ring_doorbell)
 {
     if(!state) return;
-
     auto* state_ptr = state.get();
 
     std::unique_lock<std::mutex> lock{state_ptr->gate_lock};
 
-    const uint64_t scan_pos = state_ptr->next_scan_pos;
-    const uint64_t scan_end = state_ptr->virtual_wptr.load(std::memory_order_acquire);
-    const uint64_t stride   = 1 + state_ptr->k_factor;
+    const RingView& view     = state_ptr->ring_view;
+    const uint32_t  pkt_size = view.pkt_size;
 
-    if(scan_pos >= scan_end)
-    {
-        ring_doorbell(state_ptr->doorbell_signal, value);
-        return;
-    }
+    // Bug #9 — HSA_QUEUE_TYPE_SINGLE queues require monotonically
+    // non-decreasing doorbell values. On a multi-claim race an early-exit
+    // caller can otherwise forward its own (smaller) claim index on top of a
+    // later caller's higher value. Clamp against last_doorbell_val.
+    auto clamp_for_single = [state_ptr](hsa_signal_value_t v) -> hsa_signal_value_t {
+        if(!state_ptr->is_single) return v;
+        auto prev = state_ptr->last_doorbell_val.load(std::memory_order_relaxed);
+        return (static_cast<int64_t>(v) < static_cast<int64_t>(prev))
+                   ? static_cast<hsa_signal_value_t>(prev)
+                   : v;
+    };
 
-    const uint64_t total     = scan_end - scan_pos;
-    const uint64_t pkt_count = total / stride;
-    if(pkt_count == 0)
-    {
-        state_ptr->next_scan_pos = scan_end;
-        ring_doorbell(state_ptr->doorbell_signal, value);
-        return;
-    }
+    // Shared commit/publish lambda — one place that advances real_wdid and rings.
+    auto publish_and_ring = [&](uint64_t final_pos, hsa_signal_value_t db_val) {
+        auto real_rdid = __atomic_load_n(state_ptr->real_rdid, __ATOMIC_ACQUIRE);
+        auto ring_used = final_pos - real_rdid;
+        if(ring_used > view.size)
+        {
+            ROCP_WARNING << "Queue-intercept observed ring usage beyond ring size. queue="
+                         << state_ptr->hsa_queue << ", ring_used=" << ring_used
+                         << ", ring_size=" << view.size
+                         << ", published_pos=" << state_ptr->published_pos;
+        }
+        __atomic_store_n(state_ptr->real_wdid, final_pos, __ATOMIC_RELEASE);
+        const auto clamped = clamp_for_single(db_val);
+        state_ptr->last_doorbell_val.store(static_cast<uint64_t>(clamped),
+                                           std::memory_order_relaxed);
+        ring_doorbell(state_ptr->doorbell_signal, clamped);
+    };
 
-    if((total % stride) != 0)
-    {
-        ROCP_WARNING << "Dropped partial strided write window in queue-intercept. queue="
-                     << state_ptr->hsa_queue << ", scan_pos=" << scan_pos
-                     << ", scan_end=" << scan_end << ", stride=" << stride;
-    }
-
-    std::vector<char> source_snapshot(pkt_count * state_ptr->pkt_size);
-    for(uint64_t i = 0; i < pkt_count; ++i)
-    {
-        const auto* src = static_cast<const char*>(state_ptr->ring_buf) +
-                          (((scan_pos + i) & state_ptr->ring_mask) * state_ptr->pkt_size);
-        memcpy(source_snapshot.data() + (i * state_ptr->pkt_size), src, state_ptr->pkt_size);
-    }
-
-    tls_state                 = state_ptr;
-    tls_submit_pos            = state_ptr->next_submit_pos;
-    tls_pkt_size              = state_ptr->pkt_size;
-    uint64_t start_submit_pos = tls_submit_pos;
-
+    // Resolve queue once.
     auto*        qc = get_queue_controller();
     const Queue* queue =
         (qc && state_ptr->hsa_queue) ? qc->get_queue(*state_ptr->hsa_queue) : nullptr;
 
-    if(state_ptr->k_factor == 0)
+    RingCursor cursor{view, state_ptr->published_pos, state_ptr->real_rdid};
+
+    // Drain ready claims in claim_index order.
+    while(true)
     {
+        PendingClaim head;
+        {
+            std::lock_guard<std::mutex> pend{state_ptr->pending_lock};
+            if(state_ptr->pending.empty()) break;
+            head = state_ptr->pending.begin()->second;
+        }
+
+        // Bug #1 fix — if any slot the claim owns is still INVALID, the
+        // application hasn't finished writing. Stop here; a later doorbell
+        // will catch the same claim again once its headers land.
+        if(!claim_is_ready(view, head)) break;
+
+        const uint64_t reservation_end =
+            head.claim_index + static_cast<uint64_t>(head.packet_count) * head.stride;
+        cursor.set_reservation_end(reservation_end);
+
         if(queue)
         {
-            queue->invoke_write_interceptor(source_snapshot.data(), pkt_count, ring_buffer_writer);
+            // Snapshot source packets into a side buffer so the cursor can
+            // safely overwrite the same ring slots. Packets from one claim
+            // are always contiguous in `claim_index`-space (the producer
+            // wrote them back-to-back); when stride > 1 the tail of the
+            // reservation is reservation-only and gets gap-padded below.
+            std::vector<char> snapshot(static_cast<size_t>(head.packet_count) * pkt_size);
+            for(uint32_t i = 0; i < head.packet_count; ++i)
+            {
+                memcpy(snapshot.data() + i * pkt_size,
+                       view.read_slot(head.claim_index + i),
+                       pkt_size);
+            }
+
+            ScopedWriter guard{[&cursor, pkt_size](const void* pkts, uint64_t n) {
+                const auto* src = static_cast<const char*>(pkts);
+                for(uint64_t i = 0; i < n; ++i)
+                {
+                    if(!cursor.write(src + i * pkt_size)) return;
+                }
+            }};
+
+            queue->invoke_write_interceptor(
+                snapshot.data(), head.packet_count, packet_writer_trampoline);
         }
         else
         {
-            ring_buffer_writer(source_snapshot.data(), pkt_count);
+            // No interceptor — pass packets through in the order claimed.
+            for(uint32_t i = 0; i < head.packet_count; ++i)
+            {
+                if(!cursor.write(view.read_slot(head.claim_index + i))) break;
+            }
         }
+        cursor.pad_to_reservation();
 
-        uint64_t written = tls_submit_pos - start_submit_pos;
-        if(written != pkt_count)
+        // Pop this claim now that it's processed.
         {
-            ROCP_WARNING
-                << "K=0 write-interceptor changed packet count without stride reservation. "
-                << "queue=" << state_ptr->hsa_queue << ", input_pkt_count=" << pkt_count
-                << ", written_pkt_count=" << written;
-        }
-    }
-    else
-    {
-        for(uint64_t i = 0; i < pkt_count; ++i)
-        {
-            auto*    pkt          = source_snapshot.data() + (i * state_ptr->pkt_size);
-            uint64_t start_submit = tls_submit_pos;
-
-            if(queue)
-            {
-                queue->invoke_write_interceptor(pkt, 1, ring_buffer_writer);
-            }
-            else
-            {
-                ring_buffer_writer(pkt, 1);
-            }
-
-            const uint64_t used = tls_submit_pos - start_submit;
-            if(used > stride)
-            {
-                ROCP_WARNING << "WriteInterceptor packet expansion exceeded reserved stride. queue="
-                             << state_ptr->hsa_queue << ", used=" << used << ", stride=" << stride;
-            }
-
-            for(uint64_t n = used; n < stride; ++n)
-            {
-                wait_for_free_slot(state_ptr, tls_submit_pos);
-                auto  slot = tls_submit_pos & state_ptr->ring_mask;
-                auto* dst  = static_cast<char*>(state_ptr->ring_buf) + (slot * state_ptr->pkt_size);
-                memset(dst, 0, state_ptr->pkt_size);
-                *reinterpret_cast<uint16_t*>(dst) =
-                    (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE);
-                ++tls_submit_pos;
-            }
+            std::lock_guard<std::mutex> pend{state_ptr->pending_lock};
+            if(!state_ptr->pending.empty()) state_ptr->pending.erase(state_ptr->pending.begin());
         }
     }
 
-    state_ptr->next_scan_pos   = scan_end;
-    state_ptr->next_submit_pos = tls_submit_pos;
-
-    if(state_ptr->metadata_state)
+    if(cursor.submit_pos() == state_ptr->published_pos)
     {
-        for(uint64_t i = 0; i < pkt_count; ++i)
-            sync_metadata_impl(state_ptr, nullptr, 0);
-    }
-
-    auto doorbell_val = static_cast<hsa_signal_value_t>(state_ptr->next_submit_pos - 1);
-    auto real_rdid    = __atomic_load_n(state_ptr->real_rdid, __ATOMIC_ACQUIRE);
-    auto ring_used    = (state_ptr->next_submit_pos - real_rdid);
-    if(ring_used > state_ptr->ring_size)
-    {
-        ROCP_WARNING << "Queue-intercept observed ring usage beyond ring size. queue="
-                     << state_ptr->hsa_queue << ", ring_used=" << ring_used
-                     << ", ring_size=" << state_ptr->ring_size << ", scan_pos=" << scan_pos
-                     << ", scan_end=" << scan_end
-                     << ", next_submit_pos=" << state_ptr->next_submit_pos;
-    }
-
-    __atomic_store_n(state_ptr->real_wdid, state_ptr->next_submit_pos, __ATOMIC_RELEASE);
-    ring_doorbell(state_ptr->doorbell_signal, doorbell_val);
-}
-
-void
-create_queue_state(const hsa_queue_t* queue,
-                   volatile uint64_t* wdid_addr,
-                   volatile uint64_t* rdid_addr,
-                   uint64_t           k_factor)
-{
-    auto     state         = std::make_shared<QueueState>();
-    uint64_t current_wdid  = __atomic_load_n(wdid_addr, __ATOMIC_ACQUIRE);
-    state->ring_buf        = queue->base_address;
-    state->ring_size       = queue->size;
-    state->ring_mask       = queue->size - 1;
-    state->real_wdid       = wdid_addr;
-    state->real_rdid       = rdid_addr;
-    state->hsa_queue       = queue;
-    state->doorbell_signal = queue->doorbell_signal;
-    state->k_factor        = k_factor;
-    state->virtual_wptr.store(current_wdid, std::memory_order_relaxed);
-    state->next_scan_pos   = current_wdid;
-    state->next_submit_pos = current_wdid;
-
-    get_queue_registry().wlock([&](auto& map) { map[queue] = state; });
-    get_doorbell_map().wlock([&](auto& map) { map[queue->doorbell_signal.handle] = state; });
-}
-
-void
-destroy_queue_state(const hsa_queue_t* queue)
-{
-    hsa_signal_t      doorbell = {0};
-    queue_state_ptr_t doomed   = {};
-    get_queue_registry().wlock([&](auto& map) {
-        auto it = map.find(queue);
-        if(it == map.end())
-        {
-            return;
-        }
-        doomed = it->second;
-        if(doomed) doorbell = doomed->doorbell_signal;
-        map.erase(it);
-    });
-
-    if(!doomed) return;
-    if(doorbell.handle != 0) unregister_doorbell(doorbell);
-}
-
-namespace
-{
-std::atomic<bool> s_intercept_installed = false;
-
-// Saved next-in-chain function pointers (tracing functors or raw HSA, depending on
-// when install_intercept is called). Our wrappers chain through these for untracked
-// queues and for the final doorbell ring on tracked queues.
-CoreApiTable s_next_table = {};
-
-bool
-should_bypass_inline_intercept()
-{
-    return (!s_intercept_installed.load(std::memory_order_acquire) ||
-            registration::get_fini_status() > 0);
-}
-
-// --- add_write_index wrappers (4) ---
-
-uint64_t
-wrap_add_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
-{
-    if(should_bypass_inline_intercept())
-        return s_next_table.hsa_queue_add_write_index_relaxed_fn(q, v);
-
-    auto s = lookup_queue_state(q);
-    if(s) return add_write_index_impl(s.get(), v);
-    return s_next_table.hsa_queue_add_write_index_relaxed_fn(q, v);
-}
-
-uint64_t
-wrap_add_write_index_scacq_screl(const hsa_queue_t* q, uint64_t v)
-{
-    if(should_bypass_inline_intercept())
-        return s_next_table.hsa_queue_add_write_index_scacq_screl_fn(q, v);
-
-    auto s = lookup_queue_state(q);
-    if(s) return add_write_index_impl(s.get(), v);
-    return s_next_table.hsa_queue_add_write_index_scacq_screl_fn(q, v);
-}
-
-uint64_t
-wrap_add_write_index_scacquire(const hsa_queue_t* q, uint64_t v)
-{
-    if(should_bypass_inline_intercept())
-        return s_next_table.hsa_queue_add_write_index_scacquire_fn(q, v);
-
-    auto s = lookup_queue_state(q);
-    if(s) return add_write_index_impl(s.get(), v);
-    return s_next_table.hsa_queue_add_write_index_scacquire_fn(q, v);
-}
-
-uint64_t
-wrap_add_write_index_screlease(const hsa_queue_t* q, uint64_t v)
-{
-    if(should_bypass_inline_intercept())
-        return s_next_table.hsa_queue_add_write_index_screlease_fn(q, v);
-
-    auto s = lookup_queue_state(q);
-    if(s) return add_write_index_impl(s.get(), v);
-    return s_next_table.hsa_queue_add_write_index_screlease_fn(q, v);
-}
-
-// --- store_write_index wrappers (2) ---
-
-void
-wrap_store_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
-{
-    if(should_bypass_inline_intercept())
-    {
-        s_next_table.hsa_queue_store_write_index_relaxed_fn(q, v);
+        // Nothing processed. Forward user's value (clamped for SINGLE queues).
+        const auto clamped = clamp_for_single(value);
+        state_ptr->last_doorbell_val.store(static_cast<uint64_t>(clamped),
+                                           std::memory_order_relaxed);
+        ring_doorbell(state_ptr->doorbell_signal, clamped);
         return;
     }
 
-    auto s = lookup_queue_state(q);
-    if(s)
-    {
-        store_write_index_impl(s.get(), v);
-        return;
-    }
-    s_next_table.hsa_queue_store_write_index_relaxed_fn(q, v);
-}
-
-void
-wrap_store_write_index_screlease(const hsa_queue_t* q, uint64_t v)
-{
-    if(should_bypass_inline_intercept())
-    {
-        s_next_table.hsa_queue_store_write_index_screlease_fn(q, v);
-        return;
-    }
-
-    auto s = lookup_queue_state(q);
-    if(s)
-    {
-        store_write_index_impl(s.get(), v);
-        return;
-    }
-    s_next_table.hsa_queue_store_write_index_screlease_fn(q, v);
-}
-
-// --- cas_write_index wrappers (4) ---
-
-uint64_t
-wrap_cas_write_index_relaxed(const hsa_queue_t* q, uint64_t expected, uint64_t value)
-{
-    if(should_bypass_inline_intercept())
-        return s_next_table.hsa_queue_cas_write_index_relaxed_fn(q, expected, value);
-
-    auto s = lookup_queue_state(q);
-    if(s) return cas_write_index_impl(s.get(), expected, value);
-    return s_next_table.hsa_queue_cas_write_index_relaxed_fn(q, expected, value);
-}
-
-uint64_t
-wrap_cas_write_index_scacq_screl(const hsa_queue_t* q, uint64_t expected, uint64_t value)
-{
-    if(should_bypass_inline_intercept())
-        return s_next_table.hsa_queue_cas_write_index_scacq_screl_fn(q, expected, value);
-
-    auto s = lookup_queue_state(q);
-    if(s) return cas_write_index_impl(s.get(), expected, value);
-    return s_next_table.hsa_queue_cas_write_index_scacq_screl_fn(q, expected, value);
-}
-
-uint64_t
-wrap_cas_write_index_scacquire(const hsa_queue_t* q, uint64_t expected, uint64_t value)
-{
-    if(should_bypass_inline_intercept())
-        return s_next_table.hsa_queue_cas_write_index_scacquire_fn(q, expected, value);
-
-    auto s = lookup_queue_state(q);
-    if(s) return cas_write_index_impl(s.get(), expected, value);
-    return s_next_table.hsa_queue_cas_write_index_scacquire_fn(q, expected, value);
-}
-
-uint64_t
-wrap_cas_write_index_screlease(const hsa_queue_t* q, uint64_t expected, uint64_t value)
-{
-    if(should_bypass_inline_intercept())
-        return s_next_table.hsa_queue_cas_write_index_screlease_fn(q, expected, value);
-
-    auto s = lookup_queue_state(q);
-    if(s) return cas_write_index_impl(s.get(), expected, value);
-    return s_next_table.hsa_queue_cas_write_index_screlease_fn(q, expected, value);
-}
-
-// --- load_write_index wrappers (2) ---
-
-uint64_t
-wrap_load_write_index_relaxed(const hsa_queue_t* q)
-{
-    if(should_bypass_inline_intercept())
-        return s_next_table.hsa_queue_load_write_index_relaxed_fn(q);
-
-    auto s = lookup_queue_state(q);
-    if(s) return load_write_index_impl(s.get());
-    return s_next_table.hsa_queue_load_write_index_relaxed_fn(q);
-}
-
-uint64_t
-wrap_load_write_index_scacquire(const hsa_queue_t* q)
-{
-    if(should_bypass_inline_intercept())
-        return s_next_table.hsa_queue_load_write_index_scacquire_fn(q);
-
-    auto s = lookup_queue_state(q);
-    if(s) return load_write_index_impl(s.get());
-    return s_next_table.hsa_queue_load_write_index_scacquire_fn(q);
-}
-
-// --- signal_store wrappers (2) ---
-
-void
-wrap_signal_store_relaxed(hsa_signal_t sig, hsa_signal_value_t val)
-{
-    if(should_bypass_inline_intercept())
-    {
-        s_next_table.hsa_signal_store_relaxed_fn(sig, val);
-        return;
-    }
-
-    auto s = lookup_queue_state_by_doorbell(sig);
-    if(s)
-    {
-        process_doorbell_impl(s, val, [](hsa_signal_t db, hsa_signal_value_t v) {
-            s_next_table.hsa_signal_store_relaxed_fn(db, v);
-        });
-        return;
-    }
-    s_next_table.hsa_signal_store_relaxed_fn(sig, val);
-}
-
-void
-wrap_signal_store_screlease(hsa_signal_t sig, hsa_signal_value_t val)
-{
-    if(should_bypass_inline_intercept())
-    {
-        s_next_table.hsa_signal_store_screlease_fn(sig, val);
-        return;
-    }
-
-    auto s = lookup_queue_state_by_doorbell(sig);
-    if(s)
-    {
-        process_doorbell_impl(s, val, [](hsa_signal_t db, hsa_signal_value_t v) {
-            s_next_table.hsa_signal_store_screlease_fn(db, v);
-        });
-        return;
-    }
-    s_next_table.hsa_signal_store_screlease_fn(sig, val);
-}
-
-}  // namespace
-
-bool
-is_intercepting_inline()
-{
-    return s_intercept_installed.load(std::memory_order_acquire);
-}
-
-void
-shutdown_intercept()
-{
-    s_intercept_installed.store(false, std::memory_order_release);
-
-    get_queue_registry().wlock([](auto& map) { map.clear(); });
-    get_doorbell_map().wlock([](auto& map) { map.clear(); });
-}
-
-void
-install_intercept(CoreApiTable& core_table)
-{
-    // Save current table entries as our next-in-chain (tracing functors when called
-    // after update_table, or raw HSA functions otherwise)
-    s_next_table = core_table;
-
-    core_table.hsa_queue_add_write_index_relaxed_fn     = wrap_add_write_index_relaxed;
-    core_table.hsa_queue_add_write_index_scacq_screl_fn = wrap_add_write_index_scacq_screl;
-    core_table.hsa_queue_add_write_index_scacquire_fn   = wrap_add_write_index_scacquire;
-    core_table.hsa_queue_add_write_index_screlease_fn   = wrap_add_write_index_screlease;
-
-    core_table.hsa_queue_store_write_index_relaxed_fn   = wrap_store_write_index_relaxed;
-    core_table.hsa_queue_store_write_index_screlease_fn = wrap_store_write_index_screlease;
-
-    core_table.hsa_queue_cas_write_index_relaxed_fn     = wrap_cas_write_index_relaxed;
-    core_table.hsa_queue_cas_write_index_scacq_screl_fn = wrap_cas_write_index_scacq_screl;
-    core_table.hsa_queue_cas_write_index_scacquire_fn   = wrap_cas_write_index_scacquire;
-    core_table.hsa_queue_cas_write_index_screlease_fn   = wrap_cas_write_index_screlease;
-
-    core_table.hsa_queue_load_write_index_relaxed_fn   = wrap_load_write_index_relaxed;
-    core_table.hsa_queue_load_write_index_scacquire_fn = wrap_load_write_index_scacquire;
-
-    core_table.hsa_signal_store_relaxed_fn   = wrap_signal_store_relaxed;
-    core_table.hsa_signal_store_screlease_fn = wrap_signal_store_screlease;
-
-    s_intercept_installed.store(true, std::memory_order_release);
+    state_ptr->published_pos = cursor.submit_pos();
+    publish_and_ring(state_ptr->published_pos,
+                     static_cast<hsa_signal_value_t>(state_ptr->published_pos - 1));
 }
 
 }  // namespace queue_intercept
