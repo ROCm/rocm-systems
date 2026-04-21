@@ -66,13 +66,15 @@ def test_old_run_root_analysis_tool_is_gone() -> None:
     )
 
 
-def test_total_tool_count_is_41() -> None:
-    """After the agents-as-MCP-tools refactor the registry should hold
-    34 non-agent tools plus 7 agent tools — 41 total."""
+def test_total_tool_count_is_42() -> None:
+    """After the trace_diff tool landed (Confluence row #7) the registry
+    should hold 35 non-agent tools plus 7 agent tools — 42 total."""
     from mcp_server._registry import discover_read_only_tools
 
     reg = discover_read_only_tools()
-    assert len(reg) == 41, (
-        f"expected 41 tools (34 non-agent + 7 agent); got {len(reg)}: "
+    assert len(reg) == 42, (
+        f"expected 42 tools (35 non-agent + 7 agent); got {len(reg)}: "
         f"{sorted(reg.keys())}"
     )
+    # trace_diff lives alongside regression as a READ_ONLY tool.
+    assert "trace_diff.diff_runs" in reg
