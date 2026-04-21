@@ -281,6 +281,46 @@ placeholder, **not** an error. The regression guard in
 (`tests/test_formatters/test_report_structure.py`) plus the
 webview/markdown/text ordering tests enforce this.
 
+## Recommendation subtype — `pragma` (Phase 10)
+
+Recommendations now carry an optional `subtype` field in the Layer B
+dict (and Layer C JSON). The only defined value today is `"pragma"`,
+emitted exclusively by the Phase-10 LLVM loop-hint pathway:
+
+```json
+{
+  "priority": "MEDIUM",
+  "subtype": "pragma",
+  "category": "Loop Hint (clang_loop_unroll_count)",
+  "issue": "...",
+  "suggestion": "Apply `#pragma clang loop unroll_count(N)` at src/hot.hip:42",
+  "actions": ["...", "Verify with: perfxpert diff -i <baseline>.db -i <new>.db"],
+  "estimated_impact": "1.1x-1.5x",
+  "source_file": "src/hot.hip",
+  "source_line": 42,
+  "pragma_id": "clang_loop_unroll_count",
+  "factor_sweep": [2, 4, 8],
+  "risk": "medium"
+}
+```
+
+Rendering invariants:
+
+* The text / markdown / webview formatters render an ``[advanced]``
+  badge next to the priority label for every rec with
+  ``subtype == "pragma"``.
+* ``perfxpert analyze`` filters pragma recs out of the rendered
+  output unless ``--advanced`` is passed or
+  ``PERFXPERT_ADVANCED_RECS=1`` is set — the Layer-B payload still
+  includes them (so the JSON-contract version is available to
+  downstream consumers who want the raw list).
+* Every pragma rec MUST carry a Tier-0 source anchor
+  (``source_file`` + ``source_line``); this is enforced by the fence
+  slice in ``perfxpert/agents/fence/compute_specialist.md``.
+
+See ``perfxpert/analysis/recommendations.py::build_pragma_recommendation``
+for the canonical constructor.
+
 ## Tier-0 carve-out
 
 `tier0_findings` is conditionally included — it's only present when

@@ -198,14 +198,14 @@ perfxpert doctor
 ![doctor](assets/gifs/03-doctor.gif)
 
 *`perfxpert doctor` end-to-end: Python check, MCP server reachable
-(43 tools registered), 3/5 LLM providers configured, `ALL CLEAN`.*
+(58 tools registered), 3/5 LLM providers configured, `ALL CLEAN`.*
 
 Expected output ends with `ALL CLEAN` when everything is wired. The
 doctor checks:
 
 - `perfxpert` version + Python ≥ 3.10
 - openai-agents SDK
-- MCP server reachable (`perfxpert-mcp` boots + 43 tools registered — 8 agent-hierarchy + 34 classifier/knowledge + 1 `trace_diff.diff_runs`)
+- MCP server reachable (`perfxpert-mcp` boots + 58 tools registered — 8 agent-hierarchy + 49 classifier/knowledge + 1 `trace_diff.diff_runs`)
 - task store (`~/.perfxpert` or `$PERFXPERT_TASK_ROOT`)
 - bundled opencode binary + bundled opencode config dir
 - LLM providers configured (counts `N/5` against
@@ -228,7 +228,7 @@ agent runtime.
 - **`perfxpert-mcp`** — stdio MCP server that re-exposes the 43
   READ-ONLY analysis tools over JSON-RPC (8 agent-hierarchy entry
   points — Root, Analysis, Recommendation, Correctness, +3 technique
-  specialists, + diff specialist — plus 34 classifier / knowledge
+  specialists, + diff specialist — plus 49 classifier / knowledge
   tools and 1 `trace_diff.diff_runs`). Meant to be
   spawned by an MCP client (Claude Desktop, Claude Code, Codex CLI,
   Gemini CLI, opencode). See `../integration/mcp-server.md`.
@@ -515,6 +515,18 @@ contains:
 - **Thread-trace (Tier 3)** — included when `--att-dir` is set;
   per-instruction stall ratio and bottleneck category (VMEM,
   LDS-bank, dep-chain, branch-divergence).
+- **Communication analysis (RCCL)** — included when the trace carries
+  RCCL collectives (either `category='RCCL'` regions or RCCL-named
+  kernels matching the fallback regex). Surfaces per-collective
+  message bytes, duration, **bus bandwidth** (algorithm-adjusted;
+  factor is `2(N-1)/N` for AllReduce and `(N-1)/N` for
+  AllGather/ReduceScatter/AllToAll), achievable **peak** from the
+  per-arch XGMI spec, **efficiency %** (poor <40%, fair 40-70%,
+  good >70%), and **comm/compute overlap %** (time inside RCCL
+  kernels that coincides with non-RCCL work). When the DB lacks
+  `category='RCCL'` spans the section is still rendered, but
+  `summary.capture_incomplete=true` and `msg_bytes` is zero (install
+  rocprofv3 ≥ 6.2 for full RCCL arg capture).
 - **Tier-0 source findings** — included when `--source-dir` is set;
   detected kernels, anti-patterns, suggested counters, and the
   suggested first-profiling command.
@@ -607,6 +619,44 @@ the left border + pill badge; the markdown / text formats emit a
 | HOT | 5% – 20% |
 | WARM | 1% – 5% |
 | COOL | < 1% |
+
+### Advanced recommendations (`--advanced`)
+
+Phase 10 introduces an opt-in tier of recommendations that are too
+speculative to show by default but valuable to power users: LLVM
+loop-hint pragmas (`#pragma clang loop unroll[_count|disable]`).
+They are gated behind the `--advanced` CLI flag (or the
+`PERFXPERT_ADVANCED_RECS=1` environment variable).
+
+```bash
+# SKIP-SAMPLE — requires a real trace.db
+perfxpert analyze --advanced -i trace.db --format text
+# Equivalent (CI-friendly):
+PERFXPERT_ADVANCED_RECS=1 perfxpert analyze -i trace.db --format text
+```
+
+When the gate is ON, pragma recommendations surface alongside regular
+recs with a ``[advanced]`` badge next to the priority label and a
+mandatory `Verify with: perfxpert diff ...` footer. The knowledge
+base (``perfxpert/knowledge/compiler_pragmas.yaml``) allows exactly
+three pragmas: `clang_loop_unroll_full`, `clang_loop_unroll_count`,
+and `clang_loop_unroll_disable`. Seven other clang loop hints
+(vectorize, interleave, distribute, pipeline, vectorize_predicate)
+are explicitly rejected because the LLVM amdgpu backend ignores them
+on HIP device code.
+
+Hard rules enforced by the fence slice in
+``perfxpert/agents/fence/compute_specialist.md``:
+
+* Every pragma rec must carry a Tier-0 source anchor
+  (``source_file``/``source_line``) — no anchor, no rec.
+* ``unroll_count(N)`` only uses N from the YAML ``factor_sweep``
+  (``[2, 4, 8]``); the agent may never invent other factors.
+* Triton-generated kernels (source path contains ``.triton/``) are
+  skipped — the hint would evaporate on the next JIT invocation.
+
+Under the default (gate OFF) the report is unchanged; pragma recs are
+filtered out of the rendered output.
 
 ## 5. Multi-GPU / MPI workflows
 

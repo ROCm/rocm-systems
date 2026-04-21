@@ -74,7 +74,7 @@ with **dotted** names because that's what `discover_read_only_tools()`
 returns; the equivalent wire names have the dots replaced by
 underscores.
 
-## Tools exposed (43)
+## Tools exposed (58)
 
 Auto-discovered by `mcp_server._registry.discover_read_only_tools()`
 every boot. The registry walks `perfxpert.tools.*` modules but skips
@@ -123,7 +123,7 @@ Call it conversationally from any TUI backend ("diff this run against
 baseline.db", "what got slower since yesterday's trace?") instead of
 running `analyze` twice.
 
-### Snapshot: classifier / knowledge tools (35)
+### Snapshot: classifier / knowledge tools (50)
 
 Lower-level building blocks the agents themselves compose. External
 clients can call these directly when they want the raw classifier
@@ -140,7 +140,13 @@ compiler.explain_flag
 compiler.lookup_flags
 counters.lookup_info
 counters.validate_for_gpu
+dependency_graph.reconstruct_dag            # Phase-10 D
+gpu_runtime_monitor.analyze_thermal         # Phase-10 B
+gpu_runtime_monitor.parse_amd_smi_json      # Phase-10 B
+gpu_runtime_monitor.parse_rocm_smi_json     # Phase-10 B
 intent.classify
+interconnect.lookup_peaks
+kernel_fusion.find_fusion_candidates        # Phase-10 A
 memory.classify_cache_performance
 metrics.compute_gpu_utilization
 metrics.compute_hbm_bandwidth
@@ -150,12 +156,20 @@ metrics.compute_latency
 occupancy.lookup_waves_per_eu
 occupancy.suggest_vgpr_reduction
 plateau.check
+pragma.explain_pragma
+pragma.lookup_pragmas
+pragma.suggest_pragmas_for_kernel
+predict_impact.explain_prediction
+predict_impact.list_supported_changes
+predict_impact.predict_change_impact
 profiling.fill_gap
+rccl_analysis.analyze_collectives
 regression.compare_runs
 regression.extract_kernel_runtimes_from_db
 regression.identify_hot_kernels
 roofline.classify
 roofline.lookup_peaks
+roofline.plot_points
 sol.classify_utilization
 sol.lookup_peaks
 sol.sanity_check
@@ -164,6 +178,7 @@ trace_diff.diff_runs
 trace_fingerprint.fingerprint
 tracelens.classify_overhead
 tracelens.lookup_metrics
+unified_memory.analyze_paging               # Phase-10 C
 workflow.next_step
 ```
 
@@ -172,6 +187,45 @@ workflow.next_step
 Same engine powers the `perfxpert diff` + `perfxpert ci` CLI
 subcommands, the `perfxpert analyze --baseline <db>` splice, and the
 gate-cascade `trace_diff_regression_rule` — one brain, one number.
+
+The `pragma.*` trio was added in Phase 10: `pragma.lookup_pragmas`
+enumerates the 3 allowlisted LLVM loop-hint pragmas (+ 7 rejected
+entries for fence visibility), `pragma.explain_pragma` returns the
+full catalog entry for a given pragma id, and
+`pragma.suggest_pragmas_for_kernel` applies the Amdahl gate + trigger
+rules to return 0-N candidates for a given kernel. Rendering of
+pragma recs in `perfxpert analyze` output is gated behind the
+`--advanced` CLI flag (or `PERFXPERT_ADVANCED_RECS=1` env var) — see
+the getting-started guide "Advanced recommendations" section.
+
+Phase 10 advanced-specialist additions (+6 tools over the prior 52-tool
+baseline):
+
+- `kernel_fusion.find_fusion_candidates` (Feature A) — scans the kernel
+  timeline for adjacent short kernels (< 10 us each, gap <= 500 ns
+  default) with matching tensor-shape signatures and returns a ranked
+  list of fusion candidates with `(est_speedup_lo, est_speedup_hi)`
+  brackets. Bound into the Compute Specialist allowlist.
+- `gpu_runtime_monitor.parse_amd_smi_json` / `parse_rocm_smi_json` /
+  `analyze_thermal` (Feature B) — ingest a pre-captured `amd-smi
+  monitor --json` or `rocm-smi --json` log (set
+  `PERFXPERT_GPU_MONITOR_LOG=<path>`) and return a thermal envelope +
+  throttle-event summary. Available via the MCP surface only — not
+  bound to any specialist allowlist because thermal analysis is
+  diagnostic / out-of-band.
+- `unified_memory.analyze_paging` (Feature C) — detects CPU-resident
+  GPU-accessed pages (HtoD/DtoH spikes + page-fault events) and
+  quantifies MI300X cross-die (XCD-to-XCD) traffic totals. Bound into
+  the Memory Specialist allowlist.
+- `dependency_graph.reconstruct_dag` (Feature D) — builds a coarse DAG
+  from stream-local kernel ordering + sync events, then returns
+  `critical_path`, `bubbles`, `total_bubble_ns`, and `sync_event_count`
+  so the Latency Specialist can distinguish over-synchronisation from
+  inherent dependencies. Bound into the Latency Specialist allowlist.
+
+Features E-H (multi-level memory chain, matrix meter, attention scope)
+did not add new tools — they extend specialist fences with new
+signatures drawn from existing `metrics.*` + `tracelens_port` helpers.
 
 ## Protocol examples
 
@@ -294,7 +348,7 @@ load-bearing for the security posture in spec §5.8.
 ## Client integration
 
 `perfxpert-mcp` speaks stdio MCP (JSON-RPC, protocol `2024-11-05`), so
-any MCP-compatible client can consume the 43 READ_ONLY tools. The
+any MCP-compatible client can consume the 46 READ_ONLY tools. The
 `command` field in every example below must resolve on the client's
 `PATH` — run `which perfxpert-mcp` to get an absolute path if your
 client launches with a narrower env than your login shell.
@@ -318,7 +372,7 @@ add a `perfxpert` entry under `mcpServers`:
 }
 ```
 
-Restart Claude Desktop. The 43 tools appear under the 🔌 panel with
+Restart Claude Desktop. The 58 tools appear under the 🔌 panel with
 `perfxpert_` name prefixes (underscored-on-the-wire — see §"Naming
 convention").
 
