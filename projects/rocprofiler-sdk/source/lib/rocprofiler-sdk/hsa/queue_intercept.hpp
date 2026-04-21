@@ -62,8 +62,10 @@ struct QueueState
 
     const hsa_queue_t* hsa_queue       = nullptr;  ///< HSA queue pointer for Queue* lookup
     hsa_signal_t       doorbell_signal = {0};      ///< The queue's doorbell signal
+    uint64_t           debug_id        = 0;        ///< Diagnostic identifier for log correlation
     uint64_t           k_factor        = 0;        ///< K-factor for metadata queue sync
     QueueState*        metadata_state  = nullptr;  ///< Pointer to metadata queue state if present
+    std::atomic<bool>  teardown_started{false};    ///< Queue teardown has started
     std::mutex         gate_lock;                  ///< Lock for packet submission gating
 };
 
@@ -137,7 +139,7 @@ register_doorbell(const hsa_queue_t* queue, hsa_signal_t doorbell);
  *
  * @param doorbell The doorbell signal to unregister
  */
-void
+bool
 unregister_doorbell(hsa_signal_t doorbell);
 
 /**

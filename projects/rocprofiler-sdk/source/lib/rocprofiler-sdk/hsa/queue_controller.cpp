@@ -266,6 +266,30 @@ compute_queue_k_factor()
     return k;
 }
 
+QueueController::~QueueController()
+{
+    size_t queue_count     = 0;
+    size_t callback_count  = 0;
+    size_t serializer_sets = 0;
+
+    _queues.rlock([&](const auto& map) { queue_count = map.size(); });
+    _callback_cache.rlock([&](const auto& map) { callback_count = map.size(); });
+    _profiler_serializer.rlock([&](const auto& map) { serializer_sets = map.size(); });
+
+    ROCP_INFO << "[TEARDOWN-DIAG][QC-DTOR] this=" << this
+              << " fini_status=" << registration::get_fini_status()
+              << " queue_count=" << queue_count << " callback_count=" << callback_count
+              << " serializer_sets=" << serializer_sets;
+
+    _queues.rlock([&](const auto& map) {
+        for(const auto& [queue_id, queue_ptr] : map)
+        {
+            ROCP_INFO << "[TEARDOWN-DIAG][QC-DTOR-QUEUE] queue=" << queue_id
+                      << " queue_obj=" << queue_ptr.get();
+        }
+    });
+}
+
 void
 QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 {
@@ -302,26 +326,57 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 void
 QueueController::destroy_queue(hsa_queue_t* id)
 {
-    if(!id) return;
+    if(!id)
+    {
+        ROCP_WARNING << "[TEARDOWN-DIAG][QC-DESTROY-NULL] fini_status="
+                     << registration::get_fini_status();
+        return;
+    }
 
     const auto* queue = get_queue(*id);
 
     // return if queue does not exist
-    if(!queue) return;
+    if(!queue)
+    {
+        ROCP_WARNING << "[TEARDOWN-DIAG][QC-DESTROY-MISS] queue=" << id
+                     << " fini_status=" << registration::get_fini_status();
+        return;
+    }
 
-    ROCP_INFO << "[DIAG-HG-QUEUE-DESTROY-BEGIN] queue=" << id;
+    auto state_before = queue_intercept::lookup_queue_state(id);
+
+    ROCP_INFO << "[TEARDOWN-DIAG][QC-DESTROY-BEGIN] queue=" << id
+              << " state_present=" << static_cast<bool>(state_before)
+              << " state_id=" << (state_before ? state_before->debug_id : 0)
+              << " doorbell=" << (state_before ? state_before->doorbell_signal.handle : 0)
+              << " fini_status=" << registration::get_fini_status();
 
     queue_intercept::destroy_queue_state(id);
 
+    auto state_after = queue_intercept::lookup_queue_state(id);
+    ROCP_WARNING_IF(state_after != nullptr)
+        << "[TEARDOWN-DIAG][QC-DESTROY-STATE-STILL-PRESENT] queue=" << id
+        << " state_id=" << state_after->debug_id;
+
+    ROCP_INFO << "[TEARDOWN-DIAG][QC-DESTROY-SYNC-BEGIN] queue=" << id;
     queue->sync();
-    if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);
+    ROCP_INFO << "[TEARDOWN-DIAG][QC-DESTROY-SYNC-END] queue=" << id;
+
+    if(queue->block_signal.handle != 0)
+    {
+        auto status = get_core_table().hsa_signal_destroy_fn(queue->block_signal);
+        ROCP_INFO << "[TEARDOWN-DIAG][QC-DESTROY-BLOCK-SIGNAL] queue=" << id
+                  << " signal=" << queue->block_signal.handle
+                  << " status=" << static_cast<int>(status);
+    }
+
     _queues.wlock([&](auto& map) {
         auto erased = map.erase(id);
-        ROCP_INFO << "[DIAG-HG-QUEUE-DESTROY-MAP] queue=" << id << " erased=" << erased
+        ROCP_INFO << "[TEARDOWN-DIAG][QC-DESTROY-MAP] queue=" << id << " erased=" << erased
                   << " remaining=" << map.size();
     });
 
-    ROCP_INFO << "[DIAG-HG-QUEUE-DESTROY-END] queue=" << id;
+    ROCP_INFO << "[TEARDOWN-DIAG][QC-DESTROY-END] queue=" << id;
 }
 
 ClientID
@@ -641,11 +696,25 @@ queue_controller_sync()
 void
 queue_controller_fini()
 {
-    if(get_queue_controller())
-        get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
+    if(auto* controller = get_queue_controller(); controller != nullptr)
+    {
+        size_t queue_count = 0;
+        ROCP_INFO << "[TEARDOWN-DIAG][QC-FINI-BEGIN] fini_status="
+                  << registration::get_fini_status();
+        controller->iterate_queues([&](const Queue* _queue) {
+            ++queue_count;
+            _queue->sync();
+        });
+        ROCP_INFO << "[TEARDOWN-DIAG][QC-FINI-SYNCED] queue_count=" << queue_count;
+    }
 
     // finalize queue data (e.g. clean up signal pool)
-    if(enable_queue_intercept()) queue_fini();
+    if(enable_queue_intercept())
+    {
+        ROCP_INFO << "[TEARDOWN-DIAG][QC-FINI-QUEUE-FINI-BEGIN]";
+        queue_fini();
+        ROCP_INFO << "[TEARDOWN-DIAG][QC-FINI-QUEUE-FINI-END]";
+    }
 }
 
 void
