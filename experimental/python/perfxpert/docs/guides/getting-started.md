@@ -198,14 +198,14 @@ perfxpert doctor
 ![doctor](assets/gifs/03-doctor.gif)
 
 *`perfxpert doctor` end-to-end: Python check, MCP server reachable
-(57 tools registered), 3/5 LLM providers configured, `ALL CLEAN`.*
+(58 tools registered), 3/5 LLM providers configured, `ALL CLEAN`.*
 
 Expected output ends with `ALL CLEAN` when everything is wired. The
 doctor checks:
 
 - `perfxpert` version + Python ≥ 3.10
 - openai-agents SDK
-- MCP server reachable (`perfxpert-mcp` boots + 57 tools registered — 8 agent-hierarchy + 48 classifier/knowledge + 1 `trace_diff.diff_runs`)
+- MCP server reachable (`perfxpert-mcp` boots + 58 tools registered — 8 agent-hierarchy + 49 classifier/knowledge + 1 `trace_diff.diff_runs`)
 - task store (`~/.perfxpert` or `$PERFXPERT_TASK_ROOT`)
 - bundled opencode binary + bundled opencode config dir
 - LLM providers configured (counts `N/5` against
@@ -225,10 +225,10 @@ agent runtime.
   a rocprofv3 `.db`, emits a single report (text / JSON / markdown /
   webview HTML). Deterministic with `--llm` omitted; LLM-augmented
   with `--llm {anthropic,openai}`.
-- **`perfxpert-mcp`** — stdio MCP server that re-exposes the 43
+- **`perfxpert-mcp`** — stdio MCP server that re-exposes the 58
   READ-ONLY analysis tools over JSON-RPC (8 agent-hierarchy entry
   points — Root, Analysis, Recommendation, Correctness, +3 technique
-  specialists, + diff specialist — plus 48 classifier / knowledge
+  specialists, + diff specialist — plus 49 classifier / knowledge
   tools and 1 `trace_diff.diff_runs`). Meant to be
   spawned by an MCP client (Claude Desktop, Claude Code, Codex CLI,
   Gemini CLI, opencode). See `../integration/mcp-server.md`.
@@ -652,7 +652,7 @@ the left border + pill badge; the markdown / text formats emit a
 
 ### Advanced recommendations (`--advanced`)
 
-Phase 10 introduces an opt-in tier of recommendations that are too
+The advanced tier is an opt-in set of recommendations that are too
 speculative to show by default but valuable to power users: LLVM
 loop-hint pragmas (`#pragma clang loop unroll[_count|disable]`).
 They are gated behind the `--advanced` CLI flag (or the
@@ -688,7 +688,7 @@ Hard rules enforced by the fence slice in
 Under the default (gate OFF) the report is unchanged; pragma recs are
 filtered out of the rendered output.
 
-### Kernel-fusion candidates (Phase 10 A)
+### Kernel-fusion candidates
 
 When the Compute Specialist surfaces adjacent-short-kernel pairs with
 matching tensor-shape signatures, it cites a recipe from
@@ -702,7 +702,7 @@ matching tensor-shape signatures, it cites a recipe from
 Estimated speedup comes back as an `(est_speedup_lo, est_speedup_hi)`
 bracket. Verify with `perfxpert diff` after applying the fusion.
 
-### GPU runtime monitor (Phase 10 B)
+### GPU runtime monitor (thermal / power)
 
 PerfXpert ingests pre-captured `amd-smi` / `rocm-smi` JSON logs — we
 do not shell out to the tools at analyze time. Capture in advance:
@@ -717,7 +717,7 @@ perfxpert analyze -i trace.db
 Latency specialists consult the log opportunistically to flag
 thermal / power throttle as root cause vs contributing factor.
 
-### Unified-memory + MI300X cross-die (Phase 10 C)
+### Unified-memory + MI300X cross-die
 
 The Memory Specialist now runs `unified_memory.analyze_paging(db_path)`
 on every memory-bound recommendation, surfacing:
@@ -728,7 +728,7 @@ on every memory-bound recommendation, surfacing:
 - Targeted recommendations — pin host buffers, `hipMemAdvise`, or
   partition with `ROCR_VISIBLE_DEVICES`.
 
-### Dependency graph + GPU bubbles (Phase 10 D)
+### Dependency graph + GPU bubbles
 
 The Latency Specialist reconstructs a coarse DAG of kernel dispatches
 via `dependency_graph.reconstruct_dag(db_path)` and flags:
@@ -738,7 +738,7 @@ via `dependency_graph.reconstruct_dag(db_path)` and flags:
 - `critical_path` longer than 60% of wall time → structural
   parallelism recommendation (stream partitioning, HIP graph capture).
 
-### Predicted impact on recommendations (Phase 10)
+### Predicted impact on recommendations
 
 Every rec card whose category maps onto a recognised optimisation
 technique now carries a **Predicted** line bracketing the expected
@@ -765,8 +765,9 @@ Rules (all enforced by `perfxpert.tools.predict_impact`):
 
 The prediction is always on when a technique is surfaced — there is no
 CLI gate. The JSON schema bumps to `0.3.3` when at least one rec
-carries `predicted_impact_range`; later Phase 10 features (roofline
-`0.3.4`) further bump it.
+carries `predicted_impact_range`; the Live Roofline payload
+(`roofline` top-level key) then bumps it to `0.3.4`, and ATT data
+(when present) pins it at `0.4.0`.
 
 ## 5. Multi-GPU / MPI workflows
 
@@ -1244,8 +1245,8 @@ See `python-api.md` for the full surface.
 
 ## 13. Connecting other MCP clients
 
-Any MCP-compatible client can consume the 43 READ-ONLY tools exposed
-by `perfxpert-mcp` (8 agent-hierarchy entry points + 34
+Any MCP-compatible client can consume the 58 READ-ONLY tools exposed
+by `perfxpert-mcp` (8 agent-hierarchy entry points + 49
 classifier/knowledge tools + 1 `trace_diff.diff_runs`). Configuration snippets for Claude Desktop,
 Claude Code, Codex CLI, Gemini CLI, and generic stdio clients live in
 `../integration/mcp-server.md` under §"Client integration". The
@@ -1255,7 +1256,7 @@ automatically — no client-side setup required.
 ![mcp server](assets/gifs/13-mcp-server.gif)
 
 *`perfxpert-mcp` launched in foreground — the stderr banner reports
-the 43 read-only tools it registers (8 agent-hierarchy + 34
+the 58 read-only tools it registers (8 agent-hierarchy + 49
 classifier / knowledge + 1 `trace_diff.diff_runs`).*
 
 ## 14. Troubleshooting

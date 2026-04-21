@@ -261,7 +261,7 @@ The current tree:
   section emitted by `perfxpert diff` / `perfxpert analyze --baseline`
   (Confluence row #7).
 - `0.3.4` — current: additive top-level `roofline` section emitted by
-  `roofline.plot_points` (Phase 10 — Live Roofline chart). Shape:
+  `roofline.plot_points` (Live Roofline chart). Shape:
   ```json
   "roofline": {
     "schema_version": "0.3.x",
@@ -295,7 +295,7 @@ The current tree:
 - `0.3.3` — additive change-impact-prediction fields on each
   recommendation (`predicted_impact_range`, `predicted_confidence`,
   `predicted_rationale`, `source_citation`, `roofline_delta`). Emitted
-  by the Phase-10 Feature E pipeline
+  by the change-impact-prediction pipeline
   (`perfxpert.tools.predict_impact`) whenever the specialist-attached
   or category-mapped technique matches an entry in
   `knowledge/change_impact_models.yaml`. Shape of the recommendation
@@ -324,8 +324,8 @@ The current tree:
   `predicted_impact_range != null`. `0.3.4` (Live Roofline) and ATT
   (`0.4.0`) still trump when their own fields are populated.
 - `0.3.2` — additive top-level `communication` section
-  emitted by `rccl_analysis.analyze_collectives` (Phase 10 — RCCL /
-  NIC analysis). Shape:
+  emitted by `rccl_analysis.analyze_collectives` (RCCL / NIC
+  communication analysis). Shape:
   ```json
   "communication": {
     "collectives": [
@@ -381,11 +381,12 @@ placeholder, **not** an error. The regression guard in
 (`tests/test_formatters/test_report_structure.py`) plus the
 webview/markdown/text ordering tests enforce this.
 
-## Recommendation subtype — `pragma` (Phase 10)
+## Recommendation subtype — `pragma`
 
 Recommendations now carry an optional `subtype` field in the Layer B
 dict (and Layer C JSON). The only defined value today is `"pragma"`,
-emitted exclusively by the Phase-10 LLVM loop-hint pathway:
+emitted exclusively by the LLVM loop-hint advanced-recommendations
+pathway:
 
 ```json
 {
@@ -421,9 +422,10 @@ Rendering invariants:
 See ``perfxpert/analysis/recommendations.py::build_pragma_recommendation``
 for the canonical constructor.
 
-## Phase-10 advanced-specialist tool shapes
+## Advanced-specialist tool shapes
 
-The Phase-10 MCP tools (A-D) each return a plain dict; none carry
+The advanced-specialist MCP tools (kernel fusion, GPU runtime monitor,
+unified memory, dependency graph) each return a plain dict; none carry
 `schema_version` because they sit alongside — not inside — the
 analyze-report JSON. Consumers that want schema-stable outputs should
 pin the tool's release notes in `docs/integration/mcp-server.md`.
