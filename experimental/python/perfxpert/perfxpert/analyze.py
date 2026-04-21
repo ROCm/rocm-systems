@@ -768,7 +768,22 @@ def _format_agentic_output(
         doc["recommendations"] = merged_recs
         doc["metadata"] = {**doc.get("metadata", {}), **metadata}
         if tier0_findings is not None:
-            doc["tier0_findings"] = tier0_findings
+            # When a profiling database IS present, strip instrumentation-advice
+            # fields (suggested_counters / profiling_plan / profiling_plan_actions
+            # / suggested_first_command) from the Tier-0 payload — they only
+            # make sense in the source-only (no-DB) path.
+            if database_path:
+                _strip_keys = {
+                    "suggested_counters",
+                    "profiling_plan",
+                    "profiling_plan_actions",
+                    "suggested_first_command",
+                }
+                doc["tier0_findings"] = {
+                    k: v for k, v in tier0_findings.items() if k not in _strip_keys
+                }
+            else:
+                doc["tier0_findings"] = tier0_findings
         # Schema bump: the agentic pipeline adds
         # ``narrative + primary_bottleneck + summary + tier0_findings`` on
         # top of the legacy deterministic schema. This is the contract the
@@ -868,7 +883,7 @@ def _format_agentic_output(
         if tier0_findings is not None:
             tier0_ns = tier0_dict_to_ns(tier0_findings)
             md += "\n\n---\n\n## Tier 0 — Source Scan\n\n"
-            md += _format_tier0_markdown(tier0_ns)
+            md += _format_tier0_markdown(tier0_ns, has_profiling=True)
         return md
 
     if output_format == "webview":
@@ -900,7 +915,7 @@ def _format_agentic_output(
         # scaffolding is stripped entirely.
         if tier0_findings is not None:
             tier0_ns = tier0_dict_to_ns(tier0_findings)
-            tier0_full = _format_tier0_webview(tier0_ns)
+            tier0_full = _format_tier0_webview(tier0_ns, has_profiling=True)
             tier0_wrapper = _build_tier0_wrapper_scard(tier0_full)
             html = _splice_before_wrap_end(html, tier0_wrapper)
         return html

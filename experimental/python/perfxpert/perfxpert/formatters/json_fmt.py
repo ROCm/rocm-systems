@@ -308,7 +308,7 @@ def _build_warnings_json(has_counters: bool) -> List[Dict[str, Any]]:
     return []
 
 
-def _tier0_to_dict(tier0_result: Any) -> Dict[str, Any]:
+def _tier0_to_dict(tier0_result: Any, has_profiling: bool = False) -> Dict[str, Any]:
     """Convert SourceAnalysisResult to a JSON-serializable dict for the tier0 field."""
     # Bug 3: expose profiling_plan + profiling_plan_actions + code_patterns
     # alongside the legacy `recommendations` key so downstream consumers can
@@ -338,15 +338,15 @@ def _tier0_to_dict(tier0_result: Any) -> Dict[str, Any]:
         # actions live under ``profiling_plan`` / ``profiling_plan_actions``).
         "recommendations": _build_recommendations_json(code_patterns),
         "code_patterns": _build_recommendations_json(code_patterns),
-        "profiling_plan": profiling_plan if isinstance(profiling_plan, dict) else {},
-        "profiling_plan_actions": _build_recommendations_json(profiling_plan_actions),
-        "suggested_counters": tier0_result.suggested_counters,
+        "profiling_plan": {} if has_profiling else (profiling_plan if isinstance(profiling_plan, dict) else {}),
+        "profiling_plan_actions": [] if has_profiling else _build_recommendations_json(profiling_plan_actions),
+        "suggested_counters": [] if has_profiling else tier0_result.suggested_counters,
         "suggested_first_command": tier0_result.suggested_first_command,
         "llm_explanation": tier0_result.llm_explanation,
     }
 
 
-def _format_tier0_json(tier0_result: Any) -> str:
+def _format_tier0_json(tier0_result: Any, has_profiling: bool = False) -> str:
     """Format Tier 0 source-only analysis as schema v0.2.0 JSON."""
     import json as _json
 

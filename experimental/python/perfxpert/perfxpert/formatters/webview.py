@@ -847,7 +847,7 @@ def _format_as_webview(
     return html
 
 
-def _format_tier0_webview(tier0_result: Any) -> str:
+def _format_tier0_webview(tier0_result: Any, has_profiling: bool = False) -> str:
     """Generate a self-contained AMD-themed HTML Tier 0 report (identical design system as Tier 1/2)."""
     import html as _html
     import json as _json
@@ -1080,7 +1080,7 @@ def _format_tier0_webview(tier0_result: Any) -> str:
         for c in tier0_result.suggested_counters
     )
     counters_section = ""
-    if tier0_result.suggested_counters:
+    if tier0_result.suggested_counters and not has_profiling:
         collect_cmd = (
             "rocprofv3 --sys-trace --pmc "
             + " ".join(tier0_result.suggested_counters)
@@ -1115,7 +1115,7 @@ def _format_tier0_webview(tier0_result: Any) -> str:
         or tier0_result.suggested_first_command
     )
     start_here_section = ""
-    if suggested_cmd or profiling_plan:
+    if (suggested_cmd or profiling_plan) and not has_profiling:
         desc = (
             profiling_plan.get("description")
             if isinstance(profiling_plan, dict)

@@ -207,12 +207,16 @@ def test_tier0_profiling_plan_not_in_main_recs(airgap, tmp_path, tiny_hip_src):
             f"main rec issue starts with profiling-plan prose: {r!r}"
         )
 
-    # (b) Profiling plan lives under tier0_findings.profiling_plan.
+    # (b) In combined mode (DB is present) the profiling-plan/instrumentation-advice
+    # keys are stripped from tier0_findings — they only make sense in the
+    # source-only path. The dedicated source-only test below re-asserts the
+    # profiling_plan is present when there is no DB.
     tier0 = doc.get("tier0_findings") or {}
-    plan = tier0.get("profiling_plan") or {}
-    assert plan.get("suggested_first_command"), (
-        f"tier0_findings.profiling_plan.suggested_first_command missing: "
-        f"{plan!r}"
+    assert "profiling_plan" not in tier0 or not tier0["profiling_plan"], (
+        f"combined-mode tier0_findings must not carry profiling_plan: {tier0!r}"
+    )
+    assert "suggested_first_command" not in tier0, (
+        f"combined-mode tier0_findings must not carry suggested_first_command: {tier0!r}"
     )
 
 
@@ -249,10 +253,11 @@ def test_report_html_has_separate_tier0_section(
     airgap, tmp_path, tiny_hip_src,
 ):
     """Webview combined path (-i + --source-dir) must expose a dedicated
-    Tier-0 section with an ``id="tier0"`` anchor containing both a
-    ``Profiling Plan`` heading and the suggested --sys-trace command.
-    The command must NOT appear in the main recommendations table (which
-    lives outside the tier-0 wrapper).
+    Tier-0 section with an ``id="tier0"`` anchor. Instrumentation-advice
+    blocks (Profiling Plan, Suggested Hardware Counters) are intentionally
+    absent in combined mode — the user has already profiled; that advice
+    belongs in the source-only path only. Detected code patterns DO flow
+    into the main recommendations table.
     """
     cfg = output_config.output_config(
         output_file="report", output_path=str(tmp_path)
@@ -271,21 +276,18 @@ def test_report_html_has_separate_tier0_section(
         "expected an id=\"tier0\" anchor wrapping the Tier-0 Source Scan section"
     )
 
-    # Profiling Plan heading present.
-    assert ">Profiling Plan<" in html or "<h3>Profiling Plan</h3>" in html, (
-        "expected a <h3>Profiling Plan</h3> heading inside the Tier-0 section"
-    )
-
-    # The --sys-trace command appears somewhere in the tier-0 wrapper.
-    sys_trace_cmd = "rocprofv3 --sys-trace"
-    # Slice out the tier-0 section (from id="tier0" to the next closing
-    # </section> that follows the opening one — a best-effort substring
-    # window is fine for this assertion).
+    # Instrumentation-advice blocks must NOT appear in combined mode.
     anchor = 'id="tier0"'
     idx = html.find(anchor)
     assert idx != -1
-    # Grab enough text after the anchor to cover the nested sections.
     tier0_window = html[idx:idx + 40_000]
-    assert sys_trace_cmd in tier0_window, (
-        "expected the --sys-trace command to appear inside the Tier-0 section"
+    assert "Profiling Plan" not in tier0_window, (
+        "combined-mode tier-0 section must not include the 'Profiling Plan' "
+        "instrumentation advice (user already profiled)"
     )
+    assert "Suggested Hardware Counters" not in tier0_window, (
+        "combined-mode tier-0 section must not include 'Suggested Hardware Counters' "
+        "(user already profiled)"
+    )
+    # (Rocprofv3 commands may still appear legitimately in downstream
+    # recommendation sections — we don't assert on their absence here.)

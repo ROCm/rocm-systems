@@ -102,6 +102,7 @@ def _build_narrative_from_analysis(
     analysis_out: schemas.AnalysisOutput,
     *,
     source_dir: Optional[str] = None,
+    has_profiling: bool = False,
 ) -> str:
     """Synthesize a deterministic narrative paragraph from Analysis findings.
 
@@ -169,10 +170,16 @@ def _build_narrative_from_analysis(
 
     tier0_note = ""
     if source_dir:
-        tier0_note = (
-            f" Source tree scanned at `{source_dir}`; see the Tier-0 section "
-            "for the profiling plan and detected code patterns."
-        )
+        if has_profiling:
+            tier0_note = (
+                f" Source tree scanned at `{source_dir}`; see the Tier-0 "
+                "section for detected code patterns."
+            )
+        else:
+            tier0_note = (
+                f" Source tree scanned at `{source_dir}`; see the Tier-0 "
+                "section for the profiling plan and detected code patterns."
+            )
 
     return (top_sentence + verdict_sentence + counter_note + tier0_note).strip()
 
@@ -340,7 +347,9 @@ def run_root(
     # Step 4: Build the final narrative + recs.
     if analysis_out is not None:
         narrative = _build_narrative_from_analysis(
-            analysis_out, source_dir=payload.source_dir,
+            analysis_out,
+            source_dir=payload.source_dir,
+            has_profiling=bool(payload.database_path),
         )
         primary_bottleneck = analysis_out.primary_bottleneck
         hot_kernel_seeds = _analysis_out_to_rec_seeds(analysis_out)

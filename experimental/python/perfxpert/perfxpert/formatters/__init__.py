@@ -114,7 +114,7 @@ def format_analysis_output(
 
             try:
                 doc = _json.loads(output)
-                doc["tier0"] = _tier0_to_dict(tier0_result)
+                doc["tier0"] = _tier0_to_dict(tier0_result, has_profiling=bool(database_path))
                 output = _json.dumps(doc, indent=2)
             except Exception:
                 pass  # Tier0 embedding into combined JSON is non-fatal; return Tier1/2 output unchanged
@@ -134,7 +134,7 @@ def format_analysis_output(
         )
         if tier0_result is not None:
             output += "\n\n---\n\n## Tier 0: Source Code Analysis\n\n"
-            output += _format_tier0_markdown(tier0_result)
+            output += _format_tier0_markdown(tier0_result, has_profiling=bool(database_path))
         return output
 
     if output_format == "webview":

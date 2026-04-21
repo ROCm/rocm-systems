@@ -80,7 +80,7 @@ def _tier0_recommendations_text(
     return lines
 
 
-def _format_tier0_text(tier0_result: Any) -> str:
+def _format_tier0_text(tier0_result: Any, has_profiling: bool = False) -> str:
     """Format Tier 0 source-only analysis as plain text."""
     width = 80
     lines = []
@@ -145,7 +145,7 @@ def _format_tier0_text(tier0_result: Any) -> str:
         lines.append("")
 
     # Recommended counters
-    if tier0_result.suggested_counters:
+    if tier0_result.suggested_counters and not has_profiling:
         lines.append("\u2501" * width)
         lines.append("SUGGESTED HARDWARE COUNTERS".center(width))
         lines.append("\u2501" * width)
@@ -157,7 +157,7 @@ def _format_tier0_text(tier0_result: Any) -> str:
     # the report; they never leak into the main recommendations table.
     profiling_plan = getattr(tier0_result, "profiling_plan", None) or {}
     plan_actions = getattr(tier0_result, "profiling_plan_actions", None) or []
-    if profiling_plan or plan_actions:
+    if (profiling_plan or plan_actions) and not has_profiling:
         lines.append("\u2501" * width)
         lines.append("TIER-0: PROFILING PLAN".center(width))
         lines.append("\u2501" * width)

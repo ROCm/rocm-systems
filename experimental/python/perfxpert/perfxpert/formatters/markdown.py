@@ -233,11 +233,12 @@ def _format_as_markdown(
     return "\n".join(lines)
 
 
-def _format_tier0_markdown(tier0_result: Any) -> str:
+def _format_tier0_markdown(tier0_result: Any, has_profiling: bool = False) -> str:
     """Format Tier 0 source-only analysis as Markdown."""
     lines = []
-    lines.append("# PerfXpert AI Profiling Plan \u2014 Tier 0: Source Code Analysis")
-    lines.append("")
+    if not has_profiling:
+        lines.append("# PerfXpert AI Profiling Plan \u2014 Tier 0: Source Code Analysis")
+        lines.append("")
     lines.append(f"**Source Directory:** `{tier0_result.source_dir}`")
     lines.append(f"**Analysis Date:** {tier0_result.analysis_timestamp}")
     lines.append(f"**Programming Model:** {tier0_result.programming_model}")
@@ -285,7 +286,7 @@ def _format_tier0_markdown(tier0_result: Any) -> str:
             lines.append(f"- \u26a0 {risk}")
         lines.append("")
 
-    if tier0_result.suggested_counters:
+    if tier0_result.suggested_counters and not has_profiling:
         lines.append("## Suggested Hardware Counters")
         lines.append("")
         lines.append("```")
@@ -296,7 +297,7 @@ def _format_tier0_markdown(tier0_result: Any) -> str:
     # Bug 3 — Profiling Plan subsection (instrumentation advice).
     profiling_plan = getattr(tier0_result, "profiling_plan", None) or {}
     plan_actions = getattr(tier0_result, "profiling_plan_actions", None) or []
-    if profiling_plan or plan_actions or getattr(tier0_result, "suggested_first_command", ""):
+    if (profiling_plan or plan_actions or getattr(tier0_result, "suggested_first_command", "")) and not has_profiling:
         lines.append("### Profiling Plan")
         lines.append("")
         desc = profiling_plan.get("description") if isinstance(profiling_plan, dict) else None
