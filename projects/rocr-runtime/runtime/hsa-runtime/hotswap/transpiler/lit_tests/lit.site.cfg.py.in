@@ -188,6 +188,15 @@ config.fixtures = {
     # fixture).
     "s_addk_i32":
         r"@LIT_FIXTURE_S_ADDK_I32_CO@",
+    # s_mulk_i32 (SOPK_32TIE) — companion to `s_addk_i32`. Same
+    # tied-`$src0` operand-layout contract; the mul arm was fixed
+    # alongside the add arm in the same commit. No corpus kernel
+    # currently exercises `s_mulk_i32`, so this fixture is the
+    # dedicated regression guard for the mul arm specifically —
+    # without it, a future refactor that reverts just the mul arm
+    # to `op.src(0)` would pass every other test in the repo.
+    "s_mulk_i32":
+        r"@LIT_FIXTURE_S_MULK_I32_CO@",
     # s_atomic_dec (SMEM, gfx8+ scalar-cache wrap-decrement) — pins the
     # `atomicrmw udec_wrap` lowering the handle_smem.cpp scalar-atomic
     # block emits for the AITER split-k barrier counter shape.  Closes
