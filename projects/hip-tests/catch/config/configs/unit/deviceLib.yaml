@@ -371,6 +371,12 @@ deviceLib:
   Unit_ocp_fp4_from_double_full_range_device:
     <<: *level_2
     tags: [types]
+  Unit_AtomicAdd_Coherent:
+    <<: *level_2
+    tags: [atomics]
+  Unit_AtomicAdd_NonCoherent:
+    <<: *level_2
+    tags: [atomics]
   Unit_BuiltinAtomics_fmaxCoherentGlobalMem:
     <<: *level_2
     tags: [math]
@@ -411,6 +417,12 @@ deviceLib:
     <<: *level_2
     tags: [atomics]
   Unit_unsafeAtomicAdd_NonCoherentRTC:
+    <<: *level_2
+    tags: [atomics]
+  Unit_unsafeAtomicAdd_Coherent:
+    <<: *level_2
+    tags: [atomics]
+  Unit_unsafeAtomicAdd_NonCoherent:
     <<: *level_2
     tags: [atomics]
   Unit_fp8_fnuz_compare_host_device:

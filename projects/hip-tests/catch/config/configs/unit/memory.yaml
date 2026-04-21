@@ -359,6 +359,9 @@ memory:
   Unit_hipHostRegister_Capture:
     <<: *level_2
     tags: [alloc]
+  Unit_hipHostUnregister_MemoryNotAccessibleAfterUnregister:
+    <<: *level_2
+    tags: [alloc]
   Unit_hipHostUnregister_NullPtr:
     <<: *level_2
     tags: [alloc]
@@ -1416,6 +1419,44 @@ memory:
   Unit_hipMemcpyHtoDAsync_Capture:
     <<: *level_2
     tags: [transfer]
+  Unit_hipMemsetFunctional_ZeroValue_hipMemset:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemsetFunctional_ZeroValue_hipMemsetD32:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemsetFunctional_ZeroValue_hipMemsetD16:
+    <<: *level_2
+    # Below tests soft hang in stress test on 13/09/23
+    disabled: [amd_wsl]
+    tags: [memset]
+  Unit_hipMemsetFunctional_ZeroValue_hipMemsetD8:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemsetFunctional_SmallSize_hipMemset:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemsetFunctional_SmallSize_hipMemsetD32:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemsetFunctional_SmallSize_hipMemsetD16:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemsetFunctional_SmallSize_hipMemsetD8:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemsetFunctional_ZeroSize_hipMemset:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemsetFunctional_ZeroSize_hipMemsetD32:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemsetFunctional_ZeroSize_hipMemsetD16:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemsetFunctional_ZeroSize_hipMemsetD8:
+    <<: *level_2
+    tags: [memset]
   Unit_hipMemsetFunctional_PartialSet_1D:
     <<: *level_2
     tags: [memset]
@@ -1450,6 +1491,9 @@ memory:
     <<: *level_2
     tags: [alloc]
   Unit_hipMalloc_Positive_Alignment:
+    <<: *level_2
+    tags: [alloc]
+  Unit_hipMalloc_Negative_Parameters:
     <<: *level_2
     tags: [alloc]
   Unit_hipMalloc_Allocate90PercentOfDeviceMemory:
@@ -1712,6 +1756,30 @@ memory:
     <<: *level_2
     tags: [query]
   Unit_hipMemPrefetchAsync_Negative_Parameters:
+    <<: *level_2
+    tags: [query]
+  Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation:
+    <<: *level_2
+    tags: [query]
+  Unit_hipMemPrefetchBatchAsync_LocationDistribution:
+    <<: *level_2
+    tags: [query]
+  Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity:
+    <<: *level_2
+    tags: [query]
+  Unit_hipMemPrefetchBatchAsync_Negative_NullAndInvalidPointers:
+    <<: *level_2
+    tags: [query]
+  Unit_hipMemPrefetchBatchAsync_Negative_IndexArrayConstraints:
+    <<: *level_2
+    tags: [query]
+  Unit_hipMemPrefetchBatchAsync_Negative_ParameterValidation:
+    <<: *level_2
+    tags: [query]
+  Unit_hipMemPrefetchBatchAsync_Negative_DeviceCapabilities:
+    <<: *level_2
+    tags: [query]
+  Unit_hipMemPrefetchBatchAsync_MultiDevice:
     <<: *level_2
     tags: [query]
   Unit_hipMemGetInfo_FreeLessThanTotal:

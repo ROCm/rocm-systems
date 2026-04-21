@@ -29,6 +29,9 @@ kernel:
   Unit_hipLaunchParm:
     <<: *level_2
     tags: [launch]
+  Unit_hipLaunchParmFunctor:
+    <<: *level_2
+    tags: [launch]
   Unit_kernel_chkConstantViaKernel:
     <<: *level_2
     tags: [memory]

@@ -74,6 +74,9 @@ graph:
   Unit_hipGraph_BasicFunctional:
     <<: *level_2
     tags: [lifecycle]
+  Unit_hipGraph_SimpleGraphWithKernel:
+    <<: *level_2
+    tags: [exec]
   Unit_hipGraphAddMemcpyNode_Positive_Basic:
     <<: *level_2
     tags: [node, image]
