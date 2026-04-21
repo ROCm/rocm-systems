@@ -8,6 +8,122 @@ Append-only. Newest on top.
 
 ---
 
+## 2026-04-21 — Matmul128x128 residual: fixed by V_CMP → V_CNDMASK per-lane-i1 shadow (closes the whole family)
+
+**Context.** Follow-up (and close-out) to the `warp-3-specific, K-iter-0-
+specific, upper-VGPR-bank A-load` entry directly below. The four
+diagnostic probes had narrowed the defect to an exact shape — now we name
+the ROOT CAUSE and retire all six `Gfx1250Gpu.Matmul*` XFAIL entries.
+
+**Root cause.** V_CMP → SGPR → V_CNDMASK round trip across cross-widening.
+
+The matmul's prologue computes the per-lane LDS address for the
+upper-VGPR-bank A load through the pattern
+
+```
+v_cmp_*_e64  sN, ...       ; wave-mask (wave-width i1 per lane),
+                           ; stored to SGPR narrow-width (i32 on
+                           ; wave32 source)
+... SGPR may be written / read scalarly ...
+v_cndmask_b32  vdst, src0, src1, sN   ; per-lane select keyed on sN
+```
+
+Under `WaveNativeProjection` (wave32 source → wave64 target), the V_CMP
+writer produces a **wave-width** (i64) per-lane i1. The SGPR destination
+is **source-width** (i32), so `ballotI1ToWidth` truncates the i64 ballot
+to i32 — destroying the upper 32 bits which carried the compare result
+for target lanes 32..63 (the lanes holding source wave 3's share of the
+workgroup). The V_CNDMASK consumer then reads the SGPR back and routed
+it through `extractLaneBitFromWaveMask`, which **replicates** the low 32
+bits into both halves — so target lanes 32..63 see source wave 2's (or
+0's) compare result instead of their own. For warp 3's prologue A-load,
+this mis-routes the `v_cndmask` that selects between two LDS-offset
+candidates, so warp 3 reads from warp 0's LDS region for the K-iter 0
+portion of its A fragment. The observed substitution (rows 124..127 ←
+A[0], A[2], A[4], A[6]) is the lane-by-lane consequence.
+
+**Fix (commit da404faf84).** Add a per-BB
+`DenseMap<int, WaveMaskEntry>` shadow in `RaiseContext` that caches the
+per-lane i1 produced by the most recent V_CMP_*_e64 writer to each SGPR.
+The V_CNDMASK consumer consults the shadow FIRST and reads the i1
+directly — bypassing the lossy narrow-ballot round trip entirely — and
+falls back to `extractLaneBitFromWaveMask` only when the shadow is
+empty (no fresh V_CMP writer in this BB, scalar SGPR write invalidated
+the cache, or we crossed a BB boundary).
+
+Three invariants ensure soundness (see `sgpr-wave-mask-translation.md`
+section 3.1 for the full treatment):
+- **I1 (Additive).** Narrow store + extract reader both preserved; the
+  shadow is consulted in addition, not instead. If a kernel's V_CNDMASK
+  path was correct before the fix it stays correct after.
+- **I2 (SSA-monotonic within a BB).** The SSA value in the cache is the
+  exact `cmp` produced by the last V_CMP writer to `sN`, with no
+  intervening write. Linear handler dispatch guarantees this.
+- **I3 (Any interference defeats the cache).** Scalar SGPR writes
+  invalidate via `onSgprWritten` (fired by `storeSGPR32 / storeSGPR64`),
+  and the shadow is cleared at BB boundaries.
+
+**What the four diagnostic probes each contributed.**
+
+- `RowIdA` (`A[i,k] = (i+1)·0.001`): identified the SUBSTITUTION arithmetic
+  (`rows 124..127 ← A[0], A[2], A[4], A[6]`) rather than a miss/zero.
+- `RowOnly124`: ruled out 2×2-grid-specific boundary handling
+  (single-tile reproduces the same pattern).
+- `EvenRows`: proved WAVE-3 SPECIFICITY — rows 12..15, 28..31, 44..47,
+  60..63, 76..79, 92..95, 108..111 ("sub-tile-row-1 rows 12..15" bands
+  for warps 0/1/2) were ALL CORRECT, only rows 125/127 wrong. Rules out
+  any general pass-2 / row-12..15 / target-wave-upper-half defect.
+- `KStripedRow124`: proved K-ITER 0 SPECIFICITY (got ≈ 44.8 = 48 - 3.2,
+  missing the 0.1 strip, which lives at k in [0,32)). Rules out main-
+  loop K-iter bugs, pins the defect to the prologue's upper-bank load.
+
+All four pass bit-exact under the fix and remain in the test suite as
+positive regression guards.
+
+**Wrong hypotheses enumerated and ruled out (from the H1..H4 hand-off).**
+
+- **H1 — Upper-VGPR-bank `ds_load_tr16_b128` destination write under
+  `s_set_vgpr_msb`.** The ds_load is lifted correctly: dest VGPR
+  baseIdx picks up the MSB adjust via `parseReg`'s
+  `currentVGPRAdjust[]`, and the write is gated by `emitUnderExec`
+  which reads the per-lane mask. The defect was upstream of the
+  ds_load: the v_cndmask that computed the ds_load's per-lane ADDRESS
+  was the corrupted site, not the ds_load itself.
+- **H2 — Raiser ttmp8 seed wave-uniform.** Confirmed per-lane divergent
+  at IR emission (`%ttmp8_val = shl i32 %wave_id_in_wg, 25` where
+  `%wave_id_in_wg = lshr i32 %workitem.id.x, 5`). Not the defect.
+- **H3 — LLVM AMDGPU backend regalloc miscompile for the upper-VGPR-
+  bank path.** Bug reproduces byte-identically on both projections and
+  with identical gfx942 regalloc output patterns; if regalloc were
+  coalescing v300.. onto a warp-0 live range, changing projection
+  would not preserve the error pattern.
+- **H4 — Per-wave MSB drop at the `v_cndmask_b32_e32` dst.** The MSB
+  adjust IS applied correctly (verified by runtime tracing: the
+  v_cndmask's ParsedReg for dst has `baseIdx = 256` under
+  `s_set_vgpr_msb 64`). The defect was the v_cndmask's COND operand
+  (the SGPR wave mask) being truncated, not its DST.
+
+**Why the obvious hypotheses all missed.** The substitution pattern
+(warp 3 ← warp 0 A data) naturally suggests a cross-wave address or data
+leak via LDS / bpermute / register-file aliasing. H1..H4 all point at
+the DATA PATH that manifests the symptom. The actual defect was one
+level upstream: the CONTROL-MASK (v_cmp result routed through an SGPR
+to a v_cndmask) that steered the address arithmetic. Corrupting the
+mask silently re-routes the data path in a way that looks identical to
+a data-path bug.
+
+**Graduation.**
+- All six `Gfx1250Gpu.Matmul*` XFAIL entries removed from
+  `tests/xfail.cmake` (commit da404faf84 landed the fix;
+  this entry and the follow-up retire the `WILL_FAIL TRUE`
+  annotations).
+- The four diagnostic probes remain as positive regression guards —
+  each covers a distinct axis of the defect (substitution arithmetic /
+  wave specificity / K-iter specificity / upper-vs-lower bank) and
+  would fire independently on any regression that re-opens the shape.
+
+---
+
 ## 2026-04-21 — Matmul128x128 residual: narrowed to wave-3 + K-iter-0 (prologue) + A-data side
 
 **Context.** Follow-up to the "data-substitution bug, NOT a collect-stage
