@@ -45,7 +45,7 @@ two rocpd databases and produces a schema-0.3.1 diff dict (see
 `perfxpert diff`, `perfxpert ci`, and `perfxpert analyze --baseline`
 use.
 
-The two Phase-10 communication-analysis tools are deterministic (no
+The two communication-analysis tools are deterministic (no
 LLM, no credentials) and map 1:1 onto their module functions:
 
 ```python
@@ -433,24 +433,30 @@ except QuotaExceededError:
     )
 ```
 
-## Phase-10 classifier / knowledge tools
+## Advanced-specialist classifier / knowledge tools
 
 These are raw callables (not agent entry points) that specialists invoke
 internally; each is also exposed over the MCP wire.
 
 | Tool | Python import | Role |
 |------|---------------|------|
-| `kernel_fusion.find_fusion_candidates` | `from perfxpert.tools.kernel_fusion import find_fusion_candidates` | Feature A — adjacent-short-kernel fusion candidates. |
-| `gpu_runtime_monitor.parse_amd_smi_json` | `from perfxpert.tools.gpu_runtime_monitor import parse_amd_smi_json` | Feature B — parse captured amd-smi JSON. |
-| `gpu_runtime_monitor.parse_rocm_smi_json` | `from perfxpert.tools.gpu_runtime_monitor import parse_rocm_smi_json` | Feature B — parse captured rocm-smi JSON. |
-| `gpu_runtime_monitor.analyze_thermal` | `from perfxpert.tools.gpu_runtime_monitor import analyze_thermal` | Feature B — thermal envelope + throttle summary. |
-| `unified_memory.analyze_paging` | `from perfxpert.tools.unified_memory import analyze_paging` | Feature C — paging + MI300X cross-die penalty analysis. |
-| `dependency_graph.reconstruct_dag` | `from perfxpert.tools.dependency_graph import reconstruct_dag` | Feature D — DAG + critical path + bubble detection. |
-| `predict_impact.predict_change_impact` | `from perfxpert.tools.predict_impact import predict_change_impact` | Feature E — Change-Impact Prediction: return `{predicted_speedup_range, confidence, rationale, roofline_delta, assumptions, source_citation, prediction_id}` for a baseline DB + kernel + change_type. Amdahl + tier-2 gates enforced internally. |
-| `predict_impact.list_supported_changes` | `from perfxpert.tools.predict_impact import list_supported_changes` | Feature E — enumerate the change_type ids in `knowledge/change_impact_models.yaml`. Returns `[{id, applies_to, required_metrics}]`. |
-| `predict_impact.explain_prediction` | `from perfxpert.tools.predict_impact import explain_prediction` | Feature E — re-hydrate a prediction by its `prediction_id`. In-process only in Phase 10; durable store in Phase 11. |
+| `kernel_fusion.find_fusion_candidates` | `from perfxpert.tools.kernel_fusion import find_fusion_candidates` | Adjacent-short-kernel fusion candidates — ranked list with `(est_speedup_lo, est_speedup_hi)` brackets. |
+| `gpu_runtime_monitor.parse_amd_smi_json` | `from perfxpert.tools.gpu_runtime_monitor import parse_amd_smi_json` | Parse a captured `amd-smi monitor --json` log. |
+| `gpu_runtime_monitor.parse_rocm_smi_json` | `from perfxpert.tools.gpu_runtime_monitor import parse_rocm_smi_json` | Parse a captured `rocm-smi --json` log. |
+| `gpu_runtime_monitor.analyze_thermal` | `from perfxpert.tools.gpu_runtime_monitor import analyze_thermal` | Thermal envelope + throttle-event summary over a captured log. |
+| `unified_memory.analyze_paging` | `from perfxpert.tools.unified_memory import analyze_paging` | HtoD/DtoH paging + MI300X cross-die (XCD) penalty analysis. |
+| `dependency_graph.reconstruct_dag` | `from perfxpert.tools.dependency_graph import reconstruct_dag` | DAG reconstruction + `critical_path` + `bubbles` + `total_bubble_ns` + `sync_event_count`. |
+| `rccl_analysis.analyze_collectives` | `from perfxpert.tools.rccl_analysis import analyze_collectives` | RCCL collective-ops analysis — per-op `effective_bw_gbps`, `efficiency_pct`, `efficiency_label`. |
+| `interconnect.lookup_peaks` | `from perfxpert.tools.interconnect import lookup_peaks` | XGMI / Infinity-Fabric / PCIe peak bandwidth lookup (used by `analyze_collectives` for efficiency ratios). |
+| `roofline.plot_points` | `from perfxpert.tools.roofline import plot_points` | Live Roofline — per-kernel `(ai, achieved_flops_per_s, bottleneck_class, fp_type, confidence)` from pmc_events. |
+| `pragma.lookup_pragmas` | `from perfxpert.tools.pragma import lookup_pragmas` | Enumerate the 3 allowlisted LLVM loop-hint pragmas (+ 7 rejected entries kept for fence visibility). |
+| `pragma.explain_pragma` | `from perfxpert.tools.pragma import explain_pragma` | Full catalog entry for a given `pragma_id`. |
+| `pragma.suggest_pragmas_for_kernel` | `from perfxpert.tools.pragma import suggest_pragmas_for_kernel` | Amdahl-gated pragma candidates for a hot kernel. |
+| `predict_impact.predict_change_impact` | `from perfxpert.tools.predict_impact import predict_change_impact` | Change-Impact Prediction: return `{predicted_speedup_range, confidence, rationale, roofline_delta, assumptions, source_citation, prediction_id}` for a baseline DB + kernel + change_type. Amdahl + tier-2 gates enforced internally. **Stub today — durable prediction store lands in a follow-up; status field surfaces "unsupported" when hit.** |
+| `predict_impact.list_supported_changes` | `from perfxpert.tools.predict_impact import list_supported_changes` | Enumerate the change_type ids in `knowledge/change_impact_models.yaml`. Returns `[{id, applies_to, required_metrics}]`. |
+| `predict_impact.explain_prediction` | `from perfxpert.tools.predict_impact import explain_prediction` | Re-hydrate a prediction by its `prediction_id`. In-process only today; durable store lands in a follow-up. |
 
-All nine are READ_ONLY (safe for external callers) and deterministic
+All are READ_ONLY (safe for external callers) and deterministic
 (no LLM, no sudo, no live device access). The runtime-monitor parsers
 ingest a user-supplied JSON log — set `PERFXPERT_GPU_MONITOR_LOG=<path>`
 to let specialists pick it up automatically.

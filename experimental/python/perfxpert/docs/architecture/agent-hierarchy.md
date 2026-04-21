@@ -79,27 +79,28 @@ Cross-links:
   Recommendation (or directly from a TUI backend) when the user's
   intent falls in their domain:
   - `compute_specialist` — VALU occupancy, waves-per-EU, VGPR pressure.
-    **Phase 10 A** — now also consumes
-    `kernel_fusion.find_fusion_candidates` to surface adjacent-short-
-    kernel fusion recipes (elementwise+elementwise, GEMM+bias+act, ...)
-    drawn from `knowledge/fusion_patterns.yaml`.
-    **Phase 10 F** — MFMA vs VALU ratio classifier (`mfma_vs_valu_
-    ratio_classification` in `knowledge/sol_metrics.yaml`) derived from
-    existing `metrics.*` helpers.
-    **Phase 10 G** — attention-scope patterns (Flash / naive SDPA /
-    KV-cache amplification) from `knowledge/attention_patterns.yaml`.
+    Also consumes `kernel_fusion.find_fusion_candidates` to surface
+    adjacent-short-kernel fusion recipes (elementwise+elementwise,
+    GEMM+bias+act, ...) drawn from `knowledge/fusion_patterns.yaml`.
+    MFMA vs VALU ratio classifier (`mfma_vs_valu_ratio_classification`
+    in `knowledge/sol_metrics.yaml`) derived from existing `metrics.*`
+    helpers. Attention-scope patterns (Flash / naive SDPA / KV-cache
+    amplification) from `knowledge/attention_patterns.yaml`. Pragma
+    suggestions (allowlisted LLVM loop hints) gated behind `--advanced`.
   - `memory_specialist` — HBM bandwidth, cache miss rate, LDS conflicts.
-    **Phase 10 C** — now binds `unified_memory.analyze_paging` for
-    MI300X cross-die + paging detection.
-    **Phase 10 E** — multi-level bandwidth chain (HBM → L2 → L1 → LDS)
-    with per-level classifier + recommendation in
-    `knowledge/memory_patterns.yaml`.
+    Binds `unified_memory.analyze_paging` for MI300X cross-die + paging
+    detection. Multi-level bandwidth chain (HBM → L2 → L1 → LDS) with
+    per-level classifier + recommendation in
+    `knowledge/memory_patterns.yaml`. Attaches change-impact
+    predictions to each surfaced technique via
+    `predict_impact.predict_change_impact`.
   - `latency_specialist` — dependency chains, kernel launch overhead,
     async-stream gaps.
-    **Phase 10 D** — binds `dependency_graph.reconstruct_dag` for
-    critical-path + GPU-bubble attribution.
-    **Phase 10 B** — reads `gpu_runtime_monitor.*` outputs from the
-    user-supplied `PERFXPERT_GPU_MONITOR_LOG` to flag thermal /
+    Binds `dependency_graph.reconstruct_dag` for critical-path +
+    GPU-bubble attribution. Binds `rccl_analysis.analyze_collectives`
+    + `interconnect.lookup_peaks` for per-collective bus-bandwidth +
+    NIC efficiency ratios. Reads `gpu_runtime_monitor.*` outputs from
+    the user-supplied `PERFXPERT_GPU_MONITOR_LOG` to flag thermal /
     power throttle (MCP surface only — not in the cap-5 allowlist
     because thermal analysis is diagnostic / out-of-band).
   - `diff_specialist` — run-to-run comparison; wraps
