@@ -1,6 +1,14 @@
 # ----------------------------------------------------------------------------------------#
 #
-# Clang Tidy
+# Linting
+#
+# Sets CMAKE_CXX_CLANG_TIDY, enabling clang-tidy in builds
+#
+# Creates following targets:
+# - lint
+# - lint-python
+# - lint-rocprofiler
+# - lint-rocprofiler-python
 #
 # ----------------------------------------------------------------------------------------#
 
@@ -98,3 +106,43 @@ endmacro()
 macro(ROCPROFILER_DEACTIVATE_CLANG_TIDY)
     set(CMAKE_CXX_CLANG_TIDY)
 endmacro()
+
+# ----------------------------------------------------------------------------------------#
+#
+# Lint targets
+#
+# ----------------------------------------------------------------------------------------#
+
+if(NOT ROCPROFILER_FLAKE8_EXE
+   AND _PYTHON_USER_BIN
+   AND EXISTS "${_PYTHON_USER_BIN}/flake8")
+    set(ROCPROFILER_FLAKE8_EXE
+        "${_PYTHON_USER_BIN}/flake8"
+        CACHE FILEPATH "flake8 exe")
+endif()
+
+find_program(
+    ROCPROFILER_FLAKE8_EXE
+    NAMES flake8
+    PATHS ${_PYTHON_USER_BIN}
+    HINTS ${_PYTHON_USER_BIN}
+    PATH_SUFFIXES bin)
+
+add_custom_target(lint-rocprofiler)
+if(NOT TARGET lint)
+    add_custom_target(lint)
+endif()
+if(NOT TARGET lint-python)
+    add_custom_target(lint-python)
+endif()
+
+if(ROCPROFILER_FLAKE8_EXE)
+    add_custom_target(
+        lint-rocprofiler-python
+        COMMAND ${ROCPROFILER_FLAKE8_EXE} --config ${PROJECT_SOURCE_DIR}/.flake8
+                --show-source --statistics ${PROJECT_SOURCE_DIR}/source
+        COMMENT "[rocprofiler] Running python linter ${ROCPROFILER_FLAKE8_EXE}...")
+    add_dependencies(lint-rocprofiler lint-rocprofiler-python)
+    add_dependencies(lint-python lint-rocprofiler-python)
+    add_dependencies(lint lint-rocprofiler-python)
+endif()
