@@ -19,7 +19,7 @@ set(rocpd-api-env "ROCPD_SCHEMA_PATH=${rocpd-api-schema-path}")
 ################################################################################
 rocprofiler_add_integration_execute_test(
     rocpd-api-cpp-interface-test
-    COMMAND $<TARGET_FILE:rocpd-api-test>
+    COMMAND $<TARGET_FILE:rocpd-api-test> --all
     DEPENDS rocpd-api-test
     TIMEOUT 45
     LABELS "integration-tests;rocpd"

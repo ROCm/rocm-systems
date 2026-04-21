@@ -283,7 +283,7 @@ main( int argc, char** argv )
         "-h",
         "--list",
         "-l",
-        "--get-all",
+        "--all",
         "-a",
         "--get-version",
         "-g",
@@ -296,6 +296,22 @@ main( int argc, char** argv )
         std::cerr << "rocpd-api-test: --get-version requires a rocpd schema version argument in the format <major>.<minor>.<patch>\n";
         std::cout << "Use --list to list all supported schema versions, then example usage:\n";
         std::cout << "   " << name << " --get-version 3.0.0\n";
+    };
+
+    auto print_help = [](const char* name) {
+        std::cout << "Usage: " << name << " [--help] [--all] [--list] [--get-latest] [--get-version <version>]\n";
+        std::cout << "Options:\n";
+        std::cout << "  -h, --help                  : display this help message\n";
+        std::cout << "  -a, --all                   : get list of all schema and load all schema versions\n";
+        std::cout << "  -l, --list                  : list all supported schema versions\n";
+        std::cout << "  -L, --get-latest            : load the latest schema version\n";
+        std::cout << "  -g, --get-version <version> : load the specified schema version\n\n";
+        std::cout << "Example usage:\n";
+        std::cout << "  " << name << " (no arguments)      - lists all schemas, loads latest, and iterate over all schemas\n";
+        std::cout << "  " << name << " --all               - lists all schemas and loads all schema versions\n";
+        std::cout << "  " << name << " --list              - lists all schemas\n";
+        std::cout << "  " << name << " --get-latest        - loads the latest schema version\n";
+        std::cout << "  " << name << " --get-version 3.0.0 - loads the schema version 3.0.0\n";
     };
 
     auto check_version_parts = [](const std::vector<std::string>& version_parts)
@@ -329,43 +345,31 @@ main( int argc, char** argv )
     {
         if(strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)
         {
-            std::cout << "Usage: " << argv[0] << " [--help] [--list] [--get-all] [--get-latest] [--get-version <version>]\n";
-            std::cout << "Options:\n";
-            std::cout << "  -h, --help                  : display this help message\n";
-            std::cout << "  -l, --list                  : list all supported schema versions\n";
-            std::cout << "  -a, --get-all               : get list of all schema and load all schema versions\n";
-            std::cout << "  -L, --get-latest            : load the latest schema version\n";
-            std::cout << "  -g, --get-version <version> : load the specified schema version\n\n";
-            std::cout << "Example usage:\n";
-            std::cout << "  " << argv[0] << " (no arguments)      - lists all schemas, loads latest, and iterate over all schemas\n";
-            std::cout << "  " << argv[0] << " --list              - lists all schemas\n";
-            std::cout << "  " << argv[0] << " --get-all           - iterate over all supported schema versions\n";
-            std::cout << "  " << argv[0] << " --get-latest        - loads the latest schema version\n";
-            std::cout << "  " << argv[0] << " --get-version 3.0.0 - loads the schema version 3.0.0\n";
+            print_help(argv[0]);
             return EXIT_SUCCESS;
+        }
+
+        if(strcmp(argv[1], "--all") == 0 || strcmp(argv[1], "-a") == 0)
+        {
+            load_all_schemas = true;
+            list_versions = false;
+            load_latest_schema = false;
+            load_requested_schema = false;
         }
 
         if(strcmp(argv[1], "--list") == 0 || strcmp(argv[1], "-l") == 0)
         {
+            load_all_schemas = false;
             list_versions = true;
             load_latest_schema = false;
-            load_all_schemas = false;
-            load_requested_schema = false;
-        }
-
-        if(strcmp(argv[1], "--get-all") == 0 || strcmp(argv[1], "-a") == 0)
-        {
-            list_versions = false;
-            load_latest_schema = false;
-            load_all_schemas = true;
             load_requested_schema = false;
         }
 
         if(strcmp(argv[1], "--get-latest") == 0 || strcmp(argv[1], "-L") == 0)
         {
+            load_all_schemas = false;
             list_versions = false;
             load_latest_schema = true;
-            load_all_schemas = false;
             load_requested_schema = false;
         }
 
@@ -390,11 +394,16 @@ main( int argc, char** argv )
                 return EXIT_FAILURE;
             }
             requested_schema_version = VERSION_STRING_TO_TRIPLET(version_parts);
+            load_all_schemas = false;
             list_versions = false;
             load_latest_schema = false;
-            load_all_schemas = false;
             load_requested_schema = true;
         }
+    }
+    else
+    {
+        print_help(argv[0]);
+        return EXIT_FAILURE;
     }
 
     // Get the rocpd module version
