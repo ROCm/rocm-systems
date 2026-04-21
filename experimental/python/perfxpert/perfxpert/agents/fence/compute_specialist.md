@@ -44,11 +44,17 @@ and only surfaced when ALL of the following hold:
 
 ## Tool allowlist (max 5)
 
-- compute_techniques.catalog
 - arch.lookup_peaks
 - roofline.classify
 - compiler.lookup_flags
 - kernel_fusion.find_fusion_candidates
+
+Compute-technique catalogs live in YAML (`knowledge/optimization_
+techniques.yaml`, `knowledge/proven_optimizations.yaml`,
+`knowledge/matrix_meter.yaml`, `knowledge/attention_patterns.yaml`,
+`knowledge/fusion_patterns.yaml`). These are **YAML lookups**, not MCP
+tools — the agent loads them via the knowledge loader. One allowlist
+slot is intentionally unused.
 
 Note: `pragma.suggest_pragmas_for_kernel` is NOT in the cap-5
 allowlist — it is reachable via the MCP surface + via the

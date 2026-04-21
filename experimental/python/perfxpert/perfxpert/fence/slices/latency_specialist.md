@@ -20,10 +20,14 @@ host-side API batching.
 
 ## Tool allowlist (max 5)
 
-- latency_techniques.catalog
 - arch.lookup_peaks
 - rccl_analysis.analyze_collectives
 - interconnect.lookup_peaks
+
+Latency-technique catalogs live in YAML
+(`knowledge/optimization_techniques.yaml`). This is a **YAML lookup**,
+not an MCP tool — the agent loads it via the knowledge loader. Two
+allowlist slots are intentionally unused.
 
 ## Output schema (≤5 fields)
 

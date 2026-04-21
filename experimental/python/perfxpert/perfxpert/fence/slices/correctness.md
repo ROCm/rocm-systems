@@ -18,9 +18,15 @@ Review Recommendation output through the 5-gate cascade:
 
 ## Tool allowlist (max 5)
 
-- tasks.query_by_kernel
-- tasks.create
-- trace.fingerprint
+- trace_fingerprint.fingerprint
+
+The task backbone (`tasks.query_by_kernel` / `tasks.create`) is an
+internal capability accessed via `perfxpert.tools.tasks`, not an MCP
+READ_ONLY tool — it mutates local `.perfxpert/` state and is
+deliberately not exposed on the MCP surface. The Correctness agent
+runs gates directly over its input payload and does not need extra
+MCP tools beyond the fingerprint helper. Four slots are intentionally
+unused.
 
 ## Output schema (≤5 fields)
 
