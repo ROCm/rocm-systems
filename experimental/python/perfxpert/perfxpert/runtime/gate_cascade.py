@@ -22,6 +22,13 @@ See spec §5.8 for the tool-class split: this module invokes EXECUTION-class
 tools (compile.build, profile.run, patch.verify_output, anchors.check). The
 Correctness agent does NOT have any of these in its allowlist — it gets
 GateVerdict directly.
+
+Trace-diff regression rule (Confluence row #7):
+  ``trace_diff_regression_rule`` is a standalone evaluator that wraps
+  ``tools.trace_diff.diff_runs`` and produces a ``fail``/``pass`` verdict
+  based on ``wall_delta_pct > PERFXPERT_CI_REGRESSION_THRESHOLD`` (default
+  5%). It shares the same engine as ``perfxpert diff`` + ``perfxpert ci``
+  so MCP / CLI / gate / agents all agree on the same numbers.
 """
 
 from __future__ import annotations
@@ -29,6 +36,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional
 import numpy as np
+import os
 import tempfile
 from pathlib import Path
 
@@ -545,12 +553,87 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
     )
 
 
+# -- trace-diff regression rule (Confluence row #7) ------------------------
+
+CI_REGRESSION_ENV = "PERFXPERT_CI_REGRESSION_THRESHOLD"
+DEFAULT_CI_REGRESSION_THRESHOLD_PCT = 5.0
+
+
+def _resolve_ci_threshold(override_pct: Optional[float] = None) -> float:
+    """Effective CI regression threshold in percent.
+
+    Precedence: explicit ``override_pct`` > ``$PERFXPERT_CI_REGRESSION_THRESHOLD``
+    > :data:`DEFAULT_CI_REGRESSION_THRESHOLD_PCT` (5.0).
+    """
+    if override_pct is not None:
+        return float(override_pct)
+    env = os.environ.get(CI_REGRESSION_ENV)
+    if env:
+        try:
+            return float(env)
+        except ValueError:
+            return DEFAULT_CI_REGRESSION_THRESHOLD_PCT
+    return DEFAULT_CI_REGRESSION_THRESHOLD_PCT
+
+
+def trace_diff_regression_rule(
+    baseline_db: str,
+    new_db: str,
+    *,
+    threshold_pct: Optional[float] = None,
+    top_kernels: int = 20,
+) -> Dict[str, Any]:
+    """Evaluate the trace-diff regression gate rule.
+
+    Wraps ``perfxpert.tools.trace_diff.diff_runs`` and produces a
+    machine-readable verdict. This is the shared "same brain across
+    MCP / CLI / gate" surface — ``perfxpert ci`` and the agentic
+    correctness agent both invoke this rule when they need a
+    regression verdict without involving the other 4 cascade gates.
+
+    Returns
+    -------
+    dict::
+
+        {
+          "rule": "trace_diff_regression",
+          "verdict": "pass" | "fail",
+          "wall_delta_pct": float,
+          "threshold_pct": float,
+          "reason": str,     # e.g. "runtime regressed by 7.3%"
+          "diff": {...}      # full trace_diff.diff_runs result
+        }
+    """
+    from perfxpert.tools import trace_diff as _td
+
+    threshold = _resolve_ci_threshold(threshold_pct)
+    diff_result = _td.diff_runs(baseline_db, new_db, top_kernels=top_kernels)
+    wall_pct = float(diff_result.get("wall_delta_pct", 0.0))
+    regressed = wall_pct > threshold
+    reason = (
+        f"runtime regressed by {wall_pct:.2f}%"
+        if regressed
+        else f"runtime delta {wall_pct:+.2f}% within threshold {threshold:.2f}%"
+    )
+    return {
+        "rule": "trace_diff_regression",
+        "verdict": "fail" if regressed else "pass",
+        "wall_delta_pct": wall_pct,
+        "threshold_pct": threshold,
+        "reason": reason,
+        "diff": diff_result,
+    }
+
+
 __all__ = [
     "GateVerdict",
     "GateInput",
     "KernelRuntime",
     "evaluate",
     "run_gate_cascade",
+    "trace_diff_regression_rule",
+    "CI_REGRESSION_ENV",
+    "DEFAULT_CI_REGRESSION_THRESHOLD_PCT",
     "MAX_OPTIMIZATION_CYCLES_PER_KERNEL",
     "MAX_CONSECUTIVE_FAILURES",
     "MAX_SESSION_LLM_TURNS",
