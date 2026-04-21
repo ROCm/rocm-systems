@@ -14,75 +14,84 @@
 namespace rocjitsu {
 namespace rdna4 {
 
-class SMovkI32Sopk : public Sopk {
-public:
-  SMovkI32Sopk(const MachineInst *inst);
+class SMovkI32Sopk : public Sopk
+{
+  public:
+   SMovkI32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
-};
+} ;
 
-class SVersionSopk : public Sopk {
-public:
-  SVersionSopk(const MachineInst *inst);
+class SVersionSopk : public Sopk
+{
+  public:
+   SVersionSopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SCmovkI32Sopk : public Sopk {
-public:
-  SCmovkI32Sopk(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand sdst;
-  Operand simm16;
-};
-
-class SAddkCoI32Sopk : public Sopk {
-public:
-  SAddkCoI32Sopk(const MachineInst *inst);
+class SCmovkI32Sopk : public Sopk
+{
+  public:
+   SCmovkI32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
-};
+} ;
 
-class SMulkI32Sopk : public Sopk {
-public:
-  SMulkI32Sopk(const MachineInst *inst);
+class SAddkCoI32Sopk : public Sopk
+{
+  public:
+   SAddkCoI32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
-};
+} ;
 
-class SGetregB32Sopk : public Sopk {
-public:
-  SGetregB32Sopk(const MachineInst *inst);
+class SMulkI32Sopk : public Sopk
+{
+  public:
+   SMulkI32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
-};
+} ;
 
-class SSetregB32Sopk : public Sopk {
-public:
-  SSetregB32Sopk(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand simm16;
-  Operand sdst;
-};
-
-class SSetregImm32B32Sopk : public Sopk {
-public:
-  SSetregImm32B32Sopk(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand simm16;
-};
-
-class SCallB64Sopk : public Sopk {
-public:
-  SCallB64Sopk(const MachineInst *inst);
+class SGetregB32Sopk : public Sopk
+{
+  public:
+   SGetregB32Sopk(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
-};
+} ;
+
+class SSetregB32Sopk : public Sopk
+{
+  public:
+   SSetregB32Sopk(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand simm16;
+  Operand sdst;
+} ;
+
+class SSetregImm32B32Sopk : public Sopk
+{
+  public:
+   SSetregImm32B32Sopk(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand simm16;
+} ;
+
+class SCallB64Sopk : public Sopk
+{
+  public:
+   SCallB64Sopk(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand sdst;
+  Operand simm16;
+} ;
 
 } // namespace rdna4
 } // namespace rocjitsu

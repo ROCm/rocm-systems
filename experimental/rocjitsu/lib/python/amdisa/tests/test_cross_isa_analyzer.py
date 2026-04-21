@@ -143,3 +143,52 @@ class TestCrossIsaAnalyzer:
                 assert any('VOP1' in enc for enc in encodings), (
                     f"Expected VOP1 encoding for v_mov_b32 in family '{family}'"
                 )
+
+    def test_v_cmpx_instructions_cannot_share_execute(self):
+        """Verify v_cmpx instructions cannot share execute() templates across families.
+
+        v_cmpx instructions have different execution semantics between CDNA and RDNA
+        families. Even if they appear in family_shared, CodeGenerator._can_share_execute()
+        must return False to prevent generating shared execute templates.
+        """
+        from amdisa.codegen import CodeGenerator
+
+        # Parse CDNA and RDNA ISAs
+        specs = _parse_specs(['cdna1', 'rdna1'])
+        plan = CrossIsaAnalyzer().analyze(specs)
+
+        # Create a minimal CodeGenerator to test _can_share_execute
+        # We don't need full code generation, just the sharing logic
+        codegen = CodeGenerator(
+            isa_spec=specs[0][1],  # cdna1 spec
+            out_path='/tmp',  # unused for this test
+            semantics=specs[0][2],  # cdna1 semantics
+            shared_plan=plan
+        )
+
+        # Find all v_cmpx instructions
+        v_cmpx_instructions = []
+
+        # Check family_shared for v_cmpx
+        for family_key, fam_insts in plan.family_shared.items():
+            for (mnemonic, encoding_name), info in fam_insts.items():
+                if mnemonic.startswith('v_cmpx_'):
+                    v_cmpx_instructions.append((mnemonic, encoding_name, info.semantic_class))
+
+        # Verify we found v_cmpx instructions
+        assert v_cmpx_instructions, "No v_cmpx instructions found in the plan"
+
+        # Critical assertion: _can_share_execute must return False for ALL v_cmpx
+        failing_instructions = []
+        for mnemonic, encoding_name, semantic_class in v_cmpx_instructions:
+            can_share = codegen._can_share_execute(mnemonic, encoding_name)
+            if can_share:
+                failing_instructions.append((mnemonic, encoding_name, semantic_class))
+
+        assert not failing_instructions, (
+            f"CodeGenerator._can_share_execute() incorrectly returns True for v_cmpx instructions:\n"
+            f"{failing_instructions}\n"
+            f"These instructions have different semantics between CDNA and RDNA families "
+            f"and must NOT generate shared execute templates. Their semantic classes must be "
+            f"in CodeGenerator._NON_SHAREABLE_CLASSES."
+        )

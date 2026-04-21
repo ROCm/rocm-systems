@@ -14,214 +14,245 @@
 namespace rocjitsu {
 namespace cdna2 {
 
-class SNopSopp : public Sopp {
-public:
-  SNopSopp(const MachineInst *inst);
+class SNopSopp : public Sopp
+{
+  public:
+   SNopSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SEndpgmSopp : public Sopp {
-public:
-  SEndpgmSopp(const MachineInst *inst);
+class SEndpgmSopp : public Sopp
+{
+  public:
+   SEndpgmSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
-};
+} ;
 
-class SBranchSopp : public Sopp {
-public:
-  SBranchSopp(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand simm16;
-};
-
-class SWakeupSopp : public Sopp {
-public:
-  SWakeupSopp(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-};
-
-class SCbranchScc0Sopp : public Sopp {
-public:
-  SCbranchScc0Sopp(const MachineInst *inst);
+class SBranchSopp : public Sopp
+{
+  public:
+   SBranchSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SCbranchScc1Sopp : public Sopp {
-public:
-  SCbranchScc1Sopp(const MachineInst *inst);
+class SWakeupSopp : public Sopp
+{
+  public:
+   SWakeupSopp(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+} ;
+
+class SCbranchScc0Sopp : public Sopp
+{
+  public:
+   SCbranchScc0Sopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SCbranchVcczSopp : public Sopp {
-public:
-  SCbranchVcczSopp(const MachineInst *inst);
+class SCbranchScc1Sopp : public Sopp
+{
+  public:
+   SCbranchScc1Sopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SCbranchVccnzSopp : public Sopp {
-public:
-  SCbranchVccnzSopp(const MachineInst *inst);
+class SCbranchVcczSopp : public Sopp
+{
+  public:
+   SCbranchVcczSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SCbranchExeczSopp : public Sopp {
-public:
-  SCbranchExeczSopp(const MachineInst *inst);
+class SCbranchVccnzSopp : public Sopp
+{
+  public:
+   SCbranchVccnzSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SCbranchExecnzSopp : public Sopp {
-public:
-  SCbranchExecnzSopp(const MachineInst *inst);
+class SCbranchExeczSopp : public Sopp
+{
+  public:
+   SCbranchExeczSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SBarrierSopp : public Sopp {
-public:
-  SBarrierSopp(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-};
-
-class SSetkillSopp : public Sopp {
-public:
-  SSetkillSopp(const MachineInst *inst);
+class SCbranchExecnzSopp : public Sopp
+{
+  public:
+   SCbranchExecnzSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SWaitcntSopp : public Sopp {
-public:
-  SWaitcntSopp(const MachineInst *inst);
+class SBarrierSopp : public Sopp
+{
+  public:
+   SBarrierSopp(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+} ;
+
+class SSetkillSopp : public Sopp
+{
+  public:
+   SSetkillSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SSethaltSopp : public Sopp {
-public:
-  SSethaltSopp(const MachineInst *inst);
+class SWaitcntSopp : public Sopp
+{
+  public:
+   SWaitcntSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SSleepSopp : public Sopp {
-public:
-  SSleepSopp(const MachineInst *inst);
+class SSethaltSopp : public Sopp
+{
+  public:
+   SSethaltSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SSetprioSopp : public Sopp {
-public:
-  SSetprioSopp(const MachineInst *inst);
+class SSleepSopp : public Sopp
+{
+  public:
+   SSleepSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SSendmsgSopp : public Sopp {
-public:
-  SSendmsgSopp(const MachineInst *inst);
+class SSetprioSopp : public Sopp
+{
+  public:
+   SSetprioSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SSendmsghaltSopp : public Sopp {
-public:
-  SSendmsghaltSopp(const MachineInst *inst);
+class SSendmsgSopp : public Sopp
+{
+  public:
+   SSendmsgSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class STrapSopp : public Sopp {
-public:
-  STrapSopp(const MachineInst *inst);
+class SSendmsghaltSopp : public Sopp
+{
+  public:
+   SSendmsghaltSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SIcacheInvSopp : public Sopp {
-public:
-  SIcacheInvSopp(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-};
-
-class SIncperflevelSopp : public Sopp {
-public:
-  SIncperflevelSopp(const MachineInst *inst);
+class STrapSopp : public Sopp
+{
+  public:
+   STrapSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SDecperflevelSopp : public Sopp {
-public:
-  SDecperflevelSopp(const MachineInst *inst);
+class SIcacheInvSopp : public Sopp
+{
+  public:
+   SIcacheInvSopp(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+} ;
+
+class SIncperflevelSopp : public Sopp
+{
+  public:
+   SIncperflevelSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class STtracedataSopp : public Sopp {
-public:
-  STtracedataSopp(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-};
-
-class SCbranchCdbgsysSopp : public Sopp {
-public:
-  SCbranchCdbgsysSopp(const MachineInst *inst);
+class SDecperflevelSopp : public Sopp
+{
+  public:
+   SDecperflevelSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SCbranchCdbguserSopp : public Sopp {
-public:
-  SCbranchCdbguserSopp(const MachineInst *inst);
+class STtracedataSopp : public Sopp
+{
+  public:
+   STtracedataSopp(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+} ;
+
+class SCbranchCdbgsysSopp : public Sopp
+{
+  public:
+   SCbranchCdbgsysSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SCbranchCdbgsysOrUserSopp : public Sopp {
-public:
-  SCbranchCdbgsysOrUserSopp(const MachineInst *inst);
+class SCbranchCdbguserSopp : public Sopp
+{
+  public:
+   SCbranchCdbguserSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SCbranchCdbgsysAndUserSopp : public Sopp {
-public:
-  SCbranchCdbgsysAndUserSopp(const MachineInst *inst);
+class SCbranchCdbgsysOrUserSopp : public Sopp
+{
+  public:
+   SCbranchCdbgsysOrUserSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SEndpgmSavedSopp : public Sopp {
-public:
-  SEndpgmSavedSopp(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-};
-
-class SSetGprIdxOffSopp : public Sopp {
-public:
-  SSetGprIdxOffSopp(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-};
-
-class SSetGprIdxModeSopp : public Sopp {
-public:
-  SSetGprIdxModeSopp(const MachineInst *inst);
+class SCbranchCdbgsysAndUserSopp : public Sopp
+{
+  public:
+   SCbranchCdbgsysAndUserSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-};
+} ;
 
-class SEndpgmOrderedPsDoneSopp : public Sopp {
-public:
-  SEndpgmOrderedPsDoneSopp(const MachineInst *inst);
+class SEndpgmSavedSopp : public Sopp
+{
+  public:
+   SEndpgmSavedSopp(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
-};
+} ;
+
+class SSetGprIdxOffSopp : public Sopp
+{
+  public:
+   SSetGprIdxOffSopp(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+} ;
+
+class SSetGprIdxModeSopp : public Sopp
+{
+  public:
+   SSetGprIdxModeSopp(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand simm16;
+} ;
+
+class SEndpgmOrderedPsDoneSopp : public Sopp
+{
+  public:
+   SEndpgmOrderedPsDoneSopp(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+} ;
 
 } // namespace cdna2
 } // namespace rocjitsu

@@ -5,101 +5,50 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna2/vop3.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "util/except.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
-#include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
 #include <limits>
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 
 namespace rocjitsu {
 namespace rdna2 {
 
-VInterpP1F32Vop3::VInterpP1F32Vop3(const MachineInst *inst)
-    : Vop3("v_interp_p1_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VInterpP1F32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src1;
-  src_operands_[1] = &src0;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VInterpP1F32Vop3::VInterpP1F32Vop3(const MachineInst *inst) : Vop3("v_interp_p1_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VInterpP1F32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding*>(inst)->src1), src0(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src1;src_operands_[1] = &src0;num_src_ = 2;num_dst_ = 1;}
 
 void VInterpP1F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
-VInterpP2F32Vop3::VInterpP2F32Vop3(const MachineInst *inst)
-    : Vop3("v_interp_p2_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VInterpP2F32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  src_operands_[0] = &vdst;
-  dst_operands_[0] = &vdst;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src0;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VInterpP2F32Vop3::VInterpP2F32Vop3(const MachineInst *inst) : Vop3("v_interp_p2_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VInterpP2F32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding*>(inst)->src1), src0(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding*>(inst)->src0) {src_operands_[0] = &vdst;dst_operands_[0] = &vdst;src_operands_[1] = &src1;src_operands_[2] = &src0;num_src_ = 3;num_dst_ = 1;}
 
 void VInterpP2F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
-VInterpMovF32Vop3::VInterpMovF32Vop3(const MachineInst *inst)
-    : Vop3("v_interp_mov_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VInterpMovF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src1(32, OperandType::OPR_PARAM, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src1;
-  src_operands_[1] = &src0;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VInterpMovF32Vop3::VInterpMovF32Vop3(const MachineInst *inst) : Vop3("v_interp_mov_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VInterpMovF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src1(32, OperandType::OPR_PARAM, reinterpret_cast<const OpEncoding*>(inst)->src1), src0(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src1;src_operands_[1] = &src0;num_src_ = 2;num_dst_ = 1;}
 
 void VInterpMovF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
-VNopVop3::VNopVop3(const MachineInst *inst)
-    : Vop3("v_nop", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VNopVop3>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
+VNopVop3::VNopVop3(const MachineInst *inst) : Vop3("v_nop", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VNopVop3>()) {num_src_ = 0;num_dst_ = 0;}
+
+void VNopVop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VNopVop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+VMovB32Vop3::VMovB32Vop3(const MachineInst *inst) : Vop3("v_mov_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMovB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
-VMovB32Vop3::VMovB32Vop3(const MachineInst *inst)
-    : Vop3("v_mov_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMovB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+void VMovB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_mov_b32_vop3(*this, wf);
 }
 
-void VMovB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mov_b32_vop3(*this, wf); }
-
-VReadfirstlaneB32Vop3::VReadfirstlaneB32Vop3(const MachineInst *inst)
-    : Vop3("v_readfirstlane_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VReadfirstlaneB32Vop3>()),
-      vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_VGPR_OR_LDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VReadfirstlaneB32Vop3::VReadfirstlaneB32Vop3(const MachineInst *inst) : Vop3("v_readfirstlane_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VReadfirstlaneB32Vop3>()), vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_VGPR_OR_LDS, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VReadfirstlaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
@@ -113,2483 +62,1210 @@ void VReadfirstlaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar(wf, val);
 }
 
-VCvtI32F64Vop3::VCvtI32F64Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_i32_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtI32F64Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtI32F64Vop3::VCvtI32F64Vop3(const MachineInst *inst) : Vop3("v_cvt_i32_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtI32F64Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtI32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
     int32_t r;
-    if (std::isnan(s))
-      r = 0;
-    else if (s >= 2147483648.0)
-      r = INT32_MAX;
-    else if (s < -2147483648.0)
-      r = INT32_MIN;
-    else
-      r = static_cast<int32_t>(s);
+    if (std::isnan(s)) r = 0;
+    else if (s >= 2147483648.0) r = INT32_MAX;
+    else if (s < -2147483648.0) r = INT32_MIN;
+    else r = static_cast<int32_t>(s);
     vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
   }
 }
 
-VCvtF64I32Vop3::VCvtF64I32Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_f64_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF64I32Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtF64I32Vop3::VCvtF64I32Vop3(const MachineInst *inst) : Vop3("v_cvt_f64_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtF64I32Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtF64I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_f64_i32_vop3(*this, wf);
 }
 
-VCvtF32I32Vop3::VCvtF32I32Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_f32_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF32I32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtF32I32Vop3::VCvtF32I32Vop3(const MachineInst *inst) : Vop3("v_cvt_f32_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtF32I32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtF32I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_f32_i32_vop3(*this, wf);
 }
 
-VCvtF32U32Vop3::VCvtF32U32Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_f32_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF32U32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtF32U32Vop3::VCvtF32U32Vop3(const MachineInst *inst) : Vop3("v_cvt_f32_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtF32U32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtF32U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_f32_u32_vop3(*this, wf);
 }
 
-VCvtU32F32Vop3::VCvtU32F32Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_u32_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtU32F32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtU32F32Vop3::VCvtU32F32Vop3(const MachineInst *inst) : Vop3("v_cvt_u32_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtU32F32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtU32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_u32_f32_vop3(*this, wf);
 }
 
-VCvtI32F32Vop3::VCvtI32F32Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_i32_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtI32F32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtI32F32Vop3::VCvtI32F32Vop3(const MachineInst *inst) : Vop3("v_cvt_i32_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtI32F32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtI32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_i32_f32_vop3(*this, wf);
 }
 
-VCvtF16F32Vop3::VCvtF16F32Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF16F32Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtF16F32Vop3::VCvtF16F32Vop3(const MachineInst *inst) : Vop3("v_cvt_f16_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtF16F32Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_f16_f32_vop3(*this, wf);
 }
 
-VCvtF32F16Vop3::VCvtF32F16Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_f32_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF32F16Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtF32F16Vop3::VCvtF32F16Vop3(const MachineInst *inst) : Vop3("v_cvt_f32_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtF32F16Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtF32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_f32_f16_vop3(*this, wf);
 }
 
-VCvtRpiI32F32Vop3::VCvtRpiI32F32Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_rpi_i32_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtRpiI32F32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtRpiI32F32Vop3::VCvtRpiI32F32Vop3(const MachineInst *inst) : Vop3("v_cvt_rpi_i32_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtRpiI32F32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtRpiI32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_rpi_i32_f32_vop3(*this, wf);
 }
 
-VCvtFlrI32F32Vop3::VCvtFlrI32F32Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_flr_i32_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtFlrI32F32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtFlrI32F32Vop3::VCvtFlrI32F32Vop3(const MachineInst *inst) : Vop3("v_cvt_flr_i32_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtFlrI32F32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtFlrI32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_flr_i32_f32_vop3(*this, wf);
 }
 
-VCvtOffF32I4Vop3::VCvtOffF32I4Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_off_f32_i4", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtOffF32I4Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+VCvtOffF32I4Vop3::VCvtOffF32I4Vop3(const MachineInst *inst) : Vop3("v_cvt_off_f32_i4", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtOffF32I4Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
+
+void VCvtOffF32I4Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VCvtOffF32I4Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
-
-VCvtF32F64Vop3::VCvtF32F64Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_f32_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF32F64Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtF32F64Vop3::VCvtF32F64Vop3(const MachineInst *inst) : Vop3("v_cvt_f32_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtF32F64Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtF32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>(s)));
   }
 }
 
-VCvtF64F32Vop3::VCvtF64F32Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_f64_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF64F32Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtF64F32Vop3::VCvtF64F32Vop3(const MachineInst *inst) : Vop3("v_cvt_f64_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtF64F32Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtF64F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_f64_f32_vop3(*this, wf);
 }
 
-VCvtF32Ubyte0Vop3::VCvtF32Ubyte0Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_f32_ubyte0", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF32Ubyte0Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtF32Ubyte0Vop3::VCvtF32Ubyte0Vop3(const MachineInst *inst) : Vop3("v_cvt_f32_ubyte0", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtF32Ubyte0Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtF32Ubyte0Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_f32_ubyte0_vop3(*this, wf);
 }
 
-VCvtF32Ubyte1Vop3::VCvtF32Ubyte1Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_f32_ubyte1", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF32Ubyte1Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtF32Ubyte1Vop3::VCvtF32Ubyte1Vop3(const MachineInst *inst) : Vop3("v_cvt_f32_ubyte1", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtF32Ubyte1Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtF32Ubyte1Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_f32_ubyte1_vop3(*this, wf);
 }
 
-VCvtF32Ubyte2Vop3::VCvtF32Ubyte2Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_f32_ubyte2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF32Ubyte2Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtF32Ubyte2Vop3::VCvtF32Ubyte2Vop3(const MachineInst *inst) : Vop3("v_cvt_f32_ubyte2", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtF32Ubyte2Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtF32Ubyte2Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_f32_ubyte2_vop3(*this, wf);
 }
 
-VCvtF32Ubyte3Vop3::VCvtF32Ubyte3Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_f32_ubyte3", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF32Ubyte3Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtF32Ubyte3Vop3::VCvtF32Ubyte3Vop3(const MachineInst *inst) : Vop3("v_cvt_f32_ubyte3", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtF32Ubyte3Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtF32Ubyte3Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_f32_ubyte3_vop3(*this, wf);
 }
 
-VCvtU32F64Vop3::VCvtU32F64Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_u32_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtU32F64Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtU32F64Vop3::VCvtU32F64Vop3(const MachineInst *inst) : Vop3("v_cvt_u32_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtU32F64Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtU32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
     uint32_t r;
-    if (std::isnan(s) || s < 0.0)
-      r = 0;
-    else if (s >= 4294967296.0)
-      r = UINT32_MAX;
-    else
-      r = static_cast<uint32_t>(s);
+    if (std::isnan(s) || s < 0.0) r = 0;
+    else if (s >= 4294967296.0) r = UINT32_MAX;
+    else r = static_cast<uint32_t>(s);
     vdst.write_lane(wf, lane, r);
   }
 }
 
-VCvtF64U32Vop3::VCvtF64U32Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_f64_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF64U32Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtF64U32Vop3::VCvtF64U32Vop3(const MachineInst *inst) : Vop3("v_cvt_f64_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtF64U32Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtF64U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_f64_u32_vop3(*this, wf);
 }
 
-VTruncF64Vop3::VTruncF64Vop3(const MachineInst *inst)
-    : Vop3("v_trunc_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VTruncF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VTruncF64Vop3::VTruncF64Vop3(const MachineInst *inst) : Vop3("v_trunc_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VTruncF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VTruncF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst_.neg & (1u << 0))
-      s = -s;
+    if (inst_.abs & (1u << 0)) s = std::fabs(s);
+    if (inst_.neg & (1u << 0)) s = -s;
     double result = std::trunc(s);
-    if (inst_.omod == 1)
-      result *= 2.0;
-    else if (inst_.omod == 2)
-      result *= 4.0;
-    else if (inst_.omod == 3)
-      result *= 0.5;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
+    if (inst_.omod == 1) result *= 2.0;
+    else if (inst_.omod == 2) result *= 4.0;
+    else if (inst_.omod == 3) result *= 0.5;
+    if (inst_.clamp) result = std::clamp(result, 0.0, 1.0);
     vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
 }
 
-VCeilF64Vop3::VCeilF64Vop3(const MachineInst *inst)
-    : Vop3("v_ceil_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCeilF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCeilF64Vop3::VCeilF64Vop3(const MachineInst *inst) : Vop3("v_ceil_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCeilF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCeilF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst_.neg & (1u << 0))
-      s = -s;
+    if (inst_.abs & (1u << 0)) s = std::fabs(s);
+    if (inst_.neg & (1u << 0)) s = -s;
     double result = std::ceil(s);
-    if (inst_.omod == 1)
-      result *= 2.0;
-    else if (inst_.omod == 2)
-      result *= 4.0;
-    else if (inst_.omod == 3)
-      result *= 0.5;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
+    if (inst_.omod == 1) result *= 2.0;
+    else if (inst_.omod == 2) result *= 4.0;
+    else if (inst_.omod == 3) result *= 0.5;
+    if (inst_.clamp) result = std::clamp(result, 0.0, 1.0);
     vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
 }
 
-VRndneF64Vop3::VRndneF64Vop3(const MachineInst *inst)
-    : Vop3("v_rndne_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VRndneF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VRndneF64Vop3::VRndneF64Vop3(const MachineInst *inst) : Vop3("v_rndne_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VRndneF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VRndneF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst_.neg & (1u << 0))
-      s = -s;
+    if (inst_.abs & (1u << 0)) s = std::fabs(s);
+    if (inst_.neg & (1u << 0)) s = -s;
     double result = std::nearbyint(s);
-    if (inst_.omod == 1)
-      result *= 2.0;
-    else if (inst_.omod == 2)
-      result *= 4.0;
-    else if (inst_.omod == 3)
-      result *= 0.5;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
+    if (inst_.omod == 1) result *= 2.0;
+    else if (inst_.omod == 2) result *= 4.0;
+    else if (inst_.omod == 3) result *= 0.5;
+    if (inst_.clamp) result = std::clamp(result, 0.0, 1.0);
     vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
 }
 
-VFloorF64Vop3::VFloorF64Vop3(const MachineInst *inst)
-    : Vop3("v_floor_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFloorF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VFloorF64Vop3::VFloorF64Vop3(const MachineInst *inst) : Vop3("v_floor_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFloorF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VFloorF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst_.neg & (1u << 0))
-      s = -s;
+    if (inst_.abs & (1u << 0)) s = std::fabs(s);
+    if (inst_.neg & (1u << 0)) s = -s;
     double result = std::floor(s);
-    if (inst_.omod == 1)
-      result *= 2.0;
-    else if (inst_.omod == 2)
-      result *= 4.0;
-    else if (inst_.omod == 3)
-      result *= 0.5;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
+    if (inst_.omod == 1) result *= 2.0;
+    else if (inst_.omod == 2) result *= 4.0;
+    else if (inst_.omod == 3) result *= 0.5;
+    if (inst_.clamp) result = std::clamp(result, 0.0, 1.0);
     vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
 }
 
-VPipeflushVop3::VPipeflushVop3(const MachineInst *inst)
-    : Vop3("v_pipeflush", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VPipeflushVop3>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
+VPipeflushVop3::VPipeflushVop3(const MachineInst *inst) : Vop3("v_pipeflush", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VPipeflushVop3>()) {num_src_ = 0;num_dst_ = 0;}
+
+void VPipeflushVop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VPipeflushVop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
-
-VFractF32Vop3::VFractF32Vop3(const MachineInst *inst)
-    : Vop3("v_fract_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFractF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VFractF32Vop3::VFractF32Vop3(const MachineInst *inst) : Vop3("v_fract_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFractF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VFractF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_fract_f32_vop3(*this, wf);
 }
 
-VTruncF32Vop3::VTruncF32Vop3(const MachineInst *inst)
-    : Vop3("v_trunc_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VTruncF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VTruncF32Vop3::VTruncF32Vop3(const MachineInst *inst) : Vop3("v_trunc_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VTruncF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VTruncF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_trunc_f32_vop3(*this, wf);
 }
 
-VCeilF32Vop3::VCeilF32Vop3(const MachineInst *inst)
-    : Vop3("v_ceil_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCeilF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCeilF32Vop3::VCeilF32Vop3(const MachineInst *inst) : Vop3("v_ceil_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCeilF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCeilF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_ceil_f32_vop3(*this, wf);
 }
 
-VRndneF32Vop3::VRndneF32Vop3(const MachineInst *inst)
-    : Vop3("v_rndne_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VRndneF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VRndneF32Vop3::VRndneF32Vop3(const MachineInst *inst) : Vop3("v_rndne_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VRndneF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VRndneF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_rndne_f32_vop3(*this, wf);
 }
 
-VFloorF32Vop3::VFloorF32Vop3(const MachineInst *inst)
-    : Vop3("v_floor_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFloorF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VFloorF32Vop3::VFloorF32Vop3(const MachineInst *inst) : Vop3("v_floor_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFloorF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VFloorF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_floor_f32_vop3(*this, wf);
 }
 
-VExpF32Vop3::VExpF32Vop3(const MachineInst *inst)
-    : Vop3("v_exp_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VExpF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+VExpF32Vop3::VExpF32Vop3(const MachineInst *inst) : Vop3("v_exp_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VExpF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
+
+void VExpF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_exp_f32_vop3(*this, wf);
 }
 
-void VExpF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_exp_f32_vop3(*this, wf); }
+VLogF32Vop3::VLogF32Vop3(const MachineInst *inst) : Vop3("v_log_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VLogF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
-VLogF32Vop3::VLogF32Vop3(const MachineInst *inst)
-    : Vop3("v_log_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VLogF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+void VLogF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_log_f32_vop3(*this, wf);
 }
 
-void VLogF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_log_f32_vop3(*this, wf); }
+VRcpF32Vop3::VRcpF32Vop3(const MachineInst *inst) : Vop3("v_rcp_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VRcpF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
-VRcpF32Vop3::VRcpF32Vop3(const MachineInst *inst)
-    : Vop3("v_rcp_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VRcpF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+void VRcpF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_rcp_f32_vop3(*this, wf);
 }
 
-void VRcpF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rcp_f32_vop3(*this, wf); }
-
-VRcpIflagF32Vop3::VRcpIflagF32Vop3(const MachineInst *inst)
-    : Vop3("v_rcp_iflag_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VRcpIflagF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VRcpIflagF32Vop3::VRcpIflagF32Vop3(const MachineInst *inst) : Vop3("v_rcp_iflag_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VRcpIflagF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VRcpIflagF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_rcp_iflag_f32_vop3(*this, wf);
 }
 
-VRsqF32Vop3::VRsqF32Vop3(const MachineInst *inst)
-    : Vop3("v_rsq_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VRsqF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+VRsqF32Vop3::VRsqF32Vop3(const MachineInst *inst) : Vop3("v_rsq_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VRsqF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
+
+void VRsqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_rsq_f32_vop3(*this, wf);
 }
 
-void VRsqF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rsq_f32_vop3(*this, wf); }
-
-VRcpF64Vop3::VRcpF64Vop3(const MachineInst *inst)
-    : Vop3("v_rcp_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VRcpF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VRcpF64Vop3::VRcpF64Vop3(const MachineInst *inst) : Vop3("v_rcp_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VRcpF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VRcpF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst_.neg & (1u << 0))
-      s = -s;
+    if (inst_.abs & (1u << 0)) s = std::fabs(s);
+    if (inst_.neg & (1u << 0)) s = -s;
     double result = amdgpu::transcendental::rcp_f64(s);
-    if (inst_.omod == 1)
-      result *= 2.0;
-    else if (inst_.omod == 2)
-      result *= 4.0;
-    else if (inst_.omod == 3)
-      result *= 0.5;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
+    if (inst_.omod == 1) result *= 2.0;
+    else if (inst_.omod == 2) result *= 4.0;
+    else if (inst_.omod == 3) result *= 0.5;
+    if (inst_.clamp) result = std::clamp(result, 0.0, 1.0);
     vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
 }
 
-VRsqF64Vop3::VRsqF64Vop3(const MachineInst *inst)
-    : Vop3("v_rsq_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VRsqF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VRsqF64Vop3::VRsqF64Vop3(const MachineInst *inst) : Vop3("v_rsq_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VRsqF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VRsqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst_.neg & (1u << 0))
-      s = -s;
+    if (inst_.abs & (1u << 0)) s = std::fabs(s);
+    if (inst_.neg & (1u << 0)) s = -s;
     double result = amdgpu::transcendental::rsq_f64(s);
-    if (inst_.omod == 1)
-      result *= 2.0;
-    else if (inst_.omod == 2)
-      result *= 4.0;
-    else if (inst_.omod == 3)
-      result *= 0.5;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
+    if (inst_.omod == 1) result *= 2.0;
+    else if (inst_.omod == 2) result *= 4.0;
+    else if (inst_.omod == 3) result *= 0.5;
+    if (inst_.clamp) result = std::clamp(result, 0.0, 1.0);
     vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
 }
 
-VSqrtF32Vop3::VSqrtF32Vop3(const MachineInst *inst)
-    : Vop3("v_sqrt_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSqrtF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VSqrtF32Vop3::VSqrtF32Vop3(const MachineInst *inst) : Vop3("v_sqrt_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSqrtF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VSqrtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_sqrt_f32_vop3(*this, wf);
 }
 
-VSqrtF64Vop3::VSqrtF64Vop3(const MachineInst *inst)
-    : Vop3("v_sqrt_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSqrtF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VSqrtF64Vop3::VSqrtF64Vop3(const MachineInst *inst) : Vop3("v_sqrt_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSqrtF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VSqrtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst_.neg & (1u << 0))
-      s = -s;
+    if (inst_.abs & (1u << 0)) s = std::fabs(s);
+    if (inst_.neg & (1u << 0)) s = -s;
     double result = amdgpu::transcendental::sqrt_f64(s);
-    if (inst_.omod == 1)
-      result *= 2.0;
-    else if (inst_.omod == 2)
-      result *= 4.0;
-    else if (inst_.omod == 3)
-      result *= 0.5;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
+    if (inst_.omod == 1) result *= 2.0;
+    else if (inst_.omod == 2) result *= 4.0;
+    else if (inst_.omod == 3) result *= 0.5;
+    if (inst_.clamp) result = std::clamp(result, 0.0, 1.0);
     vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
 }
 
-VSinF32Vop3::VSinF32Vop3(const MachineInst *inst)
-    : Vop3("v_sin_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSinF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+VSinF32Vop3::VSinF32Vop3(const MachineInst *inst) : Vop3("v_sin_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSinF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
+
+void VSinF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_sin_f32_vop3(*this, wf);
 }
 
-void VSinF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sin_f32_vop3(*this, wf); }
+VCosF32Vop3::VCosF32Vop3(const MachineInst *inst) : Vop3("v_cos_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCosF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
-VCosF32Vop3::VCosF32Vop3(const MachineInst *inst)
-    : Vop3("v_cos_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCosF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+void VCosF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_cos_f32_vop3(*this, wf);
 }
 
-void VCosF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_cos_f32_vop3(*this, wf); }
+VNotB32Vop3::VNotB32Vop3(const MachineInst *inst) : Vop3("v_not_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VNotB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
-VNotB32Vop3::VNotB32Vop3(const MachineInst *inst)
-    : Vop3("v_not_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VNotB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+void VNotB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_not_b32_vop3(*this, wf);
 }
 
-void VNotB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_not_b32_vop3(*this, wf); }
-
-VBfrevB32Vop3::VBfrevB32Vop3(const MachineInst *inst)
-    : Vop3("v_bfrev_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VBfrevB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VBfrevB32Vop3::VBfrevB32Vop3(const MachineInst *inst) : Vop3("v_bfrev_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VBfrevB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VBfrevB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_bfrev_b32_vop3(*this, wf);
 }
 
-VFfbhU32Vop3::VFfbhU32Vop3(const MachineInst *inst)
-    : Vop3("v_ffbh_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFfbhU32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VFfbhU32Vop3::VFfbhU32Vop3(const MachineInst *inst) : Vop3("v_ffbh_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFfbhU32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VFfbhU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_ffbh_u32_vop3(*this, wf);
 }
 
-VFfblB32Vop3::VFfblB32Vop3(const MachineInst *inst)
-    : Vop3("v_ffbl_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFfblB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VFfblB32Vop3::VFfblB32Vop3(const MachineInst *inst) : Vop3("v_ffbl_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFfblB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VFfblB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_ffbl_b32_vop3(*this, wf);
 }
 
-VFfbhI32Vop3::VFfbhI32Vop3(const MachineInst *inst)
-    : Vop3("v_ffbh_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFfbhI32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VFfbhI32Vop3::VFfbhI32Vop3(const MachineInst *inst) : Vop3("v_ffbh_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFfbhI32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VFfbhI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_ffbh_i32_vop3(*this, wf);
 }
 
-VFrexpExpI32F64Vop3::VFrexpExpI32F64Vop3(const MachineInst *inst)
-    : Vop3("v_frexp_exp_i32_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFrexpExpI32F64Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VFrexpExpI32F64Vop3::VFrexpExpI32F64Vop3(const MachineInst *inst) : Vop3("v_frexp_exp_i32_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFrexpExpI32F64Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VFrexpExpI32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst_.neg & (1u << 0))
-      s = -s;
+    if (inst_.abs & (1u << 0)) s = std::fabs(s);
+    if (inst_.neg & (1u << 0)) s = -s;
     int exp = 0;
-    if (s != 0.0 && !std::isnan(s) && !std::isinf(s))
-      std::frexp(s, &exp);
+    if (s != 0.0 && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);
     vdst.write_lane(wf, lane, static_cast<uint32_t>(exp));
   }
 }
 
-VFrexpMantF64Vop3::VFrexpMantF64Vop3(const MachineInst *inst)
-    : Vop3("v_frexp_mant_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFrexpMantF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VFrexpMantF64Vop3::VFrexpMantF64Vop3(const MachineInst *inst) : Vop3("v_frexp_mant_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFrexpMantF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VFrexpMantF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst_.neg & (1u << 0))
-      s = -s;
+    if (inst_.abs & (1u << 0)) s = std::fabs(s);
+    if (inst_.neg & (1u << 0)) s = -s;
     int exp = 0;
     double result = std::frexp(s, &exp);
-    if (inst_.omod == 1)
-      result *= 2.0;
-    else if (inst_.omod == 2)
-      result *= 4.0;
-    else if (inst_.omod == 3)
-      result *= 0.5;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
+    if (inst_.omod == 1) result *= 2.0;
+    else if (inst_.omod == 2) result *= 4.0;
+    else if (inst_.omod == 3) result *= 0.5;
+    if (inst_.clamp) result = std::clamp(result, 0.0, 1.0);
     vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
 }
 
-VFractF64Vop3::VFractF64Vop3(const MachineInst *inst)
-    : Vop3("v_fract_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFractF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VFractF64Vop3::VFractF64Vop3(const MachineInst *inst) : Vop3("v_fract_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFractF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VFractF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst_.neg & (1u << 0))
-      s = -s;
+    if (inst_.abs & (1u << 0)) s = std::fabs(s);
+    if (inst_.neg & (1u << 0)) s = -s;
     double result = s - std::floor(s);
-    if (inst_.omod == 1)
-      result *= 2.0;
-    else if (inst_.omod == 2)
-      result *= 4.0;
-    else if (inst_.omod == 3)
-      result *= 0.5;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
+    if (inst_.omod == 1) result *= 2.0;
+    else if (inst_.omod == 2) result *= 4.0;
+    else if (inst_.omod == 3) result *= 0.5;
+    if (inst_.clamp) result = std::clamp(result, 0.0, 1.0);
     vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
 }
 
-VFrexpExpI32F32Vop3::VFrexpExpI32F32Vop3(const MachineInst *inst)
-    : Vop3("v_frexp_exp_i32_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFrexpExpI32F32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VFrexpExpI32F32Vop3::VFrexpExpI32F32Vop3(const MachineInst *inst) : Vop3("v_frexp_exp_i32_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFrexpExpI32F32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VFrexpExpI32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_frexp_exp_i32_f32_vop3(*this, wf);
 }
 
-VFrexpMantF32Vop3::VFrexpMantF32Vop3(const MachineInst *inst)
-    : Vop3("v_frexp_mant_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFrexpMantF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VFrexpMantF32Vop3::VFrexpMantF32Vop3(const MachineInst *inst) : Vop3("v_frexp_mant_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFrexpMantF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VFrexpMantF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_frexp_mant_f32_vop3(*this, wf);
 }
 
-VClrexcpVop3::VClrexcpVop3(const MachineInst *inst)
-    : Vop3("v_clrexcp", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VClrexcpVop3>()) {
-  num_src_ = 0;
-  num_dst_ = 0;
+VClrexcpVop3::VClrexcpVop3(const MachineInst *inst) : Vop3("v_clrexcp", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VClrexcpVop3>()) {num_src_ = 0;num_dst_ = 0;}
+
+void VClrexcpVop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VClrexcpVop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+VMovreldB32Vop3::VMovreldB32Vop3(const MachineInst *inst) : Vop3("v_movreld_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMovreldB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
-VMovreldB32Vop3::VMovreldB32Vop3(const MachineInst *inst)
-    : Vop3("v_movreld_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMovreldB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+void VMovreldB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VMovreldB32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+VMovrelsB32Vop3::VMovrelsB32Vop3(const MachineInst *inst) : Vop3("v_movrels_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMovrelsB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
-VMovrelsB32Vop3::VMovrelsB32Vop3(const MachineInst *inst)
-    : Vop3("v_movrels_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMovrelsB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+void VMovrelsB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VMovrelsB32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst) : Vop3("v_movrelsd_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMovrelsdB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
-VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
-    : Vop3("v_movrelsd_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMovrelsdB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+void VMovrelsdB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VMovrelsdB32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst) : Vop3("v_movrelsd_2_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMovrelsd2B32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
-VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
-    : Vop3("v_movrelsd_2_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMovrelsd2B32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+void VMovrelsd2B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VMovrelsd2B32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
-
-VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_f16_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF16U16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst) : Vop3("v_cvt_f16_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtF16U16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtF16U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_f16_u16_vop3(*this, wf);
 }
 
-VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_f16_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF16I16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst) : Vop3("v_cvt_f16_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtF16I16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtF16I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_f16_i16_vop3(*this, wf);
 }
 
-VCvtU16F16Vop3::VCvtU16F16Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_u16_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtU16F16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtU16F16Vop3::VCvtU16F16Vop3(const MachineInst *inst) : Vop3("v_cvt_u16_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtU16F16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_u16_f16_vop3(*this, wf);
 }
 
-VCvtI16F16Vop3::VCvtI16F16Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_i16_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtI16F16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCvtI16F16Vop3::VCvtI16F16Vop3(const MachineInst *inst) : Vop3("v_cvt_i16_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtI16F16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCvtI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_i16_f16_vop3(*this, wf);
 }
 
-VRcpF16Vop3::VRcpF16Vop3(const MachineInst *inst)
-    : Vop3("v_rcp_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VRcpF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+VRcpF16Vop3::VRcpF16Vop3(const MachineInst *inst) : Vop3("v_rcp_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VRcpF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
+
+void VRcpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_rcp_f16_vop3(*this, wf);
 }
 
-void VRcpF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rcp_f16_vop3(*this, wf); }
-
-VSqrtF16Vop3::VSqrtF16Vop3(const MachineInst *inst)
-    : Vop3("v_sqrt_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSqrtF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VSqrtF16Vop3::VSqrtF16Vop3(const MachineInst *inst) : Vop3("v_sqrt_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSqrtF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VSqrtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_sqrt_f16_vop3(*this, wf);
 }
 
-VRsqF16Vop3::VRsqF16Vop3(const MachineInst *inst)
-    : Vop3("v_rsq_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VRsqF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+VRsqF16Vop3::VRsqF16Vop3(const MachineInst *inst) : Vop3("v_rsq_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VRsqF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
+
+void VRsqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_rsq_f16_vop3(*this, wf);
 }
 
-void VRsqF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rsq_f16_vop3(*this, wf); }
+VLogF16Vop3::VLogF16Vop3(const MachineInst *inst) : Vop3("v_log_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VLogF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
-VLogF16Vop3::VLogF16Vop3(const MachineInst *inst)
-    : Vop3("v_log_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VLogF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+void VLogF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_log_f16_vop3(*this, wf);
 }
 
-void VLogF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_log_f16_vop3(*this, wf); }
+VExpF16Vop3::VExpF16Vop3(const MachineInst *inst) : Vop3("v_exp_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VExpF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
-VExpF16Vop3::VExpF16Vop3(const MachineInst *inst)
-    : Vop3("v_exp_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VExpF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+void VExpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_exp_f16_vop3(*this, wf);
 }
 
-void VExpF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_exp_f16_vop3(*this, wf); }
-
-VFrexpMantF16Vop3::VFrexpMantF16Vop3(const MachineInst *inst)
-    : Vop3("v_frexp_mant_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFrexpMantF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VFrexpMantF16Vop3::VFrexpMantF16Vop3(const MachineInst *inst) : Vop3("v_frexp_mant_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFrexpMantF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VFrexpMantF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_frexp_mant_f16_vop3(*this, wf);
 }
 
-VFrexpExpI16F16Vop3::VFrexpExpI16F16Vop3(const MachineInst *inst)
-    : Vop3("v_frexp_exp_i16_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFrexpExpI16F16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VFrexpExpI16F16Vop3::VFrexpExpI16F16Vop3(const MachineInst *inst) : Vop3("v_frexp_exp_i16_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFrexpExpI16F16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VFrexpExpI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_frexp_exp_i16_f16_vop3(*this, wf);
 }
 
-VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst)
-    : Vop3("v_floor_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFloorF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst) : Vop3("v_floor_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFloorF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VFloorF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_floor_f16_vop3(*this, wf);
 }
 
-VCeilF16Vop3::VCeilF16Vop3(const MachineInst *inst)
-    : Vop3("v_ceil_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCeilF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VCeilF16Vop3::VCeilF16Vop3(const MachineInst *inst) : Vop3("v_ceil_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCeilF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VCeilF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_ceil_f16_vop3(*this, wf);
 }
 
-VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst)
-    : Vop3("v_trunc_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VTruncF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst) : Vop3("v_trunc_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VTruncF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VTruncF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_trunc_f16_vop3(*this, wf);
 }
 
-VRndneF16Vop3::VRndneF16Vop3(const MachineInst *inst)
-    : Vop3("v_rndne_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VRndneF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VRndneF16Vop3::VRndneF16Vop3(const MachineInst *inst) : Vop3("v_rndne_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VRndneF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VRndneF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_rndne_f16_vop3(*this, wf);
 }
 
-VFractF16Vop3::VFractF16Vop3(const MachineInst *inst)
-    : Vop3("v_fract_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFractF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-}
+VFractF16Vop3::VFractF16Vop3(const MachineInst *inst) : Vop3("v_fract_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFractF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
 void VFractF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_fract_f16_vop3(*this, wf);
 }
 
-VSinF16Vop3::VSinF16Vop3(const MachineInst *inst)
-    : Vop3("v_sin_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSinF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+VSinF16Vop3::VSinF16Vop3(const MachineInst *inst) : Vop3("v_sin_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSinF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
+
+void VSinF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_sin_f16_vop3(*this, wf);
 }
 
-void VSinF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sin_f16_vop3(*this, wf); }
+VCosF16Vop3::VCosF16Vop3(const MachineInst *inst) : Vop3("v_cos_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCosF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
-VCosF16Vop3::VCosF16Vop3(const MachineInst *inst)
-    : Vop3("v_cos_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCosF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+void VCosF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_cos_f16_vop3(*this, wf);
 }
 
-void VCosF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_cos_f16_vop3(*this, wf); }
+VSatPkU8I16Vop3::VSatPkU8I16Vop3(const MachineInst *inst) : Vop3("v_sat_pk_u8_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSatPkU8I16Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
-VSatPkU8I16Vop3::VSatPkU8I16Vop3(const MachineInst *inst)
-    : Vop3("v_sat_pk_u8_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VSatPkU8I16Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+void VSatPkU8I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VSatPkU8I16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst) : Vop3("v_cvt_norm_i16_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtNormI16F16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
-VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_norm_i16_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtNormI16F16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+void VCvtNormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VCvtNormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst) : Vop3("v_cvt_norm_u16_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtNormU16F16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;num_src_ = 1;num_dst_ = 1;}
 
-VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_norm_u16_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtNormU16F16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
+void VCvtNormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VCvtNormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
-
-VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
-    : Vop3("v_cndmask_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCndmaskB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst) : Vop3("v_cndmask_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCndmaskB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VCndmaskB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t cond = src2.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val = (cond & (1ULL << lane)) ? src1.read_lane(wf, lane) : src0.read_lane(wf, lane);
+    if (!(exec & (1ULL << lane))) continue;
+    uint32_t val = (cond & (1ULL << lane))
+        ? src1.read_lane(wf, lane)
+        : src0.read_lane(wf, lane);
     vdst.write_lane(wf, lane, val);
   }
 }
 
-VAddF32Vop3::VAddF32Vop3(const MachineInst *inst)
-    : Vop3("v_add_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VAddF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VAddF32Vop3::VAddF32Vop3(const MachineInst *inst) : Vop3("v_add_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAddF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VAddF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float sv1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     float result = sv0 + sv1;
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
 }
 
-VSubF32Vop3::VSubF32Vop3(const MachineInst *inst)
-    : Vop3("v_sub_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSubF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VSubF32Vop3::VSubF32Vop3(const MachineInst *inst) : Vop3("v_sub_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSubF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VSubF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float sv1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     float result = sv0 - sv1;
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
 }
 
-VSubrevF32Vop3::VSubrevF32Vop3(const MachineInst *inst)
-    : Vop3("v_subrev_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VSubrevF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VSubrevF32Vop3::VSubrevF32Vop3(const MachineInst *inst) : Vop3("v_subrev_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSubrevF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VSubrevF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float sv1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     float result = sv1 - sv0;
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
 }
 
-VFmacLegacyF32Vop3::VFmacLegacyF32Vop3(const MachineInst *inst)
-    : Vop3("v_fmac_legacy_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFmacLegacyF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  src_operands_[0] = &vdst;
-  dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VFmacLegacyF32Vop3::VFmacLegacyF32Vop3(const MachineInst *inst) : Vop3("v_fmac_legacy_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFmacLegacyF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {src_operands_[0] = &vdst;dst_operands_[0] = &vdst;src_operands_[1] = &src0;src_operands_[2] = &src1;num_src_ = 3;num_dst_ = 1;}
 
 void VFmacLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float sv1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     float result = std::fma(sv0, sv1, std::bit_cast<float>(vdst.read_lane(wf, lane)));
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
 }
 
-VMulLegacyF32Vop3::VMulLegacyF32Vop3(const MachineInst *inst)
-    : Vop3("v_mul_legacy_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulLegacyF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMulLegacyF32Vop3::VMulLegacyF32Vop3(const MachineInst *inst) : Vop3("v_mul_legacy_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMulLegacyF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMulLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_mul_legacy_f32_vop3(*this, wf);
 }
 
-VMulF32Vop3::VMulF32Vop3(const MachineInst *inst)
-    : Vop3("v_mul_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMulF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMulF32Vop3::VMulF32Vop3(const MachineInst *inst) : Vop3("v_mul_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMulF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMulF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float sv1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     float result = sv0 * sv1;
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
 }
 
-VMulI32I24Vop3::VMulI32I24Vop3(const MachineInst *inst)
-    : Vop3("v_mul_i32_i24", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulI32I24Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMulI32I24Vop3::VMulI32I24Vop3(const MachineInst *inst) : Vop3("v_mul_i32_i24", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMulI32I24Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMulI32I24Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t sv0 = static_cast<int32_t>(src0.read_lane(wf, lane) << 8) >> 8;
     int32_t sv1 = static_cast<int32_t>(src1.read_lane(wf, lane) << 8) >> 8;
     vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 * sv1));
   }
 }
 
-VMulHiI32I24Vop3::VMulHiI32I24Vop3(const MachineInst *inst)
-    : Vop3("v_mul_hi_i32_i24", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulHiI32I24Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMulHiI32I24Vop3::VMulHiI32I24Vop3(const MachineInst *inst) : Vop3("v_mul_hi_i32_i24", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMulHiI32I24Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMulHiI32I24Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t sv0 = static_cast<int32_t>(src0.read_lane(wf, lane) << 8) >> 8;
     int32_t sv1 = static_cast<int32_t>(src1.read_lane(wf, lane) << 8) >> 8;
     vdst.write_lane(wf, lane, static_cast<uint32_t>((static_cast<int64_t>(sv0) * sv1) >> 32));
   }
 }
 
-VMulU32U24Vop3::VMulU32U24Vop3(const MachineInst *inst)
-    : Vop3("v_mul_u32_u24", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulU32U24Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMulU32U24Vop3::VMulU32U24Vop3(const MachineInst *inst) : Vop3("v_mul_u32_u24", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMulU32U24Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMulU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane) & 0x00FFFFFFu;
     uint32_t sv1 = src1.read_lane(wf, lane) & 0x00FFFFFFu;
     vdst.write_lane(wf, lane, sv0 * sv1);
   }
 }
 
-VMulHiU32U24Vop3::VMulHiU32U24Vop3(const MachineInst *inst)
-    : Vop3("v_mul_hi_u32_u24", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulHiU32U24Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMulHiU32U24Vop3::VMulHiU32U24Vop3(const MachineInst *inst) : Vop3("v_mul_hi_u32_u24", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMulHiU32U24Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMulHiU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane) & 0x00FFFFFFu;
     uint32_t sv1 = src1.read_lane(wf, lane) & 0x00FFFFFFu;
     vdst.write_lane(wf, lane, static_cast<uint32_t>((static_cast<uint64_t>(sv0) * sv1) >> 32));
   }
 }
 
-VMinF32Vop3::VMinF32Vop3(const MachineInst *inst)
-    : Vop3("v_min_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMinF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMinF32Vop3::VMinF32Vop3(const MachineInst *inst) : Vop3("v_min_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMinF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMinF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float sv1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     float result = std::fmin(sv0, sv1);
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
 }
 
-VMaxF32Vop3::VMaxF32Vop3(const MachineInst *inst)
-    : Vop3("v_max_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMaxF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMaxF32Vop3::VMaxF32Vop3(const MachineInst *inst) : Vop3("v_max_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMaxF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMaxF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float sv1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     float result = std::fmax(sv0, sv1);
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
 }
 
-VMinI32Vop3::VMinI32Vop3(const MachineInst *inst)
-    : Vop3("v_min_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMinI32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMinI32Vop3::VMinI32Vop3(const MachineInst *inst) : Vop3("v_min_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMinI32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMinI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t sv0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t sv1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 < sv1 ? sv0 : sv1));
   }
 }
 
-VMaxI32Vop3::VMaxI32Vop3(const MachineInst *inst)
-    : Vop3("v_max_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMaxI32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMaxI32Vop3::VMaxI32Vop3(const MachineInst *inst) : Vop3("v_max_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMaxI32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMaxI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t sv0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t sv1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 > sv1 ? sv0 : sv1));
   }
 }
 
-VMinU32Vop3::VMinU32Vop3(const MachineInst *inst)
-    : Vop3("v_min_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMinU32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMinU32Vop3::VMinU32Vop3(const MachineInst *inst) : Vop3("v_min_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMinU32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMinU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     vdst.write_lane(wf, lane, sv0 < sv1 ? sv0 : sv1);
   }
 }
 
-VMaxU32Vop3::VMaxU32Vop3(const MachineInst *inst)
-    : Vop3("v_max_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMaxU32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMaxU32Vop3::VMaxU32Vop3(const MachineInst *inst) : Vop3("v_max_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMaxU32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMaxU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     vdst.write_lane(wf, lane, sv0 > sv1 ? sv0 : sv1);
   }
 }
 
-VLshrrevB32Vop3::VLshrrevB32Vop3(const MachineInst *inst)
-    : Vop3("v_lshrrev_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLshrrevB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VLshrrevB32Vop3::VLshrrevB32Vop3(const MachineInst *inst) : Vop3("v_lshrrev_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VLshrrevB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VLshrrevB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     vdst.write_lane(wf, lane, sv1 >> (sv0 & 31u));
   }
 }
 
-VAshrrevI32Vop3::VAshrrevI32Vop3(const MachineInst *inst)
-    : Vop3("v_ashrrev_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAshrrevI32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VAshrrevI32Vop3::VAshrrevI32Vop3(const MachineInst *inst) : Vop3("v_ashrrev_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAshrrevI32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VAshrrevI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t sv0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t sv1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<int32_t>(sv1) >> (sv0 & 31)));
   }
 }
 
-VLshlrevB32Vop3::VLshlrevB32Vop3(const MachineInst *inst)
-    : Vop3("v_lshlrev_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLshlrevB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VLshlrevB32Vop3::VLshlrevB32Vop3(const MachineInst *inst) : Vop3("v_lshlrev_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VLshlrevB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VLshlrevB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     vdst.write_lane(wf, lane, sv1 << (sv0 & 31u));
   }
 }
 
-VAndB32Vop3::VAndB32Vop3(const MachineInst *inst)
-    : Vop3("v_and_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VAndB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VAndB32Vop3::VAndB32Vop3(const MachineInst *inst) : Vop3("v_and_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAndB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VAndB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     vdst.write_lane(wf, lane, sv0 & sv1);
   }
 }
 
-VOrB32Vop3::VOrB32Vop3(const MachineInst *inst)
-    : Vop3("v_or_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VOrB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VOrB32Vop3::VOrB32Vop3(const MachineInst *inst) : Vop3("v_or_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VOrB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VOrB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     vdst.write_lane(wf, lane, sv0 | sv1);
   }
 }
 
-VXorB32Vop3::VXorB32Vop3(const MachineInst *inst)
-    : Vop3("v_xor_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VXorB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VXorB32Vop3::VXorB32Vop3(const MachineInst *inst) : Vop3("v_xor_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VXorB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VXorB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     vdst.write_lane(wf, lane, sv0 ^ sv1);
   }
 }
 
-VXnorB32Vop3::VXnorB32Vop3(const MachineInst *inst)
-    : Vop3("v_xnor_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VXnorB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VXnorB32Vop3::VXnorB32Vop3(const MachineInst *inst) : Vop3("v_xnor_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VXnorB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VXnorB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     vdst.write_lane(wf, lane, ~(sv0 ^ sv1));
   }
 }
 
-VAddNcU32Vop3::VAddNcU32Vop3(const MachineInst *inst)
-    : Vop3("v_add_nc_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAddNcU32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VAddNcU32Vop3::VAddNcU32Vop3(const MachineInst *inst) : Vop3("v_add_nc_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAddNcU32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VAddNcU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     vdst.write_lane(wf, lane, sv0 + sv1);
   }
 }
 
-VSubNcU32Vop3::VSubNcU32Vop3(const MachineInst *inst)
-    : Vop3("v_sub_nc_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VSubNcU32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VSubNcU32Vop3::VSubNcU32Vop3(const MachineInst *inst) : Vop3("v_sub_nc_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSubNcU32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VSubNcU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     vdst.write_lane(wf, lane, sv0 - sv1);
   }
 }
 
-VSubrevNcU32Vop3::VSubrevNcU32Vop3(const MachineInst *inst)
-    : Vop3("v_subrev_nc_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VSubrevNcU32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VSubrevNcU32Vop3::VSubrevNcU32Vop3(const MachineInst *inst) : Vop3("v_subrev_nc_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSubrevNcU32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VSubrevNcU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     vdst.write_lane(wf, lane, sv1 - sv0);
   }
 }
 
-VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
-    : Vop3("v_fmac_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFmacF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  src_operands_[0] = &vdst;
-  dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst) : Vop3("v_fmac_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFmacF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {src_operands_[0] = &vdst;dst_operands_[0] = &vdst;src_operands_[1] = &src0;src_operands_[2] = &src1;num_src_ = 3;num_dst_ = 1;}
 
 void VFmacF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float sv1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     float result = std::fma(sv0, sv1, std::bit_cast<float>(vdst.read_lane(wf, lane)));
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
 }
 
-VCvtPkrtzF16F32Vop3::VCvtPkrtzF16F32Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_pkrtz_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtPkrtzF16F32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCvtPkrtzF16F32Vop3::VCvtPkrtzF16F32Vop3(const MachineInst *inst) : Vop3("v_cvt_pkrtz_f16_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtPkrtzF16F32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCvtPkrtzF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_pkrtz_f16_f32_vop3(*this, wf);
 }
 
-VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
-    : Vop3("v_add_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VAddF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VAddF16Vop3::VAddF16Vop3(const MachineInst *inst) : Vop3("v_add_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAddF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VAddF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float sv0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float sv1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     float result = sv0 + sv1;
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, util::f32_to_f16(result));
   }
 }
 
-VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
-    : Vop3("v_sub_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSubF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VSubF16Vop3::VSubF16Vop3(const MachineInst *inst) : Vop3("v_sub_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSubF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VSubF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float sv0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float sv1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     float result = sv0 - sv1;
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, util::f32_to_f16(result));
   }
 }
 
-VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
-    : Vop3("v_subrev_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VSubrevF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst) : Vop3("v_subrev_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSubrevF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VSubrevF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float sv0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float sv1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     float result = sv1 - sv0;
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, util::f32_to_f16(result));
   }
 }
 
-VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
-    : Vop3("v_mul_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMulF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMulF16Vop3::VMulF16Vop3(const MachineInst *inst) : Vop3("v_mul_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMulF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMulF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float sv0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float sv1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     float result = sv0 * sv1;
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, util::f32_to_f16(result));
   }
 }
 
-VFmacF16Vop3::VFmacF16Vop3(const MachineInst *inst)
-    : Vop3("v_fmac_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFmacF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  src_operands_[0] = &vdst;
-  dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VFmacF16Vop3::VFmacF16Vop3(const MachineInst *inst) : Vop3("v_fmac_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFmacF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {src_operands_[0] = &vdst;dst_operands_[0] = &vdst;src_operands_[1] = &src0;src_operands_[2] = &src1;num_src_ = 3;num_dst_ = 1;}
 
 void VFmacF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float sv0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float sv1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result =
-        std::fma(sv0, sv1, util::f16_to_f32(static_cast<uint16_t>(vdst.read_lane(wf, lane))));
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
+    float result = std::fma(sv0, sv1, util::f16_to_f32(static_cast<uint16_t>(vdst.read_lane(wf, lane))));
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, util::f32_to_f16(result));
   }
 }
 
-VMaxF16Vop3::VMaxF16Vop3(const MachineInst *inst)
-    : Vop3("v_max_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMaxF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMaxF16Vop3::VMaxF16Vop3(const MachineInst *inst) : Vop3("v_max_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMaxF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMaxF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float sv0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float sv1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     float result = std::fmax(sv0, sv1);
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, util::f32_to_f16(result));
   }
 }
 
-VMinF16Vop3::VMinF16Vop3(const MachineInst *inst)
-    : Vop3("v_min_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMinF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMinF16Vop3::VMinF16Vop3(const MachineInst *inst) : Vop3("v_min_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMinF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMinF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float sv0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float sv1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     float result = std::fmin(sv0, sv1);
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, util::f32_to_f16(result));
   }
 }
 
-VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
-    : Vop3("v_ldexp_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLdexpF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst) : Vop3("v_ldexp_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VLdexpF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VLdexpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float sv0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    int32_t sv1_i =
-        static_cast<int32_t>(static_cast<int16_t>(static_cast<uint16_t>(src1.read_lane(wf, lane))));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
+    int32_t sv1_i = static_cast<int32_t>(static_cast<int16_t>(static_cast<uint16_t>(src1.read_lane(wf, lane))));
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
     float result = std::ldexp(sv0, static_cast<int>(sv1_i));
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, util::f32_to_f16(result));
   }
 }
 
-VFmaLegacyF32Vop3::VFmaLegacyF32Vop3(const MachineInst *inst)
-    : Vop3("v_fma_legacy_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFmaLegacyF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VFmaLegacyF32Vop3::VFmaLegacyF32Vop3(const MachineInst *inst) : Vop3("v_fma_legacy_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFmaLegacyF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VFmaLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float a = std::bit_cast<float>(src0.read_lane(wf, lane));
     float b = std::bit_cast<float>(src1.read_lane(wf, lane));
     float c = std::bit_cast<float>(src2.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst_.neg & (1u << 0))
-      a = -a;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
+    if (inst_.abs & (1u << 0)) a = std::fabs(a);
+    if (inst_.neg & (1u << 0)) a = -a;
+    if (inst_.abs & (1u << 1)) b = std::fabs(b);
+    if (inst_.neg & (1u << 1)) b = -b;
+    if (inst_.abs & (1u << 2)) c = std::fabs(c);
+    if (inst_.neg & (1u << 2)) c = -c;
     float result = std::fma(a, b, c);
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
 }
 
-VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
-    : Vop3("v_mad_i32_i24", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMadI32I24Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst) : Vop3("v_mad_i32_i24", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMadI32I24Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMadI32I24Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t a = static_cast<int32_t>(src0.read_lane(wf, lane) << 8) >> 8;
     int32_t b = static_cast<int32_t>(src1.read_lane(wf, lane) << 8) >> 8;
     int32_t c = static_cast<int32_t>(src2.read_lane(wf, lane));
@@ -2597,26 +1273,12 @@ void VMadI32I24Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
-    : Vop3("v_mad_u32_u24", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMadU32U24Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst) : Vop3("v_mad_u32_u24", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMadU32U24Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMadU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane) & 0x00FFFFFFu;
     uint32_t b = src1.read_lane(wf, lane) & 0x00FFFFFFu;
     uint32_t c = src2.read_lane(wf, lane);
@@ -2624,245 +1286,124 @@ void VMadU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VCubeidF32Vop3::VCubeidF32Vop3(const MachineInst *inst)
-    : Vop3("v_cubeid_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCubeidF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VCubeidF32Vop3::VCubeidF32Vop3(const MachineInst *inst) : Vop3("v_cubeid_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCubeidF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VCubeidF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float a = std::bit_cast<float>(src0.read_lane(wf, lane));
     float b = std::bit_cast<float>(src1.read_lane(wf, lane));
     float c = std::bit_cast<float>(src2.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst_.neg & (1u << 0))
-      a = -a;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
+    if (inst_.abs & (1u << 0)) a = std::fabs(a);
+    if (inst_.neg & (1u << 0)) a = -a;
+    if (inst_.abs & (1u << 1)) b = std::fabs(b);
+    if (inst_.neg & (1u << 1)) b = -b;
+    if (inst_.abs & (1u << 2)) c = std::fabs(c);
+    if (inst_.neg & (1u << 2)) c = -c;
     float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);
     float face;
-    if (az >= ax && az >= ay)
-      face = c >= 0 ? 4.0f : 5.0f;
-    else if (ay >= ax)
-      face = b >= 0 ? 2.0f : 3.0f;
-    else
-      face = a >= 0 ? 0.0f : 1.0f;
-    if (inst_.omod == 1)
-      face *= 2.0f;
-    else if (inst_.omod == 2)
-      face *= 4.0f;
-    else if (inst_.omod == 3)
-      face *= 0.5f;
-    if (inst_.clamp)
-      face = std::clamp(face, 0.0f, 1.0f);
+    if (az >= ax && az >= ay) face = c >= 0 ? 4.0f : 5.0f;
+    else if (ay >= ax) face = b >= 0 ? 2.0f : 3.0f;
+    else face = a >= 0 ? 0.0f : 1.0f;
+    if (inst_.omod == 1) face *= 2.0f;
+    else if (inst_.omod == 2) face *= 4.0f;
+    else if (inst_.omod == 3) face *= 0.5f;
+    if (inst_.clamp) face = std::clamp(face, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(face));
   }
 }
 
-VCubescF32Vop3::VCubescF32Vop3(const MachineInst *inst)
-    : Vop3("v_cubesc_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCubescF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VCubescF32Vop3::VCubescF32Vop3(const MachineInst *inst) : Vop3("v_cubesc_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCubescF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VCubescF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float a = std::bit_cast<float>(src0.read_lane(wf, lane));
     float b = std::bit_cast<float>(src1.read_lane(wf, lane));
     float c = std::bit_cast<float>(src2.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst_.neg & (1u << 0))
-      a = -a;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
+    if (inst_.abs & (1u << 0)) a = std::fabs(a);
+    if (inst_.neg & (1u << 0)) a = -a;
+    if (inst_.abs & (1u << 1)) b = std::fabs(b);
+    if (inst_.neg & (1u << 1)) b = -b;
+    if (inst_.abs & (1u << 2)) c = std::fabs(c);
+    if (inst_.neg & (1u << 2)) c = -c;
     float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);
     float sc;
-    if (az >= ax && az >= ay)
-      sc = c >= 0 ? a : -a;
-    else if (ay >= ax)
-      sc = a;
-    else
-      sc = a >= 0 ? -c : c;
-    if (inst_.omod == 1)
-      sc *= 2.0f;
-    else if (inst_.omod == 2)
-      sc *= 4.0f;
-    else if (inst_.omod == 3)
-      sc *= 0.5f;
-    if (inst_.clamp)
-      sc = std::clamp(sc, 0.0f, 1.0f);
+    if (az >= ax && az >= ay) sc = c >= 0 ? a : -a;
+    else if (ay >= ax) sc = a;
+    else sc = a >= 0 ? -c : c;
+    if (inst_.omod == 1) sc *= 2.0f;
+    else if (inst_.omod == 2) sc *= 4.0f;
+    else if (inst_.omod == 3) sc *= 0.5f;
+    if (inst_.clamp) sc = std::clamp(sc, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(sc));
   }
 }
 
-VCubetcF32Vop3::VCubetcF32Vop3(const MachineInst *inst)
-    : Vop3("v_cubetc_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCubetcF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VCubetcF32Vop3::VCubetcF32Vop3(const MachineInst *inst) : Vop3("v_cubetc_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCubetcF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VCubetcF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float a = std::bit_cast<float>(src0.read_lane(wf, lane));
     float b = std::bit_cast<float>(src1.read_lane(wf, lane));
     float c = std::bit_cast<float>(src2.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst_.neg & (1u << 0))
-      a = -a;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
+    if (inst_.abs & (1u << 0)) a = std::fabs(a);
+    if (inst_.neg & (1u << 0)) a = -a;
+    if (inst_.abs & (1u << 1)) b = std::fabs(b);
+    if (inst_.neg & (1u << 1)) b = -b;
+    if (inst_.abs & (1u << 2)) c = std::fabs(c);
+    if (inst_.neg & (1u << 2)) c = -c;
     float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);
     float tc;
-    if (az >= ax && az >= ay)
-      tc = -b;
-    else if (ay >= ax)
-      tc = b >= 0 ? c : -c;
-    else
-      tc = -b;
-    if (inst_.omod == 1)
-      tc *= 2.0f;
-    else if (inst_.omod == 2)
-      tc *= 4.0f;
-    else if (inst_.omod == 3)
-      tc *= 0.5f;
-    if (inst_.clamp)
-      tc = std::clamp(tc, 0.0f, 1.0f);
+    if (az >= ax && az >= ay) tc = -b;
+    else if (ay >= ax) tc = b >= 0 ? c : -c;
+    else tc = -b;
+    if (inst_.omod == 1) tc *= 2.0f;
+    else if (inst_.omod == 2) tc *= 4.0f;
+    else if (inst_.omod == 3) tc *= 0.5f;
+    if (inst_.clamp) tc = std::clamp(tc, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(tc));
   }
 }
 
-VCubemaF32Vop3::VCubemaF32Vop3(const MachineInst *inst)
-    : Vop3("v_cubema_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCubemaF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VCubemaF32Vop3::VCubemaF32Vop3(const MachineInst *inst) : Vop3("v_cubema_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCubemaF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VCubemaF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float a = std::bit_cast<float>(src0.read_lane(wf, lane));
     float b = std::bit_cast<float>(src1.read_lane(wf, lane));
     float c = std::bit_cast<float>(src2.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst_.neg & (1u << 0))
-      a = -a;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
+    if (inst_.abs & (1u << 0)) a = std::fabs(a);
+    if (inst_.neg & (1u << 0)) a = -a;
+    if (inst_.abs & (1u << 1)) b = std::fabs(b);
+    if (inst_.neg & (1u << 1)) b = -b;
+    if (inst_.abs & (1u << 2)) c = std::fabs(c);
+    if (inst_.neg & (1u << 2)) c = -c;
     float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);
     float ma;
-    if (az >= ax && az >= ay)
-      ma = 2.0f * az;
-    else if (ay >= ax)
-      ma = 2.0f * ay;
-    else
-      ma = 2.0f * ax;
-    if (inst_.omod == 1)
-      ma *= 2.0f;
-    else if (inst_.omod == 2)
-      ma *= 4.0f;
-    else if (inst_.omod == 3)
-      ma *= 0.5f;
-    if (inst_.clamp)
-      ma = std::clamp(ma, 0.0f, 1.0f);
+    if (az >= ax && az >= ay) ma = 2.0f * az;
+    else if (ay >= ax) ma = 2.0f * ay;
+    else ma = 2.0f * ax;
+    if (inst_.omod == 1) ma *= 2.0f;
+    else if (inst_.omod == 2) ma *= 4.0f;
+    else if (inst_.omod == 3) ma *= 0.5f;
+    if (inst_.clamp) ma = std::clamp(ma, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(ma));
   }
 }
 
-VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst)
-    : Vop3("v_bfe_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VBfeU32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst) : Vop3("v_bfe_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VBfeU32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VBfeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -2873,25 +1414,12 @@ void VBfeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst)
-    : Vop3("v_bfe_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VBfeI32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst) : Vop3("v_bfe_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VBfeI32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VBfeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -2899,35 +1427,19 @@ void VBfeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t width = c & 31;
     int32_t sv = static_cast<int32_t>(a);
     int32_t result_val;
-    if (width == 0)
-      result_val = 0;
-    else if (offset + width >= 32)
-      result_val = sv >> offset;
-    else
-      result_val = (sv << (32 - offset - width)) >> (32 - width);
+    if (width == 0) result_val = 0;
+    else if (offset + width >= 32) result_val = sv >> offset;
+    else result_val = (sv << (32 - offset - width)) >> (32 - width);
     vdst.write_lane(wf, lane, static_cast<uint32_t>(result_val));
   }
 }
 
-VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst)
-    : Vop3("v_bfi_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VBfiB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst) : Vop3("v_bfi_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VBfiB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VBfiB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -2935,119 +1447,60 @@ void VBfiB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
-    : Vop3("v_fma_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFmaF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst) : Vop3("v_fma_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFmaF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VFmaF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float a = std::bit_cast<float>(src0.read_lane(wf, lane));
     float b = std::bit_cast<float>(src1.read_lane(wf, lane));
     float c = std::bit_cast<float>(src2.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst_.neg & (1u << 0))
-      a = -a;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
+    if (inst_.abs & (1u << 0)) a = std::fabs(a);
+    if (inst_.neg & (1u << 0)) a = -a;
+    if (inst_.abs & (1u << 1)) b = std::fabs(b);
+    if (inst_.neg & (1u << 1)) b = -b;
+    if (inst_.abs & (1u << 2)) c = std::fabs(c);
+    if (inst_.neg & (1u << 2)) c = -c;
     float result = std::fma(a, b, c);
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
 }
 
-VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
-    : Vop3("v_fma_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFmaF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst) : Vop3("v_fma_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFmaF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VFmaF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double a = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double b = std::bit_cast<double>(src1.read_lane64(wf, lane));
     double c = std::bit_cast<double>(src2.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst_.neg & (1u << 0))
-      a = -a;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
+    if (inst_.abs & (1u << 0)) a = std::fabs(a);
+    if (inst_.neg & (1u << 0)) a = -a;
+    if (inst_.abs & (1u << 1)) b = std::fabs(b);
+    if (inst_.neg & (1u << 1)) b = -b;
+    if (inst_.abs & (1u << 2)) c = std::fabs(c);
+    if (inst_.neg & (1u << 2)) c = -c;
     double result = std::fma(a, b, c);
-    if (inst_.omod == 1)
-      result *= 2.0;
-    else if (inst_.omod == 2)
-      result *= 4.0;
-    else if (inst_.omod == 3)
-      result *= 0.5;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
+    if (inst_.omod == 1) result *= 2.0;
+    else if (inst_.omod == 2) result *= 4.0;
+    else if (inst_.omod == 3) result *= 0.5;
+    if (inst_.clamp) result = std::clamp(result, 0.0, 1.0);
     vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
 }
 
-VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst)
-    : Vop3("v_lerp_u8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VLerpU8Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst) : Vop3("v_lerp_u8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VLerpU8Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VLerpU8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -3061,145 +1514,68 @@ void VLerpU8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
-    : Vop3("v_alignbit_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAlignbitB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst) : Vop3("v_alignbit_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAlignbitB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VAlignbitB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
-    vdst.write_lane(wf, lane,
-                    static_cast<uint32_t>(((static_cast<uint64_t>(a) << 32) | b) >> (c & 31)));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(((static_cast<uint64_t>(a) << 32) | b) >> (c & 31)));
   }
 }
 
-VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
-    : Vop3("v_alignbyte_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAlignbyteB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst) : Vop3("v_alignbyte_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAlignbyteB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VAlignbyteB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
-    vdst.write_lane(wf, lane,
-                    static_cast<uint32_t>(((static_cast<uint64_t>(a) << 32) | b) >> ((c & 3) * 8)));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(((static_cast<uint64_t>(a) << 32) | b) >> ((c & 3) * 8)));
   }
 }
 
-VMullitF32Vop3::VMullitF32Vop3(const MachineInst *inst)
-    : Vop3("v_mullit_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMullitF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
+VMullitF32Vop3::VMullitF32Vop3(const MachineInst *inst) : Vop3("v_mullit_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMullitF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
+
+void VMullitF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VMullitF32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
-
-VMin3F32Vop3::VMin3F32Vop3(const MachineInst *inst)
-    : Vop3("v_min3_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMin3F32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMin3F32Vop3::VMin3F32Vop3(const MachineInst *inst) : Vop3("v_min3_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMin3F32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMin3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float a = std::bit_cast<float>(src0.read_lane(wf, lane));
     float b = std::bit_cast<float>(src1.read_lane(wf, lane));
     float c = std::bit_cast<float>(src2.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst_.neg & (1u << 0))
-      a = -a;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
+    if (inst_.abs & (1u << 0)) a = std::fabs(a);
+    if (inst_.neg & (1u << 0)) a = -a;
+    if (inst_.abs & (1u << 1)) b = std::fabs(b);
+    if (inst_.neg & (1u << 1)) b = -b;
+    if (inst_.abs & (1u << 2)) c = std::fabs(c);
+    if (inst_.neg & (1u << 2)) c = -c;
     float result = std::fmin(std::fmin(a, b), c);
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
 }
 
-VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
-    : Vop3("v_min3_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMin3I32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst) : Vop3("v_min3_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMin3I32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMin3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t a = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t b = static_cast<int32_t>(src1.read_lane(wf, lane));
     int32_t c = static_cast<int32_t>(src2.read_lane(wf, lane));
@@ -3207,25 +1583,12 @@ void VMin3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst)
-    : Vop3("v_min3_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMin3U32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst) : Vop3("v_min3_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMin3U32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMin3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -3233,72 +1596,36 @@ void VMin3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VMax3F32Vop3::VMax3F32Vop3(const MachineInst *inst)
-    : Vop3("v_max3_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMax3F32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMax3F32Vop3::VMax3F32Vop3(const MachineInst *inst) : Vop3("v_max3_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMax3F32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMax3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float a = std::bit_cast<float>(src0.read_lane(wf, lane));
     float b = std::bit_cast<float>(src1.read_lane(wf, lane));
     float c = std::bit_cast<float>(src2.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst_.neg & (1u << 0))
-      a = -a;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
+    if (inst_.abs & (1u << 0)) a = std::fabs(a);
+    if (inst_.neg & (1u << 0)) a = -a;
+    if (inst_.abs & (1u << 1)) b = std::fabs(b);
+    if (inst_.neg & (1u << 1)) b = -b;
+    if (inst_.abs & (1u << 2)) c = std::fabs(c);
+    if (inst_.neg & (1u << 2)) c = -c;
     float result = std::fmax(std::fmax(a, b), c);
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
 }
 
-VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst)
-    : Vop3("v_max3_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMax3I32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst) : Vop3("v_max3_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMax3I32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMax3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t a = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t b = static_cast<int32_t>(src1.read_lane(wf, lane));
     int32_t c = static_cast<int32_t>(src2.read_lane(wf, lane));
@@ -3306,25 +1633,12 @@ void VMax3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst)
-    : Vop3("v_max3_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMax3U32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst) : Vop3("v_max3_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMax3U32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMax3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -3332,99 +1646,49 @@ void VMax3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VMed3F32Vop3::VMed3F32Vop3(const MachineInst *inst)
-    : Vop3("v_med3_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMed3F32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMed3F32Vop3::VMed3F32Vop3(const MachineInst *inst) : Vop3("v_med3_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMed3F32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMed3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float a = std::bit_cast<float>(src0.read_lane(wf, lane));
     float b = std::bit_cast<float>(src1.read_lane(wf, lane));
     float c = std::bit_cast<float>(src2.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst_.neg & (1u << 0))
-      a = -a;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
+    if (inst_.abs & (1u << 0)) a = std::fabs(a);
+    if (inst_.neg & (1u << 0)) a = -a;
+    if (inst_.abs & (1u << 1)) b = std::fabs(b);
+    if (inst_.neg & (1u << 1)) b = -b;
+    if (inst_.abs & (1u << 2)) c = std::fabs(c);
+    if (inst_.neg & (1u << 2)) c = -c;
     float result = std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
 }
 
-VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst)
-    : Vop3("v_med3_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMed3I32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst) : Vop3("v_med3_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMed3I32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMed3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t a = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t b = static_cast<int32_t>(src1.read_lane(wf, lane));
     int32_t c = static_cast<int32_t>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane,
-                    static_cast<uint32_t>(std::max(std::min(std::max(a, b), c), std::min(a, b))));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(std::max(std::min(std::max(a, b), c), std::min(a, b))));
   }
 }
 
-VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst)
-    : Vop3("v_med3_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMed3U32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst) : Vop3("v_med3_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMed3U32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMed3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -3432,25 +1696,12 @@ void VMed3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VSadU8Vop3::VSadU8Vop3(const MachineInst *inst)
-    : Vop3("v_sad_u8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSadU8Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VSadU8Vop3::VSadU8Vop3(const MachineInst *inst) : Vop3("v_sad_u8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSadU8Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VSadU8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -3463,25 +1714,12 @@ void VSadU8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst)
-    : Vop3("v_sad_hi_u8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSadHiU8Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst) : Vop3("v_sad_hi_u8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSadHiU8Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VSadHiU8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -3494,55 +1732,28 @@ void VSadHiU8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VSadU16Vop3::VSadU16Vop3(const MachineInst *inst)
-    : Vop3("v_sad_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSadU16Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VSadU16Vop3::VSadU16Vop3(const MachineInst *inst) : Vop3("v_sad_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSadU16Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VSadU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
     uint32_t lo_a = a & 0xFFFF, hi_a = a >> 16;
     uint32_t lo_b = b & 0xFFFF, hi_b = b >> 16;
-    uint32_t sum =
-        (lo_a > lo_b ? lo_a - lo_b : lo_b - lo_a) + (hi_a > hi_b ? hi_a - hi_b : hi_b - hi_a);
+    uint32_t sum = (lo_a > lo_b ? lo_a - lo_b : lo_b - lo_a) + (hi_a > hi_b ? hi_a - hi_b : hi_b - hi_a);
     vdst.write_lane(wf, lane, sum + c);
   }
 }
 
-VSadU32Vop3::VSadU32Vop3(const MachineInst *inst)
-    : Vop3("v_sad_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSadU32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VSadU32Vop3::VSadU32Vop3(const MachineInst *inst) : Vop3("v_sad_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSadU32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VSadU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -3550,26 +1761,12 @@ void VSadU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VCvtPkU8F32Vop3::VCvtPkU8F32Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_pk_u8_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtPkU8F32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VCvtPkU8F32Vop3::VCvtPkU8F32Vop3(const MachineInst *inst) : Vop3("v_cvt_pk_u8_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtPkU8F32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VCvtPkU8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float fval = std::bit_cast<float>(src0.read_lane(wf, lane));
     uint32_t byte_sel = src1.read_lane(wf, lane) & 3;
     uint32_t old = src2.read_lane(wf, lane);
@@ -3579,441 +1776,229 @@ void VCvtPkU8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VDivFixupF32Vop3::VDivFixupF32Vop3(const MachineInst *inst)
-    : Vop3("v_div_fixup_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VDivFixupF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VDivFixupF32Vop3::VDivFixupF32Vop3(const MachineInst *inst) : Vop3("v_div_fixup_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VDivFixupF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VDivFixupF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float p = std::bit_cast<float>(src0.read_lane(wf, lane));
     float b = std::bit_cast<float>(src1.read_lane(wf, lane));
     float c = std::bit_cast<float>(src2.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      p = std::fabs(p);
-    if (inst_.neg & (1u << 0))
-      p = -p;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
+    if (inst_.abs & (1u << 0)) p = std::fabs(p);
+    if (inst_.neg & (1u << 0)) p = -p;
+    if (inst_.abs & (1u << 1)) b = std::fabs(b);
+    if (inst_.neg & (1u << 1)) b = -b;
+    if (inst_.abs & (1u << 2)) c = std::fabs(c);
+    if (inst_.neg & (1u << 2)) c = -c;
     float result;
-    if (std::isnan(b))
-      result = b;
-    else if (std::isnan(c))
-      result = c;
-    else if (c == 0.0f && b == 0.0f)
-      result = std::numeric_limits<float>::quiet_NaN();
-    else if (std::isinf(c) && std::isinf(b))
-      result = std::numeric_limits<float>::quiet_NaN();
+    if (std::isnan(b)) result = b;
+    else if (std::isnan(c)) result = c;
+    else if (c == 0.0f && b == 0.0f) result = std::numeric_limits<float>::quiet_NaN();
+    else if (std::isinf(c) && std::isinf(b)) result = std::numeric_limits<float>::quiet_NaN();
     else if (c == 0.0f) {
-      result = std::copysign(
-          std::numeric_limits<float>::infinity(),
-          std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));
-    } else if (std::isinf(b))
-      result = std::copysign(0.0f, b);
-    else
-      result = p;
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+      result = std::copysign(std::numeric_limits<float>::infinity(),
+                             std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));
+    }
+    else if (std::isinf(b)) result = std::copysign(0.0f, b);
+    else result = p;
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
 }
 
-VDivFixupF64Vop3::VDivFixupF64Vop3(const MachineInst *inst)
-    : Vop3("v_div_fixup_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VDivFixupF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VDivFixupF64Vop3::VDivFixupF64Vop3(const MachineInst *inst) : Vop3("v_div_fixup_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VDivFixupF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VDivFixupF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double p = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double b = std::bit_cast<double>(src1.read_lane64(wf, lane));
     double c = std::bit_cast<double>(src2.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      p = std::fabs(p);
-    if (inst_.neg & (1u << 0))
-      p = -p;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
+    if (inst_.abs & (1u << 0)) p = std::fabs(p);
+    if (inst_.neg & (1u << 0)) p = -p;
+    if (inst_.abs & (1u << 1)) b = std::fabs(b);
+    if (inst_.neg & (1u << 1)) b = -b;
+    if (inst_.abs & (1u << 2)) c = std::fabs(c);
+    if (inst_.neg & (1u << 2)) c = -c;
     double result;
-    if (std::isnan(b))
-      result = b;
-    else if (std::isnan(c))
-      result = c;
-    else if (c == 0.0 && b == 0.0)
-      result = std::numeric_limits<double>::quiet_NaN();
-    else if (std::isinf(c) && std::isinf(b))
-      result = std::numeric_limits<double>::quiet_NaN();
+    if (std::isnan(b)) result = b;
+    else if (std::isnan(c)) result = c;
+    else if (c == 0.0 && b == 0.0) result = std::numeric_limits<double>::quiet_NaN();
+    else if (std::isinf(c) && std::isinf(b)) result = std::numeric_limits<double>::quiet_NaN();
     else if (c == 0.0) {
-      result = std::copysign(
-          std::numeric_limits<double>::infinity(),
-          std::bit_cast<double>(std::bit_cast<uint64_t>(b) ^ std::bit_cast<uint64_t>(c)));
-    } else if (std::isinf(b))
-      result = std::copysign(0.0, b);
-    else
-      result = p;
-    if (inst_.omod == 1)
-      result *= 2.0;
-    else if (inst_.omod == 2)
-      result *= 4.0;
-    else if (inst_.omod == 3)
-      result *= 0.5;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
+      result = std::copysign(std::numeric_limits<double>::infinity(),
+                             std::bit_cast<double>(std::bit_cast<uint64_t>(b) ^ std::bit_cast<uint64_t>(c)));
+    }
+    else if (std::isinf(b)) result = std::copysign(0.0, b);
+    else result = p;
+    if (inst_.omod == 1) result *= 2.0;
+    else if (inst_.omod == 2) result *= 4.0;
+    else if (inst_.omod == 3) result *= 0.5;
+    if (inst_.clamp) result = std::clamp(result, 0.0, 1.0);
     vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
 }
 
-VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
-    : Vop3("v_add_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VAddF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VAddF64Vop3::VAddF64Vop3(const MachineInst *inst) : Vop3("v_add_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAddF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VAddF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double sv0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double sv1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     double result = sv0 + sv1;
-    if (inst_.omod == 1)
-      result *= 2.0;
-    else if (inst_.omod == 2)
-      result *= 4.0;
-    else if (inst_.omod == 3)
-      result *= 0.5;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
+    if (inst_.omod == 1) result *= 2.0;
+    else if (inst_.omod == 2) result *= 4.0;
+    else if (inst_.omod == 3) result *= 0.5;
+    if (inst_.clamp) result = std::clamp(result, 0.0, 1.0);
     vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
 }
 
-VMulF64Vop3::VMulF64Vop3(const MachineInst *inst)
-    : Vop3("v_mul_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMulF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMulF64Vop3::VMulF64Vop3(const MachineInst *inst) : Vop3("v_mul_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMulF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMulF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double sv0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double sv1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     double result = sv0 * sv1;
-    if (inst_.omod == 1)
-      result *= 2.0;
-    else if (inst_.omod == 2)
-      result *= 4.0;
-    else if (inst_.omod == 3)
-      result *= 0.5;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
+    if (inst_.omod == 1) result *= 2.0;
+    else if (inst_.omod == 2) result *= 4.0;
+    else if (inst_.omod == 3) result *= 0.5;
+    if (inst_.clamp) result = std::clamp(result, 0.0, 1.0);
     vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
 }
 
-VMinF64Vop3::VMinF64Vop3(const MachineInst *inst)
-    : Vop3("v_min_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMinF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMinF64Vop3::VMinF64Vop3(const MachineInst *inst) : Vop3("v_min_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMinF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMinF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double sv0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double sv1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     double result = std::fmin(sv0, sv1);
-    if (inst_.omod == 1)
-      result *= 2.0;
-    else if (inst_.omod == 2)
-      result *= 4.0;
-    else if (inst_.omod == 3)
-      result *= 0.5;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
+    if (inst_.omod == 1) result *= 2.0;
+    else if (inst_.omod == 2) result *= 4.0;
+    else if (inst_.omod == 3) result *= 0.5;
+    if (inst_.clamp) result = std::clamp(result, 0.0, 1.0);
     vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
 }
 
-VMaxF64Vop3::VMaxF64Vop3(const MachineInst *inst)
-    : Vop3("v_max_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMaxF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMaxF64Vop3::VMaxF64Vop3(const MachineInst *inst) : Vop3("v_max_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMaxF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMaxF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double sv0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double sv1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
+    if (inst_.abs & (1u << 1)) sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1)) sv1 = -sv1;
     double result = std::fmax(sv0, sv1);
-    if (inst_.omod == 1)
-      result *= 2.0;
-    else if (inst_.omod == 2)
-      result *= 4.0;
-    else if (inst_.omod == 3)
-      result *= 0.5;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
+    if (inst_.omod == 1) result *= 2.0;
+    else if (inst_.omod == 2) result *= 4.0;
+    else if (inst_.omod == 3) result *= 0.5;
+    if (inst_.clamp) result = std::clamp(result, 0.0, 1.0);
     vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
 }
 
-VLdexpF64Vop3::VLdexpF64Vop3(const MachineInst *inst)
-    : Vop3("v_ldexp_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLdexpF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VLdexpF64Vop3::VLdexpF64Vop3(const MachineInst *inst) : Vop3("v_ldexp_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VLdexpF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VLdexpF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double sv0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     int32_t sv1_i = static_cast<int32_t>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
     double result = std::ldexp(sv0, static_cast<int>(sv1_i));
-    if (inst_.omod == 1)
-      result *= 2.0;
-    else if (inst_.omod == 2)
-      result *= 4.0;
-    else if (inst_.omod == 3)
-      result *= 0.5;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
+    if (inst_.omod == 1) result *= 2.0;
+    else if (inst_.omod == 2) result *= 4.0;
+    else if (inst_.omod == 3) result *= 0.5;
+    if (inst_.clamp) result = std::clamp(result, 0.0, 1.0);
     vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
 }
 
-VMulLoU32Vop3::VMulLoU32Vop3(const MachineInst *inst)
-    : Vop3("v_mul_lo_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulLoU32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMulLoU32Vop3::VMulLoU32Vop3(const MachineInst *inst) : Vop3("v_mul_lo_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMulLoU32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMulLoU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     vdst.write_lane(wf, lane, sv0 * sv1);
   }
 }
 
-VMulHiU32Vop3::VMulHiU32Vop3(const MachineInst *inst)
-    : Vop3("v_mul_hi_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulHiU32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMulHiU32Vop3::VMulHiU32Vop3(const MachineInst *inst) : Vop3("v_mul_hi_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMulHiU32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMulHiU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     vdst.write_lane(wf, lane, static_cast<uint32_t>((static_cast<uint64_t>(sv0) * sv1) >> 32));
   }
 }
 
-VMulHiI32Vop3::VMulHiI32Vop3(const MachineInst *inst)
-    : Vop3("v_mul_hi_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulHiI32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMulHiI32Vop3::VMulHiI32Vop3(const MachineInst *inst) : Vop3("v_mul_hi_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMulHiI32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMulHiI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t sv0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t sv1 = static_cast<int32_t>(src1.read_lane(wf, lane));
-    vdst.write_lane(
-        wf, lane,
-        static_cast<uint32_t>(static_cast<uint64_t>(static_cast<int64_t>(sv0) * sv1) >> 32));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint64_t>(static_cast<int64_t>(sv0) * sv1) >> 32));
   }
 }
 
-VDivFmasF32Vop3::VDivFmasF32Vop3(const MachineInst *inst)
-    : Vop3("v_div_fmas_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VDivFmasF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VDivFmasF32Vop3::VDivFmasF32Vop3(const MachineInst *inst) : Vop3("v_div_fmas_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VDivFmasF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VDivFmasF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
     float s2 = std::bit_cast<float>(src2.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (inst_.abs & (1u << 2))
-      s2 = std::fabs(s2);
-    if (inst_.neg & (1u << 2))
-      s2 = -s2;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
+    if (inst_.abs & (1u << 2)) s2 = std::fabs(s2);
+    if (inst_.neg & (1u << 2)) s2 = -s2;
     float result = std::fma(s0, s1, s2);
     if (vcc & (1ULL << lane)) {
       result = std::ldexp(result, 128);
@@ -4022,42 +2007,22 @@ void VDivFmasF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VDivFmasF64Vop3::VDivFmasF64Vop3(const MachineInst *inst)
-    : Vop3("v_div_fmas_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VDivFmasF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VDivFmasF64Vop3::VDivFmasF64Vop3(const MachineInst *inst) : Vop3("v_div_fmas_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VDivFmasF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VDivFmasF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
     double s2 = std::bit_cast<double>(src2.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (inst_.abs & (1u << 2))
-      s2 = std::fabs(s2);
-    if (inst_.neg & (1u << 2))
-      s2 = -s2;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
+    if (inst_.abs & (1u << 2)) s2 = std::fabs(s2);
+    if (inst_.neg & (1u << 2)) s2 = -s2;
     double result = std::fma(s0, s1, s2);
     if (vcc & (1ULL << lane)) {
       result = std::ldexp(result, 1024);
@@ -4066,123 +2031,54 @@ void VDivFmasF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst)
-    : Vop3("v_msad_u8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMsadU8Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst) : Vop3("v_msad_u8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMsadU8Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMsadU8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
     uint32_t sum = 0;
     for (int i = 0; i < 4; ++i) {
       uint32_t ba = (a >> (i * 8)) & 0xFF, bb = (b >> (i * 8)) & 0xFF;
-      if (ba != 0)
-        sum += ba > bb ? ba - bb : bb - ba;
+      if (ba != 0) sum += ba > bb ? ba - bb : bb - ba;
     }
     vdst.write_lane(wf, lane, sum + c);
   }
 }
 
-VQsadPkU16U8Vop3::VQsadPkU16U8Vop3(const MachineInst *inst)
-    : Vop3("v_qsad_pk_u16_u8", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VQsadPkU16U8Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
+VQsadPkU16U8Vop3::VQsadPkU16U8Vop3(const MachineInst *inst) : Vop3("v_qsad_pk_u16_u8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VQsadPkU16U8Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
+
+void VQsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VQsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+VMqsadPkU16U8Vop3::VMqsadPkU16U8Vop3(const MachineInst *inst) : Vop3("v_mqsad_pk_u16_u8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMqsadPkU16U8Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
-VMqsadPkU16U8Vop3::VMqsadPkU16U8Vop3(const MachineInst *inst)
-    : Vop3("v_mqsad_pk_u16_u8", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMqsadPkU16U8Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
+void VMqsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VMqsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+VTrigPreopF64Vop3::VTrigPreopF64Vop3(const MachineInst *inst) : Vop3("v_trig_preop_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VTrigPreopF64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
-VTrigPreopF64Vop3::VTrigPreopF64Vop3(const MachineInst *inst)
-    : Vop3("v_trig_preop_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VTrigPreopF64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
+void VTrigPreopF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VTrigPreopF64Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+VMqsadU32U8Vop3::VMqsadU32U8Vop3(const MachineInst *inst) : Vop3("v_mqsad_u32_u8", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMqsadU32U8Vop3>()), vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
-VMqsadU32U8Vop3::VMqsadU32U8Vop3(const MachineInst *inst)
-    : Vop3("v_mqsad_u32_u8", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMqsadU32U8Vop3>()),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
+void VMqsadU32U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VMqsadU32U8Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
-
-VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
-    : Vop3("v_xor3_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VXor3B32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst) : Vop3("v_xor3_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VXor3B32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VXor3B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -4190,430 +2086,210 @@ void VXor3B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VLshlrevB64Vop3::VLshlrevB64Vop3(const MachineInst *inst)
-    : Vop3("v_lshlrev_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLshlrevB64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VLshlrevB64Vop3::VLshlrevB64Vop3(const MachineInst *inst) : Vop3("v_lshlrev_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VLshlrevB64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VLshlrevB64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint64_t val = src1.read_lane64(wf, lane);
     uint32_t shift = src0.read_lane(wf, lane) & 63u;
     vdst.write_lane64(wf, lane, val << shift);
   }
 }
 
-VLshrrevB64Vop3::VLshrrevB64Vop3(const MachineInst *inst)
-    : Vop3("v_lshrrev_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLshrrevB64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VLshrrevB64Vop3::VLshrrevB64Vop3(const MachineInst *inst) : Vop3("v_lshrrev_b64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VLshrrevB64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VLshrrevB64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint64_t val = src1.read_lane64(wf, lane);
     uint32_t shift = src0.read_lane(wf, lane) & 63u;
     vdst.write_lane64(wf, lane, val >> shift);
   }
 }
 
-VAshrrevI64Vop3::VAshrrevI64Vop3(const MachineInst *inst)
-    : Vop3("v_ashrrev_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAshrrevI64Vop3>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VAshrrevI64Vop3::VAshrrevI64Vop3(const MachineInst *inst) : Vop3("v_ashrrev_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAshrrevI64Vop3>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VAshrrevI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int64_t val = static_cast<int64_t>(src1.read_lane64(wf, lane));
     uint32_t shift = src0.read_lane(wf, lane) & 63u;
     vdst.write_lane64(wf, lane, static_cast<uint64_t>(val >> shift));
   }
 }
 
-VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
-    : Vop3("v_add_nc_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAddNcU16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst) : Vop3("v_add_nc_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAddNcU16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VAddNcU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t sv0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t sv1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 + sv1)));
   }
 }
 
-VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
-    : Vop3("v_sub_nc_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VSubNcU16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst) : Vop3("v_sub_nc_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSubNcU16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VSubNcU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t sv0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t sv1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 - sv1)));
   }
 }
 
-VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
-    : Vop3("v_mul_lo_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulLoU16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst) : Vop3("v_mul_lo_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMulLoU16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMulLoU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t sv0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t sv1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 * sv1)));
   }
 }
 
-VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
-    : Vop3("v_lshrrev_b16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLshrrevB16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst) : Vop3("v_lshrrev_b16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VLshrrevB16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VLshrrevB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t sv0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t sv1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv1 >> (sv0 & 15u))));
   }
 }
 
-VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst)
-    : Vop3("v_ashrrev_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAshrrevI16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst) : Vop3("v_ashrrev_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAshrrevI16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VAshrrevI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t sv0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t sv1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
-    vdst.write_lane(
-        wf, lane,
-        static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(sv1 >> (sv0 & 15)))));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(sv1 >> (sv0 & 15)))));
   }
 }
 
-VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
-    : Vop3("v_max_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMaxU16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst) : Vop3("v_max_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMaxU16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMaxU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t sv0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t sv1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 > sv1 ? sv0 : sv1));
   }
 }
 
-VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
-    : Vop3("v_max_i16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMaxI16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst) : Vop3("v_max_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMaxI16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMaxI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t sv0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t sv1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 > sv1 ? sv0 : sv1)));
   }
 }
 
-VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
-    : Vop3("v_min_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMinU16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMinU16Vop3::VMinU16Vop3(const MachineInst *inst) : Vop3("v_min_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMinU16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMinU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t sv0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t sv1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 < sv1 ? sv0 : sv1));
   }
 }
 
-VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
-    : Vop3("v_min_i16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMinI16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMinI16Vop3::VMinI16Vop3(const MachineInst *inst) : Vop3("v_min_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMinI16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMinI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t sv0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t sv1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 < sv1 ? sv0 : sv1)));
   }
 }
 
-VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
-    : Vop3("v_add_nc_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAddNcI16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst) : Vop3("v_add_nc_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAddNcI16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VAddNcI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t sv0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t sv1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
-    vdst.write_lane(wf, lane,
-                    static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(sv0 + sv1))));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(sv0 + sv1))));
   }
 }
 
-VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
-    : Vop3("v_sub_nc_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VSubNcI16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst) : Vop3("v_sub_nc_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSubNcI16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VSubNcI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t sv0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t sv1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
-    vdst.write_lane(wf, lane,
-                    static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(sv0 - sv1))));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(sv0 - sv1))));
   }
 }
 
-VPackB32F16Vop3::VPackB32F16Vop3(const MachineInst *inst)
-    : Vop3("v_pack_b32_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VPackB32F16Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
+VPackB32F16Vop3::VPackB32F16Vop3(const MachineInst *inst) : Vop3("v_pack_b32_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VPackB32F16Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
+
+void VPackB32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VPackB32F16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+VCvtPknormI16F16Vop3::VCvtPknormI16F16Vop3(const MachineInst *inst) : Vop3("v_cvt_pknorm_i16_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtPknormI16F16Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
-VCvtPknormI16F16Vop3::VCvtPknormI16F16Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_pknorm_i16_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtPknormI16F16Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
+void VCvtPknormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VCvtPknormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+VCvtPknormU16F16Vop3::VCvtPknormU16F16Vop3(const MachineInst *inst) : Vop3("v_cvt_pknorm_u16_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtPknormU16F16Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
-VCvtPknormU16F16Vop3::VCvtPknormU16F16Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_pknorm_u16_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtPknormU16F16Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
+void VCvtPknormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VCvtPknormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
-
-VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
-    : Vop3("v_lshlrev_b16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLshlrevB16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst) : Vop3("v_lshlrev_b16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VLshlrevB16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VLshlrevB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t sv0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t sv1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv1 << (sv0 & 15u))));
   }
 }
 
-VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
-    : Vop3("v_mad_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMadU16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMadU16Vop3::VMadU16Vop3(const MachineInst *inst) : Vop3("v_mad_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMadU16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMadU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t a = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t b = static_cast<uint16_t>(src1.read_lane(wf, lane));
     uint16_t c = static_cast<uint16_t>(src2.read_lane(wf, lane));
@@ -4621,57 +2297,24 @@ void VMadU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VInterpP1llF16Vop3::VInterpP1llF16Vop3(const MachineInst *inst)
-    : Vop3("v_interp_p1ll_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VInterpP1llF16Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(16, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src1;
-  src_operands_[1] = &src0;
-  num_src_ = 2;
-  num_dst_ = 1;
+VInterpP1llF16Vop3::VInterpP1llF16Vop3(const MachineInst *inst) : Vop3("v_interp_p1ll_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VInterpP1llF16Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding*>(inst)->src1), src0(16, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding*>(inst)->src0) {dst_operands_[0] = &vdst;src_operands_[0] = &src1;src_operands_[1] = &src0;num_src_ = 2;num_dst_ = 1;}
+
+void VInterpP1llF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VInterpP1llF16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+VInterpP1lvF16Vop3::VInterpP1lvF16Vop3(const MachineInst *inst) : Vop3("v_interp_p1lv_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VInterpP1lvF16Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding*>(inst)->src1), src0(16, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding*>(inst)->src0), src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src1;src_operands_[1] = &src0;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
-VInterpP1lvF16Vop3::VInterpP1lvF16Vop3(const MachineInst *inst)
-    : Vop3("v_interp_p1lv_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VInterpP1lvF16Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(16, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src1;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
+void VInterpP1lvF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VInterpP1lvF16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
-
-VPermB32Vop3::VPermB32Vop3(const MachineInst *inst)
-    : Vop3("v_perm_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPermB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VPermB32Vop3::VPermB32Vop3(const MachineInst *inst) : Vop3("v_perm_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VPermB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VPermB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -4680,40 +2323,25 @@ void VPermB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     for (int i = 0; i < 4; ++i) {
       uint32_t sel = (c >> (i * 8)) & 0xFF;
       uint32_t byte;
-      if (sel <= 7)
-        byte = (src >> (sel * 8)) & 0xFF;
+      if (sel <= 7) byte = (src >> (sel * 8)) & 0xFF;
       else if (sel >= 0x09 && sel <= 0x0C) {
         uint32_t bi = sel - 0x09;
         byte = ((src >> (bi * 8 + 7)) & 1) ? 0xFF : 0x00;
-      } else if (sel == 0x0D)
-        byte = 0xFF;
-      else
-        byte = 0;
+      }
+      else if (sel == 0x0D) byte = 0xFF;
+      else byte = 0;
       result |= byte << (i * 8);
     }
     vdst.write_lane(wf, lane, result);
   }
 }
 
-VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
-    : Vop3("v_xad_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VXadU32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VXadU32Vop3::VXadU32Vop3(const MachineInst *inst) : Vop3("v_xad_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VXadU32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VXadU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -4721,26 +2349,12 @@ void VXadU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst)
-    : Vop3("v_lshl_add_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLshlAddU32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst) : Vop3("v_lshl_add_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VLshlAddU32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VLshlAddU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -4748,26 +2362,12 @@ void VLshlAddU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst)
-    : Vop3("v_add_lshl_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAddLshlU32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst) : Vop3("v_add_lshl_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAddLshlU32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VAddLshlU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -4775,146 +2375,73 @@ void VAddLshlU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
-    : Vop3("v_fma_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFmaF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst) : Vop3("v_fma_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VFmaF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VFmaF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float a = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float b = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
     float c = util::f16_to_f32(static_cast<uint16_t>(src2.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst_.neg & (1u << 0))
-      a = -a;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
+    if (inst_.abs & (1u << 0)) a = std::fabs(a);
+    if (inst_.neg & (1u << 0)) a = -a;
+    if (inst_.abs & (1u << 1)) b = std::fabs(b);
+    if (inst_.neg & (1u << 1)) b = -b;
+    if (inst_.abs & (1u << 2)) c = std::fabs(c);
+    if (inst_.neg & (1u << 2)) c = -c;
     float result = std::fma(a, b, c);
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, util::f32_to_f16(result));
   }
 }
 
-VMin3F16Vop3::VMin3F16Vop3(const MachineInst *inst)
-    : Vop3("v_min3_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMin3F16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMin3F16Vop3::VMin3F16Vop3(const MachineInst *inst) : Vop3("v_min3_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMin3F16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMin3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float a = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float b = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
     float c = util::f16_to_f32(static_cast<uint16_t>(src2.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst_.neg & (1u << 0))
-      a = -a;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
+    if (inst_.abs & (1u << 0)) a = std::fabs(a);
+    if (inst_.neg & (1u << 0)) a = -a;
+    if (inst_.abs & (1u << 1)) b = std::fabs(b);
+    if (inst_.neg & (1u << 1)) b = -b;
+    if (inst_.abs & (1u << 2)) c = std::fabs(c);
+    if (inst_.neg & (1u << 2)) c = -c;
     float result = std::fmin(std::fmin(a, b), c);
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, util::f32_to_f16(result));
   }
 }
 
-VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
-    : Vop3("v_min3_i16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMin3I16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst) : Vop3("v_min3_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMin3I16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMin3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t a = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t b = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     int16_t c = static_cast<int16_t>(src2.read_lane(wf, lane) & 0xFFFF);
-    vdst.write_lane(wf, lane,
-                    static_cast<uint32_t>(static_cast<uint16_t>(std::min(std::min(a, b), c))));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(std::min(std::min(a, b), c))));
   }
 }
 
-VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
-    : Vop3("v_min3_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMin3U16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst) : Vop3("v_min3_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMin3U16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMin3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t a = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t b = static_cast<uint16_t>(src1.read_lane(wf, lane));
     uint16_t c = static_cast<uint16_t>(src2.read_lane(wf, lane));
@@ -4922,99 +2449,49 @@ void VMin3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VMax3F16Vop3::VMax3F16Vop3(const MachineInst *inst)
-    : Vop3("v_max3_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMax3F16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMax3F16Vop3::VMax3F16Vop3(const MachineInst *inst) : Vop3("v_max3_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMax3F16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMax3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float a = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float b = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
     float c = util::f16_to_f32(static_cast<uint16_t>(src2.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst_.neg & (1u << 0))
-      a = -a;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
+    if (inst_.abs & (1u << 0)) a = std::fabs(a);
+    if (inst_.neg & (1u << 0)) a = -a;
+    if (inst_.abs & (1u << 1)) b = std::fabs(b);
+    if (inst_.neg & (1u << 1)) b = -b;
+    if (inst_.abs & (1u << 2)) c = std::fabs(c);
+    if (inst_.neg & (1u << 2)) c = -c;
     float result = std::fmax(std::fmax(a, b), c);
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, util::f32_to_f16(result));
   }
 }
 
-VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
-    : Vop3("v_max3_i16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMax3I16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst) : Vop3("v_max3_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMax3I16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMax3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t a = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t b = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     int16_t c = static_cast<int16_t>(src2.read_lane(wf, lane) & 0xFFFF);
-    vdst.write_lane(wf, lane,
-                    static_cast<uint32_t>(static_cast<uint16_t>(std::max(std::max(a, b), c))));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(std::max(std::max(a, b), c))));
   }
 }
 
-VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
-    : Vop3("v_max3_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMax3U16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst) : Vop3("v_max3_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMax3U16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMax3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t a = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t b = static_cast<uint16_t>(src1.read_lane(wf, lane));
     uint16_t c = static_cast<uint16_t>(src2.read_lane(wf, lane));
@@ -5022,247 +2499,117 @@ void VMax3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VMed3F16Vop3::VMed3F16Vop3(const MachineInst *inst)
-    : Vop3("v_med3_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMed3F16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMed3F16Vop3::VMed3F16Vop3(const MachineInst *inst) : Vop3("v_med3_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMed3F16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMed3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float a = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float b = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
     float c = util::f16_to_f32(static_cast<uint16_t>(src2.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst_.neg & (1u << 0))
-      a = -a;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
+    if (inst_.abs & (1u << 0)) a = std::fabs(a);
+    if (inst_.neg & (1u << 0)) a = -a;
+    if (inst_.abs & (1u << 1)) b = std::fabs(b);
+    if (inst_.neg & (1u << 1)) b = -b;
+    if (inst_.abs & (1u << 2)) c = std::fabs(c);
+    if (inst_.neg & (1u << 2)) c = -c;
     float result = std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, util::f32_to_f16(result));
   }
 }
 
-VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
-    : Vop3("v_med3_i16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMed3I16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst) : Vop3("v_med3_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMed3I16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMed3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t a = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t b = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     int16_t c = static_cast<int16_t>(src2.read_lane(wf, lane) & 0xFFFF);
-    vdst.write_lane(wf, lane,
-                    static_cast<uint32_t>(static_cast<uint16_t>(
-                        std::max(std::min(std::max(a, b), c), std::min(a, b)))));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(std::max(std::min(std::max(a, b), c), std::min(a, b)))));
   }
 }
 
-VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
-    : Vop3("v_med3_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMed3U16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst) : Vop3("v_med3_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMed3U16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMed3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t a = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t b = static_cast<uint16_t>(src1.read_lane(wf, lane));
     uint16_t c = static_cast<uint16_t>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane,
-                    static_cast<uint32_t>(std::max(std::min(std::max(a, b), c), std::min(a, b))));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(std::max(std::min(std::max(a, b), c), std::min(a, b))));
   }
 }
 
-VInterpP2F16Vop3::VInterpP2F16Vop3(const MachineInst *inst)
-    : Vop3("v_interp_p2_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VInterpP2F16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(16, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src1;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
+VInterpP2F16Vop3::VInterpP2F16Vop3(const MachineInst *inst) : Vop3("v_interp_p2_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VInterpP2F16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding*>(inst)->src1), src0(16, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding*>(inst)->src0), src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src1;src_operands_[1] = &src0;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
+
+void VInterpP2F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VInterpP2F16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
-
-VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
-    : Vop3("v_mad_i16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMadI16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMadI16Vop3::VMadI16Vop3(const MachineInst *inst) : Vop3("v_mad_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMadI16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMadI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t a = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t b = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     int16_t c = static_cast<int16_t>(src2.read_lane(wf, lane) & 0xFFFF);
-    vdst.write_lane(wf, lane,
-                    static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(a * b + c))));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(a * b + c))));
   }
 }
 
-VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst)
-    : Vop3("v_div_fixup_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VDivFixupF16Vop3>()),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst) : Vop3("v_div_fixup_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VDivFixupF16Vop3>()), vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VDivFixupF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float p = std::bit_cast<float>(src0.read_lane(wf, lane));
     float b = std::bit_cast<float>(src1.read_lane(wf, lane));
     float c = std::bit_cast<float>(src2.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      p = std::fabs(p);
-    if (inst_.neg & (1u << 0))
-      p = -p;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
+    if (inst_.abs & (1u << 0)) p = std::fabs(p);
+    if (inst_.neg & (1u << 0)) p = -p;
+    if (inst_.abs & (1u << 1)) b = std::fabs(b);
+    if (inst_.neg & (1u << 1)) b = -b;
+    if (inst_.abs & (1u << 2)) c = std::fabs(c);
+    if (inst_.neg & (1u << 2)) c = -c;
     float result;
-    if (std::isnan(b))
-      result = b;
-    else if (std::isnan(c))
-      result = c;
-    else if (c == 0.0f && b == 0.0f)
-      result = std::numeric_limits<float>::quiet_NaN();
-    else if (std::isinf(c) && std::isinf(b))
-      result = std::numeric_limits<float>::quiet_NaN();
+    if (std::isnan(b)) result = b;
+    else if (std::isnan(c)) result = c;
+    else if (c == 0.0f && b == 0.0f) result = std::numeric_limits<float>::quiet_NaN();
+    else if (std::isinf(c) && std::isinf(b)) result = std::numeric_limits<float>::quiet_NaN();
     else if (c == 0.0f) {
-      result = std::copysign(
-          std::numeric_limits<float>::infinity(),
-          std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));
-    } else if (std::isinf(b))
-      result = std::copysign(0.0f, b);
-    else
-      result = p;
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+      result = std::copysign(std::numeric_limits<float>::infinity(),
+                             std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));
+    }
+    else if (std::isinf(b)) result = std::copysign(0.0f, b);
+    else result = p;
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
 }
 
-VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst)
-    : Vop3("v_readlane_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VReadlaneB32Vop3>()),
-      vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_VGPR_OR_LDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SSRC_LANESEL, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst) : Vop3("v_readlane_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VReadlaneB32Vop3>()), vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_VGPR_OR_LDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SSRC_LANESEL, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VReadlaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t lane = src1.read_scalar(wf);
   vdst.write_scalar(wf, src0.read_lane(wf, lane));
 }
 
-VWritelaneB32Vop3::VWritelaneB32Vop3(const MachineInst *inst)
-    : Vop3("v_writelane_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VWritelaneB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SSRC_LANESEL, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  src_operands_[0] = &vdst;
-  dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VWritelaneB32Vop3::VWritelaneB32Vop3(const MachineInst *inst) : Vop3("v_writelane_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VWritelaneB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SSRC_LANESEL, reinterpret_cast<const OpEncoding*>(inst)->src1) {src_operands_[0] = &vdst;dst_operands_[0] = &vdst;src_operands_[1] = &src0;src_operands_[2] = &src1;num_src_ = 3;num_dst_ = 1;}
 
 void VWritelaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t val = src0.read_scalar(wf);
@@ -5270,107 +2617,54 @@ void VWritelaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_lane(wf, lane, val);
 }
 
-VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
-    : Vop3("v_ldexp_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLdexpF32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst) : Vop3("v_ldexp_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VLdexpF32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VLdexpF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     int32_t sv1_i = static_cast<int32_t>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
+    if (inst_.abs & (1u << 0)) sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0)) sv0 = -sv0;
     float result = std::ldexp(sv0, static_cast<int>(sv1_i));
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
+    if (inst_.omod == 1) result *= 2.0f;
+    else if (inst_.omod == 2) result *= 4.0f;
+    else if (inst_.omod == 3) result *= 0.5f;
+    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
 }
 
-VBfmB32Vop3::VBfmB32Vop3(const MachineInst *inst)
-    : Vop3("v_bfm_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VBfmB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VBfmB32Vop3::VBfmB32Vop3(const MachineInst *inst) : Vop3("v_bfm_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VBfmB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VBfmB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     vdst.write_lane(wf, lane, (sv0 & 31u) == 0 ? 0u : ((1u << (sv0 & 31u)) - 1u) << (sv1 & 31u));
   }
 }
 
-VBcntU32B32Vop3::VBcntU32B32Vop3(const MachineInst *inst)
-    : Vop3("v_bcnt_u32_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VBcntU32B32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VBcntU32B32Vop3::VBcntU32B32Vop3(const MachineInst *inst) : Vop3("v_bcnt_u32_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VBcntU32B32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VBcntU32B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t s = src0.read_lane(wf, lane);
     vdst.write_lane(wf, lane, static_cast<uint32_t>(std::popcount(s)));
   }
 }
 
-VMbcntLoU32B32Vop3::VMbcntLoU32B32Vop3(const MachineInst *inst)
-    : Vop3("v_mbcnt_lo_u32_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMbcntLoU32B32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMbcntLoU32B32Vop3::VMbcntLoU32B32Vop3(const MachineInst *inst) : Vop3("v_mbcnt_lo_u32_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMbcntLoU32B32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMbcntLoU32B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t mask = src0.read_lane(wf, lane);
     uint32_t base = src1.read_lane(wf, lane);
     uint32_t thread_mask = lane < 32 ? (1u << lane) - 1 : 0xFFFFFFFFu;
@@ -5379,24 +2673,12 @@ void VMbcntLoU32B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VMbcntHiU32B32Vop3::VMbcntHiU32B32Vop3(const MachineInst *inst)
-    : Vop3("v_mbcnt_hi_u32_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMbcntHiU32B32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VMbcntHiU32B32Vop3::VMbcntHiU32B32Vop3(const MachineInst *inst) : Vop3("v_mbcnt_hi_u32_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMbcntHiU32B32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VMbcntHiU32B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t mask = src0.read_lane(wf, lane);
     uint32_t base = src1.read_lane(wf, lane);
     uint32_t shift = lane >= 32 ? lane - 32 : 0;
@@ -5406,115 +2688,52 @@ void VMbcntHiU32B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VCvtPknormI16F32Vop3::VCvtPknormI16F32Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_pknorm_i16_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtPknormI16F32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCvtPknormI16F32Vop3::VCvtPknormI16F32Vop3(const MachineInst *inst) : Vop3("v_cvt_pknorm_i16_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtPknormI16F32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCvtPknormI16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_pknorm_i16_f32_vop3(*this, wf);
 }
 
-VCvtPknormU16F32Vop3::VCvtPknormU16F32Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_pknorm_u16_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtPknormU16F32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCvtPknormU16F32Vop3::VCvtPknormU16F32Vop3(const MachineInst *inst) : Vop3("v_cvt_pknorm_u16_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtPknormU16F32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCvtPknormU16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_pknorm_u16_f32_vop3(*this, wf);
 }
 
-VCvtPkU16U32Vop3::VCvtPkU16U32Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_pk_u16_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtPkU16U32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCvtPkU16U32Vop3::VCvtPkU16U32Vop3(const MachineInst *inst) : Vop3("v_cvt_pk_u16_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtPkU16U32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCvtPkU16U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t s0 = src0.read_lane(wf, lane);
     uint32_t s1 = src1.read_lane(wf, lane);
     uint16_t lo = static_cast<uint16_t>(std::min(s0, 0xFFFFu));
     uint16_t hi = static_cast<uint16_t>(std::min(s1, 0xFFFFu));
-    vdst.write_lane(wf, lane,
-                    (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) |
-                        static_cast<uint32_t>(static_cast<uint16_t>(lo)));
+    vdst.write_lane(wf, lane, (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) | static_cast<uint32_t>(static_cast<uint16_t>(lo)));
   }
 }
 
-VCvtPkI16I32Vop3::VCvtPkI16I32Vop3(const MachineInst *inst)
-    : Vop3("v_cvt_pk_i16_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtPkI16I32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCvtPkI16I32Vop3::VCvtPkI16I32Vop3(const MachineInst *inst) : Vop3("v_cvt_pk_i16_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCvtPkI16I32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCvtPkI16I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t s0 = src0.read_lane(wf, lane);
     uint32_t s1 = src1.read_lane(wf, lane);
     int16_t lo = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s0), -32768, 32767));
     int16_t hi = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s1), -32768, 32767));
-    vdst.write_lane(wf, lane,
-                    (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) |
-                        static_cast<uint32_t>(static_cast<uint16_t>(lo)));
+    vdst.write_lane(wf, lane, (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) | static_cast<uint32_t>(static_cast<uint16_t>(lo)));
   }
 }
 
-VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
-    : Vop3("v_add3_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VAdd3U32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst) : Vop3("v_add3_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAdd3U32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VAdd3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -5522,26 +2741,12 @@ void VAdd3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst)
-    : Vop3("v_lshl_or_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLshlOrB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst) : Vop3("v_lshl_or_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VLshlOrB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VLshlOrB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -5549,26 +2754,12 @@ void VLshlOrB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst)
-    : Vop3("v_and_or_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAndOrB32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst) : Vop3("v_and_or_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAndOrB32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VAndOrB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -5576,25 +2767,12 @@ void VAndOrB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst)
-    : Vop3("v_or3_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VOr3B32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst) : Vop3("v_or3_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VOr3B32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VOr3B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t a = src0.read_lane(wf, lane);
     uint32_t b = src1.read_lane(wf, lane);
     uint32_t c = src2.read_lane(wf, lane);
@@ -5602,26 +2780,12 @@ void VOr3B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
-    : Vop3("v_mad_u32_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMadU32U16Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst) : Vop3("v_mad_u32_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMadU32U16Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMadU32U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t s0 = src0.read_lane(wf, lane) & 0xFFFFu;
     uint32_t s1 = src1.read_lane(wf, lane) & 0xFFFFu;
     uint32_t s2 = src2.read_lane(wf, lane);
@@ -5629,26 +2793,12 @@ void VMadU32U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
-    : Vop3("v_mad_i32_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMadI32I16Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-}
+VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst) : Vop3("v_mad_i32_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMadI32I16Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
 void VMadI32I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int32_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     int32_t s2 = static_cast<int32_t>(src2.read_lane(wf, lane));
@@ -5656,140 +2806,67 @@ void VMadI32I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VSubNcI32Vop3::VSubNcI32Vop3(const MachineInst *inst)
-    : Vop3("v_sub_nc_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VSubNcI32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VSubNcI32Vop3::VSubNcI32Vop3(const MachineInst *inst) : Vop3("v_sub_nc_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSubNcI32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VSubNcI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t sv0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t sv1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 - sv1));
   }
 }
 
-VPermlane16B32Vop3::VPermlane16B32Vop3(const MachineInst *inst)
-    : Vop3("v_permlane16_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VPermlane16B32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
+VPermlane16B32Vop3::VPermlane16B32Vop3(const MachineInst *inst) : Vop3("v_permlane16_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VPermlane16B32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
+
+void VPermlane16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VPermlane16B32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+VPermlanex16B32Vop3::VPermlanex16B32Vop3(const MachineInst *inst) : Vop3("v_permlanex16_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VPermlanex16B32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 1;}
 
-VPermlanex16B32Vop3::VPermlanex16B32Vop3(const MachineInst *inst)
-    : Vop3("v_permlanex16_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VPermlanex16B32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
+void VPermlanex16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
 }
 
-void VPermlanex16B32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
-
-VAddNcI32Vop3::VAddNcI32Vop3(const MachineInst *inst)
-    : Vop3("v_add_nc_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAddNcI32Vop3>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VAddNcI32Vop3::VAddNcI32Vop3(const MachineInst *inst) : Vop3("v_add_nc_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAddNcI32Vop3>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VAddNcI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t sv0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t sv1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 + sv1));
   }
 }
 
-VCmpFF32Vop3::VCmpFF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_f_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpFF32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpFF32Vop3::VCmpFF32Vop3(const MachineInst *inst) : Vop3("v_cmp_f_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpFF32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     vcc &= ~(1ULL << lane);
   }
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLtF32Vop3::VCmpLtF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_lt_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtF32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLtF32Vop3::VCmpLtF32Vop3(const MachineInst *inst) : Vop3("v_cmp_lt_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLtF32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 < s1)
       vcc |= (1ULL << lane);
     else
@@ -5798,35 +2875,19 @@ void VCmpLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpEqF32Vop3::VCmpEqF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_eq_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqF32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpEqF32Vop3::VCmpEqF32Vop3(const MachineInst *inst) : Vop3("v_cmp_eq_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpEqF32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 == s1)
       vcc |= (1ULL << lane);
     else
@@ -5835,35 +2896,19 @@ void VCmpEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLeF32Vop3::VCmpLeF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_le_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeF32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLeF32Vop3::VCmpLeF32Vop3(const MachineInst *inst) : Vop3("v_cmp_le_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLeF32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 <= s1)
       vcc |= (1ULL << lane);
     else
@@ -5872,35 +2917,19 @@ void VCmpLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGtF32Vop3::VCmpGtF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_gt_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtF32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGtF32Vop3::VCmpGtF32Vop3(const MachineInst *inst) : Vop3("v_cmp_gt_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGtF32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 > s1)
       vcc |= (1ULL << lane);
     else
@@ -5909,35 +2938,19 @@ void VCmpGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLgF32Vop3::VCmpLgF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_lg_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLgF32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLgF32Vop3::VCmpLgF32Vop3(const MachineInst *inst) : Vop3("v_cmp_lg_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLgF32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 < s1 || s0 > s1)
       vcc |= (1ULL << lane);
     else
@@ -5946,35 +2959,19 @@ void VCmpLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGeF32Vop3::VCmpGeF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ge_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeF32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGeF32Vop3::VCmpGeF32Vop3(const MachineInst *inst) : Vop3("v_cmp_ge_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGeF32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 >= s1)
       vcc |= (1ULL << lane);
     else
@@ -5983,34 +2980,19 @@ void VCmpGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpOF32Vop3::VCmpOF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_o_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpOF32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpOF32Vop3::VCmpOF32Vop3(const MachineInst *inst) : Vop3("v_cmp_o_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpOF32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!std::isnan(s0) && !std::isnan(s1))
       vcc |= (1ULL << lane);
     else
@@ -6019,34 +3001,19 @@ void VCmpOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpUF32Vop3::VCmpUF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_u_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpUF32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpUF32Vop3::VCmpUF32Vop3(const MachineInst *inst) : Vop3("v_cmp_u_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpUF32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (std::isnan(s0) || std::isnan(s1))
       vcc |= (1ULL << lane);
     else
@@ -6055,35 +3022,19 @@ void VCmpUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNgeF32Vop3::VCmpNgeF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_nge_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgeF32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNgeF32Vop3::VCmpNgeF32Vop3(const MachineInst *inst) : Vop3("v_cmp_nge_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNgeF32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 >= s1))
       vcc |= (1ULL << lane);
     else
@@ -6092,35 +3043,19 @@ void VCmpNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNlgF32Vop3::VCmpNlgF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_nlg_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNlgF32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNlgF32Vop3::VCmpNlgF32Vop3(const MachineInst *inst) : Vop3("v_cmp_nlg_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNlgF32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 < s1 || s0 > s1))
       vcc |= (1ULL << lane);
     else
@@ -6129,35 +3064,19 @@ void VCmpNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNgtF32Vop3::VCmpNgtF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ngt_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgtF32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNgtF32Vop3::VCmpNgtF32Vop3(const MachineInst *inst) : Vop3("v_cmp_ngt_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNgtF32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 > s1))
       vcc |= (1ULL << lane);
     else
@@ -6166,35 +3085,19 @@ void VCmpNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNleF32Vop3::VCmpNleF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_nle_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNleF32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNleF32Vop3::VCmpNleF32Vop3(const MachineInst *inst) : Vop3("v_cmp_nle_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNleF32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 <= s1))
       vcc |= (1ULL << lane);
     else
@@ -6203,35 +3106,19 @@ void VCmpNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNeqF32Vop3::VCmpNeqF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_neq_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeqF32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNeqF32Vop3::VCmpNeqF32Vop3(const MachineInst *inst) : Vop3("v_cmp_neq_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNeqF32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
       vcc |= (1ULL << lane);
     else
@@ -6240,35 +3127,19 @@ void VCmpNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNltF32Vop3::VCmpNltF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_nlt_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNltF32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNltF32Vop3::VCmpNltF32Vop3(const MachineInst *inst) : Vop3("v_cmp_nlt_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNltF32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 < s1))
       vcc |= (1ULL << lane);
     else
@@ -6277,606 +3148,327 @@ void VCmpNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpTruF32Vop3::VCmpTruF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_tru_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpTruF32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpTruF32Vop3::VCmpTruF32Vop3(const MachineInst *inst) : Vop3("v_cmp_tru_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpTruF32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpTruF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cmp_tru_f32_vop3(*this, wf);
 }
 
-VCmpxFF32Vop3::VCmpxFF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_f_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFF32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxFF32Vop3::VCmpxFF32Vop3(const MachineInst *inst) : Vop3("v_cmpx_f_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxFF32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     (void)lane;
   }
   wf.set_exec(result);
 }
 
-VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_lt_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtF32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst) : Vop3("v_cmpx_lt_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLtF32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 < s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_eq_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqF32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst) : Vop3("v_cmpx_eq_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxEqF32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 == s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_le_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeF32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst) : Vop3("v_cmpx_le_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLeF32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_gt_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtF32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst) : Vop3("v_cmpx_gt_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGtF32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 > s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_lg_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLgF32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst) : Vop3("v_cmpx_lg_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLgF32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 < s1 || s0 > s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ge_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeF32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst) : Vop3("v_cmpx_ge_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGeF32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxOF32Vop3::VCmpxOF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_o_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxOF32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxOF32Vop3::VCmpxOF32Vop3(const MachineInst *inst) : Vop3("v_cmpx_o_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxOF32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!std::isnan(s0) && !std::isnan(s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxUF32Vop3::VCmpxUF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_u_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxUF32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxUF32Vop3::VCmpxUF32Vop3(const MachineInst *inst) : Vop3("v_cmpx_u_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxUF32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNgeF32Vop3::VCmpxNgeF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_nge_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgeF32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNgeF32Vop3::VCmpxNgeF32Vop3(const MachineInst *inst) : Vop3("v_cmpx_nge_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNgeF32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 >= s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNlgF32Vop3::VCmpxNlgF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_nlg_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNlgF32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNlgF32Vop3::VCmpxNlgF32Vop3(const MachineInst *inst) : Vop3("v_cmpx_nlg_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNlgF32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 < s1 || s0 > s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNgtF32Vop3::VCmpxNgtF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ngt_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgtF32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNgtF32Vop3::VCmpxNgtF32Vop3(const MachineInst *inst) : Vop3("v_cmpx_ngt_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNgtF32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 > s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNleF32Vop3::VCmpxNleF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_nle_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNleF32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNleF32Vop3::VCmpxNleF32Vop3(const MachineInst *inst) : Vop3("v_cmpx_nle_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNleF32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 <= s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNeqF32Vop3::VCmpxNeqF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_neq_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeqF32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNeqF32Vop3::VCmpxNeqF32Vop3(const MachineInst *inst) : Vop3("v_cmpx_neq_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNeqF32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNltF32Vop3::VCmpxNltF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_nlt_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNltF32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNltF32Vop3::VCmpxNltF32Vop3(const MachineInst *inst) : Vop3("v_cmpx_nlt_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNltF32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 < s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxTruF32Vop3::VCmpxTruF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_tru_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTruF32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxTruF32Vop3::VCmpxTruF32Vop3(const MachineInst *inst) : Vop3("v_cmpx_tru_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxTruF32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxTruF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmpx_tru_f32_vop3(*this, wf);
+  uint64_t exec = wf.exec();
+  uint64_t result = 0;
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane))) continue;
+    result |= (1ULL << lane);
+  }
+  wf.set_exec(result);
 }
 
-VCmpFF64Vop3::VCmpFF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_f_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpFF64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpFF64Vop3::VCmpFF64Vop3(const MachineInst *inst) : Vop3("v_cmp_f_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpFF64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     vcc &= ~(1ULL << lane);
   }
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLtF64Vop3::VCmpLtF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_lt_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtF64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLtF64Vop3::VCmpLtF64Vop3(const MachineInst *inst) : Vop3("v_cmp_lt_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLtF64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 < s1)
       vcc |= (1ULL << lane);
     else
@@ -6885,35 +3477,19 @@ void VCmpLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpEqF64Vop3::VCmpEqF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_eq_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqF64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpEqF64Vop3::VCmpEqF64Vop3(const MachineInst *inst) : Vop3("v_cmp_eq_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpEqF64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 == s1)
       vcc |= (1ULL << lane);
     else
@@ -6922,35 +3498,19 @@ void VCmpEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLeF64Vop3::VCmpLeF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_le_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeF64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLeF64Vop3::VCmpLeF64Vop3(const MachineInst *inst) : Vop3("v_cmp_le_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLeF64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 <= s1)
       vcc |= (1ULL << lane);
     else
@@ -6959,35 +3519,19 @@ void VCmpLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGtF64Vop3::VCmpGtF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_gt_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtF64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGtF64Vop3::VCmpGtF64Vop3(const MachineInst *inst) : Vop3("v_cmp_gt_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGtF64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 > s1)
       vcc |= (1ULL << lane);
     else
@@ -6996,35 +3540,19 @@ void VCmpGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLgF64Vop3::VCmpLgF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_lg_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLgF64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLgF64Vop3::VCmpLgF64Vop3(const MachineInst *inst) : Vop3("v_cmp_lg_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLgF64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 < s1 || s0 > s1)
       vcc |= (1ULL << lane);
     else
@@ -7033,35 +3561,19 @@ void VCmpLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGeF64Vop3::VCmpGeF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ge_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeF64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGeF64Vop3::VCmpGeF64Vop3(const MachineInst *inst) : Vop3("v_cmp_ge_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGeF64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 >= s1)
       vcc |= (1ULL << lane);
     else
@@ -7070,34 +3582,19 @@ void VCmpGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpOF64Vop3::VCmpOF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_o_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpOF64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpOF64Vop3::VCmpOF64Vop3(const MachineInst *inst) : Vop3("v_cmp_o_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpOF64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!std::isnan(s0) && !std::isnan(s1))
       vcc |= (1ULL << lane);
     else
@@ -7106,34 +3603,19 @@ void VCmpOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpUF64Vop3::VCmpUF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_u_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpUF64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpUF64Vop3::VCmpUF64Vop3(const MachineInst *inst) : Vop3("v_cmp_u_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpUF64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (std::isnan(s0) || std::isnan(s1))
       vcc |= (1ULL << lane);
     else
@@ -7142,35 +3624,19 @@ void VCmpUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNgeF64Vop3::VCmpNgeF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_nge_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgeF64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNgeF64Vop3::VCmpNgeF64Vop3(const MachineInst *inst) : Vop3("v_cmp_nge_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNgeF64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 >= s1))
       vcc |= (1ULL << lane);
     else
@@ -7179,35 +3645,19 @@ void VCmpNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNlgF64Vop3::VCmpNlgF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_nlg_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNlgF64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNlgF64Vop3::VCmpNlgF64Vop3(const MachineInst *inst) : Vop3("v_cmp_nlg_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNlgF64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 < s1 || s0 > s1))
       vcc |= (1ULL << lane);
     else
@@ -7216,35 +3666,19 @@ void VCmpNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNgtF64Vop3::VCmpNgtF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ngt_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgtF64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNgtF64Vop3::VCmpNgtF64Vop3(const MachineInst *inst) : Vop3("v_cmp_ngt_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNgtF64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 > s1))
       vcc |= (1ULL << lane);
     else
@@ -7253,35 +3687,19 @@ void VCmpNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNleF64Vop3::VCmpNleF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_nle_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNleF64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNleF64Vop3::VCmpNleF64Vop3(const MachineInst *inst) : Vop3("v_cmp_nle_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNleF64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 <= s1))
       vcc |= (1ULL << lane);
     else
@@ -7290,35 +3708,19 @@ void VCmpNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNeqF64Vop3::VCmpNeqF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_neq_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeqF64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNeqF64Vop3::VCmpNeqF64Vop3(const MachineInst *inst) : Vop3("v_cmp_neq_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNeqF64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
       vcc |= (1ULL << lane);
     else
@@ -7327,35 +3729,19 @@ void VCmpNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNltF64Vop3::VCmpNltF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_nlt_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNltF64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNltF64Vop3::VCmpNltF64Vop3(const MachineInst *inst) : Vop3("v_cmp_nlt_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNltF64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 < s1))
       vcc |= (1ULL << lane);
     else
@@ -7364,596 +3750,321 @@ void VCmpNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpTruF64Vop3::VCmpTruF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_tru_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpTruF64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpTruF64Vop3::VCmpTruF64Vop3(const MachineInst *inst) : Vop3("v_cmp_tru_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpTruF64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpTruF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cmp_tru_f64_vop3(*this, wf);
 }
 
-VCmpxFF64Vop3::VCmpxFF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_f_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFF64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxFF64Vop3::VCmpxFF64Vop3(const MachineInst *inst) : Vop3("v_cmpx_f_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxFF64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     (void)lane;
   }
   wf.set_exec(result);
 }
 
-VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_lt_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtF64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst) : Vop3("v_cmpx_lt_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLtF64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 < s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_eq_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqF64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst) : Vop3("v_cmpx_eq_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxEqF64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 == s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_le_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeF64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst) : Vop3("v_cmpx_le_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLeF64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_gt_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtF64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst) : Vop3("v_cmpx_gt_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGtF64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 > s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_lg_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLgF64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst) : Vop3("v_cmpx_lg_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLgF64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 < s1 || s0 > s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ge_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeF64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst) : Vop3("v_cmpx_ge_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGeF64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxOF64Vop3::VCmpxOF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_o_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxOF64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxOF64Vop3::VCmpxOF64Vop3(const MachineInst *inst) : Vop3("v_cmpx_o_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxOF64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!std::isnan(s0) && !std::isnan(s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxUF64Vop3::VCmpxUF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_u_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxUF64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxUF64Vop3::VCmpxUF64Vop3(const MachineInst *inst) : Vop3("v_cmpx_u_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxUF64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_nge_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgeF64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst) : Vop3("v_cmpx_nge_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNgeF64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 >= s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_nlg_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNlgF64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst) : Vop3("v_cmpx_nlg_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNlgF64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 < s1 || s0 > s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ngt_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgtF64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst) : Vop3("v_cmpx_ngt_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNgtF64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 > s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_nle_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNleF64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst) : Vop3("v_cmpx_nle_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNleF64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 <= s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_neq_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeqF64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst) : Vop3("v_cmpx_neq_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNeqF64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_nlt_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNltF64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst) : Vop3("v_cmpx_nlt_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNltF64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 < s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxTruF64Vop3::VCmpxTruF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_tru_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTruF64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxTruF64Vop3::VCmpxTruF64Vop3(const MachineInst *inst) : Vop3("v_cmpx_tru_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxTruF64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxTruF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmpx_tru_f64_vop3(*this, wf);
+  uint64_t exec = wf.exec();
+  uint64_t result = 0;
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane))) continue;
+    result |= (1ULL << lane);
+  }
+  wf.set_exec(result);
 }
 
-VCmpFI32Vop3::VCmpFI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_f_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpFI32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpFI32Vop3::VCmpFI32Vop3(const MachineInst *inst) : Vop3("v_cmp_f_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpFI32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpFI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     vcc &= ~(1ULL << lane);
   }
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLtI32Vop3::VCmpLtI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_lt_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtI32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLtI32Vop3::VCmpLtI32Vop3(const MachineInst *inst) : Vop3("v_cmp_lt_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLtI32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t s0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t s1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     if (s0 < s1)
@@ -7964,25 +4075,13 @@ void VCmpLtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpEqI32Vop3::VCmpEqI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_eq_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqI32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpEqI32Vop3::VCmpEqI32Vop3(const MachineInst *inst) : Vop3("v_cmp_eq_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpEqI32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpEqI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t s0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t s1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     if (s0 == s1)
@@ -7993,25 +4092,13 @@ void VCmpEqI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLeI32Vop3::VCmpLeI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_le_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeI32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLeI32Vop3::VCmpLeI32Vop3(const MachineInst *inst) : Vop3("v_cmp_le_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLeI32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t s0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t s1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     if (s0 <= s1)
@@ -8022,25 +4109,13 @@ void VCmpLeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGtI32Vop3::VCmpGtI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_gt_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtI32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGtI32Vop3::VCmpGtI32Vop3(const MachineInst *inst) : Vop3("v_cmp_gt_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGtI32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t s0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t s1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     if (s0 > s1)
@@ -8051,25 +4126,13 @@ void VCmpGtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNeI32Vop3::VCmpNeI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ne_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeI32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNeI32Vop3::VCmpNeI32Vop3(const MachineInst *inst) : Vop3("v_cmp_ne_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNeI32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t s0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t s1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     if (s0 != s1)
@@ -8080,25 +4143,13 @@ void VCmpNeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGeI32Vop3::VCmpGeI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ge_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeI32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGeI32Vop3::VCmpGeI32Vop3(const MachineInst *inst) : Vop3("v_cmp_ge_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGeI32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t s0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t s1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     if (s0 >= s1)
@@ -8109,104 +4160,53 @@ void VCmpGeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpTI32Vop3::VCmpTI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_t_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpTI32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpTI32Vop3::VCmpTI32Vop3(const MachineInst *inst) : Vop3("v_cmp_t_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpTI32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpTI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     vcc |= (1ULL << lane);
   }
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpClassF32Vop3::VCmpClassF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_class_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpClassF32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpClassF32Vop3::VCmpClassF32Vop3(const MachineInst *inst) : Vop3("v_cmp_class_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpClassF32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpClassF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
     uint32_t mask = src1.read_lane(wf, lane);
     bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0) match = true;
+    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) != 0) match = true;
+    if ((mask & 0x004) && std::isinf(s0) && s0 < 0) match = true;
+    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0) match = true;
+    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && std::signbit(s0)) match = true;
+    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0)) match = true;
+    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0)) match = true;
+    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && !std::signbit(s0)) match = true;
+    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0) match = true;
+    if ((mask & 0x200) && std::isinf(s0) && s0 > 0) match = true;
+    if (match) vcc |= (1ULL << lane);
+    else vcc &= ~(1ULL << lane);
   }
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_lt_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtI16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst) : Vop3("v_cmp_lt_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLtI16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 < s1)
@@ -8217,25 +4217,13 @@ void VCmpLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_eq_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqI16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst) : Vop3("v_cmp_eq_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpEqI16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 == s1)
@@ -8246,25 +4234,13 @@ void VCmpEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_le_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeI16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst) : Vop3("v_cmp_le_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLeI16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 <= s1)
@@ -8275,25 +4251,13 @@ void VCmpLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_gt_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtI16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst) : Vop3("v_cmp_gt_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGtI16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 > s1)
@@ -8304,25 +4268,13 @@ void VCmpGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ne_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeI16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst) : Vop3("v_cmp_ne_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNeI16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 != s1)
@@ -8333,25 +4285,13 @@ void VCmpNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ge_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeI16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst) : Vop3("v_cmp_ge_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGeI16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 >= s1)
@@ -8362,107 +4302,55 @@ void VCmpGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpClassF16Vop3::VCmpClassF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_class_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpClassF16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpClassF16Vop3::VCmpClassF16Vop3(const MachineInst *inst) : Vop3("v_cmp_class_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpClassF16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t s0_raw = static_cast<uint16_t>(src0.read_lane(wf, lane));
     float s0 = util::f16_to_f32(s0_raw);
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
     uint32_t mask = src1.read_lane(wf, lane);
     bool match = false;
     bool is_f16_nan = ((s0_raw & 0x7C00) == 0x7C00) && ((s0_raw & 0x03FF) != 0);
-    if ((mask & 0x001) && is_f16_nan && (s0_raw & 0x0200) == 0)
-      match = true;
-    if ((mask & 0x002) && is_f16_nan && (s0_raw & 0x0200) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    if ((mask & 0x001) && is_f16_nan && (s0_raw & 0x0200) == 0) match = true;
+    if ((mask & 0x002) && is_f16_nan && (s0_raw & 0x0200) != 0) match = true;
+    if ((mask & 0x004) && std::isinf(s0) && s0 < 0) match = true;
+    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0) match = true;
+    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && std::signbit(s0)) match = true;
+    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0)) match = true;
+    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0)) match = true;
+    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && !std::signbit(s0)) match = true;
+    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0) match = true;
+    if ((mask & 0x200) && std::isinf(s0) && s0 > 0) match = true;
+    if (match) vcc |= (1ULL << lane);
+    else vcc &= ~(1ULL << lane);
   }
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpxFI32Vop3::VCmpxFI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_f_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFI32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxFI32Vop3::VCmpxFI32Vop3(const MachineInst *inst) : Vop3("v_cmpx_f_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxFI32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxFI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     (void)lane;
   }
   wf.set_exec(result);
 }
 
-VCmpxLtI32Vop3::VCmpxLtI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_lt_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtI32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLtI32Vop3::VCmpxLtI32Vop3(const MachineInst *inst) : Vop3("v_cmpx_lt_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLtI32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t s0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t s1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     if (s0 < s1)
@@ -8471,25 +4359,13 @@ void VCmpxLtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxEqI32Vop3::VCmpxEqI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_eq_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqI32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxEqI32Vop3::VCmpxEqI32Vop3(const MachineInst *inst) : Vop3("v_cmpx_eq_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxEqI32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxEqI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t s0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t s1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     if (s0 == s1)
@@ -8498,25 +4374,13 @@ void VCmpxEqI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxLeI32Vop3::VCmpxLeI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_le_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeI32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLeI32Vop3::VCmpxLeI32Vop3(const MachineInst *inst) : Vop3("v_cmpx_le_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLeI32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t s0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t s1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     if (s0 <= s1)
@@ -8525,25 +4389,13 @@ void VCmpxLeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxGtI32Vop3::VCmpxGtI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_gt_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtI32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGtI32Vop3::VCmpxGtI32Vop3(const MachineInst *inst) : Vop3("v_cmpx_gt_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGtI32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t s0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t s1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     if (s0 > s1)
@@ -8552,25 +4404,13 @@ void VCmpxGtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxNeI32Vop3::VCmpxNeI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ne_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeI32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNeI32Vop3::VCmpxNeI32Vop3(const MachineInst *inst) : Vop3("v_cmpx_ne_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNeI32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t s0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t s1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     if (s0 != s1)
@@ -8579,25 +4419,13 @@ void VCmpxNeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxGeI32Vop3::VCmpxGeI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ge_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeI32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGeI32Vop3::VCmpxGeI32Vop3(const MachineInst *inst) : Vop3("v_cmpx_ge_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGeI32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int32_t s0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int32_t s1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     if (s0 >= s1)
@@ -8606,103 +4434,52 @@ void VCmpxGeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxTI32Vop3::VCmpxTI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_t_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTI32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxTI32Vop3::VCmpxTI32Vop3(const MachineInst *inst) : Vop3("v_cmpx_t_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxTI32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxTI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxClassF32Vop3::VCmpxClassF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_class_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxClassF32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxClassF32Vop3::VCmpxClassF32Vop3(const MachineInst *inst) : Vop3("v_cmpx_class_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxClassF32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxClassF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
     uint32_t mask = src1.read_lane(wf, lane);
     bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
+    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0) match = true;
+    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) != 0) match = true;
+    if ((mask & 0x004) && std::isinf(s0) && s0 < 0) match = true;
+    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0) match = true;
+    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && std::signbit(s0)) match = true;
+    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0)) match = true;
+    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0)) match = true;
+    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && !std::signbit(s0)) match = true;
+    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0) match = true;
+    if ((mask & 0x200) && std::isinf(s0) && s0 > 0) match = true;
+    if (match) result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_lt_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtI16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst) : Vop3("v_cmpx_lt_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLtI16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 < s1)
@@ -8711,25 +4488,13 @@ void VCmpxLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_eq_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqI16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst) : Vop3("v_cmpx_eq_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxEqI16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 == s1)
@@ -8738,25 +4503,13 @@ void VCmpxEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_le_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeI16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst) : Vop3("v_cmpx_le_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLeI16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 <= s1)
@@ -8765,25 +4518,13 @@ void VCmpxLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_gt_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtI16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst) : Vop3("v_cmpx_gt_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGtI16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 > s1)
@@ -8792,25 +4533,13 @@ void VCmpxGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ne_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeI16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst) : Vop3("v_cmpx_ne_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNeI16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 != s1)
@@ -8819,25 +4548,13 @@ void VCmpxNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ge_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeI16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst) : Vop3("v_cmpx_ge_i16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGeI16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 >= s1)
@@ -8846,104 +4563,54 @@ void VCmpxGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_class_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxClassF16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst) : Vop3("v_cmpx_class_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxClassF16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t s0_raw = static_cast<uint16_t>(src0.read_lane(wf, lane));
     float s0 = util::f16_to_f32(s0_raw);
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
     uint32_t mask = src1.read_lane(wf, lane);
     bool match = false;
     bool is_f16_nan = ((s0_raw & 0x7C00) == 0x7C00) && ((s0_raw & 0x03FF) != 0);
-    if ((mask & 0x001) && is_f16_nan && (s0_raw & 0x0200) == 0)
-      match = true;
-    if ((mask & 0x002) && is_f16_nan && (s0_raw & 0x0200) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
+    if ((mask & 0x001) && is_f16_nan && (s0_raw & 0x0200) == 0) match = true;
+    if ((mask & 0x002) && is_f16_nan && (s0_raw & 0x0200) != 0) match = true;
+    if ((mask & 0x004) && std::isinf(s0) && s0 < 0) match = true;
+    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0) match = true;
+    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && std::signbit(s0)) match = true;
+    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0)) match = true;
+    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0)) match = true;
+    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && !std::signbit(s0)) match = true;
+    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0) match = true;
+    if ((mask & 0x200) && std::isinf(s0) && s0 > 0) match = true;
+    if (match) result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpFI64Vop3::VCmpFI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_f_i64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpFI64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpFI64Vop3::VCmpFI64Vop3(const MachineInst *inst) : Vop3("v_cmp_f_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpFI64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpFI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     vcc &= ~(1ULL << lane);
   }
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLtI64Vop3::VCmpLtI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_lt_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtI64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLtI64Vop3::VCmpLtI64Vop3(const MachineInst *inst) : Vop3("v_cmp_lt_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLtI64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
     int64_t s1 = static_cast<int64_t>(src1.read_lane64(wf, lane));
     if (s0 < s1)
@@ -8954,25 +4621,13 @@ void VCmpLtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpEqI64Vop3::VCmpEqI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_eq_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqI64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpEqI64Vop3::VCmpEqI64Vop3(const MachineInst *inst) : Vop3("v_cmp_eq_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpEqI64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpEqI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
     int64_t s1 = static_cast<int64_t>(src1.read_lane64(wf, lane));
     if (s0 == s1)
@@ -8983,25 +4638,13 @@ void VCmpEqI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLeI64Vop3::VCmpLeI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_le_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeI64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLeI64Vop3::VCmpLeI64Vop3(const MachineInst *inst) : Vop3("v_cmp_le_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLeI64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
     int64_t s1 = static_cast<int64_t>(src1.read_lane64(wf, lane));
     if (s0 <= s1)
@@ -9012,25 +4655,13 @@ void VCmpLeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGtI64Vop3::VCmpGtI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_gt_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtI64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGtI64Vop3::VCmpGtI64Vop3(const MachineInst *inst) : Vop3("v_cmp_gt_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGtI64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
     int64_t s1 = static_cast<int64_t>(src1.read_lane64(wf, lane));
     if (s0 > s1)
@@ -9041,25 +4672,13 @@ void VCmpGtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNeI64Vop3::VCmpNeI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ne_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeI64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNeI64Vop3::VCmpNeI64Vop3(const MachineInst *inst) : Vop3("v_cmp_ne_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNeI64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
     int64_t s1 = static_cast<int64_t>(src1.read_lane64(wf, lane));
     if (s0 != s1)
@@ -9070,25 +4689,13 @@ void VCmpNeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGeI64Vop3::VCmpGeI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ge_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeI64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGeI64Vop3::VCmpGeI64Vop3(const MachineInst *inst) : Vop3("v_cmp_ge_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGeI64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
     int64_t s1 = static_cast<int64_t>(src1.read_lane64(wf, lane));
     if (s0 >= s1)
@@ -9099,106 +4706,53 @@ void VCmpGeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpTI64Vop3::VCmpTI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_t_i64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpTI64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpTI64Vop3::VCmpTI64Vop3(const MachineInst *inst) : Vop3("v_cmp_t_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpTI64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpTI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     vcc |= (1ULL << lane);
   }
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpClassF64Vop3::VCmpClassF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_class_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpClassF64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpClassF64Vop3::VCmpClassF64Vop3(const MachineInst *inst) : Vop3("v_cmp_class_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpClassF64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpClassF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
     uint32_t mask = src1.read_lane(wf, lane);
     bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0 && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0 && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0) match = true;
+    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) != 0) match = true;
+    if ((mask & 0x004) && std::isinf(s0) && s0 < 0) match = true;
+    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0) match = true;
+    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 && std::signbit(s0)) match = true;
+    if ((mask & 0x020) && s0 == 0.0 && std::signbit(s0)) match = true;
+    if ((mask & 0x040) && s0 == 0.0 && !std::signbit(s0)) match = true;
+    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 && !std::signbit(s0)) match = true;
+    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0) match = true;
+    if ((mask & 0x200) && std::isinf(s0) && s0 > 0) match = true;
+    if (match) vcc |= (1ULL << lane);
+    else vcc &= ~(1ULL << lane);
   }
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_lt_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtU16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst) : Vop3("v_cmp_lt_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLtU16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 < s1)
@@ -9209,25 +4763,13 @@ void VCmpLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_eq_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqU16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst) : Vop3("v_cmp_eq_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpEqU16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 == s1)
@@ -9238,25 +4780,13 @@ void VCmpEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_le_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeU16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst) : Vop3("v_cmp_le_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLeU16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 <= s1)
@@ -9267,25 +4797,13 @@ void VCmpLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_gt_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtU16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst) : Vop3("v_cmp_gt_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGtU16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 > s1)
@@ -9296,25 +4814,13 @@ void VCmpGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ne_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeU16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst) : Vop3("v_cmp_ne_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNeU16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 != s1)
@@ -9325,25 +4831,13 @@ void VCmpNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ge_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeU16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst) : Vop3("v_cmp_ge_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGeU16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 >= s1)
@@ -9354,49 +4848,25 @@ void VCmpGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpxFI64Vop3::VCmpxFI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_f_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFI64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxFI64Vop3::VCmpxFI64Vop3(const MachineInst *inst) : Vop3("v_cmpx_f_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxFI64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxFI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     (void)lane;
   }
   wf.set_exec(result);
 }
 
-VCmpxLtI64Vop3::VCmpxLtI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_lt_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtI64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLtI64Vop3::VCmpxLtI64Vop3(const MachineInst *inst) : Vop3("v_cmpx_lt_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLtI64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
     int64_t s1 = static_cast<int64_t>(src1.read_lane64(wf, lane));
     if (s0 < s1)
@@ -9405,25 +4875,13 @@ void VCmpxLtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxEqI64Vop3::VCmpxEqI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_eq_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqI64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxEqI64Vop3::VCmpxEqI64Vop3(const MachineInst *inst) : Vop3("v_cmpx_eq_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxEqI64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxEqI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
     int64_t s1 = static_cast<int64_t>(src1.read_lane64(wf, lane));
     if (s0 == s1)
@@ -9432,25 +4890,13 @@ void VCmpxEqI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxLeI64Vop3::VCmpxLeI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_le_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeI64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLeI64Vop3::VCmpxLeI64Vop3(const MachineInst *inst) : Vop3("v_cmpx_le_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLeI64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
     int64_t s1 = static_cast<int64_t>(src1.read_lane64(wf, lane));
     if (s0 <= s1)
@@ -9459,25 +4905,13 @@ void VCmpxLeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxGtI64Vop3::VCmpxGtI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_gt_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtI64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGtI64Vop3::VCmpxGtI64Vop3(const MachineInst *inst) : Vop3("v_cmpx_gt_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGtI64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
     int64_t s1 = static_cast<int64_t>(src1.read_lane64(wf, lane));
     if (s0 > s1)
@@ -9486,25 +4920,13 @@ void VCmpxGtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxNeI64Vop3::VCmpxNeI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ne_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeI64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNeI64Vop3::VCmpxNeI64Vop3(const MachineInst *inst) : Vop3("v_cmpx_ne_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNeI64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
     int64_t s1 = static_cast<int64_t>(src1.read_lane64(wf, lane));
     if (s0 != s1)
@@ -9513,25 +4935,13 @@ void VCmpxNeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxGeI64Vop3::VCmpxGeI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ge_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeI64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGeI64Vop3::VCmpxGeI64Vop3(const MachineInst *inst) : Vop3("v_cmpx_ge_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGeI64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
     int64_t s1 = static_cast<int64_t>(src1.read_lane64(wf, lane));
     if (s0 >= s1)
@@ -9540,105 +4950,52 @@ void VCmpxGeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxTI64Vop3::VCmpxTI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_t_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTI64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxTI64Vop3::VCmpxTI64Vop3(const MachineInst *inst) : Vop3("v_cmpx_t_i64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxTI64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxTI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxClassF64Vop3::VCmpxClassF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_class_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxClassF64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxClassF64Vop3::VCmpxClassF64Vop3(const MachineInst *inst) : Vop3("v_cmpx_class_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxClassF64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxClassF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
     uint32_t mask = src1.read_lane(wf, lane);
     bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0 && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0 && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
+    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0) match = true;
+    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) != 0) match = true;
+    if ((mask & 0x004) && std::isinf(s0) && s0 < 0) match = true;
+    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0) match = true;
+    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 && std::signbit(s0)) match = true;
+    if ((mask & 0x020) && s0 == 0.0 && std::signbit(s0)) match = true;
+    if ((mask & 0x040) && s0 == 0.0 && !std::signbit(s0)) match = true;
+    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 && !std::signbit(s0)) match = true;
+    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0) match = true;
+    if ((mask & 0x200) && std::isinf(s0) && s0 > 0) match = true;
+    if (match) result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_lt_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtU16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst) : Vop3("v_cmpx_lt_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLtU16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 < s1)
@@ -9647,25 +5004,13 @@ void VCmpxLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_eq_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqU16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst) : Vop3("v_cmpx_eq_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxEqU16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 == s1)
@@ -9674,25 +5019,13 @@ void VCmpxEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_le_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeU16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst) : Vop3("v_cmpx_le_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLeU16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 <= s1)
@@ -9701,25 +5034,13 @@ void VCmpxLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_gt_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtU16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst) : Vop3("v_cmpx_gt_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGtU16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 > s1)
@@ -9728,25 +5049,13 @@ void VCmpxGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ne_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeU16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst) : Vop3("v_cmpx_ne_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNeU16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 != s1)
@@ -9755,25 +5064,13 @@ void VCmpxNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ge_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeU16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst) : Vop3("v_cmpx_ge_u16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGeU16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
     uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 >= s1)
@@ -9782,48 +5079,25 @@ void VCmpxGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpFU32Vop3::VCmpFU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_f_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpFU32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpFU32Vop3::VCmpFU32Vop3(const MachineInst *inst) : Vop3("v_cmp_f_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpFU32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpFU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     vcc &= ~(1ULL << lane);
   }
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLtU32Vop3::VCmpLtU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_lt_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtU32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLtU32Vop3::VCmpLtU32Vop3(const MachineInst *inst) : Vop3("v_cmp_lt_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLtU32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t s0 = src0.read_lane(wf, lane);
     uint32_t s1 = src1.read_lane(wf, lane);
     if (s0 < s1)
@@ -9834,25 +5108,13 @@ void VCmpLtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpEqU32Vop3::VCmpEqU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_eq_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqU32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpEqU32Vop3::VCmpEqU32Vop3(const MachineInst *inst) : Vop3("v_cmp_eq_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpEqU32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpEqU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t s0 = src0.read_lane(wf, lane);
     uint32_t s1 = src1.read_lane(wf, lane);
     if (s0 == s1)
@@ -9863,25 +5125,13 @@ void VCmpEqU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLeU32Vop3::VCmpLeU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_le_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeU32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLeU32Vop3::VCmpLeU32Vop3(const MachineInst *inst) : Vop3("v_cmp_le_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLeU32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t s0 = src0.read_lane(wf, lane);
     uint32_t s1 = src1.read_lane(wf, lane);
     if (s0 <= s1)
@@ -9892,25 +5142,13 @@ void VCmpLeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGtU32Vop3::VCmpGtU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_gt_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtU32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGtU32Vop3::VCmpGtU32Vop3(const MachineInst *inst) : Vop3("v_cmp_gt_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGtU32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t s0 = src0.read_lane(wf, lane);
     uint32_t s1 = src1.read_lane(wf, lane);
     if (s0 > s1)
@@ -9921,25 +5159,13 @@ void VCmpGtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNeU32Vop3::VCmpNeU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ne_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeU32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNeU32Vop3::VCmpNeU32Vop3(const MachineInst *inst) : Vop3("v_cmp_ne_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNeU32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t s0 = src0.read_lane(wf, lane);
     uint32_t s1 = src1.read_lane(wf, lane);
     if (s0 != s1)
@@ -9950,25 +5176,13 @@ void VCmpNeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGeU32Vop3::VCmpGeU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ge_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeU32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGeU32Vop3::VCmpGeU32Vop3(const MachineInst *inst) : Vop3("v_cmp_ge_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGeU32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t s0 = src0.read_lane(wf, lane);
     uint32_t s1 = src1.read_lane(wf, lane);
     if (s0 >= s1)
@@ -9979,81 +5193,43 @@ void VCmpGeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpTU32Vop3::VCmpTU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_t_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpTU32Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpTU32Vop3::VCmpTU32Vop3(const MachineInst *inst) : Vop3("v_cmp_t_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpTU32Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpTU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     vcc |= (1ULL << lane);
   }
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpFF16Vop3::VCmpFF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_f_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpFF16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpFF16Vop3::VCmpFF16Vop3(const MachineInst *inst) : Vop3("v_cmp_f_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpFF16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpFF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     vcc &= ~(1ULL << lane);
   }
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLtF16Vop3::VCmpLtF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_lt_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtF16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLtF16Vop3::VCmpLtF16Vop3(const MachineInst *inst) : Vop3("v_cmp_lt_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLtF16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 < s1)
       vcc |= (1ULL << lane);
     else
@@ -10062,35 +5238,19 @@ void VCmpLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpEqF16Vop3::VCmpEqF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_eq_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqF16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpEqF16Vop3::VCmpEqF16Vop3(const MachineInst *inst) : Vop3("v_cmp_eq_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpEqF16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 == s1)
       vcc |= (1ULL << lane);
     else
@@ -10099,35 +5259,19 @@ void VCmpEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLeF16Vop3::VCmpLeF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_le_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeF16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLeF16Vop3::VCmpLeF16Vop3(const MachineInst *inst) : Vop3("v_cmp_le_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLeF16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 <= s1)
       vcc |= (1ULL << lane);
     else
@@ -10136,35 +5280,19 @@ void VCmpLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGtF16Vop3::VCmpGtF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_gt_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtF16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGtF16Vop3::VCmpGtF16Vop3(const MachineInst *inst) : Vop3("v_cmp_gt_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGtF16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 > s1)
       vcc |= (1ULL << lane);
     else
@@ -10173,35 +5301,19 @@ void VCmpGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLgF16Vop3::VCmpLgF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_lg_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLgF16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLgF16Vop3::VCmpLgF16Vop3(const MachineInst *inst) : Vop3("v_cmp_lg_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLgF16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 < s1 || s0 > s1)
       vcc |= (1ULL << lane);
     else
@@ -10210,35 +5322,19 @@ void VCmpLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGeF16Vop3::VCmpGeF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ge_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeF16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGeF16Vop3::VCmpGeF16Vop3(const MachineInst *inst) : Vop3("v_cmp_ge_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGeF16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 >= s1)
       vcc |= (1ULL << lane);
     else
@@ -10247,34 +5343,19 @@ void VCmpGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpOF16Vop3::VCmpOF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_o_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpOF16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpOF16Vop3::VCmpOF16Vop3(const MachineInst *inst) : Vop3("v_cmp_o_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpOF16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!std::isnan(s0) && !std::isnan(s1))
       vcc |= (1ULL << lane);
     else
@@ -10283,49 +5364,25 @@ void VCmpOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpxFU32Vop3::VCmpxFU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_f_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFU32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxFU32Vop3::VCmpxFU32Vop3(const MachineInst *inst) : Vop3("v_cmpx_f_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxFU32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxFU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     (void)lane;
   }
   wf.set_exec(result);
 }
 
-VCmpxLtU32Vop3::VCmpxLtU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_lt_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtU32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLtU32Vop3::VCmpxLtU32Vop3(const MachineInst *inst) : Vop3("v_cmpx_lt_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLtU32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t s0 = src0.read_lane(wf, lane);
     uint32_t s1 = src1.read_lane(wf, lane);
     if (s0 < s1)
@@ -10334,25 +5391,13 @@ void VCmpxLtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxEqU32Vop3::VCmpxEqU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_eq_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqU32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxEqU32Vop3::VCmpxEqU32Vop3(const MachineInst *inst) : Vop3("v_cmpx_eq_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxEqU32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxEqU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t s0 = src0.read_lane(wf, lane);
     uint32_t s1 = src1.read_lane(wf, lane);
     if (s0 == s1)
@@ -10361,25 +5406,13 @@ void VCmpxEqU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxLeU32Vop3::VCmpxLeU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_le_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeU32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLeU32Vop3::VCmpxLeU32Vop3(const MachineInst *inst) : Vop3("v_cmpx_le_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLeU32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t s0 = src0.read_lane(wf, lane);
     uint32_t s1 = src1.read_lane(wf, lane);
     if (s0 <= s1)
@@ -10388,25 +5421,13 @@ void VCmpxLeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxGtU32Vop3::VCmpxGtU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_gt_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtU32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGtU32Vop3::VCmpxGtU32Vop3(const MachineInst *inst) : Vop3("v_cmpx_gt_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGtU32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t s0 = src0.read_lane(wf, lane);
     uint32_t s1 = src1.read_lane(wf, lane);
     if (s0 > s1)
@@ -10415,25 +5436,13 @@ void VCmpxGtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxNeU32Vop3::VCmpxNeU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ne_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeU32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNeU32Vop3::VCmpxNeU32Vop3(const MachineInst *inst) : Vop3("v_cmpx_ne_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNeU32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t s0 = src0.read_lane(wf, lane);
     uint32_t s1 = src1.read_lane(wf, lane);
     if (s0 != s1)
@@ -10442,25 +5451,13 @@ void VCmpxNeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxGeU32Vop3::VCmpxGeU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ge_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeU32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGeU32Vop3::VCmpxGeU32Vop3(const MachineInst *inst) : Vop3("v_cmpx_ge_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGeU32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t s0 = src0.read_lane(wf, lane);
     uint32_t s1 = src1.read_lane(wf, lane);
     if (s0 >= s1)
@@ -10469,341 +5466,182 @@ void VCmpxGeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxTU32Vop3::VCmpxTU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_t_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTU32Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxTU32Vop3::VCmpxTU32Vop3(const MachineInst *inst) : Vop3("v_cmpx_t_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxTU32Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxTU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxFF16Vop3::VCmpxFF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_f_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFF16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxFF16Vop3::VCmpxFF16Vop3(const MachineInst *inst) : Vop3("v_cmpx_f_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxFF16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxFF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     (void)lane;
   }
   wf.set_exec(result);
 }
 
-VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_lt_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtF16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst) : Vop3("v_cmpx_lt_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLtF16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 < s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_eq_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqF16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst) : Vop3("v_cmpx_eq_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxEqF16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 == s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_le_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeF16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst) : Vop3("v_cmpx_le_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLeF16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_gt_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtF16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst) : Vop3("v_cmpx_gt_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGtF16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 > s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_lg_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLgF16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst) : Vop3("v_cmpx_lg_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLgF16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 < s1 || s0 > s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ge_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeF16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst) : Vop3("v_cmpx_ge_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGeF16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_o_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxOF16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst) : Vop3("v_cmpx_o_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxOF16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!std::isnan(s0) && !std::isnan(s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpFU64Vop3::VCmpFU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_f_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpFU64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpFU64Vop3::VCmpFU64Vop3(const MachineInst *inst) : Vop3("v_cmp_f_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpFU64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpFU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     vcc &= ~(1ULL << lane);
   }
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLtU64Vop3::VCmpLtU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_lt_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtU64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLtU64Vop3::VCmpLtU64Vop3(const MachineInst *inst) : Vop3("v_cmp_lt_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLtU64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint64_t s0 = src0.read_lane64(wf, lane);
     uint64_t s1 = src1.read_lane64(wf, lane);
     if (s0 < s1)
@@ -10814,25 +5652,13 @@ void VCmpLtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpEqU64Vop3::VCmpEqU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_eq_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqU64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpEqU64Vop3::VCmpEqU64Vop3(const MachineInst *inst) : Vop3("v_cmp_eq_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpEqU64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpEqU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint64_t s0 = src0.read_lane64(wf, lane);
     uint64_t s1 = src1.read_lane64(wf, lane);
     if (s0 == s1)
@@ -10843,25 +5669,13 @@ void VCmpEqU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpLeU64Vop3::VCmpLeU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_le_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeU64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpLeU64Vop3::VCmpLeU64Vop3(const MachineInst *inst) : Vop3("v_cmp_le_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpLeU64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpLeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint64_t s0 = src0.read_lane64(wf, lane);
     uint64_t s1 = src1.read_lane64(wf, lane);
     if (s0 <= s1)
@@ -10872,25 +5686,13 @@ void VCmpLeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGtU64Vop3::VCmpGtU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_gt_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtU64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGtU64Vop3::VCmpGtU64Vop3(const MachineInst *inst) : Vop3("v_cmp_gt_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGtU64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint64_t s0 = src0.read_lane64(wf, lane);
     uint64_t s1 = src1.read_lane64(wf, lane);
     if (s0 > s1)
@@ -10901,25 +5703,13 @@ void VCmpGtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNeU64Vop3::VCmpNeU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ne_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeU64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNeU64Vop3::VCmpNeU64Vop3(const MachineInst *inst) : Vop3("v_cmp_ne_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNeU64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint64_t s0 = src0.read_lane64(wf, lane);
     uint64_t s1 = src1.read_lane64(wf, lane);
     if (s0 != s1)
@@ -10930,25 +5720,13 @@ void VCmpNeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpGeU64Vop3::VCmpGeU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ge_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeU64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpGeU64Vop3::VCmpGeU64Vop3(const MachineInst *inst) : Vop3("v_cmp_ge_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpGeU64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpGeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint64_t s0 = src0.read_lane64(wf, lane);
     uint64_t s1 = src1.read_lane64(wf, lane);
     if (s0 >= s1)
@@ -10959,57 +5737,31 @@ void VCmpGeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpTU64Vop3::VCmpTU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_t_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpTU64Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpTU64Vop3::VCmpTU64Vop3(const MachineInst *inst) : Vop3("v_cmp_t_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpTU64Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpTU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     vcc |= (1ULL << lane);
   }
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpUF16Vop3::VCmpUF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_u_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpUF16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpUF16Vop3::VCmpUF16Vop3(const MachineInst *inst) : Vop3("v_cmp_u_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpUF16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (std::isnan(s0) || std::isnan(s1))
       vcc |= (1ULL << lane);
     else
@@ -11018,35 +5770,19 @@ void VCmpUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNgeF16Vop3::VCmpNgeF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_nge_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgeF16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNgeF16Vop3::VCmpNgeF16Vop3(const MachineInst *inst) : Vop3("v_cmp_nge_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNgeF16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 >= s1))
       vcc |= (1ULL << lane);
     else
@@ -11055,35 +5791,19 @@ void VCmpNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNlgF16Vop3::VCmpNlgF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_nlg_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNlgF16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNlgF16Vop3::VCmpNlgF16Vop3(const MachineInst *inst) : Vop3("v_cmp_nlg_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNlgF16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 < s1 || s0 > s1))
       vcc |= (1ULL << lane);
     else
@@ -11092,35 +5812,19 @@ void VCmpNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNgtF16Vop3::VCmpNgtF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_ngt_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgtF16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNgtF16Vop3::VCmpNgtF16Vop3(const MachineInst *inst) : Vop3("v_cmp_ngt_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNgtF16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 > s1))
       vcc |= (1ULL << lane);
     else
@@ -11129,35 +5833,19 @@ void VCmpNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNleF16Vop3::VCmpNleF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_nle_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNleF16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNleF16Vop3::VCmpNleF16Vop3(const MachineInst *inst) : Vop3("v_cmp_nle_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNleF16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 <= s1))
       vcc |= (1ULL << lane);
     else
@@ -11166,35 +5854,19 @@ void VCmpNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNeqF16Vop3::VCmpNeqF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_neq_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeqF16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNeqF16Vop3::VCmpNeqF16Vop3(const MachineInst *inst) : Vop3("v_cmp_neq_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNeqF16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
       vcc |= (1ULL << lane);
     else
@@ -11203,35 +5875,19 @@ void VCmpNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpNltF16Vop3::VCmpNltF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_nlt_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNltF16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpNltF16Vop3::VCmpNltF16Vop3(const MachineInst *inst) : Vop3("v_cmp_nlt_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpNltF16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 < s1))
       vcc |= (1ULL << lane);
     else
@@ -11240,66 +5896,31 @@ void VCmpNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   vdst.write_scalar64(wf, vcc);
 }
 
-VCmpTruF16Vop3::VCmpTruF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_tru_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpTruF16Vop3>()),
-      vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpTruF16Vop3::VCmpTruF16Vop3(const MachineInst *inst) : Vop3("v_cmp_tru_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpTruF16Vop3>()), vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpTruF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cmp_tru_f16_vop3(*this, wf);
 }
 
-VCmpxFU64Vop3::VCmpxFU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_f_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFU64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxFU64Vop3::VCmpxFU64Vop3(const MachineInst *inst) : Vop3("v_cmpx_f_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxFU64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxFU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     (void)lane;
   }
   wf.set_exec(result);
 }
 
-VCmpxLtU64Vop3::VCmpxLtU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_lt_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtU64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLtU64Vop3::VCmpxLtU64Vop3(const MachineInst *inst) : Vop3("v_cmpx_lt_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLtU64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint64_t s0 = src0.read_lane64(wf, lane);
     uint64_t s1 = src1.read_lane64(wf, lane);
     if (s0 < s1)
@@ -11308,25 +5929,13 @@ void VCmpxLtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxEqU64Vop3::VCmpxEqU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_eq_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqU64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxEqU64Vop3::VCmpxEqU64Vop3(const MachineInst *inst) : Vop3("v_cmpx_eq_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxEqU64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxEqU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint64_t s0 = src0.read_lane64(wf, lane);
     uint64_t s1 = src1.read_lane64(wf, lane);
     if (s0 == s1)
@@ -11335,25 +5944,13 @@ void VCmpxEqU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxLeU64Vop3::VCmpxLeU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_le_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeU64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxLeU64Vop3::VCmpxLeU64Vop3(const MachineInst *inst) : Vop3("v_cmpx_le_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxLeU64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxLeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint64_t s0 = src0.read_lane64(wf, lane);
     uint64_t s1 = src1.read_lane64(wf, lane);
     if (s0 <= s1)
@@ -11362,25 +5959,13 @@ void VCmpxLeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxGtU64Vop3::VCmpxGtU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_gt_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtU64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGtU64Vop3::VCmpxGtU64Vop3(const MachineInst *inst) : Vop3("v_cmpx_gt_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGtU64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint64_t s0 = src0.read_lane64(wf, lane);
     uint64_t s1 = src1.read_lane64(wf, lane);
     if (s0 > s1)
@@ -11389,25 +5974,13 @@ void VCmpxGtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxNeU64Vop3::VCmpxNeU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ne_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeU64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNeU64Vop3::VCmpxNeU64Vop3(const MachineInst *inst) : Vop3("v_cmpx_ne_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNeU64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint64_t s0 = src0.read_lane64(wf, lane);
     uint64_t s1 = src1.read_lane64(wf, lane);
     if (s0 != s1)
@@ -11416,25 +5989,13 @@ void VCmpxNeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxGeU64Vop3::VCmpxGeU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ge_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeU64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxGeU64Vop3::VCmpxGeU64Vop3(const MachineInst *inst) : Vop3("v_cmpx_ge_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxGeU64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxGeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint64_t s0 = src0.read_lane64(wf, lane);
     uint64_t s1 = src1.read_lane64(wf, lane);
     if (s0 >= s1)
@@ -11443,531 +6004,287 @@ void VCmpxGeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-VCmpxTU64Vop3::VCmpxTU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_t_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTU64Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxTU64Vop3::VCmpxTU64Vop3(const MachineInst *inst) : Vop3("v_cmpx_t_u64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxTU64Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxTU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_u_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxUF16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst) : Vop3("v_cmpx_u_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxUF16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_nge_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgeF16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst) : Vop3("v_cmpx_nge_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNgeF16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 >= s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_nlg_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNlgF16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst) : Vop3("v_cmpx_nlg_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNlgF16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 < s1 || s0 > s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_ngt_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgtF16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst) : Vop3("v_cmpx_ngt_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNgtF16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 > s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_nle_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNleF16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst) : Vop3("v_cmpx_nle_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNleF16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 <= s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_neq_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeqF16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst) : Vop3("v_cmpx_neq_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNeqF16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_nlt_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNltF16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst) : Vop3("v_cmpx_nlt_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxNltF16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
     float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
+    if (inst_.abs & (1u << 0)) s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.abs & (1u << 1)) s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1)) s1 = -s1;
     if (!(s0 < s1))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
 }
 
-VCmpxTruF16Vop3::VCmpxTruF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmpx_tru_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTruF16Vop3>()),
-      vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 1;
-}
+VCmpxTruF16Vop3::VCmpxTruF16Vop3(const MachineInst *inst) : Vop3("v_cmpx_tru_f16", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VCmpxTruF16Vop3>()), vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding*>(inst)->vdst), src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 1;}
 
 void VCmpxTruF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmpx_tru_f16_vop3(*this, wf);
+  uint64_t exec = wf.exec();
+  uint64_t result = 0;
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane))) continue;
+    result |= (1ULL << lane);
+  }
+  wf.set_exec(result);
 }
 
-VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc("v_add_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VAddCoCiU32Vop3SdstEnc>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  dst_operands_[1] = &sdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 2;
-}
+VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst) : Vop3SdstEnc("v_add_co_ci_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAddCoCiU32Vop3SdstEnc>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->sdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;dst_operands_[1] = &sdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 2;}
 
 void VAddCoCiU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t old_vcc = src2.read_scalar64(wf);
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
     uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1) + cin;
     vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (wide > 0xFFFFFFFFULL)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    if (wide > 0xFFFFFFFFULL) vcc |= (1ULL << lane); else vcc &= ~(1ULL << lane);
   }
   sdst.write_scalar64(wf, vcc);
 }
 
-VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc("v_sub_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VSubCoCiU32Vop3SdstEnc>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  dst_operands_[1] = &sdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 2;
-}
+VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst) : Vop3SdstEnc("v_sub_co_ci_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSubCoCiU32Vop3SdstEnc>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->sdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;dst_operands_[1] = &sdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 2;}
 
 void VSubCoCiU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t old_vcc = src2.read_scalar64(wf);
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
     uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1) - cin;
     bool borrow = static_cast<uint64_t>(sv0) < static_cast<uint64_t>(sv1) + cin;
     vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (borrow)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    if (borrow) vcc |= (1ULL << lane); else vcc &= ~(1ULL << lane);
   }
   sdst.write_scalar64(wf, vcc);
 }
 
-VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc("v_subrev_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VSubrevCoCiU32Vop3SdstEnc>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  dst_operands_[1] = &sdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 2;
-}
+VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst) : Vop3SdstEnc("v_subrev_co_ci_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSubrevCoCiU32Vop3SdstEnc>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->sdst), src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;dst_operands_[1] = &sdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 2;}
 
 void VSubrevCoCiU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t old_vcc = src2.read_scalar64(wf);
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
     uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0) - cin;
     bool borrow = static_cast<uint64_t>(sv1) < static_cast<uint64_t>(sv0) + cin;
     vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (borrow)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    if (borrow) vcc |= (1ULL << lane); else vcc &= ~(1ULL << lane);
   }
   sdst.write_scalar64(wf, vcc);
 }
 
-VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc("v_div_scale_f32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VDivScaleF32Vop3SdstEnc>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  dst_operands_[1] = &sdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 2;
-}
+VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst) : Vop3SdstEnc("v_div_scale_f32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VDivScaleF32Vop3SdstEnc>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding*>(inst)->sdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;dst_operands_[1] = &sdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 2;}
 
 void VDivScaleF32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
     float s2 = std::bit_cast<float>(src2.read_lane(wf, lane));
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (inst_.neg & (1u << 2))
-      s2 = -s2;
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.neg & (1u << 1)) s1 = -s1;
+    if (inst_.neg & (1u << 2)) s2 = -s2;
     float result = s0;
     bool needs_scale = false;
-    if (!std::isnan(s1) && !std::isnan(s2) && !std::isinf(s1) && !std::isinf(s2) && s1 != 0.0f &&
-        s2 != 0.0f) {
+    if (!std::isnan(s1) && !std::isnan(s2) &&
+        !std::isinf(s1) && !std::isinf(s2) &&
+        s1 != 0.0f && s2 != 0.0f) {
       int exp1, exp2;
       std::frexp(s1, &exp1);
       std::frexp(s2, &exp2);
       needs_scale = std::abs(exp1 - exp2) > 100;
-      if (needs_scale)
-        result = std::ldexp(s0, exp2 > exp1 ? 128 : -128);
+      if (needs_scale) result = std::ldexp(s0, exp2 > exp1 ? 128 : -128);
     }
-    if (needs_scale)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    if (needs_scale) vcc |= (1ULL << lane);
+    else vcc &= ~(1ULL << lane);
     vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
   wf.set_vcc(vcc);
 }
 
-VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc("v_div_scale_f64", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VDivScaleF64Vop3SdstEnc>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  dst_operands_[1] = &sdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 2;
-}
+VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst) : Vop3SdstEnc("v_div_scale_f64", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VDivScaleF64Vop3SdstEnc>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding*>(inst)->sdst), src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;dst_operands_[1] = &sdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 2;}
 
 void VDivScaleF64Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
     double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
     double s2 = std::bit_cast<double>(src2.read_lane64(wf, lane));
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (inst_.neg & (1u << 2))
-      s2 = -s2;
+    if (inst_.neg & (1u << 0)) s0 = -s0;
+    if (inst_.neg & (1u << 1)) s1 = -s1;
+    if (inst_.neg & (1u << 2)) s2 = -s2;
     double result = s0;
     bool needs_scale = false;
-    if (!std::isnan(s1) && !std::isnan(s2) && !std::isinf(s1) && !std::isinf(s2) && s1 != 0.0 &&
-        s2 != 0.0) {
+    if (!std::isnan(s1) && !std::isnan(s2) &&
+        !std::isinf(s1) && !std::isinf(s2) &&
+        s1 != 0.0 && s2 != 0.0) {
       int exp1, exp2;
       std::frexp(s1, &exp1);
       std::frexp(s2, &exp2);
       needs_scale = std::abs(exp1 - exp2) > 768;
-      if (needs_scale)
-        result = std::ldexp(s0, exp2 > exp1 ? 1024 : -1024);
+      if (needs_scale) result = std::ldexp(s0, exp2 > exp1 ? 1024 : -1024);
     }
-    if (needs_scale)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    if (needs_scale) vcc |= (1ULL << lane);
+    else vcc &= ~(1ULL << lane);
     vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
   wf.set_vcc(vcc);
 }
 
-VMadU64U32Vop3SdstEnc::VMadU64U32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc("v_mad_u64_u32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VMadU64U32Vop3SdstEnc>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  dst_operands_[1] = &sdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 2;
-}
+VMadU64U32Vop3SdstEnc::VMadU64U32Vop3SdstEnc(const MachineInst *inst) : Vop3SdstEnc("v_mad_u64_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMadU64U32Vop3SdstEnc>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->sdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;dst_operands_[1] = &sdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 2;}
 
 void VMadU64U32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint64_t s0 = src0.read_lane(wf, lane);
     uint64_t s1 = src1.read_lane(wf, lane);
     uint64_t s2 = src2.read_lane64(wf, lane);
@@ -11976,28 +6293,12 @@ void VMadU64U32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VMadI64I32Vop3SdstEnc::VMadI64I32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc("v_mad_i64_i32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VMadI64I32Vop3SdstEnc>()),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  dst_operands_[1] = &sdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 2;
-}
+VMadI64I32Vop3SdstEnc::VMadI64I32Vop3SdstEnc(const MachineInst *inst) : Vop3SdstEnc("v_mad_i64_i32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VMadI64I32Vop3SdstEnc>()), vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->sdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1), src2(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src2) {dst_operands_[0] = &vdst;dst_operands_[1] = &sdst;src_operands_[0] = &src0;src_operands_[1] = &src1;src_operands_[2] = &src2;num_src_ = 3;num_dst_ = 2;}
 
 void VMadI64I32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     int64_t s0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int64_t s1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     int64_t s2 = static_cast<int64_t>(src2.read_lane64(wf, lane));
@@ -12006,103 +6307,52 @@ void VMadI64I32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc("v_add_co_u32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VAddCoU32Vop3SdstEnc>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  dst_operands_[1] = &sdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 2;
-}
+VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst) : Vop3SdstEnc("v_add_co_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VAddCoU32Vop3SdstEnc>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->sdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;dst_operands_[1] = &sdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 2;}
 
 void VAddCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1);
     vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (wide > 0xFFFFFFFFULL)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    if (wide > 0xFFFFFFFFULL) vcc |= (1ULL << lane); else vcc &= ~(1ULL << lane);
   }
   sdst.write_scalar64(wf, vcc);
 }
 
-VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc("v_sub_co_u32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VSubCoU32Vop3SdstEnc>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  dst_operands_[1] = &sdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 2;
-}
+VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst) : Vop3SdstEnc("v_sub_co_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSubCoU32Vop3SdstEnc>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->sdst), src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;dst_operands_[1] = &sdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 2;}
 
 void VSubCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1);
     bool borrow = sv0 < sv1;
     vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (borrow)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    if (borrow) vcc |= (1ULL << lane); else vcc &= ~(1ULL << lane);
   }
   sdst.write_scalar64(wf, vcc);
 }
 
-VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc("v_subrev_co_u32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VSubrevCoU32Vop3SdstEnc>()),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  dst_operands_[0] = &vdst;
-  dst_operands_[1] = &sdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  num_src_ = 2;
-  num_dst_ = 2;
-}
+VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst) : Vop3SdstEnc("v_subrev_co_u32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<VSubrevCoU32Vop3SdstEnc>()), vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding*>(inst)->vdst), sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->sdst), src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src0), src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->src1) {dst_operands_[0] = &vdst;dst_operands_[1] = &sdst;src_operands_[0] = &src0;src_operands_[1] = &src1;num_src_ = 2;num_dst_ = 2;}
 
 void VSubrevCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
+    if (!(exec & (1ULL << lane))) continue;
     uint32_t sv0 = src0.read_lane(wf, lane);
     uint32_t sv1 = src1.read_lane(wf, lane);
     uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0);
     bool borrow = sv1 < sv0;
     vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (borrow)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    if (borrow) vcc |= (1ULL << lane); else vcc &= ~(1ULL << lane);
   }
   sdst.write_scalar64(wf, vcc);
 }

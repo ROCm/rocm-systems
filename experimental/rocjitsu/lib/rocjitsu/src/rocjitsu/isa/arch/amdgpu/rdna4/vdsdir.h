@@ -14,20 +14,22 @@
 namespace rocjitsu {
 namespace rdna4 {
 
-class DsParamLoadVdsdir : public Vdsdir {
-public:
-  DsParamLoadVdsdir(const MachineInst *inst);
+class DsParamLoadVdsdir : public Vdsdir
+{
+  public:
+   DsParamLoadVdsdir(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand attr;
-};
+} ;
 
-class DsDirectLoadVdsdir : public Vdsdir {
-public:
-  DsDirectLoadVdsdir(const MachineInst *inst);
+class DsDirectLoadVdsdir : public Vdsdir
+{
+  public:
+   DsDirectLoadVdsdir(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
-};
+} ;
 
 } // namespace rdna4
 } // namespace rocjitsu

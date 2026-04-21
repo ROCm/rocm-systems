@@ -4406,6 +4406,8 @@ class CodeGenerator:
         'vector_swap',
         # Vector readlane/writelane/readfirstlane access encoding fields:
         'vector_readlane', 'vector_writelane', 'vector_readfirstlane',
+        # Vector compares have different executions between RDNA and CDNA
+        'vector_cmpx', 'vector_cmpx_class',
     })
 
     def _can_share_execute(self, mnemonic: str, encoding_name: str) -> bool:
@@ -4433,15 +4435,16 @@ class CodeGenerator:
             if info.semantic_class in self._NON_SHAREABLE_CLASSES:
                 return False
             return arch in info.isa_names and len(info.isa_names) >= 2
-        # Check family_shared (now uses composite key)
+        # Check family_shared (direct lookup using composite key)
+        inst_key = (mnemonic, encoding_name)
         for fam_insts in self.shared_plan.family_shared.values():
-            for (inst_mnem, inst_enc), info in fam_insts.items():
-                if inst_mnem == mnemonic and inst_enc == encoding_name:
-                    if info.semantic_class in self._NON_SHAREABLE_CLASSES:
-                        return False
-                    if arch in info.isa_names and len(info.isa_names) >= 2:
-                        return True
-                    # Continue searching other families (same mnemonic+encoding can appear in multiple families)
+            if inst_key in fam_insts:
+                info = fam_insts[inst_key]
+                if info.semantic_class in self._NON_SHAREABLE_CLASSES:
+                    return False
+                if arch in info.isa_names and len(info.isa_names) >= 2:
+                    return True
+                # Continue searching other families (same mnemonic+encoding can appear in multiple families)
         return False
 
     def gen_insts(self) -> None:

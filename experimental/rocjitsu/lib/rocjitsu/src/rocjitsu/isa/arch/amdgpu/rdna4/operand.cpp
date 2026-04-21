@@ -28,492 +28,54 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
     : IsaOperand<Isa>(size_bits, opr_type, encoding_value) {}
 
 std::string Operand::name() const {
-  switch (opr_type_) {
-  case OperandType::OPR_ATTR: {
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR0)
-      return "attr0";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR1)
-      return "attr1";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR2)
-      return "attr2";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR3)
-      return "attr3";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR4)
-      return "attr4";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR5)
-      return "attr5";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR6)
-      return "attr6";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR7)
-      return "attr7";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR8)
-      return "attr8";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR9)
-      return "attr9";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR10)
-      return "attr10";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR11)
-      return "attr11";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR12)
-      return "attr12";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR13)
-      return "attr13";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR14)
-      return "attr14";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR15)
-      return "attr15";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR16)
-      return "attr16";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR17)
-      return "attr17";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR18)
-      return "attr18";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR19)
-      return "attr19";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR20)
-      return "attr20";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR21)
-      return "attr21";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR22)
-      return "attr22";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR23)
-      return "attr23";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR24)
-      return "attr24";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR25)
-      return "attr25";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR26)
-      return "attr26";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR27)
-      return "attr27";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR28)
-      return "attr28";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR29)
-      return "attr29";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR30)
-      return "attr30";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR31)
-      return "attr31";
-    if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR32)
-      return "attr32";
-    break;
-  }
-  case OperandType::OPR_DSMEM: {
-    if (encoding_value_ == OpSelDsmem::OPR_DSMEM_DSMEM)
-      return "dsmem";
-    break;
-  }
-  case OperandType::OPR_EXEC: {
-    if (encoding_value_ == OpSelExec::OPR_EXEC_EXEC)
-      return "exec";
-    break;
-  }
-  case OperandType::OPR_GPUMEM: {
-    if (encoding_value_ == OpSelGpumem::OPR_GPUMEM_GPUMEM)
-      return "gpumem";
-    break;
-  }
-  case OperandType::OPR_PC: {
-    if (encoding_value_ == OpSelPc::OPR_PC_PC)
-      return "pc";
-    break;
-  }
-  case OperandType::OPR_SDST: {
-    if (encoding_value_ >= OpSelSdst::OPR_SDST_SGPR_MIN &&
-        encoding_value_ <= OpSelSdst::OPR_SDST_SGPR_MAX)
-      return reg_name("s", encoding_value_ - OpSelSdst::OPR_SDST_SGPR_MIN, size_bits_);
-    if (encoding_value_ >= OpSelSdst::OPR_SDST_TTMP_MIN &&
-        encoding_value_ <= OpSelSdst::OPR_SDST_TTMP_MAX)
-      return reg_name("ttmp", encoding_value_ - OpSelSdst::OPR_SDST_TTMP_MIN, size_bits_);
-    if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_LO)
-      return "vcc_lo";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_HI)
-      return "vcc_hi";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_NULL)
-      return "null";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_M0)
-      return "m0";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO)
-      return "exec_lo";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
-      return "exec_hi";
-    break;
-  }
-  case OperandType::OPR_SDST_EXEC: {
-    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO)
-      return "exec_lo";
-    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
-      return "exec_hi";
-    break;
-  }
-  case OperandType::OPR_SDST_M0: {
-    if (encoding_value_ == OpSelSdstM0::OPR_SDST_M0_M0)
-      return "m0";
-    break;
-  }
-  case OperandType::OPR_SMEM_OFFSET: {
-    if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN &&
-        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MAX)
-      return reg_name("s", encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN, size_bits_);
-    if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN &&
-        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MAX)
-      return reg_name("ttmp", encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN,
-                      size_bits_);
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_LO)
-      return "vcc_lo";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_HI)
-      return "vcc_hi";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_NULL)
-      return "null";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_M0)
-      return "m0";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_M0)
-      return "m0";
-    break;
-  }
-  case OperandType::OPR_SMEM_OFFSET_NOK: {
-    if (encoding_value_ >= OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_SGPR_MIN &&
-        encoding_value_ <= OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_SGPR_MAX)
-      return reg_name("s", encoding_value_ - OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_SGPR_MIN,
-                      size_bits_);
-    if (encoding_value_ >= OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP_MIN &&
-        encoding_value_ <= OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP_MAX)
-      return reg_name("ttmp", encoding_value_ - OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP_MIN,
-                      size_bits_);
-    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_VCC_LO)
-      return "vcc_lo";
-    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_VCC_HI)
-      return "vcc_hi";
-    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_NULL)
-      return "null";
-    if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_M0)
-      return "m0";
-    break;
-  }
-  case OperandType::OPR_SRC: {
-    if (encoding_value_ >= OpSelSrc::OPR_SRC_SGPR_MIN &&
-        encoding_value_ <= OpSelSrc::OPR_SRC_SGPR_MAX)
-      return reg_name("s", encoding_value_ - OpSelSrc::OPR_SRC_SGPR_MIN, size_bits_);
-    if (encoding_value_ >= OpSelSrc::OPR_SRC_TTMP_MIN &&
-        encoding_value_ <= OpSelSrc::OPR_SRC_TTMP_MAX)
-      return reg_name("ttmp", encoding_value_ - OpSelSrc::OPR_SRC_TTMP_MIN, size_bits_);
-    if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_LO)
-      return "vcc_lo";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_HI)
-      return "vcc_hi";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_NULL)
-      return "null";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_M0)
-      return "m0";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO)
-      return "exec_lo";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_HI)
-      return "exec_hi";
-    if (encoding_value_ >= OpSelSrc::OPR_SRC_POS_INT_MIN &&
-        encoding_value_ <= OpSelSrc::OPR_SRC_POS_INT_MAX)
-      return std::to_string(encoding_value_ - OpSelSrc::OPR_SRC_POS_INT_MIN);
-    if (encoding_value_ >= OpSelSrc::OPR_SRC_NEG_INT_MIN &&
-        encoding_value_ <= OpSelSrc::OPR_SRC_NEG_INT_MAX)
-      return std::to_string(-(encoding_value_ - OpSelSrc::OPR_SRC_NEG_INT_MIN + 1));
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_HALF)
-      return "0.5";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_NEG_HALF)
-      return "-0.5";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_ONE)
-      return "1.0";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_NEG_ONE)
-      return "-1.0";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_TWO)
-      return "2.0";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_NEG_TWO)
-      return "-2.0";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_FOUR)
-      return "4.0";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_NEG_FOUR)
-      return "-4.0";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_ONE_OVER_TWO_PI)
-      return "0.15915494";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SCC)
-      return "src_scc";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SHARED_BASE)
-      return "src_shared_base";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SHARED_LIMIT)
-      return "src_shared_limit";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_PRIVATE_BASE)
-      return "src_private_base";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_PRIVATE_LIMIT)
-      return "src_private_limit";
-    if (encoding_value_ >= OpSelSrc::OPR_SRC_VGPR_MIN &&
-        encoding_value_ <= OpSelSrc::OPR_SRC_VGPR_MAX)
-      return reg_name("v", encoding_value_ - OpSelSrc::OPR_SRC_VGPR_MIN, size_bits_);
-    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_LITERAL)
-      return "literal";
-    break;
-  }
-  case OperandType::OPR_SRC_VGPR: {
-    if (encoding_value_ >= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN &&
-        encoding_value_ <= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX)
-      return reg_name("v", encoding_value_ - OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN, size_bits_);
-    break;
-  }
-  case OperandType::OPR_SRC_VGPR_OR_INLINE: {
-    if (encoding_value_ >= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_POS_INT_MIN &&
-        encoding_value_ <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_POS_INT_MAX)
-      return std::to_string(encoding_value_ -
-                            OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_POS_INT_MIN);
-    if (encoding_value_ >= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_NEG_INT_MIN &&
-        encoding_value_ <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_NEG_INT_MAX)
-      return std::to_string(
-          -(encoding_value_ - OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_NEG_INT_MIN + 1));
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_HALF)
-      return "0.5";
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_NEG_HALF)
-      return "-0.5";
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_ONE)
-      return "1.0";
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_NEG_ONE)
-      return "-1.0";
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_TWO)
-      return "2.0";
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_NEG_TWO)
-      return "-2.0";
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_FOUR)
-      return "4.0";
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_NEG_FOUR)
-      return "-4.0";
-    if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_ONE_OVER_TWO_PI)
-      return "0.15915494";
-    if (encoding_value_ >= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MIN &&
-        encoding_value_ <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MAX)
-      return reg_name("v", encoding_value_ - OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MIN,
-                      size_bits_);
-    break;
-  }
-  case OperandType::OPR_SREG: {
-    if (encoding_value_ >= OpSelSreg::OPR_SREG_SGPR_MIN &&
-        encoding_value_ <= OpSelSreg::OPR_SREG_SGPR_MAX)
-      return reg_name("s", encoding_value_ - OpSelSreg::OPR_SREG_SGPR_MIN, size_bits_);
-    if (encoding_value_ >= OpSelSreg::OPR_SREG_TTMP_MIN &&
-        encoding_value_ <= OpSelSreg::OPR_SREG_TTMP_MAX)
-      return reg_name("ttmp", encoding_value_ - OpSelSreg::OPR_SREG_TTMP_MIN, size_bits_);
-    if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_LO)
-      return "vcc_lo";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_HI)
-      return "vcc_hi";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_NULL)
-      return "null";
-    break;
-  }
-  case OperandType::OPR_SREG_LITERAL: {
-    if (encoding_value_ >= OpSelSregLiteral::OPR_SREG_LITERAL_SGPR_MIN &&
-        encoding_value_ <= OpSelSregLiteral::OPR_SREG_LITERAL_SGPR_MAX)
-      return reg_name("s", encoding_value_ - OpSelSregLiteral::OPR_SREG_LITERAL_SGPR_MIN,
-                      size_bits_);
-    if (encoding_value_ >= OpSelSregLiteral::OPR_SREG_LITERAL_TTMP_MIN &&
-        encoding_value_ <= OpSelSregLiteral::OPR_SREG_LITERAL_TTMP_MAX)
-      return reg_name("ttmp", encoding_value_ - OpSelSregLiteral::OPR_SREG_LITERAL_TTMP_MIN,
-                      size_bits_);
-    if (encoding_value_ == OpSelSregLiteral::OPR_SREG_LITERAL_VCC_LO)
-      return "vcc_lo";
-    if (encoding_value_ == OpSelSregLiteral::OPR_SREG_LITERAL_VCC_HI)
-      return "vcc_hi";
-    if (encoding_value_ == OpSelSregLiteral::OPR_SREG_LITERAL_NULL)
-      return "null";
-    if (encoding_value_ == OpSelSregLiteral::OPR_SREG_LITERAL_SRC_LITERAL)
-      return "literal";
-    break;
-  }
-  case OperandType::OPR_SREG_M0: {
-    if (encoding_value_ >= OpSelSregM0::OPR_SREG_M0_SGPR_MIN &&
-        encoding_value_ <= OpSelSregM0::OPR_SREG_M0_SGPR_MAX)
-      return reg_name("s", encoding_value_ - OpSelSregM0::OPR_SREG_M0_SGPR_MIN, size_bits_);
-    if (encoding_value_ >= OpSelSregM0::OPR_SREG_M0_TTMP_MIN &&
-        encoding_value_ <= OpSelSregM0::OPR_SREG_M0_TTMP_MAX)
-      return reg_name("ttmp", encoding_value_ - OpSelSregM0::OPR_SREG_M0_TTMP_MIN, size_bits_);
-    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_VCC_LO)
-      return "vcc_lo";
-    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_VCC_HI)
-      return "vcc_hi";
-    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_NULL)
-      return "null";
-    if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_M0)
-      return "m0";
-    break;
-  }
-  case OperandType::OPR_SSRC: {
-    if (encoding_value_ >= OpSelSsrc::OPR_SSRC_SGPR_MIN &&
-        encoding_value_ <= OpSelSsrc::OPR_SSRC_SGPR_MAX)
-      return reg_name("s", encoding_value_ - OpSelSsrc::OPR_SSRC_SGPR_MIN, size_bits_);
-    if (encoding_value_ >= OpSelSsrc::OPR_SSRC_TTMP_MIN &&
-        encoding_value_ <= OpSelSsrc::OPR_SSRC_TTMP_MAX)
-      return reg_name("ttmp", encoding_value_ - OpSelSsrc::OPR_SSRC_TTMP_MIN, size_bits_);
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_LO)
-      return "vcc_lo";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_HI)
-      return "vcc_hi";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_NULL)
-      return "null";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_M0)
-      return "m0";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO)
-      return "exec_lo";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_HI)
-      return "exec_hi";
-    if (encoding_value_ >= OpSelSsrc::OPR_SSRC_POS_INT_MIN &&
-        encoding_value_ <= OpSelSsrc::OPR_SSRC_POS_INT_MAX)
-      return std::to_string(encoding_value_ - OpSelSsrc::OPR_SSRC_POS_INT_MIN);
-    if (encoding_value_ >= OpSelSsrc::OPR_SSRC_NEG_INT_MIN &&
-        encoding_value_ <= OpSelSsrc::OPR_SSRC_NEG_INT_MAX)
-      return std::to_string(-(encoding_value_ - OpSelSsrc::OPR_SSRC_NEG_INT_MIN + 1));
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_HALF)
-      return "0.5";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_NEG_HALF)
-      return "-0.5";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_ONE)
-      return "1.0";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_NEG_ONE)
-      return "-1.0";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_TWO)
-      return "2.0";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_NEG_TWO)
-      return "-2.0";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_FOUR)
-      return "4.0";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_NEG_FOUR)
-      return "-4.0";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_ONE_OVER_TWO_PI)
-      return "0.15915494";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SCC)
-      return "src_scc";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SHARED_BASE)
-      return "src_shared_base";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SHARED_LIMIT)
-      return "src_shared_limit";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_PRIVATE_BASE)
-      return "src_private_base";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_PRIVATE_LIMIT)
-      return "src_private_limit";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_LITERAL)
-      return "literal";
-    break;
-  }
-  case OperandType::OPR_SSRC_BARRIER_ID: {
-    if (encoding_value_ == OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0)
-      return "m0";
-    break;
-  }
-  case OperandType::OPR_SSRC_LANESEL: {
-    if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN &&
-        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MAX)
-      return reg_name("s", encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN,
-                      size_bits_);
-    if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN &&
-        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MAX)
-      return reg_name("ttmp", encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN,
-                      size_bits_);
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_LO)
-      return "vcc_lo";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_HI)
-      return "vcc_hi";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_NULL)
-      return "null";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_M0)
-      return "m0";
-    break;
-  }
-  case OperandType::OPR_SSRC_SPECIAL_SCC: {
-    if (encoding_value_ == OpSelSsrcSpecialScc::OPR_SSRC_SPECIAL_SCC_SRC_SCC)
-      return "src_scc";
-    break;
-  }
-  case OperandType::OPR_TGT: {
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT0)
-      return "mrt0";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT1)
-      return "mrt1";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT2)
-      return "mrt2";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT3)
-      return "mrt3";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT4)
-      return "mrt4";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT5)
-      return "mrt5";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT6)
-      return "mrt6";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRT7)
-      return "mrt7";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_MRTZ)
-      return "mrtz";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_POS0)
-      return "pos0";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_POS1)
-      return "pos1";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_POS2)
-      return "pos2";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_POS3)
-      return "pos3";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_POS4)
-      return "pos4";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_PRIM)
-      return "prim";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_DUAL_SRC_BLEND0)
-      return "dual_src_blend0";
-    if (encoding_value_ == OpSelTgt::OPR_TGT_DUAL_SRC_BLEND1)
-      return "dual_src_blend1";
-    break;
-  }
-  case OperandType::OPR_VCC: {
-    if (encoding_value_ == OpSelVcc::OPR_VCC_VCC)
-      return "vcc";
-    break;
-  }
-  case OperandType::OPR_VGPR: {
-    if (encoding_value_ >= OpSelVgpr::OPR_VGPR_VGPR_MIN &&
-        encoding_value_ <= OpSelVgpr::OPR_VGPR_VGPR_MAX)
-      return reg_name("v", encoding_value_ - OpSelVgpr::OPR_VGPR_VGPR_MIN, size_bits_);
-    break;
-  }
-  case OperandType::OPR_CLAUSE:
-    return std::to_string(encoding_value_);
-  case OperandType::OPR_DELAY:
-    return std::to_string(encoding_value_);
-  case OperandType::OPR_HWREG:
-    return std::to_string(encoding_value_);
-  case OperandType::OPR_LABEL:
-    return std::to_string(encoding_value_);
-  case OperandType::OPR_SENDMSG:
-    return std::to_string(encoding_value_);
-  case OperandType::OPR_SENDMSG_RTN:
-    return std::to_string(encoding_value_);
-  case OperandType::OPR_SIMM16:
-    return std::to_string(encoding_value_);
-  case OperandType::OPR_SIMM24:
-    return std::to_string(encoding_value_);
-  case OperandType::OPR_SIMM32:
-    return std::format("0x{:x}", encoding_value_);
-  case OperandType::OPR_SIMM5:
-    return std::to_string(encoding_value_);
-  case OperandType::OPR_SIMM8:
-    return std::to_string(encoding_value_);
-  case OperandType::OPR_SLEEP:
-    return std::to_string(encoding_value_);
-  case OperandType::OPR_VERSION:
-    return std::to_string(encoding_value_);
-  case OperandType::OPR_WAITCNT: {
-    uint32_t vmcnt = (encoding_value_ & 0xF) | (((encoding_value_ >> 14) & 0x3) << 4);
-    uint32_t expcnt = (encoding_value_ >> 4) & 0x7;
-    uint32_t lgkmcnt = (encoding_value_ >> 8) & 0x3F;
-    return std::format("vmcnt({}) expcnt({}) lgkmcnt({})", vmcnt, expcnt, lgkmcnt);
-  }
-  case OperandType::OPR_WAIT_ALU:
-    return std::to_string(encoding_value_);
-  case OperandType::OPR_WAIT_EVENT:
-    return std::to_string(encoding_value_);
-  case OperandType::OPR_WAIT_MEM_DS:
-    return std::to_string(encoding_value_);
-  }
-  return std::to_string(encoding_value_);
+switch (opr_type_) {
+case OperandType::OPR_ATTR: { if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR0) return "attr0"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR1) return "attr1"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR2) return "attr2"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR3) return "attr3"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR4) return "attr4"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR5) return "attr5"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR6) return "attr6"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR7) return "attr7"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR8) return "attr8"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR9) return "attr9"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR10) return "attr10"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR11) return "attr11"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR12) return "attr12"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR13) return "attr13"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR14) return "attr14"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR15) return "attr15"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR16) return "attr16"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR17) return "attr17"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR18) return "attr18"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR19) return "attr19"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR20) return "attr20"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR21) return "attr21"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR22) return "attr22"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR23) return "attr23"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR24) return "attr24"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR25) return "attr25"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR26) return "attr26"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR27) return "attr27"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR28) return "attr28"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR29) return "attr29"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR30) return "attr30"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR31) return "attr31"; if (encoding_value_ == OpSelAttr::OPR_ATTR_ATTR32) return "attr32"; break; }
+case OperandType::OPR_DSMEM: { if (encoding_value_ == OpSelDsmem::OPR_DSMEM_DSMEM) return "dsmem"; break; }
+case OperandType::OPR_EXEC: { if (encoding_value_ == OpSelExec::OPR_EXEC_EXEC) return "exec"; break; }
+case OperandType::OPR_GPUMEM: { if (encoding_value_ == OpSelGpumem::OPR_GPUMEM_GPUMEM) return "gpumem"; break; }
+case OperandType::OPR_PC: { if (encoding_value_ == OpSelPc::OPR_PC_PC) return "pc"; break; }
+case OperandType::OPR_SDST: { if (encoding_value_ >= OpSelSdst::OPR_SDST_SGPR_MIN && encoding_value_ <= OpSelSdst::OPR_SDST_SGPR_MAX) return reg_name("s", encoding_value_ - OpSelSdst::OPR_SDST_SGPR_MIN, size_bits_); if (encoding_value_ >= OpSelSdst::OPR_SDST_TTMP_MIN && encoding_value_ <= OpSelSdst::OPR_SDST_TTMP_MAX) return reg_name("ttmp", encoding_value_ - OpSelSdst::OPR_SDST_TTMP_MIN, size_bits_); if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_LO) return "vcc_lo"; if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_HI) return "vcc_hi"; if (encoding_value_ == OpSelSdst::OPR_SDST_NULL) return "null"; if (encoding_value_ == OpSelSdst::OPR_SDST_M0) return "m0"; if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO) return "exec_lo"; if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI) return "exec_hi"; break; }
+case OperandType::OPR_SDST_EXEC: { if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO) return "exec_lo"; if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI) return "exec_hi"; break; }
+case OperandType::OPR_SDST_M0: { if (encoding_value_ == OpSelSdstM0::OPR_SDST_M0_M0) return "m0"; break; }
+case OperandType::OPR_SMEM_OFFSET: { if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN && encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MAX) return reg_name("s", encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN, size_bits_); if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN && encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MAX) return reg_name("ttmp", encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN, size_bits_); if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_LO) return "vcc_lo"; if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_HI) return "vcc_hi"; if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_NULL) return "null"; if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_M0) return "m0"; if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_M0) return "m0"; break; }
+case OperandType::OPR_SMEM_OFFSET_NOK: { if (encoding_value_ >= OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_SGPR_MIN && encoding_value_ <= OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_SGPR_MAX) return reg_name("s", encoding_value_ - OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_SGPR_MIN, size_bits_); if (encoding_value_ >= OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP_MIN && encoding_value_ <= OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP_MAX) return reg_name("ttmp", encoding_value_ - OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP_MIN, size_bits_); if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_VCC_LO) return "vcc_lo"; if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_VCC_HI) return "vcc_hi"; if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_NULL) return "null"; if (encoding_value_ == OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_M0) return "m0"; break; }
+case OperandType::OPR_SRC: { if (encoding_value_ >= OpSelSrc::OPR_SRC_SGPR_MIN && encoding_value_ <= OpSelSrc::OPR_SRC_SGPR_MAX) return reg_name("s", encoding_value_ - OpSelSrc::OPR_SRC_SGPR_MIN, size_bits_); if (encoding_value_ >= OpSelSrc::OPR_SRC_TTMP_MIN && encoding_value_ <= OpSelSrc::OPR_SRC_TTMP_MAX) return reg_name("ttmp", encoding_value_ - OpSelSrc::OPR_SRC_TTMP_MIN, size_bits_); if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_LO) return "vcc_lo"; if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_HI) return "vcc_hi"; if (encoding_value_ == OpSelSrc::OPR_SRC_NULL) return "null"; if (encoding_value_ == OpSelSrc::OPR_SRC_M0) return "m0"; if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO) return "exec_lo"; if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_HI) return "exec_hi"; if (encoding_value_ >= OpSelSrc::OPR_SRC_POS_INT_MIN && encoding_value_ <= OpSelSrc::OPR_SRC_POS_INT_MAX) return std::to_string(encoding_value_ - OpSelSrc::OPR_SRC_POS_INT_MIN); if (encoding_value_ >= OpSelSrc::OPR_SRC_NEG_INT_MIN && encoding_value_ <= OpSelSrc::OPR_SRC_NEG_INT_MAX) return std::to_string(-(encoding_value_ - OpSelSrc::OPR_SRC_NEG_INT_MIN + 1)); if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_HALF) return "0.5"; if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_NEG_HALF) return "-0.5"; if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_ONE) return "1.0"; if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_NEG_ONE) return "-1.0"; if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_TWO) return "2.0"; if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_NEG_TWO) return "-2.0"; if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_FOUR) return "4.0"; if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_NEG_FOUR) return "-4.0"; if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_ONE_OVER_TWO_PI) return "0.15915494"; if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SCC) return "src_scc"; if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SHARED_BASE) return "src_shared_base"; if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SHARED_LIMIT) return "src_shared_limit"; if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_PRIVATE_BASE) return "src_private_base"; if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_PRIVATE_LIMIT) return "src_private_limit"; if (encoding_value_ >= OpSelSrc::OPR_SRC_VGPR_MIN && encoding_value_ <= OpSelSrc::OPR_SRC_VGPR_MAX) return reg_name("v", encoding_value_ - OpSelSrc::OPR_SRC_VGPR_MIN, size_bits_); if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_LITERAL) return "literal"; break; }
+case OperandType::OPR_SRC_VGPR: { if (encoding_value_ >= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN && encoding_value_ <= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX) return reg_name("v", encoding_value_ - OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN, size_bits_); break; }
+case OperandType::OPR_SRC_VGPR_OR_INLINE: { if (encoding_value_ >= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_POS_INT_MIN && encoding_value_ <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_POS_INT_MAX) return std::to_string(encoding_value_ - OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_POS_INT_MIN); if (encoding_value_ >= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_NEG_INT_MIN && encoding_value_ <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_NEG_INT_MAX) return std::to_string(-(encoding_value_ - OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_NEG_INT_MIN + 1)); if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_HALF) return "0.5"; if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_NEG_HALF) return "-0.5"; if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_ONE) return "1.0"; if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_NEG_ONE) return "-1.0"; if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_TWO) return "2.0"; if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_NEG_TWO) return "-2.0"; if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_FOUR) return "4.0"; if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_NEG_FOUR) return "-4.0"; if (encoding_value_ == OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_FLOAT_ONE_OVER_TWO_PI) return "0.15915494"; if (encoding_value_ >= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MIN && encoding_value_ <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MAX) return reg_name("v", encoding_value_ - OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MIN, size_bits_); break; }
+case OperandType::OPR_SREG: { if (encoding_value_ >= OpSelSreg::OPR_SREG_SGPR_MIN && encoding_value_ <= OpSelSreg::OPR_SREG_SGPR_MAX) return reg_name("s", encoding_value_ - OpSelSreg::OPR_SREG_SGPR_MIN, size_bits_); if (encoding_value_ >= OpSelSreg::OPR_SREG_TTMP_MIN && encoding_value_ <= OpSelSreg::OPR_SREG_TTMP_MAX) return reg_name("ttmp", encoding_value_ - OpSelSreg::OPR_SREG_TTMP_MIN, size_bits_); if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_LO) return "vcc_lo"; if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_HI) return "vcc_hi"; if (encoding_value_ == OpSelSreg::OPR_SREG_NULL) return "null"; break; }
+case OperandType::OPR_SREG_LITERAL: { if (encoding_value_ >= OpSelSregLiteral::OPR_SREG_LITERAL_SGPR_MIN && encoding_value_ <= OpSelSregLiteral::OPR_SREG_LITERAL_SGPR_MAX) return reg_name("s", encoding_value_ - OpSelSregLiteral::OPR_SREG_LITERAL_SGPR_MIN, size_bits_); if (encoding_value_ >= OpSelSregLiteral::OPR_SREG_LITERAL_TTMP_MIN && encoding_value_ <= OpSelSregLiteral::OPR_SREG_LITERAL_TTMP_MAX) return reg_name("ttmp", encoding_value_ - OpSelSregLiteral::OPR_SREG_LITERAL_TTMP_MIN, size_bits_); if (encoding_value_ == OpSelSregLiteral::OPR_SREG_LITERAL_VCC_LO) return "vcc_lo"; if (encoding_value_ == OpSelSregLiteral::OPR_SREG_LITERAL_VCC_HI) return "vcc_hi"; if (encoding_value_ == OpSelSregLiteral::OPR_SREG_LITERAL_NULL) return "null"; if (encoding_value_ == OpSelSregLiteral::OPR_SREG_LITERAL_SRC_LITERAL) return "literal"; break; }
+case OperandType::OPR_SREG_M0: { if (encoding_value_ >= OpSelSregM0::OPR_SREG_M0_SGPR_MIN && encoding_value_ <= OpSelSregM0::OPR_SREG_M0_SGPR_MAX) return reg_name("s", encoding_value_ - OpSelSregM0::OPR_SREG_M0_SGPR_MIN, size_bits_); if (encoding_value_ >= OpSelSregM0::OPR_SREG_M0_TTMP_MIN && encoding_value_ <= OpSelSregM0::OPR_SREG_M0_TTMP_MAX) return reg_name("ttmp", encoding_value_ - OpSelSregM0::OPR_SREG_M0_TTMP_MIN, size_bits_); if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_VCC_LO) return "vcc_lo"; if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_VCC_HI) return "vcc_hi"; if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_NULL) return "null"; if (encoding_value_ == OpSelSregM0::OPR_SREG_M0_M0) return "m0"; break; }
+case OperandType::OPR_SSRC: { if (encoding_value_ >= OpSelSsrc::OPR_SSRC_SGPR_MIN && encoding_value_ <= OpSelSsrc::OPR_SSRC_SGPR_MAX) return reg_name("s", encoding_value_ - OpSelSsrc::OPR_SSRC_SGPR_MIN, size_bits_); if (encoding_value_ >= OpSelSsrc::OPR_SSRC_TTMP_MIN && encoding_value_ <= OpSelSsrc::OPR_SSRC_TTMP_MAX) return reg_name("ttmp", encoding_value_ - OpSelSsrc::OPR_SSRC_TTMP_MIN, size_bits_); if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_LO) return "vcc_lo"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_HI) return "vcc_hi"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_NULL) return "null"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_M0) return "m0"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO) return "exec_lo"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_HI) return "exec_hi"; if (encoding_value_ >= OpSelSsrc::OPR_SSRC_POS_INT_MIN && encoding_value_ <= OpSelSsrc::OPR_SSRC_POS_INT_MAX) return std::to_string(encoding_value_ - OpSelSsrc::OPR_SSRC_POS_INT_MIN); if (encoding_value_ >= OpSelSsrc::OPR_SSRC_NEG_INT_MIN && encoding_value_ <= OpSelSsrc::OPR_SSRC_NEG_INT_MAX) return std::to_string(-(encoding_value_ - OpSelSsrc::OPR_SSRC_NEG_INT_MIN + 1)); if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_HALF) return "0.5"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_NEG_HALF) return "-0.5"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_ONE) return "1.0"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_NEG_ONE) return "-1.0"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_TWO) return "2.0"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_NEG_TWO) return "-2.0"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_FOUR) return "4.0"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_NEG_FOUR) return "-4.0"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_ONE_OVER_TWO_PI) return "0.15915494"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SCC) return "src_scc"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SHARED_BASE) return "src_shared_base"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SHARED_LIMIT) return "src_shared_limit"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_PRIVATE_BASE) return "src_private_base"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_PRIVATE_LIMIT) return "src_private_limit"; if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_LITERAL) return "literal"; break; }
+case OperandType::OPR_SSRC_BARRIER_ID: { if (encoding_value_ == OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0) return "m0"; break; }
+case OperandType::OPR_SSRC_LANESEL: { if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN && encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MAX) return reg_name("s", encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN, size_bits_); if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN && encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MAX) return reg_name("ttmp", encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN, size_bits_); if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_LO) return "vcc_lo"; if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_HI) return "vcc_hi"; if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_NULL) return "null"; if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_M0) return "m0"; break; }
+case OperandType::OPR_SSRC_SPECIAL_SCC: { if (encoding_value_ == OpSelSsrcSpecialScc::OPR_SSRC_SPECIAL_SCC_SRC_SCC) return "src_scc"; break; }
+case OperandType::OPR_TGT: { if (encoding_value_ == OpSelTgt::OPR_TGT_MRT0) return "mrt0"; if (encoding_value_ == OpSelTgt::OPR_TGT_MRT1) return "mrt1"; if (encoding_value_ == OpSelTgt::OPR_TGT_MRT2) return "mrt2"; if (encoding_value_ == OpSelTgt::OPR_TGT_MRT3) return "mrt3"; if (encoding_value_ == OpSelTgt::OPR_TGT_MRT4) return "mrt4"; if (encoding_value_ == OpSelTgt::OPR_TGT_MRT5) return "mrt5"; if (encoding_value_ == OpSelTgt::OPR_TGT_MRT6) return "mrt6"; if (encoding_value_ == OpSelTgt::OPR_TGT_MRT7) return "mrt7"; if (encoding_value_ == OpSelTgt::OPR_TGT_MRTZ) return "mrtz"; if (encoding_value_ == OpSelTgt::OPR_TGT_POS0) return "pos0"; if (encoding_value_ == OpSelTgt::OPR_TGT_POS1) return "pos1"; if (encoding_value_ == OpSelTgt::OPR_TGT_POS2) return "pos2"; if (encoding_value_ == OpSelTgt::OPR_TGT_POS3) return "pos3"; if (encoding_value_ == OpSelTgt::OPR_TGT_POS4) return "pos4"; if (encoding_value_ == OpSelTgt::OPR_TGT_PRIM) return "prim"; if (encoding_value_ == OpSelTgt::OPR_TGT_DUAL_SRC_BLEND0) return "dual_src_blend0"; if (encoding_value_ == OpSelTgt::OPR_TGT_DUAL_SRC_BLEND1) return "dual_src_blend1"; break; }
+case OperandType::OPR_VCC: { if (encoding_value_ == OpSelVcc::OPR_VCC_VCC) return "vcc"; break; }
+case OperandType::OPR_VGPR: { if (encoding_value_ >= OpSelVgpr::OPR_VGPR_VGPR_MIN && encoding_value_ <= OpSelVgpr::OPR_VGPR_VGPR_MAX) return reg_name("v", encoding_value_ - OpSelVgpr::OPR_VGPR_VGPR_MIN, size_bits_); break; }
+case OperandType::OPR_CLAUSE: return std::to_string(encoding_value_);
+case OperandType::OPR_DELAY: return std::to_string(encoding_value_);
+case OperandType::OPR_HWREG: return std::to_string(encoding_value_);
+case OperandType::OPR_LABEL: return std::to_string(encoding_value_);
+case OperandType::OPR_SENDMSG: return std::to_string(encoding_value_);
+case OperandType::OPR_SENDMSG_RTN: return std::to_string(encoding_value_);
+case OperandType::OPR_SIMM16: return std::to_string(encoding_value_);
+case OperandType::OPR_SIMM24: return std::to_string(encoding_value_);
+case OperandType::OPR_SIMM32: return std::format("0x{:x}", encoding_value_);
+case OperandType::OPR_SIMM5: return std::to_string(encoding_value_);
+case OperandType::OPR_SIMM8: return std::to_string(encoding_value_);
+case OperandType::OPR_SLEEP: return std::to_string(encoding_value_);
+case OperandType::OPR_VERSION: return std::to_string(encoding_value_);
+case OperandType::OPR_WAITCNT: {
+  uint32_t vmcnt = (encoding_value_ & 0xF) | (((encoding_value_ >> 14) & 0x3) << 4);
+uint32_t expcnt = (encoding_value_ >> 4) & 0x7;
+uint32_t lgkmcnt = (encoding_value_ >> 8) & 0x3F;
+  return std::format("vmcnt({}) expcnt({}) lgkmcnt({})", vmcnt, expcnt, lgkmcnt);
+}
+case OperandType::OPR_WAIT_ALU: return std::to_string(encoding_value_);
+case OperandType::OPR_WAIT_EVENT: return std::to_string(encoding_value_);
+case OperandType::OPR_WAIT_MEM_DS: return std::to_string(encoding_value_);
+}
+return std::to_string(encoding_value_);
 }
 
 namespace {
@@ -627,10 +189,8 @@ void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {
 
 void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {
   if (ev <= 105) {
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
-                       static_cast<uint32_t>(val));
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
-                       static_cast<uint32_t>(val >> 32));
+    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));
+    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));
     return;
   }
   if (ev == 106) {
@@ -645,12 +205,15 @@ void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {
 }
 
 bool is_vgpr_only_type(OperandType t) {
-  return t == OperandType::OPR_VGPR || t == OperandType::OPR_SRC_VGPR;
+  return t == OperandType::OPR_VGPR ||
+         t == OperandType::OPR_SRC_VGPR;
 }
 
 bool is_immediate_type(OperandType t) {
-  return t == OperandType::OPR_SIMM16 || t == OperandType::OPR_SIMM32 ||
-         t == OperandType::OPR_SIMM8 || t == OperandType::OPR_LABEL ||
+  return t == OperandType::OPR_SIMM16 ||
+         t == OperandType::OPR_SIMM32 ||
+         t == OperandType::OPR_SIMM8 ||
+         t == OperandType::OPR_LABEL ||
          t == OperandType::OPR_WAITCNT;
 }
 
@@ -659,6 +222,7 @@ uint32_t vgpr_index(OperandType opr_type, int ev) {
     return static_cast<uint32_t>(ev);
   return static_cast<uint32_t>(ev - 256);
 }
+
 
 } // namespace
 

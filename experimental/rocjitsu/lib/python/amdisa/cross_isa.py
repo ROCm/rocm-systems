@@ -216,12 +216,20 @@ class CrossIsaAnalyzer:
                     # Shareable across 2+ ISAs
                     family_name = self._classify_family(set(group_isas))
                     # Find an entry that matches this group's signatures
-                    _, enc0, inst0, sem0 = next(
-                        e for e in entries
-                        if e[0] == group_isas[0]
-                        and _field_signature(e[1]) == fsig
-                        and _operand_signature(e[2]) == osig
+                    next_match = next(
+                        (e for e in entries
+                         if e[0] == group_isas[0]
+                         and _field_signature(e[1]) == fsig
+                         and _operand_signature(e[2]) == osig),
+                        None
                     )
+                    if next_match is None:
+                        raise ValueError(
+                            f"Failed to find matching entry for mnemonic '{mnemonic}' "
+                            f"in ISA '{group_isas[0]}' with field_sig={fsig} and "
+                            f"operand_sig={osig}. This indicates an internal analyzer bug."
+                        )
+                    _, enc0, inst0, sem0 = next_match
                     plan.family_shared.setdefault(family_name, {})[(mnemonic, enc0.enc_name)] = SharedInstInfo(
                         mnemonic=mnemonic,
                         encoding_name=enc0.enc_name,

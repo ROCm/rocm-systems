@@ -14,415 +14,463 @@
 namespace rocjitsu {
 namespace cdna1 {
 
-class FlatLoadUbyteFlat : public Flat {
-public:
-  FlatLoadUbyteFlat(const MachineInst *inst);
+class FlatLoadUbyteFlat : public Flat
+{
+  public:
+   FlatLoadUbyteFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
-};
+} ;
 
-class FlatLoadSbyteFlat : public Flat {
-public:
-  FlatLoadSbyteFlat(const MachineInst *inst);
+class FlatLoadSbyteFlat : public Flat
+{
+  public:
+   FlatLoadSbyteFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
-};
+} ;
 
-class FlatLoadUshortFlat : public Flat {
-public:
-  FlatLoadUshortFlat(const MachineInst *inst);
+class FlatLoadUshortFlat : public Flat
+{
+  public:
+   FlatLoadUshortFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
-};
+} ;
 
-class FlatLoadSshortFlat : public Flat {
-public:
-  FlatLoadSshortFlat(const MachineInst *inst);
+class FlatLoadSshortFlat : public Flat
+{
+  public:
+   FlatLoadSshortFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
-};
+} ;
 
-class FlatLoadDwordFlat : public Flat {
-public:
-  FlatLoadDwordFlat(const MachineInst *inst);
+class FlatLoadDwordFlat : public Flat
+{
+  public:
+   FlatLoadDwordFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
-};
+} ;
 
-class FlatLoadDwordx2Flat : public Flat {
-public:
-  FlatLoadDwordx2Flat(const MachineInst *inst);
+class FlatLoadDwordx2Flat : public Flat
+{
+  public:
+   FlatLoadDwordx2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
-};
+} ;
 
-class FlatLoadDwordx3Flat : public Flat {
-public:
-  FlatLoadDwordx3Flat(const MachineInst *inst);
+class FlatLoadDwordx3Flat : public Flat
+{
+  public:
+   FlatLoadDwordx3Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
-};
+} ;
 
-class FlatLoadDwordx4Flat : public Flat {
-public:
-  FlatLoadDwordx4Flat(const MachineInst *inst);
+class FlatLoadDwordx4Flat : public Flat
+{
+  public:
+   FlatLoadDwordx4Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
-};
+} ;
 
-class FlatStoreByteFlat : public Flat {
-public:
-  FlatStoreByteFlat(const MachineInst *inst);
+class FlatStoreByteFlat : public Flat
+{
+  public:
+   FlatStoreByteFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatStoreByteD16HiFlat : public Flat {
-public:
-  FlatStoreByteD16HiFlat(const MachineInst *inst);
+class FlatStoreByteD16HiFlat : public Flat
+{
+  public:
+   FlatStoreByteD16HiFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatStoreShortFlat : public Flat {
-public:
-  FlatStoreShortFlat(const MachineInst *inst);
+class FlatStoreShortFlat : public Flat
+{
+  public:
+   FlatStoreShortFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatStoreShortD16HiFlat : public Flat {
-public:
-  FlatStoreShortD16HiFlat(const MachineInst *inst);
+class FlatStoreShortD16HiFlat : public Flat
+{
+  public:
+   FlatStoreShortD16HiFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatStoreDwordFlat : public Flat {
-public:
-  FlatStoreDwordFlat(const MachineInst *inst);
+class FlatStoreDwordFlat : public Flat
+{
+  public:
+   FlatStoreDwordFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatStoreDwordx2Flat : public Flat {
-public:
-  FlatStoreDwordx2Flat(const MachineInst *inst);
+class FlatStoreDwordx2Flat : public Flat
+{
+  public:
+   FlatStoreDwordx2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatStoreDwordx3Flat : public Flat {
-public:
-  FlatStoreDwordx3Flat(const MachineInst *inst);
+class FlatStoreDwordx3Flat : public Flat
+{
+  public:
+   FlatStoreDwordx3Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatStoreDwordx4Flat : public Flat {
-public:
-  FlatStoreDwordx4Flat(const MachineInst *inst);
+class FlatStoreDwordx4Flat : public Flat
+{
+  public:
+   FlatStoreDwordx4Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatLoadUbyteD16Flat : public Flat {
-public:
-  FlatLoadUbyteD16Flat(const MachineInst *inst);
+class FlatLoadUbyteD16Flat : public Flat
+{
+  public:
+   FlatLoadUbyteD16Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
-};
+} ;
 
-class FlatLoadUbyteD16HiFlat : public Flat {
-public:
-  FlatLoadUbyteD16HiFlat(const MachineInst *inst);
+class FlatLoadUbyteD16HiFlat : public Flat
+{
+  public:
+   FlatLoadUbyteD16HiFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
-};
+} ;
 
-class FlatLoadSbyteD16Flat : public Flat {
-public:
-  FlatLoadSbyteD16Flat(const MachineInst *inst);
+class FlatLoadSbyteD16Flat : public Flat
+{
+  public:
+   FlatLoadSbyteD16Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
-};
+} ;
 
-class FlatLoadSbyteD16HiFlat : public Flat {
-public:
-  FlatLoadSbyteD16HiFlat(const MachineInst *inst);
+class FlatLoadSbyteD16HiFlat : public Flat
+{
+  public:
+   FlatLoadSbyteD16HiFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
-};
+} ;
 
-class FlatLoadShortD16Flat : public Flat {
-public:
-  FlatLoadShortD16Flat(const MachineInst *inst);
+class FlatLoadShortD16Flat : public Flat
+{
+  public:
+   FlatLoadShortD16Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
-};
+} ;
 
-class FlatLoadShortD16HiFlat : public Flat {
-public:
-  FlatLoadShortD16HiFlat(const MachineInst *inst);
+class FlatLoadShortD16HiFlat : public Flat
+{
+  public:
+   FlatLoadShortD16HiFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
-};
+} ;
 
-class FlatAtomicSwapFlat : public Flat {
-public:
-  FlatAtomicSwapFlat(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data;
-};
-
-class FlatAtomicCmpswapFlat : public Flat {
-public:
-  FlatAtomicCmpswapFlat(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data;
-};
-
-class FlatAtomicAddFlat : public Flat {
-public:
-  FlatAtomicAddFlat(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand addr;
-  Operand data;
-};
-
-class FlatAtomicSubFlat : public Flat {
-public:
-  FlatAtomicSubFlat(const MachineInst *inst);
+class FlatAtomicSwapFlat : public Flat
+{
+  public:
+   FlatAtomicSwapFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicSminFlat : public Flat {
-public:
-  FlatAtomicSminFlat(const MachineInst *inst);
+class FlatAtomicCmpswapFlat : public Flat
+{
+  public:
+   FlatAtomicCmpswapFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicUminFlat : public Flat {
-public:
-  FlatAtomicUminFlat(const MachineInst *inst);
+class FlatAtomicAddFlat : public Flat
+{
+  public:
+   FlatAtomicAddFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicSmaxFlat : public Flat {
-public:
-  FlatAtomicSmaxFlat(const MachineInst *inst);
+class FlatAtomicSubFlat : public Flat
+{
+  public:
+   FlatAtomicSubFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicUmaxFlat : public Flat {
-public:
-  FlatAtomicUmaxFlat(const MachineInst *inst);
+class FlatAtomicSminFlat : public Flat
+{
+  public:
+   FlatAtomicSminFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicAndFlat : public Flat {
-public:
-  FlatAtomicAndFlat(const MachineInst *inst);
+class FlatAtomicUminFlat : public Flat
+{
+  public:
+   FlatAtomicUminFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicOrFlat : public Flat {
-public:
-  FlatAtomicOrFlat(const MachineInst *inst);
+class FlatAtomicSmaxFlat : public Flat
+{
+  public:
+   FlatAtomicSmaxFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicXorFlat : public Flat {
-public:
-  FlatAtomicXorFlat(const MachineInst *inst);
+class FlatAtomicUmaxFlat : public Flat
+{
+  public:
+   FlatAtomicUmaxFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicIncFlat : public Flat {
-public:
-  FlatAtomicIncFlat(const MachineInst *inst);
+class FlatAtomicAndFlat : public Flat
+{
+  public:
+   FlatAtomicAndFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicDecFlat : public Flat {
-public:
-  FlatAtomicDecFlat(const MachineInst *inst);
+class FlatAtomicOrFlat : public Flat
+{
+  public:
+   FlatAtomicOrFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicSwapX2Flat : public Flat {
-public:
-  FlatAtomicSwapX2Flat(const MachineInst *inst);
+class FlatAtomicXorFlat : public Flat
+{
+  public:
+   FlatAtomicXorFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicCmpswapX2Flat : public Flat {
-public:
-  FlatAtomicCmpswapX2Flat(const MachineInst *inst);
+class FlatAtomicIncFlat : public Flat
+{
+  public:
+   FlatAtomicIncFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicAddX2Flat : public Flat {
-public:
-  FlatAtomicAddX2Flat(const MachineInst *inst);
+class FlatAtomicDecFlat : public Flat
+{
+  public:
+   FlatAtomicDecFlat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicSubX2Flat : public Flat {
-public:
-  FlatAtomicSubX2Flat(const MachineInst *inst);
+class FlatAtomicSwapX2Flat : public Flat
+{
+  public:
+   FlatAtomicSwapX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicSminX2Flat : public Flat {
-public:
-  FlatAtomicSminX2Flat(const MachineInst *inst);
+class FlatAtomicCmpswapX2Flat : public Flat
+{
+  public:
+   FlatAtomicCmpswapX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicUminX2Flat : public Flat {
-public:
-  FlatAtomicUminX2Flat(const MachineInst *inst);
+class FlatAtomicAddX2Flat : public Flat
+{
+  public:
+   FlatAtomicAddX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicSmaxX2Flat : public Flat {
-public:
-  FlatAtomicSmaxX2Flat(const MachineInst *inst);
+class FlatAtomicSubX2Flat : public Flat
+{
+  public:
+   FlatAtomicSubX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicUmaxX2Flat : public Flat {
-public:
-  FlatAtomicUmaxX2Flat(const MachineInst *inst);
+class FlatAtomicSminX2Flat : public Flat
+{
+  public:
+   FlatAtomicSminX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicAndX2Flat : public Flat {
-public:
-  FlatAtomicAndX2Flat(const MachineInst *inst);
+class FlatAtomicUminX2Flat : public Flat
+{
+  public:
+   FlatAtomicUminX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicOrX2Flat : public Flat {
-public:
-  FlatAtomicOrX2Flat(const MachineInst *inst);
+class FlatAtomicSmaxX2Flat : public Flat
+{
+  public:
+   FlatAtomicSmaxX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicXorX2Flat : public Flat {
-public:
-  FlatAtomicXorX2Flat(const MachineInst *inst);
+class FlatAtomicUmaxX2Flat : public Flat
+{
+  public:
+   FlatAtomicUmaxX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicIncX2Flat : public Flat {
-public:
-  FlatAtomicIncX2Flat(const MachineInst *inst);
+class FlatAtomicAndX2Flat : public Flat
+{
+  public:
+   FlatAtomicAndX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
 
-class FlatAtomicDecX2Flat : public Flat {
-public:
-  FlatAtomicDecX2Flat(const MachineInst *inst);
+class FlatAtomicOrX2Flat : public Flat
+{
+  public:
+   FlatAtomicOrX2Flat(const MachineInst * inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data;
-};
+} ;
+
+class FlatAtomicXorX2Flat : public Flat
+{
+  public:
+   FlatAtomicXorX2Flat(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data;
+} ;
+
+class FlatAtomicIncX2Flat : public Flat
+{
+  public:
+   FlatAtomicIncX2Flat(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data;
+} ;
+
+class FlatAtomicDecX2Flat : public Flat
+{
+  public:
+   FlatAtomicDecX2Flat(const MachineInst * inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data;
+} ;
 
 } // namespace cdna1
 } // namespace rocjitsu

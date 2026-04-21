@@ -17,16 +17,16 @@ namespace cdna4 {
 
 class Operand : public IsaOperand<Isa> {
 public:
-  Operand(int size_bits, OperandType opr_type, int encoding_value);
-  std::string name() const override;
-  uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;
-  uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;
-  void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const override;
-  void write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const override;
-  uint64_t read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const override;
-  void write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const override;
-  uint64_t read_scalar64(const amdgpu::Wavefront &wf) const override;
-  void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const override;
+Operand(int size_bits, OperandType opr_type, int encoding_value);
+std::string name() const override;
+uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;
+uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;
+void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const override;
+void write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const override;
+uint64_t read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const override;
+void write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const override;
+uint64_t read_scalar64(const amdgpu::Wavefront &wf) const override;
+void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const override;
 };
 
 } // namespace cdna4
