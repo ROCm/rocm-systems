@@ -43,6 +43,20 @@
 // exercise the rewrite opt in per RUN line, while the
 // `c1_wave_id_lift_scalarized` refusal fixture keeps the honest
 // silent-miscompile gate with the flag off.
+//
+// --enable-wave-native. Optional; default off. Selects
+// `WaveNativeProjection` instead of `ModuloReplicationProjection`
+// for wave32 source → wave64 target cross-widening. Under wave-
+// native the kernel entry emits `@llvm.amdgcn.init_whole_wave` so
+// hardware EXEC = -1 for the body, which makes the WMMA → MFMA
+// pipeline in `wmma_lowering.cpp` correct on the upper half of the
+// Wave64 target. See `wave_projection.{hpp,cpp}` for the projection
+// class and hotswap/docs/wave-size-translation.md §2.2 for the
+// projection ladder. Lit fixtures that rely on the wave-native IR
+// shape (`v_cmpx_ballot`, the four `wmma_*`) opt in per RUN line;
+// kernels outside the matmul / WMMA subset stay on the modulo-
+// replication default until the corpus sweep validates the
+// broader flip.
 
 #include "code_object_utils.hpp"
 #include "pipeline.hpp"
@@ -100,13 +114,14 @@ int usage() {
       stderr,
       "usage:\n"
       "  raise_cli <code-object.co|.hsaco> [--isa=<arch>] "
-      "[--target-isa=<arch>] [--enable-writelane-rewrite]\n"
+      "[--target-isa=<arch>] [--enable-writelane-rewrite] "
+      "[--enable-wave-native]\n"
       "  raise_cli <code-object.co|.hsaco> --emit-ir[=<kernel>] "
       "[--isa=<arch>] [--target-isa=<arch>] "
-      "[--enable-writelane-rewrite]\n"
+      "[--enable-writelane-rewrite] [--enable-wave-native]\n"
       "  raise_cli <code-object.co|.hsaco> --write-hsaco=<path> "
       "[--kernel=<name>] [--isa=<arch>] [--target-isa=<arch>] "
-      "[--enable-writelane-rewrite]\n"
+      "[--enable-writelane-rewrite] [--enable-wave-native]\n"
       "\n"
       "Default mode: emits per-kernel OK/FAIL lines on stdout in the format\n"
       "  kerneldex coverage expects. Exits 0 iff every kernel raises.\n"
@@ -120,6 +135,9 @@ int usage() {
       "--enable-writelane-rewrite: turn on the cross-widen-divergent\n"
       "  writelane/readlane rewrite (default off; see wave-size-\n"
       "  translation.md \u00a75.6.3).\n"
+      "--enable-wave-native: select WaveNativeProjection for wave32\n"
+      "  source \u2192 wave64 target cross-widening (default off; see\n"
+      "  wave-size-translation.md \u00a72.2).\n"
       "ISA is inferred from the filename when --isa is not given.\n");
   return 2;
 }
@@ -132,6 +150,7 @@ int main(int argc, char **argv) {
   std::string targetIsa;
   bool emitIr = false;
   bool enableWritelaneRewrite = false;
+  bool enableWaveNative = false;
   std::string emitIrKernel;
   std::string writeHsacoPath;
   std::string writeHsacoKernel;
@@ -160,6 +179,8 @@ int main(int argc, char **argv) {
       writeHsacoKernel = a.substr(9);
     } else if (a == "--enable-writelane-rewrite") {
       enableWritelaneRewrite = true;
+    } else if (a == "--enable-wave-native") {
+      enableWaveNative = true;
     } else if (!a.empty() && a[0] == '-') {
       std::fprintf(stderr, "raise_cli: unknown flag: %s\n", a.c_str());
       return usage();
@@ -243,7 +264,8 @@ int main(int argc, char **argv) {
         transpiler::findKernelSymbolOffset(coData, target);
     auto raised = transpiler::raiseToIR(text.bytes, isa, target, meta,
                                         kernelOffset, targetIsa,
-                                        enableWritelaneRewrite);
+                                        enableWritelaneRewrite,
+                                        enableWaveNative);
     if (!raised.success) {
       // Contract: raiseToIR only populates RaiseResult::irText on the
       // success path (the last write before setting `success = true`),
@@ -304,7 +326,8 @@ int main(int argc, char **argv) {
     }
     std::string effectiveTargetIsa = targetIsa.empty() ? isa : targetIsa;
     auto pipe = transpiler::runPipeline(coData, isa, effectiveTargetIsa,
-                                        target, enableWritelaneRewrite);
+                                        target, enableWritelaneRewrite,
+                                        enableWaveNative);
     if (!pipe.success) {
       std::fprintf(stderr,
                    "raise_cli: pipeline failed for kernel '%s' (lifted=%d/%d, "
@@ -362,7 +385,8 @@ int main(int argc, char **argv) {
       auto meta = transpiler::extractKernelMeta(coData, kName);
       auto raised = transpiler::raiseToIR(text.bytes, isa, kName, meta,
                                           /*kernelOffset=*/0, targetIsa,
-                                          enableWritelaneRewrite);
+                                          enableWritelaneRewrite,
+                                          enableWaveNative);
       shm->done = true;
       shm->success = raised.success;
       shm->lifted = raised.liftedCount;

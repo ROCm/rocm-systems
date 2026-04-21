@@ -25,17 +25,25 @@ struct PipelineResult {
 /// `rewrite_cross_lane_divergent.{hpp,cpp}` for the rewrite contract
 /// and wave-size-translation.md §5.6.3 for the principled derivation.
 /// Default off.
+///
+/// `enableWaveNative` opt-in selects `WaveNativeProjection` for
+/// wave32 → wave64 cross-widening (see `wave_projection.{hpp,cpp}`
+/// and wave-size-translation.md §2.2 projection ladder). Default off
+/// — `ModuloReplicationProjection` remains the canonical choice
+/// until the corpus sweep under wave-native confirms no regressions.
 PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
                            const std::string &targetISA,
                            const std::string &kernelName,
-                           bool enableWritelaneRewrite = false);
+                           bool enableWritelaneRewrite = false,
+                           bool enableWaveNative = false);
 
 /// Cross-architecture pipeline: raises using sourceISA, lowers to targetISA.
 PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
                            const std::string &sourceISA,
                            const std::string &targetISA,
                            const std::string &kernelName,
-                           bool enableWritelaneRewrite = false);
+                           bool enableWritelaneRewrite = false,
+                           bool enableWaveNative = false);
 
 /// Raise and lower ALL kernels in a code object, producing a single merged
 /// HSACO containing every kernel.  Returns success only if every kernel was
@@ -44,7 +52,8 @@ PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
 PipelineResult runPipelineAllKernels(const std::vector<uint8_t> &codeObjectData,
                                      const std::string &sourceISA,
                                      const std::string &targetISA,
-                                     bool enableWritelaneRewrite = false);
+                                     bool enableWritelaneRewrite = false,
+                                     bool enableWaveNative = false);
 
 /// Process-global "strict mode" toggle, controlled by the
 /// `HSA_SALMON_STRICT` environment variable. When set to a non-empty

@@ -257,9 +257,22 @@ static void doTestMatmul(const char *hsacoFile, int M, int N, int K,
   // 64x64-tile sibling does not trigger the rewrite (no divergent
   // writelane sites) and is unaffected — the flag is only observed at
   // sites where the oracle flags a lane-divergent scalar feed.
+  // Matmul also opts in to `WaveNativeProjection` for wave32 → wave64
+  // cross-widening: the WMMA → MFMA redistribute / MFMA / collect
+  // pipeline requires hardware EXEC = -1 on all 64 target lanes so
+  // the upper half (lanes 32..63, which hold source wave 3's portion
+  // of a 128×128 output tile) actually participates in the MFMA
+  // collective. Without this, the classic partial-EXEC failure mode
+  // leaves rows 12..15 of each Wave64 MFMA sub-tile undefined, which
+  // manifested as ~3% numerical errors on random-input runs before
+  // the flag (uniform-diag masked the defect because its reference
+  // is position-invariant). See `wmma_lowering.cpp`'s "Partial-wave
+  // correctness and hardware EXEC" header and
+  // `WaveNativeProjection::emitInitialExec` for the contract.
   auto result = transpiler::runPipeline(data, "gfx1250", "gfx942",
                                         "matmul_kernel",
-                                        /*enableWritelaneRewrite=*/true);
+                                        /*enableWritelaneRewrite=*/true,
+                                        /*enableWaveNative=*/true);
   ASSERT_TRUE(result.success) << "Pipeline failed for matmul " << label;
   printf("  Pipeline: raised %d/%d insts, HSACO=%zu bytes\n",
          result.liftedCount, result.totalCount, result.hsaco.size());

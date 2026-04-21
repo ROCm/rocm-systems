@@ -1,4 +1,5 @@
 ; RUN: %raise_cli %wmma_i32_16x16x64_iu8_co --isa=gfx1250 --target-isa=gfx942 \
+; RUN:     --enable-wave-native \
 ; RUN:     --emit-ir=wmma_i32_16x16x64_iu8_kernel 2>/dev/null \
 ; RUN:   | %FileCheck %s
 ;
@@ -37,19 +38,16 @@
 ;      match — same pack type as the FP8/BF8 siblings, divergent
 ;      only in the dispatched intrinsic name.
 ;
-;   5. Each Wave32 group pass is wrapped in EIGHT
-;      `@llvm.amdgcn.strict.wwm.i32` calls — one per result
-;      dword — fencing the redistribute -> MFMA1 -> MFMA2 -> collect
-;      chain in Whole-Wave Mode, so lanes 32-63 execute the
-;      lower-half group even when the kernel is launched at
-;      blockDim == 32 (partial-wave Wave32 launch on gfx942 Wave64).
-;      Same WWM pattern as the f32-acc siblings — the per-dword
-;      i32 shape is independent of the accumulator element type
-;      (the fence is over per-lane dword packing, NOT over the
-;      accumulator itself). Per-dword rather than
-;      `strict.wwm.v8i32` on the packed vector because
-;      `SIPreAllocateWWMRegs` cannot always find an 8-VGPR aligned
-;      physreg in WMMA-heavy kernels.
+;   5. There is NO in-file `@llvm.amdgcn.strict.wwm*` marker around
+;      the redistribute -> MFMA chain. Partial-wave correctness is
+;      supplied kernel-wide by a single `@llvm.amdgcn.init_whole_wave`
+;      call at function entry (emitted by
+;      `WaveNativeProjection::emitInitialExec`), which forces
+;      hardware EXEC = -1 for the remainder of the function while
+;      preserving the source-modeled EXEC in the transpiler's
+;      alloca for `emitUnderExec` side-effect gating. See
+;      `hotswap/docs/wave-size-translation.md` §5.6.1 for the
+;      register-allocator rationale behind this design.
 ;
 ; NEGATIVE PINS:
 ;
@@ -62,8 +60,20 @@
 ;
 ;   * NO i32-acc MFMAs of WRONG K (mfma.i32.16x16x16i8, K=16) — the
 ;     dispatch must select the K=32 i8 MFMA (16x16x32) exactly.
+;
+;   * Exactly ONE `@llvm.amdgcn.init_whole_wave` call at function
+;     entry — more than one would indicate a wave-projection bug;
+;     zero would indicate the projection hook is not wired in.
+;
+;   * Zero `@llvm.amdgcn.strict.wwm*` calls anywhere — a stray
+;     WWM marker would revert the lowering to the old regalloc-
+;     bottlenecked shape.
 
 ; CHECK-LABEL: define amdgpu_kernel void @wmma_i32_16x16x64_iu8_kernel(
+
+; Kernel-entry EXEC virtualisation: exactly one init_whole_wave
+; call, emitted by `WaveNativeProjection::emitInitialExec`.
+; CHECK: call i1 @llvm.amdgcn.init.whole.wave()
 
 ; Per-MFMA bitcast to i64 (CDNA3 i8 MFMA element type).
 ; CHECK: %{{.*}} = bitcast <2 x i32> %{{.*}} to i64
@@ -75,20 +85,17 @@
 ; First group pass:
 ; CHECK: %mfma1 = call <4 x i32> @llvm.amdgcn.mfma.i32.16x16x32.i8(i64 %{{[^,]+}}, i64 %{{[^,]+}}, <4 x i32> %{{[^,]+}}, i32 0, i32 0, i32 0)
 ; CHECK: %mfma2 = call <4 x i32> @llvm.amdgcn.mfma.i32.16x16x32.i8(i64 %{{[^,]+}}, i64 %{{[^,]+}}, <4 x i32> %mfma1, i32 0, i32 0, i32 0)
-; First group's 8 per-dword WWM markers.
-; CHECK-COUNT-8: call i32 @llvm.amdgcn.strict.wwm.i32(i32 %{{[^)]+}})
 
 ; Second group pass (lane indices 32..63):
 ; CHECK: %mfma1{{[0-9]+}} = call <4 x i32> @llvm.amdgcn.mfma.i32.16x16x32.i8(i64 %{{[^,]+}}, i64 %{{[^,]+}}, <4 x i32> %{{[^,]+}}, i32 0, i32 0, i32 0)
 ; CHECK: %mfma2{{[0-9]+}} = call <4 x i32> @llvm.amdgcn.mfma.i32.16x16x32.i8(i64 %{{[^,]+}}, i64 %{{[^,]+}}, <4 x i32> %mfma1{{[0-9]+}}, i32 0, i32 0, i32 0)
-; Second group's 8 per-dword WWM markers.
-; CHECK-COUNT-8: call i32 @llvm.amdgcn.strict.wwm.i32(i32 %{{[^)]+}})
 
-; Exactly 16 strict.wwm.i32 calls total (2 groups × 8 dwords); no
-; more after the per-group markers above, and no vector-typed
-; markers anywhere in the kernel.
+; No in-file WWM markers anywhere; the kernel-entry init_whole_wave
+; above is the sole hardware-EXEC-virtualisation signal. Only one
+; init_whole_wave call per kernel.
 ; CHECK-NOT: call i32 @llvm.amdgcn.strict.wwm.i32(
-; CHECK-NOT: call {{.*}} @llvm.amdgcn.strict.wwm.v8i32(
+; CHECK-NOT: call {{.*}} @llvm.amdgcn.strict.wwm
+; CHECK-NOT: call {{.*}} @llvm.amdgcn.init.whole.wave
 
 ; Negative pin: NO f32-accumulator MFMA in this kernel. A regression
 ; that routed IU8 through the f32-accumulator switch arm would

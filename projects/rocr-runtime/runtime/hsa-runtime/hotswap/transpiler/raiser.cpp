@@ -67,7 +67,8 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
                       const KernelMeta &meta,
                       uint64_t kernelOffset,
                       const std::string &compilationTargetISA,
-                      bool enableWritelaneRewrite) {
+                      bool enableWritelaneRewrite,
+                      bool enableWaveNative) {
   RaiseResult result;
 
   MCState mc;
@@ -94,7 +95,38 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   auto *i32Ty = Type::getInt32Ty(C);
   auto *i64Ty = Type::getInt64Ty(C);
 
-  ModuloReplicationProjection projection(isa, targetIsa, i32Ty, i64Ty);
+  // Projection choice.
+  //
+  // `ModuloReplicationProjection` is the long-standing default: it fans
+  // each target lane onto `lane_id mod W_src` of the source EXEC mask
+  // and truncates cross-wave ballots to source width. Correct under
+  // the wave-size-obliviousness theorem (hotswap/docs/wave-size-
+  // translation.md §6); insufficient for kernels whose WMMA → MFMA
+  // redistribute / collect pipeline needs hardware EXEC = -1 on the
+  // upper half of the Wave64 target (lanes 32..63 would otherwise
+  // never update their MFMA destination VGPRs — see the file-header
+  // comment in `wmma_lowering.cpp`).
+  //
+  // `WaveNativeProjection` is the opt-in alternative for wave32
+  // source → wave64 target. Its `emitInitialExec` calls
+  // `@llvm.amdgcn.init_whole_wave` at kernel entry to force hardware
+  // EXEC = -1 for the whole kernel body while saving the original
+  // per-lane active mask into the (widened) EXEC alloca; every VGPR
+  // write / memory store / LDS op already routes through
+  // `emitUnderExec`, which rematerialises the per-lane predicate at
+  // each side-effect site. The direction gate inside the
+  // `WaveNativeProjection` constructor enforces that this projection
+  // is only instantiated when `isa.isWave32() && !targetIsa.isWave32()`
+  // — other directions fatal-error loudly to prevent a decider bug
+  // from silently picking an unsupported shape.
+  std::unique_ptr<WaveProjection> projectionPtr;
+  if (enableWaveNative && isa.isWave32() && !targetIsa.isWave32())
+    projectionPtr = std::make_unique<WaveNativeProjection>(isa, targetIsa,
+                                                             i32Ty, i64Ty);
+  else
+    projectionPtr = std::make_unique<ModuloReplicationProjection>(
+        isa, targetIsa, i32Ty, i64Ty);
+  WaveProjection &projection = *projectionPtr;
 
   // Build opcode → SemOp map from MCInstrInfo
   OpcodeMap opcMap;

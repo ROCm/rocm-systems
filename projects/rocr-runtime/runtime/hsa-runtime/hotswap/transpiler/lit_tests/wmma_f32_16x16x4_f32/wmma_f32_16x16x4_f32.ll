@@ -1,5 +1,6 @@
 ; RUN: %raise_cli %wmma_f32_16x16x4_f32_co --isa=gfx1250 \
-; RUN:     --target-isa=gfx942 --emit-ir=wmma_f32_16x16x4_f32_kernel 2>/dev/null \
+; RUN:     --target-isa=gfx942 --enable-wave-native \
+; RUN:     --emit-ir=wmma_f32_16x16x4_f32_kernel 2>/dev/null \
 ; RUN:   | %FileCheck %s
 ;
 ; Cross-target lift fixture for v_wmma_f32_16x16x4_f32 (gfx1250 RDNA4
@@ -65,19 +66,22 @@
 ;      per-Wave32-lane fragment via the shared `redistributeAcc`
 ;      path.
 ;
-;   5. Each Wave32 group pass is wrapped in EIGHT
-;      `@llvm.amdgcn.strict.wwm.i32` calls — one per result
-;      dword — fencing the entire redistribute -> MFMA -> collect
-;      chain in Whole-Wave Mode. This guarantees all 64 W64 lanes
-;      execute the MFMA pipeline regardless of the caller's EXEC
-;      mask, so partial-wave Wave32 launches (blockDim == 32) do
-;      not leave lanes 32-63 inactive and feed garbage into MFMA
-;      (see "Whole-wave mode" section in wmma_lowering.cpp /
-;      .hpp for the full correctness argument). Per-dword (not
-;      `strict.wwm.v8i32` on the packed vector) because the
-;      backend's `SIPreAllocateWWMRegs` pass cannot always find
-;      an 8-VGPR aligned physreg for a vector WWM operand in
-;      WMMA-heavy kernels.
+;   5. There is NO in-file `@llvm.amdgcn.strict.wwm*` marker around
+;      the redistribute -> MFMA -> collect chain. The partial-wave
+;      correctness guarantee (all 64 W64 lanes execute the MFMA
+;      pipeline even on a `blockDim == 32` launch) is provided by
+;      a single kernel-entry `@llvm.amdgcn.init_whole_wave` call
+;      emitted by `WaveNativeProjection::emitInitialExec` — that
+;      intrinsic sets hardware EXEC = -1 for the remainder of the
+;      function, which the redistribute / MFMA / collect chain
+;      relies on as a kernel-wide ambient. Side-effect gating
+;      against the *logical* wave32 active mask stays on
+;      `emitUnderExec` diamonds at the consuming VGPR stores,
+;      completely decoupled from hardware EXEC. See
+;      `hotswap/docs/wave-size-translation.md` §5.6.1 for the
+;      register-allocator rationale behind moving the EXEC = -1
+;      guarantee to kernel entry instead of wrapping per-MFMA
+;      WWM brackets.
 ;
 ; NEGATIVE PINS:
 ;
@@ -91,41 +95,44 @@
 ;     the K=4 SemOp fell through to the K=32/K=64 path.
 ;   * Exactly 2 `mfma.f32.16x16x4f32` calls (not 4) — the K=4
 ;     decomposition is 1 MFMA per Wave32 virtual group.
-;   * Exactly 16 `@llvm.amdgcn.strict.wwm.i32` calls (8 result
-;     dwords × 2 Wave32 virtual groups). Any other count would
-;     indicate an incorrect WWM-wrap count.
+;   * Zero `@llvm.amdgcn.strict.wwm*` calls anywhere in the kernel
+;     (the init_whole_wave entry ambient replaced them; leaving a
+;     stray WWM marker would revert the K=4 path to the old
+;     regalloc-bottlenecked shape).
+;   * Exactly ONE `@llvm.amdgcn.init_whole_wave` call at function
+;     entry (the EXEC alloca seed emitted by
+;     `WaveNativeProjection::emitInitialExec`). More than one
+;     would indicate a wave-projection bug; zero would indicate
+;     the projection hook is not wired into `AllocaRegFile::init`.
 
 ; CHECK-LABEL: define amdgpu_kernel void @wmma_f32_16x16x4_f32_kernel(
+
+; Kernel-entry EXEC virtualisation: exactly one init_whole_wave
+; call, emitted by `WaveNativeProjection::emitInitialExec`. This
+; replaces the prior per-MFMA `strict.wwm` wrap.
+; CHECK: call i1 @llvm.amdgcn.init.whole.wave()
 
 ; First group pass (Wave32 group 0: W64 lanes 0-31).
 ; The MFMA call takes scalar `float` for A and B, and `<4 x float>`
 ; for the accumulator. Pin that shape explicitly.
 ; CHECK: %mfma = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32(float %{{[^,]+}}, float %{{[^,]+}}, <4 x float> %{{[^,]+}}, i32 0, i32 0, i32 0)
 
-; The first group's 8 result dwords are each wrapped in their own
-; `@llvm.amdgcn.strict.wwm.i32` call. Per-dword (not vector-packed)
-; so `SIPreAllocateWWMRegs` sees single-VGPR operands and never
-; runs out of aligned physregs.
-; CHECK-COUNT-8: call i32 @llvm.amdgcn.strict.wwm.i32(i32 %{{[^)]+}})
-
 ; Second group pass (Wave32 group 1: W64 lanes 32-63). LLVM
 ; uniquifies the value name because `%mfma` is in use, so we
 ; allow any integer suffix.
 ; CHECK: %mfma{{[0-9]+}} = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32(float %{{[^,]+}}, float %{{[^,]+}}, <4 x float> %{{[^,]+}}, i32 0, i32 0, i32 0)
-
-; Second group's 8 per-dword WWM markers.
-; CHECK-COUNT-8: call i32 @llvm.amdgcn.strict.wwm.i32(i32 %{{[^)]+}})
 
 ; Exactly 2 MFMA calls (one per Wave32 virtual group) — NOT 4.
 ; Anchored AFTER the per-group positive checks above, so any extra
 ; call would surface here as an unexpected match.
 ; CHECK-NOT: call <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32(
 
-; Exactly 16 strict.wwm.i32 calls (8 result dwords × 2 groups);
-; no more after the per-group markers above, and no vector-typed
-; wwm markers anywhere in the kernel.
+; No in-file WWM markers around the redistribute / MFMA / collect
+; chain; the kernel-entry init_whole_wave above is the sole
+; hardware-EXEC-virtualisation signal.
 ; CHECK-NOT: call i32 @llvm.amdgcn.strict.wwm.i32(
-; CHECK-NOT: call {{.*}} @llvm.amdgcn.strict.wwm.v8i32(
+; CHECK-NOT: call {{.*}} @llvm.amdgcn.strict.wwm
+; CHECK-NOT: call {{.*}} @llvm.amdgcn.init.whole.wave
 
 ; Negative: no native gfx1250 WMMA intrinsic (we are on gfx942).
 ; CHECK-NOT: @llvm.amdgcn.wmma.f32.16x16x4.f32

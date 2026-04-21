@@ -108,8 +108,8 @@
 //
 // After both passes, a lane-ID-based select picks the correct group's result.
 //
-// Whole-wave mode (WWM)
-// ---------------------
+// Partial-wave correctness and hardware EXEC
+// -------------------------------------------
 // The redistribute / MFMA / collect pipeline is semantically a Wave64
 // collective: every MFMA input and every collect-time bpermute source
 // is physically stored in SOME lane of the Wave64, and each destination
@@ -133,38 +133,44 @@
 // output return garbage too.  Rows 8-15 of the output come out as
 // undefined / zero, and rows 0-7 get only a partial K-accumulation.
 //
-// The fix is to run the entire cross-lane pipeline in whole-wave mode
-// via `@llvm.amdgcn.strict.wwm`.  The intrinsic acts as a compile-time
-// marker: the backend walks the def-chain from its operand and wraps
-// every transitive cross-lane / MFMA / select / bitcast instruction
-// in a single WWM region bracketed by `s_or_saveexec` / `s_mov_b64
-// exec, saved`.  Inside the region EXEC = -1 so all 64 lanes write
-// their destinations, the Wave64 collective is exact, and the stale-
-// VGPR read chain is broken.  Outside the region (the final select
-// against `lane_id >= 32` and the Wave32-layout result) normal EXEC
-// is restored and only the originally-active lanes produce observable
-// writes to the WMMA destination VGPRs — which is exactly the
-// semantics of the source Wave32 WMMA.
+// The fix lives OUTSIDE this file, at the transpiler's kernel-entry
+// plumbing: `WaveNativeProjection::emitInitialExec` (in
+// `wave_projection.cpp`) emits `@llvm.amdgcn.init_whole_wave` at the
+// very top of the lifted kernel, which (a) sets hardware EXEC = -1 for
+// the remainder of the kernel and (b) captures the original per-lane
+// active mask into the transpiler's EXEC alloca. Every VGPR write,
+// memory store, LDS op, and atomic in the lifted IR already routes
+// through `RaiseContext::emitUnderExec`, which reads the alloca-backed
+// source EXEC and emits an `if (lane_active)` diamond — the AMDGPU
+// backend lowers those divergent branches by setting hardware EXEC
+// to the ballot of the per-lane predicate inside each `do` block and
+// restoring to EXEC = -1 afterwards. So between `emitUnderExec`
+// diamonds (which is where the bpermute / MFMA / select chain here
+// lives) hardware EXEC is -1, and all 64 lanes participate in the
+// Wave64 collective exactly as required.
 //
-// We emit the WWM marker per dword (8× `strict.wwm.i32` on the 8
-// result VGPRs), NOT once on a packed `<8 x i32>`.  Register-allocator
-// scalability: `SIPreAllocateWWMRegs` reserves a dedicated physical
-// VGPR per WWM virtual register, and a `<8 x i32>` WWM operand would
-// need an 8-VGPR aligned physreg that is free of interference with
-// all concurrently-live intervals.  In non-trivial WMMA-heavy
-// kernels (e.g. a 128×128 f16 matmul tile) no such aligned block
-// exists and the allocator aborts via the `physreg not found for
-// WWM expression` llvm_unreachable in SIPreAllocateWWMRegs.cpp.
-// Eight single-VGPR WWM operands only need eight independent
-// 1-VGPR slots, which are always findable, and the backend
-// coalesces back-to-back WWM regions with no intervening
-// EXEC-dependent code so the emitted machine code is typically the
-// same single `s_or_saveexec` / `s_mov_b64 exec, saved` bracket
-// either way.
+// This supersedes an earlier design that wrapped MFMA-output dwords in
+// `@llvm.amdgcn.strict.wwm`. That design was semantically correct but
+// unscalable: `SIPreAllocateWWMRegs` requires a DEDICATED physical
+// VGPR per virtual register defined inside a WWM bracket, and the
+// WWM def-chain from an MFMA output walks back through the entire
+// accumulator initialisation. A 128×128 f16 matmul tile's entry
+// region contains ~200 IMPLICIT_DEF / AV_MOV_B32 0 instructions for
+// its accumulator ring, which together with the kernel's own VGPR
+// demand exceeds gfx942's 256-VGPR pool and aborts the allocator
+// with `physreg not found for WWM expression`. Moving the EXEC = -1
+// guarantee to kernel entry sidesteps the allocator pressure entirely
+// — no intermediate vreg is ever "inside WWM" and regalloc is
+// ordinary — while preserving the partial-wave correctness property.
 //
-// `mbcnt_lo/hi` with mask=-1 stays outside the WWM region: it takes
-// an explicit lane mask operand and ignores EXEC, so its per-lane
-// result (0..63) is correct under either EXEC setting.
+// From the perspective of this file, that means the redistribute +
+// MFMA + collect chain emits ONLY ordinary IR (bpermute, bitcast,
+// select, MFMA intrinsic) with no WWM markers. The hardware EXEC = -1
+// invariant is the kernel-wide ambient set up by
+// `WaveNativeProjection::emitInitialExec`, and the `writeRegVec` call
+// in `handle_valu_vop3p.cpp` that consumes this file's return value
+// takes care of gating the Wave32-layout destination VGPRs back to
+// the original per-lane active mask.
 //
 // ============================================================================
 
@@ -186,48 +192,6 @@ static Value *emitDSBpermute(IRBuilder<> &B, Module &M,
   Function *fn = Intrinsic::getOrInsertDeclaration(
       &M, Intrinsic::amdgcn_ds_bpermute);
   return B.CreateCall(fn, {byteOffset, srcVal}, "bperm");
-}
-
-/// Wrap a value in `@llvm.amdgcn.strict.wwm`. See the "Whole-wave mode"
-/// section of the file-header comment for why the redistribute / MFMA /
-/// collect pipeline MUST execute with EXEC = all-ones regardless of
-/// the kernel-level EXEC mask. The intrinsic acts as a compile-time
-/// marker — the backend walks the def-chain from `val` and wraps the
-/// whole transitive cone of dependent instructions in a single WWM
-/// region bracketed by `s_or_saveexec` / `s_mov_b64 exec, saved`.
-static Value *wrapStrictWWM(IRBuilder<> &B, Module &M, Value *val) {
-  Function *fn = Intrinsic::getOrInsertDeclaration(
-      &M, Intrinsic::amdgcn_strict_wwm, {val->getType()});
-  return B.CreateCall(fn, {val}, "wwm");
-}
-
-/// Wrap each of the 8 result dwords in its own
-/// `@llvm.amdgcn.strict.wwm.i32` call.
-///
-/// Per-dword wrapping (vs. a single `<8 x i32>` marker) is deliberate.
-/// `SIPreAllocateWWMRegs` allocates a dedicated physical VGPR for each
-/// virtual register that becomes a WWM operand. A `<8 x i32>` WWM
-/// operand requires an 8-VGPR aligned physreg that is simultaneously
-/// unused and free of interference with other live intervals. In
-/// non-trivial kernels (e.g. a 128×128 f16 matmul tile chaining many
-/// WMMAs across a large accumulator residency) there is no such
-/// 8-VGPR block available, and the allocator aborts via the
-/// `physreg not found for WWM expression` llvm_unreachable in
-/// `SIPreAllocateWWMRegs.cpp`. Splitting into 8 i32-grained WWM
-/// operands only needs 8 independent single-VGPR slots — which are
-/// always findable — and preserves the semantic we care about: every
-/// dword carrying redistribute → MFMA → collect output is produced
-/// under WWM so lanes 32-63 execute it even on a partial-wave launch.
-///
-/// The backend is free to coalesce the 8 adjacent WWM regions into a
-/// single `s_or_saveexec` / `s_mov_b64 exec, saved` bracket when the
-/// regions are back-to-back with no EXEC-dependent code between them,
-/// so the emitted machine code is typically identical to the
-/// single-vector version while remaining register-allocatable.
-static void wwmWrap8Dwords(IRBuilder<> &B, Module &M, Type * /*i32Ty*/,
-                            Value **dwords) {
-  for (unsigned i = 0; i < 8; ++i)
-    dwords[i] = wrapStrictWWM(B, M, dwords[i]);
 }
 
 static Value *emitLaneId(IRBuilder<> &B, Module &M, Type *i32Ty) {
@@ -471,18 +435,15 @@ static void runGroupPass(IRBuilder<> &B, Module &M, RaiseContext &ctx,
   Value *mfmaDst[4];
   unpackDwords(B, mfma2, 4, ctx.i32Ty, mfmaDst);
 
+  // No WWM wrapper: the kernel-wide EXEC = -1 invariant established by
+  // `WaveNativeProjection::emitInitialExec` at kernel entry (via
+  // `@llvm.amdgcn.init_whole_wave`) guarantees that all 64 Wave64
+  // lanes execute the redistribute → MFMA chain even on a partial-
+  // wave launch.  Side-effect gating against the *logical* Wave32
+  // active mask is handled by `emitUnderExec` around the consumer's
+  // `writeRegVec` store of the result dwords, not here.
   Value *w32Lane = B.CreateAnd(laneId, B.getInt32(31), "w32_lane");
   collectResult(B, M, mfmaDst, w32Lane, resultDwords);
-
-  // Fence the whole redistribute → MFMA → collect chain into a single
-  // whole-wave-mode region. Without this, partial-wave launches (e.g.
-  // a Wave32 WMMA kernel running as blockDim == 32 on gfx942 with
-  // EXEC = 0x0000_0000_FFFF_FFFF) skip the VGPR writes on lanes
-  // 32-63, MFMA then reads garbage for the upper K-half, and the
-  // collect-time bpermute reads garbage back from the upper half of
-  // the Wave64 MFMA output. See the file-header "Whole-wave mode"
-  // section for the full correctness argument.
-  wwmWrap8Dwords(B, M, ctx.i32Ty, resultDwords);
 }
 
 Value *emitWMMAtoMFMA(RaiseContext &ctx, Value *a, Value *b, Value *c,
@@ -574,11 +535,11 @@ Value *emitWMMAtoMFMA(RaiseContext &ctx, Value *a, Value *b, Value *c,
 // redistribution reuses `redistributeAcc` (same WMMA C layout) and
 // the result collection reuses `collectResult` (same WMMA D layout).
 //
-// Whole-wave mode: as for the K=32/K=64 path, the group-pass output
-// is packed into a `<8 x i32>` and handed to `@llvm.amdgcn.strict.wwm`
-// so the redistribute / MFMA / collect chain executes with EXEC = -1
-// across all 64 Wave64 lanes.  See the file-header "Whole-wave mode"
-// section for the partial-wave correctness argument.
+// Hardware EXEC: the redistribute / MFMA / collect chain relies on
+// the kernel-wide EXEC = -1 invariant set up by
+// `WaveNativeProjection::emitInitialExec`, so no in-file WWM marker
+// is needed.  See the file-header "Partial-wave correctness and
+// hardware EXEC" section for the correctness argument.
 static void runGroupPassF32K4(IRBuilder<> &B, Module &M, RaiseContext &ctx,
                                unsigned groupBase, Value *laneId,
                                Value **aDwords, Value **bDwords,
@@ -639,13 +600,12 @@ static void runGroupPassF32K4(IRBuilder<> &B, Module &M, RaiseContext &ctx,
   Value *mfmaDst[4];
   unpackDwords(B, mfma, 4, ctx.i32Ty, mfmaDst);
 
+  // No WWM wrapper here either — kernel-entry `init_whole_wave` keeps
+  // hardware EXEC = -1 so lanes 32-63 run the redistribute / MFMA
+  // chain correctly.  See the equivalent comment in the K=32 / K=64
+  // `runGroupPass` helper above, and the file-header rationale.
   Value *w32Lane = B.CreateAnd(laneId, B.getInt32(31), "w32_lane");
   collectResult(B, M, mfmaDst, w32Lane, resultDwords);
-
-  // Fence the whole redistribute → MFMA → collect chain into a single
-  // whole-wave-mode region (same partial-wave argument as the K=32 /
-  // K=64 path above; see the file-header "Whole-wave mode" section).
-  wwmWrap8Dwords(B, M, ctx.i32Ty, resultDwords);
 }
 
 Value *emitWMMAtoMFMA_F32_16x16x4(RaiseContext &ctx, Value *a, Value *b,

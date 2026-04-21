@@ -54,7 +54,8 @@ struct RaiseContext {
 
   // Result of the static analysis that classifies every s_set_pc_i64
   // site. Owned by the raiser; the handler reads it to decide
-  // between Pattern A (br) and Pattern B (indirectbr) lowerings, and
+  // between Pattern A (direct br) and Pattern B / DispatchSet
+  // (cmp+br cascade via `emitEnumeratedDispatch`) lowerings, and
   // the raiser's main loop reads `chainTerminators` to materialise
   // call-site blockaddress writes into ret-pair SGPRs. See
   // setpc_analysis.hpp for the full contract; see semop.hpp's

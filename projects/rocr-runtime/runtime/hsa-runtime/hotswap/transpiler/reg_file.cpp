@@ -62,7 +62,16 @@ void AllocaRegFile::init(IRBuilder<> &B, Type *i32Ty, Type *i1Ty,
                           const ISAProfile &isa, const MCRegisterInfo &MRI,
                           const WaveProjection &proj) {
   projection = &proj;
-  execTy = isa.isWave32() ? i32Ty : B.getInt64Ty();
+  // EXEC storage width is chosen by the projection. Modulo-replication
+  // keeps it at source wave width (the long-standing default); wave-
+  // native cross-widening widens it to the target hardware mask so
+  // data-dependent EXEC writes survive the wave32 → wave64 lift
+  // without truncation. See `WaveProjection::execStorageTy` for the
+  // contract and `wave_projection.cpp:WaveNativeProjection` for the
+  // widened policy. `isa` continues to drive VGPR/AGPR bank sizing
+  // below — it's the *source* profile and thus the right place to
+  // read `hasAGPR` from.
+  execTy = proj.execStorageTy();
 
   const unsigned nSGPR = MRI.getRegClass(AMDGPU::SGPR_32RegClassID).getNumRegs();
   sgpr.assign(nSGPR, nullptr);
@@ -96,7 +105,17 @@ void AllocaRegFile::init(IRBuilder<> &B, Type *i32Ty, Type *i1Ty,
   scc = B.CreateAlloca(i1Ty, nullptr, "scc");
   B.CreateStore(ConstantInt::getFalse(i1Ty), scc);
   exec = B.CreateAlloca(execTy, nullptr, "exec");
-  B.CreateStore(ConstantInt::getSigned(execTy, -1), exec);
+  // The initial EXEC value is projection-dependent. Default (same-wave
+  // / modulo-replication): all-ones. Wave-native Wave32 → Wave64
+  // cross-widening: `@llvm.amdgcn.init_whole_wave` captures the
+  // original per-lane active mask and forces hardware EXEC = -1 so the
+  // WMMA → MFMA cross-lane pipeline can run across all 64 Wave64
+  // lanes even on a partial-wave dispatch. See
+  // `WaveProjection::emitInitialExec` and
+  // `WaveNativeProjection::emitInitialExec` for the correctness
+  // argument and the rationale for superseding the earlier
+  // `@llvm.amdgcn.strict.wwm`-per-MFMA-output strategy.
+  B.CreateStore(proj.emitInitialExec(B), exec);
   m0 = B.CreateAlloca(i32Ty, nullptr, "m0");
   B.CreateStore(ConstantInt::get(i32Ty, 0), m0);
   flatScr[0] = B.CreateAlloca(i32Ty, nullptr, "flat_scr_lo");
@@ -376,8 +395,8 @@ void AllocaRegFile::writeReg32(IRBuilder<> &B, ParsedReg pr, Value *v) {
   if (pr.kind == ParsedReg::EXEC) {
     Type *i32Ty = B.getInt32Ty();
     // Coerce incoming value to i32. storeExec handles width matching to
-    // execTy (i32 on wave32 / i64 on wave64). For wave64, a 32-bit write
-    // addresses only EXEC_LO or EXEC_HI, so merge with the current value.
+    // execTy; for wave64-native EXEC (execTy == i64) a 32-bit write
+    // addresses only a half of the mask and is reconciled below.
     if (v->getType() != i32Ty) {
       if (v->getType()->isPointerTy())
         v = B.CreatePtrToInt(v, B.getInt64Ty());
@@ -389,20 +408,52 @@ void AllocaRegFile::writeReg32(IRBuilder<> &B, ParsedReg pr, Value *v) {
     }
     if (execTy == i32Ty || pr.width >= 2) {
       storeExec(B, v);
-    } else {
-      Value *cur = loadExec(B);
-      Value *v64 = B.CreateZExt(v, execTy);
-      Value *merged;
-      if (pr.baseIdx == 1) {
-        Value *mask = ConstantInt::get(execTy, 0xFFFFFFFFULL);
-        merged = B.CreateOr(B.CreateAnd(cur, mask),
-                             B.CreateShl(v64, 32), "exec_hi_write");
-      } else {
-        Value *mask = ConstantInt::get(execTy, 0xFFFFFFFF00000000ULL);
-        merged = B.CreateOr(B.CreateAnd(cur, mask), v64, "exec_lo_write");
-      }
-      storeExec(B, merged);
+      return;
     }
+    // execTy is i64 and the write is a single-half EXEC_LO or EXEC_HI.
+    // Two reconciliation policies apply depending on the projection:
+    //
+    //   (a) Architectural half-write (default for wave64 source): the
+    //       source author named one 32-bit half, so preserve the other
+    //       half's live value and merge. This is the shape wave64
+    //       source kernels rely on (`s_mov_b32 exec_hi, sN` after an
+    //       `s_mov_b32 exec_lo, sM`).
+    //
+    //   (b) Wave-native cross-widening broadcast (wave32 source →
+    //       wave64 target, per `projection->broadcastNarrowExecLoWrite()`):
+    //       the source author's wave32 view treats `exec_lo` as the
+    //       whole wave mask, so the 32-bit value represents the
+    //       whole-wave intent. The wave-native projection models each
+    //       target lane as an independent source-thread equivalent,
+    //       which means a whole-wave write must fan out to every
+    //       target lane; we replicate the 32-bit value into both
+    //       halves of the widened EXEC. EXEC_HI writes cannot arise
+    //       from a wave32 source (the source ISA has no EXEC_HI), and
+    //       reaching one under wave-native is programmer error or a
+    //       raiser bug, so we fall back to (a) in that case for
+    //       robustness.
+    Value *v64 = B.CreateZExt(v, execTy);
+    if (projection && projection->broadcastNarrowExecLoWrite() &&
+        pr.baseIdx == 0) {
+      // Replicate: EXEC = (v << 32) | v. Equivalent to the
+      // "broadcast wave32 whole-wave mask across both halves of the
+      // widened EXEC" semantics.
+      Value *hi = B.CreateShl(v64, 32);
+      Value *merged = B.CreateOr(v64, hi, "exec_lo_broadcast");
+      storeExec(B, merged);
+      return;
+    }
+    Value *cur = loadExec(B);
+    Value *merged;
+    if (pr.baseIdx == 1) {
+      Value *mask = ConstantInt::get(execTy, 0xFFFFFFFFULL);
+      merged = B.CreateOr(B.CreateAnd(cur, mask),
+                           B.CreateShl(v64, 32), "exec_hi_write");
+    } else {
+      Value *mask = ConstantInt::get(execTy, 0xFFFFFFFF00000000ULL);
+      merged = B.CreateOr(B.CreateAnd(cur, mask), v64, "exec_lo_write");
+    }
+    storeExec(B, merged);
     return;
   }
   if (pr.kind == ParsedReg::VCC) {
@@ -467,7 +518,27 @@ void AllocaRegFile::writeReg64(IRBuilder<> &B, ParsedReg pr, Value *v) {
 
 void AllocaRegFile::writeRegExecWidth(IRBuilder<> &B, ParsedReg pr, Value *v) {
   if (pr.kind == ParsedReg::SGPR) {
-    if (execTy == B.getInt32Ty())
+    // SGPR storage is sized by the *source* architecture: one 32-bit
+    // SGPR on wave32 source (`s_and_saveexec_b32 s0, ...`), a 64-bit
+    // SGPR pair on wave64 source. Under modulo-replication those
+    // widths match `execTy` and no bridging is needed; under wave-
+    // native cross-widening `execTy` is `waveMaskTy_` (i64 target
+    // hardware) while the source-named SGPR is still 32-bit, so the
+    // incoming EXEC-width value must be narrowed to the source width
+    // before the store. See `WaveProjection::sourceWaveMaskTy` for the
+    // width policy. This is the symmetric counterpart of the widen-by-
+    // replication done when the value was first read via
+    // `readOpExecWidth` or computed by the `V_CMP → SGPR` ballot.
+    Type *sourceWidthTy = projection ? projection->sourceWaveMaskTy() : execTy;
+    if (v->getType() != sourceWidthTy) {
+      unsigned have = v->getType()->getPrimitiveSizeInBits();
+      unsigned want = sourceWidthTy->getPrimitiveSizeInBits();
+      if (have > want)
+        v = B.CreateTrunc(v, sourceWidthTy, "wn_exec_to_src_mask");
+      else if (have < want)
+        v = B.CreateZExt(v, sourceWidthTy, "wn_exec_to_src_mask");
+    }
+    if (sourceWidthTy == B.getInt32Ty())
       storeSGPR32(B, pr.baseIdx, v);
     else
       storeSGPR64(B, pr.baseIdx, v);

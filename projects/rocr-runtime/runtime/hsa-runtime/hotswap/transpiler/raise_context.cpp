@@ -604,6 +604,32 @@ void RaiseContext::emitUnderExec(llvm::function_ref<void()> body) {
 
 
 Value *RaiseContext::readOpExecWidth(const DecodedInst &di, unsigned opIdx) {
+  // All callers expect the returned value at `regs.execTy` (the EXEC
+  // alloca storage width). Under modulo-replication `execTy` matches
+  // the source wave-mask width and reads of source-width SGPR / imm
+  // operands are already at the right width. Under wave-native cross-
+  // widening `execTy` is wider than the source-named SGPR (i64 vs
+  // i32 on wave32 source → wave64 target), so we widen with the same
+  // symmetric replication that `writeReg32(EXEC_LO)` uses on the
+  // write side: `(v << W_src) | v` lifts a wave32 scalar wave mask
+  // to a wave64 scalar wave mask where target lane K and K+W_src
+  // agree. This keeps the save/restore round trip `s_mov_b32 sN,
+  // exec_lo; …; s_mov_b32 exec_lo, sN` behaving as the wave32
+  // author expected, and matches the replication done inside
+  // `WaveNativeProjection::extractLaneBitFromWaveMask` on the VCC
+  // consumer side.
+  auto widenToExec = [&](Value *narrow) -> Value * {
+    if (narrow->getType() == regs.execTy)
+      return narrow;
+    unsigned have = narrow->getType()->getPrimitiveSizeInBits();
+    unsigned want = regs.execTy->getPrimitiveSizeInBits();
+    if (have >= want)
+      return B.CreateZExtOrTrunc(narrow, regs.execTy);
+    Value *zext = B.CreateZExt(narrow, regs.execTy, "wn_src_to_exec_zext");
+    Value *hi = B.CreateShl(zext, have);
+    return B.CreateOr(zext, hi, "wn_src_to_exec_mask");
+  };
+
   if (di.isReg(opIdx)) {
     ParsedReg pr = parseReg(di.getReg(opIdx), opIdx);
     if (pr.kind == ParsedReg::VCC)
@@ -611,21 +637,31 @@ Value *RaiseContext::readOpExecWidth(const DecodedInst &di, unsigned opIdx) {
     if (pr.kind == ParsedReg::EXEC)
       return regs.loadExec(B);
     if (pr.kind == ParsedReg::SGPR) {
-      if (isa.isWave32())
-        return regs.loadSGPR32(B, pr.baseIdx);
-      return regs.loadSGPR64(B, pr.baseIdx);
+      Value *narrow = isa.isWave32() ? regs.loadSGPR32(B, pr.baseIdx)
+                                      : regs.loadSGPR64(B, pr.baseIdx);
+      return widenToExec(narrow);
     }
     errs() << "transpiler: readOpExecWidth unresolvable register '"
            << mc.regInfo->getName(di.getReg(opIdx)) << "' in " << di.mnemonic
            << "\n";
     return UndefValue::get(regs.execTy);
   }
-  if (di.isImm(opIdx))
-    return ConstantInt::getSigned(regs.execTy, di.getImm(opIdx));
+  // Immediate and relocation-expression operands are always encoded at
+  // the source wave-mask width (32 bits on wave32 source). Materialise
+  // the narrow constant first and then widen through the same
+  // replication path so an author's `s_mov_b32 exec_lo, 0xFFFF0000`
+  // composes the same wave64 EXEC pattern as a save/restore of that
+  // mask through an SGPR would.
+  Type *srcTy = isa.isWave32() ? i32Ty : i64Ty;
+  if (di.isImm(opIdx)) {
+    Value *narrow = ConstantInt::getSigned(srcTy, di.getImm(opIdx));
+    return widenToExec(narrow);
+  }
   if (opIdx < di.numOps() && di.inst.getOperand(opIdx).isExpr()) {
     int64_t val = 0;
     di.inst.getOperand(opIdx).getExpr()->evaluateAsAbsolute(val);
-    return ConstantInt::getSigned(regs.execTy, val);
+    Value *narrow = ConstantInt::getSigned(srcTy, val);
+    return widenToExec(narrow);
   }
   errs() << "transpiler: readOpExecWidth unresolvable operand " << opIdx
          << " in " << di.mnemonic << "\n";

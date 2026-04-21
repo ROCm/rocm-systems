@@ -56,25 +56,38 @@
 # rewrite entirely puts the kernel back into classifier-refusal, not
 # into correctness.
 #
-# The residual bug is believed to live in the WMMA→MFMA lane
-# redistribution (`wmma_lowering.cpp`) under ModuloReplication-
-# Projection — specifically, the "collect" stage that gathers Wave64
-# MFMA output back into the Wave32-shaped C fragment for source wave
-# 3 (target wave 1, lanes 48–63) appears to drop the last four rows'
-# worth of data. The wmma_lowering comment block explicitly notes
-# that partial EXEC during MFMA causes upper-lane garbage and that
-# the fix lives in WaveNativeProjection (which emits
-# `@llvm.amdgcn.init_whole_wave` at kernel entry). Today's raiser
-# picks ModuloReplication, not WaveNative, so the partial-EXEC
-# invariant isn't enforced.
+# The residual bug was originally conjectured to live in the
+# partial-EXEC WMMA → MFMA pipeline and to be cured by
+# `WaveNativeProjection::emitInitialExec`'s
+# `@llvm.amdgcn.init_whole_wave` preamble (hardware EXEC = -1 for the
+# whole kernel body). The matmul gtests now opt in to that projection
+# via `enableWaveNative=true` alongside `enableWritelaneRewrite=true`
+# (see `doTestMatmul` in `tests/gfx1250_gpu_test.cpp` and
+# `wave_projection.{hpp,cpp}`), and the HSACO shape confirms the
+# intrinsic is reaching codegen: `s_or_saveexec_b64 s[0:1], -1` at the
+# top of `matmul_kernel` and the captured original EXEC threading
+# through `v_cndmask_b32` / ballot / `emitUnderExec` diamonds exactly
+# as designed.
 #
-# Fixing that residual is out of scope for this hand-off (it is the
-# Class-3-or-4 half of wave-size-translation.md §6, not the Class-1
-# wave_id lift). Landing the symmetry fix under WILL_FAIL keeps the
+# The errors nevertheless remain: 490 for the single-tile case and
+# 1985 for the 2×2 grid, identical row pattern (output rows 124–127 /
+# 252–255) to the pre-WaveNative runs. That means the defect is NOT
+# partial EXEC at the MFMA collective — the WaveNative projection
+# provably fixes that symptom, and the error pattern is insensitive
+# to the fix. The residual must live deeper in the WMMA → MFMA lane
+# redistribution math (likely the "collect" stage in
+# `wmma_lowering.cpp` for the second half of source wave 3's tile)
+# or in some other bookkeeping the matmul kernel exercises that this
+# investigation has not yet localised.
+#
+# Fixing that residual is out of scope for this hand-off. Landing the
+# symmetry fix + WaveNative plumbing under WILL_FAIL keeps the
 # memory-aperture-violation path closed, keeps the uniform-diag test
-# as a live regression gate, and captures the remaining numerical
-# issue in the annotations below so the next follow-up knows exactly
-# where to look.
+# as a live regression gate, lands the WaveNative projection for the
+# 5 lit fixtures it was designed to unblock, and captures the
+# remaining numerical issue here so the next follow-up knows exactly
+# where to look (grep `wmma_lowering.cpp` for "COLLECT" and the
+# per-source-wave lane-group selection at the end of `runGroupPass`).
 set_tests_properties(Gfx1250Gpu.Matmul128x128_1tile PROPERTIES
   WILL_FAIL TRUE
   LABELS "transpiler;xfail"

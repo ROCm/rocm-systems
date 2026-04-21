@@ -8,6 +8,57 @@ Append-only. Newest on top.
 
 ---
 
+## 2026-04-21 — WaveNative projection alone does not fix the Matmul128x128 residual
+
+**Context.** After the writelane/readlane symmetry fix (same day, below),
+the Matmul128x128 random-input gtests still failed with ~3% numerical
+errors localised to output rows 124–127 / 252–255. The
+`wmma_lowering.cpp` file header and the `WaveNativeProjection`
+docstrings both point at partial-EXEC during WMMA → MFMA as the
+culprit, with `@llvm.amdgcn.init_whole_wave` as the documented fix.
+
+**What was done.** Finished wiring `WaveNativeProjection` end-to-end:
+added an `enableWaveNative` opt-in flag through `raiseToIR` /
+`runPipeline*` / `raise_cli`, plumbed the projection-driven EXEC
+alloca width + initial value through `reg_file.cpp`, widened the
+source-width SGPR ⇄ EXEC-width bridging in
+`raise_context.cpp::readOpExecWidth`, flipped the V_CMP → SGPR write
+in `handle_valu_vcmp.cpp` to pick `sourceWaveMaskTy()` rather than
+`execTy`, removed the now-obsolete `strict.wwm` wrappers in
+`wmma_lowering.cpp` (they are subsumed by the kernel-entry
+`init_whole_wave`), updated the 5 lit fixtures that expected the
+wave-native IR shape, and flipped `doTestMatmul` to opt in. The
+compiled HSACO for the matmul kernel grew from 83648 B to 133760 B
+and now starts with `s_or_saveexec_b64 s[0:1], -1` — confirming the
+projection reaches codegen exactly as intended.
+
+**What the evidence showed.** The matmul random-input errors did not
+change: same 490 count on the single-tile case, same 1985 on the 2×2
+grid, same row pattern (124–127 / 252–255). Under both ModRep and
+WaveNative the errors are byte-identical. That rules out partial-EXEC
+at the MFMA collective as the cause — WaveNative provably fixes
+partial EXEC, and the error pattern is insensitive to that fix.
+
+**What we still don't know.** The residual must live deeper in the
+WMMA → MFMA redistribution math — most likely in the "collect" stage
+in `wmma_lowering.cpp` for the second half of source wave 3's
+sub-tile, or in some bookkeeping the matmul exercises that the
+smaller `wmma_*` lit fixtures don't. Investigation handed off via
+`tests/xfail.cmake`'s rewritten commentary and the list of MFMA
+lane-layout equations at the top of `wmma_lowering.cpp`.
+
+**Value landed anyway.** WaveNative is a principled piece of
+infrastructure: it unblocks the 5 previously-failing lit fixtures
+(`v_cmpx_ballot`, the four `wmma_*`), provides the correct EXEC
+shape for any future kernel whose WMMA path actually does suffer
+from partial EXEC, and the `--enable-wave-native` flag structure
+lets callers opt in per surface. The `strict.wwm` per-MFMA-output
+strategy it replaces was documented to crash `SIPreAllocateWWMRegs`
+on 128×128 matmul tiles, so the refactor is net-positive even though
+it does not solve the specific matmul residual.
+
+---
+
 ## 2026-04-21 — Writelane/readlane rewrite must be symmetric under cross-widening
 
 **Symptom.** `Gfx1250Gpu.Matmul128x128*` faulted at dispatch with

@@ -48,6 +48,17 @@ Value *WaveProjection::emitLaneIdx(IRBuilder<> &B) const {
   return laneId;
 }
 
+Value *WaveProjection::emitInitialExec(IRBuilder<> &B) const {
+  // Default: the architectural boot state of a dispatched wave is
+  // "every source lane active", i.e. all-ones in the source-width
+  // EXEC storage. Projections that need to DECOUPLE the modeled
+  // EXEC from the hardware EXEC (e.g. `WaveNativeProjection` below,
+  // which forces hardware EXEC = -1 at entry via
+  // `@llvm.amdgcn.init_whole_wave` and stores the captured original
+  // per-lane active bit into the alloca) override this hook.
+  return ConstantInt::getSigned(execStorageTy(), -1);
+}
+
 // ----------------------------------------------------------------------------
 // ModuloReplicationProjection.
 // ----------------------------------------------------------------------------
@@ -126,6 +137,178 @@ Value *ModuloReplicationProjection::extractLaneBitFromWaveMask(
   Value *bit = B.CreateAnd(shifted, ConstantInt::get(targetTy, 1),
                             "vcc_lane_bit");
   return B.CreateICmpNE(bit, ConstantInt::get(targetTy, 0), "vcc_i1");
+}
+
+// ----------------------------------------------------------------------------
+// WaveNativeProjection — cross-widening (wave32 → wave64).
+//
+// The base `waveMaskTy_` is already `tgtIsa.isWave32() ? i32 : i64`,
+// which on the only supported direction (wave32 source → wave64
+// target) is `i64`. We reuse it directly for both the EXEC alloca
+// storage and the ballot/lane-active arithmetic so the widths line up
+// without any extra casting.
+// ----------------------------------------------------------------------------
+
+WaveNativeProjection::WaveNativeProjection(const ISAProfile &srcIsa,
+                                             const ISAProfile &tgtIsa,
+                                             Type *i32Ty, Type *i64Ty)
+    : WaveProjection(srcIsa, tgtIsa, i32Ty, i64Ty) {
+  // Restrict to the one translation direction where the wave-native
+  // projection's extra invariants are well-defined. Same-wave paths
+  // don't need a widened EXEC (ModRep already collapses to identity
+  // there), and narrowing (wave64 source → wave32 target) loses lanes
+  // regardless of policy — `ModuloReplicationProjection` documents the
+  // narrowing bail via `report_fatal_error` in `ballotI1ToWidth`; the
+  // wave-native projection is not a second answer for that direction.
+  if (!(srcIsa.isWave32() && !tgtIsa.isWave32()))
+    report_fatal_error(
+        "WaveNativeProjection is defined only for wave32 source → "
+        "wave64 target cross-widening; other directions must use "
+        "ModuloReplicationProjection (same-wave / narrowing) or a "
+        "future ThreadLoopProjection implementation. See hotswap/"
+        "docs/wave-size-translation.md \u00a72.2 for the projection "
+        "ladder.");
+}
+
+Value *WaveNativeProjection::emitInitialExec(IRBuilder<> &B) const {
+  // Wave32 → Wave64 cross-widening decouples the hardware EXEC (what
+  // the target gfx942 wavefront actually applies) from the modeled
+  // source EXEC (what the transpiler's `emitUnderExec` diamonds read
+  // through the alloca). At kernel entry we call
+  // `@llvm.amdgcn.init_whole_wave`, which:
+  //
+  //   (1) sets hardware EXEC = -1 (all 64 Wave64 lanes active), and
+  //   (2) returns a per-lane i1 whose true-bits form the ORIGINAL
+  //       hardware EXEC mask at dispatch time.
+  //
+  // We ballot (1) back into a wave-width i64 and return that as the
+  // value to seed the EXEC alloca with. From this point on the
+  // `emitUnderExec` diamonds guard every VGPR write, memory store,
+  // LDS op, and atomic through an IR-level `br i1 %lane_active`
+  // derived from the alloca — the backend lowers those divergent
+  // branches by setting hardware EXEC to the ballot of the
+  // per-lane predicate inside each `do` block and restoring to
+  // `EXEC = -1` afterwards, so no inactive source lane ever
+  // commits a side effect. Between `emitUnderExec` diamonds the
+  // hardware EXEC is -1, which is exactly what the WMMA → MFMA
+  // cross-lane pipeline in `wmma_lowering.cpp` needs to produce
+  // correct per-lane output on all 64 Wave64 lanes.
+  //
+  // This replaces the prior per-MFMA-output `@llvm.amdgcn.strict.wwm`
+  // strategy. See the long comment block on
+  // `WaveProjection::emitInitialExec` for the register-allocator
+  // pressure argument (`SIPreAllocateWWMRegs` requires dedicated
+  // physregs for every vreg inside a WWM bracket, which a 128×128
+  // matmul tile cannot satisfy).
+  Module *M = B.GetInsertBlock()->getModule();
+  Function *initWW = Intrinsic::getOrInsertDeclaration(
+      M, Intrinsic::amdgcn_init_whole_wave);
+  Value *originalActive = B.CreateCall(initWW, {}, "orig_active");
+  // Ballot the per-lane i1 back into a wave-width mask. Reuses the
+  // projection's own ballot emission so the width selection matches
+  // `waveMaskTy_` (i64 on Wave64 target) and the single result-type
+  // overload of `llvm.amdgcn.ballot` selected is the backend-
+  // supported one for this subtarget.
+  return ballotI1ToWidth(B, originalActive, waveMaskTy_, "saved_exec");
+}
+
+Value *WaveNativeProjection::emitLaneActiveBit(IRBuilder<> &B,
+                                                 Value *execVal) const {
+  // Target lane L is active iff bit L of the widened EXEC is set. The
+  // widened EXEC storage is `waveMaskTy_` (i64 on wave64 target), so
+  // the shift index is the full target lane id (0..63) with no modulo
+  // fold; that is the whole point of the wave-native projection
+  // relative to `ModuloReplicationProjection::emitLaneActiveBit`,
+  // which folds the target lane id into `lane_id mod W_src` and
+  // thereby collapses target lanes 0..31 with 32..63.
+  Value *laneId = emitLaneIdx(B);
+  Type *execTy = execVal->getType();
+  assert(execTy == waveMaskTy_ &&
+         "WaveNativeProjection requires EXEC storage to match the "
+         "target wave mask width; caller must size the alloca via "
+         "execStorageTy()");
+  Value *laneIdInExec = B.CreateZExtOrTrunc(laneId, execTy, "wn_lane_idx");
+  Value *shifted = B.CreateLShr(execVal, laneIdInExec, "wn_exec_at_lane");
+  Value *bit = B.CreateAnd(shifted, ConstantInt::get(execTy, 1),
+                            "wn_exec_bit");
+  return B.CreateICmpNE(bit, ConstantInt::get(execTy, 0), "wn_lane_active");
+}
+
+Value *WaveNativeProjection::ballotI1ToWidth(IRBuilder<> &B, Value *pred,
+                                              Type *resultTy,
+                                              const Twine &name) const {
+  assert(pred->getType() == B.getInt1Ty() &&
+         "ballotI1ToWidth requires an i1 predicate");
+  Module *M = B.GetInsertBlock()->getModule();
+  Function *ballot = Intrinsic::getOrInsertDeclaration(
+      M, Intrinsic::amdgcn_ballot, {waveMaskTy_});
+  Value *waveMask = B.CreateCall(ballot, {pred}, name);
+  unsigned wantedBits = resultTy->getPrimitiveSizeInBits();
+  unsigned waveBits = waveMaskTy_->getPrimitiveSizeInBits();
+  if (wantedBits == waveBits)
+    return waveMask;
+  if (wantedBits < waveBits)
+    // Narrowing the full target ballot to a source-width scalar loses
+    // the upper half (target lanes 32..63). This is the one residual
+    // truncation the wave-native projection accepts: source-ISA
+    // instructions that name a single 32-bit SGPR destination (e.g.
+    // `v_cmp_lt_u32_e64 s4, ...` on wave32) cannot hold a 64-bit
+    // mask. The `handle_valu_vcmp.cpp` V_CMPX branch asks for
+    // `resultTy = execStorageTy() = waveMaskTy_` and stays at full
+    // width; only the V_CMP→SGPR branch asks for the narrower source
+    // width and takes this trunc. Kernels that consume the truncated
+    // mask as a per-lane wave mask downstream can still miscompile,
+    // and such patterns remain the obstruction classifier's
+    // responsibility to refuse (see `wave_size_obstruction.cpp`).
+    return B.CreateTrunc(waveMask, resultTy, name + "_trunc");
+  // `wantedBits > waveBits`: wave32 target hardware ballot requested
+  // wider than its native mask. This direction only arises on same-
+  // target-wave lifts (not our wave32→wave64 cross-widening), so
+  // reaching it under WaveNativeProjection is a raiser bug.
+  report_fatal_error(
+      "WaveNativeProjection::ballotI1ToWidth: wantedBits > waveBits "
+      "is not defined for wave32 source → wave64 target cross-"
+      "widening; caller must request resultTy ≤ waveMaskTy");
+}
+
+Value *WaveNativeProjection::extractLaneBitFromWaveMask(IRBuilder<> &B,
+                                                         Value *v) const {
+  if (v->getType() == B.getInt1Ty())
+    return v;
+  Type *i64Ty = B.getInt64Ty();
+  if (v->getType()->isPointerTy())
+    v = B.CreatePtrToInt(v, i64Ty);
+  Type *targetTy = waveMaskTy_;
+  unsigned srcBits = v->getType()->getPrimitiveSizeInBits();
+  unsigned dstBits = targetTy->getPrimitiveSizeInBits();
+  if (srcBits < dstBits) {
+    // Source-width wave mask (e.g. a 32-bit SGPR that caught the
+    // output of `ballotI1ToWidth(..., i32, ...)` above) is widened
+    // back to target width by *replication* so target lane K and
+    // K+W_src read the same bit. Under wave-native this is the
+    // conservative choice — it matches what the V_CMP→SGPR trunc
+    // already implicitly assumed when it picked lanes 0..W_src-1 as
+    // canonical — and it keeps `v_cndmask_b32` / `s_and_b64 exec,
+    // ..., sN` rounds trips behaving like modulo-replication for
+    // the residual save/restore pattern. Replacing replication with
+    // a zero-extend would silently deactivate target lanes 32..63
+    // whenever the kernel restores EXEC through a 32-bit SGPR; the
+    // replication choice is the one that keeps the `v_cmpx →
+    // predicated store → s_mov_b32 exec_lo, -1` shape working.
+    Value *zext = B.CreateZExt(v, targetTy);
+    Value *shifted = B.CreateShl(zext, srcBits);
+    v = B.CreateOr(zext, shifted, "wn_mask_widen");
+  } else if (srcBits > dstBits) {
+    v = B.CreateTrunc(v, targetTy);
+  } else if (v->getType() != targetTy) {
+    v = B.CreateBitCast(v, targetTy);
+  }
+  Value *laneIdx = emitLaneIdx(B);
+  Value *laneIdxExt = B.CreateZExtOrTrunc(laneIdx, targetTy, "wn_vcc_lane_idx");
+  Value *shifted = B.CreateLShr(v, laneIdxExt, "wn_vcc_at_lane");
+  Value *bit = B.CreateAnd(shifted, ConstantInt::get(targetTy, 1),
+                            "wn_vcc_lane_bit");
+  return B.CreateICmpNE(bit, ConstantInt::get(targetTy, 0), "wn_vcc_i1");
 }
 
 // ----------------------------------------------------------------------------

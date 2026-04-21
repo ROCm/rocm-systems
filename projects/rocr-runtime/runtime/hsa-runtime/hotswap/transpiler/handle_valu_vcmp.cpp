@@ -164,40 +164,58 @@ HandlerResult handleVALU_Vcmp(RaiseContext &ctx, const DecodedInst &di,
     // per-lane "EXEC" instead of the single wave-level mask the SPE
     // model requires. The backend then lowers the SPE diamond as a
     // divergent branch on a per-lane value, narrowing hardware EXEC
-    // based on the wrong bit entirely — which surfaces as stores going
-    // missing on half the wave in cross-wave lifts (gfx1250 wave32 →
-    // gfx942 wave64). Routing through `ballotI1ToWidth` matches the
-    // VCC read path (`readVCCAsWaveMask`) and keeps EXEC wave-uniform.
+    // based on the wrong bit entirely — which surfaces as stores
+    // going missing on half the wave in cross-wave lifts (gfx1250
+    // wave32 → gfx942 wave64). Routing through `ballotI1ToWidth`
+    // matches the VCC read path (`readVCCAsWaveMask`) and keeps EXEC
+    // wave-uniform.
     //
-    // MODREP: cross-wave (wave32 → wave64) takes the truncation path
-    // inside `WaveProjection::ballotI1ToWidth`, which picks lanes
-    // 0..31 of the target ballot under modulo-replication. Valid only
-    // while the target-lane-K / target-lane-K+sourceBits predicates
-    // agree — the precondition enforced by the Phase-1.4 cross-wave
-    // gate in `raiser.cpp`. If the gate policy changes, revisit.
+    // Width choice. The ballot result feeds directly into the EXEC
+    // alloca via AND, so we request it at the EXEC *storage* width
+    // (`execTy`). Under modulo-replication `execTy` equals the
+    // source wave-mask width and the projection truncates the
+    // hardware ballot to match. Under wave-native cross-widening
+    // (wave32 source → wave64 target) `execTy` equals the full
+    // hardware wave mask (i64) and no truncation occurs — which is
+    // what allows a data-dependent `v_cmpx` to preserve its per-
+    // target-lane answer on lanes 32..63. See
+    // `lit_tests/v_cmpx_ballot` for the pinned IR shape (MODREP)
+    // and `lit_tests/v_cmpx_wave_native` for the wave-native shape.
     Value *mask = ctx.projection.ballotI1ToWidth(ctx.B, cmp,
                                                   ctx.regs.execTy,
                                                   "cmpx_ballot");
     Value *curExec = ctx.regs.loadExec(ctx.B);
     ctx.regs.storeExec(ctx.B, ctx.B.CreateAnd(curExec, mask, "cmpx_exec"));
   } else {
-    // Vanilla V_CMP: write to SGPR-pair destination (e64 with sdst) or
+    // Vanilla V_CMP: write to SGPR destination (e64 with sdst) or
     // VCC (e32, or e64 whose sdst is VCC).
     if (di.numDefs >= 1) {
       ParsedReg d = op.dst();
       if (d.kind == ParsedReg::SGPR) {
-        // Same ballot discipline as V_CMPX: the SGPR-pair destination
+        // Same ballot discipline as V_CMPX: the SGPR destination
         // carries a wave-level mask, not a per-lane predicate. `sext`
         // here would make every downstream consumer that reads the
-        // SGPR pair as a wave mask (`s_and_b64`, `s_mov_b64 exec, …`,
+        // SGPR as a wave mask (`s_and_b64`, `s_mov_b64 exec, …`,
         // `v_cndmask_b32`'s mask input via `readVCCAsWaveMask`) see
         // divergent SSA and silently miscompile.
         //
-        // MODREP: same modulo-replication contract as the V_CMPX
-        // branch above. See `wave_projection.hpp::ballotI1ToWidth`
-        // for the policy; grep for MODREP when revisiting cross-wave.
+        // Width choice. The destination is a single SGPR (wave32
+        // source) or an SGPR pair (wave64 source) — i.e. *source*
+        // wave-mask width, not EXEC storage width. Under modulo-
+        // replication these match; under wave-native cross-
+        // widening they diverge (execTy=i64 vs sourceWaveMaskTy=
+        // i32), and the SGPR physically cannot hold the 64-bit
+        // hardware ballot, so we ask the projection for the
+        // narrower width explicitly. That takes the trunc-to-
+        // source-width branch in
+        // `WaveNativeProjection::ballotI1ToWidth`, a documented
+        // residual lossy path that the obstruction classifier
+        // (`wave_size_obstruction.cpp`) still has to refuse
+        // downstream for kernels that consume the narrowed mask
+        // as a per-target-lane mask.
+        Type *sourceWidth = ctx.projection.sourceWaveMaskTy();
         Value *mask = ctx.projection.ballotI1ToWidth(
-            ctx.B, cmp, ctx.regs.execTy, "vcmp_ballot");
+            ctx.B, cmp, sourceWidth, "vcmp_ballot");
         ctx.writeRegExecWidth(d, mask);
       } else {
         ctx.regs.storeVCC(ctx.B, cmp);

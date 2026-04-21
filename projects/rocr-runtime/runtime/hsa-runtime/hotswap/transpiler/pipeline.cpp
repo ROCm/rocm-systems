@@ -186,9 +186,10 @@ bool isStrictMode() {
 PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
                            const std::string &targetISA,
                            const std::string &kernelName,
-                           bool enableWritelaneRewrite) {
+                           bool enableWritelaneRewrite,
+                           bool enableWaveNative) {
   return runPipeline(codeObjectData, targetISA, targetISA, kernelName,
-                     enableWritelaneRewrite);
+                     enableWritelaneRewrite, enableWaveNative);
 }
 
 // Raise one kernel to IR, compile to a relocatable .o via llc + llvm-mc.
@@ -201,7 +202,8 @@ static bool raiseAndCompileKernel(const TextSection &text,
                                   const DumpDir &tmpDir,
                                   const std::string &objPath,
                                   PipelineResult &result,
-                                  bool enableWritelaneRewrite) {
+                                  bool enableWritelaneRewrite,
+                                  bool enableWaveNative) {
   auto meta = extractKernelMeta(codeObjectData, kernelName);
   if (meta.args.empty()) {
     llvm::errs() << "transpiler: WARNING: No metadata found for '" << kernelName
@@ -215,7 +217,8 @@ static bool raiseAndCompileKernel(const TextSection &text,
                  << "\n");
 
   auto raised = raiseToIR(text.bytes, sourceISA, kernelName, meta, kernelOffset,
-                           targetISA, enableWritelaneRewrite);
+                           targetISA, enableWritelaneRewrite,
+                           enableWaveNative);
   if (!raised.success) {
     llvm::errs() << "transpiler: Raising '" << kernelName << "' to LLVM IR failed";
     if (!raised.failure.mnemonic.empty()) {
@@ -299,7 +302,8 @@ PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
                            const std::string &sourceISA,
                            const std::string &targetISA,
                            const std::string &kernelName,
-                           bool enableWritelaneRewrite) {
+                           bool enableWritelaneRewrite,
+                           bool enableWaveNative) {
   PipelineResult result;
 
   auto text = extractTextSection(codeObjectData);
@@ -323,7 +327,7 @@ PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
 
   if (!raiseAndCompileKernel(text, codeObjectData, kernelName,
                              sourceISA, targetISA, tmpDir, objPath, result,
-                             enableWritelaneRewrite))
+                             enableWritelaneRewrite, enableWaveNative))
     return result;
 
   if (!linkObjects({objPath}, hsacoPath))
@@ -344,7 +348,8 @@ PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
 PipelineResult runPipelineAllKernels(const std::vector<uint8_t> &codeObjectData,
                                      const std::string &sourceISA,
                                      const std::string &targetISA,
-                                     bool enableWritelaneRewrite) {
+                                     bool enableWritelaneRewrite,
+                                     bool enableWaveNative) {
   PipelineResult result;
 
   auto kernelNames = listKernelNames(codeObjectData);
@@ -381,7 +386,7 @@ PipelineResult runPipelineAllKernels(const std::vector<uint8_t> &codeObjectData,
 
     if (!raiseAndCompileKernel(text, codeObjectData, kName,
                                sourceISA, targetISA, tmpDir, objPath, result,
-                               enableWritelaneRewrite)) {
+                               enableWritelaneRewrite, enableWaveNative)) {
       LLVM_DEBUG(llvm::dbgs() << "FAILED\n");
       result.success = false;
       return result;
