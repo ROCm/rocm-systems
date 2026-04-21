@@ -145,7 +145,7 @@ bool Flag::init() {
       }
     }
     // Enable async logging if configured
-    if (!flagIsDefault(AMD_LOG_ASYNC) && AMD_LOG_ASYNC) {
+    if (flagIsDefault(AMD_LOG_ASYNC) || AMD_LOG_ASYNC) {
       EnableAsyncLogging(true);
     }
   }
