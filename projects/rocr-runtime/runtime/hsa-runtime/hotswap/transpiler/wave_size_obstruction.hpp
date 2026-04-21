@@ -108,6 +108,16 @@ enum class ObstructionKind : uint8_t {
   // value diverges from what the wave32 source intended.
   MbcntHiLaneIdLeak,        // v_mbcnt_hi_u32_b32 — no rewrite.
   OutOfRangeLaneOperand,    // v_readlane/writelane with static const operand >= W_s — no rewrite.
+  TtmpWaveIdLeak,           // any source read of TTMP8 under cross-widening.
+                            // raiser.cpp seeds ttmp8 with `(workitem.id.x >> 5)
+                            // << 25` so bits [29:25] carry the per-lane
+                            // `wave_id_in_workgroup`. That value is a function
+                            // of the *target* absolute lane position, not of
+                            // `lane_id mod W_s` — so any downstream computation
+                            // that reads ttmp8 and folds the result into an
+                            // address / EXEC mask / wave-uniform SGPR is a
+                            // Class 1 leak under modulo-replication and a
+                            // wave-id collision under wave-native. No rewrite.
 
   // ── Class 2 (wave-size-translation.md §6): cross-lane shuffles whose
   //                                            semantics bake in the wave width ──

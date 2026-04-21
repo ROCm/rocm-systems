@@ -426,6 +426,77 @@ Hook: `WaveProjection::emitInitialExec` (`wave_projection.{hpp,cpp}`);
 per-MFMA-output `strict.wwm` strategy; `wmma_lowering.cpp`'s file
 header cross-references this section.
 
+### 5.6.2 wave_id lift — Class 1 rescue for ttmp8[29:25] reads
+
+gfx12+ command processors materialise `wave_id_in_workgroup` in
+`ttmp8[29:25]` for every launched wavefront, and the HIP front-end
+emits the canonical read shape
+
+```asm
+    s_bfe_u32 sDST, ttmp8, 0x50019    # (offset=25, width=5)
+```
+
+anywhere the source uses `__builtin_amdgcn_mbcnt_hi` or inline
+`wave_id` arithmetic for per-wave tile assignment (Tensile /
+rocBLAS / AITER matmul, Triton persistent kernels). Under same-
+wave translation this is boring: one wave's per-lane value is
+uniform, and the transpiler's SGPR alloca path carries it
+verbatim. Under cross-widening (`WaveNativeProjection`, wave32 →
+wave64) the shape is a **Class 1 leak**: target lane `L`'s
+authoritative wave_id is `(L / W_s) mod max_waves_per_wg`, which
+differs between lanes 0..W_s-1 and W_s..2*W_s-1 within the same
+target wave.
+
+The raiser's phase-4 entry seeds the `ttmp8` alloca with the
+correct per-lane expression
+(`(workitem.id.x >> log2(W_s)) << 25`, see `raiser.cpp`). At the
+LLVM-IR level that is divergent, and `mem2reg + InstCombine` fold
+the BFE round-trip back to `workitem.id.x >> log2(W_s) & 0x1F`.
+**But** the formally-scalar `s_bfe_u32` shape — SGPR-class source
+(`ttmp8`) feeding an SGPR-class destination (`sDST`) — triggers
+an implicit `readfirstlane` in the backend's divergence /
+scalarisation pipeline: every downstream SGPR consumer sees a
+single lane-0 value, so all 64 target lanes read `wave_id = 0`
+and matmul tile-assignment collapses to a checkerboard (both
+source-wave halves write onto the same tile).
+
+Rescue: `handle_sop2.cpp::handleSOP2` special-cases the exact
+`S_BFE_U32 (ttmp8, 0x50019)` operand tuple and emits the
+architectural expression directly:
+
+```llvm
+    %tid  = call i32 @llvm.amdgcn.workitem.id.x()
+    %wave = lshr i32 %tid, <log2(W_s)>       ; 5 for wave32 source
+    %wid  = and  i32 %wave, 31               ; width=5 mask from 0x50019
+    store i32 %wid, i32* %sgpr[N]
+```
+
+The `@llvm.amdgcn.workitem.id.x` leaf is permanently marked
+divergent by the AMDGPU divergence analysis, so the VGPR the
+backend picks for `%wid` is a genuine per-lane value; downstream
+consumers of `sDST` see a divergent VGPR through the alloca and
+tile-offset arithmetic stays correct across cross-widening.
+
+Scope: deliberately narrow. The lift fires **only** for the exact
+`(ttmp8, 0x50019)` shape. Any other ttmp8 source read (non-
+canonical BFE immediates, `s_and_b32` / `s_lshr_b32` on ttmp8,
+`s_load_dword` using ttmp8 as a 64-bit base pointer, trap-handler
+prologues) still trips the `TtmpWaveIdLeak` classifier and
+refuses — the raiser's init models only the `[29:25] = wave_id`
+field, so any other bit pattern would silently miscompile. The
+gating helper is
+`wave_size_obstruction.cpp::isCanonicalWaveIdBfe`, co-located with
+`readsTtmp8Source` for the symmetric rescue / refuse decision.
+
+Hook: `handle_sop2.cpp::handleSOP2` under `SemOp::S_BFE_U32`;
+`wave_size_obstruction.cpp::isCanonicalWaveIdBfe` gates the
+classifier out of the lifted shape. Regression fence:
+`lit_tests/c1_ttmp_wave_id_lift` asserts the three-instruction IR
+shape (`workitem.id.x` → `lshr 5` → `and 31`) survives the raise,
+and the matmul gpu-level suite (`tests/gfx1250_gpu_test.cpp`,
+`Gfx1250Gpu.Matmul{64,128}x*`) asserts end-to-end numerical
+correctness across the cross-wave boundary.
+
 ## 6. Obstructions to wave-size-obliviousness
 
 A wave32 → wave64 raise under modulo-replication is correct iff the
@@ -448,6 +519,10 @@ position beyond `lane_id mod W_s`:
   `[0, W_s)`.
 - `llvm.amdgcn.wavefrontsize`, `llvm.amdgcn.ballot.i32 / .i64` —
   wave-size-dependent at the type level.
+- `s_bfe_u32 sDST, ttmp8, 0x50019` — `wave_id_in_workgroup` read
+  from the CP-seeded ttmp8[29:25] field. Rescued in place by the
+  §5.6.2 wave_id lift; any *other* ttmp8 source read still
+  refuses via `TtmpWaveIdLeak`.
 
 **Class 2 — cross-lane ops with wave-size-dependent semantics.**
 - `v_permlane64_b32` (full-wave rotate; no wave32 analogue).
@@ -481,8 +556,9 @@ The classifier (`wave_size_obstruction.{hpp,cpp}`) names each mode as
 an `ObstructionKind` and tags per-site traces with the class label
 parenthetically; per-site detail and refusal reasons are in §7. Lit
 fixtures pin one example per `ObstructionKind`, named after the class
-(`lit_tests/c1_lane_id_leak`, `c2_permlane_swap`, `c2_dpp_quad_perm`,
-`c2_ds_swizzle`, `c3_atomic_cas`, `c4_lane_dep_cmpx`).
+(`lit_tests/c1_lane_id_leak`, `c1_ttmp_wave_id_lift` — Class-1 rescue,
+not refusal — `c2_permlane_swap`, `c2_dpp_quad_perm`, `c2_ds_swizzle`,
+`c3_atomic_cas`, `c4_lane_dep_cmpx`).
 
 ## 7. Decision procedure (per kernel)
 
@@ -525,6 +601,7 @@ their handlers:
 |---|---|---|
 | `v_mbcnt_hi_u32_b32` read (C1). `mbcnt_hi` against target `EXEC_HI` produces 32..63 in the upper half; no rewrite without dataflow. | `MbcntHiLaneIdLeak` | `CrossWaveLaneIdLeak` |
 | `v_readlane` / `v_writelane` with static const operand outside `[0, W_s)` (C1). | `OutOfRangeLaneOperand` | `CrossWaveLaneIdLeak` |
+| Non-canonical `ttmp8` source read co-occurring with a WMMA op (C1). Canonical `s_bfe_u32 sDST, ttmp8, 0x50019` is rescued in §5.6.2 and filtered out by `isCanonicalWaveIdBfe`; the classifier only refuses shapes where the raiser's `ttmp8[29:25]` model of `wave_id` can't be soundly reused (other BFE immediates, non-BFE consumers, 64-bit base-pointer loads). | `TtmpWaveIdLeak` | `CrossWaveLaneIdLeak` |
 | `v_permlane64_b32` (C2). No wave32 analogue — a wave32 source can't meaningfully encode a 64-lane rotate. | `FullWaveRotate` | `CrossWaveUnrewritableShuffle` |
 | Non-commutative atomics (C3): `GLOBAL_ / FLAT_ / BUFFER_ATOMIC_{SWAP, CMPSWAP}`, `S_ATOMIC_SWAP`. Lanes `i` and `i + W_s` race on the same address; no rewrite preserves the single-participant invariant. | `NonCommutativeAtomic` | `CrossWaveReplicaRace` |
 | `v_cmpx` / `s_*_saveexec_b32` co-located with any `v_mbcnt_*` in the same kernel (C4). Syntactic over-approximation of "gating expression flows from an absolute lane id"; see §10. | `CmpxFromLaneId` / `SaveExecFromLaneId` | `CrossWaveLanePredicatedExec` |

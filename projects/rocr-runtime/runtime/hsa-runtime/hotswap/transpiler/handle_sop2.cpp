@@ -1,7 +1,10 @@
 #include "handlers.hpp"
 #include "sem_op_attrs.hpp"
 
+#include "llvm/ADT/Twine.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IntrinsicsAMDGPU.h"
+#include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
 
@@ -332,6 +335,95 @@ HandlerResult handleSOP2(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
   if (sop == SemOp::S_BFE_U32) {
+    // ---- Class 1 rescue: `s_bfe_u32 sDST, ttmp8, 0x50019` (wave_id lift) ----
+    //
+    // Canonical gfx1250 HIP prologue for reading `wave_id_in_workgroup`:
+    //
+    //     s_bfe_u32 sN, ttmp8, 0x50019   ; extract ttmp8[29:25]
+    //
+    // The command processor stores workgroup-scheduling metadata in the
+    // `ttmp` bank, and — on gfx12+ — bits [29:25] of `ttmp8` carry the
+    // wave's rank within its workgroup (0..max_waves_per_wg-1). The
+    // `bfe(ttmp8, 0x50019)` immediate encodes (offset=25, width=5), so
+    // the source semantics are exactly "read `wave_id_in_workgroup`".
+    //
+    // Why a pattern-lift is needed under cross-widening (wave32 → wave64,
+    // `WaveNativeProjection`):
+    //   - `wave_id_in_workgroup` is a Class 1 value (`§6` of
+    //     `hotswap/docs/wave-size-translation.md`): it depends on the
+    //     absolute lane position within the target wave, not merely
+    //     `lane_id mod W_s`. Target lanes 0..W_s-1 correspond to one
+    //     source wave and must read `wave_id = 2k`; target lanes
+    //     W_s..2*W_s-1 correspond to the next source wave and must
+    //     read `wave_id = 2k+1`.
+    //   - The raiser's `ttmp8` seed (`raiser.cpp`, phase-4 entry init)
+    //     stores the divergent expression `(workitem.id.x >> log2(W_s))
+    //     << 25` into the `ttmp8` alloca. At the LLVM-IR level this is
+    //     already per-lane divergent, and `mem2reg + InstCombine` fold
+    //     the BFE round-trip back to `workitem.id.x >> log2(W_s) & 0x1F`.
+    //   - Empirically, though, the formally-scalar `s_bfe_u32` shape —
+    //     SGPR-class source (`ttmp8`) feeding an SGPR-class destination
+    //     (`sDST`) — loses its per-lane divergence somewhere in the
+    //     gfx942 backend's scalarisation / divergence-analysis pipeline:
+    //     downstream SGPR consumers see a single lane-0 value, so all
+    //     64 target lanes read `wave_id = 0` and matmul tile-assignment
+    //     collapses to a checkerboard (upper half writes onto lower
+    //     half's tile). Refusing the kernel via `TtmpWaveIdLeak` made
+    //     the symptom go away but blocked the GPT-OSS / matmul corpus.
+    //
+    // Principled rescue: emit the architectural expression
+    // `(workitem.id.x >> log2(W_s)) & 0x1F` *directly* at the raise
+    // site, as a fresh `@llvm.amdgcn.workitem.id.x` leaf that the
+    // AMDGPU divergence analysis already marks divergent. The
+    // destination alloca still round-trips, but the value now enters
+    // the SGPR alloca from a known-divergent leaf rather than a chain
+    // the backend later re-uniforms. Downstream uses of `sDST` see a
+    // divergent VGPR value, preserving the per-source-wave distinction
+    // through every consumer (address arithmetic, predicate
+    // conversion, atomic indices).
+    //
+    // Same-wave translations (gfx942 → gfx942, gfx1250 → gfx1250) get
+    // an identical IR shape — the alloca path would have collapsed to
+    // this expression anyway after InstCombine — so the lift is safe
+    // unconditionally and keeps one shape across projections.
+    //
+    // Scope: deliberately narrow. Only the *exact* canonical immediate
+    // `0x50019` (offset=25, width=5) and *exact* `ttmp8` source get the
+    // lift. Any other BFE against `ttmp` falls through to the generic
+    // bitfield extract; those would indicate a non-canonical kernel
+    // using `ttmp` for something the raiser's init does not model, and
+    // forcing them through the lift would silently miscompile.
+    //
+    // See `hotswap/docs/wave-size-translation.md` §5.6.2 (wave_id
+    // lift) and §6 (Class 1 obstructions) for the full contract.
+    if (op.isSrcReg(0) && !op.isSrcReg(1)) {
+      ParsedReg srcPr = op.srcReg(0);
+      int64_t ctrlImm = op.srcImm(1);
+      if (srcPr.kind == ParsedReg::TTMP && srcPr.baseIdx == 8 &&
+          ctrlImm == 0x50019) {
+        unsigned srcWaveBits = ctx.isa.waveSize;
+        if (srcWaveBits != 32 && srcWaveBits != 64)
+          report_fatal_error(
+              "S_BFE_U32 wave_id lift: unsupported source wave size " +
+              Twine(srcWaveBits) +
+              " (expected 32 or 64); extend the shift-amount dispatch "
+              "before using this path on a new source ISA.");
+        unsigned logWs = (srcWaveBits == 64) ? 6 : 5;
+        Function *fnWorkitemIdX = Intrinsic::getOrInsertDeclaration(
+            &ctx.M, Intrinsic::amdgcn_workitem_id_x);
+        Value *tid =
+            ctx.B.CreateCall(fnWorkitemIdX, {}, "wave_id_lift_tid");
+        Value *waveId = ctx.B.CreateLShr(
+            tid, ConstantInt::get(ctx.i32Ty, logWs), "wave_id_in_wg");
+        Value *masked = ctx.B.CreateAnd(
+            waveId, ConstantInt::get(ctx.i32Ty, 0x1F), "wave_id_masked");
+        hr.sccResult = masked;
+        ctx.regs.writeReg32(ctx.B, op.dst(), masked);
+        hr.handled = true;
+        return hr;
+      }
+    }
+    // Generic scalar bitfield-extract.
     Value *src = op.src(0), *ctrl = op.src(1);
     Value *offset = ctx.B.CreateAnd(ctrl, ConstantInt::get(ctx.i32Ty, 0x1F));
     Value *width =

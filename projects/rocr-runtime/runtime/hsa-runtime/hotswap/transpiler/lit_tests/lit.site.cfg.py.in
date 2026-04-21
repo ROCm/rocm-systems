@@ -32,6 +32,22 @@ config.fixtures = {
     # class (Class 1..4) defined in hotswap/docs/wave-size-translation.md
     # §6. See wave_size_obstruction.{hpp,cpp} for the classifier.
     "c1_lane_id_leak": r"@LIT_FIXTURE_C1_LANE_ID_LEAK_CO@",
+    # c1_ttmp_wave_id_lift — canonical wave_id rescue under cross-widening.
+    # Pins the `s_bfe_u32 sDST, ttmp8, 0x50019` pattern-lift in
+    # `handle_sop2.cpp::handleSOP2` that sidesteps the backend's
+    # implicit scalarisation of the formally-scalar BFE → SGPR shape.
+    # The lift emits `(workitem.id.x >> log2(W_s)) & 0x1F` directly
+    # from the divergent-leaf intrinsic, preserving per-source-wave
+    # divergence through the destination SGPR for the benefit of
+    # every matmul / tiled-reduction kernel that keys tile offsets
+    # on `wave_id_in_workgroup`. The classifier in
+    # `wave_size_obstruction.cpp::isCanonicalWaveIdBfe` filters this
+    # exact shape out of the Class-1 refusal list so the lift actually
+    # takes effect; any *other* ttmp8 source read is still refused by
+    # TtmpWaveIdLeak. See wave-size-translation.md §5.6.2 (lift) and
+    # §6 / §7 Class-1 table (rescue vs. refuse).
+    "c1_ttmp_wave_id_lift":
+        r"@LIT_FIXTURE_C1_TTMP_WAVE_ID_LIFT_CO@",
     "c2_permlane_swap": r"@LIT_FIXTURE_C2_PERMLANE_SWAP_CO@",
     "c2_permlane16": r"@LIT_FIXTURE_C2_PERMLANE16_CO@",
     "c2_dpp_quad_perm": r"@LIT_FIXTURE_C2_DPP_QUAD_PERM_CO@",

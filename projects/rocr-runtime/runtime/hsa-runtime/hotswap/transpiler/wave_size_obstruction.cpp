@@ -5,10 +5,11 @@
 #include "mc_state.hpp"
 #include "semop.hpp"
 
-#include "MCTargetDesc/AMDGPUMCTargetDesc.h" // AMDGPU::OpName
+#include "MCTargetDesc/AMDGPUMCTargetDesc.h" // AMDGPU::OpName, AMDGPU::TTMP_32RegClassID, AMDGPU::mc2PseudoReg
 #include "Utils/AMDGPUBaseInfo.h"             // AMDGPU::getNamedOperandIdx
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
@@ -37,6 +38,8 @@ const char *obstructionKindName(ObstructionKind k) {
     return "MbcntHiLaneIdLeak (\u00a73 Class 1: absolute lane-ID leak via v_mbcnt_hi)";
   case ObstructionKind::OutOfRangeLaneOperand:
     return "OutOfRangeLaneOperand (\u00a73 Class 1: readlane/writelane operand >= W_s)";
+  case ObstructionKind::TtmpWaveIdLeak:
+    return "TtmpWaveIdLeak (\u00a73 Class 1: source read of ttmp8 under cross-widening — wave_id_in_wg field)";
   case ObstructionKind::FullWaveRotate:
     return "FullWaveRotate (\u00a73 Class 2: unrewritable v_permlane64)";
   case ObstructionKind::LaneGroupShuffle:
@@ -242,6 +245,98 @@ bool dsSwizzleSafeForModRep(uint16_t imm) {
   return false;
 }
 
+// Return true iff any source-operand register of `di` covers the 32-bit
+// TTMP8 lane — either as a bare `ttmp8` or as part of a larger tuple
+// (e.g. `ttmp[8:9]`). Defs are skipped: only reads of TTMP8 constitute a
+// wave_id leak. The surrounding `(src.waveSize != tgt.waveSize)` check
+// in the caller gates this to cross-widening only.
+//
+// Detection strategy (TableGen-authoritative, no enum arithmetic):
+//   1. Find the TTMP_32 register class — its register at position 8 IS
+//      the generation-agnostic pseudo for `ttmp8` (the class is declared
+//      `(add (sequence "TTMP%u", 0, 15))` in SIRegisterInfo.td so
+//      position == index).
+//   2. For every source reg operand (index >= di.numDefs), normalise
+//      each 32-bit sub-register via `mc2PseudoReg` (strips subtarget
+//      suffixes such as `TTMP8_gfx9plus` → `TTMP8`) and compare against
+//      the pseudo from step 1. A tuple like `ttmp[8:9]` contributes
+//      sub0 = TTMP8, sub1 = TTMP9 — we match on sub0.
+bool readsTtmp8Source(const DecodedInst &di, const MCRegisterInfo &MRI) {
+  const MCRegisterClass &TTMP32 =
+      MRI.getRegClass(AMDGPU::TTMP_32RegClassID);
+  MCRegister ttmp8Pseudo = TTMP32.getRegister(8);
+  const llvm::MCInst &inst = di.inst;
+  for (unsigned i = di.numDefs, e = inst.getNumOperands(); i < e; ++i) {
+    const MCOperand &op = inst.getOperand(i);
+    if (!op.isReg())
+      continue;
+    MCRegister reg = op.getReg();
+    if (!reg)
+      continue;
+    // Walk 32-bit sub-registers. A 32-bit TTMP lane has no sub0 and
+    // mc2PseudoReg normalises it directly; a TTMP pair (`ttmp[8:9]`)
+    // has sub0 = TTMP8_aliased / sub1 = TTMP9_aliased and we match on
+    // the sub0 lane.
+    MCRegister lane = MRI.getSubReg(reg, AMDGPU::sub0);
+    if (!lane)
+      lane = reg;
+    if (AMDGPU::mc2PseudoReg(lane) == ttmp8Pseudo)
+      return true;
+    // Also check sub1..subN in case TTMP8 appears in the upper half of a
+    // pair that starts earlier (unusual but possible in tuple-aligned
+    // encodings).
+    const unsigned maxSubIdx = MRI.getNumSubRegIndices();
+    for (unsigned subIdx = AMDGPU::sub1; subIdx < maxSubIdx; ++subIdx) {
+      MCRegister s = MRI.getSubReg(reg, subIdx);
+      if (!s)
+        break;
+      if (AMDGPU::mc2PseudoReg(s) == ttmp8Pseudo)
+        return true;
+    }
+  }
+  return false;
+}
+
+// Return true iff `di` is the canonical gfx1250 HIP-emitted wave_id
+// extraction pattern: `s_bfe_u32 sDST, ttmp8, 0x50019`. The immediate
+// encodes (offset=25, width=5), which extracts bits [29:25] of ttmp8
+// — the command processor's `wave_id_in_workgroup` field.
+//
+// Pairs with the handle_sop2.cpp `S_BFE_U32` pattern-lift that emits
+// `dst = (workitem.id.x >> log2(W_s)) & 0x1F` for this exact shape.
+// The lift gives the BFE a principled meaning under cross-widening
+// (each target lane gets its source-wave rank as a divergent VGPR),
+// so we must NOT refuse on this shape here. Any OTHER ttmp8 read
+// falls through to the `ttmp8ReadSites` path below.
+bool isCanonicalWaveIdBfe(const DecodedInst &di,
+                           const MCRegisterInfo &MRI) {
+  if (di.semOp != SemOp::S_BFE_U32)
+    return false;
+  // S_BFE_U32 canonically has one destination (sDST), one source reg
+  // (sSRC or ttmp), and one immediate control. Defs come first in the
+  // MCInst operand list, sources follow. We want src0 = ttmp8 and
+  // src1 = imm 0x50019.
+  if (di.numSrcs < 2)
+    return false;
+  unsigned src0Idx = di.srcMap[0];
+  unsigned src1Idx = di.srcMap[1];
+  if (!di.isReg(src0Idx) || !di.isImm(src1Idx))
+    return false;
+  if (di.getImm(src1Idx) != 0x50019)
+    return false;
+  const MCRegisterClass &TTMP32 =
+      MRI.getRegClass(AMDGPU::TTMP_32RegClassID);
+  MCRegister ttmp8Pseudo = TTMP32.getRegister(8);
+  MCRegister src0Reg = di.inst.getOperand(src0Idx).getReg();
+  if (!src0Reg)
+    return false;
+  // Canonical pattern is a single `ttmp8` (not a tuple), so the
+  // operand register itself should normalise to the TTMP8 pseudo.
+  if (AMDGPU::mc2PseudoReg(src0Reg) == ttmp8Pseudo)
+    return true;
+  return false;
+}
+
 } // namespace
 
 // ----------------------------------------------------------------------------
@@ -249,12 +344,13 @@ bool dsSwizzleSafeForModRep(uint16_t imm) {
 // ----------------------------------------------------------------------------
 
 ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
-                                          const MCState & /*mc*/,
+                                          const MCState &mc,
                                           const ISAProfile &src,
                                           const ISAProfile &tgt) {
   ObstructionReport report;
   if (src.waveSize == tgt.waveSize)
     return report;
+  const MCRegisterInfo &MRI = *mc.regInfo;
 
   // First pass: tag the self-contained obstruction kinds (lane-id
   // leaks, cross-lane shuffles, replica races). Also collect
@@ -266,14 +362,84 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
   // opcode_map.cpp (so the lookup is a single enum compare here),
   // not by adding `raw.contains(...)` substring tests.
   bool haveMbcnt = false;
+  bool haveWMMA = false;
   struct PendingExecSite {
     const DecodedInst *inst;
     ObstructionKind kind; // CmpxFromLaneId or SaveExecFromLaneId.
   };
   llvm::SmallVector<PendingExecSite> pendingExecWriters;
+  // Deferred TtmpWaveIdLeak site emission. The canonical shape —
+  // `s_bfe_u32 sDST, ttmp8, 0x50019` — has a principled rescue in
+  // `handle_sop2.cpp`'s `S_BFE_U32` pattern-lift, which emits
+  // `dst = (workitem.id.x >> log2(W_s)) & 0x1F` directly from the
+  // divergent-leaf intrinsic and sidesteps the backend's implicit
+  // scalarisation of the formally-scalar BFE → SGPR path. The lift
+  // preserves per-source-wave semantics across cross-widening, so
+  // the canonical shape is NOT recorded here (filtered via
+  // `isCanonicalWaveIdBfe`).
+  //
+  // Any OTHER ttmp8 source read (non-canonical immediates, AND /
+  // LSHR / s_load offsets, trap-handler prologues, etc.) is still a
+  // Class 1 leak: the raiser's ttmp8 init (`raiser.cpp` phase-4)
+  // only models the `bits [29:25] = wave_id` field, so a consumer
+  // that reads other bits or uses a different bitfield extract
+  // semantics would silently miscompile. Those sites are collected
+  // here; non-WMMA kernels have a future escape hatch through
+  // `ThreadLoopProjection` (§2.2 — iterate the body R = W_t / W_s
+  // times with a synthetic per-source-wave wave_id in ttmp8), and
+  // WMMA kernels refuse because the §5.2 lane layout requires the
+  // full target wave simultaneously and cannot be TLP-split.
+  llvm::SmallVector<const DecodedInst *> ttmp8ReadSites;
 
   for (const DecodedInst &di : insts) {
     const SemOp sop = di.semOp;
+
+    // --- §3 Class 1: wave_id leak via ttmp8 source read --------------
+    // Under cross-widening, raiser.cpp seeds the transpiler's ttmp8
+    // alloca from `workitem.id.x >> 5` shifted into bits [29:25] so
+    // the per-lane value encodes the source's `wave_id_in_workgroup`.
+    //
+    // The canonical shape `s_bfe_u32 sDST, ttmp8, 0x50019` is rescued
+    // inline by `handle_sop2.cpp`'s pattern-lift: it emits
+    // `dst = (workitem.id.x >> log2(W_s)) & 0x1F` directly from the
+    // divergent-leaf intrinsic, bypassing the backend's implicit
+    // SGPR-class scalarisation. That shape is therefore NOT a
+    // Class 1 refusal surface and is filtered out here.
+    //
+    // Any other source reference to ttmp8 (non-canonical BFE
+    // immediates, `s_and_b32` / `s_lshr_b32` operating on ttmp8,
+    // `s_load_dword` using ttmp8 as offset, trap-handler prologues
+    // touching ttmp8..ttmp15, etc.) is still a leak: the raiser's
+    // init only models the `[29:25] = wave_id` field, so consumers
+    // of other bits read either zero or a garbage pattern. We defer
+    // the site emission until after the loop has established whether
+    // the kernel also contains WMMA (see below). Without WMMA the
+    // leak is handled by ThreadLoopProjection; with WMMA it is
+    // unrewritable (TLP and WMMA are mutually exclusive — §5.2 WMMA
+    // lane layout requires the full target wave) and we refuse.
+    if (readsTtmp8Source(di, MRI) && !isCanonicalWaveIdBfe(di, MRI))
+      ttmp8ReadSites.push_back(&di);
+
+    // WMMA-family detection. If any of these show up in the kernel,
+    // the WMMA → MFMA lowering (matrix-translation.md) is going to be
+    // invoked and the TLP escape hatch is not available — every
+    // deferred ttmp8 site in this kernel becomes an unrewritable
+    // refusal surface.
+    switch (sop) {
+    case SemOp::V_WMMA_F32_16x16x32_F16:
+    case SemOp::V_WMMA_F32_16x16x32_BF16:
+    case SemOp::V_WMMA_F32_16x16x4_F32:
+    case SemOp::V_WMMA_F32_16x16x64_FP8_FP8:
+    case SemOp::V_WMMA_F32_16x16x64_FP8_BF8:
+    case SemOp::V_WMMA_F32_16x16x64_BF8_FP8:
+    case SemOp::V_WMMA_F32_16x16x64_BF8_BF8:
+    case SemOp::V_WMMA_I32_16x16x64_IU8:
+    case SemOp::V_WMMA_SCALE_F32_16x16x128_F8F6F4:
+      haveWMMA = true;
+      break;
+    default:
+      break;
+    }
 
     // --- §3 Class 1: absolute lane-ID leaks --------------------------
     if (sop == SemOp::V_MBCNT_HI_U32_B32) {
@@ -530,6 +696,32 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
     }
   }
 
+  // Deferred TtmpWaveIdLeak emission. See the pre-loop comment on
+  // `ttmp8ReadSites` for the rationale: the `s_bfe_u32 ttmp8, 0x50019`
+  // wave_id extraction is clang/hip boilerplate in every non-trivial
+  // gfx1250 kernel, so unconditionally refusing on it would collapse
+  // coverage. We only refuse when the kernel also contains WMMA —
+  // in which case ThreadLoopProjection (the §2.2 escape hatch for
+  // class-4 wave_id leaks) cannot be applied because the §5.2 WMMA
+  // lane layout requires the full target wave simultaneously. In the
+  // non-WMMA case, fall through silently; the caller's projection
+  // selector will pick TLP in raiser.cpp.
+  if (haveWMMA) {
+    for (const DecodedInst *di : ttmp8ReadSites) {
+      ObstructionSite site;
+      site.inst = di;
+      site.kind = ObstructionKind::TtmpWaveIdLeak;
+      site.rewrite = RewriteId::None;
+      site.rewriteImplemented = false;
+      site.detail =
+          "source reads ttmp8 under cross-widening — bits [29:25] carry "
+          "wave_id_in_workgroup, which is a function of the target's "
+          "absolute lane position (not of lane_id mod W_s). Kernel also "
+          "contains WMMA, so ThreadLoopProjection is not available — refuse.";
+      report.sites.push_back(std::move(site));
+    }
+  }
+
   // Second pass: for each pending EXEC writer, apply the syntactic
   // co-occurrence heuristic. If the kernel contains ANY mbcnt (lo or
   // hi), treat the writer as lane-predicated and unrewritable.
@@ -634,6 +826,7 @@ RaiseFailure selectFailureFromReport(const ObstructionReport &report) {
     switch (site->kind) {
     case ObstructionKind::MbcntHiLaneIdLeak:
     case ObstructionKind::OutOfRangeLaneOperand:
+    case ObstructionKind::TtmpWaveIdLeak:
       return RaiseFailure::crossWaveLaneIdLeak(
           *site->inst,
           Twine(obstructionKindName(site->kind)) + " [" + site->detail + "]");
