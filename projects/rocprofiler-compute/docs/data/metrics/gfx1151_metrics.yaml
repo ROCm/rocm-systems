@@ -1,0 +1,630 @@
+System Speed-of-Light:
+  VALU FLOPs (FP16):
+    rst: 'Sixteen-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time. Theoretical peak uses packed FP16 at 2× the FP32 per-CU rate: max_sclk (MHz) × $cu_per_gpu × 256 / 1000 GFLOP/s. $cu_per_gpu is total CU count, not WGP (1 WGP = 2 CUs on RDNA 3.5).'
+    unit: GFLOP/s
+  VALU FLOPs (FP32):
+    rst: 'Thirty-two-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time. Theoretical peak: max_sclk (MHz) × $cu_per_gpu × 128 / 1000 GFLOP/s (wave64 / dual-issue VALU class used for Ryzen APUs). $cu_per_gpu is the total number of Compute Units from system info, not WGP count (on RDNA 3.5, one WGP pairs two CUs).'
+    unit: GFLOP/s
+  IPC:
+    rst: 'Instructions Per Cycle — ratio of instructions executed over busy cycles. Calculated as (Total Instructions - Internal Instructions) / Busy Cycles. Higher IPC indicates better instruction throughput.'
+    unit: Instr/cycle
+  Wavefront Occupancy:
+    rst: 'Average wavefront occupancy proxy: SQ_WAVE_CYCLES_sum / SQ_BUSY_CYCLES_avr per sample, where SQ_BUSY_CYCLES_avr is the mean of per–shader-engine SQ_BUSY_CYCLES (active-wave cycles per SE). Peak is $max_waves_per_cu × $cu_per_gpu (theoretical in-flight cap). Pct of peak scales the average against that ceiling.'
+    unit: Wavefronts
+  L2 Cache Hit Rate:
+    rst: 'GL2C last-level cache hit rate (same as Memory Chart / GL2C panel). Formula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum) when the denominator is non-zero.'
+    unit: Percent
+  L2-Fabric Read BW:
+    rst: 'GL2C/EA read bandwidth from sized request counters (gl2c_perf_sel_ea_rdreq_32b/64B/96B/128B): 32·GL2C_EA_RDREQ_32B_sum + 64·GL2C_EA_RDREQ_64B_sum + 96·GL2C_EA_RDREQ_96B_sum + 128·GL2C_EA_RDREQ_128B_sum, divided by kernel wall time. Sums over GL2C instances. Peak / % of peak are N/A (no sysinfo memory BW).'
+    unit: Bytes/s
+  L2-Fabric Write BW:
+    rst: 'GL2C/EA write bandwidth: GL2C_MC_WRREQ_sum is the EA write transaction count (32 B or 64 B per txn; the spec names this path MC_WRREQ). Bandwidth = 32·(GL2C_MC_WRREQ_sum − GL2C_EA_WRREQ_64B_sum) + 64·GL2C_EA_WRREQ_64B_sum, over time. Peak / % of peak are N/A (no sysinfo memory BW).'
+    unit: Bytes/s
+  LDS Bank Conflicts:
+    rst: 'Number of LDS bank conflicts. Peak / % of Peak are N/A for raw counts.'
+    unit: Conflicts
+  Wave Dependency Wait:
+    rst: 'Percent of wave lifetime spent waiting for data dependencies (e.g. VMEM/LDS results).'
+    unit: Percent
+  Wave Issue Wait:
+    rst: 'Percent of wave lifetime spent waiting for any instruction to be ready to issue.'
+    unit: Percent
+  TCP Cache Hit Rate:
+    rst: 'Texture Cache Per-pipe (TCP) hit rate. TCP is the L0 vector cache in RDNA3.5. Same as Memory Chart TCP Hit Rate: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum.'
+    unit: Percent
+  TCP Cache BW:
+    rst: 'Same as Memory Chart “TCP Request Bandwidth” (table 303): TCP_REQ_sum × 64 B / kernel wall time. Peak / % of peak are N/A (same as Memory Chart — no theoretical ceiling row).'
+    unit: Bytes/s
+  GL1C Hit Rate:
+    rst: 'GL1 Cache hit rate (same as Memory Chart / GL1C panel). Formula: 100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum when GL1C_REQ_sum != 0.'
+    unit: Percent
+  GL1C Read BW:
+    rst: 'Same as Memory Chart table 307 “GL1C-GL2 Read Bandwidth”: 32·GL1C_GL2_REQ_READ_32B_sum + 64·GL1C_GL2_REQ_READ_64B_sum + 128·GL1C_GL2_REQ_READ_128B_sum, over time. Peak / % of peak are N/A.'
+    unit: Bytes/s
+  GL2C Cache BW:
+    rst: 'Same as Memory Chart table 308 “GL2C Read Bandwidth”: sized client read bins plus 96 B compressed reads, over time. Peak / % of peak are N/A.'
+    unit: Bytes/s
+  Scalar Data Cache Hit Rate:
+    rst: 'Same as Memory Chart Dcache Hit Rate: 100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) when the denominator is non-zero.'
+    unit: Percent
+  Scalar Data Cache BW:
+    rst: 'Same as Memory Chart table 302 “Dcache-GL1 Read Bandwidth”: SQC_TC_DATA_READ_REQ_sum × 128 B / kernel time. Peak / % of peak are N/A.'
+    unit: Bytes/s
+  Instruction Cache Hit Rate:
+    rst: 'Same as Memory Chart Icache Hit Rate: 100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) when the denominator is non-zero.'
+    unit: Percent
+  Instruction Cache BW:
+    rst: 'Same as Memory Chart table 301 “ICache-GL1 Read Bandwidth”: SQC_TC_INST_REQ_sum × 128 B / kernel time. Peak / % of peak are N/A.'
+    unit: Bytes/s
+Memory chart - Instruction Cache:
+  ICache Utilization:
+    rst: 'Definition: Percentage of cycles the instruction cache is busy. Formula: 100 * SQC_ICACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum'
+    unit: Percent
+  ICache Hit Rate:
+    rst: 'Definition: Share of instruction cache accesses that hit, using hit+miss as denominator. Formula: 100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) when the denominator is non-zero. HITS/REQ alone can exceed 100% (per-SQ per-bank counters).'
+    unit: Percent
+  ICache Miss Rate:
+    rst: 'Definition: Share of instruction cache accesses that miss (same denominator as hit rate). Formula: 100 * SQC_ICACHE_MISSES_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)'
+    unit: Percent
+  ICache Requests:
+    rst: 'Count of instruction-cache (SQC ICache) requests issued, per normalization unit. Formula: SQC_ICACHE_REQ_sum / $denom'
+    unit: Requests per Normalization Unit
+  ICache Request Stall Rate:
+    rst: 'Percent of shader busy cycles where the instruction cache input interface was stalled (valid without ready). Formula: 100 * SQC_ICACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum.'
+    unit: Percent
+  ICache-GL1 Read Bandwidth:
+    rst: 'Bytes per second of read traffic from the instruction path toward GL1 (texture-cache path instruction requests), using 128 B per SQC_TC_INST_REQ event.'
+    unit: Bytes/s
+Memory chart - Scalar Data Cache:
+  Dcache Utilization:
+    rst: 'Definition: Percentage of cycles the scalar data cache is busy. Formula: 100 * SQC_DCACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum'
+    unit: Percent
+  Dcache Hit Rate:
+    rst: 'Definition: Share of scalar data cache accesses that hit (hit+miss denominator). Formula: 100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) when the denominator is non-zero.'
+    unit: Percent
+  Dcache Requests:
+    rst: 'Count of scalar data-cache (SQC DCache) requests, per normalization unit. Formula: SQC_DCACHE_REQ_sum / $denom'
+    unit: Requests per Normalization Unit
+  Dcache Request Stall Rate:
+    rst: 'Percent of shader busy cycles where the scalar data cache input interface was stalled. Formula: 100 * SQC_DCACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum.'
+    unit: Percent
+  Dcache-GL1 Read Bandwidth:
+    rst: 'Bytes per second of scalar read traffic from SQC toward GL1 (SQC_TC_DATA_READ_REQ at 128 B per request).'
+    unit: Bytes/s
+Memory chart - TCP Cache:
+  TCP Hit Rate:
+    rst: 'Definition: Percentage of TCP cache requests that hit in cache. Formula: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum'
+    unit: Percent
+  TCP Total Requests:
+    rst: 'Total TCP requests per normalization unit (reads, writes and related traffic aggregated in TCP_REQ_sum).'
+    unit: Requests per Normalization Unit
+  TCP Read Requests:
+    rst: 'TCP read requests per normalization unit (TCP_REQ_READ_sum).'
+    unit: Requests per Normalization Unit
+  TCP Write Requests:
+    rst: 'TCP write requests per normalization unit (TCP_REQ_WRITE_sum).'
+    unit: Requests per Normalization Unit
+  TCP Miss Requests:
+    rst: 'TCP requests that missed in the L0 vector cache and required a fill from GL1C (TCP_REQ_MISS_sum / $denom).'
+    unit: Requests per Normalization Unit
+  TCP Request Bandwidth:
+    rst: 'Heuristic TCP request throughput using 64 B per TCP_REQ event over the kernel window.'
+    unit: Bytes/s
+Memory chart - LDS (Local Data Share):
+  LDS Atomic Instructions:
+    rst: 'Definition: Number of LDS atomic instructions executed. Description: Atomic operations on Local Data Share memory with return values. Formula: SQ_LDS_ATOMIC_RETURN_sum / $denom'
+    unit: Instructions per Normalization Unit
+  LDS Bank Conflict Rate:
+    rst: 'Definition: Percentage of LDS accesses that resulted in bank conflicts. Description: Bank conflicts occur when multiple work-items access the same LDS bank simultaneously. Formula: 100 * SQC_LDS_BANK_CONFLICT_sum / SQC_LDS_IDX_ACTIVE_sum'
+    unit: Percent
+  LDS Estimated Bandwidth:
+    rst: 'Definition: Estimated LDS bandwidth based on active index cycles minus bank conflicts. Description: RDNA3.5 has 32 LDS banks per CU, each capable of 4 bytes per cycle. Formula: ((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * 32) / time'
+    unit: Bytes/s
+  LDS Instructions:
+    rst: 'Total LDS (Local Data Share) instructions executed per normalization unit (SQ_INSTS_LDS_sum).'
+    unit: Instructions per Normalization Unit
+  LDS Instruction Cycles:
+    rst: 'Cycles spent executing LDS instructions per normalization unit (SQ_INST_CYCLES_LDS_sum).'
+    unit: Cycles per Normalization Unit
+  LDS Wait Cycles:
+    rst: 'Cycles waves spent waiting on LDS (wait-state attribution), per normalization unit (SQ_WAIT_INST_LDS_sum).'
+    unit: Cycles per Normalization Unit
+Memory chart - GL1C Cache:
+  GL1C Utilization:
+    rst: 'Percentage of cycles the GL1C cache is busy. Formula: 100 * GL1C_BUSY_sum / GL1C_CYCLE_sum'
+    unit: Percent
+  GL1C Hit Rate:
+    rst: 'Percentage of GL1C cache requests that hit. Formula: 100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum'
+    unit: Percent
+  GL1C Total Requests:
+    rst: 'Total GL1C cache requests per normalization unit (GL1C_REQ_sum).'
+    unit: Requests per Normalization Unit
+  GL1C Read Requests:
+    rst: 'GL1C read requests per normalization unit (GL1C_REQ_READ_sum).'
+    unit: Requests per Normalization Unit
+  GL1C Write Requests:
+    rst: 'GL1C write requests per normalization unit (GL1C_REQ_WRITE_sum).'
+    unit: Requests per Normalization Unit
+  GL1C Miss Requests:
+    rst: 'GL1C miss events per normalization unit (GL1C_REQ_MISS_sum).'
+    unit: Requests per Normalization Unit
+  GL1C Starve Rate:
+    rst: 'Percent of GL1C cycles with no requests from TCP (starvation). Formula: 100 * GL1C_STARVE_sum / GL1C_CYCLE_sum.'
+    unit: Percent
+  GL1C Stall GL2 Backpressure:
+    rst: 'Percent of GL1C busy cycles spent stalled on GL2 backpressure. Formula: 100 * GL1C_STALL_GL2_GL1_sum / GL1C_BUSY_sum.'
+    unit: Percent
+Memory chart - GL2C Cache (L2):
+  GL2C Hit Rate:
+    rst: 'Percentage of GL2C (L2 cache) requests that hit. Formula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)'
+    unit: Percent
+  GL2C Utilization:
+    rst: 'Percent of GL2C cycles the L2 cache was busy. Formula: 100 * GL2C_BUSY_sum / GL2C_CYCLE_sum.'
+    unit: Percent
+  GL2C Total Requests:
+    rst: 'Total L2 client requests per normalization unit (GL2C_REQ_sum).'
+    unit: Requests per Normalization Unit
+  GL2C Read Requests:
+    rst: 'L2 read requests per normalization unit (GL2C_READ_sum).'
+    unit: Requests per Normalization Unit
+  GL2C Write Requests:
+    rst: 'L2 write requests per normalization unit (GL2C_WRITE_sum).'
+    unit: Requests per Normalization Unit
+  GL2C Atomic Requests:
+    rst: 'L2 atomic requests per normalization unit (GL2C_ATOMIC_sum).'
+    unit: Requests per Normalization Unit
+  GL2C Read Bandwidth:
+    rst: 'Bytes per second for L2 read traffic (32/64/128 B and compressed 96 B read bins).'
+    unit: Bytes/s
+  GL2C Write Bandwidth:
+    rst: 'Bytes per second for L2 write traffic (64 B per write request in this panel).'
+    unit: Bytes/s
+Memory chart - GCEA to System Memory:
+  SARB Utilization:
+    rst: 'Percentage of cycles the System Arbiter (SARB) in GCEA (Graphics Core Efficiency Arbiter) was busy. SARB handles arbitration between the GPU and the system memory interface. Formula: 100 * GCEA_SARB_BUSY_sum / GCEA_ALWAYS_COUNT_sum'
+    unit: Percent
+  DRAM Read Bandwidth:
+    rst: 'Bandwidth for read requests to system memory (DRAM). RDNA3.5 is an APU using DDR5/LPDDR5X system memory instead of HBM. Formula: GCEA_RDRAM_SIZE_REQ_sum * 32 / time'
+    unit: Bytes/s
+  DRAM Write Bandwidth:
+    rst: 'Definition: Bandwidth for write requests to system memory (DRAM). Description: RDNA3.5 is an APU using DDR5/LPDDR5 system memory instead of HBM. Formula: GCEA_WDRAM_SIZE_REQ_sum * 32 / time'
+    unit: Bytes/s
+  SARB Stall Rate:
+    rst: 'Percent of GCEA sample cycles the System Arbiter (SARB) was stalled. Formula: 100 * GCEA_SARB_STALLED_sum / GCEA_ALWAYS_COUNT_sum.'
+    unit: Percent
+  DRAM Read Requests:
+    rst: 'DRAM read requests per client group from the GCEA memory path (GCEA_RDRAM_REQ_PER_CLIGRP_sum / $denom).'
+    unit: Requests per Normalization Unit
+  DRAM Write Requests:
+    rst: 'DRAM write requests per client group from the GCEA memory path (GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom).'
+    unit: Requests per Normalization Unit
+  Read Returns:
+    rst: 'Valid read-return events on the GCEA return path per normalization unit (GCEA_RRET_VLD_sum / $denom).'
+    unit: Count per Normalization Unit
+  Write Returns:
+    rst: 'Valid write-return events on the GCEA return path per normalization unit (GCEA_WRET_VLD_sum / $denom).'
+    unit: Count per Normalization Unit
+Roofline Performance Rates:
+  VALU FLOPs (F16):
+    rst: 'The total 16-bit floating-point operations executed per second on the VALU. Theoretical FP16 throughput is 2× the FP32 FMA peak (packed half on Navi3 / RDNA3-class VALU). This is presented with the value of the peak empirical F16 FLOPs achievable on the specific accelerator.'
+    unit: GFLOP/s
+  VALU FLOPs (F32):
+    rst: 'The total 32-bit floating-point operations executed per second on the VALU. Navi3 / RDNA3-class CUs sustain up to 128 V_FMA_F32 ops per cycle per CU in wave64 mode; the roofline peak column uses empirically measured F32 throughput. This is presented with the value of the peak empirical F32 FLOPs achievable on the specific accelerator.'
+    unit: GFLOP/s
+  VALU FLOPs (F64):
+    rst: 'The total 64-bit floating-point operations executed per second on the VALU. FP64 throughput is typically 1/16 or 1/32 of FP32 on RDNA3.5 consumer parts. This is presented with the value of the peak empirical F64 FLOPs achievable on the specific accelerator.'
+    unit: GFLOP/s
+  GL2 Cache Bandwidth:
+    rst: 'The number of bytes transferred between GL1C and GL2C per unit time. GL2C is the last-level cache in RDNA3.5 before system memory. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.'
+    unit: Bytes/s
+  GL1 Cache Bandwidth:
+    rst: 'The number of bytes transferred between TCP and GL1C per unit time. GL1C is the shared L1 cache within each Shader Engine. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.'
+    unit: Bytes/s
+  TCP Cache Bandwidth:
+    rst: 'The number of bytes looked up in the TCP (Texture Cache Per-pipe) per unit time. TCP is the L0 vector cache in RDNA3.5, one per WGP. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.'
+    unit: Bytes/s
+  LDS Bandwidth:
+    rst: 'Indicates the maximum amount of bytes that could have been loaded from, stored to, or atomically updated in the LDS per unit time. RDNA3.5 has 32 LDS banks per CU. The peak empirically measured LDS bandwidth achievable on the specific accelerator is displayed alongside for comparison.'
+    unit: Bytes/s
+Roofline Plot Points:
+  AI TCP:
+    rst: 'The Arithmetic Intensity (AI) relative to TCP cache. It is the ratio of total floating-point operations (FLOPs) to total bytes transferred from TCP to the shader cores. This value is used as the x-coordinate for the TCP roofline.'
+    unit: FLOPs/Byte
+  AI GL1:
+    rst: 'The Arithmetic Intensity (AI) relative to GL1C cache. It is the ratio of total floating-point operations (FLOPs) to total bytes transferred between GL1C and TCP. This value is used as the x-coordinate for the GL1 roofline.'
+    unit: FLOPs/Byte
+  AI GL2:
+    rst: 'The Arithmetic Intensity (AI) relative to GL2C (L2 Cache). It is the ratio of total floating-point operations (FLOPs) to total bytes transferred between GL2C and GL1C. This value is used as the x-coordinate for the GL2 roofline.'
+    unit: FLOPs/Byte
+  Performance (GFLOPs):
+    rst: 'The overall achieved performance, measured in GigaFLOPs per second (GFLOP/s). This is calculated as the sum of all VALU floating-point operations divided by the total execution time. This value is used as the y-coordinate for the kernel''s point on the Roofline plot.'
+    unit: GFLOP/s
+CPC Utilization:
+  CPC Busy:
+    rst: 'Percentage of CPC always-count cycles the Command Processor Compute was busy processing commands. Computed as 100 * CPC_STAT_BUSY / CPC_ALWAYS_COUNT.'
+    unit: Percent
+  CPC Idle:
+    rst: 'Percentage of CPC always-count cycles the Command Processor Compute was idle. Computed as 100 * CPC_STAT_IDLE / CPC_ALWAYS_COUNT.'
+    unit: Percent
+  CPC Stalled:
+    rst: 'Percentage of CPC always-count cycles the Command Processor Compute was stalled. Computed as 100 * CPC_STAT_STALL / CPC_ALWAYS_COUNT.'
+    unit: Percent
+CPC Interface Utilization:
+  TCIU Busy:
+    rst: 'Percentage of CPC always-count cycles the TC (Texture Cache) Interface Unit was busy. Computed as 100 * CPC_TCIU_BUSY / CPC_ALWAYS_COUNT.'
+    unit: Percent
+  UTCL2 Busy:
+    rst: 'Percentage of CPC always-count cycles the UTCL2 (Unified Translation Cache L2) interface was busy. Computed as 100 * CPC_UTCL2IU_BUSY / CPC_ALWAYS_COUNT.'
+    unit: Percent
+  GCRIU Busy:
+    rst: 'Percentage of CPC always-count cycles the GCR (Graphics Cache Rinse) Interface Unit was busy. Computed as 100 * CPC_GCRIU_BUSY / CPC_ALWAYS_COUNT.'
+    unit: Percent
+Micro Engine (ME) Stall Cycles:
+  ME1 Stall on RCIU Ready:
+    rst: 'Cycles ME1 was stalled waiting for RCIU (Register Cache Interface Unit) to be ready (CPC_ME1_STALL_WAIT_ON_RCIU_READY).'
+    unit: Cycles per Normalization Unit
+  ME1 Stall on Memory Read:
+    rst: 'Cycles ME1 was stalled waiting for memory read completion (CPC_ME1_STALL_WAIT_ON_MEM_READ).'
+    unit: Cycles per Normalization Unit
+  ME1 Stall on Memory Write:
+    rst: 'Cycles ME1 was stalled waiting for memory write completion (CPC_ME1_STALL_WAIT_ON_MEM_WRITE).'
+    unit: Cycles per Normalization Unit
+  ME1 Stall on ROQ Data:
+    rst: 'Cycles ME1 was stalled waiting for data from the Ring Output Queue (CPC_ME1_STALL_ON_DATA_FROM_ROQ).'
+    unit: Cycles per Normalization Unit
+CPC Memory Requests:
+  TCIU Read Requests:
+    rst: 'Number of read requests sent to the TC Interface Unit.'
+    unit: Count per Normalization Unit
+  TCIU Write Requests:
+    rst: 'Number of write requests sent to the TC Interface Unit.'
+    unit: Count per Normalization Unit
+  GUS Read Requests:
+    rst: 'Number of read requests sent to the Global Unified Shader memory interface.'
+    unit: Count per Normalization Unit
+  GUS Write Requests:
+    rst: 'Number of write requests sent to the Global Unified Shader memory interface.'
+    unit: Count per Normalization Unit
+Micro Engine (ME) Instruction Cache:
+  Instruction Cache Hits:
+    rst: 'Number of MEC instruction cache hits.'
+    unit: Count per Normalization Unit
+  Instruction Cache Misses:
+    rst: 'Number of MEC instruction cache misses.'
+    unit: Count per Normalization Unit
+  Instruction Cache Hit Rate:
+    rst: 'Percentage of MEC instruction cache accesses that hit in the cache.'
+    unit: Percent
+SPI Utilization:
+  SPI Busy:
+    rst: 'Percentage of GPU active (GUI) cycles where any SPI was busy. Computed as 100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE (GRBM block). Do not use block-level SPI_BUSY here: it is aggregated over every SPI instance, so summed busy cycles can far exceed GUI-active cycles when multiple shader engines are active in parallel.'
+    unit: Percent
+Wave Dispatch Statistics:
+  Compute Wave Dispatches:
+    rst: 'SPI counter SPI_CSN_WAVE (block SPI, event 50): compute (CSN) path wave count as stored in pmc_perf (column SPI_CSN_WAVE). Same idea as WGP “Dispatched Waves” (SQ_WAVES_sum) but at SPI; values may differ slightly. Normalized by CLI $denom: per_kernel → ÷1; per_wave → ÷SQ_WAVES; per_cycle → ÷$GRBM_GUI_ACTIVE_PER_XCD; per_second → ÷kernel wall time (s).'
+    unit: Count per Normalization Unit
+  Wave Dispatch Rate:
+    rst: 'SPI_CSN_WAVE / GRBM_GUI_ACTIVE — waves per GUI-active cycle (can exceed 1 when many SEs dispatch in parallel). Uses the same SPI_CSN_WAVE column as collection emits.'
+    unit: Waves/cycle
+WGP Utilization:
+  WGP Utilization:
+    rst: 'WGP busy as a percent of GRBM GUI-active cycles. RDNA3.5 WGPs pair 2 CUs, each with 2 SIMD32 units.'
+    unit: Percent
+Wave Life:
+  Wave Life:
+    rst: 'Average number of cycles a wave exists from creation to completion. Calculated as SQ_WAVE_CYCLES / SQ_WAVES.'
+    unit: Cycles
+Wave Instruction Mix:
+  Total Instructions:
+    rst: 'Total number of instructions executed across all waves.'
+    unit: Count per Normalization Unit
+  Instructions - VALU:
+    rst: 'Number of Vector ALU instructions executed (SQ_INSTS_VALU). VALU handles all vector arithmetic and logic operations. Transcendental VALU ops are reported separately as "Instructions - Transcendental" in the same Wave Instruction Mix table.'
+    unit: Count per Normalization Unit
+  Instructions - SALU:
+    rst: 'Number of Scalar ALU instructions executed. SALU handles scalar operations that are uniform across the wave.'
+    unit: Count per Normalization Unit
+  Instructions - SMEM:
+    rst: 'Number of Scalar Memory instructions executed. SMEM loads uniform data through the scalar cache.'
+    unit: Count per Normalization Unit
+  Instructions - VMEM:
+    rst: 'Number of Vector Memory instructions executed. Includes global, buffer, and texture memory operations.'
+    unit: Count per Normalization Unit
+  Instructions - LDS:
+    rst: 'Total Local Data Share instructions (SQ_INSTS_LDS). LDS provides fast shared memory within a workgroup. For LDS sub-categories (direct/param/ wave32 param loads), see the "LDS Instruction Mix" table.'
+    unit: Count per Normalization Unit
+  Instructions - Internal:
+    rst: 'Internal SQ instructions (SQ_INSTS_INTERNAL) per normalization unit — bookkeeping or non-user-visible work attributed to the scheduler.'
+    unit: Count per Normalization Unit
+  Instructions - Transcendental:
+    rst: 'Transcendental VALU instructions (SQ_INSTS_VALU_TRANS), per normalization unit — e.g. sin/cos/log approximations on the vector ALU.'
+    unit: Count per Normalization Unit
+LDS Instruction Mix:
+  LDS Direct Load Instructions:
+    rst: 'LDS direct load instructions issued (SQ_INSTS_LDS_DIRECT_LOAD). Subset of total LDS; not required to sum with other LDS mix rows to equal total.'
+    unit: Count per Normalization Unit
+  LDS Parameter Load Instructions:
+    rst: 'LDS parameter load instructions issued (SQ_INSTS_LDS_PARAM_LOAD).'
+    unit: Count per Normalization Unit
+  WAVE32 LDS Parameter Load Instructions:
+    rst: 'LDS parameter load instructions under wave32 execution (SQ_INSTS_WAVE32_LDS_PARAM_LOAD).'
+    unit: Count per Normalization Unit
+Wait State Analysis:
+  Wait for Any:
+    rst: 'Percentage of wave lifetime spent waiting for any reason including memory, barriers, or instruction fetch. Computed as 100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES.'
+    unit: Percent
+  Wait for Instruction Fetch:
+    rst: 'Percentage of wave lifetime spent waiting for instructions to arrive from the instruction cache. Computed as 100 * SQ_WAIT_IFETCH / SQ_WAVE_CYCLES.'
+    unit: Percent
+  Wait for Barrier:
+    rst: 'Percentage of wave lifetime spent waiting at barrier synchronization points. Computed as 100 * SQ_WAIT_BARRIER / SQ_WAVE_CYCLES.'
+    unit: Percent
+  Wait for Counter:
+    rst: 'Percentage of wave lifetime spent waiting for waitcnt counters (VMCNT, LGKMCNT, etc.) to reach target values. Computed as 100 * SQ_WAIT_CNT_ANY / SQ_WAVE_CYCLES.'
+    unit: Percent
+WGP Instruction Cache:
+  Icache Hit Rate:
+    rst: 'Instruction cache hit percentage using 100 × SQC_ICACHE_HITS / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES). Do not divide only by SQC_ICACHE_REQ — hits and requests are both per-SQ per-bank, and summed hits can exceed summed requests.'
+    unit: Percent
+WGP Scalar Data Cache:
+  Dcache Hit Rate:
+    rst: 'Scalar data cache hit percentage: 100 × SQC_DCACHE_HITS / (SQC_DCACHE_HITS + SQC_DCACHE_MISSES). Same rationale as Icache (HITS vs REQ can exceed 100%).'
+    unit: Percent
+TCP Utilization:
+  TCP Busy:
+    rst: 'Estimated TCP utilization: 100 × TCP_GATE_EN2 / (GRBM_GUI_ACTIVE × NUM_TCP), with NUM_TCP = max(1, ⌊$cu_per_gpu / 2⌋) (one TCP per WGP, 2 CUs per WGP on RDNA3.5). Uses aggregate TCP_GATE_EN2 (not TCP_GATE_EN2_sum). GRBM_GUI_ACTIVE is scaled by NUM_TCP so the denominator matches multi-TCP capacity. GATE_EN2 is TCP_PERF_SEL_GATE_EN2 (core clocks on, not windowed). If only per-instance counter sums (typically ``_sum`` columns) are available, align the numerator/denominator with your CSV layout.'
+    unit: Percent
+TCP Request Statistics:
+  Total Requests:
+    rst: 'Total number of requests to the TCP cache including reads, writes, and atomics.'
+    unit: Count per Normalization Unit
+  Read Requests:
+    rst: 'Number of read requests to the TCP cache.'
+    unit: Count per Normalization Unit
+  Write Requests:
+    rst: 'Number of write requests to the TCP cache.'
+    unit: Count per Normalization Unit
+  Miss Requests:
+    rst: 'Number of requests that missed in the TCP cache and required fetching from GL1C.'
+    unit: Count per Normalization Unit
+TCP Cache Performance:
+  Hit Rate:
+    rst: 'Percentage of TCP requests that hit in the cache. Higher hit rates reduce traffic to GL1C and improve performance.'
+    unit: Percent
+TCP TCP-GL1 Interface:
+  GL1 Read Requests:
+    rst: 'Number of read requests sent from TCP to GL1C due to cache misses.'
+    unit: Count per Normalization Unit
+  GL1 Read 128B Requests:
+    rst: 'TCP→GL1 read requests that transferred 128 bytes (TCP_GL1_REQ_READ_128B_sum / $denom). Subset of total GL1 read requests; large-line fills show up here.'
+    unit: Count per Normalization Unit
+  GL1 Write Requests:
+    rst: 'TCP→GL1 write or writeback requests (TCP_GL1_REQ_WRITE_sum / $denom).'
+    unit: Count per Normalization Unit
+TCP Stalls:
+  TA Req Stall:
+    rst: 'Cycles TCP stalled the Texture Addresser request interface due to backpressure.'
+    unit: Cycles per Normalization Unit
+  GL1 Back Pressure:
+    rst: 'Cycles TCP was stalled due to back pressure from GL1C.'
+    unit: Cycles per Normalization Unit
+  Data FIFO Stall:
+    rst: 'Cycles TCP stalled because the internal data FIFO could not accept progress (TCP_DATA_FIFO_STALL_sum / $denom). Often correlates with downstream backpressure.'
+    unit: Cycles per Normalization Unit
+GL1C Utilization:
+  GL1C Busy:
+    rst: 'Percentage of cycles where the GL1C cache was busy processing requests. GL1C is the shared L1 cache within each Shader Engine. Per sample: 100 * GL1C_BUSY / GL1C_CYCLE (when GL1C_CYCLE != 0).'
+    unit: Percent
+  GL1C Starve:
+    rst: 'Percentage of cycles where GL1C had no pending requests from TCP. Per sample: 100 * GL1C_STARVE / GL1C_CYCLE (when GL1C_CYCLE != 0).'
+    unit: Percent
+GL1C Request Statistics:
+  Total Requests:
+    rst: 'Total number of requests to the GL1C cache from TCP.'
+    unit: Count per Normalization Unit
+  Read Requests:
+    rst: 'Number of read requests to the GL1C cache.'
+    unit: Count per Normalization Unit
+  Write Requests:
+    rst: 'Number of write requests to the GL1C cache.'
+    unit: Count per Normalization Unit
+  Miss Requests:
+    rst: 'Number of requests that missed in the GL1C cache.'
+    unit: Count per Normalization Unit
+GL1C Cache Performance:
+  Hit Rate:
+    rst: 'Percentage of GL1C requests that hit in the cache.'
+    unit: Percent
+GL1C-GL2 Interface:
+  GL2 Read Requests:
+    rst: 'Number of read requests sent from GL1C to GL2C due to cache misses.'
+    unit: Count per Normalization Unit
+  GL2 Read 128B Requests:
+    rst: 'GL1C→GL2 read requests using 128-byte lines (GL1C_GL2_REQ_READ_128B_sum / $denom).'
+    unit: Count per Normalization Unit
+  GL2 Write Requests:
+    rst: 'GL1C→GL2 write requests (GL1C_GL2_REQ_WRITE_sum / $denom).'
+    unit: Count per Normalization Unit
+GL1C Stalls:
+  GL2 Stall:
+    rst: 'Cycles GL1C was stalled due to backpressure from GL2C.'
+    unit: Cycles per Normalization Unit
+  LFIFO Full Stall:
+    rst: 'Cycles GL1C stalled because the return/load FIFO was full (GL1C_STALL_LFIFO_FULL_sum / $denom), often indicating downstream or consumer backpressure.'
+    unit: Cycles per Normalization Unit
+GL2C Cache Performance:
+  GL2C Hit Rate:
+    rst: 'Percentage of GL2C requests that hit in the cache. GL2C is the last-level cache before system memory.'
+    unit: Percent
+  GL2C Hits:
+    rst: 'Number of requests that hit in the GL2C cache.'
+    unit: Count per Normalization Unit
+  GL2C Misses:
+    rst: 'Number of requests that missed in the GL2C cache and went to memory.'
+    unit: Count per Normalization Unit
+GL2C Request Statistics:
+  Total Requests:
+    rst: 'Number of requests of all types to the GL2C cache (counter GL2C_REQ). This is measured at the tag block (request path into GL2C tag / lookup). Not guaranteed to equal Read + Write + Atomic; those use separate perf events and may omit or overlap traffic relative to this aggregate.'
+    unit: Count per Normalization Unit
+  Read Requests:
+    rst: 'Number of read requests to the GL2C cache (GL2C_READ).'
+    unit: Count per Normalization Unit
+  Write Requests:
+    rst: 'Number of write requests to the GL2C cache (GL2C_WRITE).'
+    unit: Count per Normalization Unit
+  Atomic Requests:
+    rst: 'Number of atomic requests at the GL2C cache (GL2C_ATOMIC).'
+    unit: Count per Normalization Unit
+  EA Read Requests (DRAM):
+    rst: 'Number of GL2C/EA read requests destined for DRAM (memory controller). gl2c_perf_sel_ea_rdreq_dram (GL2C_EA_RDREQ_DRAM). Reported values are summed over GL2C instances.'
+    unit: Count per Normalization Unit
+  EA Write Requests (DRAM):
+    rst: 'Number of GL2C/EA write requests destined for DRAM (memory controller). gl2c_perf_sel_ea_wrreq_dram (GL2C_EA_WRREQ_DRAM). Reported values are summed over GL2C instances.'
+    unit: Count per Normalization Unit
+GL2C Bandwidth:
+  GL2C Read BW:
+    rst: 'Read bandwidth from GL2C_READ_{32,64,128}_REQ byte accounting plus GL2C_COMPRESSED_READ_96_REQ (96 B compressed reads). EA 96 B reads use GL2C_EA_RDREQ_96B.'
+    unit: Bytes/s
+  GL2C Write BW:
+    rst: 'Achieved write bandwidth at the GL2C level.'
+    unit: Bytes/s
+DRAM Read Interface:
+  DRAM Read Requests:
+    rst: 'Number of read requests sent to system memory (DRAM) per client group. RDNA3.5 uses DDR5/LPDDR5 system memory instead of HBM.'
+    unit: Count per Normalization Unit
+  DRAM Read Chained Requests:
+    rst: 'Number of chained (sequential) read request chains sent to DRAM. Chained requests improve memory efficiency for sequential access patterns.'
+    unit: Count per Normalization Unit
+  DRAM Read Banks Active:
+    rst: 'Number of DRAM banks with pending read requests (saturates at 16). More active banks indicate better memory parallelism.'
+    unit: Count per Normalization Unit
+  DRAM Read Size (32B increments):
+    rst: 'Total size of DRAM read requests in 32-byte increments.'
+    unit: Count per Normalization Unit
+DRAM Write Interface:
+  DRAM Write Requests:
+    rst: 'Number of write requests sent to system memory (DRAM) per client group.'
+    unit: Count per Normalization Unit
+  DRAM Write Chained Requests:
+    rst: 'Number of chained (sequential) write request chains sent to DRAM.'
+    unit: Count per Normalization Unit
+  DRAM Write Banks Active:
+    rst: 'Number of DRAM banks with pending write requests (saturates at 16).'
+    unit: Count per Normalization Unit
+  DRAM Write Size (32B increments):
+    rst: 'Total size of DRAM write requests in 32-byte increments.'
+    unit: Count per Normalization Unit
+System Arbiter (SARB):
+  SARB Busy:
+    rst: 'Percentage of cycles the System Arbiter was actively processing requests. Per sample: 100 * GCEA_SARB_BUSY / GCEA_ALWAYS_COUNT (when GCEA_ALWAYS_COUNT != 0). GCEA_ALWAYS_COUNT is the cycle-count denominator for these percentages.'
+    unit: Percent
+  SARB Stalled:
+    rst: 'Percentage of cycles the System Arbiter was stalled (has valid request but downstream not ready). Per sample: 100 * GCEA_SARB_STALLED / GCEA_ALWAYS_COUNT (when GCEA_ALWAYS_COUNT != 0).'
+    unit: Percent
+  SARB Starving:
+    rst: 'Percentage of cycles the System Arbiter was starving (no valid requests but downstream ready). Per sample: 100 * GCEA_SARB_STARVING / GCEA_ALWAYS_COUNT (when GCEA_ALWAYS_COUNT != 0).'
+    unit: Percent
+  SARB Total Requests:
+    rst: 'Total requests per virtual channel through the System Arbiter.'
+    unit: Count per Normalization Unit
+  SARB DRAM Requests:
+    rst: 'DRAM-bound requests per virtual channel through the System Arbiter.'
+    unit: Count per Normalization Unit
+Return Interface:
+  Read Returns:
+    rst: 'Number of read data returns from the external memory interface.'
+    unit: Count per Normalization Unit
+  Write Returns:
+    rst: 'Number of write acknowledgements from the external memory interface.'
+    unit: Count per Normalization Unit
+  Probe Requests:
+    rst: 'Number of probe-invalidate requests (cache coherency operations).'
+    unit: Count per Normalization Unit
+GPU Utilization:
+  GPU Busy:
+    rst: 'Percentage of time the GPU was actively processing work. Per sample: 100 * GRBM_GUI_ACTIVE / GRBM_COUNT (when GRBM_COUNT != 0). Avg / min / max are taken across samples.'
+    unit: Percent
+  CP Busy:
+    rst: 'Percentage of GUI-active cycles the Command Processor was busy. Per sample: 100 * GRBM_CP_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0). CP handles kernel dispatch and command stream processing.'
+    unit: Percent
+  GL2C Busy:
+    rst: 'Percentage of GUI-active cycles the GL2 Cache was busy. Per sample: 100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0). High utilization indicates memory-intensive workload.'
+    unit: Percent
+Shader Engine Utilization:
+  TA Busy:
+    rst: 'Percentage of GUI-active cycles the Texture Addresser was busy. Per sample: 100 * GRBM_TA_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0).'
+    unit: Percent
+Memory chart - TCP-GL1 Interface:
+  TCP-GL1 Read Requests:
+    rst: 'Read requests from TCP to GL1C (miss/refill path), per normalization unit.'
+    unit: Requests per Normalization Unit
+  TCP-GL1 Write Requests:
+    rst: 'Write-related requests from TCP toward GL1C, per normalization unit.'
+    unit: Requests per Normalization Unit
+  TCP-GL1 Read Bandwidth:
+    rst: 'Bytes per second for TCP→GL1 read traffic (64 B per TCP_GL1_REQ_READ event).'
+    unit: Bytes/s
+  TCP-GL1 Write Bandwidth:
+    rst: 'Bytes per second for TCP→GL1 write traffic (64 B per TCP_GL1_REQ_WRITE event).'
+    unit: Bytes/s
+Memory chart - GL1C-GL2 Interface:
+  GL1-GL2 Read Requests:
+    rst: 'Read requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_READ_sum).'
+    unit: Requests per Normalization Unit
+  GL1-GL2 Write Requests:
+    rst: 'Write requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_WRITE_sum).'
+    unit: Requests per Normalization Unit
+  GL1-GL2 Read Bandwidth:
+    rst: 'Bytes per second on the GL1C→GL2C read interface (32/64/128 B request bins).'
+    unit: Bytes/s
+  GL1-GL2 Write Bandwidth:
+    rst: 'Bytes per second on the GL1C→GL2C write interface (32/64 B request bins).'
+    unit: Bytes/s
+  GL1-GL2 Read Latency:
+    rst: 'Average cycles from GL1C read request to response (GL1C_GL2_REQ_READ_LATENCY_sum / GL1C_GL2_REQ_READ_sum) when the denominator is non-zero.'
+    unit: Cycles
+  GL1-GL2 Write Latency:
+    rst: 'Average cycles from GL1C write request to completion (GL1C_GL2_REQ_WRITE_LATENCY_sum / GL1C_GL2_REQ_WRITE_sum) when the denominator is non-zero.'
+    unit: Cycles
+Wavefront Launch Stats:
+  Grid Size:
+    rst: 'Number of work-items in the dispatch grid for the kernel (Grid_Size), averaged/min/maxed across samples. Defines total parallel work launched.'
+    unit: Work-items
+  Workgroup Size:
+    rst: 'Number of work-items per workgroup (Workgroup_Size). Together with grid size and resource limits it determines wave/wavefront count.'
+    unit: Work-items
+  VGPRs:
+    rst: 'Vector general-purpose registers allocated per wave (Arch_VGPR). Limits occupancy when the per-CU VGPR capacity is exhausted.'
+    unit: Registers
+  SGPRs:
+    rst: 'Scalar general-purpose registers allocated for the wave (SGPR). Uniform data and execution state live in the scalar path.'
+    unit: Registers
+  LDS Allocation:
+    rst: 'Local Data Share bytes reserved per workgroup (LDS_Per_Workgroup). High LDS per group reduces how many workgroups can run concurrently on a CU/WGP.'
+    unit: Bytes
+  Scratch Allocation:
+    rst: 'Scratch (private) memory bytes per work-item (Scratch_Per_Workitem). Backed by off-chip memory when spill/stack exceeds limits.'
+    unit: Bytes per Work-item
+Wave Dispatch:
+  Dispatched Waves:
+    rst: 'Number of shader waves launched (SQ_WAVES_sum), averaged/min/maxed. Each wave is a SIMD execution entity (typically wave32 on this configuration).'
+    unit: Waves
+  Dispatched Threads:
+    rst: 'Number of work-items launched as attributed in SQ_ITEMS_sum (threads), averaged/min/maxed.'
+    unit: Threads
+VMEM Instruction Mix:
+  Instructions - VMEM Flat:
+    rst: 'Flat-addressing vector memory instructions (SQ_INSTS_FLAT) per normalization unit. Flat can resolve to global, scratch or LDS depending on address.'
+    unit: Count per Normalization Unit
+  Instructions - TEX Load:
+    rst: 'Texture / image load instructions (SQ_INSTS_TEX_LOAD) per normalization unit.'
+    unit: Count per Normalization Unit
+  Instructions - TEX Store:
+    rst: 'Texture / image store instructions (SQ_INSTS_TEX_STORE) per normalization unit.'
+    unit: Count per Normalization Unit
+  Instructions - Flat Load:
+    rst: 'Flat load instructions (SQ_INSTS_FLAT_LOAD) per normalization unit.'
+    unit: Count per Normalization Unit
+  Instructions - Flat Store:
+    rst: 'Flat store instructions (SQ_INSTS_FLAT_STORE) per normalization unit.'
+    unit: Count per Normalization Unit

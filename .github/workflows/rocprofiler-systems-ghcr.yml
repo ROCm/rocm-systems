@@ -10,6 +10,7 @@ on:
     paths:
       - '.github/workflows/rocprofiler-systems-ghcr.yml'
       - 'projects/rocprofiler-systems/docker/**'
+      - 'projects/rocprofiler-systems/requirements.txt'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -23,6 +24,7 @@ on:
     paths:
       - '.github/workflows/rocprofiler-systems-ghcr.yml'
       - 'projects/rocprofiler-systems/docker/**'
+      - 'projects/rocprofiler-systems/requirements.txt'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -125,6 +127,7 @@ jobs:
         continue-on-error: true
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
         with:
+          context: projects/rocprofiler-systems
           file: projects/rocprofiler-systems/docker/${{ steps.setup_vars_gfx.outputs.docker_file }}
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
@@ -146,6 +149,7 @@ jobs:
         if: steps.docker_build.outcome != 'success'
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
         with:
+          context: projects/rocprofiler-systems
           file: projects/rocprofiler-systems/docker/${{ steps.setup_vars_gfx.outputs.docker_file }}
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}

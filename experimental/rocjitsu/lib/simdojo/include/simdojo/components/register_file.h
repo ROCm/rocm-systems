@@ -103,6 +103,16 @@ public:
   /// @returns Registers per block.
   uint32_t regs_per_block() const { return regs_per_block_; }
 
+  /// @brief Count the number of free allocation blocks.
+  /// @returns Number of blocks available for allocation.
+  uint32_t free_block_count() const {
+    uint32_t count = 0;
+    for (bool b : free_blocks_)
+      if (b)
+        ++count;
+    return count;
+  }
+
 private:
   std::vector<RegType> data_;     ///< One RegType per register.
   uint32_t total_regs_ = 0;       ///< Total registers.

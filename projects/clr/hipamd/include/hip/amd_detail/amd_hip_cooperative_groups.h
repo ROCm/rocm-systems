@@ -748,6 +748,9 @@ __CG_QUALIFIER__ void thread_group::sync() const {
       __hip_assert(false && "invalid cooperative group type");
     }
   }
+#if __has_builtin(__builtin_amdgcn_s_wait_asynccnt)
+  __builtin_amdgcn_s_wait_asynccnt(0);
+#endif
 }
 
 #endif
@@ -1332,6 +1335,88 @@ struct bit_or {
   }
 };
 #endif
+
+/**
+ * \brief Cluster group
+ *
+ * \note cluster can be 1D/2D/3D and have upto 15 workgroups in a cluster. Each cluster runs on a
+ * separate WGP processor. Sizing, cluster size is in workgroups, workgroups size is in threads.
+ */
+class cluster_group {
+  friend __device__ cluster_group this_cluster();
+
+  // Default constructor, hidden
+  __CG_QUALIFIER__ cluster_group() {}
+
+ public:
+  using arrival_token = struct {};
+
+  // Sync the cluster, equivalent to c.barrier_wait(c.barrier_arrive());
+  __CG_STATIC_QUALIFIER__ void sync() { internal::cluster::sync(); }
+
+  // Arrive on a cluster barrier, returns token that needs to be passed to barrier_wait
+  __CG_STATIC_QUALIFIER__ arrival_token barrier_arrive() {
+    // signal user cluster barrier
+    internal::cluster::barrier_arrive();
+    return arrival_token();
+  }
+
+  // Wait on arrival_token
+  __CG_STATIC_QUALIFIER__ void barrier_wait(arrival_token&&) { internal::cluster::barrier_wait(); }
+
+  // TODO: implement this when compiler work is done
+  // block rank to which shared memory address belongs to
+  // __CG_STATIC_QUALIFIER__ unsigned int query_shared_rank(const void* addr) {}
+  // Obtain the address of shared memory variable of another block in the cluster
+  // template <typename T> __CG_STATIC_QUALIFIER__ T* map_shared_rank(T* addr, int rank) {}
+
+  // index of the calling block within cluster
+  __CG_STATIC_QUALIFIER__ dim3 block_index() { return internal::cluster::block_index(); }
+
+  // Rank of calling block within [0, num_blocks)
+  __CG_STATIC_QUALIFIER__ unsigned int block_rank() { return internal::cluster::block_rank(); }
+
+  // index of the calling thread within cluster
+  __CG_STATIC_QUALIFIER__ dim3 thread_index() { return internal::cluster::thread_index(); }
+
+  // Rank of calling thread within [0, num_threads)
+  __CG_STATIC_QUALIFIER__ unsigned int thread_rank() { return internal::cluster::thread_rank(); }
+
+  // Dimensions of launched cluster in unit of blocks
+  __CG_STATIC_QUALIFIER__ dim3 dim_blocks() { return internal::cluster::dim_blocks(); }
+
+  // total number of blocks in the group
+  __CG_STATIC_QUALIFIER__ unsigned int num_blocks() { return internal::cluster::num_blocks(); }
+
+  // Dimensions of launched cluster in unit of threads
+  __CG_STATIC_QUALIFIER__ dim3 dim_threads() { return internal::cluster::dim_threads(); }
+
+  // Total number of threads in the group
+  __CG_STATIC_QUALIFIER__ unsigned int num_threads() { return internal::cluster::num_threads(); }
+
+  // Get address of shared memory variable in another cluster
+  template <typename T> __CG_STATIC_QUALIFIER__ T* map_shared_rank(T* in, int rank) {
+    return internal::cluster::map_shared_rank<T>(in, rank);
+  }
+
+  // Return block rank of shared memory address
+  __CG_STATIC_QUALIFIER__ unsigned int query_shared_rank(const void* in) {
+    return internal::cluster::query_shared_rank(in);
+  }
+
+  // Alias of num_threads
+  __CG_STATIC_QUALIFIER__ unsigned int size() { return num_threads(); }
+};
+
+/**
+ * \brief get cluster group
+ *
+ * \return cluster_group
+ */
+__device__ cluster_group this_cluster() {
+  cluster_group cg;
+  return cg;
+}
 }  // namespace cooperative_groups
 
 #endif  // __cplusplus

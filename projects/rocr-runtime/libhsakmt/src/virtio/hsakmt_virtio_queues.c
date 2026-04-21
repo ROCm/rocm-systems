@@ -109,10 +109,11 @@ static int vhsakmt_create_queue_blob_bo(vhsakmt_device_handle dev, size_t size, 
   return r;
 }
 
-HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueueExt(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
+HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueueV2(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
                                               HSAuint32 QueuePercentage,
                                               HSA_QUEUE_PRIORITY Priority, HSAuint32 SdmaEngineId,
                                               void* QueueAddress, HSAuint64 QueueSizeInBytes,
+                                              HSAuint64 MetaDataQueueSizeInBytes,
                                               HsaEvent* Event, HsaQueueResource* QueueResource) {
   CHECK_VIRTIO_KFD_OPEN();
 
@@ -223,6 +224,18 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueueExt(HSAuint32 NodeId, HSA_QUEUE_TYPE T
   }
   QueueResource->QueueId = (uint64_t)queue_bo;
   return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueueExt(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
+                                             HSAuint32 QueuePercentage,
+                                             HSA_QUEUE_PRIORITY Priority,
+                                             HSAuint32 SdmaEngineId,
+                                             void* QueueAddress,
+                                             HSAuint64 QueueSizeInBytes,
+                                             HsaEvent* Event,
+                                             HsaQueueResource* QueueResource) {
+  return vhsaKmtCreateQueueV2(NodeId, Type, QueuePercentage, Priority, SdmaEngineId,
+                              QueueAddress, QueueSizeInBytes, 0, Event, QueueResource);
 }
 
 HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,

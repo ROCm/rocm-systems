@@ -411,8 +411,10 @@ std::unordered_map<std::string, FactoryFn> &factories() {
     };
 
     f["l2_cache"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                       amdgpu::GpuMemory *) -> std::unique_ptr<simdojo::Component> {
-      return std::make_unique<amdgpu::L2Cache>(n);
+                       amdgpu::GpuMemory *mem) -> std::unique_ptr<simdojo::Component> {
+      auto l2 = std::make_unique<amdgpu::L2Cache>(n);
+      l2->set_backing_memory(mem);
+      return l2;
     };
 
     f["memory_side_cache"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode,
@@ -422,9 +424,14 @@ std::unordered_map<std::string, FactoryFn> &factories() {
     };
 
     f["command_processor"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode,
-                                rj_code_arch_t,
+                                rj_code_arch_t arch,
                                 amdgpu::GpuMemory *) -> std::unique_ptr<simdojo::Component> {
-      return std::make_unique<amdgpu::CommandProcessor>(n);
+      auto cp = std::make_unique<amdgpu::CommandProcessor>(n);
+      // VGPR granularity: 8 for CDNA3/CDNA4 (GFX940+), 4 for earlier GFX9.
+      uint32_t gran =
+          (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) ? 8 : 4;
+      cp->set_vgpr_granularity(gran);
+      return cp;
     };
 
     f["compute_unit"] = [](const std::string &n, const CfgMap &cfg, simdojo::ExecMode mode,
@@ -559,9 +566,12 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
   {
     std::vector<simdojo::Component *> all;
     root->collect_components(all);
-    for (auto *c : all)
+    for (auto *c : all) {
       if (auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(c))
         cu->set_memory(mem);
+      if (auto *cp = dynamic_cast<amdgpu::CommandProcessor *>(c))
+        cp->set_memory(mem);
+    }
   }
 
   set_cu_l2(root);
@@ -626,6 +636,45 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
     throw std::runtime_error("Config missing 'topology' section");
 
   result.build_result = build_topology(topo_def, result.exec_mode, arch);
+
+  // Extract KFD device identity from vm.gpu.device if present.
+  if (fb_config->vm() && fb_config->vm()->gpu() && fb_config->vm()->gpu()->device()) {
+    auto *d = fb_config->vm()->gpu()->device();
+    auto &dev = result.device;
+    dev.present = true;
+    dev.gpu_id = d->gpu_id();
+    dev.gfx_target_version = d->gfx_target_version();
+    dev.vendor_id = d->vendor_id();
+    dev.device_id = d->device_id();
+    dev.family_id = d->family_id();
+    dev.unique_id = d->unique_id();
+    if (d->marketing_name())
+      dev.marketing_name = d->marketing_name()->str();
+    dev.drm_render_minor = d->drm_render_minor();
+    dev.simd_count = d->simd_count();
+    dev.max_waves_per_simd = d->max_waves_per_simd();
+    dev.num_shader_engines = d->num_shader_engines();
+    dev.num_shader_arrays_per_engine = d->num_shader_arrays_per_engine();
+    dev.num_cu_per_sh = d->num_cu_per_sh();
+    dev.simd_per_cu = d->simd_per_cu();
+    dev.wave_front_size = d->wave_front_size();
+    dev.max_slots_scratch_cu = d->max_slots_scratch_cu();
+    dev.local_mem_size = d->local_mem_size();
+    dev.lds_size_kb = d->lds_size_kb();
+    dev.mem_width = d->mem_width();
+    dev.mem_clk_max = d->mem_clk_max();
+    dev.l1_size_kb = d->l1_size_kb();
+    dev.l1_line_size = d->l1_line_size();
+    dev.l1_assoc = d->l1_assoc();
+    dev.l2_size_kb = d->l2_size_kb();
+    dev.l2_line_size = d->l2_line_size();
+    dev.l2_assoc = d->l2_assoc();
+    dev.num_sdma_engines = d->num_sdma_engines();
+    dev.num_sdma_xgmi_engines = d->num_sdma_xgmi_engines();
+    dev.num_cp_queues = d->num_cp_queues();
+    dev.max_engine_clk_fcompute = d->max_engine_clk_fcompute();
+  }
+
   return result;
 }
 
@@ -640,6 +689,16 @@ rj_code_arch_t parse_arch(const std::string &arch_str) {
     return ROCJITSU_CODE_ARCH_CDNA3;
   if (arch_str == "cdna4")
     return ROCJITSU_CODE_ARCH_CDNA4;
+  if (arch_str == "rdna1")
+    return ROCJITSU_CODE_ARCH_RDNA1;
+  if (arch_str == "rdna2")
+    return ROCJITSU_CODE_ARCH_RDNA2;
+  if (arch_str == "rdna3")
+    return ROCJITSU_CODE_ARCH_RDNA3;
+  if (arch_str == "rdna3_5" || arch_str == "rdna3.5")
+    return ROCJITSU_CODE_ARCH_RDNA3_5;
+  if (arch_str == "rdna4")
+    return ROCJITSU_CODE_ARCH_RDNA4;
   if (arch_str == "rv32i")
     return ROCJITSU_CODE_ARCH_RV32I;
   if (arch_str == "rv64i")
@@ -657,6 +716,16 @@ const char *arch_to_string(rj_code_arch_t arch) {
     return "cdna3";
   case ROCJITSU_CODE_ARCH_CDNA4:
     return "cdna4";
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return "rdna1";
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return "rdna2";
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return "rdna3";
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return "rdna3_5";
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return "rdna4";
   case ROCJITSU_CODE_ARCH_RV32I:
     return "rv32i";
   case ROCJITSU_CODE_ARCH_RV64I:
