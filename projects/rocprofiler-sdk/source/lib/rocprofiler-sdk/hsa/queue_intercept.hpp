@@ -65,18 +65,6 @@ struct QueueState
     uint64_t           k_factor        = 0;        ///< K-factor for metadata queue sync
     QueueState*        metadata_state  = nullptr;  ///< Pointer to metadata queue state if present
     std::mutex         gate_lock;                  ///< Lock for packet submission gating
-
-    // Diagnostic counters for deadlock/race triage
-    std::atomic<uint64_t> add_wptr_count{0};
-    std::atomic<uint64_t> store_wptr_count{0};
-    std::atomic<uint64_t> cas_wptr_count{0};
-    std::atomic<uint64_t> cas_fail_count{0};
-    std::atomic<uint64_t> doorbell_count{0};
-    std::atomic<uint64_t> lookup_miss_count{0};
-    std::atomic<uint64_t> remainder_count{0};
-    std::atomic<uint64_t> over_stride_count{0};
-    std::atomic<int64_t>  last_doorbell_value{-1};
-    std::atomic<bool>     destroying{false};
 };
 
 using queue_state_ptr_t      = std::shared_ptr<QueueState>;
