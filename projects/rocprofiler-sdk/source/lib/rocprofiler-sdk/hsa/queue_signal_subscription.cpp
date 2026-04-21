@@ -42,8 +42,11 @@ get_queue_signal_monitor_mutex()
 std::shared_ptr<SignalMonitor>&
 get_queue_signal_monitor()
 {
-    static auto monitor =
-        create_signal_monitor(parse_signal_monitor_backend_env(), SignalMonitorConfig{});
+    static auto monitor = [] {
+        SignalMonitorConfig cfg{};
+        cfg.allow_poll_fallback = false;
+        return create_signal_monitor(SignalMonitorBackend::ioctl, cfg);
+    }();
     return monitor;
 }
 }  // namespace
