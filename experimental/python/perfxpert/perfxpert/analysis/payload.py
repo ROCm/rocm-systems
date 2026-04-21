@@ -363,6 +363,18 @@ def build_analysis_payload(
         "tier0_findings": None,
         "recommendations_deterministic": [],
         "metadata": {},
+        # Phase 10 — RCCL / NIC communication section. Populated only when
+        # the trace actually contains RCCL spans; absent otherwise so
+        # formatters can short-circuit the block.
+        # ``communication`` shape is:
+        #   { "collectives": [...], "summary": {...} }
+        # See perfxpert/tools/rccl_analysis.py for the exact schema.
+        "communication": None,
+        # Phase 10 — Live Roofline points (per-kernel AI + achieved rate +
+        # ridge point). Populated only when Tier-2 hardware counters are
+        # available in the DB. See perfxpert/tools/roofline.py::plot_points
+        # for the exact schema.
+        "roofline": None,
     }
 
     if connection is not None:
@@ -395,6 +407,52 @@ def build_analysis_payload(
             }
         except Exception:
             payload["hardware_counters"] = {"has_counters": False, "metrics": {}, "counters": {}}
+
+        # 4b. RCCL / NIC communication analysis (Phase 10). Populated only
+        # when the trace actually contains RCCL spans OR RCCL-named kernels
+        # (fallback). Key is left as ``None`` otherwise so formatters can
+        # skip the block entirely without having to check for empty dicts.
+        if database_path:
+            try:
+                from perfxpert.tools.rccl_analysis import analyze_collectives
+
+                # Try to read the gfx_id from rocpd_info_agent. Best-effort;
+                # communication analysis still produces a useful shape
+                # without a peak (efficiency_pct just stays at 0).
+                gfx_id = None
+                try:
+                    cur = connection.execute(
+                        "SELECT name FROM rocpd_info_agent WHERE type='GPU' LIMIT 1"
+                    )
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        gfx_id = str(row[0])
+                except Exception:
+                    gfx_id = None
+
+                comm = analyze_collectives(database_path, gfx_id=gfx_id)
+                if comm and comm.get("collectives"):
+                    payload["communication"] = comm
+            except Exception:
+                payload["communication"] = None
+
+        # 4c. Live Roofline points (Phase 10). Deterministic per-kernel
+        # arithmetic-intensity + achieved-FLOPs/s lookup straight from
+        # pmc_events. Only populated when hardware counters are actually
+        # available so the webview doesn't render an empty chart for
+        # Tier-1 traces.
+        has_counters = bool(
+            payload.get("hardware_counters", {}).get("has_counters", False)
+        )
+        if has_counters and database_path:
+            try:
+                from perfxpert.tools.roofline import plot_points
+
+                rf = plot_points(database_path, top_k=top_kernels)
+                if rf and rf.get("kernels"):
+                    payload["roofline"] = rf
+            except Exception:
+                payload["roofline"] = None
 
         # 5. Kernel resources / occupancy (best-effort — requires kernel symbols)
         try:
