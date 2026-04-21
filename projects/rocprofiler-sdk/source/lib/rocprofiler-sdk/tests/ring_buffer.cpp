@@ -67,8 +67,8 @@ TEST(RingBuffer, RingViewMaskIsSizeMinusOne)
 TEST(RingBuffer, RingCursorWriteAdvancesSubmitPos)
 {
     std::vector<char> backing;
-    RingView          v       = make_view(backing, 8);
-    uint64_t          rdid    = 0;
+    RingView          v    = make_view(backing, 8);
+    uint64_t          rdid = 0;
     RingCursor        cursor{v, 0, &rdid};
 
     alignas(64) char pkt[kPktSize];
@@ -84,8 +84,8 @@ TEST(RingBuffer, RingCursorWriteAdvancesSubmitPos)
 TEST(RingBuffer, RingCursorWrapAround)
 {
     std::vector<char> backing;
-    RingView          v       = make_view(backing, 4);  // mask = 3
-    uint64_t          rdid    = 0;
+    RingView          v    = make_view(backing, 4);  // mask = 3
+    uint64_t          rdid = 0;
     RingCursor        cursor{v, 0, &rdid};
 
     // Keep rdid moving so we don't stall against backpressure when wrapping.
@@ -110,9 +110,7 @@ TEST(RingBuffer, RingCursorWrapAround)
 
     EXPECT_EQ(cursor.submit_pos(), 6u);
 
-    auto slot_byte = [&](uint64_t slot_idx) -> char {
-        return backing[slot_idx * kPktSize + 2];
-    };
+    auto slot_byte = [&](uint64_t slot_idx) -> char { return backing[slot_idx * kPktSize + 2]; };
     // Slots 0,1,2,3 overwritten by pkts 4,5,_,_ ? No: wrap order is
     // logical 0..5 -> slot (0&3,1&3,2&3,3&3,4&3,5&3) = (0,1,2,3,0,1)
     EXPECT_EQ(slot_byte(0), static_cast<char>(0x40 + 4));  // slot 0 last written by pkt 4
@@ -153,9 +151,8 @@ TEST(RingBuffer, RingCursorBackpressure)
     EXPECT_EQ(cursor.submit_pos(), 5u);
 
     // Sanity: total wait was at least the 10ms sleep.
-    auto elapsed =
-        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
-                                                              t_start);
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t_start);
     EXPECT_GE(elapsed.count(), 10);
 }
 
@@ -178,8 +175,7 @@ TEST(RingBuffer, RingCursorWriteGapProducesBarrierAndHeader)
     // a unit test directly; see the comment in RingCursor::write_gap.
     uint16_t header = 0;
     memcpy(&header, backing.data(), sizeof(header));
-    EXPECT_EQ(header,
-              static_cast<uint16_t>(HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE));
+    EXPECT_EQ(header, static_cast<uint16_t>(HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE));
 
     // Remaining 62 bytes are zeroed.
     for(uint32_t i = 2; i < kPktSize; ++i)

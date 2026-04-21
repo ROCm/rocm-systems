@@ -52,9 +52,9 @@ namespace queue_intercept
  */
 struct PendingClaim
 {
-    uint64_t claim_index = 0;   ///< What add_write_index returned — the start ring slot
+    uint64_t claim_index  = 0;  ///< What add_write_index returned — the start ring slot
     uint32_t packet_count = 0;  ///< Value the caller passed to add_write_index
-    uint32_t stride = 1;        ///< Stride at claim time (1 + k_factor when claimed)
+    uint32_t stride       = 1;  ///< Stride at claim time (1 + k_factor when claimed)
 };
 
 /**
@@ -87,15 +87,15 @@ struct QueueState
     RingView ring_view = {};  ///< Ring geometry (set at creation, never changes)
     uint32_t stride    = 1;   ///< Per-packet ring advance = 1 + k_factor
 
-    std::atomic<uint64_t>    claim_pos{0};        ///< Authoritative SDK cursor (claim side)
-    volatile uint64_t*       real_wdid = nullptr; ///< Pointer to actual queue write index
-    volatile const uint64_t* real_rdid = nullptr; ///< Pointer to actual queue read index
+    std::atomic<uint64_t>    claim_pos{0};         ///< Authoritative SDK cursor (claim side)
+    volatile uint64_t*       real_wdid = nullptr;  ///< Pointer to actual queue write index
+    volatile const uint64_t* real_rdid = nullptr;  ///< Pointer to actual queue read index
 
     const hsa_queue_t* hsa_queue       = nullptr;  ///< HSA queue pointer for Queue* lookup
     hsa_signal_t       doorbell_signal = {0};      ///< The queue's doorbell signal
 
-    std::mutex gate_lock;                  ///< Lock for packet submission gating
-    uint64_t   published_pos = 0;          ///< Cursor up to which packets have been published
+    std::mutex gate_lock;          ///< Lock for packet submission gating
+    uint64_t   published_pos = 0;  ///< Cursor up to which packets have been published
 
     /// HSA_QUEUE_TYPE_SINGLE flag. When true, forwarded doorbell values must be
     /// monotonically non-decreasing (spec requirement). See bug #9.
@@ -111,8 +111,8 @@ struct QueueState
     /// race on `claim_pos.fetch_add`, so insertion order into this map does
     /// not match claim-index order; std::map gives us O(log N) sorted-by-key
     /// insert/iterate. N is small (bounded by concurrent in-flight claims).
-    std::mutex                        pending_lock;
-    std::map<uint64_t, PendingClaim>  pending;   ///< key = claim_index
+    std::mutex                       pending_lock;
+    std::map<uint64_t, PendingClaim> pending;  ///< key = claim_index
 };
 
 using queue_state_ptr_t      = std::shared_ptr<QueueState>;

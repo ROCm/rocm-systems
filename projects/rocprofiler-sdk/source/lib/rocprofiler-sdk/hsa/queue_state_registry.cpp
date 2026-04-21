@@ -97,9 +97,9 @@ create_queue_state(const hsa_queue_t* queue,
                    volatile uint64_t* rdid_addr,
                    uint64_t           k_factor)
 {
-    auto     state        = std::make_shared<QueueState>();
-    uint64_t current_wdid = __atomic_load_n(wdid_addr, __ATOMIC_ACQUIRE);
-    state->ring_view      = RingView{queue->base_address,
+    auto     state         = std::make_shared<QueueState>();
+    uint64_t current_wdid  = __atomic_load_n(wdid_addr, __ATOMIC_ACQUIRE);
+    state->ring_view       = RingView{queue->base_address,
                                 queue->size,
                                 queue->size - 1,
                                 /*pkt_size=*/64};
@@ -117,8 +117,8 @@ create_queue_state(const hsa_queue_t* queue,
     // Initialize last_doorbell_val to the hardware's current write-index so a
     // racing early-exit caller that sees nothing claimed can never forward a
     // value smaller than what the hardware has already observed.
-    state->last_doorbell_val.store(
-        (current_wdid == 0) ? 0 : (current_wdid - 1), std::memory_order_relaxed);
+    state->last_doorbell_val.store((current_wdid == 0) ? 0 : (current_wdid - 1),
+                                   std::memory_order_relaxed);
 
     get_queue_registry().wlock([&](auto& map) { map[queue] = state; });
     get_doorbell_map().wlock([&](auto& map) { map[queue->doorbell_signal.handle] = state; });

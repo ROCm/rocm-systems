@@ -134,8 +134,8 @@ TEST(QueueIntercept, DoorbellMapInsertAndLookup)
 TEST(QueueIntercept, AddWriteIndexAdvancesClaimPos)
 {
     QueueState state{};
-    state.stride    = 1;
-    uint64_t idx0   = add_write_index_impl(&state, 1, std::memory_order_relaxed);
+    state.stride  = 1;
+    uint64_t idx0 = add_write_index_impl(&state, 1, std::memory_order_relaxed);
     EXPECT_EQ(idx0, 0u);
     EXPECT_EQ(state.claim_pos.load(), 1u);
 
@@ -455,11 +455,9 @@ TEST(QueueIntercept, DoorbellTwoPacketsStridedLayout)
     // Strided layout: packets at slots 0 and 8 only. Slot 1 is left zeroed —
     // it's part of claim #1's reservation and should be gap-padded by the
     // consumer, not treated as a source slot.
-    get_pkt(ring, 0, 511)->header =
-        (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    get_pkt(ring, 0, 511)->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
     get_pkt(ring, 0, 511)->kernel_object = 0xAAAA;
-    get_pkt(ring, 8, 511)->header =
-        (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    get_pkt(ring, 8, 511)->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
     get_pkt(ring, 8, 511)->kernel_object = 0xBBBB;
 
     process_doorbell_impl(state, 0, [](hsa_signal_t, hsa_signal_value_t) {});
@@ -519,8 +517,7 @@ TEST(QueueIntercept, SingleQueueDoorbellClamp)
     state->published_pos = 0;
 
     hsa_signal_value_t captured = -1;
-    process_doorbell_impl(
-        state, 50, [&](hsa_signal_t, hsa_signal_value_t v) { captured = v; });
+    process_doorbell_impl(state, 50, [&](hsa_signal_t, hsa_signal_value_t v) { captured = v; });
 
     EXPECT_EQ(captured, 100);
     EXPECT_EQ(state->last_doorbell_val.load(std::memory_order_relaxed), 100u);
@@ -547,8 +544,7 @@ TEST(QueueIntercept, MultiQueueDoorbellNoClamp)
     state->published_pos = 0;
 
     hsa_signal_value_t captured = -1;
-    process_doorbell_impl(
-        state, 50, [&](hsa_signal_t, hsa_signal_value_t v) { captured = v; });
+    process_doorbell_impl(state, 50, [&](hsa_signal_t, hsa_signal_value_t v) { captured = v; });
 
     // Multi queue: no clamp. Forward the user's value verbatim.
     EXPECT_EQ(captured, 50);
@@ -580,8 +576,7 @@ TEST(QueueIntercept, SingleQueueDoorbellHighWaterFromPublish)
     pkt->kernel_object = 0xC0DE;
 
     hsa_signal_value_t captured1 = -1;
-    process_doorbell_impl(
-        state, 0, [&](hsa_signal_t, hsa_signal_value_t v) { captured1 = v; });
+    process_doorbell_impl(state, 0, [&](hsa_signal_t, hsa_signal_value_t v) { captured1 = v; });
 
     // After the publish, last_doorbell_val is published_pos - 1 == 0.
     EXPECT_EQ(captured1, 0);
@@ -590,15 +585,13 @@ TEST(QueueIntercept, SingleQueueDoorbellHighWaterFromPublish)
     // Now nothing new is claimed. The caller forwards a value of 5. last
     // observed is 0; 5 >= 0 so no clamp; it forwards.
     hsa_signal_value_t captured2 = -1;
-    process_doorbell_impl(
-        state, 5, [&](hsa_signal_t, hsa_signal_value_t v) { captured2 = v; });
+    process_doorbell_impl(state, 5, [&](hsa_signal_t, hsa_signal_value_t v) { captured2 = v; });
     EXPECT_EQ(captured2, 5);
     EXPECT_EQ(state->last_doorbell_val.load(std::memory_order_relaxed), 5u);
 
     // And forwarding 3 should now clamp to the new high-water mark of 5.
     hsa_signal_value_t captured3 = -1;
-    process_doorbell_impl(
-        state, 3, [&](hsa_signal_t, hsa_signal_value_t v) { captured3 = v; });
+    process_doorbell_impl(state, 3, [&](hsa_signal_t, hsa_signal_value_t v) { captured3 = v; });
     EXPECT_EQ(captured3, 5);
 }
 
@@ -670,8 +663,7 @@ TEST(PendingClaim, DoorbellDefersNonReadyClaim)
     record_claim(*state, 0, 1, 1);
     record_claim(*state, 1, 1, 1);
 
-    get_pkt(ring, 0, 255)->header =
-        (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    get_pkt(ring, 0, 255)->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
     get_pkt(ring, 0, 255)->kernel_object = 0xA000;
     // Slot 1 header is HSA_PACKET_TYPE_INVALID, writer not yet finished.
     get_pkt(ring, 1, 255)->header = (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE);
@@ -704,10 +696,9 @@ TEST(PendingClaim, DoorbellResumesAfterPreviousDefer)
     record_claim(*state, 0, 1, 1);
     record_claim(*state, 1, 1, 1);
 
-    get_pkt(ring, 0, 255)->header =
-        (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    get_pkt(ring, 0, 255)->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
     get_pkt(ring, 0, 255)->kernel_object = 0xA000;
-    get_pkt(ring, 1, 255)->header = (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE);
+    get_pkt(ring, 1, 255)->header        = (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE);
 
     // First doorbell: only claim #1 consumed.
     process_doorbell_impl(state, 0, [](hsa_signal_t, hsa_signal_value_t) {});
@@ -715,8 +706,7 @@ TEST(PendingClaim, DoorbellResumesAfterPreviousDefer)
     EXPECT_EQ(state->published_pos, 1u);
 
     // Producer finishes writing the second packet.
-    get_pkt(ring, 1, 255)->header =
-        (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    get_pkt(ring, 1, 255)->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
     get_pkt(ring, 1, 255)->kernel_object = 0xB000;
 
     // Second doorbell: claim #2 consumed, pending emptied.
@@ -747,9 +737,8 @@ TEST(PendingClaim, CasWriteIndexSuccessClearsPending)
     add_write_index_impl(&state, 1, std::memory_order_relaxed);
     ASSERT_EQ(state.pending.size(), 2u);
 
-    const uint64_t cur = state.claim_pos.load();
-    uint64_t       prev =
-        cas_write_index_impl(&state, cur, 100, std::memory_order_relaxed);
+    const uint64_t cur  = state.claim_pos.load();
+    uint64_t       prev = cas_write_index_impl(&state, cur, 100, std::memory_order_relaxed);
     EXPECT_EQ(prev, cur);
     EXPECT_TRUE(state.pending.empty());
     EXPECT_EQ(state.claim_pos.load(), 100u);
@@ -766,8 +755,7 @@ TEST(PendingClaim, CasWriteIndexFailureKeepsPending)
 
     const uint64_t cur = state.claim_pos.load();
     // Wrong expected value -> CAS fails.
-    uint64_t prev =
-        cas_write_index_impl(&state, cur + 123, 999, std::memory_order_relaxed);
+    uint64_t prev = cas_write_index_impl(&state, cur + 123, 999, std::memory_order_relaxed);
     EXPECT_EQ(prev, cur);
     EXPECT_EQ(state.pending.size(), before);
     EXPECT_EQ(state.claim_pos.load(), cur);
@@ -782,7 +770,7 @@ TEST(PendingClaim, MultiProducerClaimsSortedByIndex)
     record_claim(state, 24, 1, 8);  // inserted first, highest index
     record_claim(state, 8, 1, 8);
     record_claim(state, 16, 1, 8);
-    record_claim(state, 0, 1, 8);   // inserted last, lowest index
+    record_claim(state, 0, 1, 8);  // inserted last, lowest index
 
     ASSERT_EQ(state.pending.size(), 4u);
     auto it = state.pending.begin();

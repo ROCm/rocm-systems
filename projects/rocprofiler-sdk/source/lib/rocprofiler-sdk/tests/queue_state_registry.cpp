@@ -151,9 +151,8 @@ TEST_F(QueueStateRegistryTest, DoorbellMapHoldsWeakRef)
 
     // Doorbell map still has an entry, but it points to an expired weak_ptr.
     bool has_raw_entry = false;
-    get_doorbell_map().rlock([&](const auto& m) {
-        has_raw_entry = (m.find(saved_doorbell.handle) != m.end());
-    });
+    get_doorbell_map().rlock(
+        [&](const auto& m) { has_raw_entry = (m.find(saved_doorbell.handle) != m.end()); });
     EXPECT_TRUE(has_raw_entry);
 
     EXPECT_EQ(lookup_queue_state_by_doorbell(saved_doorbell), nullptr);
@@ -201,8 +200,7 @@ TEST_F(QueueStateRegistryTest, DestroyDrainsInFlightScan)
     // destroy_queue_state must have blocked for most of the worker's hold
     // duration. Use a 100ms lower bound (leaves ~50ms slack on kHoldDuration
     // to tolerate scheduler jitter).
-    auto elapsed_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
     EXPECT_GE(elapsed_ms, 100)
         << "destroy_queue_state returned in " << elapsed_ms
         << "ms; expected to block until the in-flight scan released gate_lock";

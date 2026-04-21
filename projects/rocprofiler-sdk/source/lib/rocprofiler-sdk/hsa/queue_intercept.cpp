@@ -43,8 +43,8 @@ add_write_index_impl(QueueState* state, uint64_t value, std::memory_order mo)
     const uint64_t prev = state->claim_pos.fetch_add(value * state->stride, mo);
     {
         std::lock_guard<std::mutex> lk{state->pending_lock};
-        state->pending.emplace(
-            prev, PendingClaim{prev, static_cast<uint32_t>(value), state->stride});
+        state->pending.emplace(prev,
+                               PendingClaim{prev, static_cast<uint32_t>(value), state->stride});
     }
     return prev;
 }
@@ -74,12 +74,12 @@ uint64_t
 cas_write_index_impl(QueueState* state, uint64_t expected, uint64_t value, std::memory_order mo)
 {
     // Failure order must be no stronger than success and must not be release/acq_rel.
-    auto fail_mo = (mo == std::memory_order_release)  ? std::memory_order_relaxed
-                 : (mo == std::memory_order_acq_rel)  ? std::memory_order_acquire
-                                                      : mo;
+    auto fail_mo = (mo == std::memory_order_release)   ? std::memory_order_relaxed
+                   : (mo == std::memory_order_acq_rel) ? std::memory_order_acquire
+                                                       : mo;
     // no rescaling; value is already in claim_pos units
-    uint64_t prev = expected;
-    const bool ok = state->claim_pos.compare_exchange_strong(prev, value, mo, fail_mo);
+    uint64_t   prev = expected;
+    const bool ok   = state->claim_pos.compare_exchange_strong(prev, value, mo, fail_mo);
     if(ok)
     {
         // Successful CAS means the caller resynchronized the wptr.
@@ -117,10 +117,9 @@ claim_is_ready(const RingView& view, const PendingClaim& c)
     for(uint32_t i = 0; i < c.packet_count; ++i)
     {
         const auto* slot = view.read_slot(c.claim_index + i);
-        const auto  hdr =
-            __atomic_load_n(reinterpret_cast<const uint16_t*>(slot), __ATOMIC_ACQUIRE);
-        const uint16_t pt = (hdr >> HSA_PACKET_HEADER_TYPE)
-                            & ((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u);
+        const auto hdr = __atomic_load_n(reinterpret_cast<const uint16_t*>(slot), __ATOMIC_ACQUIRE);
+        const uint16_t pt =
+            (hdr >> HSA_PACKET_HEADER_TYPE) & ((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u);
         if(pt == HSA_PACKET_TYPE_INVALID) return false;
     }
     return true;
@@ -206,9 +205,8 @@ process_doorbell_impl(const queue_state_ptr_t& state,
             std::vector<char> snapshot(static_cast<size_t>(head.packet_count) * pkt_size);
             for(uint32_t i = 0; i < head.packet_count; ++i)
             {
-                memcpy(snapshot.data() + i * pkt_size,
-                       view.read_slot(head.claim_index + i),
-                       pkt_size);
+                memcpy(
+                    snapshot.data() + i * pkt_size, view.read_slot(head.claim_index + i), pkt_size);
             }
 
             ScopedWriter guard{[&cursor, pkt_size](const void* pkts, uint64_t n) {

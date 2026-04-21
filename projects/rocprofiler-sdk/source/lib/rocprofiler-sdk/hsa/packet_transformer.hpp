@@ -67,10 +67,10 @@ public:
     explicit ScopedWriter(writer_fn_t fn);
     ~ScopedWriter();
 
-    ScopedWriter(const ScopedWriter&)            = delete;
+    ScopedWriter(const ScopedWriter&) = delete;
     ScopedWriter& operator=(const ScopedWriter&) = delete;
     ScopedWriter(ScopedWriter&&)                 = delete;
-    ScopedWriter& operator=(ScopedWriter&&)      = delete;
+    ScopedWriter& operator=(ScopedWriter&&) = delete;
 
 private:
     writer_fn_t prev_;
