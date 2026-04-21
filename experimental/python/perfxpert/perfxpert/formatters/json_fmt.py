@@ -46,6 +46,9 @@ def _format_as_json(
     custom_prompt: Optional[str] = None,
     kernel_resources: Optional[Dict[str, Any]] = None,
     api_overhead: Optional[Dict[str, Any]] = None,
+    detected_kernels: Optional[List[Dict[str, Any]]] = None,
+    communication: Optional[Dict[str, Any]] = None,
+    roofline: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Serialize analysis results to JSON conforming to the current schema version (v0.3.0 when TraceLens fields are present, v0.1.0 otherwise).
 
@@ -106,20 +109,8 @@ def _format_as_json(
             "idle_time_ns": idle_time_ns,
             "idle_time_pct": round(idle_pct, 2),
         },
-        # --- hotspots ---
-        "hotspots": [
-            {
-                "rank": i + 1,
-                "name": k.get("name", "unknown"),
-                "calls": int(k.get("calls", 0)),
-                "total_duration_ns": int(k.get("total_duration", 0)),
-                "avg_duration_ns": float(k.get("avg_duration", 0)),
-                "min_duration_ns": int(k.get("min_duration", 0)),
-                "max_duration_ns": int(k.get("max_duration", 0)),
-                "pct_of_total": round(float(k.get("percent_of_total", 0)), 2),
-            }
-            for i, k in enumerate(hotspots or [])
-        ],
+        # --- hotspots (schema >= 0.3.1 optionally carries source_locations) ---
+        "hotspots": _build_hotspots_json(hotspots or [], detected_kernels),
         # --- memory_analysis ---
         "memory_analysis": {
             direction: {
@@ -158,6 +149,28 @@ def _format_as_json(
     if interval_timeline or kernel_categories or short_kernels:
         doc["schema_version"] = "0.3.0"
         doc["metadata"]["analysis_version"] = "0.3.0"
+    # 0.3.1: hotspots[*].source_locations cross-reference with Tier-0
+    # detected_kernels (Confluence row #5 — Source Code Line numbers).
+    if detected_kernels is not None and any(
+        h.get("source_locations") for h in doc.get("hotspots", [])
+    ):
+        doc["schema_version"] = "0.3.1"
+        doc["metadata"]["analysis_version"] = "0.3.1"
+    # 0.3.2: RCCL / NIC ``communication`` section (Phase 10). Additive —
+    # bumps over 0.3.1 but ATT (0.4.0) still trumps below so a trace with
+    # both ATT data + RCCL data pins schema_version = 0.4.0.
+    if communication and communication.get("collectives"):
+        doc["communication"] = communication
+        doc["schema_version"] = "0.3.2"
+        doc["metadata"]["analysis_version"] = "0.3.2"
+    # 0.3.4: Live Roofline points (Phase 10 advanced-specialists). Additive
+    # ``roofline`` key carrying the per-kernel (ai, achieved_flops_per_s,
+    # bottleneck_class, fp_type, confidence) payload produced by
+    # ``perfxpert.tools.roofline.plot_points``. ATT (0.4.0) still trumps.
+    if roofline and roofline.get("kernels"):
+        doc["roofline"] = roofline
+        doc["schema_version"] = "0.3.4"
+        doc["metadata"]["analysis_version"] = "0.3.4"
     if att_analysis and att_analysis.get("has_att_data"):
         doc["schema_version"] = "0.4.0"
         doc["metadata"]["analysis_version"] = "0.4.0"
@@ -174,6 +187,44 @@ def _format_as_json(
         }
 
     return _json.dumps(doc, indent=2)
+
+
+def _build_hotspots_json(
+    hotspots: List[Dict[str, Any]],
+    detected_kernels: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """Render the ``hotspots`` list for the JSON schema.
+
+    When ``detected_kernels`` is provided (schema >= 0.3.1) each hotspot
+    entry carries a ``source_locations`` list of ``{file, line, kind}``
+    objects, where ``kind`` is ``"definition"`` or ``"launch"``.
+    """
+    from ._source_correlation import correlate_hotspots_with_source
+
+    annotated = correlate_hotspots_with_source(hotspots or [], detected_kernels)
+    out: List[Dict[str, Any]] = []
+    for i, k in enumerate(annotated):
+        entry: Dict[str, Any] = {
+            "rank": i + 1,
+            "name": k.get("name", "unknown"),
+            "calls": int(k.get("calls", 0)),
+            "total_duration_ns": int(k.get("total_duration", 0)),
+            "avg_duration_ns": float(k.get("avg_duration", 0)),
+            "min_duration_ns": int(k.get("min_duration", 0)),
+            "max_duration_ns": int(k.get("max_duration", 0)),
+            "pct_of_total": round(float(k.get("percent_of_total", 0)), 2),
+        }
+        if detected_kernels is not None:
+            entry["source_locations"] = [
+                {
+                    "file": lo.get("file"),
+                    "line": int(lo.get("line", 0)),
+                    "kind": lo.get("kind", "definition"),
+                }
+                for lo in (k.get("source_locations") or [])
+            ]
+        out.append(entry)
+    return out
 
 
 def _build_summary(
@@ -308,8 +359,19 @@ def _build_warnings_json(has_counters: bool) -> List[Dict[str, Any]]:
     return []
 
 
-def _tier0_to_dict(tier0_result: Any) -> Dict[str, Any]:
+def _tier0_to_dict(tier0_result: Any, has_profiling: bool = False) -> Dict[str, Any]:
     """Convert SourceAnalysisResult to a JSON-serializable dict for the tier0 field."""
+    # Bug 3: expose profiling_plan + profiling_plan_actions + code_patterns
+    # alongside the legacy `recommendations` key so downstream consumers can
+    # render the two buckets in a dedicated Tier-0 section. Fallback to
+    # empty dicts when a pre-refactor tier0 dict is supplied.
+    profiling_plan = getattr(tier0_result, "profiling_plan", None) or {}
+    profiling_plan_actions = getattr(tier0_result, "profiling_plan_actions", None) or []
+    code_patterns = (
+        getattr(tier0_result, "code_patterns", None)
+        or tier0_result.recommendations
+        or []
+    )
     return {
         "source_dir": tier0_result.source_dir,
         "analysis_timestamp": tier0_result.analysis_timestamp,
@@ -322,14 +384,20 @@ def _tier0_to_dict(tier0_result: Any) -> Dict[str, Any]:
         "risk_areas": tier0_result.risk_areas,
         "already_instrumented": tier0_result.already_instrumented,
         "roctx_marker_count": tier0_result.roctx_marker_count,
-        "recommendations": _build_recommendations_json(tier0_result.recommendations),
-        "suggested_counters": tier0_result.suggested_counters,
+        # Legacy keys — kept for backwards-compat; ``recommendations`` now
+        # holds ONLY code-level patterns after Bug 3 (profiling-plan
+        # actions live under ``profiling_plan`` / ``profiling_plan_actions``).
+        "recommendations": _build_recommendations_json(code_patterns),
+        "code_patterns": _build_recommendations_json(code_patterns),
+        "profiling_plan": {} if has_profiling else (profiling_plan if isinstance(profiling_plan, dict) else {}),
+        "profiling_plan_actions": [] if has_profiling else _build_recommendations_json(profiling_plan_actions),
+        "suggested_counters": [] if has_profiling else tier0_result.suggested_counters,
         "suggested_first_command": tier0_result.suggested_first_command,
         "llm_explanation": tier0_result.llm_explanation,
     }
 
 
-def _format_tier0_json(tier0_result: Any) -> str:
+def _format_tier0_json(tier0_result: Any, has_profiling: bool = False) -> str:
     """Format Tier 0 source-only analysis as schema v0.2.0 JSON."""
     import json as _json
 
@@ -365,7 +433,13 @@ def _format_tier0_json(tier0_result: Any) -> str:
         "hotspots": [],
         "memory_analysis": {},
         "hardware_counters": {"has_counters": False, "metrics": None, "counters": None},
-        "recommendations": _build_recommendations_json(tier0_result.recommendations),
+        # Main recommendations list — Bug 3: code-level items only; the
+        # profiling-plan actions live under `tier0.profiling_plan`.
+        "recommendations": _build_recommendations_json(
+            getattr(tier0_result, "code_patterns", None)
+            or tier0_result.recommendations
+            or []
+        ),
         "warnings": [],
         "errors": [],
         "llm_enhanced_explanation": tier0_result.llm_explanation,

@@ -844,6 +844,147 @@ def _format_as_webview(
     else:
         html = html.replace("<!-- CAT_SECTION_PLACEHOLDER -->", "")
 
+    # --- Communication (RCCL / NIC) section - Phase 10 ---
+    if communication and communication.get("collectives"):
+        comm = communication
+        c_summary = comm.get("summary", {}) or {}
+        c_ops = comm.get("collectives") or []
+        c_count = c_summary.get("op_count", len(c_ops))
+        c_dominant = c_summary.get("dominant_op") or "n/a"
+        c_overlap = float(c_summary.get("overlap_pct", 0.0) or 0.0)
+        c_peak = c_summary.get("peak_bw_gbps")
+        c_avg_bw = float(c_summary.get("avg_bw_gbps", 0.0) or 0.0)
+        c_peak_s = f"{c_peak:.0f} GB/s" if c_peak else "n/a"
+        c_ranks = int(c_summary.get("ranks", 0) or 0)
+        c_incomplete = bool(c_summary.get("capture_incomplete", False))
+
+        overview_html = (
+            '<div class="comm-overview" style="display:flex;flex-wrap:wrap;'
+            'gap:.75rem;margin-bottom:1rem;font-size:.92rem">'
+            f'<span class="hpill"><span class="hpill-label">Ops:</span>'
+            f'<span class="hpill-value">{c_count}</span></span>'
+            f'<span class="hpill"><span class="hpill-label">Dominant:</span>'
+            f'<span class="hpill-value">{_h(c_dominant)}</span></span>'
+            f'<span class="hpill"><span class="hpill-label">Avg busBW:</span>'
+            f'<span class="hpill-value">{c_avg_bw:.2f} GB/s</span></span>'
+            f'<span class="hpill"><span class="hpill-label">Peak:</span>'
+            f'<span class="hpill-value">{_h(c_peak_s)}</span></span>'
+            f'<span class="hpill"><span class="hpill-label">Ranks:</span>'
+            f'<span class="hpill-value">{c_ranks}</span></span>'
+            "</div>"
+        )
+
+        def _fmt_bytes_comm(b: int) -> str:
+            if b <= 0:
+                return "\u2014"
+            if b >= 1_073_741_824:
+                return f"{b / 1_073_741_824:.2f} GB"
+            if b >= 1_048_576:
+                return f"{b / 1_048_576:.1f} MB"
+            if b >= 1_024:
+                return f"{b / 1_024:.1f} KB"
+            return f"{b} B"
+
+        comm_rows = []
+        for c in c_ops:
+            op = str(c.get("op_type", "?"))
+            mb = int(c.get("msg_bytes", 0) or 0)
+            dur_ns = int(c.get("duration_ns", 0) or 0)
+            bw = float(c.get("effective_bw_gbps", 0.0) or 0.0)
+            peak_v = c.get("peak_bw_gbps")
+            eff = float(c.get("efficiency_pct", 0.0) or 0.0)
+            ov = float(c.get("overlap_ratio", 0.0) or 0.0)
+            regime = str(c.get("regime", "") or "")
+            algo = str(c.get("algo_hint", "") or "")
+            eff_label = str(c.get("efficiency_label", "") or "")
+            if eff >= 70:
+                eff_color = "#44dd66"
+            elif eff >= 40:
+                eff_color = "#ff8800"
+            else:
+                eff_color = "#e84040"
+            bar_w = min(100.0, eff)
+            peak_s = f"{peak_v:.0f} GB/s" if peak_v else "\u2014"
+            comm_rows.append(
+                f"<tr>"
+                f'<td><code>{_h(op)}</code></td>'
+                f"<td>{_fmt_bytes_comm(mb)}</td>"
+                f"<td>{_fmt_ns(dur_ns)}</td>"
+                f"<td>"
+                f'<div class="btrack" style="width:120px;height:10px;'
+                f'background:#1a1a2e;border-radius:4px;overflow:hidden;'
+                f'display:inline-block;vertical-align:middle">'
+                f'<div class="bfill" style="width:{bar_w:.1f}%;height:100%;'
+                f'background:{eff_color};border-radius:4px"></div>'
+                f"</div>"
+                f' <span style="color:{eff_color};margin-left:.5rem">'
+                f"{bw:.2f} GB/s</span>"
+                f"</td>"
+                f"<td>{_h(peak_s)}</td>"
+                f'<td style="color:{eff_color};font-weight:600">'
+                f'{eff:.1f}% <span class="dim" style="font-size:.82rem">'
+                f"({_h(eff_label)})</span></td>"
+                f"<td>{ov:.1f}%</td>"
+                f'<td class="dim" style="font-size:.85rem">{_h(regime)} / '
+                f"{_h(algo)}</td>"
+                f"</tr>"
+            )
+        comm_table = (
+            '<div class="tbl-wrap">'
+            '<table class="dtable">'
+            "<thead><tr>"
+            "<th data-tip='RCCL collective operation (AllReduce, AllGather, ReduceScatter, ...).'>Op</th>"
+            "<th data-tip='Message size per rank in bytes (count * dtype_bytes).'>Bytes</th>"
+            "<th data-tip='Wall-clock duration of this collective on the kernel side.'>Duration</th>"
+            "<th data-tip='Effective bus bandwidth = msg_bytes * factor / duration. Factor is 2(N-1)/N for AllReduce, (N-1)/N for AllGather/ReduceScatter/AllToAll, 1 for Broadcast/Reduce.'>Bus BW (vs peak)</th>"
+            "<th data-tip='Achievable XGMI busBW for this architecture (from interconnect_specs.yaml).'>Peak</th>"
+            "<th data-tip='efficiency_pct = busBW / peak. Classification: &lt;40% poor, 40-70% fair, &gt;70% good.'>Eff%</th>"
+            "<th data-tip='Fraction of this collective overlapping with non-RCCL kernel activity. Higher is better.'>Overlap%</th>"
+            "<th data-tip='Regime classification (latency/bandwidth-bound) plus algorithm hint (Ring/Tree/Pairwise).'>Regime / Algo</th>"
+            "</tr></thead>"
+            "<tbody>" + "".join(comm_rows) + "</tbody>"
+            "</table></div>"
+        )
+
+        ov_color = "#44dd66" if c_overlap >= 50 else (
+            "#ff8800" if c_overlap >= 20 else "#e84040"
+        )
+        overlap_donut = (
+            '<div class="gauge-wrap" style="margin-top:1rem">'
+            f'{_svg_gauge(c_overlap, ov_color, "Comm/Compute Overlap", f"{c_overlap:.0f}%")}'
+            f'<p class="g-hint {"ok" if c_overlap >= 50 else "warn"}" '
+            f'style="text-align:center;margin-top:.25rem">'
+            f'{"&#10003; Good overlap" if c_overlap >= 50 else "&#9888; Low overlap"}'
+            "</p>"
+            "</div>"
+        )
+
+        incomplete_note = (
+            '<p class="dim" style="margin-top:.75rem;font-size:.82rem">'
+            "&#9888; Capture incomplete \u2014 fell back to kernel-name regex "
+            "(no <code>category='RCCL'</code> spans in DB; install "
+            "<code>rocprofv3 &ge; 6.2</code> for full RCCL arg capture)."
+            "</p>"
+        ) if c_incomplete else ""
+
+        comm_section = (
+            '\n<section class="scard">'
+            '\n<div class="shdr">'
+            '\n<span class="shdr-icon">&#128225;</span>'
+            "\n<h2>Communication</h2>"
+            '\n<span class="shdr-badge sbadge-info">RCCL / XGMI</span>'
+            "\n</div>"
+            '\n<div class="sbody">'
+            f"\n{overview_html}"
+            f"\n{comm_table}"
+            f"\n{overlap_donut}"
+            f"\n{incomplete_note}"
+            "\n</div>\n</section>"
+        )
+        html = html.replace("<!-- COMM_SECTION_PLACEHOLDER -->", comm_section)
+    else:
+        html = html.replace("<!-- COMM_SECTION_PLACEHOLDER -->", "")
+
     return html
 
 

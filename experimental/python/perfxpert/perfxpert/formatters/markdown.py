@@ -29,6 +29,11 @@ Markdown formatting functions for PerfXpert analysis results.
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from ._source_correlation import (
+    correlate_hotspots_with_source,
+    format_source_citation_inline,
+)
+
 
 def _format_as_markdown(
     time_breakdown: Dict[str, Any],
@@ -40,6 +45,8 @@ def _format_as_markdown(
     interval_timeline=None,
     kernel_categories=None,
     short_kernels=None,
+    detected_kernels: Optional[List[Dict[str, Any]]] = None,
+    communication: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Format analysis results as Markdown."""
     breakdown = time_breakdown or {}
@@ -83,7 +90,8 @@ def _format_as_markdown(
         lines.append("")
         lines.append("| Rank | Kernel | Calls | Total (ms) | Avg (\u03bcs) | % Total |")
         lines.append("|------|--------|-------|------------|----------|---------|")
-        for i, k in enumerate(hotspots, 1):
+        annotated = correlate_hotspots_with_source(hotspots, detected_kernels)
+        for i, k in enumerate(annotated, 1):
             name = k.get("name", "unknown")
             if len(name) > 40:
                 name = name[:37] + "..."
@@ -93,6 +101,9 @@ def _format_as_markdown(
                 f"| {k.get('avg_duration', 0) / 1e3:,.1f} "
                 f"| {k.get('percent_of_total', 0):.1f}% |"
             )
+            cite = format_source_citation_inline(k.get("source_locations"))
+            if cite:
+                lines.append(f"    - Source: {cite}")
         lines.append("")
 
     if memory_analysis:
@@ -187,6 +198,57 @@ def _format_as_markdown(
                     lines.append("")
             lines.append("")
 
+    if communication and communication.get("collectives"):
+        lines.append("## Communication")
+        lines.append("")
+        summary = communication.get("summary", {}) or {}
+        op_count = summary.get("op_count", 0)
+        dominant = summary.get("dominant_op") or "n/a"
+        avg_eff = summary.get("avg_efficiency_pct", 0.0) or 0.0
+        overlap = summary.get("overlap_pct", 0.0) or 0.0
+        peak = summary.get("peak_bw_gbps")
+        peak_s = f"{peak:.0f} GB/s" if peak else "n/a"
+        lines.append(
+            f"**{op_count} collective(s)** - dominant: **{dominant}** - "
+            f"avg efficiency: {avg_eff:.1f}% - peak: {peak_s} - "
+            f"comm/compute overlap: {overlap:.1f}%"
+        )
+        if summary.get("capture_incomplete"):
+            lines.append("")
+            lines.append(
+                "*Capture incomplete: fell back to kernel-name regex "
+                "(no `category='RCCL'` spans in DB).*"
+            )
+        lines.append("")
+        lines.append(
+            "| Op | Bytes | Duration | Bus BW | Peak | Efficiency% | Overlap% |"
+        )
+        lines.append(
+            "|----|-------|----------|--------|------|-------------|----------|"
+        )
+        for c in communication["collectives"]:
+            mb = c.get("msg_bytes", 0) or 0
+            if mb >= 1e9:
+                mb_s = f"{mb / 1e9:.2f} GB"
+            elif mb >= 1e6:
+                mb_s = f"{mb / 1e6:.1f} MB"
+            elif mb >= 1e3:
+                mb_s = f"{mb / 1e3:.1f} KB"
+            else:
+                mb_s = f"{mb} B"
+            dur_ns = c.get("duration_ns", 0) or 0
+            dur_ms = dur_ns / 1e6
+            bw = c.get("effective_bw_gbps", 0) or 0
+            pk = c.get("peak_bw_gbps")
+            pk_s = f"{pk:.0f}" if pk else "-"
+            eff = c.get("efficiency_pct", 0) or 0
+            ov = c.get("overlap_ratio", 0) or 0
+            lines.append(
+                f"| {c.get('op_type', '?')} | {mb_s} | {dur_ms:.3f} ms | "
+                f"{bw:.2f} GB/s | {pk_s} | {eff:.1f}% | {ov:.1f}% |"
+            )
+        lines.append("")
+
     if kernel_categories:
         lines.append("## Kernel Category Breakdown")
         lines.append("")
@@ -233,11 +295,12 @@ def _format_as_markdown(
     return "\n".join(lines)
 
 
-def _format_tier0_markdown(tier0_result: Any) -> str:
+def _format_tier0_markdown(tier0_result: Any, has_profiling: bool = False) -> str:
     """Format Tier 0 source-only analysis as Markdown."""
     lines = []
-    lines.append("# PerfXpert AI Profiling Plan \u2014 Tier 0: Source Code Analysis")
-    lines.append("")
+    if not has_profiling:
+        lines.append("# PerfXpert AI Profiling Plan \u2014 Tier 0: Source Code Analysis")
+        lines.append("")
     lines.append(f"**Source Directory:** `{tier0_result.source_dir}`")
     lines.append(f"**Analysis Date:** {tier0_result.analysis_timestamp}")
     lines.append(f"**Programming Model:** {tier0_result.programming_model}")
@@ -285,7 +348,7 @@ def _format_tier0_markdown(tier0_result: Any) -> str:
             lines.append(f"- \u26a0 {risk}")
         lines.append("")
 
-    if tier0_result.suggested_counters:
+    if tier0_result.suggested_counters and not has_profiling:
         lines.append("## Suggested Hardware Counters")
         lines.append("")
         lines.append("```")
@@ -293,14 +356,57 @@ def _format_tier0_markdown(tier0_result: Any) -> str:
         lines.append("```")
         lines.append("")
 
-    lines.append("## Profiling Recommendations")
+    # Bug 3 — Profiling Plan subsection (instrumentation advice).
+    profiling_plan = getattr(tier0_result, "profiling_plan", None) or {}
+    plan_actions = getattr(tier0_result, "profiling_plan_actions", None) or []
+    if (profiling_plan or plan_actions or getattr(tier0_result, "suggested_first_command", "")) and not has_profiling:
+        lines.append("### Profiling Plan")
+        lines.append("")
+        desc = profiling_plan.get("description") if isinstance(profiling_plan, dict) else None
+        if desc:
+            lines.append(desc)
+            lines.append("")
+        suggested_cmd = (
+            profiling_plan.get("suggested_first_command")
+            if isinstance(profiling_plan, dict)
+            else None
+        ) or tier0_result.suggested_first_command
+        if suggested_cmd:
+            lines.append("**Suggested first command:**")
+            lines.append("")
+            lines.append("```bash")
+            lines.append(suggested_cmd)
+            lines.append("```")
+            lines.append("")
+        actions_list = (
+            profiling_plan.get("actions")
+            if isinstance(profiling_plan, dict)
+            else None
+        ) or []
+        extra_actions = [a for a in actions_list if a and a != suggested_cmd]
+        if extra_actions:
+            lines.append("**Additional actions:**")
+            lines.append("")
+            for a in extra_actions:
+                lines.append(f"- `{a}`")
+            lines.append("")
+
+    lines.append("### Detected Code Patterns")
     lines.append("")
     priority_emoji = {"HIGH": "\U0001f534", "MEDIUM": "\U0001f7e1", "LOW": "\U0001f7e2", "INFO": "\U0001f535"}
-    for rec in tier0_result.recommendations:
+    code_recs = (
+        getattr(tier0_result, "code_patterns", None)
+        or tier0_result.recommendations
+        or []
+    )
+    if not code_recs:
+        lines.append("*No code-level performance patterns detected.*")
+        lines.append("")
+    for rec in code_recs:
         pri = rec.get("priority", "INFO")
         cat = rec.get("category", "")
         emoji = priority_emoji.get(pri, "\u2022")
-        lines.append(f"### {emoji} [{pri}] {cat}")
+        lines.append(f"#### {emoji} [{pri}] {cat}")
         lines.append("")
         lines.append(f"**Issue:** {rec.get('issue', '')}")
         lines.append("")
@@ -338,14 +444,6 @@ def _format_tier0_markdown(tier0_result: Any) -> str:
                 if full_command:
                     lines.append(f"```bash\n{full_command}\n```")
                 lines.append("")
-        lines.append("")
-
-    if tier0_result.suggested_first_command:
-        lines.append("## Start Here \u2014 Suggested First Command")
-        lines.append("")
-        lines.append("```bash")
-        lines.append(tier0_result.suggested_first_command)
-        lines.append("```")
         lines.append("")
 
     if tier0_result.llm_explanation:
