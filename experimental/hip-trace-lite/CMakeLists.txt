@@ -41,8 +41,13 @@ if(HTL_BUILD_TESTS)
     target_include_directories(test_record PRIVATE src)
     add_test(NAME record COMMAND test_record)
 
-    add_executable(smoke test/smoke.cpp)
-    target_include_directories(smoke PRIVATE src)
-    target_link_libraries(smoke PRIVATE dl pthread)
-    # smoke is run manually with HIP application — no add_test() entry.
+    find_package(hip QUIET CONFIG PATHS /opt/rocm)
+    if(hip_FOUND)
+        add_executable(smoke test/smoke.cpp)
+        target_include_directories(smoke PRIVATE src)
+        target_link_libraries(smoke PRIVATE hip::host dl pthread)
+        # smoke is run manually with the LD_PRELOAD recipe — no add_test() entry.
+    else()
+        message(STATUS "hip-trace-lite: HIP not found; skipping smoke binary")
+    endif()
 endif()
