@@ -1916,7 +1916,7 @@ def _describe_subprocess_exit_code(returncode: int) -> str:
 def _op_workload_failure_due_to(
     *,
     timed_out: bool,
-    returncode: int | None,
+    returncode: Optional[int],
 ) -> str:
     """Short phrase for ``pytest.fail`` lead-in."""
     if timed_out:
