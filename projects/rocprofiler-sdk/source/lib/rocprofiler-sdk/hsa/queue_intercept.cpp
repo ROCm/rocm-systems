@@ -241,7 +241,8 @@ create_queue_state(const hsa_queue_t* queue,
                    volatile uint64_t* rdid_addr,
                    uint64_t           k_factor)
 {
-    auto state             = std::make_unique<QueueState>();
+    auto     state         = std::make_unique<QueueState>();
+    uint64_t current_wdid  = __atomic_load_n(wdid_addr, __ATOMIC_ACQUIRE);
     state->ring_buf        = queue->base_address;
     state->ring_size       = queue->size;
     state->ring_mask       = queue->size - 1;
@@ -250,9 +251,13 @@ create_queue_state(const hsa_queue_t* queue,
     state->hsa_queue       = queue;
     state->doorbell_signal = queue->doorbell_signal;
     state->k_factor        = k_factor;
+    state->virtual_wptr.store(current_wdid, std::memory_order_relaxed);
+    state->next_scan_pos   = current_wdid;
+    state->next_submit_pos = current_wdid;
 
     ROCP_INFO << "create_queue_state: queue=" << queue << " ring_size=" << queue->size
-              << " k_factor=" << k_factor << " doorbell=" << queue->doorbell_signal.handle;
+              << " k_factor=" << k_factor << " doorbell=" << queue->doorbell_signal.handle
+              << " initial_wdid=" << current_wdid;
 
     auto* raw_ptr = state.get();
     get_queue_registry().wlock([&](auto& map) { map[queue] = std::move(state); });
