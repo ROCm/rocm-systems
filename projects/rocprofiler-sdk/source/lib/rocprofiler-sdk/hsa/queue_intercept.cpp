@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/queue_intercept.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 
 #include <cstring>
 
@@ -129,6 +130,26 @@ sync_metadata_impl(QueueState* compute_state,
     __atomic_store_n(meta->real_wdid, meta->next_submit_pos, __ATOMIC_RELEASE);
 }
 
+namespace
+{
+thread_local QueueState* tls_state      = nullptr;
+thread_local uint64_t    tls_submit_pos = 0;
+
+void
+ring_buffer_writer(const void* pkts, uint64_t pkt_count)
+{
+    auto*       state = tls_state;
+    const auto* src   = static_cast<const char*>(pkts);
+    for(uint64_t i = 0; i < pkt_count; i++)
+    {
+        auto* dst =
+            static_cast<char*>(state->ring_buf) + ((tls_submit_pos & state->ring_mask) * 64);
+        memcpy(dst, src + i * 64, 64);
+        tls_submit_pos++;
+    }
+}
+}  // namespace
+
 void
 process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t ring_doorbell)
 {
@@ -137,31 +158,32 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t
     uint64_t scan_end = state->virtual_wptr.load(std::memory_order_acquire);
     uint64_t scan_pos = state->next_scan_pos;
 
-    for(uint64_t i = scan_pos; i < scan_end; i++)
+    if(scan_pos >= scan_end) return;
+
+    uint64_t pkt_count = scan_end - scan_pos;
+    auto*    first_pkt = static_cast<char*>(state->ring_buf) + ((scan_pos & state->ring_mask) * 64);
+
+    // Set up TLS for ring_buffer_writer
+    tls_state      = state;
+    tls_submit_pos = state->next_submit_pos;
+
+    // Look up Queue* to invoke WriteInterceptor callback chain
+    auto*        qc    = get_queue_controller();
+    const Queue* queue = (qc && state->hsa_queue) ? qc->get_queue(*state->hsa_queue) : nullptr;
+
+    if(queue)
     {
-        auto* src = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(state->ring_buf) +
-                    (i & state->ring_mask);
-
-        uint64_t dest_idx = state->next_submit_pos;
-        auto*    dst      = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(state->ring_buf) +
-                    (dest_idx & state->ring_mask);
-
-        if(dst != src)
-        {
-            memcpy(dst, src, 64);
-        }
-
-        state->next_submit_pos = dest_idx + 1 + state->k_factor;
-
-        if(state->metadata_state)
-        {
-            sync_metadata_impl(state, src, dest_idx);
-        }
+        queue->invoke_write_interceptor(first_pkt, pkt_count, ring_buffer_writer);
+    }
+    else
+    {
+        ring_buffer_writer(first_pkt, pkt_count);
     }
 
-    state->next_scan_pos = scan_end;
+    state->next_scan_pos   = scan_end;
+    state->next_submit_pos = tls_submit_pos;
+
     __atomic_store_n(state->real_wdid, state->next_submit_pos, __ATOMIC_RELEASE);
-    // Pass real submit position as doorbell value, not app's virtual value
     ring_doorbell(state->doorbell_signal, static_cast<hsa_signal_value_t>(state->next_submit_pos));
 }
 
@@ -202,6 +224,7 @@ create_queue_state(const hsa_queue_t* queue,
     state->ring_mask       = queue->size - 1;
     state->real_wdid       = wdid_addr;
     state->real_rdid       = rdid_addr;
+    state->hsa_queue       = queue;
     state->doorbell_signal = queue->doorbell_signal;
     state->k_factor        = k_factor;
 
@@ -225,6 +248,8 @@ destroy_queue_state(const hsa_queue_t* queue)
 
 namespace
 {
+static bool s_intercept_installed = false;
+
 // --- Saved original function pointers (14 total) ---
 
 // add_write_index (4 variants)
@@ -402,6 +427,12 @@ wrap_signal_store_screlease(hsa_signal_t sig, hsa_signal_value_t val)
 
 }  // namespace
 
+bool
+is_active()
+{
+    return s_intercept_installed;
+}
+
 void
 install_intercept(CoreApiTable& core_table)
 {
@@ -444,6 +475,8 @@ install_intercept(CoreApiTable& core_table)
 
     core_table.hsa_signal_store_relaxed_fn   = wrap_signal_store_relaxed;
     core_table.hsa_signal_store_screlease_fn = wrap_signal_store_screlease;
+
+    s_intercept_installed = true;
 }
 
 }  // namespace queue_intercept
