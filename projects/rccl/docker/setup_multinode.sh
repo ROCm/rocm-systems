@@ -3,10 +3,11 @@
 # setup_multinode.sh - Build and launch multi-node ROCm containers
 #
 # Single-command workflow:
-#   1. Creates host shared directories & SSH keys (if missing)
-#   2. Builds the Dockerfile.Multinode.Ubuntu image on top of any ROCm base
-#   3. Optionally launches a container with all multi-node plumbing
-#   4. Optionally verifies SSH connectivity across nodes
+#   1. Creates host shared directories (SSH keys only with --ssh-key or --ssh-keygen)
+#   2. Auto-detects SLURM allocation and generates hostfile (if missing)
+#   3. Builds the Dockerfile.Multinode.Ubuntu image on top of any ROCm base
+#   4. Optionally launches a container with all multi-node plumbing
+#   5. Optionally verifies SSH connectivity across nodes
 #
 # Usage:
 #   ./setup_multinode.sh [OPTIONS] [ROCM_IMAGE]
@@ -17,27 +18,32 @@
 #   --gpus N              Number of GPUs               (default: auto-detect)
 #   --ssh-port PORT       SSH port inside container    (default: 2224)
 #   --shm-size SIZE       Shared memory size           (default: 64g)
-#   --hostfile PATH       MPI hostfile on the host     (default: ~/.mpi_hostfile)
+#   --hostfile PATH       MPI hostfile on the host     (default: ~/.mpi_hostfile; auto from SLURM)
 #   --volume SRC:DST      Extra host volume mount      (repeatable)
 #   --shared-dir PATH     Shared workspace on host     (default: ~/.docker-shared)
 #   --builds-dir PATH     Shared builds dir on host    (default: ~/.docker-builds)
 #   --ssh-key-dir PATH    SSH key directory on host    (default: ~/.docker-ssh-keys)
+#   --ssh-key PATH        Use existing SSH key pair for inter-container SSH
+#   --ssh-authorized-keys PATH  Custom authorized_keys (for mesh SSH setups)
+#   --ssh-keygen          Auto-generate a shared SSH key pair
 #   --rebuild             Force image rebuild and replace existing containers
 #   --run-only            Skip build, just launch the container
 #   --launch-all          Build + launch on ALL nodes in the hostfile via SSH
 #   --stop-all            Stop + remove containers on ALL nodes in the hostfile
 #   --setup-deps          Build shared deps (UCX, OpenMPI) into shared dir (once)
+#   --post-setup PATH     Post-setup dir with setup.sh/env.sh   (optional)
 #   --verify              Verify SSH connectivity to all hosts in hostfile
 #   --host-ssh-port PORT  SSH port for host-to-host access  (default: 22)
 #   --verbose             Enable detailed debug logging
 #   --help                Show this help message
 #
 # Environment Variables (alternative to flags):
-#   SHARED_DIR, BUILDS_DIR, SSH_KEY_DIR, HOSTFILE, SSH_PORT, GPUS, VERBOSE
+#   SHARED_DIR, BUILDS_DIR, SSH_KEY_DIR, SSH_KEY, SSH_AUTHORIZED_KEYS, HOSTFILE, SSH_PORT, GPUS,
+#   POST_SETUP_DIR, VERBOSE
 #
 # Path expansion:
 #   All path options (--hostfile, --shared-dir, --builds-dir, --ssh-key-dir,
-#   --volume) support ~ and $VAR / ${VAR} expansion. Examples:
+#   --ssh-key, --ssh-authorized-keys, --volume) support ~ and $VAR / ${VAR} expansion. Examples:
 #     --hostfile '~/my_hostfile'
 #     --shared-dir '$HOME/shared'
 #     HOSTFILE='~/.mpi_hostfile' ./setup_multinode.sh --launch-all
@@ -50,7 +56,10 @@
 #   ./setup_multinode.sh --run-only rocm-multinode:7.1.1-complete # launch existing
 #   ./setup_multinode.sh --verify                                 # check SSH
 #   ./setup_multinode.sh --run --verbose                          # full debug output
-#   ./setup_multinode.sh --launch-all                             # build+launch on all nodes
+#   ./setup_multinode.sh --launch-all --ssh-keygen                 # build+launch, auto SSH keys
+#   ./setup_multinode.sh --launch-all --ssh-key ~/.ssh/id_rsa     # build+launch, use your keys
+#   ./setup_multinode.sh --launch-all --ssh-key ~/.ssh/id_rsa \
+#                        --ssh-authorized-keys ~/.ssh/authorized_keys  # mesh SSH
 #   ./setup_multinode.sh --setup-deps                             # build shared UCX/MPI (once)
 #   ./setup_multinode.sh --stop-all                               # stop containers everywhere
 #
@@ -80,6 +89,10 @@ SHARED_DIR="${SHARED_DIR:-${HOME}/.docker-shared}"
 BUILDS_DIR="${BUILDS_DIR:-${HOME}/.docker-builds}"
 SSH_KEY_DIR="${SSH_KEY_DIR:-${HOME}/.docker-ssh-keys}"
 HOSTFILE="${HOSTFILE:-${HOME}/.mpi_hostfile}"
+POST_SETUP_DIR="${POST_SETUP_DIR:-}"
+SSH_KEY="${SSH_KEY:-}"
+SSH_AUTHORIZED_KEYS="${SSH_AUTHORIZED_KEYS:-}"
+DO_SSH_KEYGEN=false
 
 EXTRA_VOLUMES=()
 
@@ -159,6 +172,10 @@ while [[ $# -gt 0 ]]; do
         --launch-all)   DO_LAUNCH_ALL=true;      shift ;;
         --stop-all)     DO_STOP_ALL=true; DO_BUILD=false; shift ;;
         --setup-deps)   DO_SETUP_DEPS=true;      shift ;;
+        --post-setup)   POST_SETUP_DIR="$2";     shift 2 ;;
+        --ssh-key)      SSH_KEY="$2";            shift 2 ;;
+        --ssh-authorized-keys) SSH_AUTHORIZED_KEYS="$2"; shift 2 ;;
+        --ssh-keygen)   DO_SSH_KEYGEN=true;      shift ;;
         --host-ssh-port) HOST_SSH_PORT="$2";     shift 2 ;;
         --verbose)      VERBOSE=1;               shift ;;
         --help|-h)      show_help ;;
@@ -174,11 +191,103 @@ SHARED_DIR="$(expand_path "${SHARED_DIR}")"
 BUILDS_DIR="$(expand_path "${BUILDS_DIR}")"
 SSH_KEY_DIR="$(expand_path "${SSH_KEY_DIR}")"
 HOSTFILE="$(expand_path "${HOSTFILE}")"
+[[ -n "${POST_SETUP_DIR}" ]] && POST_SETUP_DIR="$(expand_path "${POST_SETUP_DIR}")"
+[[ -n "${SSH_KEY}" ]] && SSH_KEY="$(expand_path "${SSH_KEY}")"
+[[ -n "${SSH_AUTHORIZED_KEYS}" ]] && SSH_AUTHORIZED_KEYS="$(expand_path "${SSH_AUTHORIZED_KEYS}")"
 expanded_vols=()
 for vol in "${EXTRA_VOLUMES[@]+"${EXTRA_VOLUMES[@]}"}"; do
     expanded_vols+=("$(expand_path "$vol")")
 done
 EXTRA_VOLUMES=("${expanded_vols[@]+"${expanded_vols[@]}"}")
+
+# ============================================================================
+# Auto-detect SLURM allocation: generate hostfile + configure SSH keys
+# ============================================================================
+detect_slurm_nodes() {
+    if [[ -f "${HOSTFILE}" ]]; then
+        return
+    fi
+
+    local nodelist="${SLURM_NODELIST:-${SLURM_JOB_NODELIST:-}}"
+    if [[ -z "${nodelist}" ]]; then
+        return
+    fi
+
+    if ! command -v scontrol &>/dev/null; then
+        echo "WARNING: SLURM allocation detected (SLURM_NODELIST=${nodelist})" >&2
+        echo "  but 'scontrol' not found in PATH; cannot expand node list" >&2
+        echo "  Install slurm-client or create a hostfile manually" >&2
+        return
+    fi
+
+    # --- Determine slots per node ---
+    local slots="${GPUS}"
+    if [[ "${slots}" -eq 0 ]]; then
+        local slurm_gpus="${SLURM_GPUS_PER_NODE:-}"
+        if [[ -n "${slurm_gpus}" ]]; then
+            slurm_gpus="${slurm_gpus##*:}"
+            slurm_gpus="${slurm_gpus%%\(*}"
+            [[ "${slurm_gpus}" =~ ^[0-9]+$ ]] && slots="${slurm_gpus}"
+        fi
+    fi
+    if [[ "${slots}" -eq 0 && -n "${SLURM_NTASKS_PER_NODE:-}" ]]; then
+        slots="${SLURM_NTASKS_PER_NODE}"
+    fi
+    if [[ "${slots}" -eq 0 ]]; then
+        slots=1
+        echo "WARNING: Could not determine GPU/slot count from SLURM; defaulting to slots=1" >&2
+    fi
+
+    echo "=== SLURM allocation detected ==="
+    echo "  SLURM_NODELIST : ${nodelist}"
+    echo "  SLURM_NNODES   : ${SLURM_NNODES:-unknown}"
+    echo "  Slots per node : ${slots}"
+    log_verbose "SLURM_JOB_ID=${SLURM_JOB_ID:-} SLURM_GPUS_PER_NODE=${SLURM_GPUS_PER_NODE:-} SLURM_NTASKS_PER_NODE=${SLURM_NTASKS_PER_NODE:-}"
+
+    # --- Generate hostfile ---
+    local hosts
+    hosts=$(scontrol show hostnames "${nodelist}")
+
+    mkdir -p "$(dirname "${HOSTFILE}")"
+    : > "${HOSTFILE}"
+    while IFS= read -r host; do
+        [[ -n "${host}" ]] && echo "${host} slots=${slots}" >> "${HOSTFILE}"
+    done <<< "${hosts}"
+
+    echo "  Generated hostfile: ${HOSTFILE}"
+    if [[ -n "${VERBOSE}" ]]; then
+        log_verbose "Hostfile contents:"
+        while read -r line; do
+            log_verbose "  ${line}"
+        done < "${HOSTFILE}"
+    fi
+
+    # --- Auto-configure SSH keys from the user's ~/.ssh ---
+    if [[ -n "${SSH_KEY}" ]] || [[ "${DO_SSH_KEYGEN}" == true ]]; then
+        log_verbose "SSH key explicitly provided; skipping SLURM SSH auto-detect"
+    elif [[ -f "${HOME}/.ssh/id_rsa" ]]; then
+        SSH_KEY="${HOME}/.ssh/id_rsa"
+        echo "  SSH key        : ${SSH_KEY} (auto-detected)"
+        if [[ -f "${HOME}/.ssh/authorized_keys" ]]; then
+            SSH_AUTHORIZED_KEYS="${HOME}/.ssh/authorized_keys"
+            echo "  authorized_keys: ${SSH_AUTHORIZED_KEYS} (auto-detected)"
+        fi
+    elif [[ -f "${HOME}/.ssh/id_ed25519" ]]; then
+        SSH_KEY="${HOME}/.ssh/id_ed25519"
+        echo "  SSH key        : ${SSH_KEY} (auto-detected)"
+        if [[ -f "${HOME}/.ssh/authorized_keys" ]]; then
+            SSH_AUTHORIZED_KEYS="${HOME}/.ssh/authorized_keys"
+            echo "  authorized_keys: ${SSH_AUTHORIZED_KEYS} (auto-detected)"
+        fi
+    else
+        DO_SSH_KEYGEN=true
+        echo "  SSH key        : (none found at ~/.ssh/id_rsa; will auto-generate)"
+    fi
+
+    echo ""
+}
+
+detect_slurm_nodes
 
 # ============================================================================
 # Validate option combinations
@@ -235,7 +344,8 @@ validate_options() {
             errors+=("Hostfile not found: ${HOSTFILE}
   Required by: ${actions[*]}
   Create it:   echo 'hostname slots=8' > ${HOSTFILE}
-  Or specify:  --hostfile /path/to/hostfile")
+  Or specify:  --hostfile /path/to/hostfile
+  Or run inside a SLURM allocation (auto-detected from SLURM_NODELIST)")
         fi
     fi
 
@@ -255,6 +365,36 @@ validate_options() {
             errors+=("--run-only requires a pre-built image, but 'rocm-multinode:${ROCM_IMAGE##*:}' was not found
   Build first: $0 ${ROCM_IMAGE}
   Or use:      $0 --run ${ROCM_IMAGE}")
+        fi
+    fi
+
+    # --- SSH key validation ---
+    if [[ -n "${SSH_KEY}" ]] && [[ "${DO_SSH_KEYGEN}" == true ]]; then
+        errors+=("--ssh-key and --ssh-keygen are mutually exclusive")
+    fi
+    if [[ -n "${SSH_KEY}" ]]; then
+        local priv_key pub_key
+        if [[ "${SSH_KEY}" == *.pub ]]; then
+            pub_key="${SSH_KEY}"; priv_key="${SSH_KEY%.pub}"
+        else
+            priv_key="${SSH_KEY}"; pub_key="${SSH_KEY}.pub"
+        fi
+        [[ ! -f "${priv_key}" ]] && errors+=("SSH private key not found: ${priv_key}")
+        [[ ! -f "${pub_key}" ]]  && errors+=("SSH public key not found: ${pub_key}")
+    fi
+    if [[ -n "${SSH_AUTHORIZED_KEYS}" ]]; then
+        [[ ! -f "${SSH_AUTHORIZED_KEYS}" ]] && errors+=("SSH authorized_keys file not found: ${SSH_AUTHORIZED_KEYS}")
+        if [[ -z "${SSH_KEY}" ]] && [[ "${DO_SSH_KEYGEN}" == false ]]; then
+            errors+=("--ssh-authorized-keys requires --ssh-key or --ssh-keygen (need a private key for outbound SSH)")
+        fi
+    fi
+
+    # --- Post-setup validation ---
+    if [[ -n "${POST_SETUP_DIR}" ]]; then
+        if [[ ! -d "${POST_SETUP_DIR}" ]]; then
+            errors+=("Post-setup directory not found: ${POST_SETUP_DIR}")
+        elif [[ ! -f "${POST_SETUP_DIR}/setup.sh" ]] && [[ ! -f "${POST_SETUP_DIR}/env.sh" ]]; then
+            errors+=("Post-setup dir must contain setup.sh and/or env.sh: ${POST_SETUP_DIR}")
         fi
     fi
 
@@ -303,6 +443,10 @@ if [[ -n "${VERBOSE}" ]]; then
     log_verbose "BUILDS_DIR=${BUILDS_DIR}"
     log_verbose "SSH_KEY_DIR=${SSH_KEY_DIR}"
     log_verbose "HOSTFILE=${HOSTFILE}"
+    log_verbose "POST_SETUP_DIR=${POST_SETUP_DIR:-}"
+    log_verbose "SSH_KEY=${SSH_KEY:-}"
+    log_verbose "SSH_AUTHORIZED_KEYS=${SSH_AUTHORIZED_KEYS:-}"
+    log_verbose "DO_SSH_KEYGEN=${DO_SSH_KEYGEN}"
     log_verbose "DO_BUILD=${DO_BUILD}  DO_RUN=${DO_RUN}  DO_VERIFY=${DO_VERIFY}  DO_LAUNCH_ALL=${DO_LAUNCH_ALL}  DO_STOP_ALL=${DO_STOP_ALL}  DO_SETUP_DEPS=${DO_SETUP_DEPS}"
     log_verbose "HOST_SSH_PORT=${HOST_SSH_PORT}"
     log_verbose "FORCE_REBUILD=${FORCE_REBUILD}"
@@ -311,6 +455,22 @@ if [[ -n "${VERBOSE}" ]]; then
     log_verbose "Docker version: $(docker --version 2>/dev/null || echo 'not found')"
     echo ""
 fi
+
+# ============================================================================
+# Write SSH config + set permissions for the shared key directory
+# ============================================================================
+write_ssh_config() {
+    cat > "${SSH_KEY_DIR}/config" << EOF
+Host *
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+    LogLevel ERROR
+    Port ${SSH_PORT}
+    IdentityFile ~/.ssh/id_rsa
+EOF
+    chmod 600 "${SSH_KEY_DIR}/id_rsa"
+    chmod 644 "${SSH_KEY_DIR}/id_rsa.pub" "${SSH_KEY_DIR}/authorized_keys" "${SSH_KEY_DIR}/config"
+}
 
 # ============================================================================
 # Host setup (shared dirs + SSH keys) - idempotent
@@ -338,23 +498,45 @@ setup_host() {
     fi
     log_verbose "$(ls -ld "${SSH_KEY_DIR}" 2>/dev/null)"
 
-    if [[ ! -f "${SSH_KEY_DIR}/id_rsa" ]]; then
+    if [[ -f "${SSH_KEY_DIR}/id_rsa" ]]; then
+        echo "  SSH keys exist at ${SSH_KEY_DIR}"
+    elif [[ -n "${SSH_KEY}" ]]; then
+        local priv_key pub_key
+        if [[ "${SSH_KEY}" == *.pub ]]; then
+            pub_key="${SSH_KEY}"; priv_key="${SSH_KEY%.pub}"
+        else
+            priv_key="${SSH_KEY}"; pub_key="${SSH_KEY}.pub"
+        fi
+        echo "  Configuring SSH keys from ${SSH_KEY}..."
+        cp "${priv_key}" "${SSH_KEY_DIR}/id_rsa"
+        cp "${pub_key}" "${SSH_KEY_DIR}/id_rsa.pub"
+        if [[ -n "${SSH_AUTHORIZED_KEYS}" ]]; then
+            cp "${SSH_AUTHORIZED_KEYS}" "${SSH_KEY_DIR}/authorized_keys"
+            cat "${pub_key}" >> "${SSH_KEY_DIR}/authorized_keys"
+            log_verbose "authorized_keys: merged from ${SSH_AUTHORIZED_KEYS} + ${pub_key}"
+        else
+            cp "${pub_key}" "${SSH_KEY_DIR}/authorized_keys"
+        fi
+        write_ssh_config
+        echo "  SSH keys configured at ${SSH_KEY_DIR}"
+    elif [[ "${DO_SSH_KEYGEN}" == true ]]; then
         echo "  Generating shared SSH keys..."
         ssh-keygen -t rsa -b 4096 -N "" -f "${SSH_KEY_DIR}/id_rsa" -C "docker-shared-key" -q
-        cp "${SSH_KEY_DIR}/id_rsa.pub" "${SSH_KEY_DIR}/authorized_keys"
-        cat > "${SSH_KEY_DIR}/config" << EOF
-Host *
-    StrictHostKeyChecking no
-    UserKnownHostsFile /dev/null
-    LogLevel ERROR
-    Port ${SSH_PORT}
-    IdentityFile ~/.ssh/id_rsa
-EOF
-        chmod 600 "${SSH_KEY_DIR}/id_rsa"
-        chmod 644 "${SSH_KEY_DIR}/id_rsa.pub" "${SSH_KEY_DIR}/authorized_keys" "${SSH_KEY_DIR}/config"
+        if [[ -n "${SSH_AUTHORIZED_KEYS}" ]]; then
+            cp "${SSH_AUTHORIZED_KEYS}" "${SSH_KEY_DIR}/authorized_keys"
+            cat "${SSH_KEY_DIR}/id_rsa.pub" >> "${SSH_KEY_DIR}/authorized_keys"
+            log_verbose "authorized_keys: merged from ${SSH_AUTHORIZED_KEYS} + generated key"
+        else
+            cp "${SSH_KEY_DIR}/id_rsa.pub" "${SSH_KEY_DIR}/authorized_keys"
+        fi
+        write_ssh_config
         echo "  Keys generated at ${SSH_KEY_DIR}"
     else
-        echo "  SSH keys already exist at ${SSH_KEY_DIR}"
+        echo "  No SSH keys configured (containers will generate local-only keys)"
+        echo "  For multi-node SSH, use one of:"
+        echo "    --ssh-key ~/.ssh/id_rsa                                              # shared key pair"
+        echo "    --ssh-key ~/.ssh/id_rsa --ssh-authorized-keys ~/.ssh/authorized_keys # mesh SSH (per-node keys)"
+        echo "    --ssh-keygen                                                         # generate a new pair"
     fi
 
     if [[ -n "${VERBOSE}" ]]; then
@@ -581,6 +763,10 @@ launch_container() {
         -v "${SSH_KEY_DIR}:/opt/ssh-keys:ro"
     )
 
+    if [[ -n "${POST_SETUP_DIR}" ]]; then
+        run_args+=(-v "${POST_SETUP_DIR}:/opt/post-setup:ro")
+    fi
+
     for vol in "${EXTRA_VOLUMES[@]+"${EXTRA_VOLUMES[@]}"}"; do
         run_args+=(-v "$vol")
     done
@@ -650,7 +836,11 @@ verify_ssh() {
     local ssh_key="${SSH_KEY_DIR}/id_rsa"
     if [[ ! -f "${ssh_key}" ]]; then
         echo "  Shared SSH key not found: ${ssh_key}"
-        echo "  Run setup first:  $0 --launch-all"
+        echo ""
+        echo "  Set up SSH keys first:"
+        echo "    $0 --launch-all --ssh-key ~/.ssh/id_rsa   # use your key pair"
+        echo "    $0 --launch-all --ssh-keygen              # generate a new pair"
+        echo "  For mesh SSH (per-node keys), also pass --ssh-authorized-keys"
         exit 1
     fi
     log_verbose "Using SSH key: ${ssh_key}"
@@ -693,6 +883,11 @@ verify_ssh() {
         echo "  1. Ensure the container is running: docker ps"
         echo "  2. Check sshd: docker exec <container> ss -tlnp | grep ${SSH_PORT}"
         echo "  3. Restart sshd: docker exec <container> /usr/sbin/sshd -p${SSH_PORT}"
+        echo ""
+        echo "  If SSH keys are not set up, re-launch with:"
+        echo "    $0 --launch-all --ssh-key ~/.ssh/id_rsa   # use your key pair"
+        echo "    $0 --launch-all --ssh-keygen              # generate a new pair"
+        echo "  For mesh SSH (per-node keys), also pass --ssh-authorized-keys"
         exit 1
     fi
 
@@ -761,6 +956,10 @@ launch_all() {
     forward_args+=(--hostfile "${HOSTFILE}")
     [[ "${FORCE_REBUILD}" == true ]] && forward_args+=(--rebuild)
     [[ -n "${VERBOSE}" ]] && forward_args+=(--verbose)
+    [[ -n "${POST_SETUP_DIR}" ]] && forward_args+=(--post-setup "${POST_SETUP_DIR}")
+    [[ -n "${SSH_KEY}" ]] && forward_args+=(--ssh-key "${SSH_KEY}")
+    [[ -n "${SSH_AUTHORIZED_KEYS}" ]] && forward_args+=(--ssh-authorized-keys "${SSH_AUTHORIZED_KEYS}")
+    [[ "${DO_SSH_KEYGEN}" == true ]] && forward_args+=(--ssh-keygen)
     for vol in "${EXTRA_VOLUMES[@]+"${EXTRA_VOLUMES[@]}"}"; do
         forward_args+=(--volume "$vol")
     done

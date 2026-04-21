@@ -5,7 +5,8 @@
 # 1. Remaps the non-root user's UID/GID to match the host (NFS access)
 # 2. Copies shared SSH keys into each user's ~/.ssh
 # 3. Starts sshd
-# 4. Executes the given command, LAUNCH_SCRIPT, or idles
+# 4. Runs post-setup configuration hook (if provided)
+# 5. Executes the given command, LAUNCH_SCRIPT, or idles
 #
 # Environment (all optional):
 #   HOST_UID / HOST_GID  - target UID/GID for the non-root user  (default: 1000)
@@ -14,6 +15,7 @@
 #   CONTAINER_USER       - non-root user name                    (default: ubuntu)
 #   LAUNCH_SCRIPT        - script to exec after setup            (default: "")
 #   LAUNCH_SCRIPT_ARGS   - args for the launch script            (default: "")
+#   POST_SETUP_DIR       - post-setup dir with setup.sh/env.sh   (default: /opt/post-setup)
 #   VERBOSE              - set to 1 for detailed debug logging   (default: "")
 #
 
@@ -22,7 +24,9 @@ set -e
 SSH_PORT="${SSH_PORT:-2224}"
 SSH_KEY_SOURCE="${SSH_KEY_SOURCE:-/opt/ssh-keys}"
 CONTAINER_USER="${CONTAINER_USER:-ubuntu}"
+NIC_TYPE="${NIC_TYPE:-mellanox}"
 VERBOSE="${VERBOSE:-}"
+POST_SETUP_DIR="${POST_SETUP_DIR:-/opt/post-setup}"
 
 log_verbose() {
     [[ -n "${VERBOSE}" ]] && echo "  [verbose] $*" || true
@@ -106,7 +110,9 @@ setup_user_ssh() {
         fi
         log_verbose "Copied shared keys from ${SSH_KEY_SOURCE}"
     else
-        echo "  WARN: no shared keys at ${SSH_KEY_SOURCE}; generating local keys"
+        echo "  WARN: no shared SSH keys at ${SSH_KEY_SOURCE}; generating local-only keys"
+        echo "  Hint: for multi-node SSH, pass --ssh-key or --ssh-keygen to setup_multinode.sh"
+        echo "        (auto-detected when running inside a SLURM allocation)"
         [ -f "${user_home}/.ssh/id_rsa" ] || {
             ssh-keygen -t rsa -b 4096 -N "" -f "${user_home}/.ssh/id_rsa" -C "local-key" -q
             cat "${user_home}/.ssh/id_rsa.pub" >> "${user_home}/.ssh/authorized_keys"
@@ -128,6 +134,78 @@ setup_user_ssh() {
 }
 
 # ============================================================================
+# Post-setup configuration hook (setup.sh + env.sh)
+# ============================================================================
+run_post_setup() {
+    if [[ ! -d "${POST_SETUP_DIR}" ]] || [[ -z "$(ls -A "${POST_SETUP_DIR}" 2>/dev/null)" ]]; then
+        log_verbose "No post-setup config at ${POST_SETUP_DIR} (skipping)"
+        return
+    fi
+
+    echo "  Post-setup: ${POST_SETUP_DIR}"
+
+    if [[ -f "${POST_SETUP_DIR}/env.sh" ]]; then
+        local hash
+        hash=$(sha256sum "${POST_SETUP_DIR}/env.sh" 2>/dev/null | awk '{print $1}')
+        log_verbose "env.sh SHA256: ${hash}"
+        cp "${POST_SETUP_DIR}/env.sh" /etc/profile.d/post-setup-env.sh
+        chmod 644 /etc/profile.d/post-setup-env.sh
+        source /etc/profile.d/post-setup-env.sh
+        for rc in /root/.bashrc /home/${CONTAINER_USER}/.bashrc; do
+            if [[ -f "$rc" ]] && ! grep -q 'post-setup-env.sh' "$rc" 2>/dev/null; then
+                echo 'source /etc/profile.d/post-setup-env.sh' >> "$rc"
+            fi
+        done
+        echo "  Post-setup env loaded ($(grep -c '^export' "${POST_SETUP_DIR}/env.sh" 2>/dev/null || echo 0) vars)"
+    fi
+
+    if [[ -f "${POST_SETUP_DIR}/setup.sh" ]]; then
+        local first_line
+        first_line=$(head -1 "${POST_SETUP_DIR}/setup.sh")
+        if [[ "${first_line}" != "#!/bin/bash"* ]] && [[ "${first_line}" != "#!/usr/bin/env bash"* ]]; then
+            echo "  WARN: setup.sh missing bash shebang, skipping for safety"
+            return
+        fi
+
+        local hash
+        hash=$(sha256sum "${POST_SETUP_DIR}/setup.sh" 2>/dev/null | awk '{print $1}')
+        echo "  Post-setup: setup.sh (SHA256: ${hash:0:16}...)"
+
+        local marker="/opt/builds/.post-setup.${hash:0:16}.done"
+
+        # --rebuild clears stale markers so post-setup always re-runs
+        if [[ "${FORCE_POST_SETUP:-}" == "1" ]] && [[ -f "${marker}" ]]; then
+            echo "  Post-setup: clearing stale marker (FORCE_POST_SETUP=1)"
+            rm -f "${marker}"
+        fi
+
+        if [[ -f "${marker}" ]]; then
+            echo "  Post-setup already completed (cached)"
+            log_verbose "Marker: ${marker}"
+            return
+        fi
+
+        local work_dir
+        work_dir=$(mktemp -d /tmp/post-setup.XXXXXX)
+        cp -a "${POST_SETUP_DIR}/." "${work_dir}/"
+        chmod +x "${work_dir}/setup.sh"
+
+        echo "  Post-setup: running setup.sh ..."
+        local rc=0
+        ( set -o pipefail; bash "${work_dir}/setup.sh" 2>&1 | sed 's/^/    [post-setup] /' ) || rc=$?
+
+        if [[ "${rc}" -eq 0 ]]; then
+            touch "${marker}" 2>/dev/null || true
+            echo "  [OK] Post-setup completed"
+        else
+            echo "  [FAIL] Post-setup exited with code ${rc}"
+        fi
+
+        rm -rf "${work_dir}"
+    fi
+}
+
+# ============================================================================
 # Main
 # ============================================================================
 echo "=== Container entrypoint ==="
@@ -139,6 +217,8 @@ if [[ -n "${VERBOSE}" ]]; then
     log_verbose "  CONTAINER_USER=${CONTAINER_USER}"
     log_verbose "  HOST_UID=${HOST_UID:-1000}  HOST_GID=${HOST_GID:-1000}"
     log_verbose "  LAUNCH_SCRIPT=${LAUNCH_SCRIPT:-}"
+    log_verbose "  POST_SETUP_DIR=${POST_SETUP_DIR}"
+    log_verbose "  NIC_TYPE=${NIC_TYPE}"
     log_verbose "  GPUS=${GPUS:-}"
     log_verbose "Mounted volumes:"
     mount | grep -E '/opt/(shared|builds|ssh-keys)' | while read -r line; do
@@ -169,6 +249,24 @@ if [[ -n "${VERBOSE}" ]]; then
 else
     /usr/sbin/sshd -p"${SSH_PORT}"
 fi
+
+echo "  NIC type: ${NIC_TYPE}"
+
+# NIC-specific setup (failures warn but do not block post-setup / sshd)
+if [[ "${NIC_TYPE}" == "ainic" ]]; then
+    if [[ -x /opt/install_ainic_driver.sh ]]; then
+        if ! /opt/install_ainic_driver.sh; then
+            echo "  WARNING: AINIC driver install failed (see output above)"
+            echo "           Continuing with post-setup and idle..."
+        fi
+    fi
+elif [[ "${NIC_TYPE}" == "mellanox" ]]; then
+    log_verbose "Mellanox: using host RDMA libs (bind-mounted by mnctl)"
+else
+    log_verbose "Custom NIC type '${NIC_TYPE}': no built-in driver setup"
+fi
+
+run_post_setup
 
 echo "  User: ${CONTAINER_USER} ($(id ${CONTAINER_USER} 2>/dev/null || echo 'n/a'))"
 echo "=== Ready ==="

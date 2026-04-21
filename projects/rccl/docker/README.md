@@ -51,7 +51,8 @@ See [multi-node-docker-readme.md](multi-node-docker-readme.md) for the full guid
 |---|---|
 | `Dockerfile.Multinode.Ubuntu` | Lightweight multi-node image (SSH, user, PATH hooks, build tools) |
 | `setup_multinode.sh` | Host setup + image build + shared deps (UCX/MPI) + container launch + orchestration |
-| `entrypoint.sh` | Container entrypoint (UID remap, SSH keys, sshd) |
+| `entrypoint.sh` | Container entrypoint (UID remap, SSH keys, sshd, post-setup hook) |
+| `post-setup/` | Post-setup hook examples (AINIC, Mellanox, or custom) — see [post-setup/README.md](post-setup/README.md) |
 
 ### 2-Node Example (16 GPUs)
 
@@ -67,7 +68,8 @@ EOF
 # Step 2: Build image + launch containers on all nodes (single command)
 #   - Builds the image if it doesn't exist (skips if already built)
 #   - Launches containers on every node (skips nodes already running)
-./setup_multinode.sh --launch-all
+#   Use --ssh-key with your existing key pair, or --ssh-keygen to auto-generate
+./setup_multinode.sh --launch-all --ssh-key ~/.ssh/id_rsa
 
 # Step 3: Verify and run
 ./setup_multinode.sh --verify
@@ -96,8 +98,8 @@ node-c slots=8
 node-d slots=8
 EOF
 
-# Step 2: Build + launch everywhere
-./setup_multinode.sh --launch-all
+# Step 2: Build + launch everywhere (with auto-generated SSH keys)
+./setup_multinode.sh --launch-all --ssh-keygen
 
 # Step 3: Verify and run
 ./setup_multinode.sh --verify
@@ -128,6 +130,19 @@ $MPI_HOME/bin/mpirun -np 32 \
 # Mount RCCL source for development
 ./setup_multinode.sh --launch-all \
     --volume "$HOME/rocm-systems/projects/rccl:/media/rccl"
+
+# Mesh SSH (per-node keys, each node's authorized_keys has all public keys)
+./setup_multinode.sh --launch-all \
+    --ssh-key ~/.ssh/id_rsa \
+    --ssh-authorized-keys ~/.ssh/authorized_keys
+
+# Run a post-setup script (NIC drivers, custom tools, etc.)
+./setup_multinode.sh --launch-all --post-setup ./post-setup/ainic
+
+# AINIC with driver source mounted
+./setup_multinode.sh --launch-all \
+    --post-setup ./post-setup/ainic \
+    --volume /path/to/drivers-linux:/opt/nic-drivers:ro
 
 # Debug a failing setup
 ./setup_multinode.sh --launch-all --verbose
