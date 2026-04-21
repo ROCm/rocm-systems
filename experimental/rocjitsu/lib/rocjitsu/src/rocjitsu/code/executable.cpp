@@ -4,7 +4,7 @@
 #include "rocjitsu/code/executable.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
-#include "util/debug_print.h"
+#include "util/log.h"
 
 #include <cstring>
 #include <ranges>
@@ -208,8 +208,8 @@ void Executable::load_hip_fatbin(const Section &fatbin_section, std::ifstream &e
     return;
   }
 
-  util::debug::print(__func__, ": Found .hip_fatbin with ", bundle_hdr.num_code_objs,
-                     " code objects");
+  util::Logger::debug_print(__func__, ": Found .hip_fatbin with ", bundle_hdr.num_code_objs,
+                            " code objects");
 
   std::vector<ClangOffloadBundleInfo> infos(bundle_hdr.num_code_objs);
   for (auto &info : infos) {
@@ -248,7 +248,7 @@ void Executable::load_hip_fatbin(const Section &fatbin_section, std::ifstream &e
     }
 
     if (parts[0] == CLANG_OFFLOAD_KIND_HIP || parts[0] == CLANG_OFFLOAD_KIND_HIPV4) {
-      util::debug::print(__func__, ": Fatbin has target triple ", parts[5]);
+      util::Logger::debug_print(__func__, ": Fatbin has target triple ", parts[5]);
       int64_t fatbin_offset = static_cast<int64_t>(fatbin_section.sectionOffset() + info.offset);
 
       auto co = std::make_unique<AmdGpuCodeObject>(info.size, elf_file, parts[0], parts[5],

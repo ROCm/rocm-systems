@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -128,7 +109,7 @@ struct client_data
 
     using buffer_name_info_t   = rocprofiler::sdk::buffer_name_info_t<std::string_view>;
     using callback_name_info_t = rocprofiler::sdk::callback_name_info_t<std::string_view>;
-    using kernel_symbol_vec_t  = std::vector<kernel_symbol_callback_record_t*>;
+    using kernel_symbol_vec_t  = std::vector<kernel_symbol_callback_record_t>;
     using code_object_vec_t    = std::vector<code_object_callback_record_t>;
     using buffer_id_vec_t      = std::array<rocprofiler_buffer_id_t, num_buffers>;
     using context_id_vec_t     = std::array<rocprofiler_context_id_t, num_contexts>;
@@ -241,9 +222,9 @@ client_data::get_kernel_symbol_info(uint64_t _kernel_id) const
         [_kernel_id](const auto& _data) -> const kernel_symbol_data_t* {
             for(const auto& itr : _data)
             {
-                if(_kernel_id == itr->payload.kernel_id)
+                if(_kernel_id == itr.payload.kernel_id)
                 {
-                    return &itr->payload;
+                    return &itr.payload;
                     break;
                 }
             }

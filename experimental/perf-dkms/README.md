@@ -6,7 +6,6 @@
 >
 > **Requirements:**
 > - GFX12/RDNA4 GPUs only (RX 9070 series)
-> - **Patched Linux kernel required** (see Prerequisites section)
 >
 > Use at your own risk in development/testing environments only.
 

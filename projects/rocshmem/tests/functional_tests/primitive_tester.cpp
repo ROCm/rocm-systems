@@ -84,7 +84,7 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
         break;
       case PTestType:
         {
-          /* Assigment required to verify we can send non-symetric memory */
+          /* Assignment required to verify we can send non-symetric memory */
           char val = *source;
           rocshmem_ctx_char_p(ctx, dest, val, 1);
         }

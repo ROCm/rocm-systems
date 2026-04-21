@@ -147,7 +147,7 @@ int main(int argc, char** argv) {
   HIPCHECK(hipStreamCreateWithFlags(&stream[0], hipStreamNonBlocking));
   HIPCHECK(hipDeviceEnablePeerAccess(device_id[1], 0));
   HIPCHECK(hipGetDeviceProperties(&prop[0], device_id[0]));
-  HIPCHECK(hipExtMallocWithFlags((void**)&flag[0], HIP_IPC_MEM_MIN_SIZE, (strncmp(prop[0].gcnArchName, "gfx942", 6) == 0 || strncmp(prop[0].gcnArchName, "gfx950", 6) == 0) ? hipDeviceMallocUncached : hipDeviceMallocFinegrained));
+  HIPCHECK(hipExtMallocWithFlags((void**)&flag[0], HIP_IPC_MEM_MIN_SIZE, (strncmp(prop[0].gcnArchName, "gfx942", 6) == 0 || strncmp(prop[0].gcnArchName, "gfx950", 6) == 0 || strncmp(prop[0].gcnArchName, "gfx1250", 7) == 0) ? hipDeviceMallocUncached : hipDeviceMallocFinegrained));
   HIPCHECK(hipHostMalloc ((void**)&time_delta[0], sizeof(uint64_t), hipHostMallocDefault));
   HIPCHECK(hipMalloc((void**)&abortFlag[0], sizeof(uint32_t)));
   HIPCHECK(hipMemsetAsync(flag[0], 0, HIP_IPC_MEM_MIN_SIZE, stream[0]));
@@ -158,7 +158,7 @@ int main(int argc, char** argv) {
   HIPCHECK(hipStreamCreateWithFlags(&stream[1], hipStreamNonBlocking));
   HIPCHECK(hipDeviceEnablePeerAccess(device_id[0], 0));
   HIPCHECK(hipGetDeviceProperties(&prop[1], device_id[1]));
-  HIPCHECK(hipExtMallocWithFlags((void**)&flag[1], HIP_IPC_MEM_MIN_SIZE, (strncmp(prop[1].gcnArchName, "gfx942", 6) == 0 || strncmp(prop[1].gcnArchName, "gfx950", 6) == 0) ? hipDeviceMallocUncached : hipDeviceMallocFinegrained));
+  HIPCHECK(hipExtMallocWithFlags((void**)&flag[1], HIP_IPC_MEM_MIN_SIZE, (strncmp(prop[1].gcnArchName, "gfx942", 6) == 0 || strncmp(prop[1].gcnArchName, "gfx950", 6) == 0 || strncmp(prop[1].gcnArchName, "gfx1250", 7) == 0) ? hipDeviceMallocUncached : hipDeviceMallocFinegrained));
   HIPCHECK(hipHostMalloc((void**)&time_delta[1], sizeof(uint64_t), hipHostMallocDefault));
   HIPCHECK(hipMalloc((void**)&abortFlag[1], sizeof(uint32_t)));
   HIPCHECK(hipMemsetAsync(flag[1], 0, HIP_IPC_MEM_MIN_SIZE, stream[1]));
@@ -174,11 +174,11 @@ int main(int argc, char** argv) {
   double vega_gpu_rtc_freq;
 
   HIPCHECK(hipStreamSynchronize(stream[0]));
-  vega_gpu_rtc_freq = (strncmp(prop[0].gcnArchName, "gfx942", 6) == 0 || strncmp(prop[0].gcnArchName, "gfx950", 6) == 0) ? 1.0E8 : 2.5E7;
+  vega_gpu_rtc_freq = (strncmp(prop[0].gcnArchName, "gfx942", 6) == 0 || strncmp(prop[0].gcnArchName, "gfx950", 6) == 0 || strncmp(prop[0].gcnArchName, "gfx1250", 7) == 0) ? 1.0E8 : 2.5E7;
   fprintf(stdout, "One-way latency in us: %g\n", double(*time_delta[0]) * 1e6 / NUM_LOOPS_RUN / vega_gpu_rtc_freq / 2);
 
   HIPCHECK(hipStreamSynchronize(stream[1]));
-  vega_gpu_rtc_freq = (strncmp(prop[1].gcnArchName, "gfx942", 6) == 0 || strncmp(prop[1].gcnArchName, "gfx950", 6) == 0) ? 1.0E8 : 2.5E7;
+  vega_gpu_rtc_freq = (strncmp(prop[1].gcnArchName, "gfx942", 6) == 0 || strncmp(prop[1].gcnArchName, "gfx950", 6) == 0 || strncmp(prop[1].gcnArchName, "gfx1250", 7) == 0) ? 1.0E8 : 2.5E7;
   fprintf(stdout, "One-way latency in us: %g\n", double(*time_delta[1]) * 1e6 / NUM_LOOPS_RUN / vega_gpu_rtc_freq / 2);
 
   HIPCHECK(hipFree(flag[0]));

@@ -300,12 +300,10 @@ protected:
         return sign ? -u_value : u_value;
     }
 
-#if DBGINFO
     /*! \brief Function to log VAAPI parameters
      */
     void PrintVaapiParams();
     /*! \brief Function to log DPB and decode/display buffer pool info
      */
     void PrintDpb();
-#endif // DBGINFO
 };

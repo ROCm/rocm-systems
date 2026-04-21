@@ -2,7 +2,6 @@ name: rocprofiler-sdk Code Coverage
 
 permissions:
   contents: read
-  pull-requests: write
 
 on:
   workflow_dispatch:
@@ -42,7 +41,6 @@ concurrency:
 env:
   # TODO(jrmadsen): replace LD_RUNPATH_FLAG, GPU_TARGETS, etc. with internal handling in cmake
   ROCM_PATH: "/opt/rocm"
-  ROCM_VERSION: "7.0.0"
   GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
   ## No tests should be excluded here except for extreme emergencies; tests should only be disabled in CMake
@@ -70,14 +68,15 @@ env:
 
 jobs:
   code-coverage:
-    # TEMPORARILY DISABLED: pending CI stabilization
-    if: false
     name: Code Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    permissions:
+      contents: write
+      pull-requests: write
     strategy:
       # fail-fast: false
       matrix:
         system:
-          - { gpu: 'mi300a', runner: 'rocprofiler-mi300a-dind', os: 'ubuntu-22.04', build-type: 'Release', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'Release', gpu-target: 'gfx94X' }
 
     runs-on: ${{ matrix.system.runner }}
     container:
@@ -94,15 +93,16 @@ jobs:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       GPU_RUNNER: ${{ matrix.system.runner }}
       GCC_COMPILER_VERSION: 11
-      ROCPROFILER_PC_SAMPLING_BETA_ENABLED: 1
 
     steps:
     - name: Install Latest Nightly ROCm
       shell: bash
       working-directory: /tmp
       run: |
-        tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
-        ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
+        mv "${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz" .
+        rm -rf ${{ env.ROCM_PATH }}*
+        mkdir -p "${{ env.ROCM_PATH }}"
+        tar -xf "rocm-${{ matrix.system.gpu-target }}.tar.gz" -C "${{ env.ROCM_PATH }}"
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
@@ -186,15 +186,16 @@ jobs:
       run: |
         git config --global --add safe.directory '*'
         apt-get update
-        apt-get install -y build-essential cmake python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
+        apt-get install -y build-essential python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
+        python3 -m pip install -U --user cmake==3.24.0
         python3 -m pip install -U --user -r requirements.txt
-          rm -rf \
-            ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* \
-            ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* \
-            ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* \
-            ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* \
-            ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx \
-            ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
+        rm -rf \
+          ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* \
+          ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* \
+          ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* \
+          ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* \
+          ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx \
+          ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
 
     - name: Sync gcov with compilers
       timeout-minutes: 10
@@ -238,7 +239,7 @@ jobs:
         export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
         echo -e "Building & Installing ROCDecode..."
         cmake -B build-rocdecode \
-          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
           -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
           -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
@@ -249,7 +250,7 @@ jobs:
         echo -e "ROCDecode Installed Successfully!"
         echo -e "Building & Installing ROCJPEG..."
         cmake -B build-rocjpeg \
-          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
           -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
           -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
@@ -268,8 +269,8 @@ jobs:
         echo "Install ROCProfiler-Register"
         cmake -B build-rocprofiler-register \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
-          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           .
@@ -287,8 +288,8 @@ jobs:
         echo "Install ROCR-Runtime..."
         cmake -B build \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }};${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}/llvm' \
-          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
           .
         cmake --build build --target all --parallel 16
         cmake --build build --target install
@@ -309,8 +310,8 @@ jobs:
           -DHIP_COMMON_DIR=$HIP_DIR \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DHIP_PLATFORM=amd \
-          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }};${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}/llvm' \
-          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
           -DHIP_LLVM_ROOT=${{ env.ROCM_PATH }}/lib/llvm \
           -DHIP_CATCH_TEST=0 \
           -DCLR_BUILD_HIP=ON \
@@ -330,8 +331,8 @@ jobs:
         echo "Install Aqlprofile..."
         cmake -B build-aqlprofile \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
-          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
+          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           .
@@ -354,6 +355,7 @@ jobs:
           --coverage all
           --run-attempt ${{ github.run_attempt }}
           --
+          -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
           -DPython3_EXECUTABLE=$(which python3)
@@ -378,6 +380,7 @@ jobs:
           --coverage tests
           --run-attempt ${{ github.run_attempt }}
           --
+          -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
           -DPython3_EXECUTABLE=$(which python3)
@@ -402,6 +405,7 @@ jobs:
           --coverage samples
           --run-attempt ${{ github.run_attempt }}
           --
+          -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
           -DPython3_EXECUTABLE=$(which python3)
@@ -421,7 +425,7 @@ jobs:
     - id: generatereport
       name: Generate Code Coverage Comment
       if: github.event_name == 'pull_request'
-      timeout-minutes: 5
+      timeout-minutes: 10
       working-directory: projects/rocprofiler-sdk
       shell: bash
       run: |
@@ -435,7 +439,7 @@ jobs:
         which -a git
         git --version
 
-        ./source/scripts/upload-image-to-github.py --bot --token ${{ secrets.ROCPROFILER_TOKEN }} --files .codecov/{all,tests,samples}.png --output-dir .codecov --name pr-${{ github.event.pull_request.number }}
+        ./source/scripts/upload-image-to-github.py --bot --token ${{ secrets.GITHUB_TOKEN }} --files .codecov/{all,tests,samples}.png --output-dir .codecov --name pr-${{ github.event.pull_request.number }}
 
         echo -e "\n${PWD}:"
         ls -la .
@@ -466,7 +470,7 @@ jobs:
 
     - name: Write Code Coverage Comment
       if: github.event_name == 'pull_request'
-      timeout-minutes: 5
+      timeout-minutes: 10
       uses: actions/github-script@v6
       env:
         COMMENT_BODY: |
@@ -477,7 +481,7 @@ jobs:
           ${{ steps.generatereport.outputs.CODECOVERAGE_REPORT }}
           </details>
       with:
-        github-token: ${{ secrets.ROCPROFILER_TOKEN }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
         script: |
           const commentIdentifier = '<!-- code-coverage-comment-identifier -->'; // Used to identify codecov comment
             const commentBody = process.env.COMMENT_BODY;

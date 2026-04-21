@@ -290,6 +290,7 @@
  * - gfx1151
  * - gfx1200
  * - gfx1201
+ * - gfx1250
  *
  * The following generic AMD GPU architectures are supported:
  *
@@ -1630,7 +1631,17 @@ typedef enum
    * that may send interrupts, and so forth.  The instruction has no
    * information.
    */
-  AMD_DBGAPI_INSTRUCTION_KIND_SPECIAL = 13
+  AMD_DBGAPI_INSTRUCTION_KIND_SPECIAL = 13,
+  /**
+   * The instruction unconditionally branches to "PC + offset".  The "PC" is
+   * the address of the next instruction, while the "offset" is held in a
+   * register pair.  This offset is a signed 64-bit value.  The instruction
+   * information is of type ::amd_dbgapi_register_id_t[2] with the value of
+   * the register IDs for the registers.  The first register holds the least
+   * significant address bits, and the second register holds the most
+   * significant address bits.
+   */
+  AMD_DBGAPI_INSTRUCTION_KIND_RELATIVE_BRANCH_REGISTER_PAIR = 14
 } amd_dbgapi_instruction_kind_t;
 
 /**

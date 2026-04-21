@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 #
 set(rocprofiler_sdk_sources
     ${CMAKE_CURRENT_LIST_DIR}/counters.cpp
