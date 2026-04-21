@@ -26,41 +26,41 @@ static std::string g_kernel_name = STRINGIFY(DEFAULT_KERNEL_NAME);
 
 static constexpr int N = 1024;
 
-static void VectorScalarAddELF(benchmark::State &state) {
-    // Load full ELF (contains PDI + instructions + metadata)
-    xrt::elf elf(g_elf_path);
+static void VectorScalarAddELF(benchmark::State& state) {
+  // Load full ELF (contains PDI + instructions + metadata)
+  xrt::elf elf(g_elf_path);
 
-    // Open device; ELF configures the hardware context directly
-    auto device = xrt::device(0);
-    xrt::hw_context context(device, elf);
+  // Open device; ELF configures the hardware context directly
+  auto device = xrt::device(0);
+  xrt::hw_context context(device, elf);
 
-    // Create kernel from the ELF-configured context
-    auto kernel = xrt::ext::kernel(context, g_kernel_name);
+  // Create kernel from the ELF-configured context
+  auto kernel = xrt::ext::kernel(context, g_kernel_name);
 
-    // Allocate buffer objects (no group_id needed with ext::bo)
-    xrt::bo bo_in = xrt::ext::bo{device, N * sizeof(int32_t)};
-    xrt::bo bo_out = xrt::ext::bo{device, N * sizeof(int32_t)};
+  // Allocate buffer objects (no group_id needed with ext::bo)
+  xrt::bo bo_in = xrt::ext::bo{device, N * sizeof(int32_t)};
+  xrt::bo bo_out = xrt::ext::bo{device, N * sizeof(int32_t)};
 
-    // Initialize input: [1, 2, 3, ..., 1024]
-    auto *buf_in = bo_in.map<int32_t *>();
-    std::iota(buf_in, buf_in + N, 1);
+  // Initialize input: [1, 2, 3, ..., 1024]
+  auto* buf_in = bo_in.map<int32_t*>();
+  std::iota(buf_in, buf_in + N, 1);
 
-    // Zero output
-    auto *buf_out = bo_out.map<int32_t *>();
-    std::memset(buf_out, 0, N * sizeof(int32_t));
+  // Zero output
+  auto* buf_out = bo_out.map<int32_t*>();
+  std::memset(buf_out, 0, N * sizeof(int32_t));
 
-    // Benchmark loop: sync in -> dispatch -> wait -> sync out
-    for (auto _ : state) {
-        bo_in.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  // Benchmark loop: sync in -> dispatch -> wait -> sync out
+  for (auto _ : state) {
+    bo_in.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
-        unsigned int opcode = 3;
-        auto run = kernel(opcode, 0, 0, bo_in, bo_out);
-        run.wait2();
+    unsigned int opcode = 3;
+    auto run = kernel(opcode, 0, 0, bo_in, bo_out);
+    run.wait2();
 
-        bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
 
-        benchmark::ClobberMemory();
-    }
+    benchmark::ClobberMemory();
+  }
 }
 
 BENCHMARK(VectorScalarAddELF)->Unit(benchmark::kMicrosecond);
