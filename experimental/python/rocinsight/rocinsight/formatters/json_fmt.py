@@ -44,6 +44,8 @@ def _format_as_json(
     short_kernels=None,
     att_analysis: Optional[Dict[str, Any]] = None,
     custom_prompt: Optional[str] = None,
+    kernel_resources: Optional[Dict[str, Any]] = None,
+    api_overhead: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Serialize analysis results to JSON conforming to the current schema version (v0.3.0 when TraceLens fields are present, v0.1.0 otherwise).
 
@@ -162,6 +164,16 @@ def _format_as_json(
         doc["schema_version"] = "0.4.0"
         doc["metadata"]["analysis_version"] = "0.4.0"
         doc["profiling_info"]["analysis_tier"] = 3
+
+    # ROCM-21553: kernel resources and API overhead
+    if kernel_resources and kernel_resources.get("kernels"):
+        doc["kernel_resources"] = kernel_resources
+    if api_overhead and api_overhead.get("has_api_data"):
+        doc["api_breakdown"] = {
+            "total_api_ns": api_overhead["total_api_ns"],
+            "launch_overhead_ns": api_overhead["launch_overhead_ns"],
+            "api_calls": api_overhead["api_calls"],
+        }
 
     return _json.dumps(doc, indent=2)
 

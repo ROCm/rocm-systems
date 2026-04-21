@@ -40,6 +40,9 @@ from ..analysis import (
     identify_hotspots,
     analyze_memory_copies,
     analyze_hardware_counters,
+    detect_warmup_issues,
+    analyze_kernel_resources,
+    analyze_api_overhead,
     generate_recommendations,
     _detect_already_collected,
 )
@@ -584,6 +587,11 @@ def analyze_database(
         hardware_counters = analyze_hardware_counters(connection)
         already_collected = _detect_already_collected(connection)
 
+        # ROCM-21553: new analysis functions
+        warmup_issues = detect_warmup_issues(connection, hotspots)
+        kernel_resources = analyze_kernel_resources(connection, hotspots)
+        api_overhead_data = analyze_api_overhead(connection)
+
         # TraceLens-derived analysis
         interval_timeline = compute_interval_timeline(connection)
         kernel_categories = analyze_kernels_by_category(
@@ -609,6 +617,8 @@ def analyze_database(
             short_kernels=short_kernels_data,
             interval_timeline=interval_timeline,
             att_analysis=att_analysis if att_dir else None,
+            warmup_issues=warmup_issues,
+            api_overhead=api_overhead_data,
         )
 
         if verbose:
@@ -631,11 +641,17 @@ def analyze_database(
     result.kernel_categories = kernel_categories
     result.short_kernels = short_kernels_data
     result.interval_timeline = interval_timeline
+    result.kernel_resources = kernel_resources
+    result.api_overhead = api_overhead_data
+    result.warmup_issues = warmup_issues
 
     # Also write into _raw so to_json() / to_webview() include them
     result._raw["interval_timeline"] = interval_timeline
     result._raw["kernel_categories"] = kernel_categories
     result._raw["short_kernels"] = short_kernels_data
+    result._raw["kernel_resources"] = kernel_resources
+    result._raw["api_overhead"] = api_overhead_data
+    result._raw["warmup_issues"] = warmup_issues
     if att_dir and att_analysis.get("has_att_data"):
         result._raw["att_trace"] = att_analysis
         result._raw["att_analysis"] = att_analysis

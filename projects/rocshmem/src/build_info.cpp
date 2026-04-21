@@ -40,7 +40,8 @@ namespace rocshmem {
 static constexpr int NAME_COL = 28;
 static constexpr int INFO_COL = 47;
 
-static void print_entry(std::ostream& os, const char* name, const char* info) {
+template <typename T>
+static void print_entry(std::ostream& os, const char* name, const T& info) {
   os << "# " << std::left << std::setw(NAME_COL) << name
      << ": " << std::setw(INFO_COL) << info << "#\n";
 }
@@ -106,6 +107,11 @@ static void parse_config(std::ostream& os) {
 
   // Already printed at the top of the output; suppress duplicates here.
   const std::set<std::string> skip = {
+    "ROCSHMEM_VENDOR_STRING",
+    "ROCSHMEM_VENDOR_MAJOR_VERSION",
+    "ROCSHMEM_VENDOR_MINOR_VERSION",
+    "ROCSHMEM_VENDOR_PATCH_VERSION",
+    "ROCSHMEM_VERSION",
     "ROCSHMEM_GIT_HASH",
     "ROCSHMEM_INSTALL_PREFIX",
     "ROCSHMEM_OFFLOAD_TARGETS",
@@ -151,6 +157,10 @@ void print_build_info(std::ostream& os) {
   os << "################################################################################\n";
 
   print_entry(os, "Version", rocshmem::VERSION);
+  print_entry(os, "Vendor String", ROCSHMEM_VENDOR_STRING);
+  print_entry(os, "Vendor Major Version", ROCSHMEM_VENDOR_MAJOR_VERSION);
+  print_entry(os, "Vendor Minor Version", ROCSHMEM_VENDOR_MINOR_VERSION);
+  print_entry(os, "Vendor Patch Version", ROCSHMEM_VENDOR_PATCH_VERSION);
   print_entry(os, "Git Hash", ROCSHMEM_GIT_HASH);
   print_entry(os, "Build Type", ROCSHMEM_BUILD_TYPE);
   print_entry(os, "Install Prefix", ROCSHMEM_INSTALL_PREFIX);

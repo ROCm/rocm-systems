@@ -34,6 +34,9 @@ from .core import (
     analyze_memory_copies,
     analyze_hardware_counters,
     detect_warmup_issues,
+    analyze_kernel_resources,
+    analyze_api_overhead,
+    _ARCH_SPECS,
 )
 
 from .att import (
@@ -70,6 +73,9 @@ __all__ = [
     "analyze_memory_copies",
     "analyze_hardware_counters",
     "detect_warmup_issues",
+    "analyze_kernel_resources",
+    "analyze_api_overhead",
+    "_ARCH_SPECS",
     # att.py
     "_ATT_STALL_CATEGORY_MAP",
     "_ATT_MIN_HITCOUNT",

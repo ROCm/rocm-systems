@@ -55,11 +55,10 @@ flush_worker_t::start(const pid_t& current_pid)
     m_flushing_thread = std::make_unique<std::thread>([&]() {
         LOG_TRACE("Flush worker thread started for pid={}",
                   m_worker_synchronization->origin_pid);
-        std::mutex _shutdown_condition_mutex;
         while(m_worker_synchronization->is_running)
         {
             m_worker_function(m_ofs, false);
-            std::unique_lock _lock{ _shutdown_condition_mutex };
+            std::unique_lock _lock{ m_worker_synchronization->is_running_mutex };
             m_worker_synchronization->is_running_condition.wait_for(
                 _lock, CACHE_FILE_FLUSH_TIMEOUT,
                 [&]() { return !m_worker_synchronization->is_running; });
@@ -68,7 +67,10 @@ flush_worker_t::start(const pid_t& current_pid)
         LOG_TRACE("Flush worker thread performing final flush");
         m_worker_function(m_ofs, true);
         m_ofs.close();
-        m_worker_synchronization->exit_finished = true;
+        {
+            std::lock_guard _lock{ m_worker_synchronization->exit_finished_mutex };
+            m_worker_synchronization->exit_finished = true;
+        }
         m_worker_synchronization->exit_finished_condition.notify_one();
         LOG_TRACE("Flush worker thread exiting");
     });
@@ -86,21 +88,28 @@ flush_worker_t::stop(const pid_t& current_pid)
 
     if(flushing_thread_exist && worker_is_running)
     {
-        LOG_TRACE("Signaling flush worker to stop");
-        m_worker_synchronization->is_running = false;
-        m_worker_synchronization->is_running_condition.notify_all();
-
         const bool thread_is_created_in_this_process =
             current_pid == m_worker_synchronization->origin_pid;
+
         if(!thread_is_created_in_this_process)
         {
+            // Child process after fork(): the flush thread does not exist here
+            // and the inherited mutex may be locked by a thread that is gone.
+            // Skip all mutex/CV/join logic — a plain atomic store is enough.
             LOG_DEBUG("Flush worker was created in different process, skipping join");
+            m_worker_synchronization->is_running.store(false, std::memory_order_release);
             return;
         }
 
+        LOG_TRACE("Signaling flush worker to stop");
+        {
+            std::lock_guard _lock{ m_worker_synchronization->is_running_mutex };
+            m_worker_synchronization->is_running = false;
+        }
+        m_worker_synchronization->is_running_condition.notify_all();
+
         LOG_TRACE("Waiting for flush worker thread to finish");
-        std::mutex       _exit_mutex;
-        std::unique_lock _exit_lock{ _exit_mutex };
+        std::unique_lock _exit_lock{ m_worker_synchronization->exit_finished_mutex };
         m_worker_synchronization->exit_finished_condition.wait(
             _exit_lock, [&]() { return m_worker_synchronization->exit_finished.load(); });
 

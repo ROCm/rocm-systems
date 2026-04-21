@@ -1152,6 +1152,7 @@ def _ctest_generate_tests(
 # Other helpers
 # ----------------------------------------------------------------------------
 
+
 # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
 def configure_mode(config: pytest.Config) -> None:
     """Configure the mode based on the command line options.
