@@ -234,12 +234,18 @@ CuidGpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
       return AMDCUID_STATUS_UNSUPPORTED;
     }
   } else if (m_info.header.fields.gpu.unit_id == 0) {
-    // attempt to get fingerprint through PCI Config Space if not a partition
+    // attempt to get fingerprint through PCI Config Space if not a VF
     uint16_t offset = 0;
     amdcuid_status_t status =
-        PciUtil::get_pci_cap_offset(m_info.bdf, 0x03, offset);
+        PciUtil::get_pci_dsn_cap_offset(m_info.bdf, offset);
     if (status != AMDCUID_STATUS_SUCCESS) {
-      return status;
+      // attempt to get fingerprint through VSEC fallback if DSN capability is
+      // not found
+      status = PciUtil::get_pci_vsec_cap_offset(m_info.bdf, offset);
+      if (status != AMDCUID_STATUS_SUCCESS) {
+        fingerprint = 0;
+        return status;
+      }
     }
 
     uint8_t fingerprint_size = 8;
@@ -256,7 +262,8 @@ CuidGpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
         *reinterpret_cast<uint64_t *>(fingerprint_buffer));
     delete[] fingerprint_buffer;
   } else {
-    // partitioned device without unique_id file cannot get fingerprint
+    // partitioned device without unique_id file or pci config cannot get
+    // fingerprint
     fingerprint = 0;
     return AMDCUID_STATUS_UNSUPPORTED;
   }
