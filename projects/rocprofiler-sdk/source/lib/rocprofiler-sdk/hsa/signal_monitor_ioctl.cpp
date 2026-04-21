@@ -334,7 +334,8 @@ public:
                                        hsa_signal_value_t        compare_value,
                                        signal_monitor_callback_t cb) override
     {
-        const auto id = next_id_.fetch_add(1);
+        const auto id            = next_id_.fetch_add(1);
+        const auto initial_value = ops_.load(signal);
 
         Subscription subscription{};
         subscription.signal        = signal;
@@ -353,7 +354,7 @@ public:
         ROCP_ERROR_IF(ioctl_monitor_diag_enabled())
             << fmt::format("DEBUG: ioctl monitor subscribe monitor={} id={} signal_handle={} "
                            "condition={} compare_value={} has_event_id={} event_id={} "
-                           "subscription_count={} tid={}",
+                           "subscription_count={} initial_value={} initial_match={} tid={}",
                            static_cast<void*>(this),
                            id,
                            signal.handle,
@@ -362,6 +363,8 @@ public:
                            (it != subscriptions_.end()) ? it->second.has_event_id : false,
                            (it != subscriptions_.end()) ? it->second.event_id : 0,
                            subscriptions_.size(),
+                           initial_value,
+                           evaluate_signal_condition(condition, initial_value, compare_value),
                            common::get_tid());
         return id;
     }
