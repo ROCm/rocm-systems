@@ -45,11 +45,13 @@ continue to run natively on gfx942 hardware.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import dataclasses
 import datetime
 import functools
 import json
 import os
+import queue
 import re
 import shlex
 import signal
@@ -57,7 +59,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -582,6 +584,115 @@ def _sanitize_log_component(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", s).strip("._-") or "unnamed"
 
 
+# -- Parallel dispatch ------------------------------------------------------
+#
+# The serial and parallel paths share ``_run_one`` — the differences
+# below live entirely in how we *arrange* the (script, mode) jobs and
+# which GPU each child gets.  Three primitives:
+#
+#   * ``_resolve_gpu_pool`` — turn ``--gpus`` (explicit) or the
+#     parent shell's ``HIP_VISIBLE_DEVICES`` (implicit) into a list
+#     of device IDs the workers can round-robin over.  No GPU
+#     auto-discovery: we deliberately stay within whatever the user
+#     already made visible to this shell, so running this tool on
+#     a shared box never steps on someone else's GPU.
+#
+#   * ``_run_warmup`` — serial native-mode pass over every unique
+#     script, pinned to ``gpu_pool[0]``.  AITER's @compile_ops
+#     lazily invokes hipcc on first import, writing into
+#     ``_jit_cache/``.  Two parallel workers racing to build the
+#     same module is at best wasted CPU, at worst a corrupted .so
+#     that the next worker dlopen's and crashes on.  One serial
+#     warm-up pass populates the cache once; subsequent workers are
+#     pure ``dlopen`` of the cached artefact.
+#
+#   * ``_run_parallel`` — a ``ThreadPoolExecutor`` fronting one
+#     child-process worker per pool slot, plus a ``queue.Queue[str]``
+#     of GPU IDs.  Each worker claims a GPU on entry, runs one child
+#     to completion, releases the GPU.  We don't allow the pool
+#     size to exceed the GPU pool: two workers on the same device
+#     index would either OOM or thrash, and the speedup we're
+#     after is strictly 1 GPU = 1 job.
+def _resolve_gpu_pool(arg_gpus: str, jobs: int) -> List[str]:
+    """Produce the list of GPU IDs the parallel pool will draw from.
+
+    Priority is:
+
+      1. Explicit ``--gpus`` value (accepts ``0,1,2`` or ``0-3`` or
+         ``0,2-5,7``).
+      2. The parent shell's ``HIP_VISIBLE_DEVICES`` environment
+         variable (same format).
+      3. Default ``["0"]`` — only when ``--jobs == 1``.
+
+    We deliberately do NOT scan the machine for GPUs.  The user
+    said "use HIP_VISIBLE_DEVICES for discovery" and we honour that
+    literally — on a shared box that's the only safe source of
+    truth for "which GPUs is this shell allowed to touch".
+
+    Raises ``RuntimeError`` on unparseable ranges, empty lists, or
+    ``--jobs > 1`` with no GPU source configured.
+    """
+    raw = (arg_gpus or "").strip()
+    source = "--gpus"
+    if not raw:
+        raw = os.environ.get("HIP_VISIBLE_DEVICES", "").strip()
+        source = "HIP_VISIBLE_DEVICES"
+    if not raw:
+        if jobs > 1:
+            raise RuntimeError(
+                f"--jobs {jobs} needs a GPU list; pass --gpus "
+                f"'0,1,2,...' (or a range like '0-7') or set "
+                f"HIP_VISIBLE_DEVICES in this shell before invoking "
+                f"the runner.  --jobs 1 (the default) falls back to "
+                f"GPU 0 and needs no --gpus/HIP_VISIBLE_DEVICES."
+            )
+        return ["0"]
+
+    gpus: List[str] = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if "-" in token:
+            lo_s, hi_s = token.split("-", 1)
+            try:
+                lo, hi = int(lo_s), int(hi_s)
+            except ValueError as e:
+                raise RuntimeError(
+                    f"{source}: cannot parse range {token!r} "
+                    f"(expected integer-integer)"
+                ) from e
+            if lo > hi:
+                raise RuntimeError(
+                    f"{source}: empty range {token!r} (lo > hi)"
+                )
+            gpus.extend(str(i) for i in range(lo, hi + 1))
+        else:
+            # Validate it's an int but keep the string form — HIP
+            # cares about the textual value of the env var, not
+            # Python's normalised int repr.
+            try:
+                int(token)
+            except ValueError as e:
+                raise RuntimeError(
+                    f"{source}: {token!r} is not a valid GPU index"
+                ) from e
+            gpus.append(token)
+    if not gpus:
+        raise RuntimeError(
+            f"{source}={raw!r} parsed to an empty GPU list"
+        )
+    # Preserve user-specified order; deduplicate only on exact
+    # repeats (e.g., "--gpus 0,1,0" → ["0","1"]).
+    seen = set()
+    deduped = []
+    for g in gpus:
+        if g not in seen:
+            seen.add(g)
+            deduped.append(g)
+    return deduped
+
+
 def _run_one(
     script: str,
     mode: ModeSpec,
@@ -624,18 +735,17 @@ def _run_one(
     # (bad log-dir path, no disk space) raises before we've started
     # anything expensive.  The filename is
     # <script>__<mode>__<ts>__<pid>.log with all non-safe chars
-    # collapsed; PID suffix prevents collision between two
-    # same-mode runs that finish inside the same one-second
-    # ``%Y%m%d-%H%M%S`` bucket.  Timestamps are *local* time
-    # because the runner is serial (two consecutive log files
-    # from the same process sort the same regardless of TZ) and
-    # a local timestamp is easier to correlate against kernel
-    # logs / dmesg output during triage.
+    # collapsed.  Timestamp is local time with microsecond precision
+    # (``%Y%m%d-%H%M%S-%f``); the PID component disambiguates two
+    # concurrent runner invocations on the same box.  Microseconds
+    # matter in ``--jobs > 1`` mode — several worker threads share
+    # the runner's PID and can open log files within the same
+    # one-second bucket, so a ``%Y%m%d-%H%M%S`` stamp would collide.
     log_fh = None
     log_path: Optional[str] = None
     if log_dir is not None:
         os.makedirs(log_dir, exist_ok=True)
-        ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         fname = (
             f"{_sanitize_log_component(script_label)}"
             f"__{mode.name}__{ts}__pid{os.getpid()}.log"
@@ -903,6 +1013,184 @@ def _run_one(
         elapsed_s=elapsed,
         stderr_tail=_tail(stderr),
     )
+
+
+def _run_warmup(
+    scripts: List[str],
+    warmup_gpu: str,
+    args: argparse.Namespace,
+    native_gfx: str,
+    spoof_arch: str,
+    log_dir: Optional[str],
+    base_dirs: List[str],
+) -> Dict[str, RunResult]:
+    """Native-mode pre-pass, serial, pinned to ``warmup_gpu``.
+
+    Purpose: populate ``--jit-cache`` before fanning out.  AITER's
+    ``@compile_ops`` decorator lazily invokes hipcc on first import,
+    writing the resulting ``.so`` into ``_jit_cache/``.  Two parallel
+    workers racing to build the same module is at best wasted CPU,
+    at worst a corrupted ``.so`` that the next dlopen crashes on.
+    One sequential warm-up pass reduces the parallel phase to pure
+    dlopen-of-cached-artefact, which does parallelise cleanly.
+
+    We run *native* mode specifically because it's the lightest
+    path (no ``LD_PRELOAD`` of libsalmon/libhsa, no arch-spoof
+    shim) — it exercises exactly the codegen needed to populate
+    the JIT cache, and nothing else.  Results are returned keyed
+    by script so the caller can reuse them as the native column of
+    the output grid when ``native`` is one of the requested modes
+    (avoiding a redundant re-run in the parallel phase).
+    """
+    print(
+        f"[warmup] priming JIT cache via {len(scripts)} native-mode "
+        f"run(s), serial on gpu={warmup_gpu} "
+        f"(disable with --warmup off)",
+        file=sys.stderr,
+        flush=True,
+    )
+    results: Dict[str, RunResult] = {}
+    native_mode = MODES["native"]
+    for i, script in enumerate(scripts, 1):
+        label = _short_label(script, base_dirs)
+        print(
+            f"[warmup {i}/{len(scripts)}] {label} :: native ... ",
+            end="", flush=True, file=sys.stderr,
+        )
+        if args.tee_stderr:
+            print("", file=sys.stderr, flush=True)
+        r = _run_one(
+            script=script, mode=native_mode,
+            aiter_root=args.aiter_root,
+            triton_venv=args.triton_venv,
+            libsalmon=args.libsalmon,
+            libhsa=args.libhsa,
+            libamdhip=args.libamdhip,
+            libarch_spoof=args.libarch_spoof,
+            spoof_arch=spoof_arch,
+            native_gfx=native_gfx,
+            strict_tol=args.strict_tolerance,
+            perftest_iters=args.perftest_iters,
+            jit_cache=args.jit_cache,
+            timeout_s=args.timeout,
+            visible_devices=warmup_gpu,
+            script_args=args.script_arg,
+            rng_seed=args.rng_seed,
+            tee_stderr=args.tee_stderr,
+            log_dir=log_dir,
+            script_label=label,
+        )
+        results[script] = r
+        verdict_line = (
+            f"[warmup verdict] {label} :: native ... "
+            f"{r.verdict} ({r.detail}, {r.elapsed_s:.1f}s)"
+            if args.tee_stderr else
+            f"{r.verdict} ({r.detail}, {r.elapsed_s:.1f}s)"
+        )
+        print(verdict_line, file=sys.stderr)
+    return results
+
+
+def _run_parallel(
+    jobs_spec: List[Tuple[str, str]],
+    gpu_pool: List[str],
+    n_workers: int,
+    args: argparse.Namespace,
+    native_gfx: str,
+    spoof_arch: str,
+    log_dir: Optional[str],
+    base_dirs: List[str],
+) -> List[RunResult]:
+    """Dispatch ``(script, mode)`` pairs across ``n_workers`` threads,
+    each holding one GPU slot from ``gpu_pool`` at a time.
+
+    The slot queue enforces a strict 1:1 worker-to-GPU binding: a
+    worker blocks on ``gpu_queue.get()`` before spawning its child,
+    and puts the GPU back after the child exits.  ``n_workers`` is
+    already capped to ``len(gpu_pool)`` by ``main()`` so the queue
+    starts full and no worker ever starves.
+
+    Progress lines are printed under a ``threading.Lock`` so concurrent
+    ``[run k/N] ...`` reports don't interleave mid-line.  The
+    ``[script::mode]`` prefix of ``--tee-stderr`` keeps the
+    per-child live output readable even when 8 streams interleave.
+
+    Completion order is non-deterministic and intentional — the
+    printed result order reflects who finishes first, which is
+    often the most useful ordering during triage (a 60s HANG
+    lands between two 5s PASSes).  ``_print_grid`` /
+    ``_print_failures`` / ``_print_summary`` all re-sort their input
+    by ``(script, mode)``, so the final report is still
+    deterministic.
+    """
+    gpu_queue: queue.Queue = queue.Queue()
+    for g in gpu_pool[:n_workers]:
+        gpu_queue.put(g)
+
+    print_lock = threading.Lock()
+    n_total = len(jobs_spec)
+
+    def _dispatch(job_idx: int, script: str, mode_name: str) -> RunResult:
+        gpu = gpu_queue.get()
+        try:
+            mode = MODES[mode_name]
+            label = _short_label(script, base_dirs)
+            with print_lock:
+                print(
+                    f"[run {job_idx}/{n_total}] {label} :: {mode_name} "
+                    f"... (gpu={gpu})",
+                    file=sys.stderr, flush=True,
+                )
+            r = _run_one(
+                script=script, mode=mode,
+                aiter_root=args.aiter_root,
+                triton_venv=args.triton_venv,
+                libsalmon=args.libsalmon,
+                libhsa=args.libhsa,
+                libamdhip=args.libamdhip,
+                libarch_spoof=args.libarch_spoof,
+                spoof_arch=spoof_arch,
+                native_gfx=native_gfx,
+                strict_tol=args.strict_tolerance,
+                perftest_iters=args.perftest_iters,
+                jit_cache=args.jit_cache,
+                timeout_s=args.timeout,
+                visible_devices=gpu,
+                script_args=args.script_arg,
+                rng_seed=args.rng_seed,
+                tee_stderr=args.tee_stderr,
+                log_dir=log_dir,
+                script_label=label,
+            )
+            with print_lock:
+                print(
+                    f"[verdict {job_idx}/{n_total}] {label} :: "
+                    f"{mode_name} ... {r.verdict} "
+                    f"({r.detail}, {r.elapsed_s:.1f}s, gpu={gpu})",
+                    file=sys.stderr, flush=True,
+                )
+            return r
+        finally:
+            gpu_queue.put(gpu)
+
+    results: List[RunResult] = []
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=n_workers,
+        thread_name_prefix="aiter-worker",
+    ) as pool:
+        futures = [
+            pool.submit(_dispatch, i, s, m)
+            for i, (s, m) in enumerate(jobs_spec, 1)
+        ]
+        # ``as_completed`` drains futures in finish-order; exceptions
+        # (which would be a bug in ``_dispatch`` itself, not a child
+        # failure — child failures surface as RunResult.verdict=CRASH)
+        # propagate out of ``.result()`` and abort the sweep, which
+        # is what we want.  Daemon threads would leak on Ctrl-C;
+        # relying on ThreadPoolExecutor's ``__exit__`` drain instead.
+        for f in concurrent.futures.as_completed(futures):
+            results.append(f.result())
+    return results
 
 
 # -- discovery + setup ------------------------------------------------------
@@ -1298,9 +1586,41 @@ def main() -> int:
     )
     ap.add_argument(
         "--gpu", default=None,
-        help="value for HIP_VISIBLE_DEVICES (single index like '0', or "
-             "comma list).  Default: '0' if HIP_VISIBLE_DEVICES is not "
-             "already set; pass '' to clear it.",
+        help="value for HIP_VISIBLE_DEVICES in --jobs 1 (serial) mode "
+             "— single index like '0', or comma list.  Default: '0' "
+             "if HIP_VISIBLE_DEVICES is not already set; pass '' to "
+             "clear it.  Ignored when --jobs > 1; use --gpus instead.",
+    )
+    ap.add_argument(
+        "--jobs", type=int, default=1, metavar="N",
+        help="run up to N (script, mode) jobs concurrently, one per "
+             "GPU in the --gpus pool.  Default 1 (strictly serial).  "
+             "A --warmup pass (enabled automatically for --jobs > 1) "
+             "first populates the JIT cache serially so parallel "
+             "workers hit dlopen-only hot paths.  Pool size is "
+             "capped to len(--gpus).  Use this on a multi-GPU box "
+             "to cut full-corpus sweep time from hours to minutes.",
+    )
+    ap.add_argument(
+        "--gpus", default="",
+        help="GPU pool for --jobs > 1 (comma-separated indices with "
+             "optional ranges, e.g. '0,1,2,3' or '0-7' or "
+             "'0,2-5,7').  Empty default falls back to the parent "
+             "shell's HIP_VISIBLE_DEVICES env var.  If neither is "
+             "set and --jobs > 1, the runner errors before doing "
+             "any work.  No auto-discovery: we honour whatever the "
+             "shell has declared visible so shared-box usage is safe.",
+    )
+    ap.add_argument(
+        "--warmup", default="auto", choices=("auto", "on", "off"),
+        help="whether to run a serial native-mode pre-pass to prime "
+             "the JIT cache before the parallel phase.  'auto' "
+             "(default) enables warmup iff --jobs > 1; 'on' forces "
+             "it even in --jobs 1 mode; 'off' skips it.  Skipping "
+             "warmup with --jobs > 1 on a cold --jit-cache is a "
+             "well-known way to produce duplicated hipcc work and "
+             "rarely a corrupted .so — recommended only when you "
+             "know the cache is already populated.",
     )
     ap.add_argument(
         "--rng-seed", default="0",
@@ -1399,6 +1719,35 @@ def main() -> int:
     if log_dir is not None:
         log_dir = os.path.abspath(log_dir)
 
+    if args.jobs < 1:
+        print(
+            f"--jobs must be >= 1 (got {args.jobs})",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        gpu_pool = _resolve_gpu_pool(args.gpus, args.jobs)
+    except RuntimeError as e:
+        print(f"GPU pool resolution failed: {e}", file=sys.stderr)
+        return 2
+    jobs = args.jobs
+    if jobs > len(gpu_pool):
+        print(
+            f"[aiter_corpus_runner] --jobs {jobs} exceeds GPU pool "
+            f"size {len(gpu_pool)} ({','.join(gpu_pool)}); capping "
+            f"to {len(gpu_pool)} (one worker per GPU, strictly).",
+            file=sys.stderr,
+        )
+        jobs = len(gpu_pool)
+
+    # Warmup decision.  The auto default matches the rationale in
+    # ``_run_warmup``: cold JIT cache + parallel workers is the
+    # textbook recipe for racing hipcc.
+    if args.warmup == "auto":
+        warmup_enabled = jobs > 1
+    else:
+        warmup_enabled = args.warmup == "on"
+
     # --print-command: no spawning, no work, just emit the exact
     # invocation the runner *would* use for each (script, mode)
     # pair in the current matrix.  We run the native-gfx +
@@ -1453,6 +1802,11 @@ def main() -> int:
                 print()
         return 0
 
+    parallel_banner = (
+        f"jobs={jobs} (serial)" if jobs == 1
+        else f"jobs={jobs} × gpus=[{','.join(gpu_pool[:jobs])}]"
+    )
+    warmup_banner = "on" if warmup_enabled else "off"
     print(
         f"aiter corpus runner: {len(scripts)} script(s), "
         f"modes={args.modes}, native_gfx={native_gfx!r}, "
@@ -1462,7 +1816,8 @@ def main() -> int:
         f"rng_seed={args.rng_seed!r}, "
         f"timeout={args.timeout:.0f}s, jit_cache={args.jit_cache}, "
         f"tee_stderr={args.tee_stderr}, "
-        f"log_dir={log_dir or '<off>'}",
+        f"log_dir={log_dir or '<off>'}, "
+        f"{parallel_banner}, warmup={warmup_banner}",
         file=sys.stderr,
     )
     for s in scripts:
@@ -1470,8 +1825,37 @@ def main() -> int:
     print(file=sys.stderr)
 
     results: List[RunResult] = []
-    for s in scripts:
-        for m in args.modes:
+
+    # Optional warmup pass.  Populates ``_jit_cache/`` so parallel
+    # workers don't race hipcc.  When ``native`` is among the
+    # requested modes the warmup results double as the native column
+    # of the output — no need to redo those runs in the main phase.
+    warmup_captured_native = False
+    if warmup_enabled:
+        warmup_results = _run_warmup(
+            scripts=scripts,
+            warmup_gpu=gpu_pool[0],
+            args=args, native_gfx=native_gfx, spoof_arch=spoof_arch,
+            log_dir=log_dir, base_dirs=base_dirs,
+        )
+        if "native" in args.modes:
+            results.extend(warmup_results.values())
+            warmup_captured_native = True
+        print(file=sys.stderr)
+
+    # Main run matrix, minus native pairs already done in warmup.
+    main_jobs: List[Tuple[str, str]] = [
+        (s, m)
+        for s in scripts
+        for m in args.modes
+        if not (warmup_captured_native and m == "native")
+    ]
+
+    if jobs == 1:
+        # Serial path — preserves the historic single-stream output
+        # format for users / wrapper scripts that grep ``[run]`` /
+        # ``[verdict]`` with no k/N prefix.
+        for s, m in main_jobs:
             mode = MODES[m]
             print(f"[run] {_short_label(s, base_dirs)} :: {m} ... ",
                   end="", flush=True, file=sys.stderr)
@@ -1514,6 +1898,15 @@ def main() -> int:
                 f"{r.verdict} ({r.detail}, {r.elapsed_s:.1f}s)"
             )
             print(verdict_line, file=sys.stderr)
+    else:
+        parallel_results = _run_parallel(
+            jobs_spec=main_jobs,
+            gpu_pool=gpu_pool,
+            n_workers=jobs,
+            args=args, native_gfx=native_gfx, spoof_arch=spoof_arch,
+            log_dir=log_dir, base_dirs=base_dirs,
+        )
+        results.extend(parallel_results)
 
     _print_grid(results, args.modes, base_dirs)
     _print_failures(results, args.modes, base_dirs)
@@ -1532,6 +1925,9 @@ def main() -> int:
                     "rng_seed": args.rng_seed,
                     "timeout_s": args.timeout,
                     "aiter_root": args.aiter_root,
+                    "jobs": jobs,
+                    "gpu_pool": gpu_pool[:jobs],
+                    "warmup": warmup_enabled,
                     "results": [dataclasses.asdict(r) for r in results],
                 },
                 f,

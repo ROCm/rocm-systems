@@ -11,14 +11,18 @@ test, which this runner promotes to hard failures via monkey-patch.
 ```bash
 cd projects/rocr-runtime/runtime/hsa-runtime/hotswap/transpiler/tools/aiter_corpus_runner
 
-# Curated subset (~12 op-tests), all three modes
+# Curated subset (~12 op-tests), all three modes, 1 GPU
 python3 runner.py
+
+# Same sweep fanned out across 8 GPUs (one job per GPU, automatic warmup)
+export HIP_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+python3 runner.py --jobs 8
+
+# Full op_tests corpus, 8-way parallel
+python3 runner.py --all --jobs 8
 
 # One script, one mode
 python3 runner.py --script _aiter/op_tests/test_moeTopkSoftmax.py --modes salmon
-
-# Full op_tests corpus
-python3 runner.py --all
 
 # Triage a hang / crash / fail: live stderr + full per-run logs
 python3 runner.py --modes legacy,salmon --script _aiter/op_tests/test_X.py \
@@ -26,6 +30,56 @@ python3 runner.py --modes legacy,salmon --script _aiter/op_tests/test_X.py \
 ```
 
 First-time setup is one block at the end of this doc.
+
+## Parallel execution (`--jobs N`)
+
+On a multi-GPU box the runner can fan every `(script, mode)` job out
+across the GPUs in `HIP_VISIBLE_DEVICES` (or an explicit `--gpus` pool)
+and cut wall-clock time roughly linearly.  Defaults:
+
+- `--jobs 1` — strictly serial, GPU 0.  Same behaviour as before.
+- `--jobs N > 1` — `N` worker threads, one per GPU slot.  Each child
+  runs on exactly one GPU (its assigned slot pinned via
+  `HIP_VISIBLE_DEVICES`) so a wedged kernel on one device can't
+  blast the others.
+- Pool size is capped to `len(--gpus)`; `--jobs 100 --gpus 0-3` runs 4.
+- **`--warmup` (default `auto`)** — when `--jobs > 1`, the runner
+  first does a serial native-mode pass over every unique script on
+  `gpu_pool[0]` to populate `--jit-cache/`.  AITER's `@compile_ops`
+  lazily invokes `hipcc` on first import; two parallel workers racing
+  to build the same module would at best duplicate work and at worst
+  race on a half-written `.so`.  One serial warmup makes the
+  subsequent parallel phase pure dlopen-of-cached-artifact.  When
+  `native` is among `--modes`, the warmup verdicts are reused as the
+  native column and not re-run in parallel.
+
+GPU discovery is **literally** `HIP_VISIBLE_DEVICES` (or an explicit
+`--gpus 0,1,2,...` / `--gpus 0-7`).  We don't scan the box with
+`rocminfo` — on a shared machine that'd be the wrong answer — so the
+user's shell is the single source of truth for "which GPUs may I
+touch."  `--jobs > 1` with neither source set errors out before
+spawning anything.
+
+Example output with `--jobs 4`:
+
+```
+aiter corpus runner: 14 script(s), modes=['native','legacy','salmon'], ...
+  jobs=4 × gpus=[0,1,2,3], warmup=on
+
+[warmup] priming JIT cache via 14 native-mode run(s), serial on gpu=0 (disable with --warmup off)
+[warmup 1/14] test_moeTopkSoftmax.py :: native ... PASS (ok, 6.2s)
+...
+[run 1/28] test_layernorm2d.py :: legacy ... (gpu=2)
+[run 2/28] test_moeTopkSoftmax.py :: legacy ... (gpu=0)
+[run 3/28] test_rmsnorm2d.py :: legacy ... (gpu=1)
+[run 4/28] test_layernorm2d.py :: salmon ... (gpu=3)
+[verdict 2/28] test_moeTopkSoftmax.py :: legacy ... PASS (ok, 5.8s, gpu=0)
+...
+```
+
+`[run k/N]` lines go out before the child starts; `[verdict k/N]`
+after it exits.  Interleaving is expected — sort the final grid /
+summary instead of the live progress.
 
 ## What it does
 
@@ -196,8 +250,10 @@ and let AITER's `@compile_ops` lazily build its C++ extensions into
 
 Everything lives under `$HOME`.  No `/etc/ld.so.preload`, no
 `/opt/rocm/*` writes.  `LD_PRELOAD` is per-process and only affects
-children we spawn.  Default `--gpu 0` contains any blast radius to a
-single device.
+children we spawn.  Each worker pins its child to exactly one GPU
+via `HIP_VISIBLE_DEVICES=<slot>`, so in `--jobs N` mode a wedged
+kernel on one device can't take down the sibling workers — blast
+radius scales with the size of the `--gpus` pool, not beyond it.
 
 Point at an existing AITER checkout instead of cloning:
 
@@ -224,7 +280,10 @@ python3 runner.py --aiter-root /path/to/your/aiter \
 | `--rng-seed`         | `0`                                                                        | seed for `random` / `numpy` / `torch` before every script                |
 | `--timeout`          | `600` s                                                                    | per-child wall clock; SIGKILL on overshoot                               |
 | `--jit-cache`        | `<HERE>/_jit_cache`                                                        | persistent cache for AITER's `@compile_ops`                              |
-| `--gpu`              | `0`                                                                        | `HIP_VISIBLE_DEVICES` for every child; `''` clears it                    |
+| `--gpu`              | `0`                                                                        | `HIP_VISIBLE_DEVICES` in serial (`--jobs 1`) mode; ignored with `--jobs > 1` |
+| `--jobs N`           | `1`                                                                        | run `N` `(script, mode)` jobs in parallel, one per GPU slot              |
+| `--gpus LIST`        | — (falls back to `HIP_VISIBLE_DEVICES`)                                    | comma list / range for the parallel pool (`0,1,2`, `0-7`, `0,2-5,7`)     |
+| `--warmup {auto,on,off}` | `auto` (= on when `--jobs > 1`)                                        | serial native-mode pre-pass to prime `--jit-cache` before the parallel phase |
 | `--script-arg A`     | —                                                                          | forward one argv token to the user script (repeatable)                   |
 | `--tee-stderr`       | off                                                                        | stream each child's stderr live with `[<script>::<mode>]` prefix          |
 | `--log-dir DIR`      | —                                                                          | full per-run transcripts under `DIR/<script>__<mode>__<ts>__pid<pid>.log` |
