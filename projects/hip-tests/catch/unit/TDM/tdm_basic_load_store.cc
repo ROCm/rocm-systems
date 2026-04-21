@@ -5,9 +5,12 @@
 #include <string>
 
 #if defined(__clang__) && defined(__HIP__)
-#if defined(__gfx1250__) || defined(__gfx1251__)
-__global__ void  TDM_load_store_tester(const int* data,  int* result, int sizex, int sizey)
+__global__ void  TDM_load_store_tester([[maybe_unused]] const int* data,
+                                       [[maybe_unused]] int* result,
+                                       [[maybe_unused]] int sizex,
+                                       [[maybe_unused]] int sizey)
 {
+    #if defined(__gfx1250__) || defined(__gfx1251__)
     __shared__ int shmem[10 * 10];
     auto* pShmem = static_cast<int*>(shmem);
     gfx1250_TDM_GROUP0 group0;
@@ -33,8 +36,8 @@ __global__ void  TDM_load_store_tester(const int* data,  int* result, int sizex,
     __builtin_amdgcn_tensor_store_from_lds_d2(group0.m_bitfield, group1.m_bitfield, 0);
     __builtin_amdgcn_s_wait_tensorcnt(0);
 
+    #endif // #if defined(__gfx1250__) || defined(__gfx1251__)
 }
-#endif // #if defined(__gfx1250__) || defined(__gfx1251__)
 
 TEST_CASE("TDM_Basic_load_2d")
 {
@@ -65,9 +68,7 @@ TEST_CASE("TDM_Basic_load_2d")
     }
 
     HIP_CHECK(hipMemcpy(input_dev.ptr(), input.ptr(), alloc_size, hipMemcpyHostToDevice));
-#if defined(__gfx1250__) || defined(__gfx1251__)
-TDM_load_store_tester<<<1, 32>>>(input_dev.ptr(), result_dev.ptr(), 10, 10);
-#endif
+    TDM_load_store_tester<<<1, 32>>>(input_dev.ptr(), result_dev.ptr(), 10, 10);
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipMemcpy(result.ptr(), result_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
 
