@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <vector>
@@ -208,6 +209,164 @@ std::string print_unsigned_int(T value) {
   ss << static_cast<uint64_t>(value | 0);
 
   return ss.str();
+}
+
+template <typename T, size_t N>
+void print_metric_array(const std::string& label, const T (&values)[N]) {
+  constexpr auto sentinel = std::numeric_limits<T>::max();
+  std::cout << "\t" << label << " = [";
+  for (size_t i = 0; i < N; ++i) {
+    if (values[i] == sentinel) {
+      std::cout << "N/A";
+    } else {
+      std::cout << values[i];
+    }
+    if (i + 1 != N) {
+      std::cout << ", ";
+    }
+  }
+  std::cout << "]\n";
+}
+
+// APU metrics version detection helpers
+static constexpr bool is_apu_metrics_v24(const amd_metrics_table_header_t& header) {
+  return header.format_revision == 2 && header.content_revision == 4;
+}
+
+static constexpr bool is_apu_metrics_v30(const amd_metrics_table_header_t& header) {
+  return header.format_revision == 3 && header.content_revision == 0;
+}
+
+static void print_apu_metrics_info(const amdsmi_gpu_metrics_t& smu) {
+  if (smu.apu_metrics == nullptr) {
+    return;
+  }
+
+  const auto& apu = *smu.apu_metrics;
+  const bool is_v24 = is_apu_metrics_v24(smu.common_header);
+  const bool is_v30 = is_apu_metrics_v30(smu.common_header);
+
+  const size_t l3_count = is_v24 ? AMDSMI_APU_MAX_L3 : 0;
+
+  std::cout << "\nAPU AUXILIARY METRICS:\n";
+  std::cout << "\ttemperature_gfx = " << apu.temperature_gfx << "\n";
+  std::cout << "\ttemperature_soc = " << apu.temperature_soc << "\n";
+  print_metric_array("temperature_core", apu.temperature_core);
+  if (l3_count != 0) {
+    print_metric_array("temperature_l3", apu.temperature_l3);
+  }
+  if (is_v30) {
+    std::cout << "\ttemperature_skin = " << apu.temperature_skin << "\n";
+  }
+
+  std::cout << "\nAPU UTILIZATION:\n";
+  std::cout << "\taverage_gfx_activity = " << apu.average_gfx_activity << "\n";
+  if (is_v24) {
+    std::cout << "\taverage_mm_activity = " << apu.average_mm_activity << "\n";
+  }
+  if (is_v30) {
+    std::cout << "\taverage_vcn_activity = " << apu.average_vcn_activity << "\n";
+    print_metric_array("average_ipu_activity", apu.average_ipu_activity);
+    print_metric_array("average_core_c0_activity", apu.average_core_c0_activity);
+    std::cout << "\taverage_dram_reads = " << apu.average_dram_reads << "\n";
+    std::cout << "\taverage_dram_writes = " << apu.average_dram_writes << "\n";
+    std::cout << "\taverage_ipu_reads = " << apu.average_ipu_reads << "\n";
+    std::cout << "\taverage_ipu_writes = " << apu.average_ipu_writes << "\n";
+  }
+
+  std::cout << "\nAPU POWER (mW):\n";
+  std::cout << "\taverage_socket_power = " << apu.average_socket_power << "\n";
+  if (is_v24) {
+    std::cout << "\taverage_cpu_power = " << apu.average_cpu_power << "\n";
+    std::cout << "\taverage_soc_power = " << apu.average_soc_power << "\n";
+  }
+  std::cout << "\taverage_gfx_power = " << apu.average_gfx_power << "\n";
+  print_metric_array("average_core_power", apu.average_core_power);
+  if (is_v30) {
+    std::cout << "\taverage_ipu_power = " << apu.average_ipu_power << "\n";
+    std::cout << "\taverage_apu_power = " << apu.average_apu_power << "\n";
+    std::cout << "\taverage_dgpu_power = " << apu.average_dgpu_power << "\n";
+    std::cout << "\taverage_all_core_power = " << apu.average_all_core_power << "\n";
+    std::cout << "\taverage_sys_power = " << apu.average_sys_power << "\n";
+    std::cout << "\tstapm_power_limit = " << apu.stapm_power_limit << "\n";
+    std::cout << "\tcurrent_stapm_power_limit = " << apu.current_stapm_power_limit << "\n";
+  }
+
+  std::cout << "\nAPU AVERAGE CLOCKS (MHz):\n";
+  std::cout << "\taverage_gfxclk_frequency = " << apu.average_gfxclk_frequency << "\n";
+  std::cout << "\taverage_socclk_frequency = " << apu.average_socclk_frequency << "\n";
+  std::cout << "\taverage_uclk_frequency = " << apu.average_uclk_frequency << "\n";
+  std::cout << "\taverage_fclk_frequency = " << apu.average_fclk_frequency << "\n";
+  std::cout << "\taverage_vclk_frequency = " << apu.average_vclk_frequency << "\n";
+  if (is_v24) {
+    std::cout << "\taverage_dclk_frequency = " << apu.average_dclk_frequency << "\n";
+  }
+  if (is_v30) {
+    std::cout << "\taverage_vpeclk_frequency = " << apu.average_vpeclk_frequency << "\n";
+    std::cout << "\taverage_ipuclk_frequency = " << apu.average_ipuclk_frequency << "\n";
+    std::cout << "\taverage_mpipu_frequency = " << apu.average_mpipu_frequency << "\n";
+  }
+
+  std::cout << "\nAPU CURRENT CLOCKS (MHz):\n";
+  if (is_v24) {
+    std::cout << "\tcurrent_gfxclk = " << apu.current_gfxclk << "\n";
+    std::cout << "\tcurrent_socclk = " << apu.current_socclk << "\n";
+    std::cout << "\tcurrent_uclk = " << apu.current_uclk << "\n";
+    std::cout << "\tcurrent_fclk = " << apu.current_fclk << "\n";
+    std::cout << "\tcurrent_vclk = " << apu.current_vclk << "\n";
+    std::cout << "\tcurrent_dclk = " << apu.current_dclk << "\n";
+  }
+  print_metric_array("current_coreclk", apu.current_coreclk);
+  if (l3_count != 0) {
+    print_metric_array("current_l3clk", apu.current_l3clk);
+  }
+  if (is_v30) {
+    std::cout << "\tcurrent_core_maxfreq = " << apu.current_core_maxfreq << "\n";
+    std::cout << "\tcurrent_gfx_maxfreq = " << apu.current_gfx_maxfreq << "\n";
+  }
+
+  std::cout << "\nAPU THROTTLE:\n";
+  if (is_v24) {
+    std::cout << "\tthrottle_status = " << apu.throttle_status << "\n";
+    std::cout << "\tindep_throttle_status = " << apu.indep_throttle_status << "\n";
+  }
+  if (is_v30) {
+    std::cout << "\tthrottle_residency_prochot = " << apu.throttle_residency_prochot << "\n";
+    std::cout << "\tthrottle_residency_spl = " << apu.throttle_residency_spl << "\n";
+    std::cout << "\tthrottle_residency_fppt = " << apu.throttle_residency_fppt << "\n";
+    std::cout << "\tthrottle_residency_sppt = " << apu.throttle_residency_sppt << "\n";
+    std::cout << "\tthrottle_residency_thm_core = " << apu.throttle_residency_thm_core << "\n";
+    std::cout << "\tthrottle_residency_thm_gfx = " << apu.throttle_residency_thm_gfx << "\n";
+    std::cout << "\tthrottle_residency_thm_soc = " << apu.throttle_residency_thm_soc << "\n";
+  }
+
+  if (is_v24) {
+    std::cout << "\nAPU FAN / VOLTAGE / CURRENT:\n";
+    std::cout << "\tfan_pwm = " << apu.fan_pwm << "\n";
+    std::cout << "\taverage_cpu_voltage = " << apu.average_cpu_voltage << "\n";
+    std::cout << "\taverage_soc_voltage = " << apu.average_soc_voltage << "\n";
+    std::cout << "\taverage_gfx_voltage = " << apu.average_gfx_voltage << "\n";
+    std::cout << "\taverage_cpu_current = " << apu.average_cpu_current << "\n";
+    std::cout << "\taverage_soc_current = " << apu.average_soc_current << "\n";
+    std::cout << "\taverage_gfx_current = " << apu.average_gfx_current << "\n";
+
+    std::cout << "\nAPU AVERAGE TEMPERATURE:\n";
+    std::cout << "\taverage_temperature_gfx = " << apu.average_temperature_gfx << "\n";
+    std::cout << "\taverage_temperature_soc = " << apu.average_temperature_soc << "\n";
+    print_metric_array("average_temperature_core", apu.average_temperature_core);
+    print_metric_array("average_temperature_l3", apu.average_temperature_l3);
+  }
+
+  if (is_v30) {
+    std::cout << "\nAPU OTHER:\n";
+    std::cout << "\ttime_filter_alphavalue = " << apu.time_filter_alphavalue << "\n";
+  }
+
+  if (!is_v24 && !is_v30) {
+    std::cout << "\twarning: unexpected APU metrics header version "
+              << static_cast<uint32_t>(smu.common_header.format_revision) << "."
+              << static_cast<uint32_t>(smu.common_header.content_revision) << "\n";
+  }
 }
 
 static const std::string computePartitionString(
@@ -1853,6 +2012,10 @@ int main() {
           std::cout << "]\n";
           idy = 0;
           idx++;
+        }
+
+        if (smu.apu_metrics != nullptr) {
+          print_apu_metrics_info(smu);
         }
 
         std::cout << "\n\n";
