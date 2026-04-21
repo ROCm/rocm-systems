@@ -15,9 +15,6 @@ event:
   Unit_hipEventQuery_NullCheck:
     <<: *level_2
     tags: [synchronization]
-  Unit_hipEventDestroy_NullCheck:
-    <<: *level_2
-    tags: [lifecycle]
   Unit_hipEvent:
     <<: *level_2
     # SWDEV-411303 fails in WSL. Profiling not support in WSL

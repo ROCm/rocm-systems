@@ -347,9 +347,6 @@ atomics:
   Unit_unsafeAtomicAdd_Positive_Multi_Kernel:
     <<: *level_2
     tags: [deviceLib, ops]
-  Unit_unsafe_atomic_add_half_and_bfloat:
-    <<: *level_2
-    tags: [deviceLib, ops]
   Unit_safeAtomicAdd_Positive:
     <<: *level_2
     tags: [deviceLib, ops]

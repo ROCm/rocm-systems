@@ -68,6 +68,7 @@ def main():
     source_root = args.source_root
 
     missing = []
+    stale = []
 
     for group, cases in iter_group_configs(configs_path):
         yaml_names = set(cases.keys())
@@ -76,6 +77,10 @@ def main():
         )
         for name in sorted(source_names - yaml_names):
             missing.append(f"  {group}/{name}")
+        for name in sorted(yaml_names - source_names):
+            stale.append(f"  {group}/{name}")
+
+    errors = False
 
     if missing:
         print(
@@ -84,6 +89,19 @@ def main():
         )
         for entry in missing:
             print(entry, file=sys.stderr)
+        errors = True
+
+    if stale:
+        print(
+            "ERROR: The following YAML config entries have no matching Catch2 "
+            "test case in source:",
+            file=sys.stderr,
+        )
+        for entry in stale:
+            print(entry, file=sys.stderr)
+        errors = True
+
+    if errors:
         sys.exit(1)
 
 
