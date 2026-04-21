@@ -36,10 +36,6 @@ namespace rocshmem {
 
 /**
  * @brief Minimal mock backend for testing buffer_register/buffer_unregister.
- *
- * Since buffer_register and buffer_unregister are non-virtual methods
- * implemented in the base Backend class, we only need to implement the
- * pure virtual methods to make the class concrete.
  */
 class MockBackend : public Backend {
   public:

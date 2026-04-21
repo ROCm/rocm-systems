@@ -81,7 +81,7 @@ TeamBroadcastmemOnStreamTester::~TeamBroadcastmemOnStreamTester() {
     CHECK_HIP(hipEventDestroy(start_events_timed[i]));
     CHECK_HIP(hipStreamDestroy(streams[i]));
   }
-  free_test_buffer(source_buf);
+  free_test_buffer(source_buf, args.local_buf_type);
   free_test_buffer(dest_buf);
 }
 

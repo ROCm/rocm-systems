@@ -908,6 +908,7 @@ void* Tester::alloc_test_buffer(size_t size, enum UserBufType user_buf_type) {
       if (buffer == nullptr) {
         std::cerr << "Error allocating memory from symmetric heap" << std::endl;
         std::cerr << "buffer: " << (uintptr_t) buffer << std::endl;
+        exit(-1);
       }
       break;
   }
@@ -917,6 +918,8 @@ void* Tester::alloc_test_buffer(size_t size, enum UserBufType user_buf_type) {
 void Tester::free_test_buffer(void *buffer, enum UserBufType user_buf_type) {
   switch (user_buf_type) {
     case USER_BUF_TYPE_HOST:
+      CHECK_HIP(hipHostFree(buffer));
+      break;
     case USER_BUF_TYPE_DEVICE:
     case USER_BUF_TYPE_FINE:
     case USER_BUF_TYPE_UNCACHED:

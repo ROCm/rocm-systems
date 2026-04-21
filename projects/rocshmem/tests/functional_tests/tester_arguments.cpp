@@ -93,6 +93,11 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     } else if (arg == "-localbuftype") {
       i++;
 
+      if (argc > i + 1) {
+        fprintf(stderr, "Invalid arguments for -localbuftype.\n");
+        exit(-1);
+      }
+
       if (std::string(argv[i]) == "heap") {
         local_buf_type = USER_BUF_TYPE_HEAP;
       } else if (std::string(argv[i]) == "host") {
