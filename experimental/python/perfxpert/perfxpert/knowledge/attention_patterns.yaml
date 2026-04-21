@@ -8,6 +8,10 @@ version: 1
 patterns:
   - id: flash_attention_v2
     name: "Flash-Attention v2 / v3 kernel"
+    # Flash/SDPA runs on any modern AMD GPU, but the HBM / MFMA
+    # thresholds below are calibrated for CDNA2+ (gfx90a/942/950). RDNA
+    # + legacy gfx908 hit different sweet spots — skip until re-tuned.
+    applies_to_gfx: [gfx90a, gfx942, gfx950]
     description: >
       Flash-Attention fuses Q*K^T, softmax, and P*V in on-chip SRAM so the
       attention intermediates never land in HBM. Signature: single kernel,
@@ -24,6 +28,7 @@ patterns:
 
   - id: naive_sdpa
     name: "Naive softmax(QK^T)V attention"
+    applies_to_gfx: [gfx90a, gfx942, gfx950]
     description: >
       Three separate kernels (matmul, softmax, matmul) with a full HBM
       round-trip of the attention scores. Worst on long sequences.
@@ -38,6 +43,7 @@ patterns:
 
   - id: kv_cache_read_amplified
     name: "KV-cache read amplification"
+    applies_to_gfx: [gfx90a, gfx942, gfx950]
     description: >
       Large KV-cache dominates HBM reads on decode. Detect via repeated
       DtoD memcpy of K/V tensors + high HBM_RD but low MFMA count.
@@ -51,6 +57,7 @@ patterns:
 
   - id: kv_cache_grouped_query
     name: "Grouped-query attention (GQA/MQA)"
+    applies_to_gfx: [gfx90a, gfx942, gfx950]
     description: >
       Fewer K/V heads than Q heads; HBM pressure lower but still worth
       tuning the num_kv_heads knob per decode batch size.

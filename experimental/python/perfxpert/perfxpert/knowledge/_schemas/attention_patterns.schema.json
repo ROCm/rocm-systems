@@ -9,10 +9,17 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "name", "description"],
+        "required": ["id", "name", "applies_to_gfx", "description"],
         "properties": {
           "id": {"type": "string"},
           "name": {"type": "string"},
+          "applies_to_gfx": {
+            "type": "array",
+            "description": "gfx_ids this attention pattern applies to. Detection logic matches any modern AMD GPU, but the HBM / MFMA thresholds are calibrated for CDNA2+ (gfx90a, gfx942, gfx950).",
+            "items": {"type": "string", "pattern": "^gfx[0-9a-f]+$"},
+            "minItems": 1,
+            "uniqueItems": true
+          },
           "description": {"type": "string"},
           "signature": {"type": "object"},
           "verdict": {"type": "string"},

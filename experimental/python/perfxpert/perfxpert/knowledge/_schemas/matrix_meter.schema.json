@@ -2,9 +2,16 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "description": "Phase-10 Feature F MFMA vs VALU ratio classification. Consumed by the Compute Specialist via fence/compute_specialist.md.",
-  "required": ["version", "description", "derivation", "thresholds"],
+  "required": ["version", "applies_to_gfx", "description", "derivation", "thresholds"],
   "properties": {
     "version": {"type": "integer", "minimum": 1},
+    "applies_to_gfx": {
+      "type": "array",
+      "description": "gfx_ids this matrix-meter rule applies to. MFMA is CDNA-only; thresholds calibrated for CDNA2+ (gfx90a, gfx942, gfx950). Legacy gfx908 (CDNA1) and RDNA parts are excluded.",
+      "items": {"type": "string", "pattern": "^gfx[0-9a-f]+$"},
+      "minItems": 1,
+      "uniqueItems": true
+    },
     "description": {"type": "string"},
     "derivation": {"type": "string"},
     "thresholds": {
