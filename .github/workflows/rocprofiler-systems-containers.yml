@@ -91,7 +91,7 @@ jobs:
       - name: Build CI Container (PR - No Push)
         if: github.event_name == 'pull_request'
         timeout-minutes: 45
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           retry_wait_seconds: 60
           timeout_minutes: 45
@@ -109,7 +109,7 @@ jobs:
       - name: Build Base Container (Push)
         if: github.event_name != 'pull_request'
         timeout-minutes: 45
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           retry_wait_seconds: 60
           timeout_minutes: 45
@@ -172,7 +172,7 @@ jobs:
       - name: Build Base Container (PR - No Push)
         if: github.event_name == 'pull_request'
         timeout-minutes: 45
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           retry_wait_seconds: 60
           timeout_minutes: 45
@@ -188,7 +188,7 @@ jobs:
       - name: Build Base Container (Push)
         if: github.event_name != 'pull_request'
         timeout-minutes: 45
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           retry_wait_seconds: 60
           timeout_minutes: 45
