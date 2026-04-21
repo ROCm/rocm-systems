@@ -53,8 +53,6 @@ TEST(QueueIntercept, QueueStateDefaultInit)
     EXPECT_EQ(state.next_submit_pos, 0UL);
     EXPECT_EQ(state.hsa_queue, nullptr);
     EXPECT_EQ(state.doorbell_signal.handle, 0UL);
-    EXPECT_EQ(state.k_factor, 0UL);
-    EXPECT_EQ(state.metadata_state, nullptr);
 }
 
 TEST(QueueIntercept, RegistryInsertAndLookup)
@@ -136,20 +134,6 @@ TEST(QueueIntercept, AddWriteIndexAdvancesVirtualWptr)
     EXPECT_EQ(state.virtual_wptr.load(), 4u);
 }
 
-TEST(QueueIntercept, AddWriteIndexScalesWithKFactor)
-{
-    QueueState state{};
-    state.k_factor = 7;
-
-    uint64_t idx0 = add_write_index_impl(&state, 1);
-    EXPECT_EQ(idx0, 0u);
-    EXPECT_EQ(state.virtual_wptr.load(), 8u);
-
-    uint64_t idx1 = add_write_index_impl(&state, 2);
-    EXPECT_EQ(idx1, 8u);
-    EXPECT_EQ(state.virtual_wptr.load(), 24u);
-}
-
 TEST(QueueIntercept, StoreWriteIndexSetsVirtualWptr)
 {
     QueueState state{};
@@ -157,17 +141,6 @@ TEST(QueueIntercept, StoreWriteIndexSetsVirtualWptr)
     EXPECT_EQ(state.virtual_wptr.load(), 42u);
     store_write_index_impl(&state, 0);
     EXPECT_EQ(state.virtual_wptr.load(), 0u);
-}
-
-TEST(QueueIntercept, StoreWriteIndexScalesWithKFactorDelta)
-{
-    QueueState state{};
-    state.k_factor = 7;
-
-    // App observed virtual_wptr=80 and advances by one logical packet to 81
-    state.virtual_wptr.store(80);
-    store_write_index_impl(&state, 81);
-    EXPECT_EQ(state.virtual_wptr.load(), 88u);
 }
 
 TEST(QueueIntercept, CasWriteIndexSuccess)
@@ -186,17 +159,6 @@ TEST(QueueIntercept, CasWriteIndexFailure)
     uint64_t prev = cas_write_index_impl(&state, 5, 20);
     EXPECT_EQ(prev, 10u);
     EXPECT_EQ(state.virtual_wptr.load(), 10u);
-}
-
-TEST(QueueIntercept, CasWriteIndexScalesWithKFactorDelta)
-{
-    QueueState state{};
-    state.k_factor = 7;
-    state.virtual_wptr.store(80);
-
-    uint64_t prev = cas_write_index_impl(&state, 80, 81);
-    EXPECT_EQ(prev, 80u);
-    EXPECT_EQ(state.virtual_wptr.load(), 88u);
 }
 
 TEST(QueueIntercept, LoadWriteIndexReturnsVirtualWptr)
@@ -228,7 +190,6 @@ TEST(QueueIntercept, DoorbellTraceOnlyCopiesPacket)
     state->ring_mask = 255;
     state->real_wdid = &real_wdid;
     state->real_rdid = &real_rdid;
-    state->k_factor  = 0;
 
     state->virtual_wptr.store(1);
     auto* pkt          = get_pkt(ring, 0, 255);
@@ -260,7 +221,6 @@ TEST(QueueIntercept, DoorbellMultiplePacketsTraceOnly)
     state->ring_mask = 255;
     state->real_wdid = &real_wdid;
     state->real_rdid = &real_rdid;
-    state->k_factor  = 0;
 
     state->virtual_wptr.store(3);
     for(uint64_t i = 0; i < 3; i++)
@@ -294,7 +254,6 @@ TEST(QueueIntercept, DoorbellNoNewPackets)
     state->ring_mask = 63;
     state->real_wdid = &real_wdid;
     state->real_rdid = &real_rdid;
-    state->k_factor  = 0;
 
     state->virtual_wptr.store(0);
     bool doorbell_rang = false;
@@ -303,71 +262,6 @@ TEST(QueueIntercept, DoorbellNoNewPackets)
 
     EXPECT_TRUE(doorbell_rang);
     EXPECT_EQ(real_wdid, 0u);
-}
-
-TEST(QueueIntercept, DoorbellWithKFactor)
-{
-    auto             state = std::make_shared<QueueState>();
-    alignas(64) char ring[64 * 512];
-    memset(ring, 0, sizeof(ring));
-    uint64_t real_wdid = 0;
-    uint64_t real_rdid = 0;
-
-    state->ring_buf  = ring;
-    state->ring_size = 512;
-    state->ring_mask = 511;
-    state->real_wdid = &real_wdid;
-    state->real_rdid = &real_rdid;
-    state->k_factor  = 7;
-
-    // virtual_wptr uses stride-scaled positions: 1 packet * stride(8) = 8
-    state->virtual_wptr.store(8);
-    auto* pkt          = get_pkt(ring, 0, 511);
-    pkt->header        = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
-    pkt->kernel_object = 0xCAFE;
-
-    process_doorbell_impl(state, 0, [](hsa_signal_t, hsa_signal_value_t) {});
-
-    // With K=7: 1 app packet at submit pos 0, next_submit_pos advances to 0 + 1 + 7 = 8
-    EXPECT_EQ(real_wdid, 8u);
-    EXPECT_EQ(state->next_submit_pos, 8u);
-    EXPECT_EQ(state->next_scan_pos, 8u);
-
-    auto* submitted = get_pkt(ring, 0, 511);
-    EXPECT_EQ(submitted->kernel_object, static_cast<uint64_t>(0xCAFE));
-}
-
-TEST(QueueIntercept, DoorbellTwoPacketsWithKFactor)
-{
-    auto             state = std::make_shared<QueueState>();
-    alignas(64) char ring[64 * 512];
-    memset(ring, 0, sizeof(ring));
-    uint64_t real_wdid = 0;
-    uint64_t real_rdid = 0;
-
-    state->ring_buf  = ring;
-    state->ring_size = 512;
-    state->ring_mask = 511;
-    state->real_wdid = &real_wdid;
-    state->real_rdid = &real_rdid;
-    state->k_factor  = 7;
-
-    // 2 packets * stride(8) = 16
-    state->virtual_wptr.store(16);
-    get_pkt(ring, 0, 511)->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
-    get_pkt(ring, 0, 511)->kernel_object = 0xAAAA;
-    get_pkt(ring, 1, 511)->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
-    get_pkt(ring, 1, 511)->kernel_object = 0xBBBB;
-
-    process_doorbell_impl(state, 0, [](hsa_signal_t, hsa_signal_value_t) {});
-
-    // 2 app packets * (1 + 7) = 16 total
-    EXPECT_EQ(real_wdid, 16u);
-    EXPECT_EQ(state->next_submit_pos, 16u);
-
-    // First app packet at submit pos 0, second at submit pos 8
-    EXPECT_EQ(get_pkt(ring, 0, 511)->kernel_object, static_cast<uint64_t>(0xAAAA));
-    EXPECT_EQ(get_pkt(ring, 8, 511)->kernel_object, static_cast<uint64_t>(0xBBBB));
 }
 
 TEST(QueueIntercept, CreateAndDestroyQueueState)
@@ -381,7 +275,7 @@ TEST(QueueIntercept, CreateAndDestroyQueueState)
     uint64_t fake_wdid = 0;
     uint64_t fake_rdid = 0;
 
-    create_queue_state(&fake_queue, &fake_wdid, &fake_rdid, 7);
+    create_queue_state(&fake_queue, &fake_wdid, &fake_rdid);
 
     auto state = lookup_queue_state(&fake_queue);
     ASSERT_NE(state, nullptr);
@@ -390,7 +284,6 @@ TEST(QueueIntercept, CreateAndDestroyQueueState)
     EXPECT_EQ(state->ring_mask, 255u);
     EXPECT_EQ(state->real_wdid, &fake_wdid);
     EXPECT_EQ(state->real_rdid, &fake_rdid);
-    EXPECT_EQ(state->k_factor, 7u);
     EXPECT_EQ(state->doorbell_signal.handle, 9999u);
 
     auto by_doorbell = lookup_queue_state_by_doorbell({.handle = 9999});
@@ -399,68 +292,6 @@ TEST(QueueIntercept, CreateAndDestroyQueueState)
     destroy_queue_state(&fake_queue);
     EXPECT_EQ(lookup_queue_state(&fake_queue), nullptr);
     EXPECT_EQ(lookup_queue_state_by_doorbell({.handle = 9999}), nullptr);
-}
-
-TEST(QueueIntercept, MetadataSyncWritesEntries)
-{
-    auto compute_state = std::make_shared<QueueState>();
-    auto meta_state    = std::make_shared<QueueState>();
-
-    alignas(64) char  compute_ring[64 * 256];
-    alignas(256) char meta_ring[256 * 256];
-    memset(compute_ring, 0, sizeof(compute_ring));
-    memset(meta_ring, 0, sizeof(meta_ring));
-
-    uint64_t compute_wdid = 0, compute_rdid = 0;
-    uint64_t meta_wdid = 0, meta_rdid = 0;
-
-    compute_state->ring_buf       = compute_ring;
-    compute_state->ring_size      = 256;
-    compute_state->ring_mask      = 255;
-    compute_state->real_wdid      = &compute_wdid;
-    compute_state->real_rdid      = &compute_rdid;
-    compute_state->k_factor       = 7;
-    compute_state->metadata_state = meta_state.get();
-
-    meta_state->ring_buf  = meta_ring;
-    meta_state->ring_size = 256;
-    meta_state->ring_mask = 255;
-    meta_state->real_wdid = &meta_wdid;
-    meta_state->real_rdid = &meta_rdid;
-
-    // 1 packet * stride(8) = 8
-    compute_state->virtual_wptr.store(8);
-    auto* pkt          = get_pkt(compute_ring, 0, 255);
-    pkt->header        = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
-    pkt->kernel_object = 0x1234;
-
-    process_doorbell_impl(compute_state, 0, [](hsa_signal_t, hsa_signal_value_t) {});
-
-    EXPECT_EQ(meta_wdid, 8u);
-    EXPECT_EQ(meta_state->next_submit_pos, 8u);
-}
-
-TEST(QueueIntercept, NoMetadataSyncWhenNoPairing)
-{
-    auto             compute_state = std::make_shared<QueueState>();
-    alignas(64) char ring[64 * 256];
-    memset(ring, 0, sizeof(ring));
-    uint64_t wdid = 0, rdid = 0;
-
-    compute_state->ring_buf       = ring;
-    compute_state->ring_size      = 256;
-    compute_state->ring_mask      = 255;
-    compute_state->real_wdid      = &wdid;
-    compute_state->real_rdid      = &rdid;
-    compute_state->k_factor       = 7;
-    compute_state->metadata_state = nullptr;
-
-    // 1 packet * stride(8) = 8
-    compute_state->virtual_wptr.store(8);
-    get_pkt(ring, 0, 255)->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
-
-    process_doorbell_impl(compute_state, 0, [](hsa_signal_t, hsa_signal_value_t) {});
-    EXPECT_EQ(wdid, 8u);
 }
 
 TEST(QueueIntercept, DoorbellBackpressureWaitsWhenRingFullK0)
@@ -476,7 +307,6 @@ TEST(QueueIntercept, DoorbellBackpressureWaitsWhenRingFullK0)
     state->ring_mask       = 3;
     state->real_wdid       = &real_wdid;
     state->real_rdid       = &real_rdid;
-    state->k_factor        = 0;
     state->next_scan_pos   = 4;
     state->next_submit_pos = 4;
     state->virtual_wptr.store(5);
@@ -503,54 +333,6 @@ TEST(QueueIntercept, DoorbellBackpressureWaitsWhenRingFullK0)
     EXPECT_EQ(doorbell_value, 4);
     EXPECT_LE(state->next_submit_pos - real_rdid, state->ring_size);
     EXPECT_EQ(get_pkt(ring, 4, 3)->kernel_object, static_cast<uint64_t>(0xABCD));
-}
-
-TEST(QueueIntercept, DoorbellBackpressureWaitsForPaddingWithKFactor)
-{
-    auto             state = std::make_shared<QueueState>();
-    alignas(64) char ring[64 * 8];
-    memset(ring, 0, sizeof(ring));
-    uint64_t real_wdid = 3;
-    uint64_t real_rdid = 0;
-
-    state->ring_buf        = ring;
-    state->ring_size       = 4;
-    state->ring_mask       = 3;
-    state->real_wdid       = &real_wdid;
-    state->real_rdid       = &real_rdid;
-    state->k_factor        = 1;
-    state->next_scan_pos   = 0;
-    state->next_submit_pos = 3;
-    state->virtual_wptr.store(2);
-
-    auto* src_pkt          = get_pkt(ring, 0, 3);
-    src_pkt->header        = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
-    src_pkt->kernel_object = 0xFACE;
-
-    hsa_signal_value_t doorbell_value = -1;
-    auto               fut            = std::async(std::launch::async, [&]() {
-        process_doorbell_impl(
-            state, 0, [&](hsa_signal_t, hsa_signal_value_t v) { doorbell_value = v; });
-    });
-
-    std::this_thread::sleep_for(std::chrono::milliseconds{2});
-    __atomic_store_n(&real_rdid, 1, __ATOMIC_RELEASE);
-
-    ASSERT_EQ(fut.wait_for(std::chrono::milliseconds{500}), std::future_status::ready);
-    fut.get();
-
-    EXPECT_EQ(real_wdid, 5u);
-    EXPECT_EQ(state->next_submit_pos, 5u);
-    EXPECT_EQ(state->next_scan_pos, 2u);
-    EXPECT_EQ(doorbell_value, 4);
-    EXPECT_LE(state->next_submit_pos - real_rdid, state->ring_size);
-
-    auto* submitted = get_pkt(ring, 3, 3);
-    EXPECT_EQ(submitted->kernel_object, static_cast<uint64_t>(0xFACE));
-    auto* padding = get_pkt(ring, 4, 3);
-    auto  type =
-        (padding->header >> HSA_PACKET_HEADER_TYPE) & ((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u);
-    EXPECT_EQ(type, HSA_PACKET_TYPE_BARRIER_AND);
 }
 
 }  // namespace

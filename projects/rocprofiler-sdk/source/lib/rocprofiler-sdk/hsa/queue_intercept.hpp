@@ -62,8 +62,6 @@ struct QueueState
 
     const hsa_queue_t* hsa_queue       = nullptr;  ///< HSA queue pointer for Queue* lookup
     hsa_signal_t       doorbell_signal = {0};      ///< The queue's doorbell signal
-    uint64_t           k_factor        = 0;        ///< K-factor for metadata queue sync
-    QueueState*        metadata_state  = nullptr;  ///< Pointer to metadata queue state if present
     std::mutex         gate_lock;                  ///< Lock for packet submission gating
 };
 
@@ -193,22 +191,6 @@ load_write_index_impl(const QueueState* state);
 using doorbell_fn_t = std::function<void(hsa_signal_t, hsa_signal_value_t)>;
 
 /**
- * @brief Synchronize metadata queue entries with compute queue
- *
- * When a compute queue has a paired metadata queue (metadata_state != nullptr),
- * this function writes corresponding metadata entries in lock-step with compute
- * packets. It advances the metadata queue's write pointer by 1 + k_factor.
- *
- * @param compute_state Compute queue state
- * @param pkt The kernel dispatch packet being submitted
- * @param dest_pos Destination position in compute queue
- */
-void
-sync_metadata_impl(QueueState*                         compute_state,
-                   const hsa_kernel_dispatch_packet_t* pkt,
-                   uint64_t                            dest_pos);
-
-/**
  * @brief Process doorbell ring for inline queue interposition
  *
  * This function scans the write-ahead zone (from next_scan_pos to virtual_wptr),
@@ -216,8 +198,7 @@ sync_metadata_impl(QueueState*                         compute_state,
  * WriteInterceptor chain, advances the real write doorbell index, and calls the
  * provided doorbell function.
  *
- * For k_factor=0, the callback chain is invoked over the full batch. For k_factor>0,
- * packets are transformed one-by-one and padded to stride as needed.
+ * The callback chain is invoked over the full batch of packets (1:1 forwarding).
  *
  * @param state Strong queue-state reference for call lifetime
  * @param value Signal value to pass to doorbell
@@ -238,13 +219,11 @@ process_doorbell_impl(const queue_state_ptr_t& state,
  * @param queue The HSA queue to create state for
  * @param wdid_addr Pointer to the queue's real write doorbell index
  * @param rdid_addr Pointer to the queue's real read doorbell index
- * @param k_factor K-factor for metadata queue synchronization
  */
 void
 create_queue_state(const hsa_queue_t* queue,
                    volatile uint64_t* wdid_addr,
-                   volatile uint64_t* rdid_addr,
-                   uint64_t           k_factor);
+                   volatile uint64_t* rdid_addr);
 
 /**
  * @brief Destroy and unregister queue state
