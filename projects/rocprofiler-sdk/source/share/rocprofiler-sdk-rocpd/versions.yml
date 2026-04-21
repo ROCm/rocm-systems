@@ -15,3 +15,12 @@ rocprofiler-sdk-rocpd:
       rocpd_indexes: rocpd_indexes.sql
       rocpd_data_views: data_views.sql
       rocpd_summary_views: summary_views.sql
+
+
+# Schema History
+# Version 3.0.0
+# - Initial schema
+
+# Version 3.0.1
+# - rocpd_info_pmc.target_arch added NIC type
+# - rocpd_info_agent.type added NIC type

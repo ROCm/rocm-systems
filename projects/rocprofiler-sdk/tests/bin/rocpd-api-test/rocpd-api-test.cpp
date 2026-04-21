@@ -40,6 +40,10 @@
 
 namespace
 {
+
+auto show_full_schema_tables = false;
+auto show_full_schema_views = false;
+
 /**
  * Extract schema_version from rocpd_metadata INSERT in tables schema (e.g. ("schema_version",
  * "3")). However, in new schema, the INSERT moved to the METADATA file.
@@ -116,6 +120,7 @@ struct callback_data_t
 {
     std::vector<std::string>* names;
     std::string*              schema_version;
+    std::string*              schema_content;
 };
 
 void
@@ -144,6 +149,10 @@ tables_callback(rocpd_sql_engine_t /*engine*/,
     {
         *data->schema_version = parse_schema_version(schema_content);
     }
+    if(data->schema_content != nullptr)
+    {
+        *data->schema_content = content;
+    }
 }
 
 void
@@ -167,6 +176,11 @@ views_callback(rocpd_sql_engine_t /*engine*/,
     {
         *data->schema_version = parse_schema_version(schema_content);
     }
+    if(data->schema_content != nullptr)
+    {
+        //append the schema content to the view content
+        *data->schema_content += schema_content;
+    }
 }
 
 int
@@ -175,7 +189,9 @@ load_schema(rocpd_version_triplet_t requested_version)
     auto status         = rocpd_status_t{ROCPD_STATUS_SUCCESS};
     auto table_names    = std::vector<std::string>{};
     auto schema_version = std::string{};
-    auto tables_data    = callback_data_t{&table_names, &schema_version};
+    auto schema_content = std::string{};
+    auto view_content   = std::string{};
+    auto tables_data    = callback_data_t{&table_names, &schema_version, &schema_content};
 
     auto variables = rocpd_sql_schema_jinja_variables_t{};
     variables.size = sizeof(rocpd_sql_schema_jinja_variables_t);
@@ -212,7 +228,7 @@ load_schema(rocpd_version_triplet_t requested_version)
         ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
         ROCPD_SQL_SCHEMA_ROCPD_METADATA,
     };
-    auto views_data = callback_data_t{&view_names, &schema_version};
+    auto views_data = callback_data_t{&view_names, &schema_version, &view_content};
     for(auto kind : view_kinds)
     {
         status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
@@ -232,23 +248,39 @@ load_schema(rocpd_version_triplet_t requested_version)
         }
     }
 
-    std::cout << "  rocpd-api-test: rocpd_sql_load_schema OK\n";
-    std::cout << "  Schema version: " << (schema_version.empty() ? "unknown" : schema_version)
-              << "\n";
-    std::cout << "  Number of tables: " << table_names.size() << "\n";
-    std::cout << "  Tables:";
-    for(const auto& name : table_names)
+    if(show_full_schema_tables || show_full_schema_views)
     {
-        std::cout << " " << name;
+        if(show_full_schema_tables)
+        {
+            std::cout << "  Tables content:\n";
+            std::cout << schema_content << "\n";
+        }
+        if(show_full_schema_views)
+        {
+            std::cout << "  Views content:\n";
+            std::cout << view_content << "\n";
+        }
     }
-    std::cout << "\n\n";
-    std::cout << "  Number of views: " << view_names.size() << "\n";
-    std::cout << "  Views:";
-    for(const auto& name : view_names)
+    else
     {
-        std::cout << " " << name;
+        std::cout << "  rocpd-api-test: rocpd_sql_load_schema OK\n";
+        std::cout << "  Schema version: " << (schema_version.empty() ? "unknown" : schema_version)
+                << "\n";
+        std::cout << "  Number of tables: " << table_names.size() << "\n";
+        std::cout << "  Tables:";
+        for(const auto& name : table_names)
+        {
+            std::cout << " " << name;
+        }
+        std::cout << "\n\n";
+        std::cout << "  Number of views: " << view_names.size() << "\n";
+        std::cout << "  Views:";
+        for(const auto& name : view_names)
+        {
+            std::cout << " " << name;
+        }
+        std::cout << "\n\n";
     }
-    std::cout << "\n\n";
     return EXIT_SUCCESS;
 }
 
@@ -266,7 +298,6 @@ std::vector<std::string> version_splitter(const std::string& version)
 
 }  // namespace
 
-// #define VERSION_TO_TRIPLET(version) (rocpd_version_triplet_t{version[0], version[1], version[2]})
 #define VERSION_STRING_TO_TRIPLET(version) (rocpd_version_triplet_t{(uint32_t)std::stoi(version[0]), (uint32_t)std::stoi(version[1]), (uint32_t)std::stoi(version[2])}) // NOLINT(readability-magic-numbers)
 
 int
@@ -289,6 +320,12 @@ main( int argc, char** argv )
         "-g",
         "--get-latest",
         "-L",
+        "--show-full-tables",
+        "-st",
+        "--show-full-views",
+        "-sv",
+        "--show-full-schema",
+        "-ss",
     };
 
     auto get_version_error = [](const char* name)
@@ -299,19 +336,24 @@ main( int argc, char** argv )
     };
 
     auto print_help = [](const char* name) {
-        std::cout << "Usage: " << name << " [--help] [--all] [--list] [--get-latest] [--get-version <version>]\n";
+        std::cout << "Usage: " << name << " [--help|--all|--list|--get-latest|--get-version <version>] [--show-full-schema|--show-full-tables|--show-full-views]\n";
         std::cout << "Options:\n";
         std::cout << "  -h, --help                  : display this help message\n";
         std::cout << "  -a, --all                   : get list of all schema and load all schema versions\n";
         std::cout << "  -l, --list                  : list all supported schema versions\n";
         std::cout << "  -L, --get-latest            : load the latest schema version\n";
-        std::cout << "  -g, --get-version <version> : load the specified schema version\n\n";
+        std::cout << "  -g, --get-version <version> : load the specified schema version\n";
+        std::cout << "\n";
+        std::cout << "View schema content options (default lists table/view names and table counts):\n";
+        std::cout << "  -ss, --show-full-schema     : show the full schema content (enables both options below)\n";
+        std::cout << "  -st, --show-full-tables     : just show the full table schema content\n";
+        std::cout << "  -sv, --show-full-views      : just show the full view schema content\n\n";
         std::cout << "Example usage:\n";
-        std::cout << "  " << name << " (no arguments)      - lists all schemas, loads latest, and iterate over all schemas\n";
-        std::cout << "  " << name << " --all               - lists all schemas and loads all schema versions\n";
-        std::cout << "  " << name << " --list              - lists all schemas\n";
-        std::cout << "  " << name << " --get-latest        - loads the latest schema version\n";
-        std::cout << "  " << name << " --get-version 3.0.0 - loads the schema version 3.0.0\n";
+        std::cout << "  " << name << " --all                                  : lists all schemas, loads latest, and iterate over all schemas\n";
+        std::cout << "  " << name << " --list                                 : lists all schemas\n";
+        std::cout << "  " << name << " --get-latest                           : loads the latest schema version\n";
+        std::cout << "  " << name << " --get-version 3.0.0                    : loads the schema version 3.0.0\n";
+        std::cout << "  " << name << " --get-version 3.0.0 --show-full-tables : loads the schema version 3.0.0 and shows the full table schema content\n";
     };
 
     auto check_version_parts = [](const std::vector<std::string>& version_parts)
@@ -326,30 +368,41 @@ main( int argc, char** argv )
         return true;
     };
 
+    if(argc <= 1)
+    {
+        print_help(argv[0]);
+        return EXIT_FAILURE;
+    }
+
     for(auto i = 1; i < argc; ++i)
     {
-        //iterate over supported_commands and check if argv[i] is in the list, if --get-version, then skip the next argument
-        if(strcmp(argv[i], "--get-version") == 0)
-        {
-            i++;
-            continue;
-        }
         if(std::find(supported_commands.begin(), supported_commands.end(), argv[i]) == supported_commands.end())
         {
             std::cerr << "rocpd-api-test: unsupported command: " << argv[i] << "\n";
             return EXIT_FAILURE;
         }
-    }
 
-    if(argc > 1)
-    {
-        if(strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)
+        if(strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0)
         {
             print_help(argv[0]);
             return EXIT_SUCCESS;
         }
 
-        if(strcmp(argv[1], "--all") == 0 || strcmp(argv[1], "-a") == 0)
+        if(strcmp(argv[i], "--show-full-schema") == 0 || strcmp(argv[i], "-ss") == 0)
+        {
+            show_full_schema_tables = true;
+            show_full_schema_views = true;
+        }
+        if(strcmp(argv[i], "--show-full-tables") == 0 || strcmp(argv[i], "-st") == 0)
+        {
+            show_full_schema_tables = true;
+        }
+        if(strcmp(argv[i], "--show-full-views") == 0 || strcmp(argv[i], "-sv") == 0)
+        {
+            show_full_schema_views = true;
+        }
+
+        if(strcmp(argv[i], "--all") == 0 || strcmp(argv[i], "-a") == 0)
         {
             load_all_schemas = true;
             list_versions = false;
@@ -357,7 +410,7 @@ main( int argc, char** argv )
             load_requested_schema = false;
         }
 
-        if(strcmp(argv[1], "--list") == 0 || strcmp(argv[1], "-l") == 0)
+        if(strcmp(argv[i], "--list") == 0 || strcmp(argv[i], "-l") == 0)
         {
             load_all_schemas = false;
             list_versions = true;
@@ -365,7 +418,7 @@ main( int argc, char** argv )
             load_requested_schema = false;
         }
 
-        if(strcmp(argv[1], "--get-latest") == 0 || strcmp(argv[1], "-L") == 0)
+        if(strcmp(argv[i], "--get-latest") == 0 || strcmp(argv[i], "-L") == 0)
         {
             load_all_schemas = false;
             list_versions = false;
@@ -373,14 +426,9 @@ main( int argc, char** argv )
             load_requested_schema = false;
         }
 
-        if(strcmp(argv[1], "--get-version") == 0 || strcmp(argv[1], "-g") == 0)
+        if(strcmp(argv[i], "--get-version") == 0 || strcmp(argv[i], "-g") == 0)
         {
-            if(argc < 3)
-            {
-                get_version_error(argv[0]);
-                return EXIT_FAILURE;
-            }
-            auto version = std::string{argv[2]};
+            auto version = std::string{argv[i + 1]};
             //count the number of '.' in the version string
             if(std::count(version.begin(), version.end(), '.') != 2)
             {
@@ -398,12 +446,8 @@ main( int argc, char** argv )
             list_versions = false;
             load_latest_schema = false;
             load_requested_schema = true;
+            i++;
         }
-    }
-    else
-    {
-        print_help(argv[0]);
-        return EXIT_FAILURE;
     }
 
     // Get the rocpd module version
