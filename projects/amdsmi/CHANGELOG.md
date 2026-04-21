@@ -8,6 +8,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added APU metrics support (table versions 2.4 and 3.0)**.  
+  - New `amdsmi_apu_metrics_t` struct with per-core temperatures, clocks, IPU activity, and APU power fields.
+  - `amdsmi_gpu_metrics_t.apu_metrics` pointer is non-null when APU-specific metrics are available.
+  - Python bindings updated with `AmdSmiApuMetrics` ctypes structure.
+
 - **Added VRAM and GTT tuning interface**.  
   - New `amd-smi static --mem-carveout` to view VRAM carveout options.
   - New `amd-smi set --mem-carveout` to change the VRAM carveout (APU).
