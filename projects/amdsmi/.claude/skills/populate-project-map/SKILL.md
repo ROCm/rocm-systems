@@ -102,6 +102,19 @@ Changes to the public C API must propagate through all layers:
 | C/C++ | clang-format | `.clang-format` |
 | Python | Ruff | `pyproject.toml` |
 | CMake | gersemi | `.gersemirc` |
+
+## High-Churn Hotspots
+
+Files that change frequently and have high regression risk. Performance and test subagents should prioritize these.
+
+| File | Risk Area | Watch For |
+|------|-----------|-----------|
+| `src/amd_smi/amd_smi.cc` | Core C library | NIC/switch code, hot paths, correctness |
+| `py-interface/amdsmi_interface.py` | Python API | ctypes overhead, repeated calls, sync with C header |
+| `amdsmi_cli/amdsmi_commands.py` | CLI | Output generation, device iteration, formatting regressions |
+| `include/amd_smi/amdsmi.h` | Public API | Cascades everywhere — any change triggers full propagation |
+| `CMakeLists.txt` | Build system | Packaging, install targets, version propagation |
+| `py-interface/amdsmi_wrapper.py` | Generated bindings | Library loader, context detection |
 ```
 
 ## When to Regenerate
