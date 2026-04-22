@@ -508,6 +508,24 @@ add_test(
         tests/test_mem_chart_gfx11.py ${WORKING_DIR_OPTION}
 )
 
+# CDNA gfx9 memory chart CLI/TUI — no GPU required
+add_test(
+    NAME test_mem_chart_gfx9
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_mem_chart_gfx9.xml ${COV_OPTION}
+        tests/test_mem_chart_gfx9.py ${WORKING_DIR_OPTION}
+)
+
+# Memory chart Dash/web-UI components — no GPU required
+add_test(
+    NAME test_memchart_gui_components
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_memchart_gui_components.xml ${COV_OPTION}
+        tests/test_memchart_gui_components.py ${WORKING_DIR_OPTION}
+)
+
 add_test(
     NAME test_roofline_calc_ai_analyze
     COMMAND
@@ -662,6 +680,8 @@ if(${ENABLE_COVERAGE})
         test_num_xcds_cli_output
         test_utils
         test_mem_chart_gfx11
+        test_mem_chart_gfx9
+        test_memchart_gui_components
         test_roofline_calc_ai_analyze
         test_data_imputation
         test_autogen_config
