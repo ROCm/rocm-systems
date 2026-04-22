@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from perfxpert.config import PerfXpertConfig, load_config
+from perfxpert.config import _config
 
 
 def test_defaults():
@@ -47,6 +48,20 @@ def test_load_defaults_when_no_env_no_file(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     c = load_config()
     assert c.provider == "anthropic"
+    assert c.airgap is False
+
+
+def test_load_defaults_when_home_unresolvable(monkeypatch):
+    def _raise_home_error():
+        raise RuntimeError("home is unavailable")
+
+    monkeypatch.delenv("HOME", raising=False)
+    monkeypatch.setattr(_config.Path, "home", _raise_home_error)
+    c = load_config()
+    assert c.provider == "anthropic"
+    assert c.model is None
+    assert c.max_tokens == 2048
+    assert c.fence_profile == "standard"
     assert c.airgap is False
 
 

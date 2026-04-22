@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import yaml
 
@@ -15,13 +15,19 @@ from perfxpert.config._config import PerfXpertConfig, load_config
 _VALID_FIELDS = set(PerfXpertConfig.model_fields.keys())
 
 
-def _config_path() -> Path:
-    return Path(os.environ.get("HOME", str(Path.home()))) / ".config" / "perfxpert" / "config.yaml"
+def _config_path() -> Optional[Path]:
+    home = os.environ.get("HOME")
+    if home:
+        return Path(home) / ".config" / "perfxpert" / "config.yaml"
+    try:
+        return Path.home() / ".config" / "perfxpert" / "config.yaml"
+    except RuntimeError:
+        return None
 
 
 def _read_yaml() -> Dict[str, Any]:
     path = _config_path()
-    if not path.exists():
+    if path is None or not path.exists():
         return {}
     parsed = yaml.safe_load(path.read_text()) or {}
     return parsed if isinstance(parsed, dict) else {}
@@ -29,6 +35,9 @@ def _read_yaml() -> Dict[str, Any]:
 
 def _write_yaml(data: Dict[str, Any]) -> None:
     path = _config_path()
+    if path is None:
+        sys.stderr.write("error: cannot resolve home directory for perfxpert config\n")
+        raise SystemExit(1)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(data, sort_keys=True))
 

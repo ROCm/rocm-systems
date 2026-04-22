@@ -56,8 +56,15 @@ _ENV_MAP = {
 }
 
 
-def _config_path() -> Path:
-    return Path(os.environ.get("HOME", str(Path.home()))) / ".config" / "perfxpert" / "config.yaml"
+def _config_path() -> Optional[Path]:
+    home = os.environ.get("HOME")
+    if home:
+        return Path(home) / ".config" / "perfxpert" / "config.yaml"
+    try:
+        return Path.home() / ".config" / "perfxpert" / "config.yaml"
+    except RuntimeError:
+        # If the home directory cannot be resolved, fall back to built-in defaults.
+        return None
 
 
 def load_config() -> PerfXpertConfig:
@@ -66,7 +73,7 @@ def load_config() -> PerfXpertConfig:
 
     # Layer 1: YAML file
     path = _config_path()
-    if path.exists():
+    if path is not None and path.exists():
         try:
             parsed = yaml.safe_load(path.read_text()) or {}
             if isinstance(parsed, dict):
