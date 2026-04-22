@@ -1,0 +1,98 @@
+# Rocrtst Test Categories Configuration
+# Time-based test organization for CI/CD pipeline efficiency
+# This file defines test categories by execution time and criticality
+
+# Common comprehensive patterns - used by both standard and comprehensive
+# Standard applies exclude list to filter out slower tests
+# Comprehensive runs all patterns without exclusion
+
+test_categories:
+  quick:
+    description: "Fast sanity checks - Run pre-commit (target: < 5 min)"
+    test_patterns:
+      - "rocrtst.Test_Example"
+      - "rocrtstFunc.MemoryAccessTests"
+      - "rocrtstFunc.GroupMemoryAllocationTest"
+      - "rocrtstFunc.MemoryAllocateAndFreeTest"
+      - "rocrtstFunc.Memory_Alignment_Test"
+      - "rocrtstFunc.Concurrent_Init_Test"
+      - "rocrtstFunc.Concurrent_Init_Shutdown_Test"
+      - "rocrtstFunc.Reference_Count"
+      - "rocrtstFunc.Signal_Create_Concurrently"
+      - "rocrtstFunc.Signal_Destroy_Concurrently"
+      - "rocrtstFunc.IPC"
+      - "rocrtstFunc.AgentProp_UUID"
+      - "rocrtstFunc.Deallocation_Notifier_Test"
+      - "rocrtstFunc.Memory_Atomic_Add_Test"
+      - "rocrtstFunc.Memory_Atomic_Xchg_Test"
+ 
+    exclude:
+      - "rocrtstFunc.Memory_Max_Mem"
+
+    exclude_windows:
+
+    exclude_linux:
+    
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Core functionality - Run on every PR (target: < 30 min)"
+    test_patterns: 
+
+    exclude:
+      - "rocrtstFunc.Memory_Max_Mem"
+    
+    labels:
+      - "standard"
+      - "pr"
+
+
+  comprehensive:
+    description: "Extended testing - Run nightly (target: < 2 hours)"
+    test_patterns: 
+
+    exclude:
+        - "rocrtstFunc.Memory_Max_Mem"
+   
+    labels:
+      - "comprehensive"
+      - "nightly"
+
+  full:
+    description: "Complete test suite - (target: hours+)"
+    test_patterns: 
+      
+    exclude:
+      - "rocrtstFunc.Memory_Max_Mem"
+
+    labels:
+      - "full"
+      - "weekly"
+      - "all"
+
+
+# Common GPU exclusion patterns - used by multiple GPU architectures
+
+exclude_gpu:
+  exclude_gpu_gfx950:
+    test_patterns:
+      - "rocrtstFunc.GpuCoreDump_DefaultPattern"
+ 
+    labels: #categories for which this exclusion is applicable
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx950"
+
+execution_settings:
+  default_timeout: 300  # 5 minutes per test
+  timeout_multiplier: 2 # Multiplier for all timeouts (1, 1.5, 1.75, 2, etc.)
+  category_timeouts:
+    quick: 300          # 5 minutes 
+    standard: 1800      # 30 minutes 
+    comprehensive: 7200 # 2 hours 
+    full: 14400         # 4 hours         
