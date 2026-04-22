@@ -1,11 +1,12 @@
 /*************************************************************************
- * Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
 
 #include "NetIbMPITestBase.hpp"
 #include "NetIbCastInspect.hpp"
+#include <initializer_list>
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -321,6 +322,10 @@ TEST_F(NetIbMPITest, CastSchedParmsReflectEnvVars) {
     const int rank = MPIEnvironment::world_rank;
 
     CAST_ENV_CHECK_OR_SKIP();
+    if (GetSplitDataMin() == 0) {
+        GTEST_SKIP() << "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN=0: library ignores zero, "
+                        "state.splitDataMin would not match";
+    }
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
@@ -451,7 +456,7 @@ TEST_F(NetIbMPITest, CastMaxQPCount128) {
     SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSz  = 32;
-    constexpr size_t kBufSz  = (NCCL_IB_CAST_INSPECT_MAX_QPS + 1) * kMsgSz;
+    constexpr size_t kBufSz  = (NCCL_IB_MAX_QPS + 1)  * kMsgSz;
     constexpr int    kBaseTag = 1300;
 
     std::vector<char> sendBuf(kBufSz, 0);
@@ -634,27 +639,37 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
     void* recvComm   = nullptr;
     SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
 
-    // Register a buffer large enough for the worst-case threshold.
-    constexpr size_t kBufSz = 262144;
+    void* comm = (rank == 0) ? recvComm : sendComm;
+
+    // Phase 0: small warmup buffer to learn actualNqps before allocating the real buffer.
+    constexpr size_t kWarmupSz = 128;
+    std::vector<char> warmupBuf(kWarmupSz, 0);
+    void* warmupBase = warmupBuf.data();
+    void* warmupHandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, warmupBase, kWarmupSz, NCCL_PTR_HOST, &warmupHandle), ncclSuccess);
+    const int actualNqps = GetActualNqps(sendComm, recvComm, warmupBase, 64, 1599, warmupHandle);
+    ASSERT_GT(actualNqps, 0);
+    ASSERT_EQ(DeregisterMemory(comm, warmupHandle), ncclSuccess);
+
+    // threshold = splitDataMin * nqps (from net_ib_cast.cc: dataPerQp = size*nreqs/nqps)
+    const size_t kSplitDataMin = GetSplitDataMin();
+    if (kSplitDataMin == 0) {
+        // With splitDataMin=0 every message goes through the split path regardless of size.
+        // There is no WRR boundary to test, so skip rather than crash on zero-size buffer.
+        GTEST_SKIP() << "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN=0: no WRR/split boundary exists";
+    }
+    const size_t kThreshold    = kSplitDataMin * static_cast<size_t>(actualNqps);
+    const size_t kSplitSz      = kThreshold;       // dataPerQp == splitDataMin → split
+    const size_t kWrrSz        = kThreshold - 1;   // dataPerQp <  splitDataMin → WRR
+
+    // Allocate and register the real buffer sized for the actual threshold.
+    const size_t kBufSz = kThreshold;
     std::vector<char> sendBuf(kBufSz, 0x5A);
     std::vector<char> recvBuf(kBufSz, 0x00);
-
-    void* comm    = (rank == 0) ? recvComm : sendComm;
     void* baseBuf = (rank == 0) ? static_cast<void*>(recvBuf.data())
                                 : static_cast<void*>(sendBuf.data());
     void* mhandle = nullptr;
     ASSERT_EQ(RegisterMemory(comm, baseBuf, kBufSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
-
-    // Warmup: learn real nqps to compute actual split threshold.
-    const int actualNqps = GetActualNqps(sendComm, recvComm, baseBuf, 64, 1599, mhandle);
-    ASSERT_GT(actualNqps, 0);
-
-    // threshold = splitDataMin * nqps (from net_ib_cast.cc: dataPerQp = size*nreqs/nqps)
-    const size_t kSplitDataMin = GetSplitDataMin();
-    const size_t kThreshold    = kSplitDataMin * static_cast<size_t>(actualNqps);
-    const size_t kSplitSz      = kThreshold;       // dataPerQp == splitDataMin → split
-    const size_t kWrrSz        = kThreshold - 1;   // dataPerQp <  splitDataMin → WRR
-    ASSERT_LE(kSplitSz, kBufSz) << "buffer too small for threshold=" << kThreshold;
 
     if (rank == 1) {
         const std::vector<int> tokens = EqualTokens(actualNqps);
@@ -838,25 +853,32 @@ TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
     void* recvComm   = nullptr;
     SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
 
-    // Start with a warmup-sized buffer; we'll reuse it for all sends after learning nqps.
-    constexpr size_t kBufSz = 262144;
-    std::vector<char> sendBuf(kBufSz, 0xBC);
-    std::vector<char> recvBuf(kBufSz, 0x00);
+    void* comm = (rank == 0) ? recvComm : sendComm;
 
-    void* comm    = (rank == 0) ? recvComm : sendComm;
-    void* baseBuf = (rank == 0) ? static_cast<void*>(recvBuf.data())
-                                : static_cast<void*>(sendBuf.data());
-    void* mhandle = nullptr;
-    ASSERT_EQ(RegisterMemory(comm, baseBuf, kBufSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
-
-    // Warmup: fires updateSchedParmsTry epoch AND learns real nqps.
-    const int actualNqps = GetActualNqps(sendComm, recvComm, baseBuf, 64, 1799, mhandle);
+    // Phase 0: small warmup buffer to learn actualNqps before allocating the real buffer.
+    constexpr size_t kWarmupSz = 128;
+    std::vector<char> warmupBuf(kWarmupSz, 0);
+    void* warmupBase = warmupBuf.data();
+    void* warmupHandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, warmupBase, kWarmupSz, NCCL_PTR_HOST, &warmupHandle), ncclSuccess);
+    const int actualNqps = GetActualNqps(sendComm, recvComm, warmupBase, 64, 1799, warmupHandle);
     ASSERT_GT(actualNqps, 0);
+    ASSERT_EQ(DeregisterMemory(comm, warmupHandle), ncclSuccess);
 
     // Message at the split threshold: dataPerQp = splitDataMin → split when splitData=true.
     const size_t kSplitDataMin = GetSplitDataMin();
+    if (kSplitDataMin == 0) {
+        GTEST_SKIP() << "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN=0: no WRR/split boundary exists";
+    }
     const size_t kMsgSz        = kSplitDataMin * static_cast<size_t>(actualNqps);
-    ASSERT_LE(kMsgSz, kBufSz) << "buffer too small for threshold=" << kMsgSz;
+
+    // Allocate and register the real buffer sized for the actual threshold.
+    std::vector<char> sendBuf(kMsgSz, 0xBC);
+    std::vector<char> recvBuf(kMsgSz, 0x00);
+    void* baseBuf = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, baseBuf, kMsgSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
     if (rank == 1) {
         const std::vector<int> tokens = EqualTokens(actualNqps);
@@ -946,14 +968,18 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
     void* recvComm   = nullptr;
     SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
 
-    // 512 bytes: small enough to stay below split threshold → WRR when enable=true, bypass when enable=false
-    constexpr size_t kMsgSz = 512;
-    char sendBuf[kMsgSz], recvBuf[kMsgSz];
-    memset(sendBuf, 0xCD, kMsgSz);
-    memset(recvBuf, 0,    kMsgSz);
+    // Must be strictly below splitDataMin so dataPerQp < splitDataMin for any nqps,
+    // ensuring messages take the WRR path (not the split path).
+    if (GetSplitDataMin() == 0) {
+        GTEST_SKIP() << "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN=0: no WRR/split boundary exists";
+    }
+    const size_t kMsgSz = std::max<size_t>(64, GetSplitDataMin() - 1);
+    std::vector<char> sendBuf(kMsgSz, 0xCD);
+    std::vector<char> recvBuf(kMsgSz, 0);
 
     void* comm    = (rank == 0) ? recvComm : sendComm;
-    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
     void* mhandle = nullptr;
     ASSERT_EQ(RegisterMemory(comm, buf, kMsgSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
@@ -1063,6 +1089,9 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
     ASSERT_GT(actualNqps, 0);
 
     const size_t kSplitDataMin = GetSplitDataMin();
+    if (kSplitDataMin == 0) {
+        GTEST_SKIP() << "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN=0: no WRR/split boundary exists";
+    }
     const size_t kThreshold    = kSplitDataMin * static_cast<size_t>(actualNqps);
     ASSERT_LE(kThreshold, kBufSz) << "buffer too small for threshold=" << kThreshold;
 
@@ -1072,7 +1101,15 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
     }
 
     // Sizes below threshold → WRR path (1 token consumed each).
-    const std::vector<size_t> kWrrSizes   = {512, 4096, kSplitDataMin, kThreshold - 1};
+    // All entries must be strictly below kThreshold; filter out any that aren't
+    // (e.g. 512 and 4096 may exceed kThreshold when splitDataMin is small).
+    std::vector<size_t> kWrrSizes;
+    for (size_t sz : std::initializer_list<size_t>{512, 4096, kSplitDataMin, kThreshold - 1}) {
+        if (sz > 0 && sz < kThreshold && sz <= kBufSz)
+            kWrrSizes.push_back(sz);
+    }
+    // Deduplicate (kSplitDataMin or 512 might equal kThreshold-1).
+    kWrrSizes.erase(std::unique(kWrrSizes.begin(), kWrrSizes.end()), kWrrSizes.end());
     // Sizes at/above threshold → split path (0 tokens consumed).
     const std::vector<size_t> kSplitSizes = {kThreshold, kThreshold * 2};
     int baseTag = 2000;
@@ -1141,6 +1178,11 @@ TEST_F(NetIbMPITest, CastLargeTransfer) {
     const int rank = MPIEnvironment::world_rank;
 
     CAST_ENV_CHECK_OR_SKIP();
+    {
+        const char* v = getenv("NCCL_IB_SPLIT_DATA_ON_QPS");
+        if (!v || strcmp(v, "1") != 0)
+            GTEST_SKIP() << "CastLargeTransfer requires NCCL_IB_SPLIT_DATA_ON_QPS=1";
+    }
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
@@ -1275,14 +1317,16 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
 // =============================================================================
 // Test: CastStressMultiRoundTwoConns
 //
-// Stress test: two independent connections running concurrently, 500 sends each.
+// Stress test: 100 independent connections running concurrently, 5000 sends each
+// (WRR small-message phase), followed by a ramping-size phase that exercises the
+// WRR/split boundary across {splitDataMin/4, /2, *1, *4, *16} with 20 rounds each.
 // Actual nqps determined at runtime. Works with nqps=1 (no WRR timer check) or
 // nqps>1 (RTT timer fires and rewrites initTokens from asymmetric initial values).
 //
 // Invariants asserted:
-//   - schedInit == true on both connections.
-//   - sum(activeQpTokens[i]) == activeTotTokens for both connections.
-//   - 0 <= activeTotTokens <= initTotTokens for both connections.
+//   - schedInit == true on conn[0].
+//   - sum(activeQpTokens[i]) == activeTotTokens for conn[0].
+//   - 0 <= activeTotTokens <= initTotTokens for conn[0].
 //   - If nqps > 1: initQpTokens changed from asymmetric initial values (timer fired).
 // =============================================================================
 TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
@@ -1296,173 +1340,201 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
-    void* listenComm1 = nullptr, *sendComm1 = nullptr, *recvComm1 = nullptr;
-    void* listenComm2 = nullptr, *sendComm2 = nullptr, *recvComm2 = nullptr;
-    SetupCastConnection(/*dev=*/0, &listenComm1, &sendComm1, &recvComm1);
-    SetupCastConnection(/*dev=*/0, &listenComm2, &sendComm2, &recvComm2);
+    constexpr int kNConns = 100;
+    std::vector<void*> listenComms(kNConns, nullptr);
+    std::vector<void*> sendComms(kNConns, nullptr);
+    std::vector<void*> recvComms(kNConns, nullptr);
+    for (int c = 0; c < kNConns; c++)
+        SetupCastConnection(/*dev=*/0, &listenComms[c], &sendComms[c], &recvComms[c]);
 
-    constexpr int    kNMsgs  = 500;
-    // Keep kMsgSz strictly below splitDataMin so messages always take the WRR path
-    // (dataPerQp = kMsgSz/nqps < splitDataMin/nqps < splitDataMin).
-    // Without this, a small splitDataMin (e.g. 200) would push all messages to the
-    // split path, bypassing WRR token accounting and preventing the RTT timer from
-    // ever updating initQpTokens, which this test verifies.
-    const size_t kMsgSz  = std::max<size_t>(64, GetSplitDataMin() - 1);
-    constexpr int    kBase1  = 4000;
-    constexpr int    kBase2  = 5000;
+    // Scale msgs per connection inversely with connection count so total work stays constant.
+    constexpr int kNMsgsTotal = 10000;
+    constexpr int kNMsgs      = kNMsgsTotal / kNConns;  // 100 msgs × 100 conns = 10000 total
+    if (GetSplitDataMin() == 0) {
+        GTEST_SKIP() << "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN=0: no WRR/split boundary exists";
+    }
+    const size_t kMsgSz = std::max<size_t>(64, GetSplitDataMin() - 1);
     const size_t kBufSz = static_cast<size_t>(kNMsgs) * kMsgSz;
 
-    std::vector<char> sendBuf1(kBufSz), recvBuf1(kBufSz);
-    std::vector<char> sendBuf2(kBufSz), recvBuf2(kBufSz);
-    for (size_t i = 0; i < kBufSz; i++) {
-        sendBuf1[i] = static_cast<char>((i * 3 + 7)  & 0xFF);
-        sendBuf2[i] = static_cast<char>((i * 5 + 13) & 0xFF);
+    // One send/recv buffer pair per connection.
+    std::vector<std::vector<char>> sendBufs(kNConns, std::vector<char>(kBufSz));
+    std::vector<std::vector<char>> recvBufs(kNConns, std::vector<char>(kBufSz));
+    for (int c = 0; c < kNConns; c++) {
+        for (size_t i = 0; i < kBufSz; i++) {
+            sendBufs[c][i] = static_cast<char>(((i + c) * 3 + 7)  & 0xFF);
+        }
+        memset(recvBufs[c].data(), 0, kBufSz);
     }
-    memset(recvBuf1.data(), 0, kBufSz);
-    memset(recvBuf2.data(), 0, kBufSz);
 
-    void* comm1   = (rank == 0) ? recvComm1 : sendComm1;
-    void* comm2   = (rank == 0) ? recvComm2 : sendComm2;
-    char* regBuf1 = (rank == 0) ? recvBuf1.data() : sendBuf1.data();
-    char* regBuf2 = (rank == 0) ? recvBuf2.data() : sendBuf2.data();
-    void* mhandle1 = nullptr, *mhandle2 = nullptr;
-    ASSERT_EQ(RegisterMemory(comm1, regBuf1, kBufSz, NCCL_PTR_HOST, &mhandle1), ncclSuccess);
-    ASSERT_EQ(RegisterMemory(comm2, regBuf2, kBufSz, NCCL_PTR_HOST, &mhandle2), ncclSuccess);
+    std::vector<void*> mhandles(kNConns, nullptr);
+    for (int c = 0; c < kNConns; c++) {
+        void* comm   = (rank == 0) ? recvComms[c] : sendComms[c];
+        char* regBuf = (rank == 0) ? recvBufs[c].data() : sendBufs[c].data();
+        ASSERT_EQ(RegisterMemory(comm, regBuf, kBufSz, NCCL_PTR_HOST, &mhandles[c]), ncclSuccess);
+    }
 
-    // Warmup on conn1: learn real nqps. Conn2 shares same NCCL_PARAM → same nqps.
-    // Warmup uses a small slice of regBuf1 that's already registered.
-    const int actualNqps = GetActualNqps(sendComm1, recvComm1, regBuf1, kMsgSz, 3999, mhandle1);
+    // Warmup on conn[0]: learn real nqps. All conns share same NCCL_PARAM → same nqps.
+    const int actualNqps = GetActualNqps(sendComms[0], recvComms[0],
+                                         (rank == 0) ? recvBufs[0].data() : sendBufs[0].data(),
+                                         kMsgSz, 3999, mhandles[0]);
     ASSERT_GT(actualNqps, 0);
 
-    // Arm tokens asymmetrically only when nqps > 1 (otherwise equal single-QP).
-    // For nqps=1 {100} is the only valid token; for nqps>1 use {70,30,...} pattern.
+    // Arm tokens asymmetrically on conn[0] only (timer-fired check uses conn[0]).
     if (rank == 1) {
         std::vector<int> tokens(actualNqps);
         if (actualNqps == 1) {
             tokens[0] = 100;
         } else {
-            // Fill proportionally: first QP gets 70% of first two slots, rest equal.
             tokens[0] = 70;
             tokens[1] = 30;
             for (int i = 2; i < actualNqps; i++) tokens[i] = 50;
         }
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm1, tokens.data(), actualNqps), ncclSuccess);
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm2, tokens.data(), actualNqps), ncclSuccess);
+        ASSERT_EQ(ncclIbCastSetTokens(sendComms[0], tokens.data(), actualNqps), ncclSuccess);
     }
 
-    constexpr int kBatch = 16;
+    constexpr int kBatch   = 16;
+    constexpr int kTagBase = 10000;   // tag = kTagBase + c * kNMsgs + i
 
+    // ── Phase 1: small-message WRR stress ────────────────────────────────────
     if (rank == 0) {
         for (int base = 0; base < kNMsgs; base += kBatch) {
             const int end = std::min(base + kBatch, kNMsgs);
-            std::vector<void*> reqs1(end - base, nullptr);
-            std::vector<void*> reqs2(end - base, nullptr);
-            for (int i = base; i < end; i++) {
-                void*  bufs[1]    = {recvBuf1.data() + i * kMsgSz};
-                size_t sizes[1]   = {kMsgSz};
-                int    tags[1]    = {kBase1 + i};
-                void*  handles[1] = {mhandle1};
-                ASSERT_EQ(PostRecv(recvComm1, 1, bufs, sizes, tags, handles, &reqs1[i - base]), ncclSuccess);
-                ASSERT_NE(reqs1[i - base], nullptr);
+            const int bsz = end - base;
+            std::vector<std::vector<void*>> reqs(kNConns, std::vector<void*>(bsz, nullptr));
+            for (int c = 0; c < kNConns; c++) {
+                for (int i = base; i < end; i++) {
+                    void*  bufs[1]    = {recvBufs[c].data() + i * kMsgSz};
+                    size_t sizes[1]   = {kMsgSz};
+                    int    tags[1]    = {kTagBase + c * kNMsgs + i};
+                    void*  handles[1] = {mhandles[c]};
+                    ASSERT_EQ(PostRecv(recvComms[c], 1, bufs, sizes, tags, handles,
+                                       &reqs[c][i - base]), ncclSuccess);
+                    ASSERT_NE(reqs[c][i - base], nullptr);
+                }
             }
-            for (int i = base; i < end; i++) {
-                void*  bufs[1]    = {recvBuf2.data() + i * kMsgSz};
-                size_t sizes[1]   = {kMsgSz};
-                int    tags[1]    = {kBase2 + i};
-                void*  handles[1] = {mhandle2};
-                ASSERT_EQ(PostRecv(recvComm2, 1, bufs, sizes, tags, handles, &reqs2[i - base]), ncclSuccess);
-                ASSERT_NE(reqs2[i - base], nullptr);
-            }
-            for (int i = 0; i < end - base; i++) {
-                int sz = 0;
-                ASSERT_EQ(WaitForCompletion(reqs1[i], &sz, 10000), ncclSuccess);
-            }
-            for (int i = 0; i < end - base; i++) {
-                int sz = 0;
-                ASSERT_EQ(WaitForCompletion(reqs2[i], &sz, 10000), ncclSuccess);
+            for (int c = 0; c < kNConns; c++) {
+                for (int i = 0; i < bsz; i++) {
+                    int sz = 0;
+                    ASSERT_EQ(WaitForCompletion(reqs[c][i], &sz, 10000), ncclSuccess);
+                }
             }
         }
-
-        EXPECT_EQ(memcmp(recvBuf1.data(), sendBuf1.data(), kBufSz), 0) << "conn1: data corruption";
-        EXPECT_EQ(memcmp(recvBuf2.data(), sendBuf2.data(), kBufSz), 0) << "conn2: data corruption";
-
-        struct ncclIbCastSchedState st1 = {}, st2 = {};
-        MPI_Recv(&st1, sizeof(st1), MPI_BYTE, 1, 9870, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(&st2, sizeof(st2), MPI_BYTE, 1, 9871, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-        // Also receive actualNqps from rank 1 (needed for timer-fired check).
-        int nqps = 0;
-        MPI_Recv(&nqps, 1, MPI_INT, 1, 9872, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-        // Consistency invariants (both nqps=1 and nqps>1).
-        EXPECT_TRUE(st1.schedInit) << "conn1: schedInit must be true";
-        {
-            int s = 0; for (int q = 0; q < st1.nqps; q++) s += st1.activeQpTokens[q];
-            EXPECT_EQ(s, st1.activeTotTokens) << "conn1: activeQpTokens sum mismatch";
-        }
-        EXPECT_GE(st1.activeTotTokens, 0);
-        EXPECT_LE(st1.activeTotTokens, st1.initTotTokens);
-
-        EXPECT_TRUE(st2.schedInit) << "conn2: schedInit must be true";
-        {
-            int s = 0; for (int q = 0; q < st2.nqps; q++) s += st2.activeQpTokens[q];
-            EXPECT_EQ(s, st2.activeTotTokens) << "conn2: activeQpTokens sum mismatch";
-        }
-        EXPECT_GE(st2.activeTotTokens, 0);
-        EXPECT_LE(st2.activeTotTokens, st2.initTotTokens);
-
-        // RTT timer check: only meaningful when nqps > 1.
-        if (nqps > 1) {
-            EXPECT_NE(st1.initQpTokens[0], 70) << "conn1: RTT timer did not fire";
-            EXPECT_NE(st1.initQpTokens[1], 30) << "conn1: RTT timer did not fire";
-            EXPECT_NE(st2.initQpTokens[0], 70) << "conn2: RTT timer did not fire";
-            EXPECT_NE(st2.initQpTokens[1], 30) << "conn2: RTT timer did not fire";
+        for (int c = 0; c < kNConns; c++) {
+            EXPECT_EQ(memcmp(recvBufs[c].data(), sendBufs[c].data(), kBufSz), 0)
+                << "phase1 data corruption on conn " << c;
         }
     } else {
         for (int base = 0; base < kNMsgs; base += kBatch) {
             const int end = std::min(base + kBatch, kNMsgs);
-            std::vector<void*> reqs1(end - base, nullptr);
-            std::vector<void*> reqs2(end - base, nullptr);
-            for (int i = base; i < end; i++)
-                PostSendWithRetry(sendComm1, sendBuf1.data() + i * kMsgSz, kMsgSz,
-                                  kBase1 + i, mhandle1, &reqs1[i - base]);
-            for (int i = base; i < end; i++)
-                PostSendWithRetry(sendComm2, sendBuf2.data() + i * kMsgSz, kMsgSz,
-                                  kBase2 + i, mhandle2, &reqs2[i - base]);
-            for (int i = 0; i < end - base; i++) {
-                int sz = 0;
-                ASSERT_EQ(WaitForCompletion(reqs1[i], &sz, 10000), ncclSuccess);
+            const int bsz = end - base;
+            std::vector<std::vector<void*>> reqs(kNConns, std::vector<void*>(bsz, nullptr));
+            for (int c = 0; c < kNConns; c++) {
+                for (int i = base; i < end; i++)
+                    PostSendWithRetry(sendComms[c], sendBufs[c].data() + i * kMsgSz, kMsgSz,
+                                      kTagBase + c * kNMsgs + i, mhandles[c], &reqs[c][i - base]);
             }
-            for (int i = 0; i < end - base; i++) {
-                int sz = 0;
-                ASSERT_EQ(WaitForCompletion(reqs2[i], &sz, 10000), ncclSuccess);
+            for (int c = 0; c < kNConns; c++) {
+                for (int i = 0; i < bsz; i++) {
+                    int sz = 0;
+                    ASSERT_EQ(WaitForCompletion(reqs[c][i], &sz, 10000), ncclSuccess);
+                }
             }
         }
+    }
 
-        struct ncclIbCastSchedState st1 = {}, st2 = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm1, &st1), ncclSuccess);
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm2, &st2), ncclSuccess);
-        MPI_Send(&st1, sizeof(st1), MPI_BYTE, 0, 9870, MPI_COMM_WORLD);
-        MPI_Send(&st2, sizeof(st2), MPI_BYTE, 0, 9871, MPI_COMM_WORLD);
+    // Collect sched state from conn[0] after phase 1.
+    struct ncclIbCastSchedState stAfterPhase1 = {};
+    if (rank == 0) {
+        MPI_Recv(&stAfterPhase1, sizeof(stAfterPhase1), MPI_BYTE, 1, 9870, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+        int nqps = 0;
+        MPI_Recv(&nqps, 1, MPI_INT, 1, 9872, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        EXPECT_TRUE(stAfterPhase1.schedInit) << "conn[0]: schedInit must be true after phase 1";
+        {
+            int s = 0;
+            for (int q = 0; q < stAfterPhase1.nqps; q++) s += stAfterPhase1.activeQpTokens[q];
+            EXPECT_EQ(s, stAfterPhase1.activeTotTokens) << "conn[0]: token sum mismatch";
+        }
+        EXPECT_GE(stAfterPhase1.activeTotTokens, 0);
+        EXPECT_LE(stAfterPhase1.activeTotTokens, stAfterPhase1.initTotTokens);
+        if (nqps > 1) {
+            EXPECT_NE(stAfterPhase1.initQpTokens[0], 70) << "conn[0]: RTT timer did not fire";
+            EXPECT_NE(stAfterPhase1.initQpTokens[1], 30) << "conn[0]: RTT timer did not fire";
+        }
+    } else {
+        struct ncclIbCastSchedState st0 = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComms[0], &st0), ncclSuccess);
+        MPI_Send(&st0, sizeof(st0), MPI_BYTE, 0, 9870, MPI_COMM_WORLD);
         MPI_Send(&actualNqps, 1, MPI_INT, 0, 9872, MPI_COMM_WORLD);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    ASSERT_EQ(DeregisterMemory(comm1, mhandle1), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm1), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm1), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm1), ncclSuccess);
+    // ── Phase 2: ramping-size stress ─────────────────────────────────────────
+    // Sizes span WRR and split paths: /4, /2, *1, *4, *16 relative to splitDataMin.
+    const uint32_t sdm = GetSplitDataMin();
+    const std::vector<size_t> kRampSizes = {
+        std::max<size_t>(64, sdm / 4),
+        std::max<size_t>(64, sdm / 2),
+        static_cast<size_t>(sdm),
+        static_cast<size_t>(sdm) * 4,
+        static_cast<size_t>(sdm) * 16,
+    };
+    constexpr int kLargeRounds = 20;
+    const size_t  kRampBufSz   = kRampSizes.back();   // one MR per conn, sized for largest
+
+    std::vector<std::vector<char>> rampSend(kNConns, std::vector<char>(kRampBufSz));
+    std::vector<std::vector<char>> rampRecv(kNConns, std::vector<char>(kRampBufSz));
+    for (int c = 0; c < kNConns; c++) {
+        for (size_t i = 0; i < kRampBufSz; i++)
+            rampSend[c][i] = static_cast<char>(((i + c) * 7 + 3) & 0xFF);
+        memset(rampRecv[c].data(), 0, kRampBufSz);
     }
 
-    ASSERT_EQ(DeregisterMemory(comm2, mhandle2), ncclSuccess);
+    std::vector<void*> rampHandles(kNConns, nullptr);
+    for (int c = 0; c < kNConns; c++) {
+        void* comm   = (rank == 0) ? recvComms[c] : sendComms[c];
+        char* regBuf = (rank == 0) ? rampRecv[c].data() : rampSend[c].data();
+        ASSERT_EQ(RegisterMemory(comm, regBuf, kRampBufSz, NCCL_PTR_HOST, &rampHandles[c]),
+                  ncclSuccess);
+    }
+
+    // Tag space: 20000 + sizeIdx*kNConns*kLargeRounds + c*kLargeRounds + round
+    constexpr int kRampTagBase = 20000;
+    for (int si = 0; si < static_cast<int>(kRampSizes.size()); si++) {
+        const size_t sz = kRampSizes[si];
+        for (int round = 0; round < kLargeRounds; round++) {
+            for (int c = 0; c < kNConns; c++) {
+                const int tag = kRampTagBase + si * kNConns * kLargeRounds
+                                + c * kLargeRounds + round;
+                CastDoSendRecv(rank, sendComms[c], recvComms[c],
+                               (rank == 0) ? rampRecv[c].data() : rampSend[c].data(),
+                               sz, tag, rampHandles[c]);
+            }
+        }
+    }
+
     if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm2), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm2), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm2), ncclSuccess);
+        for (int c = 0; c < kNConns; c++) {
+            EXPECT_EQ(memcmp(rampRecv[c].data(), rampSend[c].data(), kRampBufSz), 0)
+                << "phase2 data corruption on conn " << c;
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // ── Teardown ─────────────────────────────────────────────────────────────
+    for (int c = 0; c < kNConns; c++) {
+        void* comm = (rank == 0) ? recvComms[c] : sendComms[c];
+        ASSERT_EQ(DeregisterMemory(comm, rampHandles[c]), ncclSuccess);
+        ASSERT_EQ(DeregisterMemory(comm, mhandles[c]), ncclSuccess);
+        if (rank == 0) {
+            ASSERT_EQ(CloseRecvComm(recvComms[c]), ncclSuccess);
+            ASSERT_EQ(CloseListenComm(listenComms[c]), ncclSuccess);
+        } else {
+            ASSERT_EQ(CloseSendComm(sendComms[c]), ncclSuccess);
+        }
     }
 
     MPI_Barrier(MPI_COMM_WORLD);

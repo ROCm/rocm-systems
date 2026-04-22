@@ -1,10 +1,11 @@
 /*************************************************************************
- * Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#pragma once
+#ifndef RCCL_TEST_NET_IB_MPI_TEST_BASE_HPP_
+#define RCCL_TEST_NET_IB_MPI_TEST_BASE_HPP_
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -63,6 +64,22 @@ using namespace RCCLTestHelpers;
 extern ncclNet_t ncclNetIb;
 // External NET IB-CAST plugin (WRR scheduler, multi-QP)
 extern ncclNet_t netIbCast;
+
+// Select plugin by NCCL_NET env var name; falls back to ncclNetIb.
+inline ncclNet_t* GetPlugin() {
+    static ncclNet_t* plugins[] = {&ncclNetIb, &netIbCast};
+    const char* env = getenv("NCCL_NET");
+    if (env) {
+        for (auto* p : plugins) {
+            if (strcmp(env, p->name) == 0) {
+                TEST_INFO("Rank %d: Using plugin %s", MPIEnvironment::world_rank, p->name);
+                return p;
+            }
+        }
+    }
+    TEST_INFO("Rank %d: Using default plugin %s", MPIEnvironment::world_rank, ncclNetIb.name);
+    return &ncclNetIb;
+}
 
 // NET IB-specific resource deleters
 struct NetMHandleDeleter {
@@ -163,7 +180,7 @@ protected:
 
     void SetUp() override {
         MPITestBase::SetUp();
-        net_ = &ncclNetIb;
+        net_ = GetPlugin();
         numDevices_ = 0;
         initCtx_ = nullptr;
     }
@@ -579,4 +596,6 @@ protected:
     }
 };
 
-#endif // MPI_TESTS_ENABLED
+#endif /* MPI_TESTS_ENABLED */
+
+#endif /* RCCL_TEST_NET_IB_MPI_TEST_BASE_HPP_ */

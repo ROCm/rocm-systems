@@ -9,6 +9,7 @@
 #include "core.h"
 #include "socket.h"
 #include "net.h"
+#include "net_ib_cast_inspect.h"
 #include "graph.h"
 #include "utils.h"
 #include "param.h"
@@ -816,8 +817,6 @@ ncclResult_t IbCastSetNetAttr(void *ctx, ncclNetAttr_t *netAttr) {
 
 static ncclProfilerCallback_t ncclProfilerFunction;
 
-#define NCCL_IB_MAX_QPS 128
-
 #define NSEC_PER_USEC           1000ULL
 #define NSEC_PER_MSEC           (NSEC_PER_USEC * 1000)
 #define NSEC_PER_SEC            (NSEC_PER_MSEC * 1000)
@@ -907,6 +906,8 @@ struct ncclIbQpTxStats {
   uint64_t numMeasurements;
   double rtt;
 };
+
+/* NCCL_IB_MAX_QPS is defined in net_ib_cast_inspect.h (included above). */
 
 // Scratchpad for computing scheduler weights
 struct ncclIbQpTxSchedScratchpad {
@@ -3882,29 +3883,8 @@ ncclNet_t netIbCast = {
 // Test introspection API — exposes internal WRR scheduler state from a
 // sendComm handle.  Only intended for unit tests; not part of the public net
 // plugin ABI.
+// Struct definition and function prototypes live in src/include/net_ib_cast_inspect.h.
 // =============================================================================
-
-#define NCCL_IB_CAST_INSPECT_MAX_QPS NCCL_IB_MAX_QPS
-
-struct ncclIbCastSchedState {
-  int      nqps;
-  bool     schedInit;        // true once IbCastQpSchedUpdateTx has fired
-  int      qpIndex;          // current cursor position
-
-  // initTokens snapshot
-  int      initTotTokens;
-  int      initQpTokens[NCCL_IB_CAST_INSPECT_MAX_QPS];
-
-  // activeTokens snapshot
-  int      activeTotTokens;
-  int      activeQpTokens[NCCL_IB_CAST_INSPECT_MAX_QPS];
-
-  // schedParms snapshot (subset most useful for tests)
-  bool     schedEnable;
-  bool     doWrr;
-  bool     splitData;
-  uint32_t splitDataMin;
-};
 
 // ncclIbCastGetSchedState — copy WRR scheduler state out of a sendComm.
 // sendComm must be a valid ncclIbSendComm* obtained from IbCastConnect/IbCastAccept.
@@ -3921,7 +3901,7 @@ extern "C" ncclResult_t ncclIbCastGetSchedState(void* sendComm, struct ncclIbCas
   out->initTotTokens   = base->rrQpTxSched.initTokens.totTokens;
   out->activeTotTokens = base->rrQpTxSched.activeTokens.totTokens;
 
-  int n = (base->nqps < NCCL_IB_CAST_INSPECT_MAX_QPS) ? base->nqps : NCCL_IB_CAST_INSPECT_MAX_QPS;
+  int n = (base->nqps < NCCL_IB_MAX_QPS) ? base->nqps : NCCL_IB_MAX_QPS;
   for (int i = 0; i < n; i++) {
     out->initQpTokens[i]   = base->rrQpTxSched.initTokens.qpTokens[i];
     out->activeQpTokens[i] = base->rrQpTxSched.activeTokens.qpTokens[i];
@@ -3939,7 +3919,7 @@ extern "C" ncclResult_t ncclIbCastGetSchedState(void* sendComm, struct ncclIbCas
 // Bypasses the RTT-based IbCastQpSchedUpdateTx; immediately arms the scheduler.
 // qpTokens must have nqps entries; totTokens is computed as their sum.
 extern "C" ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens, int nqps) {
-  if (!sendComm || !qpTokens || nqps <= 0 || nqps > NCCL_IB_CAST_INSPECT_MAX_QPS)
+  if (!sendComm || !qpTokens || nqps <= 0 || nqps > NCCL_IB_MAX_QPS)
     return ncclInvalidArgument;
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*) sendComm;
   struct ncclIbNetCommBase* base = &comm->base;
@@ -3956,7 +3936,7 @@ extern "C" ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens,
   }
   // Zero out entries beyond nqps so stale values from a previous call cannot
   // be observed by the WRR cursor if base->nqps ever changes.
-  for (int i = nqps; i < NCCL_IB_CAST_INSPECT_MAX_QPS; i++)
+  for (int i = nqps; i < NCCL_IB_MAX_QPS; i++)
     t->qpTokens[i] = 0;
 
   base->rrQpTxSched.activeTokens = *t;
