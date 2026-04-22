@@ -72,9 +72,10 @@
  * - 1.19 - hsa_amd_agent_preload
  * - 1.20 - Memory batch discard API: hsa_amd_svm_discard_batch_async
  * - 1.21 - hsa_amd_signal_get_event_id
+ * - 1.22 - hsa_amd_signal_waiting_inc, hsa_amd_signal_waiting_dec
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 21
+#define HSA_AMD_INTERFACE_VERSION_MINOR 22
 
 #ifdef __cplusplus
 extern "C" {
@@ -1701,6 +1702,28 @@ uint32_t HSA_API
  */
 hsa_status_t HSA_API
   hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *event_id);
+
+/**
+ * @brief Increment the waiting counter on a signal, preventing it from being
+ * destroyed while a waiter is active.
+ *
+ * @param[in] signal Signal to increment waiting counter on.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ * @retval ::HSA_STATUS_ERROR_INVALID_SIGNAL The signal is invalid.
+ */
+hsa_status_t HSA_API hsa_amd_signal_waiting_inc(hsa_signal_t signal);
+
+/**
+ * @brief Decrement the waiting counter on a signal, allowing it to be
+ * destroyed when no more waiters are active.
+ *
+ * @param[in] signal Signal to decrement waiting counter on.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ * @retval ::HSA_STATUS_ERROR_INVALID_SIGNAL The signal is invalid.
+ */
+hsa_status_t HSA_API hsa_amd_signal_waiting_dec(hsa_signal_t signal);
 
 /** @} */
 
