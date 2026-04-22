@@ -1643,7 +1643,7 @@ def _execute_agentic(
     # accept `custom_prompt` as a back-compat alias for library callers.
     custom_prompt = kwargs.get("prompt") or kwargs.get("custom_prompt")
 
-    enable_llm = kwargs.get("enable_llm", False)
+    requested_llm = bool(kwargs.get("enable_llm", False))
     llm_provider = kwargs.get("llm_provider")
     llm_api_key = kwargs.get("llm_api_key")
     no_progress = bool(kwargs.get("no_progress", False))
@@ -1651,25 +1651,31 @@ def _execute_agentic(
     att_dir = kwargs.get("att_dir")
     top_kernels = int(kwargs.get("top_kernels") or 10)
     min_duration = float(kwargs.get("min_duration") or 0.0)
+    env_forces_airgap = os.environ.get("PERFXPERT_AIRGAP", "0") == "1"
+    effective_airgap = env_forces_airgap or (not requested_llm)
+    effective_provider = None if effective_airgap else llm_provider
+    effective_api_key = None if effective_airgap else llm_api_key
 
     # Bug 3 — pre-flight auth check. Surface a clean ``AuthError`` BEFORE
     # building the session + making any network call when the selected
     # provider has no usable credential. Airgap + disabled LLM skip this
     # check so deterministic runs remain credential-free.
-    if enable_llm and llm_provider:
-        _preflight_provider_auth(llm_provider, llm_api_key)
+    if effective_provider:
+        _preflight_provider_auth(effective_provider, effective_api_key)
 
     # Bug 1 — if BOTH ``--llm-api-key`` and the provider's canonical env
     # var are set and differ, the CLI flag wins (the session env override
     # in ``build_session`` handles the actual injection). Emit a one-line
     # WARNING on stderr so the user knows which credential is active.
-    if enable_llm and llm_provider and llm_api_key:
-        _warn_if_flag_overrides_env(llm_provider, llm_api_key)
+    if effective_provider and effective_api_key:
+        _warn_if_flag_overrides_env(effective_provider, effective_api_key)
 
     # Build progress feedback (spinner / plain lines / silent) based on
-    # whether LLM mode is active and the terminal / flag state.
+    # whether the user requested agentic/LLM mode and the terminal / flag
+    # state. Airgap can still route through the same agentic pipeline; it
+    # only changes whether provider-backed calls are allowed.
     progress_cb, progress_cm = _progress_context(
-        enable_llm=enable_llm,
+        enable_llm=requested_llm,
         no_progress=no_progress,
         verbose=verbose,
     )
@@ -1701,10 +1707,10 @@ def _execute_agentic(
                 user_query=custom_prompt or "Analyze this GPU performance trace.",
                 database_path=database_path if input else None,
                 source_dir=source_dir,
-                provider=llm_provider if enable_llm else None,
-                airgap=(not enable_llm),
+                provider=effective_provider,
+                airgap=effective_airgap,
                 progress_callback=progress_cb,
-                api_key=llm_api_key if enable_llm else None,
+                api_key=effective_api_key,
             )
     except ProviderError:
         raise  # let __main__.main render clean one-liner
