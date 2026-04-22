@@ -339,6 +339,18 @@ class GDABackend : public Backend {
   void setup_team_world();
 
   /**
+   * @brief Allocate and initialize team shared.
+   *
+   * TEAM_SHARED contains the PEs that share a common memory domain
+   * (same node). Must be called after setup_ipc() since membership
+   * is determined from ipcImpl.pes_with_ipc_avail. Computes real
+   * pe_start/stride from the PE list; set to ROCSHMEM_TEAM_INVALID
+   * when IPC is disabled or when node-local ranks are not uniformly
+   * strided.
+   */
+  void setup_team_shared();
+
+  /**
    * @brief Initialize the resources required to support teams
    */
   void setup_teams();
