@@ -265,7 +265,7 @@ hsa_status_t AieAgent::GetInfo(hsa_agent_info_t attribute, void *value) const {
 hsa_status_t AieAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                                    core::HsaEventCallback event_callback, void* data,
                                    uint32_t private_segment_size, uint32_t group_segment_size,
-                                   core::Queue** queue) {
+                                   bool metadata_queue, core::Queue** queue) {
   if ((flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) != 0 ||
       (flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR) != 0) {
     // AIE agents do not currently support queue creation in device memory.

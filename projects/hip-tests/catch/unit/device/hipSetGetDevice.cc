@@ -141,7 +141,7 @@ HIP_TEST_CASE(Unit_hipSetGetDevice_Positive_Threaded_Basic) {
   };
 
   if (HipTest::getDeviceCount() < 2) {
-    HipTest::HIP_SKIP_TEST("This rest requires 2 GPUs. Skipping test");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 

@@ -95,7 +95,7 @@ HIP_TEST_CASE(Unit_hipHostMalloc_Basic) {
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipGetDeviceProperties(&prop, device));
   if (prop.canMapHostMemory != 1) {
-    SUCCEED("Does support HostPinned Memory");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
   } else {
     float *A_h, *B_h, *C_h;
     float *A_d, *B_d, *C_d;
@@ -191,7 +191,7 @@ HIP_TEST_CASE(Unit_hipHostMalloc_Coherent) {
 
     HIP_CHECK(hipFreeHost(A));
   } else {
-    SUCCEED("Coherence memory allocation failed. Is SVM atomic supported?");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
   }
 }
 
@@ -221,7 +221,7 @@ HIP_TEST_CASE(Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory) {
   char* host_ptr = nullptr;
   const size_t total_ram_mb = HipTest::getTotalSystemMemoryInMB();
   if (total_ram_mb == 0) {
-    WARN("Skipping test as total system memory could not be queried");
+    HipTest::HIP_SKIP_TEST("total system memory could not be queried.");
     return;
   }
 

@@ -115,17 +115,17 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
 
   SECTION("gridDimX == 0") {
     HIP_CHECK_ERROR(func(f, 0, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorLaunchParam);
+                    hipErrorInvalidValue);
   }
 
   SECTION("gridDimY == 0") {
     HIP_CHECK_ERROR(func(f, 1, 0, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorLaunchParam);
+                    hipErrorInvalidValue);
   }
 
   SECTION("gridDimZ == 0") {
     HIP_CHECK_ERROR(func(f, 1, 1, 0, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorLaunchParam);
+                    hipErrorInvalidValue);
   }
 
   SECTION("blockDimX == 0") {
@@ -215,7 +215,7 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
     int numDevices = 0;
     HIP_CHECK(hipGetDeviceCount(&numDevices));
     if (numDevices < 2) {
-      SUCCEED("skipped the testcase as number of devices is less than 2");
+      WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);
     } else {
       HIP_CHECK(hipSetDevice(1));
       hipStream_t s1;

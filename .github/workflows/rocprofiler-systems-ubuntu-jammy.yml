@@ -69,13 +69,16 @@ jobs:
       ROCPROFSYS_CI: 'ON'
 
     steps:
-    - uses: actions/checkout@v6
+    - &sparse-checkout
+      uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-systems/
+        sparse-checkout: |
+          projects/rocprofiler-systems/
+          .gitmodules
 
     - name: Install Packages
       timeout-minutes: 25
-      uses: nick-fields/retry@v3
+      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
       with:
         retry_wait_seconds: 30
         timeout_minutes: 25
@@ -89,7 +92,7 @@ jobs:
 
     - name: Install ROCm Packages
       timeout-minutes: 25
-      uses: nick-fields/retry@v3
+      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
       with:
         retry_wait_seconds: 30
         timeout_minutes: 25
@@ -147,7 +150,7 @@ jobs:
         append-tagname ${{ matrix.hidden }} hidden-viz
         python3 ./scripts/run-ci.py -B build \
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-${{ matrix.compiler }}${TAG} \
-          --build-jobs 2 \
+          --build-jobs $(nproc) \
           --site GitHub \
           -- \
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g') \
@@ -164,7 +167,7 @@ jobs:
           -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=${{ matrix.hidden }} \
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
-          -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11" \
+          -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11" \
           -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }} \
           -DROCPROFSYS_MAX_THREADS=64 \
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network" \
@@ -200,7 +203,7 @@ jobs:
       timeout-minutes: 10
       working-directory: projects/rocprofiler-systems/
       run: |
-        cmake --build build --target install --parallel 2
+        cmake --build build --target install --parallel $(nproc)
         rm -fr /opt/rocprofiler-systems-dev/
 
     - name: CPack and Install
@@ -254,6 +257,17 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['g++', 'amdclang++']
+        include:
+          - compiler: 'g++'
+            cc: 'gcc'
+            use-clang-omp: 'OFF'
+          - compiler: 'amdclang++'
+            cc: 'amdclang'
+            use-clang-omp: 'ON'
 
     env:
       OMPI_ALLOW_RUN_AS_ROOT: 1
@@ -261,13 +275,11 @@ jobs:
       ROCPROFSYS_CI: 'ON'
 
     steps:
-    - uses: actions/checkout@v6
-      with:
-        sparse-checkout: projects/rocprofiler-systems/
+    - *sparse-checkout
 
     - name: Install System Dependency Packages
       timeout-minutes: 25
-      uses: nick-fields/retry@v3
+      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
       with:
         retry_wait_seconds: 30
         timeout_minutes: 25
@@ -283,7 +295,7 @@ jobs:
 
     - name: Install ROCm 7.2
       timeout-minutes: 25
-      uses: nick-fields/retry@v3
+      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
       with:
         retry_wait_seconds: 30
         timeout_minutes: 25
@@ -314,16 +326,16 @@ jobs:
         git config --global --add safe.directory ${GITHUB_WORKSPACE}
         git config --global --add safe.directory ${PWD}
         echo "CMake version: $(cmake --version | head -n 1)"
-        echo "Compiler version: $(g++ --version | head -n 1)"
+        echo "Compiler version: $(${{ matrix.compiler }} --version | head -n 1)"
         echo "ROCm version: 7.2"
         echo "Testing build with SYSTEM dependencies (ROCPROFSYS_BUILD_*=OFF)"
         python3 ./scripts/run-ci.py -B build \
-          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-system-deps \
-          --build-jobs 2 \
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-system-deps-${{ matrix.compiler }} \
+          --build-jobs $(nproc) \
           --site GitHub \
           -- \
-          -DCMAKE_C_COMPILER=gcc \
-          -DCMAKE_CXX_COMPILER=g++ \
+          -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
           -DROCPROFSYS_BUILD_TESTING=ON \
@@ -336,12 +348,12 @@ jobs:
           -DROCPROFSYS_BUILD_LIBIBERTY=OFF \
           -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON \
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
-          -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11" \
+          -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11" \
           -DROCPROFSYS_STRIP_LIBRARIES=OFF \
           -DROCPROFSYS_MAX_THREADS=64 \
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
-          -DUSE_CLANG_OMP=OFF \
+          -DUSE_CLANG_OMP=${{ matrix.use-clang-omp }} \
           -- \
           -LE "transpose|rccl|videodecode|jpegdecode|network"
 
@@ -368,7 +380,7 @@ jobs:
       continue-on-error: True
       uses: actions/upload-artifact@v7
       with:
-        name: ctest-${{ github.job }}-log
+        name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
         path: |
           projects/rocprofiler-systems/build/*.log
 
@@ -377,7 +389,7 @@ jobs:
       continue-on-error: True
       uses: actions/upload-artifact@v7
       with:
-        name: data-${{ github.job }}-files
+        name: data-${{ github.job }}-${{ strategy.job-index }}-files
         path: |
           projects/rocprofiler-systems/build/rocprofsys-tests-config/*.cfg
           projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*.txt
@@ -396,13 +408,11 @@ jobs:
       ROCPROFSYS_CI: 'ON'
 
     steps:
-    - uses: actions/checkout@v6
-      with:
-        sparse-checkout: projects/rocprofiler-systems/
+    - *sparse-checkout
 
     - name: Install Packages
       timeout-minutes: 25
-      uses: nick-fields/retry@v3
+      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
       with:
         retry_wait_seconds: 30
         timeout_minutes: 25
@@ -416,7 +426,7 @@ jobs:
 
     - name: Install ROCm Packages
       timeout-minutes: 25
-      uses: nick-fields/retry@v3
+      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
       with:
         retry_wait_seconds: 30
         timeout_minutes: 25
@@ -455,7 +465,7 @@ jobs:
         echo "Compiler version: $(gcc --version | head -n 1)"
         python3 ./scripts/run-ci.py -B build \
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-codecov-mpi-python-ompt-papi \
-          --build-jobs 2 \
+          --build-jobs $(nproc) \
           --site GitHub \
           --coverage \
           -- \

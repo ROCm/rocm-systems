@@ -14,6 +14,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace rocjitsu {
@@ -55,13 +56,17 @@ public:
   /// @returns Reference to the target triple string.
   const std::string &target_triple() const { return target_triple_; }
 
+  uint64_t kernel_descriptor_offset(const std::string &kernel_name) const override;
+
 private:
   void load_sections(std::ifstream &elf_file);
+  void parse_symbols();
 
   rj_code_target_id_t target_id_ = ROCJITSU_CODE_TARGET_INVALID;
   std::string offload_kind_;
   std::string target_triple_;
   int64_t fatbin_offset_ = 0;
+  std::unordered_map<std::string, uint64_t> kd_offsets_; ///< kernel_name -> .kd symbol offset
 };
 
 } // namespace rocjitsu

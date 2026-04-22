@@ -28,19 +28,38 @@ static ncclResult_t profilerProxyProgress(struct ncclProxyState* proxyState, str
     args->state = ncclProxyOpProgress;
   }
   if (args->state == ncclProxyOpProgress) {
+    // RCCL: teardown drain — skip kernel-channel events for channels whose GPU counters
+    // were never written; without this, stopEvent dereferences an uninitialised collInfo.
+    int stopping = proxyState->progressState.stop;
     for (int s = 0; s < args->nsubs; s++) {
       struct ncclProxySubArgs* sub = args->subs + s;
       struct ncclDevProfiler* workStarted = (struct ncclDevProfiler *)sub->sendbuff;
       struct ncclDevProfiler* workCompleted = (struct ncclDevProfiler *)sub->recvbuff;
-      if (sub->posted < sub->nsteps && sub->base <= workStarted[sub->channelId].data[sub->base%MAX_PROFILER_EVENTS_PER_CHANNEL].counter) {
-        ncclProfilerStartKernelChEvent(args, s, workStarted[sub->channelId].data[sub->base%MAX_PROFILER_EVENTS_PER_CHANNEL].timestamp);
-        sub->posted = sub->nsteps;
-        continue; // allow events on every channel to start
-      }
-      if (sub->transmitted < sub->nsteps && sub->base <= workCompleted[sub->channelId].data[sub->base%MAX_PROFILER_EVENTS_PER_CHANNEL].counter) {
-        ncclProfilerStopKernelChEvent(args, s, workCompleted[sub->channelId].data[sub->base%MAX_PROFILER_EVENTS_PER_CHANNEL].timestamp);
-        sub->transmitted = sub->nsteps;
+      if (sub->posted < sub->nsteps) {
+        if (sub->base <= workStarted[sub->channelId].data[sub->base%MAX_PROFILER_EVENTS_PER_CHANNEL].counter) {
+          ncclProfilerStartKernelChEvent(args, s, workStarted[sub->channelId].data[sub->base%MAX_PROFILER_EVENTS_PER_CHANNEL].timestamp);
+          sub->posted = sub->nsteps;
+          continue; // allow events on every channel to start
+        }
+        if (!stopping) continue; // GPU counter not yet written; retry next call
+        // Teardown in progress and GPU start counter never written for this channel.
+        // Skip both start and stop events — calling stop without a prior start would
+        // dereference an uninitialised kernelChInfo->collInfo.
+        sub->posted = sub->transmitted = sub->nsteps;
         args->done++;
+        continue;
+      }
+      if (sub->transmitted < sub->nsteps) {
+        if (sub->base <= workCompleted[sub->channelId].data[sub->base%MAX_PROFILER_EVENTS_PER_CHANNEL].counter) {
+          ncclProfilerStopKernelChEvent(args, s, workCompleted[sub->channelId].data[sub->base%MAX_PROFILER_EVENTS_PER_CHANNEL].timestamp);
+          sub->transmitted = sub->nsteps;
+          args->done++;
+        } else if (stopping) {
+          // Start was fired but stop counter never written; skip stop event and drain.
+          sub->transmitted = sub->nsteps;
+          args->done++;
+        }
+        // else: not ready and not stopping — retry next call
       }
     }
     if (args->done == args->nsubs) args->state = ncclProxyOpNone;

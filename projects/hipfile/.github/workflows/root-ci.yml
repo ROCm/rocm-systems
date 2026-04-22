@@ -1,0 +1,36 @@
+name: CI
+run-name: Kicks off several AIS CI workflows for various platforms.
+
+# In particular, this root workflow's only purpose is to allow
+# us to put our entire CI in a matrix. It has the added benefit
+# of not needing to specify our supported_platforms in multiple
+# locations.
+# We can consider moving the Pre-Checks here and passing them into
+# the CI as an input.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened] # Defaults
+    paths-ignore:
+      - '**.md'
+      - '.github/CODEOWNERS'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+  packages: write
+jobs:
+  AIS_CI:
+    strategy:
+      fail-fast: false
+      matrix:
+        supported_platforms:
+          - rocky
+          - suse
+          - ubuntu
+        rocm_versions:
+          - 7.2.0
+    uses: ./.github/workflows/ais-ci.yml
+    with:
+      platform: ${{ matrix.supported_platforms }}
+      rocm_version: ${{ matrix.rocm_versions }}

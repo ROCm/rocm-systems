@@ -55,7 +55,10 @@ public:
 
   void add_xcd(amdgpu::Xcd *xcd) { xcds_.push_back(xcd); }
   void add_iod(amdgpu::Iod *iod) { iods_.push_back(iod); }
-  void set_memory(amdgpu::GpuMemory *m) { memory_ = m; }
+  void set_memory(amdgpu::GpuMemory *m); // Defined in soc.cpp.
+
+  /// @brief Wire L2 → HBM backing store links (call after engine build).
+  void wire_backing(simdojo::Topology &topo);
   void set_arch(rj_code_arch_t a) { arch_ = a; }
   rj_code_arch_t arch() const { return arch_; }
 
@@ -82,6 +85,18 @@ public:
   /// @brief Return all XCDs.
   /// @returns Const reference to the vector of XCD pointers.
   const std::vector<amdgpu::Xcd *> &xcds() const { return xcds_; }
+
+  /// @brief Return the command processor for this device.
+  ///
+  /// @details In amdkfd, a gpu_id identifies the whole device, not an individual XCD.
+  /// The SoC owns the topology and is the right place to decide which CP serves
+  /// the device. For single-XCD SoCs this is xcd(0)'s CP; a future multi-XCD
+  /// implementation would return a MES dispatcher instead.
+  ///
+  /// @returns Pointer to the primary CommandProcessor, or nullptr if no XCDs.
+  amdgpu::CommandProcessor *command_processor() {
+    return xcds_.empty() ? nullptr : xcds_[0]->command_processor();
+  }
 
   /// @brief Return the number of I/O Dies.
   /// @returns Number of I/O Dies.

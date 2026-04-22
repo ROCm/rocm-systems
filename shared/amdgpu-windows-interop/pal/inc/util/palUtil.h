@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,8 @@
  */
 
 #pragma once
+
+#include "palVersion.h"
 
 /// Utility macro for turning another macro into a string literal.
 #define _PAL_STRINGIFY(_x) #_x
@@ -61,17 +63,12 @@ static_assert(
     "C++ standard version " PAL_STRINGIFY(PAL_CPLUSPLUS_20) " is required to build PAL. "
     "Found " PAL_STRINGIFY(PAL_CPLUSPLUS) ".");
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 878
 /// We already declare NOMINMAX publicly, but that won't stop clients from defining their own min/max macros.
 /// These macros confuse the compiler when using functions named min/max, leading to build errors.
 #if defined(min) || defined(max)
 static_assert(false, "Clients may not define macros named \"min\" or \"max\".");
 #endif
-#endif
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 873
-#include <chrono>
-#endif
 #include <cstddef>
 
 /// stdint is included instead of cstdint to allow Visual Studio Intellisense to work for Linux builds. This can be
@@ -555,40 +552,6 @@ struct StoreFlags
         uint32 all;
     };
 };
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 873
-/// Seconds stored as a float instead of an integer.
-using fseconds      = std::chrono::duration<float>;
-/// Milliseconds stored as a float instead of an integer.
-using fmilliseconds = std::chrono::duration<float, std::milli>;
-/// Microseconds stored as a float instead of an integer.
-using fmicroseconds = std::chrono::duration<float, std::micro>;
-/// Nanoseconds stored as a float instead of an integer.
-using fnanoseconds  = std::chrono::duration<float, std::nano>;
-
-/// A time_point who's epoch is January 1st 1970 and uses seconds for the duration.
-/// C++20 guarantees us that system_clock's epoch is always January 1st 1970 on all platforms.
-/// system_clock's internal duration is still implementation defined.
-/// On Windows it's hundreds of nanoseconds and on Linux it's seconds.
-/// However time_point has it's own duration type.
-/// As long as we go through the time_point to interpret the duration then everything should be in terms of seconds.
-using SecondsSinceEpoch = std::chrono::time_point<std::chrono::system_clock, std::chrono::seconds>;
-
-/// Like std::chrono::duration_cast, but it preserves the special 'infinite' value used in timeouts.
-template <class ToDuration, class Rep, class Period>
-constexpr ToDuration TimeoutCast(
-    const std::chrono::duration<Rep, Period>& d)
-{
-    if (d == (std::chrono::duration<Rep,Period>::max)())
-    {
-        return (ToDuration::max)();
-    }
-    else
-    {
-        return std::chrono::duration_cast<ToDuration, Rep, Period>(d);
-    }
-}
-#endif
 
 /// Inline function to determine if a Result enum is considered an error.
 constexpr bool IsErrorResult(Result result) { return (static_cast<int32>(result) < 0); }

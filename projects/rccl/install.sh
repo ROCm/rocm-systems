@@ -27,9 +27,6 @@ install_dependencies=false
 install_library=false
 install_prefix="${ROCM_PATH}"
 log_trace=false
-msccl_kernel_enabled=false
-mscclpp_enabled=false
-enable_mscclpp_clip=false
 num_parallel_jobs=$(nproc)
 npkit_enabled=false
 openmp_test_enabled=false
@@ -61,10 +58,7 @@ function display_help()
     echo "       --debug-fast            Build debug library with lto optimization disabled (fast build times)"
     echo "       --enable_backtrace      Build with custom backtrace support"
     echo "       --disable-colltrace     Build without collective trace"
-    echo "       --enable-msccl-kernel   Build with MSCCL kernels"
     echo "       --dump-asm              Disassemble code and dump assembly with inline code"
-    echo "       --enable-mscclpp        Build with MSCCL++ support"
-    echo "       --enable-mscclpp-clip   Build MSCCL++ with clip wrapper on bfloat16 and half addition routines"
     echo "       --disable-roctx         Build without ROCTX logging"
     echo "    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace, and collective trace support)"
     echo "    -h|--help                  Prints this help message"
@@ -94,9 +88,6 @@ function display_help()
     echo ""
     echo "  Available RCCL-specific CMake options for --cmake-options:"
     echo "    -DBUILD_EXT_EXAMPLES=ON               Build ext-{net,tuner,profiler} example plugins (default: OFF)"
-    echo "    -DENABLE_MSCCLPP_EXECUTOR=ON          Enable MSCCL++ Executor (default: OFF)"
-    echo "    -DENABLE_MSCCLPP_FORMAT_CHECKS=ON     Enable formatting checks in MSCCL++ (default: OFF)"
-    echo "    -DMSCCLPP_APPLY_PATCHES=OFF           Disable source code patches for MSCCL++ (default: ON)"
     echo "    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)"
     echo "    -DPROFILE=ON                          Enable profiling (default: OFF)"
     echo "    -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)"
@@ -124,7 +115,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,dependencies,debug,debug-fast,dump-asm,enable-code-coverage,enable_backtrace,disable-colltrace,disable-msccl-kernel,enable-mscclpp,enable-mpi-tests,fast,help,install,jobs:,kernel-resource-use,local_gpu_only,amdgpu_targets:,no_clean,npkit-enable,log-trace,openmp-test-enable,roctx-enable,package_build,prefix:,rm-legacy-include-dir,run_tests_all,run_tests_quick,static,tests_build,time-trace,force-reduce-pipeline,generate-sym-kernels,quiet-warnings,disable-warp-speed,verbose,rocshmem,cmake-options: -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,dependencies,debug,debug-fast,dump-asm,enable-code-coverage,enable_backtrace,disable-colltrace,enable-mpi-tests,fast,help,install,jobs:,kernel-resource-use,local_gpu_only,amdgpu_targets:,no_clean,npkit-enable,log-trace,openmp-test-enable,roctx-enable,package_build,prefix:,rm-legacy-include-dir,run_tests_all,run_tests_quick,static,tests_build,time-trace,force-reduce-pipeline,generate-sym-kernels,quiet-warnings,disable-warp-speed,verbose,rocshmem,cmake-options: -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -146,13 +137,10 @@ while true; do
          --debug-fast)		     build_release=false; debug_fast=true;							       shift ;;
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
          --disable-colltrace)        collective_trace=false;                                                                           shift ;;
-         --disable-msccl-kernel)     msccl_kernel_enabled=false;                                                                       shift ;;
          --dump-asm)                 dump_asm=true;                                                                                    shift ;;
-         --enable-mscclpp)           mscclpp_enabled=true;                                                                             shift ;;
-         --enable-mscclpp-clip)      enable_mscclpp_clip=true;                                                                         shift ;;
          --enable-mpi-tests)         enable_mpi_tests=true;                                                                            shift ;;
          --disable-roctx)            roctx_enabled=false;                                                                              shift ;;
-    -f | --fast)                     build_local_gpu_only=true; collective_trace=false; msccl_kernel_enabled=false;                    shift ;;
+    -f | --fast)                     build_local_gpu_only=true; collective_trace=false;                                                shift ;;
     -h | --help)                     display_help;                                                                                     exit 0 ;;
     -i | --install)                  install_library=true;                                                                             shift ;;
     -j | --jobs)                     num_parallel_jobs=${2};                                                                           shift 2 ;;
@@ -355,19 +343,6 @@ fi
 # Disable collective trace
 if [[ "${collective_trace}" == false ]]; then
     cmake_common_options="${cmake_common_options} -DCOLLTRACE=OFF"
-fi
-
-# Disable msccl kernel
-if [[ "${msccl_kernel_enabled}" == false ]]; then
-    cmake_common_options="${cmake_common_options} -DENABLE_MSCCL_KERNEL=OFF"
-fi
-
-if [[ "${mscclpp_enabled}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DENABLE_MSCCLPP=ON"
-fi
-
-if [[ "${enable_mscclpp_clip}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DENABLE_MSCCLPP_CLIP=ON"
 fi
 
 # Install dependencies

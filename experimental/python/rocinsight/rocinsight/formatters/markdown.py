@@ -143,7 +143,9 @@ def _format_as_markdown(
         for rec in recommendations:
             p = rec.get("priority", "INFO")
             emoji = priority_emoji.get(p, "\u2022")
-            lines.append(f"### {emoji} [{p}] {rec.get('category', '')}")
+            conf = rec.get("confidence")
+            conf_str = f" — Confidence: {int(conf * 100)}%" if conf is not None else ""
+            lines.append(f"### {emoji} [{p}] {rec.get('category', '')}{conf_str}")
             lines.append("")
             lines.append(f"**Issue:** {rec.get('issue', '')}")
             lines.append("")

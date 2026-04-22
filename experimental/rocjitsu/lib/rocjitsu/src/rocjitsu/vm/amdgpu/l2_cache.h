@@ -23,6 +23,8 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+class GpuMemory; // Forward declaration for backing store writeback.
+
 /// @brief L2 cache component shared per Accelerator Complex Die (XCD).
 ///
 /// 128-byte lines, 2048 sets, 16-way set-associative = 4MB (default).
@@ -71,6 +73,10 @@ public:
   /// @brief Set the requester port used to reach the backing store.
   /// @param port The OUT port connected to the MSC or HBM controller.
   void set_req_port(simdojo::Port *port) { req_port_ = port; }
+
+  /// @brief Set the backing memory for direct writeback in functional mode.
+  /// @param mem GpuMemory instance (used when req_port_ has no link).
+  void set_backing_memory(GpuMemory *mem) { backing_memory_ = mem; }
 
   /// @brief Read a cache line worth of data (or partial line).
   ///
@@ -188,11 +194,13 @@ private:
 
   CacheStore cache_;
   simdojo::Port *req_port_ = nullptr;
+  GpuMemory *backing_memory_ = nullptr; ///< Direct writeback path (functional mode).
   /// @brief Striped locks for atomic RMW serialization. Each stripe covers
   /// a range of cache lines, allowing atomics to different lines to proceed
   /// in parallel (matching real L2 arbitration behavior).
   std::array<std::mutex, ATOMIC_STRIPE_COUNT> atomic_stripes_;
   std::vector<simdojo::Port *> cpl_ports_;
+  uint64_t write_count_ = 0; ///< Debug: total L2 writes (for trace).
 };
 
 } // namespace amdgpu

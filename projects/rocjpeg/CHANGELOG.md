@@ -3,9 +3,21 @@
 Documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
+## (Unreleased) rocJPEG 1.5.0
+
+### Changed
+
+* rocJPEG is now delivered as part of [TheRock](https://github.com/ROCm/TheRock). All core dependencies are provided by the TheRock build.
+* Removed CPack packaging (DEB/RPM/NSIS/TGZ/ZIP generation and all related CPACK variables).
+* Removed `rocJPEG-setup.py` dependency installer script.
+* Removed Docker files.
+* Removed package install documentation; updated all documentation to reference TheRock for installation.
+* Simplified libva version check (single `>= 1.22` requirement).
+* Cleaned up CMake error messages.
+
 ## rocJPEG 1.4.0 for ROCm 7.2.1
  
-## Changed
+### Changed
 
 * Bug fixes and performance improvements
 * GitHub repository moved to [https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg)

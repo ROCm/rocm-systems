@@ -145,7 +145,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_Negative_Length_Lessthan_DeviceArrSize) {
 HIP_TEST_CASE(Unit_hipSetValidDevices_Positive_Basic) {
   int totalDevices = HipTest::getDeviceCount();
   if (totalDevices < 2) {
-    HipTest::HIP_SKIP_TEST("This test requires 2 or more GPUs. Skipping.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 
@@ -247,7 +247,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_WithAllDevicesInSystem) {
 HIP_TEST_CASE(Unit_hipSetValidDevices_Positive_Cases) {
   int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping, as this test requires more than 2 GPUs");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 
@@ -303,7 +303,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_Positive_Cases) {
 HIP_TEST_CASE(Unit_hipSetValidDevices_MultiProcess) {
   int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping, as this test requires more than 2 GPUs");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 
@@ -369,7 +369,7 @@ void launchFunction(int deviceId) {
 HIP_TEST_CASE(Unit_hipSetValidDevices_MultiThread) {
   int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping, as this test requires more than 2 GPUs");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 
@@ -411,14 +411,13 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_MultiThread) {
 HIP_TEST_CASE(Unit_hipSetValidDevices_with_hipMemcpyPeer) {
   int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping, as this test requires more than 2 GPUs");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   int canAccessPeer = -1;
   HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 1, 0));
   if (!canAccessPeer) {
-    std::string msg = "Device is not capable of directly accessing memory from peerDevice. Skipping the test.";
-    HipTest::HIP_SKIP_TEST(msg.c_str());
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     return;
   }
   REQUIRE(canAccessPeer == 1);

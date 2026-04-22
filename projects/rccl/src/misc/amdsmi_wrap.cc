@@ -16,13 +16,9 @@ static int is_wsl2 = -1;
 #define AMDSMICHECK(cmd) do {                \
   amdsmi_status_t ret = cmd;                 \
   if( ret != AMDSMI_STATUS_SUCCESS ) {       \
-    if (pfn_amdsmi_status_code_to_string) {  \
-      const char *err;                       \
-      pfn_amdsmi_status_code_to_string(ret, &err); \
-      ERROR("AMD SMI failure: %s at line: %d in file: %s", err, __LINE__, __FILE__); \
-    } else {                                 \
-      ERROR("AMD SMI failure: status %d at line: %d in file: %s", (int)ret, __LINE__, __FILE__); \
-    }                                        \
+    const char *err;                         \
+    pfn_amdsmi_status_code_to_string(ret, &err);         \
+    ERROR("AMD SMI failure: %s at line: %d in file: %s", err, __LINE__, __FILE__);    \
     return ncclInternalError;                \
   }                                          \
 } while(false)
@@ -40,45 +36,15 @@ static int is_wsl2 = -1;
     return ncclInternalError; /* missing symbol is not a warned error */ \
   amdsmi_status_t ret = pfn_##name(__VA_ARGS__); \
   if( ret != AMDSMI_STATUS_SUCCESS ) {       \
-    if (pfn_amdsmi_status_code_to_string) {  \
-      const char *err;                       \
-      pfn_amdsmi_status_code_to_string(ret, &err); \
-      ERROR("AMD SMI failure: %s at line: %d in file: %s", err, __LINE__, __FILE__); \
-    } else {                                 \
-      ERROR("AMD SMI failure: status %d at line: %d in file: %s", (int)ret, __LINE__, __FILE__); \
-    }                                        \
+    const char *err;                         \
+    pfn_amdsmi_status_code_to_string(ret, &err); \
+    ERROR("AMD SMI failure: %s at line: %d in file: %s", err, __LINE__, __FILE__);    \
     return ncclInternalError;                \
   }                                          \
 } while(0)
 
-#define AMDSMITRYSET(name, result, ...) do { \
-  if (!AMDSMI_DIRECT && pfn_##name == nullptr) { \
-    result = ncclInternalError; \
-    return ncclInternalError; /* missing symbol is not a warned error */ \
-  } \
-  amdsmi_status_t ret = pfn_##name(__VA_ARGS__); \
-  if( ret != AMDSMI_STATUS_SUCCESS ) {       \
-    if (pfn_amdsmi_status_code_to_string) {  \
-      const char *err;                       \
-      pfn_amdsmi_status_code_to_string(ret, &err); \
-      ERROR("AMD SMI failure: %s at line: %d in file: %s", err, __LINE__, __FILE__); \
-    } else {                                 \
-      ERROR("AMD SMI failure: status %d at line: %d in file: %s", (int)ret, __LINE__, __FILE__); \
-    }                                        \
-    result = ncclInternalError; \
-    return ncclInternalError;                \
-  }                                          \
-} while(0)
+RCCL_PARAM(UseAmdSmiLib, "USE_AMD_SMI_LIB", 0); // Opt-in environment variable for enabling using amd_smi_lib instead of internal code
 
-// Disabled by default due to a critical concurrency issue in amdsmi library init
-// (communicated to the amdsmi team). Once a known ROCm version ships with the fix,
-// re-enable the version-gated default here (e.g. #if ROCM_VERSION >= <fixed_version>)
-// and update this comment with the resolved ROCm version.
-// Users can opt-in in the meantime by setting RCCL_USE_AMD_SMI_LIB=1.
-#define AMDSMI_DEFAULT_ENABLED 0
-
-// Enable use of amd_smi_lib instead of internal ARSMI code by default; set RCCL_USE_AMD_SMI_LIB=1 to enable amd_smi_lib and use the AMD SMI path
-RCCL_PARAM(UseAmdSmiLib, "USE_AMD_SMI_LIB", AMDSMI_DEFAULT_ENABLED);
 #include <dlfcn.h>
 #define RCCL_AMDSMI_FN(name, rettype, arglist) rettype(*pfn_##name)arglist = nullptr;
 
@@ -128,7 +94,6 @@ namespace {
   ncclResult_t fabricInitResult = ncclSuccess;
   ncclResult_t amdSmiInitResult = ncclSuccess;
   std::atomic<bool> amdSmiInitCalled{false};  // Track if amd_smi_init has been called
-  std::mutex amdsmiInitLock;
 }
 
 /*************************************************************************
@@ -174,7 +139,10 @@ static bool amd_smi_FabricFunctionsLoaded() {
  * Existing AMD SMI Wrapper Functions
  ************************************************************************/
 
-static ncclResult_t amd_smi_init_impl() {
+ncclResult_t amd_smi_init() {
+  // Ensure we only initialize once
+  if (amdSmiInitCalled.exchange(true)) return amdSmiInitResult;
+
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE) == -1)
     __atomic_store_n(&is_wsl2, (access("/dev/dxg", F_OK) == -1) ? 0 : 1, __ATOMIC_RELEASE);
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) {
@@ -187,6 +155,7 @@ static ncclResult_t amd_smi_init_impl() {
       static void *libhandle = dlopen("libamd_smi.so", RTLD_NOW);
       if (libhandle == nullptr) {
         WARN("Failed to open libamd_smi.so");
+        amdSmiInitResult = ncclInternalError;
         return ncclInternalError;
       }
 
@@ -214,7 +183,7 @@ static ncclResult_t amd_smi_init_impl() {
         {(void**)&pfn_amdsmi_free_fabric_telemetry, "amdsmi_free_fabric_telemetry"},
         {(void**)&pfn_amdsmi_get_fw_info, "amdsmi_get_fw_info"},
       };
-      for (Symbol sym: symbols) {
+      for(Symbol sym: symbols) {
         *sym.ppfn = dlsym(libhandle, sym.name);
       }
     }
@@ -235,20 +204,6 @@ static ncclResult_t amd_smi_init_impl() {
     INFO(NCCL_INIT, "initialized internal alternative rsmi functionality");
   }
   return ncclSuccess;
-}
-
-ncclResult_t amd_smi_init() {
-  // Ensure we only initialize once and avoid grabbing the mutex for every call
-  if (!amdSmiInitCalled.load(std::memory_order_acquire)) {
-    std::lock_guard<std::mutex> lock(amdsmiInitLock);
-    if (!amdSmiInitCalled.load(std::memory_order_relaxed)) {
-      // Always cache the result and mark init as done regardless of outcome
-      // (WSL2 skip, dlopen failure, AMDSMI/ARSMI errors all included)
-      amdSmiInitResult = amd_smi_init_impl();
-      amdSmiInitCalled.store(true, std::memory_order_release);
-    }
-  }
-  return amdSmiInitResult;
 }
 
 ncclResult_t amd_smi_shutdown() {

@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 #
 # rocprofiler-systems tests
@@ -60,6 +60,7 @@ else()
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-binary-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-thread-limit-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-scratch-memory-tests.cmake)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-kfd-tests.cmake)
 
     # -------------------------------------------------------------------------------------- #
     #
