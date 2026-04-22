@@ -92,7 +92,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          submodules: recursive
           sparse-checkout: |
             projects/rocprofiler-compute
             shared/ctest
