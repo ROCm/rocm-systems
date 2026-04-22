@@ -158,7 +158,7 @@ enum class ObstructionKind : uint8_t {
                             // must never tag a `DecodedInst` with this kind.
                             // See hotswap/docs/modrep-predicate-chain.md §5
                             // (narrow-O1) for the principled derivation and
-                            // §9.6 for the Phase-2 finding that narrowed the
+                            // §5 O1 for the narrowing rationale that narrowed the
                             // classifier from "any unmasked `tid → icmp →
                             // side-effect`" to "compile-time K ≤ W_s-1" so
                             // baseline Triton recipes

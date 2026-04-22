@@ -18,7 +18,8 @@ namespace {
 
 // ============================================================================
 // Narrow-O1 classifier — see hotswap/docs/modrep-predicate-chain.md §5 (O1)
-// and §9.6 for the narrowing rationale. Two-pass design:
+// (§5 O1 "narrow-O1, as landed" documents the narrowing
+// rationale). Two-pass design:
 //
 //   Pass 1: forward-walk from each `@llvm.amdgcn.workitem.id.x()` call,
 //           tagging every tid-reachable value with its masked-or-unmasked
@@ -244,7 +245,7 @@ std::string formatRefusalDetail(const ICmpInst *cmp, unsigned sourceWaveSize,
 
 PredicateChainClassifierReport classifyPredicateChain(
     Function &F, unsigned sourceWaveSize, unsigned targetWaveSize,
-    bool waveNative) {
+    bool waveNative, unsigned maxFlatWorkgroupSize) {
   PredicateChainClassifierReport report;
 
   // Direction gate: no predicate-chain risk at same-wave or narrowing,
@@ -253,6 +254,27 @@ PredicateChainClassifierReport classifyPredicateChain(
     return report;
   if (sourceWaveSize < 2)
     return report;
+
+  // Phantom-lane guaranteed iff the HSACO's
+  // `max_flat_workgroup_size` is BELOW the target wavefront width.
+  // In that regime every launch under-fills the target wavefront,
+  // lanes with architectural `tid >= maxFlatWorkgroupSize` are
+  // activated by `init_whole_wave` without a source-wave-to-target-
+  // lane mapping, and the WaveNative projection-model statement
+  // ("target lane's `tid` IS its own source-wave tid") collapses.
+  //
+  // The `> 0` guard is required: the raiser defaults
+  // `maxFlatWorkgroupSize` to 1024 when the HSACO metadata omits
+  // it (raiser.cpp §"Pin the workgroup size"), but callers that
+  // don't have the metadata at all (including legacy / ad-hoc
+  // tools) pass 0. Treating `0` as "phantom guaranteed" would
+  // refuse every kernel those callers raise, which is a
+  // soundness/practicality trade-off the phantom-lane rule was
+  // never designed to make — leave the classifier permissive
+  // when the evidence isn't there.
+  const bool phantomLaneGuaranteed =
+      waveNative && maxFlatWorkgroupSize > 0 &&
+      maxFlatWorkgroupSize < targetWaveSize;
 
   // ===== Pass 0: collect `@llvm.amdgcn.workitem.id.x()` call sites. =====
   SmallVector<CallInst *> sites;
@@ -317,8 +339,16 @@ PredicateChainClassifierReport classifyPredicateChain(
             "unexpected non-Instruction user of tid-derived Value; "
             "classifier cannot prove safety. "
             "See hotswap/docs/modrep-predicate-chain.md \u00a75.");
-        if (!waveNative) {
+        // Refuse under MODREP always, and under WaveNative only
+        // when phantom lanes are guaranteed (see file-header
+        // docstring). The two-arm rule matches the rationale in
+        // the header: the MODREP "replica-1 EXEC-share" trap
+        // always applies; the WaveNative per-source-lane-EXEC
+        // model defends against it only when every target lane
+        // is a 1:1 source-lane image.
+        if (!waveNative || phantomLaneGuaranteed) {
           report.refused = true;
+          report.phantomLaneRefusal = phantomLaneGuaranteed;
           if (report.refusalDetail.empty())
             report.refusalDetail = report.observedSites.back();
         }
@@ -406,9 +436,39 @@ PredicateChainClassifierReport classifyPredicateChain(
     std::string detail = formatRefusalDetail(cmp, sourceWaveSize, smallK);
     report.observedSites.push_back(detail);
 
-    if (!waveNative && !report.refused) {
+    // Refuse under MODREP always (the historical behaviour) and
+    // under WaveNative only when phantom lanes are guaranteed
+    // (the post-`canary_bitmatrix_composite` tightening — see
+    // file-header docstring). `!report.refused` avoids rewriting
+    // `refusalDetail` with later sites so the diagnostic names
+    // the first failing icmp deterministically.
+    if ((!waveNative || phantomLaneGuaranteed) && !report.refused) {
       report.refused = true;
-      report.refusalDetail = std::move(detail);
+      report.phantomLaneRefusal = phantomLaneGuaranteed;
+      if (phantomLaneGuaranteed) {
+        // Prepend the phantom-lane explanation so the diagnostic
+        // names the distinguishing evidence the operator needs:
+        // "WaveNative would normally let this through; the
+        // specific reason it refuses THIS kernel is the
+        // sub-wave-width `max_flat_workgroup_size`".
+        std::string prefix;
+        raw_string_ostream os(prefix);
+        os << "phantom-lane regime: HSACO "
+              "`max_flat_workgroup_size`=" << maxFlatWorkgroupSize
+           << " is below target wavefront width "
+           << targetWaveSize
+           << ", so every launch activates lanes outside the "
+              "source kernel's lane index space via "
+              "`init_whole_wave`. Under WaveNativeProjection the "
+              "MODREP-specific `replica-1 EXEC-share` trap the "
+              "classifier normally catches does NOT apply, but "
+              "phantom lanes are unmodelled by the "
+              "per-source-lane EXEC model and the cross-widening "
+              "safety argument collapses. ";
+        report.refusalDetail = prefix + detail;
+      } else {
+        report.refusalDetail = std::move(detail);
+      }
     }
   }
 

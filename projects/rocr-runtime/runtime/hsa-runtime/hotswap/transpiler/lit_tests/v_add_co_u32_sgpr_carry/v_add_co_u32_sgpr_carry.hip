@@ -2,7 +2,7 @@
 //
 // Regression fixture for the carry-chain SGPR-operand bug class
 // (sibling to the VOPD `v_dual_cndmask_b32` SGPR-condition fix
-// documented in hotswap/docs/modrep-predicate-chain.md §9.7).
+// documented in hotswap/docs/modrep-predicate-chain.md §6.4).
 //
 // PRE-FIX BUG. The six V_{ADD,SUB,SUBREV}_CO_(CI_)U32 handlers in
 // handle_valu.cpp hardcoded `ctx.regs.loadVCC` for carry-in and

@@ -3,7 +3,7 @@
 ; RUN:   | %FileCheck %s
 ;
 ; Regression fence for the VOPD `v_dual_cndmask_b32` SGPR-condition
-; bug (hotswap/docs/modrep-predicate-chain.md §9.7, fixed 2026-04-22
+; bug (hotswap/docs/modrep-predicate-chain.md §6.4, fixed 2026-04-22
 ; in `handle_vopd.cpp`).
 ;
 ; PRE-FIX SHAPE (the bug). Both halves of a VOPD `v_dual_cndmask_b32

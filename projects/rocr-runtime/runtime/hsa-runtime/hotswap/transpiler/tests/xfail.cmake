@@ -44,7 +44,7 @@
 # reduction tree shape, different BLOCK_SIZE) and fails loudly at
 # lift time via the writelane/readlane-post-raise-safety-net
 # classifier; that failure mode is documented in
-# hotswap/docs/modrep-predicate-chain.md §9 (5) sibling-class note
+# hotswap/docs/modrep-predicate-chain.md §4.3 sub-case 2 note
 # and is not the same defect as the one re-exposed here.
 set_tests_properties(Gfx1250Gpu.Softmax PROPERTIES
   WILL_FAIL TRUE

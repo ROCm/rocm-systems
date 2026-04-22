@@ -1,7 +1,7 @@
 // ARCH: gfx1250
 //
 // Regression fixture for the VOPD `v_dual_cndmask_b32` SGPR-condition
-// bug (hotswap/docs/modrep-predicate-chain.md §9.7, 2026-04-22 fix).
+// bug (hotswap/docs/modrep-predicate-chain.md §6.4, 2026-04-22 fix).
 //
 // PRE-FIX BUG. `handle_vopd.cpp::v_cndmask_b32` hardcoded
 // `ctx.regs.loadVCC(ctx.B)` as the condition for BOTH halves of a

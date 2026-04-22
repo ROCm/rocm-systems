@@ -62,13 +62,16 @@
 //   * projects kernels with `num_warps > 1` correctly by giving
 //     each target lane its own modeled-EXEC bit (fixes the
 //     `swiglu_fp32` / `corpus_layernorm_fp32` class documented in
-//     hotswap/docs/modrep-predicate-chain.md §9.6);
-//   * lets the canary `canary_bpermute_scan_fp32` silently
-//     miscompile again (the narrow-O1 C5 classifier short-circuits
-//     under WaveNative; the underlying bug is projection-
-//     independent, see modrep-predicate-chain.md §9.7 for the
-//     falsified SPE-phi-undef hypothesis and the open question
-//     about the actual scan-arithmetic mechanism).
+//     hotswap/docs/modrep-predicate-chain.md §4.3 sub-case 1);
+//   * renders the C5 classifier's MODREP-specific refusal
+//     rationale inapplicable — target lanes have their own
+//     modeled-EXEC bits rather than sharing source wave 0's. The
+//     classifier's `waveNative` gate suppresses refusal on this
+//     path. For `canary_bpermute_scan_fp32`, the underlying
+//     miscompile that would otherwise surface is closed by the
+//     VOPD-cndmask SGPR-condition fix
+//     (modrep-predicate-chain.md §6.4) rather than by the
+//     projection choice itself.
 //
 // `--disable-wave-native` opts back into `ModuloReplicationProjection`
 // for the narrow class of pointwise / independent-half kernels where

@@ -540,7 +540,7 @@ config.fixtures = {
     "vopd_extra_subops":
         r"@LIT_FIXTURE_VOPD_EXTRA_SUBOPS_CO@",
     # VOPD `v_dual_cndmask_b32` SGPR-condition regression fence —
-    # see hotswap/docs/modrep-predicate-chain.md §9.7 (2026-04-22
+    # see hotswap/docs/modrep-predicate-chain.md §6.4 (2026-04-22
     # fix) and transpiler/handle_vopd.cpp's `v_cndmask_b32` handler.
     #
     # Pins the post-fix IR shape for VOPD cndmask pairs whose two

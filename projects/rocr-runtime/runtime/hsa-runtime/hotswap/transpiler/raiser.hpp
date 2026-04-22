@@ -74,13 +74,13 @@ struct RaiseResult {
 // lane ops stay within a single source-wave half). The C5
 // predicate-chain classifier (`c5_predicate_chain_classifier`) is
 // structurally MODREP-scoped (the refusal rationale is MODREP-
-// replica-specific) and short-circuits under WaveNative, so
-// kernels that were loud-refused under the pre-graduation MODREP
-// default now either succeed (swiglu class) or silently
-// miscompile (`canary_bpermute_scan_fp32` class, investigation
-// pending — see hotswap/docs/modrep-predicate-chain.md §9.7 for
-// the falsified SPE-phi-undef hypothesis and the open question
-// about the projection-independent scan-arithmetic bug).
+// replica-specific) and short-circuits under WaveNative. Under
+// the WaveNative default, every recipe in the compare_correctness
+// Triton corpus that hits the C5 predicate-chain signature
+// end-to-end MATCHes (canary_bpermute_scan_fp32, corpus_layernorm_fp32);
+// see hotswap/docs/modrep-predicate-chain.md §6.4 for the
+// orthogonal VOPD-cndmask / carry-chain SGPR-operand fixes that
+// close those recipes independently of the predicate-chain class.
 //
 // No process-global env-var override. `HSA_SALMON_WAVE_NATIVE=1`
 // was a transient test/debug hook during the graduation sweep

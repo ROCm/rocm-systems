@@ -85,7 +85,7 @@
 //     — the `isSourceWaveMaskAnd` gate only stops propagation
 //     through the AND user itself, not through phi unions with
 //     the AND's consumer. This matches the shape observed in
-//     `swiglu_fp32`'s IR (§9.6 Phase-2 inspection); the fixture
+//     `swiglu_fp32`'s IR (phi-arm asymmetry); the fixture
 //     is not refused end-to-end because its icmp constant is
 //     dynamic, which is caught by the `TidDynamicCmpAccepts`
 //     test above.
@@ -416,7 +416,7 @@ TEST(C5PredicateChain, PhiPropagatesTidDerivation) {
 // Refusal through a phi with one MASKED and one UNMASKED arm: the
 // classifier must still refuse because the unmasked arm reaches the
 // icmp. This pins the behaviour observed in `swiglu_fp32`'s IR
-// (Phase-2 inspection; modrep-predicate-chain.md §9.6): the SPE
+// (phi-arm asymmetry from Triton's SPE diamond): the SPE
 // diamond produces `phi [vand, spe_do], [tid, entry]` where the
 // entry arm is unmasked, and the downstream icmp against the phi
 // result is reachable from an unmasked tid path. (The swiglu end-

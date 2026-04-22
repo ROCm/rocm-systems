@@ -44,7 +44,7 @@ namespace {
 // silently ignoring the explicit scalar operand on e64 forms. That
 // matches the VOPD `v_dual_cndmask_b32` SGPR-condition bug that
 // miscompiled `canary_bpermute_scan_fp32` and `corpus_layernorm_fp32`
-// (hotswap/docs/modrep-predicate-chain.md §9.7). The current corpus
+// (hotswap/docs/modrep-predicate-chain.md §6.4). The current corpus
 // (Triton on gfx1250 / gfx942, AITER TensileLite) does not exercise
 // the non-VCC SGPR form of these instructions — Triton emits
 // `v_add_nc_u32` / `v_add_nc_u64` (no-carry) on gfx1250 and the

@@ -14,7 +14,7 @@ namespace transpiler {
 // ============================================================================
 // Narrow-O1 post-mem2reg IR-level classifier for the Class-5
 // predicate-chain class. See hotswap/docs/modrep-predicate-chain.md §5
-// (O1) for the design and §9.6 for the Phase-2 narrowing rationale.
+// (O1) for the design and narrowing rationale.
 // ============================================================================
 //
 // PROBLEM. Under modulo-replication (`ModuloReplicationProjection`),
@@ -32,7 +32,7 @@ namespace transpiler {
 // (`compare_correctness` Triton suite) is the canary that pins it.
 //
 // NARROWING RULE (the key principled bit — Phase-2 evidence in
-// `modrep-predicate-chain.md` §9.6). "Refuse any unmasked
+// `modrep-predicate-chain.md` §5 O1). "Refuse any unmasked
 // `tid → icmp → side-effect`" — the literal O1 wording — would also
 // refuse currently-passing baselines (`vecadd_f16`, `rope_fp32`,
 // elementwise Triton kernels) whose IR has structurally identical
@@ -117,43 +117,51 @@ namespace transpiler {
 // Same-wave or narrowing: no replica-1 exists, no lane-position
 // ambiguity, the classifier is a structural no-op.
 //
-// COVERAGE + INTENTIONAL NON-COVERAGE. Per §9.6 of the design doc:
+// COVERAGE + INTENTIONAL NON-COVERAGE. Per §5 O1 of the design doc:
 //
 //   * `canary_bpermute_scan_fp32`: Kogge-Stone scan stages emit
 //     `icmp ult i32 K, %tid` with K in {1, 3, 7, 15} (all
-//     `<= W_s - 1 = 31`). Classifier refuses. Flips silent-WRONG
-//     to loud-refused on the MODREP path — the principled O1
-//     outcome. Under the WaveNative default the refusal is
-//     short-circuited (see `waveNative` docstring below); the
-//     recipe's residual WRONG numerics are a projection-
-//     independent upstream bug, tracked in §9.7.
-//   * `rmsnorm_fp32`, `swiglu_fp32`, `corpus_layernorm_fp32`: their
-//     kernel-level icmps compare `tid` against a dynamic kernarg
-//     (`%arg4` / `%arg2`), not a compile-time constant. Classifier
-//     does NOT refuse. Their actual miscompile is documented
-//     separately in §9.6 (MODREP's EXEC-replication broken for
-//     `num_warps > 1`) — orthogonal class, out of scope for this
-//     classifier, and mostly fixed by WaveNative graduation.
+//     `<= W_s - 1 = 31`). Classifier refuses. This is the
+//     MODREP-path loud-refusal outcome. Under the WaveNative
+//     default the refusal is short-circuited (see `waveNative`
+//     docstring below); the recipe's previously-observed WRONG
+//     numerics turned out to be an orthogonal VOPD-cndmask bug
+//     (design-doc §6.4), fixed independently of this classifier.
+//   * `rmsnorm_fp32`, `swiglu_fp32`, `corpus_layernorm_fp32`:
+//     their kernel-level icmps compare `tid` against a dynamic
+//     kernarg (`%arg4` / `%arg2`), not a compile-time constant.
+//     Classifier does NOT refuse. Their end-to-end status is
+//     MATCH today; the relevant fixes were orthogonal to this
+//     classifier (see design-doc §6.3 / §6.4).
 //   * `vecadd_f16`, `rope_fp32`, `canary_dpp_compound_add_fp32`
-//     (baselines, MATCH under both projections): no icmps with
-//     the C5 shape. Classifier does NOT refuse. Baselines stay
-//     green.
+//     (baselines): no icmps with the C5 shape. Classifier does
+//     NOT refuse. Baselines stay green.
 //
-// RELATIONSHIP TO §5 O2 (the mask rewrite). O2 is explicitly
-// deferred per §9.6's Phase-2 finding that the mask rewrite's
-// shape is not semantically correct for the norm-family failing
-// recipes nor for the scan-shaped recipe under its actual launch
-// configuration. This classifier is refuse-only; there is no
-// `RewriteId` entry paired with `ObstructionKind::WorkitemIdPredicateChain`
-// today.
+// RELATIONSHIP TO §5 O2 (the mask rewrite). O2 is deferred
+// indefinitely per §6.2 of the design doc: the mask's shape is
+// semantically incorrect for multi-warp kernels and a structural
+// no-op for single-warp sub-case 2. This classifier is
+// refuse-only; there is no `RewriteId` entry paired with
+// `ObstructionKind::WorkitemIdPredicateChain` today.
 
 struct PredicateChainClassifierReport {
   // True iff the classifier refused at least one icmp under the
   // current projection. When true, the raiser translates this into a
-  // `RaiseFailure::crossWavePredicateChain` refusal. Always false
-  // under `waveNative=true` regardless of how many C5-shape sites
-  // were observed (the refusal is suppressed, not the detection).
+  // `RaiseFailure::crossWavePredicateChain` refusal. Under
+  // `waveNative=true` this is false unless the caller also reports
+  // `maxFlatWorkgroupSize < targetWaveSize` (phantom-lane guaranteed,
+  // see the top-of-file docstring), in which case the WaveNative
+  // projection-model statement collapses and the refusal is the
+  // principled outcome.
   bool refused = false;
+
+  // When `refused == true` AND the trigger was the phantom-lane
+  // sub-case of the WaveNative arm (not the baseline MODREP arm),
+  // `refusalDetail` is augmented with the phantom-lane
+  // explanation so the diagnostic names the specific cause. This
+  // bit lets callers (and the lit fixtures) discriminate between
+  // the two refusal paths without string-matching the detail.
+  bool phantomLaneRefusal = false;
 
   // Detail string for the first refused site. Empty iff `!refused`.
   // Stable-enough-for-lit substring format (see lit fixtures under
@@ -200,19 +208,27 @@ struct PredicateChainClassifierReport {
 //     safety proof. If a launch config ever materialises with
 //     "phantom" target lanes that are NOT a 1:1 mapping of source
 //     lanes — e.g. a target wavefront whose
-//     `max_flat_workgroup_size` is larger than the source
-//     kernel's logical WG size, leaving lanes outside the source
-//     lane index space — then `tid` on those lanes is
-//     unmodelled by either projection and the classifier's
-//     refusal is again the principled answer. The WaveNative
-//     default is permissive on that case today because the
-//     launch configurations we run under
-//     `compare_correctness` (and ROCR on the gfx1250 → gfx942
-//     transpiler path) honour the source's WG size via
-//     `max_flat_workgroup_size` in the raised HSACO. If evidence
-//     of a phantom-lane launch surfaces (see §9.7), the
-//     suppression becomes a soundness bug that this docstring
-//     is the contract for.
+//     `max_flat_workgroup_size` is smaller than the target
+//     wavefront width, leaving lanes outside the source lane
+//     index space — then `tid` on those lanes is unmodelled by
+//     either projection and the classifier's refusal is again
+//     the principled answer.
+//
+//     The `maxFlatWorkgroupSize` parameter below (added after
+//     `canary_bitmatrix_composite` empirically falsified the
+//     pre-phantom-lane WaveNative suppression — see the canary's
+//     commit message) narrows the WaveNative suppression to
+//     exactly the
+//     "no phantom lanes" regime: when `maxFlatWorkgroupSize <
+//     targetWaveSize` (and it's known, i.e. > 0), the HSACO
+//     cannot be launched with enough threads to fill a target
+//     wavefront, phantom lanes are GUARANTEED for every launch,
+//     and the classifier refuses the same way it would under
+//     MODREP. When `maxFlatWorkgroupSize >= targetWaveSize` or
+//     the caller passes 0 ("unknown"), phantom lanes are
+//     possible but not provable — the classifier stays
+//     permissive and logs the site as an attribution breadcrumb
+//     (unchanged from the pre-phantom-lane behaviour).
 //
 //   * The walk still runs so the report's `observedSites` is
 //     populated. raiser.cpp emits `LLVM_DEBUG` for every
@@ -220,9 +236,16 @@ struct PredicateChainClassifierReport {
 //     breadcrumb — if a C5-shape kernel ever miscompiles under
 //     WaveNative, the debug log names the icmp site the
 //     classifier would have refused under MODREP.
+// `maxFlatWorkgroupSize`: the kernel's `max_flat_workgroup_size`
+// metadata field from the HSACO's `.amdgpu_metadata` section, or
+// 0 if the caller does not have the information. Used ONLY under
+// `waveNative = true` to narrow the suppression (see the file-
+// header docstring's phantom-lane discussion); has no effect when
+// `waveNative = false` because the MODREP refusal arm already
+// fires unconditionally on any C5 site.
 PredicateChainClassifierReport classifyPredicateChain(
     llvm::Function &F, unsigned sourceWaveSize, unsigned targetWaveSize,
-    bool waveNative = false);
+    bool waveNative = false, unsigned maxFlatWorkgroupSize = 0);
 
 } // namespace transpiler
 

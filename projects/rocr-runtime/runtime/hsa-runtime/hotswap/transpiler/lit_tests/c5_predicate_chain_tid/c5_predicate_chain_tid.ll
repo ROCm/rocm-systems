@@ -35,7 +35,7 @@
 ; Regression fence for the Class-5 "wave-size-sensitive predicate chain"
 ; narrow-O1 classifier
 ; (hotswap/docs/modrep-predicate-chain.md §5, Phase-2 narrowing per
-;  §9.6 of that doc;
+;  §5 O1 "narrow-O1, as landed" of that doc;
 ;  transpiler/c5_predicate_chain_classifier.{hpp,cpp}).
 ;
 ; Under cross-widening (gfx1250 → gfx942 / gfx950), a wave32 source
@@ -47,7 +47,7 @@
 ; architectural `tid >= W_s` so the predicate evaluates differently
 ; for them than for source wave 0's lane L — a miscompile the
 ; classifier has no safe rewrite for today (§5 O2 is deferred per
-; §9.6). The only correct outcome is the (c) refusal branch of
+; §6.2). The only correct outcome is the (c) refusal branch of
 ; wave-size-translation.md §7's 3-outcome decision procedure.
 ;
 ; Paired with lit_tests/c5_predicate_chain_masked/ which pins the

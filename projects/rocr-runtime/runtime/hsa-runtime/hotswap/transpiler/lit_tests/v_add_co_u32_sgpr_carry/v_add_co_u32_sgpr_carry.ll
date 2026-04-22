@@ -3,7 +3,7 @@
 ; RUN:   | %FileCheck %s
 ;
 ; Regression fence for the carry-chain SGPR-operand bug class
-; (hotswap/docs/modrep-predicate-chain.md §9.7 / §9.10, fixed
+; (hotswap/docs/modrep-predicate-chain.md §6.4, fixed
 ; 2026-04-22 in `handle_valu.cpp`'s `readCarryInI1` /
 ; `writeCarryOutI1` helpers).
 ;

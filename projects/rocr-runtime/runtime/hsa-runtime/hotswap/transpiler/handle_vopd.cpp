@@ -212,7 +212,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       // conflates the two predicates and produces
       // `canary_bpermute_scan_fp32`'s silent-WRONG scan output (the
       // root-cause finding in hotswap/docs/modrep-predicate-chain.md
-      // §9.7, 2026-04-22: stage-3 lanes >= 8 read themselves instead of
+      // §6.4: stage-3 lanes >= 8 read themselves instead of
       // lane-8 partner, doubling their accumulator).
       //
       // Mirrors the non-VOPD `V_CNDMASK_B32` handler in

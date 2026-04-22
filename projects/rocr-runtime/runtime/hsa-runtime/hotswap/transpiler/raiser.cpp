@@ -826,7 +826,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   // under modulo-replication despite sharing the source EXEC bit.
   //
   // Intentionally narrow: Phase-2 IR inspection (modrep-predicate-chain.md
-  // §9.6) established that the broader "any unmasked tid → icmp →
+  // §5 O1) established that the broader "any unmasked tid → icmp →
   // side-effect refuses" rule would also refuse baselines
   // `vecadd_f16` / `rope_fp32` / `canary_dpp_compound_add_fp32` (their
   // IR has structurally identical shapes but with a dynamic kernarg as
@@ -843,35 +843,41 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   // `targetWaveSize <= sourceWaveSize`.
   //
   // No companion rewrite today. The design doc's §5 O2 "tid AND (W_s-1)"
-  // rewrite is deferred (§9.6 shows its semantics are not correct for
+  // rewrite is deferred (§6.2 documents the semantic-incorrectness of
   // the norm-family failing recipes and are a no-op for sub-case-2
   // scan-shaped recipes). If a future design iteration adds a principled
   // rewrite, pair it with a `RewriteId` alongside
   // `ObstructionKind::WorkitemIdPredicateChain`.
   {
-    // Pass `enableWaveNative` to the classifier so it SUPPRESSES
-    // refusal (but still walks and collects `observedSites`) under
-    // WaveNativeProjection. See `c5_predicate_chain_classifier.hpp`
-    // on the `waveNative` parameter for the rationale: the MODREP
-    // "replicas sharing source wave 0's EXEC" assumption — which
-    // the refusal is meant to catch — does not hold under
-    // WaveNative for the launch configurations we run today. The
-    // walk still runs so we can emit an `LLVM_DEBUG` attribution
-    // breadcrumb: if a C5-shape kernel ever miscompiles under
-    // WaveNative, the debug log names the exact icmp the classifier
-    // would have refused under MODREP.
+    // Pass `enableWaveNative` + the kernel's
+    // `max_flat_workgroup_size` to the classifier. The
+    // `waveNative` arm suppresses refusal for the common case
+    // (target-wave-sized WG, no phantom lanes) and enables
+    // refusal for the phantom-lane sub-case
+    // (`max_flat_workgroup_size < targetWaveSize`) — see
+    // `c5_predicate_chain_classifier.hpp`'s file-header docstring
+    // for the full two-arm rationale. The walk runs in both
+    // arms so `observedSites` is populated for the attribution
+    // breadcrumb below.
     PredicateChainClassifierReport predReport =
         classifyPredicateChain(*F, isa.waveSize, targetIsa.waveSize,
-                                enableWaveNative);
+                                enableWaveNative,
+                                /*maxFlatWorkgroupSize=*/
+                                meta.maxFlatWorkgroupSize > 0
+                                    ? static_cast<unsigned>(
+                                          meta.maxFlatWorkgroupSize)
+                                    : 0u);
 
-    if (enableWaveNative && !predReport.observedSites.empty()) {
+    if (enableWaveNative && !predReport.refused &&
+        !predReport.observedSites.empty()) {
       LLVM_DEBUG({
         dbgs() << "c5-predicate-chain: observed "
                << predReport.observedSites.size()
                << " C5-shape site(s) in '" << kernelName
                << "' under WaveNativeProjection (refusal "
                   "suppressed per c5_predicate_chain_classifier.hpp "
-                  "`waveNative` contract):\n";
+                  "`waveNative` contract; no phantom-lane "
+                  "configuration detected):\n";
         for (const std::string &site : predReport.observedSites)
           dbgs() << "  - " << site << "\n";
       });
@@ -883,7 +889,11 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       errs() << "transpiler: pre-translation abort: " << f.format << " on '"
              << f.mnemonic << "' \u2014 " << f.detail << "\n";
       errs() << "  outcome: (c) refuse \u2014 "
-                "WorkitemIdPredicateChain (\u00a73 Class 5)\n";
+                "WorkitemIdPredicateChain (\u00a73 Class 5"
+             << (predReport.phantomLaneRefusal
+                     ? " phantom-lane sub-case"
+                     : "")
+             << ")\n";
       result.failure = std::move(f);
       return result;
     }
