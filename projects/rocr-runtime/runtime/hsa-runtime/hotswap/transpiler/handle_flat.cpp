@@ -21,6 +21,43 @@
 using namespace llvm;
 
 namespace transpiler {
+
+namespace {
+
+// Shared helper for the `_D16_HI` half-register-store lift shape.
+//
+// Both `GLOBAL_STORE_SHORT_D16_HI` and `FLAT_STORE_SHORT_D16_HI` have
+// the same half-register selector baked into the opcode: store bits
+// [31:16] of the source VGPR (the "high half") rather than [15:0].
+// The lowered shape is `lshr i32 %src32, 16` followed by `trunc i32
+// to i16` — InstCombine folds this pair to the backend-preferred
+// sub-dword-extraction shape on every AMDGPU target.
+//
+// Kept namespace-local (rather than as a public helper) because the
+// semantics are tied 1:1 to the FLAT family's sub-dword store lift
+// inside this file.  DS family has its own structurally-identical
+// emission in handle_ds.cpp (DS_WRITE_B16_D16_HI under
+// `ds_st_d16_hi` / `ds_st_hi16_shr` breadcrumbs); MUBUF family has
+// the load-side companion in handle_mubuf.cpp (via `d16Half=2` in
+// `mubufClassify`).  Three addrspace-specific handlers, one
+// conceptual operation; they intentionally do not share a helper
+// because each resolves a different addressing / EXEC-gating
+// context before this final step.
+//
+// Value-name breadcrumbs (`d16hi_shift` on the lshr, `d16hi_trunc`
+// on the trunc) match the `ds_store_b16_d16_hi` fixture's naming
+// convention in spirit (prefix-on-shift, prefix-on-trunc), adapted
+// to the FLAT addrspace to keep lit patterns family-local.
+Value *emitD16HiHalfTruncI16(RaiseContext &ctx, Value *src32) {
+  Value *shifted = ctx.B.CreateLShr(src32,
+                                     ConstantInt::get(ctx.i32Ty, 16),
+                                     "d16hi_shift");
+  return ctx.B.CreateTrunc(shifted, Type::getInt16Ty(ctx.C),
+                            "d16hi_trunc");
+}
+
+} // namespace
+
 HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
                         OpResolver &op) {
   HandlerResult hr;
@@ -244,19 +281,14 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
     ParsedReg stData = fa.stData;
 
     if (storeDwords == 0) {
-      Type *memTy = Type::getIntNTy(ctx.C, storeBits);
       Value *src32 = ctx.regs.readReg32(ctx.B, stData);
-      if (storeHiHalf) {
-        // `_D16_HI`: store the upper 16 bits of the source VGPR.  The
-        // `lshr ..., 16` hoists bits [31:16] down to [15:0] before the
-        // trunc takes the low 16.  InstCombine folds this pair to the
-        // equivalent `trunc i32 (lshr ...) to i16` shape the backend
-        // prefers.
-        src32 = ctx.B.CreateLShr(src32,
-                                  ConstantInt::get(ctx.i32Ty, 16),
-                                  "d16hi_shift");
-      }
-      Value *val = ctx.B.CreateTrunc(src32, memTy);
+      // `_D16_HI` variant routes through the shared half-register
+      // helper that emits `lshr 16 + trunc to i16`; the non-
+      // `_D16_HI` short / byte path takes a plain trunc to `memTy`.
+      Value *val = storeHiHalf
+                      ? emitD16HiHalfTruncI16(ctx, src32)
+                      : ctx.B.CreateTrunc(
+                            src32, Type::getIntNTy(ctx.C, storeBits));
       ctx.emitUnderExec([&] { ctx.B.CreateStore(val, addr); });
     } else if (storeDwords == 1) {
       Value *val = ctx.regs.readReg32(ctx.B, stData);
@@ -742,14 +774,15 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
       stData = op.srcReg(1);
     }
     if (storeDwords == 0) {
-      Type *memTy = Type::getIntNTy(ctx.C, storeBits);
       Value *src32 = ctx.regs.readReg32(ctx.B, stData);
-      if (storeHiHalf) {
-        src32 = ctx.B.CreateLShr(src32,
-                                  ConstantInt::get(ctx.i32Ty, 16),
-                                  "d16hi_shift");
-      }
-      Value *val = ctx.B.CreateTrunc(src32, memTy);
+      // See emitD16HiHalfTruncI16's doc block for the shared-helper
+      // rationale; this branch mirrors the GLOBAL_STORE path above
+      // so both FLAT and GLOBAL `_D16_HI` variants graduate through
+      // the same emission shape.
+      Value *val = storeHiHalf
+                      ? emitD16HiHalfTruncI16(ctx, src32)
+                      : ctx.B.CreateTrunc(
+                            src32, Type::getIntNTy(ctx.C, storeBits));
       ctx.emitUnderExec([&] { ctx.B.CreateStore(val, addr); });
     } else if (storeDwords == 1) {
       Value *val = ctx.regs.readReg32(ctx.B, stData);

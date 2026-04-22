@@ -164,6 +164,14 @@ config.fixtures = {
     # positive `lshr 16` + `trunc` pin.
     "global_store_short_d16_hi":
         r"@LIT_FIXTURE_GLOBAL_STORE_SHORT_D16_HI_CO@",
+    # flat_store_short_d16_hi — addrspace-symmetric sibling.  Both
+    # GLOBAL and FLAT `_D16_HI` stores route through the same
+    # `emitD16HiHalfTruncI16` helper in handle_flat.cpp; this
+    # fixture surfaces any regression that breaks ONLY one of the
+    # two branches (e.g. a future refactor that adds a condition
+    # gate specific to GLOBAL_STORE_*).
+    "flat_store_short_d16_hi":
+        r"@LIT_FIXTURE_FLAT_STORE_SHORT_D16_HI_CO@",
     "c2_ds_swizzle": r"@LIT_FIXTURE_C2_DS_SWIZZLE_CO@",
     "c2_ds_swizzle_unsafe": r"@LIT_FIXTURE_C2_DS_SWIZZLE_UNSAFE_CO@",
     "c2_ds_swizzle_fft_reserved":

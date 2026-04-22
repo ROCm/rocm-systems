@@ -38,13 +38,17 @@
 ; CHECK-LABEL: define amdgpu_kernel void @global_store_short_d16_hi_kernel(
 
 ; The defining lift pattern: lshr-16 then trunc-to-i16 with the
-; canonical breadcrumb value-name `d16hi_shift` on the lshr.
+; canonical breadcrumb value-names `d16hi_shift` on the lshr and
+; `d16hi_trunc` on the trunc (both set by the shared
+; `emitD16HiHalfTruncI16` helper in handle_flat.cpp, which both
+; `GLOBAL_STORE_SHORT_D16_HI` and `FLAT_STORE_SHORT_D16_HI` route
+; through).  Depending on them pins the helper's shape end-to-end.
 ; CHECK-DAG: %d16hi_shift = lshr i32 %{{.+}}, 16
-; CHECK-DAG: trunc i32 %d16hi_shift to i16
+; CHECK-DAG: %d16hi_trunc = trunc i32 %d16hi_shift to i16
 
 ; The store is i16-wide and lands in addrspace(1) (global).
-; CHECK: store i16 %{{.+}}, ptr addrspace(1) %{{[^,]+}}
+; CHECK: store i16 %d16hi_trunc, ptr addrspace(1) %{{[^,]+}}
 
 ; No full-dword or byte store to global for this instruction.
-; CHECK-NOT: store i32 %{{.+}}, ptr addrspace(1) %
-; CHECK-NOT: store i8 %{{.+}}, ptr addrspace(1) %
+; CHECK-NOT: store i32 %d16hi_trunc, ptr addrspace(1) %
+; CHECK-NOT: store i8 %d16hi_trunc, ptr addrspace(1) %
