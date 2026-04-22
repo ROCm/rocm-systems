@@ -180,7 +180,6 @@ set(TEST_SRC
     hipPointerGetAttribute.cc
     hipDrvPtrGetAttributes.cc
     hipMemPrefetchAsync.cc
-    hipMemPrefetchBatchAsync.cc
     hipMemGetInfo.cc
     hipFree.cc
     hipFreeArray.cc
@@ -198,9 +197,7 @@ set(TEST_SRC
     hipMemGetAddressRange.cc
     hipMallocMipmappedArray.cc
     hipFreeMipmappedArray.cc
-    hipHostAlloc.cc
-    hipMemSetMemPool.cc
-    hipMemGetMemPool.cc)
+    hipHostAlloc.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC

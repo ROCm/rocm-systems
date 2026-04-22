@@ -2,18 +2,25 @@
 #
 # SPDX-License-Identifier: MIT
 
+# Allow ROCM_INSTALL_PATH to be supplied via the environment (e.g. by a
+# developer setup script) in addition to -DROCM_INSTALL_PATH on the CMake
+# command line.
+if(NOT ROCM_INSTALL_PATH AND DEFINED ENV{ROCM_INSTALL_PATH})
+  set(ROCM_INSTALL_PATH "$ENV{ROCM_INSTALL_PATH}")
+endif()
+
 if (AMD_COMPUTE_WIN)
   find_path(AMD_HSA_INCLUDE_DIR hsa.h
     PATHS
       ${ROCCLR_SRC_DIR}/../../rocr-runtime/runtime/hsa-runtime/inc
       ${ROCCLR_SRC_DIR}/../../rocr-runtime/runtime/hsa-runtime
-      ${CMAKE_CURRENT_BINARY_DIR}/../../rocr/inc
-      ${CMAKE_CURRENT_BINARY_DIR}/../../rocr
-      ${CMAKE_CURRENT_BINARY_DIR}/../..
-      ${CMAKE_CURRENT_BINARY_DIR}/..
-      ${CMAKE_CURRENT_BINARY_DIR}
-      ${ROCM_PATH}
       ${ROCM_INSTALL_PATH}
+      /opt/rocm
+      ${CMAKE_CURRENT_BINARY_DIR}
+    PATHS
+      ${CMAKE_CURRENT_BINARY_DIR}/..
+      ${CMAKE_CURRENT_BINARY_DIR}/../..
+      ${CMAKE_CURRENT_BINARY_DIR}/../../rocr
     PATH_SUFFIXES
       include
       include/hsa
@@ -43,17 +50,30 @@ else()
   if(UNIX)
     find_package(hsa-runtime64 1.11 REQUIRED CONFIG
       PATHS
-        ${ROCM_PATH}
         ${ROCM_INSTALL_PATH}
+        /opt/rocm/
       PATH_SUFFIXES
         cmake/hsa-runtime64
         lib/cmake/hsa-runtime64
         lib64/cmake/hsa-runtime64)
+
+    # Ensure HSA headers from the package we just resolved are searched
+    # BEFORE any other -isystem path contributed by transitively-linked
+    # dependencies (e.g. amd_comgr / rocprofiler-register at /opt/rocm),
+    # otherwise /opt/rocm/include/hsa/hsa.h will shadow the one shipped
+    # alongside hsa-runtime64.
+    get_target_property(_hsa_interface_includes
+      hsa-runtime64::hsa-runtime64 INTERFACE_INCLUDE_DIRECTORIES)
+    if(_hsa_interface_includes)
+      target_include_directories(rocclr SYSTEM BEFORE PUBLIC
+        ${_hsa_interface_includes})
+    endif()
+    unset(_hsa_interface_includes)
   else()
     find_package(hsa-runtime64 1.11 REQUIRED CONFIG
       PATHS
-        ${ROCM_PATH}
         ${ROCM_INSTALL_PATH}
+        /opt/rocm/
         ${CMAKE_CURRENT_BINARY_DIR}
         ${CMAKE_INSTALL_PREFIX}
         ${CMAKE_INSTALL_PREFIX}/..
@@ -67,8 +87,8 @@ else()
     # note: Temporarily for PAL backend build
     find_path(AMD_HSA_INCLUDE_DIR hsa.h
       HINTS
-        ${ROCM_PATH}
         ${ROCM_INSTALL_PATH}
+        /opt/rocm
         ${CMAKE_CURRENT_BINARY_DIR}
       PATHS
         ${CMAKE_CURRENT_BINARY_DIR}/..
