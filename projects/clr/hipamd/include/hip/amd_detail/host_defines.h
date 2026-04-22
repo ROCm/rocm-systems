@@ -182,22 +182,6 @@ template <> struct numeric_limits<char> {
   static constexpr char lowest() noexcept { return min(); }
 };
 
-template <> struct numeric_limits<float> {
-  static constexpr bool is_specialized = true;
-  static constexpr bool is_signed = true;
-  static constexpr float min() noexcept { return __FLT_MIN__; }
-  static constexpr float max() noexcept { return __FLT_MAX__; }
-  static constexpr float lowest() noexcept { return -__FLT_MAX__; }
-};
-
-template <> struct numeric_limits<double> {
-  static constexpr bool is_specialized = true;
-  static constexpr bool is_signed = true;
-  static constexpr double min() noexcept { return __DBL_MIN__; }
-  static constexpr double max() noexcept { return __DBL_MAX__; }
-  static constexpr double lowest() noexcept { return -__DBL_MAX__; }
-};
-
 #undef __HIP_INTERNAL_NUMERIC_LIMITS_SIGNED_INTEGER
 #undef __HIP_INTERNAL_NUMERIC_LIMITS_UNSIGNED_INTEGER
 
