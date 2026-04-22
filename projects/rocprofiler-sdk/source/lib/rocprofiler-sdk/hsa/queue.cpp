@@ -547,7 +547,12 @@ WriteInterceptor(const void* packets,
 
             const bool tracing_only = _packet_data.instrumentation_packets.empty();
 
-            if(!tracing_only || !existing_completion_signal)
+            if(!tracing_only)
+            {
+                _packet_data.pooled_signal =
+                    queue.create_signal(0, &kernel_packet.kernel_dispatch.completion_signal, true);
+            }
+            else if(!existing_completion_signal)
             {
                 _packet_data.pooled_signal =
                     queue.create_signal(0, &kernel_packet.kernel_dispatch.completion_signal, true);
