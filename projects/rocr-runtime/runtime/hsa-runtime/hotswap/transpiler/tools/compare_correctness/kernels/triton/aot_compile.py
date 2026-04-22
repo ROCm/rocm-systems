@@ -241,6 +241,14 @@ def extract_metadata(co_bytes: bytes, kernel_symbol: str) -> dict:
     )
 
 
+# Pre-launch init policies accepted on output-buffer entries.  The C++
+# side (compare_correctness.cpp::TritonOutputInit) honours these via a
+# per-output hipMemset; see its `TritonOutputInit` enum for the
+# correctness rationale.  Any value outside this tuple is rejected at
+# recipe-validation time rather than sneaking through into the sidecar.
+VALID_OUTPUT_INIT_MODES = ("sentinel", "zero")
+
+
 def validate_recipe(recipe: dict, path: str) -> None:
     required = [
         "name",
@@ -287,6 +295,32 @@ def validate_recipe(recipe: dict, path: str) -> None:
                 f"(got {first_dtype!r} and {b['dtype']!r}); split the "
                 f"recipe or extend tritonCompare in compare_correctness.cpp"
             )
+
+
+def _emit_output_entry(b: dict) -> dict:
+    """Emit a sidecar output record, validating the optional `init` field.
+
+      * "sentinel" (default) - 0xA5 pre-launch fill; unwritten lanes
+        surface as 0xA5A5... in the diff.  Use for kernels whose
+        outputs are written deterministically by the kernel.
+      * "zero" - 0x00 pre-launch fill; required for kernels that write
+        outputs via `tl.atomic_add` / atomic_max / similar RMW
+        primitives that read the initial value.  A sentinel fill would
+        poison the initial value and produce `sentinel + kernel_result`
+        instead of the intended sum.
+
+    Absence of `init` is equivalent to "sentinel" — the harness assumes
+    that default when the sidecar omits the field.
+    """
+    out = {"name": b["name"], "dtype": b["dtype"], "elems": str(b["elems"])}
+    if "init" in b:
+        if b["init"] not in VALID_OUTPUT_INIT_MODES:
+            raise RuntimeError(
+                f"output {b['name']!r} has init={b['init']!r}; "
+                f"must be one of {VALID_OUTPUT_INIT_MODES}"
+            )
+        out["init"] = b["init"]
+    return out
 
 
 def build_recipe(recipe: dict, out_dir: str, kernel_file: str) -> None:
@@ -349,8 +383,7 @@ def build_recipe(recipe: dict, out_dir: str, kernel_file: str) -> None:
             for b in recipe["inputs"]
         ],
         "outputs": [
-            {"name": b["name"], "dtype": b["dtype"], "elems": str(b["elems"])}
-            for b in recipe["outputs"]
+            _emit_output_entry(b) for b in recipe["outputs"]
         ],
         "comparator": {
             "kind": recipe["comparator"]["kind"],

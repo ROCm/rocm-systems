@@ -3681,6 +3681,17 @@ struct TritonComparator {
   double tol = 1e-5;
 };
 
+// Output pre-launch init mode.  Default is Sentinel (0xA5 fill) so any
+// lane the kernel fails to write stays visibly nonsense in the diff.
+// Zero is required for kernels whose outputs are written via
+// `tl.atomic_add` / atomic_max / similar read-modify-write primitives:
+// a 0xA5 pre-fill would poison the initial value and produce
+// `0xA5A5A5A5 + sum` instead of `sum`.  Each recipe's outputs declare
+// their mode explicitly; silently defaulting to Sentinel for a kernel
+// that needs Zero is precisely the class of silent miscompile this
+// field exists to prevent.
+enum class TritonOutputInit { Sentinel, Zero };
+
 struct TritonBufferDesc {
   std::string name;        // must match a signature arg
   std::string dtype;       // "fp16", "bf16", "fp32", "fp64", "i32", "i64"
@@ -3691,6 +3702,9 @@ struct TritonBufferDesc {
   // Outputs: optional per-output comparator override.
   bool hasComparator = false;
   TritonComparator comparator;
+  // Outputs: pre-launch init policy (see TritonOutputInit).  Ignored
+  // for inputs.
+  TritonOutputInit init = TritonOutputInit::Sentinel;
 };
 
 struct TritonRecipe {
@@ -3754,9 +3768,12 @@ struct TritonRecipe {
 // actually handle, and any new dtype triggers a fatal error rather than a
 // silent fallback.
 int dtypeBytes(const std::string &dtype) {
-  if (dtype == "fp16" || dtype == "bf16" || dtype == "i16") return 2;
-  if (dtype == "fp32" || dtype == "i32")                    return 4;
-  if (dtype == "fp64" || dtype == "i64")                    return 8;
+  if (dtype == "fp16" || dtype == "bf16" ||
+      dtype == "i16"  || dtype == "u16")                    return 2;
+  if (dtype == "fp32" ||
+      dtype == "i32"  || dtype == "u32")                    return 4;
+  if (dtype == "fp64" ||
+      dtype == "i64"  || dtype == "u64")                    return 8;
   if (dtype == "i8"   || dtype == "u8")                     return 1;
   die("triton: unsupported dtype %s (extend dtypeBytes when needed)",
       dtype.c_str());
@@ -3867,6 +3884,23 @@ TritonRecipe parseTritonSidecar(const std::string &path) {
           d.hasComparator    = true;
           d.comparator.kind  = c->get("kind").asString();
           d.comparator.tol   = c->get("tol").asDouble();
+        }
+        // Optional per-output pre-launch init mode.  Default:
+        // Sentinel (0xA5).  Explicit "zero" is required for atomic-
+        // add / atomic-max / atomic-min outputs where the kernel
+        // reads the initial value.  Any value other than "sentinel"
+        // / "zero" is a hard error — no silent interpretation.
+        if (const auto *ini = b.find("init")) {
+          const std::string &s = ini->asString();
+          if (s == "sentinel") {
+            d.init = TritonOutputInit::Sentinel;
+          } else if (s == "zero") {
+            d.init = TritonOutputInit::Zero;
+          } else {
+            die("triton sidecar: output %s has init=%s "
+                "(must be 'sentinel' or 'zero')",
+                d.name.c_str(), s.c_str());
+          }
         }
       }
       dst.push_back(std::move(d));
@@ -4216,15 +4250,18 @@ tritonMakeInput(const TritonRecipe &t, int shapeValue) {
       size_t n = sz / 8;
       std::uniform_real_distribution<double> dist(b.rangeLo, b.rangeHi);
       for (size_t i = 0; i < n; ++i) out[i] = dist(rng);
-    } else if (b.dtype == "i32") {
+    } else if (b.dtype == "i32" || b.dtype == "u32") {
       auto *out = reinterpret_cast<int32_t *>(buf.data() + off);
       size_t n = sz / 4;
-      // Full-range signed int32 — masking off the high bits (as an earlier
+      // Full-range 32-bit — masking off the high bits (as an earlier
       // version did) hides any kernel that depends on the sign bit or on
       // the full 32-bit range.  We bit-copy the unsigned 32-bit RNG output
       // into int32 instead of casting because uint32→int32 conversion is
       // implementation-defined when the value exceeds INT32_MAX in C++17;
       // memcpy gives us the unambiguous 2's-complement reinterpretation.
+      // i32 and u32 share the same fill path because the RNG samples the
+      // full 32-bit bit range either way; the kernel interprets the bits
+      // per its declared sig type.
       for (size_t i = 0; i < n; ++i) {
         uint32_t u = static_cast<uint32_t>(rng());
         std::memcpy(&out[i], &u, sizeof(uint32_t));
@@ -4353,9 +4390,21 @@ tritonDispatch(const TritonRecipe &t, hipModule_t mod,
             t.name.c_str(), sa.name.c_str(), slot.size);
 
       void *dptr = guard.alloc(bytes);
-      // Output buffers start at a visible sentinel so unwritten bytes are
-      // obvious in the diff.
-      HIP_ASSERT(hipMemset(dptr, 0xA5, bytes));
+      // Pre-launch fill.  Inputs will be overwritten with the
+      // deterministic host data immediately below, so the initial
+      // fill doesn't matter (we use 0xA5 for consistency and to
+      // catch a missed memcpy loudly).  Outputs honor their per-
+      // buffer `init` mode (Sentinel / Zero).  A kernel that writes
+      // via `tl.atomic_add` declares `init: "zero"` in the recipe
+      // and the kernel sees a clean initial value; one that writes
+      // deterministically declares the Sentinel default and any
+      // missed write surfaces as 0xA5 in the diff.
+      uint8_t fillByte = 0xA5;
+      if (outIdx >= 0 &&
+          t.outputs[outIdx].init == TritonOutputInit::Zero) {
+        fillByte = 0x00;
+      }
+      HIP_ASSERT(hipMemset(dptr, fillByte, bytes));
       if (inIdx >= 0) {
         HIP_ASSERT(hipMemcpy(dptr,
                              inputBlob.data() + inputLayout.offsets[inIdx],
@@ -4811,12 +4860,17 @@ tritonCompare(const TritonRecipe &t,
       const auto *g = reinterpret_cast<const double *>(gp);
       const auto *a = reinterpret_cast<const double *>(ap);
       for (int i = 0; i < ne; ++i) judge(g[i], a[i], i);
-    } else if (out.dtype == "i32") {
-      const auto *g = reinterpret_cast<const int32_t *>(gp);
-      const auto *a = reinterpret_cast<const int32_t *>(ap);
+    } else if (out.dtype == "i32" || out.dtype == "u32") {
+      // Compare as uint32 bit-pattern regardless of i32/u32 sig — the
+      // comparator is bit-exact and two's complement makes the signed
+      // interpretation equivalent for equality tests.
+      const auto *g = reinterpret_cast<const uint32_t *>(gp);
+      const auto *a = reinterpret_cast<const uint32_t *>(ap);
       for (int i = 0; i < ne; ++i)
         if (g[i] != a[i] && bufMismatches++ == 0) {
-          bufFirstIdx = i; bufFirstG = g[i]; bufFirstA = a[i];
+          bufFirstIdx = i;
+          bufFirstG = static_cast<double>(g[i]);
+          bufFirstA = static_cast<double>(a[i]);
           if (bufMaxAbs < 1.0) bufMaxAbs = 1.0;
         }
     } else if (out.dtype == "i64") {

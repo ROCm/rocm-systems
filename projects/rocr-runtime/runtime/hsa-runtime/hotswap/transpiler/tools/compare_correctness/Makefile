@@ -28,7 +28,13 @@ BUNDLER        := $(ROCM)/lib/llvm/bin/clang-offload-bundler
 # the PYTHONPATH entries expose the in-tree triton/python/ sources (which
 # have the AMD backend not present in pip's `triton` package).
 TRITON_VENV       ?= $(HOME)/rocm-systems/triton/.venv
-TRITON_PYTHONPATH ?= $(HOME)/rocm-systems/triton/python:$(HOME)/rocm-systems/triton/third_party/amd/python
+# triton/python is the in-tree `triton` package.  third_party/amd/python
+# has the AMD backend bits the pip-installed Triton lacks.
+# triton/python/triton_kernels is the nested `triton_kernels` library
+# (pyproject.toml-packaged but not installed in the venv); recipes that
+# invoke real GPT-OSS kernels (`sum_bitmatrix_rows_u32.py`,
+# `_topk_forward` wrappers, etc.) import from it.
+TRITON_PYTHONPATH ?= $(HOME)/rocm-systems/triton/python:$(HOME)/rocm-systems/triton/third_party/amd/python:$(HOME)/rocm-systems/triton/python/triton_kernels
 TRITON_PY         := env PYTHONPATH=$(TRITON_PYTHONPATH) $(TRITON_VENV)/bin/python
 
 # Where the smoke_test_compare_transpilers tool's copy of salmon_intercept.cpp lives.
@@ -72,7 +78,9 @@ TRITON_KERNELS := vecadd_f16 corpus_add_fp32 corpus_asin_fp32 \
                   swiglu_fp32 \
                   rope_fp32 \
                   matmul_fp16 \
-                  matmul_fp16_16x16
+                  matmul_fp16_16x16 \
+                  sum_bitmatrix_rows_u32 \
+                  sum_bitmatrix_rows_u32_nw4
 
 # Both KERNELS and TRITON_KERNELS feed the same %.gfx942.co / %.gfx1250.co
 # pattern rules.  If a name appears in both lists, Make's rule-selection is
