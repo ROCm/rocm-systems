@@ -564,7 +564,7 @@ You have access to the following data from the rocpd database:
 - **Architecture**: CDNA 4
 - **Compute Units**: 256 (8 XCDs × 32 CUs per XCD)
 - **SIMDs per CU**: 4
-- **Max Waves per SIMD**: 32 (→ up to 128 waves per CU at ≤16 VGPRs)
+- **Max Waves per SIMD**: 10 (→ up to 40 waves per CU on current ROCm HIP docs)
 - **Peak FP64**: 78.6 TFLOPS
 - **Peak FP32**: 157.3 TFLOPS
 - **Peak FP16/BF16 (matrix)**: 5,033 TFLOPS
@@ -610,7 +610,7 @@ You have access to the following data from the rocpd database:
 - **Architecture**: CDNA 3
 - **Compute Units**: 304 (8 XCDs × 38 CUs per XCD)
 - **SIMDs per CU**: 4
-- **Max Waves per SIMD**: 32 (→ 128 waves per CU maximum at ≤16 VGPRs)
+- **Max Waves per SIMD**: 10 (→ up to 40 waves per CU on current ROCm HIP docs)
 - **Peak FP64**: 81.7 TFLOPS
 - **Peak FP32**: 163.4 TFLOPS
 - **Peak FP16/BF16 (matrix)**: 1,307 TFLOPS
@@ -677,7 +677,7 @@ You have access to the following data from the rocpd database:
 - **Peak FP32**: 61.4 TFLOPS
 - **Memory**: 24 GB GDDR6
 - **Memory Bandwidth**: 960 GB/s
-- **LDS per CU**: 128 KB (doubled vs CDNA3)
+- **LDS per CU**: 64 KB (128 KB per WGP)
 - **Wave Size**: 32 (Wave32 default) or 64 (Wave64 mode)
 - **Note**: RDNA3 supports both Wave32 and Wave64; CDNA GPUs are Wave64-only.
 - **Ridge Point**: ~64 FLOP/Byte (61.4 TFLOPS / 960 GB/s)
@@ -688,7 +688,7 @@ You have access to the following data from the rocpd database:
 - **Peak FP32**: 23.04 TFLOPS
 - **Memory**: 16 GB GDDR6
 - **Memory Bandwidth**: 512 GB/s
-- **LDS per CU**: 128 KB
+- **LDS per CU**: 64 KB (128 KB per WGP)
 - **Wave Size**: 32 (Wave32 default) or 64 (Wave64 mode)
 - **Ridge Point**: ~45 FLOP/Byte (23.04 TFLOPS / 512 GB/s)
 
@@ -828,7 +828,7 @@ These measure **HBM traffic as seen from L2**: L2→HBM reads and L2→HBM write
 |---|---|---|
 | `GRBM_COUNT` | Total GPU clock cycles | Denominator for utilization |
 | `GRBM_GUI_ACTIVE` | Cycles GPU pipeline active | `GPU util = GRBM_GUI_ACTIVE / GRBM_COUNT` |
-| `SQ_WAVES` | Cumulative wavefront dispatches (not instantaneous) | `Avg waves/CU ≈ SQ_WAVES / GRBM_COUNT` (time-averaged occupancy; max ~32 on CDNA3) |
+| `SQ_WAVES` | Cumulative wavefront dispatches (not instantaneous) | `Avg waves/CU ≈ SQ_WAVES / GRBM_COUNT` (time-averaged occupancy; max ~40 on current gfx942/gfx950 docs) |
 | `FETCH_SIZE` | KiB fetched from HBM (derived from TCC) | Read BW = `FETCH_SIZE × 1024 / duration_ns` GB/s |
 | `WRITE_SIZE` | KiB written to HBM (derived from TCC) | Write BW = `WRITE_SIZE × 1024 / duration_ns` GB/s |
 | `TCC_HIT[n]` | L2 cache hits | L2 hit rate = `TCC_HIT / (TCC_HIT + TCC_MISS)` |
@@ -871,13 +871,13 @@ average concurrent waves per CU over the active period:
 ```
 Avg waves/CU ≈ SQ_WAVES / GRBM_COUNT
 
-Max waves per EU (SIMD): 8 for CDNA1/CDNA2 (MI100/MI200), 32 for CDNA3/CDNA4 (MI300+)
-Theoretical max waves per CU (CDNA3): 32 waves/EU × 4 EUs = up to 128 waves per CU
+Max waves per EU (SIMD): 8 for CDNA2 MI200, 10 for current CDNA3/CDNA4 ROCm HIP docs
+Theoretical max waves per CU (CDNA3/CDNA4): 10 waves/EU × 4 EUs = up to 40 waves per CU
 
 Occupancy % = (Avg waves/CU / theoretical_max_waves_per_CU) * 100%
-            = (SQ_WAVES / GRBM_COUNT) / 128 * 100%   [CDNA3]
+            = (SQ_WAVES / GRBM_COUNT) / 40 * 100%   [gfx942/gfx950]
 
-Note: values of SQ_WAVES / GRBM_COUNT above 128 indicate a measurement or units error.
+Note: values of SQ_WAVES / GRBM_COUNT above 40 on gfx942/gfx950 indicate a measurement or units error.
 
 < 25%  → Very low occupancy; VGPRs or LDS likely too high. High priority fix.
 25–50% → Low-medium occupancy; room for improvement.
@@ -885,9 +885,9 @@ Note: values of SQ_WAVES / GRBM_COUNT above 128 indicate a measurement or units 
 > 75%  → Good occupancy; diminishing returns from further improvement.
 ```
 
-**CDNA3 occupancy interpretation note**: With 32 waves per EU × 4 EUs = 128 theoretical max,
-full occupancy requires very low VGPR counts (≤16 per work-item). In practice, occupancy of
-8–16 waves per EU (25–50%) is typical for production kernels and may still be near-optimal
+**CDNA3 occupancy interpretation note**: With 10 waves per EU × 4 EUs = 40 theoretical max,
+full occupancy still requires very low VGPR counts (≤16 per work-item). In practice, occupancy of
+8–16 waves per CU (20–40%) is typical for production kernels and may still be near-optimal
 if memory latency is well hidden.
 
 ---
@@ -2077,7 +2077,7 @@ error: use of undeclared identifier '__builtin_amdgcn_sin'
 variant. The standard math functions are already the correct choice.
 
 ❌ **Always Flag Implausible Metric Values — Never Silently Accept Them**
-- If profiling data shows GPU utilization > 100%, memory bandwidth exceeding the GPU's theoretical peak (see Hardware Specifications), negative durations, or wave occupancy > 32 waves/CU (CDNA3), flag this explicitly as a likely measurement artifact or data issue
+- If profiling data shows GPU utilization > 100%, memory bandwidth exceeding the GPU's theoretical peak (see Hardware Specifications), negative durations, or wave occupancy > 40 waves/CU on gfx942/gfx950, flag this explicitly as a likely measurement artifact or data issue
 - Example: "The reported bandwidth of 12 TB/s exceeds MI300X's peak of 5.3 TB/s; this value appears to be a measurement artifact and should not be used for bottleneck classification."
 - Do not base recommendations on implausible values
 
@@ -2110,10 +2110,10 @@ variant. The standard math functions are already the correct choice.
 
 3. **Identify Root Causes**:
    - Memory-bound: low arithmetic intensity or poor data reuse
-   - Low occupancy: 128 VGPRs limit to 16 waves/CU (target: ≤ 64 for 32 waves/CU)
+   - Low occupancy: 128 VGPRs limit to 16 waves/CU (target: ≤ 64 for 40 waves/CU)
 
 4. **Generate Recommendations**:
-   - **High Priority**: Reduce VGPR usage to ≤ 64 to enable 32 waves/CU
+   - **High Priority**: Reduce VGPR usage to ≤ 64 to enable 40 waves/CU
    - **High Priority**: Tile data into LDS to increase arithmetic intensity
    - **Medium Priority**: Coalesce global memory accesses
 
