@@ -474,7 +474,6 @@ static struct tuningModel tuning_model_7 {
   },
 };
 
-
 static struct tuningModel tuning_model_8 {
   .hwLat = {
     /* NVLINK */
@@ -552,13 +551,13 @@ static struct tuningModel tuning_model_9 {
     /*ReduceScatter*/
     {/*LL (min/max/factor/thread_threshold)*/ {0, 8192, 1, 16}, /*LL64/128 (min/max/factor/thread_threshold)*/ {8192, 8192, 1, 64}},
     /*AllGather*/
-    {/*LL (min/max/factor/thread_threshold)*/ {0, 8192,  1, 16}, /*LL64/128 (min/max/factor/thread_threshold)*/ {8192, 8192, 1, 64}},
+    {/*LL (min/max/factor/thread_threshold)*/ {0, 4096,  1, 16}, /*LL64/128 (min/max/factor/thread_threshold)*/ {4096, 4096, 1, 64}},
     /*AllReduce*/
-    {/*LL (min/max/factor/thread_threshold)*/ {0, 16384, 1, 0},/*LL64/128 (min/max/factor/thread_threshold)*/ {16384, 16384, 1, 0}},
+    {/*LL (min/max/factor/thread_threshold)*/ {0, 8192, 1, 0},/*LL64/128 (min/max/factor/thread_threshold)*/ {8192, 8192, 1, 0}},
     /*Reduce*/
     {/*LL (min/max/factor/thread_threshold)*/ {0, 4096, 1, 0},/*LL64/128 (min/max/factor/thread_threshold)*/ {4096, 4096, 1, 0}},
     /*Broadcast*/
-    {/*LL (min/max/factor/thread_threshold)*/ {0, 16384, 1, 0},/*LL64/128 (min/max/factor/thread_threshold)*/ {16384, 16384, 1, 0}},
+    {/*LL (min/max/factor/thread_threshold)*/ {0, 8192, 1, 0},/*LL64/128 (min/max/factor/thread_threshold)*/ {8192, 8192, 1, 0}},
   },
 
     .channelThresholds  = {
@@ -1122,7 +1121,6 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
 #endif
   // Tree pipelining saves latency in aggregation cases
   int latCount = algorithm == NCCL_ALGO_RING ? numPipeOps : DIVUP(numPipeOps, NCCL_MAX_DEV_WORK_BATCH_COLLS);
-  INFO(NCCL_INIT, "Lat count:%d",latCount);
   *time = lat * latCount + nBytes / (1000 * bw);
   return ncclSuccess;
 }
