@@ -3,6 +3,7 @@
 
 #include "SIDefines.h" // AMDGPU::Hwreg::Id
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -57,7 +58,62 @@ namespace transpiler {
 // principled fail-closed choice. A future ISA adding a new load-
 // bearing register is trapped loudly instead of silently miscompiling.
 enum class HwregRead { Zero, Abort };
-enum class HwregWrite { Drop, WarnDrop, Abort };
+enum class HwregWrite {
+  // Discard silently.  For ids whose state the transpiler does not
+  // lift (diagnostic / perf / status); dropping is a no-op.
+  Drop,
+  // Discard but stderr-warn.  Legacy policy for cases where the
+  // write COULD matter but refusing would break existing tests.
+  // Prefer `Preserve` for new uses so MODE-sensitive kernels
+  // lift faithfully; prefer `Abort` for cases the lifter can't
+  // faithfully reproduce.  Kept for `Drop`-but-louder opcodes we
+  // don't want to land as pure `Drop` yet.
+  WarnDrop,
+  // Faithfully re-emit the write via `@llvm.amdgcn.s.setreg` with
+  // the exact same simm16 + value.  The backend lowers this 1:1 to
+  // `s_setreg_imm32_b32 <same simm16>, <same value>` on the target.
+  // Correct when (a) the bit position is architecturally stable
+  // across source and target ISAs, and (b) the bit's effect on
+  // compute is cross-architecturally equivalent (not a "rounding-
+  // mode-on-gfx1250 / clamp-on-gfx942" kind of repurpose).
+  //
+  // Why faithful lift is preferred over `WarnDrop` even when the
+  // specific bit Triton writes is observationally harmless on
+  // gfx942:
+  //
+  //   * The `WarnDrop` policy is a silent-fallback-shaped default
+  //     that the project's "fail loud" rule (`AGENTS.md`) explicitly
+  //     flags as latent-miscompile territory for any FP-mode-
+  //     sensitive downstream compute.  The comment block this enum
+  //     replaces acknowledged the risk ("Tightening to Abort is a
+  //     follow-up"); `Preserve` closes that gap in the correct
+  //     direction (ABI-faithful) rather than by refusal.
+  //   * If the source kernel's MODE bit is equivalent across ISAs
+  //     (the common case for bits 0..22 — standard FP round /
+  //     denormal / IEEE, unchanged since gfx8), `Preserve` produces
+  //     byte-exact behaviour versus dropping.
+  //   * If the bit is gfx-generation-specific (bits 23+ — FP16_OVFL
+  //     and gfx12 additions), `Preserve` writes to the target's
+  //     bit position; the target hardware's interpretation is
+  //     authoritative.  If a kernel later surfaces as WRONG
+  //     because of a bit-23+ repurpose, that is a NEW data point
+  //     that justifies per-bit gating rather than reverting to a
+  //     silent drop.
+  //
+  // Not a fix for any currently-known miscompile.  The
+  // `topk_forward_bf16` silent miscompile flagged in commit
+  // `7507185094` WAS empirically checked under `Preserve`: output
+  // unchanged (gfx942's MODE bit 25 is a no-op for Triton's softmax
+  // path at this shape; the bug is elsewhere — see the
+  // `topk_forward_bisect_*` recipes landed alongside this change
+  // for the ongoing triage).  `Preserve` is a principled-improvement
+  // change, independent of that triage.
+  Preserve,
+  // Refuse to lower.  Used for writes we cannot faithfully
+  // reproduce (FLAT aperture bases, trap handler, XNACK retry) or
+  // for unknown HWREG ids.
+  Abort,
+};
 
 struct HwregPolicy {
   HwregRead read;
@@ -79,21 +135,20 @@ static HwregPolicy classifyHwreg(unsigned id) {
   case ID_XNACK_MASK:
     return {HwregRead::Abort, HwregWrite::Abort};
 
-  // --- MODE: read zero, write warn-and-drop -------------------------------
+  // --- MODE: read zero, write PRESERVE via llvm.amdgcn.s.setreg -----------
   // Reading MODE as 0 returns the architectural default (IEEE, round-
-  // to-nearest-even, no FP exception flags, no FTZ). Writing MODE
+  // to-nearest-even, no FP exception flags, no FTZ).  Writing MODE
   // mutates FP rounding / FTZ / clamp / IEEE / various graphics-
-  // context bits. HIP-compiled compute kernels routinely emit
-  // `s_setreg_imm32_b32 mode(offset, size), imm` as part of their
-  // prologue (e.g. setting bit 25 to 1) where `offset` and `size`
-  // target bits whose effect on downstream compute is practically
-  // nil for the inputs tests use. Aborting on these would block the
-  // current cross-wave regression corpus; silently dropping would be
-  // a hidden latent miscompile for FP-mode-sensitive kernels. Emit a
-  // loud warning and continue, matching the cross-wave warn-only
-  // policy in raiser.cpp. Tightening to Abort is a follow-up.
+  // context bits.  HIP-compiled and Triton-compiled compute kernels
+  // routinely emit `s_setreg_imm32_b32 mode(offset, size), imm` in
+  // their prologue to pin FP mode — e.g. Triton's MoE-router
+  // `_topk_forward` writes `hwreg(MODE, 25, 1), 1`.  The previous
+  // `WarnDrop` policy silently discarded these writes; `Preserve`
+  // is the faithful lift path.  See the `HwregWrite::Preserve`
+  // enum-variant comment for the full rationale and the
+  // principled-vs-silent-fallback argument.
   case ID_MODE:
-    return {HwregRead::Zero, HwregWrite::WarnDrop};
+    return {HwregRead::Zero, HwregWrite::Preserve};
 
   // --- Trap handler bases: read-as-zero, write-abort -----------------------
   // TBA_LO/HI and TMA_LO/HI set the trap-handler base / trap-memory
@@ -305,6 +360,45 @@ HandlerResult handleSOPK(RaiseContext &ctx, const DecodedInst &di,
                 "change compute semantics (FLAT aperture, trap handler, "
                 "XNACK retry, …) that subsequent lifted instructions "
                 "rely on.\n";
+      return hr;
+    }
+    if (policy.write == HwregWrite::Preserve) {
+      // Re-emit the write via `@llvm.amdgcn.s.setreg(i32 immarg
+      // hwmode, i32 value)` so the target backend lowers it to
+      // `s_setreg_imm32_b32 <same simm16>, <same value>` byte-for-
+      // byte.  The simm16 IS an ImmArg on the intrinsic declaration,
+      // so we must pass it as a `ConstantInt`.  The value operand
+      // differs by opcode: S_SETREG_IMM32_B32 has the value as an
+      // immediate at MCInst op 0 (`imm` in the TableGen `ins`
+      // ordering); S_SETREG_B32 has the value in a scalar register
+      // at MCInst op 0 (`sdst`), which we read through `op.src(0)`.
+      int64_t simm16 = di.getImm(simm16OpIdx);
+      Value *valArg = nullptr;
+      if (sop == SemOp::S_SETREG_IMM32_B32) {
+        // MCInst operand 0 is the i32 immediate value; the simm16 is
+        // at op 1.  Read the immediate directly; DO NOT go through
+        // op.src(0) because that reads SGPR contents, not an
+        // immediate operand.
+        if (di.numOps() < 2 || !di.isImm(0)) {
+          errs() << "transpiler: " << di.mnemonic
+                 << " has unexpected operand layout (value not "
+                    "immediate at op 0) — refusing to lower.\n";
+          return hr;
+        }
+        valArg = ConstantInt::get(ctx.i32Ty, di.getImm(0));
+      } else {
+        // S_SETREG_B32: value is an SGPR at MCInst op 0.  Reading
+        // through op.src(0) returns the SSA i32 for that SGPR's
+        // current value, which is exactly what we need to pass.
+        valArg = op.src(0);
+        if (valArg->getType() != ctx.i32Ty)
+          valArg = ctx.B.CreateBitOrPointerCast(valArg, ctx.i32Ty);
+      }
+      Function *setregFn = Intrinsic::getOrInsertDeclaration(
+          &ctx.M, Intrinsic::amdgcn_s_setreg);
+      ctx.B.CreateCall(setregFn,
+                       {ConstantInt::get(ctx.i32Ty, simm16), valArg});
+      hr.handled = true;
       return hr;
     }
     if (policy.write == HwregWrite::WarnDrop) {
