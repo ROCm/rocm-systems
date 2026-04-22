@@ -51,13 +51,13 @@ void negotiateHipAqlmonCompletionSignals(rocprofiler_register_tool_activation_mo
                                          void*) {
   auto request = aqlmon_runtime_negotiation_request_t{};
   request.size = sizeof(request);
-  request.abi_version = AQLMON_RUNTIME_NEGOTIATION_ABI_VERSION;
+  request.abi_version = AQLMON_RUNTIME_CONTRACT_ABI_VERSION;
   request.proposed_mode = AQLMON_COMPLETION_SIGNAL_MODE_RUNTIME_PROVIDED;
   request.proposed_capabilities = kHipAqlmonRequestedCapabilities;
 
   auto response = aqlmon_runtime_negotiation_response_t{};
   response.size = sizeof(response);
-  response.abi_version = AQLMON_RUNTIME_NEGOTIATION_ABI_VERSION;
+  response.abi_version = AQLMON_RUNTIME_CONTRACT_ABI_VERSION;
 
   const auto status = aqlmon_runtime_negotiate(&request, &response);
   const bool runtime_provided =

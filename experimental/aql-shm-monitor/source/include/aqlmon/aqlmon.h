@@ -11,7 +11,11 @@ extern "C" {
 #endif
 
 #define AQLMON_MAGIC UINT64_C(0x4145514c4d4f4e31)
-#define AQLMON_VERSION UINT32_C(3)
+
+// Shared-memory record-stream format version.
+// Bump this when aqlmon_shm_header_t or aqlmon_record_t layout changes incompatibly.
+#define AQLMON_SHM_VERSION UINT32_C(3)
+#define AQLMON_VERSION AQLMON_SHM_VERSION
 #define AQLMON_MAX_SHM_NAME 64
 #define AQLMON_MAX_KERNEL_NAME 64
 #define AQLMON_MAX_CODE_OBJECT_URI 192

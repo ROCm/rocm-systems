@@ -44,6 +44,7 @@
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/aqlmon_receiver.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/ompt.hpp"
@@ -983,6 +984,7 @@ finalize()
         hsa::async_copy_fini();
         counters::device_counting_service_finalize();
         hsa::queue_controller_fini();
+        kernel_dispatch::aqlmon_receiver_finalize();
         thread_trace::finalize();
         ompt::finalize_ompt();
         kfd::finalize();

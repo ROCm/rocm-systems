@@ -6,12 +6,6 @@
 
 #include "aqlmon/runtime_contract.h"
 
-#if defined(__GNUC__)
-#define AQLMON_RUNTIME_CONTRACT_CPP_EXPORT __attribute__((visibility("default")))
-#else
-#define AQLMON_RUNTIME_CONTRACT_CPP_EXPORT
-#endif
-
 namespace aqlmon::runtime_contract {
 
 struct NegotiationSnapshot {
@@ -21,13 +15,13 @@ struct NegotiationSnapshot {
       AQLMON_COMPLETION_SIGNAL_MODE_MONITOR_PROVIDED;
   uint32_t granted_capabilities = 0;
   uint32_t abi_version = AQLMON_RUNTIME_NEGOTIATION_ABI_VERSION;
+  uint32_t api_version = AQLMON_RUNTIME_CONTRACT_API_VERSION;
 };
 
-AQLMON_RUNTIME_CONTRACT_CPP_EXPORT
 aqlmon_completion_signal_mode_t effective_completion_signal_mode();
 
-}  // namespace aqlmon::runtime_contract
+uint32_t effective_completion_signal_capabilities();
 
-#undef AQLMON_RUNTIME_CONTRACT_CPP_EXPORT
+}  // namespace aqlmon::runtime_contract
 
 #endif

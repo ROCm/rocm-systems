@@ -1166,13 +1166,10 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
 
     if(existing_scanned_data.attach_fn == nullptr) return ROCP_REG_NO_TOOLS;
 
-    notify_runtime_tool_activation(ROCP_REG_TOOL_ACTIVATION_ATTACH);
-
     LOG(INFO) << "rocprofiler-sdk attach starting...";
+    notify_runtime_tool_activation(ROCP_REG_TOOL_ACTIVATION_ATTACH);
     auto _ret = existing_scanned_data.attach_fn();
-
     LOG(INFO) << "rocprofiler-sdk attach completed.";
-
     return (_ret == 0) ? ROCP_REG_SUCCESS : ROCP_REG_ROCPROFILER_ERROR;
 }
 

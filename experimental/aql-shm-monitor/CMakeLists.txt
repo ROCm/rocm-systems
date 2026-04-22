@@ -16,11 +16,19 @@ include(GNUInstallDirs)
 
 find_package(Threads REQUIRED)
 
+set(AQLMON_RUNTIME_CONTRACT_API_VERSION 3)
+set(AQLMON_RUNTIME_CONTRACT_ABI_VERSION 2)
+
 set(ROCR_INC_DIR
     "${CMAKE_CURRENT_SOURCE_DIR}/../../projects/rocr-runtime/runtime/hsa-runtime/inc")
 
 add_library(aqlmon_runtime_contract SHARED
     source/lib/runtime_contract/runtime_contract.cpp
+)
+
+set_target_properties(aqlmon_runtime_contract PROPERTIES
+    VERSION ${AQLMON_RUNTIME_CONTRACT_API_VERSION}.0.0
+    SOVERSION ${AQLMON_RUNTIME_CONTRACT_ABI_VERSION}
 )
 
 target_include_directories(aqlmon_runtime_contract
@@ -32,6 +40,11 @@ target_compile_options(aqlmon_runtime_contract PRIVATE
     -Wall
     -Wextra
     -Wpedantic
+)
+
+target_link_options(aqlmon_runtime_contract PRIVATE
+    "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/source/lib/runtime_contract/runtime_contract.map"
+    "-Wl,--no-undefined-version"
 )
 
 add_library(aql_shm_monitor SHARED
@@ -51,6 +64,11 @@ target_link_libraries(aql_shm_monitor
         Threads::Threads
         dl
         rt
+)
+
+target_link_options(aql_shm_monitor PRIVATE
+    "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/source/lib/aqlmon/aqlmon.map"
+    "-Wl,--no-undefined-version"
 )
 
 target_compile_options(aql_shm_monitor PRIVATE

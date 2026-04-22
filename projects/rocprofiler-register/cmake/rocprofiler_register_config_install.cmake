@@ -54,10 +54,15 @@ configure_package_config_file(
     INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX}
     PATH_VARS PROJECT_INSTALL_DIR INCLUDE_INSTALL_DIR LIB_INSTALL_DIR)
 
+set(_rocp_reg_version_compatibility SameMajorVersion)
+if(PROJECT_VERSION_MAJOR EQUAL 0)
+    set(_rocp_reg_version_compatibility SameMinorVersion)
+endif()
+
 write_basic_package_version_file(
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${PROJECT_NAME}-config-version.cmake
     VERSION ${PROJECT_VERSION}
-    COMPATIBILITY AnyNewerVersion)
+    COMPATIBILITY ${_rocp_reg_version_compatibility})
 
 install(
     FILES

@@ -19,6 +19,14 @@ The target design is driven by four constraints:
 This document describes the full target design for the draft PR. The current branch implements only
 the first slice of that design.
 
+Current validated slice:
+
+- `rocprofiler-sdk` can consume the AQLMON shm stream for kernel-dispatch tracing
+- runtime-owned mode works for plain launches
+- monitor-owned mode works for plain launches and the validated GraphBench process-launch case
+- counter collection remains on the existing queue-intercept path
+- mixed counter sessions are not yet supported with AQLMON queue shadow enabled
+
 ## Design Summary
 
 The design introduces a new linked library layer named `AQLMON`.
@@ -142,7 +150,8 @@ This design explicitly does not do any of the following:
 - no packet copy to a second queue ring
 - no queue packet move
 - no synthetic packet buffer for the common path
-- no broad queue interception that changes the packet ring memory itself
+- no packet-ring replacement or queue-ring copy
+- producer-side queue API interposition is still used to shadow the write pointer and doorbell
 
 The only delayed publication mechanism is the shadow write-pointer approach.
 
@@ -333,6 +342,10 @@ What exists now:
 - HIP/CLR as the first runtime example
 - a per-kernel fast-path bit in HIP/ROCclr to request runtime-provided completion signals
 - the current preload monitor consuming that POC mode decision
+- a `rocprofiler-sdk` shm receiver that becomes authoritative only after the shm path is
+  operational, while the legacy queue path remains available as fallback
+- mixed sessions that request counter collection keep kernel-dispatch tracing on the old
+  queue-intercept path instead of using AQLMON
 
 What still remains to reach the full design:
 

@@ -263,10 +263,9 @@ rocprofiler_register_runtime_tool_activation_callback(
 /// @brief Helper macro for users to generate versioning int expected by
 /// rocprofiler-register when the library maintains a major, minor, patch, and tweak
 /// version numbers
-#define ROCPROFILER_REGISTER_COMPUTE_VERSION_3(                                          \
-    MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION)                                         \
-    (ROCPROFILER_REGISTER_COMPUTE_VERSION_2(MAJOR_VERSION, MINOR_VERSION) +              \
-     (PATCH_VERSION))
+#define ROCPROFILER_REGISTER_COMPUTE_VERSION_4(                                          \
+    MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION, TWEAK_VERSION)                          \
+    (ROCPROFILER_REGISTER_COMPUTE_VERSION_3(MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION))
 
 /// @def ROCPROFILER_REGISTER_IMPORT_FUNC(NAME)
 /// @param[in] NAME the string identifier for the library

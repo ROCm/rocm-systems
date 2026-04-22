@@ -8,11 +8,17 @@
 #include <cstdlib>
 #include <cstring>
 #include <strings.h>
+#include <type_traits>
 
 namespace {
 
 constexpr uint32_t kKnownCapabilities =
     AQLMON_COMPLETION_SIGNAL_CAP_KERNEL_DISPATCH_SIGNALS;
+
+constexpr uint32_t kRuntimeProvidedMode =
+    static_cast<uint32_t>(AQLMON_COMPLETION_SIGNAL_MODE_RUNTIME_PROVIDED);
+constexpr uint32_t kMonitorProvidedMode =
+    static_cast<uint32_t>(AQLMON_COMPLETION_SIGNAL_MODE_MONITOR_PROVIDED);
 
 bool has_struct_bytes(uint64_t size, size_t offset, size_t field_size) {
   return size >= (offset + field_size);
@@ -33,6 +39,15 @@ bool response_has_required_fields(const aqlmon_runtime_negotiation_response_t& r
          has_struct_bytes(
              response.size, offsetof(aqlmon_runtime_negotiation_response_t, granted_capabilities),
              sizeof(response.granted_capabilities));
+}
+
+bool is_valid_completion_signal_mode(uint32_t mode) {
+  return mode == kRuntimeProvidedMode || mode == kMonitorProvidedMode;
+}
+
+aqlmon_completion_signal_mode_t to_completion_signal_mode(uint32_t mode) {
+  return (mode == kRuntimeProvidedMode) ? AQLMON_COMPLETION_SIGNAL_MODE_RUNTIME_PROVIDED
+                                        : AQLMON_COMPLETION_SIGNAL_MODE_MONITOR_PROVIDED;
 }
 
 enum class CompletionSignalPolicy {
@@ -79,9 +94,7 @@ std::atomic<uint32_t>& negotiation_status() {
 aqlmon_completion_signal_mode_t load_completion_signal_mode(
     const std::atomic<uint32_t>& value) {
   const uint32_t raw = value.load(std::memory_order_acquire);
-  return (raw == AQLMON_COMPLETION_SIGNAL_MODE_RUNTIME_PROVIDED)
-             ? AQLMON_COMPLETION_SIGNAL_MODE_RUNTIME_PROVIDED
-             : AQLMON_COMPLETION_SIGNAL_MODE_MONITOR_PROVIDED;
+  return to_completion_signal_mode(raw);
 }
 
 aqlmon::runtime_contract::NegotiationSnapshot snapshot_from_state() {
@@ -92,6 +105,7 @@ aqlmon::runtime_contract::NegotiationSnapshot snapshot_from_state() {
   snapshot.selected_mode = load_completion_signal_mode(selected_completion_signal_mode());
   snapshot.granted_capabilities =
       granted_completion_signal_capabilities().load(std::memory_order_acquire);
+  snapshot.api_version = AQLMON_RUNTIME_CONTRACT_API_VERSION;
   return snapshot;
 }
 
@@ -116,15 +130,23 @@ void write_response(
                       sizeof(response->reserved))) {
     response->reserved = 0;
   }
+  if(has_struct_bytes(response->size, offsetof(aqlmon_runtime_negotiation_response_t, api_version),
+                      sizeof(response->api_version))) {
+    response->api_version = snapshot.api_version;
+  }
   if(has_struct_bytes(response->size,
                       offsetof(aqlmon_runtime_negotiation_response_t, selected_mode),
                       sizeof(response->selected_mode))) {
-    response->selected_mode = snapshot.selected_mode;
+    response->selected_mode = static_cast<uint32_t>(snapshot.selected_mode);
   }
   if(has_struct_bytes(response->size,
                       offsetof(aqlmon_runtime_negotiation_response_t, granted_capabilities),
                       sizeof(response->granted_capabilities))) {
     response->granted_capabilities = snapshot.granted_capabilities;
+  }
+  if(has_struct_bytes(response->size, offsetof(aqlmon_runtime_negotiation_response_t, reserved1),
+                      sizeof(response->reserved1))) {
+    memset(response->reserved1, 0, sizeof(response->reserved1));
   }
 }
 
@@ -136,7 +158,7 @@ aqlmon::runtime_contract::NegotiationSnapshot select_negotiation_result(
   snapshot.granted_capabilities = 0;
   snapshot.status = AQLMON_STATUS_SUCCESS;
 
-  if(request.proposed_mode == AQLMON_COMPLETION_SIGNAL_MODE_MONITOR_PROVIDED) {
+  if(request.proposed_mode == kMonitorProvidedMode) {
     return snapshot;
   }
 
@@ -159,7 +181,9 @@ aqlmon::runtime_contract::NegotiationSnapshot select_negotiation_result(
 aqlmon_status_t status_against_request(
     const aqlmon_runtime_negotiation_request_t& request,
     const aqlmon::runtime_contract::NegotiationSnapshot& snapshot) {
-  if(snapshot.selected_mode != request.proposed_mode) return AQLMON_STATUS_DENIED;
+  if(static_cast<uint32_t>(snapshot.selected_mode) != request.proposed_mode) {
+    return AQLMON_STATUS_DENIED;
+  }
 
   if(snapshot.selected_mode == AQLMON_COMPLETION_SIGNAL_MODE_RUNTIME_PROVIDED) {
     const uint32_t requested_capabilities = request.proposed_capabilities & kKnownCapabilities;
@@ -175,8 +199,19 @@ aqlmon_status_t status_against_request(
 
 namespace aqlmon::runtime_contract {
 
+static_assert(std::is_standard_layout_v<aqlmon_runtime_negotiation_request_t>);
+static_assert(std::is_standard_layout_v<aqlmon_runtime_negotiation_response_t>);
+static_assert(offsetof(aqlmon_runtime_negotiation_request_t, proposed_mode) % alignof(uint32_t) ==
+              0);
+static_assert(offsetof(aqlmon_runtime_negotiation_response_t, selected_mode) % alignof(uint32_t) ==
+              0);
+
 aqlmon_completion_signal_mode_t effective_completion_signal_mode() {
   return load_completion_signal_mode(selected_completion_signal_mode());
+}
+
+uint32_t effective_completion_signal_capabilities() {
+  return granted_completion_signal_capabilities().load(std::memory_order_acquire);
 }
 
 }  // namespace aqlmon::runtime_contract
@@ -188,21 +223,48 @@ aqlmon_completion_signal_mode_t effective_completion_signal_mode() {
 #endif
 
 AQLMON_RUNTIME_CONTRACT_EXPORT uint32_t aqlmon_runtime_contract_version(void) {
-  return AQLMON_RUNTIME_CONTRACT_VERSION;
+  return AQLMON_RUNTIME_CONTRACT_API_VERSION;
+}
+
+AQLMON_RUNTIME_CONTRACT_EXPORT uint32_t aqlmon_runtime_contract_api_version(void) {
+  return AQLMON_RUNTIME_CONTRACT_API_VERSION;
+}
+
+AQLMON_RUNTIME_CONTRACT_EXPORT uint32_t aqlmon_runtime_contract_abi_version(void) {
+  return AQLMON_RUNTIME_CONTRACT_ABI_VERSION;
+}
+
+AQLMON_RUNTIME_CONTRACT_EXPORT aqlmon_completion_signal_mode_t
+aqlmon_runtime_completion_signal_mode(void) {
+  return aqlmon::runtime_contract::effective_completion_signal_mode();
+}
+
+AQLMON_RUNTIME_CONTRACT_EXPORT uint32_t aqlmon_runtime_completion_signal_capabilities(void) {
+  return aqlmon::runtime_contract::effective_completion_signal_capabilities();
 }
 
 AQLMON_RUNTIME_CONTRACT_EXPORT aqlmon_status_t aqlmon_runtime_negotiate(
     const aqlmon_runtime_negotiation_request_t* request,
     aqlmon_runtime_negotiation_response_t* response) {
   if(request == nullptr || response == nullptr) return AQLMON_STATUS_ERROR_INVALID_ARGUMENT;
-  if(request->abi_version != AQLMON_RUNTIME_NEGOTIATION_ABI_VERSION) {
+  const auto supported_snapshot = snapshot_from_state();
+  if(!has_struct_bytes(request->size, offsetof(aqlmon_runtime_negotiation_request_t, abi_version),
+                       sizeof(request->abi_version)) ||
+     !has_struct_bytes(response->size, offsetof(aqlmon_runtime_negotiation_response_t, abi_version),
+                       sizeof(response->abi_version))) {
+    write_response(response, supported_snapshot);
+    return AQLMON_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+  if(request->abi_version != AQLMON_RUNTIME_CONTRACT_ABI_VERSION) {
+    write_response(response, supported_snapshot);
     return AQLMON_STATUS_ERROR_VERSION_MISMATCH;
   }
   if(!request_has_required_fields(*request) || !response_has_required_fields(*response)) {
+    write_response(response, supported_snapshot);
     return AQLMON_STATUS_ERROR_INVALID_ARGUMENT;
   }
-  if(request->proposed_mode != AQLMON_COMPLETION_SIGNAL_MODE_RUNTIME_PROVIDED &&
-     request->proposed_mode != AQLMON_COMPLETION_SIGNAL_MODE_MONITOR_PROVIDED) {
+  if(!is_valid_completion_signal_mode(request->proposed_mode)) {
+    write_response(response, supported_snapshot);
     return AQLMON_STATUS_ERROR_INVALID_ARGUMENT;
   }
 

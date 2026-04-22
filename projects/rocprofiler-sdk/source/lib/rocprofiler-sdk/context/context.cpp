@@ -28,6 +28,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/aqlmon_receiver.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
@@ -337,6 +338,10 @@ start_context(rocprofiler_context_id_t context_id)
     }
 
     auto status = ROCPROFILER_STATUS_SUCCESS;
+
+    if(cfg->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                              ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH))
+        rocprofiler::kernel_dispatch::aqlmon_receiver_start();
 
     if(cfg->dispatch_counter_collection) rocprofiler::counters::start_context(cfg);
     if(cfg->device_thread_trace) cfg->device_thread_trace->start_context();

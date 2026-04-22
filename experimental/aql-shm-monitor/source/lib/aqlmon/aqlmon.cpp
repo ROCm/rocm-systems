@@ -3,7 +3,6 @@
 
 #include "aqlmon/aqlmon.h"
 #include "aqlmon/runtime_contract.h"
-#include "../runtime_contract/runtime_contract.hpp"
 
 #include "amd_hsa_signal.h"
 #include "amd_hsa_queue.h"
@@ -297,6 +296,7 @@ struct QueueState {
   std::atomic<uint64_t> published_wptr{0};
   std::atomic<uint64_t> last_real_rptr{0};
   std::atomic<bool> profiling_enabled{false};
+  std::atomic<bool> intercept_enabled{false};
   std::atomic<bool> active{true};
   std::mutex publish_mutex = {};
   std::vector<SlotState> slots = {};
@@ -332,12 +332,12 @@ class SharedMemoryTrace {
                                                   sizeof(aqlmon_shm_header_t));
 
     std::memset(mapping_, 0, mapping_size_);
-    header_->magic = AQLMON_MAGIC;
     header_->version = AQLMON_VERSION;
     header_->header_size = sizeof(aqlmon_shm_header_t);
     header_->record_size = sizeof(aqlmon_record_t);
     header_->capacity = capacity_;
     std::snprintf(header_->shm_name, sizeof(header_->shm_name), "%s", name_.c_str());
+    __atomic_store_n(&header_->magic, AQLMON_MAGIC, __ATOMIC_RELEASE);
     return true;
   }
 
@@ -376,6 +376,10 @@ using hsa_queue_create_fn_t =
     hsa_status_t (*)(hsa_agent_t, uint32_t, hsa_queue_type32_t,
                      void (*)(hsa_status_t, hsa_queue_t*, void*), void*, uint32_t, uint32_t,
                      hsa_queue_t**);
+using hsa_amd_queue_intercept_create_fn_t =
+    hsa_status_t (*)(hsa_agent_t, uint32_t, hsa_queue_type32_t,
+                     void (*)(hsa_status_t, hsa_queue_t*, void*), void*, uint32_t, uint32_t,
+                     hsa_queue_t**);
 using hsa_shut_down_fn_t = hsa_status_t (*)();
 using hsa_queue_destroy_fn_t = hsa_status_t (*)(hsa_queue_t*);
 using hsa_queue_inactivate_fn_t = hsa_status_t (*)(hsa_queue_t*);
@@ -408,6 +412,7 @@ using hsa_loader_loaded_code_object_get_info_fn_t =
 struct RealApi {
   hsa_shut_down_fn_t shut_down = nullptr;
   hsa_queue_create_fn_t queue_create = nullptr;
+  hsa_amd_queue_intercept_create_fn_t amd_queue_intercept_create = nullptr;
   hsa_queue_destroy_fn_t queue_destroy = nullptr;
   hsa_queue_inactivate_fn_t queue_inactivate = nullptr;
   hsa_queue_load_index_fn_t queue_load_read_index_scacquire = nullptr;
@@ -459,6 +464,8 @@ RealApi& real_api() {
 
     api.shut_down = reinterpret_cast<hsa_shut_down_fn_t>(resolve("hsa_shut_down"));
     api.queue_create = reinterpret_cast<hsa_queue_create_fn_t>(resolve("hsa_queue_create"));
+    api.amd_queue_intercept_create = reinterpret_cast<hsa_amd_queue_intercept_create_fn_t>(
+        resolve("hsa_amd_queue_intercept_create"));
     api.queue_destroy = reinterpret_cast<hsa_queue_destroy_fn_t>(resolve("hsa_queue_destroy"));
     api.queue_inactivate =
         reinterpret_cast<hsa_queue_inactivate_fn_t>(resolve("hsa_queue_inactivate"));
@@ -577,32 +584,37 @@ class Monitor {
   void register_queue(hsa_queue_t* queue, hsa_agent_t agent) {
     if(!enabled_ || queue == nullptr || !queue_shadow_enabled()) return;
 
-    auto* amd_queue = reinterpret_cast<amd_queue_v2_t*>(queue);
-    auto state = std::make_shared<QueueState>(queue, amd_queue, agent);
+    auto state = std::make_shared<QueueState>(queue, nullptr, agent);
 
-    const uint64_t initial_wptr = amd_queue ? load_atomic(&amd_queue->write_dispatch_id) : 0;
-    const uint64_t initial_rptr = amd_queue ? load_atomic(&amd_queue->read_dispatch_id) : 0;
+    const uint64_t initial_wptr = 0;
+    const uint64_t initial_rptr = 0;
     state->shadow_reserved_wptr.store(initial_wptr, std::memory_order_relaxed);
     state->shadow_doorbell_wptr.store(initial_wptr, std::memory_order_relaxed);
     state->published_wptr.store(initial_wptr, std::memory_order_relaxed);
     state->last_real_rptr.store(initial_rptr, std::memory_order_relaxed);
+    state->intercept_enabled.store(true, std::memory_order_release);
 
     {
       std::lock_guard<std::mutex> lk{registry_mutex_};
       queues_[reinterpret_cast<uint64_t>(queue)] = state;
       if(state->real_doorbell.handle != 0) doorbells_[state->real_doorbell.handle] = state;
     }
+
+    if(aqlmon_runtime_completion_signal_mode() ==
+       AQLMON_COMPLETION_SIGNAL_MODE_MONITOR_PROVIDED) {
+      enable_queue_profiling(*state);
+    }
+
     debug_log("register queue=%p id=%llu base=%p size=%u doorbell=0x%llx\n",
               static_cast<void*>(queue), static_cast<unsigned long long>(queue->id),
               queue->base_address, queue->size,
               static_cast<unsigned long long>(state->real_doorbell.handle));
-    enable_queue_profiling(*state);
   }
 
   void retire_queue(hsa_queue_t* queue, const char* reason) {
     if(queue == nullptr) return;
 
-    auto state = lookup_queue(queue);
+    auto state = lookup_queue(queue, false);
     if(!state) {
       debug_log("retire-miss reason=%s queue=%p\n", reason, static_cast<void*>(queue));
       return;
@@ -727,9 +739,10 @@ class Monitor {
   }
 
   void note_queue_profiling_setting(const hsa_queue_t* queue, bool enabled) {
-    auto state = lookup_queue(queue);
+    auto state = lookup_queue(queue, false);
     if(!state) return;
     state->profiling_enabled.store(enabled, std::memory_order_release);
+    if(enabled) state->intercept_enabled.store(true, std::memory_order_release);
   }
 
   bool note_shadow_doorbell(hsa_signal_t signal, hsa_signal_value_t value) {
@@ -837,13 +850,14 @@ class Monitor {
     debug_log("monitor dtor end this=%p\n", static_cast<void*>(this));
   }
 
-  std::shared_ptr<QueueState> lookup_queue(const hsa_queue_t* queue) {
+  std::shared_ptr<QueueState> lookup_queue(const hsa_queue_t* queue, bool require_intercept = true) {
     if(!enabled_ || queue == nullptr || shutting_down_.load(std::memory_order_acquire)) return {};
 
     thread_local const hsa_queue_t* cached_queue = nullptr;
     thread_local std::shared_ptr<QueueState> cached_state = {};
     if(cached_queue == queue && cached_state &&
-       cached_state->active.load(std::memory_order_acquire)) {
+       cached_state->active.load(std::memory_order_acquire) &&
+       (!require_intercept || cached_state->intercept_enabled.load(std::memory_order_acquire))) {
       return cached_state;
     }
 
@@ -851,7 +865,9 @@ class Monitor {
     const auto itr = queues_.find(reinterpret_cast<uint64_t>(queue));
     cached_queue = queue;
     cached_state = (itr != queues_.end() && itr->second &&
-                    itr->second->active.load(std::memory_order_acquire))
+                    itr->second->active.load(std::memory_order_acquire) &&
+                    (!require_intercept ||
+                     itr->second->intercept_enabled.load(std::memory_order_acquire)))
                        ? itr->second
                        : std::shared_ptr<QueueState>{};
     return cached_state;
@@ -864,6 +880,7 @@ class Monitor {
     thread_local std::shared_ptr<QueueState> cached_state = {};
     if(cached_signal == signal.handle && cached_state &&
        cached_state->active.load(std::memory_order_acquire) &&
+       cached_state->intercept_enabled.load(std::memory_order_acquire) &&
        cached_state->real_doorbell.handle == signal.handle) {
       return cached_state;
     }
@@ -872,7 +889,8 @@ class Monitor {
     const auto itr = doorbells_.find(signal.handle);
     cached_signal = signal.handle;
     cached_state = (itr != doorbells_.end() && itr->second &&
-                    itr->second->active.load(std::memory_order_acquire))
+                    itr->second->active.load(std::memory_order_acquire) &&
+                    itr->second->intercept_enabled.load(std::memory_order_acquire))
                        ? itr->second
                        : std::shared_ptr<QueueState>{};
     return cached_state;
@@ -1085,7 +1103,7 @@ class Monitor {
     hsa_signal_t signal = packet->completion_signal;
     bool injected_signal = false;
     if(signal.handle == 0 &&
-       aqlmon::runtime_contract::effective_completion_signal_mode() ==
+       aqlmon_runtime_completion_signal_mode() ==
            AQLMON_COMPLETION_SIGNAL_MODE_MONITOR_PROVIDED) {
       signal = acquire_injected_signal();
       if(signal.handle != 0) {
@@ -1283,7 +1301,8 @@ class Monitor {
     std::lock_guard<std::mutex> lk{registry_mutex_};
     result.reserve(queues_.size());
     for(const auto& itr : queues_) {
-      if(itr.second && itr.second->active.load(std::memory_order_acquire)) {
+      if(itr.second && itr.second->active.load(std::memory_order_acquire) &&
+         itr.second->intercept_enabled.load(std::memory_order_acquire)) {
         result.emplace_back(itr.second);
       }
     }
@@ -1427,7 +1446,27 @@ AQLMON_EXPORT hsa_status_t hsa_queue_create(
   auto& api = real_api();
   auto status = api.queue_create(agent, size, type, callback, data, private_segment_size,
                                  group_segment_size, queue);
-  if(status == HSA_STATUS_SUCCESS && queue != nullptr && !monitor_finalizing()) {
+  if(status == HSA_STATUS_SUCCESS && queue != nullptr && *queue != nullptr && !monitor_finalizing()) {
+    Monitor::instance().register_queue(*queue, agent);
+  }
+  return status;
+}
+
+AQLMON_EXPORT hsa_status_t hsa_amd_queue_intercept_create(
+    hsa_agent_t agent,
+    uint32_t size,
+    hsa_queue_type32_t type,
+    void (*callback)(hsa_status_t, hsa_queue_t*, void*),
+    void* data,
+    uint32_t private_segment_size,
+    uint32_t group_segment_size,
+    hsa_queue_t** queue) {
+  auto& api = real_api();
+  if(api.amd_queue_intercept_create == nullptr) return HSA_STATUS_ERROR;
+
+  auto status = api.amd_queue_intercept_create(agent, size, type, callback, data,
+                                               private_segment_size, group_segment_size, queue);
+  if(status == HSA_STATUS_SUCCESS && queue != nullptr && *queue != nullptr && !monitor_finalizing()) {
     Monitor::instance().register_queue(*queue, agent);
   }
   return status;

@@ -1,0 +1,11 @@
+AQLMON_RUNTIME_CONTRACT_2 {
+  global:
+    aqlmon_runtime_contract_version;
+    aqlmon_runtime_contract_api_version;
+    aqlmon_runtime_contract_abi_version;
+    aqlmon_runtime_completion_signal_mode;
+    aqlmon_runtime_completion_signal_capabilities;
+    aqlmon_runtime_negotiate;
+  local:
+    *;
+};

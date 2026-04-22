@@ -24,6 +24,9 @@ The POC keeps `rocprofiler-register` generic:
 
 Instead, a linked runtime calls the `aqlmon` contract directly when that generic callback fires.
 
+The current negotiation result is process-global: the first successful runtime negotiation becomes
+the active completion-signal ownership mode for the process.
+
 HIP/CLR is the first example runtime:
 
 - HIP links `libaqlmon_runtime_contract.so`
@@ -59,13 +62,19 @@ What is implemented:
 - HIP/CLR runtime negotiation against the linked `aqlmon` contract
 - runtime-provided vs monitor-provided completion-signal mode selection
 - current preload monitor consuming the negotiated mode
+- `rocprofiler-sdk` shm receiver for kernel-dispatch completion correlation
 - simple launcher for packet-dump validation
+- legacy queue-intercept fallback kept alive until the `rocprofiler-sdk` shm receiver is
+  operational
+- if a session requests counter collection or another queue-intercept-dependent service, kernel
+  dispatch tracing stays on the old queue-intercept path and AQLMON is not used for that session
 
 What is not implemented yet:
 
-- SDK integration
 - removing the current `LD_PRELOAD` dependency of the heavy monitor backend
-- a real profiler tool using the runtime activation path end to end
+- automatic `rocprofv3` preload/policy selection for all session types
+- a fully supported mixed `kernel-trace + counter-collection` session on top of queue shadow
+- runtime-owned graph replay completion coverage for zero-signal graph packets
 
 ## Build
 
@@ -177,3 +186,11 @@ Completion handling is also off the producer thread:
 - The current HIP integration only requests `KERNEL_DISPATCH_SIGNALS`.
 - Zero-signal packets are ignored when runtime-provided mode is active.
 - Multi-process fan-in to one shm object is still not coordinated.
+- The validated `rocprofiler-sdk` shm path is currently for kernel-trace-oriented sessions.
+- Counter collection still uses the existing queue-intercept path. If counters are requested,
+  kernel-dispatch tracing stays on that old path as well.
+- With the current POC, preloading `libaql_shm_monitor.so` into counter-collection sessions while
+  queue shadow is enabled can hang the workload.
+- For counter-only validation, `AQLMONITOR_DISABLE_QUEUE_SHADOW=1` restores the existing SDK
+  behavior. The intended long-term direction is to leave counter collection on the old path and
+  use AQLMON for kernel-dispatch tracing.

@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/aqlmon_receiver.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
@@ -37,6 +38,13 @@ namespace hsa
 {
 namespace
 {
+bool&
+queue_intercept_initialized()
+{
+    static bool value = false;
+    return value;
+}
+
 // HSA Intercept Functions (create_queue/destroy_queue)
 hsa_status_t
 create_queue(hsa_agent_t        agent,
@@ -516,7 +524,11 @@ enable_queue_intercept()
         bool has_scratch_reporting = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY) ||
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
 
-        if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
+        const bool needs_intercept_for_kernel_tracing =
+            has_kernel_tracing && !kernel_dispatch::aqlmon_receiver_enabled();
+
+        if(itr->dispatch_counter_collection || itr->pc_sampler ||
+           needs_intercept_for_kernel_tracing ||
            has_scratch_reporting || itr->device_counter_collection || itr->device_thread_trace ||
            itr->dispatch_thread_trace)
             return true;
@@ -530,7 +542,13 @@ queue_controller_init(HsaApiTable* table)
 {
     CHECK_NOTNULL(get_queue_controller())->init(*table->core_, *table->amd_ext_);
 
-    if(enable_queue_intercept()) queue_init();
+    if(kernel_dispatch::aqlmon_receiver_requested()) kernel_dispatch::aqlmon_receiver_start();
+
+    if(enable_queue_intercept() && !queue_intercept_initialized())
+    {
+        queue_init();
+        queue_intercept_initialized() = true;
+    }
 }
 
 void
@@ -547,7 +565,11 @@ queue_controller_fini()
         get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
 
     // finalize queue data (e.g. clean up signal pool)
-    if(enable_queue_intercept()) queue_fini();
+    if(queue_intercept_initialized())
+    {
+        queue_fini();
+        queue_intercept_initialized() = false;
+    }
 }
 
 void
@@ -564,7 +586,13 @@ queue_controller_init(RocAttachDispatchTable* attach_table)
     }
     *(get_attach_table()) = attach_table;
 
-    if(enable_queue_intercept()) queue_init();
+    if(kernel_dispatch::aqlmon_receiver_requested()) kernel_dispatch::aqlmon_receiver_start();
+
+    if(enable_queue_intercept() && !queue_intercept_initialized())
+    {
+        queue_init();
+        queue_intercept_initialized() = true;
+    }
 }
 
 }  // namespace hsa

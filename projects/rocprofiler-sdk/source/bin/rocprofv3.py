@@ -1430,6 +1430,7 @@ def run(app_args, args, **kwargs):
     ROCPROF_KOKKOSP_LIBRARY = (
         f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool-kokkosp.so"
     )
+    AQLMON_LIBRARY = f"{ROCM_DIR}/lib/libaql_shm_monitor.so"
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = (
         f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofv3-list-avail.so"
     )
@@ -1441,6 +1442,9 @@ def run(app_args, args, **kwargs):
     ROCPROF_SDK_LIBRARY = resolve_library_path(ROCPROF_SDK_LIBRARY, args)
     ROCPROF_ROCTX_LIBRARY = resolve_library_path(ROCPROF_ROCTX_LIBRARY, args)
     ROCPROF_KOKKOSP_LIBRARY = resolve_library_path(ROCPROF_KOKKOSP_LIBRARY, args)
+    AQLMON_LIBRARY = resolve_library_path(
+        AQLMON_LIBRARY, dotdict({"required": False, **args})
+    )
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = resolve_library_path(
         ROCPROF_LIST_AVAIL_TOOL_LIBRARY, args
     )
@@ -1451,6 +1455,33 @@ def run(app_args, args, **kwargs):
         ROCPROF_TOOL_LIBRARY,
         ROCPROF_SDK_LIBRARY,
     ]
+
+    enable_aqlmon_kernel_trace = (
+        not args.pid
+        and bool(getattr(args, "kernel_trace", False))
+        and not bool(getattr(args, "pmc", None))
+        and not bool(getattr(args, "pmc_groups", None))
+        and AQLMON_LIBRARY
+    )
+
+    if enable_aqlmon_kernel_trace:
+        prepend_preload.append(AQLMON_LIBRARY)
+        default_shm_name = f"/rocprofv3-aqlmon-{os.getpid()}"
+        update_env(
+            "AQLMONITOR_SHM_NAME",
+            default_shm_name,
+            overwrite=False,
+        )
+        update_env(
+            "ROCPROFILER_AQLMON_SHM_NAME",
+            app_env.get("AQLMONITOR_SHM_NAME", default_shm_name),
+            overwrite=False,
+        )
+        update_env(
+            "AQLMONITOR_COMPLETION_SIGNAL_POLICY",
+            "monitor",
+            overwrite=False,
+        )
 
     if not args.pid:
         update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)

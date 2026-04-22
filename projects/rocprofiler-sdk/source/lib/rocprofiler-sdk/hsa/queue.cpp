@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/aqlmon_receiver.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
@@ -329,10 +330,12 @@ WriteInterceptor(const void* packets,
     ROCP_FATAL_IF(data == nullptr) << "WriteInterceptor was not passed a pointer to the queue";
 
     auto& queue = *static_cast<Queue*>(data);
+    const bool use_aqlmon_kernel_tracing = kernel_dispatch::aqlmon_receiver_enabled();
+    const bool needs_legacy_kernel_dispatch_tracing =
+        !use_aqlmon_kernel_tracing && !context::get_active_contexts(context_filter).empty();
 
     // We have no packets or no one who needs to be notified, do nothing.
-    if(pkt_count == 0 ||
-       (queue.get_notifiers() == 0 && context::get_active_contexts(context_filter).empty()))
+    if(pkt_count == 0 || (queue.get_notifiers() == 0 && !needs_legacy_kernel_dispatch_tracing))
     {
         writer(packets, pkt_count);
         return;
@@ -365,9 +368,12 @@ WriteInterceptor(const void* packets,
     };
 
     auto tracing_data_v = tracing::tracing_data{};
-    tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
-                               ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
-                               tracing_data_v);
+    if(needs_legacy_kernel_dispatch_tracing)
+    {
+        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                   ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                   tracing_data_v);
+    }
 
     for(const auto* itr : context::get_active_contexts(queue_callback_context_filter))
         tracing_data_v.external_correlation_ids.emplace(itr, tracing::empty_user_data);
