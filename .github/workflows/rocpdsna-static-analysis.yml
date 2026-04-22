@@ -1,0 +1,95 @@
+name: rocpdsna Static Analysis
+run-name: rocpdsna-static-analysis
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+      - sna-develop
+    paths:
+      - '.github/workflows/rocpdsna-static-analysis.yml'
+      - 'projects/rocpdsna/**'
+      - '!projects/rocpdsna/build/**'
+      - '!projects/rocpdsna/docs/**'
+      - '!projects/rocpdsna/README.md'
+  pull_request:
+    paths:
+      - '.github/workflows/rocpdsna-static-analysis.yml'
+      - 'projects/rocpdsna/**'
+      - '!projects/rocpdsna/build/**'
+      - '!projects/rocpdsna/docs/**'
+      - '!projects/rocpdsna/README.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  clang-tidy:
+    name: clang-tidy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocpdsna
+            .github/workflows
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            gcc g++ clang-tidy-18 \
+            libsqlite3-dev libspdlog-dev libfmt-dev nlohmann-json3-dev \
+            libgtest-dev libgmock-dev libbenchmark-dev
+          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-18 100
+
+      - name: Configure
+        working-directory: projects/rocpdsna
+        env:
+          CC: gcc
+          CXX: g++
+        run: |
+          cmake --version
+          clang-tidy --version | head -2
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DROCPDSNA_BUILD_TESTS=OFF \
+            -DROCPDSNA_BUILD_BENCHMARKS=OFF
+
+      - name: Build
+        working-directory: projects/rocpdsna
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Run clang-tidy
+        working-directory: projects/rocpdsna
+        run: |
+          set -o pipefail
+          cmake --build build --target clang-tidy 2>&1 | tee clang-tidy.log
+          WARNINGS=$(grep -cE 'warning:' clang-tidy.log || true)
+          ERRORS=$(grep -cE 'error:' clang-tidy.log || true)
+          {
+            echo "## clang-tidy summary"
+            echo ""
+            echo "| Severity | Count |"
+            echo "|----------|-------|"
+            echo "| Errors   | ${ERRORS} |"
+            echo "| Warnings | ${WARNINGS} |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "Errors: ${ERRORS}, Warnings: ${WARNINGS}"
+
+      - name: Upload clang-tidy log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: clang-tidy-log
+          path: projects/rocpdsna/clang-tidy.log
+          if-no-files-found: warn
