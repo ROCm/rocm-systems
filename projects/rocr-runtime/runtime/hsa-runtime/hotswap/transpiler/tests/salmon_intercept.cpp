@@ -68,6 +68,17 @@ using hipModuleLaunchKernel_t = hipError_t (*)(
     hipFunction_t, unsigned int, unsigned int, unsigned int,
     unsigned int, unsigned int, unsigned int, unsigned int,
     hipStream_t, void**, void**);
+// `hipFuncGetAttribute(int *value, hipFunction_attribute_t attrib, hipFunction_t f)`
+// queries per-function attributes.  The enum value we care about is
+// `HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK = 0` — HIP reads it
+// directly out of the kernel descriptor's `max_flat_workgroup_size`
+// field (the same field the Salmon raiser's phantom-lane fallback
+// keys on), so querying it at launch time is the lowest-cost way to
+// reconstruct which projection `raiser.cpp` chose.  Spelled as `int`
+// here so this shim stays header-free (same convention as the rest
+// of the file).
+using hipFuncGetAttribute_t =
+    hipError_t (*)(int* /*value*/, int /*attrib*/, hipFunction_t /*f*/);
 using rocr_salmon_patch_elf_t = int (*)(void*, size_t, const char*);
 
 // HIP error-code constants we use when the intercept refuses a call
@@ -101,6 +112,15 @@ static hipModuleLoadDataEx_t g_proc_hipModuleLoadDataEx = nullptr;
 // HIP-API-versioning reason the load_data resolver does.
 static hipModuleLaunchKernel_t g_real_hipModuleLaunchKernel = nullptr;
 static hipModuleLaunchKernel_t g_proc_hipModuleLaunchKernel = nullptr;
+
+// hipFuncGetAttribute resolution — same three-path scheme as the
+// launcher / loader pointers.  We don't hook this function; we just
+// call through to it from inside `hipModuleLaunchKernel` to query
+// the kernel's `max_flat_workgroup_size` attribute and recover the
+// projection choice the raiser made.  See the big comment block
+// above `hipModuleLaunchKernel` below.
+static hipFuncGetAttribute_t g_real_hipFuncGetAttribute = nullptr;
+static hipFuncGetAttribute_t g_proc_hipFuncGetAttribute = nullptr;
 
 static rocr_salmon_patch_elf_t g_patch_elf = nullptr;
 static const char* g_target_isa = nullptr;
@@ -279,6 +299,25 @@ static void init() {
             dlerror());
   }
 
+  // hipFuncGetAttribute is used by `hipModuleLaunchKernel`'s gate to
+  // query the kernel's `max_flat_workgroup_size` attribute at launch
+  // time; see the big comment above `hipModuleLaunchKernel` for the
+  // rationale.  Best-effort resolution here mirrors the launcher
+  // resolution — callers using `hipGetProcAddress` populate
+  // `g_proc_hipFuncGetAttribute` when they query the symbol.
+  if (auto* fn = reinterpret_cast<hipFuncGetAttribute_t>(
+          dlsym(RTLD_NEXT, "hipFuncGetAttribute"))) {
+    g_real_hipFuncGetAttribute = fn;
+  } else {
+    fprintf(stderr,
+            "salmon_intercept: hipFuncGetAttribute not visible via "
+            "RTLD_NEXT (%s); partial-wave launch gate will conservatively "
+            "refuse blockDim < target_wave_size launches without the "
+            "max-threads attribute query to identify MODREP-projected "
+            "kernels (dlsym/hipGetProcAddress hook may populate later)\n",
+            dlerror());
+  }
+
   fprintf(stderr,
           "salmon_intercept: active, target=%s (wave_size=%u, "
           "ir_raiser=%s)%s\n",
@@ -444,6 +483,24 @@ static hipModuleLaunchKernel_t resolve_real_launch_kernel() {
   return g_real_hipModuleLaunchKernel;
 }
 
+// Resolve the real hipFuncGetAttribute.  Unlike the launcher, this
+// pointer can legitimately be `nullptr` at call time (if neither
+// `RTLD_NEXT` nor `hipGetProcAddress` has populated it yet) — the
+// caller handles that by falling back to the conservative default
+// policy (refuse the partial-wave launch).  See the MODREP-detection
+// block comment on `hipModuleLaunchKernel` for why this is correct.
+static hipFuncGetAttribute_t resolve_real_func_get_attribute() {
+  if (g_proc_hipFuncGetAttribute) return g_proc_hipFuncGetAttribute;
+  return g_real_hipFuncGetAttribute;
+}
+
+// HIP's `hipFunction_attribute_t` enum value for
+// `HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK`.  HIP exposes this as
+// `enum hipFunction_attribute` element 0 — stable since HIP 1.0 and
+// mirrored from the CUDA driver API's `CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK`.
+// Hard-coded to 0 here to keep the shim header-free.
+static constexpr int kHipFuncAttributeMaxThreadsPerBlock = 0;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // hipModuleLaunchKernel — partial-wave launch refusal gate.
 //
@@ -471,23 +528,48 @@ static hipModuleLaunchKernel_t resolve_real_launch_kernel() {
 // corrupted collective outputs on lanes that happen to read from
 // phantom-lane participants.
 //
-// This wrapper closes that runtime gap by refusing `hipModuleLaunchKernel`
-// calls where `blockDim.x * blockDim.y * blockDim.z < targetWaveSize`.
-// The user can work around the refusal in two principled ways:
+// This wrapper closes that runtime gap by refusing
+// `hipModuleLaunchKernel` calls where
+// `blockDim.x * blockDim.y * blockDim.z < targetWaveSize` AND the
+// kernel was NOT already raised under `ModuloReplicationProjection`.
+// The MODREP-or-not distinction matters: when the source kernel
+// declares a small `__launch_bounds__(N)` (Triton kernels with
+// `num_warps=1` do this by default, setting `max_flat_workgroup_size
+// = N` in the kernel descriptor), the raiser's phantom-lane fallback
+// in `raiser.cpp` has ALREADY engaged MODREP at lift time so no
+// `init_whole_wave` is emitted — phantom target lanes stay
+// hardware-inactive regardless of the runtime launch shape, and a
+// partial-wave launch is correct by construction.  Refusing those
+// kernels here would be an over-refusal that blocks correctly-raised
+// kernels from running.
 //
-//   1. Add `__launch_bounds__(N)` to the source kernel and recompile
-//      so the raise-time phantom-lane fallback engages
-//      `ModuloReplicationProjection` for this launch shape.  This is
-//      the CORRECT fix for kernels that use cross-lane ops.
-//   2. Set `HSA_HOTSWAP_ALLOW_PARTIAL_WAVE=1` in the environment to
-//      disable this runtime check.  This is the OPT-IN ACCEPT-THE-RISK
-//      path for kernels that are provably phantom-lane-safe (no
-//      cross-lane primitives at all — pure per-lane VALU work with
-//      SPE-gated loads / stores).  The kernel's correctness under
-//      partial-wave launch in that case is provable by construction:
-//      phantom lanes compute undef VGPRs locally, but every write to
-//      memory is SPE-gated (see the load/store gating commit
-//      `ebe575dcdc`), so the undef never externalizes.
+// We reconstruct the projection choice at launch time by querying
+// HIP for the kernel's `MAX_THREADS_PER_BLOCK` attribute — HIP reads
+// that directly out of the ELF kernel descriptor's
+// `max_flat_workgroup_size` field, which is the exact same field
+// `raiser.cpp`'s phantom-lane fallback keys on.  If
+// `max_flat_workgroup_size < targetWaveSize`, the raiser chose MODREP
+// and the launch is safe; otherwise it chose WaveNative, which in
+// combination with a runtime partial-wave launch produces the
+// phantom-lane miscompile this gate is designed to catch.
+//
+// The user has two principled workarounds when the refusal fires:
+//
+//   1. Add `__launch_bounds__(N)` to the source kernel (with
+//      `N < targetWaveSize`) and recompile so the raise-time
+//      phantom-lane fallback engages `ModuloReplicationProjection`
+//      for this launch shape.  This is the CORRECT fix for kernels
+//      that use cross-lane primitives.
+//   2. Set `HSA_HOTSWAP_ALLOW_PARTIAL_WAVE=1` in the environment
+//      to disable this runtime check entirely.  This is the OPT-IN
+//      ACCEPT-THE-RISK path for kernels that are provably
+//      phantom-lane-safe at the ISA level (no cross-lane primitives
+//      at all — pure per-lane VALU work with SPE-gated loads /
+//      stores).  The kernel's correctness under partial-wave launch
+//      in that case is provable by construction: phantom lanes
+//      compute undef VGPRs locally, but every write to memory is
+//      SPE-gated (see the load/store gating commit `ebe575dcdc`),
+//      so the undef never externalizes.
 //
 // Refusing with `hipErrorInvalidConfiguration` (= 9 in the HIP error
 // enum — the `InvalidConfiguration` path HIP already uses for "launch
@@ -530,25 +612,55 @@ extern "C" hipError_t hipModuleLaunchKernel(
         static_cast<uint64_t>(blockDimY) *
         static_cast<uint64_t>(blockDimZ);
     if (block_threads < static_cast<uint64_t>(g_target_wave_size)) {
+      // MODREP-detection shortcut: if the kernel descriptor's
+      // `max_flat_workgroup_size` attribute is below the target
+      // wave size, the raiser has ALREADY engaged
+      // `ModuloReplicationProjection` — no `init_whole_wave` was
+      // emitted, phantom target lanes stay hardware-inactive, and a
+      // partial-wave launch is correct by construction.  Pass
+      // through without refusing.  See the block comment above for
+      // the full projection-reconstruction rationale.
+      //
+      // We only consult `hipFuncGetAttribute` when it's available;
+      // when it isn't (the attribute-resolver returned `nullptr` in
+      // init() and the Triton-proc-address path hasn't populated it
+      // either), we conservatively fall through to refusing, which
+      // is the safer default: over-refusal is a test-harness
+      // annoyance, but under-refusal is a silent miscompile.
+      if (auto* fn_attr = resolve_real_func_get_attribute()) {
+        int max_threads = 0;
+        hipError_t attr_err =
+            fn_attr(&max_threads, kHipFuncAttributeMaxThreadsPerBlock, f);
+        if (attr_err == 0 && max_threads > 0 &&
+            static_cast<unsigned>(max_threads) < g_target_wave_size) {
+          // `max_flat_workgroup_size < targetWaveSize` → raiser
+          // engaged MODREP → phantom-lane-safe.  Pass through.
+          return real(f, gridDimX, gridDimY, gridDimZ,
+                      blockDimX, blockDimY, blockDimZ,
+                      sharedMemBytes, stream, kernelParams, extra);
+        }
+      }
       fprintf(stderr,
               "salmon_intercept: REFUSING hipModuleLaunchKernel: "
               "block dims %u x %u x %u = %llu thread(s) per block, "
-              "target=%s (wave_size=%u) — partial-wave launches put "
-              "the kernel in the phantom-lane regime where "
-              "`init_whole_wave` sets HW EXEC=-1 on a partially-filled "
-              "wave, so any cross-lane primitive (DPP reductions, "
-              "ds_bpermute, readlane/writelane, permlane16, ds_swizzle) "
-              "reads undef from the unused lanes and silently "
-              "miscompiles.  Principled fixes: (1) add `__launch_bounds__"
-              "(%llu)` to the source kernel and recompile so the "
-              "raise-time phantom-lane fallback engages "
-              "ModuloReplicationProjection; (2) set "
+              "target=%s (wave_size=%u), kernel's "
+              "max_flat_workgroup_size does not satisfy the MODREP "
+              "phantom-lane-safe condition (< %u) — partial-wave "
+              "launch puts the kernel in the phantom-lane regime "
+              "where `init_whole_wave` sets HW EXEC=-1 on a "
+              "partially-filled wave, so any cross-lane primitive "
+              "(DPP reductions, ds_bpermute, readlane/writelane, "
+              "permlane16, ds_swizzle) reads undef from the unused "
+              "lanes and silently miscompiles.  Principled fixes: "
+              "(1) add `__launch_bounds__(%llu)` to the source "
+              "kernel and recompile so the raise-time phantom-lane "
+              "fallback engages ModuloReplicationProjection; (2) set "
               "HSA_HOTSWAP_ALLOW_PARTIAL_WAVE=1 if the kernel is "
               "provably cross-lane-free (pure per-lane VALU work).  "
               "Returning hipErrorInvalidConfiguration (=%d).\n",
               blockDimX, blockDimY, blockDimZ,
               static_cast<unsigned long long>(block_threads), g_target_isa,
-              g_target_wave_size,
+              g_target_wave_size, g_target_wave_size,
               static_cast<unsigned long long>(block_threads),
               kHipErrorInvalidConfiguration);
       return kHipErrorInvalidConfiguration;
@@ -607,6 +719,13 @@ extern "C" hipError_t hipGetProcAddress(
     fprintf(stderr,
             "salmon_intercept: redirected hipGetProcAddress(\"%s\")\n",
             symbol);
+  } else if (std::strcmp(symbol, "hipFuncGetAttribute") == 0) {
+    // hipFuncGetAttribute is NOT hooked — we just stash the real
+    // proc-address pointer so `resolve_real_func_get_attribute()`
+    // can call through to it from inside
+    // `hipModuleLaunchKernel`'s gate.  We leave `*pfn` pointing at
+    // the real implementation so callers see no wrapper at all.
+    g_proc_hipFuncGetAttribute = reinterpret_cast<hipFuncGetAttribute_t>(*pfn);
   }
   return err;
 }
