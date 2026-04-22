@@ -4,7 +4,8 @@ Implements the beads schema (SQLite + JSONL under .beads/) in pure Python
 so no external binary is needed. Users who have `br` installed separately
 can read/write the same .beads/ dir — format is compatible.
 
-Operations: create, next (topological ready-queue), update, close,
+Operations: create, next (topological ready-queue), update, close_task,
+close_connection,
 query_by_kernel (for Revert-Advisor avoidance).
 
 Tool class: READ_ONLY (modifies task store, not user code).
@@ -51,7 +52,7 @@ class TaskStore:
         task_id = store.create("Profile matmul kernel", priority=1)
         task = store.next()
         store.update(task_id, status="in_progress")
-        store.close(task_id, reason="done")
+        store.close_task(task_id, reason="done")
     """
 
     def __init__(self, root: Path):
@@ -72,23 +73,31 @@ class TaskStore:
         self._get()  # triggers schema creation
 
     def close(self, task_id: str = None, reason: str = "done") -> None:
-        """Close a task (status='closed'), or close the SQLite connection if no task_id.
+        """Close a task by id.
 
-        Overloaded: tasks.close(task_id, reason) OR store.close() (close connection).
+        Use close_connection() to close the SQLite handle.
         """
         if task_id is None:
-            # Connection close
-            if self._conn:
-                self._conn.close()
-                self._conn = None
-            return
+            raise TypeError(
+                "TaskStore.close() now requires task_id; use close_connection() "
+                "to close the SQLite connection"
+            )
+        self.close_task(task_id, reason)
 
+    def close_task(self, task_id: str, reason: str = "done") -> None:
+        """Close a task (status='closed')."""
         conn = self._get()
         conn.execute(
             "UPDATE tasks SET status='closed', closed_at=?, close_reason=? WHERE id=?",
             (_now_iso(), reason, task_id),
         )
         conn.commit()
+
+    def close_connection(self) -> None:
+        """Close the SQLite connection without changing task state."""
+        if self._conn:
+            self._conn.close()
+            self._conn = None
 
     def create(
         self,

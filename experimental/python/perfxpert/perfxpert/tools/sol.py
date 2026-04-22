@@ -13,7 +13,15 @@ from perfxpert.tools._class import ToolClass, tool_class
 from perfxpert.tools.arch import lookup_peaks
 
 
-KernelType = Literal["fp64", "fp32", "bf16"]
+KernelType = Literal["fp64", "fp32", "bf16", "fp64_matrix", "fp32_matrix"]
+
+_PEAK_KEYS = {
+    "fp64": "peak_fp64_tflops",
+    "fp32": "peak_fp32_tflops",
+    "bf16": "peak_bf16_tflops",
+    "fp64_matrix": "peak_fp64_matrix_tflops",
+    "fp32_matrix": "peak_fp32_matrix_tflops",
+}
 
 
 @tool_class(ToolClass.READ_ONLY)
@@ -30,7 +38,7 @@ def sanity_check(
 
     Args:
         achieved_flops_per_sec: claimed throughput in FLOPS/s.
-        kernel_type: "fp64", "fp32", or "bf16".
+        kernel_type: "fp64", "fp32", "bf16", "fp64_matrix", or "fp32_matrix".
         gfx_id: architecture identifier.
 
     Returns:
@@ -44,7 +52,9 @@ def sanity_check(
         {"plausible": False, "reason": "500 TFLOPS fp64 exceeds peak 81.7 TFLOPS", ...}
     """
     specs = lookup_peaks(gfx_id)
-    peak_key = f"peak_{kernel_type}_tflops"
+    if kernel_type not in _PEAK_KEYS:
+        raise ValueError(f"Unknown kernel_type {kernel_type!r}")
+    peak_key = _PEAK_KEYS[kernel_type]
     if peak_key not in specs:
         raise ValueError(
             f"Unknown kernel_type {kernel_type!r} for {gfx_id}; "

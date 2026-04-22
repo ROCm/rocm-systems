@@ -23,8 +23,9 @@ def lookup_peaks(gfx_id: str) -> Dict[str, Any]:
 
     Returns:
         Dict with keys: name, codename, peak_fp64_tflops, peak_fp32_tflops,
-        peak_bf16_tflops (where applicable), memory_bandwidth_tbs, cu_count,
-        lds_kb, wave_size, max_vgprs_per_thread, ridge_point.
+        optional matrix-peak fields (where applicable), peak_bf16_tflops,
+        memory_bandwidth_tbs, cu_count, lds_kb, wave_size,
+        max_vgprs_per_thread, ridge_point, and optional sku_variants.
 
     Raises:
         KeyError: if gfx_id is not recognized. Error includes list of known archs.

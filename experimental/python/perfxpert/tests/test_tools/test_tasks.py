@@ -77,13 +77,18 @@ def test_persistence_across_reopens(tmp_path: Path):
     s1 = tasks.TaskStore(store_dir)
     s1.init()
     task_id = s1.create("Persistent task")
-    s1.close()  # explicit close of SQLite connection
+    s1.close_connection()
 
     s2 = tasks.TaskStore(store_dir)
     # No init — just open existing store
     retrieved = s2.next()
     assert retrieved["id"] == task_id
-    s2.close()
+    s2.close_connection()
+
+
+def test_close_without_task_id_raises_clear_error(store):
+    with pytest.raises(TypeError):
+        store.close()
 
 
 def test_json_output_format(store):

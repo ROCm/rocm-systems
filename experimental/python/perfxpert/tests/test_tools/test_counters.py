@@ -30,6 +30,23 @@ def test_validate_splits_tcc_derived_into_own_passes():
     assert len(fetch_passes) == 1
     assert len(write_passes) == 1
     assert fetch_passes[0] != write_passes[0]
+    assert any(v.get("auto_fixed") for v in result["violations"])
+
+
+def test_validate_unknown_counter_fails():
+    result = counters.validate_for_gpu(["NOT_A_COUNTER"], gpu_arch="gfx942")
+    assert result["ok"] is False
+    assert "Unknown counters" in result["violations"][0]["reason"]
+
+
+def test_validate_balances_regular_counters_across_passes():
+    counters_in = [
+        "SQ_WAVES", "SQ_INSTS_VALU", "SQ_INSTS_VMEM_RD", "SQ_INSTS_VMEM_WR", "SQ_INSTS_LDS",
+        "TCC_HIT", "TCC_MISS", "TCC_EA0_RDREQ", "TCC_EA0_WRREQ", "TCC_BUBBLE",
+    ]
+    result = counters.validate_for_gpu(counters_in, gpu_arch="gfx908")
+    assert result["ok"] is True
+    assert len(result["fixed_passes"]) == 2
 
 
 def test_is_read_only_class():

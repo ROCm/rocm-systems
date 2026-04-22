@@ -6,6 +6,7 @@ structured lookup. Reads knowledge/counter_catalog.yaml + pmc_limits.yaml.
 Tool class: READ_ONLY.
 """
 
+from collections import defaultdict
 from typing import Any, Dict, List
 
 from perfxpert.knowledge import load_yaml
@@ -59,6 +60,7 @@ def validate_for_gpu(counter_list: List[str], gpu_arch: str) -> Dict[str, Any]:
         {"ok": bool, "violations": [...], "fixed_passes": [[counter,...], ...]}
     """
     limits_cfg = load_yaml("pmc_limits")["per_block_limits"]
+    isolation_rules = load_yaml("rocprofv3_counter_limits")["isolation_rules"]
     catalog = load_yaml("counter_catalog")
 
     # Build name → block index from the flat catalog
@@ -73,33 +75,61 @@ def validate_for_gpu(counter_list: List[str], gpu_arch: str) -> Dict[str, Any]:
         arch_key = f"{gpu_arch}_limit"
         return int(info.get(arch_key, info.get("limit", 4)))
 
-    # Separate TCC-derived counters — each gets its own pass (anti-Sakana)
-    derived = [c for c in counter_list if c in _TCC_DERIVED]
-    regular = [c for c in counter_list if c not in _TCC_DERIVED]
+    violations: List[Dict[str, Any]] = []
+    unknown = sorted(
+        {c for c in counter_list if c not in name_to_block and c not in _TCC_DERIVED}
+    )
+    if unknown:
+        violations.append(
+            {
+                "severity": "error",
+                "rule": "All requested counters must exist in the counter catalog",
+                "reason": f"Unknown counters: {', '.join(unknown)}",
+            }
+        )
 
-    # Group regular by block, respecting per-block limit
-    passes: List[List[str]] = []
-    by_block: Dict[str, List[str]] = {}
+    known = [c for c in counter_list if c not in unknown]
+    derived = [c for c in known if c in _TCC_DERIVED]
+    regular = [c for c in known if c not in _TCC_DERIVED]
+
+    rule_map = {rule["rule"]: rule for rule in isolation_rules}
+    regular_sq = [c for c in regular if name_to_block.get(c) == "SQ"]
+
+    if "FETCH_SIZE" in derived and len(known) > 1:
+        rule = rule_map["FETCH_SIZE requires its own dedicated pass"]
+        violations.append({**rule, "auto_fixed": True})
+    if "WRITE_SIZE" in derived and len(known) > 1:
+        rule = rule_map["WRITE_SIZE requires its own dedicated pass"]
+        violations.append({**rule, "auto_fixed": True})
+    if {"FETCH_SIZE", "WRITE_SIZE"}.issubset(set(derived)):
+        rule = rule_map["FETCH_SIZE and WRITE_SIZE MUST NOT share a pass"]
+        violations.append({**rule, "auto_fixed": True})
+    if derived and regular_sq:
+        rule = rule_map["FETCH_SIZE/WRITE_SIZE MUST NOT share a pass with any SQ counter"]
+        violations.append({**rule, "auto_fixed": True})
+
+    by_block: Dict[str, List[str]] = defaultdict(list)
     for c in regular:
-        block = name_to_block.get(c, "UNKNOWN")
-        by_block.setdefault(block, []).append(c)
+        by_block[name_to_block[c]].append(c)
 
-    # Pack one pass at a time, up to per-block limit
-    active: List[str] = []
-    active_counts: Dict[str, int] = {}
-    for block, names in by_block.items():
-        lim = _limit_for(block)
-        for c in names:
-            if active_counts.get(block, 0) >= lim:
-                passes.append(active)
-                active, active_counts = [], {}
-            active.append(c)
-            active_counts[block] = active_counts.get(block, 0) + 1
-    if active:
-        passes.append(active)
+    passes: List[List[str]] = []
+    if by_block:
+        n_passes = max(
+            (len(names) + _limit_for(block) - 1) // _limit_for(block)
+            for block, names in by_block.items()
+        )
+        pass_counters: List[List[str]] = [[] for _ in range(n_passes)]
+        for block, names in by_block.items():
+            limit = _limit_for(block)
+            for pass_idx in range(n_passes):
+                chunk = names[pass_idx * limit : (pass_idx + 1) * limit]
+                pass_counters[pass_idx].extend(chunk)
+        passes.extend([p for p in pass_counters if p])
 
-    # Each TCC-derived counter gets its own pass (spec §5.8 anti-Sakana rule)
     for d in derived:
         passes.append([d])
 
-    return {"ok": True, "violations": [], "fixed_passes": passes}
+    ok = not any(
+        v["severity"] == "error" and not v.get("auto_fixed", False) for v in violations
+    )
+    return {"ok": ok, "violations": violations, "fixed_passes": passes}

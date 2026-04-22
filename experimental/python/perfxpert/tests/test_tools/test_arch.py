@@ -10,6 +10,7 @@ def test_lookup_peaks_returns_structured_data_for_mi300x():
     peaks = arch.lookup_peaks("gfx942")
     assert peaks["name"] == "MI300X"
     assert peaks["peak_fp64_tflops"] == 81.7
+    assert peaks["peak_fp64_matrix_tflops"] == 163.4
     assert peaks["memory_bandwidth_tbs"] == 5.3
     assert peaks["ridge_point"] == 15.4
 
@@ -20,6 +21,12 @@ def test_lookup_peaks_covers_all_known_archs():
         result = arch.lookup_peaks(gfx)
         assert "name" in result
         assert "peak_fp64_tflops" in result
+
+
+def test_lookup_peaks_exposes_gfx90a_variants():
+    peaks = arch.lookup_peaks("gfx90a")
+    variant_names = {entry["name"] for entry in peaks["sku_variants"]}
+    assert {"MI210", "MI250X"}.issubset(variant_names)
 
 
 def test_lookup_peaks_unknown_arch_raises():

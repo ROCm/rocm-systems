@@ -33,6 +33,18 @@
       },
       "note": {
         "type": "string"
+      },
+      "goals": {
+        "type": "array",
+        "items": {"type": "string"}
+      },
+      "arches": {
+        "type": "array",
+        "items": {"type": "string"}
+      },
+      "kernel_classes": {
+        "type": "array",
+        "items": {"type": "string"}
       }
     }
   }

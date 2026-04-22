@@ -25,14 +25,41 @@
         "name": {"type": "string"},
         "codename": {"type": "string"},
         "peak_fp64_tflops": {"type": "number", "minimum": 0},
+        "peak_fp64_matrix_tflops": {"type": "number", "minimum": 0},
         "peak_fp32_tflops": {"type": "number", "minimum": 0},
+        "peak_fp32_matrix_tflops": {"type": "number", "minimum": 0},
         "peak_bf16_tflops": {"type": "number", "minimum": 0},
         "memory_bandwidth_tbs": {"type": "number", "minimum": 0},
         "cu_count": {"type": "integer", "minimum": 1},
         "lds_kb": {"type": "integer", "enum": [64, 128, 160]},
         "wave_size": {"type": "integer", "enum": [32, 64]},
         "max_vgprs_per_thread": {"type": "integer", "minimum": 64},
-        "ridge_point": {"type": "number", "minimum": 0, "description": "FLOPS/Byte arithmetic intensity at which compute = memory peak"}
+        "ridge_point": {"type": "number", "minimum": 0, "description": "FLOPS/Byte arithmetic intensity at which compute = memory peak"},
+        "sku_variants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "peak_fp64_tflops",
+              "peak_fp32_tflops",
+              "memory_bandwidth_tbs",
+              "cu_count",
+              "ridge_point"
+            ],
+            "properties": {
+              "name": {"type": "string"},
+              "peak_fp64_tflops": {"type": "number", "minimum": 0},
+              "peak_fp64_matrix_tflops": {"type": "number", "minimum": 0},
+              "peak_fp32_tflops": {"type": "number", "minimum": 0},
+              "peak_fp32_matrix_tflops": {"type": "number", "minimum": 0},
+              "peak_bf16_tflops": {"type": "number", "minimum": 0},
+              "memory_bandwidth_tbs": {"type": "number", "minimum": 0},
+              "cu_count": {"type": "integer", "minimum": 1},
+              "ridge_point": {"type": "number", "minimum": 0}
+            }
+          }
+        }
       }
     }
   }

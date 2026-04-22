@@ -43,11 +43,39 @@ def test_mi300x_fp64_peak_is_corrected():
     assert 80 <= fp64 <= 83, f"MI300X FP64 expected ~81.7 TFLOPS, got {fp64}"
 
 
+def test_mi300x_fp64_matrix_peak_is_present():
+    specs = load_yaml("gpu_specs")
+    mi300x = specs["gfx942"]
+    assert mi300x["peak_fp64_matrix_tflops"] == 163.4
+
+
 def test_cdna4_has_160kb_lds():
     """CDNA4 (gfx950) doubled LDS to 160 KB/CU per CLAUDE.md."""
     specs = load_yaml("gpu_specs")
     mi350 = specs["gfx950"]
     assert mi350["lds_kb"] == 160, f"CDNA4 LDS expected 160 KB/CU, got {mi350['lds_kb']}"
+
+
+def test_mi350x_vector_peaks_match_product_page():
+    specs = load_yaml("gpu_specs")
+    mi350 = specs["gfx950"]
+    assert mi350["peak_fp64_tflops"] == 72.1
+    assert mi350["peak_fp32_tflops"] == 144.2
+    assert mi350["ridge_point"] == 9.0
+
+
+def test_gfx90a_is_conservative_family_floor_with_variants():
+    specs = load_yaml("gpu_specs")
+    gfx90a = specs["gfx90a"]
+    assert gfx90a["peak_fp64_tflops"] == 22.6
+    assert gfx90a["peak_fp64_matrix_tflops"] == 45.3
+    variant_names = {entry["name"] for entry in gfx90a["sku_variants"]}
+    assert {"MI210", "MI250X"}.issubset(variant_names)
+
+
+def test_rdna3_lds_is_tracked_per_cu():
+    specs = load_yaml("gpu_specs")
+    assert specs["gfx1100"]["lds_kb"] == 64
 
 
 def test_schema_rejects_invalid_arch_id_pattern():

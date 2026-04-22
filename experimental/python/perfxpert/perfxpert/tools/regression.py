@@ -21,14 +21,13 @@ REGRESSION_THRESHOLD_PCT = 0.10    # a hot kernel > 10% worse = regression
 
 def _kernel_durations(db_path: str) -> Dict[str, float]:
     """Total duration_ns per kernel name."""
-    conn = sqlite3.connect(db_path)
-    rows = conn.execute("""
-        SELECT name, SUM(duration_ns) AS total_ns
-        FROM rocpd_kernel_dispatch
-        GROUP BY name
-        ORDER BY total_ns DESC
-    """).fetchall()
-    conn.close()
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute("""
+            SELECT name, SUM(duration_ns) AS total_ns
+            FROM rocpd_kernel_dispatch
+            GROUP BY name
+            ORDER BY total_ns DESC
+        """).fetchall()
     return {name: float(total) for name, total in rows}
 
 
@@ -123,6 +122,11 @@ def compare_runs(
     per_kernel = []
     geomean_logs = []
     hot_regression_triggered = False
+    comparable_before_total = sum(
+        before[k]
+        for k in all_kernels
+        if before.get(k, 0) > 0 and after.get(k, 0) > 0
+    )
     for k in sorted(all_kernels):
         b = before.get(k, 0)
         a = after.get(k, 0)
@@ -132,8 +136,8 @@ def compare_runs(
         per_kernel.append({"kernel": k, "delta_pct": delta, "was_hot": k in hot})
 
         # Weighted geomean: each kernel weighted by its baseline runtime share
-        weight = b / total_before
-        if a > 0:
+        if a > 0 and comparable_before_total > 0:
+            weight = b / comparable_before_total
             geomean_logs.append(weight * math.log(a / b))
 
         if k in hot and delta > REGRESSION_THRESHOLD_PCT:
@@ -144,13 +148,13 @@ def compare_runs(
     # Verdict
     if hot_regression_triggered:
         verdict = "regressed"
+    elif weighted_geomean > threshold:
+        # Long-tail regression
+        verdict = "regressed"
     elif abs(total_delta) < threshold and abs(weighted_geomean) < threshold:
         verdict = "neutral"
     elif total_delta < -threshold:
         verdict = "improved"
-    elif weighted_geomean > threshold:
-        # Long-tail regression
-        verdict = "regressed"
     else:
         verdict = "neutral"
 

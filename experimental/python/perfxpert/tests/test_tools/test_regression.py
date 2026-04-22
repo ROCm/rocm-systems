@@ -1,5 +1,6 @@
 """Tests for perfxpert.tools.regression — with Gate 4 'hot kernel' definition."""
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,17 @@ FIX = Path(__file__).parent.parent / "fixtures"
 BASELINE = FIX / "regression_baseline.db"
 IMPROVED = FIX / "regression_improved.db"
 TAIL_HURT = FIX / "regression_tail_hurt.db"
+
+
+def _write_dispatch_db(path: Path, rows):
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE rocpd_kernel_dispatch (name TEXT NOT NULL, duration_ns INTEGER NOT NULL)"
+        )
+        conn.executemany(
+            "INSERT INTO rocpd_kernel_dispatch (name, duration_ns) VALUES (?, ?)",
+            rows,
+        )
 
 
 def test_compare_detects_improvement():
@@ -48,6 +60,40 @@ def test_noise_threshold():
     """Baseline vs itself → verdict = neutral."""
     r = regression.compare_runs(str(BASELINE), str(BASELINE), threshold_pct=3.0)
     assert r["verdict"] == "neutral"
+
+
+def test_deleted_kernels_do_not_underweight_remaining_regressions(tmp_path: Path):
+    before = tmp_path / "before.db"
+    after = tmp_path / "after.db"
+    _write_dispatch_db(before, [("A", 50), ("B", 50)])
+    _write_dispatch_db(after, [("A", 55)])
+
+    result = regression.compare_runs(str(before), str(after), threshold_pct=3.0)
+    assert result["verdict"] == "regressed"
+    assert result["weighted_geomean_delta_pct"] > 0.09
+
+
+def test_kernel_durations_closes_connection_on_exception(monkeypatch):
+    class BrokenConnection:
+        def __init__(self):
+            self.closed = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            self.closed = True
+            return False
+
+        def execute(self, *_args, **_kwargs):
+            raise sqlite3.DatabaseError("boom")
+
+    broken = BrokenConnection()
+    monkeypatch.setattr(regression.sqlite3, "connect", lambda _path: broken)
+
+    with pytest.raises(sqlite3.DatabaseError):
+        regression._kernel_durations("broken.db")
+    assert broken.closed is True
 
 
 def test_is_read_only_class():

@@ -91,6 +91,13 @@ class TestI1KernelResources:
         """CDNA4 (gfx950) has 160 KB LDS per CU."""
         assert _ARCH_SPECS["gfx950"]["lds_per_cu_kb"] == 160
 
+    def test_gfx942_uses_10_waves_per_simd(self):
+        """Current ROCm HIP docs describe 10 wave slots per SIMD on CDNA3/CDNA4."""
+        assert _ARCH_SPECS["gfx942"]["max_waves_per_simd"] == 10
+
+    def test_rdna3_lds_is_tracked_per_cu(self):
+        assert _ARCH_SPECS["gfx1100"]["lds_per_cu_kb"] == 64
+
     def test_returns_empty_when_no_hotspots(self):
         """No hotspots -> empty kernel list."""
         mock_conn = MagicMock()

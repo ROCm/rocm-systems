@@ -18,12 +18,12 @@ wave_occupancy_pct:
   medium: 0.50     # 50-75% acceptable
   low: 0.25        # < 25% very poor; VGPRs/LDS likely too high
   unit: fraction
-  description: "Avg waves per CU normalized to theoretical max (128 on CDNA3)"
+  description: "Avg waves per CU normalized to theoretical max (40 on gfx942/gfx950 per current ROCm HIP docs; 32 on CDNA2 MI200)"
 
 avg_waves_per_cu:
-  high: 24         # ~75% of 32 max-per-EU on CDNA3
-  medium: 16       # 50%
-  low: 8           # 25% — latency-bound signature
+  high: 30         # ~75% of 40 max-per-CU on current CDNA3/CDNA4 docs
+  medium: 20       # 50%
+  low: 10          # 25% — latency-bound signature
   unit: waves
   description: "SQ_WAVES / GRBM_COUNT (time-averaged)"
 

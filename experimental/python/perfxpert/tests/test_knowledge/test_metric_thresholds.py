@@ -42,3 +42,11 @@ def test_high_exceeds_medium_exceeds_low():
         assert entry["high"] > entry["medium"] > entry["low"], (
             f"metric {name} has non-monotonic thresholds"
         )
+
+
+def test_wave_occupancy_thresholds_match_documented_40_wave_cdna_max():
+    data = load_yaml("metric_thresholds")
+    assert "40" in data["wave_occupancy_pct"]["description"]
+    assert data["avg_waves_per_cu"]["high"] == 30
+    assert data["avg_waves_per_cu"]["medium"] == 20
+    assert data["avg_waves_per_cu"]["low"] == 10

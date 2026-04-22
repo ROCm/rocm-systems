@@ -50,6 +50,26 @@ def test_bf16_variant():
     assert r["plausible"] is True
 
 
+def test_fp64_matrix_variant():
+    """MI300X FP64 matrix peak = 163.4 TFLOPS."""
+    r = sol.sanity_check(
+        achieved_flops_per_sec=160e12,
+        kernel_type="fp64_matrix",
+        gfx_id="gfx942",
+    )
+    assert r["plausible"] is True
+
+
+def test_fp64_matrix_variant_exceeding_peak_rejected():
+    r = sol.sanity_check(
+        achieved_flops_per_sec=170e12,
+        kernel_type="fp64_matrix",
+        gfx_id="gfx942",
+    )
+    assert r["plausible"] is False
+    assert r["sol_peak"] == 163.4e12
+
+
 def test_unknown_kernel_type_raises():
     with pytest.raises(ValueError):
         sol.sanity_check(achieved_flops_per_sec=1e12, kernel_type="fp16", gfx_id="gfx942")

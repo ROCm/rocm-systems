@@ -28,6 +28,24 @@ def test_explain_unknown_raises():
         compiler.explain_flag("--definitely-not-a-flag")
 
 
+def test_lookup_filters_for_matrix_targeting():
+    flags = compiler.lookup_flags(
+        goal="mfma_enablement",
+        arch="gfx942",
+        kernel_class="matrix",
+    )
+    assert [f["flag"] for f in flags] == ["--offload-arch="]
+
+
+def test_lookup_filters_for_occupancy_controls():
+    flags = compiler.lookup_flags(
+        goal="occupancy",
+        arch="gfx942",
+        kernel_class="register_limited",
+    )
+    assert [f["flag"] for f in flags] == ["-mllvm -amdgpu-num-vgpr="]
+
+
 def test_is_read_only_class():
     assert compiler.lookup_flags.__tool_class__ == ToolClass.READ_ONLY
     assert compiler.explain_flag.__tool_class__ == ToolClass.READ_ONLY
