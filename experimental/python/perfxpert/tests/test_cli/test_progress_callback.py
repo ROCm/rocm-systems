@@ -112,6 +112,7 @@ def test_execute_agentic_env_airgap_skips_auth_preflight(monkeypatch):
     assert mock_root.call_args.kwargs["airgap"] is True
     assert mock_root.call_args.kwargs["provider"] is None
     assert mock_root.call_args.kwargs["api_key"] is None
+    assert mock_root.call_args.kwargs["progress_callback"] is None
 
 
 # --- 3. CLI non-TTY: plain status lines on stderr ------------------------
@@ -122,16 +123,33 @@ _CLI_PRELUDE = (
     # (non-TTY) stderr pipe. We skip the argparse `-i` requirement by
     # driving _execute_agentic through the process_args path.
     "import sys\n"
+    "from unittest.mock import patch\n"
     "from perfxpert import analyze\n"
-    "analyze._execute_agentic(\n"
-    "    None,\n"
-    "    config=None,\n"
-    "    source_dir='.',\n"
-    "    output_format='json',\n"
-    "    enable_llm=True,\n"        # forces the callback branch
-    "    llm_provider='anthropic',\n"  # ignored under airgap
-    "    no_progress={no_progress},\n"
-    ")\n"
+    "def _fake_agent_root(**kwargs):\n"
+    "    cb = kwargs.get('progress_callback')\n"
+    "    if cb is not None:\n"
+    "        cb('Routing your query (Root agent)')\n"
+    "        cb('Root agent done')\n"
+    "    return {{\n"
+    "        'narrative': 'ok',\n"
+    "        'recommendations': [],\n"
+    "        'primary_bottleneck': 'mixed',\n"
+    "        'warnings': [],\n"
+    "        'metadata': {{}},\n"
+    "    }}\n"
+    "with patch('perfxpert.analyze._preflight_provider_auth'), \\\n"
+    "     patch('perfxpert.analysis.payload.build_analysis_payload', return_value={{}}), \\\n"
+    "     patch('perfxpert.analyze._format_agentic_output', return_value='{{\"status\":\"ok\"}}'), \\\n"
+    "     patch('perfxpert.api.agent_root', side_effect=_fake_agent_root):\n"
+    "    analyze._execute_agentic(\n"
+    "        None,\n"
+    "        config=None,\n"
+    "        source_dir='.',\n"
+    "        output_format='json',\n"
+    "        enable_llm=True,\n"
+    "        llm_provider='anthropic',\n"
+    "        no_progress={no_progress},\n"
+    "    )\n"
 )
 
 
@@ -153,16 +171,18 @@ def _airgap_env(monkeypatch, tmp_path):
 
 
 def test_analyze_cli_non_tty_prints_status_lines(_airgap_env):
-    """Subprocess run of ``_execute_agentic`` under airgap + a piped
+    """Subprocess run of ``_execute_agentic`` with live LLM mode and a piped
     stderr emits the ``[perfxpert]`` status prefix on stderr and the
     JSON result on stdout. No ANSI escapes in either stream.
     """
+    env = dict(_airgap_env)
+    env.pop("PERFXPERT_AIRGAP", None)
     code = _CLI_PRELUDE.format(no_progress="False")
     res = subprocess.run(
         [sys.executable, "-c", code],
         capture_output=True,
         text=True,
-        env=_airgap_env,
+        env=env,
         timeout=30,
     )
     assert res.returncode == 0, (
@@ -181,16 +201,42 @@ def test_analyze_cli_non_tty_prints_status_lines(_airgap_env):
     )
 
 
-def test_analyze_cli_no_progress_flag_silent(_airgap_env):
-    """When ``--no-progress`` is set, the CLI suppresses the
-    ``[perfxpert]`` status prefix even in LLM mode. stdout is unchanged.
+def test_analyze_cli_env_airgap_suppresses_llm_progress(_airgap_env):
+    """Env-forced airgap must suppress LLM-only progress UX even when
+    ``enable_llm=True`` was requested by the caller.
     """
-    code = _CLI_PRELUDE.format(no_progress="True")
+    code = _CLI_PRELUDE.format(no_progress="False")
     res = subprocess.run(
         [sys.executable, "-c", code],
         capture_output=True,
         text=True,
         env=_airgap_env,
+        timeout=30,
+    )
+    assert res.returncode == 0, (
+        f"exit={res.returncode}\nstderr={res.stderr!r}\nstdout={res.stdout!r}"
+    )
+    assert res.stdout.strip(), "stdout must contain the analysis output"
+    assert _ansi_free(res.stdout), "stdout must be ANSI-free when piped"
+    assert "[perfxpert]" not in res.stderr, (
+        "PERFXPERT_AIRGAP=1 must disable LLM-only progress UX; "
+        f"got stderr={res.stderr!r}"
+    )
+    assert _ansi_free(res.stderr), "stderr must remain ANSI-free when piped"
+
+
+def test_analyze_cli_no_progress_flag_silent(_airgap_env):
+    """When ``--no-progress`` is set, the CLI suppresses the
+    ``[perfxpert]`` status prefix even in LLM mode. stdout is unchanged.
+    """
+    env = dict(_airgap_env)
+    env.pop("PERFXPERT_AIRGAP", None)
+    code = _CLI_PRELUDE.format(no_progress="True")
+    res = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=env,
         timeout=30,
     )
     assert res.returncode == 0, (

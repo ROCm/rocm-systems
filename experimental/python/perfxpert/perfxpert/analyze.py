@@ -1653,6 +1653,7 @@ def _execute_agentic(
     min_duration = float(kwargs.get("min_duration") or 0.0)
     env_forces_airgap = os.environ.get("PERFXPERT_AIRGAP", "0") == "1"
     effective_airgap = env_forces_airgap or (not requested_llm)
+    llm_active = requested_llm and (not effective_airgap)
     effective_provider = None if effective_airgap else llm_provider
     effective_api_key = None if effective_airgap else llm_api_key
 
@@ -1670,12 +1671,12 @@ def _execute_agentic(
     if effective_provider and effective_api_key:
         _warn_if_flag_overrides_env(effective_provider, effective_api_key)
 
-    # Build progress feedback (spinner / plain lines / silent) based on
-    # whether the user requested agentic/LLM mode and the terminal / flag
-    # state. Airgap can still route through the same agentic pipeline; it
-    # only changes whether provider-backed calls are allowed.
+    # Build progress feedback (spinner / plain lines / silent) from the
+    # effective LLM state, not the raw CLI request. ``PERFXPERT_AIRGAP=1``
+    # must fully disable LLM-only UX even when the user also passed
+    # ``--llm``.
     progress_cb, progress_cm = _progress_context(
-        enable_llm=requested_llm,
+        enable_llm=llm_active,
         no_progress=no_progress,
         verbose=verbose,
     )
