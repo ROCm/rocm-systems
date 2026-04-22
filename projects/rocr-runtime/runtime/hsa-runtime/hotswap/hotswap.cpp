@@ -189,6 +189,21 @@ static LLVMState InitLLVMImpl(const std::string& isa_name) {
       state.MAI.get(), state.MRI.get(), MOFI.get());
   MOFI->InitMCObjectFileInfo(triple, true, *state.Ctx);
 #endif
+  // Same rationale as the `initInlineSourceManager` call in the
+  // target-assembler path (~line 1332 below): the MCContext ctor
+  // defaults `SourceMgr *Mgr = nullptr`, so any MC-layer diagnostic
+  // (from the disassembler here, from the target assembler there)
+  // that reaches `MCContext::reportCommon` / `diagnose` with a
+  // valid SMLoc would trip the
+  // `llvm_unreachable("Either SourceMgr should be available")`
+  // abort at MCContext.cpp:1093.  The inline SourceMgr gives the
+  // diagnose path a non-null fallback so the diagnostic is routed
+  // through the default diag handler (stderr) and the caller's
+  // downstream error-path code runs, instead of the process
+  // abort'ing on SIG6.  `initInlineSourceManager` is idempotent;
+  // this context is NOT reset between disassemblies (one ctx per
+  // loaded module), so we only need to init it once here.
+  state.Ctx->initInlineSourceManager();
 
   state.disasm.reset(
       state.target->createMCDisassembler(*state.STI, *state.Ctx));
@@ -1330,6 +1345,34 @@ RewriteResult RetargetCodeObject(void* elf_data, size_t elf_size,
 
   // Reset MCContext state for the assembly
   ta.Ctx->reset();
+
+  // Attach an inline SourceMgr to the MCContext so the MC layer can
+  // format diagnostics from instruction-emission errors (unsupported
+  // encodings, out-of-range operands, etc.) without hitting the
+  // `llvm_unreachable("Either SourceMgr should be available")` abort
+  // in `MCContext::reportCommon` (llvm/lib/MC/MCContext.cpp).  The
+  // parser below is given its own `src_mgr` directly, but that's a
+  // separate SourceMgr — the MCContext's own SrcMgr stays `nullptr`
+  // after construction (the ctor defaults the `SourceMgr *Mgr`
+  // parameter to `nullptr`), so any error reported via
+  // `MCContext::reportError` / `reportWarning` with a valid `SMLoc`
+  // would trigger the abort.  `initInlineSourceManager` is idempotent
+  // (guarded by `if (!InlineSrcMgr)`) but `MCContext::reset` clears
+  // the inline SourceMgr, so we need to re-init after every reset.
+  //
+  // Manifested empirically as `SIG6 ... Either SourceMgr should be
+  // available UNREACHABLE executed at MCContext.cpp:1093` on every
+  // Triton kernel in `compare_correctness --lane=legacy`.  The
+  // rule-based rewrite path emits N `waitcnt` patches + M
+  // target-unsupported instructions, and those unsupported opcodes
+  // trigger MC's error-reporting path which then aborts.  With the
+  // inline SourceMgr attached, the errors are formatted and routed
+  // through the default diag handler; `parser->Run` returns
+  // `asm_failed = true`; the caller's existing `data.size() < 64`
+  // fallback (~40 lines below) surfaces a clean `HSA_STATUS_ERROR`
+  // instead of a process abort, letting the test harness see an
+  // EXIT-based failure rather than SIG6.
+  ta.Ctx->initInlineSourceManager();
 
   llvm::Triple tgt_triple("amdgcn-amd-amdhsa");
   llvm::MCTargetOptions mc_opts;

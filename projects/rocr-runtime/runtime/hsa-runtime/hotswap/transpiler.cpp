@@ -3509,6 +3509,17 @@ static LLVMState InitLLVM(const std::string& isa_name) {
       state.MAI.get(), state.MRI.get(), MOFI.get());
   MOFI->InitMCObjectFileInfo(triple, true, *state.Ctx);
 #endif
+  // Give the MCContext an InlineSrcMgr so the disassembler's
+  // `reportCommon` / `diagnose` paths have a non-null SourceMgr to
+  // hand to the default diag handler for any valid-SMLoc diagnostic.
+  // Without this, malformed instruction bytes encountered by the
+  // disassembler (or by downstream codegen that re-uses this ctx)
+  // trip the `llvm_unreachable("Either SourceMgr should be available")`
+  // abort at MCContext.cpp:1093 — observed as SIG6 on every Triton
+  // kernel in `compare_correctness --lane=legacy`.  Mirrors the
+  // companion `initInlineSourceManager` call on the `state.Ctx` and
+  // target-assembler `ta.Ctx` in `hotswap.cpp`.
+  state.Ctx->initInlineSourceManager();
 
   state.disasm.reset(
       state.target->createMCDisassembler(*state.STI, *state.Ctx));
@@ -5318,6 +5329,19 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
   llvm::MCTargetOptions mc_opts;
 
   tgt_state.Ctx->reset();
+  // Re-init the InlineSrcMgr after reset — `MCContext::reset` clears
+  // both SrcMgr and InlineSrcMgr, but the assembly step below can
+  // emit diagnostics (from `MCAsmParser::printMessage` via
+  // `MCContext::diagnose`) that hit `MCContext.cpp:1093`'s
+  // `llvm_unreachable("Either SourceMgr should be available")` when
+  // both are null.  This is the path that fires on every Triton
+  // kernel under `compare_correctness --lane=legacy` for
+  // target-unsupported instructions surfaced by the rule-based
+  // rewrite (the "M unsupported" counter just printed above).
+  // Companion inits in the disassembler-side ctor (`transpiler.cpp`
+  // ~line 3520) cover the disassembly path but get clobbered here
+  // by `reset()`.
+  tgt_state.Ctx->initInlineSourceManager();
 
   llvm::StringRef asm_ref(translated_asm);
   auto buf = llvm::MemoryBuffer::getMemBuffer(asm_ref, "", false);
