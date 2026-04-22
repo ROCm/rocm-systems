@@ -29,20 +29,30 @@ force=0
 for arg in "$@"; do
   case "$arg" in
     --force|-f) force=1 ;;
-    -h|--help)
-      sed -n '5,15p' "$0" | sed 's/^# \?//'
-      exit 0
-      ;;
+    -h|--help) echo "Usage: $0 [--force]"; exit 0 ;;
     *) echo "error: unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
 
-# `git rev-parse --git-path hooks` returns the hooks dir for the
-# enclosing repo (handles non-standard layouts: submodules, worktrees,
-# GIT_DIR overrides). The path it returns is relative to the cwd, so we
-# anchor cwd to SCRIPT_DIR before resolving and converting to absolute.
-HOOKS_DIR_REL="$(git -C "$SCRIPT_DIR" rev-parse --git-path hooks)"
-HOOKS_DIR="$(cd "$SCRIPT_DIR" && cd "$HOOKS_DIR_REL" && pwd)"
+# Resolve the hooks directory git will actually invoke. `core.hooksPath`,
+# if set, overrides the default `<gitdir>/hooks/` (used by tools like
+# husky and corporate dotfiles). `--git-path hooks` does NOT honor that
+# config, so we have to check it ourselves — otherwise the install would
+# silently no-op.
+HOOKS_DIR="$(git -C "$SCRIPT_DIR" config --get core.hooksPath || true)"
+if [ -z "$HOOKS_DIR" ]; then
+  HOOKS_DIR_REL="$(git -C "$SCRIPT_DIR" rev-parse --git-path hooks)"
+  # That path is relative to cwd; anchor it to SCRIPT_DIR and absolutize.
+  HOOKS_DIR="$(cd "$SCRIPT_DIR" && cd "$HOOKS_DIR_REL" && pwd)"
+else
+  # core.hooksPath may itself be relative (to the worktree root). Make it
+  # absolute *before* mkdir, since the directory may not yet exist.
+  case "$HOOKS_DIR" in
+    /*) ;; # already absolute, use as-is
+    *)  HOOKS_DIR="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)/$HOOKS_DIR" ;;
+  esac
+fi
+mkdir -p "$HOOKS_DIR"
 HOOK_DST="$HOOKS_DIR/pre-commit"
 
 # Refuse to clobber whatever's already there — could be another
@@ -58,5 +68,4 @@ if [ -e "$HOOK_DST" ] || [ -L "$HOOK_DST" ]; then
 fi
 
 ln -s "$HOOK_SRC" "$HOOK_DST"
-chmod +x "$HOOK_SRC"
 echo "installed: $HOOK_DST -> $HOOK_SRC"

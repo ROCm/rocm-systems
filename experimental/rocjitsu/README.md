@@ -147,11 +147,12 @@ This symlinks `scripts/git-hooks/pre-commit` into the enclosing repo's
 hooks directory. The installer refuses to overwrite an existing
 `pre-commit` hook; pass `--force` to replace it.
 
-If a commit is rejected, run the formatter, re-stage, and commit again:
+If a commit is rejected, run the formatter, re-stage the affected files,
+and commit again:
 
 ```bash
 bash scripts/clang_format.sh
-git add -u
+git add <reformatted files>   # or `git add -u` if they are already tracked
 git commit
 ```
 

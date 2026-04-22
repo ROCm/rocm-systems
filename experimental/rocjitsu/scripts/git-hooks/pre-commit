@@ -14,9 +14,10 @@
 # subdirectory may be relocated within its parent repo, the watched path is
 # computed dynamically from the hook's own location.
 #
-# Caveat: this checks the working-tree file, not the staged blob. A
-# partially-staged file (git add -p) may be reported clean or dirty based
-# on unstaged changes. Re-stage after fixing and commit again.
+# The hook checks the *staged* content of each file (git's `:0:<path>`
+# blob), not the working-tree file. This means partial staging (git
+# add -p) is handled correctly: only what's about to be committed is
+# checked.
 
 # Strict bash mode: exit on error (-e), error on undefined vars (-u),
 # fail a pipeline if any stage fails (-o pipefail).
@@ -51,14 +52,18 @@ WATCH_PREFIX="$ROCJITSU_REL/"
 #   --name-only         just print paths, no diff hunks
 #   --diff-filter=ACM   only Added / Copied / Modified files (skip deletes
 #                       and pure renames — nothing to format there)
+#   -z                  separate paths with NUL instead of LF, and emit
+#                       them verbatim (no quote-escaping) — handles
+#                       filenames containing spaces, tabs, or newlines
 #   -- "$WATCH_PREFIX"  restrict to paths under the watched directory
-# `grep` narrows to .cpp / .h. The `|| true` keeps the pipeline from
-# failing under `set -e` when grep finds no matches (grep exits 1 then).
-# `mapfile -t` reads the lines into a bash array, one element per file.
-mapfile -t staged < <(
-  git -C "$GIT_ROOT" diff --cached --name-only --diff-filter=ACM \
+# `grep -z` operates on NUL-delimited records to keep the same framing.
+# `|| true` keeps the pipeline from failing under `set -e` when grep
+# finds no matches (grep exits 1 then). `mapfile -d ''` reads
+# NUL-delimited input into the array, one element per file.
+mapfile -d '' -t staged < <(
+  git -C "$GIT_ROOT" diff --cached --name-only --diff-filter=ACM -z \
        -- "$WATCH_PREFIX" \
-    | grep -E '\.(cpp|h)$' || true
+    | grep -zE '\.(cpp|h)$' || true
 )
 
 # No staged files in the watched dir → nothing to check, let the commit
@@ -76,16 +81,25 @@ if ! command -v clang-format &>/dev/null; then
   exit 1
 fi
 
-# Check each file. `--dry-run --Werror` makes clang-format exit non-zero
-# if the file would be reformatted, without actually touching it.
-# `-style=file:...` pins the style file to rocjitsu's own .clang-format
-# rather than letting clang-format search upward (which could pick up a
-# different config from the parent repo).
+# Check each file by piping its *staged* content into clang-format.
+#   git show ":0:$f"   the contents of $f at stage 0 of the index (i.e.
+#                      what will be committed). This is independent of any
+#                      unstaged edits to the working-tree file.
+#   --dry-run --Werror makes clang-format exit non-zero if the input would
+#                      be reformatted, without producing any output.
+#   --assume-filename  needed when reading from stdin so per-file style
+#                      rules (extension-driven) still apply.
+#   -style=file:...    pin the style file to rocjitsu's own .clang-format
+#                      rather than letting clang-format search upward
+#                      (which could pick up a different config from the
+#                      parent repo).
 bad=()
 for f in "${staged[@]}"; do
-  if ! clang-format --dry-run --Werror \
-        -style=file:"$ROCJITSU_DIR/.clang-format" \
-        "$GIT_ROOT/$f" &>/dev/null; then
+  if ! git -C "$GIT_ROOT" show ":0:$f" \
+        | clang-format --dry-run --Werror \
+                       -style=file:"$ROCJITSU_DIR/.clang-format" \
+                       --assume-filename="$f" \
+                       &>/dev/null; then
     bad+=("$f")
   fi
 done
