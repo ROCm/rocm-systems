@@ -24,6 +24,6 @@ Show
 Type "# perfxpert-mcp — stdio JSON-RPC bridge for MCP clients"
 Enter
 Sleep 500ms
-Type "timeout 3 perfxpert-mcp 2>&1 | grep -m1 'perfxpert-mcp:'"
+Type "timeout 3 perfxpert-mcp </dev/null 2>&1 | grep -m1 'perfxpert-mcp:'"
 Enter
 Sleep 5s
