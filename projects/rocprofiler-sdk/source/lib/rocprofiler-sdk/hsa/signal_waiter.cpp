@@ -209,8 +209,17 @@ SignalWaiter::run()
 
                 if(registration::get_fini_status() <= 0)
                 {
-                    auto dispatch_time = kernel_dispatch::get_dispatch_time_from_ticks(
-                        session, packet, gpu_start, gpu_end);
+                    kernel_dispatch::profiling_time dispatch_time;
+                    if(gpu_start != 0 && gpu_end != 0)
+                    {
+                        dispatch_time = kernel_dispatch::get_dispatch_time_from_ticks(
+                            session, packet, gpu_start, gpu_end);
+                    }
+                    else
+                    {
+                        dispatch_time =
+                            kernel_dispatch::get_dispatch_time(session, packet);
+                    }
                     kernel_dispatch::dispatch_complete(session, packet, dispatch_time);
 
                     auto session_ptr = active[si];

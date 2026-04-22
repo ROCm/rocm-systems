@@ -634,10 +634,7 @@ WriteInterceptor(const void* packets,
             else
             {
                 completion_signal = kernel_packet.kernel_dispatch.completion_signal;
-                // For tracing-only with an existing app signal, do NOT reset the signal
-                // value — the GPU firmware/hardware will handle it. Only reset for
-                // pooled signals we created.
-                if(!tracing_only || !existing_completion_signal)
+                if(!tracing_only)
                 {
                     get_core_table()->hsa_signal_store_screlease_fn(completion_signal, 0);
                 }
