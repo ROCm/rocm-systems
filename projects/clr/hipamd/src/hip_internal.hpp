@@ -589,6 +589,7 @@ namespace hip {
   extern amd::Context* host_context;
 
   extern void init(bool* status);
+  extern bool aqlmonRuntimeProvidesKernelCompletionSignals();
 
   extern Device* getCurrentDevice();
 

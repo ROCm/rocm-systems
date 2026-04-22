@@ -5,6 +5,9 @@
  */
 
 #include <hip/hip_runtime.h>
+
+#include <atomic>
+
 #include "hip_internal.hpp"
 #include "hip_platform.hpp"
 #include "platform/runtime.hpp"
@@ -13,9 +16,83 @@
 #include "rocclr/os/os.hpp"
 
 #include <hip/amd_detail/hip_api_trace.hpp>
+
+#if defined(HIP_ROCPROFILER_REGISTER) && HIP_ROCPROFILER_REGISTER > 0 && \
+    defined(HIP_ENABLE_AQLMON_RUNTIME_CONTRACT) && HIP_ENABLE_AQLMON_RUNTIME_CONTRACT > 0
+#include <aqlmon/runtime_contract.h>
+#include <rocprofiler-register/rocprofiler-register.h>
+#endif
+
 namespace hip {
 const HipToolsDispatchTable* GetHipToolsDispatchTable();
 }  // namespace hip
+
+namespace {
+
+std::atomic<bool> g_hipAqlmonRuntimeProvidesKernelCompletionSignals{false};
+
+#if defined(HIP_ROCPROFILER_REGISTER) && HIP_ROCPROFILER_REGISTER > 0 && \
+    defined(HIP_ENABLE_AQLMON_RUNTIME_CONTRACT) && HIP_ENABLE_AQLMON_RUNTIME_CONTRACT > 0
+
+constexpr uint32_t kHipAqlmonRequestedCapabilities =
+    AQLMON_COMPLETION_SIGNAL_CAP_KERNEL_DISPATCH_SIGNALS;
+
+const char* toolActivationModeString(rocprofiler_register_tool_activation_mode_t mode) {
+  switch (mode) {
+    case ROCP_REG_TOOL_ACTIVATION_STARTUP: return "startup";
+    case ROCP_REG_TOOL_ACTIVATION_ATTACH: return "attach";
+    case ROCP_REG_TOOL_ACTIVATION_NONE: return "none";
+  }
+
+  return "unknown";
+}
+
+void negotiateHipAqlmonCompletionSignals(rocprofiler_register_tool_activation_mode_t mode,
+                                         void*) {
+  auto request = aqlmon_runtime_negotiation_request_t{};
+  request.size = sizeof(request);
+  request.abi_version = AQLMON_RUNTIME_NEGOTIATION_ABI_VERSION;
+  request.proposed_mode = AQLMON_COMPLETION_SIGNAL_MODE_RUNTIME_PROVIDED;
+  request.proposed_capabilities = kHipAqlmonRequestedCapabilities;
+
+  auto response = aqlmon_runtime_negotiation_response_t{};
+  response.size = sizeof(response);
+  response.abi_version = AQLMON_RUNTIME_NEGOTIATION_ABI_VERSION;
+
+  const auto status = aqlmon_runtime_negotiate(&request, &response);
+  const bool runtime_provided =
+      status == AQLMON_STATUS_SUCCESS &&
+      response.selected_mode == AQLMON_COMPLETION_SIGNAL_MODE_RUNTIME_PROVIDED &&
+      (response.granted_capabilities & kHipAqlmonRequestedCapabilities) ==
+          kHipAqlmonRequestedCapabilities;
+
+  g_hipAqlmonRuntimeProvidesKernelCompletionSignals.store(runtime_provided,
+                                                          std::memory_order_relaxed);
+
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT,
+          "AQLMON completion-signal negotiation via %s: status=%u, selected_mode=%u, "
+          "granted_capabilities=0x%x",
+          toolActivationModeString(mode), static_cast<unsigned>(status),
+          static_cast<unsigned>(response.selected_mode), response.granted_capabilities);
+}
+
+void registerHipAqlmonCompletionSignalCallback() {
+  const auto status = rocprofiler_register_runtime_tool_activation_callback(
+      "hip", &negotiateHipAqlmonCompletionSignals, nullptr);
+  if (status != ROCP_REG_SUCCESS) {
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT,
+            "AQLMON completion-signal callback registration failed: %u",
+            static_cast<unsigned>(status));
+  }
+}
+
+#else
+
+void registerHipAqlmonCompletionSignalCallback() {}
+
+#endif
+
+}  // namespace
 
 namespace hip {
 std::once_flag g_ihipInitialized;
@@ -35,6 +112,8 @@ void init(bool* status) {
     *status = false;
     return;
   }
+
+  registerHipAqlmonCompletionSignalCallback();
 
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Version: %d.%d.%d, Direct Dispatch: %d",
           HIP_VERSION_MAJOR, HIP_VERSION_MINOR, HIP_VERSION_PATCH, AMD_DIRECT_DISPATCH);
@@ -82,6 +161,10 @@ void init(bool* status) {
   // Complete platform initialization
   PlatformState::Instance().Init();
   *status = true;
+}
+
+bool aqlmonRuntimeProvidesKernelCompletionSignals() {
+  return g_hipAqlmonRuntimeProvidesKernelCompletionSignals.load(std::memory_order_relaxed);
 }
 
 // ================================================================================================

@@ -4114,18 +4114,21 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     aql_packet->setup = sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
   }
 
+  const bool request_completion_signal =
+      attach_signal || (vcmd != nullptr && vcmd->attachCompletionSignal());
+
   if (isGraphCapture) {
     // Dispatch the packet
     if (!dispatchAqlPacket(&dispatchPacket, aqlHeaderWithOrder,
                            (sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS),
                            GPU_FLUSH_ON_EXECUTION, command_->getPktCapturingState(),
-                           command_->getAqlPacket())) {
+                           command_->getAqlPacket(), request_completion_signal)) {
       return false;
     }
   } else {
     if (!dispatchAqlPacket(&dispatchPacket, aqlHeaderWithOrder,
                            (sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS),
-                           GPU_FLUSH_ON_EXECUTION, false, nullptr, attach_signal)) {
+                           GPU_FLUSH_ON_EXECUTION, false, nullptr, request_completion_signal)) {
       return false;
     }
   }

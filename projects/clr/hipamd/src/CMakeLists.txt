@@ -303,6 +303,38 @@ if(HIP_ENABLE_ROCPROFILER_REGISTER)
     set_target_properties(amdhip64 PROPERTIES INSTALL_RPATH "\$ORIGIN")
 endif()
 
+option(HIP_ENABLE_AQLMON_RUNTIME_CONTRACT "Enable the AQLMON runtime negotiation contract" ON)
+
+if(HIP_ENABLE_AQLMON_RUNTIME_CONTRACT)
+    find_path(AQLMON_RUNTIME_CONTRACT_INCLUDE_DIR aqlmon/runtime_contract.h
+        HINTS
+            $ENV{AQLMON_RUNTIME_CONTRACT_ROOT}
+            $ENV{AQLMON_ROOT}
+            $ENV{AQLMONITOR_ROOT}
+            ${CMAKE_INSTALL_PREFIX}
+        PATHS /opt/rocm
+        PATH_SUFFIXES include)
+
+    find_library(AQLMON_RUNTIME_CONTRACT_LIBRARY NAMES aqlmon_runtime_contract
+        HINTS
+            $ENV{AQLMON_RUNTIME_CONTRACT_ROOT}
+            $ENV{AQLMON_ROOT}
+            $ENV{AQLMONITOR_ROOT}
+            ${CMAKE_INSTALL_PREFIX}
+        PATHS /opt/rocm
+        PATH_SUFFIXES lib lib64 ${CMAKE_INSTALL_LIBDIR})
+
+    if(AQLMON_RUNTIME_CONTRACT_INCLUDE_DIR AND AQLMON_RUNTIME_CONTRACT_LIBRARY)
+        target_compile_definitions(amdhip64 PRIVATE HIP_ENABLE_AQLMON_RUNTIME_CONTRACT=1)
+        target_include_directories(amdhip64 PRIVATE ${AQLMON_RUNTIME_CONTRACT_INCLUDE_DIR})
+        target_link_libraries(amdhip64 PRIVATE ${AQLMON_RUNTIME_CONTRACT_LIBRARY})
+        set_target_properties(amdhip64 PROPERTIES INSTALL_RPATH "\$ORIGIN")
+        message(STATUS "AQLMON runtime contract: ${AQLMON_RUNTIME_CONTRACT_LIBRARY}")
+    else()
+        message(STATUS "AQLMON runtime contract not found. Disabling HIP integration.")
+    endif()
+endif()
+
 add_custom_command(TARGET amdhip64 POST_BUILD COMMAND
   ${CMAKE_COMMAND} -E copy ${PROJECT_BINARY_DIR}/share/hip/.hipInfo ${PROJECT_BINARY_DIR}/lib/.hipInfo)
 add_custom_command(TARGET amdhip64 POST_BUILD COMMAND

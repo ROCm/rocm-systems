@@ -15,6 +15,25 @@ the `rocprofiler_configure` symbols and invokes each of them. The `rocprofiler_c
 effectively tells rocprofiler which behaviors it wants to be notified about, features it wants to use (e.g. API tracing, kernel dispatch timing),
 etc.
 
+## Runtime Tool-Activation Notification
+
+rocprofiler-register also provides a small runtime-facing callback registration API for
+one-time tool activation notification:
+
+- runtimes register `rocprofiler_register_runtime_tool_activation_callback(...)`
+- if a tool becomes active during normal API-table propagation,
+  rocprofiler-register invokes the callback with
+  `ROCP_REG_TOOL_ACTIVATION_STARTUP`
+- if a tool becomes active through `rocprofiler_register_attach(...)`,
+  rocprofiler-register invokes the callback with
+  `ROCP_REG_TOOL_ACTIVATION_ATTACH` before the profiler attach entry point runs
+- if the tool is already active when the runtime registers, the callback is invoked
+  immediately
+
+The callback mechanism is intentionally generic and process-lifetime only. It does not
+carry tool-specific policy; it just lets runtimes lazily enable whatever generic
+tool-facing behavior they need once a profiler is active.
+
 ## Environment Variables
 
 | Environment Variable              | Description                                                               | Default Value  |

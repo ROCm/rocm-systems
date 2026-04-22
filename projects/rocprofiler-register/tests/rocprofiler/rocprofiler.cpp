@@ -237,6 +237,26 @@ rocprofiler_set_api_table(const char* name,
 
     return 0;
 }
+
+int
+rocprofiler_attach(void) __attribute__((visibility("default")));
+
+int
+rocprofiler_attach(void)
+{
+    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
+    return 0;
+}
+
+int
+rocprofiler_detach(void) __attribute__((visibility("default")));
+
+int
+rocprofiler_detach(void)
+{
+    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
+    return 0;
+}
 }
 
 void

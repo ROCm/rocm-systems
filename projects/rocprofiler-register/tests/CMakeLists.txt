@@ -556,3 +556,69 @@ set_tests_properties(
         "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};LD_PRELOAD=librocprofiler-register.so;ROCPROFILER_REGISTER_LIBRARY=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/librocprofiler-sdk.so.0;ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3;ROCPROFILER_REGISTER_MONOCHROME=true;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
         LABELS
         "dlopen;secure")
+
+add_executable(test-tool-activation-callback)
+target_sources(test-tool-activation-callback PRIVATE test-tool-activation-callback.cpp)
+target_link_libraries(
+    test-tool-activation-callback PRIVATE rocprofiler-register::tests-common
+                                          rocprofiler-register::rocprofiler-register)
+
+add_test(
+    NAME test-tool-activation-callback-startup
+    COMMAND $<TARGET_FILE:test-tool-activation-callback>
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+
+set_tests_properties(
+    test-tool-activation-callback-startup
+    PROPERTIES
+        ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};LD_PRELOAD=librocprofiler-register.so;ROCP_TOOL_LIBRARIES=libgeneric-tool.so;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        PASS_REGULAR_EXPRESSION
+        ".rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.test-tool-activation-callback.cpp. callback startup\n.test-tool-activation-callback.cpp. startup identifier 0\n.test-tool-activation-callback.cpp. callback_count 1\n.test-tool-activation-callback.cpp. success startup before\n"
+        LABELS
+        "tool-activation")
+
+add_test(
+    NAME test-tool-activation-callback-startup-after
+    COMMAND $<TARGET_FILE:test-tool-activation-callback>
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+
+set_tests_properties(
+    test-tool-activation-callback-startup-after
+    PROPERTIES
+        ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};LD_PRELOAD=librocprofiler-register.so;ROCP_TOOL_LIBRARIES=libgeneric-tool.so;ROCP_REG_TEST_TOOL_ACTIVE_REGISTER_AFTER=1;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        PASS_REGULAR_EXPRESSION
+        ".rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.test-tool-activation-callback.cpp. startup identifier 0\n.test-tool-activation-callback.cpp. callback startup\n.test-tool-activation-callback.cpp. callback_count 1\n.test-tool-activation-callback.cpp. success startup after\n"
+        LABELS
+        "tool-activation")
+
+add_test(
+    NAME test-tool-activation-callback-attach
+    COMMAND $<TARGET_FILE:test-tool-activation-callback>
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+
+set_tests_properties(
+    test-tool-activation-callback-attach
+    PROPERTIES
+        ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};LD_PRELOAD=librocprofiler-register.so;ROCP_REG_TEST_TOOL_ACTIVE_ATTACH=1;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        PASS_REGULAR_EXPRESSION
+        ".test-tool-activation-callback.cpp. callback attach\n.rocprofiler.cpp. rocprofiler_attach\n.test-tool-activation-callback.cpp. callback_count 1\n.test-tool-activation-callback.cpp. success attach before\n"
+        LABELS
+        "tool-activation")
+
+add_test(
+    NAME test-tool-activation-callback-attach-after
+    COMMAND $<TARGET_FILE:test-tool-activation-callback>
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+
+set_tests_properties(
+    test-tool-activation-callback-attach-after
+    PROPERTIES
+        ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};LD_PRELOAD=librocprofiler-register.so;ROCP_REG_TEST_TOOL_ACTIVE_ATTACH=1;ROCP_REG_TEST_TOOL_ACTIVE_REGISTER_AFTER=1;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        PASS_REGULAR_EXPRESSION
+        ".rocprofiler.cpp. rocprofiler_attach\n.test-tool-activation-callback.cpp. callback attach\n.test-tool-activation-callback.cpp. callback_count 1\n.test-tool-activation-callback.cpp. success attach after\n"
+        LABELS
+        "tool-activation")

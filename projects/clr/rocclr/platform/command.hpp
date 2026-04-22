@@ -1330,6 +1330,7 @@ class NDRangeKernelCommand : public Command {
     CooperativeGroups = 0x01,
     CooperativeMultiDeviceGroups = 0x02,
     AnyOrderLaunch = 0x04,
+    AttachCompletionSignal = 0x08,
   };
 
   //! Construct an ExecuteKernel command
@@ -1375,6 +1376,9 @@ class NDRangeKernelCommand : public Command {
 
   //! Returns extra Param, set when using anyorder launch
   bool getAnyOrderLaunchFlag() const { return (extraParam_ & AnyOrderLaunch) ? true : false; }
+
+  //! Returns true when the runtime requested a completion-signal-only dispatch fast path.
+  bool attachCompletionSignal() const { return (extraParam_ & AttachCompletionSignal) ? true : false; }
 
   //! Return the current grid ID for multidevice launch
   uint32_t gridId() const { return gridId_; }

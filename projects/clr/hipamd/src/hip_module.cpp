@@ -359,6 +359,10 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
     params |= amd::NDRangeKernelCommand::AnyOrderLaunch;
   }
 
+  if (hip::aqlmonRuntimeProvidesKernelCompletionSignals()) {
+    params |= amd::NDRangeKernelCommand::AttachCompletionSignal;
+  }
+
   amd::NDRangeKernelCommand* kernelCommand = new amd::NDRangeKernelCommand(
       *stream, waitList, *kernel, ndrange, launch_params.sharedMemBytes_, params, gridId, numGrids,
       prevGridSum, allGridSum, firstDevice, profileNDRange);

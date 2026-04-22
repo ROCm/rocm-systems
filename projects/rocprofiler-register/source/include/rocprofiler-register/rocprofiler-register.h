@@ -161,6 +161,70 @@ rocprofiler_register_iterate_registration_info(
     void*                                       data)
     ROCPROFILER_REGISTER_ATTRIBUTE(nonnull(1)) ROCPROFILER_REGISTER_PUBLIC_API;
 
+/// @enum rocprofiler_register_tool_activation_mode_t
+/// @brief one-time notification mode for when a profiling tool becomes active
+///
+/// @var ROCP_REG_TOOL_ACTIVATION_NONE
+/// @brief no tool activation has been observed yet
+///
+/// @var ROCP_REG_TOOL_ACTIVATION_STARTUP
+/// @brief a tool was already active during normal startup registration
+///
+/// @var ROCP_REG_TOOL_ACTIVATION_ATTACH
+/// @brief a tool became active through the late-attach path
+///
+typedef enum rocprofiler_register_tool_activation_mode_t  // NOLINT(performance-enum-size)
+{
+    ROCP_REG_TOOL_ACTIVATION_NONE = 0,
+    ROCP_REG_TOOL_ACTIVATION_STARTUP,
+    ROCP_REG_TOOL_ACTIVATION_ATTACH,
+} rocprofiler_register_tool_activation_mode_t;
+
+/**
+ * @brief Callback invoked at most once for a unique runtime registration when a
+ * profiling tool becomes active.
+ *
+ * The callback is invoked synchronously on the thread which observes the activation.
+ * If the tool is already active when the runtime registers the callback, the callback
+ * is invoked immediately from
+ * ::rocprofiler_register_runtime_tool_activation_callback.
+ *
+ * @param [in] mode How the tool became active
+ * @param [in] data User data supplied at registration time
+ */
+typedef void (*rocprofiler_register_tool_activation_cb_t)(
+    rocprofiler_register_tool_activation_mode_t mode,
+    void*                                       data);
+
+/**
+ * @brief Register a one-time callback to be notified when a profiling tool becomes
+ * active.
+ *
+ * This API is intended for runtimes which need to lazily enable generic tool-facing
+ * behavior once a profiler is active. The callback registration is process-lifetime:
+ * rocprofiler-register suppresses duplicate registrations of the same
+ * `(runtime_name, callback, data)` triple and invokes each unique registration at most
+ * once.
+ *
+ * If a tool is already active when this function is called, the callback is invoked
+ * immediately before the function returns.
+ *
+ * @param [in] runtime_name Optional runtime/library name used only for logging and
+ * duplicate suppression. May be NULL.
+ * @param [in] callback Callback to invoke once the tool becomes active
+ * @param [in] data User data to pass to the callback
+ * @return ::rocprofiler_register_error_code_t
+ * @retval ::ROCP_REG_SUCCESS Registration succeeded or an equivalent registration had
+ * already been recorded
+ * @retval ::ROCP_REG_INVALID_ARGUMENT callback was NULL
+ */
+rocprofiler_register_error_code_t
+rocprofiler_register_runtime_tool_activation_callback(
+    const char*                              runtime_name,
+    rocprofiler_register_tool_activation_cb_t callback,
+    void*                                    data)
+    ROCPROFILER_REGISTER_PUBLIC_API;
+
 #ifdef __cplusplus
 }
 #endif

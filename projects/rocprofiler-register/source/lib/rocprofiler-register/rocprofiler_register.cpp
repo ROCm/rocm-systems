@@ -38,8 +38,10 @@
 #include <mutex>
 #include <regex>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <dlfcn.h>
 #include <unistd.h>
@@ -534,6 +536,19 @@ auto           instance_counters = std::array<std::atomic_uint64_t, ROCP_REG_LAS
 auto           registered =
     std::array<std::optional<registered_library_api_table>, max_instances>{};
 
+struct runtime_tool_activation_registration
+{
+    std::string                              runtime_name = {};
+    rocprofiler_register_tool_activation_cb_t callback    = nullptr;
+    void*                                    data         = nullptr;
+};
+
+auto runtime_tool_activation_state =
+    std::atomic<uint32_t>{ ROCP_REG_TOOL_ACTIVATION_NONE };
+auto runtime_tool_activation_mutex     = std::mutex{};
+auto runtime_tool_activation_pending   = std::vector<runtime_tool_activation_registration>{};
+auto runtime_tool_activation_notified  = std::vector<runtime_tool_activation_registration>{};
+
 struct scoped_count
 {
     scoped_count()
@@ -549,6 +564,73 @@ struct scoped_count
 
     uint32_t value = 0;
 };
+
+bool
+same_runtime_tool_activation_registration(
+    const runtime_tool_activation_registration& lhs,
+    std::string_view                            runtime_name,
+    rocprofiler_register_tool_activation_cb_t   callback,
+    void*                                       data)
+{
+    return lhs.callback == callback && lhs.data == data &&
+           lhs.runtime_name == runtime_name;
+}
+
+template <typename ContainerT>
+bool
+contains_runtime_tool_activation_registration(
+    const ContainerT&                           entries,
+    std::string_view                            runtime_name,
+    rocprofiler_register_tool_activation_cb_t   callback,
+    void*                                       data)
+{
+    for(const auto& itr : entries)
+    {
+        if(same_runtime_tool_activation_registration(itr, runtime_name, callback, data))
+            return true;
+    }
+
+    return false;
+}
+
+void
+invoke_runtime_tool_activation_callback(
+    const runtime_tool_activation_registration& registration,
+    rocprofiler_register_tool_activation_mode_t mode)
+{
+    auto _runtime_name = std::string_view{ registration.runtime_name };
+    LOG(INFO) << "Invoking runtime tool-activation callback for "
+              << (_runtime_name.empty() ? "<unnamed>" : _runtime_name)
+              << " with mode=" << static_cast<uint32_t>(mode);
+    registration.callback(mode, registration.data);
+}
+
+void
+notify_runtime_tool_activation(rocprofiler_register_tool_activation_mode_t mode)
+{
+    if(mode == ROCP_REG_TOOL_ACTIVATION_NONE) return;
+
+    auto expected = uint32_t{ ROCP_REG_TOOL_ACTIVATION_NONE };
+    if(!runtime_tool_activation_state.compare_exchange_strong(expected,
+                                                              static_cast<uint32_t>(mode),
+                                                              std::memory_order_acq_rel,
+                                                              std::memory_order_acquire))
+    {
+        return;
+    }
+
+    auto callbacks = std::vector<runtime_tool_activation_registration>{};
+    {
+        auto _lk = std::lock_guard<std::mutex>{ runtime_tool_activation_mutex };
+        callbacks.swap(runtime_tool_activation_pending);
+        runtime_tool_activation_notified.insert(runtime_tool_activation_notified.end(),
+                                                callbacks.begin(),
+                                                callbacks.end());
+    }
+
+    for(const auto& itr : callbacks)
+        invoke_runtime_tool_activation_callback(itr, mode);
+}
 
 std::optional<registered_library_api_table>*
 rocp_add_registered_library_api_table(const char*                        common_name,
@@ -879,6 +961,7 @@ rocprofiler_register_library_api_table(
         if(_ret != 0) return ROCP_REG_ROCPROFILER_ERROR;
 
         if(reginfo) (*reginfo)->propagated = true;
+        notify_runtime_tool_activation(ROCP_REG_TOOL_ACTIVATION_STARTUP);
     }
     else
     {
@@ -915,6 +998,71 @@ rocprofiler_register_iterate_registration_info(
         }
     }
 
+    return ROCP_REG_SUCCESS;
+}
+
+rocprofiler_register_error_code_t
+rocprofiler_register_runtime_tool_activation_callback(
+    const char*                               runtime_name,
+    rocprofiler_register_tool_activation_cb_t callback,
+    void*                                     data)
+{
+    if(callback == nullptr) return ROCP_REG_INVALID_ARGUMENT;
+
+    auto _runtime_name = std::string_view{ runtime_name != nullptr ? runtime_name : "" };
+    auto _mode = static_cast<rocprofiler_register_tool_activation_mode_t>(
+        runtime_tool_activation_state.load(std::memory_order_acquire));
+
+    auto _registration = runtime_tool_activation_registration{
+        std::string{ _runtime_name }, callback, data
+    };
+    auto _callback_registration = runtime_tool_activation_registration{};
+
+    if(_mode == ROCP_REG_TOOL_ACTIVATION_NONE)
+    {
+        auto _lk = std::lock_guard<std::mutex>{ runtime_tool_activation_mutex };
+
+        _mode = static_cast<rocprofiler_register_tool_activation_mode_t>(
+            runtime_tool_activation_state.load(std::memory_order_relaxed));
+
+        if(contains_runtime_tool_activation_registration(runtime_tool_activation_pending,
+                                                        _runtime_name,
+                                                        callback,
+                                                        data) ||
+           contains_runtime_tool_activation_registration(runtime_tool_activation_notified,
+                                                        _runtime_name,
+                                                        callback,
+                                                        data))
+        {
+            return ROCP_REG_SUCCESS;
+        }
+
+        if(_mode == ROCP_REG_TOOL_ACTIVATION_NONE)
+        {
+            runtime_tool_activation_pending.emplace_back(std::move(_registration));
+            return ROCP_REG_SUCCESS;
+        }
+
+        _callback_registration = std::move(_registration);
+        runtime_tool_activation_notified.emplace_back(_callback_registration);
+    }
+    else
+    {
+        auto _lk = std::lock_guard<std::mutex>{ runtime_tool_activation_mutex };
+
+        if(contains_runtime_tool_activation_registration(runtime_tool_activation_notified,
+                                                        _runtime_name,
+                                                        callback,
+                                                        data))
+        {
+            return ROCP_REG_SUCCESS;
+        }
+
+        _callback_registration = std::move(_registration);
+        runtime_tool_activation_notified.emplace_back(_callback_registration);
+    }
+
+    invoke_runtime_tool_activation_callback(_callback_registration, _mode);
     return ROCP_REG_SUCCESS;
 }
 
@@ -1017,6 +1165,8 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
     }
 
     if(existing_scanned_data.attach_fn == nullptr) return ROCP_REG_NO_TOOLS;
+
+    notify_runtime_tool_activation(ROCP_REG_TOOL_ACTIVATION_ATTACH);
 
     LOG(INFO) << "rocprofiler-sdk attach starting...";
     auto _ret = existing_scanned_data.attach_fn();
