@@ -390,54 +390,81 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
 
-  // Non-RTN (GLC=0) variant: the disassembler emits
-  // `(sdata, sbase, offset)` with numDefs == 0 instead of the tied-sdst
-  // `(sdst, sbase, offset)` shape the RTN handler decodes below. The
-  // AITER corpus only ever emits the RTN form (the split-k barrier
-  // needs `old` for the "am I last?" branch), so refuse the non-RTN
-  // shape loudly rather than silently mis-decode by calling `op.dst()`
-  // on a zero-def instruction. When a real non-RTN producer shows up,
-  // add a sibling arm that reads data from `op.srcReg(0)` and drops the
-  // write-back; the `_RTN` collapse rule in opcode_map.cpp
-  // (`atomicRetToNoRet`) already pins the numDefs contract at init
-  // time, so this runtime check is a belt-and-suspenders guard against
-  // a corpus encountering the non-RTN pseudo directly.
+  // Two disassembler shapes for the same SemOp, distinguished by the
+  // instruction's GLC bit (encoding-level) and `di.numDefs`
+  // (decode-level):
+  //
+  //   RTN     (GLC=1, numDefs=1): `(sdst, sbase, offset)` — TableGen
+  //           declares `$sdst_in` tied to `$sdst`, so the disassembler
+  //           elides the tied input and the decoded operand list is
+  //           (sdst, sbase, offset).  The atomic's input value (xchg
+  //           data for swap, wrap-threshold for dec) comes from the
+  //           *pre-instruction* value of the dst SGPR; the post-
+  //           instruction value is the returned `old`.  The AITER
+  //           split-k barrier keys its "am I the last workgroup?"
+  //           branch on `old == 1`, so this is the hot path for
+  //           `bf16gemm_*_splitk_clean.co` lowering.
+  //
+  //   non-RTN (GLC=0, numDefs=0): `(sdata, sbase, offset)` — no dst
+  //           at all.  The atomic runs and the returned `old` is
+  //           dropped on the floor.  hipcc's inline-asm lowering of
+  //           `s_atomic_dec %[rmw], %[ptr], %[off]` (no `_rtn` suffix
+  //           in the mnemonic string) produces this shape even when
+  //           the `"+s"(rmw)` constraint suggests a tied in/out, so
+  //           the non-RTN arm has to exist for any HIP fixture that
+  //           spells the instruction via inline asm.  See
+  //           `lit_tests/s_atomic_dec/` for the canonical fixture
+  //           (split-k barrier reproducer).
+  //
+  // Common to both arms: the atomic binop (`rmwOp` above), the base
+  // pointer in `sbase` (SGPR pair), a `soffset` that is either an
+  // inline imm or an SGPR element index scaled by the dword width
+  // when the `scale_offset` (CPol::SCAL) bit is set, and the
+  // explicit `Align(4)` / `AtomicOrdering::Monotonic` the RTN path
+  // already pins.
+  ParsedReg base;
+  unsigned offIdx;
+  Value *data = nullptr;
+  ParsedReg dataDst;  // Valid only for the RTN arm.
   if (di.numDefs == 0) {
-    llvm::errs() << "transpiler: " << di.mnemonic
-                 << ": non-RTN (GLC=0) SMEM atomic form is not lifted yet "
-                    "(disassembler shape is (sdata, sbase, offset) with "
-                    "no def, not the (sdst, sbase, offset) shape this "
-                    "handler decodes)\n";
-    hr.failure = RaiseFailure::unsupportedShape(
-        di, "SMEM",
-        "non-RTN (GLC=0) SMEM atomic: operand shape is "
-        "(sdata, sbase, offset) with no def; only the returned-old-value "
-        "(GLC=1, _RTN) form is lifted today");
-    return hr;
+    // Non-RTN: (sdata, sbase, offset).  Read sdata as the atomic's
+    // input value; the returned `old` is intentionally discarded
+    // below (the HW already wrote the new value to memory, which is
+    // the whole point of the non-RTN form's existence).
+    base = op.srcReg(1);
+    offIdx = op.srcIdx(2);
+    data = ctx.regs.readReg32(ctx.B, op.srcReg(0));
+  } else {
+    // RTN: (sdst_tied, sbase, offset).  Read the pre-instruction
+    // value of sdst as the atomic's input (this is the tied-input
+    // slot TableGen's `$sdst_in` names), then write the returned
+    // `old` back to the same SGPR after the atomicrmw.
+    dataDst = op.dst();
+    base = op.srcReg(0);
+    offIdx = op.srcIdx(1);
+    data = ctx.regs.readReg32(ctx.B, dataDst);
   }
-
-  ParsedReg dataDst = op.dst();
-  ParsedReg base = op.srcReg(0);
-  // For the `_RTN` form the dst register is tied to the input data slot
-  // (the disassembler emits only `(sdst, sbase, offset)` even though
-  // TableGen declares `$sdst_in` tied), so the input value of the
-  // atomic op — the xchg data for swap, the wrap-threshold for dec —
-  // comes from the *pre-instruction* value of the dst register.
-  Value *data = ctx.regs.readReg32(ctx.B, dataDst);
 
   Value *baseAddr = ctx.regs.loadSGPR64(ctx.B, base.baseIdx);
   Value *ptr = ctx.B.CreateIntToPtr(baseAddr, ctx.ptrGlobalTy);
 
-  unsigned offIdx = op.srcIdx(1);
+  // Positional source index of the offset operand in OpResolver's
+  // operand view: slot 1 for the RTN shape (sbase, offset), slot 2
+  // for the non-RTN shape (sdata, sbase, offset).  Keeps the
+  // imm/SGPR-offset arm routed through the generic `op.src()` reader
+  // (which handles imm, SGPR, and any other source kind uniformly)
+  // so the RTN path's IR is bit-identical to the pre-split handler.
+  unsigned offSrcPos = (di.numDefs == 0 ? 2u : 1u);
   if (di.isImm(offIdx)) {
-    int64_t off = op.srcImm(1);
+    int64_t off = di.getImm(offIdx);
     if (off != 0)
       ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, ctx.B.getInt64(off));
   } else {
-    // Dword-width atomic, so the `scale_offset` (CPol::SCAL) bit scales
-    // the SGPR element-index by 4 to recover the byte offset — same
-    // rule as the other SMEM paths.
-    Value *regOff = ctx.B.CreateZExt(op.src(1), ctx.i64Ty, "smem_at_roff");
+    // Dword-width atomic, so the `scale_offset` (CPol::SCAL) bit
+    // scales the SGPR element-index by 4 to recover the byte offset
+    // — same rule as the other SMEM paths.
+    Value *regOff = ctx.B.CreateZExt(op.src(offSrcPos), ctx.i64Ty,
+                                      "smem_at_roff");
     if (di.hasScaleOffset)
       regOff = ctx.B.CreateMul(regOff, ConstantInt::get(ctx.i64Ty, 4),
                                "smem_at_roff_scaled");
@@ -453,7 +480,17 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
   // callers.
   Value *old = ctx.B.CreateAtomicRMW(rmwOp, ptr, data, Align(4),
                                      AtomicOrdering::Monotonic);
-  ctx.regs.storeSGPR32(ctx.B, dataDst.baseIdx, old);
+  if (di.numDefs != 0) {
+    // RTN arm: publish the pre-modification value to the tied sdst.
+    // Non-RTN arm: `old` is intentionally unused — the HW has already
+    // committed the new value to memory, which is all the non-RTN
+    // form guarantees.  `(void) old;` suppresses an unused-variable
+    // hint if a reviewer treats the RTN path as dead for a
+    // fixture that only emits the non-RTN shape.
+    ctx.regs.storeSGPR32(ctx.B, dataDst.baseIdx, old);
+  } else {
+    (void)old;
+  }
   hr.handled = true;
   return hr;
 }
