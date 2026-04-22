@@ -24,7 +24,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 # SDK import is lazy + isolated to this file — never in agent modules.
 try:
@@ -66,7 +66,7 @@ class FakeProviderResponse:
     handoff: Optional[str] = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class Agent:
     """An LLM-backed reasoning unit with a fence slice and tool allowlist.
 
@@ -79,16 +79,21 @@ class Agent:
     fence_path: Optional[str]               # None = no fence file (test/placeholder)
     input_schema: Type                      # Pydantic model (or dict for tests)
     output_schema: Type                     # Pydantic model (or dict for tests)
-    tools: List[ToolBinding] = field(default_factory=list)
-    allowed_handoffs: List[str] = field(default_factory=list)
+    tools: Tuple[ToolBinding, ...] = field(default_factory=tuple)
+    allowed_handoffs: Tuple[str, ...] = field(default_factory=tuple)
     token_budget: int = 4096
     fence_text: str = field(init=False, default="")
     fence_line_count: int = field(init=False, default=0)
 
     def __post_init__(self) -> None:
-        if len(self.tools) > 5:
+        tools = tuple(self.tools)
+        allowed_handoffs = tuple(self.allowed_handoffs)
+        object.__setattr__(self, "tools", tools)
+        object.__setattr__(self, "allowed_handoffs", allowed_handoffs)
+
+        if len(tools) > 5:
             raise AgentConstructionError(
-                f"Agent {self.name}: {len(self.tools)} tools declared (cap is 5)"
+                f"Agent {self.name}: {len(tools)} tools declared (cap is 5)"
             )
 
         if self.fence_path is not None:

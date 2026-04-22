@@ -36,7 +36,7 @@ def test_analysis_classifies_compute_bound_fixture(compute_bound_db):
     assert out.primary_bottleneck in ("compute", "mixed")
 
 
-def test_recommendation_dispatches_compute_specialist_in_airgap(compute_bound_db):
+def test_recommendation_dispatches_compute_specialist_in_airgap(compute_bound_db, test_gfx_id):
     session = build_session(airgap=True)
     findings = session.run_analysis(
         schemas.AnalysisInput(database_path=str(compute_bound_db))
@@ -44,6 +44,6 @@ def test_recommendation_dispatches_compute_specialist_in_airgap(compute_bound_db
     if findings.primary_bottleneck != "compute":
         pytest.skip("fixture not classified compute by rule; specialist routing untested")
     rec_out = session.run_recommendation(
-        schemas.RecommendationInput(findings=findings)
+        schemas.RecommendationInput(findings=findings, gfx_id=test_gfx_id)
     )
     assert rec_out.specialist_used == "compute"

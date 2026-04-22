@@ -72,8 +72,7 @@ def _run_sol_gate(claimed_speedup: float, gfx_id: str) -> Dict[str, Any]:
     """Delegate to tools.sol.sanity_check."""
     from perfxpert.tools import sol
     r = sol.sanity_check(claimed_speedup=claimed_speedup, gfx_id=gfx_id)
-    r["ok"] = r.get("verdict") == "sane"
-    return r
+    return {**r, "ok": r.get("verdict") == "sane"}
 
 
 def _run_bitwise_gate(baseline_db: str, candidate_db: str) -> Dict[str, Any]:

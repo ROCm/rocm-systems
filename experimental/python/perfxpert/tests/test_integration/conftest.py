@@ -45,6 +45,11 @@ def latency_bound_db():
 
 
 @pytest.fixture
+def test_gfx_id():
+    return "gfx942"
+
+
+@pytest.fixture
 def regression_db_pair():
     """Tuple (baseline, candidate) — candidate is intentionally slower."""
     b = _find_fixture("baseline.db")

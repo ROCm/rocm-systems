@@ -17,6 +17,7 @@ Revert-Advisor recycling tried ideas).
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -31,11 +32,15 @@ _FENCE_PATH = Path(__file__).parent / "fence" / "correctness.md"
 
 # -- Module-level delegators (for test injection) -------------------------
 
-def _tasks_query_by_kernel(kernel_name: str) -> List[Dict[str, Any]]:
+def _tasks_query_by_kernel(kernel_name: str, root: Optional[str] = None) -> List[Dict[str, Any]]:
+    if root:
+        return tasks_tool.query_by_kernel_at(root, kernel_name)
     return tasks_tool.query_by_kernel(kernel_name)
 
 
-def _tasks_create(**kw) -> str:
+def _tasks_create(*, root: Optional[str] = None, **kw) -> str:
+    if root:
+        return tasks_tool.create_at(root, **kw)
     return tasks_tool.create(**kw)
 
 
@@ -66,6 +71,53 @@ def _airgap_narrative(v: schemas.GateVerdictModel) -> str:
     return f"Gate {gate} {v.status}: {v.detail}"
 
 
+def _history_value(entry: Dict[str, Any], key: str) -> Any:
+    if key in entry:
+        return entry.get(key)
+    meta = entry.get("meta")
+    if isinstance(meta, dict):
+        return meta.get(key)
+    return None
+
+
+def _validate_tasks_create_binding() -> None:
+    sig = inspect.signature(_tasks_create)
+    params = sig.parameters.values()
+    if any(param.kind is inspect.Parameter.VAR_KEYWORD for param in params):
+        return
+    names = {param.name for param in sig.parameters.values()}
+    required = {"title", "meta"}
+    missing = sorted(required - names)
+    if missing:
+        raise TypeError(
+            "tasks.create binding must accept title and meta keyword arguments; "
+            f"missing {', '.join(missing)}"
+        )
+
+
+def _create_reject_follow_up(
+    verdict: schemas.GateVerdictModel,
+    kernel_name: Optional[str],
+    source_dir: Optional[str],
+) -> str:
+    _validate_tasks_create_binding()
+    title = f"Investigate rejected optimization: {verdict.failing_gate}"
+    meta = {"verdict": verdict.model_dump(), "kernel": kernel_name}
+    if not isinstance(title, str) or not title:
+        raise TypeError("follow-up task title must be a non-empty string")
+    if not isinstance(meta, dict):
+        raise TypeError("follow-up task meta must be a dict")
+    return _tasks_create(root=source_dir, title=title, meta=meta)
+
+
+def _select_untried_alternative(
+    candidate: Optional[str], tried: set[str], fallback: Optional[str]
+) -> Optional[str]:
+    if candidate and candidate not in tried:
+        return candidate
+    return fallback
+
+
 # -- Runner ---------------------------------------------------------------
 
 def run_correctness(
@@ -86,15 +138,22 @@ def run_correctness(
 
     # For regression: propose alternative not in history.
     alternative: Optional[str] = None
+    tried: set[str] = set()
     if verdict.status == "regressed":
-        history = _tasks_query_by_kernel(payload.kernel_name or "")
-        tried = {h.get("technique") for h in history}
+        history = _tasks_query_by_kernel(
+            payload.kernel_name or "",
+            root=payload.source_dir,
+        )
+        tried = {_history_value(h, "technique") for h in history}
         tried.add(payload.last_technique)
+        tried.discard(None)
         # In airgap/fallback, no LLM to suggest — leave empty; the spec allows
-        # a structured warning instead of a forced suggestion.
+        # a structured warning instead of a forced suggestion. Regressions do
+        # not create a new task here: the current change is reverted first,
+        # then Root can decide whether to schedule a follow-up attempt.
         alternative = None
         for candidate in history:
-            c = candidate.get("candidate_alternative")
+            c = _history_value(candidate, "candidate_alternative")
             if c and c not in tried:
                 alternative = c
                 break
@@ -102,9 +161,10 @@ def run_correctness(
     # For reject: create follow-up task.
     follow_up_task_id: Optional[str] = None
     if verdict.status == "reject":
-        follow_up_task_id = _tasks_create(
-            title=f"Investigate rejected optimization: {verdict.failing_gate}",
-            meta={"verdict": verdict.model_dump(), "kernel": payload.kernel_name},
+        follow_up_task_id = _create_reject_follow_up(
+            verdict,
+            payload.kernel_name,
+            payload.source_dir,
         )
 
     # Narrative: template in airgap, LLM otherwise.
@@ -121,7 +181,11 @@ def run_correctness(
     else:
         so = raw.get("structured_output") or {}
         narrative = so.get("narrative", _airgap_narrative(verdict))
-        alternative = so.get("alternative_technique", alternative)
+        alternative = _select_untried_alternative(
+            so.get("alternative_technique"),
+            tried,
+            alternative,
+        )
 
     return schemas.CorrectnessOutput(
         verdict=verdict.status,

@@ -139,6 +139,21 @@ def test_anchor_failure_rejects(patches):
     assert v.failing_gate == "anchors"
 
 
+def test_run_sol_gate_does_not_mutate_tool_result(monkeypatch):
+    returned = {"verdict": "sane", "peak_ratio": 0.8}
+
+    class _FakeSol:
+        @staticmethod
+        def sanity_check(**kwargs):
+            return returned
+
+    monkeypatch.setitem(__import__("sys").modules, "perfxpert.tools.sol", _FakeSol)
+    result = gate_cascade._run_sol_gate(1.5, "gfx942")
+
+    assert result["ok"] is True
+    assert "ok" not in returned
+
+
 def test_verdict_is_frozen(patches):
     v = gate_cascade.evaluate(
         baseline_db="b.db", candidate_db="c.db",

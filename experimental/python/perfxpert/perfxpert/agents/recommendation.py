@@ -24,7 +24,7 @@ from perfxpert.agents import (
     compute_specialist, latency_specialist, memory_specialist, schemas,
 )
 from perfxpert.agents.framework import Agent, ToolBinding, run_agent
-from perfxpert.tools import plateau, trace_fingerprint
+from perfxpert.tools import plateau, profiling, trace_fingerprint
 
 
 _FENCE_PATH = Path(__file__).parent / "fence" / "recommendation.md"
@@ -54,7 +54,7 @@ def build_recommendation_agent() -> Agent:
     tools = [
         ToolBinding(name="plateau.check", fn=_plateau_check),
         ToolBinding(name="trace.fingerprint", fn=trace_fingerprint.fingerprint),
-        ToolBinding(name="profiling.fill_gap", fn=lambda **kw: {}),  # Phase 1 placeholder
+        ToolBinding(name="profiling.fill_gap", fn=profiling.fill_gap),
     ]
     return Agent(
         name="Recommendation",
@@ -85,6 +85,12 @@ def _dedup(techniques: List[Dict[str, Any]], seen: List[str]) -> List[Dict[str, 
     return [t for t in techniques if _hash_technique(t) not in seen_set]
 
 
+def _require_gfx_id(payload: schemas.RecommendationInput) -> str:
+    if not payload.gfx_id:
+        raise ValueError("RecommendationInput.gfx_id is required for specialist routing")
+    return payload.gfx_id
+
+
 def run_recommendation(
     payload: schemas.RecommendationInput,
     *,
@@ -100,26 +106,29 @@ def run_recommendation(
 
     # Dispatch
     if bottleneck == "compute":
+        gfx_id = _require_gfx_id(payload)
         specialist_used = "compute"
         spec_input = schemas.ComputeSpecialistInput(
-            gfx_id="gfx942",   # inferred upstream; placeholder-safe
+            gfx_id=gfx_id,
             hot_kernels=payload.findings.hot_kernels,
             counter_data={},
         )
         spec_out = _run_specialist_compute(spec_input, provider=provider, airgap=airgap)
         techniques = list(spec_out.techniques)
     elif bottleneck == "memory_transfer":
+        gfx_id = _require_gfx_id(payload)
         specialist_used = "memory"
         spec_input = schemas.MemorySpecialistInput(
-            gfx_id="gfx942",
+            gfx_id=gfx_id,
             hot_kernels=payload.findings.hot_kernels,
         )
         spec_out = _run_specialist_memory(spec_input, provider=provider, airgap=airgap)
         techniques = list(spec_out.techniques)
     elif bottleneck in ("latency", "api_overhead"):
+        gfx_id = _require_gfx_id(payload)
         specialist_used = "latency"
         spec_input = schemas.LatencySpecialistInput(
-            gfx_id="gfx942",
+            gfx_id=gfx_id,
             hot_kernels=payload.findings.hot_kernels,
             api_overhead_pct=payload.findings.time_breakdown.get("api_pct", 0.0),
         )

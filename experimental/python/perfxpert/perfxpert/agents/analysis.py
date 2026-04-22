@@ -38,6 +38,7 @@ except ImportError:
 
 
 _FENCE_PATH = Path(__file__).parent / "fence" / "analysis.md"
+_VALID_BOTTLENECKS = {"compute", "memory_transfer", "latency", "api_overhead", "mixed"}
 
 
 def build_analysis_agent() -> Agent:
@@ -80,6 +81,12 @@ def _collect_deterministic_metrics(db: str, top_n: int = 10) -> Dict[str, Any]:
     }
 
 
+def _validated_bottleneck_type(value: Any) -> str:
+    if value not in _VALID_BOTTLENECKS:
+        raise ValueError(f"Unknown bottleneck type {value!r}")
+    return value
+
+
 def run_analysis(
     payload: schemas.AnalysisInput,
     *,
@@ -104,7 +111,7 @@ def run_analysis(
 
     if raw.get("_mode") == "airgap":
         return schemas.AnalysisOutput(
-            primary_bottleneck=rule_verdict["type"],
+            primary_bottleneck=_validated_bottleneck_type(rule_verdict["type"]),
             confidence=rule_verdict["confidence"],
             time_breakdown=facts["time_breakdown"],
             hot_kernels=facts["hot_kernels"],
@@ -113,7 +120,9 @@ def run_analysis(
 
     so = raw.get("structured_output") or {}
     return schemas.AnalysisOutput(
-        primary_bottleneck=so.get("primary_bottleneck", rule_verdict["type"]),
+        primary_bottleneck=_validated_bottleneck_type(
+            so.get("primary_bottleneck", rule_verdict["type"])
+        ),
         confidence=so.get("confidence", rule_verdict["confidence"]),
         time_breakdown=so.get("time_breakdown", facts["time_breakdown"]),
         hot_kernels=so.get("hot_kernels", facts["hot_kernels"]),

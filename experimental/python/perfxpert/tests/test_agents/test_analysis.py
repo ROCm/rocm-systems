@@ -29,7 +29,7 @@ def test_analysis_no_execution_tools():
 def test_analysis_has_no_allowed_handoffs():
     """Layer 1 agents return to Root — they don't fan out (only Recommendation does)."""
     agent = analysis_module.build_analysis_agent()
-    assert agent.allowed_handoffs == []
+    assert agent.allowed_handoffs == ()
 
 
 def test_analysis_classifies_compute_bound(fake_provider, monkeypatch):
@@ -43,6 +43,16 @@ def test_analysis_classifies_compute_bound(fake_provider, monkeypatch):
             "counter_data_available": True,
         },
     )
+    monkeypatch.setattr(
+        analysis_module,
+        "_collect_deterministic_metrics",
+        lambda db, top_n=10: {
+            "time_breakdown": {"kernel_pct": 0.90, "memcpy_pct": 0.05, "api_pct": 0.03, "idle_pct": 0.02},
+            "hot_kernels": [{"name": "[KERNEL_1]", "pct": 0.75}],
+            "metrics_for_classifier": {"valu_util_pct": 0.85},
+            "counter_data_available": True,
+        },
+    )
     # Tools are stubbed via monkeypatch; the agent trusts LLM's synthesis
     result = analysis_module.run_analysis(
         schemas.AnalysisInput(database_path="fake.db", top_kernels=10),
@@ -53,13 +63,23 @@ def test_analysis_classifies_compute_bound(fake_provider, monkeypatch):
     assert result.confidence == 0.88
 
 
-def test_analysis_classifies_memory_bound(fake_provider):
+def test_analysis_classifies_memory_bound(fake_provider, monkeypatch):
     fake_provider.return_value = FakeProviderResponse(
         structured_output={
             "primary_bottleneck": "memory_transfer",
             "confidence": 0.80,
             "time_breakdown": {"kernel_pct": 0.55, "memcpy_pct": 0.40, "api_pct": 0.03, "idle_pct": 0.02},
             "hot_kernels": [{"name": "[KERNEL_1]", "pct": 0.40}],
+            "counter_data_available": False,
+        },
+    )
+    monkeypatch.setattr(
+        analysis_module,
+        "_collect_deterministic_metrics",
+        lambda db, top_n=10: {
+            "time_breakdown": {"kernel_pct": 0.55, "memcpy_pct": 0.40, "api_pct": 0.03, "idle_pct": 0.02},
+            "hot_kernels": [{"name": "[KERNEL_1]", "pct": 0.40}],
+            "metrics_for_classifier": {"memcpy_pct": 0.40},
             "counter_data_available": False,
         },
     )
@@ -94,13 +114,48 @@ def test_analysis_airgap_uses_deterministic_classifier(monkeypatch):
     assert result.primary_bottleneck in ("compute", "mixed")
 
 
-def test_analysis_propagates_counter_availability(fake_provider):
+def test_analysis_airgap_rejects_unknown_rule_bottleneck(monkeypatch):
+    monkeypatch.setenv("PERFXPERT_AIRGAP", "1")
+    monkeypatch.setattr(
+        analysis_module,
+        "_collect_deterministic_metrics",
+        lambda db, top_n=10: {
+            "time_breakdown": {"kernel_pct": 0.90, "memcpy_pct": 0.05, "api_pct": 0.03, "idle_pct": 0.02},
+            "hot_kernels": [],
+            "metrics_for_classifier": {},
+            "counter_data_available": True,
+        },
+    )
+    monkeypatch.setattr(
+        analysis_module.bottleneck,
+        "classify_from_metrics",
+        lambda metrics: {"type": "unknown", "confidence": 0.2},
+    )
+
+    with pytest.raises(ValueError, match="unknown"):
+        analysis_module.run_analysis(
+            schemas.AnalysisInput(database_path="fake.db"),
+            airgap=True,
+        )
+
+
+def test_analysis_propagates_counter_availability(fake_provider, monkeypatch):
     fake_provider.return_value = FakeProviderResponse(
         structured_output={
             "primary_bottleneck": "mixed",
             "confidence": 0.5,
             "time_breakdown": {"kernel_pct": 0.5, "memcpy_pct": 0.2, "api_pct": 0.2, "idle_pct": 0.1},
             "hot_kernels": [],
+            "counter_data_available": False,
+        },
+    )
+    monkeypatch.setattr(
+        analysis_module,
+        "_collect_deterministic_metrics",
+        lambda db, top_n=10: {
+            "time_breakdown": {"kernel_pct": 0.5, "memcpy_pct": 0.2, "api_pct": 0.2, "idle_pct": 0.1},
+            "hot_kernels": [],
+            "metrics_for_classifier": {},
             "counter_data_available": False,
         },
     )

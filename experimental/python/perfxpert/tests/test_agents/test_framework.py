@@ -41,6 +41,48 @@ def test_agent_construction_accepts_5_tools():
     assert len(a.tools) == 5
 
 
+def test_agent_normalizes_mutable_collections_to_immutable_sequences():
+    tools = [ToolBinding(name="tool_0", fn=lambda x: x)]
+    handoffs = ["analysis"]
+    agent = Agent(
+        name="Immutable",
+        layer=1,
+        fence_path=None,
+        input_schema=dict,
+        output_schema=dict,
+        tools=tools,
+        allowed_handoffs=handoffs,
+    )
+
+    tools.append(ToolBinding(name="tool_1", fn=lambda x: x))
+    handoffs.append("recommendation")
+
+    assert agent.tools == (ToolBinding(name="tool_0", fn=tools[0].fn),)
+    assert agent.allowed_handoffs == ("analysis",)
+
+
+def test_agent_rejects_post_construction_mutation():
+    agent = Agent(
+        name="Frozen",
+        layer=1,
+        fence_path=None,
+        input_schema=dict,
+        output_schema=dict,
+        tools=[],
+    )
+
+    with pytest.raises((AttributeError, TypeError)):
+        agent.tools += (ToolBinding(name="tool_0", fn=lambda x: x),)
+
+
+def test_agent_builder_outputs_immutable_sequences():
+    from perfxpert.agents import analysis as analysis_module
+
+    agent = analysis_module.build_analysis_agent()
+    assert isinstance(agent.tools, tuple)
+    assert isinstance(agent.allowed_handoffs, tuple)
+
+
 def test_agent_construction_enforces_fence_line_cap(tmp_path):
     big_fence = tmp_path / "big.md"
     big_fence.write_text("\n".join(f"line {i}" for i in range(401)))
