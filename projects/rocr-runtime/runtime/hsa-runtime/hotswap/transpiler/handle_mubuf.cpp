@@ -249,6 +249,42 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
     MubufAtomicAddr atomic =
         decodeMubufAtomicAddr(ctx, di, op, "buffer_atomic");
     Value *gep = atomic.ptr;
+
+    // `BUFFER_ATOMIC_CMPSWAP` is the one buffer atomic whose vdata is
+    // a register PAIR carrying `{cmp, new}` rather than a single data
+    // word.  Split it out before the single-word atomicrmw dispatch
+    // below; mirrors the sibling FLAT_ATOMIC_CMPSWAP /
+    // GLOBAL_ATOMIC_CMPSWAP handlers in `handle_flat.cpp`, which
+    // decode the vdata pair with a synthetic `baseIdx + 1` read.
+    // The MUBUF vdata register is addressable through `op.dst(0)`
+    // (tied operand, only populated for RTN form — the assert above
+    // already pins `IsAtomicRet == (numDefs > 0)` so reaching this
+    // branch with a meaningful `op.dst(0)` is safe).
+    if (sop == SemOp::BUFFER_ATOMIC_CMPSWAP) {
+      ParsedReg dataPair = op.dst(0);
+      Value *cmpVal = ctx.regs.readReg32(ctx.B, dataPair);
+      ParsedReg newReg = dataPair;
+      newReg.baseIdx += 1;
+      newReg.width = 1;
+      Value *newVal = ctx.regs.readReg32(ctx.B, newReg);
+      ctx.emitUnderExec([&] {
+        // `Monotonic` ordering to match the sibling MUBUF atomicrmw
+        // branch below (see the comment there on the fixture-pinned
+        // choice).  FLAT / GLOBAL cmpxchg use SequentiallyConsistent
+        // but that's their family convention; MUBUF pins Monotonic
+        // via `buffer_atomic_add_u32` fixture and we stay consistent.
+        auto *cas = ctx.B.CreateAtomicCmpXchg(
+            gep, cmpVal, newVal, MaybeAlign(),
+            AtomicOrdering::Monotonic,
+            AtomicOrdering::Monotonic);
+        if (di.numDefs > 0)
+          ctx.regs.writeReg32(ctx.B, op.dst(),
+                              ctx.B.CreateExtractValue(cas, 0));
+      });
+      hr.handled = true;
+      return hr;
+    }
+
     Value *data = ctx.regs.readReg32(ctx.B, op.dst(0));
 
     AtomicRMWInst::BinOp atomicOp;
@@ -260,6 +296,15 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
     case SemOp::BUFFER_ATOMIC_AND: atomicOp = AtomicRMWInst::And; break;
     case SemOp::BUFFER_ATOMIC_OR:  atomicOp = AtomicRMWInst::Or; break;
     case SemOp::BUFFER_ATOMIC_XOR: atomicOp = AtomicRMWInst::Xor; break;
+    // `buffer_atomic_swap` — pure exchange.  Added in the same
+    // commit as the CMPSWAP branch above to close the handler gap
+    // that used to refuse both atomics at the `default:` arm.  The
+    // RTN-form write-back (see the shared emit below) is what makes
+    // SWAP semantically meaningful; a dropped result would reduce
+    // `buffer_atomic_swap` to a plain store and lose the caller's
+    // "old value" read, quietly miscompiling any CAS-loop or
+    // lock-free shape that relies on it.
+    case SemOp::BUFFER_ATOMIC_SWAP: atomicOp = AtomicRMWInst::Xchg; break;
     case SemOp::BUFFER_ATOMIC_ADD_F32:
       atomicOp = AtomicRMWInst::FAdd; atomicTy = ctx.f32Ty; isFP = true; break;
     case SemOp::BUFFER_ATOMIC_PK_ADD_BF16:
@@ -276,8 +321,29 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
     }
     if (isFP) data = ctx.B.CreateBitCast(data, atomicTy);
     ctx.emitUnderExec([&] {
-      ctx.B.CreateAtomicRMW(atomicOp, gep, data, MaybeAlign(),
-                            AtomicOrdering::Monotonic);
+      auto *rmw = ctx.B.CreateAtomicRMW(atomicOp, gep, data, MaybeAlign(),
+                                        AtomicOrdering::Monotonic);
+      // RTN-form write-back.  Previously this handler dropped the
+      // `atomicrmw` result unconditionally, which miscompiled every
+      // RTN buffer atomic (the destination VGPR kept the pre-atomic
+      // value, so any downstream read got the wrong "old value").
+      // The bug was latent because no Triton corpus kernel currently
+      // exercises the RTN form of `buffer_atomic_{add,sub,and,or,xor,
+      // add_f32,pk_add_{bf16,f16}}`; it would have surfaced as a
+      // correctness regression the moment one did.  Sibling FLAT
+      // (`handle_flat.cpp` ~line 865) and GLOBAL handlers already
+      // do this write-back; this brings MUBUF to parity.  Ordering
+      // is kept at `Monotonic` to match the existing
+      // `buffer_atomic_add_u32` lit fixture's pinned expectation
+      // (the `scope:SCOPE_DEV` modifier on gfx12 doesn't imply
+      // stronger ordering at the IR level; the backend adds the
+      // needed s_wait_* fences from the ISA scope bits, not from
+      // IR ordering).
+      if (di.numDefs > 0) {
+        Value *retVal = rmw;
+        if (isFP) retVal = ctx.B.CreateBitCast(retVal, ctx.i32Ty);
+        ctx.regs.writeReg32(ctx.B, op.dst(), retVal);
+      }
     });
     hr.handled = true;
     return hr;

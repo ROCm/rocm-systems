@@ -477,6 +477,21 @@ config.fixtures = {
     # BUFFER_ATOMIC_ADD) in opcode_map.cpp.
     "buffer_atomic_add_u32":
         r"@LIT_FIXTURE_BUFFER_ATOMIC_ADD_U32_CO@",
+    # buffer_atomic_swap_b32 / buffer_atomic_cmpswap_b32 — closes the
+    # handler gap that used to refuse both atomics at
+    # `handle_mubuf.cpp`'s `default:` arm with `unsupportedShape [MUBUF]:
+    # unsupported buffer atomic`.  The SWAP variant lowers through the
+    # `AtomicRMWInst::Xchg` case added alongside ADD/SUB/AND/OR/XOR
+    # in the same handler switch; the CMPSWAP variant takes a dedicated
+    # pre-switch branch (vdata is a VReg_64 pair carrying {cmp, new},
+    # not a single dword) that mirrors the sibling FLAT_ATOMIC_CMPSWAP /
+    # GLOBAL_ATOMIC_CMPSWAP handlers in `handle_flat.cpp`.  No corpus
+    # kernel currently exercises either; the fixtures are the defensive
+    # regression target.
+    "buffer_atomic_swap_b32":
+        r"@LIT_FIXTURE_BUFFER_ATOMIC_SWAP_B32_CO@",
+    "buffer_atomic_cmpswap_b32":
+        r"@LIT_FIXTURE_BUFFER_ATOMIC_CMPSWAP_B32_CO@",
     # buffer_load_d16_u8 (MUBUF/VBUFFER) — gfx9+/gfx1250 D16 partial-
     # write byte loads.  Pins both half-merge directions:
     #   `_d16_u8`     -> (prior & 0xFFFF0000) | zext(byte, i32)
