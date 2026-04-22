@@ -1,0 +1,83 @@
+name: rocpdsna Version Check
+run-name: rocpdsna-version-check
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/rocpdsna-version-check.yml'
+      - 'projects/rocpdsna/**'
+      - '!projects/rocpdsna/build/**'
+      - '!projects/rocpdsna/docs/**'
+      - '!projects/rocpdsna/README.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  version-check:
+    name: version-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          sparse-checkout: |
+            projects/rocpdsna
+            .github/workflows
+
+      - name: Check version bump or CHANGELOG update
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -e
+          BASE="origin/${BASE_REF}"
+          git fetch origin "${BASE_REF}"
+
+          INCLUDE_DIFF=$(git diff --name-only "${BASE}...HEAD" -- \
+            'projects/rocpdsna/include/' | wc -l)
+          if [ "${INCLUDE_DIFF}" -eq 0 ]; then
+            echo "No public header changes - version check not required."
+            exit 0
+          fi
+
+          echo "Public headers changed in this PR:"
+          git diff --name-only "${BASE}...HEAD" -- 'projects/rocpdsna/include/'
+          echo
+
+          # Escape hatch: any commit subject containing [no-version-bump]
+          if git log "${BASE}..HEAD" --pretty=%s | grep -qF '[no-version-bump]'; then
+            echo "::notice::Version-bump check skipped via [no-version-bump] commit trailer"
+            exit 0
+          fi
+
+          OLD=$(git show "${BASE}:projects/rocpdsna/CMakeLists.txt" \
+            | grep -oE 'project\(rocpdsna VERSION [0-9]+\.[0-9]+\.[0-9]+' || true)
+          NEW=$(grep -oE 'project\(rocpdsna VERSION [0-9]+\.[0-9]+\.[0-9]+' \
+            projects/rocpdsna/CMakeLists.txt || true)
+
+          if [ -n "${NEW}" ] && [ "${OLD}" != "${NEW}" ]; then
+            echo "::notice::Version bumped: ${OLD##*VERSION } -> ${NEW##*VERSION }"
+            exit 0
+          fi
+
+          CHANGELOG_DIFF=$(git diff --name-only "${BASE}...HEAD" -- \
+            'projects/rocpdsna/CHANGELOG.md' | wc -l)
+          if [ "${CHANGELOG_DIFF}" -gt 0 ]; then
+            echo "::notice::CHANGELOG.md updated; version bump may be deferred to release."
+            exit 0
+          fi
+
+          {
+            echo "::error::Public headers under projects/rocpdsna/include/ changed but no version bump in CMakeLists.txt and no CHANGELOG.md update."
+            echo
+            echo "Pick one of:"
+            echo "  1. Bump 'project(rocpdsna VERSION ...)' in projects/rocpdsna/CMakeLists.txt"
+            echo "  2. Add an entry under '## [Unreleased]' in projects/rocpdsna/CHANGELOG.md"
+            echo "  3. Add '[no-version-bump]' to a commit subject if this change is genuinely non-user-facing"
+          }
+          exit 1
