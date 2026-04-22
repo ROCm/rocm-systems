@@ -90,6 +90,16 @@ environ_vars["LD_LIBRARY_PATH"] = ":".join(
 )
 
 
+class _CMakeTemplate(string.Template):
+    """Generated CMake snippets: only ``@python_key`` is expanded by ``.substitute()``.
+
+    CMake ``${VAR}`` / ``${{VAR}}`` text stays literal (avoids Python f-string
+    interpolation turning those into empty strings).
+    """
+
+    delimiter = "@"
+
+
 def _os_release_id_version() -> str:
     """Short OS tag for CDash labels, e.g. ``ubuntu-22.04``, ``rhel-8.8``."""
     try:
@@ -268,16 +278,6 @@ set(CTEST_COVERAGE_COMMAND "@gcov_command")
         configure_command=_esc(configure_cmd),
         build_command=_esc(build_cmd),
     )
-
-
-class _CMakeTemplate(string.Template):
-    """Generated CMake snippets: only ``@python_key`` is expanded by ``.substitute()``.
-
-    CMake ``${VAR}`` / ``${{VAR}}`` text stays literal (avoids Python f-string
-    interpolation turning those into empty strings).
-    """
-
-    delimiter = "@"
 
 
 def _generate_dashboard(cmake_cmd: str) -> str:
