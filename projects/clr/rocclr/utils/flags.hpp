@@ -98,7 +98,7 @@ release(uint, OPENCL_VERSION, 200,                                            \
         "Force GPU opencl version")                                           \
 release(bool, HSA_LOCAL_MEMORY_ENABLE, true,                                  \
         "Enable HSA device local memory usage")                               \
-release(uint, HSA_KERNARG_POOL_SIZE, 4 * 1024 * 1024,                         \
+release(uint, HSA_KERNARG_POOL_SIZE, 16 * 1024 * 1024,                        \
         "Kernarg pool size")                                                  \
 release(bool, GPU_MIPMAP, true,                                               \
         "Enables GPU mipmap extension")                                       \
@@ -209,7 +209,7 @@ release(bool, ROC_USE_FGS_KERNARG, true,                                      \
         "Use fine grain kernel args segment for supported asics")             \
 release(uint, ROC_P2P_SDMA_SIZE, 1024,                                        \
         "The minimum size in KB for P2P transfer with SDMA")                  \
-release(uint, ROC_AQL_QUEUE_SIZE, 16384,                                      \
+release(uint, ROC_AQL_QUEUE_SIZE, 65536,                                      \
         "AQL queue size in AQL packets")                                      \
 release(uint, ROC_SIGNAL_POOL_SIZE, 64,                                       \
         "Initial size of HSA signal pool")                                    \
