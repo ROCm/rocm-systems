@@ -365,6 +365,12 @@ sqlite_backend::execute(const std::string& query)
 }
 
 void
+sqlite_backend::set_foreign_keys_enabled(bool enabled)
+{
+    execute(enabled ? "PRAGMA foreign_keys = ON" : "PRAGMA foreign_keys = OFF");
+}
+
+void
 sqlite_backend::flush()
 {
     if(m_mode != storage_mode_t::in_memory)

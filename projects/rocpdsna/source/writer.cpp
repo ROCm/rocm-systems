@@ -155,4 +155,10 @@ writer_t::flush_in_memory_data_to_disk()
     m_impl->flush_in_memory_data_to_disk();
 }
 
+void
+writer_t::set_sqlite_foreign_keys_enabled(bool enabled)
+{
+    m_impl->set_sqlite_foreign_keys_enabled(enabled);
+}
+
 }  // namespace rocpdsna

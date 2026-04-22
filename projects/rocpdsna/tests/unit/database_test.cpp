@@ -325,4 +325,128 @@ TEST_F(sqlite_backend_test, check_is_uuid_correct)
     EXPECT_EQ(db->get_uuid(), expected_uuid);
 }
 
+// =============================================================================
+// Foreign Key (PRAGMA foreign_keys) Tests
+//
+// Step 1: Create schema with FK constraints
+// Step 2: FK ON  - insert with valid reference succeeds
+// Step 3: FK ON  - insert with invalid reference fails
+// Step 4: FK OFF - insert with invalid reference succeeds
+// Step 5: FK OFF - bulk inserts with invalid references all succeed
+// Step 6: Verify rows inserted while FK OFF are persisted
+// Step 7: FK ON again - insert with invalid reference fails again
+// =============================================================================
+
+class sqlite_backend_foreign_key_test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        m_database_path =
+            "test_fk_" +
+            std::to_string(
+                ::testing::UnitTest::GetInstance()->current_test_info()->line()) +
+            ".db";
+        m_db = sqlite_backend::create(m_database_path, "fk_test_uuid");
+
+        m_db->execute("CREATE TABLE parent (id INTEGER PRIMARY KEY);"
+                      "CREATE TABLE child ("
+                      "  id        INTEGER PRIMARY KEY,"
+                      "  parent_id INTEGER REFERENCES parent(id)"
+                      ")");
+        m_db->execute("INSERT INTO parent VALUES (1)");
+    }
+
+    void TearDown() override
+    {
+        m_db.reset();
+        std::remove(m_database_path.c_str());
+    }
+
+    int count_rows(const std::string& table)
+    {
+        int           count = 0;
+        sqlite3*      raw   = nullptr;
+        sqlite3_stmt* stmt  = nullptr;
+
+        m_db->flush();
+
+        sqlite3_open(m_database_path.c_str(), &raw);
+        sqlite3_prepare_v2(
+            raw, ("SELECT COUNT(*) FROM " + table).c_str(), -1, &stmt, nullptr);
+        if(sqlite3_step(stmt) == SQLITE_ROW)
+        {
+            count = sqlite3_column_int(stmt, 0);
+        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(raw);
+        return count;
+    }
+
+    std::string                     m_database_path;
+    std::shared_ptr<sqlite_backend> m_db;
+};
+
+// Step 1: Schema with FK constraints is created successfully
+TEST_F(sqlite_backend_foreign_key_test, step1_schema_with_fk_constraints_created)
+{
+    EXPECT_NO_THROW(m_db->execute("INSERT INTO parent VALUES (2)"));
+    EXPECT_NO_THROW(m_db->execute("INSERT INTO child VALUES (1, 2)"));
+}
+
+// Step 2: FK ON - insert with valid reference succeeds
+TEST_F(sqlite_backend_foreign_key_test, step2_fk_on_valid_reference_succeeds)
+{
+    m_db->set_foreign_keys_enabled(true);
+    EXPECT_NO_THROW(m_db->execute("INSERT INTO child VALUES (1, 1)"));
+}
+
+// Step 3: FK ON - insert with invalid reference throws
+TEST_F(sqlite_backend_foreign_key_test, step3_fk_on_invalid_reference_throws)
+{
+    m_db->set_foreign_keys_enabled(true);
+    EXPECT_THROW(m_db->execute("INSERT INTO child VALUES (1, 999)"), std::runtime_error);
+}
+
+// Step 4: FK OFF - insert with invalid reference succeeds
+TEST_F(sqlite_backend_foreign_key_test, step4_fk_off_invalid_reference_succeeds)
+{
+    m_db->set_foreign_keys_enabled(false);
+    EXPECT_NO_THROW(m_db->execute("INSERT INTO child VALUES (1, 999)"));
+}
+
+// Step 5: FK OFF - bulk inserts with invalid references all succeed
+TEST_F(sqlite_backend_foreign_key_test, step5_fk_off_bulk_invalid_references_succeed)
+{
+    m_db->set_foreign_keys_enabled(false);
+
+    for(int i = 1; i <= 5; ++i)
+    {
+        EXPECT_NO_THROW(
+            m_db->execute("INSERT INTO child VALUES (" + std::to_string(i) + ", 888)"));
+    }
+}
+
+// Step 6: Rows inserted while FK OFF are actually persisted
+TEST_F(sqlite_backend_foreign_key_test, step6_fk_off_rows_are_persisted)
+{
+    m_db->set_foreign_keys_enabled(false);
+
+    m_db->execute("INSERT INTO child VALUES (10, 777)");
+    m_db->execute("INSERT INTO child VALUES (11, 888)");
+    m_db->execute("INSERT INTO child VALUES (12, 999)");
+
+    EXPECT_EQ(count_rows("child"), 3);
+}
+
+// Step 7: FK re-enabled - invalid reference throws again
+TEST_F(sqlite_backend_foreign_key_test, step7_fk_reenabled_invalid_reference_throws)
+{
+    m_db->set_foreign_keys_enabled(false);
+    EXPECT_NO_THROW(m_db->execute("INSERT INTO child VALUES (1, 999)"));
+
+    m_db->set_foreign_keys_enabled(true);
+    EXPECT_THROW(m_db->execute("INSERT INTO child VALUES (2, 999)"), std::runtime_error);
+}
+
 }  // namespace

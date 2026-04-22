@@ -206,8 +206,10 @@ public:
     // =========================================================================
     // Schema & admin
     // =========================================================================
-    void                      initialize_schema(::rocpdsna::version_t version);
-    void                      execute(const std::string& query);
+    void initialize_schema(::rocpdsna::version_t version);
+    void execute(const std::string& query);
+    /// Runs PRAGMA foreign_keys = ON or OFF on this connection.
+    void                      set_foreign_keys_enabled(bool enabled);
     void                      flush();
     [[nodiscard]] std::string get_uuid() const;
 

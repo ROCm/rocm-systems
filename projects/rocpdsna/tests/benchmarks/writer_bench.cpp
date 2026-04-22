@@ -32,7 +32,8 @@
 #include <cstdio>
 #include <memory>
 #include <string>
-#define VERSION (rocpdsna::version_t{ 3, 0, 0 })
+#define VERSION              (rocpdsna::version_t{ 3, 0, 0 })
+#define FOREIGN_KEYS_ENABLED false
 namespace
 {
 
@@ -241,6 +242,7 @@ public:
         m_storage =
             std::make_unique<rocpdsna::storage_t>(m_database_path, m_uuid, VERSION);
         m_writer = std::make_shared<rocpdsna::writer_t>(std::move(m_storage));
+        m_writer->set_sqlite_foreign_keys_enabled(FOREIGN_KEYS_ENABLED);
         setup_schema();
     }
 
@@ -327,6 +329,7 @@ public:
         m_storage =
             std::make_unique<rocpdsna::storage_t>(m_database_path, m_uuid, VERSION);
         m_writer = std::make_shared<rocpdsna::writer_t>(std::move(m_storage));
+        m_writer->set_sqlite_foreign_keys_enabled(FOREIGN_KEYS_ENABLED);
     }
 
     void TearDown(const benchmark::State&) override

@@ -34,7 +34,8 @@
 #include <string>
 #include <thread>
 #include <vector>
-#define VERSION (rocpdsna::version_t{ 3, 0, 0 })
+#define VERSION              (rocpdsna::version_t{ 3, 0, 0 })
+#define FOREIGN_KEYS_ENABLED false
 namespace
 {
 
@@ -73,6 +74,7 @@ struct thread_context
         const std::string uuid = std::to_string(thread_id);
         storage = std::make_unique<rocpdsna::storage_t>(database_path, uuid, VERSION);
         writer  = std::make_shared<rocpdsna::writer_t>(std::move(storage));
+        writer->set_sqlite_foreign_keys_enabled(FOREIGN_KEYS_ENABLED);
 
         constexpr size_t node_id = 1;
         const size_t     pid     = 1000 + thread_id;
