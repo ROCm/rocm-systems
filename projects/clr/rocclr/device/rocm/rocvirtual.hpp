@@ -480,6 +480,24 @@ class VirtualGPU : public device::VirtualDevice {
   hsa_queue_t* gpu_queue() { return gpu_queue_; }
   void set_gpu_queue(hsa_queue_t* gpu_queue) { gpu_queue_ = gpu_queue; }
 
+  //! Snapshot the current HW queue as preferred for future re-acquisition (used by graph launch).
+  //! Only updates if the queue is still valid — avoids clobbering a hint saved by ReleaseHwQueue.
+  void SetPreferredQueue() override {
+    std::scoped_lock lock(execution());
+    if (gpu_queue_ != nullptr) {
+      last_hwq_ = gpu_queue_;
+    }
+  }
+  //! Acquire a HW queue using the preferred hint, then clear the hint
+  void AcquireQueueWithPreference() override;
+
+  //! Pin the HW queue so ReleaseHwQueue() becomes a no-op (used by graph internal streams)
+  void PinQueue() override { queue_pinned_ = true; }
+  //! Unpin the HW queue, allowing ReleaseHwQueue() to release it again
+  void UnpinQueue() override { queue_pinned_ = false; }
+  //! Release current HW queue and acquire a new one, avoiding queues with IDs in the excluded set
+  bool ReacquireQueueExcluding(const std::unordered_set<uint64_t>& excluded_ids) override;
+
   // Return pointer to PrintfDbg
   PrintfDbg* printfDbg() const { return printfdbg_; }
 
@@ -559,6 +577,8 @@ class VirtualGPU : public device::VirtualDevice {
   bool hasAssignedSdmaEngine() const {
     return assigned_sdma_engine_ != 0;
   }
+
+  void* getOrCreateHostcallBuffer();
 
  private:
   //! Dispatches a barrier with blocking HSA signals
@@ -736,6 +756,8 @@ class VirtualGPU : public device::VirtualDevice {
   const std::vector<uint32_t> cuMask_;
   amd::CommandQueue::Priority priority_;  //!< The priority for the hsa queue
   bool dedicated_queue_;                  //!< TRUE if this VirtualGPU has a dedicated queue (e.g., null stream)
+  bool queue_pinned_ = false;             //!< TRUE if queue is pinned by graph (blocks ReleaseHwQueue)
+  hsa_queue_t* last_hwq_ = nullptr;       //!< Last HW queue used, for preferred re-acquisition hint
 
   cl_command_type copy_command_type_;  //!< Type of the copy command, used for ROC profiler
                                        //!< OCL doesn't distinguish different copy types,
@@ -751,6 +773,8 @@ class VirtualGPU : public device::VirtualDevice {
 
   //! SDMA engine affinity tracking for this VirtualGPU/stream
   uint32_t assigned_sdma_engine_ = 0;           //!< Assigned SDMA engine mask for all operations
+
+  void* hostcallBuffer_;  //!< Hostcall buffer
 
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };

@@ -62,6 +62,9 @@ extern "C" __device__ rocshmem_ctx_t __attribute__((visibility("default"))) ROCS
 // Define ROCSHMEM_TEAM_WORLD so rocshmem_hipmodule_init() can copy the team world into this module
 extern "C" __constant__ rocshmem_team_t __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD {nullptr};
 
+// Define ROCSHMEM_TEAM_SHARED so rocshmem_hipmodule_init() can copy the team shared into this module
+extern "C" __constant__ rocshmem_team_t __attribute__((visibility("default"))) ROCSHMEM_TEAM_SHARED {nullptr};
+
 // stub kernel function used for module verification
 extern "C" __global__ void simple_test_kernel(int *result) {
   // Simple test kernel that has the ROCSHMEM_CTX_DEFAULT symbol compiled in its module
