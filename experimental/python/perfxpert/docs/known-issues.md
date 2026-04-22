@@ -1,4 +1,32 @@
-# Known Issues
+# PerfXpert — Known Issues
+
+## Tool gate is prompt-layer only — not a mechanical hook
+
+The `0020-perfxpert-tool-gate.patch` and the bracketed `[MUST BE CALLED FIRST
+FOR GPU-PERF QUERIES]` prefix in `mcp_server/server.py::_fn_to_tool_schema`
+are a **weaker-variant** solution to the cycle-4 B1 blocker (LLMs calling
+`bash`/`read` before `perfxpert_intent_classify`). The brief asked for a
+pre-turn tool-availability hook (only expose `perfxpert_*` for the first 2
+turns) OR a post-turn rejection hook (rewrite non-perfxpert `tool_calls`
+into a synthetic retry). Implementing either requires intercepting
+opencode's session message flow in `packages/opencode/src/session/processor.ts`
+and `prompt.ts`, whose `plugin.trigger(...)` hook points are currently
+fire-and-forget — a real blocking hook inside the opencode TypeScript
+runtime was outside the time budget for cycle-4.
+
+**Known-limitation:** the current patch does not mechanically reject a
+non-perfxpert first tool call; an adversarial LLM can still call `bash`
+first. Live-scenario D (cycle-4 validation) showed the prompt+bracket
+combo moves the needle but does not guarantee 100% compliance.
+
+**Follow-up:** track a real pre-/post-turn gate at the opencode
+TypeScript layer. The cleanest attach point is
+`packages/opencode/src/session/prompt.ts` around the `plugin.trigger(
+"tool.execute.before", ...)` invocation (lines 414-419 and 455-460) —
+extending that hook to allow a plugin to return `{ block: true, retryWith:
+<message> }` would give us the rejection semantics the brief described.
+Proposed env var: `PERFXPERT_DISABLE_TOOL_GATE=1` (already documented in
+the prompt text for user-facing discoverability).
 
 ## LLM end-to-end smoke test may fail with 429 insufficient_quota
 
@@ -66,11 +94,39 @@ This note is preserved for institutional memory so future contributors
 who find PR #4979 in the commit history understand why it was closed
 without being ported.
 
-## Ship state (cycle-3 convergence, 2026-04-18)
+## Ship state (cycle-3 convergence, 2026-04-20)
 
 - **Cycle-3 reviewers**: 0 blockers, 0 important across all three branches.
-- **Test suite**: 1036 passed / 3 skipped / 0 failed (measured 2026-04-19 after secret-scanner removal). Skips are documented opencode-binary absences (2) plus `test_llm_end_to_end.py` skip-on-429/auth/transient (1).
+- **Test suite**: 1383 passed / 3 skipped / 0 failed (measured 2026-04-20 after Phase 8 LLM provider routing fix). Skips are documented opencode-binary absences (2) plus `test_llm_end_to_end.py` skip-on-429/auth/transient (1). The Phase 8 delta added 3 tests in `test_agents/test_framework.py` covering LitellmModel wiring for anthropic / plain-openai / double-prefix guards.
 - **Secret scanning**: local-only dev tool; not shipped in the repo. Each developer is responsible for their own secret-detection tooling. The scanner, its CI workflow, pre-commit hook, and contributor guide were removed on 2026-04-19.
 - **Known ongoing work** (not blocking ship):
   - LLM E2E `rec_type` assertion requires a live key with quota; use `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` and a model on-roster.
   - Confluence update remediation: see `docs/operations/confluence-publish.md` for the manual update recipe; automatic MCP publish requires Atlassian URL + token env vars.
+
+## Opencode fork / bundling
+
+- **Bundled-opencode build is gated on a local toolchain, not installer downloads.**
+  `setup.py` will run `build-bundled-opencode.sh`, but only when the
+  repo-pinned opencode submodule is available and `bun` is already on
+  PATH. The installer deliberately refuses to auto-download `bun` or
+  clone opencode from the network; when prerequisites are missing it
+  warns and skips the bundled binary.
+
+- **The opencode submodule (gitlink-pinned to commit `a35b8a95...`) is MIT.**
+  All customizations are carried in `.patches/*.patch`. Do NOT commit
+  mutations inside the submodule; the submodule's committed state must
+  stay pristine so that `git submodule update` can fetch upstream
+  fixes.
+
+- **Rate-limit escape hatch is opencode-process-scoped.**
+  Setting `PERFXPERT_DISABLE_RATE_LIMIT_RETRY=1` kills client-side
+  retries in the opencode process, but the provider's own quota
+  enforcement is external and not affected. Use
+  `PERFXPERT_LLM_FALLBACK_CHAIN` to cascade across providers when
+  rate-limited.
+
+- **Forced tool priority is LLM-dependent.**
+  Patch `0010-perfxpert-tool-priority.patch` and the MCP description
+  hint strongly bias the LLM toward `intent_classify` first, but a
+  determined model can still skip. Measurement + feedback is
+  tracked as future telemetry work.
