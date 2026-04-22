@@ -239,9 +239,8 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     state_ptr->next_scan_pos   = scan_end;
     state_ptr->next_submit_pos = tls_submit_pos;
 
-    auto doorbell_val = static_cast<hsa_signal_value_t>(state_ptr->next_submit_pos - 1);
-    auto real_rdid    = __atomic_load_n(state_ptr->real_rdid, __ATOMIC_ACQUIRE);
-    auto ring_used    = (state_ptr->next_submit_pos - real_rdid);
+    auto real_rdid = __atomic_load_n(state_ptr->real_rdid, __ATOMIC_ACQUIRE);
+    auto ring_used = (state_ptr->next_submit_pos - real_rdid);
     if(ring_used > state_ptr->ring_size)
     {
         ROCP_WARNING << "Queue-intercept observed ring usage beyond ring size. queue="
@@ -532,6 +531,8 @@ shutdown_intercept()
 void
 install_intercept(CoreApiTable& core_table)
 {
+    ROCP_INFO << "[queue-intercept] inline intercept path ENGAGED (tracing-only, no expansion)";
+
     // Save current table entries as our next-in-chain (tracing functors when called
     // after update_table, or raw HSA functions otherwise)
     s_next_table = core_table;
