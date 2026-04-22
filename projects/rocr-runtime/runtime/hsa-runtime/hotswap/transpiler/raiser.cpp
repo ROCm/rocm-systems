@@ -844,18 +844,40 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       return result;
     }
 
+    // Unsupported `dpp_ctrl` on an i32 update.dpp site — the rewrite
+    // family covers quad_perm / row_shl / row_shr today (all stay
+    // within a single 16-lane row).  Any ctrl outside that set is
+    // either wave-size-dependent (wave_* shifts / rotations) or
+    // hasn't been audited yet (row_mirror / row_half_mirror /
+    // row_share / row_xmask — expressible but no corpus demand
+    // yet).  Refusing loudly surfaces the demand so the next
+    // extension has a concrete test pointer.  See
+    // `buildDppLaneMap` in rewrite_cross_lane_divergent.cpp for
+    // the per-ctrl widening protocol.
+    if (rewriteReport.refusedUnsupportedDpp()) {
+      RaiseFailure f = RaiseFailure::crossWaveRewriteOracleDisagreement(
+          kernelName, rewriteReport.unsupportedDppDetail);
+      errs() << "transpiler: post-raise abort: " << f.format << " on '"
+             << f.mnemonic << "' \u2014 " << f.detail << "\n";
+      result.failure = std::move(f);
+      return result;
+    }
+
     // Second-order invariant: the syntactic Phase 1.4.5 classifier
     // matched `WaveIdLiftScalarized` iff the decoded instruction
     // stream contains at least one `v_writelane_b32` /
     // `v_readlane_b32`. Under the symmetry rule every such intrinsic
     // is rewritten (or the whole function refuses above), so a non-
-    // zero classifier count MUST coincide with a non-zero
-    // `totalRewritten()`. If it does not, a handler is silently
-    // dropping an intrinsic emission and the classifier is seeing
-    // source-level writelane sites the raised IR lost — a
-    // miscompile-by-omission the safety net catches.
+    // zero classifier count MUST coincide with a non-zero count of
+    // writelane + readlane rewrites specifically. Checking that
+    // specific sum (not the grand total including `dppRewritten`)
+    // matters: a kernel that emits DPP sites alongside missing
+    // writelane / readlane would otherwise silently satisfy the
+    // invariant via the DPP count, masking the handler-emission
+    // regression this gate exists to catch.
     if (classifierWaveIdLiftScalarizedSites > 0 &&
-        rewriteReport.totalRewritten() == 0) {
+        (rewriteReport.writelaneRewritten +
+         rewriteReport.readlaneRewritten) == 0) {
       std::string msg;
       raw_string_ostream os(msg);
       os << "classifier matched WaveIdLiftScalarized on "
