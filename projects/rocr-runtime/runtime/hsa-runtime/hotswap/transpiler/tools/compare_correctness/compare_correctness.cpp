@@ -874,6 +874,147 @@ Recipe makeCanaryDsSwizzleSwap1Recipe() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Recipe: canary_ds_swizzle_quad_perm — P6 QUAD_PERM envelope regression guard
+//
+// Canary for `ds_swizzle_b32 offset:swizzle(QUAD_PERM, 3, 2, 1, 0)`
+// (imm = 0x801B), the in-quad reversal within every 4-lane group.
+// Complements `canary_ds_swizzle_swap1` by exercising a DIFFERENT
+// top-level envelope of the P6 handler — QUAD_PERM (top-byte 0x80)
+// vs BITMASK_PERM (top-bit 0) — so imm-decoder / classifier
+// regressions that special-case one envelope without the other
+// would fail here but pass the SWAP-1 canary.
+//
+// Gold semantics = per-quad reversal: for every lane L,
+//   out[L] = in[(L & ~3) | Q[L & 3]]
+// where Q = {3, 2, 1, 0} — i.e. lane 0 reads lane 3, lane 1 reads
+// lane 2, lane 2 reads lane 1, lane 3 reads lane 0, repeating
+// every 4 lanes.  bit-5-preservation means this formula is
+// identical on wave32 source and wave64 target, so all three
+// modes (native / legacy / salmon) MUST match.
+//
+// See `kernels/canary_ds_swizzle_quad_perm.hip` for the imm-
+// encoding rationale (and the gotcha that tripped the initial
+// version of this recipe — the assembler prints quad selectors
+// in position order, which is NOT the same as the encoding
+// order).  See `handle_ds.cpp::DS_SWIZZLE_B32` for the four-
+// envelope taxonomy and the wave-size-obliviousness argument.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeCanaryDsSwizzleQuadPermRecipe() {
+  Recipe r;
+  r.name = "canary_ds_swizzle_quad_perm";
+  // Fixed blockSize=64 for the same reason as the sibling SWAP-1
+  // canary: one target wave64 per workgroup makes the per-quad
+  // reversal unambiguous in post-mortem diff inspection.  N values
+  // above 64 cover multi-workgroup launches.
+  r.defaultNs     = {64, 128, 256, 1024};
+  r.defaultBlocks = {64};
+  r.validate = [](int N, int blockSize) -> std::optional<std::string> {
+    if (blockSize != 64)
+      return std::string("blockSize must be 64 (the target wave64 width): "
+                         "per-quad reversal is analysed within a single "
+                         "target wave");
+    if (N % 4 != 0)
+      return std::string("N must be a multiple of 4 (the QUAD size): "
+                         "ragged tails fall off the end of a quad group "
+                         "and the reversal reads an out-of-bounds lane "
+                         "whose value is ISA-dependent");
+    if (N % blockSize != 0)
+      return std::string("N must be a multiple of blockSize (64): "
+                         "half-workgroup tails complicate the per-quad "
+                         "analysis without adding coverage");
+    return std::nullopt;
+  };
+  r.outputElemBytes = sizeof(float);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    std::vector<uint8_t> buf(N * sizeof(float));
+    auto *f = reinterpret_cast<float *>(buf.data());
+    for (int i = 0; i < N; ++i) f[i] = static_cast<float>(i) + 0.5f;
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N,
+                      int blockSize) {
+    const float *in = reinterpret_cast<const float *>(input.data());
+    std::vector<uint8_t> out(N * sizeof(float));
+    float *o = reinterpret_cast<float *>(out.data());
+    // Quad selector Q = (3, 2, 1, 0): position k reads lane
+    // `(quad_base | (3 - k))` — the reversal formula.
+    constexpr int kQuad = 4;
+    for (int tid = 0; tid < N; ++tid) {
+      int wg_id = tid / blockSize;
+      int lane_in_wg = tid % blockSize;
+      int quad_base = lane_in_wg & ~(kQuad - 1);
+      int lane_in_quad = lane_in_wg & (kQuad - 1);
+      int src_lane_in_wg = quad_base | (3 - lane_in_quad);
+      int src_tid = wg_id * blockSize + src_lane_in_wg;
+      o[tid] = (src_tid < N) ? in[src_tid] : 0.0f;
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "canary_ds_swizzle_quad_perm"));
+    float *dIn, *dOut;
+    size_t bytes = N * sizeof(float);
+    HIP_ASSERT(hipMalloc(&dIn, bytes));
+    HIP_ASSERT(hipMalloc(&dOut, bytes));
+    uint32_t sentinel = 0x7FC00000u;
+    std::vector<uint32_t> sentinelHost(N, sentinel);
+    HIP_ASSERT(hipMemcpy(dOut, sentinelHost.data(), bytes,
+                         hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dIn, input.data(), bytes, hipMemcpyHostToDevice));
+
+    struct alignas(8) Args {
+      const float *in;
+      float *out;
+    } args = {dIn, dOut};
+    size_t argSize = sizeof(args);
+    void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                      HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                      HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, config));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(bytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dOut, bytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dIn));
+    HIP_ASSERT(hipFree(dOut));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int outElems) {
+    const float *g = reinterpret_cast<const float *>(gold.data());
+    const float *a = reinterpret_cast<const float *>(actual.data());
+    int mismatches = 0;
+    double maxAbs = 0.0;
+    int firstIdx = -1;
+    double firstG = 0.0, firstA = 0.0;
+    for (int i = 0; i < outElems; ++i) {
+      if (g[i] != a[i]) {
+        if (firstIdx < 0) {
+          firstIdx = i;
+          firstG = g[i];
+          firstA = a[i];
+        }
+        double d = std::fabs(g[i] - a[i]);
+        if (d > maxAbs) maxAbs = d;
+        ++mismatches;
+      }
+    }
+    return std::make_tuple(mismatches, maxAbs, firstIdx, firstG, firstA);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helpers for the cvt_* recipes.  Both live here rather than in the kernels
 // because they define the CPU reference, not any device-side behaviour.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4559,6 +4700,7 @@ const std::vector<Recipe> &allRecipes() {
         makeSSetVgprMsbRecipe(),
         makeCanaryReadlaneLastLaneRecipe(),
         makeCanaryDsSwizzleSwap1Recipe(),
+        makeCanaryDsSwizzleQuadPermRecipe(),
     };
     for (const auto &t : allTritonRecipes())
       r.push_back(tritonToRecipe(t));
