@@ -64,6 +64,15 @@ jobs:
         run: |
           ./TheRock/build_tools/health_status.py
 
+      - name: Pull DVC files for rocm-systems
+        run: |
+          if command -v dvc &> /dev/null; then
+            echo "dvc detected"
+          else
+            echo "Warning, dvc not detected!"
+          fi
+          LOGNAME=github-runner dvc pull -v
+
       - name: Fetch sources
         timeout-minutes: 30
         run: |
