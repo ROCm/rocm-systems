@@ -34,7 +34,6 @@
 #include <hsa/hsa_ext_finalize.h>
 #include <hsa/hsa_ext_image.h>
 
-#include <cstddef>
 #include <cstdint>
 #include <sstream>
 #include <string_view>
@@ -117,32 +116,6 @@ template <>
 struct formatter<hsa_amd_vmem_alloc_handle_t>
 : rocprofiler::hsa::utils::handle_formatter<hsa_amd_vmem_alloc_handle_t>
 {};
-
-#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0A
-template <>
-struct formatter<hsa_fabric_handle_t>
-{
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename Ctx>
-    auto format(const hsa_fabric_handle_t& v, Ctx& ctx) const
-    {
-        auto out = fmt::format_to(ctx.out(), "handle=");
-
-        for(std::size_t i = 0; i < sizeof(v.handle); ++i)
-        {
-            out = fmt::format_to(out, "{:02x}", static_cast<unsigned int>(v.handle[i]));
-            if((i + 1) < sizeof(v.handle)) out = fmt::format_to(out, ":");
-        }
-
-        return out;
-    }
-};
-#    endif
 
 template <>
 struct formatter<hsa_access_permission_t>

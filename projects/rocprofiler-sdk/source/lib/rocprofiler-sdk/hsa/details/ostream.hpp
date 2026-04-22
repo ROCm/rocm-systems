@@ -24,7 +24,6 @@
 
 #include <rocprofiler-sdk/hsa.h>
 
-#include <cstddef>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -1224,35 +1223,6 @@ operator<<(std::ostream& out, const hsa_amd_memory_pool_t& v)
     return out;
 }
 
-#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0A
-inline static std::ostream&
-operator<<(std::ostream& out, const hsa_fabric_handle_t& v)
-{
-    std::operator<<(out, '{');
-    HSA_depth_max_cnt++;
-    if(HSA_depth_max == -1 || HSA_depth_max_cnt <= HSA_depth_max)
-    {
-        if(std::string_view{"hsa_fabric_handle_t::handle"}.find(HSA_structs_regex) !=
-           std::string_view::npos)
-        {
-            rocprofiler::hsa::detail::operator<<(out, "handle=");
-
-            constexpr auto _hex = "0123456789abcdef";
-            for(std::size_t i = 0; i < sizeof(v.handle); ++i)
-            {
-                auto _byte = static_cast<unsigned int>(v.handle[i]);
-                out.put(_hex[(_byte >> 4) & 0xF]);
-                out.put(_hex[_byte & 0xF]);
-                if((i + 1) < sizeof(v.handle)) out.put(':');
-            }
-        }
-    };
-    HSA_depth_max_cnt--;
-    std::operator<<(out, '}');
-    return out;
-}
-#endif
-
 inline static std::ostream&
 operator<<(std::ostream& out, const hsa_pitched_ptr_t& v)
 {
@@ -1758,15 +1728,6 @@ operator<<(std::ostream& out, const hsa_amd_memory_pool_t& v)
     rocprofiler::hsa::detail::operator<<(out, v);
     return out;
 }
-
-#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0A
-inline static std::ostream&
-operator<<(std::ostream& out, const hsa_fabric_handle_t& v)
-{
-    rocprofiler::hsa::detail::operator<<(out, v);
-    return out;
-}
-#endif
 
 inline static std::ostream&
 operator<<(std::ostream& out, const hsa_pitched_ptr_t& v)
