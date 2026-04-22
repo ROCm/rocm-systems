@@ -5,10 +5,31 @@ message because you moved an EXECUTION tool into the MCP-exposed list,
 STOP and open an architectural RFC per spec §5.8.
 """
 
-import pytest
+import importlib
+import inspect
+import pkgutil
+
+import perfxpert.tools as _tools_pkg
 
 from perfxpert.tools._class import ToolClass
 from mcp_server._registry import discover_read_only_tools
+
+_SKIP_MODULES = {"_class", "_safety"}
+
+
+def _discover_tools_by_class(tool_class: ToolClass) -> dict[str, object]:
+    """Mirror registry discovery so exposure tests catch future tool drift."""
+    registry = {}
+    for mod_info in pkgutil.iter_modules(_tools_pkg.__path__):
+        if mod_info.ispkg or mod_info.name in _SKIP_MODULES:
+            continue
+        mod = importlib.import_module(f"perfxpert.tools.{mod_info.name}")
+        for fn_name, fn in inspect.getmembers(mod, inspect.isfunction):
+            if fn_name.startswith("_"):
+                continue
+            if getattr(fn, "__tool_class__", None) is tool_class:
+                registry[f"{mod_info.name}.{fn_name}"] = fn
+    return registry
 
 
 def test_no_execution_tools_in_registry():
@@ -17,6 +38,17 @@ def test_no_execution_tools_in_registry():
         assert getattr(fn, "__tool_class__", None) == ToolClass.READ_ONLY, (
             f"MCP registry contains non-READ_ONLY tool: {name}"
         )
+
+
+def test_registry_excludes_every_execution_tool():
+    """Comprehensive guard: every EXECUTION tool must remain off the MCP surface."""
+    registered_names = set(discover_read_only_tools().keys())
+    execution_names = set(_discover_tools_by_class(ToolClass.EXECUTION).keys())
+    leaked = registered_names & execution_names
+    assert not leaked, (
+        f"CRITICAL: EXECUTION tools leaked into MCP registry: {sorted(leaked)}. "
+        "This is a §5.8 violation. Revert immediately."
+    )
 
 
 def test_registry_discovers_expected_tools():

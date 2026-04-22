@@ -12,24 +12,78 @@ from pathlib import Path
 import pytest
 
 from .diff_report import field_level_diffs
-from .fixtures_inventory import available_fixtures
+from .fixtures_inventory import available_parity_fixtures
 from .parity_runner import ParityRunner
 
 SNAPSHOTS_DIR = Path(__file__).parent / "parity_snapshots"
 
+MIN_REQUIRED_FIXTURES = 3
+MIN_ACTIONABLE_FIXTURES = 3
+MIN_DISTINCT_BOTTLENECKS = 2
+MIN_DISTINCT_REC_TYPES = 2
+MIN_DISTINCT_TECHNIQUES = 2
 PARITY_THRESHOLD = 0.95
+
+
+@pytest.mark.parity
+def test_minimum_viable_fixture_floor() -> None:
+    """Week-5 PR CI must exercise non-trivial parity signals, not placeholder parity."""
+    runner = ParityRunner()
+    fixtures = available_parity_fixtures()
+    assert len(fixtures) >= MIN_REQUIRED_FIXTURES, (
+        f"Parity suite requires at least {MIN_REQUIRED_FIXTURES} fixtures in CI; "
+        f"found {len(fixtures)}. Add hermetic parity fixtures instead of skipping."
+    )
+    results = [runner.run_both_paths(fx) for fx in fixtures]
+
+    actionable = [
+        dual for dual in results
+        if dual.old.primary_rec_type is not None or dual.new.primary_rec_type is not None
+    ]
+    assert len(actionable) >= MIN_ACTIONABLE_FIXTURES, (
+        f"Parity suite requires at least {MIN_ACTIONABLE_FIXTURES} fixtures with "
+        "non-null recommendation categories."
+    )
+
+    bottlenecks = {
+        val
+        for dual in results
+        for val in (dual.old.primary_bottleneck, dual.new.primary_bottleneck)
+        if val is not None
+    }
+    assert len(bottlenecks) >= MIN_DISTINCT_BOTTLENECKS, (
+        "Parity floor is too weak: present fixtures do not cover enough distinct "
+        f"bottleneck classes ({sorted(bottlenecks)})."
+    )
+
+    rec_types = {
+        val
+        for dual in results
+        for val in (dual.old.primary_rec_type, dual.new.primary_rec_type)
+        if val is not None
+    }
+    assert len(rec_types) >= MIN_DISTINCT_REC_TYPES, (
+        "Parity floor is too weak: present fixtures do not cover enough distinct "
+        f"recommendation categories ({sorted(rec_types)})."
+    )
+
+    techniques = {
+        val
+        for dual in results
+        for val in (dual.old.primary_rec_technique, dual.new.primary_rec_technique)
+        if val is not None
+    }
+    assert len(techniques) >= MIN_DISTINCT_TECHNIQUES, (
+        "Parity floor is too weak: present fixtures do not cover enough distinct "
+        f"optimization techniques ({sorted(techniques)})."
+    )
 
 
 @pytest.mark.parity
 def test_runner_runs_every_inventory_fixture_without_crash() -> None:
     """Contract: ParityRunner produces DualResult for every present fixture."""
     runner = ParityRunner()
-    fixtures = available_fixtures()
-    if len(fixtures) < 10:
-        pytest.skip(
-            f"Parity suite needs ≥ 10 fixtures (spec §7 exit criteria); got {len(fixtures)}. "
-            f"Fixtures backfilled in Phase 13."
-        )
+    fixtures = available_parity_fixtures()
     for fx in fixtures:
         dual = runner.run_both_paths(fx)
         assert dual.old is not None
@@ -39,7 +93,7 @@ def test_runner_runs_every_inventory_fixture_without_crash() -> None:
 @pytest.mark.parity
 def test_aggregate_agreement_at_or_above_95pct() -> None:
     runner = ParityRunner()
-    fixtures = available_fixtures()
+    fixtures = available_parity_fixtures()
     if not fixtures:
         pytest.skip("No fixtures available (Phase 13 backfill pending)")
 

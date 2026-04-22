@@ -27,6 +27,9 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
+import os
+import sys
+import warnings
 
 try:
     from importlib.metadata import version as _pkg_version
@@ -52,7 +55,7 @@ from ..tracelens_port import (
     analyze_kernels_by_category,
     analyze_short_kernels,
 )
-from .llm_analyzer import AnalysisContext, LLMAnalyzer
+from .llm_analyzer import LLMAnalyzer
 from .exceptions import (
     DatabaseNotFoundError,
     DatabaseCorruptedError,
@@ -511,10 +514,32 @@ class AnalysisResult:
         return "\n".join(lines)
 
 
-def _is_agentic_enabled() -> bool:
-    """Feature flag: PERFXPERT_USE_AGENTS truthy values opt into the new path."""
-    import os
-    return os.environ.get("PERFXPERT_USE_AGENTS", "").strip().lower() in {"1", "true", "yes"}
+_LEGACY_WARNING = (
+    "\n"
+    "⚠️  DEPRECATED: You are running perfxpert in LEGACY mode via PERFXPERT_LEGACY=1.\n"
+    "   The legacy Python TUI will be removed in the next minor release (vX.Y+1).\n"
+    "   Migrate to the agentic path (the default) before upgrading.\n"
+    "   See: docs/migration-to-agentic.md\n"
+)
+
+
+def _is_legacy_mode() -> bool:
+    """Phase 6 feature-flag gate.
+
+    Legacy mode is now strictly opt-in via PERFXPERT_LEGACY=1.
+    The Phase-4 PERFXPERT_USE_AGENTS flag is preserved as a no-op for
+    backward compatibility — users who had it set before Phase 6 experience
+    no change. PERFXPERT_LEGACY takes precedence if both are set.
+    """
+    return os.environ.get("PERFXPERT_LEGACY") == "1"
+
+
+def _emit_legacy_deprecation_once():
+    """Print deprecation warning to stderr once per process."""
+    if getattr(_emit_legacy_deprecation_once, "_emitted", False):
+        return
+    print(_LEGACY_WARNING, file=sys.stderr)
+    _emit_legacy_deprecation_once._emitted = True
 
 
 def analyze_database(
@@ -533,9 +558,9 @@ def analyze_database(
     """
     Public entry point — dispatches to legacy or agentic implementation.
 
-    Default behavior: LEGACY (backward compatible). Set PERFXPERT_USE_AGENTS=1
-    to enable the new hierarchical-agent path. This env-flag is a Phase 4/5/6
-    transition switch; Phase 6 flips the default.
+    Default behavior (Phase 6+): AGENTIC. Set PERFXPERT_LEGACY=1
+    to opt into the legacy path (removed in vX.Y+1). The Phase-4 PERFXPERT_USE_AGENTS
+    flag is preserved as a no-op for backward compatibility.
 
     Args and semantics are identical in both branches. The agentic branch
     delegates to perfxpert.agents.runtime.
@@ -573,8 +598,9 @@ def analyze_database(
         >>> for rec in result.recommendations.high_priority:
         ...     print(f"- {rec.title}")
     """
-    if _is_agentic_enabled():
-        return _analyze_database_agentic(
+    if _is_legacy_mode():
+        _emit_legacy_deprecation_once()
+        return _route_to_legacy(
             database_path,
             custom_prompt=custom_prompt,
             enable_llm=enable_llm,
@@ -586,7 +612,7 @@ def analyze_database(
             top_kernels=top_kernels,
             att_dir=att_dir,
         )
-    return _analyze_database_legacy(
+    return _route_to_agents(
         database_path,
         custom_prompt=custom_prompt,
         enable_llm=enable_llm,
@@ -600,7 +626,7 @@ def analyze_database(
     )
 
 
-def _analyze_database_agentic(
+def _route_to_agents(
     database_path: Union[str, Path],
     *,
     custom_prompt: Optional[str] = None,
@@ -613,29 +639,50 @@ def _analyze_database_agentic(
     top_kernels: int = 10,
     att_dir: Optional[str] = None,
 ) -> AnalysisResult:
-    """Agentic path: delegates to Phase 3 runtime if available."""
+    """Agentic path: delegates to Phase 3 session API.
+
+    Builds an AnalysisSession via build_session(), runs the analysis via
+    session.run_analysis(AnalysisInput(...)), and converts the AnalysisOutput
+    back to legacy AnalysisResult shape for backward compatibility.
+    """
     try:
-        from perfxpert.agents import runtime
-        return runtime.run_analyze(
-            database_path=database_path,
-            custom_prompt=custom_prompt,
-            enable_llm=enable_llm,
-            llm_provider=llm_provider,
-            llm_api_key=llm_api_key,
-            llm_thinking_tokens=llm_thinking_tokens,
-            output_format=output_format,
-            verbose=verbose,
-            top_kernels=top_kernels,
-            att_dir=att_dir,
-        )
-    except (ImportError, AttributeError) as e:
+        from perfxpert.agents import runtime, schemas
+    except ImportError as e:
         raise RuntimeError(
-            "PERFXPERT_USE_AGENTS=1 is set but agent runtime is not available. "
-            "This is a Phase 3 dependency. Unset the env var to use the legacy path."
+            "Agent runtime is not available. "
+            "This is a Phase 3 dependency. Set PERFXPERT_LEGACY=1 to use the legacy path."
         ) from e
 
+    # Build session with LLM provider if enabled
+    session = runtime.build_session(
+        provider=llm_provider if enable_llm else None,
+        airgap=(not enable_llm),  # airgap if LLM is disabled
+    )
 
-def _analyze_database_legacy(
+    # Run analysis via Phase 3 session API
+    try:
+        analysis_output = session.run_analysis(
+            schemas.AnalysisInput(
+                database_path=str(database_path),
+                top_kernels=top_kernels,
+                att_dir=att_dir,
+            )
+        )
+    except Exception as e:
+        raise DatabaseCorruptedError(f"Agentic analysis failed: {e}") from e
+
+    # Convert AnalysisOutput back to legacy AnalysisResult shape
+    return _wrap_agentic_result(
+        analysis_output,
+        database_path=database_path,
+        custom_prompt=custom_prompt,
+        enable_llm=enable_llm,
+        llm_provider=llm_provider,
+        verbose=verbose,
+    )
+
+
+def _route_to_legacy(
     database_path: Union[str, Path],
     *,
     custom_prompt: Optional[str] = None,
@@ -651,7 +698,7 @@ def _analyze_database_legacy(
     """
     Analyze a rocpd database file and return AI-powered insights.
 
-    This is the legacy (default) implementation.
+    This is the legacy (deprecated) implementation, opt-in via PERFXPERT_LEGACY=1.
     Performs local analysis (always) and optional LLM enhancement.
 
     Args:
@@ -774,79 +821,135 @@ def _analyze_database_legacy(
         result.profiling_info.profiling_mode = "thread_trace"
 
     # Optional LLM enhancement
+    # NOTE: Phase 6 deprecation — LLMAnalyzer is a stub in legacy mode
+    # The analyze_with_llm() method is deleted; LLM enhancement not available in legacy path
     if enable_llm and llm_provider:
-        try:
-            if verbose:
-                print(f"[Analysis] Enhancing with {llm_provider} LLM...")
-
-            analyzer = LLMAnalyzer(
-                provider=llm_provider,
-                api_key=llm_api_key,
-                verbose=verbose,
-                thinking_budget_tokens=llm_thinking_tokens,
+        result.warnings.append(
+            AnalysisWarning(
+                severity="warning",
+                message="LLM enhancement is not available in legacy mode (PERFXPERT_LEGACY=1)",
+                recommendation="Switch to agentic mode (unset PERFXPERT_LEGACY) for LLM features, or use perfxpert-code for interactive analysis",
             )
+        )
+        if verbose:
+            print("[Analysis] LLM enhancement skipped (legacy mode does not support LLM)")
 
-            # Convert result to dict for LLM
-            analysis_data = _convert_result_to_llm_format(result)
+    return result
 
-            # Build AnalysisContext so _select_tags() gates reference guide sections
-            # (including tracelens_metrics when TraceLens data is present)
-            has_counters = hardware_counters.get("has_counters", False)
-            analysis_tier = 2 if has_counters else 1
-            context = AnalysisContext(
-                tier=analysis_tier,
-                has_counters=has_counters,
-                custom_prompt=custom_prompt,
-                kernel_categories=result.kernel_categories or [],
-                interval_timeline={
-                    k: v
-                    for k, v in result.interval_timeline.items()
-                    if k.endswith("_pct")
-                },
-                short_kernel_summary=(
-                    {
-                        "threshold_us": result.short_kernels.get("threshold_us", 10),
-                        "short_kernel_count": result.short_kernels.get(
-                            "short_kernel_count", 0
-                        ),
-                        "wasted_pct_of_kernel_time": result.short_kernels.get(
-                            "wasted_pct_of_kernel_time", 0
-                        ),
-                    }
-                    if result.short_kernels
-                    else None
-                ),
+
+def _wrap_agentic_result(
+    analysis_output: "schemas.AnalysisOutput",
+    database_path: Union[str, Path],
+    custom_prompt: Optional[str] = None,
+    enable_llm: bool = False,
+    llm_provider: Optional[str] = None,
+    verbose: bool = False,
+) -> AnalysisResult:
+    """Convert agentic AnalysisOutput back to legacy AnalysisResult shape.
+
+    This allows existing callers and output formatters to work unchanged.
+    The AnalysisOutput schema (§4.3) provides:
+      - primary_bottleneck: str (compute | memory_transfer | latency | api_overhead | mixed)
+      - confidence: float (0.0 – 1.0)
+      - time_breakdown: Dict[str, float] (kernel_pct | memcpy_pct | api_pct | idle_pct)
+      - hot_kernels: List[Dict] ({name, pct, duration_ns, ...})
+      - counter_data_available: bool
+
+    We map this back to the legacy AnalysisResult structure with minimal fields
+    filled — enough for existing output formatters and callers to function.
+    """
+    from datetime import datetime
+
+    def _percent(value: float) -> float:
+        v = float(value or 0.0)
+        return v * 100.0 if 0.0 <= v <= 1.0 else v
+
+    # Extract data from AnalysisOutput
+    time_breakdown_dict = analysis_output.time_breakdown
+    hot_kernels = analysis_output.hot_kernels or []
+    has_counters = analysis_output.counter_data_available
+
+    # Build metadata
+    metadata = AnalysisMetadata(
+        rocpd_version=_PERFXPERT_VERSION,
+        analysis_version="0.1.0",
+        database_file=str(database_path),
+        analysis_timestamp=datetime.now().isoformat(),
+        custom_prompt=custom_prompt,
+    )
+
+    # Build profiling info
+    profiling_mode = "sys_trace_with_counters" if has_counters else "sys_trace_only"
+    analysis_tier = 2 if has_counters else 1
+    profiling_info = ProfilingInfo(
+        total_duration_ns=0,  # Not available in agentic output
+        profiling_mode=profiling_mode,
+        analysis_tier=analysis_tier,
+        gpus=[],
+    )
+
+    # Build summary
+    kernel_pct = _percent(time_breakdown_dict.get("kernel_pct", 0.0))
+    memcpy_pct = _percent(time_breakdown_dict.get("memcpy_pct", 0.0))
+    api_pct = _percent(time_breakdown_dict.get("api_pct", 0.0))
+    idle_pct = _percent(time_breakdown_dict.get("idle_pct", 0.0))
+
+    summary = AnalysisSummary(
+        overall_assessment=f"Analysis complete. {len(hot_kernels)} kernels analyzed.",
+        primary_bottleneck=analysis_output.primary_bottleneck,
+        confidence=analysis_output.confidence,
+        key_findings=[
+            f"Total kernel execution time: {kernel_pct:.1f}%",
+            f"Memory copy overhead: {memcpy_pct:.1f}%",
+            f"Top kernel: {hot_kernels[0]['name'] if hot_kernels else 'N/A'}",
+        ],
+    )
+
+    # Build execution breakdown
+    execution_breakdown = ExecutionBreakdown(
+        kernel_time_ns=0,  # Not available in agentic output
+        kernel_time_pct=kernel_pct,
+        memcpy_time_ns=0,  # Not available in agentic output
+        memcpy_time_pct=memcpy_pct,
+        api_overhead_pct=api_pct,
+        idle_time_pct=idle_pct,
+    )
+
+    # Build recommendations — empty since agentic path handles this in Recommendation agent
+    rec_set = RecommendationSet()
+
+    # Build warnings
+    warnings = []
+    if not has_counters:
+        warnings.append(
+            AnalysisWarning(
+                severity="warning",
+                message="No hardware counters collected. Analysis limited to Tier 1 (trace data only).",
+                recommendation="Collect counters with: rocprofv3 --pmc GRBM_COUNT SQ_WAVES -- ./app",
             )
+        )
 
-            # Get LLM enhancement
-            llm_explanation = analyzer.analyze_with_llm(
-                analysis_data,
-                custom_prompt=custom_prompt,
-                context=context,
-            )
+    result = AnalysisResult(
+        metadata=metadata,
+        profiling_info=profiling_info,
+        summary=summary,
+        execution_breakdown=execution_breakdown,
+        recommendations=rec_set,
+        warnings=warnings,
+    )
 
-            result.llm_enhanced_explanation = llm_explanation
+    # Minimal raw data cache for to_json()/to_webview() compatibility
+    result._raw = {
+        "time_breakdown": time_breakdown_dict,
+        "hotspots": hot_kernels,
+        "memory_analysis": {},  # Not available in agentic output
+        "recommendations_raw": [],  # Handled by Recommendation agent
+        "hardware_counters": {"has_counters": has_counters, "metrics": {}},
+        "database_path": str(database_path),
+    }
 
-            if verbose:
-                print("[Analysis] LLM enhancement complete")
-
-        except (LLMAuthenticationError, LLMRateLimitError):
-            # Auth and rate-limit errors must propagate — the caller needs to
-            # know their credentials are invalid or exhausted.
-            raise
-        except Exception as e:
-            # Other LLM errors are non-critical: add a warning and continue
-            # with local-only results.
-            result.warnings.append(
-                AnalysisWarning(
-                    severity="warning",
-                    message=f"LLM enhancement failed: {e}",
-                    recommendation="Analysis continues with local-only results",
-                )
-            )
-
-            if verbose:
-                print(f"[Analysis] LLM enhancement failed: {e}")
+    if verbose:
+        print(f"[Analysis] Agentic analysis complete. Bottleneck: {analysis_output.primary_bottleneck}")
 
     return result
 

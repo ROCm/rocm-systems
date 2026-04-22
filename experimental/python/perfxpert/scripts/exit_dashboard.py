@@ -189,7 +189,7 @@ def main() -> None:
     if args.render:
         render_to_terminal(dashboard)
 
-    if verdict == "NO-GO" and not args.allow_partial:
+    if verdict == "NO-GO":
         sys.exit(2)
     if verdict == "PARTIAL (pending)" and not args.allow_partial:
         sys.exit(1)

@@ -33,7 +33,7 @@ jobs:
       - name: Run integration
         run: |
           cd experimental/python/perfxpert
-          pytest tests/test_integration -v 2>/dev/null || echo "No integration tests yet"
+          pytest tests/test_integration -v
 
   opencode-wrapper:
     name: "OpenCode wrapper smoke test"
@@ -47,7 +47,7 @@ jobs:
       - name: Wrapper test
         run: |
           cd experimental/python/perfxpert
-          pytest tests/test_agents/test_opencode.py -v 2>/dev/null || echo "No opencode tests yet"
+          pytest tests/test_tools/test_opencode_launcher.py tests/test_integration/test_opencode_config.py -v
 
   phase5-gate:
     name: "Phase 5 Go/No-Go (parity + red-team + false-positive)"
@@ -75,15 +75,15 @@ jobs:
       - name: Airgap parity invariant (100% identical)
         run: |
           cd experimental/python/perfxpert
-          pytest tests/test_integration/test_airgap.py tests/test_integration/test_airgap_intent_classify.py -v 2>/dev/null || echo "Airgap tests not yet implemented"
+          pytest tests/test_integration/test_airgap.py tests/test_integration/test_airgap_intent_classify.py -v
       - name: MCP exposure split (0 execution tools exposed)
         run: |
           cd experimental/python/perfxpert
-          pytest tests/test_integration/test_mcp_exposure.py -v 2>/dev/null || echo "MCP exposure tests not yet implemented"
+          pytest tests/test_integration/test_mcp_exposure.py -v
       - name: Generate exit dashboard
         run: |
           cd experimental/python/perfxpert
-          python scripts/exit_dashboard.py --output exit_dashboard.json 2>/dev/null || echo "Exit dashboard script not yet implemented"
+          python scripts/exit_dashboard.py --output exit_dashboard.json --allow-partial
       - name: Upload dashboard artifact
         if: always()
         uses: actions/upload-artifact@v4

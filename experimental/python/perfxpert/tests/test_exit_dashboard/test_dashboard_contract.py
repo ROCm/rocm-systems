@@ -36,12 +36,13 @@ def test_script_exists_and_is_executable() -> None:
 @pytest.mark.dashboard
 def test_dashboard_emits_all_9_metrics(tmp_path: Path) -> None:
     out = tmp_path / "dashboard.json"
-    subprocess.run(
+    proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--output", str(out), "--allow-partial"],
         capture_output=True,
         text=True,
-        check=True,
     )
+    assert proc.returncode in (0, 1, 2)
+    assert out.exists(), "dashboard JSON should be written even on non-zero verdicts"
     data = json.loads(out.read_text())
     assert "metrics" in data
     missing = EXPECTED_METRIC_KEYS - set(data["metrics"].keys())
@@ -53,10 +54,10 @@ def test_dashboard_emits_all_9_metrics(tmp_path: Path) -> None:
 @pytest.mark.dashboard
 def test_dashboard_marks_go_only_when_all_thresholds_met(tmp_path: Path) -> None:
     out = tmp_path / "dashboard.json"
-    subprocess.run(
+    proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--output", str(out), "--allow-partial"],
-        check=True,
     )
+    assert proc.returncode in (0, 1, 2)
     data = json.loads(out.read_text())
     metrics = data["metrics"]
     verdict = data["overall_verdict"]
@@ -82,3 +83,16 @@ def test_dashboard_marks_go_only_when_all_thresholds_met(tmp_path: Path) -> None
         assert verdict == "GO", f"All metrics pass but verdict = {verdict}"
     else:
         assert verdict in ("NO-GO", "PARTIAL (pending)")
+
+
+@pytest.mark.dashboard
+def test_allow_partial_does_not_mask_no_go(tmp_path: Path) -> None:
+    out = tmp_path / "dashboard.json"
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT), "--output", str(out), "--allow-partial"],
+        capture_output=True,
+        text=True,
+    )
+    data = json.loads(out.read_text())
+    if data["overall_verdict"] == "NO-GO":
+        assert proc.returncode == 2

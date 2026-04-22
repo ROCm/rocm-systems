@@ -1,10 +1,10 @@
 """Orchestrator that runs BOTH the legacy and new analysis paths on a fixture
 and returns a `DualResult` for comparison.
 
-Legacy path: the pre-refactor call graph via `PERFXPERT_USE_AGENTS=0`.
+Legacy path: the pre-refactor call graph via `PERFXPERT_LEGACY=1`.
 
 New path: the agent pipeline via the feature-flagged `analyze_database()` call
-with `PERFXPERT_USE_AGENTS=1`.
+with `PERFXPERT_LEGACY` unset.
 
 Both paths return an `AnalysisResult` dataclass (same public type) but populate
 it through different call graphs. Parity tests compare structured fields:
@@ -19,7 +19,7 @@ import os
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from .fixtures_inventory import ParityFixture
 
@@ -58,18 +58,46 @@ class DualResult:
         }
 
 
+_SOURCE_BACKGROUND_CATEGORIES = {"Initial Profiling", "Instrumentation"}
+_SOURCE_CATEGORY_TO_BOTTLENECK = {
+    "Memory Transfer": "memory_transfer",
+    "Managed Memory": "memory_transfer",
+    "Synchronization": "latency",
+    "No Streams": "latency",
+    "ROCm Libraries": "compute",
+}
+_SOURCE_CATEGORY_TO_REC_TYPE = {
+    "Memory Transfer": "memory",
+    "Managed Memory": "memory",
+    "Synchronization": "latency",
+    "No Streams": "latency",
+    "ROCm Libraries": "compute",
+    "Initial Profiling": "info",
+    "Instrumentation": "info",
+}
+_SOURCE_CATEGORY_TO_TECHNIQUE = {
+    "Memory Transfer": "hip_stream_overlap",
+    "Managed Memory": "hip_stream_overlap",
+    "Synchronization": "device_sync_removal",
+    "No Streams": "hip_stream_overlap",
+}
+
+
 @contextmanager
 def _force_path(new_path: bool):
-    """Context manager: flip PERFXPERT_USE_AGENTS for one run, restore on exit."""
-    prev = os.environ.get("PERFXPERT_USE_AGENTS")
-    os.environ["PERFXPERT_USE_AGENTS"] = "1" if new_path else "0"
+    """Context manager: flip PERFXPERT_LEGACY for one run, restore on exit."""
+    prev = os.environ.get("PERFXPERT_LEGACY")
+    if new_path:
+        os.environ.pop("PERFXPERT_LEGACY", None)
+    else:
+        os.environ["PERFXPERT_LEGACY"] = "1"
     try:
         yield
     finally:
         if prev is None:
-            os.environ.pop("PERFXPERT_USE_AGENTS", None)
+            os.environ.pop("PERFXPERT_LEGACY", None)
         else:
-            os.environ["PERFXPERT_USE_AGENTS"] = prev
+            os.environ["PERFXPERT_LEGACY"] = prev
 
 
 class ParityRunner:
@@ -104,39 +132,84 @@ class ParityRunner:
 
 def _extract_bottleneck(result) -> Optional[str]:
     summary = getattr(result, "summary", None)
-    if summary is None:
+    if summary is not None:
+        return getattr(summary, "primary_bottleneck", None)
+    source_rec = _primary_source_recommendation(result)
+    if source_rec is None:
         return None
-    return getattr(summary, "primary_bottleneck", None)
+    return _SOURCE_CATEGORY_TO_BOTTLENECK.get(source_rec.get("category"))
 
 
 def _extract_rec_type(result) -> Optional[str]:
-    recs = getattr(result, "recommendations", None)
-    if recs is None:
-        return None
-    high = getattr(recs, "high_priority", None) or []
-    if not high:
-        med = getattr(recs, "medium_priority", None) or []
-        if med:
-            return getattr(med[0], "category", None)
-        return None
-    return getattr(high[0], "category", None)
+    source_rec = _primary_source_recommendation(result)
+    if source_rec is not None:
+        return _SOURCE_CATEGORY_TO_REC_TYPE.get(source_rec.get("category"))
+    bottleneck = _extract_bottleneck(result)
+    kernel_pct, memcpy_pct, api_pct = _percent_triplet(result)
+    total_calls = _total_kernel_calls(result)
+    avg_kernel_duration_us = _avg_kernel_duration_us(result)
+    category = _primary_recommendation_category(result)
+
+    if total_calls > 1000 and avg_kernel_duration_us is not None and avg_kernel_duration_us < 10 and api_pct > 0.15:
+        return "latency"
+    if memcpy_pct > 0.20 or bottleneck == "memory_transfer":
+        return "memory"
+    if category in {"API Overhead", "Launch Overhead", "Launch Efficiency", "GPU Utilization", "Low Occupancy"}:
+        return "latency"
+    if bottleneck in {"latency", "api_overhead"}:
+        return "latency"
+    if category in {"Compute-Bound Kernel", "Mixed Bottleneck Kernel", "Kernel Hotspot"}:
+        return "compute"
+    if bottleneck == "compute":
+        return "compute"
+    return None
 
 
 def _extract_rec_technique(result) -> Optional[str]:
+    source_rec = _primary_source_recommendation(result)
+    if source_rec is not None:
+        return _SOURCE_CATEGORY_TO_TECHNIQUE.get(source_rec.get("category"))
+    candidate = _primary_recommendation(result)
+    if candidate is not None:
+        technique = getattr(candidate, "technique_id", None)
+        if technique:
+            return technique
+        rid = getattr(candidate, "id", None)
+        if rid and "-" in rid:
+            return _legacy_id_to_technique(rid)
+
+    bottleneck = _extract_bottleneck(result)
+    kernel_pct, memcpy_pct, api_pct = _percent_triplet(result)
+    total_calls = _total_kernel_calls(result)
+    avg_kernel_duration_us = _avg_kernel_duration_us(result)
+    top_kernel_name = _top_kernel_name(result)
+
+    if total_calls > 1000 and avg_kernel_duration_us is not None and avg_kernel_duration_us < 10 and api_pct > 0.15:
+        return "kernel_fusion_small_launches"
+    if memcpy_pct > 0.20 or bottleneck == "memory_transfer":
+        return "hip_stream_overlap"
+    if bottleneck == "compute":
+        if top_kernel_name and any(token in top_kernel_name.lower() for token in ("gemm", "matmul")):
+            return "mfma_enablement"
+        if kernel_pct > 0.70:
+            return "vgpr_reduction_compute_bound"
+    return None
+
+
+def _primary_source_recommendation(result) -> Optional[dict]:
+    """Return the first source-only recommendation with non-boilerplate signal."""
     recs = getattr(result, "recommendations", None)
-    if recs is None:
+    if not isinstance(recs, list):
         return None
-    high = getattr(recs, "high_priority", None) or []
-    if not high:
-        return None
-    # Technique lives in rec.technique_id (new path) OR rec.id first tail token (old path).
-    r0 = high[0]
-    technique = getattr(r0, "technique_id", None)
-    if technique:
-        return technique
-    rid = getattr(r0, "id", None)
-    if rid and "-" in rid:
-        return _legacy_id_to_technique(rid)
+    actionable = [
+        rec for rec in recs
+        if isinstance(rec, dict)
+        and rec.get("category") not in _SOURCE_BACKGROUND_CATEGORIES
+    ]
+    if actionable:
+        return actionable[0]
+    if recs and isinstance(recs[0], dict):
+        return recs[0]
     return None
 
 
@@ -156,3 +229,77 @@ def _legacy_id_to_technique(rid: str) -> Optional[str]:
         "BLOCKING": "cache_blocking_kernel",
     }
     return mapping.get(tail)
+
+
+def _primary_recommendation(result) -> Optional[Any]:
+    recs = getattr(result, "recommendations", None)
+    if recs is None:
+        return None
+    high = getattr(recs, "high_priority", None) or []
+    if high:
+        return high[0]
+    med = getattr(recs, "medium_priority", None) or []
+    if med:
+        return med[0]
+    return None
+
+
+def _primary_recommendation_category(result) -> Optional[str]:
+    rec = _primary_recommendation(result)
+    if rec is None:
+        return None
+    return getattr(rec, "category", None)
+
+
+def _result_hotspots(result) -> list[dict]:
+    raw = getattr(result, "_raw", {}) or {}
+    hotspots = raw.get("hotspots", [])
+    return hotspots if isinstance(hotspots, list) else []
+
+
+def _top_kernel_name(result) -> Optional[str]:
+    hotspots = _result_hotspots(result)
+    if hotspots and isinstance(hotspots[0], dict):
+        return hotspots[0].get("name")
+    return None
+
+
+def _total_kernel_calls(result) -> int:
+    total = 0
+    for kernel in _result_hotspots(result):
+        if isinstance(kernel, dict):
+            total += int(kernel.get("calls", 0) or 0)
+    return total
+
+
+def _avg_kernel_duration_us(result) -> Optional[float]:
+    total_calls = _total_kernel_calls(result)
+    if total_calls <= 0:
+        return None
+    breakdown = getattr(result, "execution_breakdown", None)
+    total_kernel_time_ns = getattr(breakdown, "kernel_time_ns", 0) or 0
+    if total_kernel_time_ns:
+        return float(total_kernel_time_ns) / float(total_calls) / 1000.0
+    hotspots = _result_hotspots(result)
+    total_duration = sum(int(kernel.get("duration_ns", kernel.get("total_duration", 0)) or 0) for kernel in hotspots if isinstance(kernel, dict))
+    if total_duration <= 0:
+        return None
+    return float(total_duration) / float(total_calls) / 1000.0
+
+
+def _fraction(value: Any) -> float:
+    if value is None:
+        return 0.0
+    numeric = float(value)
+    return numeric / 100.0 if numeric > 1.0 else numeric
+
+
+def _percent_triplet(result) -> tuple[float, float, float]:
+    breakdown = getattr(result, "execution_breakdown", None)
+    if breakdown is None:
+        return (0.0, 0.0, 0.0)
+    return (
+        _fraction(getattr(breakdown, "kernel_time_pct", 0.0)),
+        _fraction(getattr(breakdown, "memcpy_time_pct", 0.0)),
+        _fraction(getattr(breakdown, "api_overhead_pct", 0.0)),
+    )

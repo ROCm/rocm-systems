@@ -8,6 +8,26 @@ from perfxpert.agents import schemas
 from perfxpert.agents.framework import FakeProviderResponse
 
 
+def _fake_facts(
+    *,
+    kernel_pct: float = 0.90,
+    memcpy_pct: float = 0.05,
+    api_pct: float = 0.03,
+    counter_data_available: bool = False,
+):
+    return {
+        "time_breakdown": {
+            "kernel_pct": kernel_pct,
+            "memcpy_pct": memcpy_pct,
+            "api_pct": api_pct,
+            "idle_pct": max(0.0, 1.0 - kernel_pct - memcpy_pct - api_pct),
+        },
+        "hot_kernels": [{"name": "[KERNEL_1]", "pct": kernel_pct}],
+        "metrics_for_classifier": {},
+        "counter_data_available": counter_data_available,
+    }
+
+
 def test_analysis_agent_builds():
     agent = analysis_module.build_analysis_agent()
     assert agent.name == "Analysis"
@@ -43,7 +63,11 @@ def test_analysis_classifies_compute_bound(fake_provider, monkeypatch):
             "counter_data_available": True,
         },
     )
-    # Tools are stubbed via monkeypatch; the agent trusts LLM's synthesis
+    monkeypatch.setattr(
+        analysis_module,
+        "_collect_deterministic_metrics",
+        lambda db, top_n=10: _fake_facts(counter_data_available=True),
+    )
     result = analysis_module.run_analysis(
         schemas.AnalysisInput(database_path="fake.db", top_kernels=10),
         provider="anthropic",
@@ -53,7 +77,7 @@ def test_analysis_classifies_compute_bound(fake_provider, monkeypatch):
     assert result.confidence == 0.88
 
 
-def test_analysis_classifies_memory_bound(fake_provider):
+def test_analysis_classifies_memory_bound(fake_provider, monkeypatch):
     fake_provider.return_value = FakeProviderResponse(
         structured_output={
             "primary_bottleneck": "memory_transfer",
@@ -62,6 +86,11 @@ def test_analysis_classifies_memory_bound(fake_provider):
             "hot_kernels": [{"name": "[KERNEL_1]", "pct": 0.40}],
             "counter_data_available": False,
         },
+    )
+    monkeypatch.setattr(
+        analysis_module,
+        "_collect_deterministic_metrics",
+        lambda db, top_n=10: _fake_facts(kernel_pct=0.55, memcpy_pct=0.40),
     )
     result = analysis_module.run_analysis(
         schemas.AnalysisInput(database_path="fake.db"),
@@ -94,7 +123,7 @@ def test_analysis_airgap_uses_deterministic_classifier(monkeypatch):
     assert result.primary_bottleneck in ("compute", "mixed")
 
 
-def test_analysis_propagates_counter_availability(fake_provider):
+def test_analysis_propagates_counter_availability(fake_provider, monkeypatch):
     fake_provider.return_value = FakeProviderResponse(
         structured_output={
             "primary_bottleneck": "mixed",
@@ -104,8 +133,62 @@ def test_analysis_propagates_counter_availability(fake_provider):
             "counter_data_available": False,
         },
     )
+    monkeypatch.setattr(
+        analysis_module,
+        "_collect_deterministic_metrics",
+        lambda db, top_n=10: _fake_facts(kernel_pct=0.5, memcpy_pct=0.2, api_pct=0.2, counter_data_available=False),
+    )
     result = analysis_module.run_analysis(
         schemas.AnalysisInput(database_path="fake.db"),
         provider="anthropic",
     )
     assert result.counter_data_available is False
+
+
+@pytest.mark.parametrize(
+    ("facts", "expected"),
+    [
+        (
+            {
+                "time_breakdown": {"kernel_pct": 0.20, "memcpy_pct": 0.40, "api_pct": 0.05, "idle_pct": 0.0},
+                "hot_kernels": [],
+                "metrics_for_classifier": {"memcpy_pct": 0.40},
+                "counter_data_available": False,
+            },
+            "memory_transfer",
+        ),
+        (
+            {
+                "time_breakdown": {"kernel_pct": 0.10, "memcpy_pct": 0.05, "api_pct": 0.50, "idle_pct": 0.0},
+                "hot_kernels": [{"name": "tiny", "calls": 1200, "duration_ns": 6_000_000}],
+                "metrics_for_classifier": {
+                    "api_overhead_pct": 0.50,
+                    "avg_kernel_duration_us": 5.0,
+                    "total_kernel_calls": 1200,
+                },
+                "counter_data_available": False,
+            },
+            "latency",
+        ),
+        (
+            {
+                "time_breakdown": {"kernel_pct": 0.85, "memcpy_pct": 0.05, "api_pct": 0.05, "idle_pct": 0.0},
+                "hot_kernels": [{"name": "matmul", "calls": 50, "duration_ns": 5_000_000}],
+                "metrics_for_classifier": {},
+                "counter_data_available": True,
+            },
+            "compute",
+        ),
+    ],
+)
+def test_analysis_airgap_uses_legacy_compatible_trace_fallback(monkeypatch, facts, expected):
+    monkeypatch.setattr(
+        analysis_module,
+        "_collect_deterministic_metrics",
+        lambda db, top_n=10: facts,
+    )
+    result = analysis_module.run_analysis(
+        schemas.AnalysisInput(database_path="fake.db"),
+        airgap=True,
+    )
+    assert result.primary_bottleneck == expected

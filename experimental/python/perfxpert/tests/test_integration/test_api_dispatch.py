@@ -1,4 +1,4 @@
-"""Tests for ai_analysis/api.py feature-flag dispatch (PERFXPERT_USE_AGENTS)."""
+"""Tests for ai_analysis/api.py feature-flag dispatch (Phase 6: PERFXPERT_LEGACY)."""
 
 from pathlib import Path
 from unittest import mock
@@ -25,12 +25,24 @@ def fake_db(tmp_path: Path):
     return db
 
 
-def test_default_path_is_legacy(fake_db, monkeypatch):
-    """Without PERFXPERT_USE_AGENTS, the legacy code path is used."""
-    monkeypatch.delenv("PERFXPERT_USE_AGENTS", raising=False)
+def test_default_path_is_agentic(fake_db, monkeypatch):
+    """Without PERFXPERT_LEGACY, the agentic path is used (Phase 6 default)."""
+    monkeypatch.delenv("PERFXPERT_LEGACY", raising=False)
 
-    with mock.patch.object(api, "_analyze_database_legacy", wraps=api._analyze_database_legacy) as legacy:
-        with mock.patch.object(api, "_analyze_database_agentic", create=True) as agentic:
+    with mock.patch.object(api, "_route_to_agents") as agentic:
+        with mock.patch.object(api, "_route_to_legacy") as legacy:
+            agentic.return_value = mock.MagicMock()
+            api.analyze_database(database_path=fake_db)
+            agentic.assert_called_once()
+            legacy.assert_not_called()
+
+
+def test_legacy_flag_on_routes_to_legacy(fake_db, monkeypatch):
+    """With PERFXPERT_LEGACY=1, the legacy path is used."""
+    monkeypatch.setenv("PERFXPERT_LEGACY", "1")
+
+    with mock.patch.object(api, "_route_to_legacy", wraps=api._route_to_legacy) as legacy:
+        with mock.patch.object(api, "_route_to_agents") as agentic:
             try:
                 api.analyze_database(database_path=fake_db)
             except Exception:
@@ -40,34 +52,13 @@ def test_default_path_is_legacy(fake_db, monkeypatch):
             agentic.assert_not_called()
 
 
-def test_flag_on_routes_to_agentic(fake_db, monkeypatch):
-    """With PERFXPERT_USE_AGENTS=1, the agentic path is used."""
-    monkeypatch.setenv("PERFXPERT_USE_AGENTS", "1")
-
-    with mock.patch.object(api, "_analyze_database_agentic", create=True) as agentic:
-        with mock.patch.object(api, "_analyze_database_legacy", wraps=api._analyze_database_legacy) as legacy:
+@pytest.mark.parametrize("value", ["0", "false", "False", ""])
+def test_legacy_flag_off_values_route_to_agentic(value, fake_db, monkeypatch):
+    """Explicit falsy values for PERFXPERT_LEGACY route to agentic."""
+    monkeypatch.setenv("PERFXPERT_LEGACY", value)
+    with mock.patch.object(api, "_route_to_agents") as agentic:
+        with mock.patch.object(api, "_route_to_legacy") as legacy:
             agentic.return_value = mock.MagicMock()
             api.analyze_database(database_path=fake_db)
             agentic.assert_called_once()
             legacy.assert_not_called()
-
-
-@pytest.mark.parametrize("value", ["0", "false", "False", ""])
-def test_flag_off_values_route_to_legacy(value, fake_db, monkeypatch):
-    monkeypatch.setenv("PERFXPERT_USE_AGENTS", value)
-    with mock.patch.object(api, "_analyze_database_legacy", wraps=api._analyze_database_legacy) as legacy:
-        try:
-            api.analyze_database(database_path=fake_db)
-        except Exception:
-            pass
-        legacy.assert_called_once()
-
-
-def test_flag_truthy_values_route_to_agentic(fake_db, monkeypatch):
-    for value in ["1", "true", "True", "yes"]:
-        monkeypatch.setenv("PERFXPERT_USE_AGENTS", value)
-        with mock.patch.object(api, "_analyze_database_agentic", create=True) as agentic:
-            agentic.return_value = mock.MagicMock()
-            api.analyze_database(database_path=fake_db)
-            agentic.assert_called_once()
-            agentic.reset_mock()
