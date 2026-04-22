@@ -4860,6 +4860,22 @@ tritonCompare(const TritonRecipe &t,
       const auto *g = reinterpret_cast<const double *>(gp);
       const auto *a = reinterpret_cast<const double *>(ap);
       for (int i = 0; i < ne; ++i) judge(g[i], a[i], i);
+    } else if (out.dtype == "i16" || out.dtype == "u16") {
+      // Compare as uint16 bit-pattern regardless of i16/u16 sig.
+      // Equality under two's complement is sign-agnostic for i16
+      // whether we cast up or preserve bits; the diagnostic cells
+      // show the unsigned interpretation so the printed value is
+      // always non-negative (readers can infer the signed
+      // interpretation if that's what the recipe's semantics demand).
+      const auto *g = reinterpret_cast<const uint16_t *>(gp);
+      const auto *a = reinterpret_cast<const uint16_t *>(ap);
+      for (int i = 0; i < ne; ++i)
+        if (g[i] != a[i] && bufMismatches++ == 0) {
+          bufFirstIdx = i;
+          bufFirstG = static_cast<double>(g[i]);
+          bufFirstA = static_cast<double>(a[i]);
+          if (bufMaxAbs < 1.0) bufMaxAbs = 1.0;
+        }
     } else if (out.dtype == "i32" || out.dtype == "u32") {
       // Compare as uint32 bit-pattern regardless of i32/u32 sig — the
       // comparator is bit-exact and two's complement makes the signed

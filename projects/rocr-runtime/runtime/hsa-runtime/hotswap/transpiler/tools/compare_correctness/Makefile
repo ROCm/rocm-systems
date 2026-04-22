@@ -80,7 +80,10 @@ TRITON_KERNELS := vecadd_f16 corpus_add_fp32 corpus_asin_fp32 \
                   matmul_fp16 \
                   matmul_fp16_16x16 \
                   sum_bitmatrix_rows_u32 \
-                  sum_bitmatrix_rows_u32_nw4
+                  sum_bitmatrix_rows_u32_nw4 \
+                  downcast_to_mxfp_fp32 \
+                  downcast_to_mxfp_bf16 \
+                  topk_forward_bf16
 
 # Both KERNELS and TRITON_KERNELS feed the same %.gfx942.co / %.gfx1250.co
 # pattern rules.  If a name appears in both lists, Make's rule-selection is

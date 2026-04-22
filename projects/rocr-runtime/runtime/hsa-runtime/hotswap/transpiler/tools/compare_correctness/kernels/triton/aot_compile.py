@@ -282,19 +282,20 @@ def validate_recipe(recipe: dict, path: str) -> None:
     # Mirror the C++ harness's Phase-1 mixed-dtype refusal at AOT time so a
     # mis-shaped recipe fails the build instead of producing a sidecar that
     # crashes compare_correctness on first launch.  Keep both checks in
-    # sync; tritonCompare reinterprets the entire output blob as the first
-    # output's dtype, so any mismatch is silently wrong.
+    # At least one output is required.  Mixed dtypes across outputs are
+    # supported: the C++ tritonCompare loop in compare_correctness.cpp
+    # (the one around `globalOffsetEl`/`globalOffsetByt`) dispatches
+    # per-output by `out.dtype` and advances the byte-offset by that
+    # output's `elems * dtypeBytes(dtype)`.  An earlier Phase-1 check
+    # rejected mixed dtypes against a then-existing tritonCompare
+    # assumption; the C++ was since extended to handle heterogeneous
+    # outputs (topk_forward returns bf16 values + i16 indices + u32
+    # bitmatrix; rmsnorm / layer_norm return fp16 Y + fp16 mean + fp16
+    # rstd with different per-output comparator semantics) and this
+    # validator was the last mirror of the old restriction.
     outs = recipe["outputs"]
     if not outs:
         raise RuntimeError(f"{path}: at least one output is required")
-    first_dtype = outs[0]["dtype"]
-    for b in outs[1:]:
-        if b["dtype"] != first_dtype:
-            raise RuntimeError(
-                f"{path}: Phase 1 requires all outputs share dtype "
-                f"(got {first_dtype!r} and {b['dtype']!r}); split the "
-                f"recipe or extend tritonCompare in compare_correctness.cpp"
-            )
 
 
 def _emit_output_entry(b: dict) -> dict:
