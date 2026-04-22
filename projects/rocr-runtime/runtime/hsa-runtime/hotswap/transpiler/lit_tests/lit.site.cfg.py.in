@@ -724,17 +724,20 @@ config.fixtures = {
     # storeVCC/loadVCC paths and fails the CHECK pattern.
     "v_add_co_u32_sgpr_carry":
         r"@LIT_FIXTURE_V_ADD_CO_U32_SGPR_CARRY_CO@",
-    # tensor_load_to_lds (VIMAGE TENSOR, gfx1250-only) — single
+    # tensor_load_to_lds (VIMAGE TENSOR _d2, gfx1250-only) — single
     # `.co` fixture shared by two complementary lit tests in the
     # `tensor_load_to_lds/` directory:
     #   * `tensor_load_to_lds.ll` — pins the cross-target
-    #     (gfx1250 -> gfx942) loud refusal contract. The handler in
-    #     `handle_vimage.cpp` refuses via
-    #     `RaiseFailure::unsupportedShape` because the per-dim
-    #     addressing semantics of a Tensor Descriptor cannot be
-    #     reconstructed from gfx9xx primitives, and the matching LLVM
-    #     intrinsic `int_amdgcn_tensor_load_to_lds`
-    #     (IntrinsicsAMDGPU.td:4213) is itself `isGFX125xOnly`.
+    #     (gfx1250 -> gfx942) TDM-emulation lift contract. The handler
+    #     in `handle_vimage.cpp` emits a call to the link-merged
+    #     helper `salmon_tdm_load_to_lds` (runtime/tdm.hip, declared
+    #     via tdm_runtime.{hpp,cpp}) with groups 0/1 marshalled from
+    #     the two SGPR ranges and groups 2/3 zero-filled (the `_d2`
+    #     contract). Pre-TDM-feature the fixture pinned a loud
+    #     refusal; the refusal path still fires when the TDM runtime
+    #     bitcode is unavailable (hipcc missing at build time), which
+    #     cannot be exercised from lit today — see
+    #     `tdmRuntimeAvailable()`.
     #   * `tensor_load_to_lds_same_target.ll` — pins the same-target
     #     (gfx1250 -> gfx1250) intrinsic-emit path: marshalling of
     #     vaddr0 / vaddr1 SGPR ranges into the `<4 x i32>` /
@@ -742,14 +745,36 @@ config.fixtures = {
     #     groups (2 and 3) and the always-reserved group 4, and the
     #     `i32 0` cpol immediate, ending in a single
     #     `llvm.amdgcn.tensor.load.to.lds` call.
-    # Sibling `tensor_store_from_lds` and the `_d4` operand-shape
-    # variant follow the identical SemOp dispatch (only the trailing
-    # intrinsic name and the operand-count branch differ); the
-    # corpus blockers we unblocked are all `_d2` loads, so we keep
-    # the fixture as a single `_d2` payload and exercise both
-    # contracts off it.
+    # Sibling `tensor_load_to_lds_d4`, `tensor_store_from_lds`, and
+    # `tensor_store_from_lds_d4` fixtures below complete the 2x2
+    # {form x direction} matrix for the cross-target TDM-emulation
+    # lift.
     "tensor_load_to_lds":
         r"@LIT_FIXTURE_TENSOR_LOAD_TO_LDS_CO@",
+    # tensor_load_to_lds_d4 (VIMAGE TENSOR _d4, gfx1250-only) —
+    # companion to `tensor_load_to_lds` pinning the 4/5D form where
+    # groups 2 and 3 are marshalled from real SGPR ranges rather than
+    # zero-filled. See `lit_tests/tensor_load_to_lds_d4/*.ll` for the
+    # IR shape contract and the _d2 / _d4 delta rationale.
+    "tensor_load_to_lds_d4":
+        r"@LIT_FIXTURE_TENSOR_LOAD_TO_LDS_D4_CO@",
+    # tensor_store_from_lds (VIMAGE TENSOR _d2, gfx1250-only) — store-
+    # direction sibling of `tensor_load_to_lds`. Pins the cross-target
+    # TDM-emulation lift for the `salmon_tdm_store_from_lds` helper
+    # path. Same `marshalTDMArgs` code path as the load direction;
+    # catches an accidental wire-up swap (emitting the load helper
+    # for the store SemOp, silently turning every hand-authored store
+    # into a load).
+    "tensor_store_from_lds":
+        r"@LIT_FIXTURE_TENSOR_STORE_FROM_LDS_CO@",
+    # tensor_store_from_lds_d4 (VIMAGE TENSOR _d4, gfx1250-only) —
+    # final cell of the 2x2 {form x direction} coverage matrix. Pins
+    # the _d4 store: all four groups marshalled from SGPRs plus the
+    # store helper symbol. A regression that only fixes the load
+    # direction's _d4 handling (or only the _d2 store) would fail
+    # exactly this fixture.
+    "tensor_store_from_lds_d4":
+        r"@LIT_FIXTURE_TENSOR_STORE_FROM_LDS_D4_CO@",
     # v_wmma_f32_16x16x4_f32 (gfx1250 RDNA4 VOP3P opcode 0x05D) —
     # single `.co` fixture shared by two complementary lit tests in
     # the `wmma_f32_16x16x4_f32/` directory:

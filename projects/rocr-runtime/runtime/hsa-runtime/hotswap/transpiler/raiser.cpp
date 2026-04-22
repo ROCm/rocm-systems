@@ -21,6 +21,7 @@
 #include "handlers.hpp"
 #include "rewrite_cross_lane_divergent.hpp"
 #include "c5_predicate_chain_classifier.hpp"
+#include "tdm_runtime.hpp"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -1085,6 +1086,22 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
                      : "")
              << ")\n";
       result.failure = std::move(f);
+      return result;
+    }
+  }
+
+  // ==== Phase 6.7: Link TDM emulation runtime ====
+  // The cross-target VIMAGE handler emits calls to
+  // `salmon_tdm_load_to_lds` / `salmon_tdm_store_from_lds` (declared,
+  // no body) when the compilation target lacks the gfx1250 TENSORcnt
+  // unit. Link the embedded HIP-authored runtime bitcode in here so
+  // `verifyModule` sees a self-contained module and `llc` resolves the
+  // calls at codegen time. No-op when the handler did not emit any
+  // helper calls.
+  if (moduleUsesTDMRuntime(M)) {
+    if (!linkTDMRuntime(M, compilationTargetISA)) {
+      errs() << "transpiler: TDM runtime link failed for kernel '" << kernelName << "'\n";
+      result.failure = RaiseFailure::irVerificationFailed("TDM runtime bitcode link failed");
       return result;
     }
   }

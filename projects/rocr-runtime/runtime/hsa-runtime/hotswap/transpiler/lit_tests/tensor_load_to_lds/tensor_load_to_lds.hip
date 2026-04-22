@@ -1,46 +1,29 @@
 // ARCH: gfx1250
 //
 // Lit fixture for VIMAGE TENSOR `tensor_load_to_lds_d2` — cross-target
-// loud refusal path. See SemOp::TENSOR_LOAD_TO_LDS and SemOp::
+// TDM-emulation path. See SemOp::TENSOR_LOAD_TO_LDS and SemOp::
 // TENSOR_STORE_FROM_LDS in semop.hpp, the opcode_map.cpp
-// canonicalization entries, and the handleVIMAGE refusal contract
-// in transpiler/handle_vimage.cpp.
+// canonicalization entries, and the handleVIMAGE TDM emulation
+// contract in transpiler/handle_vimage.cpp.
 //
 // The gfx1250 TENSOR cnt unit is the only hardware that can execute
 // these tensor-descriptor memory ops (`MIMGInstructions.td:2049-2113`,
-// `let SubtargetPredicate = isGFX125xOnly`). On gfx942 and earlier
-// generations there is NO equivalent instruction or instruction
-// sequence; the per-dim addressing semantics of a Tensor Descriptor
-// cannot be reconstructed from gfx9xx primitives without
-// fundamentally altering the kernel's memory-access pattern. The
-// matching LLVM intrinsics (`int_amdgcn_tensor_load_to_lds`,
-// `int_amdgcn_tensor_store_from_lds`, IntrinsicsAMDGPU.td:4213) are
-// themselves gated `isGFX125xOnly`, so even a same-shape intrinsic
-// emit would fail at codegen on a non-gfx1250 target.
-//
-// Per the user-rules (no silent fallbacks), the handler refuses the
-// cross-target lift via `RaiseFailure::unsupportedShape` with a
-// precise diagnostic that names the offending mnemonic, the
-// architectural mismatch, and the canonical same-target intrinsic.
-// This fixture pins:
-//
-//   1. `%not` inversion of the exit code — the test passes only
-//      when raise_cli actually fails.
-//   2. The stderr diagnostic includes the offending mnemonic
-//      (`tensor_load_to_lds`) and the encoding format
-//      (`VIMAGE`). raise_cli's failure-line format is fixed
-//      (raise_cli.cpp:213): `kernel '<name>' failed to raise:
-//      <mnemonic> [<format>]`.
+// `let SubtargetPredicate = isGFX125xOnly`). The cross-target lift
+// on gfx942 emits a call to the link-merged HIP-authored runtime
+// helper `salmon_tdm_load_to_lds` (`runtime/tdm.hip`, declared via
+// `tdm_runtime.{hpp,cpp}`); the companion fixture
+// `tensor_load_to_lds_same_target.ll` pins the gfx1250 -> gfx1250
+// same-target intrinsic emit, the sibling `_d4.ll` fixture covers
+// the _d4 form, and the `tensor_store_from_lds*` fixtures cover the
+// store direction.
 //
 // ENCODING: We emit the 12-byte VIMAGE TENSOR encoding by hand using
 // `.long` directives rather than the `tensor_load_to_lds` mnemonic
 // or the `__builtin_amdgcn_tensor_load_to_lds` clang builtin. The
-// host's ROCm 7.2.1 assembler emits `vdata=s0` (0x00) into bits
-// 39:32 for `tensor_load_to_lds` (which has no vdata output), but
-// the canonical encoding the corpus uses — and the encoding the
-// raise_cli's bundled LLVM disassembler accepts — places the NULL
-// SGPR sentinel `0x7C` in the vdata slot. Hand-encoding side-steps
-// the assembler bug; the produced bytes
+// host's ROCm 7.2.1 assembler and the raise_cli's bundled LLVM
+// disassembler disagree on where the NULL SGPR sentinel `0x7C` sits
+// in the 12-byte encoding (byte 4 = `vdata` vs. byte 7 = `vaddr4`).
+// Hand-encoding side-steps the drift; the produced bytes
 // `D0710001 7C000000 7C7C0428` exactly mirror the encoding emitted
 // by Triton-generated kernels in the kerneldex corpus that
 // originally surfaced this gap (e.g.
@@ -48,8 +31,11 @@
 //
 // MAINTENANCE: this fixture intentionally produces a
 // `tensor_load_to_lds_d2` to a hand-zeroed descriptor. The kernel
-// must NEVER be dispatched — only the raiser pre-translation
-// refusal is exercised.
+// must NEVER be dispatched — the SGPR ranges referenced in the
+// encoding are never assigned a valid Tensor Descriptor at runtime.
+// Only the raiser's static IR emission is exercised (via `%raise_cli
+// --emit-ir`). For a dispatchable end-to-end TDM fixture see
+// `test_data/gfx1250/tdm_smoke_kernel.hip` + `TdmGpu.CrossTargetCorpus`.
 
 #include <hip/hip_runtime.h>
 
