@@ -276,7 +276,7 @@ def _generate_dashboard(cmake_cmd: str) -> str:
 
     # Define variables for dashboard submission
     submit = "1"  # Submit to CDash or not
-    model = "Experimental"  # Mode (Nightly, Experimental, Continuous, etc.)
+    model = "Experimental"  # Model (Nightly, Experimental, Continuous, etc.)
     group = "TheRock"  # Group for the dashboard
     ARGN = "${ARGN}"  # Arguments for dashboard submission
 
