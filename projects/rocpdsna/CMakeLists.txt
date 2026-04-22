@@ -49,12 +49,9 @@ endif()
 # Version
 # ------------------------------------------------------------ #
 
-set(rocpdsna_VERSION_MAJOR 0)
-set(rocpdsna_VERSION_MINOR 1)
-set(rocpdsna_VERSION_PATCH 0)
-set(rocpdsna_VERSION
-    ${rocpdsna_VERSION_MAJOR}.${rocpdsna_VERSION_MINOR}.${rocpdsna_VERSION_PATCH}
-)
+# Version is the single source of truth in `project(rocpdsna VERSION ...)`
+# above. CMake automatically populates rocpdsna_VERSION_{MAJOR,MINOR,PATCH}
+# and rocpdsna_VERSION from it.
 
 # ------------------------------------------------------------ #
 # Object Library (compiled once, used by both shared and static)
@@ -223,6 +220,14 @@ endif()
 add_library(rocpdsna SHARED $<TARGET_OBJECTS:rocpdsna-objects>)
 add_library(rocpdsna-static STATIC $<TARGET_OBJECTS:rocpdsna-objects>)
 set_target_properties(rocpdsna-static PROPERTIES OUTPUT_NAME rocpdsna)
+
+# Embed semantic version + ABI version on the shared library so that
+# librocpdsna.so.<MAJOR> is the SONAME and librocpdsna.so.<MAJOR>.<MINOR>.<PATCH>
+# is the actual file, with both symlinks installed alongside librocpdsna.so.
+set_target_properties(
+    rocpdsna
+    PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR}
+)
 
 foreach(_target rocpdsna rocpdsna-static)
     target_include_directories(
