@@ -8,6 +8,7 @@
 
 #include <hip/driver_types.h>
 #include <hip/texture_types.h>
+#include "cl_common.hpp"
 
 namespace hip {
 inline cl_channel_type getCLChannelType(const hipArray_Format hipFormat,
@@ -98,7 +99,8 @@ inline cl_mem_object_type getCLMemObjectType(const unsigned int hipWidth,
 inline cl_mem_object_type getCLMemObjectType(const hipArray* arr) {
   const cl_mem dstMemObj = reinterpret_cast<const cl_mem>(arr->data);
   const amd::Image* dstImage = as_amd(dstMemObj)->asImage();
-  return dstImage ? dstImage->getType() : CL_MEM_OBJECT_ALLOCATION_FAILURE;
+  return dstImage ? static_cast<cl_mem_object_type>(dstImage->getType())
+                  : CL_MEM_OBJECT_ALLOCATION_FAILURE;
 }
 
 inline bool isLayered1D(const hipArray* arr) {

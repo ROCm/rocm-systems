@@ -209,12 +209,17 @@ if(__HIP_ENABLE_PCH)
   find_package(LLVM REQUIRED CONFIG
     HINTS
       ${ROCM_PATH}/llvm)
-  # find_package(LLVM) returns the lib/cmake/llvm location. We require the root.
+  # find_package(LLVM) sets LLVM_TOOLS_BINARY_DIR to the actual bin dir; derive
+  # LLVM root from it. LLVM_DIR may point to a redirect stub (not the real root).
   if(NOT DEFINED HIP_LLVM_ROOT)
-    set(HIP_LLVM_ROOT "${LLVM_DIR}/../../..")
-    if(NOT EXISTS "${HIP_LLVM_ROOT}/bin/clang")
-      # required because Rock installs llvm to /opt/rocm/lib/llvm
-      set(HIP_LLVM_ROOT "${LLVM_DIR}/../../llvm")
+    if(DEFINED LLVM_TOOLS_BINARY_DIR)
+      get_filename_component(HIP_LLVM_ROOT "${LLVM_TOOLS_BINARY_DIR}/.." ABSOLUTE)
+    else()
+      set(HIP_LLVM_ROOT "${LLVM_DIR}/../../..")
+      if(NOT EXISTS "${HIP_LLVM_ROOT}/bin/clang")
+        # required because Rock installs llvm to /opt/rocm/lib/llvm
+        set(HIP_LLVM_ROOT "${LLVM_DIR}/../../llvm")
+      endif()
     endif()
   endif()
 

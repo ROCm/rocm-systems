@@ -354,7 +354,7 @@ hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsRe
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  amd::Image* view = image->createView(amdContext, image->getImageFormat(), nullptr, mipLevel, 0);
+  amd::Image* view = image->createView(amdContext, image->getImageFormat(), nullptr, mipLevel, amd::MemFlags::Empty);
 
   hipArray* myarray = new hipArray();
 
@@ -383,25 +383,25 @@ hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsRe
 }
 
 // Helper function to convert from OpenGL Flags to HIP Memory Flags
-hipError_t HipToClMemoryFlags(uint32_t gl_flags, cl_mem_flags* cl_flags) {
+hipError_t HipToClMemoryFlags(uint32_t gl_flags, amd::MemFlags* cl_flags) {
   if (cl_flags == nullptr) {
     return hipErrorInvalidValue;
   }
   switch (gl_flags) {
       case hipGraphicsRegisterFlagsNone:
-        *cl_flags = 0;
+        *cl_flags = amd::MemFlags::Empty;
         break;
       case hipGraphicsRegisterFlagsReadOnly:
-        *cl_flags = CL_MEM_READ_ONLY;
+        *cl_flags = amd::MemFlags::ReadOnly;
         break;
       case hipGraphicsRegisterFlagsWriteDiscard:
-        *cl_flags = CL_MEM_WRITE_ONLY;
+        *cl_flags = amd::MemFlags::WriteOnly;
         break;
       case hipGraphicsRegisterFlagsSurfaceLoadStore:
-        *cl_flags = CL_MEM_READ_WRITE;
+        *cl_flags = amd::MemFlags::ReadWrite;
         break;
       case hipGraphicsRegisterFlagsTextureGather:
-        *cl_flags = CL_MEM_READ_WRITE | CL_MEM_READ_ONLY;
+        *cl_flags = amd::MemFlags::ReadWrite | amd::MemFlags::ReadOnly;
         break;
       default:
         return hipErrorInvalidValue;
@@ -421,7 +421,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  cl_mem_flags cl_flags = 0;
+  amd::MemFlags cl_flags = amd::MemFlags::Empty;
   hipError_t status = HipToClMemoryFlags(flags, &cl_flags);
   if (status != hipSuccess) {
     LogPrintfError("invalid parameter \"flags\" %u, gl interop can not convert", flags);
@@ -584,7 +584,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
 
     int iBytesPerPixel = 0;
     if (!amd::getCLFormatFromGL(amdContext, glInternalFormat, &clImageFormat, &iBytesPerPixel,
-                                amd::MemFlags::None)) {
+                                amd::MemFlags::Empty)) {
       LogWarning("\"texture\" format does not map to an appropriate CL image format");
       HIP_RETURN(hipErrorInvalidValue);
     }
@@ -731,7 +731,7 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  cl_mem_flags cl_flags = 0;
+  amd::MemFlags cl_flags = amd::MemFlags::Empty;
   hipError_t status = HipToClMemoryFlags(flags, &cl_flags);
   if (status != hipSuccess) {
     LogPrintfError("invalid parameter \"flags\" %u, gl interop can not convert", flags);
@@ -871,7 +871,7 @@ hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
 
   //! Now create command and enqueue
   amd::AcquireExtObjectsCommand* command = new amd::AcquireExtObjectsCommand(
-      *hip_stream, nullWaitList, count, memObjects, CL_COMMAND_ACQUIRE_GL_OBJECTS);
+      *hip_stream, nullWaitList, count, memObjects, amd::CommandType::AcquireGlObjects);
   // Make sure we have memory for the command execution
   if (!command->validateMemory()) {
     delete command;
@@ -992,7 +992,7 @@ hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t* resources
 
   // Now create command and enqueue
   amd::ReleaseExtObjectsCommand* command = new amd::ReleaseExtObjectsCommand(
-      *hip_stream, nullWaitList, count, memObjects, CL_COMMAND_RELEASE_GL_OBJECTS);
+      *hip_stream, nullWaitList, count, memObjects, amd::CommandType::ReleaseGlObjects);
   // Make sure we have memory for the command execution
   if (!command->validateMemory()) {
     delete command;

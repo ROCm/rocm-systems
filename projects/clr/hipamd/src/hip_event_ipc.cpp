@@ -91,7 +91,7 @@ hipError_t IPCEvent::streamWait(hip::Stream* stream, uint flags) {
   const int offset = ipc_evt_.ipc_shmem_->read_index;
   return ihipStreamOperation(
       reinterpret_cast<hipStream_t>(stream),
-      ROCCLR_COMMAND_STREAM_WAIT_VALUE,
+      static_cast<amd::CommandType>(ROCCLR_COMMAND_STREAM_WAIT_VALUE),
       &(ipc_evt_.ipc_shmem_->signal[offset]), 0, 1, 1,
       sizeof(uint32_t));
 }
@@ -131,7 +131,7 @@ hipError_t IPCEvent::enqueueRecordCommand(hip::Stream* stream, amd::Command* com
 
   // Device writes 0 to signal after hipEventRecord command completes
   const auto status = ihipStreamOperation(reinterpret_cast<hipStream_t>(stream),
-                                          ROCCLR_COMMAND_STREAM_WRITE_VALUE, &signal, 0, 0, 0,
+                                          static_cast<amd::CommandType>(ROCCLR_COMMAND_STREAM_WRITE_VALUE), &signal, 0, 0, 0,
                                           sizeof(uint32_t));
   if (status != hipSuccess) {
     return status;

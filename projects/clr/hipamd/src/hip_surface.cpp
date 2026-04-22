@@ -57,15 +57,15 @@ hipError_t ihipCreateSurfaceObject(hipSurfaceObject_t* pSurfObject,
   }
 
   amd::Image* image = nullptr;
-  cl_mem memObj = reinterpret_cast<cl_mem>(pResDesc->res.array.array->data);
-  if (!is_valid(memObj)) {
+  amd::Memory* memObj = reinterpret_cast<amd::Memory*>(pResDesc->res.array.array->data);
+  if (memObj == nullptr) {
     return hipErrorInvalidValue;
   }
-  image = as_amd(memObj)->asImage();
+  image = memObj->asImage();
 
   void* surfObjectBuffer = nullptr;
   hipError_t err =
-      ihipMalloc(&surfObjectBuffer, sizeof(__hip_surface), CL_MEM_SVM_FINE_GRAIN_BUFFER);
+      ihipMalloc(&surfObjectBuffer, sizeof(__hip_surface), static_cast<unsigned int>(amd::MemFlags::SvmFineGrain));
   if (surfObjectBuffer == nullptr || err != hipSuccess) {
     return hipErrorOutOfMemory;
   }

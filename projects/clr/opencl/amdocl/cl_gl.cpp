@@ -16,6 +16,12 @@
 #include "cl_d3d11_amd.hpp"
 #endif  //_WIN32
 
+// Include interop_gl.hpp before cl_common.hpp so that GL/glx.h → GL/glxext.h
+// can use the X11 "Status" typedef (defined by X11/Xlib.h). interop_gl.hpp
+// already #undef's Status/None/Success after glxext.h has been parsed, so by
+// the time cl_common.hpp is processed, the X11 macros are already cleared.
+#include "platform/interop_gl.hpp"
+
 #include <GL/gl.h>
 #include <GL/glext.h>
 
@@ -24,7 +30,6 @@
 #include <EGL/eglplatform.h>
 
 #include "cl_common.hpp"
-#include "platform/interop_gl.hpp"
 
 #include "device/device.hpp"
 
@@ -35,6 +40,16 @@
 #include <cstring>
 #include <vector>
 
+// Forward declarations for internal AMD GL interop helpers defined later in
+// namespace amd (their definitions appear after the namespace amd { block).
+namespace amd {
+cl_mem clCreateFromGLBufferAMD(Context& amdContext, cl_mem_flags flags, GLuint bufobj,
+                               cl_int* errcode_ret);
+cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenum target,
+                                GLint miplevel, GLuint texture, cl_int* errcode_ret);
+cl_mem clCreateFromGLRenderbufferAMD(Context& amdContext, cl_mem_flags clFlags, GLuint renderbuffer,
+                                     cl_int* errcode_ret);
+}  // namespace amd
 
 /*! \addtogroup API
  *  @{
@@ -1651,7 +1666,7 @@ cl_int clEnqueueAcquireExtObjectsAMD(cl_command_queue command_queue, cl_uint num
 
   //! Now create command and enqueue
   amd::AcquireExtObjectsCommand* command = new amd::AcquireExtObjectsCommand(
-      hostQueue, eventWaitList, num_objects, memObjects, cmd_type);
+      hostQueue, eventWaitList, num_objects, memObjects, static_cast<amd::CommandType>(cmd_type));
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;
   }
@@ -1703,7 +1718,7 @@ cl_int clEnqueueReleaseExtObjectsAMD(cl_command_queue command_queue, cl_uint num
 
   //! Now create command and enqueue
   amd::ReleaseExtObjectsCommand* command = new amd::ReleaseExtObjectsCommand(
-      hostQueue, eventWaitList, num_objects, memObjects, cmd_type);
+      hostQueue, eventWaitList, num_objects, memObjects, static_cast<amd::CommandType>(cmd_type));
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;
   }

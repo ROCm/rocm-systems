@@ -438,7 +438,7 @@ RUNTIME_EXIT
  */
 CL_API_ENTRY void* CL_API_CALL clGetExtensionFunctionAddressForPlatform(cl_platform_id platform,
                                                                         const char* funcname) {
-  if (platform != NULL && platform != AMD_PLATFORM) {
+  if (platform != NULL && platform != CL_AMD_PLATFORM) {
     return NULL;
   }
 
@@ -446,6 +446,9 @@ CL_API_ENTRY void* CL_API_CALL clGetExtensionFunctionAddressForPlatform(cl_platf
 }
 
 CL_API_ENTRY void* CL_API_CALL clGetExtensionFunctionAddress(const char* func_name) {
+  // AMD extension functions declared in cl_profile_amd.h, cl_sdi_amd.h, etc. are
+  // pulled into namespace amd::cl via cl_type_map.hpp. Bring them into scope here.
+  using namespace amd::cl;  // NOLINT(build/namespaces)
 #define CL_EXTENSION_ENTRYPOINT_CHECK(name)                                                        \
   if (!strcmp(func_name, #name)) return reinterpret_cast<void*>(name);
 #define CL_EXTENSION_ENTRYPOINT_CHECK2(name1, name2)                                               \

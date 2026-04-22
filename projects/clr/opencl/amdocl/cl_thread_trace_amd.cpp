@@ -339,7 +339,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueThreadTraceCommandAMD,
       amdThreadTrace->setState(amd::ThreadTrace::Begin);
       command = new amd::ThreadTraceCommand(
           *hostQueue, eventWaitList, static_cast<const void*>(&amdThreadTrace->threadTraceConfig()),
-          *amdThreadTrace, amd::ThreadTraceCommand::Begin, CL_COMMAND_THREAD_TRACE);
+          *amdThreadTrace, amd::ThreadTraceCommand::Begin,
+          static_cast<amd::CommandType>(CL_COMMAND_THREAD_TRACE));
       break;
     case CL_THREAD_TRACE_END_COMMAND:
       if ((amdThreadTrace->getState() != amd::ThreadTrace::Begin) &&
@@ -349,7 +350,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueThreadTraceCommandAMD,
       amdThreadTrace->setState(amd::ThreadTrace::End);
       command = new amd::ThreadTraceCommand(*hostQueue, eventWaitList,
                                             &amdThreadTrace->threadTraceConfig(), *amdThreadTrace,
-                                            amd::ThreadTraceCommand::End, CL_COMMAND_THREAD_TRACE);
+                                            amd::ThreadTraceCommand::End,
+                                            static_cast<amd::CommandType>(CL_COMMAND_THREAD_TRACE));
       break;
     case CL_THREAD_TRACE_PAUSE_COMMAND:
       if (amdThreadTrace->getState() != amd::ThreadTrace::Begin) {
@@ -358,7 +360,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueThreadTraceCommandAMD,
       amdThreadTrace->setState(amd::ThreadTrace::Pause);
       command = new amd::ThreadTraceCommand(
           *hostQueue, eventWaitList, &amdThreadTrace->threadTraceConfig(), *amdThreadTrace,
-          amd::ThreadTraceCommand::Pause, CL_COMMAND_THREAD_TRACE);
+          amd::ThreadTraceCommand::Pause,
+          static_cast<amd::CommandType>(CL_COMMAND_THREAD_TRACE));
       break;
     case CL_THREAD_TRACE_RESUME_COMMAND:
       if (amdThreadTrace->getState() != amd::ThreadTrace::Pause) {
@@ -367,7 +370,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueThreadTraceCommandAMD,
       amdThreadTrace->setState(amd::ThreadTrace::Begin);
       command = new amd::ThreadTraceCommand(
           *hostQueue, eventWaitList, &amdThreadTrace->threadTraceConfig(), *amdThreadTrace,
-          amd::ThreadTraceCommand::Resume, CL_COMMAND_THREAD_TRACE);
+          amd::ThreadTraceCommand::Resume,
+          static_cast<amd::CommandType>(CL_COMMAND_THREAD_TRACE));
       break;
   }
 
@@ -492,9 +496,13 @@ RUNTIME_ENTRY(cl_int, clEnqueueBindThreadTraceBufferAMD,
 
   amdThreadTrace->setState(amd::ThreadTrace::MemoryBound);
   // Create a new ThreadTraceMemObjectsCommand command
+  // mem_objects is cl_mem* (== _cl_mem**); constructor takes const void**.
+  // Two-step cast: reinterpret to void** (same layout), then add const.
+  const void** memObjectsVoid =
+      const_cast<const void**>(reinterpret_cast<void**>(mem_objects));
   amd::ThreadTraceMemObjectsCommand* command = new amd::ThreadTraceMemObjectsCommand(
-      *hostQueue, eventWaitList, mem_objects_num, mem_objects, buffer_size, *amdThreadTrace,
-      CL_COMMAND_THREAD_TRACE_MEM);
+      *hostQueue, eventWaitList, mem_objects_num, memObjectsVoid, buffer_size, *amdThreadTrace,
+      static_cast<amd::CommandType>(CL_COMMAND_THREAD_TRACE_MEM));
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;
   }

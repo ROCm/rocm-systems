@@ -55,12 +55,12 @@ class FatBinaryInfo {
 
   hipModule_t Module(int device_id) const {
     DeviceIdCheck(device_id);
-    return reinterpret_cast<hipModule_t>(as_cl(dev_programs_[device_id]));
+    return reinterpret_cast<hipModule_t>(dev_programs_[device_id]);
   }
 
   hipError_t GetModule(int device_id, hipModule_t* hmod) const {
     DeviceIdCheck(device_id);
-    *hmod = reinterpret_cast<hipModule_t>(as_cl(dev_programs_[device_id]));
+    *hmod = reinterpret_cast<hipModule_t>(dev_programs_[device_id]);
     return hipSuccess;
   }
 

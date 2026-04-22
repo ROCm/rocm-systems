@@ -4,8 +4,15 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "cl_common.hpp"
+// cl_profile_amd.h must be included at global scope (before cl_common.hpp) so that
+// cl_perfcounter_property, cl_perfcounter_info, PerfcounterInfo enum values, and
+// cl_set_device_clock_mode_*_amd types are declared at global scope. cl_common.hpp
+// pulls cl_type_map.hpp which re-includes cl_profile_amd.h inside namespace amd::cl;
+// the header guard prevents double-inclusion, so this first include (with the full
+// CL type headers already present) establishes the declarations at global scope.
+#include "CL/opencl.h"
 #include "cl_profile_amd.h"
+#include "cl_common.hpp"
 #include "platform/context.hpp"
 #include "platform/command.hpp"
 #include "platform/perfctr.hpp"

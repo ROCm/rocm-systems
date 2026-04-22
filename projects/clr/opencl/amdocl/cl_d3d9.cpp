@@ -27,7 +27,7 @@ RUNTIME_ENTRY(cl_int, clGetDeviceIDsFromDX9MediaAdapterKHR,
   cl_uint num_gpu_devices = 0;
   static const bool VALIDATE_ONLY = true;
 
-  if (platform != NULL && platform != AMD_PLATFORM) {
+  if (platform != NULL && platform != CL_AMD_PLATFORM) {
     LogWarning("\"platform\" is not a valid AMD platform");
     return CL_INVALID_PLATFORM;
   }

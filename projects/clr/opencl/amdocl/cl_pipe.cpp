@@ -4,6 +4,14 @@
  * SPDX-License-Identifier: MIT
  */
 
+// cl_kernel.h must be included at global scope before cl_common.hpp because
+// cl_type_map.hpp (pulled in by cl_common.hpp) re-includes it inside namespace
+// amd::cl; the header guard prevents double-inclusion, so this establishes
+// clk_pipe_t at global scope where cl_pipe.cpp needs it.
+// cl_kernel.h requires CL types and top.hpp types to be available first.
+#include "CL/opencl.h"
+#include "top.hpp"
+#include "cl_kernel.h"
 #include "cl_common.hpp"
 #include "platform/memory.hpp"
 #include "platform/context.hpp"
@@ -98,7 +106,8 @@ RUNTIME_ENTRY_RET(cl_mem, clCreatePipe,
 
   amd::Context& amdContext = *as_amd(context);
   amd::Memory* mem = new (amdContext)
-      amd::Pipe(amdContext, flags, size, (size_t)pipe_packet_size, (size_t)pipe_max_packets);
+      amd::Pipe(amdContext, static_cast<amd::MemFlags>(flags), size, (size_t)pipe_packet_size,
+                (size_t)pipe_max_packets);
   if (mem == NULL) {
     *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
     return nullptr;

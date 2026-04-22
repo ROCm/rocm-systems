@@ -87,8 +87,8 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
   uint queueSize = amdDevice.info().queueOnDevicePreferredSize_;
   uint queueRTCUs = amd::CommandQueue::RealTimeDisabled;
   amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal;
-  int32_t queueonDeviceProperty = amdDevice.info().queueOnDeviceProperties_;
-  int32_t queueProperty = amdDevice.info().queueProperties_;
+  amd::QueueProperties queueonDeviceProperty = amdDevice.info().queueOnDeviceProperties_;
+  amd::QueueProperties queueProperty = amdDevice.info().queueProperties_;
   if (p != NULL)
     while (p->name != 0) {
       switch (p->name) {
@@ -101,7 +101,7 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
             return (cl_command_queue)0;
           }
           else if ((properties == CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE) &&
-            !(properties & queueProperty)) { 
+            (static_cast<amd::QueueProperties>(properties) & queueProperty) == amd::QueueProperties::None) {
             *not_null(errcode_ret) = CL_INVALID_QUEUE_PROPERTIES;
             return (cl_command_queue)0;
           }
@@ -122,7 +122,7 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
           break;
         case CL_QUEUE_ON_DEVICE:
           if((properties == CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE) &&
-            !(properties & queueonDeviceProperty)) {
+            (static_cast<amd::QueueProperties>(properties) & queueonDeviceProperty) == amd::QueueProperties::None) {
             *not_null(errcode_ret) = CL_INVALID_QUEUE_PROPERTIES;
             return (cl_command_queue)0;
           }
@@ -153,7 +153,7 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
 
     // Check if the app creates a host queue
     if (!(properties & CL_QUEUE_ON_DEVICE)) {
-      queue = new amd::HostQueue(amdContext, amdDevice, properties, queueRTCUs, priority);
+      queue = new amd::HostQueue(amdContext, amdDevice, static_cast<amd::QueueProperties>(properties), queueRTCUs, priority);
     } else {
       // Is it a device default queue
       if (properties & CL_QUEUE_ON_DEVICE_DEFAULT) {
@@ -167,7 +167,7 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
       }
       // Check if runtime can allocate a new device queue on this context
       if (amdContext.isDevQueuePossible(amdDevice)) {
-        queue = new amd::DeviceQueue(amdContext, amdDevice, properties, queueSize);
+        queue = new amd::DeviceQueue(amdContext, amdDevice, static_cast<amd::QueueProperties>(properties), queueSize);
       }
     }
 
@@ -335,7 +335,7 @@ RUNTIME_ENTRY(cl_int, clGetCommandQueueInfo,
       return amd::clGetInfo(device, param_value_size, param_value, param_value_size_ret);
     }
     case CL_QUEUE_PROPERTIES: {
-      cl_command_queue_properties properties = as_amd(command_queue)->properties().value_;
+      cl_command_queue_properties properties = static_cast<cl_command_queue_properties>(as_amd(command_queue)->properties().value_);
       return amd::clGetInfo(properties, param_value_size, param_value, param_value_size_ret);
     }
     case CL_QUEUE_REFERENCE_COUNT: {
@@ -403,7 +403,7 @@ RUNTIME_ENTRY(cl_int, clSetCommandQueueProperty,
     return CL_INVALID_COMMAND_QUEUE;
   }
 
-  *not_null(old_properties) = as_amd(command_queue)->properties().value_;
+  *not_null(old_properties) = static_cast<cl_command_queue_properties>(as_amd(command_queue)->properties().value_);
 
   if (properties & CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE) {
     clFinish(command_queue);
@@ -411,9 +411,9 @@ RUNTIME_ENTRY(cl_int, clSetCommandQueueProperty,
 
   bool success;
   if (enable == CL_TRUE) {
-    success = as_amd(command_queue)->properties().set(properties);
+    success = as_amd(command_queue)->properties().set(static_cast<amd::QueueProperties>(properties));
   } else {
-    success = as_amd(command_queue)->properties().clear(properties);
+    success = as_amd(command_queue)->properties().clear(static_cast<amd::QueueProperties>(properties));
   }
 
   return success ? CL_SUCCESS : CL_INVALID_QUEUE_PROPERTIES;

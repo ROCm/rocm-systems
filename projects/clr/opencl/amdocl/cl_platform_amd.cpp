@@ -18,7 +18,7 @@
  */
 
 RUNTIME_ENTRY(cl_int, clUnloadPlatformAMD, (cl_platform_id platform)) {
-  if (AMD_PLATFORM == platform) {
+  if (CL_AMD_PLATFORM == platform) {
     amd::Runtime::tearDown();
   }
   return CL_SUCCESS;

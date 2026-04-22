@@ -67,8 +67,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueCopyBufferP2PAMD,
   }
 
   amd::CopyMemoryP2PCommand* command =
-      new amd::CopyMemoryP2PCommand(hostQueue, CL_COMMAND_COPY_BUFFER, eventWaitList, *srcBuffer,
-                                    *dstBuffer, srcOffset, dstOffset, size);
+      new amd::CopyMemoryP2PCommand(hostQueue, amd::CommandType::CopyBuffer, eventWaitList,
+                                    *srcBuffer, *dstBuffer, srcOffset, dstOffset, size);
 
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;

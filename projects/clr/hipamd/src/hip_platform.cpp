@@ -429,7 +429,7 @@ hipError_t hipGetSymbolSize(size_t* sizePtr, const void* symbol) {
 hipError_t ihipCreateGlobalVarObj(const char* name, hipModule_t hmod, amd::Memory** amd_mem_obj,
                                   hipDeviceptr_t* dptr, size_t* bytes) {
   // Get Device Program pointer
-  auto* program = as_amd(reinterpret_cast<cl_program>(hmod));
+  auto* program = reinterpret_cast<amd::Program*>(hmod);
   auto* dev_program = program->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
 
   if (!dev_program) {

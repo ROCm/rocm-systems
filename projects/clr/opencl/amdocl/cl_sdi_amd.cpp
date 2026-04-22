@@ -28,7 +28,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueWaitSignalAMD,
     return CL_INVALID_MEM_OBJECT;
   }
 
-  if (!(buffer->getMemFlags() & CL_MEM_BUS_ADDRESSABLE_AMD)) {
+  if ((buffer->getMemFlags() & static_cast<amd::MemFlags>(CL_MEM_BUS_ADDRESSABLE_AMD)) ==
+      amd::MemFlags::Empty) {
     return CL_INVALID_MEM_OBJECT;
   }
 
@@ -50,7 +51,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueWaitSignalAMD,
   }
 
   amd::SignalCommand* command =
-      new amd::SignalCommand(hostQueue, CL_COMMAND_WAIT_SIGNAL_AMD, eventWaitList, *buffer, value);
+      new amd::SignalCommand(hostQueue, static_cast<amd::CommandType>(CL_COMMAND_WAIT_SIGNAL_AMD),
+                             eventWaitList, *buffer, value);
 
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;
@@ -92,7 +94,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueWriteSignalAMD,
     return CL_INVALID_MEM_OBJECT;
   }
 
-  if (!(buffer->getMemFlags() & CL_MEM_EXTERNAL_PHYSICAL_AMD)) {
+  if ((buffer->getMemFlags() & static_cast<amd::MemFlags>(CL_MEM_EXTERNAL_PHYSICAL_AMD)) ==
+      amd::MemFlags::Empty) {
     return CL_INVALID_MEM_OBJECT;
   }
 
@@ -117,8 +120,9 @@ RUNTIME_ENTRY(cl_int, clEnqueueWriteSignalAMD,
     return err;
   }
 
-  amd::SignalCommand* command = new amd::SignalCommand(hostQueue, CL_COMMAND_WRITE_SIGNAL_AMD,
-                                                       eventWaitList, *buffer, value, offset);
+  amd::SignalCommand* command = new amd::SignalCommand(
+      hostQueue, static_cast<amd::CommandType>(CL_COMMAND_WRITE_SIGNAL_AMD), eventWaitList, *buffer,
+      value, offset);
 
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;
@@ -178,7 +182,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueMakeBuffersResidentAMD,
       return CL_INVALID_MEM_OBJECT;
     }
 
-    if (!(buffer->getMemFlags() & CL_MEM_BUS_ADDRESSABLE_AMD)) {
+    if ((buffer->getMemFlags() & static_cast<amd::MemFlags>(CL_MEM_BUS_ADDRESSABLE_AMD)) ==
+        amd::MemFlags::Empty) {
       return CL_INVALID_MEM_OBJECT;
     }
 
@@ -197,7 +202,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueMakeBuffersResidentAMD,
   }
 
   amd::MakeBuffersResidentCommand* command = new amd::MakeBuffersResidentCommand(
-      hostQueue, CL_COMMAND_MAKE_BUFFERS_RESIDENT_AMD, eventWaitList, memObjects, bus_addresses);
+      hostQueue, static_cast<amd::CommandType>(CL_COMMAND_MAKE_BUFFERS_RESIDENT_AMD), eventWaitList,
+      memObjects, reinterpret_cast<amd::BusAddress*>(bus_addresses));
 
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;

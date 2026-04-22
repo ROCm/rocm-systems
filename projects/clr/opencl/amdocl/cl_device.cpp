@@ -92,7 +92,7 @@ RUNTIME_ENTRY(cl_int, clGetPlatformIDs,
   }
 
   assert(platforms != NULL && "check the code above");
-  *platforms = AMD_PLATFORM;
+  *platforms = CL_AMD_PLATFORM;
 
   *not_null(num_platforms) = 1;
   return CL_SUCCESS;
@@ -125,7 +125,7 @@ RUNTIME_EXIT
 RUNTIME_ENTRY(cl_int, clGetPlatformInfo,
               (cl_platform_id platform, cl_platform_info param_name, size_t param_value_size,
                void* param_value, size_t* param_value_size_ret)) {
-  if (platform != NULL && platform != AMD_PLATFORM) {
+  if (platform != NULL && platform != CL_AMD_PLATFORM) {
     return CL_INVALID_PLATFORM;
   }
 
@@ -213,7 +213,7 @@ RUNTIME_EXIT
 RUNTIME_ENTRY(cl_int, clGetDeviceIDs,
               (cl_platform_id platform, cl_device_type device_type, cl_uint num_entries,
                cl_device_id* devices, cl_uint* num_devices)) {
-  if (platform != NULL && platform != AMD_PLATFORM) {
+  if (platform != NULL && platform != CL_AMD_PLATFORM) {
     return CL_INVALID_PLATFORM;
   }
 
@@ -276,7 +276,7 @@ RUNTIME_ENTRY(cl_int, clGetDeviceInfo,
   switch (param_name) {
     case CL_DEVICE_TYPE: {
       // For cl_device_type, we need to mask out the default bit.
-      cl_device_type device_type = as_amd(device)->type();
+      cl_device_type device_type = static_cast<cl_device_type>(as_amd(device)->type());
       return amd::clGetInfo(device_type, param_value_size, param_value, param_value_size_ret);
     }
       CASE(CL_DEVICE_VENDOR_ID, vendorId_);
@@ -398,7 +398,7 @@ RUNTIME_ENTRY(cl_int, clGetDeviceInfo,
     default:
       break;
   }
-  if (as_amd(device)->type() == CL_DEVICE_TYPE_GPU) {
+  if (as_amd(device)->type() == amd::DeviceType::GPU) {
     switch (param_name) {
       case CL_DEVICE_GLOBAL_FREE_MEMORY_AMD: {
         // Free memory should contain 2 values:

@@ -10,6 +10,7 @@
 #include "hip_platform.hpp"
 #include "hip_conversions.hpp"
 #include "platform/sampler.hpp"
+#include "cl_common.hpp"
 
 struct __hip_texture {
   uint32_t imageSRD[HIP_IMAGE_OBJECT_SIZE_DWORD];
@@ -238,7 +239,9 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
             (pResViewDesc != nullptr)
                 ? hip::getCLChannelType(hip::getArrayFormat(pResViewDesc->format), readMode)
                 : hip::getCLChannelType(pResDesc->res.array.array->Format, readMode);
-        const amd::Image::Format imageFormat(cl_image_format{channelOrder, channelType});
+        const amd::Image::Format imageFormat(amd::ImageFormat{
+            static_cast<amd::ChannelOrder>(channelOrder),
+            static_cast<amd::ChannelDataType>(channelType)});
         if (!imageFormat.isValid()) {
           return hipErrorInvalidValue;
         }
@@ -280,13 +283,15 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
             (pResViewDesc != nullptr)
                 ? hip::getCLChannelType(hip::getArrayFormat(pResViewDesc->format), readMode)
                 : hip::getCLChannelType(pResDesc->res.mipmap.mipmap->format, readMode);
-        const amd::Image::Format imageFormat(cl_image_format{channelOrder, channelType});
+        const amd::Image::Format imageFormat(amd::ImageFormat{
+            static_cast<amd::ChannelOrder>(channelOrder),
+            static_cast<amd::ChannelDataType>(channelType)});
         if (!imageFormat.isValid()) {
           return hipErrorInvalidValue;
         }
 
-        image = image->createView(*hip::getCurrentDevice()->asContext(), imageFormat, nullptr, 0, 0,
-                                  true);
+        image = image->createView(*hip::getCurrentDevice()->asContext(), imageFormat, nullptr, 0,
+                                  amd::MemFlags::Empty, true);
         if (image == nullptr) {
           return hipErrorInvalidValue;
         }
@@ -300,7 +305,9 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
           hip::getCLChannelOrder(hip::getNumChannels(pResDesc->res.linear.desc), pTexDesc->sRGB);
       const cl_channel_type channelType =
           hip::getCLChannelType(hip::getArrayFormat(pResDesc->res.linear.desc), pTexDesc->readMode);
-      const amd::Image::Format imageFormat({channelOrder, channelType});
+      const amd::Image::Format imageFormat(amd::ImageFormat{
+          static_cast<amd::ChannelOrder>(channelOrder),
+          static_cast<amd::ChannelDataType>(channelType)});
       const cl_mem_object_type imageType = hip::getCLMemObjectType(pResDesc->resType);
       const size_t imageSizeInBytes = pResDesc->res.linear.sizeInBytes;
       amd::Memory* buffer =
@@ -330,7 +337,9 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
           hip::getCLChannelOrder(hip::getNumChannels(pResDesc->res.pitch2D.desc), pTexDesc->sRGB);
       const cl_channel_type channelType = hip::getCLChannelType(
           hip::getArrayFormat(pResDesc->res.pitch2D.desc), pTexDesc->readMode);
-      const amd::Image::Format imageFormat({channelOrder, channelType});
+      const amd::Image::Format imageFormat(amd::ImageFormat{
+          static_cast<amd::ChannelOrder>(channelOrder),
+          static_cast<amd::ChannelDataType>(channelType)});
       const cl_mem_object_type imageType = hip::getCLMemObjectType(pResDesc->resType);
       // Guard against unsigned underflow when height is 0
       const size_t imageSizeInBytes = (pResDesc->res.pitch2D.height > 0)
@@ -366,7 +375,7 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
 
   void* texObjectBuffer = nullptr;
   hipError_t err =
-      ihipMalloc(&texObjectBuffer, sizeof(__hip_texture), CL_MEM_SVM_FINE_GRAIN_BUFFER);
+      ihipMalloc(&texObjectBuffer, sizeof(__hip_texture), static_cast<unsigned int>(amd::MemFlags::SvmFineGrain));
   if (texObjectBuffer == nullptr || err != hipSuccess) {
     return hipErrorOutOfMemory;
   }

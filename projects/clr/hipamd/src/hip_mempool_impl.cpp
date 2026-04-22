@@ -179,8 +179,8 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
     if (dev_info.maxMemAllocSize_ < size) {
       return nullptr;
     }
-    cl_svm_mem_flags flags = (state_.interprocess_) ? ROCCLR_MEM_INTERPROCESS : 0;
-    flags |= (state_.phys_mem_) ? ROCCLR_MEM_PHYMEM : 0;
+    amd::MemFlags flags = (state_.interprocess_) ? amd::MemFlags::Interprocess : amd::MemFlags::Empty;
+    flags |= (state_.phys_mem_) ? amd::MemFlags::PhyMem : amd::MemFlags::Empty;
     if (state_.use_vm_heap_) {
       dev_ptr = Alloc(size);
     } else {
@@ -239,7 +239,7 @@ bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
     }
     // Graph-allocated virtual buffer: normal FreeMemory/SvmBuffer::free miss
     // releasing phys_mem_obj, sub_obj, and parent VA. Handle cleanup here.
-    if (HIP_MEM_POOL_USE_VM && (memory->getMemFlags() & CL_MEM_VA_RANGE_AMD) &&
+    if (HIP_MEM_POOL_USE_VM && (memory->getMemFlags() & amd::MemFlags::VaRangeAmd) != amd::MemFlags::Empty &&
         memory->parent() != nullptr &&
         memory->getUserData().phys_mem_obj != nullptr) {
       amd::Memory* phys_mem_obj = memory->getUserData().phys_mem_obj;

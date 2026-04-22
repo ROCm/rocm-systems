@@ -34,7 +34,7 @@ amd::Memory* getMemoryObject(const void* ptr, size_t& offset, size_t size) {
   // On Windows, when using hipHostRegister, the map may contain a single memory object for
   // multiple devices. This is because device addresses can overlap.
   // The offset needs to be calculated relative to the memory of the current device.
-  if (IS_WINDOWS && (memObj != nullptr) && (memObj->getMemFlags() & CL_MEM_USE_HOST_PTR) &&
+  if (IS_WINDOWS && (memObj != nullptr) && (memObj->getMemFlags() & amd::MemFlags::UseHostPtr) != amd::MemFlags::Empty &&
       currentDev != nullptr) {
     device::Memory* currentDevMem = memObj->getDeviceMemory(*currentDev, false);
     if (currentDevMem != nullptr) {
@@ -52,7 +52,7 @@ hipMemoryType getMemoryType(const amd::Memory* memory) {
     return hipMemoryTypeHost;
   }
 
-  return ((CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR) & memory->getMemFlags())
+  return ((amd::MemFlags::SvmFineGrain | amd::MemFlags::UseHostPtr) & memory->getMemFlags()) != amd::MemFlags::Empty
              ? hipMemoryTypeHost
              : hipMemoryTypeDevice;
 }
@@ -314,7 +314,7 @@ hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
     return hipSuccess;
   }
 
-  bool useHostDevice = (flags & CL_MEM_SVM_FINE_GRAIN_BUFFER) != 0;
+  bool useHostDevice = (flags & static_cast<unsigned int>(amd::MemFlags::SvmFineGrain)) != 0;
   amd::Context* curDevContext = hip::getCurrentDevice()->asContext();
   amd::Context* amdContext = useHostDevice ? hip::host_context : curDevContext;
 
@@ -379,7 +379,7 @@ hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
     return hipErrorInvalidValue;
   }
 
-  unsigned int ihipFlags = CL_MEM_SVM_FINE_GRAIN_BUFFER;
+  unsigned int ihipFlags = static_cast<unsigned int>(amd::MemFlags::SvmFineGrain);
   if (flags & hipHostMallocUncached) {
     if (IS_WINDOWS) {
       return hipErrorInvalidValue;
@@ -387,22 +387,22 @@ hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
     if (flags & (hipHostMallocNonCoherent | hipHostMallocCoherent)) {
       return hipErrorInvalidValue;
     }
-    ihipFlags |= ROCCLR_MEM_HSA_UNCACHED;
+    ihipFlags |= static_cast<unsigned int>(amd::MemFlags::HsaUncached);
   }
 
   if (flags == 0 ||
       flags & (hipHostMallocCoherent | hipHostMallocMapped | hipHostMallocNumaUser |
                hipHostMallocUncached) ||
       (!(flags & hipHostMallocNonCoherent) && HIP_HOST_COHERENT)) {
-    ihipFlags |= CL_MEM_SVM_ATOMICS;
+    ihipFlags |= static_cast<unsigned int>(amd::MemFlags::SvmAtomics);
   }
 
   if (flags & hipHostMallocNumaUser) {
-    ihipFlags |= CL_MEM_FOLLOW_USER_NUMA_POLICY;
+    ihipFlags |= static_cast<unsigned int>(amd::MemFlags::FollowUserNumaPolicy);
   }
 
   if (flags & hipHostMallocNonCoherent) {
-    ihipFlags &= ~CL_MEM_SVM_ATOMICS;
+    ihipFlags &= ~static_cast<unsigned int>(amd::MemFlags::SvmAtomics);
   }
 
   hipError_t status = ihipMalloc(ptr, sizeBytes, ihipFlags);
@@ -442,7 +442,7 @@ hipError_t ihipMemcpy_validate_memory(amd::Memory* memObj, size_t sizeBytes, siz
 
   // If the mem object is a VMM sub buffer (subbuffer has parent set),
   // then use parent's size for validation.
-  if (memObj->parent() && (memObj->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+  if (memObj->parent() && (memObj->getMemFlags() & amd::MemFlags::VaRangeAmd) != amd::MemFlags::Empty) {
     memObj = memObj->parent();
   }
 
@@ -463,6 +463,103 @@ hipError_t ihipMemcpy_validate(amd::Memory* dstMemory, amd::Memory* srcMemory, s
   status = ihipMemcpy_validate_memory(dstMemory, sizeBytes, dstOffset, /*read_write*/ true);
   if (status != hipSuccess) return status;
 
+  return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t ihipMemcpyCommand(amd::Command*& command, void* dst, const void* src, size_t sizeBytes,
+                             hipMemcpyKind kind, hip::Stream& stream, bool isAsync) {
+  amd::Command::EventWaitList waitList;
+  size_t sOffset = 0;
+  amd::Memory* srcMemory = getMemoryObject(src, sOffset);
+  size_t dOffset = 0;
+  amd::Memory* dstMemory = getMemoryObject(dst, dOffset);
+  amd::Device* queueDevice = &stream.device();
+  amd::CopyMetadata copyMetadata(isAsync, amd::CopyMetadata::CopyEnginePreference::NONE);
+  hip::MemcpyType type = ihipGetMemcpyType(src, dst, kind);
+  hip::Stream* pStream = &stream;
+  switch (type) {
+    case hipWriteBuffer:
+      if (queueDevice != dstMemory->GetDeviceById() &&
+          (dstMemory->getMemFlags() & amd::MemFlags::VaRangeAmd) == amd::MemFlags::Empty) {
+        pStream = hip::getNullStream(dstMemory->GetDeviceById()->context());
+        amd::Command* cmd = stream.getLastQueuedCommand(true);
+        if (cmd != nullptr) {
+          waitList.push_back(cmd);
+        }
+      }
+      command = new amd::WriteMemoryCommand(*pStream, amd::CommandType::WriteBuffer, waitList,
+                                            *dstMemory->asBuffer(), dOffset, sizeBytes, src, 0, 0,
+                                            copyMetadata);
+      break;
+    case hipReadBuffer:
+      if (queueDevice != srcMemory->GetDeviceById() &&
+          (srcMemory->getMemFlags() & amd::MemFlags::VaRangeAmd) == amd::MemFlags::Empty) {
+        pStream = hip::getNullStream(srcMemory->GetDeviceById()->context());
+        amd::Command* cmd = stream.getLastQueuedCommand(true);
+        if (cmd != nullptr) {
+          waitList.push_back(cmd);
+        }
+      }
+      command = new amd::ReadMemoryCommand(*pStream, amd::CommandType::ReadBuffer, waitList,
+                                           *srcMemory->asBuffer(), sOffset, sizeBytes, dst, 0, 0,
+                                           copyMetadata);
+      break;
+    case hipCopyBufferP2P:
+      command = new amd::CopyMemoryP2PCommand(stream, amd::CommandType::CopyBuffer, waitList,
+                                              *srcMemory->asBuffer(), *dstMemory->asBuffer(),
+                                              sOffset, dOffset, sizeBytes);
+      if (command == nullptr) {
+        return hipErrorOutOfMemory;
+      }
+      // Make sure runtime has valid memory for the command execution. P2P access
+      // requires page table mapping on the current device to another GPU memory
+      if (!static_cast<amd::CopyMemoryP2PCommand*>(command)->validateMemory()) {
+        delete command;
+        return hipErrorInvalidValue;
+      }
+      break;
+    case hipCopyBufferSDMA:
+      copyMetadata.copyEnginePreference_ = amd::CopyMetadata::CopyEnginePreference::SDMA;
+    case hipCopyBuffer:
+      if ((srcMemory->GetDeviceById() == dstMemory->GetDeviceById()) &&
+          queueDevice != srcMemory->GetDeviceById()) {
+        pStream = hip::getNullStream(srcMemory->GetDeviceById()->context());
+        amd::Command* cmd = stream.getLastQueuedCommand(true);
+        if (cmd != nullptr) {
+          waitList.push_back(cmd);
+        }
+      } else if (srcMemory->GetDeviceById() != dstMemory->GetDeviceById()) {
+        // Scenarios such as DtoH where dst is pinned memory
+        if ((queueDevice != srcMemory->GetDeviceById()) &&
+            (dstMemory->getContext().devices().size() != 1) &&
+            (srcMemory->getMemFlags() & amd::MemFlags::VaRangeAmd) == amd::MemFlags::Empty) {
+          pStream = hip::getNullStream(srcMemory->GetDeviceById()->context());
+          amd::Command* cmd = stream.getLastQueuedCommand(true);
+          if (cmd != nullptr) {
+            waitList.push_back(cmd);
+          }
+          // Scenarios such as HtoD where src is pinned memory
+        } else if ((queueDevice != dstMemory->GetDeviceById()) &&
+                   (srcMemory->getContext().devices().size() != 1) &&
+                   (dstMemory->getMemFlags() & amd::MemFlags::VaRangeAmd) == amd::MemFlags::Empty) {
+          pStream = hip::getNullStream(dstMemory->GetDeviceById()->context());
+          amd::Command* cmd = stream.getLastQueuedCommand(true);
+          if (cmd != nullptr) {
+            waitList.push_back(cmd);
+          }
+        }
+      }
+      command = new amd::CopyMemoryCommand(*pStream, amd::CommandType::CopyBuffer, waitList,
+                                           *srcMemory->asBuffer(), *dstMemory->asBuffer(), sOffset,
+                                           dOffset, sizeBytes, copyMetadata);
+      break;
+    case hipHostToHost:
+      break;
+  }
+  if (waitList.size() > 0) {
+    waitList[0]->release();
+  }
   return hipSuccess;
 }
 
@@ -747,13 +844,13 @@ hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes, unsigned int flag
   if (flags == hipDeviceMallocDefault) {
     ihipFlags = 0;
   } else if (flags == hipDeviceMallocFinegrained) {
-    ihipFlags = CL_MEM_SVM_ATOMICS;
+    ihipFlags = static_cast<unsigned int>(amd::MemFlags::SvmAtomics);
   } else if (flags == hipDeviceMallocUncached) {
-    ihipFlags = ROCCLR_MEM_HSA_UNCACHED;
+    ihipFlags = static_cast<unsigned int>(amd::MemFlags::HsaUncached);
   } else if (flags == hipDeviceMallocContiguous) {
-    ihipFlags = ROCCLR_MEM_HSA_CONTIGUOUS | ROCCLR_MEM_HSA_UNCACHED;
+    ihipFlags = static_cast<unsigned int>(amd::MemFlags::HsaContiguous | amd::MemFlags::HsaUncached);
   } else if (flags == hipMallocSignalMemory) {
-    ihipFlags = CL_MEM_SVM_ATOMICS | CL_MEM_SVM_FINE_GRAIN_BUFFER | ROCCLR_MEM_HSA_SIGNAL_MEMORY;
+    ihipFlags = static_cast<unsigned int>(amd::MemFlags::SvmAtomics | amd::MemFlags::SvmFineGrain | amd::MemFlags::HsaSignalMemory);
     if (sizeBytes != 8) {
       HIP_RETURN(hipErrorInvalidValue);
     }
@@ -986,7 +1083,7 @@ hipError_t ihipMallocPitch(void** ptr, size_t* pitch, size_t width, size_t heigh
     return hipErrorOutOfMemory;
   }
 
-  *ptr = amd::SvmBuffer::malloc(*hip::getCurrentDevice()->asContext(), amd::MemFlags::None, sizeBytes,
+  *ptr = amd::SvmBuffer::malloc(*hip::getCurrentDevice()->asContext(), amd::MemFlags::Empty, sizeBytes,
                                 device->info().memBaseAddrAlign_);
 
   if (*ptr == nullptr) {
@@ -1039,7 +1136,9 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
                             const size_t imageSlicePitch, const uint32_t numMipLevels,
                             const size_t offset, amd::Memory* buffer, hipError_t& status) {
   status = hipSuccess;
-  const amd::Image::Format imageFormat({channelOrder, channelType});
+  const amd::Image::Format imageFormat(amd::ImageFormat{
+      static_cast<amd::ChannelOrder>(channelOrder),
+      static_cast<amd::ChannelDataType>(channelType)});
   if (!imageFormat.isValid()) {
     LogPrintfError("Invalid Image format for channel Order:%u Type:%u", channelOrder, channelType);
     status = hipErrorInvalidValue;
@@ -1047,7 +1146,7 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
   }
 
   amd::Context& context = *hip::getCurrentDevice()->asContext();
-  if (!imageFormat.isSupported(context, imageType)) {
+  if (!imageFormat.isSupported(context, static_cast<amd::MemObjectType>(imageType))) {
     LogPrintfError("Image type: %u not supported", imageType);
     status = hipErrorInvalidValue;
     return nullptr;
@@ -1060,8 +1159,8 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
     return nullptr;
   }
 
-  if (!amd::Image::validateDimensions(devices, imageType, imageWidth, imageHeight, imageDepth,
-                                      imageArraySize)) {
+  if (!amd::Image::validateDimensions(devices, static_cast<amd::MemObjectType>(imageType),
+                                      imageWidth, imageHeight, imageDepth, imageArraySize)) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Image does not have valid dimensions");
     status = hipErrorInvalidValue;
     return nullptr;
@@ -1083,30 +1182,32 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
   // TODO validate the image descriptor.
   bool isExternalBuffer = buffer != nullptr ? buffer->isInterop() : false;
   amd::Image* image = nullptr;
+  const amd::MemObjectType amdImageType = static_cast<amd::MemObjectType>(imageType);
   if (isExternalBuffer) {
     // We will create mipmap image view on top of external buffer which is from Vulkan or D3D
     // image. The buffer contains subchunks of tiled image, or it's just a linear image. Lower
     // level PAL will infer memory layout (offset, pitch, slice pitch, size) for each level
     // array in terms of tiling mode(linear or optimal), extent, format and mipmap levels.
     // Note that RocR will support mipmap in the future.
-    switch (imageType) {
-      case CL_MEM_OBJECT_IMAGE1D:
-      case CL_MEM_OBJECT_IMAGE2D:
-      case CL_MEM_OBJECT_IMAGE3D:
+    switch (amdImageType) {
+      case amd::MemObjectType::Image1D:
+      case amd::MemObjectType::Image2D:
+      case amd::MemObjectType::Image3D:
         image = new (buffer->getContext())
-            amd::Image(*buffer->asBuffer(), imageType, CL_MEM_READ_WRITE, imageFormat, imageWidth,
-                       (imageHeight == 0) ? 1 : imageHeight, (imageDepth == 0) ? 1 : imageDepth,
-                       imageRowPitch, imageSlicePitch, numMipLevels, offset);
+            amd::Image(*buffer->asBuffer(), amdImageType, amd::MemFlags::ReadWrite, imageFormat,
+                       imageWidth, (imageHeight == 0) ? 1 : imageHeight,
+                       (imageDepth == 0) ? 1 : imageDepth, imageRowPitch, imageSlicePitch,
+                       numMipLevels, offset);
         break;
       default:
         LogPrintfError("Cannot create image of imageType: 0x%x for external buffer", imageType);
     }
   } else if (buffer != nullptr) {
-    switch (imageType) {
-      case CL_MEM_OBJECT_IMAGE1D_BUFFER:
-      case CL_MEM_OBJECT_IMAGE2D:
+    switch (amdImageType) {
+      case amd::MemObjectType::Image1DBuffer:
+      case amd::MemObjectType::Image2D:
         image = new (buffer->getContext())
-            amd::Image(*buffer->asBuffer(), imageType, CL_MEM_READ_WRITE, imageFormat,
+            amd::Image(*buffer->asBuffer(), amdImageType, amd::MemFlags::ReadWrite, imageFormat,
                        (imageWidth == 0) ? 1 : imageWidth, (imageHeight == 0) ? 1 : imageHeight,
                        (imageDepth == 0) ? 1 : imageDepth, imageRowPitch, imageSlicePitch,
                        numMipLevels, offset);
@@ -1115,28 +1216,28 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
         LogPrintfError("Cannot create image of imageType: 0x%x", imageType);
     }
   } else {
-    switch (imageType) {
-      case CL_MEM_OBJECT_IMAGE1D:
-      case CL_MEM_OBJECT_IMAGE2D:
-      case CL_MEM_OBJECT_IMAGE3D:
+    switch (amdImageType) {
+      case amd::MemObjectType::Image1D:
+      case amd::MemObjectType::Image2D:
+      case amd::MemObjectType::Image3D:
         image = new (context)
-            amd::Image(context, imageType, CL_MEM_READ_WRITE, imageFormat, imageWidth,
+            amd::Image(context, amdImageType, amd::MemFlags::ReadWrite, imageFormat, imageWidth,
                        (imageHeight == 0) ? 1 : imageHeight, (imageDepth == 0) ? 1 : imageDepth,
                        imageWidth * imageFormat.getElementSize(),               /* row pitch */
                        imageWidth * imageHeight * imageFormat.getElementSize(), /* slice pitch */
                        numMipLevels);
         break;
-      case CL_MEM_OBJECT_IMAGE1D_ARRAY:
+      case amd::MemObjectType::Image1DArray:
         image = new (context)
-            amd::Image(context, imageType, CL_MEM_READ_WRITE, imageFormat, imageWidth,
+            amd::Image(context, amdImageType, amd::MemFlags::ReadWrite, imageFormat, imageWidth,
                        imageArraySize, 1, /* image depth */
                        imageWidth * imageFormat.getElementSize(),
                        imageWidth * imageHeight * imageFormat.getElementSize(), numMipLevels);
         break;
-      case CL_MEM_OBJECT_IMAGE2D_ARRAY:
+      case amd::MemObjectType::Image2DArray:
         image = new (context)
-            amd::Image(context, imageType, CL_MEM_READ_WRITE, imageFormat, imageWidth, imageHeight,
-                       imageArraySize, imageWidth * imageFormat.getElementSize(),
+            amd::Image(context, amdImageType, amd::MemFlags::ReadWrite, imageFormat, imageWidth,
+                       imageHeight, imageArraySize, imageWidth * imageFormat.getElementSize(),
                        imageWidth * imageHeight * imageFormat.getElementSize(), numMipLevels);
         break;
       default:
@@ -1294,7 +1395,7 @@ hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr) {
 
   // To match with Nvidia behaviour validate that hostPtr passed
   // was allocated using hipHostAlloc(), and not hipMalloc()
-  if (!(svmMem->getMemFlags() & CL_MEM_SVM_FINE_GRAIN_BUFFER)) {
+  if ((svmMem->getMemFlags() & amd::MemFlags::SvmFineGrain) == amd::MemFlags::Empty) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -1310,21 +1411,21 @@ hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags)
                 hipExtHostRegisterUncached | hipHostRegisterIoMemory)) {
     return hipErrorInvalidValue;
   } else {
-    unsigned int memFlags = CL_MEM_USE_HOST_PTR | CL_MEM_SVM_ATOMICS;
+    unsigned int memFlags = static_cast<unsigned int>(amd::MemFlags::UseHostPtr | amd::MemFlags::SvmAtomics);
     if (flags & hipExtHostRegisterUncached) {
       if (IS_WINDOWS) {
         return hipErrorInvalidValue;
       }
-      memFlags |= ROCCLR_MEM_HSA_UNCACHED;
+      memFlags |= static_cast<unsigned int>(amd::MemFlags::HsaUncached);
     } else if (flags & hipHostRegisterIoMemory) {
       if (IS_WINDOWS) {
         return hipErrorInvalidValue;
       }
-      memFlags |= ROCCLR_MEM_IO_MEMORY;
+      memFlags |= static_cast<unsigned int>(amd::MemFlags::IoMemory);
     }
 
     amd::Memory* mem =
-        new (*hip::host_context) amd::Buffer(*hip::host_context, memFlags, sizeBytes);
+        new (*hip::host_context) amd::Buffer(*hip::host_context, static_cast<amd::MemFlags>(memFlags), sizeBytes);
 
     constexpr bool sysMemAlloc = false;
     constexpr bool skipAlloc = false;
@@ -1706,7 +1807,7 @@ hipError_t ihipMemcpyAtoDCommand(amd::Command*& command, void* dstDevice, amd::C
   amd::Memory* dstMemory = getMemoryObject(dstDevice, dOffset);
 
   amd::CopyMemoryCommand* cpyMemCmd = new amd::CopyMemoryCommand(
-      *stream, CL_COMMAND_COPY_IMAGE_TO_BUFFER, amd::Command::EventWaitList{}, *srcImage,
+      *stream, amd::CommandType::CopyImageToBuffer, amd::Command::EventWaitList{}, *srcImage,
       *dstMemory, srcOrigin, dstOrigin, copyRegion, srcRect, dstRect);
 
   if (!cpyMemCmd->validatePeerMemory()) {
@@ -1725,7 +1826,7 @@ hipError_t ihipMemcpyDtoACommand(amd::Command*& command, amd::Image* dstImage,
   amd::Memory* srcMemory = getMemoryObject(srcDevice, sOffset);
 
   amd::CopyMemoryCommand* cpyMemCmd = new amd::CopyMemoryCommand(
-      *stream, CL_COMMAND_COPY_BUFFER_TO_IMAGE, amd::Command::EventWaitList{}, *srcMemory,
+      *stream, amd::CommandType::CopyBufferToImage, amd::Command::EventWaitList{}, *srcMemory,
       *dstImage, srcOrigin, dstOrigin, copyRegion, srcRect, dstRect);
 
   if (!cpyMemCmd->validatePeerMemory()) {
@@ -1758,7 +1859,7 @@ hipError_t ihipMemcpyDtoDCommand(amd::Command*& command, void* dstDevice, void* 
       ((srcMemory->getContext().devices().size() == 1) &&
        (dstMemory->getContext().devices().size() == 1))) {
     copyCommand =
-        new amd::CopyMemoryP2PCommand(*stream, CL_COMMAND_COPY_BUFFER_RECT, waitList, *srcMemory,
+        new amd::CopyMemoryP2PCommand(*stream, amd::CommandType::CopyBufferRect, waitList, *srcMemory,
                                       *dstMemory, srcStart, dstStart, copyRegion, srcRect, dstRect);
     p2pcopy = true;
   } else {
@@ -1790,7 +1891,7 @@ hipError_t ihipMemcpyDtoDCommand(amd::Command*& command, void* dstDevice, void* 
       }
     }
     copyCommand =
-        new amd::CopyMemoryCommand(*pStream, CL_COMMAND_COPY_BUFFER_RECT, waitList, *srcMemory,
+        new amd::CopyMemoryCommand(*pStream, amd::CommandType::CopyBufferRect, waitList, *srcMemory,
                                    *dstMemory, srcStart, dstStart, copyRegion, srcRect, dstRect);
   }
 
@@ -1824,7 +1925,7 @@ hipError_t ihipMemcpyDtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
   amd::CopyMetadata copyMetadata(isAsync, amd::CopyMetadata::CopyEnginePreference::NONE);
   if (dstMemory) {
     amd::CopyMemoryCommand* copyCommand = new amd::CopyMemoryCommand(
-        *stream, CL_COMMAND_COPY_BUFFER_RECT, amd::Command::EventWaitList{}, *srcMemory, *dstMemory,
+        *stream, amd::CommandType::CopyBufferRect, amd::Command::EventWaitList{}, *srcMemory, *dstMemory,
         srcOrigin, dstOrigin, copyRegion, srcRect, dstRect, copyMetadata);
     command = copyCommand;
   } else {
@@ -1838,7 +1939,7 @@ hipError_t ihipMemcpyDtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
     }
 
     amd::ReadMemoryCommand* readCommand =
-        new amd::ReadMemoryCommand(*stream, CL_COMMAND_READ_BUFFER_RECT, waitList, *srcMemory,
+        new amd::ReadMemoryCommand(*stream, amd::CommandType::ReadBufferRect, waitList, *srcMemory,
                                    srcStart, copyRegion, dstHost, srcRect, dstRect, copyMetadata);
     if (readCommand == nullptr) {
       return hipErrorOutOfMemory;
@@ -1872,12 +1973,12 @@ hipError_t ihipMemcpyHtoDCommand(amd::Command*& command, void* dstDevice, amd::C
   amd::CopyMetadata copyMetadata(isAsync, amd::CopyMetadata::CopyEnginePreference::NONE);
   if (srcMemory) {
     amd::CopyMemoryCommand* copyCommand = new amd::CopyMemoryCommand(
-        *stream, CL_COMMAND_COPY_BUFFER_RECT, amd::Command::EventWaitList{}, *srcMemory, *dstMemory,
+        *stream, amd::CommandType::CopyBufferRect, amd::Command::EventWaitList{}, *srcMemory, *dstMemory,
         srcOrigin, dstOrigin, copyRegion, srcRect, dstRect, copyMetadata);
     command = copyCommand;
   } else {
     amd::WriteMemoryCommand* writeCommand = new amd::WriteMemoryCommand(
-        *stream, CL_COMMAND_WRITE_BUFFER_RECT, amd::Command::EventWaitList{}, *dstMemory, dstStart,
+        *stream, amd::CommandType::WriteBufferRect, amd::Command::EventWaitList{}, *dstMemory, dstStart,
         copyRegion, srcHost, dstRect, srcRect, copyMetadata);
     if (!writeCommand->validatePeerMemory()) {
       delete writeCommand;
@@ -1913,7 +2014,7 @@ hipError_t ihipMemcpyAtoACommand(amd::Command*& command, amd::Image* dstImage,
                                  amd::Coord3D srcOrigin, amd::Coord3D copyRegion,
                                  hip::Stream* stream) {
   amd::CopyMemoryCommand* cpyMemCmd =
-      new amd::CopyMemoryCommand(*stream, CL_COMMAND_COPY_IMAGE, amd::Command::EventWaitList{},
+      new amd::CopyMemoryCommand(*stream, amd::CommandType::CopyImage, amd::Command::EventWaitList{},
                                  *srcImage, *dstImage, srcOrigin, dstOrigin, copyRegion);
 
   if (cpyMemCmd == nullptr) {
@@ -1952,7 +2053,7 @@ hipError_t ihipMemcpyHtoACommand(amd::Command*& command, amd::Image* dstImage,
   amd::CopyMetadata copyMetadata(isAsync, amd::CopyMetadata::CopyEnginePreference::NONE);
   if (srcMemory) {
     amd::CopyMemoryCommand* copyCommand = new amd::CopyMemoryCommand(
-        *stream, CL_COMMAND_COPY_BUFFER_TO_IMAGE, amd::Command::EventWaitList{}, *srcMemory,
+        *stream, amd::CommandType::CopyBufferToImage, amd::Command::EventWaitList{}, *srcMemory,
         *dstImage, srcOrigin, dstOrigin, copyRegion, copyMetadata);
     command = copyCommand;
   } else {
@@ -1968,7 +2069,7 @@ hipError_t ihipMemcpyHtoACommand(amd::Command*& command, amd::Image* dstImage,
     }
 
     amd::WriteMemoryCommand* writeMemCmd = new amd::WriteMemoryCommand(
-        *pStream, CL_COMMAND_WRITE_IMAGE, waitList, *dstImage, dstOrigin, copyRegion,
+        *pStream, amd::CommandType::WriteImage, waitList, *dstImage, dstOrigin, copyRegion,
         static_cast<const char*>(srcHost) + start, srcRowPitch, srcSlicePitch, copyMetadata);
     if (!writeMemCmd->validatePeerMemory()) {
       delete writeMemCmd;
@@ -1996,7 +2097,7 @@ hipError_t ihipMemcpyAtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
   amd::CopyMetadata copyMetadata(isAsync, amd::CopyMetadata::CopyEnginePreference::NONE);
   if (dstMemory) {
     amd::CopyMemoryCommand* copyCommand = new amd::CopyMemoryCommand(
-        *stream, CL_COMMAND_COPY_IMAGE_TO_BUFFER, amd::Command::EventWaitList{}, *srcImage,
+        *stream, amd::CommandType::CopyImageToBuffer, amd::Command::EventWaitList{}, *srcImage,
         *dstMemory, srcOrigin, dstOrigin, copyRegion, copyMetadata);
     command = copyCommand;
   } else {
@@ -2012,7 +2113,7 @@ hipError_t ihipMemcpyAtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
     }
 
     amd::ReadMemoryCommand* readMemCmd = new amd::ReadMemoryCommand(
-        *pStream, CL_COMMAND_READ_IMAGE, waitList, *srcImage, srcOrigin, copyRegion,
+        *pStream, amd::CommandType::ReadImage, waitList, *srcImage, srcOrigin, copyRegion,
         static_cast<char*>(dstHost) + start, dstRowPitch, dstSlicePitch, copyMetadata);
     if (!readMemCmd->validatePeerMemory()) {
       delete readMemCmd;
@@ -2951,7 +3052,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     // Create and enqueue batch copy command
     amd::Command::EventWaitList waitList;
     amd::BatchCopyMemoryCommand* batchCmd = new amd::BatchCopyMemoryCommand(
-        stream, ROCCLR_COMMAND_BATCH_COPY_BUFFER, waitList, std::move(copyOps));
+        stream, static_cast<amd::CommandType>(ROCCLR_COMMAND_BATCH_COPY_BUFFER), waitList, std::move(copyOps));
 
     if (batchCmd == nullptr) {
       return hipErrorOutOfMemory;
@@ -3090,7 +3191,7 @@ hipError_t ihipMemset_validate(amd::Memory* dstMemory, int64_t value, size_t val
   }
 
   // In case of vmm sub object, validate using parents vaddr mem object.
-  if (dstMemory->parent() && (dstMemory->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+  if (dstMemory->parent() && (dstMemory->getMemFlags() & amd::MemFlags::VaRangeAmd) != amd::MemFlags::Empty) {
     dstMemory = dstMemory->parent();
   }
 
@@ -3148,7 +3249,7 @@ hipError_t ihipMemsetCommand(amd::Command*& command, amd::Memory* dstMemory, int
   // surface=[pitch, width, height]
   amd::Coord3D surface(sizeBytes, sizeBytes, 1);
   amd::FillMemoryCommand* fillMemCommand =
-      new amd::FillMemoryCommand(*stream, CL_COMMAND_FILL_BUFFER, waitList, *dstMemory->asBuffer(),
+      new amd::FillMemoryCommand(*stream, amd::CommandType::FillBuffer, waitList, *dstMemory->asBuffer(),
                                  &value, valueSize, fillOffset, fillSize, surface);
   if (fillMemCommand == nullptr) {
     return hipErrorOutOfMemory;
@@ -3192,7 +3293,7 @@ hipError_t ihipMemset(void* dst, int64_t value, size_t valueSize, size_t sizeByt
     auto flags = memObj->getMemFlags();
     if ((memObj->getUserData().sync_mem_ops_) ||
         (offset == 0 &&
-         !(flags & (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS | CL_MEM_USE_HOST_PTR)))) {
+         ((flags & (amd::MemFlags::SvmFineGrain | amd::MemFlags::SvmAtomics | amd::MemFlags::UseHostPtr)) == amd::MemFlags::Empty))) {
       isAsync = true;
     }
   }
@@ -3333,7 +3434,7 @@ hipError_t ihipMemset3DCommand(amd::Command*& command, hipPitchedPtr pitchedDevP
     return hipErrorInvalidValue;
   }
   command =
-      new amd::FillMemoryCommand(*stream, CL_COMMAND_FILL_BUFFER, amd::Command::EventWaitList{},
+      new amd::FillMemoryCommand(*stream, amd::CommandType::FillBuffer, amd::Command::EventWaitList{},
                                  *memory->asBuffer(), &value, elementSize, origin, region, surface);
   if (command == nullptr) {
     return hipErrorOutOfMemory;
@@ -3366,7 +3467,7 @@ hipError_t ihipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent
   if (isAsync == false) {
     auto flags = memory->getMemFlags();
     if (offset == 0 &&
-        !(flags & (CL_MEM_USE_HOST_PTR | CL_MEM_SVM_ATOMICS | CL_MEM_SVM_FINE_GRAIN_BUFFER))) {
+        ((flags & (amd::MemFlags::UseHostPtr | amd::MemFlags::SvmAtomics | amd::MemFlags::SvmFineGrain)) == amd::MemFlags::Empty)) {
       isAsync = true;
     }
   }
@@ -3697,7 +3798,7 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     }
 
     attributes->devicePointer = reinterpret_cast<char*>(devMem->virtualAddress() + offset);
-    constexpr uint32_t kManagedAlloc = (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR);
+    const amd::MemFlags kManagedAlloc = (amd::MemFlags::SvmFineGrain | amd::MemFlags::AllocHostPtr);
     attributes->isManaged =
         ((memObj->getMemFlags() & kManagedAlloc) == kManagedAlloc) ? true : false;
     attributes->allocationFlags = memObj->getUserData().flags;
@@ -3747,7 +3848,7 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
   size_t offset = 0;
   amd::Memory* memObj = getMemoryObject(ptr, offset);
   amd::Memory* vaddr_mem_obj = amd::MemObjMap::FindVirtualMemObj(ptr);
-  constexpr uint32_t kManagedAlloc = (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR);
+  const amd::MemFlags kManagedAlloc = (amd::MemFlags::SvmFineGrain | amd::MemFlags::AllocHostPtr);
 
   hipError_t status = hipSuccess;
 
@@ -3892,7 +3993,7 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
           *reinterpret_cast<int*>(data) = 0;
         } else if (vaddr_mem_obj) {
           // virtual memory allocation, mapped to a physical memory
-          if (vaddr_mem_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD) {
+          if ((vaddr_mem_obj->getMemFlags() & amd::MemFlags::VaRangeAmd) != amd::MemFlags::Empty) {
             *reinterpret_cast<int*>(data) = 0;
           }
         } else {
@@ -4338,7 +4439,7 @@ hipError_t hipMemcpyAtoH(void* dstHost, hipArray_t srcArray, size_t srcOffset, s
 hipError_t hipMallocHost(void** ptr, size_t size) {
   HIP_INIT_API(hipMallocHost, ptr, size);
   CHECK_STREAM_CAPTURE_SUPPORTED();
-  HIP_RETURN_DURATION(ihipMalloc(ptr, size, CL_MEM_SVM_FINE_GRAIN_BUFFER), ReturnPtrValue(ptr));
+  HIP_RETURN_DURATION(ihipMalloc(ptr, size, static_cast<unsigned int>(amd::MemFlags::SvmFineGrain)), ReturnPtrValue(ptr));
 }
 
 hipError_t hipFreeHost(void* ptr) {
@@ -4477,7 +4578,7 @@ hipError_t ihipMipmappedArrayGetLevel(hipArray_t* level_array_pptr,
   // Create new hip Array parameter and create an image view with new mip level.
   (*level_array_pptr) = new hipArray();
   (*level_array_pptr)->data = as_cl<amd::Memory>(
-      image->createView(image->getContext(), image->getImageFormat(), NULL, mip_level, 0));
+      image->createView(image->getContext(), image->getImageFormat(), NULL, mip_level, amd::MemFlags::Empty));
 
   // Copy the new width, height & depth details of the flag to hipArray.
   cl_mem cl_mip_mem_obj = reinterpret_cast<cl_mem>((*level_array_pptr)->data);

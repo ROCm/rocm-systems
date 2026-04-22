@@ -552,8 +552,8 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   deviceProps.arch.hasDynamicParallelism = 0;
   deviceProps.concurrentKernels = 1;
   deviceProps.pciDomainID = info.pciDomainID;
-  deviceProps.pciBusID = info.deviceTopology_.pcie.bus;
-  deviceProps.pciDeviceID = info.deviceTopology_.pcie.device;
+  deviceProps.pciBusID = info.deviceTopology_.bus;
+  deviceProps.pciDeviceID = info.deviceTopology_.device;
   deviceProps.maxSharedMemoryPerMultiProcessor = info.localMemSizePerCU_;
   deviceProps.canMapHostMemory = 1;
   deviceProps.regsPerMultiprocessor = info.availableRegistersPerCU_;
@@ -601,7 +601,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   deviceProps.asicRevision = info.asicRevision_;
   deviceProps.ipcEventSupported = 1;
   deviceProps.streamPrioritiesSupported = 1;
-  deviceProps.multiGpuBoardGroupID = info.deviceTopology_.pcie.device;
+  deviceProps.multiGpuBoardGroupID = info.deviceTopology_.device;
 
   // HMM capabilities
   deviceProps.asyncEngineCount = info.numAsyncQueues_;
@@ -753,8 +753,8 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
   deviceProps.arch.hasDynamicParallelism = 0;
   deviceProps.concurrentKernels = 1;
   deviceProps.pciDomainID = info.pciDomainID;
-  deviceProps.pciBusID = info.deviceTopology_.pcie.bus;
-  deviceProps.pciDeviceID = info.deviceTopology_.pcie.device;
+  deviceProps.pciBusID = info.deviceTopology_.bus;
+  deviceProps.pciDeviceID = info.deviceTopology_.device;
   deviceProps.maxSharedMemoryPerMultiProcessor = info.localMemSizePerCU_;
   deviceProps.canMapHostMemory = 1;
   // FIXME: This should be removed, targets can have character names as well.

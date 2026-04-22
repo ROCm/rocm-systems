@@ -625,7 +625,7 @@ namespace hip {
   extern hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, hipDevice_t device);
 
   extern hipError_t ihipDeviceGet(hipDevice_t* device, int deviceId);
-  extern hipError_t ihipStreamOperation(hipStream_t stream, cl_command_type cmdType, void* ptr,
+  extern hipError_t ihipStreamOperation(hipStream_t stream, amd::CommandType cmdType, void* ptr,
                                         uint64_t value, uint64_t mask, unsigned int flags,
                                         size_t sizeBytes);
   hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,

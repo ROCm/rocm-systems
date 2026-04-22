@@ -413,10 +413,10 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateBuffer,
       *not_null(errcode_ret) = CL_INVALID_BUFFER_SIZE;
       return (cl_mem)0;
     }
-    mem = new (amdContext) amd::Buffer(*svmMem, flags, offset, size);
+    mem = new (amdContext) amd::Buffer(*svmMem, static_cast<amd::MemFlags>(flags), offset, size);
     svmMem->setHostMem(host_ptr);
   } else {
-    mem = new (amdContext) amd::Buffer(amdContext, flags, size);
+    mem = new (amdContext) amd::Buffer(amdContext, static_cast<amd::MemFlags>(flags), size);
   }
 
   if (mem == NULL) {
@@ -450,7 +450,7 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateSubBuffer,
     return NULL;
   }
 
-  if (buffer.getMemFlags() & (CL_MEM_EXTERNAL_PHYSICAL_AMD | CL_MEM_BUS_ADDRESSABLE_AMD)) {
+  if (static_cast<uint64_t>(buffer.getMemFlags()) & (CL_MEM_EXTERNAL_PHYSICAL_AMD | CL_MEM_BUS_ADDRESSABLE_AMD)) {
     *not_null(errcode_ret) = CL_INVALID_VALUE;
     return NULL;
   }
@@ -478,7 +478,7 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateSubBuffer,
   }
 
   amd::Memory* mem = new (buffer.getContext())
-      amd::Buffer(buffer, (flags) ? flags : buffer.getMemFlags(), region->origin, region->size);
+      amd::Buffer(buffer, (flags) ? static_cast<amd::MemFlags>(flags) : buffer.getMemFlags(), region->origin, region->size);
   if (mem == NULL) {
     *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
     return NULL;
@@ -581,7 +581,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueReadBuffer,
     return CL_INVALID_MEM_OBJECT;
   }
 
-  if (srcBuffer->getMemFlags() & (CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) {
+  if (static_cast<uint64_t>(srcBuffer->getMemFlags()) & (CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) {
     return CL_INVALID_OPERATION;
   }
 
@@ -615,7 +615,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueReadBuffer,
 
   amd::CopyMetadata copyMetadata(!blocking_read, amd::CopyMetadata::CopyEnginePreference::SDMA);
   amd::ReadMemoryCommand* command =
-      new amd::ReadMemoryCommand(hostQueue, CL_COMMAND_READ_BUFFER, eventWaitList, *srcBuffer,
+      new amd::ReadMemoryCommand(hostQueue, amd::CommandType::ReadBuffer, eventWaitList, *srcBuffer,
                                  srcOffset, srcSize, ptr, 0, 0, copyMetadata);
 
   if (command == NULL) {
@@ -723,7 +723,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueWriteBuffer,
     return CL_INVALID_MEM_OBJECT;
   }
 
-  if (dstBuffer->getMemFlags() & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) {
+  if (static_cast<uint64_t>(dstBuffer->getMemFlags()) & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) {
     return CL_INVALID_OPERATION;
   }
 
@@ -757,7 +757,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueWriteBuffer,
 
   amd::CopyMetadata copyMetadata(!blocking_write, amd::CopyMetadata::CopyEnginePreference::SDMA);
   amd::WriteMemoryCommand* command =
-      new amd::WriteMemoryCommand(hostQueue, CL_COMMAND_WRITE_BUFFER, eventWaitList, *dstBuffer,
+      new amd::WriteMemoryCommand(hostQueue, amd::CommandType::WriteBuffer, eventWaitList, *dstBuffer,
                                   dstOffset, dstSize, ptr, 0, 0, copyMetadata);
 
   if (command == NULL) {
@@ -887,7 +887,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueCopyBuffer,
   }
 
   amd::CopyMemoryCommand* command =
-      new amd::CopyMemoryCommand(hostQueue, CL_COMMAND_COPY_BUFFER, eventWaitList, *srcBuffer,
+      new amd::CopyMemoryCommand(hostQueue, amd::CommandType::CopyBuffer, eventWaitList, *srcBuffer,
                                  *dstBuffer, srcOffset, dstOffset, size);
 
   if (command == NULL) {
@@ -1028,7 +1028,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueReadBufferRect,
     return CL_INVALID_MEM_OBJECT;
   }
 
-  if (srcBuffer->getMemFlags() & (CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) {
+  if (static_cast<uint64_t>(srcBuffer->getMemFlags()) & (CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) {
     return CL_INVALID_OPERATION;
   }
 
@@ -1072,7 +1072,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueReadBufferRect,
   amd::Coord3D size(region[0], region[1], region[2]);
   amd::CopyMetadata copyMetadata(!blocking_read, amd::CopyMetadata::CopyEnginePreference::SDMA);
   amd::ReadMemoryCommand* command =
-      new amd::ReadMemoryCommand(hostQueue, CL_COMMAND_READ_BUFFER_RECT, eventWaitList, *srcBuffer,
+      new amd::ReadMemoryCommand(hostQueue, amd::CommandType::ReadBufferRect, eventWaitList, *srcBuffer,
                                  srcStart, size, ptr, bufRect, hostRect, copyMetadata);
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;
@@ -1213,7 +1213,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueWriteBufferRect,
     return CL_INVALID_MEM_OBJECT;
   }
 
-  if (dstBuffer->getMemFlags() & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) {
+  if (static_cast<uint64_t>(dstBuffer->getMemFlags()) & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) {
     return CL_INVALID_OPERATION;
   }
 
@@ -1257,7 +1257,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueWriteBufferRect,
   amd::Coord3D size(region[0], region[1], region[2]);
   amd::CopyMetadata copyMetadata(!blocking_write, amd::CopyMetadata::CopyEnginePreference::SDMA);
   amd::WriteMemoryCommand* command =
-      new amd::WriteMemoryCommand(hostQueue, CL_COMMAND_WRITE_BUFFER_RECT, eventWaitList,
+      new amd::WriteMemoryCommand(hostQueue, amd::CommandType::WriteBufferRect, eventWaitList,
                                   *dstBuffer, dstStart, size, ptr, bufRect, hostRect, copyMetadata);
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;
@@ -1438,7 +1438,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueCopyBufferRect,
 
   amd::Coord3D size(region[0], region[1], region[2]);
   amd::CopyMemoryCommand* command =
-      new amd::CopyMemoryCommand(hostQueue, CL_COMMAND_COPY_BUFFER_RECT, eventWaitList, *srcBuffer,
+      new amd::CopyMemoryCommand(hostQueue, amd::CommandType::CopyBufferRect, eventWaitList, *srcBuffer,
                                  *dstBuffer, srcStart, dstStart, size, srcRect, dstRect);
 
   if (command == NULL) {
@@ -1518,7 +1518,7 @@ RUNTIME_ENTRY(cl_int, clSetMemObjectDestructorCallback,
     return CL_INVALID_VALUE;
   }
 
-  if (!as_amd(memobj)->setDestructorCallback(pfn_notify, user_data)) {
+  if (!as_amd(memobj)->setDestructorCallback(reinterpret_cast<void(*)(void*, void*)>(pfn_notify), user_data)) {
     return CL_OUT_OF_HOST_MEMORY;
   }
 
@@ -1656,7 +1656,7 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateImage2D,
     return (cl_mem)0;
   }
 
-  const amd::Image::Format imageFormat(*image_format);
+  const amd::Image::Format imageFormat(amd::ImageFormat{static_cast<amd::ChannelOrder>(image_format->image_channel_order), static_cast<amd::ChannelDataType>(image_format->image_channel_data_type)});
   if (!imageFormat.isValid()) {
     *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
     LogWarning("invalid parameter \"image_format\"");
@@ -1735,7 +1735,7 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateImage2D,
   }
 
   amd::Image* image =
-      new (amdContext) amd::Image(amdContext, CL_MEM_OBJECT_IMAGE2D, flags, imageFormat,
+      new (amdContext) amd::Image(amdContext, amd::MemObjectType::Image2D, static_cast<amd::MemFlags>(flags), imageFormat,
                                   image_width, image_height, 1, image_row_pitch, 0);
   if (image == NULL) {
     *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
@@ -1846,7 +1846,7 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateImage3D,
     LogWarning("invalid parameter \"image_format\"");
     return (cl_mem)0;
   }
-  amd::Image::Format imageFormat(*image_format);
+  amd::Image::Format imageFormat(amd::ImageFormat{static_cast<amd::ChannelOrder>(image_format->image_channel_order), static_cast<amd::ChannelDataType>(image_format->image_channel_data_type)});
 
   if (!imageFormat.isValid()) {
     *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
@@ -1946,7 +1946,7 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateImage3D,
   }
 
   amd::Image* image = new (amdContext)
-      amd::Image(amdContext, CL_MEM_OBJECT_IMAGE3D, flags, imageFormat, image_width, image_height,
+      amd::Image(amdContext, amd::MemObjectType::Image3D, static_cast<amd::MemFlags>(flags), imageFormat, image_width, image_height,
                  image_depth, image_row_pitch, image_slice_pitch);
   if (image == NULL) {
     *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
@@ -2017,13 +2017,13 @@ RUNTIME_ENTRY(cl_int, clGetSupportedImageFormats,
     return CL_INVALID_VALUE;
   }
   // chack image_type
-  switch (image_type) {
-    case CL_MEM_OBJECT_IMAGE1D_BUFFER:
-    case CL_MEM_OBJECT_IMAGE1D:
-    case CL_MEM_OBJECT_IMAGE1D_ARRAY:
-    case CL_MEM_OBJECT_IMAGE2D:
-    case CL_MEM_OBJECT_IMAGE2D_ARRAY:
-    case CL_MEM_OBJECT_IMAGE3D:
+  switch (static_cast<amd::MemObjectType>(image_type)) {
+    case amd::MemObjectType::Image1DBuffer:
+    case amd::MemObjectType::Image1D:
+    case amd::MemObjectType::Image1DArray:
+    case amd::MemObjectType::Image2D:
+    case amd::MemObjectType::Image2DArray:
+    case amd::MemObjectType::Image3D:
       break;
 
     default:
@@ -2036,12 +2036,15 @@ RUNTIME_ENTRY(cl_int, clGetSupportedImageFormats,
   }
 
   const amd::Context& amdContext = *as_amd(context);
+  const amd::MemObjectType amdImageType = static_cast<amd::MemObjectType>(image_type);
+  const amd::MemFlags amdFlags = static_cast<amd::MemFlags>(flags);
 
   if (image_formats != NULL) {
-    amd::Image::getSupportedFormats(amdContext, image_type, num_entries, image_formats, flags);
+    amd::Image::getSupportedFormats(amdContext, amdImageType, num_entries,
+                                    reinterpret_cast<amd::ImageFormat*>(image_formats), amdFlags);
   }
   if (num_image_formats != NULL) {
-    *num_image_formats = amd::Image::numSupportedFormats(amdContext, image_type, flags);
+    *num_image_formats = amd::Image::numSupportedFormats(amdContext, amdImageType, amdFlags);
   }
 
   return CL_SUCCESS;
@@ -2154,11 +2157,11 @@ RUNTIME_ENTRY(cl_int, clEnqueueReadImage,
     return CL_INVALID_MEM_OBJECT;
   }
 
-  if (srcImage->getMemFlags() & (CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) {
+  if (static_cast<uint64_t>(srcImage->getMemFlags()) & (CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) {
     return CL_INVALID_OPERATION;
   }
 
-  if (srcImage->getImageFormat().image_channel_order == CL_DEPTH_STENCIL) {
+  if (srcImage->getImageFormat().channelOrder == amd::ChannelOrder::DepthStencil) {
     return CL_INVALID_OPERATION;
   }
 
@@ -2208,7 +2211,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueReadImage,
 
   amd::CopyMetadata copyMetadata(!blocking_read, amd::CopyMetadata::CopyEnginePreference::SDMA);
   amd::ReadMemoryCommand* command =
-      new amd::ReadMemoryCommand(hostQueue, CL_COMMAND_READ_IMAGE, eventWaitList, *srcImage,
+      new amd::ReadMemoryCommand(hostQueue, amd::CommandType::ReadImage, eventWaitList, *srcImage,
                                  srcOrigin, srcRegion, ptr, row_pitch, slice_pitch, copyMetadata);
 
   if (command == NULL) {
@@ -2338,11 +2341,11 @@ RUNTIME_ENTRY(cl_int, clEnqueueWriteImage,
     return CL_INVALID_MEM_OBJECT;
   }
 
-  if (dstImage->getMemFlags() & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) {
+  if (static_cast<uint64_t>(dstImage->getMemFlags()) & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) {
     return CL_INVALID_OPERATION;
   }
 
-  if (dstImage->getImageFormat().image_channel_order == CL_DEPTH_STENCIL) {
+  if (dstImage->getImageFormat().channelOrder == amd::ChannelOrder::DepthStencil) {
     return CL_INVALID_OPERATION;
   }
 
@@ -2395,7 +2398,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueWriteImage,
 
   amd::CopyMetadata copyMetadata(!blocking_write, amd::CopyMetadata::CopyEnginePreference::SDMA);
   amd::WriteMemoryCommand* command = new amd::WriteMemoryCommand(
-      hostQueue, CL_COMMAND_WRITE_IMAGE, eventWaitList, *dstImage, dstOrigin, dstRegion, ptr,
+      hostQueue, amd::CommandType::WriteImage, eventWaitList, *dstImage, dstOrigin, dstRegion, ptr,
       input_row_pitch, input_slice_pitch, copyMetadata);
 
   if (command == NULL) {
@@ -2520,7 +2523,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueCopyImage,
     return CL_IMAGE_FORMAT_MISMATCH;
   }
 
-  if (srcImage->getImageFormat().image_channel_order == CL_DEPTH_STENCIL) {
+  if (srcImage->getImageFormat().channelOrder == amd::ChannelOrder::DepthStencil) {
     return CL_INVALID_OPERATION;
   }
 
@@ -2589,7 +2592,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueCopyImage,
   }
 
   amd::CopyMemoryCommand* command =
-      new amd::CopyMemoryCommand(hostQueue, CL_COMMAND_COPY_IMAGE, eventWaitList, *srcImage,
+      new amd::CopyMemoryCommand(hostQueue, amd::CommandType::CopyImage, eventWaitList, *srcImage,
                                  *dstImage, srcOrigin, dstOrigin, copyRegion);
 
   if (command == NULL) {
@@ -2710,7 +2713,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueCopyImageToBuffer,
     return CL_INVALID_CONTEXT;
   }
 
-  if (srcImage->getImageFormat().image_channel_order == CL_DEPTH_STENCIL) {
+  if (srcImage->getImageFormat().channelOrder == amd::ChannelOrder::DepthStencil) {
     return CL_INVALID_OPERATION;
   }
 
@@ -2748,7 +2751,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueCopyImageToBuffer,
   }
 
   amd::CopyMemoryCommand* command =
-      new amd::CopyMemoryCommand(hostQueue, CL_COMMAND_COPY_IMAGE_TO_BUFFER, eventWaitList,
+      new amd::CopyMemoryCommand(hostQueue, amd::CommandType::CopyImageToBuffer, eventWaitList,
                                  *srcImage, *dstBuffer, srcOrigin, dstOffset, srcRegion);
 
   if (command == NULL) {
@@ -2864,7 +2867,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueCopyBufferToImage,
     return CL_INVALID_CONTEXT;
   }
 
-  if (dstImage->getImageFormat().image_channel_order == CL_DEPTH_STENCIL) {
+  if (dstImage->getImageFormat().channelOrder == amd::ChannelOrder::DepthStencil) {
     return CL_INVALID_OPERATION;
   }
 
@@ -2902,7 +2905,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueCopyBufferToImage,
   }
 
   amd::CopyMemoryCommand* command =
-      new amd::CopyMemoryCommand(hostQueue, CL_COMMAND_COPY_BUFFER_TO_IMAGE, eventWaitList,
+      new amd::CopyMemoryCommand(hostQueue, amd::CommandType::CopyBufferToImage, eventWaitList,
                                  *srcBuffer, *dstImage, srcOffset, dstOrigin, dstRegion);
 
   if (command == NULL) {
@@ -3044,19 +3047,19 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapBuffer,
     return NULL;
   }
 
-  if ((srcBuffer->getMemFlags() & (CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) &&
+  if ((static_cast<uint64_t>(srcBuffer->getMemFlags()) & (CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) &&
       (map_flags & CL_MAP_READ)) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
     return NULL;
   }
 
-  if ((srcBuffer->getMemFlags() & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) &&
+  if ((static_cast<uint64_t>(srcBuffer->getMemFlags()) & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) &&
       (map_flags & (CL_MAP_WRITE | CL_MAP_WRITE_INVALIDATE_REGION))) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
     return NULL;
   }
 
-  if (srcBuffer->getMemFlags() & CL_MEM_EXTERNAL_PHYSICAL_AMD) {
+  if (static_cast<uint64_t>(srcBuffer->getMemFlags()) & CL_MEM_EXTERNAL_PHYSICAL_AMD) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
     return NULL;
   }
@@ -3094,7 +3097,7 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapBuffer,
 
   // Allocate a map command for the queue thread
   amd::MapMemoryCommand* command = new amd::MapMemoryCommand(
-      hostQueue, CL_COMMAND_MAP_BUFFER, eventWaitList, *srcBuffer,
+      hostQueue, amd::CommandType::MapBuffer, eventWaitList, *srcBuffer,
       amd::cl::from_cl_MapFlags(map_flags),
       blocking_map ? true : false, srcOffset, srcSize, nullptr, nullptr, mapPtr);
   if (command == NULL) {
@@ -3109,7 +3112,7 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapBuffer,
     return NULL;
   }
 
-  if (srcBuffer->getMemFlags() & CL_MEM_USE_PERSISTENT_MEM_AMD) {
+  if (static_cast<uint64_t>(srcBuffer->getMemFlags()) & CL_MEM_USE_PERSISTENT_MEM_AMD) {
     // [Windows VidMM restriction]
     // Runtime can't map persistent memory if it's still busy or
     // even wasn't submitted to HW from the worker thread yet
@@ -3278,7 +3281,7 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
     return NULL;
   }
 
-  if (srcImage->getImageFormat().image_channel_order == CL_DEPTH_STENCIL) {
+  if (srcImage->getImageFormat().channelOrder == amd::ChannelOrder::DepthStencil) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
     return NULL;
   }
@@ -3294,13 +3297,13 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
     return NULL;
   }
 
-  if ((srcImage->getMemFlags() & (CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) &&
+  if ((static_cast<uint64_t>(srcImage->getMemFlags()) & (CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) &&
       (map_flags & CL_MAP_READ)) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
     return NULL;
   }
 
-  if ((srcImage->getMemFlags() & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) &&
+  if ((static_cast<uint64_t>(srcImage->getMemFlags()) & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) &&
       (map_flags & (CL_MAP_WRITE | CL_MAP_WRITE_INVALIDATE_REGION))) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
     return NULL;
@@ -3370,7 +3373,7 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
 
   // Allocate a map command for the queue thread
   amd::MapMemoryCommand* command = new amd::MapMemoryCommand(
-      hostQueue, CL_COMMAND_MAP_IMAGE, eventWaitList, *srcImage,
+      hostQueue, amd::CommandType::MapImage, eventWaitList, *srcImage,
       amd::cl::from_cl_MapFlags(map_flags),
       blocking_map ? true : false, srcOrigin, srcRegion, nullptr, nullptr, mapPtr);
   if (command == NULL) {
@@ -3385,7 +3388,7 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
     return NULL;
   }
 
-  if (srcImage->getMemFlags() & CL_MEM_USE_PERSISTENT_MEM_AMD) {
+  if (static_cast<uint64_t>(srcImage->getMemFlags()) & CL_MEM_USE_PERSISTENT_MEM_AMD) {
     // [Windows VidMM restriction]
     // Runtime can't map persistent memory if it's still busy or
     // even wasn't submitted to HW from the worker thread yet
@@ -3526,7 +3529,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueUnmapMemObject,
   }
 
   amd::UnmapMemoryCommand* command = new amd::UnmapMemoryCommand(
-      hostQueue, CL_COMMAND_UNMAP_MEM_OBJECT, eventWaitList, *amdMemory, mapped_ptr);
+      hostQueue, amd::CommandType::UnmapMemObject, eventWaitList, *amdMemory, mapped_ptr);
 
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;
@@ -3598,11 +3601,11 @@ RUNTIME_ENTRY(cl_int, clGetMemObjectInfo,
 
   switch (param_name) {
     case CL_MEM_TYPE: {
-      cl_mem_object_type type = as_amd(memobj)->getType();
+      cl_mem_object_type type = static_cast<cl_mem_object_type>(as_amd(memobj)->getType());
       return amd::clGetInfo(type, param_value_size, param_value, param_value_size_ret);
     }
     case CL_MEM_FLAGS: {
-      cl_mem_flags flags = as_amd(memobj)->getMemFlags();
+      cl_mem_flags flags = static_cast<cl_mem_flags>(as_amd(memobj)->getMemFlags());
       return amd::clGetInfo(flags, param_value_size, param_value, param_value_size_ret);
     }
     case CL_MEM_SIZE: {
@@ -3612,7 +3615,7 @@ RUNTIME_ENTRY(cl_int, clGetMemObjectInfo,
     case CL_MEM_HOST_PTR: {
       amd::Memory* memory = as_amd(memobj);
       const void* hostPtr =
-          (memory->getMemFlags() & CL_MEM_USE_HOST_PTR) ? memory->getHostMem() : NULL;
+          (static_cast<uint64_t>(memory->getMemFlags()) & CL_MEM_USE_HOST_PTR) ? memory->getHostMem() : NULL;
       return amd::clGetInfo(hostPtr, param_value_size, param_value, param_value_size_ret);
     }
     case CL_MEM_MAP_COUNT: {
@@ -3750,7 +3753,9 @@ RUNTIME_ENTRY(cl_int, clGetImageInfo,
 
   switch (param_name) {
     case CL_IMAGE_FORMAT: {
-      cl_image_format format = image->getImageFormat();
+      cl_image_format format;
+      format.image_channel_order = static_cast<cl_channel_order>(image->getImageFormat().channelOrder);
+      format.image_channel_data_type = static_cast<cl_channel_type>(image->getImageFormat().channelDataType);
       return amd::clGetInfo(format, param_value_size, param_value, param_value_size_ret);
     }
     case CL_IMAGE_ELEMENT_SIZE: {
@@ -3771,29 +3776,29 @@ RUNTIME_ENTRY(cl_int, clGetImageInfo,
     }
     case CL_IMAGE_HEIGHT: {
       size_t height = image->getHeight();
-      if ((image->getType() == CL_MEM_OBJECT_IMAGE1D) ||
-          (image->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) ||
-          (image->getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
+      if ((image->getType() == amd::MemObjectType::Image1D) ||
+          (image->getType() == amd::MemObjectType::Image1DArray) ||
+          (image->getType() == amd::MemObjectType::Image1DBuffer)) {
         height = 0;
       }
       return amd::clGetInfo(height, param_value_size, param_value, param_value_size_ret);
     }
     case CL_IMAGE_DEPTH: {
       size_t depth = image->getDepth();
-      if ((image->getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER) ||
-          (image->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) ||
-          (image->getType() == CL_MEM_OBJECT_IMAGE2D_ARRAY) ||
-          (image->getType() == CL_MEM_OBJECT_IMAGE1D) ||
-          (image->getType() == CL_MEM_OBJECT_IMAGE2D)) {
+      if ((image->getType() == amd::MemObjectType::Image1DBuffer) ||
+          (image->getType() == amd::MemObjectType::Image1DArray) ||
+          (image->getType() == amd::MemObjectType::Image2DArray) ||
+          (image->getType() == amd::MemObjectType::Image1D) ||
+          (image->getType() == amd::MemObjectType::Image2D)) {
         depth = 0;
       }
       return amd::clGetInfo(depth, param_value_size, param_value, param_value_size_ret);
     }
     case CL_IMAGE_ARRAY_SIZE: {
       size_t arraySize = 0;
-      if (image->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+      if (image->getType() == amd::MemObjectType::Image1DArray) {
         arraySize = image->getHeight();
-      } else if (image->getType() == CL_MEM_OBJECT_IMAGE2D_ARRAY) {
+      } else if (image->getType() == amd::MemObjectType::Image2DArray) {
         arraySize = image->getDepth();
       }
       return amd::clGetInfo(arraySize, param_value_size, param_value, param_value_size_ret);
@@ -3973,7 +3978,7 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateImage,
     return (cl_mem)0;
   }
 
-  const amd::Image::Format imageFormat(*image_format);
+  const amd::Image::Format imageFormat(amd::ImageFormat{static_cast<amd::ChannelOrder>(image_format->image_channel_order), static_cast<amd::ChannelDataType>(image_format->image_channel_data_type)});
   if (!imageFormat.isValid()) {
     *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
     LogWarning("invalid parameter: image_format");
@@ -3982,7 +3987,7 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateImage,
 
   amd::Context& amdContext = *as_amd(context);
 
-  if (!imageFormat.isSupported(amdContext, image_desc->image_type)) {
+  if (!imageFormat.isSupported(amdContext, static_cast<amd::MemObjectType>(image_desc->image_type))) {
     *not_null(errcode_ret) = CL_IMAGE_FORMAT_NOT_SUPPORTED;
     LogWarning("invalid parameter: image_format");
     return (cl_mem)0;
@@ -4013,7 +4018,8 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateImage,
     return (cl_mem)0;
   }
 
-  if (!amd::Image::validateDimensions(devices, image_desc->image_type, image_desc->image_width,
+  if (!amd::Image::validateDimensions(devices, static_cast<amd::MemObjectType>(image_desc->image_type),
+                                      image_desc->image_width,
                                       image_desc->image_height, image_desc->image_depth,
                                       image_desc->image_array_size)) {
     *not_null(errcode_ret) = CL_INVALID_IMAGE_SIZE;
@@ -4047,7 +4053,7 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateImage,
   switch (image_desc->image_type) {
     case CL_MEM_OBJECT_IMAGE1D:
       image = new (amdContext)
-          amd::Image(amdContext, CL_MEM_OBJECT_IMAGE1D, flags, imageFormat, image_desc->image_width,
+          amd::Image(amdContext, amd::MemObjectType::Image1D, static_cast<amd::MemFlags>(flags), imageFormat, image_desc->image_width,
                      1, 1, imageRowPitch, 0, image_desc->num_mip_levels);
       break;
     case CL_MEM_OBJECT_IMAGE2D:
@@ -4079,17 +4085,17 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateImage,
         }
 
         image = new (amdContext) amd::Image(
-            buffer, CL_MEM_OBJECT_IMAGE2D, (flags != 0) ? flags : buffer.getMemFlags(), imageFormat,
+            buffer, amd::MemObjectType::Image2D, (flags != 0) ? static_cast<amd::MemFlags>(flags) : buffer.getMemFlags(), imageFormat,
             image_desc->image_width, image_desc->image_height, 1, imageRowPitch, imageSlicePitch);
       } else {
-        image = new (amdContext) amd::Image(amdContext, CL_MEM_OBJECT_IMAGE2D, flags, imageFormat,
+        image = new (amdContext) amd::Image(amdContext, amd::MemObjectType::Image2D, static_cast<amd::MemFlags>(flags), imageFormat,
                                             image_desc->image_width, image_desc->image_height, 1,
                                             imageRowPitch, 0, image_desc->num_mip_levels);
       }
       break;
     case CL_MEM_OBJECT_IMAGE3D:
       image = new (amdContext)
-          amd::Image(amdContext, CL_MEM_OBJECT_IMAGE3D, flags, imageFormat, image_desc->image_width,
+          amd::Image(amdContext, amd::MemObjectType::Image3D, static_cast<amd::MemFlags>(flags), imageFormat, image_desc->image_width,
                      image_desc->image_height, image_desc->image_depth, imageRowPitch,
                      imageSlicePitch, image_desc->num_mip_levels);
       break;
@@ -4115,20 +4121,20 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateImage,
         return (cl_mem)0;
       }
 
-      image = new (amdContext) amd::Image(buffer, CL_MEM_OBJECT_IMAGE1D_BUFFER,
-                                          (flags != 0) ? flags : buffer.getMemFlags(), imageFormat,
+      image = new (amdContext) amd::Image(buffer, amd::MemObjectType::Image1DBuffer,
+                                          (flags != 0) ? static_cast<amd::MemFlags>(flags) : buffer.getMemFlags(), imageFormat,
                                           image_desc->image_width, 1, 1, imageRowPitch,
                                           imageSlicePitch, image_desc->num_mip_levels);
     } break;
     case CL_MEM_OBJECT_IMAGE1D_ARRAY:
       image =
-          new (amdContext) amd::Image(amdContext, CL_MEM_OBJECT_IMAGE1D_ARRAY, flags, imageFormat,
+          new (amdContext) amd::Image(amdContext, amd::MemObjectType::Image1DArray, static_cast<amd::MemFlags>(flags), imageFormat,
                                       image_desc->image_width, image_desc->image_array_size, 1,
                                       imageRowPitch, imageSlicePitch, image_desc->num_mip_levels);
       break;
     case CL_MEM_OBJECT_IMAGE2D_ARRAY:
       image = new (amdContext) amd::Image(
-          amdContext, CL_MEM_OBJECT_IMAGE2D_ARRAY, flags, imageFormat, image_desc->image_width,
+          amdContext, amd::MemObjectType::Image2DArray, static_cast<amd::MemFlags>(flags), imageFormat, image_desc->image_width,
           image_desc->image_height, image_desc->image_array_size, imageRowPitch, imageSlicePitch,
           image_desc->num_mip_levels);
       break;
@@ -4279,7 +4285,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueFillBuffer,
   }
 
   amd::FillMemoryCommand* command =
-      new amd::FillMemoryCommand(hostQueue, CL_COMMAND_FILL_BUFFER, eventWaitList, *fillBuffer,
+      new amd::FillMemoryCommand(hostQueue, amd::CommandType::FillBuffer, eventWaitList, *fillBuffer,
                                  pattern, pattern_size, fillOffset, fillSize, surface);
 
   if (command == NULL) {
@@ -4420,7 +4426,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueFillImage,
     return CL_INVALID_CONTEXT;
   }
 
-  if (fillImage->getImageFormat().image_channel_order == CL_DEPTH_STENCIL) {
+  if (fillImage->getImageFormat().channelOrder == amd::ChannelOrder::DepthStencil) {
     return CL_INVALID_OPERATION;
   }
 
@@ -4456,7 +4462,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueFillImage,
   }
 
   amd::FillMemoryCommand* command = new amd::FillMemoryCommand(
-      hostQueue, CL_COMMAND_FILL_IMAGE, eventWaitList, *fillImage, fill_color,
+      hostQueue, amd::CommandType::FillImage, eventWaitList, *fillImage, fill_color,
       sizeof(cl_float4),  // @note color size is always 16 bytes value
       fillOrigin, fillRegion, surface);
 
@@ -4608,7 +4614,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueMigrateMemObjects,
   }
 
   amd::MigrateMemObjectsCommand* command = new amd::MigrateMemObjectsCommand(
-      hostQueue, CL_COMMAND_MIGRATE_MEM_OBJECTS, eventWaitList, memObjects,
+      hostQueue, amd::CommandType::MigrateMemObjects, eventWaitList, memObjects,
       amd::cl::from_cl_MemMigrationFlags(flags));
 
   if (command == NULL) {
@@ -4646,7 +4652,7 @@ RUNTIME_ENTRY_RET(cl_mem, clConvertImageAMD,
     LogWarning("invalid parameter: image_format");
     return (cl_mem)0;
   }
-  const amd::Image::Format imageFormat(*image_format);
+  const amd::Image::Format imageFormat(amd::ImageFormat{static_cast<amd::ChannelOrder>(image_format->image_channel_order), static_cast<amd::ChannelDataType>(image_format->image_channel_data_type)});
   if (!imageFormat.isValid()) {
     *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
     LogWarning("invalid parameter: image_format");
@@ -4699,7 +4705,7 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateBufferFromImageAMD,
     return NULL;
   }
 
-  amd::Memory* mem = new (amdContext) amd::Buffer(*amdImage, 0, 0, amdImage->getSize());
+  amd::Memory* mem = new (amdContext) amd::Buffer(*amdImage, amd::MemFlags::Empty, 0, amdImage->getSize());
   if (mem == NULL) {
     *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
     return (cl_mem)0;

@@ -184,7 +184,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueNDRangeKernel,
   }
 
   if (amdKernel->parameters().getSvmSystemPointersSupport() == FGS_YES &&
-      !(device.info().svmCapabilities_ & CL_DEVICE_SVM_FINE_GRAIN_SYSTEM)) {
+      !(device.info().svmCapabilities_ & amd::SvmCapabilities::FineGrainSystem)) {
     // The user indicated that this kernel will access SVM system pointers,
     // but the device does not support them.
     return CL_INVALID_OPERATION;
@@ -352,7 +352,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueTask,
     return CL_INVALID_COMMAND_QUEUE;
   }
 
-  return hostQueue->dispatch_->clEnqueueNDRangeKernel(
+  return amd::ICDDispatchedObject::icdVendorDispatch_->clEnqueueNDRangeKernel(
       command_queue, kernel, 1, NULL, globalWorkSize, localWorkSize, num_events_in_wait_list,
       event_wait_list, event);
 }
@@ -442,7 +442,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueNativeKernel,
 
   const amd::Device& device = hostQueue.device();
 
-  if (!(device.info().executionCapabilities_ & CL_EXEC_NATIVE_KERNEL)) {
+  if (static_cast<uint64_t>(device.info().executionCapabilities_ & amd::ExecCapabilities::NativeKernel) == 0) {
     return CL_INVALID_OPERATION;
   }
 
@@ -467,7 +467,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueNativeKernel,
   }
 
   amd::NativeFnCommand* command = new amd::NativeFnCommand(
-      hostQueue, eventWaitList, user_func, args, cb_args, num_mem_objects, mem_list, args_mem_loc);
+      hostQueue, eventWaitList, user_func, args, cb_args, num_mem_objects,
+      const_cast<const void**>(reinterpret_cast<void**>(const_cast<cl_mem*>(mem_list))), args_mem_loc);
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;
   }

@@ -209,7 +209,7 @@ hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes,
   size_t offset = 0;
   amd::Memory* memObj = getMemoryObject(dev_ptr, offset);
   if (memObj) {
-    if (!(memObj->getMemFlags() & (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR))) {
+    if ((memObj->getMemFlags() & (amd::MemFlags::SvmFineGrain | amd::MemFlags::AllocHostPtr)) == amd::MemFlags::Empty) {
       HIP_RETURN(hipErrorInvalidValue);
     }
   } else {
@@ -261,7 +261,7 @@ hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr, size_t len
       HIP_RETURN(hipErrorInvalidValue);
     }
   } else {
-    if (memObj->getMemFlags() & (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR)) {
+    if ((memObj->getMemFlags() & (amd::MemFlags::SvmFineGrain | amd::MemFlags::AllocHostPtr)) != amd::MemFlags::Empty) {
       if (length != 0 && memObj->getSize() != length) {
         HIP_RETURN(hipErrorInvalidValue);
       }
@@ -446,7 +446,7 @@ hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t coun
       }
 
       const bool is_managed_memory =
-          (mem_obj->getMemFlags() & (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR)) != 0;
+          (mem_obj->getMemFlags() & (amd::MemFlags::SvmFineGrain | amd::MemFlags::AllocHostPtr)) != amd::MemFlags::Empty;
 
       requires_pageable_support |= !is_managed_memory;
 

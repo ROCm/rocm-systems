@@ -1007,7 +1007,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     kernArgManager_ = kernArgManager;
   }
   GraphKernelArgManager* GetKernelArgManager() { return kernArgManager_; }
-  static void DecrementRefCount(cl_event event, cl_int command_exec_status, void* user_data);
+  static void DecrementRefCount(void* event_handle, int32_t command_exec_status, void* user_data);
   hipError_t CaptureAndFormPacketsForGraph();
   void GetKernelArgSizeForGraph(std::unordered_map<int, size_t>& kernArgSizeForGraph);
 
@@ -2260,7 +2260,7 @@ class GraphMemcpyNodeFromSymbol : public GraphMemcpyNode1D {
     amd::Memory* dstMemory = getMemoryObject(dst, dOffset);
     if (dstMemory == nullptr && kind != hipMemcpyDeviceToHost && kind != hipMemcpyDefault) {
       return hipErrorInvalidMemcpyDirection;
-    } else if (dstMemory != nullptr && dstMemory->getMemFlags() == 0 &&
+    } else if (dstMemory != nullptr && dstMemory->getMemFlags() == amd::MemFlags::Empty &&
                kind != hipMemcpyDeviceToDevice && kind != hipMemcpyDeviceToDeviceNoCU &&
                kind != hipMemcpyDefault) {
       return hipErrorInvalidMemcpyDirection;
@@ -2371,16 +2371,16 @@ class GraphMemcpyNodeToSymbol : public GraphMemcpyNode1D {
     }
     size_t dOffset = 0;
     amd::Memory* srcMemory = getMemoryObject(src, dOffset);
-    cl_mem_flags srcFlag = 0;
+    amd::MemFlags srcFlag = amd::MemFlags::Empty;
     if (srcMemory != nullptr) {
       srcFlag = srcMemory->getMemFlags();
       if (!IS_LINUX) {
-        srcFlag &= ~ROCCLR_MEM_INTERPROCESS;
+        srcFlag &= ~amd::MemFlags::Interprocess;
       }
     }
     if (srcMemory == nullptr && kind != hipMemcpyHostToDevice && kind != hipMemcpyDefault) {
       return hipErrorInvalidValue;
-    } else if (srcMemory != nullptr && srcFlag == 0 && kind != hipMemcpyDeviceToDevice &&
+    } else if (srcMemory != nullptr && srcFlag == amd::MemFlags::Empty && kind != hipMemcpyDeviceToDevice &&
                kind != hipMemcpyDeviceToDeviceNoCU && kind != hipMemcpyDefault) {
       return hipErrorInvalidValue;
     } else if (kind == hipMemcpyHostToHost || kind == hipMemcpyDeviceToHost) {
@@ -2693,14 +2693,14 @@ class GraphHostNode : public GraphNode {
     return hipSuccess;
   }
 
-  static void Callback(cl_event event, cl_int command_exec_status, void* user_data) {
+  static void Callback(void* event_handle, int32_t command_exec_status, void* user_data) {
     hipHostNodeParams* NodeParams = reinterpret_cast<hipHostNodeParams*>(user_data);
     NodeParams->fn(NodeParams->userData);
   }
 
   void EnqueueCommands(hip::Stream* stream) override {
     if (!commands_.empty()) {
-      if (!commands_[0]->setCallback(CL_COMPLETE, GraphHostNode::Callback, &NodeParams_)) {
+      if (!commands_[0]->setCallback(static_cast<amd::Status>(amd::ExecutionStatus::Complete), GraphHostNode::Callback, &NodeParams_)) {
         ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed during setCallback");
       }
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
@@ -3241,7 +3241,7 @@ class hipGraphBatchMemOpNode : public GraphNode {
     }
     amd::Command::EventWaitList waitList;
     amd::BatchMemoryOperationCommand* command = new amd::BatchMemoryOperationCommand(
-        *stream, ROCCLR_COMMAND_BATCH_STREAM, batchMemOpNodeParam_.count,
+        *stream, static_cast<amd::CommandType>(ROCCLR_COMMAND_BATCH_STREAM), batchMemOpNodeParam_.count,
         batchMemOpNodeParam_.flags, waitList, batchMemOpNodeParam_.paramArray,
         sizeof(hipStreamBatchMemOpParams));
     commands_.emplace_back(command);

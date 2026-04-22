@@ -88,10 +88,10 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
     HIP_RETURN(hipErrorNotSupported);
   }
 
-  // When ROCCLR_MEM_PHYMEM is set, ROCr impl gets and stores unique hsa handle. Flag no-op on PAL.
-  unsigned int ihipFlags = ROCCLR_MEM_PHYMEM;
+  // When PhyMem is set, ROCr impl gets and stores unique hsa handle. Flag no-op on PAL.
+  amd::MemFlags ihipFlags = amd::MemFlags::PhyMem;
   if (prop->type == hipMemAllocationTypeUncached) {
-    ihipFlags |= CL_MEM_SVM_ATOMICS | ROCCLR_MEM_HSA_UNCACHED;
+    ihipFlags |= amd::MemFlags::SvmAtomics | amd::MemFlags::HsaUncached;
   }
 
   bool useHostDevice = (prop->location.type == hipMemLocationTypeHost);

@@ -249,7 +249,7 @@ static_assert(static_cast<uint32_t>(amd::KernelArgAddressQualifier::Private)  ==
 static_assert(static_cast<uint32_t>(amd::KernelArgAccessQualifier::ReadOnly)  == CL_KERNEL_ARG_ACCESS_READ_ONLY);
 static_assert(static_cast<uint32_t>(amd::KernelArgAccessQualifier::WriteOnly) == CL_KERNEL_ARG_ACCESS_WRITE_ONLY);
 static_assert(static_cast<uint32_t>(amd::KernelArgAccessQualifier::ReadWrite) == CL_KERNEL_ARG_ACCESS_READ_WRITE);
-static_assert(static_cast<uint32_t>(amd::KernelArgAccessQualifier::None)      == CL_KERNEL_ARG_ACCESS_NONE);
+static_assert(static_cast<uint32_t>(amd::KernelArgAccessQualifier::NoAccess)   == CL_KERNEL_ARG_ACCESS_NONE);
 
 // Verify KernelArgTypeQualifier values match CL_KERNEL_ARG_TYPE_* constants.
 static_assert(static_cast<uint64_t>(amd::KernelArgTypeQualifier::None)     == CL_KERNEL_ARG_TYPE_NONE);
@@ -287,7 +287,7 @@ static_assert(static_cast<uint32_t>(amd::FilterMode::Nearest) == CL_FILTER_NEARE
 static_assert(static_cast<uint32_t>(amd::FilterMode::Linear)  == CL_FILTER_LINEAR);
 
 // Verify AddressingMode values match CL_ADDRESS_* constants.
-static_assert(static_cast<uint32_t>(amd::AddressingMode::None)           == CL_ADDRESS_NONE);
+static_assert(static_cast<uint32_t>(amd::AddressingMode::NoAddressing)           == CL_ADDRESS_NONE);
 static_assert(static_cast<uint32_t>(amd::AddressingMode::ClampToEdge)    == CL_ADDRESS_CLAMP_TO_EDGE);
 static_assert(static_cast<uint32_t>(amd::AddressingMode::Clamp)          == CL_ADDRESS_CLAMP);
 static_assert(static_cast<uint32_t>(amd::AddressingMode::Repeat)         == CL_ADDRESS_REPEAT);

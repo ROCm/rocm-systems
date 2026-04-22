@@ -112,7 +112,7 @@ class FreeAsyncCommand : public amd::Command {
 
  public:
   FreeAsyncCommand(amd::HostQueue& queue, void* ptr, hip::Event* event)
-      : amd::Command(queue, 1, amd::Event::nullWaitList), ptr_(ptr), event_(event) {}
+      : amd::Command(queue, static_cast<amd::CommandType>(1), amd::Event::nullWaitList), ptr_(ptr), event_(event) {}
 
   virtual void submit(device::VirtualDevice& device) final {
     size_t offset = 0;

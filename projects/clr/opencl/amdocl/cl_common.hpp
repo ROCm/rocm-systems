@@ -76,6 +76,19 @@ template <typename T> struct class_token {
   static const cl_token value = Tinvalid;
 };
 
+// Forward declarations for amd:: runtime types referenced in CL_TYPES_DO macros.
+class Context;
+class Event;
+class CommandQueue;
+class Kernel;
+class Program;
+class Device;
+class Memory;
+class Sampler;
+class Counter;
+class PerfCounter;
+class ThreadTrace;
+
 #define DEFINE_CL_TRAITS(CL, AMD)                         \
                                                           \
   template <> struct class_token<AMD> {                   \
@@ -128,23 +141,41 @@ struct ICDDispatchedObject {
 
 }  // namespace amd
 
+// In phase1, RuntimeObject no longer inherits from ICDDispatchedObject, so
+// CL handle pointers are identical to amd::* object pointers. Use
+// reinterpret_cast directly instead of going through ICDDispatchedObject.
 template <typename CL> typename amd::as_internal<CL>::type* as_amd(CL* cl_obj) {
-  return cl_obj == NULL ? NULL
-                        : amd::ICDDispatchedObject::fromHandle<typename amd::as_internal<CL>::type>(
-                              static_cast<void*>(cl_obj));
+  return reinterpret_cast<typename amd::as_internal<CL>::type*>(cl_obj);
 }
 
 template <typename AMD> typename amd::as_external<AMD>::type* as_cl(AMD* amd_obj) {
-  return amd_obj == NULL ? NULL
-                         : static_cast<typename amd::as_external<AMD>::type*>(amd_obj->handle());
+  return reinterpret_cast<typename amd::as_external<AMD>::type*>(amd_obj);
 }
 
 template <typename CL> bool is_valid(CL* handle) {
-  return amd::as_internal<CL>::type::isValidHandle(handle);
+  return handle != nullptr;
 }
+
+// X11/Xlib.h defines Status as a macro (#define Status int); undef it so that
+// amd::Status (used in command.hpp and elsewhere) is not clobbered.
+#ifdef Status
+#undef Status
+#endif
+// X11/X.h defines None as 0L and Success as 0; undef them so that
+// amd::*::None and amd::Status::Success enum values are not clobbered.
+#ifdef None
+#undef None
+#endif
+#ifdef Success
+#undef Success
+#endif
 
 #include "vdi_common.hpp"
 #include "cl_type_map.hpp"
+
+// CL_AMD_PLATFORM: typed wrapper around AMD_PLATFORM for opencl-layer code.
+// AMD_PLATFORM returns void*; in the opencl layer we need cl_platform_id.
+#define CL_AMD_PLATFORM (reinterpret_cast<cl_platform_id>(AMD_PLATFORM))
 
 namespace amd {
 

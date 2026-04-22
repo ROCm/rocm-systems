@@ -59,7 +59,7 @@ Function::~Function() {
 
 // ================================================================================================
 amd::Kernel* Function::BuildKernel(hipModule_t hmod) const {
-  amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
+  amd::Program* program = reinterpret_cast<amd::Program*>(hmod);
   const amd::Symbol* symbol = program->findSymbol(name_.c_str());
   guarantee(symbol != nullptr, "Cannot find Symbol with name: %s", name_.c_str());
   return new amd::Kernel(*program, *symbol, name_);
@@ -198,7 +198,7 @@ hipError_t Var::GetDeviceVarPtr(amd::Memory** mem, int deviceId) {
 // ================================================================================================
 static hipError_t createVarMem(amd::Memory** mem_out, const std::string& name,
                                hipModule_t hmod, int deviceId) {
-  amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
+  amd::Program* program = reinterpret_cast<amd::Program*>(hmod);
   device::Program* dev_program = program->getDeviceProgram(*g_devices.at(deviceId)->devices()[0]);
   guarantee(dev_program != nullptr, "Cannot get Device Program for module: 0x%x", hmod);
 

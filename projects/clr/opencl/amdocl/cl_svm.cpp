@@ -132,7 +132,8 @@ RUNTIME_ENTRY_RET_NOERRCODE(void*, clSVMAlloc,
   const cl_uint hostAddressBits = LP64_SWITCH(32, 64);
   cl_uint minContextAlignment = std::numeric_limits<uint>::max();
   for (const auto& it : devices) {
-    cl_device_svm_capabilities svmCapabilities = it->info().svmCapabilities_;
+    cl_device_svm_capabilities svmCapabilities =
+        static_cast<cl_device_svm_capabilities>(it->info().svmCapabilities_);
     if (svmCapabilities == 0) {
       continue;
     }
@@ -315,8 +316,9 @@ RUNTIME_ENTRY(cl_int, clEnqueueSVMFree,
     return err;
   }
 
-  amd::Command* command = new amd::SvmFreeMemoryCommand(hostQueue, eventWaitList, num_svm_pointers,
-                                                        svm_pointers, pfn_free_func, user_data);
+  amd::Command* command = new amd::SvmFreeMemoryCommand(
+      hostQueue, eventWaitList, num_svm_pointers, svm_pointers,
+      reinterpret_cast<amd::SvmFreeMemoryCommand::freeCallBack>(pfn_free_func), user_data);
 
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;
@@ -991,7 +993,7 @@ RUNTIME_ENTRY(cl_int, clSetKernelExecInfo,
         bool foundFineGrainedSystemDevice = false;
         const std::vector<amd::Device*>& devices = amdContext->devices();
         for (const auto it : devices) {
-          if (it->info().svmCapabilities_ & CL_DEVICE_SVM_FINE_GRAIN_SYSTEM) {
+          if (!!(it->info().svmCapabilities_ & amd::SvmCapabilities::FineGrainSystem)) {
             foundFineGrainedSystemDevice = true;
             break;
           }
@@ -1184,7 +1186,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueSVMMigrateMem,
   }
 
   amd::MigrateMemObjectsCommand* command = new amd::MigrateMemObjectsCommand(
-      hostQueue, CL_COMMAND_MIGRATE_MEM_OBJECTS, eventWaitList, memObjects,
+      hostQueue, amd::CommandType::MigrateMemObjects, eventWaitList, memObjects,
       amd::cl::from_cl_MemMigrationFlags(flags));
 
   if (command == NULL) {

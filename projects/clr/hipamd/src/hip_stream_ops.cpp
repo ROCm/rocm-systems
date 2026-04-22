@@ -9,7 +9,7 @@
 #include "platform/command_utils.hpp"
 
 namespace hip {
-hipError_t ihipBatchMemOperation(hipStream_t stream, cl_command_type cmdType, unsigned int count,
+hipError_t ihipBatchMemOperation(hipStream_t stream, amd::CommandType cmdType, unsigned int count,
                                  hipStreamBatchMemOpParams* paramArray, unsigned int flags) {
   if (paramArray == nullptr || flags != 0 || count == 0 || count > 256) {
     return hipErrorInvalidValue;
@@ -39,7 +39,7 @@ hipError_t ihipBatchMemOperation(hipStream_t stream, cl_command_type cmdType, un
 }
 
 
-hipError_t ihipStreamOperation(hipStream_t stream, cl_command_type cmdType, void* ptr,
+hipError_t ihipStreamOperation(hipStream_t stream, amd::CommandType cmdType, void* ptr,
                                uint64_t value, uint64_t mask, unsigned int flags,
                                size_t sizeBytes) {
   size_t offset = 0;
@@ -61,9 +61,9 @@ hipError_t ihipStreamOperation(hipStream_t stream, cl_command_type cmdType, void
   // NOTE: 'mask' is only used in Wait operation, 'sizeBytes' is only used in Write operation
   // 'flags' for now used only for Wait, but in future there will usecases for Write too.
 
-  if (cmdType == ROCCLR_COMMAND_STREAM_WAIT_VALUE) {
+  if (cmdType == static_cast<amd::CommandType>(ROCCLR_COMMAND_STREAM_WAIT_VALUE)) {
     // Stream Wait on AQL barrier-value type packet is only supported on SignalMemory objects
-    if (GPU_STREAMOPS_CP_WAIT && (!(memory->getMemFlags() & ROCCLR_MEM_HSA_SIGNAL_MEMORY))) {
+    if (GPU_STREAMOPS_CP_WAIT && ((memory->getMemFlags() & amd::MemFlags::HsaSignalMemory) == amd::MemFlags::Empty)) {
       return hipErrorInvalidValue;
     }
     switch (flags) {
@@ -83,7 +83,7 @@ hipError_t ihipStreamOperation(hipStream_t stream, cl_command_type cmdType, void
         return hipErrorInvalidValue;
         break;
     }
-  } else if (cmdType == ROCCLR_COMMAND_STREAM_WRITE_VALUE) {
+  } else if (cmdType == static_cast<amd::CommandType>(ROCCLR_COMMAND_STREAM_WRITE_VALUE)) {
     switch (flags) {
       case hipStreamWriteValueDefault:
         outFlags = ROCCLR_STREAM_WRITE_VALUE_DEFAULT;
@@ -122,21 +122,21 @@ hipError_t hipStreamWaitValue32(hipStream_t stream, void* ptr, uint32_t value, u
   HIP_INIT_API(hipStreamWaitValue32, stream, ptr, value, mask, flags);
   // NOTE: ptr corresponds to a HSA Signal memeory which is 64 bits.
   // 32 bit value and mask are converted to 64-bit values.
-  HIP_RETURN_DURATION(ihipStreamOperation(stream, ROCCLR_COMMAND_STREAM_WAIT_VALUE, ptr, value,
+  HIP_RETURN_DURATION(ihipStreamOperation(stream, static_cast<amd::CommandType>(ROCCLR_COMMAND_STREAM_WAIT_VALUE), ptr, value,
                                           mask, flags, sizeof(uint32_t)));
 }
 
 hipError_t hipStreamWaitValue64(hipStream_t stream, void* ptr, uint64_t value, unsigned int flags,
                                 uint64_t mask) {
   HIP_INIT_API(hipStreamWaitValue64, stream, ptr, value, mask, flags);
-  HIP_RETURN_DURATION(ihipStreamOperation(stream, ROCCLR_COMMAND_STREAM_WAIT_VALUE, ptr, value,
+  HIP_RETURN_DURATION(ihipStreamOperation(stream, static_cast<amd::CommandType>(ROCCLR_COMMAND_STREAM_WAIT_VALUE), ptr, value,
                                           mask, flags, sizeof(uint64_t)));
 }
 
 hipError_t hipStreamWriteValue32(hipStream_t stream, void* ptr, uint32_t value,
                                  unsigned int flags) {
   HIP_INIT_API(hipStreamWriteValue32, stream, ptr, value, flags);
-  HIP_RETURN_DURATION(ihipStreamOperation(stream, ROCCLR_COMMAND_STREAM_WRITE_VALUE, ptr, value,
+  HIP_RETURN_DURATION(ihipStreamOperation(stream, static_cast<amd::CommandType>(ROCCLR_COMMAND_STREAM_WRITE_VALUE), ptr, value,
                                           0,      // mask un-used set it to 0
                                           flags,
                                           sizeof(uint32_t)));
@@ -145,7 +145,7 @@ hipError_t hipStreamWriteValue32(hipStream_t stream, void* ptr, uint32_t value,
 hipError_t hipStreamWriteValue64(hipStream_t stream, void* ptr, uint64_t value,
                                  unsigned int flags) {
   HIP_INIT_API(hipStreamWriteValue64, stream, ptr, value, flags);
-  HIP_RETURN_DURATION(ihipStreamOperation(stream, ROCCLR_COMMAND_STREAM_WRITE_VALUE, ptr, value,
+  HIP_RETURN_DURATION(ihipStreamOperation(stream, static_cast<amd::CommandType>(ROCCLR_COMMAND_STREAM_WRITE_VALUE), ptr, value,
                                           0,      // mask un-used set it to 0
                                           flags,
                                           sizeof(uint64_t)));
@@ -155,6 +155,6 @@ hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
                                hipStreamBatchMemOpParams* paramArray, unsigned int flags) {
   HIP_INIT_API(hipStreamBatchMemOp, count, paramArray, flags);
   HIP_RETURN_DURATION(
-      ihipBatchMemOperation(stream, ROCCLR_COMMAND_BATCH_STREAM, count, paramArray, flags));
+      ihipBatchMemOperation(stream, static_cast<amd::CommandType>(ROCCLR_COMMAND_BATCH_STREAM), count, paramArray, flags));
 }
 }  // namespace hip

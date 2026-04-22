@@ -17,7 +17,7 @@ namespace hip {
 // ================================================================================================
 Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
                const std::vector<uint32_t>& cuMask, hipStreamCaptureStatus captureStatus)
-    : amd::HostQueue(*dev->asContext(), *dev->devices()[0], 0, amd::CommandQueue::RealTimeDisabled,
+    : amd::HostQueue(*dev->asContext(), *dev->devices()[0], amd::QueueProperties::None, amd::CommandQueue::RealTimeDisabled,
                      convertToQueuePriority(p), cuMask, null_stream),
       device_(dev),
       priority_(p),
@@ -178,7 +178,7 @@ bool Stream::StreamCaptureOngoing(hipStream_t hStream) {
 }
 
 // ================================================================================================
-void CL_CALLBACK ihipStreamCallback(cl_event event, cl_int command_exec_status, void* user_data) {
+void ihipStreamCallback(void* event_handle, int32_t command_exec_status, void* user_data) {
   auto* cbo = reinterpret_cast<StreamCallback*>(user_data);
   cbo->callback();
   delete cbo;
@@ -536,7 +536,7 @@ hipError_t hipStreamQuery_common(hipStream_t stream) {
   }
 
   amd::Event& event = command->event();
-  if (command->type() != 0) {
+  if (command->type() != static_cast<amd::CommandType>(0)) {
     event.notifyCmdQueue();
   }
 
@@ -586,7 +586,7 @@ hipError_t streamCallback_common(hipStream_t stream, StreamCallback* cbo, void* 
 
   // Callback marker — released after the HIP callback fires, not here.
   amd::Command* command = new amd::Marker(*hip_stream, !kMarkerDisableFlush, eventWaitList);
-  if (!command->setCallback(CL_COMPLETE, ihipStreamCallback, cbo)) {
+  if (!command->setCallback(static_cast<amd::Status>(amd::ExecutionStatus::Complete), ihipStreamCallback, cbo)) {
     command->release();
     if (last_command != nullptr) {
       last_command->release();

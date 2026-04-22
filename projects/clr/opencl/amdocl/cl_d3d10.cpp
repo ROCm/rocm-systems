@@ -45,7 +45,7 @@ RUNTIME_ENTRY(cl_int, clGetDeviceIDsFromD3D10KHR,
   static const bool VALIDATE_ONLY = true;
   HMODULE d3d10Module = NULL;
 
-  if (platform != NULL && platform != AMD_PLATFORM) {
+  if (platform != NULL && platform != CL_AMD_PLATFORM) {
     LogWarning("\"platrform\" is not a valid AMD platform");
     return CL_INVALID_PLATFORM;
   }

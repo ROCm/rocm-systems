@@ -495,7 +495,9 @@ RUNTIME_ENTRY(cl_int, clBuildProgram,
 
   if (device_list == NULL) {
     // build for all devices in the context.
-    return amd::cl::to_cl(amdProgram->build(amdProgram->context().devices(), options, pfn_notify, user_data));
+    return amd::cl::to_cl(amdProgram->build(amdProgram->context().devices(), options,
+                                             reinterpret_cast<void(*)(void*, void*)>(pfn_notify),
+                                             user_data));
   }
 
   std::vector<amd::Device*> devices(num_devices);
@@ -506,7 +508,9 @@ RUNTIME_ENTRY(cl_int, clBuildProgram,
     }
     devices[i] = device;
   }
-  return amd::cl::to_cl(amdProgram->build(devices, options, pfn_notify, user_data));
+  return amd::cl::to_cl(amdProgram->build(devices, options,
+                                           reinterpret_cast<void(*)(void*, void*)>(pfn_notify),
+                                           user_data));
 }
 RUNTIME_EXIT
 
@@ -627,8 +631,9 @@ RUNTIME_ENTRY(cl_int, clCompileProgram,
 
   if (device_list == NULL) {
     // compile for all devices in the context.
-    return amd::cl::to_cl(amdProgram->compile(amdProgram->context().devices(), num_input_headers, headerPrograms,
-                               header_include_names, options, pfn_notify, user_data));
+    return amd::cl::to_cl(amdProgram->compile(amdProgram->context().devices(), num_input_headers,
+                               headerPrograms, header_include_names, options,
+                               reinterpret_cast<void(*)(void*, void*)>(pfn_notify), user_data));
   }
 
   std::vector<amd::Device*> devices(num_devices);
@@ -641,8 +646,9 @@ RUNTIME_ENTRY(cl_int, clCompileProgram,
     devices[i] = device;
   }
 
-  return amd::cl::to_cl(amdProgram->compile(devices, num_input_headers, headerPrograms, header_include_names,
-                             options, pfn_notify, user_data));
+  return amd::cl::to_cl(amdProgram->compile(devices, num_input_headers, headerPrograms,
+                             header_include_names, options,
+                             reinterpret_cast<void(*)(void*, void*)>(pfn_notify), user_data));
 }
 RUNTIME_EXIT
 
@@ -782,8 +788,9 @@ RUNTIME_ENTRY_RET(cl_program, clLinkProgram,
 
   if (device_list == NULL) {
     // compile for all devices in the context.
-    status = amd::cl::to_cl(program->link(as_amd(context)->devices(), num_input_programs, inputPrograms, options,
-                           pfn_notify, user_data));
+    status = amd::cl::to_cl(program->link(as_amd(context)->devices(), num_input_programs,
+                           inputPrograms, options,
+                           reinterpret_cast<void(*)(void*, void*)>(pfn_notify), user_data));
   } else {
     std::vector<amd::Device*> devices(num_devices);
 
@@ -798,7 +805,9 @@ RUNTIME_ENTRY_RET(cl_program, clLinkProgram,
     }
 
     status =
-        amd::cl::to_cl(program->link(devices, num_input_programs, inputPrograms, options, pfn_notify, user_data));
+        amd::cl::to_cl(program->link(devices, num_input_programs, inputPrograms, options,
+                                     reinterpret_cast<void(*)(void*, void*)>(pfn_notify),
+                                     user_data));
   }
   *not_null(errcode_ret) = status;
   if (status == CL_SUCCESS) {
@@ -873,7 +882,7 @@ RUNTIME_EXIT
  *  \version 1.2r07
  */
 RUNTIME_ENTRY(cl_int, clUnloadPlatformCompiler, (cl_platform_id platform)) {
-  if (platform != NULL && platform != AMD_PLATFORM) {
+  if (platform != NULL && platform != CL_AMD_PLATFORM) {
     return CL_INVALID_PLATFORM;
   }
 

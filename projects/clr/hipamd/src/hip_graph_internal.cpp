@@ -1645,7 +1645,7 @@ hipError_t GraphExec::UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* no
 
 // ================================================================================================
 
-void GraphExec::DecrementRefCount(cl_event event, cl_int command_exec_status, void* user_data) {
+void GraphExec::DecrementRefCount(void* event_handle, int32_t command_exec_status, void* user_data) {
   GraphExec* graphExec = reinterpret_cast<GraphExec*>(user_data);
   graphExec->release();
 }
@@ -2289,7 +2289,7 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
   CallbackCommand->setCommandEntryScope(amd::Device::kCacheStateIgnore);
   amd::Event& event = CallbackCommand->event();
   constexpr bool kBlocking = false;
-  if (!event.setCallback(CL_COMPLETE, GraphExec::DecrementRefCount, this, kBlocking)) {
+  if (!event.setCallback(static_cast<amd::Status>(amd::ExecutionStatus::Complete), GraphExec::DecrementRefCount, this, kBlocking)) {
     this->release();
     CallbackCommand->release();
     return hipErrorInvalidHandle;
