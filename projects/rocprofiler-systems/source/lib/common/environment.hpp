@@ -12,7 +12,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -511,32 +510,32 @@ consolidate_env_entries(std::vector<std::string>& envp)
 
     /// Reconstructs an environment entry string from key and value parts.
     /// @param key   The environment variable name
-    /// @param parts The deduplicated value components
+    /// @param parts The deduplicated value components (may be empty)
     /// @param delim The delimiter to use when joining parts
-    /// @return String in "KEY=part1<delim>part2<delim>..." format
+    /// @return String in "KEY=part1<delim>part2<delim>..." format, or "KEY="
+    ///         when @p parts is empty.
     auto join_parts = [](std::string_view key, const std::vector<std::string>& parts,
                          char delim) {
         std::string result;
-
-        const auto total_parts_length = std::accumulate(
-            parts.begin(), parts.end(), std::size_t{ 0 },
-            [](std::size_t acc, const std::string& part) { return acc + part.size(); });
-
-        const auto delim_count       = parts.size() - 1;
-        const auto equal_sign_length = 1;
-
-        result.reserve(key.size() + equal_sign_length + total_parts_length + delim_count);
+        result.reserve(key.size() + 1);
         result.append(key);
         result += '=';
 
-        // Join all parts with the delimiter
-        result =
-            std::accumulate(parts.begin(), parts.end(), std::move(result),
-                            [delim, &parts](std::string acc, const std::string& part) {
-                                if(part != parts.front()) acc += delim;
-                                acc.append(part);
-                                return acc;
-                            });
+        if(parts.empty()) return result;
+
+        std::size_t total_parts_length = 0;
+        for(const auto& part : parts)
+            total_parts_length += part.size();
+
+        result.reserve(result.size() + total_parts_length + (parts.size() - 1));
+
+        bool first = true;
+        for(const auto& part : parts)
+        {
+            if(!first) result += delim;
+            result.append(part);
+            first = false;
+        }
 
         return result;
     };

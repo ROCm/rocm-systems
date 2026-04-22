@@ -26,7 +26,6 @@
 #include <cstdlib>
 #include <exception>
 #include <iostream>
-#include <libgen.h>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -79,6 +78,13 @@ reset_color()
 {
     return monochrome_flag().load(std::memory_order_relaxed) ? std::string_view{}
                                                              : ANSI_RESET;
+}
+
+std::string_view
+basename_of(std::string_view path)
+{
+    const auto slash = path.rfind('/');
+    return (slash == std::string_view::npos) ? path : path.substr(slash + 1);
 }
 
 int
@@ -352,11 +358,6 @@ tool_runner::prepare_command(const char* exe)
 {
     if(data.out.launcher.empty()) return;
 
-    const auto basename_of = [](std::string_view path) {
-        const auto slash = path.rfind('/');
-        return (slash == std::string_view::npos) ? path : path.substr(slash + 1);
-    };
-
     bool                     injected = false;
     std::vector<std::string> new_argv;
     new_argv.reserve(data.out.command.size() + LAUNCHER_INJECT_SLOTS);
@@ -494,7 +495,7 @@ tool_runner::do_full_parse()
     rocprofsys::argparse::init_parser(data);
     signals::disable_signal_detection(signals::signal_settings::get_enabled());
 
-    auto parser = parser_t{ basename(argv[0]), build_description() };
+    auto parser = parser_t{ std::string{ basename_of(argv[0]) }, build_description() };
 
     configure_parser(parser);
 

@@ -4,15 +4,14 @@
 #pragma once
 
 #include "common/common_utils.hpp"
+#include "common/domain_flag_state.hpp"
 #include "common/env_vars.hpp"
 #include "common/json_config.hpp"
-#include "common/preset_registry.hpp"
 
 #include <timemory/utility/argparse.hpp>
 
 #include <cstdlib>
 #include <iostream>
-#include <optional>
 #include <string>
 #include <string_view>
 
@@ -20,24 +19,6 @@ namespace rocprofsys
 {
 namespace common_utils
 {
-
-/**
- * State tracking for domain flags and preset options.
- * Used to track which options were specified on the command line
- * for validation and export purposes.
- */
-struct domain_flag_state
-{
-    preset_registry    registry;
-    std::string        active_preset_name;
-    bool               export_config_requested = false;
-    std::string        export_config_file;
-    bool               gpu_domain_enabled      = false;
-    bool               rocm_domain_enabled     = false;
-    bool               cpu_domain_enabled      = false;
-    bool               parallel_domain_enabled = false;
-    std::optional<int> early_exit;
-};
 
 using argument_parser = tim::argparse::argument_parser;
 

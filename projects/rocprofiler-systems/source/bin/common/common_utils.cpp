@@ -3,7 +3,7 @@
 
 #include "common/common_utils.hpp"
 
-#include "common/argument_registration.hpp"
+#include "common/domain_flag_state.hpp"
 #include "common/env_vars.hpp"
 #include "common/json_config.hpp"
 
