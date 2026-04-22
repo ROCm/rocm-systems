@@ -4783,6 +4783,28 @@ tritonCompare(const TritonRecipe &t,
     double rmsWorstG   = 0.0;
     double rmsWorstA   = 0.0;
 
+    // Per-element comparator lambda.  Called by the float dtype
+    // loops unconditionally, and by the integer dtype loops only
+    // when `cmp.kind == "rel-rms"` (integer buffers under
+    // `abs`/`rel` stay on the fast bit-exact path above this lambda
+    // in the dispatch).  `judge` does three jobs in one pass:
+    //
+    //   1. Update bufMaxAbs (worst single-element absolute diff,
+    //      used for the diagnostic print).
+    //   2. For `rel-rms`: accumulate sumDiff2 / sumGold2 and track
+    //      the worst single-element for diagnostics.  The verdict
+    //      is computed ONCE at end-of-buffer from the accumulated
+    //      sums, so this branch returns without touching
+    //      bufMismatches.
+    //   3. For `abs` / `rel`: evaluate the per-element predicate
+    //      and bump bufMismatches if it fails.
+    //
+    // NaN/Inf handling: both-NaN / same-signed-both-Inf count as
+    // agreement (silent match); any other NaN-or-Inf mismatch
+    // poisons the diff to +Inf so rel-rms can't suppress it.
+    // Integer-backed callers never produce NaN/Inf on their
+    // double cast, so those branches are dead for integer buffers
+    // (harmless cycles, not incorrect).
     auto judge = [&](double gv, double av, int i) {
       bool gNaN = std::isnan(gv);
       bool aNaN = std::isnan(av);
@@ -4861,48 +4883,144 @@ tritonCompare(const TritonRecipe &t,
       const auto *a = reinterpret_cast<const double *>(ap);
       for (int i = 0; i < ne; ++i) judge(g[i], a[i], i);
     } else if (out.dtype == "i16" || out.dtype == "u16") {
-      // Compare as uint16 bit-pattern regardless of i16/u16 sig.
-      // Equality under two's complement is sign-agnostic for i16
-      // whether we cast up or preserve bits; the diagnostic cells
-      // show the unsigned interpretation so the printed value is
-      // always non-negative (readers can infer the signed
-      // interpretation if that's what the recipe's semantics demand).
-      const auto *g = reinterpret_cast<const uint16_t *>(gp);
-      const auto *a = reinterpret_cast<const uint16_t *>(ap);
-      for (int i = 0; i < ne; ++i)
-        if (g[i] != a[i] && bufMismatches++ == 0) {
-          bufFirstIdx = i;
-          bufFirstG = static_cast<double>(g[i]);
-          bufFirstA = static_cast<double>(a[i]);
-          if (bufMaxAbs < 1.0) bufMaxAbs = 1.0;
+      // Integer output compare.
+      //
+      // `abs` / `rel` comparators keep the fast bit-exact equality
+      // loop: for integer buffers we expect bit-exact equality by
+      // default, and a non-zero `abs`/`rel` tolerance on integers is
+      // not well-defined under the current harness (see TODO at
+      // end of this dispatch).
+      //
+      // `rel-rms` routes through `judge` so the buffer-level RMS
+      // verdict sees per-element stats (sumDiff2 / sumGold2).
+      // CRITICAL: we must cast through the SIGNED type for signed
+      // dtypes — a bit-pattern 0xFFFF is -1 as i16 but 65535 as
+      // u16; interpreting a signed buffer as unsigned would flip
+      // the sign of every negative value and make the rel-rms
+      // metric meaningless.  The equality fast path's "sign-
+      // agnostic for equality" argument (below) does NOT extend to
+      // arithmetic on doubles.
+      if (cmp.kind == "rel-rms") {
+        if (out.dtype == "i16") {
+          const auto *g = reinterpret_cast<const int16_t *>(gp);
+          const auto *a = reinterpret_cast<const int16_t *>(ap);
+          for (int i = 0; i < ne; ++i)
+            judge(static_cast<double>(g[i]), static_cast<double>(a[i]), i);
+        } else { // u16
+          const auto *g = reinterpret_cast<const uint16_t *>(gp);
+          const auto *a = reinterpret_cast<const uint16_t *>(ap);
+          for (int i = 0; i < ne; ++i)
+            judge(static_cast<double>(g[i]), static_cast<double>(a[i]), i);
         }
+      } else {
+        // Compare as uint16 bit-pattern regardless of i16/u16 sig.
+        // Equality under two's complement is sign-agnostic for i16
+        // whether we cast up or preserve bits; the diagnostic cells
+        // show the unsigned interpretation so the printed value is
+        // always non-negative (readers can infer the signed
+        // interpretation if that's what the recipe's semantics
+        // demand).
+        const auto *g = reinterpret_cast<const uint16_t *>(gp);
+        const auto *a = reinterpret_cast<const uint16_t *>(ap);
+        for (int i = 0; i < ne; ++i)
+          if (g[i] != a[i] && bufMismatches++ == 0) {
+            bufFirstIdx = i;
+            bufFirstG = static_cast<double>(g[i]);
+            bufFirstA = static_cast<double>(a[i]);
+            if (bufMaxAbs < 1.0) bufMaxAbs = 1.0;
+          }
+      }
     } else if (out.dtype == "i32" || out.dtype == "u32") {
-      // Compare as uint32 bit-pattern regardless of i32/u32 sig — the
-      // comparator is bit-exact and two's complement makes the signed
-      // interpretation equivalent for equality tests.
-      const auto *g = reinterpret_cast<const uint32_t *>(gp);
-      const auto *a = reinterpret_cast<const uint32_t *>(ap);
-      for (int i = 0; i < ne; ++i)
-        if (g[i] != a[i] && bufMismatches++ == 0) {
-          bufFirstIdx = i;
-          bufFirstG = static_cast<double>(g[i]);
-          bufFirstA = static_cast<double>(a[i]);
-          if (bufMaxAbs < 1.0) bufMaxAbs = 1.0;
+      // Same split as i16/u16 — signed rel-rms must use int32_t*.
+      if (cmp.kind == "rel-rms") {
+        if (out.dtype == "i32") {
+          const auto *g = reinterpret_cast<const int32_t *>(gp);
+          const auto *a = reinterpret_cast<const int32_t *>(ap);
+          for (int i = 0; i < ne; ++i)
+            judge(static_cast<double>(g[i]), static_cast<double>(a[i]), i);
+        } else { // u32
+          const auto *g = reinterpret_cast<const uint32_t *>(gp);
+          const auto *a = reinterpret_cast<const uint32_t *>(ap);
+          for (int i = 0; i < ne; ++i)
+            judge(static_cast<double>(g[i]), static_cast<double>(a[i]), i);
         }
-    } else if (out.dtype == "i64") {
-      const auto *g = reinterpret_cast<const int64_t *>(gp);
-      const auto *a = reinterpret_cast<const int64_t *>(ap);
-      for (int i = 0; i < ne; ++i)
-        if (g[i] != a[i] && bufMismatches++ == 0) {
-          bufFirstIdx = i;
-          bufFirstG = static_cast<double>(g[i]);
-          bufFirstA = static_cast<double>(a[i]);
-          if (bufMaxAbs < 1.0) bufMaxAbs = 1.0;
+      } else {
+        // Compare as uint32 bit-pattern regardless of i32/u32 sig
+        // — the comparator is bit-exact and two's complement makes
+        // the signed interpretation equivalent for equality tests.
+        const auto *g = reinterpret_cast<const uint32_t *>(gp);
+        const auto *a = reinterpret_cast<const uint32_t *>(ap);
+        for (int i = 0; i < ne; ++i)
+          if (g[i] != a[i] && bufMismatches++ == 0) {
+            bufFirstIdx = i;
+            bufFirstG = static_cast<double>(g[i]);
+            bufFirstA = static_cast<double>(a[i]);
+            if (bufMaxAbs < 1.0) bufMaxAbs = 1.0;
+          }
+      }
+    } else if (out.dtype == "i64" || out.dtype == "u64") {
+      // Same split as i16/i32 — plus u64 as the one integer dtype
+      // the pre-existing fast path omitted (see the `else die(...)`
+      // branch).  Bit-pattern >2^53 loses precision when cast to
+      // double; the loss is symmetric between gold and actual, so
+      // the diff stays representable, but gold values with high-bit
+      // difference below the rounding epsilon become undetectable
+      // on the rel-rms metric.  Recipes with u64 outputs that need
+      // bit-exact guarantees should use `abs tol=0.0` (fast path).
+      if (cmp.kind == "rel-rms") {
+        if (out.dtype == "i64") {
+          const auto *g = reinterpret_cast<const int64_t *>(gp);
+          const auto *a = reinterpret_cast<const int64_t *>(ap);
+          for (int i = 0; i < ne; ++i)
+            judge(static_cast<double>(g[i]), static_cast<double>(a[i]), i);
+        } else { // u64
+          const auto *g = reinterpret_cast<const uint64_t *>(gp);
+          const auto *a = reinterpret_cast<const uint64_t *>(ap);
+          for (int i = 0; i < ne; ++i)
+            judge(static_cast<double>(g[i]), static_cast<double>(a[i]), i);
         }
+      } else if (out.dtype == "i64") {
+        const auto *g = reinterpret_cast<const int64_t *>(gp);
+        const auto *a = reinterpret_cast<const int64_t *>(ap);
+        for (int i = 0; i < ne; ++i)
+          if (g[i] != a[i] && bufMismatches++ == 0) {
+            bufFirstIdx = i;
+            bufFirstG = static_cast<double>(g[i]);
+            bufFirstA = static_cast<double>(a[i]);
+            if (bufMaxAbs < 1.0) bufMaxAbs = 1.0;
+          }
+      } else { // u64 with abs/rel
+        const auto *g = reinterpret_cast<const uint64_t *>(gp);
+        const auto *a = reinterpret_cast<const uint64_t *>(ap);
+        for (int i = 0; i < ne; ++i)
+          if (g[i] != a[i] && bufMismatches++ == 0) {
+            bufFirstIdx = i;
+            bufFirstG = static_cast<double>(g[i]);
+            bufFirstA = static_cast<double>(a[i]);
+            if (bufMaxAbs < 1.0) bufMaxAbs = 1.0;
+          }
+      }
     } else {
       die("triton %s output %s: compare doesn't handle dtype=%s",
           t.name.c_str(), out.name.c_str(), out.dtype.c_str());
     }
+    // Pre-existing inconsistency, documented here to block the next
+    // diligent reader from "fixing" it without thinking:
+    //
+    // For integer output dtypes with `cmp.kind == "abs"` or `"rel"`,
+    // the fast loops above use BIT-EXACT equality and silently ignore
+    // `cmp.tol`.  This predates the rel-rms integer path; no current
+    // recipe uses `abs tol>0` / `rel` on integer outputs, and the
+    // semantics of a non-zero abs/rel tolerance on integer data
+    // aren't pinned down (should tol=1 on int32 mean "within 1
+    // ULP-of-magnitude"? "within 1 count"? something else?).
+    //
+    // If / when a future recipe needs integer-valued abs/rel
+    // tolerance, route that dtype through `judge` in the branch
+    // above (matching the rel-rms pattern) and make the semantics
+    // explicit in `cmp.tol` docs.  Until then, this loop faithfully
+    // preserves the historical "integer outputs are bit-exact
+    // unless you opt into rel-rms" contract.
 
     // Per-buffer rel-rms verdict.
     if (cmp.kind == "rel-rms") {

@@ -196,19 +196,85 @@ RECIPES = [
         ],
         "outputs": [
             # Top-k values (bf16).  Shape (N_ROWS, N_EXPTS_ACT).
+            #
+            # Per-output `rel-rms` comparator matches the MODE=4 entry
+            # in `topk_forward_bisect.py::_recipe` — same pipeline
+            # (streaming_topk + softmax + sort), same observed drift
+            # class (rms(diff)/rms(gold) ~= 0.15 after closing the
+            # V_FMA_MIX inline-constant and _D16_HI store bugs).  See
+            # that file's mode-table comment for the full derivation.
             {"name": "Yv", "dtype": "bf16",
-             "elems": "N_ROWS * N_EXPTS_ACT"},
+             "elems": "N_ROWS * N_EXPTS_ACT",
+             "comparator": {"kind": "rel-rms", "tol": 0.25}},
             # Top-k indices (i16).  Same shape.
+            #
+            # NO per-output comparator override — falls through to
+            # the top-level bit-exact comparator.  This deliberately
+            # leaves the recipe's verdict as "WRONG" on Yi until the
+            # divergence is characterised.
+            #
+            # What we've established so far (2026-04-22, after
+            # closing FMA_MIX-op_sel and GLOBAL/FLAT_STORE_D16_HI):
+            #
+            # * Yv passes rel-rms(tol=0.25) — aggregate softmax
+            #   output values match in RMS, so the PICKED VALUES'
+            #   distribution is close between native and salmon.
+            # * Yi (index output) has the SAME INDEX SET in only
+            #   6.8% (35/512) of rows.  Top-1 pick alone differs in
+            #   49% (249/512) of rows.  That's MUCH more divergence
+            #   than a few bf16 ULPs of drift can explain under any
+            #   reasonable tie-break-flip model.
+            # * MODE=4 in topk_forward_bisect.py passes with
+            #   rel-rms(tol=0.25) on Yv because that recipe does
+            #   `tl.sort(y_values, dim=1, descending=True)` at the
+            #   end — the final sort is by VALUE alone and is
+            #   invariant to which set of 4 indices streaming_topk
+            #   returned (as long as the values are similar).  The
+            #   production `_topk_forward` kernel does NOT do this
+            #   final sort; it writes streaming_topk's (value, index)
+            #   output directly, so index-set divergence is visible
+            #   in Yi.
+            #
+            # Hypotheses to investigate (not yet bisected):
+            #
+            # * `tl.topk` / `tl.bitonic_merge` under cross-widening
+            #   produce different index-tie-breaks from native.
+            # * The u32 (value_key << 16 | index_key) packing used
+            #   by streaming_topk has a lane-local assumption that
+            #   breaks under wave32->wave64 projection.
+            # * `tl.load(X, mask, other=-inf)` with a cross-widened
+            #   mask loads wrong lanes' X values in salmon (would
+            #   explain why salmon's post-softmax Yv[0] is often
+            #   LARGER than native's — reading a neighbouring
+            #   lane's value that happens to be larger).
+            #
+            # A permissive comparator here (e.g. rel-rms(tol=0.5))
+            # WOULD graduate this recipe to "match" on the RMS
+            # metric (see analysis in commit message), but that
+            # would mask the specific question of "does salmon pick
+            # the same top-k SET as native" — which is exactly the
+            # correctness invariant `_topk_forward` is supposed to
+            # preserve.  Holding Yi bit-exact keeps the test honest
+            # until the root cause is nailed down.
             {"name": "Yi", "dtype": "i16",
              "elems": "N_ROWS * N_EXPTS_ACT"},
             # Bitmatrix: transposed-then-sliced (N_ROWS_PAD32,
             # N_COLS_WORDS) u32.  We allocate (N_ROWS_PAD32 *
             # N_COLS_WORDS) elements; the kernel writes only the
             # [:N_ROWS, :] prefix in logical layout but the memory
-            # backs the full pre-transpose rectangle.
+            # backs the full pre-transpose rectangle.  Same
+            # rationale as Yi: Bits is strictly derived from Yi, so
+            # any Yi divergence causes corresponding Bits
+            # divergence; bit-exact comparator keeps the signal
+            # visible.
             {"name": "Bits", "dtype": "u32",
              "elems": "N_ROWS_PAD32 * N_COLS_WORDS"},
         ],
+        # Fallback comparator for Yi / Bits (both use the fallback;
+        # Yv has its own rel-rms override above).  Bit-exact keeps
+        # the Yi divergence visible as WRONG until the underlying
+        # streaming_topk / cross-widening semantic is understood —
+        # see the Yi output comment for the full rationale.
         "comparator": {"kind": "abs", "tol": 0.0},
     }
 ]

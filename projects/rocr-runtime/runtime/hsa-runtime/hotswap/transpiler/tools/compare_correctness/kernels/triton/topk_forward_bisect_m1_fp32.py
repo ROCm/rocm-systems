@@ -79,5 +79,41 @@ RECIPES = [{
     "outputs": [
         {"name": "Yv", "dtype": "fp32", "elems": "N_ROWS * N_EXPTS_ACT_HC"},
     ],
-    "comparator": {"kind": "abs", "tol": 0.0},
+    # Rel-rms comparator at 1e-5.  Motivation:
+    #
+    # With the cross-lane-divergent rewrite in place (update.dpp ->
+    # ds_bpermute + select, ...), the per-row reduction tree shape
+    # differs between native wave32 and salmon-wave64 lift (wave64
+    # folds 32 lanes in one tree, wave32 folds 32 lanes across 2
+    # waves and re-combines; the final sum traverses a different
+    # associativity).  fp32 adds are NOT associative, so ULP-scale
+    # drift is expected.  Empirical measurement on this recipe:
+    #
+    #   rms(gold) = 12.68  (RMS of per-slot fp32 sum output)
+    #   rms(diff) = 1.0e-6 (~1 fp32 ULP at magnitude 7)
+    #   rel-rms   = rms(diff) / rms(gold) = 8.7e-8
+    #   max|err|  = 3.8e-6 (4x single-ULP, at the worst slot)
+    #
+    # rel-rms 8.7e-8 is the NORMALISED buffer-level metric; the
+    # ~1-ULP absolute scale maps to 1.0e-6 / rms(gold) = ~1e-7.
+    # The two numbers are both in the same small-drift regime but
+    # describe different things, don't conflate them.
+    #
+    # Why tol=1e-5 and not 1e-7: gives ~115x safety margin on the
+    # observed 8.7e-8 rel-rms drift, which covers variance in the
+    # RNG-seeded input and across-seed shape of the error envelope
+    # without masking a real structural bug.  A systematic fp32-
+    # reduction miscompile (wrong accumulator width, dropped sum
+    # lane, etc.) would drift by a significant fraction of
+    # rms(gold) — several orders of magnitude above 1e-5.
+    #
+    # Caveat on seed-dependence: tolerance is calibrated for a
+    # single (recipe, shape, seed) triple.  The harness seeds from
+    # std::hash<std::string> which is libstdc++-version-specific;
+    # if inputs shift under a libstdc++ change, drift may shift
+    # proportionally.  The 115x margin is deliberately generous
+    # for this reason.  See `hotswap/docs/learnings.md`
+    # 2026-04-22 entry on principled tolerances for the full
+    # argument.
+    "comparator": {"kind": "rel-rms", "tol": 1e-5},
 }]

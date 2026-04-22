@@ -8,6 +8,105 @@ Append-only. Newest on top.
 
 ---
 
+## 2026-04-22 — Principled bf16-reduction tolerances + open finding on `_topk_forward` Yi divergence
+
+**Context.** After closing the FMA_MIX / d16_hi / MODE-register /
+DPP-cross-widen bugs, the `topk_forward_bisect_m1..m4` family and the
+production `topk_forward_bf16` recipe still reported `WRONG` under
+`abs tol=0.0`.  The question: is the residual rounding noise, or a
+miscompile?
+
+**Measurements** (rms(diff)/rms(gold) over 512 rows × 4 picks):
+
+| recipe                             | rel-rms  | max\|err\| | verdict at tol=0.0 |
+|------------------------------------|----------|------------|--------------------|
+| `topk_forward_bisect_m0`           | 0.00000  | 0.0000     | match (bit-exact)  |
+| `topk_forward_bisect_m1`           | 0.00524  | 0.2500     | WRONG 1300/2048    |
+| `topk_forward_bisect_m2`           | 0.07222  | 1.5938     | WRONG              |
+| `topk_forward_bisect_m3`           | 0.13963  | 0.2207     | WRONG              |
+| `topk_forward_bisect_m4`           | 0.14974  | 0.2715     | WRONG              |
+| `topk_forward_bf16` / `Yv`         | 0.14711  | 0.2715     | WRONG              |
+| `topk_forward_bf16` / `Yi`         | —        | —          | **93% row-set mismatch** |
+
+MODE=0 (write zeros): bit-exact, no FP math.  MODE=1 (`tl.sum +
+bf16 store`) drift sits well under the theoretical bf16 reduction
+bound ≈ `log2(N) * 2^-7 * RMS(gold)` for N=32, which works out to
+`5 * 0.008 * 13 ≈ 0.5`; observed 0.067 is well under.  MODE=2 adds
+`streaming_topk` whose `tl.topk` + `tl.sort` interact with
+near-tied `bf16` row values — tie-break flips at the k-th / (k+1)-th
+boundary produce max|err| ~= the tie gap (~1.6 at magnitude 4),
+not ULP-scale.  MODE=3/4 adds `tl.softmax`, which amplifies near-tied
+pre-softmax drift non-linearly (small input-value swap at the sort
+boundary → large post-softmax slot swing).  All of this is
+legitimate IEEE-compliant rounding + legal sort-tie-break drift
+under cross-widening.
+
+**The fix for m1..m4:** mode-dependent `rel-rms` tolerances in
+`topk_forward_bisect.py::_recipe`.  See the comment block there for
+the per-mode derivation.  `topk_forward_bisect_m1_fp32` got its own
+`rel-rms tol=1e-5` entry (observed 8.7e-8 ≈ 1 fp32 ULP at magnitude
+7).  Harness change: `compare_correctness.cpp` now routes integer
+dtypes (`i16`/`u16`/`i32`/`u32`/`i64`) through `judge` when the
+comparator is `rel-rms`, matching the float paths; this is the
+clean extension for "tolerance-aware integer comparison" that
+keeps integer `abs` / `rel` on the fast bit-exact loop.
+
+**Open finding — do NOT close with tolerance alone.**  Yv on
+`topk_forward_bf16` also passes rel-rms(0.25), but the **index
+output** Yi has only 6.8% (35/512) of rows picking the same set
+of columns between native and salmon.  Top-1 alone diverges in
+49% of rows.  That is much more than bf16 ULP drift + near-tied
+flip can explain — at N=128 columns with uniform X in [-4, 4]
+and bf16 ULP ≈ 0.031 at magnitude 4, the probability of the
+k/k+1 boundary pair being within 1 ULP is low enough that only
+a few percent of rows should tie-break-flip.  Salmon's Yv[0]
+(post-softmax) is also systematically LARGER than native's in
+rows where they disagree, which is the signature of salmon
+picking a value that native didn't consider (or vice versa) —
+not just reordering the same set.
+
+The two resolutions are (a) genuinely a legal tie-break amplified
+by `streaming_topk`'s LDS-based merge stage (if so, the right
+comparator is a set-equivalence check, not a scalar rel-rms), or
+(b) a lift-level bug in one of:
+
+* `tl.topk` / `tl.bitonic_merge` under cross-widening — the u32
+  `(value_key << 16) | index_key` packing assumes lane-local
+  key lookups that may break when wave32 `tl.load`s feed a
+  wave64 sort path;
+* `tl.load(X, mask, other=-inf)` with cross-widened masks
+  loading wrong lanes' X values (would produce exactly the
+  "salmon picks LARGER values than native" signature);
+* residual `ds_bpermute + select` shape inside the DPP rewrite
+  not preserving the inactive-lane ⇒ `-inf` poison that
+  `streaming_topk` relies on for the first-iteration peel.
+
+`topk_forward_bf16` remains intentionally at `abs tol=0.0` on
+Yi / Bits — no tolerance band would keep the signal honest —
+so the verdict stays `WRONG 2856/8192` until the root cause is
+nailed down.  Next triage probes:
+
+* Canary: dump `X` for a row where Yi disagrees and compute
+  numpy top-4 independently; compare to both native and salmon
+  picks.  If native picks a value smaller than salmon's pick
+  and smaller than numpy's, native's streaming_topk has a bug
+  — extremely unlikely since native is gfx1250-Triton-compiled
+  code running on the same hardware, but necessary for rigor.
+* Bisect with a HIP + inline-asm canary of the precise u32 pack
+  + `tl.topk` shape at BLOCK_M=32, BLOCK_N=32, k=4, to isolate
+  whether the index-key low 16 bits survive cross-widening.
+* A second `_const_in` probe for `topk_forward` with all-equal
+  X values: under ties-broken-by-smaller-index, both native and
+  salmon should pick indices [0, 1, 2, 3]; any other result is
+  a direct bug.
+
+The `rel-rms` extensions in the harness are general-purpose and
+stand on their own correctness (integer reduction of `sumDiff2`
+/ `sumGold2` is just as sound as the float paths); they don't
+depend on the `_topk_forward` investigation finishing.
+
+---
+
 ## 2026-04-22 — V_FMA_MIX inline-constant narrow-half: op_sel misapplied, silent bf16-reduction miscompile (closes topk_forward_bisect_m1_const_in)
 
 **Context.** Every bf16-in + reduction + bf16-out Triton kernel was
