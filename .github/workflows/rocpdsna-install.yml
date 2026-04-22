@@ -1,0 +1,107 @@
+name: rocpdsna Install
+run-name: rocpdsna-install
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+      - sna-develop
+    paths:
+      - '.github/workflows/rocpdsna-install.yml'
+      - 'projects/rocpdsna/**'
+      - '!projects/rocpdsna/build/**'
+      - '!projects/rocpdsna/docs/**'
+      - '!projects/rocpdsna/README.md'
+  pull_request:
+    paths:
+      - '.github/workflows/rocpdsna-install.yml'
+      - 'projects/rocpdsna/**'
+      - '!projects/rocpdsna/build/**'
+      - '!projects/rocpdsna/docs/**'
+      - '!projects/rocpdsna/README.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  install-and-consume:
+    name: ${{ matrix.os }} / install + find_package
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    env:
+      CC: gcc
+      CXX: g++
+      INSTALL_PREFIX: ${{ github.workspace }}/rocpdsna-install
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocpdsna
+            .github/workflows
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            gcc g++ \
+            libsqlite3-dev libspdlog-dev libfmt-dev nlohmann-json3-dev
+
+      - name: Configure rocpdsna
+        working-directory: projects/rocpdsna
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX} \
+            -DROCPDSNA_BUILD_TESTS=OFF \
+            -DROCPDSNA_BUILD_BENCHMARKS=OFF
+
+      - name: Build rocpdsna
+        working-directory: projects/rocpdsna
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Install rocpdsna
+        working-directory: projects/rocpdsna
+        run: cmake --install build
+
+      - name: Verify install layout
+        run: |
+          set -e
+          test -f ${INSTALL_PREFIX}/lib/librocpdsna.so       || { echo "::error::librocpdsna.so missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/lib/librocpdsna.a        || { echo "::error::librocpdsna.a missing";  exit 1; }
+          test -d ${INSTALL_PREFIX}/include/rocpdsna         || { echo "::error::include/rocpdsna missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/include/rocpdsna/writer.hpp  || { echo "::error::writer.hpp missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/include/rocpdsna/reader.hpp  || { echo "::error::reader.hpp missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/include/rocpdsna/storage.hpp || { echo "::error::storage.hpp missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/lib/cmake/rocpdsna/rocpdsna-config.cmake         || { echo "::error::rocpdsna-config.cmake missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/lib/cmake/rocpdsna/rocpdsna-config-version.cmake || { echo "::error::rocpdsna-config-version.cmake missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/lib/cmake/rocpdsna/rocpdsna-targets.cmake        || { echo "::error::rocpdsna-targets.cmake missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/lib/cmake/rocpdsna/Findrocpdsna.cmake            || { echo "::error::Findrocpdsna.cmake missing"; exit 1; }
+          echo "Install layout OK:"
+          find ${INSTALL_PREFIX} -type f | sort
+
+      - name: Configure consumer (find_package)
+        run: |
+          cmake \
+            -S projects/rocpdsna/tests/find_package \
+            -B consumer-build \
+            -DCMAKE_PREFIX_PATH=${INSTALL_PREFIX}
+
+      - name: Build consumer
+        run: cmake --build consumer-build --parallel $(nproc)
+
+      - name: Run consumer smoke test
+        working-directory: consumer-build
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/rocpdsna-install/lib
+        run: ctest --output-on-failure
