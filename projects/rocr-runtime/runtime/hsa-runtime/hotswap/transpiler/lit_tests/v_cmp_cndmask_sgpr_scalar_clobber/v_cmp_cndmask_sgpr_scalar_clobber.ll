@@ -1,7 +1,18 @@
 ; RUN: %raise_cli %v_cmp_cndmask_sgpr_scalar_clobber_co --isa=gfx1250 \
-; RUN:     --target-isa=gfx942 \
+; RUN:     --target-isa=gfx942 --disable-wave-native \
 ; RUN:     --emit-ir=v_cmp_cndmask_sgpr_scalar_clobber_kernel 2>/dev/null \
 ; RUN:   | %FileCheck %s
+;
+; `--disable-wave-native` pins the MODREP projection path. The
+; CHECK sequence below asserts the
+; `ModuloReplicationProjection::extractLaneBitFromWaveMask` shape
+; (mask_widen_shl / mask_widen_replicate), which is MODREP-specific:
+; WaveNative stores per-lane EXEC at target width and emits a
+; different extract chain, so the positive CHECKs below would not
+; match post-graduation default. See
+; hotswap/docs/modrep-predicate-chain.md §6 for the graduation
+; rationale and wave-size-translation.md §5.6.1 for the WaveNative
+; vs MODREP EXEC-storage contract.
 ;
 ; Fallback-path fixture for the V_CMP -> SGPR -> V_CNDMASK_B32_e64
 ; idiom. A scalar `s_mov_b32 s4, imm` sits between the V_CMP

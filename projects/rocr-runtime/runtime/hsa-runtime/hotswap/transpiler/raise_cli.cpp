@@ -50,19 +50,33 @@
 // pin the pre-rewrite contract.  Later-wins between the two flags is
 // by command-line order (last occurrence decides).
 //
-// --enable-wave-native. Optional; default off. Selects
-// `WaveNativeProjection` instead of `ModuloReplicationProjection`
-// for wave32 source → wave64 target cross-widening. Under wave-
-// native the kernel entry emits `@llvm.amdgcn.init_whole_wave` so
-// hardware EXEC = -1 for the body, which makes the WMMA → MFMA
-// pipeline in `wmma_lowering.cpp` correct on the upper half of the
-// Wave64 target. See `wave_projection.{hpp,cpp}` for the projection
-// class and hotswap/docs/wave-size-translation.md §2.2 for the
-// projection ladder. Lit fixtures that rely on the wave-native IR
-// shape (`v_cmpx_ballot`, the four `wmma_*`) opt in per RUN line;
-// kernels outside the matmul / WMMA subset stay on the modulo-
-// replication default until the corpus sweep validates the
-// broader flip.
+// --enable-wave-native / --disable-wave-native. Default **on** as
+// of the WaveNative graduation. Selects `WaveNativeProjection`
+// instead of `ModuloReplicationProjection` for wave32 source →
+// wave64 target cross-widening. Under wave-native the kernel entry
+// emits `@llvm.amdgcn.init_whole_wave` so hardware EXEC = -1 for
+// the body, which:
+//   * makes the WMMA → MFMA pipeline in `wmma_lowering.cpp`
+//     correct on the upper half of the Wave64 target (the original
+//     design motivation — see wave-size-translation.md §5.6.1);
+//   * projects kernels with `num_warps > 1` correctly by giving
+//     each target lane its own modeled-EXEC bit (fixes the
+//     `swiglu_fp32` / `corpus_layernorm_fp32` class documented in
+//     hotswap/docs/modrep-predicate-chain.md §9.6);
+//   * lets the canary `canary_bpermute_scan_fp32` silently
+//     miscompile again (the narrow-O1 C5 classifier short-circuits
+//     under WaveNative; the underlying bug is projection-
+//     independent, see modrep-predicate-chain.md §9.7 for the
+//     falsified SPE-phi-undef hypothesis and the open question
+//     about the actual scan-arithmetic mechanism).
+//
+// `--disable-wave-native` opts back into `ModuloReplicationProjection`
+// for the narrow class of pointwise / independent-half kernels where
+// MODREP's "replicas of source wave 0" model is correct AND where
+// the C5 refusal under MODREP is the desired loud-fail signal.
+// `HSA_SALMON_WAVE_NATIVE=1` in the process environment forces
+// WaveNative even when the caller explicitly opts out (see
+// `raiser.cpp` for the override).
 
 #include "code_object_utils.hpp"
 #include "pipeline.hpp"
@@ -121,13 +135,13 @@ int usage() {
       "usage:\n"
       "  raise_cli <code-object.co|.hsaco> [--isa=<arch>] "
       "[--target-isa=<arch>] [--disable-writelane-rewrite] "
-      "[--enable-wave-native]\n"
+      "[--disable-wave-native]\n"
       "  raise_cli <code-object.co|.hsaco> --emit-ir[=<kernel>] "
       "[--isa=<arch>] [--target-isa=<arch>] "
-      "[--disable-writelane-rewrite] [--enable-wave-native]\n"
+      "[--disable-writelane-rewrite] [--disable-wave-native]\n"
       "  raise_cli <code-object.co|.hsaco> --write-hsaco=<path> "
       "[--kernel=<name>] [--isa=<arch>] [--target-isa=<arch>] "
-      "[--disable-writelane-rewrite] [--enable-wave-native]\n"
+      "[--disable-writelane-rewrite] [--disable-wave-native]\n"
       "\n"
       "Default mode: emits per-kernel OK/FAIL lines on stdout in the format\n"
       "  kerneldex coverage expects. Exits 0 iff every kernel raises.\n"
@@ -144,9 +158,15 @@ int usage() {
       "  kept for backward compatibility (existing REWRITE lit RUN lines);\n"
       "  `--disable-` pins the pre-rewrite REFUSE / UNCHANGED path for the\n"
       "  sibling RUN lines. Later-wins on the command line.\n"
-      "--enable-wave-native: select WaveNativeProjection for wave32\n"
-      "  source \u2192 wave64 target cross-widening (default off; see\n"
-      "  wave-size-translation.md \u00a72.2).\n"
+      "--enable-wave-native / --disable-wave-native: select between\n"
+      "  WaveNativeProjection (post-graduation default) and\n"
+      "  ModuloReplicationProjection for wave32 source \u2192 wave64\n"
+      "  target cross-widening. The `--enable-` form is kept for\n"
+      "  backward compatibility; `--disable-` pins the MODREP path\n"
+      "  for lit fixtures and for kernels outside WaveNative's\n"
+      "  class coverage (see wave-size-translation.md \u00a7\u00a72.2 / 5.6.1\n"
+      "  and modrep-predicate-chain.md \u00a76 for the graduation\n"
+      "  rationale). Later-wins on the command line.\n"
       "ISA is inferred from the filename when --isa is not given.\n");
   return 2;
 }
@@ -164,7 +184,7 @@ int main(int argc, char **argv) {
   // pre-rewrite path for the lit fixtures that pin the
   // REFUSE / UNCHANGED sibling contracts.
   bool enableWritelaneRewrite = true;
-  bool enableWaveNative = false;
+  bool enableWaveNative = true;
   std::string emitIrKernel;
   std::string writeHsacoPath;
   std::string writeHsacoKernel;
@@ -201,6 +221,16 @@ int main(int argc, char **argv) {
       enableWritelaneRewrite = false;
     } else if (a == "--enable-wave-native") {
       enableWaveNative = true;
+    } else if (a == "--disable-wave-native") {
+      // Later-wins on the command line, symmetric with
+      // --enable-/--disable-writelane-rewrite. Post-graduation the
+      // default is on; --disable-wave-native is the opt-out path for
+      // lit fixtures that pin MODREP-specific IR shapes (the
+      // `cross_wave_warn` warn-only contract, the narrow-O1 C5
+      // refusal siblings) and for producer flows that want MODREP's
+      // "independent halves" throughput on pointwise kernels. See
+      // this file's top-of-file comment.
+      enableWaveNative = false;
     } else if (!a.empty() && a[0] == '-') {
       std::fprintf(stderr, "raise_cli: unknown flag: %s\n", a.c_str());
       return usage();

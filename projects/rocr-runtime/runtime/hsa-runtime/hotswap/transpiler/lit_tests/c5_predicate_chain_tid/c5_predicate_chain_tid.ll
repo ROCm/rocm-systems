@@ -1,6 +1,17 @@
 ; RUN: %not %raise_cli %c5_predicate_chain_tid_co --isa=gfx1250 --target-isa=gfx942 \
+; RUN:     --disable-wave-native \
 ; RUN:     --emit-ir=c5_predicate_chain_tid_kernel 2>&1 \
 ; RUN:   | %FileCheck %s --check-prefix=STDERR
+;
+; `--disable-wave-native` forces `ModuloReplicationProjection` — the
+; narrow-O1 classifier's refusal rationale is MODREP-scoped (the
+; replica-1-vs-source-wave-0 divergence it catches is a MODREP
+; artefact), so the classifier's `waveNative` gate short-circuits
+; refusal under the post-graduation WaveNative default. This
+; fixture pins the refusal on MODREP specifically. See
+; c5_predicate_chain_classifier.hpp's `waveNative` parameter
+; docstring and hotswap/docs/modrep-predicate-chain.md §6
+; "Picked: WaveNative as default" for the graduation rationale.
 ;
 ; Regression fence for the Class-5 "wave-size-sensitive predicate chain"
 ; narrow-O1 classifier

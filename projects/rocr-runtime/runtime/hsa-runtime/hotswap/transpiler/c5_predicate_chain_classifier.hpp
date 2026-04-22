@@ -127,11 +127,30 @@ struct PredicateChainClassifierReport {
 
 // Classify every `@llvm.amdgcn.workitem.id.x()` call in F against
 // the narrowing rule above. No-op (returns
-// `!refused && visitedCalls == 0`) when
-// `targetWaveSize <= sourceWaveSize` — same-wave / narrowing
-// directions have no replica-1 and no predicate-chain risk.
+// `!refused && visitedCalls == 0`) when either:
+//
+//   * `targetWaveSize <= sourceWaveSize` — same-wave / narrowing
+//     directions have no replica-1 and no predicate-chain risk.
+//   * `waveNative == true` — the WaveNativeProjection's
+//     `init_whole_wave` + per-lane modeled EXEC model eliminates
+//     MODREP's "target wave = R replicas of source wave 0 sharing
+//     source EXEC" assumption. Under WaveNative each target lane is
+//     its OWN source lane (tid = architectural tid = WG-level
+//     source tid for num_warps > 1 kernels; modeled EXEC bit =
+//     per-source-lane active state captured from the original HW
+//     EXEC at entry). The refusal rationale — "target replica-1
+//     evaluates the predicate differently from source wave 0's
+//     lane L despite sharing EXEC" — cannot fire because there
+//     are no replicas: each target lane evaluates the predicate
+//     on its own source-tid, and its store is gated by its own
+//     modeled EXEC bit. A kernel that would have been refused
+//     under MODREP is safe under WaveNative by construction. See
+//     wave-size-translation.md §5.6.1 for the WaveNative model and
+//     modrep-predicate-chain.md §9.5 / §9.6 for the MODREP-specific
+//     classes the classifier exists to catch.
 PredicateChainClassifierReport classifyPredicateChain(
-    llvm::Function &F, unsigned sourceWaveSize, unsigned targetWaveSize);
+    llvm::Function &F, unsigned sourceWaveSize, unsigned targetWaveSize,
+    bool waveNative = false);
 
 } // namespace transpiler
 

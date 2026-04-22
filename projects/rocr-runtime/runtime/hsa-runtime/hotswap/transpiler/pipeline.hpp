@@ -33,11 +33,13 @@ struct PipelineResult {
 /// bit-exactness regression gates).  Callers that specifically want
 /// the pre-rewrite path pass `false`.
 ///
-/// `enableWaveNative` opt-in selects `WaveNativeProjection` for
-/// wave32 → wave64 cross-widening (see `wave_projection.{hpp,cpp}`
-/// and wave-size-translation.md §2.2 projection ladder). Default off
-/// — `ModuloReplicationProjection` remains the canonical choice
-/// until the corpus sweep under wave-native confirms no regressions.
+/// `enableWaveNative` selects `WaveNativeProjection` for wave32 →
+/// wave64 cross-widening (see `wave_projection.{hpp,cpp}` and
+/// wave-size-translation.md §2.2 projection ladder). Default **on**
+/// as of the WaveNative graduation; pass `false` explicitly to
+/// opt into `ModuloReplicationProjection`. See `raiser.hpp`'s
+/// `enableWaveNative` parameter docstring for the full rationale
+/// and the `HSA_SALMON_WAVE_NATIVE` env-var override.
 ///
 /// Single-ISA convention: pass the same ISA string for both
 /// `sourceISA` and `targetISA` (e.g. `runPipeline(data, "gfx942",
@@ -67,7 +69,7 @@ PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
                            const std::string &targetISA,
                            const std::string &kernelName,
                            bool enableWritelaneRewrite = true,
-                           bool enableWaveNative = false);
+                           bool enableWaveNative = true);
 
 /// Raise and lower ALL kernels in a code object, producing a single merged
 /// HSACO containing every kernel.  Returns success only if every kernel was
@@ -77,7 +79,7 @@ PipelineResult runPipelineAllKernels(const std::vector<uint8_t> &codeObjectData,
                                      const std::string &sourceISA,
                                      const std::string &targetISA,
                                      bool enableWritelaneRewrite = true,
-                                     bool enableWaveNative = false);
+                                     bool enableWaveNative = true);
 
 /// Process-global "strict mode" toggle, controlled by the
 /// `HSA_SALMON_STRICT` environment variable. When set to a non-empty

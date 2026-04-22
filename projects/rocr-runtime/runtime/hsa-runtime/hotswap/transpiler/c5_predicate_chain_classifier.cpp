@@ -162,7 +162,8 @@ std::string formatRefusalDetail(const ICmpInst *cmp, const ConstantInt *K,
 } // namespace
 
 PredicateChainClassifierReport classifyPredicateChain(
-    Function &F, unsigned sourceWaveSize, unsigned targetWaveSize) {
+    Function &F, unsigned sourceWaveSize, unsigned targetWaveSize,
+    bool waveNative) {
   PredicateChainClassifierReport report;
 
   // Direction gate: no predicate-chain risk at same-wave or narrowing,
@@ -170,6 +171,17 @@ PredicateChainClassifierReport classifyPredicateChain(
   if (targetWaveSize <= sourceWaveSize)
     return report;
   if (sourceWaveSize < 2)
+    return report;
+
+  // Projection gate: under WaveNativeProjection the refusal rationale
+  // does not apply (each target lane is its own source lane; no
+  // MODREP replica-1 sharing source wave 0's EXEC). See the
+  // `waveNative` parameter docstring in the header for the detailed
+  // model; this early-return is the structural consequence of that
+  // reasoning. No sites tracked because the classifier should not
+  // surface any end-to-end signal under a projection where its
+  // diagnostic would be a false positive.
+  if (waveNative)
     return report;
 
   // Collect every `@llvm.amdgcn.workitem.id.x()` call site. Matches

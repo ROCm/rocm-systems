@@ -37,6 +37,18 @@
 //   * NarrowingDirectionGate — wave64 → wave32 (narrowing)
 //     MUST return `!refused && visitedCalls == 0`. Pins the
 //     direction gate.
+//   * WaveNativeProjectionGate — same refusal-shaped kernel as
+//     TidDirectSmallConstRefuses, but invoked with
+//     `waveNative = true`. MUST return
+//     `!refused && visitedCalls == 0`. Pins the structural
+//     projection gate: under WaveNativeProjection each target
+//     lane is its own source lane (no MODREP replica-1 sharing
+//     source wave 0's EXEC), so the refusal rationale cannot
+//     apply and the classifier must stay quiet. Protects the
+//     HSA_SALMON_WAVE_NATIVE plumbing in loader/executable.cpp +
+//     the `enableWaveNative` thread-through in raiser.cpp Phase
+//     6.6 from a future refactor that accidentally drops the
+//     parameter.
 //   * NoCallsIsNoOp — function with no `workitem.id.x` intrinsic
 //     call returns `!refused && visitedCalls == 0`.
 //   * PhiPropagatesTidDerivation — tid flows through a phi whose
@@ -286,6 +298,37 @@ TEST(C5PredicateChain, NarrowingDirectionGate) {
                                         /*tgt=*/kSrcWs);
   EXPECT_FALSE(report.refused);
   EXPECT_EQ(report.visitedCalls, 0u);
+}
+
+// ---------------------------------------------------------------------
+// Projection gate: WaveNativeProjection MUST suppress the refusal,
+// even on the exact IR shape that the default MODREP path would
+// refuse. Pins the structural projection gate documented on the
+// `waveNative` parameter in the header — regressions that accidentally
+// drop the plumbing from loader/executable.cpp or raiser.cpp Phase 6.6
+// fail this test.
+// ---------------------------------------------------------------------
+TEST(C5PredicateChain, WaveNativeProjectionGate) {
+  Harness H;
+  Value *tid = H.emitTid();
+  auto *i32Ty = Type::getInt32Ty(H.ctx);
+  Value *cmp = H.B.CreateICmpULT(
+      tid, ConstantInt::get(i32Ty, 15), "c5_cmp_wave_native");
+  H.emitStoreGate(cmp);
+  H.finish();
+
+  // Sanity: under MODREP (waveNative=false) this exact IR refuses.
+  // Narrows the WaveNative assertion to "the flag specifically is
+  // what turns the refusal off", not "the IR happens to be safe".
+  auto modrepReport =
+      classifyPredicateChain(*H.F, kSrcWs, kTgtWs, /*waveNative=*/false);
+  EXPECT_TRUE(modrepReport.refused);
+
+  auto waveNativeReport =
+      classifyPredicateChain(*H.F, kSrcWs, kTgtWs, /*waveNative=*/true);
+  EXPECT_FALSE(waveNativeReport.refused);
+  EXPECT_EQ(waveNativeReport.visitedCalls, 0u);
+  EXPECT_TRUE(waveNativeReport.refusalDetail.empty());
 }
 
 // ---------------------------------------------------------------------

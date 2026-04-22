@@ -1508,6 +1508,14 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
           }
 
           const uint8_t* elfBytes = reinterpret_cast<const uint8_t*>(elfData);
+          // Post-graduation default: WaveNative is on for wave32 →
+          // wave64 cross-widening. See hotswap/docs/modrep-predicate-
+          // chain.md §6 for the empirical evidence (swiglu_fp32
+          // WRONG → match; corpus_layernorm_fp32 partial-match; no
+          // ctest / lit / BatchRaise regressions) that drove the
+          // graduation. Process-global `HSA_SALMON_WAVE_NATIVE=1`
+          // override is handled inside `raiseToIR` for parity with
+          // the gtest surface; no per-call read here.
           auto irResult = transpiler::runPipelineAllKernels(
               {elfBytes, elfBytes + elfSize}, srcGfx, tgtGfx);
 

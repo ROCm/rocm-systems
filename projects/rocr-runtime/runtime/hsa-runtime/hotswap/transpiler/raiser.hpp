@@ -48,20 +48,46 @@ struct RaiseResult {
 // `REFUSE` sibling contract) pass `false` explicitly.
 //
 // `enableWaveNative` toggles `WaveNativeProjection` for wave32 source
-// → wave64 target cross-widening. Default off; under the default,
-// `ModuloReplicationProjection` is used (the long-standing shape,
-// see wave-size-translation.md §§2.2 and 5.1). Under wave-native the
+// → wave64 target cross-widening.
+//
+// Default **on** as of the WaveNative graduation (see
+// hotswap/docs/modrep-predicate-chain.md §6 "Picked: WaveNative as
+// default" for the empirical evidence). Under the default, the
 // kernel body runs with hardware EXEC = -1 after an `@llvm.amdgcn.
 // init_whole_wave` prologue captures the original per-lane active
-// mask into the EXEC alloca. This preserves lanes 32..63 through
-// every WMMA → MFMA collective (the pipeline in `wmma_lowering.cpp`
-// requires full EXEC on both halves of the Wave64 for correct
-// redistribute / MFMA / collect), at the cost of a semantic change
-// to source-width EXEC writes (`s_mov_b32 exec_lo, v` now replicates
-// into both halves of the widened EXEC; see
-// `WaveProjection::broadcastNarrowExecLoWrite`). Gated per-caller
-// during the rollout until the corpus sweep confirms no regression
-// on kernels that rely on the old half-write semantics.
+// mask into the (widened) EXEC alloca. Each target lane has its
+// own modeled-EXEC bit — source-wave L's EXEC_L and target-wave's
+// lane L+W_s are independent, NOT MODREP replicas — so kernels
+// compiled with `num_warps > 1` (swiglu_fp32, corpus_layernorm_fp32)
+// correctly project each source wave onto its own target-wavefront
+// half. The compare_correctness sweep post-graduation shows
+// `swiglu_fp32` flipping from WRONG 4/4 to match 4/4 and
+// `corpus_layernorm_fp32` partial-matching with much smaller
+// residual error.
+//
+// MODREP (`ModuloReplicationProjection`) is retained but opt-in via
+// `--disable-wave-native` (raise_cli) or `enableWaveNative=false`
+// (pipeline callers). It remains correct on the narrow class of
+// kernels where source-wave-0's semantics replicate cleanly across
+// the target wave (pointwise kernels with no cross-wave state;
+// kernels that pass G1's obstruction classifier and whose cross-
+// lane ops stay within a single source-wave half). The C5
+// predicate-chain classifier (`c5_predicate_chain_classifier`) is
+// structurally MODREP-scoped (the refusal rationale is MODREP-
+// replica-specific) and short-circuits under WaveNative, so
+// kernels that were loud-refused under the pre-graduation MODREP
+// default now either succeed (swiglu class) or silently
+// miscompile (`canary_bpermute_scan_fp32` class, investigation
+// pending — see hotswap/docs/modrep-predicate-chain.md §9.7 for
+// the falsified SPE-phi-undef hypothesis and the open question
+// about the projection-independent scan-arithmetic bug).
+//
+// Process-global override: setting `HSA_SALMON_WAVE_NATIVE=1`
+// forces the post-graduation on-default even for callers that
+// explicitly pass `false` (to e.g. validate the new default
+// against a stubbornly-MODREP-coded existing test). Setting
+// `HSA_SALMON_WAVE_NATIVE=0` is ignored (there is no "force
+// disable" override — opt out via the parameter).
 RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
                       const std::string &sourceISA,
                       const std::string &kernelName,
@@ -69,7 +95,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
                       uint64_t kernelOffset = 0,
                       const std::string &compilationTargetISA = "",
                       bool enableWritelaneRewrite = true,
-                      bool enableWaveNative = false);
+                      bool enableWaveNative = true);
 
 } // namespace transpiler
 

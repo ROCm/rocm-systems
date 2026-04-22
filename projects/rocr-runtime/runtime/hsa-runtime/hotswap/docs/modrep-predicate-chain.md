@@ -1,17 +1,33 @@
 # MODREP predicate-chain class
 
-**Status.** Narrow-O1 classifier landed 2026-04-21 (see §5 O1's
-status line, §6's "Picked" paragraph, and the landed-regression-
-guards list at the end of §7). Catches the Kogge-Stone
-scan-stage-guard shape (`workitem.id.x()` → `icmp` against
-compile-time `K ≤ W_s − 1`), refusing one recipe
-(`canary_bpermute_scan_fp32`) that previously silently miscompiled.
-§5 O2 (mask rewrite) is explicitly deferred per the Phase-2 IR
-inspection in §9.6 — the proposed rewrite shape was shown to be
-semantically incorrect for the remaining failing recipes. The
-`swiglu_fp32` / `corpus_layernorm_fp32` miscompiles stay out of
-scope until a single-element trace establishes their actual
-mechanism; see §9.6 for the orthogonal-class diagnosis.
+**Status.** WaveNativeProjection graduated to the cross-widening
+default 2026-04-21 (this commit, see §6's "Picked: WaveNative as
+default" paragraph). Strict numerical improvements on
+`compare_correctness`: `swiglu_fp32` flips from WRONG 4/4 to match
+4/4; `corpus_layernorm_fp32` partial-matches (N=1024 matches;
+smaller N retain much smaller residual error). Zero regressions
+across the full ctest + lit + BatchRaise.AiterGfx950 surface.
+MODREP remains fully intact as an opt-in via `--disable-wave-native`
+(and is still the default for non-cross-widening directions —
+same-wave and narrowing bypass WaveNative's direction gate).
+
+The narrow-O1 C5 classifier (landed in the prior commit, 2026-04-21)
+stays in the codebase as a MODREP-scoped refusal net: under
+WaveNative its `waveNative` short-circuit fires, which is why
+`canary_bpermute_scan_fp32` silently miscompiles under the new
+default. Its miscompile mechanism is projection-independent
+(falsified the §9.7 SPE-phi-undef hypothesis via the
+`HSA_SALMON_VGPR_SPE_BYPASS=1` experiment: identical WRONG numbers
+under three different projection configurations, plus a regression
+on `canary_permlanex16_rowmax_fp32 N_ROWS=8192`). The actual
+mechanism is open — see §9.7 for the falsified hypothesis + open
+question. To surface the canary refusal diagnostic again, the
+caller opts into MODREP via `--disable-wave-native`.
+
+§5 O2 (`tid AND (W_s − 1)` mask rewrite) remains deferred. Under
+WaveNative the predicate-chain class the mask was designed for
+doesn't fire (WaveNative's per-lane modeled EXEC removes the
+MODREP replica-1 ambiguity), so the mask has nothing to rewrite.
 
 **Scope.** One wave-size axis concern: kernels compiled for a source
 wave width `W_s` that reach cross-widening (`W_t > W_s`) under modulo-
@@ -772,6 +788,100 @@ observations during implementation would reopen the decision:
   with its mixed bitmatrix / scan / writelane pattern). Forces
   O3 onto the roadmap.
 
+**Picked (as landed 2026-04-21, graduation commit): WaveNative as
+default cross-widening projection; MODREP retained as opt-in.**
+(The prior narrow-O1-only landing is the pre-graduation state; its
+"Picked" text remains below as the historical record.)
+
+### Why WaveNative graduated
+
+Empirical evidence collected with `HSA_SALMON_WAVE_NATIVE=1` (the
+temporary opt-in flag from Step A of the investigation, now
+promoted to default):
+
+**Correctness (compare_correctness salmon path, gfx1250 → gfx942):**
+
+| recipe | MODREP (pre-graduation) | WaveNative (post-graduation) |
+|---|---|---|
+| `canary_bpermute_scan_fp32` | refused 4/4 (C5 classifier) | WRONG 4/4 (C5 short-circuits under WaveNative; underlying bug is projection-independent, see §9.7) |
+| `swiglu_fp32` | WRONG 4/4 | **match 4/4** |
+| `corpus_layernorm_fp32` | WRONG 4/4 | match @ N=1024; WRONG @ N=128/256/512 with 20×–80× smaller max\|err\| |
+| `rmsnorm_fp32` | match 4/4 | match 4/4 |
+| `corpus_softmax_fp32` | EXIT=2 (writelane safety net) | EXIT=2 (unchanged) |
+| 7 baselines (`vecadd_f16`, `rope_fp32`, `corpus_add_fp32`, `corpus_asin_fp32`, `canary_dpp_compound_add_fp32`, `canary_dpp_reduce_fp32`, `canary_permlanex16_rowmax_fp32`) | match 4/4 | match 4/4 |
+
+**Regression surface:** `ctest` and `llvm-lit` produced identical
+pass/fail counts under both projections
+(48 tests, 4 pre-existing failures; 89 lit tests, 1 pre-existing
+`s_atomic_dec` failure). `BatchRaise.AiterGfx950` raise rate
+unchanged (24/27, 3 expected `v_permlane32_swap_b32` pendings).
+`Gfx1250Gpu.Matmul128x128_1tile` unchanged (already exercised
+WaveNative explicitly pre-graduation).
+
+### Why WaveNative covers what MODREP fails on
+
+- **`num_warps > 1` classes (swiglu / corpus_layernorm).** MODREP's
+  "target wave = R replicas of source wave 0 sharing source
+  EXEC" model is incorrect when the source has multiple
+  wavefronts with distinct EXEC registers. WaveNative stores
+  per-lane modeled EXEC at target width: target wavefront 0 lanes
+  0..31 run source wave 0, lanes 32..63 run source wave 1,
+  each with its own EXEC bit. No replica sharing.
+- **WMMA / matrix kernels.** Already depend on WaveNative for the
+  `init_whole_wave` + Wave64-collective correctness invariant
+  (wave-size-translation.md §5.6.1). Graduation is a superset:
+  everything that already worked keeps working; new recipes
+  outside the matrix family pick up the same correctness
+  guarantees.
+
+### What doesn't fix under WaveNative
+
+- **`canary_bpermute_scan_fp32`.** Produces identical WRONG
+  numerical output under MODREP, WaveNative, and WaveNative +
+  `HSA_SALMON_VGPR_SPE_BYPASS=1` (the experiment documented in
+  §9.7). The miscompile mechanism is projection-independent —
+  the bug is upstream of WaveNative/MODREP entirely, most likely
+  in `handle_ds.cpp`'s `ds_bpermute_b32` lift or in the cumsum's
+  specific arithmetic-emission path. §9.7 tracks the open
+  investigation.
+- **`corpus_layernorm_fp32` small-N residual.** N=128/256/512
+  have much smaller error under WaveNative than MODREP, but are
+  still not bit-for-bit match. Likely a reduction-ordering or
+  precision issue orthogonal to the projection class. §9.8
+  tracks the open investigation.
+
+### MODREP retention
+
+MODREP code is fully intact — no deletions, no structural changes.
+Three surfaces retain MODREP as the active projection:
+
+1. Same-wave and narrowing: WaveNativeProjection's constructor
+   `report_fatal_error`s on `!(isa.isWave32() && !targetIsa.isWave32())`,
+   so same-wave / narrowing directions always pick MODREP (via
+   the `enableWaveNative && ...` guard in `raiser.cpp`'s projection
+   selection).
+2. Explicit `--disable-wave-native` on `raise_cli`, or
+   `enableWaveNative=false` on `pipeline.hpp` / `raiser.hpp`
+   callers. Preserved specifically for (a) lit fixtures that pin
+   MODREP-shape IR invariants (`c5_predicate_chain_tid`,
+   `v_cmp_cndmask_sgpr_scalar_clobber`), (b) surfacing the C5
+   classifier's diagnostic for canary-class kernels, (c) operators
+   debugging projection-specific behaviour.
+3. The C5 classifier's refusal path runs under MODREP and
+   short-circuits under WaveNative (see
+   `c5_predicate_chain_classifier.hpp`'s `waveNative` parameter
+   docstring). Refusing `canary_bpermute_scan_fp32` on the MODREP
+   path keeps the loud-refused attribution available via explicit
+   opt-out.
+
+---
+
+## 6.0. Historical record: narrow-O1-only pick (2026-04-21 prior commit)
+
+The prior "Picked" narrative below reflects the narrow-O1-only
+landing that preceded this graduation commit. Kept for traceability;
+superseded by the WaveNative graduation above.
+
 **Picked (as landed 2026-04-21): narrow-O1 only.** Trigger: the
 sequential falsification chain in §9:
 
@@ -1424,3 +1534,95 @@ The `<kernel_symbol>` comes from the recipe's sidecar
    `c5_predicate_chain_classifier.hpp` draft, and the
    `selectFailureFromReport` case) that I had in flight have been
    reverted.
+7. **§9.7 SPE-phi-undef hypothesis — FALSIFIED (opened + closed
+   2026-04-21 by the Step-A/B empirical investigation of
+   WaveNative graduation).**
+
+   Hypothesis (per §9.5 / §9.6 of the pre-graduation design): the
+   `canary_bpermute_scan_fp32` miscompile under MODREP (and,
+   newly, under WaveNative) is caused by the SPE diamond's phi
+   pattern `%vgpr_N = phi [%loaded, %spe_do], [undef, %spe_skip]`.
+   Inactive source lanes take `spe_skip`; `PromoteMemToReg`
+   materialises their phi as `undef`. A convergent cross-lane op
+   (`ds_bpermute`, `permlanex16`, DPP) then reads the undef VGPR
+   as its DATA input across all 64 hardware lanes. Under
+   `init_whole_wave` + WaveNative (HW EXEC = -1), inactive-source
+   lanes execute but their SPE-gated VGPR-alloca writes are still
+   discarded by the AMDGPU backend's HW-EXEC-masked store lowering
+   of the mem2reg-introduced phi.
+
+   Experiment (`HSA_SALMON_VGPR_SPE_BYPASS=1`, env-var-gated patch
+   in `raise_context.cpp` that replaces `emitUnderExec([&]{
+   storeVGPR*(...) })` with the direct `storeVGPR*(...)` call for
+   the VGPR / AGPR arms of `writeReg*` / `storeVGPR*` / `storeAGPR*`).
+   Under the bypass, VGPR writes from load handlers run
+   unconditionally; under WaveNative's `init_whole_wave` ambient
+   HW EXEC = -1 all 64 lanes commit the computed value to their
+   VGPR alloca. Predicted result: active lanes' bpermute gathers
+   see defined values from every lane, `canary_bpermute_scan_fp32`
+   flips from WRONG to match.
+
+   Empirical result: **falsified**.
+
+   - `canary_bpermute_scan_fp32` under WaveNative + SPE-bypass
+     produces *identical* WRONG numerical output to WaveNative
+     alone (and to MODREP). `max|err|` 6.22701, 15.4385, 18.4618,
+     21.7873 on N=128/1024/8192/65536 respectively. Reproducible
+     byte-for-byte across multiple runs.
+   - `canary_permlanex16_rowmax_fp32` at N_ROWS=8192 regresses
+     from match to EXIT=2 under the bypass — the SPE-bypass
+     introduces a separate hazard at scale.
+
+   Conclusion: the SPE-phi-undef pattern is NOT the mechanism of
+   `canary_bpermute_scan_fp32`'s miscompile. The bug is
+   projection-independent (identical output under MODREP,
+   WaveNative, and WaveNative + SPE-bypass) and upstream of the
+   projection layer entirely. Suspect surfaces for follow-up:
+
+   - `handle_ds.cpp`'s `DS_BPERMUTE_B32` handler's IR shape
+     (selector byte-to-lane scaling, data operand routing).
+   - The scan's ambient-arithmetic handlers (`V_ADD_F32`,
+     `V_CNDMASK_B32`, per-stage predicate emission) — Triton's
+     gfx1250 cumsum might emit an instruction pattern that a
+     handler lifts with subtle off-by-one / sign-extension bug.
+   - The source-binary → SemOp decode for some specific
+     instruction in the scan stages.
+
+   Method: single-element trace. Pick one output slot where
+   salmon produces WRONG output, instrument the scan stages on a
+   side channel, compare against the native gfx942 build's
+   arithmetic path element-by-element. The experiment code was
+   reverted; no new code remained under investigation.
+
+   This finding removes the §9.5 "convergent-cross-lane-op
+   inactive-lane leak" class from the graduation's unresolved
+   list — the original diagnosis was wrong, so the class doesn't
+   exist as framed. `canary_bpermute_scan_fp32` stays under "open
+   mechanism" until the single-element trace runs.
+
+8. **Corpus_layernorm small-N residual (opened 2026-04-21 by
+   WaveNative graduation).**
+
+   Under WaveNative, `corpus_layernorm_fp32` matches at N=1024
+   but remains WRONG at N=128/256/512. The residual error
+   magnitudes are tiny (max\|err\| 0.016 at N=512, 0.034 at N=256,
+   0.128 at N=128) — 20×–80× smaller than the pre-WaveNative
+   MODREP error (max\|err\| up to 2.7 at N=128). Error shrinks as
+   N grows.
+
+   Hypotheses worth investigating:
+
+   - Reduction-ordering difference between the raised gfx942
+     kernel and the Triton-native gfx942 gold, amplified by the
+     smaller reduction tree at smaller N.
+   - Rounding-mode or FP-precision drift in a handler (`v_rsq_f32`
+     / `v_rcp_f32` Newton iteration paths — the same cluster that
+     the prior `v_div_scale_f32` commit tightened orthogonally
+     and incidentally fixed `rmsnorm_fp32`).
+   - Sub-case-2 interaction specific to WaveNative on smaller
+     blockDim.x ranges the pre-graduation sweep didn't observe as
+     distinct.
+
+   Method: same single-element trace on N=128 of `corpus_layernorm_fp32`.
+   Compare the raised mean + var computation against the Triton
+   native gold; find the first divergence.
