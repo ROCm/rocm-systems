@@ -573,11 +573,9 @@ static uint32_t getRSMIEnvVar_LoggingEnabled(const char* ev_str) {
   return ret;
 }
 
+#ifdef DEBUG
 static inline std::unordered_set<uint32_t> GetEnvVarUIntegerSets(const char* ev_str) {
   std::unordered_set<uint32_t> returnSet;
-#ifndef DEBUG
-  (void)ev_str;
-#else
   ev_str = getenv(ev_str);
   if (ev_str == nullptr) {
     return returnSet;
@@ -596,9 +594,9 @@ static inline std::unordered_set<uint32_t> GetEnvVarUIntegerSets(const char* ev_
       returnSet.insert(parsedUInt);
     }
   }
-#endif
   return returnSet;
 }
+#endif
 
 // Get and store env. variables in this method
 void RocmSMI::GetEnvVariables(void) {
