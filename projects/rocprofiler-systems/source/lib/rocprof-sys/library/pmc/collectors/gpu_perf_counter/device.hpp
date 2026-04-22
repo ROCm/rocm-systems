@@ -96,6 +96,26 @@ public:
         return result;
     }
 
+    void start()
+    {
+        auto status = m_driver_api->start_context(m_context);
+        if(status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            LOG_WARNING("Failed to start context for device {} (status={})",
+                        m_agent->device_type_index, static_cast<int>(status));
+        }
+    }
+
+    void stop()
+    {
+        auto status = m_driver_api->stop_context(m_context);
+        if(status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            LOG_WARNING("Failed to stop context for device {} (status={})",
+                        m_agent->device_type_index, static_cast<int>(status));
+        }
+    }
+
 private:
     std::shared_ptr<Driver>                   m_driver_api;
     rocprofiler_context_id_t                  m_context;

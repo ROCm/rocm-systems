@@ -26,6 +26,9 @@ namespace rocprofsys::pmc::drivers::rocprofiler_sdk::testing
 class mock_driver
 {
 public:
+    MOCK_METHOD(rocprofiler_status_t, create_context,
+                (rocprofiler_context_id_t * context));
+
     MOCK_METHOD(rocprofiler_status_t, start_context, (rocprofiler_context_id_t context));
 
     MOCK_METHOD(rocprofiler_status_t, stop_context, (rocprofiler_context_id_t context));

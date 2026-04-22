@@ -34,40 +34,26 @@ public:
     using driver_t = typename DriverFactory::driver_t;
     using device_t = collectors::gpu_perf_counter::device<driver_t>;
 
-    provider(uint32_t                                             context_handle,
-             const std::vector<std::shared_ptr<agent>>&           agent_list,
+    provider(const std::vector<std::shared_ptr<agent>>&           agent_list,
              const collectors::gpu_perf_counter::enabled_metrics& enabled)
     : m_driver_api{ DriverFactory::create_driver() }
-    , m_context{ context_handle }
     {
         configure_agents(agent_list, enabled);
     }
 
     void start()
     {
-        auto status = m_driver_api->start_context(m_context);
-        if(status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED)
+        for(const auto& device : m_devices)
         {
-            LOG_DEBUG(
-                "HSA not loaded for GPU Perf Counter context (status={}). Ignoring.. ",
-                static_cast<int>(status));
-            return;
-        }
-
-        if(status != ROCPROFILER_STATUS_SUCCESS)
-        {
-            LOG_WARNING("Failed to start SDK PMC context (status={})",
-                        static_cast<int>(status));
+            device->start();
         }
     }
 
     void stop()
     {
-        auto status = m_driver_api->stop_context(m_context);
-        if(status != ROCPROFILER_STATUS_SUCCESS)
+        for(const auto& device : m_devices)
         {
-            LOG_DEBUG("Failed to stop SDK PMC context (status={})",
-                      static_cast<int>(status));
+            device->stop();
         }
     }
 
@@ -117,8 +103,17 @@ private:
 
             m_profile_configs[gpu_agent->handle] = profile;
 
+            rocprofiler_context_id_t counter_context{};
+            status = m_driver_api->create_context(&counter_context);
+            if(status != ROCPROFILER_STATUS_SUCCESS)
+            {
+                LOG_WARNING("Failed to create context for agent {} (status={})",
+                            gpu_agent->handle, static_cast<int>(status));
+                continue;
+            }
+
             status = m_driver_api->configure_device_counting_service(
-                m_context, rocprofiler_buffer_id_t{ 0 }, agent_id,
+                counter_context, rocprofiler_buffer_id_t{ 0 }, agent_id,
                 [](rocprofiler_context_id_t ctx, rocprofiler_agent_id_t agent_cb,
                    rocprofiler_device_counting_agent_cb_t set_config, void* user_data) {
                     auto* configs = static_cast<
@@ -138,8 +133,9 @@ private:
 
             const auto counter_meta = resolve_counter_details(filtered_ids);
 
-            m_devices.push_back(std::make_shared<device_t>(
-                m_driver_api, m_context, gpu_agent, profile, std::move(counter_meta)));
+            m_devices.push_back(std::make_shared<device_t>(m_driver_api, counter_context,
+                                                           gpu_agent, profile,
+                                                           std::move(counter_meta)));
         }
     }
 
@@ -246,7 +242,6 @@ private:
     }
 
     std::shared_ptr<driver_t>              m_driver_api;
-    rocprofiler_context_id_t               m_context;
     std::vector<std::shared_ptr<device_t>> m_devices;
     // Must outlive the context: the SDK callback set via
     // configure_device_counting_service fires during start_context(), reading from this

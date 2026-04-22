@@ -26,6 +26,11 @@ namespace rocprofsys::pmc::drivers::rocprofiler_sdk
  */
 struct driver
 {
+    static rocprofiler_status_t create_context(rocprofiler_context_id_t* context)
+    {
+        return rocprofiler_create_context(context);
+    }
+
     // --- Context lifecycle ---
 
     static rocprofiler_status_t start_context(rocprofiler_context_id_t context)
