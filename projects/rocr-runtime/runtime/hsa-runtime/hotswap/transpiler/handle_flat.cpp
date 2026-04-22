@@ -200,6 +200,23 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
       sop == SemOp::GLOBAL_STORE_DWORDX4) {
     int storeDwords = 1;
     int storeBits = 32;
+    // `_D16_HI` variants store bits [31:16] of the source VGPR rather
+    // than [15:0] — a half-register selector baked into the opcode
+    // (AMDGPU ISA; see `global_store_d16_hi_b16` in
+    // FLATInstructions.td and handle_ds.cpp's DS_WRITE_B16_D16_HI for
+    // the existing DS-family precedent).  The compiler emits this
+    // form to write the upper-16-bits half of a 32-bit value without
+    // an explicit `v_lshrrev_b32` shift — idiomatic in the fp32→bf16
+    // round-to-nearest-even epilogue (`v_add3_u32 v, bits, odd_bit,
+    // 0x7fff` produces the RNE-biased sum in a 32-bit VGPR, and
+    // `global_store_d16_hi_b16` writes its upper 16 bits = the bf16
+    // result).  Pre-fix, `storeHiHalf=false` for
+    // `GLOBAL_STORE_SHORT_D16_HI` was silently wrong: every bf16-cast-
+    // store kernel (Triton's `.to(tl.bfloat16) + tl.store` shape, which
+    // the observed-production `topk_forward_bisect_m_laneprobe` recipe
+    // exercises with no cross-lane ops) stored the LOW 16 bits of the
+    // biased sum, reading as NaN-ish (`0x7FFF`) for typical values.
+    bool storeHiHalf = false;
     if (sop == SemOp::GLOBAL_STORE_DWORDX4) storeDwords = 4;
     else if (sop == SemOp::GLOBAL_STORE_DWORDX3) storeDwords = 3;
     else if (sop == SemOp::GLOBAL_STORE_DWORDX2) storeDwords = 2;
@@ -208,6 +225,7 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
              sop == SemOp::GLOBAL_STORE_SHORT_D16_HI) {
       storeBits = 16;
       storeDwords = 0;
+      storeHiHalf = (sop == SemOp::GLOBAL_STORE_SHORT_D16_HI);
     } else if (sop == SemOp::GLOBAL_STORE_BYTE) {
       storeBits = 8;
       storeDwords = 0;
@@ -227,7 +245,18 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
 
     if (storeDwords == 0) {
       Type *memTy = Type::getIntNTy(ctx.C, storeBits);
-      Value *val = ctx.B.CreateTrunc(ctx.regs.readReg32(ctx.B, stData), memTy);
+      Value *src32 = ctx.regs.readReg32(ctx.B, stData);
+      if (storeHiHalf) {
+        // `_D16_HI`: store the upper 16 bits of the source VGPR.  The
+        // `lshr ..., 16` hoists bits [31:16] down to [15:0] before the
+        // trunc takes the low 16.  InstCombine folds this pair to the
+        // equivalent `trunc i32 (lshr ...) to i16` shape the backend
+        // prefers.
+        src32 = ctx.B.CreateLShr(src32,
+                                  ConstantInt::get(ctx.i32Ty, 16),
+                                  "d16hi_shift");
+      }
+      Value *val = ctx.B.CreateTrunc(src32, memTy);
       ctx.emitUnderExec([&] { ctx.B.CreateStore(val, addr); });
     } else if (storeDwords == 1) {
       Value *val = ctx.regs.readReg32(ctx.B, stData);
@@ -660,12 +689,21 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
       sop == SemOp::FLAT_STORE_SHORT_D16_HI) {
     int storeDwords = 1;
     int storeBits = 32;
+    // `FLAT_STORE_SHORT_D16_HI` stores bits [31:16] of the source
+    // VGPR, not [15:0] — same half-register selector as
+    // `GLOBAL_STORE_SHORT_D16_HI` above; see the comment block on
+    // the GLOBAL_STORE_ branch for the full rationale (bf16 RNE
+    // epilogue, pre-fix miscompile shape, etc.).
+    bool storeHiHalf = false;
     if (sop == SemOp::FLAT_STORE_DWORDX4) storeDwords = 4;
     else if (sop == SemOp::FLAT_STORE_DWORDX3) storeDwords = 3;
     else if (sop == SemOp::FLAT_STORE_DWORDX2) storeDwords = 2;
     else if (sop == SemOp::FLAT_STORE_DWORD) storeDwords = 1;
     else if (sop == SemOp::FLAT_STORE_SHORT ||
-             sop == SemOp::FLAT_STORE_SHORT_D16_HI) { storeBits = 16; storeDwords = 0; }
+             sop == SemOp::FLAT_STORE_SHORT_D16_HI) {
+      storeBits = 16; storeDwords = 0;
+      storeHiHalf = (sop == SemOp::FLAT_STORE_SHORT_D16_HI);
+    }
     else if (sop == SemOp::FLAT_STORE_BYTE) { storeBits = 8; storeDwords = 0; }
 
     // Two operand-shape variants with distinct AS semantics; mirror
@@ -705,7 +743,13 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
     }
     if (storeDwords == 0) {
       Type *memTy = Type::getIntNTy(ctx.C, storeBits);
-      Value *val = ctx.B.CreateTrunc(ctx.regs.readReg32(ctx.B, stData), memTy);
+      Value *src32 = ctx.regs.readReg32(ctx.B, stData);
+      if (storeHiHalf) {
+        src32 = ctx.B.CreateLShr(src32,
+                                  ConstantInt::get(ctx.i32Ty, 16),
+                                  "d16hi_shift");
+      }
+      Value *val = ctx.B.CreateTrunc(src32, memTy);
       ctx.emitUnderExec([&] { ctx.B.CreateStore(val, addr); });
     } else if (storeDwords == 1) {
       Value *val = ctx.regs.readReg32(ctx.B, stData);

@@ -154,6 +154,16 @@ config.fixtures = {
     # pin both sides of the rewrite's all-or-nothing symmetry.
     "c2_dpp_row_ror_refuse":
         r"@LIT_FIXTURE_C2_DPP_ROW_ROR_REFUSE_CO@",
+    # global_store_short_d16_hi — companion to ds_store_b16_d16_hi.
+    # Pins the "upper 16 bits of source VGPR" lift shape for
+    # `global_store_d16_hi_b16` (the addrspace(1) half-register
+    # store the compiler emits as the bf16 RNE-cast epilogue
+    # without an explicit v_lshrrev_b32).  A regression that
+    # re-introduces the no-shift low-16 form (pre-fix miscompile
+    # pinned by `topk_forward_bisect_m_laneprobe`) would fail the
+    # positive `lshr 16` + `trunc` pin.
+    "global_store_short_d16_hi":
+        r"@LIT_FIXTURE_GLOBAL_STORE_SHORT_D16_HI_CO@",
     "c2_ds_swizzle": r"@LIT_FIXTURE_C2_DS_SWIZZLE_CO@",
     "c2_ds_swizzle_unsafe": r"@LIT_FIXTURE_C2_DS_SWIZZLE_UNSAFE_CO@",
     "c2_ds_swizzle_fft_reserved":

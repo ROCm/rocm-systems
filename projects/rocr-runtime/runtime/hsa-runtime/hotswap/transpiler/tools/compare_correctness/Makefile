@@ -92,7 +92,11 @@ TRITON_KERNELS := vecadd_f16 corpus_add_fp32 corpus_asin_fp32 \
                   topk_forward_bisect_m1_nw1 \
                   topk_forward_bisect_m1_max \
                   topk_forward_bisect_m1_nored \
-                  topk_forward_bisect_m_laneprobe
+                  topk_forward_bisect_m_laneprobe \
+                  topk_forward_bisect_m_load_store \
+                  topk_forward_bisect_m1_fp32 \
+                  topk_forward_bisect_m1_bf16_out \
+                  topk_forward_bisect_m_bf16_upconv
 
 # Both KERNELS and TRITON_KERNELS feed the same %.gfx942.co / %.gfx1250.co
 # pattern rules.  If a name appears in both lists, Make's rule-selection is
