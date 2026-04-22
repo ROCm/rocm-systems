@@ -38,8 +38,7 @@ struct PipelineResult {
 /// wave-size-translation.md §2.2 projection ladder). Default **on**
 /// as of the WaveNative graduation; pass `false` explicitly to
 /// opt into `ModuloReplicationProjection`. See `raiser.hpp`'s
-/// `enableWaveNative` parameter docstring for the full rationale
-/// and the `HSA_SALMON_WAVE_NATIVE` env-var override.
+/// `enableWaveNative` parameter docstring for the full rationale.
 ///
 /// Single-ISA convention: pass the same ISA string for both
 /// `sourceISA` and `targetISA` (e.g. `runPipeline(data, "gfx942",

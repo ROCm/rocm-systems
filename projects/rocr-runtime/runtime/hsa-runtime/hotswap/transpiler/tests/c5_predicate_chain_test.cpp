@@ -39,16 +39,38 @@
 //     direction gate.
 //   * WaveNativeProjectionGate — same refusal-shaped kernel as
 //     TidDirectSmallConstRefuses, but invoked with
-//     `waveNative = true`. MUST return
-//     `!refused && visitedCalls == 0`. Pins the structural
-//     projection gate: under WaveNativeProjection each target
-//     lane is its own source lane (no MODREP replica-1 sharing
-//     source wave 0's EXEC), so the refusal rationale cannot
-//     apply and the classifier must stay quiet. Protects the
-//     HSA_SALMON_WAVE_NATIVE plumbing in loader/executable.cpp +
-//     the `enableWaveNative` thread-through in raiser.cpp Phase
-//     6.6 from a future refactor that accidentally drops the
-//     parameter.
+//     `waveNative = true`. MUST return `!refused` while STILL
+//     populating `observedSites` (the walk runs so raiser.cpp
+//     can emit `LLVM_DEBUG` attribution breadcrumbs — the
+//     classifier's `waveNative` gate SUPPRESSES refusal, it does
+//     not skip the walk). Pins the structural projection gate:
+//     under WaveNativeProjection each target lane is its own
+//     source lane, so the MODREP replica-1 rationale does not
+//     apply, but we still need the site list for debug
+//     attribution. Protects the `enableWaveNative` thread-
+//     through in raiser.cpp Phase 6.6 (and the LLVM_DEBUG
+//     emission under WaveNative) from a future refactor that
+//     accidentally drops the parameter or the walk.
+//   * CrossSubtreeMaskedVsUnmaskedAccepts — `icmp f(tid)_unmasked,
+//     g(tid)_masked` where both operands are tid-derived via
+//     different subtrees: unmasked `tid+1` vs masked `tid & 15`.
+//     Pins the FALSIFIED cross-subtree-refusal theory: the
+//     classifier used to refuse this shape in an earlier
+//     iteration, but compare_correctness (2026-04-21) showed
+//     Triton's bounds-check idiom
+//     (`icmp sgt tid-unmasked, tid-masked`) is in the baseline-
+//     MATCH set under MODREP for `ult`/`ugt`/`slt`/`sgt`. Only
+//     `eq`/`ne` variants would actually diverge (a different
+//     per-predicate rule the classifier does not implement
+//     today). The test pins the non-refusal so a future
+//     iteration re-introducing the cross-subtree rule without
+//     per-predicate reasoning fails here.
+//   * IntrinsicPropagatorRefuses — `icmp @llvm.umin(tid, 100), 15`:
+//     tid flows through a `umin` numeric intrinsic (not a
+//     BinaryOperator). Pins the #8 intrinsic-propagator audit —
+//     without explicit enumeration of numeric intrinsics as
+//     propagators, the walk would stop at the `umin` call and
+//     miss the downstream C5 site.
 //   * NoCallsIsNoOp — function with no `workitem.id.x` intrinsic
 //     call returns `!refused && visitedCalls == 0`.
 //   * PhiPropagatesTidDerivation — tid flows through a phi whose
@@ -327,7 +349,11 @@ TEST(C5PredicateChain, WaveNativeProjectionGate) {
   auto waveNativeReport =
       classifyPredicateChain(*H.F, kSrcWs, kTgtWs, /*waveNative=*/true);
   EXPECT_FALSE(waveNativeReport.refused);
-  EXPECT_EQ(waveNativeReport.visitedCalls, 0u);
+  // Walk still runs — `visitedCalls` reflects the tid call count,
+  // and `observedSites` names the C5 shape so raiser.cpp can emit
+  // LLVM_DEBUG attribution. Only the refusal itself is suppressed.
+  EXPECT_EQ(waveNativeReport.visitedCalls, 1u);
+  EXPECT_EQ(waveNativeReport.observedSites.size(), 1u);
   EXPECT_TRUE(waveNativeReport.refusalDetail.empty());
 }
 
@@ -433,4 +459,81 @@ TEST(C5PredicateChain, MaskedPhiThroughUnmaskedArmRefuses) {
   auto report = classifyPredicateChain(*H.F, kSrcWs, kTgtWs);
   EXPECT_TRUE(report.refused);
   EXPECT_EQ(report.visitedCalls, 1u);
+}
+
+// ---------------------------------------------------------------------
+// Cross-subtree non-refusal: `icmp (tid+1)_unmasked, (tid&15)_masked`.
+// Both icmp operands are tid-derived via different walks: operand 0
+// is `add tid, 1` (unmasked), operand 1 is `and tid, 15` (masked).
+// An earlier iteration of the classifier refused this shape on the
+// theory that replica-0's `(L+1, L&15)` and replica-1's
+// `(L+33, L&15)` evaluate the predicate differently. For
+// `ult`/`ugt`/`slt`/`sgt` the specific value ranges make the
+// predicate evaluate identically across replicas — e.g.
+// `icmp ult (L+1), (L&15)` is false for every L in [0, 31] and
+// `icmp ult (L+33), (L&15)` is also false for every L in [0, 31],
+// so both replicas agree. Only `eq`/`ne` variants genuinely
+// diverge (`icmp eq tid, (tid&15)` is true iff `L < 16`, which
+// differs between replicas); that per-predicate tightening is not
+// implemented today. compare_correctness 2026-04-21 confirmed
+// `vecadd_f16`, `corpus_add_fp32`, `corpus_asin_fp32`, and
+// `canary_dpp_reduce_fp32` all emit this shape under Triton's
+// `icmp sgt tid_unmasked, tid_masked` bounds-check idiom and pass
+// MATCH end-to-end under MODREP.
+//
+// This test pins the non-refusal so a future iteration that
+// re-introduces the cross-subtree rule without per-predicate
+// reasoning fails here.
+// ---------------------------------------------------------------------
+TEST(C5PredicateChain, CrossSubtreeMaskedVsUnmaskedAccepts) {
+  Harness H;
+  Value *tid = H.emitTid();
+  auto *i32Ty = Type::getInt32Ty(H.ctx);
+  Value *plus1 = H.B.CreateAdd(tid, ConstantInt::get(i32Ty, 1),
+                                "tid_plus_1");
+  Value *masked = H.B.CreateAnd(tid, ConstantInt::get(i32Ty, 15),
+                                 "tid_masked_15");
+  Value *cmp = H.B.CreateICmpULT(plus1, masked, "c5_cmp_cross_subtree");
+  H.emitStoreGate(cmp);
+  H.finish();
+
+  auto report = classifyPredicateChain(*H.F, kSrcWs, kTgtWs);
+  EXPECT_FALSE(report.refused);
+  EXPECT_EQ(report.visitedCalls, 1u);
+  EXPECT_TRUE(report.refusalDetail.empty());
+  EXPECT_TRUE(report.observedSites.empty());
+}
+
+// ---------------------------------------------------------------------
+// Intrinsic-propagator refusal: tid flows through `@llvm.umin(tid,
+// 100)` and then into an `icmp ult %umin, 15`. Pins #8 — without
+// explicit enumeration of numeric intrinsics as propagators the
+// walk would stop at the `umin` call and the downstream C5 icmp
+// would be missed.
+//
+// Semantic check: `umin(tid, 100)` is NOT a mask (it clamps at 100,
+// not at W_s-1=31). For replica-0 L in [0,31]: result = L. For
+// replica-1 L+32 in [32, 63]: result = L+32 (since both < 100). So
+// the umin output still carries per-replica divergence — classifier
+// must treat it as unmasked-propagator.
+// ---------------------------------------------------------------------
+TEST(C5PredicateChain, IntrinsicPropagatorRefuses) {
+  Harness H;
+  Value *tid = H.emitTid();
+  auto *i32Ty = Type::getInt32Ty(H.ctx);
+  Function *uminDecl = Intrinsic::getOrInsertDeclaration(
+      H.M.get(), Intrinsic::umin, {i32Ty});
+  Value *umin = H.B.CreateCall(
+      uminDecl, {tid, ConstantInt::get(i32Ty, 100)}, "umin_tid_100");
+  Value *cmp = H.B.CreateICmpULT(
+      umin, ConstantInt::get(i32Ty, 15), "c5_cmp_through_umin");
+  H.emitStoreGate(cmp);
+  H.finish();
+
+  auto report = classifyPredicateChain(*H.F, kSrcWs, kTgtWs);
+  EXPECT_TRUE(report.refused);
+  EXPECT_EQ(report.visitedCalls, 1u);
+  EXPECT_NE(report.refusalDetail.find("compile-time constant 15"),
+            std::string::npos)
+      << "refusalDetail='" << report.refusalDetail << "'";
 }

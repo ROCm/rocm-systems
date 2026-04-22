@@ -3,12 +3,31 @@
 ; RUN:     --emit-ir=c5_predicate_chain_tid_kernel 2>&1 \
 ; RUN:   | %FileCheck %s --check-prefix=STDERR
 ;
-; `--disable-wave-native` forces `ModuloReplicationProjection` — the
-; narrow-O1 classifier's refusal rationale is MODREP-scoped (the
-; replica-1-vs-source-wave-0 divergence it catches is a MODREP
-; artefact), so the classifier's `waveNative` gate short-circuits
-; refusal under the post-graduation WaveNative default. This
-; fixture pins the refusal on MODREP specifically. See
+; Paired non-refusal RUN under the WaveNative default (no
+; `--disable-wave-native`). Same kernel binary; the projection
+; gate inside `classifyPredicateChain` suppresses refusal under
+; `enableWaveNative=true`, so raise_cli must succeed and the
+; lifted IR must contain the kernel body. Pins the #11
+; WaveNative-default contract: the env-var-free, flag-free
+; invocation that reflects how the ROCR runtime calls the
+; transpiler today MUST not refuse a C5-shape kernel. A
+; regression that accidentally flips `waveNative=true` back to
+; a short-circuit-to-empty-report would skip the walk entirely
+; and silently pass here too — the gtest
+; `WaveNativeProjectionGate` catches that by asserting
+; `observedSites.size() == 1` under the same shape.
+; RUN: %raise_cli %c5_predicate_chain_tid_co --isa=gfx1250 --target-isa=gfx942 \
+; RUN:     --emit-ir=c5_predicate_chain_tid_kernel 2>/dev/null \
+; RUN:   | %FileCheck %s --check-prefix=IR_WN
+;
+; `--disable-wave-native` on the first RUN forces
+; `ModuloReplicationProjection` — the narrow-O1 classifier's
+; refusal rationale is MODREP-scoped (the replica-1-vs-source-
+; wave-0 divergence it catches is a MODREP artefact), so the
+; classifier's `waveNative` gate suppresses refusal under the
+; post-graduation WaveNative default. The STDERR fixture pins
+; the refusal on MODREP specifically; the IR_WN fixture pins
+; non-refusal under the WaveNative default. See
 ; c5_predicate_chain_classifier.hpp's `waveNative` parameter
 ; docstring and hotswap/docs/modrep-predicate-chain.md §6
 ; "Picked: WaveNative as default" for the graduation rationale.
@@ -66,3 +85,11 @@
 ; kerneldex-style so coverage tooling can bucket on it.
 ; STDERR: raise_cli: kernel 'c5_predicate_chain_tid_kernel' failed to raise:
 ; STDERR-SAME: cross-wave-predicate-chain
+
+; Under the WaveNative default the same kernel must raise
+; cleanly. The IR contains the kernel body (IR-LABEL) and the
+; `workitem.id.x()` lift that the MODREP-path refusal named —
+; the source of the C5 shape is still there; only the projection
+; has changed so the classifier's refusal is suppressed.
+; IR_WN-LABEL: define amdgpu_kernel void @c5_predicate_chain_tid_kernel(
+; IR_WN: call i32 @llvm.amdgcn.workitem.id.x()

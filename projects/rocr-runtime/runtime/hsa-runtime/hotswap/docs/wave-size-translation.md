@@ -79,16 +79,21 @@ hetGPU / DynamoRIO wave-width binary translators) converges on:
 | Full-wave packing (two source waves per target wave) | 100% | None. | Every wave-level op (EXEC arithmetic, VCC, ballots, cross-lane primitives) breaks — packed waves share hardware EXEC but expect disjoint ones. |
 | Thread-loop transformation | ~50% | Lane-position-dependent EXEC kernels. | Class 2 obstructions (§6) persist — a thread loop cannot re-express `v_permlane64` as something wave32 observes. |
 | Scalarisation | 1 / W_s | Near-total. | ~32× slowdown on wave32; last-resort rung only. |
-| Modulo-replication | 100% | Wave-size-oblivious kernels (§6). | The target wave runs as two wave32 replicas sharing the source EXEC mask; the source-EXEC bit for target lane `i` is selected at `lane_id MOD W_s`. Correct **iff** the source is wave-size-oblivious — falsifiable per kernel by §7. |
+| Wave-native projection **(default for wave32 → wave64 since 2026-04-21)** | 100% | Wave-size-oblivious kernels AND `num_warps > 1` source kernels AND matrix kernels dependent on Wave64-collective correctness (§5.6.1). | `@llvm.amdgcn.init_whole_wave` at kernel entry forces hardware EXEC = -1 kernel-wide; the original per-lane active mask is saved to the (widened) EXEC alloca. Each target lane has its own modeled-EXEC bit — lanes 0..31 of target wave 0 model source wave 0, lanes 32..63 model source wave 1 (each with its own EXEC register, NOT replicas). Costs a per-kernel `init_whole_wave` prologue and a per-side-effect SPE diamond. Correct on the superset of the modulo-replication domain: everything modulo-replication gets right, plus `num_warps > 1` kernels where source EXEC registers are independent per wave (documented at hotswap/docs/modrep-predicate-chain.md §6). |
+| Modulo-replication | 100% | Narrow subset of wave-size-oblivious kernels where every source wave replicates cleanly onto the target wave (G1-passing, no `num_warps > 1` state per §5.6.1). | The target wave runs as two wave32 replicas sharing the source EXEC mask; the source-EXEC bit for target lane `i` is selected at `lane_id MOD W_s`. Correct **iff** the source is wave-size-oblivious AND a single source EXEC replicates faithfully across both replicas — falsifiable per kernel by §7. Retained as an opt-in (`--disable-wave-native` / `enableWaveNative=false`) for pointwise / independent-half kernels AND for lit fixtures that pin MODREP-shape IR invariants (the C5 predicate-chain classifier only refuses under MODREP). |
 
 The first four rows each miscompile a named construct or pay a
-~wave-width throughput penalty. Modulo-replication is what survives;
-§6 defines *wave-size-obliviousness* precisely and §7 discharges it
-statically via a three-outcome procedure (emit / rewrite / refuse).
-Thread-loop and scalarisation are deferred rungs for kernels that
-reach outcome (c) under modulo-replication: `ThreadLoopProjection`
-exists as a skeleton in `transpiler/wave_projection.hpp` with every
-override `report_fatal_error`ing until a corpus kernel demands it;
+~wave-width throughput penalty. Wave-native is the post-graduation
+default and what survives for `num_warps > 1` and matrix kernels;
+modulo-replication is the pre-graduation default and remains
+valid on the narrower class where single-replica EXEC semantics are
+faithful. §6 defines *wave-size-obliviousness* precisely and §7
+discharges it statically via a three-outcome procedure (emit /
+rewrite / refuse). Thread-loop and scalarisation are deferred rungs
+for kernels that reach outcome (c) under either projection:
+`ThreadLoopProjection` exists as a skeleton in
+`transpiler/wave_projection.hpp` with every override
+`report_fatal_error`ing until a corpus kernel demands it;
 scalarisation has no skeleton yet.
 
 ## 3. Source model — gfx1250 wave32
@@ -414,12 +419,31 @@ form the original per-lane active mask.
 wave-width value and seeds the `exec` alloca, so modeled EXEC matches
 the source author's wave32 view.
 
-Modulo-replication does not need this: its EXEC alloca is source-width,
-cross-lane primitives are rewritten to wave32-equivalent constructs
-(§5.3), and the only Wave64-collective is SPE's internal ballot in
-`extractLaneBitFromWaveMask`, which treats the upper half as an
-independent replica. `ModuloReplicationProjection::emitInitialExec`
-returns the default all-ones.
+Modulo-replication does not need `init_whole_wave`: its EXEC alloca
+is source-width, cross-lane primitives are rewritten to wave32-
+equivalent constructs (§5.3), and the only Wave64-collective is
+SPE's internal ballot in `extractLaneBitFromWaveMask`, which treats
+the upper half as an independent replica.
+`ModuloReplicationProjection::emitInitialExec` returns the default
+all-ones. This independence is MODREP's strength on pointwise /
+independent-half kernels and its fundamental limitation on
+`num_warps > 1` kernels: if the source's two waves carry distinct
+EXEC registers (e.g. a warp-0 store-gated region that warp-1
+skips), MODREP's "replicas of source wave 0" model conflates them.
+Wave-native's per-lane modeled EXEC — derived from the original
+hardware mask captured by `init_whole_wave` — preserves the
+per-source-wave distinction and correctly projects each source wave
+onto its own target-wavefront half.
+
+Post-graduation (2026-04-21), the default is `WaveNativeProjection`
+for wave32 → wave64 cross-widening; `ModuloReplicationProjection`
+is the fallback selected by `--disable-wave-native` or
+`enableWaveNative=false`. See `hotswap/docs/modrep-predicate-chain.md`
+§6 "Picked: WaveNative as default" for the empirical evidence
+(swiglu_fp32 WRONG → match 4/4; corpus_layernorm_fp32 partial-match
+with 20×–80× smaller error; no lit/ctest/BatchRaise regressions) and
+`transpiler/raiser.hpp`'s `enableWaveNative` parameter docstring for
+the programmatic toggle.
 
 Hook: `WaveProjection::emitInitialExec` (`wave_projection.{hpp,cpp}`);
 `AllocaRegFile::init` calls it once per kernel. Supersedes the prior

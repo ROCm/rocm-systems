@@ -1513,9 +1513,11 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
           // chain.md §6 for the empirical evidence (swiglu_fp32
           // WRONG → match; corpus_layernorm_fp32 partial-match; no
           // ctest / lit / BatchRaise regressions) that drove the
-          // graduation. Process-global `HSA_SALMON_WAVE_NATIVE=1`
-          // override is handled inside `raiseToIR` for parity with
-          // the gtest surface; no per-call read here.
+          // graduation. No env-var override — the transient
+          // `HSA_SALMON_WAVE_NATIVE` hook used during the sweep was
+          // removed so `--disable-wave-native` and
+          // `enableWaveNative=false` are the single source of
+          // truth for opting back into MODREP.
           auto irResult = transpiler::runPipelineAllKernels(
               {elfBytes, elfBytes + elfSize}, srcGfx, tgtGfx);
 

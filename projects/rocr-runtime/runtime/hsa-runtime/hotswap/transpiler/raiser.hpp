@@ -82,12 +82,15 @@ struct RaiseResult {
 // the falsified SPE-phi-undef hypothesis and the open question
 // about the projection-independent scan-arithmetic bug).
 //
-// Process-global override: setting `HSA_SALMON_WAVE_NATIVE=1`
-// forces the post-graduation on-default even for callers that
-// explicitly pass `false` (to e.g. validate the new default
-// against a stubbornly-MODREP-coded existing test). Setting
-// `HSA_SALMON_WAVE_NATIVE=0` is ignored (there is no "force
-// disable" override — opt out via the parameter).
+// No process-global env-var override. `HSA_SALMON_WAVE_NATIVE=1`
+// was a transient test/debug hook during the graduation sweep
+// and was removed when the default flipped — the env var
+// silently overriding `enableWaveNative=false` would defeat the
+// opt-out path that `--disable-wave-native` (raise_cli) and
+// `enableWaveNative=false` (programmatic callers, including lit
+// fixtures that pin MODREP-shape IR invariants) rely on. If a
+// future need for a global toggle arises, add a proper
+// `PipelineConfig` field.
 RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
                       const std::string &sourceISA,
                       const std::string &kernelName,

@@ -1274,8 +1274,37 @@ The `<kernel_symbol>` comes from the recipe's sidecar
    a list? This is the "hang new attrs off `SemOpAttrs`" pattern
    the README index section recommends.
 5. **Convergent-cross-lane-op inactive-lane leak under sub-case 2
-   (opened 2026-04-21 by Phase-0 investigation of §9 (2)).** When
-   the salmon path launches a kernel with `blockDim.x = W_s`
+   (opened 2026-04-21 by Phase-0 investigation of §9 (2); **STATUS:
+   FALSIFIED** 2026-04-21 — superseded by §9.7's empirical finding
+   that `canary_bpermute_scan_fp32`'s miscompile is projection-
+   independent and not an inactive-lane-leak mechanism at all.
+   Retained verbatim below as the historical attempted diagnosis;
+   kept for the narrative thread, not as a live open question.)**
+
+   ---
+
+   **Correction (2026-04-21).** The claim below that
+   `AllocaRegFile::init` "seeds VGPRs with a sentinel (the
+   `0xA5A5A5A5` pattern)" is factually incorrect. `AllocaRegFile::init`
+   (`transpiler/reg_file.cpp:61–128`) creates VGPR allocas without
+   any explicit store — their contents are `undef` until first
+   write, not any sentinel bit pattern. The `0xA5A5A5A5` bytes
+   observed in §2's WRONG-output dumps come from the
+   `hipMemset(dOut, 0xA5, bytes)` call in
+   `compare_correctness.cpp:2212` — the TOOL's output-buffer
+   sentinel for unwritten slots, used precisely so a kernel that
+   fails to write a slot surfaces loudly in the comparator. What §2
+   actually observes is "the raised kernel did not write some
+   slots", not "the raised kernel stored a raiser-synthesised
+   sentinel". The class framed below therefore rests on a wrong
+   bridge; the actual cause of unwritten slots under sub-case 2 is
+   a still-open question tracked in §9.7.
+
+   ---
+
+   **Historical text (kept for the narrative; do not rely on).**
+
+   When the salmon path launches a kernel with `blockDim.x = W_s`
    (sub-case 2 of §4.2 / §4.3 — confirmed for
    `canary_bpermute_scan_fp32` and `rmsnorm_fp32` per §9 (2)'s
    trace), the hardware wave at entry has EXEC covering only the
@@ -1328,10 +1357,16 @@ The `<kernel_symbol>` comes from the recipe's sidecar
      convergent-cross-lane-op source VGPR so inactive-lane sources
      become a neutral value (e.g. `0` for a sum scan). Requires
      per-primitive knowledge of what "neutral" means.
-   - Seed `AllocaRegFile::init` with `0` instead of `0xA5A5A5A5`
-     under cross-widening. Narrow fix; lossy for any future
-     sentinel-based sanitiser probe but benign for numerical
-     correctness.
+   - Seed `AllocaRegFile::init` with an explicit `0` store for
+     every VGPR under cross-widening. (Per the correction block
+     above, the VGPR allocas are currently left `undef`, not
+     `0xA5A5A5A5`-filled — an explicit-zero store would just
+     replace an `undef` read with a `0` read on inactive-lane
+     bpermute sources. If the true mechanism is undef-read
+     propagating to the arithmetic, zeroing could plausibly help;
+     if it's a handler-level arithmetic bug as §9.7 suggests,
+     zeroing is a no-op. Kept only as a thought experiment now
+     that §9.7 has falsified the underlying framing.)
 
    Evidence anchor: the Phase-0 trace in §9 (2) confirms
    `canary_bpermute_scan_fp32` launches at `blockDim.x = 32`
@@ -1626,3 +1661,118 @@ The `<kernel_symbol>` comes from the recipe's sidecar
    Method: same single-element trace on N=128 of `corpus_layernorm_fp32`.
    Compare the raised mean + var computation against the Triton
    native gold; find the first divergence.
+
+9. **§6 graduation numbers falsified by controlled MODREP/WaveNative
+   sweep (opened 2026-04-21 during classifier cleanup reflection,
+   post-graduation commit `c3cc463112`).**
+
+   During the principled-cleanup pass on the C5 classifier, a
+   controlled three-way sweep ran compare_correctness on the full
+   Triton corpus under both projections by temporarily forcing
+   `enableWaveNative=false` in `loader/executable.cpp`'s
+   `runPipelineAllKernels` invocation (reverted before commit).
+   Classifier was the post-cleanup version (narrowed back from the
+   cross-subtree widening, equivalent in refusal scope to the
+   original narrow-O1). Post-`df6bf1d35a` MODREP compared against
+   post-graduation WaveNative:
+
+   | recipe | MODREP (forced, post-df6bf1d35a) | WaveNative (default) |
+   |---|---|---|
+   | `swiglu_fp32` | **match 4/4** | match 4/4 |
+   | `rmsnorm_fp32` | match 4/4 | match 4/4 |
+   | `corpus_layernorm_fp32` | WRONG @ N=128/256/512 (max\|err\| 0.128/0.0342/0.0158), match @ N=1024 | **bit-for-bit identical** numerics to MODREP |
+   | `canary_bpermute_scan_fp32` | **EXIT=2 (C5 refused 4/4, loud)** | WRONG 4/4 (silent) |
+   | `corpus_softmax_fp32` | EXIT=2 | EXIT=2 |
+   | 7 baselines (`vecadd_f16`, `rope_fp32`, `corpus_add_fp32`, `corpus_asin_fp32`, `canary_dpp_compound_add_fp32`, `canary_dpp_reduce_fp32`, `canary_permlanex16_rowmax_fp32`) | match 4/4 | match 4/4 |
+
+   Spot-check on `Gfx1250Gpu.Matmul128x128_1tile` (all six row-pattern
+   sub-tests): passes **under MODREP** when `enableWaveNative=false`
+   is explicitly threaded into the gfx1250_gpu_test call — despite
+   the test-site comment asserting the Wave64-collective
+   correctness invariant requires WaveNative. Either the invariant
+   is no longer needed (`df6bf1d35a` or an earlier commit
+   incidentally fixed the upper-half issue) or the Uniform/RowId
+   patterns happen to not surface the defect; either way the
+   test-site comment is stale.
+
+   **What this falsifies.** The §6 "Picked: WaveNative as default"
+   graduation paragraph claims:
+
+   - `swiglu_fp32` flips WRONG 4/4 → match 4/4 under WaveNative.
+     **False.** MODREP post-`df6bf1d35a` also produces match 4/4.
+     The pre-graduation "WRONG 4/4 under MODREP" was measured
+     BEFORE `df6bf1d35a` landed, and the WRONG→match attribution
+     belongs to `df6bf1d35a`, not to WaveNative.
+   - `corpus_layernorm_fp32` partial-matches under WaveNative with
+     20×–80× smaller error than MODREP. **False.** The
+     max\|err\| numerics are bit-for-bit identical under both
+     projections post-`df6bf1d35a`.
+   - `canary_bpermute_scan_fp32` is unaffected by the graduation.
+     **False in the worst direction.** MODREP refuses loudly (C5
+     classifier); WaveNative silently miscompiles. The
+     graduation converted a loud refusal into a silent
+     miscompile for this recipe.
+
+   **Net effect of the graduation on compare_correctness.** WaveNative
+   default vs MODREP post-`df6bf1d35a`: **zero new matches, one
+   regression** (`canary_bpermute_scan_fp32` loud-refused → silent-
+   WRONG). On the Triton corpus alone the graduation was a strict
+   regression.
+
+   **What the graduation may still be right about.** Not tested by
+   this sweep:
+
+   - Non-matmul WMMA recipes on multi-tile / multi-wave shapes.
+     `Gfx1250Gpu.Matmul128x128_1tile` is single-tile; the original
+     §5.6.1 Wave64-collective argument was specifically about
+     multi-tile fan-out where lanes 32..63 carry distinct source-
+     wave-3 state.
+   - AITER corpus / gpt-oss matmul kernels raised through the
+     runtime hook (not via direct `runPipeline` calls). These go
+     through the `loader/executable.cpp` salmon path and would
+     pick up whatever default is set.
+   - Pipeline interactions where MODREP's replica model breaks on
+     `num_warps > 1` without the recipe also surfacing a numerical
+     miscompile in the specific compare_correctness shape.
+
+   **Possible responses (scoping note for the human):**
+
+   - **(a) Revert the graduation commit `c3cc463112`**. Restore
+     `enableWaveNative=false` as the default. Matmul128x128_1tile
+     adds `enableWaveNative=true` at its call site (already there
+     today, no change needed). AITER corpus and gpt-oss matmul
+     surfaces would regain the pre-graduation MODREP default; spot
+     test to confirm they still raise cleanly.
+   - **(b) Keep the graduation but rewrite §6**. Acknowledge the
+     sweep numbers as-measured-today, explicitly attribute
+     swiglu_fp32 / corpus_layernorm_fp32 changes to `df6bf1d35a`
+     rather than WaveNative, document canary_bpermute_scan_fp32
+     as a REGRESSION the graduation accepted, and keep WaveNative
+     as default purely on the §5.6.1 / wmma-safety argument for
+     kernels that compare_correctness does not exercise (multi-
+     tile WMMA, `num_warps > 1` edge cases).
+   - **(c) Split the default by workload class**. Gate the
+     `enableWaveNative=true` default on `hasWMMA(insts)` or
+     equivalent at the raiser. Same-shape kernels keep the
+     pre-graduation MODREP path with its loud-refusal on C5;
+     WMMA-containing kernels flip to WaveNative.
+
+   **What the cleanup does NOT decide.** The cleanup commit keeps
+   the graduation in place (`enableWaveNative=true` default)
+   because the graduation was already landed and the user's
+   cleanup prompt is scoped to fixing the principled-reflection
+   issues, not re-deciding the graduation. This §9 entry is the
+   falsifying-evidence record that the principled prompt's
+   "record in §9 and surface to the human" rule requires when
+   design-doc numbers are falsified mid-implementation. The
+   scoping options above are for the human to pick; the cleanup
+   commit proceeds on the graduation-kept default.
+
+   Evidence anchor: the sweep ran at `0e5a34cea7` + cleanup-in-
+   progress, with the TEMP-SWEEP patch
+   `runPipelineAllKernels(..., enableWaveNative=false)` in
+   `loader/executable.cpp` (reverted pre-commit). Reproducer:
+   apply the TEMP-SWEEP patch, rebuild `hsa-runtime64`, run
+   `./compare_correctness --recipe=<any_triton>` with
+   `LD_PRELOAD=./libsalmon_intercept.so` and
+   `LD_LIBRARY_PATH=<build>/rocr/lib`.

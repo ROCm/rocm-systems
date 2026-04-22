@@ -72,28 +72,19 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
                       bool enableWaveNative) {
   RaiseResult result;
 
-  // Global override for empirical regression sweeps during the
-  // WaveNativeProjection graduation evaluation (see
-  // hotswap/docs/modrep-predicate-chain.md §9.5 / §9.6 for the class
-  // analysis, and loader/executable.cpp's sibling read of this env
-  // var in the salmon hook for the ROCR-runtime counterpart). When
-  // `HSA_SALMON_WAVE_NATIVE=1` is set in the process environment,
-  // every `raiseToIR` invocation lifts under WaveNative regardless
-  // of the caller's default — letting the existing gtest and ctest
-  // surfaces (which call `raiseToIR` / `runPipeline` with the
-  // historical `enableWaveNative=false` default) reach the
-  // WaveNative path without a per-call-site flag edit. The override
-  // is monotonic: callers that already pass `true` explicitly are
-  // unaffected. Kept as test/debug infrastructure; the eventual
-  // default-flip (if Step C's evidence supports it) will change the
-  // parameter's declared default and leave this block as a global
-  // opt-in-to-override hook.
-  {
-    static const char *s_wave_native_env =
-        std::getenv("HSA_SALMON_WAVE_NATIVE");
-    if (s_wave_native_env && s_wave_native_env[0] == '1')
-      enableWaveNative = true;
-  }
+  // NOTE. The `HSA_SALMON_WAVE_NATIVE=1` process-environment override
+  // that lived here through the empirical graduation sweep (pre-
+  // 2026-04-21) has been removed now that `enableWaveNative`
+  // defaults to `true`. The override served one purpose — flipping
+  // every call-site's projection without editing each caller —
+  // which is no longer needed. Keeping it around would subtly
+  // break the opt-OUT path: `--disable-wave-native` on
+  // `raise_cli` (and `enableWaveNative=false` on programmatic
+  // callers) are how lit fixtures and operators pin MODREP for
+  // projection-specific debugging, and a silent env-var that
+  // unconditionally flips to WaveNative would defeat that. If
+  // future evidence needs a global toggle, add a proper
+  // `PipelineConfig` field rather than re-introducing the env var.
 
   MCState mc;
   initMCState(mc, sourceISA);
@@ -858,15 +849,34 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   // rewrite, pair it with a `RewriteId` alongside
   // `ObstructionKind::WorkitemIdPredicateChain`.
   {
-    // Pass `enableWaveNative` to the classifier so it short-circuits
-    // under WaveNativeProjection. See
-    // `c5_predicate_chain_classifier.hpp` on the `waveNative`
-    // parameter for the rationale: the MODREP "replicas sharing
-    // source wave 0's EXEC" assumption — which the refusal is
-    // meant to catch — does not hold under WaveNative.
+    // Pass `enableWaveNative` to the classifier so it SUPPRESSES
+    // refusal (but still walks and collects `observedSites`) under
+    // WaveNativeProjection. See `c5_predicate_chain_classifier.hpp`
+    // on the `waveNative` parameter for the rationale: the MODREP
+    // "replicas sharing source wave 0's EXEC" assumption — which
+    // the refusal is meant to catch — does not hold under
+    // WaveNative for the launch configurations we run today. The
+    // walk still runs so we can emit an `LLVM_DEBUG` attribution
+    // breadcrumb: if a C5-shape kernel ever miscompiles under
+    // WaveNative, the debug log names the exact icmp the classifier
+    // would have refused under MODREP.
     PredicateChainClassifierReport predReport =
         classifyPredicateChain(*F, isa.waveSize, targetIsa.waveSize,
                                 enableWaveNative);
+
+    if (enableWaveNative && !predReport.observedSites.empty()) {
+      LLVM_DEBUG({
+        dbgs() << "c5-predicate-chain: observed "
+               << predReport.observedSites.size()
+               << " C5-shape site(s) in '" << kernelName
+               << "' under WaveNativeProjection (refusal "
+                  "suppressed per c5_predicate_chain_classifier.hpp "
+                  "`waveNative` contract):\n";
+        for (const std::string &site : predReport.observedSites)
+          dbgs() << "  - " << site << "\n";
+      });
+    }
+
     if (predReport.refused) {
       RaiseFailure f = RaiseFailure::crossWavePredicateChain(
           kernelName, predReport.refusalDetail);

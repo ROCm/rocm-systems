@@ -74,9 +74,9 @@
 // for the narrow class of pointwise / independent-half kernels where
 // MODREP's "replicas of source wave 0" model is correct AND where
 // the C5 refusal under MODREP is the desired loud-fail signal.
-// `HSA_SALMON_WAVE_NATIVE=1` in the process environment forces
-// WaveNative even when the caller explicitly opts out (see
-// `raiser.cpp` for the override).
+// No env-var override exists; `HSA_SALMON_WAVE_NATIVE` was a
+// transient test hook during the graduation sweep and has been
+// removed so the opt-out path isn't silently bypassed.
 
 #include "code_object_utils.hpp"
 #include "pipeline.hpp"
