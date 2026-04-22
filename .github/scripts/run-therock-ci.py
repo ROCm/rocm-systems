@@ -68,9 +68,6 @@ logging.basicConfig(level=logging.INFO)
 _DEFAULT_PROJECT_NAME = "rocprofiler-sdk-alt"
 _DEFAULT_BASE_URL = "my.cdash.org"
 
-# Define paths to output artifacts directory and script directory
-OUTPUT_ARTIFACTS_DIR = os.getenv("OUTPUT_ARTIFACTS_DIR")
-
 # Defaults; overridden by --source-dir/--binary-dir when provided
 SOURCE_DIR = str(ROCPROFILER_SDK_TESTS_PATH)
 BINARY_DIR = str(ROCPROFILER_SDK_TESTS_PATH / "build")
@@ -395,7 +392,7 @@ def main(argv: list[str] | None = None) -> int:
 
     ctest_cmd = _which_ctest()
 
-    # Configure ctest run commmand
+    # Configure ctest run command
     ctest_argv = [
         ctest_cmd,
         "-S",
