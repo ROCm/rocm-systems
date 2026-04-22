@@ -266,7 +266,7 @@ python -m amdisa --gen-all --gen-shared-execute \
     rdna1:path/to/amdgpu_isa_rdna1.xml \
     rdna2:path/to/amdgpu_isa_rdna2.xml \
     rdna3:path/to/amdgpu_isa_rdna3.xml \
-    rdna3.5:path/to/amdgpu_isa_rdna3_5.xml \
+    rdna3_5:path/to/amdgpu_isa_rdna3_5.xml \
     rdna4:path/to/amdgpu_isa_rdna4.xml
 bash scripts/clang_format.sh
 ```

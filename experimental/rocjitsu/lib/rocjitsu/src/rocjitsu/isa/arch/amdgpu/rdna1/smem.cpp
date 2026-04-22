@@ -18,6 +18,7 @@
 #include <bit>
 #include <cmath>
 #include <limits>
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 
 namespace rocjitsu {
 namespace rdna1 {
@@ -187,7 +188,7 @@ void SBufferLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
 SGl1InvSmem::SGl1InvSmem(const MachineInst *inst) : Smem("s_gl1_inv", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SGl1InvSmem>()) {num_src_ = 0;num_dst_ = 0;}
 
 void SGl1InvSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.cu().l1_vector().invalidate_all();
+  amdgpu::execute_s_gl1_inv_smem(*this, wf);
 }
 
 SDcacheInvSmem::SDcacheInvSmem(const MachineInst *inst) : Smem("s_dcache_inv", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SDcacheInvSmem>()) {num_src_ = 0;num_dst_ = 0;}

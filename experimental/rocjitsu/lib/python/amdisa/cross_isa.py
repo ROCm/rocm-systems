@@ -40,7 +40,25 @@ class SharedInstInfo:
 
 @dataclass
 class SharedInstructionPlan:
-    """Result of cross-ISA analysis.  Consumed by the codegen."""
+    """Result of cross-ISA analysis.  Consumed by the codegen.
+
+    Key schemes differ across the three dicts:
+
+    - ``universal``: keyed by mnemonic alone.  Safe because an instruction
+      can only be universal if ALL entries across ALL ISAs have identical
+      field layout, semantics, and operands — which implies a single
+      encoding.  Multi-encoding mnemonics (e.g., v_mov_b32 in VOP1 + VOP3)
+      always have differing field layouts, so they never reach universal;
+      they go through the grouping path into ``family_shared`` instead.
+
+    - ``family_shared``: keyed by family name → ``(mnemonic, encoding_name)``.
+      The composite key prevents collisions between different encodings of
+      the same mnemonic (e.g., VOP1 vs VOP3 variants).
+
+    - ``isa_exclusive``: keyed by ISA name → set of mnemonics.  Encoding
+      information is not tracked because the per-ISA codegen processes each
+      encoding file independently and doesn't need it here.
+    """
 
     universal: dict[str, SharedInstInfo] = field(default_factory=dict)
     family_shared: dict[str, dict[tuple[str, str], SharedInstInfo]] = field(default_factory=dict)
@@ -60,10 +78,16 @@ class SharedInstructionPlan:
 
 
 def _field_signature(enc: InstEncoding) -> tuple[tuple[str, int], ...]:
-    """Return a canonical tuple of (field_name, bit_count) for an encoding."""
+    """Return a canonical tuple of (field_name, bit_count) for an encoding.
+
+    Padding fields (``pad_*``) and the format identifier (``encoding``) are
+    excluded — they are never referenced by execute() bodies, and their
+    layout varies across XML spec versions without affecting semantics.
+    """
     return tuple(
         (f.name, f.bit_cnt)
         for f in sorted(enc.ucode_fields, key=lambda f: f.bit_offset)
+        if not f.name.startswith('pad_') and f.name != 'encoding'
     )
 
 
@@ -83,18 +107,20 @@ def _operand_signature(inst: Instruction) -> tuple[tuple[str, str, int, bool, bo
 
 
 # ISA family groupings for family_shared classification.
-CDNA_ISAS = frozenset({'cdna1', 'cdna2', 'cdna3', 'cdna4'})
-RDNA_ISAS = frozenset({'rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4'})
-ALL_ISAS = CDNA_ISAS | RDNA_ISAS
+# Sub-family groupings reflect encoding layout generations: ISAs within
+# the same sub-family share encoding field layouts (e.g., ENC_MUBUF
+# changed between RDNA2 and RDNA3), while ISAs across sub-families may
+# diverge.  _classify_family() checks sub-families first (finest to
+# coarsest), so instructions that are identical within a generation get
+# their own bucket rather than colliding at the coarse family level.
+CDNA_GFX9 = frozenset({'cdna1', 'cdna2', 'cdna3', 'cdna4'})
+RDNA_GFX10 = frozenset({'rdna1', 'rdna2'})
+RDNA_GFX11 = frozenset({'rdna3', 'rdna3_5'})
+RDNA_GFX12 = frozenset({'rdna4'})
 
-# Finer sub-families for encoding-level sharing.
-_FAMILIES: list[tuple[str, frozenset[str]]] = [
-    ('cdna', CDNA_ISAS),
-    ('rdna', RDNA_ISAS),
-    ('gfx9', frozenset({'cdna1', 'cdna2', 'cdna3', 'cdna4'})),
-    ('gfx10', frozenset({'rdna1', 'rdna2'})),
-    ('gfx11', frozenset({'rdna3', 'rdna3_5'})),
-]
+CDNA_ISAS = CDNA_GFX9  # All CDNA ISAs currently share one generation.
+RDNA_ISAS = RDNA_GFX10 | RDNA_GFX11 | RDNA_GFX12
+ALL_ISAS = CDNA_ISAS | RDNA_ISAS
 
 
 class CrossIsaAnalyzer:
@@ -115,7 +141,14 @@ class CrossIsaAnalyzer:
         """
         plan = SharedInstructionPlan()
 
-        # Step 1: Build mnemonic → list of (isa_name, encoding, instruction, sem)
+        # Step 1: Build mnemonic → list of (isa_name, encoding, instruction, sem).
+        # Keyed by mnemonic only — entries from different encodings of the
+        # same mnemonic (e.g., v_mov_b32 in VOP1 and VOP3) land in the same
+        # bucket.  Step 2's classification logic handles multi-encoding
+        # mnemonics: their differing field layouts cause same_structure to
+        # be False, routing them through the grouping path which separates
+        # them by (field_sig, sem_key, operand_sig) and assigns each
+        # per-encoding group independently.
         inst_map: dict[str, list[tuple[str, InstEncoding, Instruction, InstructionSemantics | None]]] = {}
         for isa_name, spec, sem_spec in specs:
             for enc in spec.inst_encodings:
@@ -176,7 +209,21 @@ class CrossIsaAnalyzer:
 
             if same_structure and present_isas == isa_names_set:
                 # Universal — identical on ALL ISAs.
+                # Any entry is representative: same_structure guarantees
+                # identical field_sig, sem_key, and opnd_sig across all.
                 _, enc0, inst0, sem0 = entries[0]
+                # Defensive: same_structure guarantees identical field
+                # layouts, but verify that the encoding name is also
+                # consistent — the mnemonic-only key in plan.universal
+                # assumes a single encoding name across all ISAs.
+                enc_names = {e[1].enc_name for e in entries}
+                assert len(enc_names) == 1, (
+                    f"Universal instruction '{mnemonic}' has identical field "
+                    f"layouts but inconsistent encoding names: {enc_names}. "
+                    f"The universal dict is keyed by mnemonic alone and "
+                    f"cannot represent multiple encoding names. This needs "
+                    f"a composite key or per-encoding classification."
+                )
                 plan.universal[mnemonic] = SharedInstInfo(
                     mnemonic=mnemonic,
                     encoding_name=enc0.enc_name,
@@ -205,6 +252,10 @@ class CrossIsaAnalyzer:
                 continue
 
             # Different structure across ISAs → each gets its own classification.
+            # This path also handles multi-encoding mnemonics (e.g., v_mov_b32
+            # in VOP1 + VOP3): the differing field layouts across encodings
+            # cause same_structure to be False, so each encoding is classified
+            # independently via the sub-groups below.
             # Group by (field_sig, sem_key, operand_sig) and classify each group.
             groups: dict[tuple, list[str]] = {}
             for isa_name, enc, inst, sem in entries:
@@ -230,7 +281,27 @@ class CrossIsaAnalyzer:
                             f"operand_sig={osig}. This indicates an internal analyzer bug."
                         )
                     _, enc0, inst0, sem0 = next_match
-                    plan.family_shared.setdefault(family_name, {})[(mnemonic, enc0.enc_name)] = SharedInstInfo(
+                    inst_key = (mnemonic, enc0.enc_name)
+                    fam_dict = plan.family_shared.setdefault(family_name, {})
+                    # Guard against silent overwrites: two sub-groups with
+                    # different field layouts can collide on the same
+                    # (mnemonic, enc_name) key if they share a family name
+                    # and encoding name but diverge in layout across ISA
+                    # generations.  This doesn't happen with current ISA
+                    # specs, but if future specs introduce intra-family
+                    # encoding layout changes, this assertion will fire.
+                    # Fix by introducing finer sub-family groupings or by
+                    # incorporating the field layout into the key.
+                    assert inst_key not in fam_dict or fam_dict[inst_key].field_layout == fsig, (
+                        f"Key collision in family_shared['{family_name}'] for "
+                        f"{inst_key}: existing entry has field_layout="
+                        f"{fam_dict[inst_key].field_layout}, new group has "
+                        f"field_layout={fsig}. Two sub-groups with different "
+                        f"field layouts map to the same (mnemonic, enc_name) "
+                        f"key. Consider finer sub-family groupings or a "
+                        f"layout-aware key."
+                    )
+                    fam_dict[inst_key] = SharedInstInfo(
                         mnemonic=mnemonic,
                         encoding_name=enc0.enc_name,
                         field_layout=fsig,
@@ -240,17 +311,35 @@ class CrossIsaAnalyzer:
                         isa_names=sorted(group_isas),
                     )
                 else:
-                    # ISA-exclusive (single ISA) - gets inline code
+                    # ISA-exclusive — only 1 ISA has this particular
+                    # encoding variant (field layout / semantics / operands),
+                    # even if the mnemonic itself exists on other ISAs
+                    # with a different structure.  Gets inline code.
                     plan.isa_exclusive.setdefault(group_isas[0], set()).add(mnemonic)
 
         return plan
 
     @staticmethod
     def _classify_family(isas: set[str]) -> str:
-        """Return a family name for a set of ISAs."""
-        if isas <= CDNA_ISAS:
-            return 'cdna'
+        """Return a family name for a set of ISAs.
+
+        Checks sub-families first (finest grouping) and falls back to
+        coarse family names when a group spans multiple sub-families
+        within the same family.
+        """
+        # Sub-family (finest) — encoding layouts are identical within these.
+        if isas <= RDNA_GFX12:
+            return 'rdna_gfx12'
+        if isas <= RDNA_GFX11:
+            return 'rdna_gfx11'
+        if isas <= RDNA_GFX10:
+            return 'rdna_gfx10'
+        if isas <= CDNA_GFX9:
+            return 'cdna_gfx9'
+        # Coarse family — spans sub-families but stays within one family.
         if isas <= RDNA_ISAS:
             return 'rdna'
-        # Mixed — use a descriptive name.
+        if isas <= CDNA_ISAS:
+            return 'cdna'
+        # Mixed CDNA + RDNA — use a descriptive name.
         return '_'.join(sorted(isas))

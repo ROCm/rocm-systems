@@ -4415,7 +4415,9 @@ class CodeGenerator:
 
         Args:
             mnemonic: Instruction mnemonic (e.g., 'v_mov_b32')
-            encoding_name: Encoding name (e.g., 'ENC_VOP1', 'ENC_VOP3')
+            encoding_name: Encoding name (e.g., 'ENC_VOP1', 'ENC_VOP3').
+                Used for family_shared lookup; the same mnemonic can have
+                different encodings with different sharing characteristics.
 
         Returns:
             True if instruction is universal or family_shared on ≥2 ISAs.
@@ -4425,6 +4427,11 @@ class CodeGenerator:
            or universal in the shared_plan).
         2. Its semantic class is profile-independent (no mtype/coherency calls).
         3. The current ISA is one of the ISAs that share this instruction.
+
+        Lookup strategy:
+        - Universal instructions: looked up by mnemonic only (encoding-agnostic)
+        - Family-shared instructions: looked up by (mnemonic, encoding_name) key
+        - Searches all families; returns True on first shareable match
         """
         if self.shared_plan is None:
             return False

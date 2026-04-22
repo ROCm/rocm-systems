@@ -334,46 +334,19 @@ void SBitreplicateB64B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
 SAndSaveexecB32Sop1::SAndSaveexecB32Sop1(const MachineInst *inst) : Sop1("s_and_saveexec_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SAndSaveexecB32Sop1>()), sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->sdst), ssrc0(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->ssrc0) {dst_operands_[0] = &sdst;src_operands_[0] = &ssrc0;num_src_ = 1;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->ssrc0 == 255) ssrc0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst*>(inst)->simm32));}
 
 void SAndSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = ssrc0.read_scalar64(wf);
-  sdst.write_scalar64(wf, old_exec);
-  uint64_t result = old_exec & src;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  amdgpu::execute_s_and_saveexec_b32_sop1(*this, wf);
 }
 
 SOrSaveexecB32Sop1::SOrSaveexecB32Sop1(const MachineInst *inst) : Sop1("s_or_saveexec_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SOrSaveexecB32Sop1>()), sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->sdst), ssrc0(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->ssrc0) {dst_operands_[0] = &sdst;src_operands_[0] = &ssrc0;num_src_ = 1;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->ssrc0 == 255) ssrc0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst*>(inst)->simm32));}
 
 void SOrSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = ssrc0.read_scalar64(wf);
-  sdst.write_scalar64(wf, old_exec);
-  uint64_t result = old_exec | src;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  amdgpu::execute_s_or_saveexec_b32_sop1(*this, wf);
 }
 
 SXorSaveexecB32Sop1::SXorSaveexecB32Sop1(const MachineInst *inst) : Sop1("s_xor_saveexec_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SXorSaveexecB32Sop1>()), sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->sdst), ssrc0(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->ssrc0) {dst_operands_[0] = &sdst;src_operands_[0] = &ssrc0;num_src_ = 1;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->ssrc0 == 255) ssrc0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst*>(inst)->simm32));}
 
 void SXorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = ssrc0.read_scalar64(wf);
-  sdst.write_scalar64(wf, old_exec);
-  uint64_t result = old_exec ^ src;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  amdgpu::execute_s_xor_saveexec_b32_sop1(*this, wf);
 }
 
 SAndn2SaveexecB32Sop1::SAndn2SaveexecB32Sop1(const MachineInst *inst) : Sop1("s_andn2_saveexec_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SAndn2SaveexecB32Sop1>()), sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->sdst), ssrc0(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->ssrc0) {dst_operands_[0] = &sdst;src_operands_[0] = &ssrc0;num_src_ = 1;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->ssrc0 == 255) ssrc0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst*>(inst)->simm32));}
@@ -391,46 +364,19 @@ void SOrn2SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
 SNandSaveexecB32Sop1::SNandSaveexecB32Sop1(const MachineInst *inst) : Sop1("s_nand_saveexec_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SNandSaveexecB32Sop1>()), sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->sdst), ssrc0(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->ssrc0) {dst_operands_[0] = &sdst;src_operands_[0] = &ssrc0;num_src_ = 1;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->ssrc0 == 255) ssrc0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst*>(inst)->simm32));}
 
 void SNandSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = ssrc0.read_scalar64(wf);
-  sdst.write_scalar64(wf, old_exec);
-  uint64_t result = ~(old_exec & src);
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  amdgpu::execute_s_nand_saveexec_b32_sop1(*this, wf);
 }
 
 SNorSaveexecB32Sop1::SNorSaveexecB32Sop1(const MachineInst *inst) : Sop1("s_nor_saveexec_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SNorSaveexecB32Sop1>()), sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->sdst), ssrc0(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->ssrc0) {dst_operands_[0] = &sdst;src_operands_[0] = &ssrc0;num_src_ = 1;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->ssrc0 == 255) ssrc0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst*>(inst)->simm32));}
 
 void SNorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = ssrc0.read_scalar64(wf);
-  sdst.write_scalar64(wf, old_exec);
-  uint64_t result = ~(old_exec | src);
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  amdgpu::execute_s_nor_saveexec_b32_sop1(*this, wf);
 }
 
 SXnorSaveexecB32Sop1::SXnorSaveexecB32Sop1(const MachineInst *inst) : Sop1("s_xnor_saveexec_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SXnorSaveexecB32Sop1>()), sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->sdst), ssrc0(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->ssrc0) {dst_operands_[0] = &sdst;src_operands_[0] = &ssrc0;num_src_ = 1;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->ssrc0 == 255) ssrc0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst*>(inst)->simm32));}
 
 void SXnorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = ssrc0.read_scalar64(wf);
-  sdst.write_scalar64(wf, old_exec);
-  uint64_t result = ~(old_exec ^ src);
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  amdgpu::execute_s_xnor_saveexec_b32_sop1(*this, wf);
 }
 
 SAndn1SaveexecB32Sop1::SAndn1SaveexecB32Sop1(const MachineInst *inst) : Sop1("s_andn1_saveexec_b32", reinterpret_cast<const OpEncoding*>(inst), make_exec_fn<SAndn1SaveexecB32Sop1>()), sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding*>(inst)->sdst), ssrc0(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding*>(inst)->ssrc0) {dst_operands_[0] = &sdst;src_operands_[0] = &ssrc0;num_src_ = 1;num_dst_ = 1;if (reinterpret_cast<const OpEncoding*>(inst)->ssrc0 == 255) ssrc0 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst*>(inst)->simm32));}
