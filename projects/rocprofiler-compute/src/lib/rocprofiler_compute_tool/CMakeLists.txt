@@ -20,4 +20,6 @@ add_library(
 target_include_directories(${target} PUBLIC .)
 target_link_libraries(${target} PUBLIC rocprofiler-sdk::rocprofiler-sdk gsl_assert)
 
-add_subdirectory(test)
+if(ENABLE_TESTS)
+    add_subdirectory(test)
+endif()
