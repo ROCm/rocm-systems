@@ -878,6 +878,13 @@ configure_settings(bool _init)
         "for all ranks",
         std::string{}, "data", "io", "advanced");
 
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_RANK_FILTER_LOGS",
+        "Ranks for which console output is generated. Values should be separated by commas "
+        "and can be explicit or ranges, e.g. 0,1,5-8. An empty value enables output "
+        "for all ranks",
+        std::string{}, "data", "io", "advanced");
+
     // set the defaults
     _config->get_flamegraph_output()     = false;
     _config->get_ctest_notes()           = false;
@@ -2606,6 +2613,13 @@ get_rank_filter_output()
     return static_cast<tim::tsettings<std::string>&>(*_v).get();
 }
 
+std::string
+get_rank_filter_logs()
+{
+    static auto _v = get_config()->at("ROCPROFSYS_RANK_FILTER_LOGS");
+    return static_cast<tim::tsettings<std::string>&>(*_v).get();
+}
+
 #if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
     (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
 #    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 1
@@ -2648,11 +2662,12 @@ get_mpi_rank_from_env()
 
 namespace output_filtering
 {
-bool
-is_output_enabled_for_current_mpi_rank()
-{
 #if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
-    auto enabled_ranks_str = get_rank_filter_output();
+namespace
+{
+bool
+is_rank_in_filter(std::string enabled_ranks_str)
+{
     rocprofsys::utility::trim_str(enabled_ranks_str);
     for(auto& ch : enabled_ranks_str)
         ch = std::tolower(ch);
@@ -2675,6 +2690,25 @@ is_output_enabled_for_current_mpi_rank()
     LOG_DEBUG("Output for MPI rank {} is {}", current_rank.value(),
               is_enabled ? "enabled" : "disabled");
     return is_enabled;
+}
+}  // namespace
+#endif
+
+bool
+is_output_enabled_for_current_mpi_rank()
+{
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
+    return is_rank_in_filter(get_rank_filter_output());
+#else
+    return true;
+#endif
+}
+
+bool
+is_log_output_enabled_for_current_mpi_rank()
+{
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
+    return is_rank_in_filter(get_rank_filter_logs());
 #else
     return true;
 #endif
