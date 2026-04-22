@@ -57,12 +57,14 @@ jobs:
               echo "REPORT_PATH=/apps/cvs_tests/test_reports" >> $GITHUB_ENV
               echo "LOG_DEST=/logs/gfx950-dcgpu" >> $GITHUB_ENV
               ;;
-            gfx942-dcgpu)
+
+            gfx94X-dcgpu)
               echo "OUTPUT_ARTIFACTS_DIR=/home/arravikum/dist_new/dist/rocm" >> $GITHUB_ENV
               echo "AWS_SHARED_CREDENTIALS_FILE=/home/arravikum/awsconfig/credentials.ini" >> $GITHUB_ENV
               echo "REPORT_PATH=/home/arravikum/cvs_8nic/cvs/test_reports" >> $GITHUB_ENV
               echo "LOG_DEST=/logs/gfx94X-dcgpu" >> $GITHUB_ENV
               ;;
+
             *)
               echo "Unsupported arch: ${{ inputs.amdgpu_families }}"
               exit 1
