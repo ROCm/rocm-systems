@@ -520,6 +520,195 @@ Recipe makeLaneSwapRecipe() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Recipe: canary_readlane_last_lane — C1 per-source-wave broadcast rewrite guard
+//
+// Canary for the `v_readlane_b32 sDST, vSRC, K` pattern with K = W_s - 1
+// — the "broadcast from the last lane of the source wave" idiom.  Pins
+// the per-source-wave readlane emulation that
+// `rewrite_cross_lane_divergent.cpp` performs on cross-widening lifts,
+// and documents the matching wave32-source vs wave64-target semantic
+// gap that a native-compiled gfx942 binary (which has no source-wave
+// notion) cannot close.
+//
+// Gold semantics (CpuReference) encodes the wave32 source behaviour:
+// per-wave broadcast of lane (W_s - 1)'s seed.  For the canonical
+// workgroup of 64 lanes on gfx1250 wave32 (two source waves of 32
+// each), that's:
+//   * out[tid in  0..31] == in[31]   (source wave 0's lane 31)
+//   * out[tid in 32..63] == in[63]   (source wave 1's lane 31)
+//
+// Observed verdicts at landing:
+//   native : WRONG 32/64 (target-wave64 semantics, no source-wave
+//            notion — inherent, not a hipcc bug).
+//   legacy : WRONG 32/64 (text transpiler copies the mnemonic through
+//            without any per-source-wave rewrite).
+//   salmon : match under BOTH projections (WaveNative — current
+//            pipeline default — and MODREP via
+//            HSA_HOTSWAP_DISABLE_WAVE_NATIVE=1).  The rewrite at
+//            `rewrite_cross_lane_divergent.cpp` recognises the lifted
+//            `@llvm.amdgcn.readlane(val, 31)` as a cross-wave-divergent
+//            site and rewrites it to an on-target `ds_bpermute` that
+//            reads lane `(lane_id & ~(W_s - 1)) | 31` — the "last lane
+//            of THIS source-wave replica".  The resulting per-replica
+//            broadcast matches the wave32-source gold bit-exactly.
+//
+// Regression contract (what a verdict drift means):
+//
+//   salmon `match` -> `WRONG 32/64`  ==  rewrite regression.  One of
+//     (a) the classifier stopped flagging the site, (b) the rewrite
+//     produced a wrong selector expression, or (c) a downstream
+//     projection stopped threading `cwd_lane_id`.  The mismatch count
+//     is fixed at half the output size, so the regression is loud.
+//
+//   salmon `match` -> `EXIT=2`  ==  classifier moved from "rewrite" to
+//     "refuse".  Intentional only if a tighter §7.1 C1 validator lands
+//     that refuses all wave-dependent lane constants; retire the
+//     `match` expectation in that case, otherwise investigate.
+//
+//   native / legacy `WRONG` -> `match`  ==  CpuReference drift or
+//     hipcc started doing source-wave-aware readlane emulation
+//     (unlikely — hipcc has no source-wave notion).  Investigate
+//     before relaxing the canary's failure-side expectation.
+//
+// See `hotswap/docs/gpt-oss-derisking.md` §7.1 / §9.2 item 5 and
+// `kernels/canary_readlane_last_lane.hip` for the source shape and
+// inline-asm contract.  The canary complements the existing
+// `readlane_divergent_rewrite.ll` lit fixture: lit pins the IR shape
+// the rewrite produces, the canary pins its end-to-end runtime
+// correctness on real hardware.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeCanaryReadlaneLastLaneRecipe() {
+  Recipe r;
+  r.name = "canary_readlane_last_lane";
+  // Fixed workgroup size of W_t = 64 (gfx942 wave64) gives the cleanest
+  // demonstration of the miscompile: exactly one target wave covers the
+  // output, and the two halves of that wave correspond one-to-one with
+  // the two source waves the wave32 kernel ran.  Sweeping multiple N
+  // values lets the regression signal distinguish "always WRONG 32/64"
+  // (the miscompile class) from "WRONG only at small N" (harness bug)
+  // or "WRONG only at large N" (some other coincidence).  Block size is
+  // pinned to 64 for the same reason — any blockSize other than the
+  // native target wave would muddy the per-wave-broadcast analysis.
+  r.defaultNs     = {64, 128, 256, 1024};
+  r.defaultBlocks = {64};
+  r.validate = [](int N, int blockSize) -> std::optional<std::string> {
+    if (blockSize != 64)
+      return std::string("blockSize must be 64 (the target wave64 width): "
+                         "this canary's per-wave-broadcast analysis assumes "
+                         "exactly one target wave per workgroup");
+    if (N % blockSize != 0)
+      return std::string("N must be a multiple of blockSize (64) to keep "
+                         "every workgroup full of lanes that actually "
+                         "participate in the inline-asm v_readlane_b32");
+    return std::nullopt;
+  };
+  r.outputElemBytes = sizeof(float);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    std::vector<uint8_t> buf(N * sizeof(float));
+    auto *f = reinterpret_cast<float *>(buf.data());
+    // in[i] = i + 0.5, distinct for every lane so the per-source-wave
+    // broadcast outputs are unambiguously distinguishable in the diff.
+    for (int i = 0; i < N; ++i) f[i] = static_cast<float>(i) + 0.5f;
+    return buf;
+  };
+
+  // CPU reference: per source-wave-of-W_s=32, broadcast lane (W_s - 1)'s
+  // seed to every lane in that source wave.  This is what the wave32
+  // source kernel means; the canary judges every mode against it.
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int blockSize) {
+    constexpr int kSrcWaveSize = 32;  // gfx1250 / wave32 source.
+    const float *in = reinterpret_cast<const float *>(input.data());
+    std::vector<uint8_t> out(N * sizeof(float));
+    float *o = reinterpret_cast<float *>(out.data());
+    // The launch grids ceil(N/blockSize) workgroups of `blockSize`
+    // threads each.  Per-source-wave broadcast picks lane (W_s - 1)
+    // of each source wave within a workgroup; cross workgroups the
+    // result is simply a shifted copy of that pattern.
+    for (int tid = 0; tid < N; ++tid) {
+      int wg_id = tid / blockSize;
+      int lane_in_wg = tid % blockSize;
+      int src_wave_in_wg = lane_in_wg / kSrcWaveSize;
+      int last_lane_of_src_wave_in_wg =
+          src_wave_in_wg * kSrcWaveSize + (kSrcWaveSize - 1);
+      int broadcast_tid = wg_id * blockSize + last_lane_of_src_wave_in_wg;
+      // Bounds check: if the last lane of a source wave would fall
+      // past N (ragged tail), the CPU reference follows the kernel's
+      // early-return shape and leaves the out-of-range tail undefined
+      // — but our validate() above pins N % blockSize == 0 so this
+      // never fires on sanctioned shapes.
+      o[tid] = (broadcast_tid < N) ? in[broadcast_tid] : 0.0f;
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "canary_readlane_last_lane"));
+
+    float *dIn, *dOut;
+    size_t bytes = N * sizeof(float);
+    HIP_ASSERT(hipMalloc(&dIn, bytes));
+    HIP_ASSERT(hipMalloc(&dOut, bytes));
+    // Sentinel NaN so unwritten lanes surface crisply in the diff.
+    uint32_t sentinel = 0x7FC00000u;
+    std::vector<uint32_t> sentinelHost(N, sentinel);
+    HIP_ASSERT(hipMemcpy(dOut, sentinelHost.data(), bytes,
+                         hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dIn, input.data(), bytes, hipMemcpyHostToDevice));
+
+    struct alignas(8) Args {
+      const float *in;
+      float *out;
+    } args = {dIn, dOut};
+    size_t argSize = sizeof(args);
+    void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                      HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                      HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, config));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(bytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dOut, bytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dIn));
+    HIP_ASSERT(hipFree(dOut));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int outElems) {
+    const float *g = reinterpret_cast<const float *>(gold.data());
+    const float *a = reinterpret_cast<const float *>(actual.data());
+    // Bit-exact compare — the values on both sides are IEEE-representable
+    // seed-plus-0.5 integers, so any difference is a miscompile, not
+    // rounding.
+    int mismatches = 0;
+    double maxAbs = 0.0;
+    int firstIdx = -1;
+    double firstG = 0.0, firstA = 0.0;
+    for (int i = 0; i < outElems; ++i) {
+      if (g[i] != a[i]) {
+        if (firstIdx < 0) {
+          firstIdx = i;
+          firstG = g[i];
+          firstA = a[i];
+        }
+        double d = std::fabs(g[i] - a[i]);
+        if (d > maxAbs) maxAbs = d;
+        ++mismatches;
+      }
+    }
+    return std::make_tuple(mismatches, maxAbs, firstIdx, firstG, firstA);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helpers for the cvt_* recipes.  Both live here rather than in the kernels
 // because they define the CPU reference, not any device-side behaviour.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4203,6 +4392,7 @@ const std::vector<Recipe> &allRecipes() {
         makeWmmaF32_16x16x4_GemmRecipe(),
         makeMubufStoreB32Recipe(),
         makeSSetVgprMsbRecipe(),
+        makeCanaryReadlaneLastLaneRecipe(),
     };
     for (const auto &t : allTritonRecipes())
       r.push_back(tritonToRecipe(t));

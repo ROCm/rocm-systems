@@ -37,11 +37,37 @@ INTERCEPT_SRC  := ../../tests/salmon_intercept.cpp
 KERNELS        := vecadd block_sum_shfl lane_swap \
                   cvt_pkrtz cvt_pk_f16 bfm_b32 swap_b32 mov_b64 cvt_f32_bf16 \
                   v_add_lshl_u32 v_bfe_i32 s_bfe_i32 s_bitset0_b32 \
-                  s_bitset0_b64 c4_lane_dep_cmpx
+                  s_bitset0_b64 v_bfi_b32 v_cmp_cndmask_sgpr \
+                  v_cmpx_gt_i32 s_and_saveexec_b32 \
+                  c4_lane_dep_cmpx \
+                  wmma_f32_16x16x4_gemm \
+                  mubuf_store_b32 s_set_vgpr_msb \
+                  canary_readlane_last_lane
 
 # Triton recipes.  Each name must correspond to a kernels/triton/<name>.py
 # file that defines a RECIPES list (see kernels/triton/README.md).
-TRITON_KERNELS := vecadd_f16
+#
+# `vecadd_f16` is hand-authored.  `corpus_*` recipes are thin wrappers
+# around upstream Triton kernels pulled by kernels/triton/_corpus/pull.py
+# (see kernels/triton/_corpus/README.md).  Building a corpus_* recipe
+# without first running pull.py fails fast with a helpful message.
+# `canary_*` recipes are hand-authored minimal kernels that each pin
+# down one wave-size obstruction class from
+# `hotswap/docs/gpt-oss-derisking.md §1` — bpermute, DPP, permlane —
+# so a salmon regression on any class surfaces from a unit-sized
+# recipe rather than only from GPT-OSS-scale kernels where triage
+# is hard.
+TRITON_KERNELS := vecadd_f16 corpus_add_fp32 corpus_asin_fp32 \
+                  corpus_softmax_fp32 corpus_layernorm_fp32 \
+                  canary_bpermute_scan_fp32 \
+                  canary_dpp_reduce_fp32 \
+                  canary_dpp_compound_add_fp32 \
+                  canary_permlanex16_rowmax_fp32 \
+                  rmsnorm_fp32 \
+                  swiglu_fp32 \
+                  rope_fp32 \
+                  matmul_fp16 \
+                  matmul_fp16_16x16
 
 # Both KERNELS and TRITON_KERNELS feed the same %.gfx942.co / %.gfx1250.co
 # pattern rules.  If a name appears in both lists, Make's rule-selection is
