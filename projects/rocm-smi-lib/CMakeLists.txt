@@ -445,22 +445,24 @@ endif()
 include(CPack)
 
 cpack_add_component(
-  dev
-  DISPLAY_NAME "Development"
-  DESCRIPTION "Development needed header files for ROCM-SMI"
-  DEPENDS dev)
+    dev
+    DISPLAY_NAME "Development"
+    DESCRIPTION "Development needed header files for ROCM-SMI"
+    DEPENDS dev
+)
 
 cpack_add_component(
-  asan
-  DISPLAY_NAME "ASAN"
-  DESCRIPTION "ASAN libraries for the ROCM-SMI"
-  DEPENDS asan)
+    asan
+    DISPLAY_NAME "ASAN"
+    DESCRIPTION "ASAN libraries for the ROCM-SMI"
+    DEPENDS asan
+)
 
 cpack_add_component_group("tests")
 cpack_add_component(tests GROUP tests)
 if(NOT BUILD_SHARED_LIBS)
-  cpack_add_component_group("static")
-  cpack_add_component(dev GROUP static)
+    cpack_add_component_group("static")
+    cpack_add_component(dev GROUP static)
 endif()
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

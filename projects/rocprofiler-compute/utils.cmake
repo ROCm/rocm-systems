@@ -73,7 +73,7 @@ function(
             endif()
             install(
                 FILES "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
-		DESTINATION ${LINTIAN_DOCS_DIR}
+                DESTINATION ${LINTIAN_DOCS_DIR}
                 COMPONENT ${COMPONENT_NAME_T}
             )
         endif()

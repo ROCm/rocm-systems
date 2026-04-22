@@ -214,7 +214,7 @@ function(
         # Install copyright file
         install(
             FILES "${CMAKE_BINARY_DIR}/DEBIAN/copyright"
-	    DESTINATION ${LINTIAN_DOCS_DIR}
+            DESTINATION ${LINTIAN_DOCS_DIR}
             COMPONENT ${COMPONENT_NAME_T}
         )
 
@@ -251,8 +251,7 @@ function(
                 message(FATAL_ERROR "Failed to compress: ${error}")
             endif()
             install(
-                FILES
-                    "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
+                FILES "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
                 DESTINATION ${LINTIAN_DOCS_DIR}
                 COMPONENT ${COMPONENT_NAME_T}
             )
