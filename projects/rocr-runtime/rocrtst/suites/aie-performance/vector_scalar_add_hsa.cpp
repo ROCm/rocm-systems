@@ -100,6 +100,32 @@ void load_binary(hsa_amd_memory_pool_t pool, const std::filesystem::path& path, 
   size_out = size;
 }
 
+// Create packet payload
+void create_packet_payload(void* pdi_buf, void* insts_buf, std::uint32_t insts_dwords, void* input,
+                           void* output, hsa_amd_aie_ert_start_kernel_data_t* payload) {
+  // PDI pointer
+  payload->pdi_addr = pdi_buf;
+  // Transaction opcode (not counted in packet_dwords)
+  payload->data[0] = 0x3;
+  payload->data[1] = 0x0;
+  // Instructions: 3 dwords
+  payload->data[2] =
+      static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(insts_buf) & 0xFFFFFFFF);
+  payload->data[3] = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(insts_buf) >> 32);
+  payload->data[4] = insts_dwords;
+  // Source address: 2 dwords
+  payload->data[5] =
+      static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(input) & 0xFFFFFFFF);
+  payload->data[6] = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(input) >> 32);
+  // Destination address: 2 dwords
+  payload->data[7] =
+      static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(output) & 0xFFFFFFFF);
+  payload->data[8] = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(output) >> 32);
+  // Sizes: 1 dword per tensor (source, then destination)
+  payload->data[9] = static_cast<std::uint32_t>(DATA_SIZE);   // input
+  payload->data[10] = static_cast<std::uint32_t>(DATA_SIZE);  // output
+}
+
 // Dispatch packet submission
 void dispatch_packet(hsa_queue_t* queue, hsa_amd_aie_ert_start_kernel_data_t* payload,
                      std::size_t payload_dwords) {
@@ -225,32 +251,10 @@ static void VectorScalarAddHSANoAlloc(benchmark::State& state) {
 
   // --- Benchmark loop: dispatch is synchronous ---
   for (auto _ : state) {
-    // Create HSA packet
+    // Create HSA packet payload
+    create_packet_payload(pdi_buf, insts_buf, insts_dwords, input, output, payload);
 
-    // PDI pointer
-    payload->pdi_addr = pdi_buf;
-    // Transaction opcode (not counted in packet_dwords)
-    payload->data[0] = 0x3;
-    payload->data[1] = 0x0;
-    // Instructions: 3 dwords
-    payload->data[2] =
-        static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(insts_buf) & 0xFFFFFFFF);
-    payload->data[3] =
-        static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(insts_buf) >> 32);
-    payload->data[4] = insts_dwords;
-
-    // Source address: 2 dwords
-    payload->data[5] =
-        static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(input) & 0xFFFFFFFF);
-    payload->data[6] = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(input) >> 32);
-    // Destination address: 2 dwords
-    payload->data[7] =
-        static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(output) & 0xFFFFFFFF);
-    payload->data[8] = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(output) >> 32);
-    // Sizes: 1 dword per tensor (source, then destination)
-    payload->data[9] = static_cast<std::uint32_t>(DATA_SIZE);   // input
-    payload->data[10] = static_cast<std::uint32_t>(DATA_SIZE);  // output
-
+    // Create and dispatch HSA packet
     dispatch_packet(queue, payload, PACKET_DWORDS);
 
     benchmark::ClobberMemory();
@@ -366,32 +370,8 @@ static void VectorScalarAddHSA(benchmark::State& state) {
       state.SkipWithError("Failed to allocate payload buffer");
     }
 
-    // Create HSA packet
-
-    // PDI pointer
-    payload->pdi_addr = pdi_buf;
-    // Transaction opcode (not counted in packet_dwords)
-    payload->data[0] = 0x3;
-    payload->data[1] = 0x0;
-    // Instructions: 3 dwords
-    payload->data[2] =
-        static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(insts_buf) & 0xFFFFFFFF);
-    payload->data[3] =
-        static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(insts_buf) >> 32);
-    payload->data[4] = insts_dwords;
-    // Source address: 2 dwords
-    payload->data[5] =
-        static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(input) & 0xFFFFFFFF);
-    payload->data[6] = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(input) >> 32);
-    // Destination address: 2 dwords
-    payload->data[7] =
-        static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(output) & 0xFFFFFFFF);
-    payload->data[8] = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(output) >> 32);
-    // Sizes: 1 dword per tensor (source, then destination)
-    payload->data[9] = static_cast<std::uint32_t>(DATA_SIZE);   // input
-    payload->data[10] = static_cast<std::uint32_t>(DATA_SIZE);  // output
-
-    dispatch_packet(queue, payload, PACKET_DWORDS);
+    // Create and dispatch HSA packet
+    create_packet_payload(pdi_buf, insts_buf, insts_dwords, input, output, payload);
 
     // Free payload after dispatch to include allocation overhead in the benchmark
     hsa_amd_memory_pool_free(payload);
