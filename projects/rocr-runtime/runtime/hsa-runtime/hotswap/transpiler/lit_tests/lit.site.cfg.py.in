@@ -492,6 +492,20 @@ config.fixtures = {
         r"@LIT_FIXTURE_BUFFER_ATOMIC_SWAP_B32_CO@",
     "buffer_atomic_cmpswap_b32":
         r"@LIT_FIXTURE_BUFFER_ATOMIC_CMPSWAP_B32_CO@",
+    # Non-RTN (glc=0) companions to the RTN SWAP / CMPSWAP fixtures
+    # above.  Added after the /principled review of the RTN fixtures
+    # flagged a concern that the handler's `op.dst(0)` access path
+    # might crash on non-RTN forms — it doesn't (operand 0 of a MUBUF
+    # atomic is always vdata whether tied-def or source-only), but
+    # the non-RTN path wasn't test-covered either.  These fixtures
+    # pin the no-write-back invariant: the atomicrmw / cmpxchg must
+    # emit (atomic side-effect preserved) but the result must be
+    # unused in SSA (no extractvalue, no writeReg — the
+    # `di.numDefs > 0` guard in the handler skips the write-back).
+    "buffer_atomic_swap_b32_nortn":
+        r"@LIT_FIXTURE_BUFFER_ATOMIC_SWAP_B32_NORTN_CO@",
+    "buffer_atomic_cmpswap_b32_nortn":
+        r"@LIT_FIXTURE_BUFFER_ATOMIC_CMPSWAP_B32_NORTN_CO@",
     # buffer_load_d16_u8 (MUBUF/VBUFFER) — gfx9+/gfx1250 D16 partial-
     # write byte loads.  Pins both half-merge directions:
     #   `_d16_u8`     -> (prior & 0xFFFF0000) | zext(byte, i32)

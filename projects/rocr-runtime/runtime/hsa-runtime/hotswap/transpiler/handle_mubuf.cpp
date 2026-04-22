@@ -243,6 +243,21 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
   }
 
   // ---- Buffer atomics ----
+  //
+  // RTN / non-RTN operand shape note.  MUBUF buffer atomics put the
+  // vdata register at operand 0 in BOTH the RTN (glc=1 / tied-def)
+  // and non-RTN (glc=0 / pure-source) forms.  The difference is
+  // whether operand 0 is also tied to the destination (RTN) or
+  // only a source (non-RTN).  `op.dst(0)` — which maps to
+  // `ctx.parseReg(di.getReg(0), 0)` per `raise_context.hpp:489` —
+  // reads operand 0 unconditionally and therefore returns the
+  // vdata register for both forms.  The RTN-only write-back below
+  // is gated by `di.numDefs > 0` (consistent with the assert just
+  // below this comment), which correctly SKIPS for non-RTN.  The
+  // two per-form invariants are pinned by
+  // `lit_tests/buffer_atomic_swap_b32/` (RTN) +
+  // `lit_tests/buffer_atomic_swap_b32_nortn/` (non-RTN) and the
+  // cmpswap twins.
   if (sop >= SemOp::BUFFER_ATOMIC_ADD && sop <= SemOp::BUFFER_ATOMIC_PK_ADD_F16) {
     assert(((di.tsFlags & SIInstrFlags::IsAtomicRet) != 0) == (di.numDefs > 0) &&
            "buffer atomic: IsAtomicRet disagrees with numDefs");
