@@ -583,7 +583,21 @@ typedef enum {
                                                         temperature */
   AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDD_USR,        //!< VDD USR voltage regulator temperature
   AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_E32,   //!< VDDIO 1.1V E32 voltage regulator temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_04_HBM_B,    //!< VDDIO 0.4V HBM B voltage regulator temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_04_HBM_D,    //!< VDDIO 0.4V HBM D voltage regulator temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_HBM_B,   //!< VDDCR 0.75V HBM B voltage regulator temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_HBM_D,   //!< VDDCR 0.75V HBM D voltage regulator temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_GTA_A,    //!< VDDIO 1.1V GTA A voltage regulator temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_GTA_C,    //!< VDDIO 1.1V GTA C voltage regulator temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075_GTA_A,   //!< VDDAN 0.75V GTA A voltage regulator temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075_GTA_C,   //!< VDDAN 0.75V GTA C voltage regulator temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_075_UCIE,    //!< VDDCR 0.75V UCIE voltage regulator temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAA,  //!< VDDIO 0.65V UCIEAA voltage regulator temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAM_A,//!< VDDIO 0.65V UCIEAM A voltage regulator temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_065_UCIEAM_C,//!< VDDIO 0.65V UCIEAM C voltage regulator temperature
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075,         //!< VDDAN 0.75V voltage regulator temperature
   AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VR_LAST = 199,
+  AMDSMI_TEMPERATURE_TYPE_GPUBOARD_LAST = AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDAN_075, //!< Last GPU board temperature type
 
   // Baseboard System temperature
   AMDSMI_TEMPERATURE_TYPE_BASEBOARD_FIRST = 200,
