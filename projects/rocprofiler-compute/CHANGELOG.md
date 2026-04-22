@@ -22,8 +22,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed `inf` display for metrics with zero-denominator counters (e.g., L2-Fabric Write Latency when no write requests are issued). The metric evaluation path now catches `inf` scalar results and returns `"N/A"`, consistent with existing `NaN` handling.
 
-* Fixed MFMA values showing up as N/A in the gfx9 memory chart diagram (CLI/TUI and web UI).
-
 ### Upcoming changes
 
 ## ROCm Compute Profiler 3.6.0 for ROCm 7.13.0
