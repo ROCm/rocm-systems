@@ -448,6 +448,38 @@ static void runGroupPass(IRBuilder<> &B, Module &M, RaiseContext &ctx,
 
 Value *emitWMMAtoMFMA(RaiseContext &ctx, Value *a, Value *b, Value *c,
                        WMMAInputType inputType) {
+  // Callers (the `V_WMMA_*` dispatches in `handle_valu_vop3p.cpp`)
+  // are expected to have already refused the lift when the current
+  // projection does not provide the full-wave EXEC invariant AND
+  // the target actually supports the MFMA intrinsics this helper
+  // emits — see the block comment in this file (~line 130) for
+  // why the redistribute / collect pipeline requires HW EXEC=-1
+  // for correctness.  Assert the invariant as a defense-in-depth
+  // fence so a future refactor adding a new WMMA opcode case that
+  // forgets the caller-side gate fails loudly in assert-on builds
+  // (debug + all lit / gtest runs).
+  //
+  // The `hasMFMA` disjunct reflects the existing (pre-gate) shape
+  // of the `V_WMMA_F32_16x16x{32,64}_*` dispatch: when neither
+  // `hasWMMA12` nor `hasMFMA` holds (gfx1250 → gfx1250 same-target
+  // today, whose native WMMA intrinsics are gated on
+  // `hasTensorOps` in a branch that dispatch does NOT yet model),
+  // the code falls through to `emitWMMAtoMFMA` and produces MFMA-
+  // intrinsic IR that the backend can't actually lower.  The
+  // raise-time "success" there is a latent bug, not my gate's
+  // responsibility — the caller-side gate lives in that branch and
+  // is authoritative.  Asserting on `hasMFMA == false` here would
+  // regress `BatchRaise.Gfx1250TestData`, which exercises exactly
+  // that path.
+  assert((ctx.projection.providesFullWaveExecInvariant() ||
+          !ctx.targetIsa.hasMFMA) &&
+         "emitWMMAtoMFMA requires the current projection to provide "
+         "the full-wave EXEC invariant (init_whole_wave sets HW EXEC=-1) "
+         "when targeting an MFMA-capable ISA. Caller in "
+         "handle_valu_vop3p.cpp MUST gate on "
+         "`ctx.projection.providesFullWaveExecInvariant()` and refuse "
+         "via RaiseFailure::unsupportedShape before reaching here.");
+
   IRBuilder<> &B = ctx.B;
   Module &M = ctx.M;
 
@@ -610,6 +642,18 @@ static void runGroupPassF32K4(IRBuilder<> &B, Module &M, RaiseContext &ctx,
 
 Value *emitWMMAtoMFMA_F32_16x16x4(RaiseContext &ctx, Value *a, Value *b,
                                    Value *c) {
+  // Same defense-in-depth assert as `emitWMMAtoMFMA` above.  The
+  // K=4 f32 decomposition uses the same runGroupPass* +
+  // bpermute-collect shape and relies on the same full-wave EXEC
+  // invariant; keep the two gates in lock-step.
+  assert(ctx.projection.providesFullWaveExecInvariant() &&
+         "emitWMMAtoMFMA_F32_16x16x4 requires the current projection "
+         "to provide the full-wave EXEC invariant (init_whole_wave "
+         "sets HW EXEC=-1). Caller in handle_valu_vop3p.cpp MUST gate "
+         "on `ctx.projection.providesFullWaveExecInvariant()` and "
+         "refuse via RaiseFailure::unsupportedShape before reaching "
+         "here.");
+
   IRBuilder<> &B = ctx.B;
   Module &M = ctx.M;
 

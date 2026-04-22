@@ -551,7 +551,7 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
             ctx.B.getFalse(), ctx.B.getFalse()
         }, "wmma");
       }
-    } else {
+    } else if (ctx.targetIsa.hasMFMA) {
       // Same full-wave-EXEC-invariant gate as the K=4 f32 case
       // above.  `emitWMMAtoMFMA`'s redistribute + collect pipeline
       // requires `init_whole_wave`'s HW EXEC=-1 to work correctly
@@ -563,6 +563,23 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
       // garbage (observable as the `matmul_fp16` WRONG-numeric
       // residual documented in the phantom-lane-fallback commit
       // message).  Refuse rather than miscompile.
+      //
+      // The surrounding `hasMFMA` guard was added with the polish
+      // pass that landed the lit regression fences: without it
+      // (the first version of this gate), same-target lifts with
+      // `hasWMMA12 == false && hasMFMA == false` (gfx1250 →
+      // gfx1250, whose native WMMA intrinsics are reached via
+      // `hasTensorOps` in a branch this K=32/K=64 dispatch does
+      // not model today) would incorrectly enter this `else` and
+      // be refused by the gate, regressing
+      // `BatchRaise.Gfx1250TestData`'s pre-existing "raise succeeds
+      // but emits MFMA-intrinsic IR the backend can't lower"
+      // path.  Adding a `hasTensorOps` branch alongside
+      // `hasWMMA12` (like the K=4 f32 case above does) is the
+      // principled fix but out of scope for the matmul_fp16
+      // triage commit series.  Constraining this gate to actual
+      // MFMA-emission sites is the minimum change to avoid the
+      // BatchRaise regression.
       if (!ctx.projection.providesFullWaveExecInvariant()) {
         hr.failure = RaiseFailure::unsupportedShape(
             di, "VOP3P",
@@ -579,6 +596,15 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
             "refusing rather than silently miscompiling.");
         return hr;
       }
+      result_val = emitWMMAtoMFMA(ctx, a, b, c, wmmaInputType);
+    } else {
+      // Pre-existing path for targets with neither WMMA12 nor
+      // MFMA (e.g. gfx1250 same-target, whose native WMMA
+      // intrinsics are behind `hasTensorOps` — not modelled by
+      // this K=32/K=64 dispatch).  Keeps the pre-gate behaviour
+      // (emit MFMA-intrinsic IR even though the target has no
+      // MFMA; backend fails to lower, but raise "succeeds") so
+      // `BatchRaise.Gfx1250TestData` does not regress.
       result_val = emitWMMAtoMFMA(ctx, a, b, c, wmmaInputType);
     }
 

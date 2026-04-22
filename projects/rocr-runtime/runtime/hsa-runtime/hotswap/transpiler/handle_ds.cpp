@@ -184,33 +184,52 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     Type *ptrLdsTy = PointerType::get(ctx.C, 3);
     auto *i8Ty = Type::getInt8Ty(ctx.C);
 
-    // 2 output dwords, each holds 4 i8 values from 4 different
-    // source lanes within the 8-lane transpose group.
-    Value *outDw[2];
-    for (unsigned j = 0; j < 2; j++) {
-      Value *acc = ConstantInt::get(ctx.i32Ty, 0);
-      for (unsigned i = 0; i < 4; i++) {
-        Value *srcLane = ctx.B.CreateAdd(groupBase,
-                            ctx.B.getInt32(4 * j + i));
-        // ds_bpermute selector is byte-addressed (lane_id << 2).
-        Value *base = ctx.B.CreateCall(bperm,
-            {ctx.B.CreateShl(srcLane, ctx.B.getInt32(2)), addr32},
-            "bp_base");
-        Value *ldAddr = ctx.B.CreateAdd(base, lInGroup, "ld_addr");
-        Value *ptr = ctx.B.CreateIntToPtr(
-            ctx.B.CreateZExt(ldAddr, ctx.i64Ty), ptrLdsTy, "tr8_p");
-        Value *valI8 = ctx.B.CreateLoad(i8Ty, ptr, "tr8_b");
-        Value *valI32 = ctx.B.CreateZExt(valI8, ctx.i32Ty);
-        Value *shifted = ctx.B.CreateShl(valI32,
-                            ctx.B.getInt32(8 * i));
-        acc = ctx.B.CreateOr(acc, shifted, "tr8_pack");
-      }
-      outDw[j] = acc;
-    }
-
+    // SPE-gate the entire bpermute-addressed load + pack + store
+    // sequence so phantom lanes don't issue the per-element LDS
+    // loads with bpermute-derived addresses that may land outside
+    // the WG's LDS allocation.  Same rationale as the simpler
+    // DS_READ loads further down (and the handle_flat.cpp global/
+    // flat-load fix in the same commit chain): the bpermute
+    // selector is `groupBase + 4j + i` where `groupBase` comes
+    // from the lane's own `mbcnt_hi`-derived lane id — for a
+    // phantom target lane whose hardware lane index falls outside
+    // the source-kernel WG's modelled range, `groupBase` points
+    // at an arbitrary "source lane" that may or may not have
+    // written anything useful to LDS, and the resulting `ldAddr`
+    // can easily exceed the kernel's `group_segment_fixed_size`
+    // allocation.  The `storeVGPR32` destination writes at the
+    // end of each iteration use the low-level
+    // `ctx.regs.storeVGPR32` path (not the auto-gating
+    // `ctx.storeVGPR32`) so we don't nest a second SPE diamond
+    // around each write — harmless but wasteful IR.
     ParsedReg dest = op.dst();
-    for (unsigned j = 0; j < 2; j++)
-      ctx.storeVGPR32(dest.baseIdx + j, outDw[j]);
+    ctx.emitUnderExec([&] {
+      // 2 output dwords, each holds 4 i8 values from 4 different
+      // source lanes within the 8-lane transpose group.
+      Value *outDw[2];
+      for (unsigned j = 0; j < 2; j++) {
+        Value *acc = ConstantInt::get(ctx.i32Ty, 0);
+        for (unsigned i = 0; i < 4; i++) {
+          Value *srcLane = ctx.B.CreateAdd(groupBase,
+                              ctx.B.getInt32(4 * j + i));
+          // ds_bpermute selector is byte-addressed (lane_id << 2).
+          Value *base = ctx.B.CreateCall(bperm,
+              {ctx.B.CreateShl(srcLane, ctx.B.getInt32(2)), addr32},
+              "bp_base");
+          Value *ldAddr = ctx.B.CreateAdd(base, lInGroup, "ld_addr");
+          Value *ptr = ctx.B.CreateIntToPtr(
+              ctx.B.CreateZExt(ldAddr, ctx.i64Ty), ptrLdsTy, "tr8_p");
+          Value *valI8 = ctx.B.CreateLoad(i8Ty, ptr, "tr8_b");
+          Value *valI32 = ctx.B.CreateZExt(valI8, ctx.i32Ty);
+          Value *shifted = ctx.B.CreateShl(valI32,
+                              ctx.B.getInt32(8 * i));
+          acc = ctx.B.CreateOr(acc, shifted, "tr8_pack");
+        }
+        outDw[j] = acc;
+      }
+      for (unsigned j = 0; j < 2; j++)
+        ctx.regs.storeVGPR32(ctx.B, dest.baseIdx + j, outDw[j]);
+    });
 
     hr.handled = true;
   };
@@ -233,10 +252,6 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     }
 
     Type *ptrLdsTy = PointerType::get(ctx.C, 3);
-    auto *v4i32Ty = FixedVectorType::get(ctx.i32Ty, 4);
-
-    Value *ptr = ctx.B.CreateIntToPtr(addr, ptrLdsTy, "tr_ptr");
-    Value *loaded = ctx.B.CreateLoad(v4i32Ty, ptr, "tr_load");
 
     // Optimized transpose via LDS re-reads.
     // Instead of 32 bpermute+select per transpose (which causes register
@@ -278,39 +293,53 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
 
     auto *i16Ty = Type::getInt16Ty(ctx.C);
 
-    Value *outDw[4];
-    for (unsigned j = 0; j < 4; j++) {
-      Value *srcLo = ctx.B.CreateAdd(groupBase, ctx.B.getInt32(2 * j));
-      Value *srcHi = ctx.B.CreateAdd(groupBase, ctx.B.getInt32(2 * j + 1));
-
-      // Get source lane's LDS base address via ds_bpermute.
-      Value *baseLo = ctx.B.CreateCall(bperm,
-          {ctx.B.CreateShl(srcLo, ctx.B.getInt32(2)), addr32}, "bp_base_lo");
-      Value *baseHi = ctx.B.CreateCall(bperm,
-          {ctx.B.CreateShl(srcHi, ctx.B.getInt32(2)), addr32}, "bp_base_hi");
-
-      // LDS address for element L_in_group in source lane's contiguous data.
-      Value *ldAddrLo = ctx.B.CreateAdd(baseLo, elemOff, "ld_addr_lo");
-      Value *ldAddrHi = ctx.B.CreateAdd(baseHi, elemOff, "ld_addr_hi");
-
-      // Load i16 from LDS (address space 3).
-      Value *ptrLo = ctx.B.CreateIntToPtr(
-          ctx.B.CreateZExt(ldAddrLo, ctx.i64Ty), ptrLdsTy, "tr_p_lo");
-      Value *ptrHi = ctx.B.CreateIntToPtr(
-          ctx.B.CreateZExt(ldAddrHi, ctx.i64Ty), ptrLdsTy, "tr_p_hi");
-      Value *valLo = ctx.B.CreateLoad(i16Ty, ptrLo, "tr_lo");
-      Value *valHi = ctx.B.CreateLoad(i16Ty, ptrHi, "tr_hi");
-
-      // Pack two i16 into one i32: (hi << 16) | lo
-      Value *lo32 = ctx.B.CreateZExt(valLo, ctx.i32Ty);
-      Value *hi32 = ctx.B.CreateZExt(valHi, ctx.i32Ty);
-      outDw[j] = ctx.B.CreateOr(
-          ctx.B.CreateShl(hi32, ctx.B.getInt32(16)), lo32, "tr_out");
-    }
-
+    // SPE-gate the bpermute-addressed per-element LDS loads + pack
+    // + store sequence (same rationale as the DS_LOAD_TR8 gating
+    // above).  Phantom lanes on a sub-wave-width launch would
+    // otherwise issue `CreateLoad(i16Ty, ptrLo, ...)` and
+    // `CreateLoad(i16Ty, ptrHi, ...)` against ds_bpermute-derived
+    // LDS addresses that fall outside the WG's
+    // `group_segment_fixed_size` allocation; the stores at the end
+    // of the loop use low-level `ctx.regs.storeVGPR32` instead of
+    // the auto-gating `ctx.storeVGPR32` to avoid nesting a second
+    // SPE diamond around each write.
     ParsedReg dest = op.dst();
-    for (unsigned j = 0; j < 4; j++)
-      ctx.storeVGPR32(dest.baseIdx + j, outDw[j]);
+    ctx.emitUnderExec([&] {
+      Value *outDw[4];
+      for (unsigned j = 0; j < 4; j++) {
+        Value *srcLo = ctx.B.CreateAdd(groupBase, ctx.B.getInt32(2 * j));
+        Value *srcHi = ctx.B.CreateAdd(groupBase, ctx.B.getInt32(2 * j + 1));
+
+        // Get source lane's LDS base address via ds_bpermute.
+        Value *baseLo = ctx.B.CreateCall(bperm,
+            {ctx.B.CreateShl(srcLo, ctx.B.getInt32(2)), addr32},
+            "bp_base_lo");
+        Value *baseHi = ctx.B.CreateCall(bperm,
+            {ctx.B.CreateShl(srcHi, ctx.B.getInt32(2)), addr32},
+            "bp_base_hi");
+
+        // LDS address for element L_in_group in source lane's contiguous data.
+        Value *ldAddrLo = ctx.B.CreateAdd(baseLo, elemOff, "ld_addr_lo");
+        Value *ldAddrHi = ctx.B.CreateAdd(baseHi, elemOff, "ld_addr_hi");
+
+        // Load i16 from LDS (address space 3).
+        Value *ptrLo = ctx.B.CreateIntToPtr(
+            ctx.B.CreateZExt(ldAddrLo, ctx.i64Ty), ptrLdsTy, "tr_p_lo");
+        Value *ptrHi = ctx.B.CreateIntToPtr(
+            ctx.B.CreateZExt(ldAddrHi, ctx.i64Ty), ptrLdsTy, "tr_p_hi");
+        Value *valLo = ctx.B.CreateLoad(i16Ty, ptrLo, "tr_lo");
+        Value *valHi = ctx.B.CreateLoad(i16Ty, ptrHi, "tr_hi");
+
+        // Pack two i16 into one i32: (hi << 16) | lo
+        Value *lo32 = ctx.B.CreateZExt(valLo, ctx.i32Ty);
+        Value *hi32 = ctx.B.CreateZExt(valHi, ctx.i32Ty);
+        outDw[j] = ctx.B.CreateOr(
+            ctx.B.CreateShl(hi32, ctx.B.getInt32(16)), lo32, "tr_out");
+      }
+
+      for (unsigned j = 0; j < 4; j++)
+        ctx.regs.storeVGPR32(ctx.B, dest.baseIdx + j, outDw[j]);
+    });
 
     hr.handled = true;
     return hr;

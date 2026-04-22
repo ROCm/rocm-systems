@@ -55,8 +55,17 @@ struct ISAProfile {
     return p;
   }
 
- private:
-  ISAProfile() = default; // constructible only via fromSubtarget()
+  // Default ctor is public so unit tests can construct a minimal
+  // profile via field assignment — see
+  // `tests/wave_projection_test.cpp` for the `WaveNativeProjection`
+  // direction-gate check that needs a hand-forged wave32 source /
+  // wave64 target pair without standing up a full
+  // `MCSubtargetInfo`.  Production code MUST use `fromSubtarget`;
+  // hand-forging loses the cross-checks between feature flags
+  // (e.g. hasAGPR == hasMFMA) that `fromSubtarget` enforces.  A
+  // review-time heuristic: grep for ISAProfile-default-ctor uses
+  // outside `tests/` and flag any hit.
+  ISAProfile() = default;
 };
 
 } // namespace transpiler

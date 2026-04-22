@@ -306,6 +306,32 @@ config.fixtures = {
     # refactor that accidentally entangles the two arms).
     "c5_predicate_chain_phantom_lane":
         r"@LIT_FIXTURE_C5_PREDICATE_CHAIN_PHANTOM_LANE_CO@",
+    # phantom_lane_modrep_fallback / wmma_phantom_lane_refuse — the
+    # two-arm regression fence for `raiser.cpp`'s phantom-lane →
+    # MODREP fallback + the `handle_valu_vop3p.cpp` WMMA-refusal
+    # gate.  Both fixtures use `__launch_bounds__(32)` so their
+    # gfx1250 HSACOs have `max_flat_workgroup_size=32`, which under
+    # a gfx942 wave64 target is below `targetWaveSize` and triggers
+    # the fallback.  The pair pins the two POST-fallback outcomes:
+    #
+    #   * `phantom_lane_modrep_fallback` — non-WMMA kernel lifts
+    #     cleanly under MODREP (no `init_whole_wave`, fallback
+    #     log message observed, IR body present).
+    #   * `wmma_phantom_lane_refuse` — WMMA kernel reaches the
+    #     `emitWMMAtoMFMA_F32_16x16x4` call site, the
+    #     `providesFullWaveExecInvariant` gate in
+    #     `handle_valu_vop3p.cpp` refuses with an attribution-
+    #     rich diagnostic naming the opcode, the invariant, the
+    #     init_whole_wave dependency, and the phantom-lane
+    #     fallback as the route into the unsafe state.
+    #
+    # Together they lock in the three-commit matmul_fp16 triage
+    # (load-gating symmetry + phantom-lane MODREP fallback + WMMA
+    # refusal under non-full-wave-EXEC projection).
+    "phantom_lane_modrep_fallback":
+        r"@LIT_FIXTURE_PHANTOM_LANE_MODREP_FALLBACK_CO@",
+    "wmma_phantom_lane_refuse":
+        r"@LIT_FIXTURE_WMMA_PHANTOM_LANE_REFUSE_CO@",
     # s_set_pc_i64 (SOP1) — four sibling fixtures, one per analysis
     # outcome class. See setpc_analysis.cpp / handle_sop1.cpp for the
     # Pattern A (DirectA, br) / Pattern B (IndirectB, indirectbr) /

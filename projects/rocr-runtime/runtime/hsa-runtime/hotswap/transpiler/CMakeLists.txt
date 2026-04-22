@@ -223,6 +223,7 @@ set(TEST_SOURCES
   tests/corpus_test.cpp
   tests/c5_predicate_chain_test.cpp
   tests/mxfp4_dequant_test.cpp
+  tests/wave_projection_test.cpp
 )
 
 find_package(hip QUIET)
@@ -273,6 +274,21 @@ target_link_libraries(transpiler_tests
     -Wl,--exclude-libs,ALL
     hotswap-transpiler
     GTest::GTest
+)
+
+# AMDGPU target-private header paths — same as the library target
+# (see the PRIVATE `target_include_directories` block further up).
+# Tests that include transpiler headers pulling in
+# `amdgpu_formats.hpp` / `decoded_inst.hpp` (e.g.
+# `tests/wave_projection_test.cpp`) need these paths to find
+# `SIDefines.h` / `AMDGPUGen*.inc` during compilation.  The library
+# itself links these in PRIVATE because no public header exposes
+# the AMDGPU-private types, but test TUs that reach into the full
+# transpiler graph need them at compile time.
+target_include_directories(transpiler_tests PRIVATE
+  "${LLVM_BUILD_MAIN_SRC_DIR}/lib/Target/AMDGPU"
+  "${LLVM_BUILD_MAIN_SRC_DIR}/lib/Target/AMDGPU/Utils"
+  "${LLVM_BINARY_DIR}/lib/Target/AMDGPU"
 )
 
 if(hip_FOUND)
