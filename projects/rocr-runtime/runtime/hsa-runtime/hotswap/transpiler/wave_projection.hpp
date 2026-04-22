@@ -172,6 +172,28 @@ public:
   virtual llvm::Value *extractLaneBitFromWaveMask(llvm::IRBuilder<> &B,
                                                    llvm::Value *v) const = 0;
 
+  // True iff this projection guarantees hardware EXEC = -1 between
+  // `emitUnderExec` diamonds.  That invariant is load-bearing for a
+  // specific class of cross-lane lowerings whose correctness requires
+  // all target-wave lanes to participate in the collective (most
+  // notably the WMMA → MFMA redistribute / collect pipeline in
+  // `wmma_lowering.cpp` — target lanes 32..63 on a partial-wave
+  // launch would never write their MFMA destination VGPRs without
+  // HW EXEC=-1, and the collect-stage bpermute's reads from the
+  // upper half would return garbage).  Handlers that rely on that
+  // invariant (such as the V_WMMA_* dispatches in
+  // `handle_valu_vop3p.cpp`) MUST consult this flag and either
+  // refuse loudly or emit a different lowering when it's false.
+  //
+  // `ModuloReplicationProjection` returns false because it keeps
+  // hardware EXEC at the source-wave active mask (see
+  // `emitInitialExec`'s comment on why this is correct for the wave-
+  // size-oblivious class of kernels but unsafe for WMMA translation).
+  // `WaveNativeProjection` returns true because its
+  // `emitInitialExec` explicitly calls `@llvm.amdgcn.init_whole_wave`
+  // to set HW EXEC=-1 for the kernel body.
+  virtual bool providesFullWaveExecInvariant() const { return false; }
+
 protected:
   ISAProfile src_;
   ISAProfile tgt_;
@@ -260,6 +282,11 @@ public:
 
   llvm::Type *execStorageTy() const override { return waveMaskTy_; }
   bool broadcastNarrowExecLoWrite() const override { return true; }
+  // `init_whole_wave` in `emitInitialExec` forces HW EXEC=-1 for the
+  // kernel body, so this projection does provide the full-wave-EXEC
+  // invariant that WMMA→MFMA lowering (and other
+  // all-lanes-must-participate collectives) require.
+  bool providesFullWaveExecInvariant() const override { return true; }
 
   llvm::Value *emitInitialExec(llvm::IRBuilder<> &B) const override;
   llvm::Value *emitLaneActiveBit(llvm::IRBuilder<> &B,

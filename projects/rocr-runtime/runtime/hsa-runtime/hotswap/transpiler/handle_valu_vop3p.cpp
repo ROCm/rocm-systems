@@ -393,6 +393,41 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
           ctx.B.getFalse(), ctx.B.getFalse()
       }, "wmma");
     } else if (ctx.targetIsa.hasMFMA) {
+      // WMMA → MFMA cross-widening requires the full-wave EXEC
+      // invariant that only WaveNativeProjection's
+      // `init_whole_wave` provides (see
+      // `wmma_lowering.cpp::emitWMMAtoMFMA_F32_16x16x4`'s block
+      // comment on why target lanes 32..63 MUST participate in
+      // the Wave64 MFMA collective).  If the current projection
+      // does not guarantee that invariant — most commonly because
+      // `raiser.cpp`'s phantom-lane fallback chose
+      // ModuloReplicationProjection for a
+      // `max_flat_workgroup_size < targetWaveSize` kernel — refuse
+      // loudly rather than producing a silent miscompile.  The
+      // residual pre-`handle_valu_vop3p.cpp`-gating behaviour was
+      // that `matmul_fp16` / `matmul_fp16_16x16` under the MODREP
+      // fallback ran without faulting (the phantom-lane MODREP
+      // fallback closed the HIP-700 crash from an earlier commit)
+      // but produced wrong numerics — the decomposition's
+      // `ds_bpermute` + bit-shuffle chain assumes all 64 target
+      // lanes wrote their MFMA destination VGPRs, which MODREP's
+      // HW-EXEC=source-active mask does not satisfy.
+      if (!ctx.projection.providesFullWaveExecInvariant()) {
+        hr.failure = RaiseFailure::unsupportedShape(
+            di, "VOP3P",
+            "v_wmma_f32_16x16x4_f32 cross-target (WMMA → MFMA) "
+            "requires the full-wave EXEC invariant that "
+            "WaveNativeProjection's `init_whole_wave` provides "
+            "(all 64 target lanes participate in the MFMA "
+            "collective).  Current projection does not guarantee "
+            "that invariant (likely ModuloReplicationProjection, "
+            "chosen via `raiser.cpp`'s phantom-lane fallback for "
+            "kernels whose `max_flat_workgroup_size` is below the "
+            "target wavefront width — see that block comment).  "
+            "No safe lowering exists under MODREP for this shape; "
+            "refusing rather than silently miscompiling.");
+        return hr;
+      }
       result_val = emitWMMAtoMFMA_F32_16x16x4(ctx, a, b, c);
     } else {
       hr.failure = RaiseFailure::unsupportedShape(
@@ -517,6 +552,33 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
         }, "wmma");
       }
     } else {
+      // Same full-wave-EXEC-invariant gate as the K=4 f32 case
+      // above.  `emitWMMAtoMFMA`'s redistribute + collect pipeline
+      // requires `init_whole_wave`'s HW EXEC=-1 to work correctly
+      // on partial-wave launches; ModuloReplicationProjection
+      // leaves HW EXEC at the source-active mask, so target lanes
+      // 32..63 on a `max_flat_workgroup_size < targetWaveSize`
+      // launch never write their MFMA destination VGPRs and the
+      // collect-stage `ds_bpermute` reads from that half return
+      // garbage (observable as the `matmul_fp16` WRONG-numeric
+      // residual documented in the phantom-lane-fallback commit
+      // message).  Refuse rather than miscompile.
+      if (!ctx.projection.providesFullWaveExecInvariant()) {
+        hr.failure = RaiseFailure::unsupportedShape(
+            di, "VOP3P",
+            "v_wmma_*_16x16x{32,64}_* cross-target (WMMA → MFMA) "
+            "requires the full-wave EXEC invariant that "
+            "WaveNativeProjection's `init_whole_wave` provides "
+            "(all 64 target lanes participate in the MFMA "
+            "collective).  Current projection does not guarantee "
+            "that invariant (likely ModuloReplicationProjection, "
+            "chosen via `raiser.cpp`'s phantom-lane fallback for "
+            "kernels whose `max_flat_workgroup_size` is below the "
+            "target wavefront width — see that block comment).  "
+            "No safe lowering exists under MODREP for this shape; "
+            "refusing rather than silently miscompiling.");
+        return hr;
+      }
       result_val = emitWMMAtoMFMA(ctx, a, b, c, wmmaInputType);
     }
 
