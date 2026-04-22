@@ -340,7 +340,6 @@ static void initPluginLibsOnceFunc() {
     netPluginLibs[pluginCounter].ncclNetPluginState = ncclNetPluginStateInitReady;
     netPluginLibs[pluginCounter].ncclGinPluginState = netPluginLibs[pluginCounter].ncclGin ? ncclNetPluginStateInitReady : ncclNetPluginStateLoadFailed;
     ++pluginCounter;
-    netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   }
 #endif
