@@ -867,8 +867,9 @@ inline __HOST_DEVICE__ __half2 __h2div(__half2 x, __half2 y) {
 // Device specific functions
 #if defined(__clang__) && defined(__HIP__)
 inline __device__ __half atomicAdd(__half* const address, const __half value) {
-  return static_cast<__half>(__scoped_atomic_fetch_add(
-      (_Float16*)address, static_cast<_Float16>(value), __ATOMIC_ACQ_REL, __MEMORY_SCOPE_DEVICE));
+  return static_cast<__half>(__scoped_atomic_fetch_add((_Float16*)address,
+                                                       static_cast<__half_raw>(value).data,
+                                                       __ATOMIC_ACQ_REL, __MEMORY_SCOPE_DEVICE));
 }
 
 inline __device__ __half2 atomicAdd(__half2* const address, const __half2 value) {
