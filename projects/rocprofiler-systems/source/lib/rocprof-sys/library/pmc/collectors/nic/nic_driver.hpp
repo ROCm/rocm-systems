@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <amd_smi/amdsmi.h>
@@ -103,13 +104,13 @@ public:
         result.reserve(num_stats);
         for(const auto& stat : raw)
         {
-            result.push_back({ stat.name, stat.value });
+            result.emplace_back(stat_entry{ stat.name, stat.value });
         }
         return result;
     }
 
 private:
-    static void check(amdsmi_status_t status, const char* func)
+    static void check(amdsmi_status_t status, std::string_view func)
     {
         if(status != AMDSMI_STATUS_SUCCESS)
         {
@@ -118,7 +119,7 @@ private:
         }
     }
 
-    amdsmi_processor_handle m_handle;
+    const amdsmi_processor_handle m_handle;
 };
 
 }  // namespace rocprofsys::pmc::collectors::nic

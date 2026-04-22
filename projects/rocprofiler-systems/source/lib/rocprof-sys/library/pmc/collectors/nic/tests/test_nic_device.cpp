@@ -10,7 +10,6 @@
 #include <stdexcept>
 
 using namespace rocprofsys::pmc::collectors::nic;
-using ::testing::_;
 using ::testing::AtLeast;
 using ::testing::Return;
 using ::testing::StrictMock;
@@ -32,10 +31,7 @@ protected:
 
     void SetUp() override { mock_driver = std::make_shared<MockDriver>(); }
 
-    /**
-     * @brief Configure mock to return NIC with full RDMA support.
-     */
-    void SetupFullRdmaSupport()
+    void SetupBaseNicInfo()
     {
         EXPECT_CALL(*mock_driver, get_nic_asic_info())
             .Times(AtLeast(1))
@@ -48,6 +44,11 @@ protected:
         EXPECT_CALL(*mock_driver, get_nic_rdma_info())
             .Times(AtLeast(1))
             .WillRepeatedly(Return(rdma_info{ 1 }));
+    }
+
+    void SetupFullRdmaSupport()
+    {
+        SetupBaseNicInfo();
 
         EXPECT_CALL(*mock_driver, get_nic_rdma_port_statistics(0))
             .Times(AtLeast(1))
@@ -61,22 +62,9 @@ protected:
             }));
     }
 
-    /**
-     * @brief Configure mock to return full statistics with values.
-     */
     void SetupStatisticsData()
     {
-        EXPECT_CALL(*mock_driver, get_nic_asic_info())
-            .Times(AtLeast(1))
-            .WillRepeatedly(Return(asic_info{ "AMD AINIC Test", "AMD" }));
-
-        EXPECT_CALL(*mock_driver, get_nic_port_info())
-            .Times(AtLeast(1))
-            .WillRepeatedly(Return(port_info{ "enp226s0" }));
-
-        EXPECT_CALL(*mock_driver, get_nic_rdma_info())
-            .Times(AtLeast(1))
-            .WillRepeatedly(Return(rdma_info{ 1 }));
+        SetupBaseNicInfo();
 
         EXPECT_CALL(*mock_driver, get_nic_rdma_port_statistics(0))
             .Times(AtLeast(1))

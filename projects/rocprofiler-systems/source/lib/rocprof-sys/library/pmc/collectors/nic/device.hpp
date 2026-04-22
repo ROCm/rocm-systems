@@ -94,7 +94,7 @@ public:
 
             for(const auto& stat : stats)
             {
-                auto it = METRIC_MAP.find(std::string_view(stat.name));
+                auto it = METRIC_MAP.find(stat.name);
                 if(it != METRIC_MAP.end())
                 {
                     nic_metrics.*(it->second) = stat.value;
@@ -168,12 +168,7 @@ private:
             return false;
         }
 
-        m_supported_metrics.bits.rx_rdma_ucast_bytes = 1;
-        m_supported_metrics.bits.tx_rdma_ucast_bytes = 1;
-        m_supported_metrics.bits.rx_rdma_ucast_pkts  = 1;
-        m_supported_metrics.bits.tx_rdma_ucast_pkts  = 1;
-        m_supported_metrics.bits.rx_rdma_cnp_pkts    = 1;
-        m_supported_metrics.bits.tx_rdma_cnp_pkts    = 1;
+        m_supported_metrics.value = ALL_NIC_METRICS;
 
         LOG_DEBUG("NIC device [{}] ({}) initialized with {} RDMA port(s)", m_index,
                   m_device_name, m_rdma_port_count);
@@ -183,7 +178,7 @@ private:
 
     std::shared_ptr<Driver> m_driver;
     enabled_metrics         m_supported_metrics;
-    size_t                  m_index;
+    const size_t            m_index;
     std::string             m_device_name;
     std::string             m_product_name;
     std::string             m_vendor_name;

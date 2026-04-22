@@ -69,8 +69,8 @@ struct nic_traits
         Cache::initialize_pmc_metadata(device->get_index(), device->get_product_name());
     }
 
-    template <typename Perfetto, typename DeviceEntries>
-    static void init_perfetto_storage(const DeviceEntries& device_entries)
+    template <typename DeviceEntries>
+    static container_t extract_devices(const DeviceEntries& device_entries)
     {
         container_t devices;
         devices.reserve(device_entries.size());
@@ -78,7 +78,13 @@ struct nic_traits
         {
             devices.push_back(entry.device);
         }
-        Perfetto::init_storage(devices);
+        return devices;
+    }
+
+    template <typename Perfetto, typename DeviceEntries>
+    static void init_perfetto_storage(const DeviceEntries& device_entries)
+    {
+        Perfetto::init_storage(extract_devices(device_entries));
     }
 
     template <typename Perfetto>
@@ -92,18 +98,12 @@ struct nic_traits
     static void post_process_perfetto(const DeviceEntries&     device_entries,
                                       const enabled_metrics_t& enabled)
     {
-        container_t devices;
-        devices.reserve(device_entries.size());
-        for(const auto& entry : device_entries)
-        {
-            devices.push_back(entry.device);
-        }
-        Perfetto::post_process(devices, enabled);
+        Perfetto::post_process(extract_devices(device_entries), enabled);
     }
 
-    [[nodiscard]] static metrics_t get_metrics(const device_ptr_t& device,
-                                               const enabled_metrics_t& /*enabled*/,
-                                               uint64_t /*timestamp*/)
+    [[nodiscard]] static metrics_t get_metrics(
+        const device_ptr_t& device, [[maybe_unused]] const enabled_metrics_t& enabled,
+        [[maybe_unused]] uint64_t timestamp)
     {
         return device->get_nic_metrics();
     }
