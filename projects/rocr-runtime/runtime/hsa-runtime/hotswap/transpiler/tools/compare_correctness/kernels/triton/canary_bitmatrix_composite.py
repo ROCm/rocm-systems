@@ -81,84 +81,95 @@ sequence so every obstruction surfaces:
 Observed verdicts at landing
 ============================
 
-The canary revealed a specific new bug that the single-primitive
-canaries missed:
+The canary revealed a specific soundness gap that the single-
+primitive canaries missed, and the fix for it landed in the same
+commit as the canary — see the commit message for the full
+timeline:
 
 * ``native`` : gold.  Triton recipes use the native-gfx942 run as
   the reference.
 * ``legacy`` : SIG6 CRASH on every shape (``7 waitcnt, 0
   exec-widened, 1 unsupported``).  Orthogonal legacy limitation,
   not a salmon concern.
-* ``salmon`` : **WRONG 960/1024** on every shape (93.75%
-  mismatch).
+* ``salmon`` : **EXIT=2** on every shape, principled refusal via
+  ``c5_predicate_chain_classifier.cpp``'s phantom-lane arm.
+  Stderr names the phantom-lane regime
+  (``max_flat_workgroup_size=32 < target wavefront width 64``)
+  plus the triggering ``icmp ugt`` against compile-time constant
+  2 within (0, W_s-1=31], so triage tools can distinguish this
+  refusal from the baseline MODREP refusal (which fires on any
+  C5 site regardless of WG).
 
-Narrowing the composite:
+Canary evolution (chronological):
 
-* ``probe_sum_only`` (same structure, ``y = total - x`` without
-  the ``tl.cumsum``) — salmon **match**.  Confirms the int32
-  DPP-compound-add + permlanex16 reduction path is clean
-  (consistent with ``canary_dpp_compound_add_u32`` passing in
-  isolation).
-* ``probe_cumsum_i32_raw`` (just ``y = tl.cumsum(x, axis=0)``)
-  — salmon **WRONG 960/1024**.  Isolates the miscompile to the
+Phase 1 (pre-phantom-lane-rule) — salmon produced
+**WRONG 960/1024** on every shape (93.75% silent miscompile).
+Narrowing via diagnostic probe kernels (not landed) found:
+
+* ``y = total - x`` (no cumsum) — salmon **match**.  Confirms
+  the int32 DPP-compound-add + permlanex16 reduction path is
+  clean (consistent with ``canary_dpp_compound_add_u32``
+  passing in isolation).
+* ``y = tl.cumsum(x, axis=0)`` (just the scan) — salmon
+  **WRONG 960/1024**.  Isolates the miscompile to the
   ``tl.cumsum`` lift on the ``i32`` dtype specifically.
 
-Root-cause mapping:
+Phase 2 (root-cause analysis) — comparing salmon's raised IR for
+``canary_bpermute_scan_fp32`` (fp32 cumsum, salmon was passing
+numerically under the pre-phantom-lane WaveNative suppression)
+vs the failing i32 cumsum revealed that both paths carry
+``workitem.id.x()`` → ``icmp ugt/ult K, %tid`` predicate chains,
+but the fp32 path's VOPD-specific lowering (fixed in commit
+``bd04c268e7``) happens to materialise the predicate through
+``ballot.i64`` + ``s_and_saveexec_b32`` which
+``rewrite_cross_lane_divergent.cpp`` traces as wave-aware.  The
+i32 path's non-VOPD ``v_cndmask_b32`` lowering bypasses that
+chain and leaves the raw ``icmp`` downstream-visible.
 
-The ``canary_bpermute_scan_fp32`` companion uses ``tl.cumsum`` on
-fp32 and passes, so the bug is not in the bpermute scan itself
-at the IR level — it's in how salmon's rewrite passes handle
-the Triton-emitted predicate chain for the i32 codegen lowering.
+Phase 3 (matched to the documented soundness gap) — the
+per-source-lane EXEC model that ``WaveNativeProjection``
+relies on to claim ``tid < K`` is wave-safe depends on target
+lanes being a 1:1 image of source-kernel threads.  When the
+HSACO's ``max_flat_workgroup_size`` is BELOW the target
+wavefront width (32 for a ``num_warps=1`` Triton kernel vs 64
+on gfx942 wave64), every launch activates spare "phantom"
+target lanes via ``init_whole_wave``; their architectural
+``tid`` is their hardware lane index (32..63), the source
+kernel never modelled computation at those positions, and
+convergent cross-lane ops (``ds_bpermute``, ``ds_swizzle``,
+``permlane*``) can read the phantom lanes' unmodelled state.
+This is precisely the soundness gap documented in the
+``waveNative`` parameter contract of
+``c5_predicate_chain_classifier.hpp`` — historically deferred
+because no corpus kernel had empirically surfaced it.  THIS
+canary is the evidence.
 
-Comparing salmon's raised IR for both dtypes:
-
-* fp32 scan: predicates materialise through ``ballot.i64`` +
-  ``s_and_saveexec_b32`` (a VOPD-lowering byproduct) and the
-  ``rewrite_cross_lane_divergent.cpp`` classifier correctly
-  traces the ``ballot`` → ``saveexec`` chain as wave-aware.
-  Salmon's C2 path uses that to emit per-source-wave ds_bpermute
-  selectors.
-* i32 scan: predicates come through as direct ``select i1
-  %vcmp, ...`` where ``%vcmp = icmp ugt/ult i32 K, %tid`` — and
-  ``%tid`` is ``call @llvm.amdgcn.workitem.id.x()``, a wave-size-
-  sensitive value that does NOT go through a ballot/saveexec
-  normalisation step.  This is exactly the C5 "Wave-size-
-  sensitive predicate chain" class documented in
-  ``hotswap/docs/modrep-predicate-chain.md``: under modulo-
-  replication, upper-half target lanes (tid 32..63) fall outside
-  the predicate's intended source-wave-relative range and read
-  or skip ds_bpermute incorrectly.
-
-Disposition — **not a fix to pursue in this canary's commit**:
-
-The root cause lives in the C5 predicate-chain classifier /
-rewrite in salmon's modulo-replication projection, which another
-agent is already fixing end-to-end per
-``modrep-predicate-chain.md``.  That fix will rewrite
-``%tid``-derived predicate chains at their source (the ballot
-materialisation that fp32 gets by accident will become
-unconditional), and this canary will then graduate to ``match``.
-
-Landing this canary as WRONG-on-every-shape turns the composite
-failure into a regression gate that the C5 fix will close.  If
-the C5 fix ever lands and this canary STILL shows WRONG, it
-surfaces a residual interaction bug specific to sum+cumsum that
-the single-primitive C5 repair didn't catch — exactly the
-"interaction bug that single-primitive canaries missed"
-contingency this composite was designed for.
+Phase 4 (fix in same commit) — the classifier's ``waveNative``
+arm was narrowed to also refuse when the kernel's
+``max_flat_workgroup_size`` is statically below
+``targetWaveSize``.  Canary D graduates from silent WRONG to
+principled EXIT=2.  ``canary_bpermute_scan_fp32`` (which had
+the same phantom-lane regime but was numerically passing under
+the pre-fix suppression, a coincidence — see that canary's
+docstring) also graduates to principled refusal under the new
+rule.
 
 Regression contract:
 
-* salmon `WRONG 960/1024` -> `match`  ==  the C5 predicate-chain
-  fix landed AND composition is clean; retire the WRONG
-  expectation.
-* salmon `WRONG 960/1024` -> different mismatch count  ==
-  interaction with sum's lift path shifted; investigate.
-* salmon `WRONG 960/1024` -> `EXIT=2`  ==  classifier upgraded
-  from silent-miscompile to principled-refusal (e.g. the C5 fix
-  emits an explicit refusal for the pattern rather than
-  rewriting it); investigate whether the refusal is the intended
-  graduation shape.
+* salmon ``EXIT=2`` -> ``match``  ==  somebody added a
+  principled handler / rewrite for the phantom-lane case (e.g.
+  a legitimate ``init_whole_wave`` alternative that models lane
+  positions, or a mask-the-phantom-lanes-out lowering of
+  ``ds_bpermute``).  Retire the EXIT=2 expectation; document
+  the new rewrite.
+* salmon ``EXIT=2`` -> ``WRONG``  ==  the phantom-lane arm of
+  the classifier regressed (e.g. by losing the
+  ``maxFlatWorkgroupSize`` thread-through in the raiser).
+  Fixing it restores the EXIT=2 expectation.
+* salmon ``EXIT=2`` -> different stderr  ==  the refusal
+  diagnostic changed.  Verify the new diagnostic still names
+  the phantom-lane regime or the C5 class so operators can
+  bucket the refusal reason.
 
 Harness schema notes
 ====================

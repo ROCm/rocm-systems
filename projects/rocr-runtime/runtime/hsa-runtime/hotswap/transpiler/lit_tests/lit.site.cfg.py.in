@@ -290,6 +290,22 @@ config.fixtures = {
         r"@LIT_FIXTURE_C5_PREDICATE_CHAIN_TID_CO@",
     "c5_predicate_chain_masked":
         r"@LIT_FIXTURE_C5_PREDICATE_CHAIN_MASKED_CO@",
+    # c5_predicate_chain_phantom_lane — third sibling pinning the
+    # WaveNative phantom-lane sub-case added after
+    # `canary_bitmatrix_composite` falsified the pre-phantom-lane
+    # WaveNative suppression. Same icmp shape as
+    # `c5_predicate_chain_tid` but with `__launch_bounds__(32)` on
+    # the HIP source so `max_flat_workgroup_size` is below the
+    # target wave64 width, triggering
+    # `classifyPredicateChain`'s `phantomLaneGuaranteed` predicate.
+    # The fixture's RUN pair pins refusal under BOTH
+    # WaveNative (default, phantom-lane-annotated) AND MODREP
+    # (unannotated — MODREP's arm doesn't consult
+    # `maxFlatWorkgroupSize`, and the fixture CHECK-NOTs the
+    # phantom-lane prefix on the MODREP run to catch any future
+    # refactor that accidentally entangles the two arms).
+    "c5_predicate_chain_phantom_lane":
+        r"@LIT_FIXTURE_C5_PREDICATE_CHAIN_PHANTOM_LANE_CO@",
     # s_set_pc_i64 (SOP1) — four sibling fixtures, one per analysis
     # outcome class. See setpc_analysis.cpp / handle_sop1.cpp for the
     # Pattern A (DirectA, br) / Pattern B (IndirectB, indirectbr) /

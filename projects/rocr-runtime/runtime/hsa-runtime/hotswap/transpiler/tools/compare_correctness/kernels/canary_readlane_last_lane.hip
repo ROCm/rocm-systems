@@ -65,9 +65,14 @@
 //     transpiler copies the mnemonic across verbatim and so
 //     inherits the same wave64-target-lane semantics as native.
 //
-//   salmon : match on every shape, under BOTH projections
-//     (WaveNative — the current pipeline default — and
-//     ModuloReplication via HSA_HOTSWAP_DISABLE_WAVE_NATIVE=1).
+//   salmon : match on every shape under the runtime's
+//     WaveNativeProjection default.  (Re-testing the MODREP arm
+//     requires the `--disable-wave-native` CLI flag to raise_cli —
+//     there is no env-var override for the intercept library; see
+//     `raiser.hpp`'s "No process-global env-var override" comment
+//     for why.  `raise_cli` on the same HSACO + `--disable-wave-
+//     native` also succeeds, so both projections exercise the
+//     rewrite clean.)
 //     The `rewrite_cross_lane_divergent.cpp` pass recognises the
 //     lifted `llvm.amdgcn.readlane(val, 31)` as a cross-wave-
 //     divergent site under cross-widening and rewrites it into

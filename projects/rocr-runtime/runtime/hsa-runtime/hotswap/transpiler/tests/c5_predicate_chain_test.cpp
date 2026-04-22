@@ -345,16 +345,129 @@ TEST(C5PredicateChain, WaveNativeProjectionGate) {
   auto modrepReport =
       classifyPredicateChain(*H.F, kSrcWs, kTgtWs, /*waveNative=*/false);
   EXPECT_TRUE(modrepReport.refused);
+  EXPECT_FALSE(modrepReport.phantomLaneRefusal);
 
+  // WaveNative + no maxFlatWorkgroupSize given (default 0 == unknown
+  // to the classifier). Suppression arm kicks in, walk still runs.
   auto waveNativeReport =
       classifyPredicateChain(*H.F, kSrcWs, kTgtWs, /*waveNative=*/true);
   EXPECT_FALSE(waveNativeReport.refused);
+  EXPECT_FALSE(waveNativeReport.phantomLaneRefusal);
   // Walk still runs — `visitedCalls` reflects the tid call count,
   // and `observedSites` names the C5 shape so raiser.cpp can emit
   // LLVM_DEBUG attribution. Only the refusal itself is suppressed.
   EXPECT_EQ(waveNativeReport.visitedCalls, 1u);
   EXPECT_EQ(waveNativeReport.observedSites.size(), 1u);
   EXPECT_TRUE(waveNativeReport.refusalDetail.empty());
+
+  // WaveNative + maxFlatWorkgroupSize >= targetWaveSize (no phantom
+  // lanes). Suppression arm kicks in — same shape as the default-0
+  // case above.
+  auto noPhantomReport = classifyPredicateChain(
+      *H.F, kSrcWs, kTgtWs, /*waveNative=*/true,
+      /*maxFlatWorkgroupSize=*/kTgtWs);
+  EXPECT_FALSE(noPhantomReport.refused);
+  EXPECT_FALSE(noPhantomReport.phantomLaneRefusal);
+  EXPECT_EQ(noPhantomReport.observedSites.size(), 1u);
+}
+
+// ---------------------------------------------------------------------
+// WaveNative + phantom-lane regime (maxFlatWorkgroupSize < targetWaveSize):
+// the classifier tightens back to refusal. Pins the
+// `canary_bitmatrix_composite` contract — the docstring-named
+// soundness gap of the permissive WaveNative default — and its
+// complement (the suppression must STILL apply when the WG honours
+// the target wavefront width).
+// ---------------------------------------------------------------------
+TEST(C5PredicateChain, WaveNativePhantomLaneRegimeRefuses) {
+  Harness H;
+  Value *tid = H.emitTid();
+  auto *i32Ty = Type::getInt32Ty(H.ctx);
+  Value *cmp = H.B.CreateICmpULT(
+      tid, ConstantInt::get(i32Ty, 15), "c5_cmp_phantom_lane");
+  H.emitStoreGate(cmp);
+  H.finish();
+
+  // Phantom-lane guaranteed: max_flat_workgroup_size = source wave
+  // size (32) is BELOW the target wave size (64), so every launch
+  // leaves 32 lanes of the target wavefront outside the source
+  // kernel's lane index space. The classifier must refuse under
+  // WaveNative with `phantomLaneRefusal == true` so downstream
+  // attribution distinguishes this arm from the baseline MODREP
+  // refusal (which fires on the same IR regardless of WG size).
+  auto phantomReport =
+      classifyPredicateChain(*H.F, kSrcWs, kTgtWs, /*waveNative=*/true,
+                              /*maxFlatWorkgroupSize=*/kSrcWs);
+  EXPECT_TRUE(phantomReport.refused);
+  EXPECT_TRUE(phantomReport.phantomLaneRefusal);
+  EXPECT_EQ(phantomReport.observedSites.size(), 1u);
+  // Diagnostic names the phantom-lane rationale so operators can
+  // distinguish the two refusal arms at triage time. Match on a
+  // stable substring — the full wording is longer and the lit
+  // fixtures pin the exact shape.
+  EXPECT_NE(phantomReport.refusalDetail.find("phantom-lane regime"),
+            std::string::npos);
+  EXPECT_NE(phantomReport.refusalDetail.find("max_flat_workgroup_size"),
+            std::string::npos);
+  // The base C5-shape diagnostic is still present (the phantom-lane
+  // detail is a prefix on the underlying refusal reason, not a
+  // replacement).
+  EXPECT_NE(phantomReport.refusalDetail.find("compile-time constant 15"),
+            std::string::npos);
+}
+
+// ---------------------------------------------------------------------
+// The phantom-lane tightening must NOT fire for the no-evidence case
+// (maxFlatWorkgroupSize = 0 meaning "caller doesn't know"). Conservative
+// default: preserve the historical WaveNative suppression rather than
+// refuse every kernel whose caller omits the metadata. Pins the
+// `> 0` guard in the classifier.
+// ---------------------------------------------------------------------
+TEST(C5PredicateChain, WaveNativeUnknownWorkgroupSizeKeepsSuppression) {
+  Harness H;
+  Value *tid = H.emitTid();
+  auto *i32Ty = Type::getInt32Ty(H.ctx);
+  Value *cmp = H.B.CreateICmpULT(
+      tid, ConstantInt::get(i32Ty, 15), "c5_cmp_unknown_wg");
+  H.emitStoreGate(cmp);
+  H.finish();
+
+  // Explicitly pass `maxFlatWorkgroupSize = 0` to assert the
+  // "unknown" sentinel does NOT trigger phantom-lane refusal.
+  auto report =
+      classifyPredicateChain(*H.F, kSrcWs, kTgtWs, /*waveNative=*/true,
+                              /*maxFlatWorkgroupSize=*/0u);
+  EXPECT_FALSE(report.refused);
+  EXPECT_FALSE(report.phantomLaneRefusal);
+}
+
+// ---------------------------------------------------------------------
+// The phantom-lane rule MUST be WaveNative-only — under MODREP the
+// MODREP refusal arm already fires unconditionally on any C5 site, so
+// the phantom-lane bit is an orthogonal signal the classifier tracks
+// but the MODREP path should not flip on. Pins the "MODREP arm is
+// independent of maxFlatWorkgroupSize" contract.
+// ---------------------------------------------------------------------
+TEST(C5PredicateChain, ModrepArmIgnoresWorkgroupSize) {
+  Harness H;
+  Value *tid = H.emitTid();
+  auto *i32Ty = Type::getInt32Ty(H.ctx);
+  Value *cmp = H.B.CreateICmpULT(
+      tid, ConstantInt::get(i32Ty, 15), "c5_cmp_modrep_wg");
+  H.emitStoreGate(cmp);
+  H.finish();
+
+  // MODREP: refuses at maxFlatWG = 0 (unknown), = kSrcWs (phantom
+  // would-be-trigger), and = kTgtWs (no phantom). All three should
+  // refuse with phantomLaneRefusal=false — the phantom-lane bit is
+  // a WaveNative-only annotation.
+  for (unsigned wg : {0u, kSrcWs, kTgtWs, 4u * kTgtWs}) {
+    auto report = classifyPredicateChain(
+        *H.F, kSrcWs, kTgtWs, /*waveNative=*/false,
+        /*maxFlatWorkgroupSize=*/wg);
+    EXPECT_TRUE(report.refused) << "wg=" << wg;
+    EXPECT_FALSE(report.phantomLaneRefusal) << "wg=" << wg;
+  }
 }
 
 // ---------------------------------------------------------------------

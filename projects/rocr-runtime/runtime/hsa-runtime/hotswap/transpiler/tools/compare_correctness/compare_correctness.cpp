@@ -542,9 +542,14 @@ Recipe makeLaneSwapRecipe() {
 //            notion — inherent, not a hipcc bug).
 //   legacy : WRONG 32/64 (text transpiler copies the mnemonic through
 //            without any per-source-wave rewrite).
-//   salmon : match under BOTH projections (WaveNative — current
-//            pipeline default — and MODREP via
-//            HSA_HOTSWAP_DISABLE_WAVE_NATIVE=1).  The rewrite at
+//   salmon : match on every shape under the runtime's
+//            WaveNativeProjection default.  (The intercept library
+//            does not expose an env-var MODREP override — see
+//            `raiser.hpp`'s "No process-global env-var override"
+//            comment for why — so the MODREP arm is only reachable
+//            via `raise_cli --disable-wave-native` for offline
+//            triage; `raise_cli` succeeds on this fixture under both
+//            projections.)  The rewrite at
 //            `rewrite_cross_lane_divergent.cpp` recognises the lifted
 //            `@llvm.amdgcn.readlane(val, 31)` as a cross-wave-divergent
 //            site and rewrites it to an on-target `ds_bpermute` that
