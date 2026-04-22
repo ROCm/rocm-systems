@@ -21,7 +21,6 @@ class TestNativeTool:
         ).get_collector_library_path()
         assert lib_path == installed_lib_path
 
-    @pytest.mark.skip()
     def test_when_run_from_opt_and_doesnt_find_prebuilt_native_collector__throws(
         self, installed_compute_path: Path, installed_sdk_tool_path
     ):

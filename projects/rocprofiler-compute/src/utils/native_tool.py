@@ -38,10 +38,16 @@ class NativeTool:
         return native_tool_path
 
     def __find_existing_collector(self) -> Path | None:
-        collector_path = self.__find_built_collector()
-        if not collector_path:
+        if self.__is_run_from_rocm_installation_folder():
             collector_path = self.__find_installed_collector()
+            if not collector_path:
+                raise RuntimeError("Failed to find installed native collector")
+        else:
+            collector_path = self.__find_built_collector()
         return collector_path
+
+    def __is_run_from_rocm_installation_folder(self) -> bool:
+        return self.compute_script_dir.parent == self.sdk_tool_path.parents[2]
 
     def __find_installed_collector(self) -> Path | None:
         rocm_root_path = self.__get_installed_rocm_root_path()
