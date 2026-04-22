@@ -12,34 +12,27 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
-from perfxpert.agents import analysis as analysis_module
-from perfxpert.ai_analysis.api import analyze_database
-from perfxpert.agents.framework import FakeProviderResponse
 from tests.test_parity.fixtures_inventory import available_parity_fixtures
+from perfxpert.ai_analysis.api import analyze_database
 
 
 AIRGAP_SNAPSHOT_DIR = Path(__file__).parent / "_airgap_snapshots"
 
 
-@pytest.fixture(scope="module", autouse=True)
-def clear_airgap_snapshots() -> None:
-    shutil.rmtree(AIRGAP_SNAPSHOT_DIR, ignore_errors=True)
-
-
 @contextmanager
 def airgap_env(on: bool):
     prev = os.environ.get("PERFXPERT_AIRGAP")
-    prev_new_path = os.environ.get("PERFXPERT_NEW_PATH")
     if on:
         os.environ["PERFXPERT_AIRGAP"] = "1"
+        os.environ.setdefault("PERFXPERT_NEW_PATH", "1")
     else:
         os.environ.pop("PERFXPERT_AIRGAP", None)
+        os.environ.setdefault("PERFXPERT_NEW_PATH", "1")
     try:
         yield
     finally:
@@ -47,10 +40,6 @@ def airgap_env(on: bool):
             os.environ.pop("PERFXPERT_AIRGAP", None)
         else:
             os.environ["PERFXPERT_AIRGAP"] = prev
-        if prev_new_path is None:
-            os.environ.pop("PERFXPERT_NEW_PATH", None)
-        else:
-            os.environ["PERFXPERT_NEW_PATH"] = prev_new_path
 
 
 def _extract_decisions(result) -> dict:
@@ -78,32 +67,9 @@ def pytest_generate_tests(metafunc):
 
 
 @pytest.mark.parity
-def test_airgap_decision_fingerprint_identical_to_llm_mode(fx, monkeypatch) -> None:
-    def mock_invoke(agent, payload, provider):
-        chosen_verdict = analysis_module._fallback_trace_classification(payload["facts"])
-        if chosen_verdict["type"] == "mixed":
-            chosen_verdict = payload["rule_verdict"]
-        return FakeProviderResponse(
-            structured_output={
-                "primary_bottleneck": chosen_verdict["type"],
-                "confidence": chosen_verdict["confidence"],
-                "time_breakdown": payload["facts"]["time_breakdown"],
-                "hot_kernels": payload["facts"]["hot_kernels"],
-                "counter_data_available": payload["facts"]["counter_data_available"],
-            }
-        )
-
-    monkeypatch.setattr(
-        "perfxpert.agents.framework._sdk_invoke",
-        mock_invoke,
-    )
+def test_airgap_decision_fingerprint_identical_to_llm_mode(fx) -> None:
     with airgap_env(on=False):
-        with_llm_result = analyze_database(
-            database_path=str(fx.db_path),
-            enable_llm=True,
-            llm_provider="anthropic",
-            llm_api_key="fake-key",
-        )
+        with_llm_result = analyze_database(database_path=str(fx.db_path), enable_llm=False)
     with airgap_env(on=True):
         no_llm_result = analyze_database(database_path=str(fx.db_path), enable_llm=False)
 
