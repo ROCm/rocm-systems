@@ -39,8 +39,8 @@ struct nic_traits
 {
     using metrics_t         = pmc::collectors::nic::metrics;
     using enabled_metrics_t = pmc::collectors::nic::enabled_metrics;
-    using nic_driver_t      = pmc::collectors::nic::nic_driver;
-    using device_t          = device<nic_driver_t>;
+    using driver_t          = pmc::collectors::nic::nic_driver;
+    using device_t          = device<driver_t>;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;
 
@@ -121,7 +121,7 @@ struct nic_traits
             return entries;
         }
 
-        auto devices = provider->template get_nic_devices<device_t, nic_driver_t>();
+        auto devices = provider->template get_nic_devices<device_t, driver_t>();
 
         for(auto& device : devices)
         {

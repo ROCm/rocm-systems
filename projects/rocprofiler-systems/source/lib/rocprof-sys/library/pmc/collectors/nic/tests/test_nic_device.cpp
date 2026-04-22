@@ -172,4 +172,142 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenNoRdmaPorts)
     EXPECT_EQ(m.tx_rdma_ucast_bytes, 0ULL);
 }
 
+TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenStatisticsQueryThrows)
+{
+    EXPECT_CALL(*mock_driver, get_nic_asic_info())
+        .WillOnce(Return(asic_info{ "AMD AINIC Test", "AMD" }));
+
+    EXPECT_CALL(*mock_driver, get_nic_port_info())
+        .WillOnce(Return(port_info{ "enp226s0" }));
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_info()).WillOnce(Return(rdma_info{ 1 }));
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_port_statistics(0))
+        .WillOnce(Return(std::vector<stat_entry>{
+            { "rx_rdma_ucast_bytes", 0 },
+            { "tx_rdma_ucast_bytes", 0 },
+            { "rx_rdma_ucast_pkts", 0 },
+            { "tx_rdma_ucast_pkts", 0 },
+            { "rx_rdma_cnp_pkts", 0 },
+            { "tx_rdma_cnp_pkts", 0 },
+        }))
+        .WillOnce(Throw(std::runtime_error("stats query failed")));
+
+    device<MockDriver> dev(mock_driver, test_index);
+    EXPECT_TRUE(dev.is_supported());
+
+    auto m = dev.get_nic_metrics();
+    EXPECT_EQ(m.rx_rdma_ucast_bytes, 0ULL);
+    EXPECT_EQ(m.tx_rdma_ucast_bytes, 0ULL);
+    EXPECT_EQ(m.rx_rdma_ucast_pkts, 0ULL);
+    EXPECT_EQ(m.tx_rdma_ucast_pkts, 0ULL);
+    EXPECT_EQ(m.rx_rdma_cnp_pkts, 0ULL);
+    EXPECT_EQ(m.tx_rdma_cnp_pkts, 0ULL);
+}
+
+TEST_F(NicDeviceTest, GetNicMetrics_IgnoresUnknownStatNames)
+{
+    SetupBaseNicInfo();
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_port_statistics(0))
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(std::vector<stat_entry>{
+            { "rx_rdma_ucast_bytes", 1000 },
+            { "unknown_stat_1", 9999 },
+            { "tx_rdma_ucast_bytes", 2000 },
+            { "some_other_counter", 8888 },
+        }));
+
+    device<MockDriver> dev(mock_driver, test_index);
+    auto               m = dev.get_nic_metrics();
+
+    EXPECT_EQ(m.rx_rdma_ucast_bytes, 1000ULL);
+    EXPECT_EQ(m.tx_rdma_ucast_bytes, 2000ULL);
+    EXPECT_EQ(m.rx_rdma_ucast_pkts, 0ULL);
+    EXPECT_EQ(m.tx_rdma_ucast_pkts, 0ULL);
+    EXPECT_EQ(m.rx_rdma_cnp_pkts, 0ULL);
+    EXPECT_EQ(m.tx_rdma_cnp_pkts, 0ULL);
+}
+
+TEST_F(NicDeviceTest, GetNicMetrics_HandlesPartialStats)
+{
+    SetupBaseNicInfo();
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_port_statistics(0))
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(std::vector<stat_entry>{
+            { "rx_rdma_ucast_bytes", 500 },
+            { "tx_rdma_cnp_pkts", 10 },
+        }));
+
+    device<MockDriver> dev(mock_driver, test_index);
+    auto               m = dev.get_nic_metrics();
+
+    EXPECT_EQ(m.rx_rdma_ucast_bytes, 500ULL);
+    EXPECT_EQ(m.tx_rdma_cnp_pkts, 10ULL);
+    EXPECT_EQ(m.tx_rdma_ucast_bytes, 0ULL);
+    EXPECT_EQ(m.rx_rdma_ucast_pkts, 0ULL);
+    EXPECT_EQ(m.tx_rdma_ucast_pkts, 0ULL);
+    EXPECT_EQ(m.rx_rdma_cnp_pkts, 0ULL);
+}
+
+TEST_F(NicDeviceTest, DeviceInitializes_WhenAsicInfoThrows)
+{
+    EXPECT_CALL(*mock_driver, get_nic_asic_info())
+        .WillOnce(Throw(std::runtime_error("get_nic_asic_info failed")));
+
+    EXPECT_CALL(*mock_driver, get_nic_port_info())
+        .WillOnce(Return(port_info{ "enp226s0" }));
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_info()).WillOnce(Return(rdma_info{ 1 }));
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_port_statistics(0))
+        .WillOnce(Return(std::vector<stat_entry>{
+            { "rx_rdma_ucast_bytes", 0 },
+        }));
+
+    device<MockDriver> dev(mock_driver, test_index);
+
+    EXPECT_TRUE(dev.is_supported());
+    EXPECT_TRUE(dev.get_product_name().empty());
+    EXPECT_TRUE(dev.get_vendor_name().empty());
+    EXPECT_EQ(dev.get_name(), "enp226s0");
+}
+
+TEST_F(NicDeviceTest, DeviceInitializes_WhenPortInfoThrows)
+{
+    EXPECT_CALL(*mock_driver, get_nic_asic_info())
+        .WillOnce(Return(asic_info{ "AMD AINIC Test", "AMD" }));
+
+    EXPECT_CALL(*mock_driver, get_nic_port_info())
+        .WillOnce(Throw(std::runtime_error("get_nic_port_info failed")));
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_info()).WillOnce(Return(rdma_info{ 1 }));
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_port_statistics(0))
+        .WillOnce(Return(std::vector<stat_entry>{
+            { "rx_rdma_ucast_bytes", 0 },
+        }));
+
+    device<MockDriver> dev(mock_driver, test_index);
+
+    EXPECT_TRUE(dev.is_supported());
+    EXPECT_TRUE(dev.get_name().empty());
+    EXPECT_EQ(dev.get_product_name(), "AMD AINIC Test");
+    EXPECT_EQ(dev.get_vendor_name(), "AMD");
+}
+
+TEST_F(NicDeviceTest, DeviceNotSupported_WhenStatsEmpty)
+{
+    SetupBaseNicInfo();
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_port_statistics(0))
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(std::vector<stat_entry>{}));
+
+    device<MockDriver> dev(mock_driver, test_index);
+
+    EXPECT_FALSE(dev.is_supported());
+}
+
 }  // namespace rocprofsys::pmc::collectors::nic::testing
