@@ -114,8 +114,15 @@ private:
     {
         if(status != AMDSMI_STATUS_SUCCESS)
         {
-            throw std::runtime_error(std::string(func) +
-                                     " failed: " + std::to_string(status));
+            const char* status_msg = nullptr;
+            if(amdsmi_status_code_to_string(status, &status_msg) ==
+                   AMDSMI_STATUS_SUCCESS &&
+               status_msg != nullptr)
+            {
+                throw std::runtime_error(std::string(func) + " failed: " + status_msg);
+            }
+            throw std::runtime_error(std::string(func) + " failed with status " +
+                                     std::to_string(static_cast<int>(status)));
         }
     }
 
