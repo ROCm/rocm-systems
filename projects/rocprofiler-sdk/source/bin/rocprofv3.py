@@ -931,6 +931,13 @@ For attachment profiling of running processes:
         default=None,
     )
 
+    add_parser_bool_argument(
+        advanced_options,
+        "--attach-children",
+        help="""When --pid is used, attach to the target process and all of its descendant processes. Enabled by default; use --attach-children=false to attach only to the specified PID.""",
+        default=True,
+    )
+
     if args is None:
         args = sys.argv[1:]
 
@@ -1819,6 +1826,7 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_ATTACH_PID", args.pid)
         if args.attach_duration_msec is not None:
             update_env("ROCPROF_ATTACH_DURATION", f"{args.attach_duration_msec}")
+        update_env("ROCPROF_ATTACH_CHILDREN", "1" if args.attach_children else "0")
         path = os.path.join(f"{ROCM_DIR}", "bin/rocprof-attach")
         if app_args:
             exit_code = subprocess.check_call([sys.executable, path], env=app_env)

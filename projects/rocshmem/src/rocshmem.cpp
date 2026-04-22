@@ -624,7 +624,7 @@ __host__ int rocshmem_team_split_strided(
 
   auto num_user_teams{backend->team_tracker.get_num_user_teams()};
   auto max_num_teams{backend->team_tracker.get_max_num_teams()};
-  if (num_user_teams >= max_num_teams - 1) {
+  if (num_user_teams >= max_num_teams - TeamTracker::NUM_RESERVED_TEAMS) {
     /* Exceeded maximum number of teams */
     return -1;
   }
@@ -700,7 +700,8 @@ __host__ int rocshmem_team_split_strided(
 }
 
 __host__ void rocshmem_team_destroy(rocshmem_team_t team) {
-  if (team == ROCSHMEM_TEAM_INVALID || team == ROCSHMEM_TEAM_WORLD) {
+  if (team == ROCSHMEM_TEAM_INVALID || team == ROCSHMEM_TEAM_WORLD ||
+      team == ROCSHMEM_TEAM_SHARED) {
     /* Do nothing */
     return;
   }
