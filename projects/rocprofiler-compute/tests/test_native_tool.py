@@ -10,7 +10,7 @@ from utils.native_tool import NativeTool
 
 
 class TestNativeTool:
-    def test_when_opt_lib_exists__founds_it(
+    def test_when_opt_lib_exists__finds_it(
         self,
         installed_lib_path: Path,
         installed_compute_path: Path,
@@ -21,7 +21,7 @@ class TestNativeTool:
         )
         assert lib_path == installed_lib_path
 
-    def test_when_opt_lib_doesnt_exist_but_built_lib_exists__founds_it(
+    def test_when_opt_lib_doesnt_exist_but_built_lib_exists__finds_it(
         self,
         installed_sdk_path: Path,
         sources_compute_path: Path,
@@ -42,13 +42,13 @@ class TestNativeTool:
             )
         assert lib_path is None
 
-    def test_when_incorrect_rocprofv3_path_provided__asserts(
+    def test_when_incorrect_opt_path_provided__asserts(
         self, installed_compute_path: Path
     ):
         lib_path = None
         with pytest.raises(AssertionError):
             lib_path = NativeTool().get_collector_library_path(
-                installed_compute_path, Path("incorrect_rocprofv3_path")
+                installed_compute_path, Path("incorrect_rocm_path")
             )
         assert lib_path is None
 
