@@ -31,6 +31,129 @@ namespace transpiler {
 // known broken (see the pending-rewrite table in wave-size-
 // translation.md §7); they stay same-lane for now but any new cross-
 // lane SemOp must be modelled correctly before landing.
+
+// Shared `ds_bpermute`-based emulation of the `VOP_PERMLANE_SWAP`
+// profile (see `llvm/lib/Target/AMDGPU/VOP1Instructions.td`) — two
+// tied VGPR pairs (vdst↔vdst_in, src0↔src0_out) whose values are
+// swapped across the lane partner `L XOR partnerXorMask`.  Called
+// from both the XOR-16 and XOR-32 arms below; the only things that
+// differ between the two SemOp cases are:
+//
+//   * `partnerXorMask` — 16 for `v_permlane16_swap_b32` (XOR-16 pair
+//     stays within each 32-lane half), 32 for
+//     `v_permlane32_swap_b32` (XOR-32 pair spans both halves of a
+//     wave64).
+//   * `ssaPrefix`       — `"pls16"` or `"pls32"`, stamped onto every
+//     emitted SSA value's twine.  Lit fixtures pin on this prefix
+//     (`lit_tests/{c2_permlane_swap,v_permlane32_swap_b32}/`), so it
+//     IS a load-bearing contract; any future widener (XOR-64 on some
+//     future ISA, say) would pick its own prefix.
+//
+// EXEC / fi / bc handling: the MCInst surfaces `fi` and `bound_ctrl`
+// as named immediate operands ONLY in the e64 form (VOP3OpSel
+// encoding); the e32 form (VOP1 encoding, which the GPT-OSS /
+// AITER corpus exclusively emits) has no fi/bc operands and they
+// default to 0.  The `ds_bpermute` emulation is observationally
+// equivalent to the source's `fi=0, bc=0` semantics WHEN
+// EXEC=all-active at the swap site — which is the invariant
+// butterfly-reduction kernels (Triton / AITER fmha reduction cores)
+// maintain (the kernel emits divergent EXEC writes only at
+// iteration boundaries, not inside the reduction core).  For
+// partial-EXEC sites:
+//
+//   * fi=0 source semantics: inactive lanes' contribution is 0;
+//     ds_bpermute returns the stale VGPR value instead.  Divergence
+//     only on inactive lanes.
+//   * bc=0 source semantics: out-of-range source lane → return
+//     %old.  For the XOR-16 swap every partner is in-range (XOR 16
+//     stays within each 32-lane half); for the XOR-32 swap every
+//     partner is in-range on wave64 (XOR 32 maps 0..31 ↔ 32..63
+//     within the single wave).  `bc` is irrelevant for both masks.
+//
+// The corpus patterns (e32 form, EXEC=full at the swap site) are
+// bit-exact correct under this emulation; fi/bc are accepted
+// without inspection and the EXEC=full assumption is documented
+// here.  P4.b future-hardening (wave-size-translation.md §10): a
+// "true fi=0 emulation" would zero inactive lanes' VGPR
+// contribution before the bpermute via `select EXEC[L], src, 0`,
+// at the cost of two extra selects per swap; a static alternative
+// is a classifier check that proves EXEC=full at the swap site
+// and refuses otherwise.  Today's corpus invariant makes both
+// deferrable.
+static HandlerResult
+emitPermLaneSwapEmulation(RaiseContext &ctx, const DecodedInst &di,
+                           OpResolver &op, uint32_t partnerXorMask,
+                           const char *ssaPrefix) {
+  HandlerResult hr;
+
+  // Operand-table contract (same for every `VOP_PERMLANE_SWAP`
+  // profile instance): MCInst operand 0 is `vdst` (output, tied to
+  // `vdst_in` input — the disassembler elides the tied input), and
+  // the `OpName::src0_out` named operand is the second output (tied
+  // to `src0` input, same elision).  Logical inputs are therefore
+  // `readReg32(vdst)` (the pre-instruction value of the tied vdst
+  // slot) and `op.src(0)` (which `buildSrcMap` keeps as src0 after
+  // the `vdst_in` elision).  Two outputs, two tied inputs, both
+  // carried on VGPRs.
+  int src0OutIdx = AMDGPU::getNamedOperandIdx(di.inst.getOpcode(),
+                                               AMDGPU::OpName::src0_out);
+  if (src0OutIdx < 0 ||
+      static_cast<unsigned>(src0OutIdx) >= di.inst.getNumOperands() ||
+      !di.inst.getOperand(static_cast<unsigned>(src0OutIdx)).isReg()) {
+    std::string msg = std::string(di.mnemonic) +
+                      " missing OpName::src0_out register operand — "
+                      "operand-table mismatch (expected the "
+                      "VOP_PERMLANE_SWAP profile's second-output "
+                      "operand-table slot to be a register)";
+    hr.failure = RaiseFailure::unsupportedShape(di, "VALU", msg);
+    return hr;
+  }
+  ParsedReg vdstReg = op.dst();
+  ParsedReg src0OutReg =
+      ctx.parseReg(di.getReg(static_cast<unsigned>(src0OutIdx)),
+                    static_cast<unsigned>(src0OutIdx));
+
+  // Snapshot BOTH inputs up-front (read-before-write: `vdst_in`
+  // aliases `vdst`, so writing vdstReg first would shadow this
+  // read; mirroring the snapshot for `src0_in` keeps the pair
+  // structural rather than relying on the rest of the handler's
+  // implicit ordering).
+  Value *vdstIn = ctx.regs.readReg32(ctx.B, vdstReg);
+  Value *src0In = op.src(0);
+
+  // Partner lane: `L XOR partnerXorMask`.  Computed on the target
+  // hardware lane id (mbcnt-derived), with per-BB memoisation via
+  // `emitLaneIdx`.  Byte-address shift by 2 is the ds_bpermute
+  // convention — each lane's selector is the byte offset of the
+  // source lane's LDS slot (LDS slot size = 4 bytes for a 32-bit
+  // dword).
+  Value *laneId = ctx.emitLaneIdx();
+  Value *partner = ctx.B.CreateXor(
+      laneId, ctx.B.getInt32(partnerXorMask),
+      Twine(ssaPrefix) + "_partner");
+  Value *bpermIdx = ctx.B.CreateShl(partner, ctx.B.getInt32(2),
+                                     Twine(ssaPrefix) + "_addr");
+
+  // Two convergent ds_bpermute calls, cross-wired so the two tied
+  // output VGPRs each pick up their partner's tied-input value:
+  //
+  //   new_vdst      = bperm(addr, src0_in)
+  //   new_src0_out  = bperm(addr, vdst_in)
+  //
+  // Emitted OUTSIDE `emitUnderExec` so all hardware lanes
+  // participate in the bpermute's LDS round-trip; `writeReg32`
+  // below wraps the stores for EXEC masking on the target side.
+  Function *bperm = Intrinsic::getOrInsertDeclaration(
+      &ctx.M, Intrinsic::amdgcn_ds_bpermute);
+  Value *newVdst = ctx.B.CreateCall(bperm, {bpermIdx, src0In},
+                                     Twine(ssaPrefix) + "_new_vdst");
+  Value *newSrc0Out = ctx.B.CreateCall(
+      bperm, {bpermIdx, vdstIn}, Twine(ssaPrefix) + "_new_src0_out");
+  ctx.writeReg32(vdstReg, newVdst);
+  ctx.writeReg32(src0OutReg, newSrc0Out);
+  hr.handled = true;
+  return hr;
+}
 HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
                                     OpResolver &op) {
   HandlerResult hr;
@@ -265,43 +388,12 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
   // emulation parity follows from emulation-correctness +
   // .td-semantics.
   //
-  // EXEC / fi / bc handling: the MCInst surfaces `fi` and
-  // `bound_ctrl` as named immediate operands ONLY in the e64 form
-  // (VOP3OpSel encoding); the e32 form (VOP1 encoding, which the
-  // GPT-OSS corpus exclusively emits) has no fi/bc operands and
-  // they default to 0. The `ds_bpermute` emulation is observation-
-  // ally equivalent to the source's `fi=0, bc=0` semantics WHEN
-  // EXEC=all-active at the swap site — which is the invariant
-  // Triton-style butterfly-reduction kernels maintain (the kernel
-  // emits `s_setpc` / divergent EXEC writes only at iteration
-  // boundaries, not inside the reduction). For partial-EXEC sites:
-  //
-  //   * fi=0 source semantics: inactive lanes' contribution is 0.
-  //     ds_bpermute returns the stale VGPR value instead.
-  //     Divergence on inactive lanes only.
-  //   * bc=0 source semantics: out-of-range source lane → return
-  //     %old. For our XOR-16 swap, every lane has an in-range
-  //     partner (XOR 16 stays within the 32-lane half), so bc is
-  //     irrelevant.
-  //
-  // The corpus pattern (e32 form, EXEC=full at the swap site) is
-  // bit-exact correct under this emulation. We accept all four
-  // fi/bc combinations and document the EXEC=full assumption.
-  //
-  // P4.b future-hardening (hotswap/docs/wave-size-translation.md §10):
-  // a "true fi=0 emulation" would zero inactive lanes' VGPR
-  // contribution before
-  // the bpermute, e.g. by `select EXEC[L], src0_in[L], 0` and
-  // `select EXEC[L], vdst_in[L], 0` immediately before the
-  // intrinsic calls. That delivers bit-exact `fi=0` semantics at
-  // the cost of two extra selects per swap. A *static* alternative
-  // would be a classifier check that proves EXEC=full at the swap
-  // site (e.g. via flow analysis from the most recent
-  // s_mov_b32_e64 EXEC, -1) and refuses otherwise — sound-not-
-  // complete but principled. Today's corpus invariant
-  // (Triton-style butterfly reductions with full EXEC at swap
-  // sites) makes both approaches deferrable; revisit when a
-  // corpus kernel surfaces partial EXEC at a swap site.
+  // Emission details (operand-table lookup, snapshot ordering,
+  // convergence, EXEC/fi/bc handling, P4.b future-hardening) are
+  // documented on the shared `emitPermLaneSwapEmulation` helper at
+  // the top of this file.  Both arms below call the helper with
+  // their mask-specific arguments; the only per-arm code here is
+  // the XOR-32 precondition check on wave size.
   //
   // V_PERMLANE32_SWAP_B32 (the wider variant) is the wave64-native
   // XOR-32 sibling.  Source kernels that emit it come from the
@@ -311,89 +403,51 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
   // sources (gfx950 → gfx942) need an emulation because the gfx942
   // target does NOT enable `FeaturePermlane32Swap` — gfx940 base
   // features do not include it, so the instruction is unavailable
-  // natively on the compilation target.  The emulation uses the
-  // same `ds_bpermute(lane_id XOR <stride>, src)` shape as the
-  // XOR-16 handler above, with the XOR mask widened to 32; on
-  // wave64 that swaps lanes [0..31] with [32..63] exactly as
-  // `v_permlane32_swap_b32`'s native semantics specify.  Refusal
-  // is preserved only for the narrowing direction (wave64 source →
-  // wave32 target, which has no 64-lane neighbourhood to XOR
-  // against) and for the impossible wave32-source case (no wave32
-  // ISA enables the feature, so seeing it in wave32 source bytes
-  // indicates either a corrupted disassembly or a wave64 source
-  // mis-classified as wave32).
-  case SemOp::V_PERMLANE16_SWAP_B32: {
-    // Two output registers: vdst (op.dst(), MCInst index 0) and
-    // src0_out (named OpName::src0_out, MCInst index 1). Two
-    // logical inputs: vdst_in (tied to vdst, same VGPR — read via
-    // ctx.regs.readReg32 of the vdst register) and src0 (tied to
-    // src0_out, same VGPR — accessible via op.src(0) since
-    // buildSrcMap skips vdst_in but keeps src0).
-    int src0OutIdx = AMDGPU::getNamedOperandIdx(
-        di.inst.getOpcode(), AMDGPU::OpName::src0_out);
-    if (src0OutIdx < 0 ||
-        static_cast<unsigned>(src0OutIdx) >= di.inst.getNumOperands() ||
-        !di.inst.getOperand(static_cast<unsigned>(src0OutIdx)).isReg()) {
-      hr.failure = RaiseFailure::unsupportedShape(
-          di, "VALU",
-          "v_permlane16_swap_b32 missing OpName::src0_out register "
-          "operand — operand-table mismatch");
-      return hr;
-    }
-    ParsedReg vdstReg = op.dst();
-    ParsedReg src0OutReg =
-        ctx.parseReg(di.getReg(static_cast<unsigned>(src0OutIdx)),
-                      static_cast<unsigned>(src0OutIdx));
-
-    // Snapshot BOTH input values up-front, before any other
-    // operations that could (now or in a future refactor) clobber
-    // the destination registers. The handler's correctness depends
-    // on the read-before-write ordering: vdst_in is the SAME VGPR
-    // as the vdst output, so any writeReg32 to vdstReg below would
-    // shadow this read if it happened first. Mirroring this for
-    // src0_in keeps both snapshots paired structurally rather than
-    // relying on the implicit ordering of the rest of the handler.
-    Value *vdstIn = ctx.regs.readReg32(ctx.B, vdstReg);
-    Value *src0In = op.src(0);
-
-    // Partner lane: L XOR 16. Computed on the target hardware lane
-    // id (mbcnt-derived), with per-BB memoisation via emitLaneIdx.
-    Value *laneId = ctx.emitLaneIdx();
-    Value *partner = ctx.B.CreateXor(laneId, ctx.B.getInt32(16),
-                                      "pls16_partner");
-    Value *bpermIdx = ctx.B.CreateShl(partner, ctx.B.getInt32(2),
-                                       "pls16_addr");
-
-    // Two convergent ds_bpermute calls — one per output VGPR.
-    // Same convergence reasoning as the P2 permlane16 emulation
-    // above: emitted OUTSIDE emitUnderExec so all hardware lanes
-    // participate; writeReg32 below wraps the stores for EXEC
-    // masking on the target side.
-    Function *bperm = Intrinsic::getOrInsertDeclaration(
-        &ctx.M, Intrinsic::amdgcn_ds_bpermute);
-    Value *newVdst = ctx.B.CreateCall(bperm, {bpermIdx, src0In},
-                                       "pls16_new_vdst");
-    Value *newSrc0Out = ctx.B.CreateCall(bperm, {bpermIdx, vdstIn},
-                                          "pls16_new_src0_out");
-    ctx.writeReg32(vdstReg, newVdst);
-    ctx.writeReg32(src0OutReg, newSrc0Out);
-    hr.handled = true;
-    return hr;
-  }
+  // natively on the compilation target.  The helper's
+  // `ds_bpermute(lane_id XOR 32, src)` emulation covers this on
+  // wave64 → wave64; refusal is preserved for the narrowing
+  // direction (wave64 source → wave32 target, which has no 64-lane
+  // neighbourhood to XOR against) and for the impossible wave32-
+  // source case (no wave32 ISA enables the feature, so seeing it
+  // in wave32 source bytes indicates either a corrupted disassembly
+  // or a wave64 source mis-classified as wave32).
+  //
+  // CI regression gates:
+  //   * `Gfx1250Gpu.Permlane16Swap` (tests/gfx1250_gpu_test.cpp)
+  //     runs the XOR-16 emulation on gfx942 hardware and verifies
+  //     per-lane outputs against the expected XOR-16 partner
+  //     pattern across all 64 lanes.  A regression in the helper
+  //     (wrong XOR mask, missing byte-address shift, cross-wiring
+  //     error) fails this test before reaching a user.
+  //   * `BatchRaise.AiterGfx950` (tests/batch_raise_test.cpp) lifts
+  //     3 AITER `fmha_v3_fwd/fwd_hd128_bf16*` kernels whose
+  //     reduction cores depend on `v_permlane32_swap_b32`; a
+  //     regression on the helper surfaces here as a lift failure.
+  //     IR-shape coverage lives in `lit_tests/c2_permlane_swap/`
+  //     (XOR-16) and `lit_tests/v_permlane32_swap_b32/` (XOR-32).
+  case SemOp::V_PERMLANE16_SWAP_B32:
+    return emitPermLaneSwapEmulation(ctx, di, op, /*partnerXorMask=*/16,
+                                      /*ssaPrefix=*/"pls16");
   case SemOp::V_PERMLANE32_SWAP_B32: {
-    // Refuse the shapes where the XOR-32 neighbourhood has no
-    // hardware analogue.  Both predicates guard the *runtime*
-    // partner-lane computation — `laneId ^ 32` on a wave32 device
-    // (target wave32) would produce values >= 32 that
-    // `ds_bpermute` cannot deliver, and on a wave32 source the
-    // instruction is not in the decoder's opcode table at all
-    // (FeaturePermlane32Swap is gated on GFX950Insts), so seeing
-    // it here either means a corrupted disassembly or a wave64
-    // source mis-classified upstream.  Refusing both directions
-    // preserves the "refuse when uncertain" contract the P4
-    // pending row in hotswap/docs/wave-size-translation.md §5.3
-    // documents; the wave64 → wave64 path below is the positive
-    // case this handler now lifts.
+    // Two precondition checks, both specific to the wider XOR-32
+    // variant:
+    //
+    //   1. target wave32 → `laneId ^ 32` wraps past the target
+    //      wave; `ds_bpermute` cannot deliver a lane index >=
+    //      target wave size.
+    //   2. source wave32 → no wave32 ISA enables
+    //      `FeaturePermlane32Swap` (see the GFX950Insts block in
+    //      `llvm/lib/Target/AMDGPU/AMDGPU.td`), so seeing the
+    //      instruction in wave32 source bytes means corrupted
+    //      disassembly or upstream wave-size mis-classification.
+    //
+    // Refusal in both cases preserves the "refuse when uncertain"
+    // contract documented on the P4 pending row of
+    // hotswap/docs/wave-size-translation.md §5.3; the wave64 →
+    // wave64 path below is the positive case this handler now
+    // lifts.  The XOR-16 sibling has no equivalent precondition
+    // because its partner stays within each 32-lane half
+    // regardless of wave size.
     if (ctx.targetIsa.isWave32()) {
       hr.failure = RaiseFailure::unsupportedShape(
           di, "VALU",
@@ -417,67 +471,8 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
           "source's wave topology.");
       return hr;
     }
-    // Wave64 source → wave64 target: emulate via ds_bpermute with
-    // XOR-32 partner, structurally identical to the XOR-16
-    // V_PERMLANE16_SWAP_B32 arm above (same operand layout — both
-    // use the `VOP_PERMLANE_SWAP` profile in
-    // llvm/lib/Target/AMDGPU/VOP1Instructions.td — and same
-    // convergence semantics).  Only the XOR mask and the
-    // diagnostic SSA-name prefix (`pls32_*`) differ.
-    int src0OutIdx = AMDGPU::getNamedOperandIdx(
-        di.inst.getOpcode(), AMDGPU::OpName::src0_out);
-    if (src0OutIdx < 0 ||
-        static_cast<unsigned>(src0OutIdx) >= di.inst.getNumOperands() ||
-        !di.inst.getOperand(static_cast<unsigned>(src0OutIdx)).isReg()) {
-      hr.failure = RaiseFailure::unsupportedShape(
-          di, "VALU",
-          "v_permlane32_swap_b32 missing OpName::src0_out register "
-          "operand — operand-table mismatch");
-      return hr;
-    }
-    ParsedReg vdstReg = op.dst();
-    ParsedReg src0OutReg =
-        ctx.parseReg(di.getReg(static_cast<unsigned>(src0OutIdx)),
-                      static_cast<unsigned>(src0OutIdx));
-
-    // Snapshot BOTH input values up-front (same read-before-write
-    // ordering concern as V_PERMLANE16_SWAP_B32 above: `vdst_in`
-    // aliases `vdst`, so any `writeReg32` to vdstReg below would
-    // shadow this read if it happened first).
-    Value *vdstIn = ctx.regs.readReg32(ctx.B, vdstReg);
-    Value *src0In = op.src(0);
-
-    // Partner lane: L XOR 32.  Valid for every lane in a wave64
-    // (0..31 ↔ 32..63), which is the instruction's entire
-    // hardware-wave domain — no wrap or inactive-lane-sentinel
-    // concern at the wave-edge.  Byte-address shift by 2 is the
-    // standard ds_bpermute convention.
-    Value *laneId = ctx.emitLaneIdx();
-    Value *partner = ctx.B.CreateXor(laneId, ctx.B.getInt32(32),
-                                      "pls32_partner");
-    Value *bpermIdx = ctx.B.CreateShl(partner, ctx.B.getInt32(2),
-                                       "pls32_addr");
-
-    // Two convergent ds_bpermute calls — one per output VGPR —
-    // matching the V_PERMLANE16_SWAP_B32 emulation's convergence
-    // reasoning: emitted OUTSIDE `emitUnderExec` so all hardware
-    // lanes participate; `writeReg32` below wraps the stores for
-    // EXEC masking on the target side.  EXEC=full at the swap
-    // site is the same corpus invariant the XOR-16 variant
-    // assumes — AITER fmha kernels issue the XOR-32 swap as part
-    // of the main reduction body with EXEC=-1, matching the
-    // Triton-style butterfly-reduction pattern the P4.b note in
-    // §7 documents as deferred-fi-0 future-hardening territory.
-    Function *bperm = Intrinsic::getOrInsertDeclaration(
-        &ctx.M, Intrinsic::amdgcn_ds_bpermute);
-    Value *newVdst = ctx.B.CreateCall(bperm, {bpermIdx, src0In},
-                                       "pls32_new_vdst");
-    Value *newSrc0Out = ctx.B.CreateCall(bperm, {bpermIdx, vdstIn},
-                                          "pls32_new_src0_out");
-    ctx.writeReg32(vdstReg, newVdst);
-    ctx.writeReg32(src0OutReg, newSrc0Out);
-    hr.handled = true;
-    return hr;
+    return emitPermLaneSwapEmulation(ctx, di, op, /*partnerXorMask=*/32,
+                                      /*ssaPrefix=*/"pls32");
   }
 
   // ---- v_readfirstlane_b32 sDST, vSRC ----
