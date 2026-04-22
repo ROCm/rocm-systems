@@ -72,6 +72,7 @@ struct write_packet_t
 };
 
 class Queue;
+class SignalWaiter;
 
 using queue_batch_packets_callback_t = std::function<bool()>;
 
@@ -172,6 +173,8 @@ public:
     }
     void sync() const;
 
+    SignalWaiter* get_signal_waiter();
+
     void register_callback(ClientID id, queue_callbacks_t callbacks);
     void remove_callback(ClientID id);
 
@@ -196,6 +199,7 @@ private:
     queue_state                          _state           = queue_state::normal;
     std::mutex                           _lock_queue      = {};
     hsa_signal_t                         _active_kernels  = {.handle = 0};
+    std::unique_ptr<SignalWaiter>         _signal_waiter   = {};
 };
 
 inline rocprofiler_queue_id_t

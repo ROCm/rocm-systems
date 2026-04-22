@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/signal_waiter.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
@@ -470,12 +471,6 @@ WriteInterceptor(const void* packets,
             // create a reference for short hand access
             auto& kernel_packet = _packet_data.kernel_packet;
 
-            // create our own signal that we can get a callback on. if there is an original
-            // completion signal we will create a barrier packet, assign the original completion
-            // signal that that barrier packet, and add it right after the kernel packet
-            _packet_data.pooled_signal =
-                queue.create_signal(0, &kernel_packet.kernel_dispatch.completion_signal, true);
-
             // computes the "size" based on the offset of reserved_padding field
             constexpr auto kernel_dispatch_info_rt_size =
                 common::compute_runtime_sizeof<rocprofiler_kernel_dispatch_info_t>();
@@ -550,6 +545,32 @@ WriteInterceptor(const void* packets,
                 }
             });
 
+            const bool tracing_only = _packet_data.instrumentation_packets.empty();
+
+            if(!tracing_only)
+            {
+                // INSTRUMENTATION PATH: create pooled signal for counter collection / ATT
+                _packet_data.pooled_signal =
+                    queue.create_signal(0, &kernel_packet.kernel_dispatch.completion_signal, true);
+            }
+            else if(!existing_completion_signal)
+            {
+                // TRACING-ONLY but no app signal: create one for timing
+                _packet_data.pooled_signal =
+                    queue.create_signal(0, &kernel_packet.kernel_dispatch.completion_signal, true);
+            }
+            else
+            {
+                // TRACING-ONLY with existing app signal: use it directly.
+                // Increment waiting counter for signal lifetime safety.
+                auto* ext_table = hsa::get_amd_ext_table();
+                if(ext_table && ext_table->hsa_amd_signal_waiting_inc_fn)
+                {
+                    ext_table->hsa_amd_signal_waiting_inc_fn(
+                        kernel_packet.kernel_dispatch.completion_signal);
+                }
+            }
+
             bool inserted_before = false;
             if(_packet_data.is_serialized)
             {
@@ -587,8 +608,10 @@ WriteInterceptor(const void* packets,
             if(inserted_before)
                 transformed_packets.back().kernel_dispatch.header |= 1 << HSA_PACKET_HEADER_BARRIER;
 
-            // if the original completion signal exists, trigger it via a barrier packet
-            if(existing_completion_signal)
+            // if the original completion signal exists and we have instrumentation,
+            // trigger it via a barrier packet. For tracing-only, the app's signal
+            // remains on the kernel packet — no barrier needed.
+            if(!tracing_only && existing_completion_signal)
             {
                 auto barrier   = hsa_barrier_and_packet_t{};
                 barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
@@ -609,7 +632,7 @@ WriteInterceptor(const void* packets,
 
             auto& completion_signal = _packet_data.completion_signal;
             auto& interrupt_signal  = _packet_data.interrupt_signal;
-            if(injected_end_pkt)
+            if(!tracing_only && injected_end_pkt)
             {
                 // Adding a barrier packet with the original packet's completion signal.
                 queue.create_signal(0, &interrupt_signal, false);
@@ -620,7 +643,13 @@ WriteInterceptor(const void* packets,
             else
             {
                 completion_signal = kernel_packet.kernel_dispatch.completion_signal;
-                get_core_table()->hsa_signal_store_screlease_fn(completion_signal, 0);
+                // For tracing-only with an existing app signal, do NOT reset the signal
+                // value — the GPU firmware/hardware will handle it. Only reset for
+                // pooled signals we created.
+                if(!tracing_only || !existing_completion_signal)
+                {
+                    get_core_table()->hsa_signal_store_screlease_fn(completion_signal, 0);
+                }
             }
 
             ROCP_FATAL_IF(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
@@ -643,15 +672,30 @@ WriteInterceptor(const void* packets,
 
         if(!_info_session.packet_data.empty())
         {
-            auto* last_pooled_signal     = _info_session.packet_data.back().pooled_signal;
-            auto  last_completion_signal = _info_session.packet_data.back().completion_signal;
-
             auto shared = std::make_shared<info_session_t>(std::move(_info_session));
 
-            // Enqueue the signal into the handler. Will call completed_cb when signal completes.
-            queue.signal_async_handler(last_pooled_signal,
-                                       last_completion_signal,
-                                       new std::shared_ptr<info_session_t>(shared));
+            bool all_tracing_only = true;
+            for(const auto& pkt : shared->packet_data)
+            {
+                if(!pkt.instrumentation_packets.empty())
+                {
+                    all_tracing_only = false;
+                    break;
+                }
+            }
+
+            if(all_tracing_only)
+            {
+                queue.get_signal_waiter()->enqueue(std::move(shared));
+            }
+            else
+            {
+                auto* last_pooled_signal     = shared->packet_data.back().pooled_signal;
+                auto  last_completion_signal = shared->packet_data.back().completion_signal;
+                queue.signal_async_handler(last_pooled_signal,
+                                           last_completion_signal,
+                                           new std::shared_ptr<info_session_t>(shared));
+            }
         }
 
         // Command is only executed if GLOG_v=2 or higher, otherwise it is a no-op
@@ -846,6 +890,7 @@ Queue::Queue(
 
 Queue::~Queue()
 {
+    if(_signal_waiter) _signal_waiter->stop();
     sync();
     _core_api.hsa_signal_destroy_fn(_active_kernels);
 }
@@ -938,6 +983,16 @@ Queue::sync() const
         ROCP_WARNING_IF(_value != 0)
             << fmt::format("Timeout while waiting for queue sync: {} kernels still active", _value);
     }
+}
+
+SignalWaiter*
+Queue::get_signal_waiter()
+{
+    if(!_signal_waiter)
+    {
+        _signal_waiter = std::make_unique<SignalWaiter>();
+    }
+    return _signal_waiter.get();
 }
 
 void
