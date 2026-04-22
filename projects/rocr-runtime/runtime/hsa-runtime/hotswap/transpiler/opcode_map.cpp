@@ -246,7 +246,19 @@ static const Entry kCanonTable[] = {
     E(S_ADDC_U32, S_ADDC_U32),
     E(S_SUB_U32, S_SUB_U32), E(S_SUB_I32, S_SUB_U32),
     E(S_SUBB_U32, S_SUBB_U32),
-    E(S_ADD_U64, S_ADD_U64),
+    // S_ADD_U64 is intentionally mapped below in the gfx12-rename block
+    // alongside S_SUB_U64 — both surface as `SemOp::S_{ADD,SUB}_NC_U64`
+    // to mirror the gfx12 `s_{add,sub}_nc_u64` assembler mnemonics used
+    // downstream in `handle_sop2.cpp` and the lit fixtures.  A naive
+    // `E(S_ADD_U64, S_ADD_U64)` row used to live here and lost the
+    // routing race silently to `canonToSem.try_emplace` (which keeps
+    // the FIRST insertion — opcode_map.cpp:1506), which meant every
+    // `s_add_u64` lift actually decoded as `SemOp::S_ADD_U64` rather
+    // than the intended `S_ADD_NC_U64`.  The handler's defensive
+    // `sop == S_ADD_U64 || sop == S_ADD_NC_U64` disjunct masked the
+    // miscompile into a "same behavior either way" no-op — which is
+    // the exact pattern a diligent reviewer catches as dead code.
+    // Cleaned up in the same commit that adds this comment.
     E(S_AND_B32, S_AND_B32), E(S_AND_B64, S_AND_B64),
     E(S_OR_B32, S_OR_B32), E(S_OR_B64, S_OR_B64),
     E(S_XOR_B32, S_XOR_B32), E(S_XOR_B64, S_XOR_B64),
@@ -272,8 +284,20 @@ static const Entry kCanonTable[] = {
     E(S_PACK_LH_B32_B16, S_PACK_LH_B32_B16),
     E(S_LSHL1_ADD_U32, S_LSHL1_ADD_U32), E(S_LSHL2_ADD_U32, S_LSHL2_ADD_U32),
     E(S_LSHL3_ADD_U32, S_LSHL3_ADD_U32), E(S_LSHL4_ADD_U32, S_LSHL4_ADD_U32),
-    // LLVM's pseudo is `S_ADD_U64`; we still surface it as `SemOp::S_ADD_NC_U64`
-    // to keep handler parity with the no-carry mnemonic used downstream.
+    // gfx12 `s_add_nc_u64` (renamed from `s_add_u64` in the
+    // assembler — see SOPInstructions.td 2300-ish range, same
+    // pattern as `s_sub_u64 ... "s_sub_nc_u64"` below).  LLVM's
+    // pseudo is still `S_ADD_U64`; surface it as
+    // `SemOp::S_ADD_NC_U64` so the handler dispatch, the lit
+    // fixtures (`lit_tests/s_sub_nc_u64/` and any future
+    // `s_add_nc_u64` sibling), and the runtime diagnostics all
+    // speak the same gfx12+ mnemonic.  This row is the ONLY
+    // `S_ADD_U64` entry in `kCanonTable` — an earlier version
+    // of this file had a stray `E(S_ADD_U64, S_ADD_U64)` row in
+    // the SOP2 family block above that won the
+    // `canonToSem.try_emplace` race and quietly routed every
+    // `s_add_u64` lift to the wrong SemOp.  See the comment in
+    // that block for the audit trail.
     E(S_ADD_U64, S_ADD_NC_U64),
     // gfx12 `s_sub_nc_u64` (renamed from `s_sub_u64` in the
     // assembler — see SOPInstructions.td 2311

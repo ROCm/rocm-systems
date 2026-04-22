@@ -220,7 +220,15 @@ HandlerResult handleSOP2(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
-  if (sop == SemOp::S_ADD_U64 || sop == SemOp::S_ADD_NC_U64) {
+  // s_add_nc_u64: gfx12 64-bit scalar add, no carry.  SCC is *not*
+  // updated (the `nc` suffix), matching S_SUB_NC_U64 below; see
+  // SOPInstructions.td ~661 for both opcodes' shared `no-Defs-[SCC]`
+  // shape.  Opcode-map row: `opcode_map.cpp` folds LLVM's
+  // `S_ADD_U64` pseudo into this single SemOp (gfx12 renamed the
+  // mnemonic).  An earlier version of this handler also matched a
+  // dead `SemOp::S_ADD_U64`; that enum entry is gone, see
+  // opcode_map.cpp's S_ADD_U64 comment for the audit trail.
+  if (sop == SemOp::S_ADD_NC_U64) {
     ctx.regs.writeReg64(ctx.B, op.dst(),
                         ctx.B.CreateAdd(op.src64(0), op.src64(1), "sadd64"));
     hr.handled = true;

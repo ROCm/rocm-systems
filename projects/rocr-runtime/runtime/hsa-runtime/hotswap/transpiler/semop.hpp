@@ -223,7 +223,20 @@ enum class SemOp : uint16_t {
   S_CMOV_B32, S_CMOV_B64,
 
   // -- SOP2 --
-  S_ADD_U32, S_ADDC_U32, S_SUB_U32, S_SUBB_U32, S_ADD_U64,
+  // `S_ADD_U64` used to live here as a second SemOp alongside the
+  // gfx12-renamed `S_ADD_NC_U64` below, created by the same commit
+  // that first added the `s_add_u64` opcode-map row.  The row in
+  // `opcode_map.cpp` was later replaced with the gfx12-renamed
+  // `SemOp::S_ADD_NC_U64` target (matching S_SUB_U64 → S_SUB_NC_U64),
+  // but the old `SemOp::S_ADD_U64` enum entry + a defensive `||`
+  // branch in `handle_sop2.cpp` + a stray duplicate opcode-map row
+  // were left behind.  `canonToSem.try_emplace` (opcode_map.cpp:1506
+  // keeps-first) silently routed lifts through the stale enum value;
+  // the handler's `||` disjunct masked the difference.  See
+  // `opcode_map.cpp`'s S_ADD_U64 block comment for the full audit.
+  // `SemOp::S_ADD_NC_U64` below is now the ONLY SemOp for LLVM's
+  // `S_ADD_U64` pseudo.
+  S_ADD_U32, S_ADDC_U32, S_SUB_U32, S_SUBB_U32,
   S_AND_B32, S_AND_B64, S_OR_B32, S_OR_B64, S_XOR_B32, S_XOR_B64,
   S_ANDN2_B32, S_ANDN2_B64, S_ORN2_B32, S_ORN2_B64,
   // SOP2 negated bitops (gfx7+). SOPInstructions.td:789-803 — each
