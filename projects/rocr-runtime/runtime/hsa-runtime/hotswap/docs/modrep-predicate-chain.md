@@ -1,33 +1,70 @@
 # MODREP predicate-chain class
 
-**Status.** WaveNativeProjection graduated to the cross-widening
-default 2026-04-21 (this commit, see §6's "Picked: WaveNative as
-default" paragraph). Strict numerical improvements on
-`compare_correctness`: `swiglu_fp32` flips from WRONG 4/4 to match
-4/4; `corpus_layernorm_fp32` partial-matches (N=1024 matches;
-smaller N retain much smaller residual error). Zero regressions
-across the full ctest + lit + BatchRaise.AiterGfx950 surface.
+**Status (2026-04-22, post-VOPD-fix).** The four originally-failing
+Triton recipes this document was scoped to address have these
+end-to-end verdicts today:
+
+- `canary_bpermute_scan_fp32`: **MATCH 4/4** under WaveNative
+  default (loud-refused 4/4 under `--disable-wave-native`).
+- `swiglu_fp32`: **MATCH 4/4** under both projections.
+- `corpus_layernorm_fp32`: **MATCH 4/4** under WaveNative
+  default.
+- `corpus_softmax_fp32`: **EXIT=2** unchanged (writelane
+  safety-net class, orthogonal to this document per
+  `wave-size-translation.md` §5.6.3).
+
+The work that actually got here, in landing order:
+
+1. `6648d27d5e` landed the narrow-O1 C5 classifier (this
+   document's §5 O1) — MODREP-scoped loud refusal of
+   `workitem.id.x() → icmp K, tid` kernels with compile-time
+   `K ∈ (0, W_s-1]`.
+2. `c3cc463112` graduated `WaveNativeProjection` to the
+   cross-widening default. (Its empirical justification
+   mis-attributed the swiglu / layernorm end-to-end flips to
+   the projection switch; the real drivers are items 3 and
+   `df6bf1d35a`. See §6's "Attribution caveat" and §9 (9).)
+3. `22ade3c72f` principled-cleanup of the C5 classifier
+   (two-pass refactor, intrinsic-propagator audit, WaveNative-
+   default non-refusal contract lit fixture).
+4. `bd04c268e7` — **the actually-driving fix**. A silent
+   fallback in `handle_vopd.cpp::v_cndmask_b32` (hardcoded
+   `loadVCC()` regardless of the instruction's explicit scalar
+   operand) silently miscompiled any Triton VOPD cndmask pair
+   with distinct scalar conditions on its two halves —
+   precisely the shape Triton's Kogge-Stone scan (`canary`) and
+   mean-of-squares LayerNorm reduction both emit. Fix routed
+   the scalar operand through the same SGPR-aware machinery
+   `V_CNDMASK_B32_e64` has always used. Entirely orthogonal to
+   this document's predicate-chain class; fixes
+   `canary_bpermute_scan_fp32` and `corpus_layernorm_fp32`
+   end-to-end. §9.7 / §9.8 documents it.
+5. `b8fd5f96d5` extended the same SGPR-operand routing fix to
+   the six `V_{ADD,SUB,SUBREV}_CO_(CI_)U32` handlers —
+   proactive class-closure with zero corpus exposure today.
+   §9.10 documents it.
+
+§5 O2 (`tid AND (W_s − 1)` mask rewrite) **remains deferred
+indefinitely** per §9 (6): the mask's shape is semantically
+incorrect for the norm-family recipes and a no-op on the
+sub-case-2 scan-shaped recipes. No future recipe would be
+helped by it as specified; reopening criteria in §6.C.
+
+§5 O1 (the narrow-O1 classifier) **landed and is retained** as
+a MODREP-scoped regression guard. Today it does not correspond
+to any live miscompile — the canary's WRONG output was a VOPD-
+cndmask bug, not a predicate-chain class bug — but a future
+recipe genuinely hitting the predicate-chain class would
+loud-refuse here under MODREP rather than silently WRONG.
+
 MODREP remains fully intact as an opt-in via `--disable-wave-native`
 (and is still the default for non-cross-widening directions —
 same-wave and narrowing bypass WaveNative's direction gate).
 
-The narrow-O1 C5 classifier (landed in the prior commit, 2026-04-21)
-stays in the codebase as a MODREP-scoped refusal net: under
-WaveNative its `waveNative` short-circuit fires, which is why
-`canary_bpermute_scan_fp32` silently miscompiles under the new
-default. Its miscompile mechanism is projection-independent
-(falsified the §9.7 SPE-phi-undef hypothesis via the
-`HSA_SALMON_VGPR_SPE_BYPASS=1` experiment: identical WRONG numbers
-under three different projection configurations, plus a regression
-on `canary_permlanex16_rowmax_fp32 N_ROWS=8192`). The actual
-mechanism is open — see §9.7 for the falsified hypothesis + open
-question. To surface the canary refusal diagnostic again, the
-caller opts into MODREP via `--disable-wave-native`.
-
-§5 O2 (`tid AND (W_s − 1)` mask rewrite) remains deferred. Under
-WaveNative the predicate-chain class the mask was designed for
-doesn't fire (WaveNative's per-lane modeled EXEC removes the
-MODREP replica-1 ambiguity), so the mask has nothing to rewrite.
+See §6 for the full post-fix landing narrative with per-recipe
+attribution; §6.A preserves the 2026-04-21 graduation framing
+verbatim for traceability, with the attribution corrections
+annotated inline.
 
 **Scope.** One wave-size axis concern: kernels compiled for a source
 wave width `W_s` that reach cross-widening (`W_t > W_s`) under modulo-
@@ -788,67 +825,119 @@ observations during implementation would reopen the decision:
   with its mixed bitmatrix / scan / writelane pattern). Forces
   O3 onto the roadmap.
 
-**Picked (as landed 2026-04-21, graduation commit): WaveNative as
-default cross-widening projection; MODREP retained as opt-in.**
-(The prior narrow-O1-only landing is the pre-graduation state; its
-"Picked" text remains below as the historical record.)
+**Picked — as landed 2026-04-22 (post-VOPD-fix rewrite; supersedes
+the earlier WaveNative-graduation narrative now in §6.A).**
 
-### Why WaveNative graduated
+This section underwent two rewrites between 2026-04-21 and
+2026-04-22. The git history tells the story:
 
-Empirical evidence collected with `HSA_SALMON_WAVE_NATIVE=1` (the
-temporary opt-in flag from Step A of the investigation, now
-promoted to default):
+   * `6648d27d5e` (2026-04-21) landed the narrow-O1 classifier —
+     see §6.B for the original "narrow-O1 only" narrative.
+   * `c3cc463112` (2026-04-21) graduated `WaveNativeProjection` as
+     the default — the narrative for that landing is preserved in
+     §6.A below, *with the attribution corrections noted inline*.
+     The numbers in §6.A's table were measured correctly at
+     graduation time but mis-attributed several recipes' fixes to
+     WaveNative; §9.9 and §9.7 later falsified that attribution.
+   * `bd04c268e7` (2026-04-22, §9.7) fixed the real root cause for
+     `canary_bpermute_scan_fp32` and `corpus_layernorm_fp32`: a
+     silent fallback in `handle_vopd.cpp::v_cndmask_b32`
+     hardcoding `loadVCC()` regardless of the instruction's
+     actual scalar-condition operand. This is the commit that
+     drove the two largest end-to-end MATCH flips; it is entirely
+     orthogonal to the predicate-chain class this document
+     scopes.
+   * `b8fd5f96d5` (2026-04-22, §9.10) extended the same
+     SGPR-operand routing fix to the six
+     `V_{ADD,SUB,SUBREV}_CO_(CI_)U32` handlers in `handle_valu.cpp`
+     — proactive class-closure; no empirical regression today.
 
-**Correctness (compare_correctness salmon path, gfx1250 → gfx942):**
+The net state of the work this document scoped is below.
 
-| recipe | MODREP (pre-graduation) | WaveNative (post-graduation) |
-|---|---|---|
-| `canary_bpermute_scan_fp32` | refused 4/4 (C5 classifier) | WRONG 4/4 (C5 short-circuits under WaveNative; underlying bug is projection-independent, see §9.7) |
-| `swiglu_fp32` | WRONG 4/4 | **match 4/4** |
-| `corpus_layernorm_fp32` | WRONG 4/4 | match @ N=1024; WRONG @ N=128/256/512 with 20×–80× smaller max\|err\| |
-| `rmsnorm_fp32` | match 4/4 | match 4/4 |
-| `corpus_softmax_fp32` | EXIT=2 (writelane safety net) | EXIT=2 (unchanged) |
-| 7 baselines (`vecadd_f16`, `rope_fp32`, `corpus_add_fp32`, `corpus_asin_fp32`, `canary_dpp_compound_add_fp32`, `canary_dpp_reduce_fp32`, `canary_permlanex16_rowmax_fp32`) | match 4/4 | match 4/4 |
+### What landed for the predicate-chain class
 
-**Regression surface:** `ctest` and `llvm-lit` produced identical
-pass/fail counts under both projections
-(48 tests, 4 pre-existing failures; 89 lit tests, 1 pre-existing
-`s_atomic_dec` failure). `BatchRaise.AiterGfx950` raise rate
-unchanged (24/27, 3 expected `v_permlane32_swap_b32` pendings).
-`Gfx1250Gpu.Matmul128x128_1tile` unchanged (already exercised
-WaveNative explicitly pre-graduation).
+1. **Narrow-O1 classifier** — landed at `6648d27d5e` per §5 O1.
+   `transpiler/c5_predicate_chain_classifier.{hpp,cpp}` +
+   raiser.cpp Phase 6.6. Refuses `workitem.id.x() → icmp K, tid`
+   kernels where `K ∈ (0, W_s-1]` and the chain is not
+   AND-masked by `(W_s - 1)` first. Two-pass walker (cleanup
+   commit `22ade3c72f` refactored the original single-pass for
+   soundness + clarity). Classifier is MODREP-scoped: runs
+   under MODREP, short-circuits under WaveNative.
 
-### Why WaveNative covers what MODREP fails on
+2. **§5 O2 (mask rewrite)** — **deliberately not landed.**
+   §9 (6) falsified its shape during Phase 2: it would collapse
+   `tid 32..63` onto `0..31` against the source compiler's
+   intent for the norm-family recipes, and it is a no-op on
+   sub-case 2 where the target's active lanes already have
+   `tid ∈ [0, W_s)`. No recipe in the current corpus would be
+   helped by it as specified.
 
-- **`num_warps > 1` classes (swiglu / corpus_layernorm).** MODREP's
-  "target wave = R replicas of source wave 0 sharing source
-  EXEC" model is incorrect when the source has multiple
-  wavefronts with distinct EXEC registers. WaveNative stores
-  per-lane modeled EXEC at target width: target wavefront 0 lanes
-  0..31 run source wave 0, lanes 32..63 run source wave 1,
-  each with its own EXEC bit. No replica sharing.
-- **WMMA / matrix kernels.** Already depend on WaveNative for the
-  `init_whole_wave` + Wave64-collective correctness invariant
-  (wave-size-translation.md §5.6.1). Graduation is a superset:
-  everything that already worked keeps working; new recipes
-  outside the matrix family pick up the same correctness
-  guarantees.
+3. **WaveNativeProjection graduated as default** — landed at
+   `c3cc463112`. Preserved for (a) the WMMA / matrix-kernel
+   correctness invariant §5.6.1 of
+   `wave-size-translation.md` documented, (b) `num_warps > 1`
+   EXEC-replication correctness that MODREP's replica model
+   cannot express. *Attribution caveat in the dedicated
+   subsection below* — the graduation's "swiglu / layernorm
+   WRONG → match" claims were actually driven by other commits,
+   not by the projection switch itself.
 
-### What doesn't fix under WaveNative
+### What actually drove the end-to-end MATCH flips
 
-- **`canary_bpermute_scan_fp32`.** Produces identical WRONG
-  numerical output under MODREP, WaveNative, and WaveNative +
-  `HSA_SALMON_VGPR_SPE_BYPASS=1` (the experiment documented in
-  §9.7). The miscompile mechanism is projection-independent —
-  the bug is upstream of WaveNative/MODREP entirely, most likely
-  in `handle_ds.cpp`'s `ds_bpermute_b32` lift or in the cumsum's
-  specific arithmetic-emission path. §9.7 tracks the open
-  investigation.
-- **`corpus_layernorm_fp32` small-N residual.** N=128/256/512
-  have much smaller error under WaveNative than MODREP, but are
-  still not bit-for-bit match. Likely a reduction-ordering or
-  precision issue orthogonal to the projection class. §9.8
-  tracks the open investigation.
+Bit-for-bit attribution of each originally-failing recipe, as
+the compare_correctness salmon sweep records it on
+2026-04-22-post-VOPD-fix HEAD:
+
+| recipe | pre-work verdict | today's verdict | driver commit(s) |
+|---|---|---|---|
+| `canary_bpermute_scan_fp32` | WRONG 4/4 | **match 4/4** | `bd04c268e7` (§9.7 VOPD-cndmask SGPR-condition fix). The predicate-chain class this doc scoped is NOT the bug; narrow-O1 classifier still serves as MODREP-path regression guard. |
+| `swiglu_fp32` | WRONG 4/4 | match 4/4 | `df6bf1d35a` (pre-graduation MODREP widen-by-replicate half-wave fix). *Not* WaveNative graduation and *not* this document's predicate-chain class — the fix pre-dates both. §9.9 documents the attribution correction. |
+| `corpus_layernorm_fp32` | WRONG 4/4 | **match 4/4** | `bd04c268e7` (§9.7 VOPD-cndmask fix). The "small-N residual" §9.8 previously documented was the same bug, not a separate reduction-ordering class. §9.8 is closed by the same commit. |
+| `rmsnorm_fp32` | WRONG 4/4 at Phase-0 | match 4/4 | Orthogonal `v_div_scale_f32` / `v_rsq_f32` handler tightening (between Phase 0 and Phase 2 of this doc; never part of this document's scope). No C5 bearing. |
+| `corpus_softmax_fp32` | CRASH then EXIT=2 | EXIT=2 | No change. Writelane safety-net class (§5.6.3 of `wave-size-translation.md`), orthogonal to this document. |
+
+**Net end-to-end progress for the 4 recipes this document
+scoped**: 3 of 4 MATCH (canary, swiglu, corpus_layernorm); the
+4th is refused on an orthogonal class. `rmsnorm_fp32` is a
+pre-existing MATCH via an unrelated commit (included above for
+completeness — the doc's §2 listed it as WRONG at Phase-0
+timing, which was true then).
+
+### Attribution caveat for the WaveNative graduation
+
+§6.A below (the 2026-04-21 graduation narrative) claimed
+WaveNative flipped `swiglu_fp32` and `corpus_layernorm_fp32`
+from WRONG to match. §9.9 (opened by the `22ade3c72f` cleanup
+sweep) falsified that claim empirically:
+
+- **`swiglu_fp32`**: post-`df6bf1d35a` MODREP also produces
+  MATCH 4/4 on this recipe. The half-wave-wrong widen-by-
+  replicate fix in `df6bf1d35a` was the actual mechanism; the
+  WaveNative graduation was measured after that commit had
+  already landed and credited the fix to the wrong layer.
+- **`corpus_layernorm_fp32`**: the "partial-match under
+  WaveNative with 20×–80× smaller error than MODREP" claim in
+  §6.A's table was a red herring — both projections produced
+  bit-identical numerics post-`df6bf1d35a`. The residual WRONG
+  at small N was the VOPD-cndmask bug, fixed by `bd04c268e7`;
+  the projection choice was incidental.
+- **`canary_bpermute_scan_fp32`**: §6.A documented it as "WRONG
+  4/4 under WaveNative" post-graduation. §9.7's mechanism trace
+  fixed the bug; the projection choice was again incidental.
+
+**What WaveNative graduation does actually buy**: (a) the
+WMMA / matrix-kernel Wave64-collective correctness §5.6.1
+requires (unchanged by the post-fix analysis — genuinely
+WaveNative-dependent), (b) any future `num_warps > 1` kernel
+whose source waves have genuinely distinct EXEC registers
+(swiglu / corpus_layernorm turned out NOT to be such kernels;
+they are `num_warps = 1` per their Triton declarations). So
+WaveNative-as-default is not *wrong* — it's the more principled
+projection for cross-widening — but the graduation commit's
+empirical justification was mis-attributed. `--disable-wave-native`
+/ `enableWaveNative=false` remain available; §9.9 spells out
+the scoping options if you want to re-decide.
 
 ### MODREP retention
 
@@ -865,22 +954,137 @@ Three surfaces retain MODREP as the active projection:
    callers. Preserved specifically for (a) lit fixtures that pin
    MODREP-shape IR invariants (`c5_predicate_chain_tid`,
    `v_cmp_cndmask_sgpr_scalar_clobber`), (b) surfacing the C5
-   classifier's diagnostic for canary-class kernels, (c) operators
-   debugging projection-specific behaviour.
+   classifier's diagnostic for canary-class kernels (per 3 below),
+   (c) operators debugging projection-specific behaviour.
 3. The C5 classifier's refusal path runs under MODREP and
    short-circuits under WaveNative (see
    `c5_predicate_chain_classifier.hpp`'s `waveNative` parameter
-   docstring). Refusing `canary_bpermute_scan_fp32` on the MODREP
-   path keeps the loud-refused attribution available via explicit
-   opt-out.
+   docstring). Today this is a regression guard, not a live fix —
+   `canary_bpermute_scan_fp32` now MATCHes under the WaveNative
+   default via `bd04c268e7` — but a future kernel that surfaces
+   the same C5-shape icmp pattern and miscompiles under MODREP
+   would loud-refuse here rather than silently WRONG.
+
+### How to interpret this section going forward
+
+- The predicate-chain class the doc scoped (§1–§4) is real; the
+  narrow-O1 classifier correctly refuses it under MODREP. The
+  class just turned out not to be the driver of any currently-
+  observed end-to-end miscompile, once `bd04c268e7` landed the
+  VOPD-cndmask fix.
+- §5's O1 is **DONE** (landed as regression guard + loud-refusal
+  on MODREP).
+- §5's O2 is **DEFERRED INDEFINITELY** per §9 (6); reopening
+  criteria in §6.C.
+- §5's O3 / O4 are **not triggered** by any current recipe.
+- Any future reopening should be driven by the reopening criteria
+  in §6.C (a new corpus recipe surfacing the predicate-chain
+  class as its actual miscompile mechanism, or a new scope-
+  discovery kernel needing ThreadLoopProjection). Until then
+  the class is closed.
 
 ---
 
-## 6.0. Historical record: narrow-O1-only pick (2026-04-21 prior commit)
+## 6.A. Historical record: 2026-04-21 WaveNative graduation narrative (attribution superseded)
+
+The "Picked: WaveNative" narrative below reflects the
+`c3cc463112` graduation commit's original framing. The numbers
+in the correctness table were measured correctly at the time but
+the *causal attribution* to WaveNative was falsified by §9.9 and
+§9.7 over the next 24 hours (see "Attribution caveat" in §6
+above). Kept verbatim for traceability; do NOT cite the
+attribution claims here as authoritative — the per-recipe
+driver commits are in §6's "What actually drove the end-to-end
+MATCH flips" table.
+
+**Picked (as landed 2026-04-21, graduation commit
+`c3cc463112`): WaveNative as default cross-widening projection;
+MODREP retained as opt-in.**
+
+### Why WaveNative graduated [2026-04-21 framing; see §6 attribution caveat]
+
+Empirical evidence collected with `HSA_SALMON_WAVE_NATIVE=1` (the
+temporary opt-in flag from Step A of the investigation, now
+promoted to default):
+
+**Correctness (compare_correctness salmon path, gfx1250 → gfx942):**
+
+| recipe | MODREP (pre-graduation) | WaveNative (post-graduation) |
+|---|---|---|
+| `canary_bpermute_scan_fp32` | refused 4/4 (C5 classifier) | WRONG 4/4 (C5 short-circuits under WaveNative; underlying bug is projection-independent, see §9.7) |
+| `swiglu_fp32` | WRONG 4/4 | **match 4/4** |
+| `corpus_layernorm_fp32` | WRONG 4/4 | match @ N=1024; WRONG @ N=128/256/512 with 20×–80× smaller max\|err\| |
+| `rmsnorm_fp32` | match 4/4 | match 4/4 |
+| `corpus_softmax_fp32` | EXIT=2 (writelane safety net) | EXIT=2 (unchanged) |
+| 7 baselines (`vecadd_f16`, `rope_fp32`, `corpus_add_fp32`, `corpus_asin_fp32`, `canary_dpp_compound_add_fp32`, `canary_dpp_reduce_fp32`, `canary_permlanex16_rowmax_fp32`) | match 4/4 | match 4/4 |
+
+**Attribution correction per §9.9 (2026-04-22):** the "MODREP
+pre-graduation" column above conflates two distinct MODREP
+states — pre-`df6bf1d35a` (where swiglu and corpus_layernorm
+were genuinely WRONG) and post-`df6bf1d35a` (where they were
+already MATCH on MODREP, which is what a controlled three-way
+sweep actually measures). `c3cc463112`'s evidence was captured
+without isolating this, so the "swiglu flipped WRONG → match
+under WaveNative" claim is false. The WaveNative-vs-MODREP
+numbers on 2026-04-22 HEAD are identical on both projections for
+the four non-canary recipes; the canary bug was projection-
+independent and is now fixed by `bd04c268e7` rather than by the
+graduation.
+
+**Regression surface [still valid, unchanged by §9.9/§9.7]:**
+`ctest` and `llvm-lit` produced identical pass/fail counts under
+both projections (48 tests, 4 pre-existing failures; 89 lit
+tests, 1 pre-existing `s_atomic_dec` failure).
+`BatchRaise.AiterGfx950` raise rate unchanged (24/27, 3 expected
+`v_permlane32_swap_b32` pendings). `Gfx1250Gpu.Matmul128x128_1tile`
+unchanged (already exercised WaveNative explicitly pre-
+graduation).
+
+### Why WaveNative covers what MODREP fails on [one claim superseded]
+
+- **`num_warps > 1` classes (swiglu / corpus_layernorm)** — **this
+  bullet is SUPERSEDED.** Triton declares both recipes with
+  `num_warps = 1` (see `swiglu_fp32.py` and
+  `corpus_layernorm_fp32.py` in the Triton corpus). The
+  `num_warps > 1` model is correct in principle but does not
+  describe these recipes. Their pre-VOPD-fix WRONGness was the
+  `handle_vopd.cpp::v_cndmask_b32` silent fallback documented
+  in §9.7. This bullet is kept for the general `num_warps > 1`
+  correctness argument — it just doesn't drive either of these
+  two recipes.
+- **WMMA / matrix kernels** — **still valid.** Already depend on
+  WaveNative for the `init_whole_wave` + Wave64-collective
+  correctness invariant (`wave-size-translation.md §5.6.1`).
+  Graduation is a superset: everything that already worked
+  keeps working; new recipes outside the matrix family pick up
+  the same correctness guarantees.
+
+### What doesn't fix under WaveNative [at 2026-04-21 graduation time; all closed by 2026-04-22]
+
+- **`canary_bpermute_scan_fp32`** — **CLOSED** 2026-04-22 by
+  `bd04c268e7` (§9.7). The mechanism was the VOPD-cndmask
+  silent fallback, NOT the `handle_ds.cpp` DS_BPERMUTE_B32 shape
+  this bullet originally speculated about. Now MATCH 4/4 under
+  WaveNative default; remains C5-refused under MODREP (the
+  refusal is correct-by-construction but no longer corresponds
+  to a live miscompile, since the bug is fixed upstream of the
+  classifier).
+- **`corpus_layernorm_fp32` small-N residual** — **CLOSED**
+  2026-04-22 by `bd04c268e7` (§9.7 / §9.8). The "reduction-
+  ordering drift" hypothesis was false; it was the same
+  VOPD-cndmask bug on the LayerNorm mean-of-squares reduction.
+  Now MATCH 4/4 under WaveNative default.
+
+---
+
+## 6.B. Historical record: narrow-O1-only pick (2026-04-21 prior commit)
 
 The prior "Picked" narrative below reflects the narrow-O1-only
-landing that preceded this graduation commit. Kept for traceability;
-superseded by the WaveNative graduation above.
+landing that preceded the WaveNative graduation. Kept for
+traceability; the "post-landing" verdicts below reflect the
+2026-04-21 state only — by 2026-04-22 post-VOPD-fix the canary
+and corpus_layernorm verdicts have changed (see §6's table for
+the 2026-04-22 state).
 
 **Picked (as landed 2026-04-21): narrow-O1 only.** Trigger: the
 sequential falsification chain in §9:
@@ -966,7 +1170,7 @@ findings allow.
 
 ---
 
-## 6.1. Deferred options — reopening criteria
+## 6.C. Deferred options — reopening criteria
 
 O2 / O3 / O4 reopen the decision if:
 
@@ -990,22 +1194,33 @@ O2 / O3 / O4 reopen the decision if:
 
 ### Existing canaries that pin this class
 
-Verdicts below reflect the actually-landed narrow-O1 state
-(2026-04-21). Per §6's "Picked: narrow-O1 only" paragraph, O2 is
-deferred — the "Post-O2: MATCH 4/4" cells the original doc
-proposed are NOT part of the landed contract and have been
-replaced with "out of scope / see §9.6" where applicable.
+Verdicts below reflect 2026-04-22 HEAD (post-VOPD-fix). Per §6's
+"Picked — as landed" section, O1 landed as classifier-only
+regression guard; O2 deferred indefinitely per §9 (6); the actual
+end-to-end MATCH flips for `canary_bpermute_scan_fp32` and
+`corpus_layernorm_fp32` were driven by the orthogonal
+`bd04c268e7` VOPD-cndmask fix (§9.7), not by the
+predicate-chain machinery this document scopes. Each entry
+below reflects that attribution.
 
 - `canary_bpermute_scan_fp32` — pins the scan-predicate variant.
   Kernel: `tl.cumsum` over 128 elements per program with
   `num_warps = 1`. Kogge-Stone scan-stage guards `icmp ult K, tid`
   with K ∈ {1, 3, 7, 15}, all `≤ W_s - 1 = 31` — exactly the
   narrow-O1 signature. Salmon launch shape per §9 (2):
-  `blockDim.x = 32 = W_s`. Pre-landing: WRONG 4/4. **Post-landing:
-  loud refusal 4/4 with `cross-wave-predicate-chain` diagnostic.**
-  The lit fixture contract is one-sided (the `c5_predicate_chain_tid`
-  fixture pins the refusal shape structurally, not the end-to-end
-  MATCH-after-fix assertion the original doc proposed).
+  `blockDim.x = 32 = W_s`. 2026-04-22 HEAD: **MATCH 4/4 under
+  WaveNative default** (via `bd04c268e7` / §9.7's VOPD-cndmask
+  fix — the actual miscompile mechanism was entirely orthogonal
+  to the predicate-chain class, and the C5 shape of the scan
+  guards is a coincidence). Under `--disable-wave-native`
+  (MODREP path): **refused 4/4** via the narrow-O1 classifier
+  — the refusal is still correct-by-construction but no longer
+  corresponds to a live miscompile now that the upstream bug
+  is fixed. The `lit_tests/c5_predicate_chain_tid/` fixture
+  pins the refusal shape on MODREP structurally;
+  `lit_tests/v_dual_cndmask_b32_sgpr_cond/` pins the actual
+  root-cause fix at IR level; `compare_correctness` pins the
+  end-to-end MATCH.
 - `rmsnorm_fp32` — NOT a narrow-O1 match (its icmps compare
   against dynamic `%arg4`, not a compile-time K). Was WRONG 4/4
   at the start of this investigation; now MATCH 4/4 in the
@@ -1015,19 +1230,29 @@ replaced with "out of scope / see §9.6" where applicable.
   commentary about the `_num_f*` lowering path). No C5 bearing.
 - `swiglu_fp32` — NOT a narrow-O1 match (dynamic-kernarg
   icmps, structurally identical to `vecadd_f16`'s passing
-  shape). Pre-landing: WRONG 4/4. Post-landing: still WRONG
-  4/4. Bug class is not predicate-chain — see §9.6 for the
-  Phase-2 evidence and the orthogonal-class diagnosis. Out of
-  scope for this document.
-- `corpus_layernorm_fp32` — same as `swiglu_fp32`: not a
-  narrow-O1 match, stays WRONG 4/4 post-landing, out of scope.
+  shape). 2026-04-22 HEAD: **MATCH 4/4 under both WaveNative
+  default and `--disable-wave-native` MODREP.** The end-to-end
+  fix came from `df6bf1d35a` (MODREP widen-by-replicate
+  half-wave fix), pre-dating the WaveNative graduation and
+  having nothing to do with the predicate-chain class. §9.9
+  documents the attribution correction (the 2026-04-21
+  graduation commit mis-credited this fix to WaveNative).
+- `corpus_layernorm_fp32` — NOT a narrow-O1 match (same
+  dynamic-kernarg icmp shape as swiglu). 2026-04-22 HEAD:
+  **MATCH 4/4 under WaveNative default** (via `bd04c268e7` /
+  §9.7's VOPD-cndmask fix — Triton's mean-of-squares reduction
+  emits the same VOPD `v_dual_cndmask_b32 vX, ..., sN ::
+  v_dual_cndmask_b32 vA, ..., vcc_lo` shape the scan canary
+  does, for the same reason and with the same fix). §9.8 is
+  closed by the same commit.
 - `corpus_softmax_fp32` — already refused via the §5.6.3
   writelane safety net; listed here for completeness. Not
   additionally matched by the narrow-O1 classifier, but its
   existing refusal diagnostic already attributes the failure
   to the correct class (`writelane/readlane-post-raise-safety-net
-  [cross-wave-lane-id-leak]`). Future work could graduate it to
-  the C5 diagnostic if evidence shows the same
+  [cross-wave-lane-id-leak]`). 2026-04-22 HEAD: EXIT=2
+  unchanged. Future work could graduate it to the C5
+  diagnostic if evidence shows the same
   `workitem.id.x → icmp(K)` signature applies, but no such
   evidence exists today.
 - `canary_dpp_compound_add_fp32` — the structural baseline that
@@ -1044,31 +1269,71 @@ replaced with "out of scope / see §9.6" where applicable.
 
 ### Landed regression guards (lit + gtest)
 
+*Predicate-chain class (the narrow-O1 classifier — this document's
+actual §5 O1 landing):*
+
 - `lit_tests/c5_predicate_chain_tid/` — REFUSAL sibling. Inline
   asm emits `workitem.id.x() → icmp ult K=16, tid → cndmask →
-  store`; lit expects `cross-wave-predicate-chain` diagnostic,
+  store`. First RUN line asserts refusal under
+  `--disable-wave-native` (MODREP path); second RUN line
+  asserts clean raise + IR emission under WaveNative default
+  (added 2026-04-21 by `22ade3c72f` to pin the
+  WaveNative-default non-refusal contract end-to-end). Lit
+  expects `cross-wave-predicate-chain` diagnostic,
   `compile-time constant 16`, `Class 5 / WorkitemIdPredicateChain`
-  per-site trace, and raise_cli non-zero exit.
+  per-site trace on the MODREP RUN, and the `workitem.id.x()
+  call` + kernel label on the WaveNative RUN.
 - `lit_tests/c5_predicate_chain_masked/` — NON-REFUSAL sibling.
   Same K=16 icmp, but preceded by `and tid, 31` (= W_s-1); lit
   expects raise_cli success and the `and i32 ..., 31` anchor
   in the emitted IR.
 - `tests/c5_predicate_chain_test.cpp` — `C5PredicateChain.*`
-  gtest suite (10 cases). Audits the classifier on synthesised
-  IR in isolation from the raiser's MC-level pipeline:
+  gtest suite (13 cases as of 2026-04-22, post-cleanup refactor
+  in `22ade3c72f`). Audits the classifier on synthesised IR in
+  isolation from the raiser's MC-level pipeline:
   `TidDirectSmallConstRefuses`, `TidMaskedBeforeCmpAccepts`,
   `TidSmallConstZeroAccepts`, `TidLargeConstAccepts`,
   `TidDynamicCmpAccepts`, `SameWaveDirectionGate`,
-  `NarrowingDirectionGate`, `NoCallsIsNoOp`,
-  `PhiPropagatesTidDerivation`,
-  `MaskedPhiThroughUnmaskedArmRefuses`.
+  `NarrowingDirectionGate`, `WaveNativeProjectionGate`,
+  `NoCallsIsNoOp`, `PhiPropagatesTidDerivation`,
+  `MaskedPhiThroughUnmaskedArmRefuses`,
+  `CrossSubtreeMaskedVsUnmaskedAccepts` (pins the falsified
+  cross-subtree widening the cleanup briefly explored),
+  `IntrinsicPropagatorRefuses` (pins the numeric-intrinsic
+  propagator audit — `llvm.umin` / `llvm.smax` / etc.).
 - `lit_tests/cross_wave_warn/` and `lit_tests/v_cmpx_ballot/` —
-  updated in the same commit to use `K ≥ W_s` constants
-  (64 / 96) so their cross-wave EXEC-writer / ballot-routing
-  coverage is not conflated with the new C5 predicate-chain
-  coverage. Pre-update those fixtures exercised K ≤ W_s-1
+  updated alongside the classifier landing to use `K ≥ W_s`
+  constants (64 / 96) so their cross-wave EXEC-writer / ballot-
+  routing coverage is not conflated with the new C5 predicate-
+  chain coverage. Pre-update those fixtures exercised K ≤ W_s-1
   predicates, which the narrow-O1 classifier correctly refuses
   as latent-bug kernels.
+
+*VOPD / VOP3B SGPR-condition class (the actually-driving fix for
+canary + layernorm end-to-end — orthogonal to §5's predicate-
+chain class, but tracked here because the landing sequence of
+§9.7 / §9.8 closure depends on it):*
+
+- `lit_tests/v_dual_cndmask_b32_sgpr_cond/` — REGRESSION FENCE
+  for the `bd04c268e7` VOPD `v_dual_cndmask_b32` SGPR-condition
+  fix (§9.7). Inline asm emits a paired
+  `v_dual_cndmask_b32 ..., s0 :: v_dual_cndmask_b32 ..., vcc_lo`
+  VOPD with DIFFERENT scalar conditions on the two halves. Lit
+  expects two distinct `vopd_cndmask` selects whose conditions
+  are different `i1` values (the SGPR-path cmp and the
+  VCC-path cmp) — a regression that re-introduces hardcoded-
+  VCC collapses the two conditions and fails the CHECK
+  pattern.
+- `lit_tests/v_add_co_u32_sgpr_carry/` — REGRESSION FENCE for
+  the `b8fd5f96d5` carry-chain SGPR-operand fix (§9.10). Inline
+  asm emits `v_add_co_u32 ..., s0, ... :: v_add_co_ci_u32_e64
+  ..., s0, ..., s0` — the canonical 64-bit address-chain shape
+  under VCC pressure. Lit expects the carry-out ballots through
+  `amdgcn.ballot.i64` into the SGPR path, the second add's
+  carry-in forwards the SAME `i1` SSA value the first add
+  produced (fresh-shadow lookup — no `load i1, ptr %vcc` in
+  between), and a CHECK-NOT pin on `load i1, ptr %vcc` catches
+  any regression that re-introduces hardcoded-VCC.
 
 ### Future lit fixture (only if O2 revisited)
 
