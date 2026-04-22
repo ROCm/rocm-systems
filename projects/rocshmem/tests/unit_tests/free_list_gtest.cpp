@@ -82,7 +82,7 @@ TYPED_TEST(FreeListTestFixture, pop_empty_device) {
                           sizeof(bool));
 
   CHECK_HIP(hipMemset(is_empty, 0, sizeof(bool)));
-  FreeListProxy<Allocator, T> empty_list_proxy{};
+  FreeListProxy<T> empty_list_proxy{};
   FreeList<T>* empty_free_list{empty_list_proxy.get()};
 
   rocshmem::pop_empty<<<1, 1>>>(empty_free_list, is_empty);

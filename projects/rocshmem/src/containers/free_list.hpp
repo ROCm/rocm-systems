@@ -33,7 +33,7 @@
 namespace rocshmem {
 
 // Forward declaration of the proxy.
-template <typename ALLOCATOR, typename TYPE>
+template <typename TYPE>
 class FreeListProxy;
 
 /*****************************************************************************
@@ -42,7 +42,7 @@ class FreeListProxy;
 
 template <typename TYPE>
 class FreeList {
-  template <typename ALLOCATOR, typename T>
+  template <typename T>
   friend class FreeListProxy;
 
   using MutexProxyType = ABQLBlockMutexProxy;
@@ -257,16 +257,18 @@ class FreeList {
   MutexProxyType mutex_;
 };
 
-template <typename ALLOCATOR, typename TYPE>
+template <typename TYPE>
 class FreeListProxy {
   using FreeListT = FreeList<TYPE>;
-  using ProxyT = DeviceProxy<ALLOCATOR, FreeListT>;
+  using ProxyT = DeviceProxy<HIPAllocator, FreeListT>;
 
  public:
   __host__ __device__ FreeListT* get() { return proxy_.get(); }
 
-  FreeListProxy(size_t num_elems = 1) : proxy_{num_elems} {
-    new (proxy_.get()) FreeListT(*get_default_allocator());
+  explicit FreeListProxy(const MemoryAllocator& alloc = HIPAllocator(),
+                         size_t num_elems = 1)
+      : allocator_{alloc}, proxy_{num_elems} {
+    new (proxy_.get()) FreeListT(allocator_);
   }
 
   FreeListProxy(const FreeListProxy& other) = delete;
@@ -284,6 +286,7 @@ class FreeListProxy {
   }
 
  private:
+  MemoryAllocator allocator_{};
   ProxyT proxy_{};
 };
 }  // namespace rocshmem

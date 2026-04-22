@@ -278,7 +278,7 @@ class ROBackend : public Backend {
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<HIPAllocator, ROContext *> ctx_free_list{};
+  FreeListProxy<ROContext *> ctx_free_list{};
 
   /**
    * @brief AtomicWFQueue containing status flag buffers for default context
