@@ -563,7 +563,7 @@ kernel name substring list to isolate desired kernels.
       $ rocprof-compute profile -k <your_kernel> --iteration-multiplexing -- <app>
 
    If you are unsure which kernel names your application dispatches, first run
-   a short profile **without** ``--iteration-multiplexing`` and inspect the
+   a profile **without** ``--iteration-multiplexing`` and inspect the
    output to identify the kernel names of interest.
 
 The following example demonstrates profiling isolating the kernel matching
