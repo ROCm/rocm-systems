@@ -1,0 +1,220 @@
+#include "rocshmem/api_trace.h"
+#include "rocshmem/rocshmem_common.hpp"
+#include <cstddef>
+#include <cstdint>
+#include <iostream>
+#include <vector>
+#include <array>
+
+#if defined(ROCSHMEM_ROCPROFILER_REGISTER)
+#    include <rocprofiler-register/rocprofiler-register.h>
+
+#    define ROCP_REG_VERSION                                                             \
+        ROCPROFILER_REGISTER_COMPUTE_VERSION_3(ROCSHMEM_VERSION)
+
+ROCPROFILER_REGISTER_DEFINE_IMPORT(rocshmem, ROCP_REG_VERSION)
+#endif
+
+#include <roctracer/roctx.h>
+#include "context.hpp"
+rocshmem::rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
+
+__host__ void barrier_all_on_stream_impl(hipStream_t stream);
+
+__host__ void quiet_on_stream_impl(hipStream_t stream);
+
+__host__ void sync_all_on_stream_impl(hipStream_t stream);
+
+__host__ void alltoallmem_on_stream_impl(rocshmem_team_t team, void *dest,
+                                      const void *source, size_t size,
+                                      hipStream_t stream);
+
+__host__ void broadcastmem_on_stream_impl(rocshmem_team_t team, void *dest,
+                                       const void *source, size_t nelems,
+                                       int pe_root, hipStream_t stream);
+
+__host__ void getmem_on_stream_impl(void *dest, const void *source, size_t nelems,
+                                 int pe, hipStream_t stream);
+
+__host__ void putmem_on_stream_impl(void *dest, const void *source, size_t nelems,
+                                 int pe, hipStream_t stream);
+
+__host__ void putmem_signal_on_stream_impl(void *dest, const void *source,
+                                        size_t nelems, uint64_t *sig_addr,
+                                        uint64_t signal, int sig_op, int pe,
+                                        hipStream_t stream);
+
+__host__ void signal_wait_until_on_stream_impl(uint64_t *sig_addr, int cmp,
+                                            uint64_t cmp_value,
+                                            hipStream_t stream);
+
+namespace rocshmem
+{
+
+// Forward declaration of default context
+extern __constant__ rocshmem_ctx_t ROCSHMEM_CTX_DEFAULT;
+
+namespace
+{
+constexpr size_t
+compute_table_offset(size_t n)
+{
+    return (sizeof(uint64_t) + (n * sizeof(void*)));
+}
+
+constexpr size_t
+compute_table_size(size_t nmembers)
+{
+    return (sizeof(uint64_t) + (nmembers * sizeof(void*)));
+}
+
+#define ROCSHMEM_ASSERT_OFFSET(TABLE, MEMBER, IDX)                                           \
+    static_assert(offsetof(TABLE, MEMBER) == compute_table_offset(IDX),                  \
+                  "Do not re-arrange the table members")
+
+
+// DO NOT REORDER, ADD NEW ITEMS TO BOTTOM
+ROCSHMEM_ASSERT_OFFSET(rocshmemApiFuncTable, barrier_all_on_stream_fn, 0);
+ROCSHMEM_ASSERT_OFFSET(rocshmemApiFuncTable, quiet_on_stream_fn, 1);
+ROCSHMEM_ASSERT_OFFSET(rocshmemApiFuncTable, sync_all_on_stream_fn, 2);
+ROCSHMEM_ASSERT_OFFSET(rocshmemApiFuncTable, alltoallmem_on_stream_fn, 3);
+ROCSHMEM_ASSERT_OFFSET(rocshmemApiFuncTable, broadcastmem_on_stream_fn, 4);
+ROCSHMEM_ASSERT_OFFSET(rocshmemApiFuncTable, getmem_on_stream_fn, 5);
+ROCSHMEM_ASSERT_OFFSET(rocshmemApiFuncTable, putmem_on_stream_fn, 6);
+ROCSHMEM_ASSERT_OFFSET(rocshmemApiFuncTable, putmem_signal_on_stream_fn, 7);
+ROCSHMEM_ASSERT_OFFSET(rocshmemApiFuncTable, signal_wait_until_on_stream_fn, 8);
+
+#undef ROCSHMEM_ASSERT_OFFSET
+
+static_assert(sizeof(rocshmemApiFuncTable) == compute_table_size(9),
+              "Update table major/step version and add a new offset assertion if this "
+              "fails to compile");
+
+std::array<unsigned char, sizeof(rocshmemApiFuncTable)> m_buffer = {};
+
+rocshmemApiFuncTable*
+RocshmemGetFunctionTable_impl()
+{
+    static auto* tbl =
+        new(m_buffer.data()) rocshmemApiFuncTable{
+            sizeof(rocshmemApiFuncTable),
+            &barrier_all_on_stream_impl,
+            &quiet_on_stream_impl,
+            &sync_all_on_stream_impl,
+            &alltoallmem_on_stream_impl,
+            &broadcastmem_on_stream_impl,
+            &getmem_on_stream_impl,
+            &putmem_on_stream_impl,
+            &putmem_signal_on_stream_impl,
+            &signal_wait_until_on_stream_impl
+        };
+
+#if defined(ROCSHMEM_ROCPROFILER_REGISTER) && ROCSHMEM_ROCPROFILER_REGISTER > 0
+    std::array<void*, 1>                       table_array{ tbl };
+    rocprofiler_register_library_indentifier_t lib_id =
+        rocprofiler_register_library_indentifier_t{};
+    rocprofiler_register_error_code_t rocp_reg_status =
+        rocprofiler_register_library_api_table(
+            "rocshmem", &ROCPROFILER_REGISTER_IMPORT_FUNC(rocshmem), ROCP_REG_VERSION,
+            table_array.data(), table_array.size(), &lib_id);
+
+    if(rocp_reg_status != ROCP_REG_SUCCESS && rocp_reg_status != ROCP_REG_NO_TOOLS) {
+        fprintf(stderr, "[rocprofiler-sdk-rocshmem][%d] rocprofiler-register failed with error code %d : %s\n",
+                getpid(), rocp_reg_status,
+                rocprofiler_register_error_string(rocp_reg_status));
+    }
+#endif
+
+    return tbl;
+}
+
+}  // end of anonymous namespace
+extern "C" {
+const rocshmemApiFuncTable*
+RocshmemGetFunctionTable()
+{
+    static const auto* tbl = RocshmemGetFunctionTable_impl();
+    return tbl;
+}
+}
+}  // end of namespace rocshmem
+
+
+// =============================================================================
+// IMPLEMENTATION FUNCTIONS WITH ROCPROFILER TRACING
+// =============================================================================
+
+__host__ void barrier_all_on_stream_impl(hipStream_t stream)
+{
+    LOG_API("host::barrier_all_on_stream ()");
+    rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
+    ctx->barrier_all_on_stream(stream);
+}
+
+__host__ void quiet_on_stream_impl(hipStream_t stream)
+{
+    LOG_API("rocshmem_quiet_on_stream");
+    rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
+    ctx->quiet_on_stream(stream);
+}
+
+__host__ void sync_all_on_stream_impl(hipStream_t stream)
+{
+    LOG_API("rocshmem_sync_all_on_stream");
+    rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
+    ctx->sync_all_on_stream(stream);
+}
+
+__host__ void alltoallmem_on_stream_impl(rocshmem_team_t team, void *dest,
+                                          const void *source, size_t size,
+                                          hipStream_t stream)
+{
+     LOG_API("host::alltoallmem_on_stream (dest=%p, source=%p, size=%zd)", dest, source, size);
+    rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
+    ctx->alltoallmem_on_stream(team, dest, source, size, stream);
+}
+
+__host__ void broadcastmem_on_stream_impl(rocshmem_team_t team, void *dest,
+                                           const void *source, size_t nelems,
+                                           int pe_root, hipStream_t stream)
+{
+    LOG_API("host::broadcastmem_on_stream (dest=%p, source=%p, nelems=%zd, pe_root=%d)", dest, source, nelems, pe_root);
+    rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
+    ctx->broadcastmem_on_stream(team, dest, source, nelems, pe_root, stream);
+}
+
+__host__ void getmem_on_stream_impl(void *dest, const void *source, size_t nelems,
+                                     int pe, hipStream_t stream)
+{
+    LOG_API("host::getmem_on_stream (dest=%p, source=%p, nelems=%zd, pe=%d)", dest, source, nelems, pe);
+    rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
+    ctx->getmem_on_stream(dest, source, nelems, pe, stream);
+}
+
+__host__ void putmem_on_stream_impl(void *dest, const void *source, size_t nelems,
+                                     int pe, hipStream_t stream)
+{
+    LOG_API("host::putmem_on_stream (dest=%p, source=%p, nelems=%zd, pe=%d)", dest, source, nelems, pe);
+    rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
+    ctx->putmem_on_stream(dest, source, nelems, pe, stream);
+}
+
+__host__ void putmem_signal_on_stream_impl(void *dest, const void *source,
+                                            size_t nelems, uint64_t *sig_addr,
+                                            uint64_t signal, int sig_op, int pe,
+                                            hipStream_t stream)
+{
+    LOG_API("host::putmem_signal_on_stream (dest=%p, source=%p, nelems=%zd, pe=%d)", dest, source, nelems, pe);
+    rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
+    ctx->putmem_signal_on_stream(dest, source, nelems, sig_addr, signal, sig_op, pe, stream);
+}
+
+__host__ void signal_wait_until_on_stream_impl(uint64_t *sig_addr, int cmp,
+                                                uint64_t cmp_value,
+                                                hipStream_t stream)
+{
+    LOG_API("host::signal_wait_until_on_stream (sig_addr=%p, cmp=%d)", sig_addr, cmp);
+    rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
+    ctx->signal_wait_until_on_stream(sig_addr, cmp, cmp_value, stream);
+}
+
