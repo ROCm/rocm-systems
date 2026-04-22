@@ -28,10 +28,15 @@ __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& o
     static_assert(__hip_internal::is_void<TyGroup>::value, "This group does not exclusively represent a tile");
   }
 
-  // TODO g-h-c we only do add for now
-  unsigned long long mask = ~0ull;
+  // TODO g-h-c we should be able to calculate the mask AT COMPILE TIME, and thusly
+  // do a loop unroll at compile time but only IF THE GROUP IS A BLOCK TILE of a compile-time size
   unsigned int maskNumBits;
   int numIterations;
+  // next bit to aggregate with
+  unsigned int maskIdx;
+  unsigned int laneId = __lane_id();
+  int nextBit = laneId;
+  unsigned long long mask = ~0ull;
 
   // we cannot simply just use the __activemask() here, because more than one tile could have active
   // threads at a time; we need to mask away the threads that not part of this tile first
@@ -45,6 +50,11 @@ __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& o
   // need to apply the active mask
   mask &= __activemask();
   maskNumBits = __popcll(mask);
+  maskIdx = __popcll(((1ul << laneId) - 1) & mask);
+
+  if (laneId) {
+    mask <<= 64 - laneId;
+  }
 
 #ifdef __OPTIMIZE__  // at the time of this writing the ockl wfred functions do not compile when
                      // using -O0
@@ -57,7 +67,6 @@ __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& o
                 sizeof(Val) > 4) {
     Val result = val;
     Val rhs;
-    unsigned int laneId;
     auto backwardPermute = [](int index, permuteType arg) {
       if constexpr (__hip_internal::is_floating_point<Val>::value &&
                   sizeof(Val) <= 4) {
@@ -70,26 +79,50 @@ __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& o
     // the number of iterations needs to be at least log2(number of bits on)
     numIterations = sizeof(int) * 8 - __clz(maskNumBits);
 
-    if (!(maskNumBits & (maskNumBits - 1))) {
-      // the number of bits in the mask is a power of 2
+    if constexpr (impl::isTiledGroup<TyGroup>::value) {
+      // the number of bits in the mask is always a power of 2 when
+      // tiled blocks are used and in that case we need an iteration less
       numIterations -= 1;
+    } else {
+      // in the coalesced_threads case it depends, we are not sure whether
+      // it is a power of 2, or not so we check
+      if (!(maskNumBits & (maskNumBits - 1))) {
+        numIterations -= 1;
+      }
     }
 
-    laneId = __lane_id();
+    int modulo = 1;
 
-    for (int laneDelta = 1; laneDelta < warpSize; laneDelta <<= 1) {
-       int remoteIdx = laneId - laneDelta;
-       bool insideLanes = remoteIdx >= 0;
+    while (numIterations) {
+      int offset = modulo >> 1;
+      int increment = modulo - offset;
+      int nextPos = maskIdx - offset - increment;
+      bool insideLanes = nextPos >= 0;
 
-       // clamp index; if out of bounds, the thread read its own value
-       remoteIdx = (remoteIdx < (laneId & ~(warpSize - 1))) ? laneId : remoteIdx;
-       rhs = backwardPermute(remoteIdx << 2, result);
+      if (insideLanes) {
+        int next;
 
-       if (insideLanes) {
-         result = op(result, rhs);
-       }
-     }
-     return result;
+        // find the position to aggregate with; although we could just call fns64() that will probably
+        // be very slow when called multiple times in this for loop; this is equivalent
+        for (int i = 0; i < increment; i++) {
+          next = __builtin_clzll(mask) + 1;
+          mask <<= next;
+          nextBit -= next;
+        }
+      }
+
+      // clamp index; if out of bounds, the thread read its own value
+      nextBit = (nextBit < (laneId & ~(warpSize - 1))) ? laneId : nextBit;
+      rhs = backwardPermute(nextBit << 2, result);
+
+      if (insideLanes) {
+        result = op(result, rhs);
+      }
+
+      modulo <<= 1;
+      numIterations--;
+    }
+    return result;
   } else {
     assert(false && "Unimplemented");
   }

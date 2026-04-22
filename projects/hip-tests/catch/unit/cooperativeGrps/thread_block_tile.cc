@@ -1074,6 +1074,7 @@ void testScanForTileSize()
   void* devicePtr = d_result.ptr();
   void* args[] = { &devicePtr };
   int accum = 0;
+  int pos = 0;
 
   HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleScan<TileSize>),
                                        gridDim,
@@ -1086,16 +1087,25 @@ void testScanForTileSize()
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
 
-  for (int i = 0; i < getWarpSize(); i++) {
-    accum += i;
-    INFO("Index: "<< i);
-    REQUIRE(h_result.host_ptr()[i] == accum);
+  while (pos < getWarpSize()) {
+    for (int i = 0; i < TileSize; i++) {
+      accum += pos + i;
+      INFO("Index: " << pos + i);
+      REQUIRE(h_result.host_ptr()[pos + i] == accum);
+    }
+
+    accum = 0;
+    pos += TileSize;
   }
 }
 
-// TODO g-h-c repeat the same tests 
 TEST_CASE(Unit_Thread_Block_Tile_Inclusive_Scan_Basic)
 {
+  testScanForTileSize<1>();
+  testScanForTileSize<2>();
+  testScanForTileSize<4>();
+  testScanForTileSize<8>();
+  testScanForTileSize<16>();
   testScanForTileSize<32>();
 }
 
