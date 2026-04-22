@@ -8,8 +8,6 @@ Building and installing rocDecode from source code
 
 If you will be contributing to the rocDecode code base, or if you want to preview new features, build rocDecode from its source code.
 
-If you will not be previewing features or contributing to the code base, use the :doc:`package installers <./rocDecode-package-install>` to install rocDecode. 
-
 :doc:`Clone the rocDecode project <./rocDecode-clone-project>`.
 
 Change directory to the rocDecode project directory.
@@ -53,9 +51,4 @@ Build and install the rocDecode test module. This module is required if you'll b
 
 Run ``make test`` to test your build. To run the test with the verbose option, run ``make test ARGS="-VV"``. 
 
-To create a package installer for rocDecode, run:
-
-.. code:: shell
-
-  sudo make package
 

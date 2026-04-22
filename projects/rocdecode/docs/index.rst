@@ -17,9 +17,8 @@ The rocDecode project is located in https://github.com/ROCm/rocm-systems/tree/de
 
   .. grid-item-card:: Install
 
-    * :doc:`rocDecode prerequisites <./install/rocDecode-prerequisites>`
+    * :doc:`rocDecode build prerequisites <./install/rocDecode-prerequisites>`
     * :doc:`Cloning the rocDecode project <./install/rocDecode-clone-project>`
-    * :doc:`Installing rocDecode with the package installer <./install/rocDecode-package-install>`
     * :doc:`Building and installing rocDecode from source code <./install/rocDecode-build-and-install>`
     * `rocDecode Docker containers <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/docker>`_
 

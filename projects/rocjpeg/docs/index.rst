@@ -17,9 +17,8 @@ The rocJPEG project is located in https://github.com/ROCm/rocm-systems/tree/deve
 
   .. grid-item-card:: Install
 
-    * :doc:`rocJPEG installation prerequisites <./install/rocjpeg-prerequisites>`
+    * :doc:`rocJPEG build prerequisites <./install/rocjpeg-prerequisites>`
     * :doc:`Cloning the rocJPEG project <./install/rocjpeg-clone-repo>`
-    * :doc:`Installing rocJPEG with the package installer <./install/rocjpeg-package-install>`
     * :doc:`Building rocJPEG from source code <./install/rocjpeg-build-and-install>`
 
   .. grid-item-card:: How to

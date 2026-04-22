@@ -6,11 +6,7 @@
 Building and installing rocJPEG from source code
 ********************************************************************
 
-These instructions are for building rocJPEG from its source code. If you will not be contributing to the rocJPEG code base or previewing features, :doc:`package installers <./rocjpeg-package-install>` are available.
-
-.. note::
-
-  ROCm must be installed before installing rocJPEG. See `Quick start installation guide <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html>`_ for detailed ROCm installation instructions.
+If you will be contributing to the rocJPEG code base, or if you want to preview new features, build rocJPEG from its source code.
 
 :doc:`Clone the rocJPEG project <./rocjpeg-clone-repo>`. Change directory to ``projects/rocjpeg``:
 
@@ -35,7 +31,7 @@ Build and install rocJPEG using the following commands:
 
 After installation, the rocJPEG libraries will be copied to ``/opt/rocm/lib`` and the rocJPEG header files will be copied to ``/opt/rocm/include/rocjpeg``.
 
-Install the CTest module:
+Build the CTest module:
 
 .. code:: shell
 
