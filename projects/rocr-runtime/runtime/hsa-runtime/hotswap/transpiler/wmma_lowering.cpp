@@ -450,33 +450,31 @@ Value *emitWMMAtoMFMA(RaiseContext &ctx, Value *a, Value *b, Value *c,
                        WMMAInputType inputType) {
   // Callers (the `V_WMMA_*` dispatches in `handle_valu_vop3p.cpp`)
   // are expected to have already refused the lift when the current
-  // projection does not provide the full-wave EXEC invariant AND
-  // the target actually supports the MFMA intrinsics this helper
-  // emits — see the block comment in this file (~line 130) for
-  // why the redistribute / collect pipeline requires HW EXEC=-1
-  // for correctness.  Assert the invariant as a defense-in-depth
-  // fence so a future refactor adding a new WMMA opcode case that
-  // forgets the caller-side gate fails loudly in assert-on builds
+  // projection does not provide the full-wave EXEC invariant — see
+  // the block comment in this file (~line 130) for why the
+  // redistribute / collect pipeline below requires HW EXEC=-1 for
+  // correctness.  Assert the invariant here as defense-in-depth
+  // so a future refactor adding a new WMMA opcode case that
+  // forgets its caller-side gate fails loudly in assert-on builds
   // (debug + all lit / gtest runs).
   //
-  // The `hasMFMA` disjunct reflects the existing (pre-gate) shape
-  // of the `V_WMMA_F32_16x16x{32,64}_*` dispatch: when neither
-  // `hasWMMA12` nor `hasMFMA` holds (gfx1250 → gfx1250 same-target
-  // today, whose native WMMA intrinsics are gated on
-  // `hasTensorOps` in a branch that dispatch does NOT yet model),
-  // the code falls through to `emitWMMAtoMFMA` and produces MFMA-
-  // intrinsic IR that the backend can't actually lower.  The
-  // raise-time "success" there is a latent bug, not my gate's
-  // responsibility — the caller-side gate lives in that branch and
-  // is authoritative.  Asserting on `hasMFMA == false` here would
-  // regress `BatchRaise.Gfx1250TestData`, which exercises exactly
-  // that path.
-  assert((ctx.projection.providesFullWaveExecInvariant() ||
-          !ctx.targetIsa.hasMFMA) &&
+  // Earlier versions of this assert had a `|| !hasMFMA` disjunct
+  // that accepted a latent bug: when the K=32/K=64 dispatch's
+  // `hasWMMA12`-only native-intrinsic gate failed to match gfx1250
+  // (whose native K=32/K=64 intrinsics live in
+  // `AMDGPUWMMAIntrinsicsGFX1250`, not the `AMDGPUWMMAIntrinsicsGFX12`
+  // base family `hasWMMA12` gates on), we fell through here with
+  // `hasMFMA = false` and emitted MFMA-intrinsic IR the target
+  // couldn't lower.  That latent bug was fixed in the same commit
+  // as this assert tightening (handle_valu_vop3p.cpp now gates the
+  // native branch on `hasTensorOps` and adds a no-path-available
+  // refusal below it), so the disjunct is no longer needed — reaching
+  // here without the full-wave-EXEC invariant is a caller-side gate
+  // regression, period.
+  assert(ctx.projection.providesFullWaveExecInvariant() &&
          "emitWMMAtoMFMA requires the current projection to provide "
-         "the full-wave EXEC invariant (init_whole_wave sets HW EXEC=-1) "
-         "when targeting an MFMA-capable ISA. Caller in "
-         "handle_valu_vop3p.cpp MUST gate on "
+         "the full-wave EXEC invariant (init_whole_wave sets HW EXEC=-1). "
+         "Caller in handle_valu_vop3p.cpp MUST gate on "
          "`ctx.projection.providesFullWaveExecInvariant()` and refuse "
          "via RaiseFailure::unsupportedShape before reaching here.");
 

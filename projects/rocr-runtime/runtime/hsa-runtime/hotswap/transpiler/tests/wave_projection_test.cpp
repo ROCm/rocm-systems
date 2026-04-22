@@ -59,26 +59,18 @@ namespace {
 // (gfx1250, wave32) / target (gfx942, wave64) cross-widening the
 // matmul_fp16 triage surfaced the bug on.
 //
-// Hand-forged via the public-but-discouraged default ctor rather
-// than `fromSubtarget` because standing up an `MCSubtargetInfo`
-// would require the full LLVM AMDGPU init chain (multiple
+// Constructed via `ISAProfile::forTesting(waveSize)` rather than
+// `fromSubtarget` because standing up an `MCSubtargetInfo` would
+// require the full LLVM AMDGPU init chain (multiple
 // `InitializeAllTarget*` calls + target-lookup dance) and buys
-// us nothing for the contract check this file pins.  Only the
-// `waveSize` field is consulted by `WaveNativeProjection`'s
-// direction-gate assertion; the other fields are irrelevant to
-// `providesFullWaveExecInvariant()`.  See the docstring on
-// `ISAProfile`'s default ctor in `isa_profile.hpp` for the
-// test-only scope.
-ISAProfile makeGfx1250Profile() {
-  ISAProfile p;
-  p.waveSize = 32;
-  return p;
-}
-ISAProfile makeGfx942Profile() {
-  ISAProfile p;
-  p.waveSize = 64;
-  return p;
-}
+// us nothing for the contract check this file pins — only the
+// `waveSize` dimension is consulted by `WaveNativeProjection`'s
+// direction-gate assertion, and
+// `providesFullWaveExecInvariant()`'s return value is independent
+// of the other feature flags.  See the `forTesting` docstring in
+// `isa_profile.hpp` for the test-only scope of this factory.
+ISAProfile makeGfx1250Profile() { return ISAProfile::forTesting(32); }
+ISAProfile makeGfx942Profile() { return ISAProfile::forTesting(64); }
 
 } // namespace
 

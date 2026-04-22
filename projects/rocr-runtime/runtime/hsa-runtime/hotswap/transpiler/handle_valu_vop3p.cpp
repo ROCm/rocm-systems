@@ -496,7 +496,28 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
     }();
 
     Value *result_val;
-    if (ctx.targetIsa.hasWMMA12) {
+    // Native-intrinsic branch: the K=32 / K=64 WMMA intrinsics
+    // (`int_amdgcn_wmma_f32_16x16x32_f16`, `..._f32_16x16x64_*`,
+    // `..._i32_16x16x64_iu8`) live in `AMDGPUWMMAIntrinsicsGFX1250`
+    // (IntrinsicsAMDGPU.td:4096 — the gfx1250-specific family),
+    // NOT in `AMDGPUWMMAIntrinsicsGFX12` (IntrinsicsAMDGPU.td:3123 —
+    // the gfx12 RDNA4 base family, which only covers K=16
+    // `..._16x16x16_*`).  The gate therefore must be
+    // `hasTensorOps` (`FeatureGFX1250Insts`), not `hasWMMA12`
+    // (`FeatureWMMA{128,256}bInsts` — set only on the gfx12 base
+    // subtargets that DON'T have K=32/K=64 hardware).  An earlier
+    // version of this handler used `hasWMMA12` here, which made
+    // gfx1250 same-target lifts of K=32/K=64 WMMA fall through to
+    // the `emitWMMAtoMFMA` branch below and emit MFMA-intrinsic IR
+    // the backend couldn't lower on gfx1250 (no MFMA hardware).
+    // `BatchRaise.Gfx1250TestData` "succeeded" on that broken path
+    // because the raise completed, even though any downstream
+    // codegen attempt would have failed.  See
+    // `hotswap/docs/gpt-oss-derisking.md` for the WMMA taxonomy
+    // and the K=4 f32 case above for the same structural fix
+    // pattern (which got it right originally — this K=32/K=64
+    // case was slower to catch up).
+    if (ctx.targetIsa.hasTensorOps) {
       Intrinsic::ID wmmaId;
       switch (sop) {
       case SemOp::V_WMMA_F32_16x16x32_F16:
@@ -514,7 +535,8 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
       case SemOp::V_WMMA_I32_16x16x64_IU8:
         wmmaId = Intrinsic::amdgcn_wmma_i32_16x16x64_iu8; break;
       default:
-        report_fatal_error("transpiler: WMMA SemOp not in WMMA12 dispatch");
+        report_fatal_error(
+            "transpiler: WMMA SemOp not in gfx1250 K=32/K=64 dispatch");
       }
       Function *wmmaFn = Intrinsic::getOrInsertDeclaration(
           &ctx.M, wmmaId, {cdIRTy, abIRTy});
@@ -534,52 +556,50 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
             ctx.B.getFalse(), ctx.B.getFalse(),
             ctx.B.getFalse()
         }, "wmma");
-      } else if (is8bit) {
+      } else {
         // AMDGPUWmmaIntrinsicModsC: (A, B, C_mod, C, reuse_a, reuse_b)
+        //
+        // Both the 8-bit FP8/BF8 family and the 16-bit f16/bf16
+        // family use this 6-arg shape in the gfx1250 intrinsic
+        // set (`AMDGPUWMMAIntrinsicsGFX1250` — IntrinsicsAMDGPU.td
+        // ~line 4098).  An earlier version of this handler split
+        // the 16-bit family into an 8-arg `ModsAllReuse` shape
+        // (A_mod, A, B_mod, B, C_mod, C, reuse_a, reuse_b) that
+        // matches the gfx12 RDNA4 base WMMA family's intrinsics —
+        // which do NOT include K=32/K=64 variants; those gfx12-base
+        // intrinsics are K=16-only (`..._16x16x16_*` in
+        // `AMDGPUWMMAIntrinsicsGFX12` ~line 3123).  That mismatched
+        // arg-list did not surface under the old `hasWMMA12` gate
+        // because `hasWMMA12` is never true on gfx1250 subtargets
+        // (their feature set deliberately excludes
+        // `FeatureWMMA{128,256}bInsts`), so the branch was
+        // unreachable at runtime — but the principled fix in the
+        // same commit (switching the gate to `hasTensorOps`) makes
+        // the branch reachable, and the arg list must match.  See
+        // the LLVM intrinsic-signature trailer further up in this
+        // block comment for the full per-family taxonomy.
         result_val = ctx.B.CreateCall(wmmaFn, {
             a, b,
             ConstantInt::get(Type::getInt16Ty(ctx.C), 0), c,
             ctx.B.getFalse(), ctx.B.getFalse()
         }, "wmma");
-      } else {
-        // AMDGPUWmmaIntrinsicModsAllReuse:
-        //   (A_mod, A, B_mod, B, C_mod, C, reuse_a, reuse_b)
-        result_val = ctx.B.CreateCall(wmmaFn, {
-            ctx.B.getFalse(), a,
-            ctx.B.getFalse(), b,
-            ConstantInt::get(Type::getInt16Ty(ctx.C), 0), c,
-            ctx.B.getFalse(), ctx.B.getFalse()
-        }, "wmma");
       }
     } else if (ctx.targetIsa.hasMFMA) {
-      // Same full-wave-EXEC-invariant gate as the K=4 f32 case
-      // above.  `emitWMMAtoMFMA`'s redistribute + collect pipeline
-      // requires `init_whole_wave`'s HW EXEC=-1 to work correctly
-      // on partial-wave launches; ModuloReplicationProjection
-      // leaves HW EXEC at the source-active mask, so target lanes
-      // 32..63 on a `max_flat_workgroup_size < targetWaveSize`
-      // launch never write their MFMA destination VGPRs and the
-      // collect-stage `ds_bpermute` reads from that half return
-      // garbage (observable as the `matmul_fp16` WRONG-numeric
-      // residual documented in the phantom-lane-fallback commit
-      // message).  Refuse rather than miscompile.
-      //
-      // The surrounding `hasMFMA` guard was added with the polish
-      // pass that landed the lit regression fences: without it
-      // (the first version of this gate), same-target lifts with
-      // `hasWMMA12 == false && hasMFMA == false` (gfx1250 →
-      // gfx1250, whose native WMMA intrinsics are reached via
-      // `hasTensorOps` in a branch this K=32/K=64 dispatch does
-      // not model today) would incorrectly enter this `else` and
-      // be refused by the gate, regressing
-      // `BatchRaise.Gfx1250TestData`'s pre-existing "raise succeeds
-      // but emits MFMA-intrinsic IR the backend can't lower"
-      // path.  Adding a `hasTensorOps` branch alongside
-      // `hasWMMA12` (like the K=4 f32 case above does) is the
-      // principled fix but out of scope for the matmul_fp16
-      // triage commit series.  Constraining this gate to actual
-      // MFMA-emission sites is the minimum change to avoid the
-      // BatchRaise regression.
+      // Cross-target WMMA → MFMA decomposition.  The
+      // redistribute + collect pipeline in
+      // `wmma_lowering.cpp::emitWMMAtoMFMA` requires
+      // `init_whole_wave`'s HW EXEC=-1 to work correctly on
+      // partial-wave launches: target lanes 32..63 must write
+      // their MFMA destination VGPRs for the collect-stage
+      // `ds_bpermute` reads to land on real data.  The
+      // `ModuloReplicationProjection` fallback that
+      // `raiser.cpp` selects for `max_flat_workgroup_size <
+      // targetWaveSize` kernels leaves HW EXEC at the source-
+      // active mask and therefore does NOT provide that
+      // invariant — the resulting IR silently miscompiles
+      // (observable as the `matmul_fp16` WRONG-numeric
+      // residual documented in the phantom-lane-fallback
+      // commit `e96edd3ea2`).  Refuse rather than miscompile.
       if (!ctx.projection.providesFullWaveExecInvariant()) {
         hr.failure = RaiseFailure::unsupportedShape(
             di, "VOP3P",
@@ -598,14 +618,30 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
       }
       result_val = emitWMMAtoMFMA(ctx, a, b, c, wmmaInputType);
     } else {
-      // Pre-existing path for targets with neither WMMA12 nor
-      // MFMA (e.g. gfx1250 same-target, whose native WMMA
-      // intrinsics are behind `hasTensorOps` — not modelled by
-      // this K=32/K=64 dispatch).  Keeps the pre-gate behaviour
-      // (emit MFMA-intrinsic IR even though the target has no
-      // MFMA; backend fails to lower, but raise "succeeds") so
-      // `BatchRaise.Gfx1250TestData` does not regress.
-      result_val = emitWMMAtoMFMA(ctx, a, b, c, wmmaInputType);
+      // Target has neither gfx1250 tensor ops (hasTensorOps, K=32
+      // / K=64 WMMA native) nor MFMA (gfx942 CDNA3 et al., the
+      // cross-target decomposition sink).  No path exists to
+      // lower this opcode.  The pre-2026-04-22 handler fell
+      // through to `emitWMMAtoMFMA` here and emitted MFMA-
+      // intrinsic IR the target couldn't lower; the raise
+      // "succeeded" but the backend then failed to codegen —
+      // `BatchRaise.Gfx1250TestData` was structurally accepting
+      // that broken-IR outcome, not catching it.  Refuse loudly
+      // so coverage tooling surfaces targets whose WMMA K=32/
+      // K=64 support is missing rather than pretending the lift
+      // worked.
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "VOP3P",
+          "v_wmma_*_16x16x{32,64}_* has no available lowering on "
+          "the target ISA: the target does not provide gfx1250 "
+          "tensor ops (`hasTensorOps` / `FeatureGFX1250Insts` for "
+          "the native K=32/K=64 WMMA intrinsic family "
+          "`AMDGPUWMMAIntrinsicsGFX1250`) nor MFMA (`hasMFMA` for "
+          "the cross-target decomposition via "
+          "`wmma_lowering.cpp::emitWMMAtoMFMA`).  No known safe "
+          "lowering exists; refusing rather than emitting IR that "
+          "cannot be lowered.");
+      return hr;
     }
 
     ctx.writeRegVec(dest, result_val);

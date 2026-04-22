@@ -197,11 +197,55 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     // at an arbitrary "source lane" that may or may not have
     // written anything useful to LDS, and the resulting `ldAddr`
     // can easily exceed the kernel's `group_segment_fixed_size`
-    // allocation.  The `storeVGPR32` destination writes at the
-    // end of each iteration use the low-level
-    // `ctx.regs.storeVGPR32` path (not the auto-gating
-    // `ctx.storeVGPR32`) so we don't nest a second SPE diamond
-    // around each write — harmless but wasteful IR.
+    // allocation.
+    //
+    // Convergence-contract question this gate raises: wrapping
+    // `ds_bpermute` in `emitUnderExec` restricts participation to
+    // SPE-active lanes, whereas the hardware instruction is
+    // convergent and normally (under `init_whole_wave`) has all 64
+    // target lanes contributing selectors + source-VGPR data.
+    // Why is that restriction safe for this transpose pattern?
+    //
+    //   * Under a full-wave launch
+    //     (`max_flat_workgroup_size >= targetWaveSize`),
+    //     `saved_exec` covers every target lane and SPE
+    //     never gates any lane off — HW EXEC stays -1 inside
+    //     the diamond.  `ds_bpermute` participation is identical
+    //     to the pre-gate behaviour; no semantic drift.
+    //
+    //   * Under a phantom-lane launch
+    //     (`max_flat_workgroup_size < targetWaveSize`, e.g. a
+    //     wave32 source kernel's 32-thread WG running on a
+    //     wave64 target), the phantom lanes (target lanes
+    //     32..63 for a 32-thread WG on wave64) have no
+    //     source-kernel workitem.  The source kernel's
+    //     TR8/TR16 transpose was written to operate within a
+    //     single 8-lane group; those groups live ENTIRELY
+    //     inside the first source wave (lanes 0..31 on wave32,
+    //     identical target lanes 0..31 under the
+    //     phantom-lane-triggered MODREP fallback chosen by
+    //     `raiser.cpp`).  Gating the phantom lanes out of the
+    //     bpermute therefore preserves the source kernel's
+    //     intent exactly — they were never supposed to
+    //     contribute to the transpose; the pre-gate behaviour
+    //     of "HW EXEC=-1 forces phantom lanes to contribute
+    //     undef-derived VGPRs to the collective" was the bug,
+    //     not the fix.
+    //
+    //   * If a future source kernel ever emits a TR8/TR16
+    //     across a >32-lane transpose group (a gfx1250-specific
+    //     wave32 construction that crosses from source wave N
+    //     to source wave N+1 within a single hardware group),
+    //     the gate would over-refuse participation; that shape
+    //     doesn't exist in any corpus kernel today and would
+    //     need a new projection entry (not a relaxation of the
+    //     gate) if it ever surfaced.
+    //
+    // The `storeVGPR32` destination writes at the end of each
+    // iteration use the low-level `ctx.regs.storeVGPR32` path
+    // (not the auto-gating `ctx.storeVGPR32`) so we don't nest a
+    // second SPE diamond around each write — harmless but
+    // wasteful IR.
     ParsedReg dest = op.dst();
     ctx.emitUnderExec([&] {
       // 2 output dwords, each holds 4 i8 values from 4 different

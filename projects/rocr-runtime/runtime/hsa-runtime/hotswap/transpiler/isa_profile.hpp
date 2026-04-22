@@ -55,17 +55,32 @@ struct ISAProfile {
     return p;
   }
 
-  // Default ctor is public so unit tests can construct a minimal
-  // profile via field assignment — see
-  // `tests/wave_projection_test.cpp` for the `WaveNativeProjection`
-  // direction-gate check that needs a hand-forged wave32 source /
-  // wave64 target pair without standing up a full
-  // `MCSubtargetInfo`.  Production code MUST use `fromSubtarget`;
+  // Test-only factory.  Constructs an `ISAProfile` with only the
+  // `waveSize` dimension set (the other feature flags default to
+  // `false`) so unit tests exercising wave-direction-gated code —
+  // `WaveNativeProjection`'s ctor assertion, `emitLaneActiveBit`'s
+  // source / target wave-width arithmetic, the
+  // `providesFullWaveExecInvariant` contract —
+  // don't have to stand up a full `MCSubtargetInfo` (which would
+  // require pulling in the LLVM AMDGPU target init chain just to
+  // read one bit).  Production code MUST use `fromSubtarget`:
   // hand-forging loses the cross-checks between feature flags
-  // (e.g. hasAGPR == hasMFMA) that `fromSubtarget` enforces.  A
-  // review-time heuristic: grep for ISAProfile-default-ctor uses
-  // outside `tests/` and flag any hit.
-  ISAProfile() = default;
+  // (e.g. `hasAGPR == hasMFMA`) that `fromSubtarget` derives from
+  // the canonical subtarget feature definitions in LLVM's
+  // AMDGPU.td.  The factory is named and scoped rather than a
+  // public default ctor so `git grep forTesting` is the review
+  // anchor, not `git grep 'ISAProfile()'` (which would also hit
+  // the private default ctor declaration below and mask real
+  // findings).
+  static ISAProfile forTesting(unsigned waveSize) {
+    ISAProfile p;
+    p.waveSize = waveSize;
+    return p;
+  }
+
+ private:
+  ISAProfile() = default; // constructible only via fromSubtarget() /
+                          // forTesting(), per the comments above.
 };
 
 } // namespace transpiler
