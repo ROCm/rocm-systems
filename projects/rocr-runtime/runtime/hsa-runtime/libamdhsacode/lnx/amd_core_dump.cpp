@@ -400,8 +400,10 @@ hsa_status_t Collect(SegmentsInfo& segments) override {
   bool debug_enabled_by_us = false;
 
   // Try to enable debug interface
-  if (HSAKMT_CALL(hsaKmtDbgEnable(&runtime_ptr, &runtime_size))) {
-    fprintf(stderr, "Failed to enable debug interface, trying to generate core dump anyway.\n");
+  HSAKMT_STATUS enable_status = hsaKmtDbgEnable(&runtime_ptr, &runtime_size);
+
+  if (enable_status == HSAKMT_STATUS_ALREADY_IN_PROGRESS) {
+    fprintf(stderr, "Debugger already attached, trying to create core dump anyway.\n");
     debug_enabled_by_us = false;
 
     // Call helper to reconstruct runtime_info using already-enabled interface
@@ -409,8 +411,11 @@ hsa_status_t Collect(SegmentsInfo& segments) override {
       fprintf(stderr, "Failed to reconstruct runtime info.\n");
       return HSA_STATUS_ERROR;
     }
-  } else {
+  } else if(enable_status == HSAKMT_STATUS_SUCCESS) {
     debug_enabled_by_us = true;
+  } else {
+      fprintf(stderr, "Failed to enable debug.");
+      return HSA_STATUS_ERROR;
   }
 
   std::unique_ptr<void, decltype(std::free) *> runtime_info(runtime_ptr, std::free);

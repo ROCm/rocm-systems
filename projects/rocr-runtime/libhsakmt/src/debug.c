@@ -497,7 +497,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgEnableCtx(HsaKFDContext *ctx,
 	args.pid = getpid();
 
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_DBG_TRAP, &args)) {
+		int saved_errno = errno;
 		free(*runtime_info);
+		if (errno == EALREADY)
+			return HSAKMT_STATUS_ALREADY_IN_PROGRESS;
 		return HSAKMT_STATUS_ERROR;
 	}
 

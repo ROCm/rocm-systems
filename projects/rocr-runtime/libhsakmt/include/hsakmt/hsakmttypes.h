@@ -121,6 +121,7 @@ typedef enum _HSAKMT_STATUS
     HSAKMT_STATUS_MEMORY_NOT_REGISTERED        = 36, // Memory buffer not registered
     HSAKMT_STATUS_MEMORY_ALIGNMENT             = 37, // Memory parameter not aligned
 
+    HSAKMT_STATUS_ALREADY_IN_PROGRESS          = 40
 } HSAKMT_STATUS;
 
 //
