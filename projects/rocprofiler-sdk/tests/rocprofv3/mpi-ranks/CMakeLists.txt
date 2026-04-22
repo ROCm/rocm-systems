@@ -31,10 +31,10 @@ endif()
 # Run-as-root permission for OpenMPI; ignored by other MPI implementations.
 set(MPI_ENV_VARS OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1)
 
-# rocprofv3 %env{...}% substitution: concatenate the rank variables exported by OpenMPI
-# (OMPI_COMM_WORLD_RANK) and MPICH (PMI_RANK). Whichever is unset expands to an empty
-# string, leaving the rank from the active MPI implementation.
-set(MPI_RANK_DIR_VAR "rank.%env{OMPI_COMM_WORLD_RANK}%%env{PMI_RANK}%")
+# Use rocprofv3's built-in %rank% output key so the rank directory is resolved via the
+# profiler's MPI-rank detection logic instead of relying on MPI-implementation-specific
+# environment variables.
+set(MPI_RANK_DIR_VAR "rank.%rank%")
 
 # Test with MPI - profile only rank 0 out of 4 ranks. Use ${MPI_RANK_DIR_VAR} to create
 # separate output directories per rank, independent of the MPI implementation.
