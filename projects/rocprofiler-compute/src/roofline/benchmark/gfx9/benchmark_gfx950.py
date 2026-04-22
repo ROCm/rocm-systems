@@ -16,8 +16,8 @@ from . import benchmark_gfx9_base
 # Bench_gfx950 Class
 # =============================================================================
 class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
-    def __init__(self, device_ids: list) -> None:
-        super().__init__(device_ids)
+    def __init__(self, device_id: str) -> None:
+        super().__init__(device_id)
 
         self.unsupported_data_types = []
 
@@ -37,12 +37,6 @@ class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
             "BF16": 32768,
             "I8": 65536,
             "F64": 2048,
-        }
-
-        self.cache_sizes = {
-            "L1": 32 * 1024,
-            "L2": 4 * 1024 * 1024,
-            "MALL": 64 * 1024 * 1024,
         }
 
     # -----------------------------------------------------------------------------

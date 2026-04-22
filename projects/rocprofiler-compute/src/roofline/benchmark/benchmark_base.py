@@ -57,7 +57,7 @@ VALU_NFMA = 1024
 # Bench_base Class (ABSTRACT)
 # =============================================================================
 class Bench_base(ABC):
-    def __init__(self, device_ids: list) -> None:
+    def __init__(self, device_id: str) -> None:
         # Arch or hardware-specific variables must be set in child classes
         # self.lds_sizes: dict[str, int]
         self.unsupported_data_types: list[str]
@@ -122,6 +122,7 @@ class Bench_base(ABC):
         self.matrix_f64_src: str
         self.matrix_i8_src: str
         self.set_kernel_source()
+        self.set_cache_sizes()
 
     # -----------------------------------------------------------------------------
     # Helper Methods and Classes
@@ -247,6 +248,28 @@ class Bench_base(ABC):
 
         # Parse out only gfx
         return arch_str.split(":", 1)[0]
+
+    def set_cache_sizes(self) -> None:
+        from utils.amdsmi_interface import get_gpu_cache_info, get_gpu_num_compute_units
+
+        cu_count = get_gpu_num_compute_units()
+        cache_info = get_gpu_cache_info()
+        assert cache_info  # cache info must be populated
+
+        for _, cache_values in cache_info.items():
+            # Cache level is L1 and we are looking for vL1d which means
+            # there should be a cache instance per CU available on the GPU
+            if (
+                cache_values["cache_level"] == "L1"
+                and cache_values["num_cache_instance"] == cu_count
+            ):
+                self.cache_sizes["L1"] = cache_values["cache_size"]
+            # Cache levels L2 and L3/MALL are shared across all CUs
+            # therefore only have one cache instance
+            elif cache_values["cache_level"] == "L2":
+                self.cache_sizes["L2"] = cache_values["cache_size"]
+            elif cache_values["cache_level"] == "L3":
+                self.cache_sizes["MALL"] = cache_values["cache_size"]
 
     def run_get_samples(
         self,

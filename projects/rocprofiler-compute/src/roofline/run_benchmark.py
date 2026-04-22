@@ -22,14 +22,14 @@
 import importlib
 
 
-def load_bench(device_ids: list[str]) -> object:
+def load_bench(device_id: str) -> object:
     try:
         from utils.hip_interface import hipGetDeviceProperties
 
         # Get exact LLVM target name of the device
-        gfx_device = (hipGetDeviceProperties(int(device_ids[0])).gcnArchName).split(
-            ":", 1
-        )[0]
+        gfx_device = (hipGetDeviceProperties(int(device_id)).gcnArchName).split(":", 1)[
+            0
+        ]
 
         # Force gfx940 MI300A_A0 and gfx941 MI300X_A0 products
         # to use same class as gfx942 MI300_A1
@@ -47,12 +47,12 @@ def load_bench(device_ids: list[str]) -> object:
         # Get the bench class from the module
         bench_class = getattr(bench_module, f"Bench_{gfx_device}")
         # Instantiate and return the bench class
-        bench_instance = bench_class(device_ids)
+        bench_instance = bench_class(device_id)
         return bench_instance
     except Exception as e:
         # Propagate error so users do not attempt to use a non-existent bench instance
         raise RuntimeError(
-            f"Failed to load benchmark for devices {device_ids}: {e}"
+            f"Failed to load benchmark for devices {device_id}: {e}"
         ) from e
 
 
@@ -60,18 +60,18 @@ if __name__ == "__main__":
     import sys
     from pathlib import Path
 
-    device_ids = [0]
+    device_id = 0
 
     if len(sys.argv) >= 3:
         if sys.argv[1] == "-d":
-            device_ids = int(sys.argv[2])
+            device_id = int(sys.argv[2])
 
     sys.path.append(str(Path(__file__).parent.parent.resolve()))
     # TODO: verify multi-device scenario- only one device works at this time
     try:
-        bench = load_bench(device_ids)
+        bench = load_bench(device_id)
     except RuntimeError as e:
         print(f"GPU benchmarking could not be executed: {e}")
         sys.exit(1)
-    metrics = bench.run_on_devices(device_ids)
+    metrics = bench.run_on_devices(device_id)
     bench.dump_csv(metrics, "roofline.csv")

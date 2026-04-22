@@ -15,8 +15,8 @@ from .. import benchmark_base
 # Bench_gfx9 Class (ABSTRACT)
 # =============================================================================
 class Bench_gfx9(benchmark_base.Bench_base):
-    def __init__(self, device_ids: list) -> None:
-        super().__init__(device_ids)
+    def __init__(self, device_id: str) -> None:
+        super().__init__(device_id)
 
         self.WAVEFRONT_SIZE = 64
         self.MATRIX_OPS_TYPE = "MFMA"
