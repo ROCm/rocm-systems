@@ -662,22 +662,25 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 #endif
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 23
-HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipOccupancyMaxPotentialClusterSize, hipOccupancyMaxPotentialClusterSize, hipOccupancyMaxPotentialClusterSize_fn, clusterSize, f, config);
-HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipOccupancyMaxActiveClusters, hipOccupancyMaxActiveClusters, hipOccupancyMaxActiveClusters_fn, numClusters, f, config);
-#endif
-
-#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 24
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMipmappedArrayGetMemoryRequirements, hipMipmappedArrayGetMemoryRequirements, hipMipmappedArrayGetMemoryRequirements_fn, memoryRequirements, mipmap, device);
 #endif
 
-#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 25
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 24
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetAttribute, hipKernelGetAttribute, hipKernelGetAttribute_fn, pi, attrib, kernel, dev);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 25
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelSetAttribute, hipKernelSetAttribute, hipKernelSetAttribute_fn, attrib, value, kernel, dev);
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetFunction, hipKernelGetFunction, hipKernelGetFunction_fn, pFunc, kernel);
 #endif
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 26
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemPrefetchBatchAsync, hipMemPrefetchBatchAsync, hipMemPrefetchBatchAsync_fn, dev_ptrs, sizes, count, prefetch_locs, prefetch_loc_idxs, num_prefetch_locs, flags, stream);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 27
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipOccupancyMaxPotentialClusterSize, hipOccupancyMaxPotentialClusterSize, hipOccupancyMaxPotentialClusterSize_fn, clusterSize, f, config);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipOccupancyMaxActiveClusters, hipOccupancyMaxActiveClusters, hipOccupancyMaxActiveClusters_fn, numClusters, f, config);
 #endif
 // clang-format on
 
