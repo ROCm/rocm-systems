@@ -1015,6 +1015,252 @@ Recipe makeCanaryDsSwizzleQuadPermRecipe() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Recipe: canary_cvt_scale_pk8_bf16_fp4 — gfx1250-only MXFP4 dequant primitive
+//
+// Canary for the Salmon cross-target (gfx1250 -> gfx942) lowering of the
+// gfx1250-only VOP3 scaled packed-8 FP4 -> BF16 convert
+// (`v_cvt_scale_pk8_bf16_fp4`, VOP3Instructions.td:1873; intrinsic
+// `int_amdgcn_cvt_scale_pk8_bf16_fp4` declared inside the
+// `isGFX125xOnly` block of IntrinsicsAMDGPU.td:686).
+//
+// Corpus scope
+// ============
+//
+// Observed in 64 instances each of
+// `scope_discovery/kernels/_matmul_ogs_06d912ce88af.hsaco` and
+// `_matmul_ogs_0af655e6ea2b.hsaco` (the Triton GPT-OSS MoE matmul
+// kernels `_matmul_ogs_NNT_bf16xbf16xmxfp4_*`).  Both corpus blobs
+// use only `scale_sel=0` across all 128 instances combined.  The
+// cross-target handler's declared support set tracks this: scale_sel
+// != 0 refuses loudly.  See `hotswap/docs/matrix-translation.md §7.N`
+// (the dequant-primitive subsection added alongside this canary) for
+// the declared support set and its corpus provenance.
+//
+// Landing this canary + the cross-target handler is standalone
+// cross-target coverage for the MXFP4 dequant primitive; end-to-end
+// lift of the two matmul_ogs kernels still blocks on pending Template
+// A (BF16 16x16x32 WMMA -> MFMA, `matrix-translation.md §T2`) and on
+// TDM (`global_load_async_to_lds_*`).
+//
+// See `kernels/canary_cvt_scale_pk8_bf16_fp4.hip` for the source
+// shape (HIP + clang builtin; Triton cannot force this primitive in
+// isolation from the dense WMMA — see the file-level docstring) and
+// the portable-gfx942 dequant that `native` exercises.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Portable FP4 E2M1 -> BF16 bit-pattern derivation.  Kept here (in
+// the harness) rather than shared via
+// `transpiler/mxfp4_dequant.hpp` because `compare_correctness`
+// builds without linking LLVM and the `.hpp`'s companion `.cpp`
+// depends on `llvm::report_fatal_error`.  The primary reference
+// implementation is `mxfp4::mxfp4BitAlgebraBf16Bits`; the gtest
+// `Mxfp4Dequant.*` suite sweeps all 4096 (nibble, scale_byte) inputs
+// and asserts that reference matches the LUT-via-double reference
+// bit-for-bit.  This function mirrors the bit-algebra reference
+// step-for-step; a drift surfaces immediately in the canary's native
+// vs. CPU-reference comparison.  If the boundary ever goes away
+// (e.g. the harness starts linking LLVM), switch to including the
+// header and delete the host mirror.
+uint16_t host_fp4_nibble_to_bf16_bits(uint32_t nibble) {
+  uint32_t sign_bit  = (nibble >> 3) & 0x1u;
+  uint32_t exp_fp4   = (nibble >> 1) & 0x3u;
+  uint32_t mant_fp4  =  nibble       & 0x1u;
+  uint32_t bf16_exp_norm  = exp_fp4 + 126u;
+  uint32_t bf16_mant_norm = mant_fp4 ? 0x40u : 0x00u;
+  uint32_t bf16_exp_sub   = mant_fp4 ? 126u : 0u;
+  uint32_t bf16_mant_sub  = 0u;
+  uint32_t is_sub = (exp_fp4 == 0u) ? 1u : 0u;
+  uint32_t bf16_exp  = is_sub ? bf16_exp_sub  : bf16_exp_norm;
+  uint32_t bf16_mant = is_sub ? bf16_mant_sub : bf16_mant_norm;
+  return static_cast<uint16_t>((sign_bit << 15) | (bf16_exp << 7) | bf16_mant);
+}
+
+// Apply an E8M0 scale byte to a BF16 bit pattern.  Host mirror of the
+// device `apply_e8m0_scale_to_bf16` in the .hip file.  See that
+// function's comment block for the corner-case table.
+uint16_t host_apply_e8m0_scale_to_bf16(uint16_t fp4_bf16_bits, uint32_t scale_byte) {
+  if (scale_byte == 0xFFu) return static_cast<uint16_t>(0x7FC0);
+  uint32_t magnitude = fp4_bf16_bits & 0x7FFFu;
+  if (magnitude == 0u) return fp4_bf16_bits;
+  uint32_t sign_bits = fp4_bf16_bits & 0x8000u;
+  uint32_t fp4_exp  = (fp4_bf16_bits >> 7) & 0xFFu;
+  uint32_t fp4_mant =  fp4_bf16_bits       & 0x7Fu;
+  int32_t new_exp_i = static_cast<int32_t>(fp4_exp)
+                    + static_cast<int32_t>(scale_byte) - 127;
+  if (new_exp_i >= 0xFF)
+    return static_cast<uint16_t>(sign_bits | 0x7F80u);
+  if (new_exp_i >= 1)
+    return static_cast<uint16_t>(sign_bits
+        | ((static_cast<uint32_t>(new_exp_i) & 0xFFu) << 7)
+        | fp4_mant);
+  uint32_t implicit_1_mant = 0x80u | fp4_mant;
+  int32_t shift_amt = 1 - new_exp_i;
+  uint32_t sub_mant = (shift_amt >= 8) ? 0u : (implicit_1_mant >> shift_amt);
+  return static_cast<uint16_t>(sign_bits | sub_mant);
+}
+
+// Scale bytes swept by the canary's input generator.  Mix of:
+//   * 0x00       — 2^-127, the E8M0 subnormal floor; exercises the
+//                  underflow -> BF16 subnormal / zero branch.
+//   * 0x01       — 2^-126, the smallest E8M0 normal scale.
+//   * 0x40       — 2^-63.
+//   * 0x7E,0x7F,0x80,0x81 — around identity (2^0 is 0x7F); the hot
+//                           path for matmul MXFP4 where most scales
+//                           are near 1.
+//   * 0xC0       — 2^65.
+//   * 0xFC,0xFD,0xFE — near the overflow boundary; exercises the
+//                      saturate-to-Inf branch.
+//   * 0xFF       — E8M0 NaN; exercises NaN propagation.
+static constexpr uint8_t kCanaryScaleBytes[] = {
+    0x7Fu, 0x80u, 0x7Eu, 0x81u,
+    0x00u, 0x01u, 0x40u, 0xC0u,
+    0xFCu, 0xFDu, 0xFEu, 0xFFu,
+};
+static constexpr int kCanaryScaleBytesCount =
+    sizeof(kCanaryScaleBytes) / sizeof(kCanaryScaleBytes[0]);
+
+// Deterministic packed-FP4 generator.  Derived from tid via a
+// Weyl-sequence-style hash so that across the full N sweep, every
+// 4-bit nibble value appears in every one of the 8 lane positions.
+// The constants 0x9E3779B1 (golden-ratio-ish) and 0x7F4A7C15 are
+// standard mixing primes from the PCG / splitmix family; pairing
+// them against tid gives uniform coverage of the 32-bit packed-FP4
+// space with no bias toward any nibble position.
+//
+// This generator also feeds the on-device kernel's input buffer, so
+// the CPU reference and the device-side portable dequant operate on
+// the same bytes byte-for-byte.
+uint32_t host_packed_fp4_for_tid(int tid) {
+  uint32_t t = static_cast<uint32_t>(tid);
+  return (t * 0x9E3779B1u) ^ ((t >> 3) * 0x7F4A7C15u);
+}
+
+// Recipe
+Recipe makeCanaryCvtScalePk8Bf16Fp4Recipe() {
+  Recipe r;
+  r.name = "canary_cvt_scale_pk8_bf16_fp4";
+  // No cross-lane dependency in the primitive itself; blockSize only
+  // affects launch shape.  Sweep a mix of single-wave and multi-wave
+  // workgroups so a per-wave miscompile in the cross-target handler
+  // surfaces as a per-lane pattern mismatch.  Shapes chosen at the
+  // same scale as the rest of the canary family.
+  r.defaultNs     = {128, 1024, 4096};
+  r.defaultBlocks = {64, 128};
+  r.outputElemBytes = sizeof(uint16_t);
+  // Each thread emits 8 BF16 words.  Output element count is 8*N.
+  r.outputElems = [](int N, int) { return 8 * N; };
+
+  r.makeInput = [](int N) {
+    // Input buffer layout: N pairs of {packed : u32, scale : u32}.
+    // Matches `struct InputPair` in the .hip kernel.  Packed as raw
+    // bytes so the harness and the kernel agree on offsets without
+    // depending on C++ struct padding.
+    std::vector<uint8_t> buf(N * 2 * sizeof(uint32_t));
+    auto *u = reinterpret_cast<uint32_t *>(buf.data());
+    for (int tid = 0; tid < N; ++tid) {
+      u[2 * tid + 0] = host_packed_fp4_for_tid(tid);
+      // scale low byte cycles through the representative table;
+      // high bytes are zero (scale_sel=0 only consumes the low byte
+      // today).  A future handler extension that honours scale_sel
+      // != 0 would change this generator to populate the other bytes
+      // and expand the output-side verification.
+      uint8_t sb = kCanaryScaleBytes[tid % kCanaryScaleBytesCount];
+      u[2 * tid + 1] = static_cast<uint32_t>(sb);
+    }
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int /*block*/) {
+    const uint32_t *u = reinterpret_cast<const uint32_t *>(input.data());
+    std::vector<uint8_t> out(8 * N * sizeof(uint16_t));
+    uint16_t *o = reinterpret_cast<uint16_t *>(out.data());
+    for (int tid = 0; tid < N; ++tid) {
+      uint32_t packed     = u[2 * tid + 0];
+      uint32_t scale_word = u[2 * tid + 1];
+      uint32_t scale_byte = scale_word & 0xFFu;   // scale_sel == 0
+      for (int i = 0; i < 8; ++i) {
+        uint32_t nibble = (packed >> (i * 4)) & 0xFu;
+        uint16_t fp4_bf = host_fp4_nibble_to_bf16_bits(nibble);
+        o[tid * 8 + i]  = host_apply_e8m0_scale_to_bf16(fp4_bf, scale_byte);
+      }
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod,
+                                    "canary_cvt_scale_pk8_bf16_fp4"));
+
+    uint8_t *dIn;
+    uint16_t *dOut;
+    size_t inBytes  = input.size();
+    size_t outBytes = 8 * N * sizeof(uint16_t);
+    HIP_ASSERT(hipMalloc(&dIn,  inBytes));
+    HIP_ASSERT(hipMalloc(&dOut, outBytes));
+    HIP_ASSERT(hipMemcpy(dIn, input.data(), inBytes, hipMemcpyHostToDevice));
+    // Sentinel-fill the output so any lane the kernel fails to write
+    // surfaces crisply as a bit-level mismatch against the CPU
+    // reference rather than as a zero that might silently match.
+    std::vector<uint16_t> sentinel(8 * N, 0xDEAD);
+    HIP_ASSERT(hipMemcpy(dOut, sentinel.data(), outBytes,
+                         hipMemcpyHostToDevice));
+
+    struct alignas(8) Args {
+      const uint8_t *in;
+      uint16_t *out;
+    } args = {dIn, dOut};
+    size_t argSize = sizeof(args);
+    void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                      HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                      HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, config));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(outBytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dOut, outBytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dIn));
+    HIP_ASSERT(hipFree(dOut));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*block*/, int outElems) {
+    const uint16_t *g = reinterpret_cast<const uint16_t *>(gold.data());
+    const uint16_t *a = reinterpret_cast<const uint16_t *>(actual.data());
+    int mismatches = 0;
+    double maxAbs = 0.0;
+    int firstIdx = -1;
+    double firstG = 0.0, firstA = 0.0;
+    // Bit-exact BF16 compare.  Both sides compute the exact same
+    // arithmetic on the exact same inputs; any bit-level difference
+    // is a real divergence (handler bug, device dequant bug, or
+    // input-pack mismatch).  We surface the differing BF16 bit
+    // patterns as doubles so the existing Failures formatter prints
+    // them usefully; the `(double)` cast is safe because both
+    // operands are 16-bit unsigned integers.
+    for (int i = 0; i < outElems; ++i) {
+      if (g[i] != a[i]) {
+        if (firstIdx < 0) {
+          firstIdx = i;
+          firstG   = static_cast<double>(g[i]);
+          firstA   = static_cast<double>(a[i]);
+        }
+        double d = std::fabs(static_cast<double>(g[i])
+                           - static_cast<double>(a[i]));
+        if (d > maxAbs) maxAbs = d;
+        ++mismatches;
+      }
+    }
+    return std::make_tuple(mismatches, maxAbs, firstIdx, firstG, firstA);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helpers for the cvt_* recipes.  Both live here rather than in the kernels
 // because they define the CPU reference, not any device-side behaviour.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4701,6 +4947,7 @@ const std::vector<Recipe> &allRecipes() {
         makeCanaryReadlaneLastLaneRecipe(),
         makeCanaryDsSwizzleSwap1Recipe(),
         makeCanaryDsSwizzleQuadPermRecipe(),
+        makeCanaryCvtScalePk8Bf16Fp4Recipe(),
     };
     for (const auto &t : allTritonRecipes())
       r.push_back(tritonToRecipe(t));

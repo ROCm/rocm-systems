@@ -93,6 +93,7 @@ add_library(hotswap-transpiler STATIC
   handle_vopd.cpp
   handle_vimage.cpp
   wmma_lowering.cpp
+  mxfp4_dequant.cpp
   pipeline.cpp
   code_object_utils.cpp
   kernarg_layout.cpp
@@ -221,6 +222,7 @@ set(TEST_SOURCES
   tests/batch_raise_test.cpp
   tests/corpus_test.cpp
   tests/c5_predicate_chain_test.cpp
+  tests/mxfp4_dequant_test.cpp
 )
 
 find_package(hip QUIET)

@@ -44,7 +44,8 @@ KERNELS        := vecadd block_sum_shfl lane_swap \
                   mubuf_store_b32 s_set_vgpr_msb \
                   canary_readlane_last_lane \
                   canary_ds_swizzle_swap1 \
-                  canary_ds_swizzle_quad_perm
+                  canary_ds_swizzle_quad_perm \
+                  canary_cvt_scale_pk8_bf16_fp4
 
 # Triton recipes.  Each name must correspond to a kernels/triton/<name>.py
 # file that defines a RECIPES list (see kernels/triton/README.md).

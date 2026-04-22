@@ -151,6 +151,227 @@ void writeCarryOutI1(RaiseContext &ctx, const DecodedInst &di,
   ctx.regs.storeVCC(ctx.B, carryI1);
 }
 
+// Emit the cross-target (gfx1250 -> gfx94x) dequantisation expansion
+// of `v_cvt_scale_pk8_bf16_fp4` for `scale_sel == 0` as pure IR.
+// Returns a `<8 x bfloat>` Value; the caller hands it to
+// `writeRegVec` exactly like the same-target intrinsic path does.
+//
+// see hotswap/docs/matrix-translation.md §7.4 — MXFP4 dequant primitive.
+//
+// Algorithm (per lane i in 0..7; matches
+// `mxfp4::mxfp4BitAlgebraBf16Bits` in mxfp4_dequant.cpp step-for-step
+// so the cpp-level unit test pins the algorithm and the canary on
+// gfx1250 pins it end-to-end against the hardware primitive):
+//
+//   1. Extract 4-bit nibble:   %n_i  = (%src >> (i*4)) & 0xF
+//   2. Decompose FP4 E2M1:     sign=n_i[3], exp_fp4=n_i[2:1], mant_fp4=n_i[0]
+//   3. FP4 -> BF16 fields:
+//        // Normal FP4 (exp_fp4 >= 1): bf16_exp = exp_fp4 + 126,
+//        // bf16_mant = mant_fp4 ? 0x40 : 0.
+//        // Subnormal FP4 (exp_fp4 == 0): bf16_exp = mant_fp4 ? 126 : 0,
+//        // bf16_mant = 0.  (±0 stays ±0; ±0.5 becomes normal BF16 exp=126.)
+//   4. Scale byte:             scale_byte = %scale & 0xFF    (scale_sel==0 only)
+//   5. Apply scale via exp add:
+//        new_exp = (signed i32) bf16_exp + scale_byte - 127
+//        result =
+//          (scale_byte == 0xFF)         ? 0x7FC0                         // qNaN
+//          : (bf16_magnitude == 0)       ? (sign << 15)                   // ±0
+//          : (new_exp >= 0xFF)           ? (sign << 15) | 0x7F80          // ±Inf
+//          : (new_exp >= 1)              ? (sign<<15) | (new_exp<<7) | bf16_mant   // normal
+//          : subnormal_shift(new_exp, sign, 0x80 | bf16_mant)             // subnormal / ±0
+//   6. Insert i16 bits -> bfloat -> <8 x bfloat> lane i.
+//
+// Corner-case summary (all bit-exact against the OCP MXFP spec + what
+// the hardware primitive emits on bit-valid inputs; see
+// `tests/mxfp4_dequant_test.cpp` for the full 4096-point sweep):
+//   * FP4 ±0 × NaN scale  -> NaN (IEEE 0 × NaN = NaN).  The NaN-scale
+//     branch short-circuits before the magnitude-zero check.
+//   * FP4 ±0 × finite scale -> ±0 preserving sign.
+//   * Overflow (new_exp >= 0xFF): saturate to BF16 ±Inf.  BF16
+//     supports Inf even though FP4 does not — destination-format
+//     semantics apply after the scale add.
+//   * Underflow (new_exp <= 0): compute BF16 subnormal via right-shift
+//     of the (implicit-1).mant field; zero when the shift drops all
+//     bits past count 7 (BF16 subnormal range floor is 2^-133).
+//   * Rounding mode: N/A.  The multiplication by 2^(scale_byte - 127)
+//     is exact in floating-point for any power-of-2 scale; we emit
+//     integer field manipulation instead of an fmul so the lowering
+//     is bit-exact regardless of the target's float-mode register
+//     state (FTZ / DAZ bits are irrelevant because no fmul actually
+//     runs).
+static llvm::Value *emitCvtScalePk8Bf16Fp4CrossTargetExpansion(
+    RaiseContext &ctx, llvm::Value *srcI32, llvm::Value *scaleI32) {
+  llvm::IRBuilder<> &B = ctx.B;
+  llvm::Type *i32Ty = ctx.i32Ty;
+  llvm::Type *i16Ty = llvm::Type::getInt16Ty(ctx.C);
+  llvm::Type *bf16Ty = llvm::Type::getBFloatTy(ctx.C);
+
+  // Constants used across all 8 lanes.  Factored out so the emitted
+  // IR reads cleanly in lit / FileCheck output.
+  llvm::Constant *c0xF   = llvm::ConstantInt::get(i32Ty, 0xF);
+  llvm::Constant *c0xFF  = llvm::ConstantInt::get(i32Ty, 0xFF);
+  llvm::Constant *c127   = llvm::ConstantInt::get(i32Ty, 127);
+  llvm::Constant *c126   = llvm::ConstantInt::get(i32Ty, 126);
+  llvm::Constant *c1     = llvm::ConstantInt::get(i32Ty, 1);
+  llvm::Constant *c3     = llvm::ConstantInt::get(i32Ty, 3);
+  llvm::Constant *c7     = llvm::ConstantInt::get(i32Ty, 7);
+  llvm::Constant *c8     = llvm::ConstantInt::get(i32Ty, 8);
+  llvm::Constant *c0x40  = llvm::ConstantInt::get(i32Ty, 0x40);
+  llvm::Constant *c0x80  = llvm::ConstantInt::get(i32Ty, 0x80);
+  llvm::Constant *c0x7F80 = llvm::ConstantInt::get(i32Ty, 0x7F80);
+
+  // Scale-byte extraction: low byte of the i32 scale register.  All 8
+  // lanes share the same scale byte for scale_sel == 0 per the
+  // declared support set.
+  llvm::Value *scaleByte = B.CreateAnd(scaleI32, c0xFF, "mxfp4_scale_byte");
+  llvm::Value *isScaleNaN =
+      B.CreateICmpEQ(scaleByte, c0xFF, "mxfp4_is_scale_nan");
+
+  // BF16 canonical qNaN (0x7FC0), used when scale_byte == 0xFF; stored
+  // as i32 so it merges with the select chain's other i32 branches.
+  llvm::Constant *bf16NaN = llvm::ConstantInt::get(i32Ty, 0x7FC0);
+
+  // Per-lane result accumulator: <8 x bfloat>, starts as undef (none
+  // of the 8 lanes are fully-defined until every insertelement has
+  // fired).  Mirrors the shape `writeRegVec` expects from the
+  // same-target intrinsic arm.
+  llvm::Type *v8bf16Ty = llvm::FixedVectorType::get(bf16Ty, 8);
+  llvm::Value *vec = llvm::UndefValue::get(v8bf16Ty);
+
+  llvm::Constant *c0 = llvm::ConstantInt::get(i32Ty, 0);
+
+  for (unsigned lane = 0; lane < 8; ++lane) {
+    // Nibble extraction.  Low nibble (lane 0) is in src bits [3:0],
+    // matching hardware's "nibble 0 = lane 0" contract (documented on
+    // the same-target arm above).
+    llvm::Value *shamt = llvm::ConstantInt::get(i32Ty, lane * 4);
+    llvm::Value *nibble = B.CreateAnd(
+        B.CreateLShr(srcI32, shamt, "mxfp4_src_shr"),
+        c0xF, "mxfp4_nibble");
+
+    // FP4 E2M1 field decomposition.
+    llvm::Value *signBit =
+        B.CreateAnd(B.CreateLShr(nibble, c3), c1, "mxfp4_sign");
+    llvm::Value *expFp4 =
+        B.CreateAnd(B.CreateLShr(nibble, c1), c3, "mxfp4_exp_fp4");
+    llvm::Value *mantFp4 =
+        B.CreateAnd(nibble, c1, "mxfp4_mant_fp4");
+    llvm::Value *signField =
+        B.CreateShl(signBit, llvm::ConstantInt::get(i32Ty, 15),
+                    "mxfp4_sign_field");
+
+    // Normal-FP4 BF16 fields: exp_fp4 + 126 and (mant_fp4 ? 0x40 : 0).
+    llvm::Value *bf16ExpNorm =
+        B.CreateAdd(expFp4, c126, "mxfp4_bf16_exp_norm");
+    llvm::Value *mantFp4NZ =
+        B.CreateICmpNE(mantFp4, c0, "mxfp4_mant_fp4_nz");
+    llvm::Value *bf16MantNorm =
+        B.CreateSelect(mantFp4NZ, c0x40, c0, "mxfp4_bf16_mant_norm");
+
+    // Subnormal-FP4 BF16 fields: if mant_fp4 = 1 (FP4 ±0.5) use
+    // bf16_exp = 126; otherwise (FP4 ±0) bf16_exp = 0.  bf16_mant is
+    // always 0 in this branch.
+    llvm::Value *bf16ExpSub =
+        B.CreateSelect(mantFp4NZ, c126, c0, "mxfp4_bf16_exp_sub");
+    llvm::Value *isFp4Sub =
+        B.CreateICmpEQ(expFp4, c0, "mxfp4_is_fp4_sub");
+    llvm::Value *bf16Exp = B.CreateSelect(isFp4Sub, bf16ExpSub, bf16ExpNorm,
+                                           "mxfp4_bf16_exp");
+    llvm::Value *bf16Mant = B.CreateSelect(isFp4Sub, c0, bf16MantNorm,
+                                            "mxfp4_bf16_mant");
+
+    // Magnitude (exp || mant in low 15 bits).  Used only to detect
+    // the FP4-±0 shortcut; no rounding implication.
+    llvm::Value *magnitude = B.CreateOr(
+        B.CreateShl(bf16Exp, c7), bf16Mant, "mxfp4_magnitude");
+    llvm::Value *isFp4Zero =
+        B.CreateICmpEQ(magnitude, c0, "mxfp4_is_fp4_zero");
+
+    // Scaled exponent: bf16_exp + scale_byte - 127.  Signed i32 so
+    // subnormal / zero decay is captured by new_exp < 1 rather than
+    // by unsigned wrap.
+    llvm::Value *expPlusScale =
+        B.CreateAdd(bf16Exp, scaleByte, "mxfp4_exp_plus_scale");
+    llvm::Value *newExp =
+        B.CreateSub(expPlusScale, c127, "mxfp4_new_exp");
+
+    // Overflow branch: new_exp >= 0xFF -> BF16 ±Inf.  Comparison is
+    // signed because new_exp may underflow negative; anything >=
+    // 0xFF is overflow regardless.
+    llvm::Value *isOverflow =
+        B.CreateICmpSGE(newExp, c0xFF, "mxfp4_is_overflow");
+    llvm::Value *infBits =
+        B.CreateOr(signField, c0x7F80, "mxfp4_inf_bits");
+
+    // Normal branch: new_exp in [1, 0xFE] -> (sign<<15) | (new_exp<<7)
+    // | bf16_mant.  We mask new_exp to 8 bits to keep the field
+    // width correct when the branch is dead (the select's other arm
+    // handles that case, but we still want a clean IR shape).
+    llvm::Value *newExpMasked =
+        B.CreateAnd(newExp, c0xFF, "mxfp4_new_exp_masked");
+    llvm::Value *normalBits = B.CreateOr(
+        B.CreateOr(signField,
+                   B.CreateShl(newExpMasked, c7, "mxfp4_new_exp_shl"),
+                   "mxfp4_sign_or_exp"),
+        bf16Mant, "mxfp4_normal_bits");
+
+    // Subnormal branch: new_exp <= 0 -> shift (implicit-1).mant right
+    // by (1 - new_exp).  If shift >= 8 the BF16 representation loses
+    // every bit and we flush to ±0.  This defensive clamp is
+    // unreachable today — for FP4 exp >= 1 + scale_byte = 0 the
+    // minimum new_exp is 127 + 0 - 127 = 0, giving shift_amt = 1; we
+    // keep the clamp so widening the declared support set (e.g. a
+    // future scale_sel handling that exposes smaller FP4 exponents)
+    // doesn't silently miscompile.
+    llvm::Value *implicit1Mant =
+        B.CreateOr(c0x80, bf16Mant, "mxfp4_implicit_1_mant");
+    llvm::Value *shiftAmt =
+        B.CreateSub(c1, newExp, "mxfp4_shift_amt");
+    llvm::Value *shiftedMant =
+        B.CreateLShr(implicit1Mant, shiftAmt, "mxfp4_shifted_mant");
+    llvm::Value *shiftTooBig =
+        B.CreateICmpSGE(shiftAmt, c8, "mxfp4_shift_too_big");
+    llvm::Value *subMant = B.CreateSelect(shiftTooBig, c0, shiftedMant,
+                                           "mxfp4_sub_mant");
+    llvm::Value *subBits =
+        B.CreateOr(signField, subMant, "mxfp4_sub_bits");
+
+    // new_exp >= 1 selects the normal bits; otherwise subnormal.
+    llvm::Value *newExpGe1 =
+        B.CreateICmpSGE(newExp, c1, "mxfp4_new_exp_ge_1");
+    llvm::Value *normalOrSub =
+        B.CreateSelect(newExpGe1, normalBits, subBits,
+                       "mxfp4_normal_or_sub");
+
+    // Priority-ordered merge, matching the C++ reference's control flow:
+    //   result = is_scale_nan ? qNaN
+    //          : is_fp4_zero  ? sign_field
+    //          : is_overflow  ? inf_bits
+    //          :                normal_or_sub
+    //
+    // LLVM's `select` is bottom-up (inner selects evaluated last), so
+    // build the chain from the default case outward.
+    llvm::Value *afterOverflow = B.CreateSelect(
+        isOverflow, infBits, normalOrSub, "mxfp4_after_overflow");
+    llvm::Value *afterZero = B.CreateSelect(
+        isFp4Zero, signField, afterOverflow, "mxfp4_after_zero");
+    llvm::Value *laneI32 = B.CreateSelect(
+        isScaleNaN, bf16NaN, afterZero, "mxfp4_lane_i32");
+
+    // i32 -> i16 -> bfloat insertion.  Trunc drops the zero-padded
+    // upper bits; every result branch above produces a value in
+    // [0, 0xFFFF] (qNaN=0x7FC0, Inf|sign ≤ 0xFF80, normal|sign|mant
+    // ≤ 0xFFC0, sub|sign ≤ 0x80C0), so trunc is information-
+    // preserving.
+    llvm::Value *laneI16 = B.CreateTrunc(laneI32, i16Ty, "mxfp4_lane_i16");
+    llvm::Value *laneBf = B.CreateBitCast(laneI16, bf16Ty, "mxfp4_lane_bf16");
+    vec = B.CreateInsertElement(vec, laneBf,
+                                 llvm::ConstantInt::get(i32Ty, lane),
+                                 "mxfp4_vec_insert");
+  }
+  return vec;
+}
+
 } // namespace
 
 HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
@@ -1524,43 +1745,51 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
   }
   // VOP3 gfx1250-only scaled packed-8 FP4 -> BF16 convert.
   //
-  // Hardware shape (AMDGPUGenInstrInfo.inc / VOP3Instructions.td:1788):
-  //   opcode V_CVT_SCALE_PK8_BF16_FP4_e64 with MC operand layout
+  // Hardware shape (AMDGPUGenInstrInfo.inc / VOP3Instructions.td:1873,
+  // opcode V_CVT_SCALE_PK8_BF16_FP4_e64, VOP3 opcode 0x2a0):
   //     0: vdst        (VReg_128 aligned — 4 consecutive VGPRs,
   //                     written as <8 x bfloat> / 128 bits)
   //     1: src0        (VGPR_32 — 1 VGPR, packed 8xFP4 in the i32
   //                     bits, nibble 0 = lane 0, nibble 7 = lane 7)
   //     2: src1        (VSrc_b32 — scale, E8M0 encoded in an i32)
-  //     3: scale_sel   (immediate byte-selector, range 0..15;
-  //                     byte_sel % 2 picks the high / low FP4 word of
-  //                     the packed pair — only FP4 has the /2 collapse;
-  //                     FP8/BF8 siblings take the full 0..3 range).
+  //     3: scale_sel   (4-bit ImmArg, range 0..15 per
+  //                     `AMDGPUCvtScaleIntrinsic` in
+  //                     IntrinsicsAMDGPU.td:686.  The AMD ISA spec
+  //                     definition of scale_sel's 4-bit semantics
+  //                     for the packed-8 FP4 shape is not currently
+  //                     reproduced in this tree; the captured gfx1250
+  //                     corpus (`scope_discovery/kernels/
+  //                     _matmul_ogs_{06d912ce88af,0af655e6ea2b}.hsaco`)
+  //                     uses only `scale_sel == 0` across 128
+  //                     instances combined, which has the unambiguous
+  //                     reading "the scale byte is the low byte of
+  //                     the 32-bit scale register".  Both handler
+  //                     arms REFUSE scale_sel != 0 loudly until the
+  //                     spec is pinned.).
   //
-  // LLVM lowering (IntrinsicsAMDGPU.td:686, class
-  // `AMDGPUCvtScaleIntrinsic<llvm_v8bf16_ty, llvm_i32_ty, ...>`):
+  // LLVM lowering (IntrinsicsAMDGPU.td:688):
   //   declare <8 x bfloat> @llvm.amdgcn.cvt.scale.pk8.bf16.fp4(
   //       i32 %src, i32 %scale, i32 immarg %scale_sel)
-  // with `ImmArg<ArgIndex<2>>` + `Range<0, 16>` on the selector.
   //
-  // Cross-target: gfx942 has no MX-FP4 scaling unit (the MXFP familyis
-  // gated behind FeatureGFX1250Insts via `isGFX125xOnly`), so a
-  // lift to --target-isa=gfx942 would require a manual per-nibble
-  // dequantisation expansion.  That is a separate design; until a
-  // corpus kernel actually wants cross-target MX-FP4, we refuse
-  // loudly rather than silently mis-lowering.
+  // Dispatch
+  // --------
+  //
+  //   * `ctx.targetIsa.hasTensorOps` (gfx1250 or any future target
+  //     that ships the same VOP3 family): emit the native intrinsic
+  //     directly and let the backend select the hardware instruction.
+  //
+  //   * Otherwise (cross-target: gfx942 / gfx950): emit the per-nibble
+  //     bit-algebra dequantisation expansion from
+  //     `emitCvtScalePk8Bf16Fp4CrossTargetExpansion` above.  Bit-exact
+  //     against the hardware primitive on bit-valid inputs within the
+  //     declared support set (see `hotswap/docs/matrix-translation.md
+  //     §7.4`).
+  //
+  // Both arms share the same operand-shape validation (src/scale i32,
+  // `scale_sel` immediate, `scale_sel == 0` or refuse) so a corpus
+  // drift surfaces on both paths rather than only on whichever one
+  // happened to run.
   if (sop == SemOp::V_CVT_SCALE_PK8_BF16_FP4) {
-    if (!ctx.targetIsa.hasTensorOps) {
-      hr.failure = RaiseFailure::unsupportedShape(
-          di, "VOP3",
-          "v_cvt_scale_pk8_bf16_fp4 is a gfx1250-only VOP3 "
-          "(int_amdgcn_cvt_scale_pk8_bf16_fp4 lives behind "
-          "isGFX125xOnly in IntrinsicsAMDGPU.td:686); cross-target "
-          "lift to gfx942 would need a per-nibble FP4->BF16 "
-          "dequantisation expansion that no corpus kernel exercises "
-          "today");
-      return hr;
-    }
-
     unsigned opc = di.inst.getOpcode();
     int selIdx = AMDGPU::getNamedOperandIdx(opc, AMDGPU::OpName::scale_sel);
     if (selIdx < 0 || !di.isImm(selIdx)) {
@@ -1572,6 +1801,26 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     }
     int64_t scaleSel = di.getImm(selIdx);
 
+    // Declared support set: scale_sel == 0 only.  The 4-bit
+    // scale_sel field's semantics for the packed-8 FP4 shape aren't
+    // pinned in any doc in-tree (see comment block above); the
+    // captured corpus uses only scale_sel == 0 across both blobs
+    // that emit this primitive.  Refusing other values is the
+    // "fail loud on declared-support-set boundary" discipline —
+    // same shape as the refusal-of-non-default-op_sel check on
+    // V_CVT_F32_{FP8,BF8} higher in this file.
+    if (scaleSel != 0) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "VOP3",
+          "v_cvt_scale_pk8_bf16_fp4 scale_sel != 0 is outside the "
+          "declared support set (AMD ISA spec semantics for the "
+          "4-bit scale_sel field on packed-8 FP4 are not pinned "
+          "in-tree today; captured corpus uses only scale_sel=0 "
+          "across every instance) — see hotswap/docs/"
+          "matrix-translation.md §7.4");
+      return hr;
+    }
+
     Value *src = op.src(0);
     if (src->getType() != ctx.i32Ty)
       src = ctx.B.CreateBitOrPointerCast(src, ctx.i32Ty);
@@ -1579,12 +1828,25 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     if (scale->getType() != ctx.i32Ty)
       scale = ctx.B.CreateBitOrPointerCast(scale, ctx.i32Ty);
 
-    Function *cvtFn = Intrinsic::getOrInsertDeclaration(
-        &ctx.M, Intrinsic::amdgcn_cvt_scale_pk8_bf16_fp4);
-    Value *result = ctx.B.CreateCall(
-        cvtFn,
-        {src, scale, ConstantInt::get(ctx.i32Ty, scaleSel)},
-        "cvt_scale_pk8_bf16_fp4");
+    Value *result;
+    if (ctx.targetIsa.hasTensorOps) {
+      // Same-target arm: emit the LLVM intrinsic that lowers 1:1 to
+      // the hardware opcode.  The write-back path bitcasts the
+      // <8 x bfloat> to i128 before handing to writeRegVec.
+      Function *cvtFn = Intrinsic::getOrInsertDeclaration(
+          &ctx.M, Intrinsic::amdgcn_cvt_scale_pk8_bf16_fp4);
+      result = ctx.B.CreateCall(
+          cvtFn,
+          {src, scale, ConstantInt::get(ctx.i32Ty, scaleSel)},
+          "cvt_scale_pk8_bf16_fp4");
+    } else {
+      // Cross-target arm: bit-algebra per-nibble dequantisation,
+      // bit-exact against the hardware primitive's output for
+      // scale_sel == 0 on every (packed_fp4, scale) input in the
+      // declared support set.  See
+      // `emitCvtScalePk8Bf16Fp4CrossTargetExpansion` above.
+      result = emitCvtScalePk8Bf16Fp4CrossTargetExpansion(ctx, src, scale);
+    }
     ctx.writeRegVec(op.dst(), result);
     hr.handled = true;
     return hr;

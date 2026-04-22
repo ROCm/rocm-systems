@@ -28,13 +28,39 @@
 
 #include <hip/hip_runtime.h>
 
+typedef __attribute__((ext_vector_type(8))) __bf16 v8bf16;
+
+// scale_sel = 0: the corpus-observed value across all 128 captured
+// instances; both handler arms (same-target and cross-target) lower
+// this case.
 extern "C" __global__ void
 v_cvt_scale_pk8_bf16_fp4_kernel(unsigned int *out) {
   unsigned int packedFP4 = (unsigned int)(uintptr_t)out;
   unsigned int scale     = (unsigned int)(uintptr_t)(out + 1);
 
-  typedef __attribute__((ext_vector_type(8))) __bf16 v8bf16;
   v8bf16 r = __builtin_amdgcn_cvt_scale_pk8_bf16_fp4(packedFP4, scale, 0);
+
+  unsigned short *dst = (unsigned short *)out;
+  for (int i = 0; i < 8; ++i) {
+    dst[i] = __builtin_bit_cast(unsigned short, r[i]);
+  }
+}
+
+// scale_sel = 2: a value OUTSIDE the handler's declared support set.
+// The 4-bit `scale_sel` field's semantics for the packed-8 FP4 shape
+// aren't pinned in-tree today (no corpus kernel uses scale_sel != 0;
+// AMD ISA spec definition not reproduced).  Both handler arms MUST
+// refuse this loudly.  Pins the refusal diagnostic on a kernel that
+// exercises it — complementing the non-refusal pin in
+// `v_cvt_scale_pk8_bf16_fp4_kernel` above.  See
+// `hotswap/docs/matrix-translation.md §7.4` for the declared support
+// set and why we refuse instead of guessing the semantics.
+extern "C" __global__ void
+v_cvt_scale_pk8_bf16_fp4_kernel_sel2(unsigned int *out) {
+  unsigned int packedFP4 = (unsigned int)(uintptr_t)out;
+  unsigned int scale     = (unsigned int)(uintptr_t)(out + 1);
+
+  v8bf16 r = __builtin_amdgcn_cvt_scale_pk8_bf16_fp4(packedFP4, scale, 2);
 
   unsigned short *dst = (unsigned short *)out;
   for (int i = 0; i < 8; ++i) {
