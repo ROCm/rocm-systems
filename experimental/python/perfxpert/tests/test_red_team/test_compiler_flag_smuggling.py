@@ -13,6 +13,7 @@ SMUGGLED_FLAGS = [
     "-Wl,-rpath,/evil",
     "-Wa,--compress-debug-sections",
     "-Xpreprocessor",
+    "-mllvm=-load=/tmp/evil-pass.so",
     "-Wl,--wrap,write",
     "--sysroot=/evil",
     "-fplugin=/evil.so",
@@ -45,3 +46,14 @@ def test_allowlisted_flags_still_work(tmp_path: Path, monkeypatch):
         flags=["-O3", "--offload-arch=gfx942", "-ffast-math"],
     )
     assert result["returncode"] == 0
+
+
+def test_paired_mllvm_smuggling_is_rejected(tmp_path: Path):
+    (tmp_path / "src.cpp").write_text("int main(){return 0;}\n")
+
+    with pytest.raises(compile_runner.CompileFlagError):
+        compile_runner.build(
+            project_root=tmp_path,
+            source_rel="src.cpp",
+            flags=["-O2", "-mllvm", "-amdgpu-num-vgpr=8"],
+        )

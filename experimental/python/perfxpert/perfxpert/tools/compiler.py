@@ -13,11 +13,8 @@ from perfxpert.tools._class import ToolClass, tool_class
 
 
 @tool_class(ToolClass.READ_ONLY)
-def lookup_flags(goal: str = None, arch: str = None, kernel_class: str = None) -> List[Dict[str, Any]]:
-    """Return allowlisted compiler flags, optionally filtered by goal/arch/kernel_class.
-
-    Phase 1: simple allowlist filter. Phase 3 adds goal matching.
-    """
+def lookup_flags() -> List[Dict[str, Any]]:
+    """Return allowlisted compiler flags."""
     flags = load_yaml("compiler_flags")
     return [f for f in flags if f.get("allowlist", False)]
 

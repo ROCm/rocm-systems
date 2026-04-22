@@ -3,15 +3,13 @@
 Every EXECUTION tool in perfxpert.tools.* MUST funnel untrusted input
 through these helpers. Test coverage is in tests/test_tools/test_safety.py
 and tests/test_red_team/ (adversarial).
-
-See docs/superpowers/specs/2026-04-17-multi-agent-perfxpert-design.md §5.8
-for the complete attack-vector table.
 """
 
 from __future__ import annotations
 
 import os
 import re
+import stat
 from pathlib import Path
 from typing import Iterable, List, Set, Tuple
 
@@ -64,8 +62,9 @@ def confine_to_project_root(project_root: Path, user_path: str) -> Path:
 # -- shell-metachar denial --------------------------------------------------
 
 # Disallowed anywhere in a string that may reach a shell or argument list.
+# Includes brace/history expansion markers from the interactive threat model.
 # Newlines and NULs are always rejected.
-_SHELL_METACHARS = re.compile(r"[;&|`$()<>\n\r\0]|\\\\|\\\"|\\'")
+_SHELL_METACHARS = re.compile(r"[;&|`$()<>{}!\n\r\0]|\\\\|\\\"|\\'")
 
 
 def reject_shell_metachars(s: str) -> None:
@@ -153,17 +152,124 @@ _ENV_PREFIX_WHITELIST = (
     "ROCPROFILER_",
 )
 
+_ENV_DENYLIST_EXACT = {
+    "BASH_ENV",
+    "ENV",
+    "GCONV_PATH",
+    "IFS",
+    "NODE_OPTIONS",
+    "PERL5OPT",
+    "PYTHONHOME",
+    "PYTHONPATH",
+    "RUBYOPT",
+}
+
+_ENV_DENYLIST_PREFIXES = (
+    "LD_",
+    "DYLD_",
+)
+
+_SAFE_PATH_DIRS = (
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/local/sbin",
+    "/usr/sbin",
+    "/sbin",
+    "/opt/rocm/bin",
+)
+
+_SAFE_PATH_PREFIXES = tuple(Path(p).resolve() for p in _SAFE_PATH_DIRS)
+
+
+def _is_denied_env_key(key: str) -> bool:
+    return key in _ENV_DENYLIST_EXACT or any(
+        key.startswith(prefix) for prefix in _ENV_DENYLIST_PREFIXES
+    )
+
+
+def _collect_allowed_env(extra: dict | None = None) -> dict:
+    safe = {}
+    for source in (os.environ, extra or {}):
+        for k, v in source.items():
+            if k == "PATH" or _is_denied_env_key(k):
+                continue
+            if k in _ENV_WHITELIST or any(
+                k.startswith(p) for p in _ENV_PREFIX_WHITELIST
+            ):
+                safe[k] = v
+    return safe
+
+
+def _validated_path_dir(entry: str) -> Path | None:
+    """Return a canonical safe PATH directory or None if the entry is unusable."""
+    if not entry:
+        return None
+    if os.pathsep in entry or not os.path.isabs(entry):
+        return None
+    try:
+        path = Path(entry).resolve(strict=True)
+    except OSError:
+        return None
+    if not path.is_dir():
+        return None
+    return path
+
+
+def _is_safe_path_dir(path: Path) -> bool:
+    for prefix in _SAFE_PATH_PREFIXES:
+        if path == prefix or prefix in path.parents:
+            return True
+
+    try:
+        home = Path.home().resolve(strict=True)
+    except OSError:
+        return False
+    return path == home or home in path.parents
+
+
+def _safe_path_entries(env: dict) -> List[str]:
+    entries: List[str] = []
+
+    inherited_path = env.get("PATH", "") or os.environ.get("PATH", "")
+    for raw in inherited_path.split(os.pathsep):
+        path = _validated_path_dir(raw)
+        if path and _is_safe_path_dir(path):
+            entries.append(str(path))
+
+    for root_var in ("ROCM_PATH", "HIP_PATH"):
+        root = env.get(root_var)
+        if not root:
+            continue
+        root_path = _validated_path_dir(root)
+        if root_path is None:
+            continue
+        bin_dir = _validated_path_dir(str(root_path / "bin"))
+        if bin_dir and _is_safe_path_dir(bin_dir):
+            entries.append(str(bin_dir))
+
+    entries.extend(str(prefix) for prefix in _SAFE_PATH_PREFIXES)
+    return entries
+
+
+def _build_safe_path(env: dict) -> str:
+    unique_entries = []
+    seen = set()
+    for entry in _safe_path_entries(env):
+        if entry not in seen:
+            unique_entries.append(entry)
+            seen.add(entry)
+    return os.pathsep.join(unique_entries)
+
 
 def build_safe_env(extra: dict | None = None) -> dict:
     """Construct a minimal subprocess env containing only whitelisted keys.
 
     - API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, …) are NEVER forwarded.
-    - Adds anything in `extra` last (caller responsibility for those values).
+    - Loader/interpreter injection vars (LD_*, DYLD_*, PYTHONPATH, …) are
+      explicitly denied even if supplied via `extra`.
+    - PATH is deterministic and does not inherit the caller's PATH.
     """
-    safe = {}
-    for k, v in os.environ.items():
-        if k in _ENV_WHITELIST or any(k.startswith(p) for p in _ENV_PREFIX_WHITELIST):
-            safe[k] = v
-    if extra:
-        safe.update(extra)
+    safe = _collect_allowed_env(extra=extra)
+    safe["PATH"] = _build_safe_path(safe)
     return safe

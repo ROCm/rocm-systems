@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from importlib import resources
 from pathlib import Path
 from typing import Iterable
@@ -42,10 +43,13 @@ def resolve_opencode_binary() -> Path:
     override = os.environ.get("PERFXPERT_OPENCODE_PATH")
     if override:
         p = Path(override)
-        if p.is_file():
+        if p.is_file() and os.access(p, os.X_OK):
             return p
-        print(f"perfxpert-code: WARNING — PERFXPERT_OPENCODE_PATH={override} not found; "
-              "falling back to bundled", file=sys.stderr)
+        print(
+            f"perfxpert-code: WARNING — PERFXPERT_OPENCODE_PATH={override} "
+            "is missing or not executable; falling back to bundled",
+            file=sys.stderr,
+        )
 
     # Bundled binary
     try:
@@ -106,6 +110,8 @@ def _handle_version_flag(argv: Iterable[str]) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point for `perfxpert-code`."""
+    from perfxpert.runtime import recursion_guard
+
     if argv is None:
         argv = sys.argv[1:]
 
@@ -113,8 +119,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
+        recursion_guard.ensure_not_recursive("opencode")
         binary = resolve_opencode_binary()
         config_dir = resolve_config_dir()
+    except recursion_guard.RecursionGuardViolation as e:
+        print(f"\033[31mperfxpert-code: {e}\033[0m", file=sys.stderr)
+        return 1
     except FileNotFoundError as e:
         print(f"\033[31mperfxpert-code: {e}\033[0m", file=sys.stderr)
         return 1
@@ -126,37 +136,88 @@ def main(argv: list[str] | None = None) -> int:
     # opencode 1.4.x discovers `opencode.json` from cwd (no `--config` flag).
     # Copy the bundled config into a stable per-user dir and `cd` there before exec,
     # so MCP wiring + AGENTS.md instructions apply without polluting the user's cwd.
-    runtime_cfg_dir = _prepare_runtime_config_dir(config_dir)
-
     cmd = [str(binary), *argv]
 
     # Pass through most of the user env; opencode needs LLM API keys and rocprofv3 envs.
     # We do NOT use the EXECUTION-tool env whitelist here because opencode is the
     # user's interactive session and they explicitly consent to it.
-    env = dict(os.environ)
-    # Recursion guard marker (spec §5.8 / R10)
-    env["PERFXPERT_IN_OPENCODE_SESSION"] = "1"
-
     try:
-        proc = subprocess.run(cmd, env=env, cwd=str(runtime_cfg_dir), check=False)
+        cache_root = _runtime_cache_root()
+        with tempfile.TemporaryDirectory(prefix="opencode-", dir=str(cache_root)) as tmp_dir:
+            runtime_cfg_dir = _prepare_runtime_config_dir(config_dir, Path(tmp_dir))
+            try:
+                with recursion_guard.opencode_session():
+                    env = dict(os.environ)
+                    proc = subprocess.run(
+                        cmd,
+                        env=env,
+                        cwd=str(runtime_cfg_dir),
+                        check=False,
+                    )
+            finally:
+                _make_runtime_config_cleanup_safe(runtime_cfg_dir)
     except KeyboardInterrupt:
         return 130
+    except OSError as e:
+        print(f"\033[31mperfxpert-code: {e}\033[0m", file=sys.stderr)
+        return 1
     return proc.returncode
 
 
-def _prepare_runtime_config_dir(src_config_dir: Path) -> Path:
+def _runtime_cache_root() -> Path:
+    xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
+    if xdg_cache_home:
+        cache_base = Path(xdg_cache_home)
+    else:
+        home = os.environ.get("HOME")
+        if home:
+            cache_base = Path(home) / ".cache"
+        else:
+            try:
+                cache_base = Path.home() / ".cache"
+            except (RuntimeError, OSError):
+                cache_base = Path(tempfile.gettempdir()) / f"perfxpert-{os.getuid()}"
+    cache_root = cache_base / "perfxpert"
+    cache_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    cache_root.chmod(0o700)
+    return cache_root
+
+
+def _prepare_runtime_config_dir(src_config_dir: Path, runtime_dir: Path | None = None) -> Path:
     """Stage a read-only copy of the bundled config where opencode will pick it up.
 
     opencode 1.4.x has no `--config <path>` flag; it auto-discovers `opencode.json`
     from the current directory. We create a dedicated runtime dir so we can point
     opencode at our bundled config without forcing the user to run from a specific
-    directory or clobber their own `opencode.json`.
+    directory or clobber their own `opencode.json`. The staged copy is created in a
+    private cache root and made read-only before launch so the runtime config is not
+    left behind as a mutable user-writable directory.
     """
-    import shutil
-    runtime_dir = Path.home() / ".cache" / "perfxpert" / "opencode"
-    runtime_dir.mkdir(parents=True, exist_ok=True)
+    if runtime_dir is None:
+        runtime_dir = Path(
+            tempfile.mkdtemp(prefix="opencode-", dir=str(_runtime_cache_root()))
+        )
+    runtime_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    runtime_dir.chmod(0o700)
     for f in src_config_dir.iterdir():
+        if not f.is_file():
+            continue
         target = runtime_dir / f.name
-        if not target.exists() or target.read_bytes() != f.read_bytes():
-            shutil.copy2(f, target)
+        if target.is_symlink():
+            target.unlink()
+        elif target.exists():
+            target.chmod(0o600)
+            target.unlink()
+        shutil.copy2(f, target)
+        target.chmod(0o400)
+    runtime_dir.chmod(0o500)
     return runtime_dir
+
+
+def _make_runtime_config_cleanup_safe(runtime_dir: Path) -> None:
+    if not runtime_dir.exists():
+        return
+    runtime_dir.chmod(0o700)
+    for child in runtime_dir.iterdir():
+        if child.is_file():
+            child.chmod(0o600)

@@ -44,6 +44,8 @@ def test_confine_to_project_root_resolves_symlink_escape(tmp_path: Path):
     "foo&&evil",
     "foo$(whoami)",
     "foo`whoami`",
+    "foo{bar,baz}",
+    "foo!history",
     "foo > /tmp/exfil",
     "foo\nrm -rf ~",
     "foo\0embedded",
@@ -98,10 +100,42 @@ def test_flag_allowlist_rejects_unknown():
 # -- build_safe_env ---------------------------------------------------------
 
 def test_build_safe_env_only_whitelist(monkeypatch):
+    home = Path("/tmp/test-home")
+    local_bin = home / ".local" / "bin"
+    local_bin.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-secret")
-    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setenv("PATH", f"/tmp/evil:{home}/.local/bin:/usr/bin")
+    monkeypatch.setenv("LD_PRELOAD", "/tmp/libhack.so")
+    monkeypatch.setenv("PYTHONPATH", "/tmp/site-packages")
     monkeypatch.setenv("ROCM_PATH", "/opt/rocm")
-    env = _safety.build_safe_env()
+    env = _safety.build_safe_env(
+        extra={
+            "ROCPROFV3_LOG_LEVEL": "debug",
+            "LD_LIBRARY_PATH": "/tmp/evil-lib",
+            "PATH": "/tmp/override",
+        }
+    )
     assert "PATH" in env
     assert "ROCM_PATH" in env
+    assert str(local_bin) in env["PATH"]
+    assert "/tmp/evil" not in env["PATH"]
+    assert "ROCPROFV3_LOG_LEVEL" in env
     assert "ANTHROPIC_API_KEY" not in env, "API keys must NOT leak to subprocess"
+    assert "LD_PRELOAD" not in env
+    assert "LD_LIBRARY_PATH" not in env
+    assert "PYTHONPATH" not in env
+
+
+def test_build_safe_env_rejects_invalid_rocm_path_injection(monkeypatch):
+    monkeypatch.setenv("HOME", "/tmp/test-home")
+    monkeypatch.setenv("ROCM_PATH", "/tmp/evil:/usr/bin")
+    env = _safety.build_safe_env()
+    assert "/tmp/evil" not in env["PATH"]
+
+
+def test_build_safe_env_rejects_relative_hip_path(monkeypatch):
+    monkeypatch.setenv("HOME", "/tmp/test-home")
+    monkeypatch.setenv("HIP_PATH", "../evil")
+    env = _safety.build_safe_env()
+    assert "../evil/bin" not in env["PATH"]

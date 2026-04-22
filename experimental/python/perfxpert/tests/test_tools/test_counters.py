@@ -32,6 +32,19 @@ def test_validate_splits_tcc_derived_into_own_passes():
     assert fetch_passes[0] != write_passes[0]
 
 
+def test_validate_for_gpu_reports_unknown_counters():
+    result = counters.validate_for_gpu(
+        ["SQ_WAVES", "NOT_A_REAL_COUNTER"],
+        gpu_arch="gfx942",
+    )
+
+    assert result["ok"] is False
+    assert result["fixed_passes"] == []
+    assert result["violations"] == [
+        {"type": "unknown_counter", "counters": ["NOT_A_REAL_COUNTER"]}
+    ]
+
+
 def test_is_read_only_class():
     assert counters.lookup_info.__tool_class__ == ToolClass.READ_ONLY
     assert counters.validate_for_gpu.__tool_class__ == ToolClass.READ_ONLY
