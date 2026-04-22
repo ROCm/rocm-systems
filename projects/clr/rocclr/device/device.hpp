@@ -1355,6 +1355,7 @@ extern bool getValueFromIsaMeta(const std::string& isa, const char* key, std::st
 }  // namespace amd::device
 
 namespace amd {
+
 /*! IHIP IPC MEMORY Structure */
 #define AMD_IPC_MEM_HANDLE_SIZE 32
 
@@ -1404,7 +1405,13 @@ class MemObjMap : public AllStatic {
   //!< Same as FindMemObj but for ipc handle to MemObj mapping
   static amd::Memory* FindIpcHandleMemObj(const IpcMemHandle& k);
 
+  //! Context::svmFree holds AllocatedLock_ exclusively; nested MemObjMap ops bump this to skip
+  //! re-locking the same std::shared_mutex on the owning thread.
+  static void svmFreeMapBatchDepthInc() { ++svmFreeMapBatchDepth_; }
+  static void svmFreeMapBatchDepthDec() { --svmFreeMapBatchDepth_; }
+
  private:
+  friend class Context;
   //!< the mem object<->hostptr information container
   static std::map<uintptr_t, amd::Memory*> MemObjMap_;
   //!< the virtual mem object<->hostptr information container
@@ -1413,6 +1420,29 @@ class MemObjMap : public AllStatic {
   static std::shared_mutex AllocatedLock_;
   //!< the ipc handle<->mem object information container
   static std::map<IpcMemHandle, amd::Memory*> IpcHandleMemObjMap_;
+
+  static thread_local int svmFreeMapBatchDepth_;
+
+  template <typename F>
+  static auto runWithSharedAllocLock(F&& f) -> decltype(f()) {
+    if (svmFreeMapBatchDepth_ > 0) {
+      return f();
+    }
+    std::shared_lock<std::shared_mutex> lk(AllocatedLock_);
+    return f();
+  }
+
+  template <typename F>
+  static auto runWithUniqueAllocLock(F&& f) -> decltype(f()) {
+    if (svmFreeMapBatchDepth_ > 0) {
+      return f();
+    }
+    std::unique_lock<std::shared_mutex> lk(AllocatedLock_);
+    return f();
+  }
+
+  static amd::Memory* findMemObjUnlocked(const void* k, size_t* offset = nullptr);
+  static amd::Memory* findVirtualMemObjUnlocked(const void* k);
 };
 
 /// @brief Instruction Set Architecture properties.

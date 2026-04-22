@@ -28,6 +28,10 @@
 #include <cassert>
 #include <cstring>
 
+#include <pthread.h>
+#include <unistd.h>
+#include <sys/types.h>
+
 #if defined(WITH_HSA_DEVICE)
 #include "device/rocm/rocdevice.hpp"
 extern amd::AppProfile* rocCreateAppProfile();
@@ -357,24 +361,9 @@ std::map<uintptr_t, amd::Memory*> MemObjMap::VirtualMemObjMap_ ROCCLR_INIT_PRIOR
 std::map<MemObjMap::IpcMemHandle, amd::Memory*> MemObjMap::IpcHandleMemObjMap_ ROCCLR_INIT_PRIORITY(
     101);
 
+thread_local int MemObjMap::svmFreeMapBatchDepth_ = 0;
 
-void MemObjMap::AddMemObj(const void* k, amd::Memory* v) {
-  std::unique_lock lock(AllocatedLock_);
-  auto rval = MemObjMap_.insert({reinterpret_cast<uintptr_t>(k), v});
-  if (!rval.second) {
-    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Memobj map already has an entry for ptr: 0x%x",
-                      reinterpret_cast<uintptr_t>(k));
-  }
-}
-
-void MemObjMap::RemoveMemObj(const void* k) {
-  std::unique_lock lock(AllocatedLock_);
-  auto rval = MemObjMap_.erase(reinterpret_cast<uintptr_t>(k));
-  guarantee(rval == 1, "Memobj map does not have ptr: 0x%x", reinterpret_cast<uintptr_t>(k));
-}
-
-amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset) {
-  std::shared_lock lock(AllocatedLock_);
+amd::Memory* MemObjMap::findMemObjUnlocked(const void* k, size_t* offset) {
   uintptr_t key = reinterpret_cast<uintptr_t>(k);
   auto it = MemObjMap_.upper_bound(key);
   if (it == MemObjMap_.begin()) {
@@ -389,11 +378,45 @@ amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset) {
     if (offset != nullptr) {
       *offset = key - it->first;
     }
-    // the k is in the range
     return mem;
-  } else {
+  }
+  return nullptr;
+}
+
+amd::Memory* MemObjMap::findVirtualMemObjUnlocked(const void* k) {
+  uintptr_t key = reinterpret_cast<uintptr_t>(k);
+  auto it = VirtualMemObjMap_.upper_bound(key);
+  if (it == VirtualMemObjMap_.begin()) {
     return nullptr;
   }
+
+  --it;
+  amd::Memory* mem = it->second;
+  if (key >= it->first && key < (it->first + mem->getSize())) {
+    return mem;
+  }
+  return nullptr;
+}
+
+void MemObjMap::AddMemObj(const void* k, amd::Memory* v) {
+  runWithUniqueAllocLock([&] {
+    auto rval = MemObjMap_.insert({reinterpret_cast<uintptr_t>(k), v});
+    if (!rval.second) {
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Memobj map already has an entry for ptr: 0x%x",
+                        reinterpret_cast<uintptr_t>(k));
+    }
+  });
+}
+
+void MemObjMap::RemoveMemObj(const void* k) {
+  runWithUniqueAllocLock([&] {
+    auto rval = MemObjMap_.erase(reinterpret_cast<uintptr_t>(k));
+    guarantee(rval == 1, "Memobj map does not have ptr: 0x%x", reinterpret_cast<uintptr_t>(k));
+  });
+}
+
+amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset) {
+  return runWithSharedAllocLock([&] { return findMemObjUnlocked(k, offset); });
 }
 
 void MemObjMap::UpdateAccess(amd::Device* peerDev) {
@@ -442,28 +465,15 @@ void MemObjMap::AddVirtualMemObj(const void* k, amd::Memory* v) {
 }
 
 void MemObjMap::RemoveVirtualMemObj(const void* k) {
-  std::unique_lock lock(AllocatedLock_);
-  auto rval = VirtualMemObjMap_.erase(reinterpret_cast<uintptr_t>(k));
-  guarantee(rval == 1, "Virtual Memobj map does not have ptr: 0x%x",
-            reinterpret_cast<uintptr_t>(k));
+  runWithUniqueAllocLock([&] {
+    auto rval = VirtualMemObjMap_.erase(reinterpret_cast<uintptr_t>(k));
+    guarantee(rval == 1, "Virtual Memobj map does not have ptr: 0x%x",
+              reinterpret_cast<uintptr_t>(k));
+  });
 }
 
 amd::Memory* MemObjMap::FindVirtualMemObj(const void* k) {
-  std::shared_lock lock(AllocatedLock_);
-  uintptr_t key = reinterpret_cast<uintptr_t>(k);
-  auto it = VirtualMemObjMap_.upper_bound(key);
-  if (it == VirtualMemObjMap_.begin()) {
-    return nullptr;
-  }
-
-  --it;
-  amd::Memory* mem = it->second;
-  if (key >= it->first && key < (it->first + mem->getSize())) {
-    // the k is in the range
-    return mem;
-  } else {
-    return nullptr;
-  }
+  return runWithSharedAllocLock([&] { return findVirtualMemObjUnlocked(k); });
 }
 
 void MemObjMap::AddIpcHandleMemObj(const IpcMemHandle& k, amd::Memory* v) {
@@ -476,14 +486,14 @@ void MemObjMap::AddIpcHandleMemObj(const IpcMemHandle& k, amd::Memory* v) {
 }
 
 void MemObjMap::RemoveIpcHandleMemObj(amd::Memory* v) {
-  std::unique_lock lock(AllocatedLock_);
-
-  for (const auto it : IpcHandleMemObjMap_) {
-    if (it.second == v) {
-      IpcHandleMemObjMap_.erase(it.first);
-      break;
+  runWithUniqueAllocLock([&] {
+    for (const auto it : IpcHandleMemObjMap_) {
+      if (it.second == v) {
+        IpcHandleMemObjMap_.erase(it.first);
+        break;
+      }
     }
-  }
+  });
 }
 
 amd::Memory* MemObjMap::FindIpcHandleMemObj(const IpcMemHandle& k) {
@@ -1046,6 +1056,8 @@ char* Device::getExtensionString() {
 bool Device::IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* mem_offset) const {
   amd::Memory* amd_mem_obj = amd::MemObjMap::FindMemObj(dev_ptr);
   if (amd_mem_obj == nullptr) {
+    LogPrintfError("[DEVICE][IpcCreate] PID: %d, TID: %lu, Ptr: %p - FAILED FindMemObj ",
+      getpid(), (unsigned long)pthread_self(), dev_ptr);
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
              "Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
     return false;
@@ -1078,12 +1090,31 @@ bool Device::IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* me
   auto dev_mem = static_cast<device::Memory*>(amd_mem_obj->getDeviceMemory(*this));
   auto result = dev_mem->ExportHandle(handle);
 
+  if (result) {
+    // 16 bytes * 2 (hex) + 1 (null terminator) = 33
+    char handleStr[33];
+    for (int i = 0; i < 16; ++i) {
+        snprintf(&handleStr[i * 2], 3, "%02x", (unsigned char)handle[i]);
+    }
+    LogPrintfError("[DEVICE][IpcCreate] PID: %d | TID: %lu | Ptr: %p | Handle: %s - SUCCESS", getpid(), (unsigned long)pthread_self(), dev_ptr, handleStr);
+
+  } else {
+    LogPrintfError("[DEVICE][IpcCreate] PID: %d, TID: %lu, Ptr: %p - FAILED at ExportHandle ", getpid(), (unsigned long)pthread_self(), dev_ptr);
+  }
+
   return result;
 }
 
 // ================================================================================================
 bool Device::IpcAttach(const char* handle, size_t mem_size, size_t mem_offset, unsigned int flags,
                        void** dev_ptr) const {
+
+  char handleStr[33];
+  for (int i = 0; i < 16; ++i) {
+      snprintf(&handleStr[i * 2], 3, "%02x", (unsigned char)handle[i]);
+  }
+  LogPrintfError("[DEVICE][IpcAttach] PID: %d | TID: %lu | Inbound Handle: %s | Size: %zu", getpid(), (unsigned long)pthread_self(), handleStr, mem_size);
+
   amd::Memory* amd_mem_obj = nullptr;
 
   // Create an amd Memory object for the handle
@@ -1094,6 +1125,11 @@ bool Device::IpcAttach(const char* handle, size_t mem_size, size_t mem_offset, u
   }
 
   if (!amd_mem_obj->create(nullptr)) {
+    for (int i = 0; i < 16; ++i) {
+        snprintf(&handleStr[i * 2], 3, "%02x", (unsigned char)handle[i]);
+    }
+    LogPrintfError("[DEVICE][IpcAttach] PID: %d | TID: %lu | Handle: %s FAILED at create a svm hidden buffer()", getpid(), (unsigned long)pthread_self(), handleStr);
+
     LogError("failed to create a svm hidden buffer!");
     amd_mem_obj->release();
     return false;

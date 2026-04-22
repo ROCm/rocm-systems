@@ -25,6 +25,11 @@
 
 #include <algorithm>
 #include <functional>
+#include <shared_mutex>
+
+#include <pthread.h>
+#include <unistd.h>
+#include <sys/types.h>
 
 #ifdef _WIN32
 #include <d3d10_1.h>
@@ -364,6 +369,11 @@ void* Context::svmAlloc(size_t size, size_t alignment, cl_svm_mem_flags flags,
 
 void Context::svmFree(void* ptr) const {
   amd::ScopedLock lock(&ctxLock_);
+  std::unique_lock<std::shared_mutex> memMapLock(MemObjMap::AllocatedLock_);
+  MemObjMap::svmFreeMapBatchDepthInc();
+  struct DepthPop {
+    ~DepthPop() { MemObjMap::svmFreeMapBatchDepthDec(); }
+  } depthPop;
   for (const auto& dev : svmAllocDevice_) {
     dev->svmFree(ptr);
   }
