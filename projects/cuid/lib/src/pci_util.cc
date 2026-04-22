@@ -82,7 +82,7 @@ amdcuid_status_t PciUtil::read_pci_config_space(std::string bdf,
     return AMDCUID_STATUS_PCI_ERROR;
   }
 
-  if (static_cast<std::ifstream::pos_type>(offset) + buffer_size > length) {
+  if (static_cast<std::ifstream::pos_type>(offset + buffer_size) > length) {
     config_file.close();
     return AMDCUID_STATUS_PCI_ERROR;
   }
@@ -94,8 +94,8 @@ amdcuid_status_t PciUtil::read_pci_config_space(std::string bdf,
   }
 
   config_file.read(reinterpret_cast<char *>(buffer), buffer_size);
-  if (config_file.fail() || static_cast<size_t>(config_file.gcount()) !=
-                                buffer_size) {
+  if (config_file.fail() ||
+      static_cast<size_t>(config_file.gcount()) != buffer_size) {
     config_file.close();
     return AMDCUID_STATUS_PCI_ERROR;
   }
@@ -118,8 +118,8 @@ amdcuid_status_t PciUtil::get_pci_dsn_cap_offset(std::string bdf,
     return status;
   }
 
-// Device Serial Number (cap_id 0x0003) is a PCIe Extended Capability.
-#define dsn_cap_id 0x0003 // PCIe DSN capability ID
+  // Device Serial Number (cap_id 0x0003) is a PCIe Extended Capability.
+  const uint16_t dsn_cap_id = 0x0003; // PCIe DSN capability ID
 
   // Traverse the extended capability list starting at offset 0x100.
   uint16_t cap_ptr = 0x100;
@@ -179,7 +179,7 @@ amdcuid_status_t PciUtil::get_pci_vsec_cap_offset(std::string bdf,
   // Traverse the extended capability list starting at offset 0x100.
   uint16_t cap_ptr = 0x100;
   for (size_t hops = 0; hops < 1024; ++hops) {
-    if (cap_ptr < 0x100 || cap_ptr + 3 >= sizeof(config_space)) {
+    if (cap_ptr < 0x100 || cap_ptr + 7 >= sizeof(config_space)) {
       return AMDCUID_STATUS_UNSUPPORTED;
     }
 
@@ -210,13 +210,8 @@ amdcuid_status_t PciUtil::get_pci_vsec_cap_offset(std::string bdf,
       }
     }
 
-    // End of list.
-    if (next_ptr == 0) {
-      break;
-    }
-
-    // Guard against malformed/cyclic lists.
-    if (next_ptr == cap_ptr) {
+    // Guard against malformed/cyclic lists or end of list.
+    if (next_ptr == 0 || next_ptr == cap_ptr) {
       break;
     }
 

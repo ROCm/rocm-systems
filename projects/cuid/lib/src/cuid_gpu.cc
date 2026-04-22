@@ -244,7 +244,7 @@ CuidGpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
       status = PciUtil::get_pci_vsec_cap_offset(m_info.bdf, offset);
       if (status != AMDCUID_STATUS_SUCCESS) {
         fingerprint = 0;
-        return status;
+        return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
       }
     }
 
@@ -254,20 +254,20 @@ CuidGpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
                                             fingerprint_size, offset);
     if (status != AMDCUID_STATUS_SUCCESS) {
       fingerprint = 0;
-      delete[] fingerprint_buffer;
       return status;
     }
     // pcie config file is little endian, so need to convert to big endian
-    fingerprint = PciUtil::le64_to_be64(
-        *reinterpret_cast<uint64_t *>(fingerprint_buffer));
-    delete[] fingerprint_buffer;
+    uint64_t fingerprint_value = 0;
+    std::memcpy(&fingerprint_value, fingerprint_buffer,
+                sizeof(fingerprint_value));
+    fingerprint = PciUtil::le64_to_be64(fingerprint_value);
   } else {
     // partitioned device without unique_id file or pci config cannot get
     // fingerprint
     fingerprint = 0;
     return AMDCUID_STATUS_UNSUPPORTED;
   }
-  return AMDCUID_STATUS_SUCCESS;
+  return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
 }
 
 amdcuid_status_t CuidGpu::get_primary_cuid(amdcuid_primary_id &id) const {

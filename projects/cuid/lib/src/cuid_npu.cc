@@ -274,7 +274,7 @@ CuidNpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
     status = PciUtil::get_pci_vsec_cap_offset(m_info.bdf, offset);
     if (status != AMDCUID_STATUS_SUCCESS) {
       fingerprint = 0;
-      return status;
+      return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
     }
   }
   if (status == AMDCUID_STATUS_SUCCESS) {
@@ -293,7 +293,7 @@ CuidNpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
     }
   }
 
-  return AMDCUID_STATUS_SUCCESS;
+  return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
 }
 
 amdcuid_status_t CuidNpu::get_primary_cuid(amdcuid_primary_id &id) const {
