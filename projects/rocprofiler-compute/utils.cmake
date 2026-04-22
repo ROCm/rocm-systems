@@ -66,7 +66,10 @@ function(
         # Install Change Log
         find_program(DEB_GZIP_EXEC gzip)
         if(NOT DEB_GZIP_EXEC)
-            message(FATAL_ERROR "gzip command not found: Failed to compress the changelog")
+            message(
+                FATAL_ERROR
+                "gzip command not found: Failed to compress the changelog"
+            )
         endif()
         if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/CHANGELOG.md")
             execute_process(

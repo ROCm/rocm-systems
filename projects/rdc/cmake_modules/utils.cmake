@@ -170,13 +170,20 @@ function(
         )
 
         # Configure the changelog file
-        set(CHANGELOG_DATA_FILES "${CMAKE_SOURCE_DIR}/DEBIAN/changelog.in" "${CMAKE_SOURCE_DIR}/CHANGELOG.md")
+        set(CHANGELOG_DATA_FILES
+            "${CMAKE_SOURCE_DIR}/DEBIAN/changelog.in"
+            "${CMAKE_SOURCE_DIR}/CHANGELOG.md"
+        )
         set(CHANGELOG_DATA_APPENDED "${CMAKE_BINARY_DIR}/DEBIAN/changelog.in")
         file(WRITE "${CHANGELOG_DATA_APPENDED}" "")
         foreach(changelog_data ${CHANGELOG_DATA_FILES})
             append_file("${changelog_data}" "${CHANGELOG_DATA_APPENDED}")
         endforeach()
-        configure_file("${CHANGELOG_DATA_APPENDED}" "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian" @ONLY)
+        configure_file(
+            "${CHANGELOG_DATA_APPENDED}"
+            "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
+            @ONLY
+        )
 
         # Install Change Log
         find_program(DEB_GZIP_EXEC gzip)
