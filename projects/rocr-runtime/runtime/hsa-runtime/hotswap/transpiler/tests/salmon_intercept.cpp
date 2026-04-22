@@ -53,6 +53,8 @@
 
 using hipError_t = int;
 using hipModule_t = void*;
+using hipFunction_t = void*;
+using hipStream_t = void*;
 
 using hipJitOption = int;
 using hipDriverProcAddressQueryResult = int;
@@ -62,7 +64,19 @@ using hipModuleLoadDataEx_t = hipError_t (*)(hipModule_t*, const void*,
                                               void**);
 using hipGetProcAddress_t = hipError_t (*)(const char*, void**, int, uint64_t,
                                             hipDriverProcAddressQueryResult*);
+using hipModuleLaunchKernel_t = hipError_t (*)(
+    hipFunction_t, unsigned int, unsigned int, unsigned int,
+    unsigned int, unsigned int, unsigned int, unsigned int,
+    hipStream_t, void**, void**);
 using rocr_salmon_patch_elf_t = int (*)(void*, size_t, const char*);
+
+// HIP error-code constants we use when the intercept refuses a call
+// rather than forwarding it.  The HIP header's `enum hipError_t`
+// assigns `hipErrorInvalidConfiguration = 9`; we spell the value as an
+// `int` constant here to avoid needing the HIP header at compile time
+// (this shim is deliberately header-free so it can build against any
+// HIP installation — see the "Build:" comment at the top of the file).
+static constexpr int kHipErrorInvalidConfiguration = 9;
 
 // "Real" implementations populated via RTLD_NEXT dlsym (the symbols visible
 // to the dynamic linker).  These cover any caller that uses the PLT — e.g.
@@ -79,8 +93,70 @@ static hipGetProcAddress_t g_real_hipGetProcAddress = nullptr;
 static hipModuleLoadData_t g_proc_hipModuleLoadData = nullptr;
 static hipModuleLoadDataEx_t g_proc_hipModuleLoadDataEx = nullptr;
 
+// hipModuleLaunchKernel resolution.  Populated by the RTLD_NEXT path in
+// `init()` (the PLT route used by e.g. `compare_correctness`) and by
+// the hipGetProcAddress hook (the runtime route used by Triton /
+// hipGetProcAddress-resolving runtimes).  `resolve_real_launch_kernel()`
+// prefers the proc-address variant when available for the same
+// HIP-API-versioning reason the load_data resolver does.
+static hipModuleLaunchKernel_t g_real_hipModuleLaunchKernel = nullptr;
+static hipModuleLaunchKernel_t g_proc_hipModuleLaunchKernel = nullptr;
+
 static rocr_salmon_patch_elf_t g_patch_elf = nullptr;
 static const char* g_target_isa = nullptr;
+
+// Target wavefront width in threads, derived once at init() from
+// `g_target_isa` and cached here.  `0` means "unknown" (no refusal);
+// populated to 32 on gfx10xx+ / gfx11xx+ / gfx12xx+ and 64 on gfx9xx /
+// gfx8xx / gfx7xx / gfx6xx per the AMDGPU ISA wave-size convention
+// (FeatureWavefrontSize32 on RDNA1+, FeatureWavefrontSize64 on the
+// CDNA / GCN5 and earlier families).  See `target_wave_size()` below.
+static unsigned g_target_wave_size = 0;
+
+// Whether the Salmon IR raiser is enabled for this process, captured
+// from `HSA_HOTSWAP_IR_RAISER` at `init()`.  The partial-wave launch
+// refusal below gates on this because the phantom-lane miscompile
+// class is specific to the IR-raise-and-retarget path: native-lane
+// runs (source ISA matches device ISA — no wave widening) and the
+// legacy cross-widen path (separate machinery, not an IR-raise) both
+// leave the `init_whole_wave` vs partial-block invariant undisturbed.
+// Refusing launches those paths emit would be an over-refusal that
+// blocks correct kernels, which is why we narrow the check to the
+// mode where `WaveNativeProjection` actually participates — namely
+// the IR-raise mode set by `compare_correctness`'s Salmon lane and
+// by any external caller that opts in to Salmon via the same env
+// var.
+static bool g_ir_raiser_active = false;
+
+// Opt-out for the partial-wave launch refusal.  When set to a non-
+// empty / non-zero value, `hipModuleLaunchKernel` forwards calls with
+// `blockDim < targetWaveSize` to the real HIP loader instead of
+// returning `hipErrorInvalidConfiguration`.  This exists for kernels
+// that legitimately launch with partial waves AND are provably safe
+// (no cross-lane ops — `ds_bpermute`, `readlane`, `writelane`, DPP /
+// permlane* / ds_swizzle reductions), where the phantom-lane miscompile
+// class doesn't apply.  The intended workflow is:
+//
+//   1. A raise-time phantom-lane fallback catches kernels with
+//      `max_flat_workgroup_size < targetWaveSize` and switches them
+//      to `ModuloReplicationProjection` so phantom lanes stay
+//      hardware-inactive — see `raiser.cpp`'s fallback block.
+//   2. The runtime check below catches the REMAINING case: a kernel
+//      compiled WITHOUT `__launch_bounds__` (so
+//      `max_flat_workgroup_size` defaults to something large enough
+//      to bypass the raise-time fallback) but launched at runtime
+//      with `blockDim < targetWaveSize`.  In that regime the raise
+//      chose `WaveNativeProjection`, `init_whole_wave` sets HW
+//      EXEC=-1 at kernel entry, and the phantom lanes WILL
+//      contribute garbage to any cross-lane collective the kernel
+//      uses.  The correct fix is the user's responsibility: add
+//      `__launch_bounds__(N)` to the source kernel and recompile so
+//      the raise-time fallback engages.
+//   3. Users who know their kernel is partial-wave-safe set
+//      HSA_HOTSWAP_ALLOW_PARTIAL_WAVE=1 to bypass this runtime
+//      refusal.  The env-var opt-out is explicit acknowledgement,
+//      not a default fallback.
+static bool g_allow_partial_wave_launch = false;
 
 static void init() {
   static bool done = false;
@@ -145,7 +221,73 @@ static void init() {
     std::abort();
   }
 
-  fprintf(stderr, "salmon_intercept: active, target=%s\n", g_target_isa);
+  // Derive the target wavefront width from `HSA_HOTSWAP_ISA_OVERRIDE`.
+  // AMDGPU ISA convention: RDNA (gfx10xx+) subtargets default to
+  // FeatureWavefrontSize32; CDNA / GCN5 and earlier
+  // (gfx9xx / gfx8xx / gfx7xx / gfx6xx) default to
+  // FeatureWavefrontSize64.  We use the first digit after the "gfx"
+  // prefix because the numbering is monotonic within each family
+  // (gfx942, gfx908, gfx90a → wave64; gfx1030, gfx1100, gfx1250 →
+  // wave32).  A non-prefixed string leaves `g_target_wave_size = 0`,
+  // which disables the partial-wave launch refusal below (principled:
+  // don't refuse a launch when we can't confidently derive the target
+  // wave width).
+  g_target_wave_size = 0;
+  if (std::strncmp(g_target_isa, "gfx", 3) == 0 && g_target_isa[3] != 0) {
+    const char* digits = g_target_isa + 3;
+    // Largest currently-modelled gfx numbering is gfx12xx — 4 digits.
+    // Any future gfx13xx+ will land on this same wave32 branch; any
+    // gfx9xx / gfx8xx / gfx7xx / gfx6xx number is <1000 and hits
+    // wave64.  Using atol (not atoi) so 4-digit values don't overflow
+    // on 16-bit int targets — paranoid since int is 32-bit on every
+    // platform this shim builds on, but it's a free guarantee.
+    long major = std::atol(digits);
+    if (major >= 1000) {
+      g_target_wave_size = 32;
+    } else if (major > 0) {
+      g_target_wave_size = 64;
+    }
+  }
+
+  const char* allow_partial = std::getenv("HSA_HOTSWAP_ALLOW_PARTIAL_WAVE");
+  if (allow_partial && allow_partial[0] && allow_partial[0] != '0') {
+    g_allow_partial_wave_launch = true;
+  }
+
+  // The IR raiser gate for the partial-wave refusal (see the
+  // `g_ir_raiser_active` comment above for the rationale).  Captured
+  // once here because `compare_correctness`'s three-lane harness sets
+  // the env var BEFORE forking each child and doesn't flip it mid-run,
+  // so a cached read at intercept init suffices.
+  const char* ir_raiser = std::getenv("HSA_HOTSWAP_IR_RAISER");
+  g_ir_raiser_active = ir_raiser && ir_raiser[0] && ir_raiser[0] != '0';
+
+  // Best-effort PLT resolution for hipModuleLaunchKernel, same pattern
+  // as the load_data resolvers above.  Populating this here lets the
+  // RTLD_NEXT path (`compare_correctness`, raw HIP programs) reach the
+  // real launcher.  The Triton / hipGetProcAddress route populates the
+  // `g_proc_hipModuleLaunchKernel` sibling pointer below when a caller
+  // asks for the launch symbol.
+  if (auto* fn = reinterpret_cast<hipModuleLaunchKernel_t>(
+          dlsym(RTLD_NEXT, "hipModuleLaunchKernel"))) {
+    g_real_hipModuleLaunchKernel = fn;
+  } else {
+    fprintf(stderr,
+            "salmon_intercept: hipModuleLaunchKernel not visible via "
+            "RTLD_NEXT (%s); will rely on the dlsym/hipGetProcAddress "
+            "hooks instead\n",
+            dlerror());
+  }
+
+  fprintf(stderr,
+          "salmon_intercept: active, target=%s (wave_size=%u, "
+          "ir_raiser=%s)%s\n",
+          g_target_isa, g_target_wave_size,
+          g_ir_raiser_active ? "on" : "off",
+          g_allow_partial_wave_launch
+              ? ", partial-wave launches ALLOWED via "
+                "HSA_HOTSWAP_ALLOW_PARTIAL_WAVE"
+              : "");
 }
 
 static bool is_elf(const void* data) {
@@ -291,6 +433,133 @@ extern "C" hipError_t hipModuleLoadDataEx(hipModule_t* module,
   return real(module, buf, numOptions, options, optionValues);
 }
 
+// Resolve the real hipModuleLaunchKernel.  Same preference order as
+// the load_data resolvers: proc-address path wins over the RTLD_NEXT
+// path so we never call a stale / version-mismatched symbol.  Returns
+// nullptr only when `init()` has never succeeded in populating either
+// pointer — in which case the caller aborts, because a launch wrapper
+// with no real launcher to forward to is broken by construction.
+static hipModuleLaunchKernel_t resolve_real_launch_kernel() {
+  if (g_proc_hipModuleLaunchKernel) return g_proc_hipModuleLaunchKernel;
+  return g_real_hipModuleLaunchKernel;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// hipModuleLaunchKernel — partial-wave launch refusal gate.
+//
+// This hook implements the runtime-side half of the Salmon phantom-lane
+// safety contract.  See `raiser.cpp`'s phantom-lane fallback (the
+// `max_flat_workgroup_size < targetWaveSize` branch that switches the
+// projection from `WaveNativeProjection` to `ModuloReplicationProjection`)
+// for the raise-time half: that catch fires when the statically-visible
+// workgroup-size attribute is below the target wavefront width, forcing
+// MODREP so phantom target lanes stay hardware-inactive.
+//
+// The raise-time catch is necessary but not sufficient.  A kernel
+// compiled WITHOUT `__launch_bounds__(N)` has `max_flat_workgroup_size`
+// default to the archit-wide maximum (e.g. 1024), so the raise-time
+// fallback never engages, and `WaveNativeProjection` is chosen —
+// `init_whole_wave` sets HW EXEC = -1 on every target wave so all 64
+// hardware lanes execute the kernel body.  If the runtime launch then
+// picks `blockDim < targetWaveSize` (e.g. `blockDim.x = 32` on gfx942
+// wave64), the HARDWARE runs 32 real source threads plus 32 phantom
+// lanes — and any cross-lane collective the kernel issues (DPP
+// reduction, `ds_bpermute`, `readlane`, permlane16 butterfly, DS
+// swizzle) pulls undef bits from the phantom lanes and mixes them into
+// the collective's output on the real lanes.  The miscompile is
+// silent: there is no crash, no wrong numerics at most elements — just
+// corrupted collective outputs on lanes that happen to read from
+// phantom-lane participants.
+//
+// This wrapper closes that runtime gap by refusing `hipModuleLaunchKernel`
+// calls where `blockDim.x * blockDim.y * blockDim.z < targetWaveSize`.
+// The user can work around the refusal in two principled ways:
+//
+//   1. Add `__launch_bounds__(N)` to the source kernel and recompile
+//      so the raise-time phantom-lane fallback engages
+//      `ModuloReplicationProjection` for this launch shape.  This is
+//      the CORRECT fix for kernels that use cross-lane ops.
+//   2. Set `HSA_HOTSWAP_ALLOW_PARTIAL_WAVE=1` in the environment to
+//      disable this runtime check.  This is the OPT-IN ACCEPT-THE-RISK
+//      path for kernels that are provably phantom-lane-safe (no
+//      cross-lane primitives at all — pure per-lane VALU work with
+//      SPE-gated loads / stores).  The kernel's correctness under
+//      partial-wave launch in that case is provable by construction:
+//      phantom lanes compute undef VGPRs locally, but every write to
+//      memory is SPE-gated (see the load/store gating commit
+//      `ebe575dcdc`), so the undef never externalizes.
+//
+// Refusing with `hipErrorInvalidConfiguration` (= 9 in the HIP error
+// enum — the `InvalidConfiguration` path HIP already uses for "launch
+// dims rejected" conditions such as oversubscription) gives the caller
+// a standard HIP error to branch on rather than a process abort.  A
+// stderr diagnostic spells out the refusal reason and both workarounds
+// above so the user has a single place to read about the fix.
+// ─────────────────────────────────────────────────────────────────────────────
+extern "C" hipError_t hipModuleLaunchKernel(
+    hipFunction_t f,
+    unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ,
+    unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
+    unsigned int sharedMemBytes, hipStream_t stream,
+    void** kernelParams, void** extra) {
+  init();
+
+  hipModuleLaunchKernel_t real = resolve_real_launch_kernel();
+  if (!real) {
+    fprintf(stderr, "salmon_intercept: no real hipModuleLaunchKernel\n");
+    std::abort();
+  }
+
+  // Phantom-lane launch gate.  Uses uint64_t for the product to stay
+  // immune to unsigned-int overflow on pathologically large launches —
+  // even though three 32-bit multiplies overflowing is already a
+  // launch-size validation failure HIP would reject downstream, we
+  // don't want to silently bypass the check by wrapping to a tiny
+  // product.
+  //
+  // The `g_ir_raiser_active` guard narrows the check to the Salmon
+  // raise path (the only mode where `WaveNativeProjection` +
+  // `init_whole_wave` +`HSA_HOTSWAP_IR_RAISER` combine to produce the
+  // phantom-lane miscompile class).  Native-lane runs and the legacy
+  // pre-salmon cross-widen path don't share that invariant, so a
+  // blanket refusal would over-reject correct kernels on those paths.
+  if (g_ir_raiser_active && g_target_wave_size > 0 &&
+      !g_allow_partial_wave_launch) {
+    const uint64_t block_threads =
+        static_cast<uint64_t>(blockDimX) *
+        static_cast<uint64_t>(blockDimY) *
+        static_cast<uint64_t>(blockDimZ);
+    if (block_threads < static_cast<uint64_t>(g_target_wave_size)) {
+      fprintf(stderr,
+              "salmon_intercept: REFUSING hipModuleLaunchKernel: "
+              "block dims %u x %u x %u = %llu thread(s) per block, "
+              "target=%s (wave_size=%u) — partial-wave launches put "
+              "the kernel in the phantom-lane regime where "
+              "`init_whole_wave` sets HW EXEC=-1 on a partially-filled "
+              "wave, so any cross-lane primitive (DPP reductions, "
+              "ds_bpermute, readlane/writelane, permlane16, ds_swizzle) "
+              "reads undef from the unused lanes and silently "
+              "miscompiles.  Principled fixes: (1) add `__launch_bounds__"
+              "(%llu)` to the source kernel and recompile so the "
+              "raise-time phantom-lane fallback engages "
+              "ModuloReplicationProjection; (2) set "
+              "HSA_HOTSWAP_ALLOW_PARTIAL_WAVE=1 if the kernel is "
+              "provably cross-lane-free (pure per-lane VALU work).  "
+              "Returning hipErrorInvalidConfiguration (=%d).\n",
+              blockDimX, blockDimY, blockDimZ,
+              static_cast<unsigned long long>(block_threads), g_target_isa,
+              g_target_wave_size,
+              static_cast<unsigned long long>(block_threads),
+              kHipErrorInvalidConfiguration);
+      return kHipErrorInvalidConfiguration;
+    }
+  }
+
+  return real(f, gridDimX, gridDimY, gridDimZ,
+              blockDimX, blockDimY, blockDimZ,
+              sharedMemBytes, stream, kernelParams, extra);
+}
+
 // Triton (and other runtimes built against newer ROCm) resolve HIP entry
 // points via hipGetProcAddress instead of dlsym/PLT.  We intercept it,
 // stash the real pointers it returned, and hand callers a pointer to our
@@ -323,6 +592,18 @@ extern "C" hipError_t hipGetProcAddress(
   } else if (std::strcmp(symbol, "hipModuleLoadData") == 0) {
     g_proc_hipModuleLoadData = reinterpret_cast<hipModuleLoadData_t>(*pfn);
     *pfn = reinterpret_cast<void*>(&hipModuleLoadData);
+    fprintf(stderr,
+            "salmon_intercept: redirected hipGetProcAddress(\"%s\")\n",
+            symbol);
+  } else if (std::strcmp(symbol, "hipModuleLaunchKernel") == 0) {
+    // Route the launch symbol through our partial-wave refusal gate.
+    // Same contract as the load_data redirects above: we stash the
+    // real proc-address-resolved pointer for forward dispatch, and
+    // hand the caller a pointer to our wrapper so every launch path
+    // flows through the blockDim check.
+    g_proc_hipModuleLaunchKernel =
+        reinterpret_cast<hipModuleLaunchKernel_t>(*pfn);
+    *pfn = reinterpret_cast<void*>(&hipModuleLaunchKernel);
     fprintf(stderr,
             "salmon_intercept: redirected hipGetProcAddress(\"%s\")\n",
             symbol);
