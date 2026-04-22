@@ -559,17 +559,8 @@ WriteInterceptor(const void* packets,
                 _packet_data.pooled_signal =
                     queue.create_signal(0, &kernel_packet.kernel_dispatch.completion_signal, true);
             }
-            else
-            {
-                // TRACING-ONLY with existing app signal: use it directly.
-                // Increment waiting counter for signal lifetime safety.
-                auto* ext_table = hsa::get_amd_ext_table();
-                if(ext_table && ext_table->hsa_amd_signal_waiting_inc_fn)
-                {
-                    ext_table->hsa_amd_signal_waiting_inc_fn(
-                        kernel_packet.kernel_dispatch.completion_signal);
-                }
-            }
+            // else: tracing-only with existing app signal — use it directly.
+            // waiting_inc is deferred until routing decision below.
 
             bool inserted_before = false;
             if(_packet_data.is_serialized)
@@ -686,6 +677,15 @@ WriteInterceptor(const void* packets,
 
             if(all_tracing_only)
             {
+                auto* ext_table = hsa::get_amd_ext_table();
+                for(auto& pkt : shared->packet_data)
+                {
+                    if(pkt.completion_signal.handle != 0 && !pkt.pooled_signal)
+                    {
+                        if(ext_table && ext_table->hsa_amd_signal_waiting_inc_fn)
+                            ext_table->hsa_amd_signal_waiting_inc_fn(pkt.completion_signal);
+                    }
+                }
                 queue.get_signal_waiter()->enqueue(std::move(shared));
             }
             else
@@ -988,10 +988,8 @@ Queue::sync() const
 SignalWaiter*
 Queue::get_signal_waiter()
 {
-    if(!_signal_waiter)
-    {
-        _signal_waiter = std::make_unique<SignalWaiter>();
-    }
+    std::call_once(_signal_waiter_init,
+                   [this]() { _signal_waiter = std::make_unique<SignalWaiter>(); });
     return _signal_waiter.get();
 }
 

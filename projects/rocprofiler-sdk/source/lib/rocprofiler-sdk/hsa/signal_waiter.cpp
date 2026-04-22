@@ -104,16 +104,8 @@ SignalWaiter::run()
     // Active sessions being monitored for completion.
     std::vector<std::shared_ptr<queue_info_session_t>> active;
 
-    // Scratch buffers for the ioctl call, reused across iterations.
+    // Scratch buffer for the ioctl call, reused across iterations.
     std::vector<kfd_event_data> event_data_buf;
-
-    // Maps each entry in event_data_buf back to (session_idx, packet_idx).
-    struct event_source
-    {
-        size_t session_idx;
-        size_t packet_idx;
-    };
-    std::vector<event_source> event_sources;
 
     while(!_stopped.load(std::memory_order_relaxed))
     {
@@ -138,7 +130,6 @@ SignalWaiter::run()
 
         // 3-4. Collect event_ids from every packet in every active session.
         event_data_buf.clear();
-        event_sources.clear();
 
         for(size_t si = 0; si < active.size(); ++si)
         {
@@ -156,7 +147,6 @@ SignalWaiter::run()
                 ev.event_id           = eid;
                 ev.kfd_event_data_ext = 0;
                 event_data_buf.emplace_back(ev);
-                event_sources.push_back({si, pi});
             }
         }
 
@@ -209,45 +199,42 @@ SignalWaiter::run()
                     continue;
                 }
 
-                // 7. Signal completed (value <= 0). Process this packet.
+                // Signal completed (value <= 0). Process this packet.
 
-                // If we have fully finalized, skip processing.
-                if(registration::get_fini_status() > 0) continue;
-
-                // 7a. Collect timestamps and deliver tracing data.
-                auto dispatch_time = kernel_dispatch::get_dispatch_time(session, packet);
-                kernel_dispatch::dispatch_complete(session, packet, dispatch_time);
-
-                // 7b. Signal completion callbacks.
-                auto session_ptr = active[si];
-                session.queue.signal_callback([&](const auto& map) {
-                    for(const auto& [client_id, cb_data] : map)
-                    {
-                        cb_data.signal_completion(session.queue,
-                                                  packet.kernel_packet,
-                                                  session_ptr,
-                                                  packet,
-                                                  packet.instrumentation_packets,
-                                                  dispatch_time);
-                    }
-                });
-
-                // 7c. Serialization support.
-                if(packet.is_serialized)
+                if(registration::get_fini_status() == 0)
                 {
-                    CHECK_NOTNULL(hsa::get_queue_controller())
-                        ->serializer(&session.queue)
-                        .wlock([&](auto& serializer) {
-                            serializer.kernel_completion_signal(session.queue);
-                        });
+                    auto dispatch_time = kernel_dispatch::get_dispatch_time(session, packet);
+                    kernel_dispatch::dispatch_complete(session, packet, dispatch_time);
+
+                    auto session_ptr = active[si];
+                    session.queue.signal_callback([&](const auto& map) {
+                        for(const auto& [client_id, cb_data] : map)
+                        {
+                            cb_data.signal_completion(session.queue,
+                                                      packet.kernel_packet,
+                                                      session_ptr,
+                                                      packet,
+                                                      packet.instrumentation_packets,
+                                                      dispatch_time);
+                        }
+                    });
+
+                    if(packet.is_serialized)
+                    {
+                        CHECK_NOTNULL(hsa::get_queue_controller())
+                            ->serializer(&session.queue)
+                            .wlock([&](auto& serializer) {
+                                serializer.kernel_completion_signal(session.queue);
+                            });
+                    }
                 }
 
-                // 7d. Decrement the signal waiting count.
+                // Always clean up signal lifetime and correlation IDs,
+                // even during finalization.
                 auto* ext_table = hsa::get_amd_ext_table();
                 if(ext_table && ext_table->hsa_amd_signal_waiting_dec_fn)
                     ext_table->hsa_amd_signal_waiting_dec_fn(packet.completion_signal);
 
-                // 7e. Decrement correlation ref counts.
                 auto* _corr_id = session.correlation_id;
                 if(_corr_id)
                 {
@@ -258,7 +245,6 @@ SignalWaiter::run()
                     _corr_id->sub_ref_count();
                 }
 
-                // Mark the completion signal as consumed so we don't process it again.
                 packet.completion_signal.handle = 0;
             }
 

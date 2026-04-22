@@ -47,6 +47,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 
 namespace rocprofiler
@@ -194,12 +195,13 @@ private:
     CoreApiTable                         _core_api             = {};
     AmdExtTable                          _ext_api              = {};
     const AgentCache&                    _agent;
-    common::Synchronized<callback_map_t> _callbacks       = {};
-    hsa_queue_t*                         _intercept_queue = nullptr;
-    queue_state                          _state           = queue_state::normal;
-    std::mutex                           _lock_queue      = {};
-    hsa_signal_t                         _active_kernels  = {.handle = 0};
-    std::unique_ptr<SignalWaiter>        _signal_waiter   = {};
+    common::Synchronized<callback_map_t> _callbacks          = {};
+    hsa_queue_t*                         _intercept_queue    = nullptr;
+    queue_state                          _state              = queue_state::normal;
+    std::mutex                           _lock_queue         = {};
+    hsa_signal_t                         _active_kernels     = {.handle = 0};
+    std::once_flag                       _signal_waiter_init = {};
+    std::unique_ptr<SignalWaiter>        _signal_waiter      = {};
 };
 
 inline rocprofiler_queue_id_t
