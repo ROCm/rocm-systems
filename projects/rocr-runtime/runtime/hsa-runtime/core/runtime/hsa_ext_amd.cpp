@@ -922,6 +922,29 @@ hsa_status_t hsa_amd_signal_get_event_id(hsa_signal_t hsa_signal, uint32_t *even
   CATCH;
 }
 
+hsa_status_t hsa_amd_signal_waiting_inc(hsa_signal_t hsa_signal) {
+  TRY;
+  IS_OPEN();
+
+  core::Signal* signal = core::Signal::Convert(hsa_signal);
+  IS_VALID(signal);
+
+  signal->WaitingInc();
+  return HSA_STATUS_SUCCESS;
+  CATCH;
+}
+
+hsa_status_t hsa_amd_signal_waiting_dec(hsa_signal_t hsa_signal) {
+  TRY;
+  IS_OPEN();
+
+  core::Signal* signal = core::Signal::Convert(hsa_signal);
+  IS_VALID(signal);
+
+  signal->WaitingDec();
+  return HSA_STATUS_SUCCESS;
+  CATCH;
+}
 
 hsa_status_t hsa_amd_signal_async_handler(hsa_signal_t hsa_signal, hsa_signal_condition_t cond,
                                           hsa_signal_value_t value, hsa_amd_signal_handler handler,

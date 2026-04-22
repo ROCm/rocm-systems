@@ -1383,6 +1383,14 @@ hsa_status_t HSA_API hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *
   return amdExtTable->hsa_amd_signal_get_event_id_fn(signal, event_id);
 }
 
+hsa_status_t HSA_API hsa_amd_signal_waiting_inc(hsa_signal_t signal) {
+  return amdExtTable->hsa_amd_signal_waiting_inc_fn(signal);
+}
+
+hsa_status_t HSA_API hsa_amd_signal_waiting_dec(hsa_signal_t signal) {
+  return amdExtTable->hsa_amd_signal_waiting_dec_fn(signal);
+}
+
 // Tools only table interfaces.
 namespace rocr {
 

@@ -272,6 +272,8 @@ global:
 	hsa_amd_counted_queue_release;
 	hsa_amd_svm_discard_batch_async;
 	hsa_amd_signal_get_event_id;
+	hsa_amd_signal_waiting_inc;
+	hsa_amd_signal_waiting_dec;
 local:
     *;
 };

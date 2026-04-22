@@ -411,6 +411,10 @@ hsa_status_t HSA_API hsa_amd_enable_logging(uint8_t* flags, void* file);
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *event_id);
 
+hsa_status_t HSA_API hsa_amd_signal_waiting_inc(hsa_signal_t signal);
+
+hsa_status_t HSA_API hsa_amd_signal_waiting_dec(hsa_signal_t signal);
+
 }  // namespace amd
 }  // namespace rocr
 
