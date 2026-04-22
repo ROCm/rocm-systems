@@ -39,12 +39,17 @@ foreach(src_file ${KERNEL_MODULE_SOURCES})
     )
 endforeach()
 
-# Create symbolic link to aql_c directory
-execute_process(
-    COMMAND ${CMAKE_COMMAND} -E create_symlink
-        ${KBUILD_SRC_DIR}/aql_c
-        ${KBUILD_BIN_DIR}/aql_c
-)
+# Create aql_c directory and symlink individual files (avoid polluting source tree)
+file(MAKE_DIRECTORY ${KBUILD_BIN_DIR}/aql_c)
+file(GLOB AQL_C_SRC_FILES ${KBUILD_SRC_DIR}/aql_c/*.c ${KBUILD_SRC_DIR}/aql_c/*.h)
+foreach(aql_file ${AQL_C_SRC_FILES})
+    get_filename_component(fname ${aql_file} NAME)
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
+            ${aql_file}
+            ${KBUILD_BIN_DIR}/aql_c/${fname}
+    )
+endforeach()
 
 # Create Kbuild file from the Makefile (extract only the kernel build parts)
 file(WRITE ${KBUILD_BIN_DIR}/Kbuild

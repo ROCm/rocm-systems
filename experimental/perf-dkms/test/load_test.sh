@@ -6,14 +6,14 @@
 set -e
 
 # Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+export RED='\033[0;31m'
+export GREEN='\033[0;32m'
+export YELLOW='\033[1;33m'
+export NC='\033[0m' # No Color
 
 # Test configuration
-MODULE_NAME="amdgpu_pmu"
-TEST_TIMEOUT=30
+export MODULE_NAME="amdgpu_pmu"
+export TEST_TIMEOUT=30
 
 # Helper functions
 log_info() {
