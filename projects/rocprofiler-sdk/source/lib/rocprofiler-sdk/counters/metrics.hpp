@@ -107,8 +107,6 @@ loadMetrics(bool reload = false, std::optional<ArchMetric> add_metric = std::nul
 
 /**
  * Get the metrics that apply to a specific agent.
- * The returned metrics will have counter IDs that are unique per agent
- * (encoding both base metric ID and agent's logical_node_id).
  */
 std::vector<Metric>
 getMetricsForAgent(const rocprofiler_agent_t* agent);

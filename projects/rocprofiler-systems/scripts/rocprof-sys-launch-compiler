@@ -102,7 +102,34 @@ if [ "$(basename ${1})" = "cmake" ] && [ "${2}" = "-E" ] && [ "${3}" = "__run_co
     fi
 fi
 
-if [[ "${CXX_COMPILER}" != "${1}" ]]; then
+# Known wrappers that may appear before the actual compiler
+KNOWN_WRAPPERS=(
+    "resource_info.py"  # TheRock build profiling
+    "ccache"            # Compiler cache
+)
+
+CCACHE_PREFIX=""
+ACTUAL_COMPILER="${1}"
+CURRENT_BASENAME="$(basename "${1}")"
+
+for wrapper in "${KNOWN_WRAPPERS[@]}"; do
+    if [[ "${CURRENT_BASENAME}" == "${wrapper}" ]]; then
+        if [ -z "${2:-}" ]; then
+            echo -e "\nError: ${BASH_SOURCE[0]} detected '${wrapper}' as a wrapper," >&2
+            echo "but no underlying command was specified as the next argument." >&2
+            exit 1
+        fi
+        # Preserve ccache so we can re-apply it to the rocprofiler-systems compiler
+        if [[ "${wrapper}" == "ccache" ]]; then
+            CCACHE_PREFIX="${1}"
+        fi
+        shift
+        ACTUAL_COMPILER="${1}"
+        CURRENT_BASENAME="$(basename "${1}")"
+    fi
+done
+
+if [[ "${CXX_COMPILER}" != "${ACTUAL_COMPILER}" ]]; then
     debug-message $@
     # the command does not depend on rocprofiler-systems so just execute the command w/o re-directing to ${ROCPROFSYS_COMPILER}
     eval $@
@@ -113,7 +140,7 @@ else
         exit 1
     fi
 
-    # discard the compiler from the command
+    # discard the compiler from the command (wrappers were already shifted in the loop above)
     shift
 
     if [ -n "$(basename ${ROCPROFSYS_COMPILER} | egrep 'amdclang|amdllvm')" ]; then
@@ -123,7 +150,12 @@ else
         export LIBRARY_PATH=${LLVM_LIB_DIR}:${LIBRARY_PATH}
     fi
 
-    debug-message ${ROCPROFSYS_COMPILER} $@
-    # execute ${ROCPROFSYS_COMPILER} (again, usually nvcc_wrapper)
-    ${ROCPROFSYS_COMPILER} $@
+    # Use ccache with the rocprofiler-systems compiler if ccache was originally requested
+    if [ -n "${CCACHE_PREFIX}" ]; then
+        debug-message ${CCACHE_PREFIX} ${ROCPROFSYS_COMPILER} $@
+        ${CCACHE_PREFIX} ${ROCPROFSYS_COMPILER} $@
+    else
+        debug-message ${ROCPROFSYS_COMPILER} $@
+        ${ROCPROFSYS_COMPILER} $@
+    fi
 fi

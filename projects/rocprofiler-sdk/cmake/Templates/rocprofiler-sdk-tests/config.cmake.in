@@ -45,3 +45,11 @@ find_package_handle_standard_args(
     VERSION_VAR @PACKAGE_NAME@_VERSION
     REQUIRED_VARS @PACKAGE_NAME@_ROOT @PACKAGE_NAME@_VERSION
     HANDLE_COMPONENTS HANDLE_VERSION_RANGE)
+
+add_executable(@PACKAGE_NAME@::agent_hsaco_targets IMPORTED)
+set_property(
+    TARGET @PACKAGE_NAME@::agent_hsaco_targets
+    PROPERTY
+        IMPORTED_LOCATION
+        ${@PACKAGE_NAME@_ROOT_DIR}/${PACKAGE_NAME}/tests/unit-tests/bin
+    )

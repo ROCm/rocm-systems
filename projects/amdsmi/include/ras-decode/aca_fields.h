@@ -111,34 +111,34 @@ typedef struct {
  * @param[in] fields Pointer to the ACA fields structure
  * @return The raw 64-bit value stored in the structure
  */
-uint64_t aca_fields_read(const aca_fields_t *fields);
+uint64_t aca_fields_read(const aca_fields_t* fields);
 
 /**
  * @brief Initializes ACA status fields from a raw status register value
  * @param[out] fields Pointer to the status fields structure to initialize
  * @param[in] status_reg Raw 64-bit status register value
  */
-void aca_status_init(aca_status_fields_t *fields, uint64_t status_reg);
+void aca_status_init(aca_status_fields_t* fields, uint64_t status_reg);
 
 /**
  * @brief Initializes ACA IPID fields from a raw IPID register value
  * @param[out] fields Pointer to the IPID fields structure to initialize
  * @param[in] ipid_reg Raw 64-bit IPID register value
  */
-void aca_ipid_init(aca_ipid_fields_t *fields, uint64_t ipid_reg);
+void aca_ipid_init(aca_ipid_fields_t* fields, uint64_t ipid_reg);
 
 /**
  * @brief Initializes ACA syndrome fields from a raw syndrome register value
  * @param[out] fields Pointer to the syndrome fields structure to initialize
  * @param[in] synd_reg Raw 64-bit syndrome register value
  */
-void aca_synd_init(aca_synd_fields_t *fields, uint64_t synd_reg);
+void aca_synd_init(aca_synd_fields_t* fields, uint64_t synd_reg);
 
 /**
  * @brief Initializes ACA address fields from a raw address register value
  * @param[out] fields Pointer to the address fields structure to initialize
  * @param[in] addr_reg Raw 64-bit address register value
  */
-void aca_addr_init(aca_addr_fields_t *fields, uint64_t addr_reg);
+void aca_addr_init(aca_addr_fields_t* fields, uint64_t addr_reg);
 
 #endif

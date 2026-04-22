@@ -1,28 +1,10 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "kill_gotcha.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+
+#include "logger/debug.hpp"
 
 #include <cstdlib>
 #include <unistd.h>
@@ -57,9 +39,9 @@ kill_gotcha::operator()(const gotcha_data& _data, kill_func_t _func, pid_t _pid,
 
         if(_sig == SIGKILL && _pid != _self_pid && _pid > 0)
         {
-            ROCPROFSYS_DEBUG("[kill_gotcha] Intercepted '%s(%d, SIGKILL)' triggered from "
-                             "process with id: %d. Sleeping for %d seconds...\n",
-                             _data.tool_id.c_str(), _pid, _self_pid, kill_delay);
+            LOG_DEBUG("[kill_gotcha] Intercepted '{}({}, SIGKILL)' triggered from "
+                      "process with id: {}. Sleeping for {} seconds...",
+                      _data.tool_id, _pid, _self_pid, kill_delay);
 
             ::sleep(kill_delay);
         }

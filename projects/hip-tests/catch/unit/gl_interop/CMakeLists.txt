@@ -1,5 +1,10 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 set(TEST_SRC
     hipGLGetDevices.cc
+    hipGLContextSwitch.cc
     hipGraphicsGLRegisterBuffer.cc
     hipGraphicsGLRegisterImage.cc
     hipGraphicsMapResources.cc

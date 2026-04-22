@@ -1,28 +1,12 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "metadata_registry.hpp"
 #include "agent_manager.hpp"
-#include "core/debug.hpp"
+#include "logger/debug.hpp"
+
+#include "core/config.hpp"
+
 #include <algorithm>
 #include <cstdint>
 
@@ -208,8 +192,6 @@ from_json_track(const nlohmann::json& _json)
     return t;
 }
 
-#if ROCPROFSYS_USE_ROCM
-
 nlohmann::json
 to_json(const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
@@ -220,11 +202,11 @@ to_json(const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
     result["load_size"]      = static_cast<long long>(code_object.load_size);
     result["load_delta"]     = static_cast<long long>(code_object.load_delta);
     result["storage_type"]   = static_cast<int>(code_object.storage_type);
-#    if(ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     result["agent_id_handle"] = static_cast<long long>(code_object.agent_id.handle);
-#    else
+#else
     result["agent_id_handle"] = static_cast<long long>(code_object.rocp_agent.handle);
-#    endif
+#endif
     return result;
 }
 
@@ -241,11 +223,11 @@ from_json_code_object(const nlohmann::json& _json)
     co.storage_type   = static_cast<rocprofiler_code_object_storage_type_t>(
         _json["storage_type"].get<int>());
     auto handle = _json["agent_id_handle"].get<long long>();
-#    if(ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     co.agent_id.handle = handle;
-#    else
+#else
     co.rocp_agent.handle = handle;
-#    endif
+#endif
     return co;
 }
 
@@ -287,7 +269,6 @@ from_json_kernel_symbol(const nlohmann::json& _json)
     ks.accum_vgpr_count          = _json["accum_vgpr_count"].get<int>();
     return ks;
 }
-#endif
 
 nlohmann::json
 to_json(const agent& _agent)
@@ -376,7 +357,6 @@ to_json(const metadata_registry&                   _registry,
         result["strings"].push_back(str);
     }
 
-#if ROCPROFSYS_USE_ROCM
     auto           code_object_list  = _registry.get_code_object_list();
     nlohmann::json code_object_array = nlohmann::json::array();
     for(const auto& code_object : code_object_list)
@@ -392,7 +372,6 @@ to_json(const metadata_registry&                   _registry,
         kernel_symbol_array.push_back(to_json(kernel_symbol));
     }
     result["kernel_symbols"] = kernel_symbol_array;
-#endif
 
     for(const auto& agent : _agents)
     {
@@ -453,7 +432,6 @@ from_json(metadata_registry& _registry, std::vector<std::shared_ptr<agent>>& _ag
         _registry.add_string(item.template get<std::string>());
     });
 
-#if ROCPROFSYS_USE_ROCM
     fill_from_json("code_objects", [&_registry](const auto& item) {
         auto code_object = from_json_code_object(item);
         _registry.add_code_object(code_object);
@@ -463,11 +441,10 @@ from_json(metadata_registry& _registry, std::vector<std::shared_ptr<agent>>& _ag
         auto kernel_symbol = from_json_kernel_symbol(item);
         _registry.add_kernel_symbol(kernel_symbol);
     });
-#endif
 
     if(!_agents.empty())
     {
-        ROCPROFSYS_WARNING(0, "Given agents vector is not empty. Clearing it..");
+        LOG_WARNING("Given agents vector is not empty. Clearing it..");
         _agents.clear();
     }
 
@@ -637,8 +614,6 @@ metadata_registry::get_string_list() const
     return result;
 }
 
-#if ROCPROFSYS_USE_ROCM > 0
-
 void
 metadata_registry::add_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
@@ -759,21 +734,30 @@ metadata_registry::overwrite_callback_names(
             modified_ops[i] = extract_operations(i);
         }
 
-        ROCPROFSYS_CI_THROW(modified_ops.find(callback_kind) != modified_ops.end(),
-                            "Overwriting a previously overwritten entry is forbidden");
+        if(get_is_continuous_integration() &&
+           modified_ops.find(callback_kind) != modified_ops.end())
+        {
+            throw std::runtime_error(
+                "Overwriting a previously overwritten entry is forbidden");
+        }
 
-        ROCPROFSYS_CI_THROW(!modified_ops.empty() &&
-                                callback_kind >= modified_ops.begin()->first,
-                            "Category must have a larger enum value than all previously "
-                            "modified_ops categories");
+        if(get_is_continuous_integration() && !modified_ops.empty() &&
+           callback_kind >= modified_ops.begin()->first)
+        {
+            throw std::runtime_error(
+                "Category must have a larger enum value than all previously "
+                "modified_ops categories");
+        }
 
         // Overwrite desired category
         auto operation_names = extract_operations(callback_kind);
         for(const auto& [index, new_value] : category_info.second)
         {
-            ROCPROFSYS_CI_THROW(index < 0 ||
-                                    static_cast<size_t>(index) >= operation_names.size(),
-                                "Index is invalid");
+            if(get_is_continuous_integration() &&
+               (index < 0 || static_cast<size_t>(index) >= operation_names.size()))
+            {
+                throw std::runtime_error("Index is invalid");
+            }
             operation_names[index] = new_value;
         }
         modified_ops[callback_kind] = std::move(operation_names);
@@ -787,8 +771,10 @@ metadata_registry::overwrite_callback_names(
     {
         auto renaming_entry = modified_ops.find(i);
 
-        ROCPROFSYS_CI_THROW(renaming_entry == modified_ops.end(),
-                            "A category that needs to be emplaced is missing");
+        if(get_is_continuous_integration() && renaming_entry == modified_ops.end())
+        {
+            throw std::runtime_error("A category that needs to be emplaced is missing");
+        }
 
         const auto& operations_vec = renaming_entry->second;
         m_callback_tracing_info.emplace(i, category_names.at(i).data());
@@ -813,25 +799,22 @@ metadata_registry::get_callback_tracing_info() const
     return m_callback_tracing_info;
 }
 
-#endif
-
 metadata_registry::metadata_registry()
 {
-#if ROCPROFSYS_USE_ROCM > 0
     overwrite_callback_names({
-#    if(ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
         { ROCPROFILER_CALLBACK_TRACING_OMPT,
           { { ROCPROFILER_OMPT_ID_parallel_begin, "omp_parallel" },
             { ROCPROFILER_OMPT_ID_parallel_end, "omp_parallel" } } }
-#    endif
-    });
 #endif
+    });
 }
 
 bool
 metadata_registry::save_to_file(const std::string&                         filepath,
                                 const std::vector<std::shared_ptr<agent>>& _agents) const
 {
+    LOG_DEBUG("Saving metadata registry to file: {}", filepath);
     try
     {
         auto json        = to_json(*this, _agents);
@@ -840,16 +823,17 @@ metadata_registry::save_to_file(const std::string&                         filep
         std::ofstream file(filepath);
         if(!file.is_open())
         {
-            ROCPROFSYS_WARNING(1, "Error opening file for writing: %s", filepath.c_str());
+            LOG_WARNING("Failed to open file for writing: {}", filepath);
             return false;
         }
 
         file << json_string;
         file.close();
+        LOG_INFO("Metadata registry saved successfully to: {}", filepath);
         return true;
     } catch(const std::exception& e)
     {
-        ROCPROFSYS_WARNING(1, "Error saving metadata to file: %s", e.what());
+        LOG_ERROR("Exception while saving metadata to file {}: {}", filepath, e.what());
         return false;
     }
 }
@@ -858,12 +842,13 @@ bool
 metadata_registry::load_from_file(const std::string&                   filepath,
                                   std::vector<std::shared_ptr<agent>>& _agents)
 {
+    LOG_DEBUG("Loading metadata registry from file: {}", filepath);
     try
     {
         std::ifstream file(filepath);
         if(!file.is_open())
         {
-            ROCPROFSYS_WARNING(1, "Error opening file for reading: %s", filepath.c_str());
+            LOG_WARNING("Failed to open file for reading: {}", filepath);
             return false;
         }
 
@@ -872,10 +857,12 @@ metadata_registry::load_from_file(const std::string&                   filepath,
         file.close();
 
         rocprofsys::trace_cache::from_json(*this, _agents, json);
+        LOG_INFO("Metadata registry loaded successfully from: {}", filepath);
         return true;
     } catch(const std::exception& e)
     {
-        ROCPROFSYS_WARNING(1, "Error loading metadata from file: %s", e.what());
+        LOG_ERROR("Exception while loading metadata from file {}: {}", filepath,
+                  e.what());
         return false;
     }
 }

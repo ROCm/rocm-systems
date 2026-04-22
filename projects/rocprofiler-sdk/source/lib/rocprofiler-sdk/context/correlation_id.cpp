@@ -137,6 +137,16 @@ correlation_id::sub_kern_count()
 correlation_id*
 correlation_tracing_service::construct(uint32_t _init_ref_count)
 {
+    // During finalization, we cannot create correlation IDs.
+    // This can happen when HSA async threads call APIs after finalization starts.
+    // This is not an error condition - just return nullptr and let the caller handle it.
+    if(registration::get_fini_status() != 0)
+    {
+        ROCP_TRACE << "correlation_tracing_service::construct called during finalization"
+                   << " (fini_status=" << registration::get_fini_status() << "), returning nullptr";
+        return nullptr;
+    }
+
     ROCP_FATAL_IF(_init_ref_count == 0) << "must have reference count > 0";
 
     auto  _internal_id = get_unique_internal_id();

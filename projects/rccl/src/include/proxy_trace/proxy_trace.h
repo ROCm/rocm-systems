@@ -15,6 +15,7 @@
 #endif
 #include <fmt/format.h>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 namespace facebook_rccl {
 
@@ -107,6 +108,10 @@ struct ProxyTraceOp {
   ProxyOpStepStatus status{ProxyOpStepStatus::UNINITIALIZED};
   std::chrono::time_point<std::chrono::high_resolution_clock> startTs{};
   std::chrono::time_point<std::chrono::high_resolution_clock> lastUpdateTs{};
+  std::unordered_map<ProxyCounterTypes, std::chrono::time_point<std::chrono::high_resolution_clock>> timestamps{
+      {ProxyCounterTypes::POSTED, {}},
+      {ProxyCounterTypes::KERNEL_COPY_READY, {}},
+  };
   void computeStatus();
   // str the entry to a string
   std::string str();
@@ -123,11 +128,51 @@ using ProxyActiveOpIdTracker =
                        std::unordered_map<int64_t /* opCount*/, int64_t>>;
 
 class ProxyTrace {
-public:
-  ProxyTrace(int32_t rank) : myRank(rank) {}
+ public:
+  ProxyTrace(int32_t rank) : myRank(rank) {}; 
+  
+  ProxyTrace() = delete;
   ProxyTrace(const ProxyTrace &) = delete;
   ProxyTrace &operator=(const ProxyTrace &) = delete;
-  bool initialized{false};
+
+  //
+  // Public APIs called by the proxy thread and ncclCommDump().
+  // All these APIs lock the same shared mutex before executing.
+  //
+
+  void updateProxyOpCounter(
+      const ProxyTraceRecordKey& traceKey,
+      ProxyCounterTypes counter,
+      int64_t val);
+
+  void setProxyOpTimestamp(
+      const ProxyTraceRecordKey& traceKey,
+      ProxyCounterTypes counter);
+
+  void addNewProxyOp(
+      ProxyTraceRecordKey& key,
+      const ProxyTraceExtraInfo& extraInfo,
+      ProxyOpType opType,
+      int channelId,
+      int nSteps,
+      uint32_t nbytes,
+      int peerRank);
+
+  // Dump all trace for a given communicator
+  std::string dump(uint64_t commHash);
+
+  // Dump all active ops
+  std::string dump();
+
+  //
+  // Getters called by public APIs as well as unit tests.
+  // These are not thread-safe unless called by the public APIs above.
+  // 
+
+  ProxyTraceOp *getProxyTraceOpPtr(const ProxyTraceRecordKey &traceKey);
+  float getMapSizeMB() const;
+
+private:
   void checkOpCompleted(const ProxyTraceRecordKey &key);
 
   void addNewProxyTraceOpImpl(const ProxyTraceRecordKey &key,
@@ -139,21 +184,11 @@ public:
   // If the opCount is not found, create a new entry for it and return 0
   int64_t getOrCreateProxyOpId(uint64_t commHash, uint64_t opCount);
 
-  // Dump all trace for a given communicator
-  std::string dump(uint64_t commHash);
-
-  // Dump all active ops
-  std::string dump();
-
   // check if an active send/recv operation exists for a given commHash:opCount
   bool checkActiveOpExist(uint64_t commHash, uint64_t opCount,
                           uint32_t proxyOpId) const;
 
-  ProxyTraceOp *getProxyTraceOpPtr(const ProxyTraceRecordKey &traceKey);
-  float getMapSizeMB() const;
-  void resetAll();
-
-private:
+  mutable std::mutex mutex_;
   int myRank{-1};
 
   // Current active send/recv operations.
@@ -170,15 +205,4 @@ private:
   std::deque<std::pair<std::string, std::string>> finishedOps;
 };
 struct ncclProxySubArgs;
-void proxyTraceInit(std::unique_ptr<ProxyTrace> &proxyTrace,
-                            int32_t rank, uint64_t commHash);
-
-void updateProxyOpCounter(std::unique_ptr<ProxyTrace> &proxyTraceObj,
-                                  const ProxyTraceRecordKey &traceKey,
-                                  ProxyCounterTypes counter, int64_t val);
-
-void addNewProxyOp(
-    std::unique_ptr<ProxyTrace> &proxyTraceObj, ProxyTraceRecordKey &key,
-    const ProxyTraceExtraInfo &extraInfo, ProxyOpType opType, int channelId,
-    int nSteps, uint32_t nbytes, int peerRank);
 } // namespace facebook_rccl

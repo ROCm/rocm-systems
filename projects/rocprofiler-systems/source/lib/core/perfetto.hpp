@@ -1,29 +1,12 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "categories.hpp"
 #include "common.hpp"
+
+#include "config.hpp"
 
 #if defined(TIMEMORY_USE_PERFETTO)
 #    include <timemory/components/perfetto/backends.hpp>
@@ -31,8 +14,6 @@
 #    include <perfetto.h>
 PERFETTO_DEFINE_CATEGORIES(ROCPROFSYS_PERFETTO_CATEGORIES);
 #endif
-
-#include "debug.hpp"
 
 #include <timemory/process/process.hpp>
 
@@ -43,6 +24,8 @@ PERFETTO_DEFINE_CATEGORIES(ROCPROFSYS_PERFETTO_CATEGORIES);
 #include <utility>
 #include <vector>
 
+#include "logger/debug.hpp"
+
 namespace rocprofsys
 {
 std::unique_ptr<::perfetto::TracingSession>& get_perfetto_session(
@@ -51,9 +34,10 @@ std::unique_ptr<::perfetto::TracingSession>& get_perfetto_session(
 template <typename Tp>
 struct perfetto_counter_track
 {
-    using track_map_t = std::map<uint32_t, std::vector<::perfetto::CounterTrack>>;
-    using name_map_t  = std::map<uint32_t, std::vector<std::unique_ptr<std::string>>>;
-    using data_t      = std::pair<name_map_t, track_map_t>;
+    using category_type = Tp;
+    using track_map_t   = std::map<uint32_t, std::vector<::perfetto::CounterTrack>>;
+    using name_map_t    = std::map<uint32_t, std::vector<std::unique_ptr<std::string>>>;
+    using data_t        = std::pair<name_map_t, track_map_t>;
 
     static auto   init() { (void) get_data(); }
     static auto   exists(size_t _idx, int64_t _n = -1);
@@ -109,9 +93,15 @@ perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
     }
     auto        _index     = _track_data.size();
     auto&       _name      = _name_data.emplace_back(std::make_unique<std::string>(_v));
-    const char* _unit_name = (_units && strlen(_units) > 0) ? _units : nullptr;
+    const char* _name_cstr = _name->c_str();
+    const char* _unit_name = nullptr;
+    if(_units && strlen(_units) > 0)
+    {
+        auto& _unit_str = _name_data.emplace_back(std::make_unique<std::string>(_units));
+        _unit_name      = _unit_str->c_str();
+    }
     _track_data.emplace_back(
-        ::perfetto::CounterTrack{ ::perfetto::DynamicString{ _name->c_str() } }
+        ::perfetto::CounterTrack{ ::perfetto::DynamicString{ _name_cstr } }
             .set_unit_name(_unit_name)
             .set_category(_category)
             .set_unit_multiplier(_mult)
@@ -144,12 +134,11 @@ perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
                 std::stringstream _css{};
                 for(auto&& eitr : _curr)
                     _css << " " << std::hex << std::setw(12) << std::left << eitr;
-                ROCPROFSYS_THROW("perfetto_counter_track emplace method for '%s' (%p) "
-                                 "invalidated C-string '%s' (%p).\n%8s: %s\n%8s: %s\n",
-                                 _v.c_str(), (void*) _name->c_str(),
-                                 std::get<0>(itr).c_str(),
-                                 (void*) std::get<0>(itr).c_str(), "previous",
-                                 _pss.str().c_str(), "current", _css.str().c_str());
+                throw std::runtime_error(fmt::format(
+                    "perfetto_counter_track emplace method for '{}' ({:p}) "
+                    "invalidated C-string '{}' ({p}).\nprevious: {}\ncurrent: {}\n",
+                    _v, (void*) _name->c_str(), std::get<0>(itr),
+                    (void*) std::get<0>(itr).c_str(), _pss.str(), _css.str()));
             }
         }
     }

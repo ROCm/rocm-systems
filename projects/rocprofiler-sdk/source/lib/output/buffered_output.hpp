@@ -24,6 +24,7 @@
 
 #include "counter_info.hpp"
 #include "generator.hpp"
+#include "kfd_info.hpp"
 #include "pc_sample_transform.hpp"
 #include "statistics.hpp"
 #include "stream_info.hpp"
@@ -191,6 +192,7 @@ using scratch_memory_buffered_output_t =
 using memory_allocation_buffered_output_t =
     buffered_output<tool_buffer_tracing_memory_allocation_ext_record_t,
                     domain_type::MEMORY_ALLOCATION>;
+using kfd_buffered_output_t = buffered_output<tool_buffer_tracing_kfd_record_t, domain_type::KFD>;
 using counter_records_buffered_output_t =
     ::rocprofiler::tool::buffered_output<rocprofiler::tool::serialized_counter_record_t,
                                          domain_type::COUNTER_VALUES>;

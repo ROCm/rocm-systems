@@ -1,30 +1,10 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/components/cpu_freq.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/defines.hpp"
 #include "core/perfetto.hpp"
 #include "core/timemory.hpp"
@@ -35,6 +15,8 @@
 #include <timemory/units.hpp>
 #include <timemory/utility/procfs/cpuinfo.hpp>
 #include <timemory/utility/type_list.hpp>
+
+#include "logger/debug.hpp"
 
 namespace cpuinfo = tim::procfs::cpuinfo;
 
@@ -98,20 +80,21 @@ cpu_freq::configure()
         {
             if(_v.find_first_not_of("0123456789-") != std::string::npos)
             {
-                ROCPROFSYS_VERBOSE_F(
-                    0,
-                    "Invalid CPU specification. Only numerical values (e.g., 0) or "
-                    "ranges (e.g., 0-7) are permitted. Ignoring %s...",
-                    _v.c_str());
+                LOG_DEBUG("Invalid CPU specification. Only numerical values (e.g., 0) or "
+                          "ranges (e.g., 0-7) are permitted. Ignoring {}...",
+                          _v.c_str());
                 continue;
             }
             if(_v.find('-') != std::string::npos)
             {
                 auto _vv = tim::delimit(_v, "-");
-                ROCPROFSYS_CONDITIONAL_THROW(
-                    _vv.size() != 2,
-                    "Invalid CPU range specification: %s. Required format N-M, e.g. 0-4",
-                    _v.c_str());
+                if(_vv.size() != 2)
+                {
+                    throw std::runtime_error(
+                        fmt::format("Invalid CPU range specification: {}. Required "
+                                    "format N-M, e.g. 0-4",
+                                    _v));
+                }
                 for(size_t i = std::stoull(_vv.at(0)); i <= std::stoull(_vv.at(1)); ++i)
                     _enabled_freqs.emplace(i);
             }
@@ -137,21 +120,24 @@ cpu_freq::configure()
             _enabled_freqs.emplace(itr);
         else
         {
-            ROCPROFSYS_VERBOSE(
-                0, "[cpu_freq::config] Warning! Removing invalid cpu %zu...\n", itr);
+            LOG_DEBUG("[cpu_freq::config] Removing invalid cpu {}...", itr);
         }
     }
 
     if(!cpuinfo::freq{})
     {
-        ROCPROFSYS_VERBOSE(0, "[cpu_freq::config] Warning! CPU frequencies are disabled "
-                              ":: unable to open /proc/cpuinfo");
+        LOG_WARNING("[cpu_freq::config] CPU frequencies are disabled "
+                    ":: unable to open /proc/cpuinfo");
         _enabled_freqs.clear();
     }
 
-    ROCPROFSYS_CI_FAIL(!cpuinfo::freq{},
-                       "[cpu_freq::config] CPU frequencies are disabled "
-                       ":: unable to open /proc/cpuinfo");
+    if(get_is_continuous_integration() && !cpuinfo::freq{})
+    {
+        LOG_CRITICAL("[cpu_freq::config] CPU frequencies are disabled :: unable to open "
+                     "/proc/cpuinfo");
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        std::abort();
+    }
 
     get_enabled_cpus() = _enabled_freqs;
 }

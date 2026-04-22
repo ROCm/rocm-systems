@@ -92,8 +92,14 @@ add_subdirectory(code-object-multi-threaded)
 # rocpd validation tests
 add_subdirectory(rocpd)
 
+# rocattach validation tests
+add_subdirectory(rocattach)
+
 # rocprofv3 validation tests
 add_subdirectory(rocprofv3)
+
+# late-start tracing validation tests
+add_subdirectory(late-start-tracing)
 
 # python bindings
 add_subdirectory(python-bindings)

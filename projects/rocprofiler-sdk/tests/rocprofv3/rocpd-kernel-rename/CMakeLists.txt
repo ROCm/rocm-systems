@@ -121,6 +121,7 @@ rocprofiler_add_integration_validate_test(
          --generated-no-rename-csv-input
          ${CMAKE_CURRENT_BINARY_DIR}/generated-no-rename-csv/out_kernel_trace.csv
     TIMEOUT 120
-    LABELS "integration-tests;rocpd" PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-rename-csv-generation)

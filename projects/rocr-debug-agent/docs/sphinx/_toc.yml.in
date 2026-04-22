@@ -1,0 +1,15 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+root: index
+subtrees:
+  - caption: Install
+    entries:
+    - file: install/installation
+      title: Installation
+  - caption: How to
+    entries:
+    - file: how-to/user-guide
+      title: User guide
+  - caption: About
+    entries:
+    - file: license

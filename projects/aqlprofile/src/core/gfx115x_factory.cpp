@@ -48,7 +48,16 @@ Gfx115xFactory::Gfx115xFactory(const AgentInfo* agent_info)
         block_info->instance_count = 4;
         break;
       case Gl2cCounterBlockId:
-        block_info->instance_count = 4;
+        block_info->instance_count = 8;
+        break;
+      case TcpCounterBlockId:
+        block_info->instance_count = 2;
+        break;
+      case TaCounterBlockId:
+        block_info->instance_count = 2;
+        break;
+      case TdCounterBlockId:
+        block_info->instance_count = 2;
         break;
       default:
         break;

@@ -1,29 +1,9 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/runtime.hpp"
 #include "api.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/defines.hpp"
 #include "core/utility.hpp"
 #include "library/thread_data.hpp"
@@ -42,6 +22,8 @@
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/declaration.hpp>
 #include <timemory/utility/signals.hpp>
+
+#include "logger/debug.hpp"
 
 #include <array>
 #include <csignal>
@@ -192,8 +174,7 @@ setup_gotchas()
     if(_initialized) return;
     _initialized = true;
 
-    ROCPROFSYS_BASIC_DEBUG(
-        "Configuring gotcha wrapper around fork, MPI_Init, and MPI_Init_thread\n");
+    LOG_DEBUG("Configuring gotcha wrapper around fork, MPI_Init, and MPI_Init_thread");
 
     component::mpi_gotcha::configure();
     component::exit_gotcha::configure();
@@ -209,7 +190,7 @@ get_main_bundle()
         auto _self = RUSAGE_SELF;
         std::swap(_self, tim::get_rusage_type());
         auto _tmp = std::make_unique<main_bundle_t>(
-            JOIN('/', "rocprofsys/process", process::get_id()),
+            fmt::format("rocprofsys/process/{}", process::get_id()),
             quirk::config<quirk::auto_start>{});
         std::swap(_self, tim::get_rusage_type());
         return _tmp;
@@ -221,7 +202,7 @@ std::unique_ptr<init_bundle_t>&
 get_init_bundle()
 {
     static auto _v = std::make_unique<init_bundle_t>(
-        JOIN('/', "rocprofsys/process", process::get_id()));
+        fmt::format("rocprofsys/process/{}", process::get_id()));
     return _v;
 }
 
@@ -230,7 +211,7 @@ get_preinit_bundle()
 {
     static auto _v =
         (setup_gotchas(), std::make_unique<preinit_bundle_t>(
-                              JOIN('/', "rocprofsys/process", process::get_id()),
+                              fmt::format("rocprofsys/process/{}", process::get_id()),
                               quirk::config<quirk::auto_start>{}));
     return _v;
 }

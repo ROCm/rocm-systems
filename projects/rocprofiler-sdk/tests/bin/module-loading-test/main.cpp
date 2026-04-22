@@ -223,8 +223,8 @@ main()
 
     std::cout << "Found " << num_gpus << " GPU(s)\n";
 
-    int num_threads =
-        std::thread::hardware_concurrency();  // More threads than GPUs to increase contention
+    // Cap at 64 threads to avoid overwhelming the system while still testing concurrency
+    int num_threads     = std::min(std::thread::hardware_concurrency(), 64u);
     int threads_per_gpu = num_threads / num_gpus;
     std::cout << "Launching " << num_threads << " threads\n";
 

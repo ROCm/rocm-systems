@@ -151,6 +151,43 @@ def test_otf2_data(
         ), f"{otf2_category} ({len(_otf2_data)}):\n\t{_otf2_data}\n{json_category} ({len(_json_data)}):\n\t{_json_data}"
 
 
+def test_otf2_system_tree_node(otf2_data):
+    """
+    Validate that each system tree node has class_name with AMD in it, and has ACCELERATOR_DEVICE domain
+    Refer to https://github.com/ROCm/rocm-systems/pull/2366 for history
+    """
+    import otf2
+
+    # Build map of system_tree_node to system_tree_node_domain
+    unique_nodes = otf2_data.drop_duplicates(subset=["system_tree_node"])
+    node_name_and_domain_map = [
+        {
+            "name": row["system_tree_node"].name,
+            "class_name": row["system_tree_node"].class_name,
+            "domain": row["system_tree_node_domain"],
+        }
+        for _, row in unique_nodes.iterrows()
+    ]
+    print("\n")
+
+    # Now check the system_tree_node_domain is correctly set to ACCELERATOR_DEVICE
+    count = 0
+    for node in node_name_and_domain_map:
+        if "AMD" in node["class_name"]:
+            if node["domain"] == otf2.SystemTreeDomain.ACCELERATOR_DEVICE:
+                print(
+                    f"MATCHED - SystemTreeNode {node['name']} with class {node['class_name']} had system_tree_node_domain: {node['domain']}"
+                )
+                count += 1
+            else:
+                assert (
+                    node["domain"] == otf2.SystemTreeDomain.ACCELERATOR_DEVICE
+                ), f"SystemTreeNode {node['name']} with class {node['class_name']} validation failed: domain is {node['domain']}, expected 'ACCELERATOR_DEVICE'"
+
+    # Each OTF2 file should have at least 1 node with SystemTreeNodeDomain == ACCELERATOR_DEVICE
+    assert count > 0, f"No ACCELERATOR_DEVICE nodes found in OTF2 file\n"
+
+
 def test_rocpd_data(
     rocpd_data,
     json_data,
@@ -253,8 +290,8 @@ def test_rocpd_data(
 def _perform_time_sanity_checks(data):
     """Helper function to perform time sanity checks on data."""
     columns = data[0].keys()
-    start_columns = [c for c in columns if "start" in c.lower()]
-    end_columns = [c for c in columns if "end" in c.lower()]
+    start_columns = [c for c in columns if "start" in c.lower() and "time" in c.lower()]
+    end_columns = [c for c in columns if "end" in c.lower() and "time" in c.lower()]
 
     if not start_columns or not end_columns:
         return None, None
@@ -377,6 +414,7 @@ def test_csv_data(
         file_category = [category for category in categories if category in filename]
         assert len(file_category) > 0, f"{filename} is not a valid csv filename"
         category = file_category[0]
+
         if category == "counter_collection":
             _js_data = json_data["rocprofiler-sdk-tool"]["callback_records"][category]
         elif category == "agent":
@@ -406,6 +444,27 @@ def test_csv_data(
                             and string_records[entry["operation"]] not in exclude_ops
                         ):
                             _js_data.append(entry)
+                elif key == "kfd":
+                    kfd_records = json_data["rocprofiler-sdk-tool"]["buffer_records"][
+                        "kfd"
+                    ]
+                    for entry in kfd_records:
+                        # for instantaneous records, add start_timestamp/end_timestamp to the json data
+                        if "timestamp" in entry:
+                            entry["start_timestamp"] = entry["timestamp"]
+                            entry["end_timestamp"] = entry["timestamp"]
+
+                        # report pid as thread_id to match CSV
+                        entry["thread_id"] = entry["pid"]
+
+                        # report 0 correlation ID
+                        entry["correlation_id"] = {
+                            "internal": 0,
+                            "external": 0,
+                            "ancestor": 0,
+                        }
+
+                        _js_data.append(entry)
                 else:
                     if key.endswith("_api"):
                         _js_data.extend(value)
@@ -428,12 +487,215 @@ def test_csv_data(
         if None in (csv_start_col, json_start_col, csv_end_col, json_end_col):
             continue
 
+        # Helper to get correlation_id for tiebreaking when timestamps are identical
+        def get_csv_corr_id(x):
+            return int(x.get("Correlation_Id", 0))
+
+        def get_json_corr_id(x):
+            corr = x.get("correlation_id", {})
+            if isinstance(corr, dict):
+                return int(corr.get("internal", 0))
+            return int(corr) if corr else 0
+
         _csv_data_sorted = sorted(
-            _csv_data, key=lambda x: (int(x[csv_start_col]), int(x[csv_end_col]))
+            _csv_data,
+            key=lambda x: (
+                int(x[csv_start_col]),
+                int(x[csv_end_col]),
+                get_csv_corr_id(x),
+            ),
         )
         _js_data_sorted = sorted(
-            _js_data, key=lambda x: (int(x[json_start_col]), int(x[json_end_col]))
+            _js_data,
+            key=lambda x: (
+                int(x[json_start_col]),
+                int(x[json_end_col]),
+                get_json_corr_id(x),
+            ),
         )
 
         for a, b in zip(_csv_data_sorted, _js_data_sorted):
             _perform_csv_json_match(a, b, keys_mapping[category], json_data)
+
+
+def test_summary_region_category_filtering(
+    summary_dir, expected_categories=None, allow_none=False
+):
+    """
+    Test that summary output contains ONLY the expected categories.
+
+    Args:
+        summary_dir: Path to directory containing summary CSV files
+        expected_categories: List of category names that should be present (e.g., ['kernel', 'hip'])
+        allow_none: If True, allows no region summaries (for --region-categories NONE test)
+    """
+    import os
+    import glob
+
+    if not os.path.exists(summary_dir):
+        raise FileNotFoundError(f"Summary directory not found: {summary_dir}")
+
+    # Get all CSV files
+    csv_files = glob.glob(os.path.join(summary_dir, "*.csv"))
+    basenames = [os.path.basename(f) for f in csv_files]
+
+    assert len(basenames) > 0, f"No summary files found in {summary_dir}"
+
+    print(f"\nFound {len(basenames)} summary files in {summary_dir}:")
+    for name in sorted(basenames):
+        print(f"  - {name}")
+
+    # For NONE test: ensure no region-based summaries are generated
+    if allow_none:
+        # Region summaries have filenames like "rocm_hip_*.csv", "rocm_hsa_*.csv"
+        region_files = [f for f in basenames if f.lower().startswith("rocm_")]
+        assert len(region_files) == 0, (
+            f"--region-categories NONE should not generate region summaries, "
+            f"but found: {region_files}"
+        )
+
+    # Check that expected categories are present and ONLY those categories exist
+    if expected_categories:
+        # 1. Check all expected categories are present
+        for category in expected_categories:
+            category_lower = category.lower()
+            matching_files = [f for f in basenames if category_lower in f.lower()]
+            assert len(matching_files) > 0, (
+                f"Expected category '{category}' not found. "
+                f"No files matching '{category_lower}' in {basenames}"
+            )
+
+        # 2. Check no unexpected categories exist
+        for filename in basenames:
+            filename_lower = filename.lower()
+            matches_expected = any(
+                cat.lower() in filename_lower for cat in expected_categories
+            )
+            assert matches_expected, (
+                f"Unexpected file '{filename}' found. "
+                f"Does not match any expected category: {expected_categories}"
+            )
+
+
+def test_perfetto_arg_annotations(pftrace_reader):
+    """
+    Test that function argument annotations are available in perfetto with --annotate-args.
+    """
+    # Query for API function argument annotations from --annotate-args
+    # Filter for hip_api/hsa_api/marker_api (KFD/kernel have args from other sources)
+    # Exclude metadata fields (always present, even without --annotate-args)
+    query = """
+    SELECT
+        slice.name as slice_name,
+        slice.category as slice_category,
+        slice.id as slice_id,
+        args.key as arg_name,
+        args.string_value as arg_value
+    FROM slice
+    JOIN args ON slice.arg_set_id = args.arg_set_id
+    WHERE args.key LIKE 'debug.%'
+      AND slice.category IN ('hip_api', 'hsa_api', 'marker_api')
+      AND args.key NOT IN (
+        'debug.begin_ns', 'debug.end_ns', 'debug.delta_ns',
+        'debug.tid', 'debug.kind', 'debug.operation',
+        'debug.corr_id', 'debug.ancestor_id'
+      )
+    """
+
+    result = pftrace_reader.query_tp(query)
+
+    # Function argument annotations must exist - perfetto was generated with --annotate-args
+    assert (
+        not result.empty
+    ), "Expected function argument annotations not found - --annotate-args may be broken. "
+
+
+def test_perfetto_event_id_annotations(pftrace_reader):
+    """
+    Test that hipEvent operations have properly annotated event IDs.
+    """
+    # Query for all hipEvent operations with their event annotations
+    event_ops_query = """
+    SELECT
+        slice.name as operation,
+        args.string_value as event_id,
+        slice.ts as timestamp
+    FROM slice
+    JOIN args ON slice.arg_set_id = args.arg_set_id
+    WHERE slice.name IN ('hipEventCreate', 'hipEventRecord', 'hipEventDestroy')
+      AND args.key = 'debug.event'
+    ORDER BY timestamp
+    """
+
+    event_ops = pftrace_reader.query_tp(event_ops_query)
+
+    # Validate we have event data
+    assert not event_ops.empty, (
+        "No hipEvent operations found with event ID annotations. "
+        "Ensure --annotate-args is enabled and the test app uses HIP events."
+    )
+
+    # Group by operation type
+    creates = event_ops[event_ops["operation"] == "hipEventCreate"]
+    records = event_ops[event_ops["operation"] == "hipEventRecord"]
+    destroys = event_ops[event_ops["operation"] == "hipEventDestroy"]
+
+    # Get unique event IDs for each operation
+    created_ids = set(creates["event_id"].unique())
+    recorded_ids = set(records["event_id"].unique())
+    destroyed_ids = set(destroys["event_id"].unique())
+
+    # Validate counts
+    num_creates = len(creates)
+    num_records = len(records)
+    num_destroys = len(destroys)
+    num_unique_created = len(created_ids)
+    num_unique_recorded = len(recorded_ids)
+    num_unique_destroyed = len(destroyed_ids)
+
+    assert num_creates > 0, "No hipEventCreate operations found"
+    assert num_records > 0, "No hipEventRecord operations found"
+    assert num_destroys > 0, "No hipEventDestroy operations found"
+
+    # hipEventRecord and hipEventDestroy receive event by value, so IDs should match
+    assert recorded_ids == destroyed_ids, (
+        f"Mismatch between recorded and destroyed event IDs.\n"
+        f"Recorded but not destroyed: {recorded_ids - destroyed_ids}\n"
+        f"Destroyed but not recorded: {destroyed_ids - recorded_ids}"
+    )
+
+    # NOTE: hipEventCreate annotations will show pointer addresses captured on API entry before being initialized, not event handles.
+    # Therefore, we cannot validate created_ids == recorded_ids.
+
+    # Each event should be created exactly once
+    create_counts = creates["event_id"].value_counts()
+    multiple_creates = create_counts[create_counts > 1]
+    assert multiple_creates.empty, (
+        f"Found {len(multiple_creates)} event(s) created multiple times: "
+        f"{dict(multiple_creates)}"
+    )
+
+    # Each event should be destroyed exactly once
+    destroy_counts = destroys["event_id"].value_counts()
+    multiple_destroys = destroy_counts[destroy_counts > 1]
+    assert multiple_destroys.empty, (
+        f"Found {len(multiple_destroys)} event(s) destroyed multiple times: "
+        f"{dict(multiple_destroys)}"
+    )
+
+    # Validate expected counts based on test parameters
+    expected_creates = 4  # 2 threads × 2 events per thread
+    expected_records = 2000  # 2 threads × 2 events × 500 iterations
+    expected_destroys = 4  # 2 threads × 2 events per thread
+
+    assert (
+        num_creates == expected_creates
+    ), f"Expected {expected_creates} hipEventCreate calls but found {num_creates}"
+
+    assert (
+        num_records == expected_records
+    ), f"Expected {expected_records} hipEventRecord calls but found {num_records}"
+
+    assert (
+        num_destroys == expected_destroys
+    ), f"Expected {expected_destroys} hipEventDestroy calls but found {num_destroys}"

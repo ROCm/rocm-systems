@@ -1,29 +1,18 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
 #pragma clang diagnostic ignored "-Wunused-parameter"
-#define SIZE (1024 * 1024)
-static size_t Nbytes = SIZE * sizeof(int);
+constexpr unsigned int SIZE = 1024 * 1024;
+constexpr size_t Nbytes = SIZE * sizeof(int);
+constexpr int ThreadsPerBlock = 256;
+constexpr int TotalBlocks = (SIZE % 256 == 0) ? (SIZE / 256) : ((SIZE / 256) + 1);
 
 __device__ int globalOut[SIZE];
 
@@ -82,7 +71,7 @@ static void CpuCallback(void* args) {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamBeginCapture_with_hipGraphAddHostNode") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_with_hipGraphAddHostNode) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t cpuGraphNode;
@@ -139,7 +128,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_with_hipGraphAddHostNode") {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
+HIP_TEST_CASE(Unit_hipStreamEndCapture_later_and_add_a_node_inbetween) {
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyD2H_C;
   hipStream_t stream;
@@ -150,7 +139,7 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
-  HipTest::vectorADD<int><<<1, 1, 0, stream>>>(A_d, B_d, C_d, SIZE);
+  HipTest::vectorADD<int><<<TotalBlocks, ThreadsPerBlock, 0, stream>>>(A_d, B_d, C_d, SIZE);
 
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
   hipGraph_t capGraph{nullptr};
@@ -485,7 +474,7 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
+HIP_TEST_CASE(Unit_hipStreamEndCapture_first_and_add_a_node_later) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyD2H_C;
@@ -497,7 +486,7 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
-  HipTest::vectorSUB<int><<<1, 1, 0, stream>>>(A_d, B_d, C_d, SIZE);
+  HipTest::vectorSUB<int><<<TotalBlocks, ThreadsPerBlock, 0, stream>>>(A_d, B_d, C_d, SIZE);
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
 
   size_t numN{};
@@ -783,7 +772,7 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamEndCapture_first_and_add_other_graph_node_later") {
+HIP_TEST_CASE(Unit_hipStreamEndCapture_first_and_add_other_graph_node_later) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyH2D_A, memcpyH2D_B, memcpyD2H_AC, memcpyH2D_C;
@@ -798,7 +787,7 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_other_graph_node_later") {
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(A_d1, A_h1, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(B_d1, B_h1, Nbytes, hipMemcpyHostToDevice, stream));
-  HipTest::vectorADD<int><<<1, 1, 0, stream>>>(A_d1, B_d1, C_d1, SIZE);
+  HipTest::vectorADD<int><<<TotalBlocks, ThreadsPerBlock, 0, stream>>>(A_d1, B_d1, C_d1, SIZE);
   HIP_CHECK(hipMemcpyAsync(C_h1, C_d1, Nbytes, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
 
@@ -851,7 +840,7 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_other_graph_node_later") {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamEndCapture_later_and_addEmptyNode") {
+HIP_TEST_CASE(Unit_hipStreamEndCapture_later_and_addEmptyNode) {
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyD2H_C;
   hipStream_t stream;
@@ -862,7 +851,7 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_addEmptyNode") {
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
-  HipTest::vectorSUB<int><<<1, 1, 0, stream>>>(A_d, B_d, C_d, SIZE);
+  HipTest::vectorSUB<int><<<TotalBlocks, ThreadsPerBlock, 0, stream>>>(A_d, B_d, C_d, SIZE);
 
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
   hipGraph_t capGraph{nullptr};

@@ -41,8 +41,13 @@
 
 #include "core/commandbuffermgr.hpp"
 
+#ifdef _WIN32
+#define CONSTRUCTOR_API
+#define DESTRUCTOR_API
+#else
 #define CONSTRUCTOR_API __attribute__((constructor))
 #define DESTRUCTOR_API __attribute__((destructor))
+#endif
 #define ERR_CHECK(cond, err, msg) \
   {                               \
     if (cond) {                   \
@@ -600,6 +605,7 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
     const bool is_concurrent = pm4_factory->IsConcurrent();
     const uint32_t xcc_num = pm4_factory->GetXccNumber();
     const uint32_t se_number = pm4_factory->GetShaderEnginesNumber() / xcc_num;
+    const uint32_t sa_number = pm4_factory->GetShaderArraysNumber();
 
     if (profile->type == HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC) {
       uint64_t* samples = reinterpret_cast<uint64_t*>(profile->output_buffer.ptr);
@@ -648,10 +654,8 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
           if (pm4_factory->GetBlockInfo(p)->attr & CounterBlockSeAttr)
             block_samples_count *= se_number;
           if (pm4_factory->GetBlockInfo(p)->attr & CounterBlockSaAttr)
-            block_samples_count *= 2;
+            block_samples_count *= sa_number;
           if (pm4_factory->GetBlockInfo(p)->attr & CounterBlockWgpAttr)
-            block_samples_count *= pm4_factory->GetNumWGPs();
-          if (pm4_factory->GetBlockInfo(p)->attr & CounterBlockSqAttr && pm4_factory->IsGFX11())
             block_samples_count *= pm4_factory->GetNumWGPs();
 
           for (uint32_t blk = 0; blk < block_samples_count; ++blk) {
@@ -816,3 +820,20 @@ PUBLIC_API hsa_status_t hsa_ven_amd_aqlprofile_att_marker(
 }
 
 }  // extern "C"
+
+#ifdef _WIN32
+#include <windows.h>
+extern "C" BOOL WINAPI DllMain(HINSTANCE /*hinstDLL*/, DWORD fdwReason, LPVOID /*lpvReserved*/) {
+  switch (fdwReason) {
+    case DLL_PROCESS_ATTACH:
+      aql_profile::constructor();
+      break;
+    case DLL_PROCESS_DETACH:
+      aql_profile::destructor();
+      break;
+    default:
+      break;
+  }
+  return TRUE;
+}
+#endif

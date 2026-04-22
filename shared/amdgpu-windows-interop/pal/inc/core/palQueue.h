@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -196,19 +196,15 @@ struct QueueCreateInfo
     };
 
     uint32 numReservedCu;           ///< The number of reserved compute units for RT CU queue
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 914
-    uint32 persistentCeRamOffset;   ///< Byte offset to the beginning of the region of CE RAM which this Queue should
-                                    ///  preserve across consecutive submissions.  Must be a multiple of 32.  It is an
-                                    ///  error to specify a nonzero value here if the the Device does not support
-                                    ///  @ref supportPersistentCeRam for the Engine this Queue will attach to.
-    uint32 persistentCeRamSize;     ///< Amount of CE RAM space which this Queue should preserve across consecutive
-                                    ///  submissions.  Units are in DWORDs, and this must be a multiple of 8.  It is an
-                                    ///  error to specify a nonzero value here if the the Device does not support
-                                    ///  @ref supportPersistentCeRam for the Engine this Queue will attach to.
-#endif
-
     uintptr_t aqlPacketList;        ///< Location of the HIP runtime's info about this queue
+};
+
+/// Contains general information about a living IQueue which the client might want to query.
+///
+/// @note Anything added here must be constant for the life of the queue.
+struct QueueProperties
+{
+    uint32 deviceIndex; ///< This queue is owned by the device at this position in the platform's IDevice array.
 };
 
 /// Specifies the portion of @ref SubmitInfo that is specific to each sub-queue in a multi-queue object (@see
@@ -305,7 +301,8 @@ struct PresentDirectInfo
             uint32 notifyOnly          :  1; ///< Indicates that a present occurred outside of PAL. PAL must not
                                              ///  execute a present if this is true but may update internal
                                              ///  tracking state.
-            uint32 reserved            : 28; ///< Reserved for future use.
+            uint32 frameIdValid        :  1; ///< Indicate frameId value is valid
+            uint32 reserved            : 27; ///< Reserved for future use.
         };
         uint32 u32All;       ///< Flags packed as 32-bit uint.
     } flags;                 ///< Present flags.
@@ -331,6 +328,8 @@ struct PresentDirectInfo
         IGpuMemory*    pDstTypedBuffer; ///< The typed buffer to be presented.  If null, the present will not occur
                                         ///  but PAL may still call into the OS on certain platforms that expect it.
     };
+
+    uint64               frameId;       ///< The frameId will be linearly incremented by the UMD at present time
 
 };
 
@@ -365,6 +364,10 @@ struct PresentSwapChainInfo
                                 ///  presentation has no associated presentId. A non-zero presentId must be greater
                                 ///  than any non-zero presentId passed previously by the application for the same
                                 ///  swapchain.
+    uint64  frameId;            ///< The frameId will be incremented by the UMD at present time. Only implemented on
+                                ///  WsiPlatform::Win32. XGL/OGLP must fall back to WsiPlatform::Win32 if frameId is
+                                ///  required, otherwise DXXP will update frameId for DXGI presents.
+
     union
     {
         struct
@@ -380,7 +383,8 @@ struct PresentSwapChainInfo
             uint32 turboSyncEnabled     :  1; ///< Whether TurboSync is enabled.
             uint32 syncIntervalOverride :  1; ///< Override default syncInterval with the value in syncInterval
                                               ///  Supported only on Windows wsiPlatforms.
-            uint32 reserved             : 28; ///< Reserved for future use.
+            uint32 frameIdValid         :  1; ///< Indicates that frameId is valid.
+            uint32 reserved             : 27; ///< Reserved for future use.
         };
         uint32 u32All; ///< Flags packed as 32-bit uint.
     } flags;           ///< PresentSwapChainInfo flags.
@@ -456,6 +460,13 @@ struct KernelContextInfo
 class IQueue : public IDestroyable
 {
 public:
+    /// Gets this queue's QueueProperties constants. The returned reference is guaranteed to:
+    ///   1. Be valid until this queue is destroyed.
+    ///   2. Refer to the same address on every call to this queue.
+    ///
+    /// @returns A reference to this queue's QueueProperties.
+    virtual const QueueProperties& Properties() const = 0;
+
     /// Submits a group of root command buffers for execution on this queue.
     ///
     /// @param [in] submitInfo Specifies all command buffers to execute along with other residency and synchronization

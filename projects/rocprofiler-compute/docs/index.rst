@@ -1,6 +1,6 @@
 .. meta::
    :description: ROCm Compute Profiler documentation and reference
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, AMD
+   :keywords: Omniperf, ROCm, profiler, tool, Instinct, GPUs, accelerator, AMD
 
 ***********************************
 ROCm Compute Profiler documentation
@@ -28,6 +28,8 @@ ROCm Compute Profiler is open source and hosted at `<https://github.com/ROCm/roc
 
       * :doc:`Installation and deployment <install/core-install>`
 
+      * :doc:`Quickstart <install/quickstart>`
+
    .. grid-item::
 
 Use the following topics to learn more about the advantages of ROCm Compute Profiler in your
@@ -41,8 +43,11 @@ in practice.
 
       * :doc:`how-to/use`
 
-      * :doc:`how-to/profile/mode`
+      * :doc:`how-to/pc_sampling`
 
+      * :doc:`how-to/live_attach_detach`
+
+      * :doc:`how-to/profile/mode`
       * :doc:`how-to/analyze/mode`
 
         * :doc:`how-to/analyze/cli`
@@ -55,15 +60,35 @@ in practice.
 
       * :doc:`conceptual/performance-model`
 
-        * :doc:`conceptual/compute-unit`
+        * :doc:`conceptual/cdna/cdna-performance-model`
 
-        * :doc:`conceptual/l2-cache`
+          * :doc:`conceptual/cdna/system-speed-of-light`
 
-        * :doc:`conceptual/shader-engine`
+          * :doc:`conceptual/cdna/compute-unit`
 
-        * :doc:`conceptual/command-processor`
+          * :doc:`conceptual/cdna/l2-cache`
 
-        * :doc:`conceptual/system-speed-of-light`
+          * :doc:`conceptual/cdna/shader-engine`
+
+          * :doc:`conceptual/cdna/command-processor`
+
+        * :doc:`conceptual/rdna/rdna-performance-model`
+
+          * :doc:`conceptual/rdna/system-speed-of-light`
+
+          * :doc:`conceptual/rdna/wgp`
+
+          * :doc:`conceptual/rdna/tcp-cache`
+
+          * :doc:`conceptual/rdna/gl1-cache`
+
+          * :doc:`conceptual/rdna/gl2-cache`
+
+          * :doc:`conceptual/rdna/shader-engine`
+
+          * :doc:`conceptual/rdna/command-processor`
+
+          * :doc:`conceptual/rdna/references`
 
       * :doc:`conceptual/definitions`
 

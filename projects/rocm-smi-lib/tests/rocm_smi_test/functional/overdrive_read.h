@@ -49,7 +49,7 @@
 
 class TestOverdriveRead : public TestBase {
  public:
-    TestOverdriveRead();
+  TestOverdriveRead();
 
   // @Brief: Destructor for test case of TestOverdriveRead
   virtual ~TestOverdriveRead();
@@ -60,7 +60,7 @@ class TestOverdriveRead : public TestBase {
   // @Brief: Core measurement execution
   virtual void Run();
 
-  // @Brief: Clean up and retrive the resource
+  // @Brief: Clean up and retrieve the resource
   virtual void Close();
 
   // @Brief: Display  results

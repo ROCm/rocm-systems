@@ -50,6 +50,7 @@
 #include "core/inc/memory_region.h"
 #include "hsakmt/hsakmttypes.h"
 #include "inc/hsa.h"
+#include "core/inc/hsa_internal.h"
 
 namespace rocr {
 namespace core {
@@ -156,12 +157,14 @@ public:
   /// if @p type is one of the SDMA queue types.
   /// @param[in] queue_addr Address of the queue's ring buffer.
   /// @param[in] queue_size_bytes Size of the queue's ring buffer in bytes.
+  /// @param[in] queue_metadata_addr Address of the queue's metadata ring buffer.
+  /// @param[in] queue_metadata_size_bytes Size of the queue's metadata ring buffer in bytes.
   /// @param[in] event HsaEvent for event-driven callbacks.
   /// @param[out] queue_resource Queue resource information populated by the driver.
   virtual hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
-                                   HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id,
-                                   void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
-                                   HsaQueueResource& queue_resource) const = 0;
+                                   HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
+                                   void* queue_addr, uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes,
+                                   HsaEvent* event, HsaQueueResource& queue_resource) const = 0;
 
   /// @brief Destroy a queue.
   /// @param queue_id Kernel-mode driver's assigned queue ID.
@@ -175,7 +178,7 @@ public:
   /// @param[in] queue_size_bytes Size of the queue's ring buffer in bytes.
   /// @param[in] event HsaEvent for event-driven callbacks.
   virtual hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,
-                                   HSA_QUEUE_PRIORITY priority, void* queue_addr,
+                                   HSA::hsa_amd_queue_priority_internal_t priority, void* queue_addr,
                                    uint64_t queue_size_bytes, HsaEvent* event) const = 0;
 
   /// @brief Set the CU mask for a queue.
@@ -195,7 +198,7 @@ public:
   virtual hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
                                      uint32_t* first_gws) const = 0;
 
-  /// @brief Imports memory using dma-buf.
+  /// @brief Exports a memory object via dma-buf.
   ///
   /// @param[in] mem virtual address
   /// @param[in] size memory size in bytes
@@ -204,13 +207,21 @@ public:
   virtual hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
                                     size_t *offset) = 0;
 
-  /// @brief Imports a memory chunk via dma-buf.
+  /// @brief Imports a memory object via dma-buf.
+  ///
+  /// @note The handle must be destroyed with @ref DestroyImportedShareableHandle.
   ///
   /// @param[in] dmabuf_fd dma-buf file descriptor
   /// @param[in] agent agent to import the memory for
   /// @param[out] handle handle to the imported memory
-  virtual hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent &agent,
-                                    core::ShareableHandle &handle) = 0;
+  /// @param[in] mem address of existing buffer, used to bypass import
+  virtual hsa_status_t ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
+                                    core::ShareableHandle* handle, void* mem = nullptr) = 0;
+
+  /// @brief Destroys the handle created during @ref ImportDMABuf.
+  ///
+  /// @param[in] handle handle of the object to release
+  virtual hsa_status_t DestroyImportedShareableHandle(core::ShareableHandle* handle) = 0;
 
   /// @brief Maps the memory associated with the handle.
   ///
@@ -232,19 +243,28 @@ public:
   virtual hsa_status_t Unmap(core::ShareableHandle handle, void *mem,
                              size_t offset, size_t size) = 0;
 
-  /// @brief Get Shareable Memory Handle for physical memory
-  /// @param[in] va virtual address
-  /// @param[in] mem  physical memory handle
-  /// @param[in] size size of memory allocated in bytes
-  /// @param[out] handle handle of the memory object
-  virtual hsa_status_t GetShareableHandle(void* va, void* mem, size_t size,
-                                          core::ShareableHandle* handle) = 0;
-
-  /// @brief Releases the object associated with the handle.
+  /// @brief Maps the virtual address to the physical address and creates a handle to share this
+  /// mapping.
   ///
-  /// @param[in] handle handle of the object to release
-  virtual hsa_status_t
-  ReleaseShareableHandle(core::ShareableHandle &handle) = 0;
+  /// @note The handle must be destroyed with @ref DestroyShareableHandle.
+  ///
+  /// @param[in] va virtual address
+  /// @param[in] mem physical memory handle
+  /// @param[in] size memory size in bytes
+  /// @param[in] agent agent associated with @p mem
+  /// @param[out] handle handle of the memory object
+  /// @param[out] offset memory offset in bytes
+  /// @param[out] drm_fd file descriptor
+  /// @param[out] drm_fd_offset offset in @p drm_fd
+  virtual hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size,
+                                             const core::Agent& agent,
+                                             core::ShareableHandle* handle, uint64_t* offset,
+                                             int* drm_fd, uint64_t* drm_fd_offset) = 0;
+
+  /// @brief Destroys the handle created during @ref CreateShareableHandle.
+  ///
+  /// @param[in] handle handle of the object to destroy
+  virtual hsa_status_t DestroyShareableHandle(core::ShareableHandle* handle) = 0;
 
   /// @brief Acquire a streaming performance monitor on an agent.
   /// @param[in] preferred_node_id Node ID of the preferred agent.
@@ -358,6 +378,13 @@ public:
   /// @param[in] mem address of memory to be made unresident
   /// @return HSA_STATUS_SUCCESS if the driver successfully releases the residency
   virtual hsa_status_t MakeMemoryUnresident(const void* mem) const = 0;
+
+  /// @brief Gets the queue save area information for a specific queue.
+  /// @param[in]  queue_id Queue ID of the queue
+  /// @param[out] address Address of the queue save area
+  /// @param[out] size Size of the used queue save area in bytes
+  /// @return HSA_STATUS_SUCCESS if the driver successfully returns the queue save area information
+  virtual hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const = 0;
 
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;

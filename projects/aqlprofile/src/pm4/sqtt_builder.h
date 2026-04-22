@@ -225,9 +225,9 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     if (config->data_buffer_size > 0)
     {
       // Max 16GB for gfx{9, 10, 12} and 512MB for gfx11. Min of 32 page per SE.
-      if (base_step >= (1ul<<34) || (Primitives::GFXIP_LEVEL == 11 && base_step >= (1ul<<29)))
+      if (base_step >= (1ull<<34) || (Primitives::GFXIP_LEVEL == 11 && base_step >= (1ull<<29)))
         throw std::runtime_error("SQTT Buffer size too high");
-      else if (base_step < (1ul<<17))
+      else if (base_step < (1ull<<17))
         throw std::runtime_error("SQTT Buffer size too low");
     }
     config->capacity_per_se = base_step;

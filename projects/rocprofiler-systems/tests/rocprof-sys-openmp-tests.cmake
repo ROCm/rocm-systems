@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 # ----------------------------------------------------------------------------- #
 #
@@ -12,7 +12,7 @@
 # for the underlying functions that belong to the tracked host category (causing push vs pop mismatch).
 # To avoid this, add ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON to the environment.
 
-if(NOT EXISTS "${ROCM_LLVM_LIB_PATH}/libomptarget.so" AND ROCPROFSYS_USE_ROCM)
+if(NOT EXISTS "${ROCM_LLVM_LIB_PATH}/libomptarget.so")
     message(
         FATAL_ERROR
         "libomptarget.so not found in \"${ROCM_LLVM_LIB_PATH}\". "
@@ -26,6 +26,7 @@ set(_ompt_environment
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_TIME_OUTPUT=OFF"
     "ROCPROFSYS_USE_OMPT=ON"
+    "ROCPROFSYS_LOG_LEVEL=trace"
     "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,trip_count,peak_rss"
     "${_test_openmp_env}"
     "${_test_library_path}"

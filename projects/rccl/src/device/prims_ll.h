@@ -167,6 +167,8 @@ private:
 #ifdef __GFX11__
       asm volatile ("global_load_b128 %0, %1, off glc slc dlc\n"
         "s_waitcnt vmcnt(0)\n" : "=v"(i4.i4) : "v"(&src->i4));
+#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+      i4.v4u = __builtin_amdgcn_global_load_b128((v4u_gptr)src->v, RCCL_SYSTEM_SYNCSCOPE);
 #else
       *((u64_gptr)i4.v) = __builtin_nontemporal_load((u64_gptr)src->v);
       *((u64_gptr)i4.v + 1) = __builtin_nontemporal_load((u64_gptr)src->v+1);
@@ -210,6 +212,8 @@ private:
 #ifdef __GFX11__
         asm volatile ("global_load_b128 %0, %1, off glc slc dlc\n"
           "s_waitcnt vmcnt(0)\n" : "=v"(line[i].i4) : "v"(&src->i4));
+#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+        line[i].v4u = __builtin_amdgcn_global_load_b128((v4u_gptr)src->v, RCCL_SYSTEM_SYNCSCOPE);
 #else
         line[i].v[0] = __builtin_nontemporal_load(src->v);
         line[i].v[1] = __builtin_nontemporal_load(src->v+1);
@@ -237,6 +241,8 @@ private:
 #ifdef __GFX11__
       asm volatile ("global_load_b128 %0, %1, off glc slc dlc\n"
         "s_waitcnt vmcnt(0)\n" : "=v"(line[i].i4) : "v"(&src->i4));
+#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+      line[i].v4u = __builtin_amdgcn_global_load_b128((v4u_gptr)src->v, RCCL_SYSTEM_SYNCSCOPE);
 #else
       line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
       line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v+1);
@@ -268,8 +274,13 @@ private:
     i4.flag1 = flag;
     i4.data2 = (val >> 32);
     i4.flag2 = flag;
+    #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+    // System scope store that bypasses the hardware caches, should generate global_store_dwordx4 instruction with sc0 and sc1 bits set to 1 on gfx942/gfx950.
+    __builtin_amdgcn_global_store_b128((v4u_gptr) dst->v, i4.v4u, RCCL_SYSTEM_SYNCSCOPE);
+    #else
     *((u64_gptr) dst->v) = *((u64_gptr) i4.v);
-    *((u64_gptr) dst->v+1) = *((u64_gptr) i4.v+1); 
+    *((u64_gptr) dst->v+1) = *((u64_gptr) i4.v+1);
+    #endif
 #if defined(__gfx950__) && ROCM_VERSION < 70002
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, ""); // flush cache on gfx950 if ROCr fix for hipHostMallocUncached is not available (ROCm version < 7.0.2)
 #endif
@@ -290,6 +301,16 @@ private:
       uint64_t u8;
     };
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+    if(sizeof(U) == 1)
+      u1 = __hip_atomic_load((__attribute__((address_space(1))) uint8_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    else if(sizeof(U) == 2)
+      u2 = __hip_atomic_load((__attribute__((address_space(1))) uint16_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    else if(sizeof(U) == 4)
+      u4 = __hip_atomic_load((__attribute__((address_space(1))) uint32_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    else
+      u8 = __hip_atomic_load((__attribute__((address_space(1))) uint64_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+#else
     if(sizeof(U) == 1)
 #ifdef __GFX11__
       u1 = __atomic_load_n((uint8_t*)src, __ATOMIC_RELAXED);
@@ -313,6 +334,7 @@ private:
       u8 = __atomic_load_n((uint64_t*)src, __ATOMIC_RELAXED);
 #else
       u8 = __builtin_nontemporal_load((u64_gptr)src);
+#endif
 #endif
 #else
     if(sizeof(U) == 1)
@@ -338,6 +360,16 @@ private:
     };
     elt = val;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+    if(sizeof(U) == 1)
+      __hip_atomic_store((__attribute__((address_space(1))) uint8_t*)dst, u1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    else if(sizeof(U) == 2)
+      __hip_atomic_store((__attribute__((address_space(1))) uint16_t*)dst, u2, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    else if(sizeof(U) == 4)
+      __hip_atomic_store((__attribute__((address_space(1))) uint32_t*)dst, u4, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    else
+      __hip_atomic_store((__attribute__((address_space(1))) uint64_t*)dst, u8, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+#else
     if(sizeof(U) == 1)
       __builtin_nontemporal_store(u1, (uint8_t*)dst);
     else if(sizeof(U) == 2)
@@ -348,6 +380,7 @@ private:
       __builtin_nontemporal_store(u8, (uint64_t*)dst);
 #if defined(__gfx950__) && ROCM_VERSION < 70002
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, ""); // flush cache on gfx950 if ROCr fix for hipHostMallocUncached is not available (ROCm version < 7.0.2)
+#endif
 #endif
 #else
     if(sizeof(U) == 1)
@@ -507,13 +540,6 @@ private:
       nelem -= eltPerTrip;
       offset += nthreads;
     }
-    #ifdef __gfx950__ 
-    if constexpr (isMsccl(Metadata) && DST){
-      // Wait for pending vector loads and stores
-      __builtin_amdgcn_s_waitcnt((15 << 8) | (7 << 4)); // s_waitcnt vmcnt(0)
-    }
-    #endif
-
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_PRIM_COLLECT_DATA_PROCESS_TIME)
     if (tid == 0) {
       npKitDataProcessExitTime = NPKIT_GET_GPU_TIMESTAMP();
@@ -540,82 +566,6 @@ private:
         incSend(i, offset);
       incSend(0, offset);
     }
-  }
-
-  template <int REDUCE, int COPY, int MULTISRCS, int MULTIDSTS>
-  __device__ __forceinline__ void mscclGenericOp(T** srcs, int nsrcs, T** dsts, int ndsts, int nelem) {
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_MSCCL_GENERIC_OP_ENTRY)
-    if (tid == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_MSCCL_GENERIC_OP_ENTRY, nelem*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
-    nelem = nelem < 0 ? 0 : nelem;
-    T *srcElts = srcs[0];
-    T *dstElts = dsts[0];
-    nelem -= tid*EltPerLine;
-    srcElts += tid*EltPerLine;
-    dstElts += tid*EltPerLine;
-    if (MULTISRCS){
-      for (int i = 1; i < nsrcs; i++){
-        srcs[i] += tid*EltPerLine;
-      }
-    }
-    if (MULTIDSTS){
-      for (int i = 1; i < ndsts; i++){
-        dsts[i] += tid*EltPerLine;
-      }
-    }
-    int eltPerTrip = nthreads*EltPerLine;
-    while (nelem > 0) {
-      int eltInLine = EltPerLine < nelem ? EltPerLine : nelem;
-
-      DataLoader dl;
-      uint64_t data;
-      dl.loadBegin(srcElts, eltInLine);
-      srcElts += eltPerTrip;
-      data = dl.loadFinish();
-      if (REDUCE) {
-        uint64_t dataD;
-        dl.loadBegin(dstElts, eltInLine);
-        dataD = dl.loadFinish();
-        dataD = applyReduce(redOp, dataD, data);
-        if (MULTISRCS){
-          for (int i = 1; i < nsrcs; i++){
-            dl.loadBegin(srcs[i], eltInLine);
-            srcs[i] += eltPerTrip;
-            data = dl.loadFinish();
-            dataD = applyReduce(redOp, dataD, data);
-          }
-        }
-        storeData(dstElts, dataD, eltInLine);
-        dstElts += eltPerTrip;
-      }
-      if (COPY){
-        storeData(dstElts, data, eltInLine);
-        dstElts += eltPerTrip;
-        if (MULTIDSTS){
-          for (int i = 1; i < ndsts; i++){
-            dl.loadBegin(srcs[i], eltInLine);
-            srcs[i] += eltPerTrip;
-            data = dl.loadFinish();
-            storeData(dsts[i], data, eltInLine);
-            dsts[i] += eltPerTrip;
-          }
-        }
-      }
-      nelem -= eltPerTrip;
-    }
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_MSCCL_GENERIC_OP_EXIT)
-    if (tid == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_MSCCL_GENERIC_OP_EXIT, nelem*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
-    barrier();
   }
 
   __device__ __forceinline__ void loadRecvConn(struct ncclConnInfo* conn, int i) {
@@ -654,7 +604,11 @@ public:
     redOp(redOpArg),
     tid(tid), nthreads(nthreads), wid(tid%WARP_SIZE), group(group), threadsPerBlock(blockDim.x),
     stepLines(ncclShmem.comm.buffSizes[NCCL_PROTO_LL]/NCCL_STEPS/sizeof(ncclLLFifoLine)) {
+#ifdef ENABLE_WARP_SPEED
+    auto *channel = &ncclShmem.warpChannel[threadIdx.x / WARP_SIZE];
+#else
     auto *channel = &ncclShmem.channel;
+#endif
     barriers = &ncclShmem.groups[group].barrier;
     // If we are going to support oneshot collNet + LL, then we would need to add connector index here
     int nrecv=0, nsend=0;
@@ -679,6 +633,14 @@ public:
     loadSendSync();
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
   }
+
+  __forceinline__ __device__ Primitives(
+      int tid, int nthreads, int const *recvPeers, int const *sendPeers,
+      void const *inputBuf, void *outputBuf, uint64_t redOpArg, uint8_t group,
+      uint8_t connIndexRecv, uint8_t connIndexSend, struct ncclDevWorkColl* collWork,
+      struct ncclDevWorkP2p* p2pWork, int stepSize_ = 0, int mode = primsModeDefault
+    ): Primitives(tid, nthreads, recvPeers, sendPeers, inputBuf, outputBuf, redOpArg, group,
+                  connIndexRecv, connIndexSend, collWork) {}
 
   __device__ ~Primitives() {
     // Save steps for the next operation
@@ -823,15 +785,5 @@ public:
   }
   __device__ void recvSend(int eltN) {
     return LLGenericOp<1, 1, -1, -1>(-1, -1, eltN, false);
-  }
-
-  // MSCCL primitives
-  __device__ void sendWithBarrier(intptr_t inpIx, int eltN) {
-    send(inpIx, eltN);
-    // This is the only primitive.instruction where there is no barrier at the end, add it
-    barrier();
-  }
-  __device__ void localCopy(T* srcs, T* dsts, int eltN) {
-    return mscclGenericOp<0,1,0,0>(&srcs, 1, &dsts, 1, eltN);
   }
 };

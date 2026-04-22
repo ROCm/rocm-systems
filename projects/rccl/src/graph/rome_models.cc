@@ -375,7 +375,7 @@ static struct rcclRomeModel rome_model_56 = {
   .gdrLevel = { },
   .pattern = "40404040",
   .ringBase = "0 1 3 2 6 7 15 14 10 11 9 8 12 13 5 4|0 1 2 3 7 6 13 12 8 9 10 11 15 14 5 4|0 2 3 7 6 14 15 11 10 8 9 13 12 4 5 1|4 5 13 12 8 9 11 10 14 15 7 6 2 3 1 0|4 5 14 15 11 10 9 8 12 13 6 7 3 2 1 0|1 5 4 12 13 9 8 10 11 15 14 6 7 3 2 0",
-  .options = "pivotA2AEnabled=1,pivotA2ANumBiRings=3,tuning=1,mscclEnabled=1,treeDefined=1",
+  .options = "pivotA2AEnabled=1,pivotA2ANumBiRings=3,tuning=1,treeDefined=1",
   .treeBase= "(0(1(3(2(6(7(15(14(10))))))))(4(5(13(12(8(9(11))))))))|(2(3(7(6(13(12(8(9(10))))))))(1(0(4(5(14(15(11))))))))|(14(15(11(10(8(9(13(12(4))))))))(6(7(3(2(0(1(5))))))))|(10(11(9(8(12(13(5(4(0))))))))(14(15(7(6(2(3(1))))))))|(10(11(15(14(5(4(0(1(2))))))))(9(8(12(13(6(7(3))))))))|(4(5(1(0(2(3(7(6(14))))))))(12(13(9(8(10(11(15))))))))|(6(7(15(14(10(11(9(8(12))))))))(2(3(1(0(4(5(13))))))))|(13(12(8(9(10(11(15(14(5))))))))(6(7(3(2(1(0(4))))))))|(8(9(13(12(4(5(1(0(2))))))))(10(11(15(14(6(7(3))))))))|(12(13(5(4(0(1(3(2(6))))))))(8(9(11(10(14(15(7))))))))|(5(4(0(1(2(3(7(6(13))))))))(14(15(11(10(9(8(12))))))))|(2(3(7(6(14(15(11(10(8))))))))(0(1(5(4(12(13(9))))))))",
 };
 
@@ -558,7 +558,7 @@ static struct rcclRomeModel rome_model_79 = {
   .gdrLevel = { },
   .pattern = "4040",
   .ringBase = "0 1 2 3 4 5 6 7|0 1 2 3 4 5 7 6|0 2 4 1 3 6 5 7|0 2 4 6 1 7 3 5|0 3 1 5 2 7 4 6|0 3 5 1 6 2 7 4|0 4 1 7 3 6 2 5|7 6 5 4 3 2 1 0|6 7 5 4 3 2 1 0|7 5 6 3 1 4 2 0|5 3 7 1 6 4 2 0|6 4 7 2 5 1 3 0|4 7 2 6 1 5 3 0|5 2 6 3 7 1 4 0|0 1 2 3 4 5 6 7|0 1 2 3 4 5 7 6|0 2 4 1 3 6 5 7|0 2 4 6 1 7 3 5|0 3 1 5 2 7 4 6|0 3 5 1 6 2 7 4|0 4 1 7 3 6 2 5|7 6 5 4 3 2 1 0|6 7 5 4 3 2 1 0|7 5 6 3 1 4 2 0|5 3 7 1 6 4 2 0|6 4 7 2 5 1 3 0|4 7 2 6 1 5 3 0|5 2 6 3 7 1 4 0",
-  .options = "noCpuCheck=1,mscclEnabled=1,tuning=5,disableNumaMatching=1",
+  .options = "noCpuCheck=1,tuning=5,disableNumaMatching=1",
 };
 
 static struct rcclRomeModel rome_model_80 = {
@@ -1215,6 +1215,549 @@ static struct rcclRomeModel rome_model_87 = {
                "N2 5 4 6 2 0 7 1 3 N3|",
 };
 
+static struct rcclRomeModel rome_model_88 = {
+  .nGpus = 8, .nCpus = 2, .nNics = 4, .nLinks = 7,
+  .gpuIds = { 0x5000, 0x25000, 0x45000, 0x65000, 0x85000, 0xa5000, 0xc5000, 0xe5000, },
+  .nicIds = { 0x9000, 0x49000, 0x89000, 0xc9000, },
+  .gpuNuma = { 0, 0, 0, 0, 1, 1, 1, 1, },
+  .nicNuma = { 0, 0, 1, 1, },
+  .connMatrix = { 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, },
+  .gdrLevel = { PATH_PXB, PATH_PXB, PATH_PHB, PATH_PHB, PATH_SYS, PATH_SYS, PATH_SYS, PATH_SYS, PATH_PHB, PATH_PHB, PATH_PXB, PATH_PXB, PATH_SYS, PATH_SYS, PATH_SYS, PATH_SYS, PATH_SYS, PATH_SYS, PATH_SYS, PATH_SYS, PATH_PXB, PATH_PXB, PATH_PHB, PATH_PHB, PATH_SYS, PATH_SYS, PATH_SYS, PATH_SYS, PATH_PHB, PATH_PHB, PATH_PXB, PATH_PXB, },
+  .pattern = "4242",
+  .ringBase = "N0 0 1 2 3 4 5 6 7 N3|"
+              "N0 1 0 2 4 3 5 7 6 N3|"
+              "N1 2 5 0 3 6 1 7 4 N2|"
+              "N1 3 7 0 4 2 1 6 5 N2|"
+              "N2 4 6 2 7 3 0 5 1 N0|"
+              "N2 5 4 7 1 3 2 6 0 N0|"
+              "N3 6 3 1 4 0 7 5 2 N1|"
+              "N3 7 2 0 6 4 1 5 3 N1|"
+
+              "N0 1 0 2 4 3 5 7 6 N3|"
+              "N1 2 5 0 3 6 1 7 4 N2|"
+              "N1 3 7 0 4 2 1 6 5 N2|"
+              "N2 4 6 2 7 3 0 5 1 N0|"
+              "N2 5 4 7 1 3 2 6 0 N0|"
+              "N3 6 3 1 4 0 7 5 2 N1|"
+              "N3 7 2 0 6 4 1 5 3 N1|"
+              "N0 0 1 2 3 4 5 6 7 N3|"
+
+              "N1 2 5 0 3 6 1 7 4 N2|"
+              "N1 3 7 0 4 2 1 6 5 N2|"
+              "N2 4 6 2 7 3 0 5 1 N0|"
+              "N2 5 4 7 1 3 2 6 0 N0|"
+              "N3 6 3 1 4 0 7 5 2 N1|"
+              "N3 7 2 0 6 4 1 5 3 N1|"
+              "N0 0 1 2 3 4 5 6 7 N3|"
+              "N0 1 0 2 4 3 5 7 6 N3|"
+
+              "N1 3 7 0 4 2 1 6 5 N2|"
+              "N2 4 6 2 7 3 0 5 1 N0|"
+              "N2 5 4 7 1 3 2 6 0 N0|"
+              "N3 6 3 1 4 0 7 5 2 N1|"
+              "N3 7 2 0 6 4 1 5 3 N1|"
+              "N0 0 1 2 3 4 5 6 7 N3|"
+              "N0 1 0 2 4 3 5 7 6 N3|"
+              "N1 2 5 0 3 6 1 7 4 N2|"
+
+              "N2 4 6 2 7 3 0 5 1 N0|"
+              "N2 5 4 7 1 3 2 6 0 N0|"
+              "N3 6 3 1 4 0 7 5 2 N1|"
+              "N3 7 2 0 6 4 1 5 3 N1|"
+              "N0 0 1 2 3 4 5 6 7 N3|"
+              "N0 1 0 2 4 3 5 7 6 N3|"
+              "N1 2 5 0 3 6 1 7 4 N2|"
+              "N1 3 7 0 4 2 1 6 5 N2|"
+
+              "N2 5 4 7 1 3 2 6 0 N0|"
+              "N3 6 3 1 4 0 7 5 2 N1|"
+              "N3 7 2 0 6 4 1 5 3 N1|"
+              "N0 0 1 2 3 4 5 6 7 N3|"
+              "N0 1 0 2 4 3 5 7 6 N3|"
+              "N1 2 5 0 3 6 1 7 4 N2|"
+              "N1 3 7 0 4 2 1 6 5 N2|"
+              "N2 4 6 2 7 3 0 5 1 N0|"
+
+              "N3 6 3 1 4 0 7 5 2 N1|"
+              "N3 7 2 0 6 4 1 5 3 N1|"
+              "N0 0 1 2 3 4 5 6 7 N3|"
+              "N0 1 0 2 4 3 5 7 6 N3|"
+              "N1 2 5 0 3 6 1 7 4 N2|"
+              "N1 3 7 0 4 2 1 6 5 N2|"
+              "N2 4 6 2 7 3 0 5 1 N0|"
+              "N2 5 4 7 1 3 2 6 0 N0|"
+
+              "N3 7 2 0 6 4 1 5 3 N1|"
+              "N0 0 1 2 3 4 5 6 7 N3|"
+              "N0 1 0 2 4 3 5 7 6 N3|"
+              "N1 2 5 0 3 6 1 7 4 N2|"
+              "N1 3 7 0 4 2 1 6 5 N2|"
+              "N2 4 6 2 7 3 0 5 1 N0|"
+              "N2 5 4 7 1 3 2 6 0 N0|"
+              "N3 6 3 1 4 0 7 5 2 N1|",
+
+  .ringTail2 = "N3 6 3 1 4 0 7 5 2 N1|"
+               "N3 7 2 0 6 4 1 5 3 N1|"
+               "N2 4 6 2 7 3 0 5 1 N0|"
+               "N2 5 4 7 1 3 2 6 0 N0|"
+               "N0 0 1 2 3 4 5 6 7 N3|"
+               "N0 1 0 2 4 3 5 7 6 N3|"
+               "N1 2 5 0 3 6 1 7 4 N2|"
+               "N1 3 7 0 4 2 1 6 5 N2|"
+
+               "N3 7 2 0 6 4 1 5 3 N1|"
+               "N2 4 6 2 7 3 0 5 1 N0|"
+               "N2 5 4 7 1 3 2 6 0 N0|"
+               "N0 0 1 2 3 4 5 6 7 N3|"
+               "N0 1 0 2 4 3 5 7 6 N3|"
+               "N1 2 5 0 3 6 1 7 4 N2|"
+               "N1 3 7 0 4 2 1 6 5 N2|"
+               "N3 6 3 1 4 0 7 5 2 N1|"
+
+               "N2 4 6 2 7 3 0 5 1 N0|"
+               "N2 5 4 7 1 3 2 6 0 N0|"
+               "N0 0 1 2 3 4 5 6 7 N3|"
+               "N0 1 0 2 4 3 5 7 6 N3|"
+               "N1 2 5 0 3 6 1 7 4 N2|"
+               "N1 3 7 0 4 2 1 6 5 N2|"
+               "N3 6 3 1 4 0 7 5 2 N1|"
+               "N3 7 2 0 6 4 1 5 3 N1|"
+
+               "N2 5 4 7 1 3 2 6 0 N0|"
+               "N0 0 1 2 3 4 5 6 7 N3|"
+               "N0 1 0 2 4 3 5 7 6 N3|"
+               "N1 2 5 0 3 6 1 7 4 N2|"
+               "N1 3 7 0 4 2 1 6 5 N2|"
+               "N3 6 3 1 4 0 7 5 2 N1|"
+               "N3 7 2 0 6 4 1 5 3 N1|"
+               "N2 4 6 2 7 3 0 5 1 N0|"
+
+               "N0 0 1 2 3 4 5 6 7 N3|"
+               "N0 1 0 2 4 3 5 7 6 N3|"
+               "N1 2 5 0 3 6 1 7 4 N2|"
+               "N1 3 7 0 4 2 1 6 5 N2|"
+               "N3 6 3 1 4 0 7 5 2 N1|"
+               "N3 7 2 0 6 4 1 5 3 N1|"
+               "N2 4 6 2 7 3 0 5 1 N0|"
+               "N2 5 4 7 1 3 2 6 0 N0|"
+
+               "N0 1 0 2 4 3 5 7 6 N3|"
+               "N1 2 5 0 3 6 1 7 4 N2|"
+               "N1 3 7 0 4 2 1 6 5 N2|"
+               "N3 6 3 1 4 0 7 5 2 N1|"
+               "N3 7 2 0 6 4 1 5 3 N1|"
+               "N2 4 6 2 7 3 0 5 1 N0|"
+               "N2 5 4 7 1 3 2 6 0 N0|"
+               "N0 0 1 2 3 4 5 6 7 N3|"
+
+               "N1 2 5 0 3 6 1 7 4 N2|"
+               "N1 3 7 0 4 2 1 6 5 N2|"
+               "N3 6 3 1 4 0 7 5 2 N1|"
+               "N3 7 2 0 6 4 1 5 3 N1|"
+               "N2 4 6 2 7 3 0 5 1 N0|"
+               "N2 5 4 7 1 3 2 6 0 N0|"
+               "N0 0 1 2 3 4 5 6 7 N3|"
+               "N0 1 0 2 4 3 5 7 6 N3|"
+
+               "N1 3 7 0 4 2 1 6 5 N2|"
+               "N3 6 3 1 4 0 7 5 2 N1|"
+               "N3 7 2 0 6 4 1 5 3 N1|"
+               "N2 4 6 2 7 3 0 5 1 N0|"
+               "N2 5 4 7 1 3 2 6 0 N0|"
+               "N0 0 1 2 3 4 5 6 7 N3|"
+               "N0 1 0 2 4 3 5 7 6 N3|"
+               "N1 2 5 0 3 6 1 7 4 N2|",
+
+  .ringTail1 = "N1 2 1 3 4 5 6 7 0 N0|"
+               "N1 3 0 2 4 6 5 7 1 N0|"
+               "N0 0 1 4 7 5 3 6 2 N1|"
+               "N0 1 0 5 2 7 6 4 3 N1|"
+               "N3 6 1 2 3 5 0 7 4 N2|"
+               "N3 7 3 2 6 0 4 1 5 N2|"
+               "N2 4 0 3 7 2 5 1 6 N3|"
+               "N2 5 4 2 0 6 3 1 7 N3|"
+
+               "N1 3 0 2 4 6 5 7 1 N0|"
+               "N0 0 1 4 7 5 3 6 2 N1|"
+               "N0 1 0 5 2 7 6 4 3 N1|"
+               "N3 6 1 2 3 5 0 7 4 N2|"
+               "N3 7 3 2 6 0 4 1 5 N2|"
+               "N2 4 0 3 7 2 5 1 6 N3|"
+               "N2 5 4 2 0 6 3 1 7 N3|"
+               "N1 2 1 3 4 5 6 7 0 N0|"
+
+               "N0 0 1 4 7 5 3 6 2 N1|"
+               "N0 1 0 5 2 7 6 4 3 N1|"
+               "N3 6 1 2 3 5 0 7 4 N2|"
+               "N3 7 3 2 6 0 4 1 5 N2|"
+               "N2 4 0 3 7 2 5 1 6 N3|"
+               "N2 5 4 2 0 6 3 1 7 N3|"
+               "N1 2 1 3 4 5 6 7 0 N0|"
+               "N1 3 0 2 4 6 5 7 1 N0|"
+
+               "N0 1 0 5 2 7 6 4 3 N1|"
+               "N3 6 1 2 3 5 0 7 4 N2|"
+               "N3 7 3 2 6 0 4 1 5 N2|"
+               "N2 4 0 3 7 2 5 1 6 N3|"
+               "N2 5 4 2 0 6 3 1 7 N3|"
+               "N1 2 1 3 4 5 6 7 0 N0|"
+               "N1 3 0 2 4 6 5 7 1 N0|"
+               "N0 0 1 4 7 5 3 6 2 N1|"
+
+               "N3 6 1 2 3 5 0 7 4 N2|"
+               "N3 7 3 2 6 0 4 1 5 N2|"
+               "N2 4 0 3 7 2 5 1 6 N3|"
+               "N2 5 4 2 0 6 3 1 7 N3|"
+               "N1 2 1 3 4 5 6 7 0 N0|"
+               "N1 3 0 2 4 6 5 7 1 N0|"
+               "N0 0 1 4 7 5 3 6 2 N1|"
+               "N0 1 0 5 2 7 6 4 3 N1|"
+
+               "N3 7 3 2 6 0 4 1 5 N2|"
+               "N2 4 0 3 7 2 5 1 6 N3|"
+               "N2 5 4 2 0 6 3 1 7 N3|"
+               "N1 2 1 3 4 5 6 7 0 N0|"
+               "N1 3 0 2 4 6 5 7 1 N0|"
+               "N0 0 1 4 7 5 3 6 2 N1|"
+               "N0 1 0 5 2 7 6 4 3 N1|"
+               "N3 6 1 2 3 5 0 7 4 N2|"
+
+               "N2 4 0 3 7 2 5 1 6 N3|"
+               "N2 5 4 2 0 6 3 1 7 N3|"
+               "N1 2 1 3 4 5 6 7 0 N0|"
+               "N1 3 0 2 4 6 5 7 1 N0|"
+               "N0 0 1 4 7 5 3 6 2 N1|"
+               "N0 1 0 5 2 7 6 4 3 N1|"
+               "N3 6 1 2 3 5 0 7 4 N2|"
+               "N3 7 3 2 6 0 4 1 5 N2|"
+
+               "N2 5 4 2 0 6 3 1 7 N3|"
+               "N1 2 1 3 4 5 6 7 0 N0|"
+               "N1 3 0 2 4 6 5 7 1 N0|"
+               "N0 0 1 4 7 5 3 6 2 N1|"
+               "N0 1 0 5 2 7 6 4 3 N1|"
+               "N3 6 1 2 3 5 0 7 4 N2|"
+               "N3 7 3 2 6 0 4 1 5 N2|"
+               "N2 4 0 3 7 2 5 1 6 N3|",
+
+  .options = "noCpuCheck=1",
+};
+
+static struct rcclRomeModel rome_model_89 = {
+  .nGpus = 8, .nCpus = 2, .nNics = 8, .nLinks = 7,
+  .gpuIds     = { 0xc000, 0x22000, 0x38000, 0x5c000, 0x9f000, 0xaf000, 0xbf000, 0xdf000, },
+  .nicIds     = { 0x7000, 0x1d000, 0x33000, 0x57000, 0x9a000, 0xaa000, 0xba000, 0xda000, },
+  .gpuNuma    = { 0, 0, 0, 0, 1, 1, 1, 1, },
+  .nicNuma    = { 0, 0, 0, 0, 1, 1, 1, 1, },
+  .connMatrix = { 0, 1, 1, 1, 1, 1, 1, 1,
+                  1, 0, 1, 1, 1, 1, 1, 1,
+                  1, 1, 0, 1, 1, 1, 1, 1,
+                  1, 1, 1, 0, 1, 1, 1, 1,
+                  1, 1, 1, 1, 0, 1, 1, 1,
+                  1, 1, 1, 1, 1, 0, 1, 1,
+                  1, 1, 1, 1, 1, 1, 0, 1,
+                  1, 1, 1, 1, 1, 1, 1, 0, },
+  .gdrLevel   = {PATH_PXB, PATH_PXB, PATH_PHB, PATH_PHB, PATH_SYS, PATH_SYS, PATH_SYS, PATH_SYS,
+                 PATH_PXB, PATH_PXB, PATH_PHB, PATH_PHB, PATH_SYS, PATH_SYS, PATH_SYS, PATH_SYS,
+                 PATH_PHB, PATH_PHB, PATH_PXB, PATH_PXB, PATH_SYS, PATH_SYS, PATH_SYS, PATH_SYS,
+                 PATH_PHB, PATH_PHB, PATH_PXB, PATH_PXB, PATH_SYS, PATH_SYS, PATH_SYS, PATH_SYS,
+                 PATH_SYS, PATH_SYS, PATH_SYS, PATH_SYS, PATH_PXB, PATH_PXB, PATH_PHB, PATH_PHB,
+                 PATH_SYS, PATH_SYS, PATH_SYS, PATH_SYS, PATH_PXB, PATH_PXB, PATH_PHB, PATH_PHB,
+                 PATH_SYS, PATH_SYS, PATH_SYS, PATH_SYS, PATH_PHB, PATH_PHB, PATH_PXB, PATH_PXB,
+                 PATH_SYS, PATH_SYS, PATH_SYS, PATH_SYS, PATH_PHB, PATH_PHB, PATH_PXB, PATH_PXB, },
+  .pattern    = "4444",
+  .ringBase   = "N0 0 1 2 3 4 5 6 7 N7|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N2 2 5 0 3 6 1 7 4 N4|"
+                "N3 3 7 0 4 2 1 6 5 N5|"
+                "N4 4 6 2 7 3 0 5 1 N1|"
+                "N5 5 4 7 1 3 2 6 0 N0|"
+                "N6 6 3 1 4 0 7 5 2 N2|"
+                "N7 7 2 0 6 4 1 5 3 N3|"
+
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N2 2 5 0 3 6 1 7 4 N4|"
+                "N3 3 7 0 4 2 1 6 5 N5|"
+                "N4 4 6 2 7 3 0 5 1 N1|"
+                "N5 5 4 7 1 3 2 6 0 N0|"
+                "N6 6 3 1 4 0 7 5 2 N2|"
+                "N7 7 2 0 6 4 1 5 3 N3|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+
+                "N2 2 5 0 3 6 1 7 4 N4|"
+                "N3 3 7 0 4 2 1 6 5 N5|"
+                "N4 4 6 2 7 3 0 5 1 N1|"
+                "N5 5 4 7 1 3 2 6 0 N0|"
+                "N6 6 3 1 4 0 7 5 2 N2|"
+                "N7 7 2 0 6 4 1 5 3 N3|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+
+                "N3 3 7 0 4 2 1 6 5 N5|"
+                "N4 4 6 2 7 3 0 5 1 N1|"
+                "N5 5 4 7 1 3 2 6 0 N0|"
+                "N6 6 3 1 4 0 7 5 2 N2|"
+                "N7 7 2 0 6 4 1 5 3 N3|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N2 2 5 0 3 6 1 7 4 N4|"
+
+                "N4 4 6 2 7 3 0 5 1 N1|"
+                "N5 5 4 7 1 3 2 6 0 N0|"
+                "N6 6 3 1 4 0 7 5 2 N2|"
+                "N7 7 2 0 6 4 1 5 3 N3|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N2 2 5 0 3 6 1 7 4 N4|"
+                "N3 3 7 0 4 2 1 6 5 N5|"
+
+                "N5 5 4 7 1 3 2 6 0 N0|"
+                "N6 6 3 1 4 0 7 5 2 N2|"
+                "N7 7 2 0 6 4 1 5 3 N3|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N2 2 5 0 3 6 1 7 4 N4|"
+                "N3 3 7 0 4 2 1 6 5 N5|"
+                "N4 4 6 2 7 3 0 5 1 N1|"
+
+                "N6 6 3 1 4 0 7 5 2 N2|"
+                "N7 7 2 0 6 4 1 5 3 N3|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N2 2 5 0 3 6 1 7 4 N4|"
+                "N3 3 7 0 4 2 1 6 5 N5|"
+                "N4 4 6 2 7 3 0 5 1 N1|"
+                "N5 5 4 7 1 3 2 6 0 N0|"
+
+                "N7 7 2 0 6 4 1 5 3 N3|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N2 2 5 0 3 6 1 7 4 N4|"
+                "N3 3 7 0 4 2 1 6 5 N5|"
+                "N4 4 6 2 7 3 0 5 1 N1|"
+                "N5 5 4 7 1 3 2 6 0 N0|"
+                "N6 6 3 1 4 0 7 5 2 N2|",
+
+  .ringTail2  = "N7 7 4 1 3 2 0 6 5 N5|"
+                "N6 6 3 0 7 5 1 4 2 N2|"
+                "N4 4 6 2 1 7 0 5 3 N3|"
+                "N5 5 2 7 3 1 6 0 4 N4|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N2 2 5 0 3 6 4 7 1 N1|"
+                "N3 3 7 2 6 1 5 4 0 N0|"
+
+                "N6 6 3 0 7 5 1 4 2 N2|"
+                "N4 4 6 2 1 7 0 5 3 N3|"
+                "N5 5 2 7 3 1 6 0 4 N4|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N2 2 5 0 3 6 4 7 1 N1|"
+                "N3 3 7 2 6 1 5 4 0 N0|"
+                "N7 7 4 1 3 2 0 6 5 N5|"
+
+                "N4 4 6 2 1 7 0 5 3 N3|"
+                "N5 5 2 7 3 1 6 0 4 N4|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N2 2 5 0 3 6 4 7 1 N1|"
+                "N3 3 7 2 6 1 5 4 0 N0|"
+                "N7 7 4 1 3 2 0 6 5 N5|"
+                "N6 6 3 0 7 5 1 4 2 N2|"
+
+                "N5 5 2 7 3 1 6 0 4 N4|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N2 2 5 0 3 6 4 7 1 N1|"
+                "N3 3 7 2 6 1 5 4 0 N0|"
+                "N7 7 4 1 3 2 0 6 5 N5|"
+                "N6 6 3 0 7 5 1 4 2 N2|"
+                "N4 4 6 2 1 7 0 5 3 N3|"
+
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N2 2 5 0 3 6 4 7 1 N1|"
+                "N3 3 7 2 6 1 5 4 0 N0|"
+                "N7 7 4 1 3 2 0 6 5 N5|"
+                "N6 6 3 0 7 5 1 4 2 N2|"
+                "N4 4 6 2 1 7 0 5 3 N3|"
+                "N5 5 2 7 3 1 6 0 4 N4|"
+
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N2 2 5 0 3 6 4 7 1 N1|"
+                "N3 3 7 2 6 1 5 4 0 N0|"
+                "N7 7 4 1 3 2 0 6 5 N5|"
+                "N6 6 3 0 7 5 1 4 2 N2|"
+                "N4 4 6 2 1 7 0 5 3 N3|"
+                "N5 5 2 7 3 1 6 0 4 N4|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+
+                "N2 2 5 0 3 6 4 7 1 N1|"
+                "N3 3 7 2 6 1 5 4 0 N0|"
+                "N7 7 4 1 3 2 0 6 5 N5|"
+                "N6 6 3 0 7 5 1 4 2 N2|"
+                "N4 4 6 2 1 7 0 5 3 N3|"
+                "N5 5 2 7 3 1 6 0 4 N4|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+
+                "N3 3 7 2 6 1 5 4 0 N0|"
+                "N7 7 4 1 3 2 0 6 5 N5|"
+                "N6 6 3 0 7 5 1 4 2 N2|"
+                "N4 4 6 2 1 7 0 5 3 N3|"
+                "N5 5 2 7 3 1 6 0 4 N4|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N2 2 5 0 3 6 4 7 1 N1|",
+
+
+  .ringTail1  = "N5 5 4 2 7 1 6 3 0 N0|"
+                "N2 2 5 0 3 7 4 6 1 N1|"
+                "N3 3 6 4 0 5 1 7 2 N2|"
+                "N4 4 7 0 6 5 2 1 3 N3|"
+                "N6 6 2 0 7 5 3 1 4 N4|"
+                "N7 7 3 2 6 0 4 1 5 N5|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+
+                "N2 2 5 0 3 7 4 6 1 N1|"
+                "N3 3 6 4 0 5 1 7 2 N2|"
+                "N4 4 7 0 6 5 2 1 3 N3|"
+                "N6 6 2 0 7 5 3 1 4 N4|"
+                "N7 7 3 2 6 0 4 1 5 N5|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N5 5 4 2 7 1 6 3 0 N0|"
+
+                "N3 3 6 4 0 5 1 7 2 N2|"
+                "N4 4 7 0 6 5 2 1 3 N3|"
+                "N6 6 2 0 7 5 3 1 4 N4|"
+                "N7 7 3 2 6 0 4 1 5 N5|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N5 5 4 2 7 1 6 3 0 N0|"
+                "N2 2 5 0 3 7 4 6 1 N1|"
+
+                "N4 4 7 0 6 5 2 1 3 N3|"
+                "N6 6 2 0 7 5 3 1 4 N4|"
+                "N7 7 3 2 6 0 4 1 5 N5|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N5 5 4 2 7 1 6 3 0 N0|"
+                "N2 2 5 0 3 7 4 6 1 N1|"
+                "N3 3 6 4 0 5 1 7 2 N2|"
+
+                "N6 6 2 0 7 5 3 1 4 N4|"
+                "N7 7 3 2 6 0 4 1 5 N5|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N5 5 4 2 7 1 6 3 0 N0|"
+                "N2 2 5 0 3 7 4 6 1 N1|"
+                "N3 3 6 4 0 5 1 7 2 N2|"
+                "N4 4 7 0 6 5 2 1 3 N3|"
+
+                "N7 7 3 2 6 0 4 1 5 N5|"
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N5 5 4 2 7 1 6 3 0 N0|"
+                "N2 2 5 0 3 7 4 6 1 N1|"
+                "N3 3 6 4 0 5 1 7 2 N2|"
+                "N4 4 7 0 6 5 2 1 3 N3|"
+                "N6 6 2 0 7 5 3 1 4 N4|"
+
+                "N1 1 0 2 4 3 5 7 6 N6|"
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N5 5 4 2 7 1 6 3 0 N0|"
+                "N2 2 5 0 3 7 4 6 1 N1|"
+                "N3 3 6 4 0 5 1 7 2 N2|"
+                "N4 4 7 0 6 5 2 1 3 N3|"
+                "N6 6 2 0 7 5 3 1 4 N4|"
+                "N7 7 3 2 6 0 4 1 5 N5|"
+
+                "N0 0 1 2 3 4 5 6 7 N7|"
+                "N5 5 4 2 7 1 6 3 0 N0|"
+                "N2 2 5 0 3 7 4 6 1 N1|"
+                "N3 3 6 4 0 5 1 7 2 N2|"
+                "N4 4 7 0 6 5 2 1 3 N3|"
+                "N6 6 2 0 7 5 3 1 4 N4|"
+                "N7 7 3 2 6 0 4 1 5 N5|"
+                "N1 1 0 2 4 3 5 7 6 N6|",
+
+  .options    = "noCpuCheck=1,tuning=5,ll128Enabled=1,disableNumaMatching=1",
+
+  .treeRail   = "N0 0 1 2 4 3 6 5 7 N1|"
+                "N1 1 0 4 7 3 5 2 6 N0|"
+                "N2 2 3 0 5 6 1 7 4 N3|"
+                "N3 3 2 7 0 6 4 1 5 N2|"
+                "N4 4 5 1 6 0 3 7 2 N5|"
+                "N5 5 4 6 2 0 7 1 3 N4|"
+                "N6 6 7 5 3 4 0 2 1 N7|"
+                "N7 7 6 3 1 4 2 5 0 N6|"
+
+                "N2 2 3 0 5 6 1 7 4 N3|"
+                "N3 3 2 7 0 6 4 1 5 N2|"
+                "N4 4 5 1 6 0 3 7 2 N5|"
+                "N5 5 4 6 2 0 7 1 3 N4|"
+                "N6 6 7 5 3 4 0 2 1 N7|"
+                "N7 7 6 3 1 4 2 5 0 N6|"
+                "N0 0 1 2 4 3 6 5 7 N1|"
+                "N1 1 0 4 7 3 5 2 6 N0|"
+
+                "N4 4 5 1 6 0 3 7 2 N5|"
+                "N5 5 4 6 2 0 7 1 3 N4|"
+                "N6 6 7 5 3 4 0 2 1 N7|"
+                "N7 7 6 3 1 4 2 5 0 N6|"
+                "N0 0 1 2 4 3 6 5 7 N1|"
+                "N1 1 0 4 7 3 5 2 6 N0|"
+                "N2 2 3 0 5 6 1 7 4 N3|"
+                "N3 3 2 7 0 6 4 1 5 N2|"
+
+                "N6 6 7 5 3 4 0 2 1 N7|"
+                "N7 7 6 3 1 4 2 5 0 N6|"
+                "N0 0 1 2 4 3 6 5 7 N1|"
+                "N1 1 0 4 7 3 5 2 6 N0|"
+                "N2 2 3 0 5 6 1 7 4 N3|"
+                "N3 3 2 7 0 6 4 1 5 N2|"
+                "N4 4 5 1 6 0 3 7 2 N5|"
+                "N5 5 4 6 2 0 7 1 3 N4|"
+
+                "N0 0 1 2 4 3 6 5 7 N1|"
+                "N1 1 0 4 7 3 5 2 6 N0|"
+                "N2 2 3 0 5 6 1 7 4 N3|"
+                "N3 3 2 7 0 6 4 1 5 N2|"
+                "N4 4 5 1 6 0 3 7 2 N5|"
+                "N5 5 4 6 2 0 7 1 3 N4|"
+                "N6 6 7 5 3 4 0 2 1 N7|"
+                "N7 7 6 3 1 4 2 5 0 N6|"
+
+                "N2 2 3 0 5 6 1 7 4 N3|"
+                "N3 3 2 7 0 6 4 1 5 N2|"
+                "N4 4 5 1 6 0 3 7 2 N5|"
+                "N5 5 4 6 2 0 7 1 3 N4|"
+                "N6 6 7 5 3 4 0 2 1 N7|"
+                "N7 7 6 3 1 4 2 5 0 N6|"
+                "N0 0 1 2 4 3 6 5 7 N1|"
+                "N1 1 0 4 7 3 5 2 6 N0|"
+
+                "N4 4 5 1 6 0 3 7 2 N5|"
+                "N5 5 4 6 2 0 7 1 3 N4|"
+                "N6 6 7 5 3 4 0 2 1 N7|"
+                "N7 7 6 3 1 4 2 5 0 N6|"
+                "N0 0 1 2 4 3 6 5 7 N1|"
+                "N1 1 0 4 7 3 5 2 6 N0|"
+                "N2 2 3 0 5 6 1 7 4 N3|"
+                "N3 3 2 7 0 6 4 1 5 N2|"
+
+                "N6 6 7 5 3 4 0 2 1 N7|"
+                "N7 7 6 3 1 4 2 5 0 N6|"
+                "N0 0 1 2 4 3 6 5 7 N1|"
+                "N1 1 0 4 7 3 5 2 6 N0|"
+                "N2 2 3 0 5 6 1 7 4 N3|"
+                "N3 3 2 7 0 6 4 1 5 N2|"
+                "N4 4 5 1 6 0 3 7 2 N5|"
+                "N5 5 4 6 2 0 7 1 3 N4|",
+};
+
 static struct rcclRomeModel romeTopoModels[] = {
   rome_model_22, /*  0 */
   rome_model_25, /*  1 */
@@ -1260,6 +1803,8 @@ static struct rcclRomeModel romeTopoModels[] = {
   rome_model_84, /* 41 */
   rome_model_85, /* 42 */
   rome_model_87, /* 43 */
+  rome_model_88, /* 44 */
+  rome_model_89, /* 45 */
 };
 
 // This environment variable allows disabling of the reversal the graph parsing
@@ -1492,6 +2037,10 @@ extern const char* topoPathTypeStr[];
 static void parseOptions(struct ncclTopoSystem* system, const char *options) {
   if (strcmp(options, "")) {
     char *str_temp = (char *)malloc(strlen(options) + 1);
+    if (str_temp == nullptr) {
+      WARN("Failed to allocate memory for options parsing");
+      return;
+    }
     strcpy(str_temp, options);
     char* tokens[MAX_OPT_TOKENS];
     int numTokens = 0;
@@ -1523,8 +2072,6 @@ static void parseOptions(struct ncclTopoSystem* system, const char *options) {
         system->ll128Enabled = (bool)atol(tokens[i*2+1]);
       } else if (strcmp(tokens[i*2], "baseBw") == 0) {
         system->baseBw = std::stof(tokens[i*2+1]);
-      } else if (strcmp(tokens[i*2], "mscclEnabled") == 0) {
-        system->mscclEnabled = (bool)atol(tokens[i*2+1]);
       } else if (strcmp(tokens[i*2], "treeDefined") == 0) {
         system->treeDefined = (bool)atol(tokens[i*2+1]);
       }
@@ -1536,6 +2083,10 @@ static void parseOptions(struct ncclTopoSystem* system, const char *options) {
 static bool checkOption(const char *options, const char *name) {
   if (strcmp(options, "")) {
     char *str_temp = (char *)malloc(strlen(options) + 1);
+    if (str_temp == nullptr) {
+      WARN("Failed to allocate memory for options checking");
+      return false;
+    }
     strcpy(str_temp, options);
     char* tokens[MAX_OPT_TOKENS];
     int numTokens = 0;
@@ -1904,6 +2455,35 @@ int checkAlltoallWidth(struct rcclRomeModel *romeTopo) {
 }
 
 RCCL_PARAM(DisableRailTrees, "DISABLE_RAIL_TREES", 0);
+RCCL_PARAM(DisableNetOverride, "DISABLE_NET_OVERRIDE", 0);
+
+static void applyNetOverride(struct ncclTopoSystem* system, const char* options) {
+  if (rcclParamDisableNetOverride()) return;
+  if (!checkOption(options, "netOverride")) return;
+  // This override assumes a fixed layout: each NIC hangs off a PCIe switch that
+  // also connects a single GPU, and the non-paired GPUs (usually >= PATH_PHB)
+  // are paired by gpu.dev/2. On systems with different switch fan-out, mixed
+  // placement, or numbering, this can mis-classify paths. Use
+  // RCCL_DISABLE_NET_OVERRIDE to opt out.
+  // Kernel patch https://lkml.org/lkml/2024/6/12/551 is recommended to avoid having to
+  // pair GPUs with NICs (check xml.cc:getBcmLinks)
+  // Applying kernel patch should pick up rome_model_88 in the 8-GPU/4-NIC that does not
+  // apply this override, but we keep this override for other systems that may benefit from it.
+  for (int i = 0; i < system->nodes[NET].count; i++) {
+    for (int j = 0; j < system->nodes[GPU].count; j++) {
+      if (system->nodes[GPU].nodes[j].paths[NET][i].type == PATH_PXB) {
+        int k;
+        for (k = 0; k < system->nodes[GPU].count; k++) {
+          if (k != j &&
+            system->nodes[GPU].nodes[k].gpu.dev/2 == system->nodes[GPU].nodes[j].gpu.dev/2)
+            break;
+        }
+        if (k < system->nodes[GPU].count)
+          system->nodes[GPU].nodes[k].paths[NET][i].type = PATH_PXB;
+      }
+    }
+  }
+}
 
 ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* graph, const char *ringBase) {
   constexpr int NUMA_CPUS = 2;
@@ -1932,6 +2512,10 @@ ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
 
   int *g8, n[NCCL_TOPO_MAX_NODES];
   int *all_gpu_permutations = (int *)malloc(TOTAL_PERMUTE_COUNT*NUMA_CPUS*NUMA_GPUS*sizeof(int));
+  if (all_gpu_permutations == nullptr) {
+    WARN("Failed to allocate memory for GPU permutations");
+    return ncclSystemError;
+  }
   struct timeval tvs, tve;
   gettimeofday(&tvs, NULL);
   std::vector<int> r(ngpus), g(ngpus), rdm(ngpus);
@@ -2025,9 +2609,7 @@ ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
   INFO(NCCL_GRAPH, "%s", line);
   system->type |= RCCL_TOPO_4P2H_ROME;
   parseOptions(system, romeTopoModels[i].options);
-  if(IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx950")){
-    system->tuning = 6;
-  }
+  rcclApplyTuningOverrides(system);
   // create 4P2H based on reference and remapped ids
   switch (graph->pattern) {
   case NCCL_TOPO_PATTERN_RING:
@@ -2066,35 +2648,21 @@ ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
       NCCLCHECK(parseGraph(romeTopoModels[i].treeRail, system, graph, g8, nnets > 1 ? n : NULL, 0));
       if (graph->nChannels) {
         system->useRailOptimizedTrees = true;
-        return ncclSuccess;
       }
     }
 
-    // Fall back to looking for tree configuration from treeBase
-    if (romeTopoModels[i].treeBase != nullptr) {
-      NCCLCHECK(parseGraphLight(romeTopoModels[i].treeBase, system, graph, rdm.data()));
-      if (graph->nChannels) return ncclSuccess;
-    }
-
-    // Fall back to tree from ringBase
-    NCCLCHECK(parseGraph(ringBase != nullptr ? ringBase : romeTopoModels[i].ringBase, system, graph, rdm.data(), nnets > 1 ? n : NULL, 0));
-    // Override GDR distance if requested
-    if (checkOption(romeTopoModels[i].options, "netOverride")) {
-      for (int i = 0; i < system->nodes[NET].count; i++) {
-        for (int j = 0; j < system->nodes[GPU].count; j++) {
-          if (system->nodes[GPU].nodes[j].paths[NET][i].type == PATH_PXB) {
-            int k;
-            for (k = 0; k < system->nodes[GPU].count; k++) {
-              if (k != j &&
-                system->nodes[GPU].nodes[k].gpu.dev/2 == system->nodes[GPU].nodes[j].gpu.dev/2)
-                break;
-            }
-            if (k < system->nodes[GPU].count)
-              system->nodes[GPU].nodes[k].paths[NET][i].type = PATH_PXB;
-          }
-        }
+    if (!graph->nChannels) {
+      // Fall back to looking for tree configuration from treeBase
+      if (romeTopoModels[i].treeBase != nullptr) {
+        NCCLCHECK(parseGraphLight(romeTopoModels[i].treeBase, system, graph, rdm.data()));
       }
     }
+
+    if (!graph->nChannels) {
+      // Fall back to tree from ringBase
+      NCCLCHECK(parseGraph(ringBase != nullptr ? ringBase : romeTopoModels[i].ringBase, system, graph, rdm.data(), nnets > 1 ? n : NULL, 0));
+    }
+    applyNetOverride(system, romeTopoModels[i].options);
     break;
   }
 
@@ -2224,9 +2792,8 @@ ncclResult_t parseRome4P2H(struct ncclTopoSystem* system, struct ncclTopoGraph* 
   }
   INFO(NCCL_GRAPH, "%s", line);
   parseOptions(system, romeTopoModels[i].options);
-  if(IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx950")){
-    system->tuning = 6;
-  }
+  rcclApplyTuningOverrides(system);
+
   // create 4P2H based on reference and remapped ids
   switch (graph->pattern) {
   case NCCL_TOPO_PATTERN_RING:
@@ -2257,28 +2824,13 @@ ncclResult_t parseRome4P2H(struct ncclTopoSystem* system, struct ncclTopoGraph* 
   case NCCL_TOPO_PATTERN_BALANCED_TREE:
     if (romeTopoModels[i].treeBase != nullptr) {
       NCCLCHECK(parseGraphLight(romeTopoModels[i].treeBase, system, graph, g));
-      if (graph->nChannels) return ncclSuccess;
     }
 
-    // Fall back to tree from ringBase
-    NCCLCHECK(parseGraph(ringBase != nullptr ? ringBase : romeTopoModels[i].ringBase, system, graph, rdm, nnets > 1 ? n : NULL, 0));
-    // Override GDR distance if requested
-    if (checkOption(romeTopoModels[i].options, "netOverride")) {
-      for (int i = 0; i < system->nodes[NET].count; i++) {
-        for (int j = 0; j < system->nodes[GPU].count; j++) {
-          if (system->nodes[GPU].nodes[j].paths[NET][i].type == PATH_PXB) {
-            int k;
-            for (k = 0; k < system->nodes[GPU].count; k++) {
-              if (k != j &&
-                system->nodes[GPU].nodes[k].gpu.dev/2 == system->nodes[GPU].nodes[j].gpu.dev/2)
-                break;
-            }
-            if (k < system->nodes[GPU].count)
-              system->nodes[GPU].nodes[k].paths[NET][i].type = PATH_PXB;
-          }
-        }
-      }
+    if (!graph->nChannels) {
+      // Fall back to tree from ringBase
+      NCCLCHECK(parseGraph(ringBase != nullptr ? ringBase : romeTopoModels[i].ringBase, system, graph, rdm, nnets > 1 ? n : NULL, 0));
     }
+    applyNetOverride(system, romeTopoModels[i].options);
     break;
   }
   return ncclSuccess;
@@ -2313,6 +2865,10 @@ ncclResult_t parse1H16P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
 
   int *g16, n[NCCL_TOPO_MAX_NODES], rdm[NUMA_GPUS*NUMA_CPUS];
   int *all_gpu_permutations = (int *)malloc(TOTAL_PERMUTE_COUNT*NUMA_CPUS*NUMA_GPUS*sizeof(int));
+  if (all_gpu_permutations == nullptr) {
+    WARN("Failed to allocate memory for GPU permutations");
+    return ncclSystemError;
+  }
   struct timeval tvs, tve;
   gettimeofday(&tvs, NULL);
   std::vector<int> r(ngpus), g(ngpus);
@@ -2410,9 +2966,7 @@ ncclResult_t parse1H16P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
   INFO(NCCL_GRAPH, "%s", line);
   system->type |= RCCL_TOPO_16P1H;
   parseOptions(system, romeTopoModels[i].options);
-  if(IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx950")){
-    system->tuning = 6;
-  }
+  rcclApplyTuningOverrides(system);
 
   // create 16P1H based on reference and remapped ids
   NCCLCHECK(parseGraph(romeTopoModels[i].ringBase, system, graph, rdm, nnets > 1 ? n : NULL, false));

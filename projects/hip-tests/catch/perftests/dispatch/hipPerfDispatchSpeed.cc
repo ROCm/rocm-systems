@@ -1,20 +1,7 @@
 /*
- Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 /**
@@ -51,16 +38,16 @@ __global__ void _dispatchSpeed(float* outBuf) {
 
 // kernel that has an execution of count, in GPU clock ticks
 __global__ void _TimingKernel(uint64_t count) {
-  uint64_t begin_time = __builtin_amdgcn_s_memrealtime();
+  uint64_t begin_time = wall_clock64();
   uint64_t curr_time = begin_time;
   do {
-    curr_time = __builtin_amdgcn_s_memrealtime();
+    curr_time = wall_clock64();
   } while (begin_time + count > curr_time);
 }
 
 enum TimingMode { TimingMode_WallTime, TimingMode_HIPEvent, TimingMode_NumModes };
 
-TEST_CASE("Perf_hipPerfDispatchAndExecutionSpeed") {
+HIP_TEST_CASE(Perf_hipPerfDispatchAndExecutionSpeed) {
   hipError_t err = hipSuccess;
 
   unsigned int testListSize = sizeof(testList) / sizeof(testList[0]);

@@ -1,24 +1,38 @@
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 project(rocprofiler-systems-fork LANGUAGES CXX)
+
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
+endif()
 
 set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 string(REPLACE " " ";" _FLAGS "${CMAKE_CXX_FLAGS_DEBUG}")
 list(APPEND _FLAGS -fno-inline)
 
 find_package(Threads REQUIRED)
-find_package(rocprofiler-systems REQUIRED COMPONENTS user)
+if(NOT TARGET rocprofiler-systems::rocprofiler-systems-user-library)
+    find_package(rocprofiler-systems REQUIRED COMPONENTS user)
+endif()
 
 # Basic fork example
 add_executable(fork-example fork.cpp)
 target_link_libraries(
     fork-example
-    PRIVATE Threads::Threads rocprofiler-systems::rocprofiler-systems
+    PRIVATE Threads::Threads rocprofiler-systems::rocprofiler-systems-user-library
 )
 target_compile_options(fork-example PRIVATE ${_FLAGS})
 
-if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(TARGETS fork-example DESTINATION bin COMPONENT rocprofiler-systems-examples)
+if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET fork-example)
+    install(
+        TARGETS fork-example
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+        COMPONENT rocprofiler-systems-examples
+    )
 endif()
 
 # HIP fork example (multi-process concurrency test)
@@ -55,6 +69,18 @@ if(HIPCC_EXECUTABLE)
     )
         add_executable(hipMallocConcurrencyMproc hipMallocConcurrencyMproc.cpp)
         target_link_libraries(hipMallocConcurrencyMproc PRIVATE Threads::Threads)
+        set_target_properties(
+            hipMallocConcurrencyMproc
+            PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+        )
+        # Specify GPU architectures to compile for
+        foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+            target_compile_options(
+                hipMallocConcurrencyMproc
+                PRIVATE --offload-arch=${arch}
+            )
+            target_link_options(hipMallocConcurrencyMproc PRIVATE --offload-arch=${arch})
+        endforeach()
 
         if(
             CMAKE_CXX_COMPILER_ID MATCHES "Clang"
@@ -77,14 +103,13 @@ if(HIPCC_EXECUTABLE)
         endif()
 
         if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
-            # defined in MacroUtilities.cmake
             rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET hipMallocConcurrencyMproc)
         endif()
 
-        if(ROCPROFSYS_INSTALL_EXAMPLES)
+        if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET hipMallocConcurrencyMproc)
             install(
                 TARGETS hipMallocConcurrencyMproc
-                DESTINATION bin
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
                 COMPONENT rocprofiler-systems-examples
             )
         endif()

@@ -4,14 +4,13 @@
 
 ROCm Compute Profiler is a system performance profiling tool for machine
 learning/HPC workloads running on AMD MI GPUs. The tool presently
-targets usage on MI100, MI200, and MI300 accelerators.
+targets usage on MI100, MI200, MI300, and MI350 series accelerators.
 
 * For more information on available features, installation steps, and
 workload profiling and analysis, please refer to the online
 [documentation](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
-* ROCm Compute Profiler is an AMD open source research project and is not supported
-as part of the ROCm software stack. We welcome contributions and
+* ROCm Compute Profiler is an AMD open source tool that is part of the ROCm software stack. We welcome contributions and
 feedback from the community. Please see the
 [CONTRIBUTING.md](CONTRIBUTING.md) file for additional details on our
 contribution process.
@@ -34,7 +33,21 @@ git sparse-checkout set projects/rocprofiler-compute
 git checkout develop
 
 cd projects/rocprofiler-compute
+
+# Initialize vendored dependencies
+git submodule update --init --recursive -- src/vendored/
+
 python3 -m pip install -r requirements.txt
+```
+
+**Note**: When working from source, vendored dependencies (like PyYAML) are included as git submodules. If you see import errors about missing vendored modules, run `git submodule update --init --recursive -- src/vendored/`.
+
+### Development dependencies
+
+To install development tools (linter, pre-commit hooks, YAML utilities), run:
+
+```bash
+python3 -m pip install -r requirements-development.txt
 ```
 
 ## Testing
@@ -51,14 +64,21 @@ To quickly get the environment (bash shell) for building and testing, run the fo
 
 Inside the docker container, clean, build, then install the project with tests enabled:
 ```
-rm -rf build install && cmake -B build -D CMAKE_INSTALL_PREFIX=install -D ENABLE_TESTS=ON -D INSTALL_TESTS=ON -DENABLE_COVERAGE=ON -S . && cmake --build build --target install --parallel 8
+rm -rf build install && cmake -B build -D CMAKE_INSTALL_PREFIX=install -D ENABLE_TESTS=ON -D INSTALL_TESTS=ON -D ENABLE_COVERAGE=ON -S . && cmake --build build --target install --parallel 8
 ```
+
+Common CMake options:
+- `-D ENABLE_TESTS=ON` - Enable building test executables
+- `-D INSTALL_TESTS=ON` - Install test files and test suite
+- `-D ENABLE_COVERAGE=ON` - Enable code coverage reporting
+- `-D TEST_FROM_INSTALL=ON` - Enable testing from installation directory instead of build directory
+- `-D SKIP_NATIVE_TOOL_BUILD=ON` - Skip building the native profiling tool (enables runtime compilation instead), useful when rocprofiler-sdk is not available during build time
 
 Note that per the above command, build assets will be stored under `build` directory and installed assets will be stored under `install` directory.
 
 Then, to run the automated test suite, run the following commands:
 ```
-mkdir build
+cd build
 ctest
 ```
 
@@ -68,7 +88,7 @@ For manual testing, you can find the executable at `install/bin/rocprof-compute`
 
 ### Create standalone binary using docker container
 
-This method uses the cmake target inside a docker container.
+This method uses the cmake target inside a RHEL 8 docker container with Python3.11 installed.
 
 To create a standalone binary, run the following commands:
 * `cd docker`
@@ -78,22 +98,23 @@ To create a standalone binary, run the following commands:
 
 ### Create standalone binary using cmake target locally without docker
 
+**NOTE: Python3.11 should be installed on the system to build the standalone binary**
+
 To create a standalone binary, run the following commands:
-* `pip install -r requirements.txt` (install python dependencies)
+
 * Optionally, provide `-D STANDALONEBINARY_EXTRACT_DIR=/<path>` option in cmake config. command to change the absolute path where standalone binary will extract its contents. Default is `/tmp`.
-* `cmake -B build -S .` (cmake config. command)
-* `cmake --build build --target standalonebinary` (call standalonebinary cmake target)
+* `cmake -B build -D CMAKE_INSTALL_PREFIX=install -D STANDALONEBINARY=ON -S .` (cmake config. command)
+* `cmake --build build --target install --parallel 8` (run cmake install target)
 
 ### Standalone binary creation methodology
 
 To build the binary we follow these steps:
 * Use RHEL 8.10 docker image as the base image (only in docker method)
-* Install python3.9 (only in docker method)
-* Install runtime dependencies (only in docker method)
-* Install dependencies for building standalone binary
-* Call the standalonebinary cmake target which uses Nuitka to build the standalone binary
+* Install python3.11
+* Install python dependencies
+* Call the install cmake target with STANDALONEBINARY=ON cmake args. which will use Nuitka to build the standalone binary
 
-You should find the rocprof-compute.bin standalone binary inside the `build` folder in the root directory of the project.
+You should find the rocprof-compute.bin standalone binary inside the `install/libexec/rocprofiler-compute/rocprof-compute.bin` folder in the root directory of the project.
 
 ### Things to note about standalone binary
 
@@ -101,12 +122,20 @@ You should find the rocprof-compute.bin standalone binary inside the `build` fol
 
 * By default, standalone binary extracts its contents to a directory `rocprof_compute_standalonebinary_<pid>` under `/tmp` parent directory upon execution, however, the parent directory can be configured as explained in standalone binary creation section.
 
-* When using docker method, since RHEL 8 ships with glibc version 2.28, this standalone binary can only be run on environment with glibc version greater than 2.28.
-glibc version can be checked using `ldd --version` command.
+* When using docker method, since RHEL 8 ships with glibc version 2.28, this standalone binary can only be run on environment with glibc version greater than or equal to 2.28. glibc version can be checked using `ldd --version` command.
 
 * If not using docker, the minimum glibc version is determined by the OS where cmake is run.
 
-To test the standalone binary provide the `--call-binary` option to pytest.
+* When using docker, native counter collection tool is not compiled due to unavailability of rocprofiler-sdk. Instead, native counter collection tool will be runtime compiled based on the environment where the binary is running.
+
+### Test standalone binary
+
+Create standalone binary with tests enabled, then run the tests:
+
+* `cmake -B build -D CMAKE_INSTALL_PREFIX=install -D ENABLE_TESTS=ON -D INSTALL_TESTS=ON -D STANDALONEBINARY=ON -S .`
+* `cmake --build build --target install --parallel 8`
+* `cd install/libexec/rocprofiler-compute`
+* `ctest`
 
 ## How to Cite
 
@@ -115,7 +144,7 @@ This software can be cited using a Zenodo
 style reference is provided below for convenience:
 
 ```
-@software{xiaomin_lu_2022_7314631
+@misc{xiaomin_lu_2022_7314631
   author       = {Xiaomin Lu and
                   Cole Ramos and
                   Fei Zheng and
@@ -124,12 +153,7 @@ style reference is provided below for convenience:
                   Keith Lowery and
                   Nicholas Curtis and
                   Cristian Di Pietrantonio},
-  title        = {ROCm/rocprofiler-compute: v3.1.0 (12 February 2025)},
-  month        = February,
-  year         = 2025,
-  publisher    = {Zenodo},
-  version      = {v3.1.0},
-  doi          = {10.5281/zenodo.7314631},
-  url          = {https://doi.org/10.5281/zenodo.7314631}
+  title        = {rocprofiler-compute},
+  url          = {https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute}
 }
 ```

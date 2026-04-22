@@ -1,26 +1,8 @@
-# Copyright (c) 2020 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
-project(stream)
-
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.21)
 
 if(UNIX)
   if(NOT DEFINED ROCM_PATH)
@@ -34,26 +16,30 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
-# Find hip
-find_package(hip)
-
-# Set compiler and linker
-set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
-set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
+project(stream LANGUAGES CXX HIP)
 
 # Create the excutable
 if(TARGET build_cookbook)
-set(EXCLUDE_OPTION EXCLUDE_FROM_ALL)
+  set(EXCLUDE_OPTION EXCLUDE_FROM_ALL)
 else()
-set(EXCLUDE_OPTION )
+  set(EXCLUDE_OPTION)
 endif()
+
+# Mark source file as HIP code (contains __global__ kernels)
+set_source_files_properties(stream.cpp PROPERTIES LANGUAGE HIP)
+
 add_executable(stream ${EXCLUDE_OPTION} stream.cpp)
 
 target_include_directories(stream PRIVATE ../../common)
 
-# Link with HIP
-target_link_libraries(stream hip::host)
+# Set RPATH so executable can find HIP libraries at runtime
+if(UNIX)
+  set_target_properties(stream PROPERTIES
+    BUILD_RPATH "${ROCM_PATH}/lib"
+    INSTALL_RPATH "${ROCM_PATH}/lib"
+  )
+endif()
 
-if(TARGET cookbook)
-add_dependencies(build_cookbook stream)
+if(TARGET build_cookbook)
+  add_dependencies(build_cookbook stream)
 endif()

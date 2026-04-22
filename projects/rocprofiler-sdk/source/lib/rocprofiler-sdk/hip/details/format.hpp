@@ -266,6 +266,9 @@ struct formatter<hipMemAllocationType> : rocprofiler::hip::details::base_formatt
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 14
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemAllocationType, Uncached);
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 22
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemAllocationType, Managed);
+#endif
             ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipMemAllocationType);
         }
         return fmt::format_to(ctx.out(), "Unknown");
@@ -556,6 +559,11 @@ struct formatter<hipLaunchAttributeID> : rocprofiler::hip::details::base_formatt
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, MemSyncDomainMap);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, MemSyncDomain);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, Max);
+#    if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 27
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, Ignore);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, ClusterDimension);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, ClusterSchedulingPolicyPreference);
+#    endif
             ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipLaunchAttributeID);
         }
         return fmt::format_to(ctx.out(), "Unknown");
@@ -567,6 +575,23 @@ struct formatter<hipLaunchAttributeValue> : rocprofiler::hip::details::base_form
     template <typename Ctx>
     auto format(hipLaunchAttributeValue v, Ctx& ctx) const
     {
+#    if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 27
+        return fmt::format_to(
+            ctx.out(),
+            "{{accessPolicyWindow={}, cooperative={}, priority={}, syncPolicy={}, "
+            "memSyncDomainMap={}, memSyncDomain={}, clusterDim={{x={}, y={}, z={}}}, "
+            "clusterSchedulingPolicyPreference={}}}",
+            v.accessPolicyWindow,
+            v.cooperative,
+            v.priority,
+            v.syncPolicy,
+            v.memSyncDomainMap,
+            v.memSyncDomain,
+            v.clusterDim.x,
+            v.clusterDim.y,
+            v.clusterDim.z,
+            v.clusterSchedulingPolicyPreference);
+#    else
         return fmt::format_to(
             ctx.out(),
             "{{accessPolicyWindow={}, cooperative={}, priority={}, syncPolicy={}, "
@@ -577,6 +602,7 @@ struct formatter<hipLaunchAttributeValue> : rocprofiler::hip::details::base_form
             v.syncPolicy,
             v.memSyncDomainMap,
             v.memSyncDomain);
+#    endif
     }
 };
 ROCP_SDK_HIP_FORMATTER(hipMemcpyAttributes,
@@ -622,6 +648,34 @@ struct formatter<hipDriverEntryPointQueryResult> : rocprofiler::hip::details::ba
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipDriverEntryPoint, SymbolNotFound);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipDriverEntryPoint, VersionNotSufficent);
             ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipDriverEntryPointQueryResult);
+        }
+        return fmt::format_to(ctx.out(), "Unknown");
+    }
+};
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 23
+ROCP_SDK_HIP_FORMATTER(hipArrayMemoryRequirements,
+                       "{}alignment={}, size={}{}",
+                       '{',
+                       v.alignment,
+                       v.size,
+                       '}')
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 27
+template <>
+struct formatter<hipClusterSchedulingPolicy> : rocprofiler::hip::details::base_formatter
+{
+    template <typename Ctx>
+    auto format(hipClusterSchedulingPolicy v, Ctx& ctx) const
+    {
+        switch(v)
+        {
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipClusterSchedulingPolicy, Default);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipClusterSchedulingPolicy, Spread);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipClusterSchedulingPolicy, LoadBalancing);
+            ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipClusterSchedulingPolicy);
         }
         return fmt::format_to(ctx.out(), "Unknown");
     }

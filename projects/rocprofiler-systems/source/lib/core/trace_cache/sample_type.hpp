@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 #include "core/trace_cache/cacheable.hpp"
@@ -43,9 +24,12 @@ enum class type_identifier_t : uint32_t
     kernel_dispatch         = 0x0003,
     memory_copy             = 0x0004,
     memory_alloc            = 0x0005,
-    amd_smi_sample          = 0x0006,
+    gpu_pmc_sample          = 0x0006,
     cpu_freq_sample         = 0x0007,
     backtrace_region_sample = 0x0008,
+    scratch_memory          = 0x0009,
+    ainic_pmc_sample        = 0x000A,
+    kfd_sample              = 0x000B,
     fragmented_space        = 0xFFFF
 };
 
@@ -146,6 +130,83 @@ get_size(const kernel_dispatch_sample& item)
         item.private_segment_size, item.group_segment_size, item.workgroup_size_x,
         item.workgroup_size_y, item.workgroup_size_z, item.grid_size_x, item.grid_size_y,
         item.grid_size_z, static_cast<uint64_t>(item.stream_handle));
+}
+
+struct scratch_memory_sample : cacheable_t
+{
+    static constexpr type_identifier_t type_identifier =
+        type_identifier_t::scratch_memory;
+
+    scratch_memory_sample() = default;
+    scratch_memory_sample(uint64_t _start_timestamp, uint64_t _end_timestamp,
+                          uint64_t _thread_id, uint64_t _agent_id_handle,
+                          uint64_t _queue_id_handle, int32_t _kind, int32_t _operation,
+                          int32_t _flags, uint64_t _allocation_size,
+                          uint64_t _correlation_id_internal,
+                          uint64_t _correlation_id_ancestor, size_t _stream_handle)
+    : start_timestamp(_start_timestamp)
+    , end_timestamp(_end_timestamp)
+    , thread_id(_thread_id)
+    , agent_id_handle(_agent_id_handle)
+    , queue_id_handle(_queue_id_handle)
+    , kind(_kind)
+    , operation(_operation)
+    , flags(_flags)
+    , allocation_size(_allocation_size)
+    , correlation_id_internal(_correlation_id_internal)
+    , correlation_id_ancestor(_correlation_id_ancestor)
+    , stream_handle(_stream_handle)
+    {}
+
+    uint64_t start_timestamp;
+    uint64_t end_timestamp;
+    uint64_t thread_id;
+    uint64_t agent_id_handle;
+    uint64_t queue_id_handle;
+    int32_t  kind;
+    int32_t  operation;
+    int32_t  flags;
+    uint64_t allocation_size;
+    uint64_t correlation_id_internal;
+    uint64_t correlation_id_ancestor;
+    size_t   stream_handle;
+};
+
+template <>
+inline void
+serialize(uint8_t* buffer, const scratch_memory_sample& item)
+{
+    utility::store_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
+                         item.agent_id_handle, item.queue_id_handle, item.kind,
+                         item.operation, item.flags, item.allocation_size,
+                         item.correlation_id_internal, item.correlation_id_ancestor,
+                         static_cast<uint64_t>(item.stream_handle));
+}
+
+template <>
+inline scratch_memory_sample
+deserialize(uint8_t*& buffer)
+{
+    scratch_memory_sample item;
+    uint64_t              stream_handle;
+    utility::parse_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
+                         item.agent_id_handle, item.queue_id_handle, item.kind,
+                         item.operation, item.flags, item.allocation_size,
+                         item.correlation_id_internal, item.correlation_id_ancestor,
+                         stream_handle);
+    item.stream_handle = stream_handle;
+    return item;
+}
+
+template <>
+inline size_t
+get_size(const scratch_memory_sample& item)
+{
+    return utility::get_size(item.start_timestamp, item.end_timestamp, item.thread_id,
+                             item.agent_id_handle, item.queue_id_handle, item.kind,
+                             item.operation, item.flags, item.allocation_size,
+                             item.correlation_id_internal, item.correlation_id_ancestor,
+                             static_cast<uint64_t>(item.stream_handle));
 }
 
 struct memory_copy_sample : cacheable_t
@@ -462,7 +523,8 @@ struct pmc_event_with_sample : in_time_sample
                           size_t _stack_id, size_t _parent_stack_id,
                           size_t _correlation_id, std::string _call_stack,
                           std::string _line_info, uint32_t _device_id,
-                          uint8_t _device_type, std::string _pmc_info_name, double _value)
+                          uint8_t _device_type, std::string _pmc_info_name, double _value,
+                          std::optional<int64_t> _system_tid)
     : in_time_sample(_category_enum_id, std::move(_track_name), _timestamp_ns,
                      std::move(_event_metadata), _stack_id, _parent_stack_id,
                      _correlation_id, std::move(_call_stack), std::move(_line_info))
@@ -470,12 +532,14 @@ struct pmc_event_with_sample : in_time_sample
     , device_type(_device_type)
     , pmc_info_name(std::move(_pmc_info_name))
     , value(_value)
+    , system_tid(_system_tid)
     {}
 
-    uint32_t    device_id;
-    uint8_t     device_type;
-    std::string pmc_info_name;
-    double      value;
+    uint32_t               device_id;
+    uint8_t                device_type;
+    std::string            pmc_info_name;
+    double                 value;
+    std::optional<int64_t> system_tid;
 };
 
 template <>
@@ -488,7 +552,7 @@ serialize(uint8_t* buffer, const pmc_event_with_sample& item)
         static_cast<uint64_t>(item.stack_id), static_cast<uint64_t>(item.parent_stack_id),
         static_cast<uint64_t>(item.correlation_id), std::string_view(item.call_stack),
         std::string_view(item.line_info), item.device_id, item.device_type,
-        std::string_view(item.pmc_info_name), item.value);
+        std::string_view(item.pmc_info_name), item.value, item.system_tid);
 }
 
 template <>
@@ -503,7 +567,8 @@ deserialize(uint8_t*& buffer)
     utility::parse_value(buffer, category_enum_id, track_name_view, timestamp_ns,
                          event_metadata_view, stack_id, parent_stack_id, correlation_id,
                          call_stack_view, line_info_view, item.device_id,
-                         item.device_type, pmc_info_name_view, item.value);
+                         item.device_type, pmc_info_name_view, item.value,
+                         item.system_tid);
     item.category_enum_id = category_enum_id;
     item.track_name       = std::string(track_name_view);
     item.timestamp_ns     = timestamp_ns;
@@ -527,87 +592,7 @@ get_size(const pmc_event_with_sample& item)
         static_cast<uint64_t>(item.stack_id), static_cast<uint64_t>(item.parent_stack_id),
         static_cast<uint64_t>(item.correlation_id), std::string_view(item.call_stack),
         std::string_view(item.line_info), item.device_id, item.device_type,
-        std::string_view(item.pmc_info_name), item.value);
-}
-
-struct amd_smi_sample : cacheable_t
-{
-    static constexpr type_identifier_t type_identifier =
-        type_identifier_t::amd_smi_sample;
-
-    amd_smi_sample() = default;
-    amd_smi_sample(uint64_t _settings, uint32_t _device_id, size_t _timestamp,
-                   uint32_t _gfx_activity, uint32_t _umc_activity, uint32_t _mm_activity,
-                   uint32_t _power, int64_t _temperature, size_t _mem_usage,
-                   std::vector<uint8_t> _gpu_activity)
-    : settings(_settings)
-    , device_id(_device_id)
-    , timestamp(_timestamp)
-    , gfx_activity(_gfx_activity)
-    , umc_activity(_umc_activity)
-    , mm_activity(_mm_activity)
-    , power(_power)
-    , temperature(_temperature)
-    , mem_usage(_mem_usage)
-    , gpu_activity(std::move(_gpu_activity))
-    {}
-
-    enum class settings_positions : uint8_t
-    {
-        busy = 0,
-        temp,
-        power,
-        mem_usage,
-        vcn_activity,
-        jpeg_activity,
-        xgmi,
-        pcie
-    };
-
-    uint64_t             settings;  // bitfield
-    uint32_t             device_id;
-    size_t               timestamp;
-    uint32_t             gfx_activity;
-    uint32_t             umc_activity;
-    uint32_t             mm_activity;
-    uint32_t             power;
-    int64_t              temperature;
-    size_t               mem_usage;
-    std::vector<uint8_t> gpu_activity;
-};
-
-template <>
-inline void
-serialize(uint8_t* buffer, const amd_smi_sample& item)
-{
-    utility::store_value(
-        buffer, item.settings, item.device_id, static_cast<uint64_t>(item.timestamp),
-        item.gfx_activity, item.umc_activity, item.mm_activity, item.power,
-        item.temperature, static_cast<uint64_t>(item.mem_usage), item.gpu_activity);
-}
-
-template <>
-inline amd_smi_sample
-deserialize(uint8_t*& buffer)
-{
-    amd_smi_sample item;
-    uint64_t       timestamp, mem_usage;
-    utility::parse_value(buffer, item.settings, item.device_id, timestamp,
-                         item.gfx_activity, item.umc_activity, item.mm_activity,
-                         item.power, item.temperature, mem_usage, item.gpu_activity);
-    item.timestamp = timestamp;
-    item.mem_usage = mem_usage;
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const amd_smi_sample& item)
-{
-    return utility::get_size(
-        item.settings, item.device_id, static_cast<uint64_t>(item.timestamp),
-        item.gfx_activity, item.umc_activity, item.mm_activity, item.power,
-        item.temperature, static_cast<uint64_t>(item.mem_usage), item.gpu_activity);
+        std::string_view(item.pmc_info_name), item.value, item.system_tid);
 }
 
 struct cpu_freq_sample : cacheable_t
@@ -749,6 +734,91 @@ get_size(const backtrace_region_sample& item)
         std::string_view(item.name), item.start_timestamp, item.end_timestamp,
         std::string_view(item.category), std::string_view(item.call_stack),
         std::string_view(item.line_info), std::string_view(item.extdata));
+}
+
+struct kfd_sample : cacheable_t
+{
+    static constexpr type_identifier_t type_identifier = type_identifier_t::kfd_sample;
+
+    kfd_sample() = default;
+    kfd_sample(uint64_t _thread_id, std::string _name, uint64_t _start_timestamp,
+               uint64_t _end_timestamp, std::string _args_str, std::string _category,
+               std::string _track_name, std::string _event_metadata, uint32_t _device_id,
+               uint8_t _device_type, std::string _pmc_info_name, double _value,
+               std::optional<int64_t> _system_tid)
+    : thread_id(_thread_id)
+    , name(std::move(_name))
+    , start_timestamp(_start_timestamp)
+    , end_timestamp(_end_timestamp)
+    , args_str(std::move(_args_str))
+    , category(std::move(_category))
+    , track_name(std::move(_track_name))
+    , event_metadata(std::move(_event_metadata))
+    , device_id(_device_id)
+    , device_type(_device_type)
+    , pmc_info_name(std::move(_pmc_info_name))
+    , value(_value)
+    , system_tid(_system_tid)
+    {}
+
+    uint64_t               thread_id;
+    std::string            name;
+    uint64_t               start_timestamp;
+    uint64_t               end_timestamp;
+    std::string            args_str;
+    std::string            category;
+    std::string            track_name;
+    std::string            event_metadata;
+    uint32_t               device_id;
+    uint8_t                device_type;
+    std::string            pmc_info_name;
+    double                 value;
+    std::optional<int64_t> system_tid;
+};
+
+template <>
+inline void
+serialize(uint8_t* buffer, const kfd_sample& item)
+{
+    utility::store_value(
+        buffer, item.thread_id, std::string_view(item.name), item.start_timestamp,
+        item.end_timestamp, std::string_view(item.args_str),
+        std::string_view(item.category), std::string_view(item.track_name),
+        std::string_view(item.event_metadata), item.device_id, item.device_type,
+        std::string_view(item.pmc_info_name), item.value, item.system_tid);
+}
+
+template <>
+inline kfd_sample
+deserialize(uint8_t*& buffer)
+{
+    kfd_sample       item;
+    std::string_view name_view, args_str_view, category_view, track_name_view,
+        event_metadata_view, pmc_info_name_view;
+    utility::parse_value(buffer, item.thread_id, name_view, item.start_timestamp,
+                         item.end_timestamp, args_str_view, category_view,
+                         track_name_view, event_metadata_view, item.device_id,
+                         item.device_type, pmc_info_name_view, item.value,
+                         item.system_tid);
+    item.name           = std::string(name_view);
+    item.args_str       = std::string(args_str_view);
+    item.category       = std::string(category_view);
+    item.track_name     = std::string(track_name_view);
+    item.event_metadata = std::string(event_metadata_view);
+    item.pmc_info_name  = std::string(pmc_info_name_view);
+    return item;
+}
+
+template <>
+inline size_t
+get_size(const kfd_sample& item)
+{
+    return utility::get_size(
+        item.thread_id, std::string_view(item.name), item.start_timestamp,
+        item.end_timestamp, std::string_view(item.args_str),
+        std::string_view(item.category), std::string_view(item.track_name),
+        std::string_view(item.event_metadata), item.device_id, item.device_type,
+        std::string_view(item.pmc_info_name), item.value, item.system_tid);
 }
 
 }  // namespace trace_cache

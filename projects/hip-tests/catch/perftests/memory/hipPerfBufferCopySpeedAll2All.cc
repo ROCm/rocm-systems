@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 * @addtogroup hipMemcpyAsync
@@ -98,7 +85,7 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu, DEV_MEM_
   unsigned int blocks = 16;  // DEBUG_CLR_LIMIT_BLIT_WG
   HIP_CHECK(hipGetDeviceCount(&nGpus));
   if (nGpus < 2) {
-    fprintf(stderr, "Need at least 2 GPUs, skipped!\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 #if 0
@@ -234,7 +221,8 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu, DEV_MEM_
   free(streams);
   free(dstBuf);
   free(srcBuf);
-  SUCCEED("");
+  // Successful completion of the perf sweep; not a runtime skip (see HIP_SKIP_TEST elsewhere).
+  CHECK(true);
 }
 
 static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu) {
@@ -267,7 +255,7 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu) {
  * ------------------------
  * - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_PerfBufferCopySpeedAll2All_test - hipMemcpyPeerAsync - remotes to local") {
+HIP_TEST_CASE(Perf_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_remotes_to_local) {
   testCopyPerf(false, false, false);
 }
 
@@ -286,7 +274,7 @@ TEST_CASE("Perf_PerfBufferCopySpeedAll2All_test - hipMemcpyPeerAsync - remotes t
  * ------------------------
  * - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_PerfBufferCopySpeedAll2All_test - hipMemcpyPeerAsync - local to remotes") {
+HIP_TEST_CASE(Perf_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_local_to_remotes) {
   testCopyPerf(true, false, false);
 }
 
@@ -307,7 +295,7 @@ TEST_CASE("Perf_PerfBufferCopySpeedAll2All_test - hipMemcpyPeerAsync - local to 
  * ------------------------
  * - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_PerfBufferCopySpeedAll2All_test - kernel copy - remotes to local") {
+HIP_TEST_CASE(Perf_PerfBufferCopySpeedAll2All_test_kernel_copy_remotes_to_local) {
   testCopyPerf(false, true, false);
 }
 
@@ -328,7 +316,7 @@ TEST_CASE("Perf_PerfBufferCopySpeedAll2All_test - kernel copy - remotes to local
  * ------------------------
  * - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_PerfBufferCopySpeedAll2All_test - kernel copy - local to remotes") {
+HIP_TEST_CASE(Perf_PerfBufferCopySpeedAll2All_test_kernel_copy_local_to_remotes) {
   testCopyPerf(true, true, false);
 }
 
@@ -347,7 +335,7 @@ TEST_CASE("Perf_PerfBufferCopySpeedAll2All_test - kernel copy - local to remotes
  * ------------------------
  * - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_PerfBufferCopySpeedAll2One_test - hipMemcpyPeerAsync - remotes to local") {
+HIP_TEST_CASE(Perf_PerfBufferCopySpeedAll2One_test_hipMemcpyPeerAsync_remotes_to_local) {
   testCopyPerf(false, false, true);
 }
 
@@ -366,7 +354,7 @@ TEST_CASE("Perf_PerfBufferCopySpeedAll2One_test - hipMemcpyPeerAsync - remotes t
  * ------------------------
  * - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_PerfBufferCopySpeedOne2All_test - hipMemcpyPeerAsync - local to remotes") {
+HIP_TEST_CASE(Perf_PerfBufferCopySpeedOne2All_test_hipMemcpyPeerAsync_local_to_remotes) {
   testCopyPerf(true, false, true);
 }
 
@@ -385,7 +373,7 @@ TEST_CASE("Perf_PerfBufferCopySpeedOne2All_test - hipMemcpyPeerAsync - local to 
  * ------------------------
  * - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_PerfBufferCopySpeedAll2One_test - kernel copy - remotes to local") {
+HIP_TEST_CASE(Perf_PerfBufferCopySpeedAll2One_test_kernel_copy_remotes_to_local) {
   testCopyPerf(false, true, true);
 }
 
@@ -406,7 +394,7 @@ TEST_CASE("Perf_PerfBufferCopySpeedAll2One_test - kernel copy - remotes to local
  * ------------------------
  * - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_PerfBufferCopySpeedOne2All_test - kernel copy - local to remotes") {
+HIP_TEST_CASE(Perf_PerfBufferCopySpeedOne2All_test_kernel_copy_local_to_remotes) {
   testCopyPerf(true, true, true);
 }
 

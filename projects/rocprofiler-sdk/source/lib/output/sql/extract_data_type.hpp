@@ -59,6 +59,8 @@ struct extract_data_type<Tp, std::enable_if_t<std::is_integral<Tp>::value>>
         {
             if constexpr(sizeof(Tp) > sizeof(int32_t))
                 return Tp{sqlite3_column_int64(stmt, col)};
+            else if constexpr(sizeof(Tp) < sizeof(int32_t))
+                return static_cast<Tp>(sqlite3_column_int(stmt, col));
             else
                 return Tp{sqlite3_column_int(stmt, col)};
         }

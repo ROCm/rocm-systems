@@ -1464,6 +1464,56 @@ typedef union rocprofiler_hsa_api_args_t
         int32_t*                  status;
     } hsa_amd_ais_file_read;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x09
+    struct
+    {
+        hsa_agent_t              agent;
+        hsa_queue_type_t         type;
+        hsa_amd_queue_priority_t priority;
+        void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data);
+        void*         data;
+        uint64_t      flags;
+        hsa_queue_t** queue;
+    } hsa_amd_counted_queue_acquire;
+    struct
+    {
+        hsa_queue_t* queue;
+    } hsa_amd_counted_queue_release;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0A
+    struct
+    {
+        const hsa_amd_memory_copy_op_t* copy_ops;
+        uint32_t                        num_copy_ops;
+        uint32_t                        num_dep_signals;
+        const hsa_signal_t*             dep_signals;
+    } hsa_amd_memory_async_batch_copy;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0B
+    struct
+    {
+        hsa_agent_t agent;
+        uint64_t    flags;
+    } hsa_amd_agent_preload;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0C
+    struct
+    {
+        void**              ptrs;
+        size_t*             sizes;
+        uint32_t            count;
+        uint32_t            num_dep_signals;
+        const hsa_signal_t* dep_signals;
+        hsa_signal_t        completion_signal;
+    } hsa_amd_svm_discard_batch_async;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+    struct
+    {
+        hsa_signal_t signal;
+        uint32_t*    event_id;
+    } hsa_amd_signal_get_event_id;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 

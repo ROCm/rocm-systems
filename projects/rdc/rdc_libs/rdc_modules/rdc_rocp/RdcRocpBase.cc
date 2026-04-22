@@ -110,7 +110,7 @@ static const std::map<rdc_field_t, const char*> temp_field_map_k = {
     {RDC_FI_PROF_SIMD_UTILIZATION, "SIMD_UTILIZATION"},
 };
 
-double RdcRocpBase::run_profiler(uint32_t agent_index, rdc_field_t field) {
+rdc_status_t RdcRocpBase::run_profiler(uint32_t agent_index, rdc_field_t field, double* value) {
   thread_local std::vector<rocprofiler_record_counter_t> records;
 
   auto counter_sampler = CounterSampler::get_samplers()[agent_index];
@@ -134,12 +134,13 @@ double RdcRocpBase::run_profiler(uint32_t agent_index, rdc_field_t field) {
   }
 
   // Aggregate counter values. Rocprof v1/v2 summed values across dimensions.
-  double value = 0.0;
+  double temp_value = 0.0;
   for (auto& record : records) {
-    value += record.counter_value;  // Summing up values from all dimensions.
+    temp_value += record.counter_value;  // Summing up values from all dimensions.
   }
+  *value = temp_value;
 
-  return value;
+  return RDC_ST_OK;
 }
 
 const char* RdcRocpBase::get_field_id_from_name(rdc_field_t field) {
@@ -317,11 +318,13 @@ RdcRocpBase::RdcRocpBase() {
 }
 
 RdcRocpBase::~RdcRocpBase() {
-  hsa_status_t status = HSA_STATUS_SUCCESS;
-  status = hsa_shut_down();
-  assert(status == HSA_STATUS_SUCCESS);
-  status = hsa_shut_down();
-  assert(status == HSA_STATUS_ERROR_NOT_INITIALIZED);
+  if (m_is_initialized == false) {
+    return;
+  }
+  const hsa_status_t status = hsa_shut_down();
+  if ((status == HSA_STATUS_SUCCESS) || (status == HSA_STATUS_ERROR_NOT_INITIALIZED)) {
+    m_is_initialized = false;
+  }
 }
 
 rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value_data* data,
@@ -341,23 +344,35 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
 
   const auto start_time = std::chrono::high_resolution_clock::now();
   // direct read from rocprofiler
-  const double read_dbl = run_profiler(agent_index, field);
+  double read_dbl = 0.0;
+  const auto status = run_profiler(agent_index, field, &read_dbl);
+
+  if (status != RDC_ST_OK) {
+    RDC_LOG(RDC_ERROR, "Profiler failed!");
+    return status;
+  }
+
   const auto stop_time = std::chrono::high_resolution_clock::now();
   const double elapsed = std::chrono::duration<double, std::milli>(stop_time - start_time).count();
 
   // For OCC_ELAPSED, we need to read the occupancy metric as well
   std::map<std::string, double> sampled_values;
   if (field == RDC_FI_PROF_OCC_ELAPSED) {
-    const double occupancy_val = run_profiler(agent_index, RDC_FI_PROF_OCC_PER_ACTIVE_CU);
+    double occ_val = 0.0;
+    const auto status = run_profiler(agent_index, RDC_FI_PROF_OCC_PER_ACTIVE_CU, &occ_val);
+    if (status != RDC_ST_OK) {
+      RDC_LOG(RDC_ERROR, "Occupancy read failed!");
+      return status;
+    }
     auto occ_field_it = field_to_metric.find(RDC_FI_PROF_OCC_PER_ACTIVE_CU);
     if (occ_field_it != field_to_metric.end()) {
-      sampled_values[occ_field_it->second] = occupancy_val;
+      sampled_values[occ_field_it->second] = occ_val;
     }
   }
 
   // Apply field transformations using the helper function
   return apply_field_transformation(field, agent_index, read_dbl, elapsed, sampled_values, data,
-                                     type);
+                                    type);
 }
 
 rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& fields,
@@ -380,7 +395,8 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
 
   // Collect all unique metric names needed for sampling
   std::vector<std::string> metrics_to_sample;
-  std::map<rdc_field_t, size_t> field_to_metric_index;  // Maps field to position in metrics_to_sample
+  std::map<rdc_field_t, size_t>
+      field_to_metric_index;  // Maps field to position in metrics_to_sample
 
   for (size_t i = 0; i < fields.size(); i++) {
     const auto& field = fields[i].field_id;
@@ -405,7 +421,8 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
 
     // Special case: RDC_FI_PROF_OCC_ELAPSED needs two metrics
     if (field == RDC_FI_PROF_OCC_ELAPSED) {
-      if (field_to_metric_index.find(RDC_FI_PROF_OCC_PER_ACTIVE_CU) == field_to_metric_index.end()) {
+      if (field_to_metric_index.find(RDC_FI_PROF_OCC_PER_ACTIVE_CU) ==
+          field_to_metric_index.end()) {
         auto occ_field_it = field_to_metric.find(RDC_FI_PROF_OCC_PER_ACTIVE_CU);
         if (occ_field_it != field_to_metric.end()) {
           field_to_metric_index[RDC_FI_PROF_OCC_PER_ACTIVE_CU] = metrics_to_sample.size();
@@ -434,7 +451,7 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
     } catch (const std::exception& e) {
       RDC_LOG(RDC_ERROR, "Error while sampling counter values: " << e.what());
       for (size_t i = 0; i < fields.size(); i++) {
-          statuses[i] = RDC_ST_BAD_PARAMETER;
+        statuses[i] = RDC_ST_BAD_PARAMETER;
       }
       return RDC_ST_BAD_PARAMETER;
     }
@@ -468,8 +485,8 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
     double read_dbl = sampled_it->second;
 
     // Apply field transformation using the helper function
-    statuses[i] = apply_field_transformation(field, agent_index, read_dbl, elapsed,
-                                             sampled_values, &values[i], &types[i]);
+    statuses[i] = apply_field_transformation(field, agent_index, read_dbl, elapsed, sampled_values,
+                                             &values[i], &types[i]);
   }
 
   return RDC_ST_OK;
@@ -479,7 +496,6 @@ rdc_status_t RdcRocpBase::apply_field_transformation(
     rdc_field_t field, uint32_t agent_index, double raw_value, double elapsed_time_ms,
     const std::map<std::string, double>& sampled_values, rdc_field_value_data* output,
     rdc_field_type_t* type) {
-
   // Default type is DOUBLE
   *type = DOUBLE;
 
@@ -489,7 +505,7 @@ rdc_status_t RdcRocpBase::apply_field_transformation(
   double divided_dbl = NAN;
   if (is_eval_field) {
     if (elapsed_time_ms != 0.0) {
-      divided_dbl = raw_value / (elapsed_time_ms / 1000.0);
+      divided_dbl = raw_value / elapsed_time_ms;
     } else {
       RDC_LOG(RDC_ERROR, "Error: Elapsed time is zero. Cannot divide by zero.");
       return RDC_ST_BAD_PARAMETER;
@@ -530,9 +546,11 @@ rdc_status_t RdcRocpBase::apply_field_transformation(
       const std::string target_version = agents[agent_index].name;
       const bool isMI200 = (target_version.find("gfx90a") != std::string::npos);
       if (isMI200) {
-        output->dbl = divided_dbl / (1024.0F / static_cast<double>(agents[agent_index].simd_per_cu));
+        output->dbl =
+            divided_dbl / (1024.0F / static_cast<double>(agents[agent_index].simd_per_cu));
       } else {  // Assume mi300
-        output->dbl = divided_dbl / (2048.0F / static_cast<double>(agents[agent_index].simd_per_cu));
+        output->dbl =
+            divided_dbl / (2048.0F / static_cast<double>(agents[agent_index].simd_per_cu));
       }
     } break;
 

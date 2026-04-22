@@ -8,15 +8,17 @@ CLI analysis
 
 This section provides an overview of ROCm Compute Profiler's CLI analysis features.
 
-* :ref:`Derived metrics <cli-list-metrics>`: All of ROCm Compute Profiler's built-in metrics.
+* :ref:`Derived metrics <cli-list-available-metrics>`: All of ROCm Compute Profiler's built-in metrics.
 
 * :ref:`Baseline comparison <analysis-baseline-comparison>`: Compare multiple runs in a side-by-side manner.
 
 * :ref:`Metric customization <cli-analysis-options>`: Isolate a subset of built-in metrics or build your own profiling configuration.
 
 * :ref:`Filtering <cli-analysis-options>`: Hone in on a particular kernel, GPU ID, or dispatch ID via post-process filtering.
-  
+
 * :ref:`Per-kernel roofline analysis <per-kernel-roofline>`: Detailed arithmetic intensity and performance analysis for individual kernels.
+
+* :ref:`Roofline HTML generation <roofline-html-generation>`: Generate interactive HTML roofline charts from profiling data.
 
 Run ``rocprof-compute analyze -h`` for more details.
 
@@ -126,7 +128,7 @@ There are three high-level GPU analysis views:
    option. Or, build your own configuration following
    `config_template <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/panel_config_template.yaml>`_.
    The following snippet shows how to generate a report containing only metric 2
-   (:doc:`System Speed-of-Light </conceptual/system-speed-of-light>`).
+   (:doc:`System Speed-of-Light </conceptual/cdna/system-speed-of-light>`).
 
    .. code-block:: shell-session
 
@@ -310,35 +312,51 @@ There are three high-level GPU analysis views:
 More analysis options
 =====================
 
-Single run
-  .. code-block:: shell
+**Single run**
 
-     $ rocprof-compute analyze -p workloads/vcopy/MI200/
+.. code-block:: shell
 
-List top kernels and dispatches
-  .. code-block:: shell
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/
 
-     $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-stats
+**List top kernels and dispatches**
 
-List metrics
-  .. code-block:: shell
+.. code-block:: shell
 
-     $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-stats
 
-List IP blocks
-  .. code-block:: shell
 
-     $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-blocks gfx90a
+**List metrics**
 
-Show Description column which is excluded by default in cli output
-  .. code-block:: shell
+.. code-block:: shell
 
-     $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a --include-cols Description
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a
 
-Show System Speed-of-Light and CS_Busy blocks only
-  .. code-block:: shell
+**List IP blocks**
 
-     $ rocprof-compute analyze -p workloads/vcopy/MI200/  -b 2  5.1.0
+.. code-block:: shell
+
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-blocks gfx90a
+
+
+**Show Description column which is excluded by default in cli output**
+
+.. code-block:: shell
+
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a --include-cols Description
+
+**TTY output view (plain tables)**
+
+Use ``--view table`` to force plain tabular output for all sections and ignore ``cli_style`` from the analysis YAML (for example, memory charts and Roofline charts are shown as tables). Additional ``--view`` values may be added in future releases.
+
+.. code-block:: shell
+
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 --view table
+
+**Show System Speed-of-Light and CS_Busy blocks only**
+
+.. code-block:: shell
+
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/  -b 2  5.1.0
 
 .. note::
 
@@ -346,68 +364,72 @@ Show System Speed-of-Light and CS_Busy blocks only
    this case, ``1`` is the ID for System Speed-of-Light and ``5.1.0`` the ID for
    GPU Busy Cycles metric.
 
-Filter kernels
-  First, list the top kernels in your application using `--list-stats`.
 
-  .. code-block::
+**Filter kernels**
 
-     $ rocprof-compute analyze -p workloads/vcopy/MI200/ --list-stats
+First, list the top kernels in your application using `--list-stats`.
 
-     Analysis mode = cli
-     [analysis] deriving rocprofiler-compute metrics...
+.. code-block::
 
-     --------------------------------------------------------------------------------
-     Detected Kernels (sorted descending by duration)
-     ╒════╤══════════════════════════════════════════════╕
-     │    │ Kernel_Name                                  │
-     ╞════╪══════════════════════════════════════════════╡
-     │  0 │ vecCopy(double*, double*, double*, int, int) │
-     ╘════╧══════════════════════════════════════════════╛
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --list-stats
 
-     --------------------------------------------------------------------------------
-     Dispatch list
-     ╒════╤═══════════════╤══════════════════════════════════════════════╤══════════╕
-     │    │   Dispatch_ID │ Kernel_Name                                  │   GPU_ID │
-     ╞════╪═══════════════╪══════════════════════════════════════════════╪══════════╡
-     │  0 │             0 │ vecCopy(double*, double*, double*, int, int) │        0 │
-     ╘════╧═══════════════╧══════════════════════════════════════════════╧══════════╛
+   Analysis mode = cli
+   [analysis] deriving rocprofiler-compute metrics...
 
-  Second, select the index of the kernel you would like to filter; for example,
-  ``vecCopy(double*, double*, double*, int, int) [clone .kd]`` at index ``0``.
-  Then, use this index to apply the filter via ``-k`` or ``--kernels``.
+   --------------------------------------------------------------------------------
+   Detected Kernels (sorted descending by duration)
+   ╒════╤══════════════════════════════════════════════╕
+   │    │ Kernel_Name                                  │
+   ╞════╪══════════════════════════════════════════════╡
+   │  0 │ vecCopy(double*, double*, double*, int, int) │
+   ╘════╧══════════════════════════════════════════════╛
 
-  .. code-block:: shell-session
+   --------------------------------------------------------------------------------
+   Dispatch list
+   ╒════╤═══════════════╤══════════════════════════════════════════════╤══════════╕
+   │    │   Dispatch_ID │ Kernel_Name                                  │   GPU_ID │
+   ╞════╪═══════════════╪══════════════════════════════════════════════╪══════════╡
+   │  0 │             0 │ vecCopy(double*, double*, double*, int, int) │        0 │
+   ╘════╧═══════════════╧══════════════════════════════════════════════╧══════════╛
 
-     $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0
+Second, select the index of the kernel you would like to filter; for example,
+``vecCopy(double*, double*, double*, int, int) [clone .kd]`` at index ``0``.
+Then, use this index to apply the filter via ``-k`` or ``--kernels``.
 
-     Analysis mode = cli
-     [analysis] deriving rocprofiler-compute metrics...
+.. code-block:: shell-session
 
-     --------------------------------------------------------------------------------
-     0. Top Stats
-     0.1 Top Kernels
-     ╒════╤══════════════════════════════════════════╤═════════╤═══════════╤════════════╤══════════════╤════════╤═════╕
-     │    │ Kernel_Name                              │   Count │   Sum(ns) │   Mean(ns) │   Median(ns) │    Pct │ S   │
-     ╞════╪══════════════════════════════════════════╪═════════╪═══════════╪════════════╪══════════════╪════════╪═════╡
-     │  0 │ vecCopy(double*, double*, double*, int,  │    1.00 │  18560.00 │   18560.00 │     18560.00 │ 100.00 │ *   │
-     │    │ int)                                     │         │           │            │              │        │     │
-     ╘════╧══════════════════════════════════════════╧═════════╧═══════════╧════════════╧══════════════╧════════╧═════╛
-     ...
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0
 
-  You should see your filtered kernels indicated by an asterisk in the **Top
-  Stats** table.
+   Analysis mode = cli
+   [analysis] deriving rocprofiler-compute metrics...
+
+   --------------------------------------------------------------------------------
+   0. Top Stats
+   0.1 Top Kernels
+   ╒════╤══════════════════════════════════════════╤═════════╤═══════════╤════════════╤══════════════╤════════╤═════╕
+   │    │ Kernel_Name                              │   Count │   Sum(ns) │   Mean(ns) │   Median(ns) │    Pct │ S   │
+   ╞════╪══════════════════════════════════════════╪═════════╪═══════════╪════════════╪══════════════╪════════╪═════╡
+   │  0 │ vecCopy(double*, double*, double*, int,  │    1.00 │  18560.00 │   18560.00 │     18560.00 │ 100.00 │ *   │
+   │    │ int)                                     │         │           │            │              │        │     │
+   ╘════╧══════════════════════════════════════════╧═════════╧═══════════╧════════════╧══════════════╧════════╧═════╛
+   ...
+
+You should see your filtered kernels indicated by an asterisk in the **Top
+Stats** table.
 
 .. _per-kernel-roofline:
 
-Per-kernel roofline analysis
-  When analyzing specific kernels, the roofline analysis provides detailed metrics for each filtered kernel:
+**Per-kernel roofline analysis**
 
-  .. code-block:: shell-session
+When analyzing specific kernels, the roofline analysis provides detailed metrics for each filtered kernel:
 
-     $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 -b 4
-  This generates enhanced roofline output showing per-kernel performance rates and arithmetic intensity calculations:
+.. code-block:: shell-session
 
-  .. code-block:: text
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 -b 4
+
+This generates enhanced roofline output showing per-kernel performance rates and arithmetic intensity calculations:
+
+.. code-block:: text
 
    ================================================================================
    4. Roofline
@@ -454,24 +476,82 @@ Per-kernel roofline analysis
       |   ├─────────────┼──────────────────────┼─────────┼────────────┤
       |   │ 4.2.3       │ Performance (GFLOPs) │         │ Gflop/s    │
       |   ╘═════════════╧══════════════════════╧═════════╧════════════╛
-  The per-kernel analysis uses YAML-based metric evaluation for accurate calculations.
 
-  Analyze multiple kernels for comparison:
+The per-kernel analysis uses YAML-based metric evaluation for accurate calculations.
 
-  .. code-block:: shell-session
+Analyze multiple kernels for comparison:
 
-     $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 1 2 -b 4
+.. code-block:: shell-session
 
-Baseline comparison
-  .. code-block:: shell
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 1 2 -b 4
 
-     rocprof-compute analyze -p workload1/path/  -p workload2/path/
+.. _roofline-html-generation:
 
-  OR
+**Roofline HTML generation**
 
-  .. code-block:: shell
+Roofline HTML plots are generated during analyze mode. Profile mode creates
+``roofline.csv`` containing microbenchmark data, and analyze mode uses this
+data to produce interactive HTML roofline charts.
 
-     rocprof-compute analyze -p workload1/path/ -k 0  -p workload2/path/ -k 1
+Two-step workflow:
+
+.. code-block:: shell-session
+
+   # Step 1: Profile to generate roofline.csv
+   $ rocprof-compute profile --name vcopy --roof-only -- tests/vcopy -n 1048576 -b 256
+
+   # Step 2: Analyze to generate HTML roofline plots
+   $ rocprof-compute analyze -p workloads/vcopy/MI300A_A1/ -b 4
+
+Roofline visualization options (available only in analyze mode):
+
+* ``--sort``: Overlay top kernels or top dispatches (default: kernels)
+* ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, LDS (default: ALL)
+* ``--roofline-data-type``: Choose datatypes for roofline visualization (default: FP32)
+
+Example with multiple options:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --sort dispatches --mem-level HBM L2 --roofline-data-type FP32 FP16
+
+.. _analysis-baseline-comparison:
+
+**Baseline comparison**
+
+Baseline comparison allows for checking A/B effect. Currently baseline comparison is limited to the same :ref:`SoC <def-soc>`. Cross-comparison between SoCs is in development.
+
+For both the Current Workload and the Baseline Workload, you can independently setup the following filters to allow fine grained comparisons:
+
+* Workload Name with ``--path``
+* GPU ID filtering (multi-selection) with ``--gpu-id``
+* Kernel Name filtering (multi-selection) with ``--kernel``
+* Dispatch ID filtering (regex filtering) with ``--dispatch``
+* ROCm Compute Profiler panels/blocks (multi-selection) with ``--block``
+
+.. code-block:: shell
+
+   rocprof-compute analyze -p [path1] [path2] … [pathN]
+
+.. code-block:: shell
+
+   rocprof-compute analyze -p [path1] [options for path1] ... -p [pathN] [options for pathN]
+
+Examples:
+
+.. code-block:: shell
+
+   rocprof-compute analyze -p workloads/workload_1/gpu_arch/ -k 0 -b 2 -p workloads/workload_2/gpu_arch/ -k 1 -b 2
+
+.. code-block:: shell
+
+   rocprof-compute analyze -p workloads/workload_1/gpu_arch/ workloads/workload_2/gpu_arch/ ... workloads/workload_7/gpu_arch/ -b 12
+
+.. image:: ../../data/analyze/cli/baseline_comparison.png
+   :align: center
+   :alt: Baseline Comparison example of LDS block among 7 runs
+   :width: 800
+
 
 Analysis output format
 ======================
@@ -534,7 +614,7 @@ Analysis database example
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze --verbose --db test -p workloads/vmem/MI300X_A1 -p workloads/vmem1/MI300X_A1
+   $ rocprof-compute analyze --verbose --output-name test --output-format db -p workloads/nbody/MI300X_A1 -p workloads/nbody1/MI300X_A1
    DEBUG Execution mode = analyze
 
                                     __                                       _
@@ -545,25 +625,101 @@ Analysis database example
                   |_|                                           |_|
 
       INFO Analysis mode = db
+      INFO ed45b0b189
    DEBUG [omnisoc init]
+      INFO ed45b0b189
    DEBUG [omnisoc init]
    DEBUG [analysis] prepping to do some analysis
       INFO [analysis] deriving rocprofiler-compute metrics...
-   WARNING Roofline ceilings not found for /app/projects/rocprofiler-compute/workloads/vmem/MI300X_A1.
-   WARNING Roofline ceilings not found for /app/projects/rocprofiler-compute/workloads/vmem1/MI300X_A1.
-   WARNING PC sampling data not found for /app/projects/rocprofiler-compute/workloads/vmem/MI300X_A1.
-   WARNING PC sampling data not found for /app/projects/rocprofiler-compute/workloads/vmem1/MI300X_A1.
+   DEBUG Collected roofline ceilings
+   WARNING PC sampling data not found for /app/projects/rocprofiler-compute/workloads/nbody/MI300X_A1.
+   WARNING PC sampling data not found for /app/projects/rocprofiler-compute/workloads/nbody1/MI300X_A1.
    DEBUG Collected dispatch data
    DEBUG Applied analysis mode filters
    DEBUG Calculated dispatch data
    DEBUG Collected metrics data
    WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
-   (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
+      (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
    WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
-   (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
+      (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
    DEBUG Calculated metric values
    DEBUG Calculated roofline data points
    DEBUG [analysis] generating analysis
    DEBUG SQLite database initialized with name: test.db
    DEBUG Initialized database: test.db
+      INFO ed45b0b189
+      INFO ed45b0b189
    DEBUG Completed writing database
+   WARNING Created file: test.db
+
+
+PyTorch Operator Analysis
+=========================
+
+.. warning::
+
+   PyTorch operator analysis is currently available only in CLI mode. GUI and TUI
+   will provide different interfaces for operator selection and visualization.
+
+   These options require ``--experimental``. After profiling with
+   ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`),
+   use ``rocprof-compute --experimental analyze ...`` with
+   ``--list-torch-operators`` or ``--torch-operator`` as needed.
+
+
+Listing All Operators
+---------------------
+
+Display all PyTorch operators captured during profiling:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute --experimental analyze --path ./workload --list-torch-operators
+
+   ================================================================================
+   PyTorch Operator Call Tree: ./workload
+   Grouped by source location, sorted by total GPU kernel duration.
+   ================================================================================
+
+   main.py:60 (kernel_launches: 110, total_duration: 59.31 ms)
+   └─ nn.Module.Net.forward (kernel_launches: 110, total_duration: 59.31 ms)
+      ├─ nn.Module.Conv2d.forward
+      |  └─ torch.nn.functional.conv2d (kernel_launches: 40, total_duration: 27.08 ms)
+      └─ nn.Module.Linear.forward
+         └─ torch.nn.functional.linear (kernel_launches: 20, total_duration: 15.41 ms)
+
+Output is grouped by source location (``file:line``) and shows full operator
+hierarchy (``/``-separated) and kernel stats. A consolidated CSV
+(``torch_trace/consolidated.csv``) is written with all operator/kernel data;
+see :ref:`torch-operator-profiling` for details.
+
+Filtering by Operator
+---------------------
+
+``--torch-operator`` uses PurePosixPath glob patterns to select operators.
+Operator hierarchies are ``/``-separated (e.g.
+``nn.Module.Net.forward/torch.nn.functional.relu``), and patterns are matched
+using ``PurePosixPath.match()``:
+
+* **Wildcard** — ``*relu`` (ends with relu), ``*conv*`` (contains conv)
+* **Exact** — ``torch.nn.functional.relu``
+* **Multi-level** — ``*/torch.nn.functional.relu``, ``*/*functional*/*``
+* **Match all** — no arguments, ``all``, ``*``, or ``**``
+
+.. code-block:: shell-session
+
+   # Wildcard match
+   $ rocprof-compute --experimental analyze --path ./workload --torch-operator "*relu"
+
+   # Exact match
+   $ rocprof-compute --experimental analyze --path ./workload --torch-operator torch.nn.functional.relu
+
+   # Match all operators (no arguments)
+   $ rocprof-compute --experimental analyze --path ./workload --torch-operator
+
+**Filter multiple operators** (space or comma separated):
+
+.. code-block:: shell-session
+
+   $ rocprof-compute --experimental analyze --path ./workload \
+       --torch-operator "*relu,*conv*,*linear"

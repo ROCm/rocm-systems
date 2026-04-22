@@ -25,6 +25,7 @@
 #include "lib/common/mpl.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/enum_string.hpp>
 
 #include <bitset>
 #include <cstddef>
@@ -35,7 +36,10 @@ namespace rocprofiler
 namespace context
 {
 // number of bits to reserve all op codes
-constexpr size_t domain_ops_padding = 512;
+// NOTE: HIP runtime API has 515+ operations as of ROCm 7.x, must be larger than max op count.
+// NOTE: This is set in <rocprofiler-sdk/cxx/enum_string.hpp> so we can apply static_asserts to
+// ensure that any operation enumeration does not exceed this value.
+constexpr auto domain_ops_padding = ::rocprofiler::sdk::details::context_domain_ops_padding;
 
 template <typename Tp>
 struct domain_info;

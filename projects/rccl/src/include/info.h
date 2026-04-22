@@ -30,6 +30,10 @@ struct ncclInfo {
   int chunkSteps;
   int sliceSteps;
   const void* acc;
+#ifdef ENABLE_ROCSHMEM
+  // Optional per-operation metadata for rocSHMEM collectives.
+  size_t* sizes;
+#endif
 };
 
 #endif

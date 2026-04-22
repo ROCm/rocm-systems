@@ -576,5 +576,31 @@ typedef enum rocprofiler_hip_runtime_api_id_t  // NOLINT(performance-enum-size)
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 20
     ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetParamInfo,
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 21
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExtDisableLogging,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExtEnableLogging,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExtSetLoggingParams,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 22
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemSetMemPool,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemGetMemPool,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 23
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMipmappedArrayGetMemoryRequirements,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 24
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetAttribute,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 25
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelSetAttribute,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetFunction,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 26
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemPrefetchBatchAsync,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 27
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipOccupancyMaxPotentialClusterSize,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipOccupancyMaxActiveClusters,
+#endif
     ROCPROFILER_HIP_RUNTIME_API_ID_LAST,
 } rocprofiler_hip_runtime_api_id_t;

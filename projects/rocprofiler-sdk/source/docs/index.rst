@@ -12,7 +12,6 @@ ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU co
 It supports application tracing to provide a big picture of the GPU application execution and kernel counter collection to provide low-level hardware details from the performance counters.
 The ROCprofiler-SDK library provides runtime-independent APIs for tracing runtime calls and asynchronous activities such as GPU kernel dispatches and memory moves. The tracing includes callback APIs for runtime API tracing and activity APIs for asynchronous activity records logging.
 
-In summary, ROCprofiler-SDK combines `ROCProfiler <https://rocm.docs.amd.com/projects/rocprofiler/en/latest/index.html>`_ and `ROCTracer <https://rocm.docs.amd.com/projects/roctracer/en/latest/index.html>`_.
 You can utilize the ROCprofiler-SDK to develop a tool for profiling and tracing HIP applications on ROCm software.
 
 The code is open source and hosted at `<https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk>`_.

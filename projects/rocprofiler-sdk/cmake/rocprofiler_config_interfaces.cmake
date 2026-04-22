@@ -288,13 +288,15 @@ else()
         drm_LIBRARY
         NAMES drm
         HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu REQUIRED)
+        PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATH_SUFFIXES ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu REQUIRED)
 
     find_library(
         drm_amdgpu_LIBRARY
         NAMES drm_amdgpu
         HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu REQUIRED)
+        PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATH_SUFFIXES ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu REQUIRED)
 
     target_include_directories(rocprofiler-sdk-drm SYSTEM
                                INTERFACE ${drm_INCLUDE_DIR} ${xf86drm_INCLUDE_DIR})

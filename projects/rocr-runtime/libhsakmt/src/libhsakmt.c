@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: MIT
  */
  
-#include <stdio.h>
 #include <errno.h>
 #include <sys/ioctl.h>
 

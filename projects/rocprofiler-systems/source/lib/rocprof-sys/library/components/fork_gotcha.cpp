@@ -1,29 +1,9 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "api.hpp"
 
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/perfetto.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/state.hpp"
@@ -35,6 +15,8 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/process/process.hpp>
+
+#include "logger/debug.hpp"
 
 #include <cstdlib>
 #include <memory>
@@ -75,12 +57,11 @@ prefork_setup()
     tim::set_env("ROCPROFSYS_PRELOAD", "0", 1);
     tim::set_env("ROCPROFSYS_ROOT_PROCESS", process::get_id(), 0);
     rocprofsys_reset_preload_hidden();
-    ROCPROFSYS_BASIC_VERBOSE(0, "fork() called on PID %i (rank: %i), TID %li\n",
-                             process::get_id(), dmp::rank(), threading::get_id());
-    ROCPROFSYS_BASIC_DEBUG(
-        "Warning! Calling fork() within an OpenMPI application using libfabric "
-        "may result is segmentation fault\n");
-    TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(get_debug_env(), 16);
+    LOG_INFO("fork() called on PID {} (rank: {}), TID {}", process::get_id(), dmp::rank(),
+             threading::get_id());
+    LOG_WARNING("Calling fork() within an OpenMPI application using libfabric "
+                "may result is segmentation fault");
+    // TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(get_debug_env(), 16);
 
     if(config::get_use_sampling()) sampling::block_samples();
 
@@ -116,9 +97,12 @@ postfork_child()
 {
     if(postfork_child_lock) return;
 
-    ROCPROFSYS_REQUIRE(is_child_process())
-        << "Error! child process " << process::get_id()
-        << " believes it is the root process " << get_root_process_id() << "\n";
+    if(!is_child_process())
+    {
+        LOG_ERROR("Child process {} believes it is the root process {}",
+                  process::get_id(), get_root_process_id());
+        std::exit(1);
+    }
 
     set_state(State::Finalized);
 
@@ -165,8 +149,7 @@ fork_gotcha::operator()(const gotcha_data_t&, pid_t (*_real_fork)()) const
 
     if(_pid != 0)
     {
-        ROCPROFSYS_BASIC_VERBOSE(0, "fork() called on PID %i created PID %i\n", getpid(),
-                                 _pid);
+        LOG_INFO("fork() called on PID {} created PID {}", getpid(), _pid);
 
         postfork_parent();
     }
@@ -177,9 +160,8 @@ fork_gotcha::operator()(const gotcha_data_t&, pid_t (*_real_fork)()) const
 
     if(!settings::use_output_suffix())
     {
-        ROCPROFSYS_BASIC_VERBOSE(
-            0, "Application which make calls to fork() should enable using an process "
-               "identifier output suffix (i.e. set ROCPROFSYS_USE_PID=ON)\n");
+        LOG_DEBUG("Application which make calls to fork() should enable using an process "
+                  "identifier output suffix (i.e. set ROCPROFSYS_USE_PID=ON)");
     }
 
     return _pid;

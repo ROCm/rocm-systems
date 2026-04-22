@@ -79,15 +79,23 @@ using kernel_symbol_map_t  = std::unordered_map<rocprofiler_kernel_id_t, kernel_
 using external_corr_id_set_t = std::unordered_set<external_corr_id_data*>;
 using retired_corr_id_set_t  = std::unordered_set<uint64_t>;
 
-rocprofiler_client_id_t*      client_id                = nullptr;
-rocprofiler_client_finalize_t client_fini_func         = nullptr;
-rocprofiler_context_id_t      client_ctx               = {0};
-rocprofiler_buffer_id_t       client_buffer            = {};
-buffer_name_info*             client_name_info         = new buffer_name_info{};
-kernel_symbol_map_t*          client_kernels           = new kernel_symbol_map_t{};
-auto                          client_mutex             = std::shared_mutex{};
-auto                          client_external_corr_ids = external_corr_id_set_t{};
-auto                          client_retired_corr_ids  = retired_corr_id_set_t{};
+// Maps correlation ID to maximum end timestamp observed for records with that ID
+using corr_id_max_end_ts_map_t = std::unordered_map<uint64_t, uint64_t>;
+
+// Maps correlation ID to retirement timestamp
+using corr_id_retirement_ts_map_t = std::unordered_map<uint64_t, uint64_t>;
+
+rocprofiler_client_id_t*      client_id                    = nullptr;
+rocprofiler_client_finalize_t client_fini_func             = nullptr;
+rocprofiler_context_id_t      client_ctx                   = {0};
+rocprofiler_buffer_id_t       client_buffer                = {};
+buffer_name_info*             client_name_info             = new buffer_name_info{};
+kernel_symbol_map_t*          client_kernels               = new kernel_symbol_map_t{};
+auto                          client_mutex                 = std::shared_mutex{};
+auto                          client_external_corr_ids     = external_corr_id_set_t{};
+auto                          client_retired_corr_ids      = retired_corr_id_set_t{};
+auto                          client_corr_id_max_end_ts    = corr_id_max_end_ts_map_t{};
+auto                          client_corr_id_retirement_ts = corr_id_retirement_ts_map_t{};
 
 void
 print_call_stack(const call_stack_t& _call_stack)
@@ -213,6 +221,22 @@ set_external_correlation_id(rocprofiler_thread_id_t                            t
     return 0;
 }
 
+// Helper to update the max end timestamp for a correlation ID
+static void
+track_record_end_timestamp(uint64_t corr_id, uint64_t end_timestamp)
+{
+    auto _lk = std::unique_lock<std::shared_mutex>{client_mutex};
+    auto it  = client_corr_id_max_end_ts.find(corr_id);
+    if(it == client_corr_id_max_end_ts.end())
+    {
+        client_corr_id_max_end_ts[corr_id] = end_timestamp;
+    }
+    else
+    {
+        it->second = std::max(it->second, end_timestamp);
+    }
+}
+
 void
 tool_tracing_callback(rocprofiler_context_id_t      context,
                       rocprofiler_buffer_id_t       buffer_id,
@@ -221,18 +245,6 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                       void*                         user_data,
                       uint64_t /*drop_count*/)
 {
-    static const auto ensure_internal_correlation_id_retirement_ordering = [](uint64_t _corr_id) {
-        auto _lk = std::shared_lock<std::shared_mutex>{client_mutex};
-        // this correlation ID should not have reported as retired yet so
-        // we are demoing the expectation here
-        if(client_retired_corr_ids.count(_corr_id) > 0)
-        {
-            auto msg = std::stringstream{};
-            msg << "internal correlation id " << _corr_id << " was retired prematurely";
-            throw std::runtime_error{msg.str()};
-        }
-    };
-
     for(size_t i = 0; i < num_headers; ++i)
     {
         auto* header = headers[i];
@@ -263,8 +275,8 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
             // this should always be empty
             auto _extern_corr_id = external_corr_id_data{};
 
-            // demonstrate reliability of correlation ID retirement ordering
-            ensure_internal_correlation_id_retirement_ordering(record->correlation_id.internal);
+            // Track the end timestamp for temporal ordering validation
+            track_record_end_timestamp(record->correlation_id.internal, record->end_timestamp);
 
             auto info = std::stringstream{};
             info << "tid=" << record->thread_id << ", context=" << context.handle
@@ -283,8 +295,8 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
             auto* record =
                 static_cast<rocprofiler_buffer_tracing_kernel_dispatch_record_t*>(header->payload);
 
-            // demonstrate reliability of correlation ID retirement ordering
-            ensure_internal_correlation_id_retirement_ordering(record->correlation_id.internal);
+            // Track the end timestamp for temporal ordering validation
+            track_record_end_timestamp(record->correlation_id.internal, record->end_timestamp);
 
             auto _extern_corr_id = external_corr_id_data{};
             if(record->correlation_id.external.ptr)
@@ -293,8 +305,8 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                     static_cast<external_corr_id_data*>(record->correlation_id.external.ptr);
                 _extcid->seen_count++;
                 _extern_corr_id = *_extcid;
-                // demonstrate reliability of correlation ID retirement ordering
-                ensure_internal_correlation_id_retirement_ordering(_extcid->internal_corr_id);
+                // Track the end timestamp for the external correlation ID's internal correlation ID
+                track_record_end_timestamp(_extcid->internal_corr_id, record->end_timestamp);
             }
 
             auto info = std::stringstream{};
@@ -319,8 +331,8 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
             auto* record =
                 static_cast<rocprofiler_buffer_tracing_memory_copy_record_t*>(header->payload);
 
-            // demonstrate reliability of correlation ID retirement ordering
-            ensure_internal_correlation_id_retirement_ordering(record->correlation_id.internal);
+            // Track the end timestamp for temporal ordering validation
+            track_record_end_timestamp(record->correlation_id.internal, record->end_timestamp);
 
             auto _extern_corr_id = external_corr_id_data{};
             if(record->correlation_id.external.ptr)
@@ -329,8 +341,8 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                     static_cast<external_corr_id_data*>(record->correlation_id.external.ptr);
                 _extcid->seen_count++;
                 _extern_corr_id = *_extcid;
-                // demonstrate reliability of correlation ID retirement ordering
-                ensure_internal_correlation_id_retirement_ordering(_extcid->internal_corr_id);
+                // Track the end timestamp for the external correlation ID's internal correlation ID
+                track_record_end_timestamp(_extcid->internal_corr_id, record->end_timestamp);
             }
 
             auto info = std::stringstream{};
@@ -359,6 +371,8 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
             {
                 auto _lk = std::unique_lock<std::shared_mutex>{client_mutex};
                 client_retired_corr_ids.emplace(record->internal_correlation_id);
+                // Store the retirement timestamp for validation in tool_fini
+                client_corr_id_retirement_ts[record->internal_correlation_id] = record->timestamp;
             }
 
             auto _extern_corr_id = external_corr_id_data{};
@@ -494,12 +508,46 @@ tool_fini(void* tool_data)
 
     std::cout << "finalizing...\n" << std::flush;
     rocprofiler_stop_context(client_ctx);
-    ROCPROFILER_CHECK(rocprofiler_flush_buffer(client_buffer));
+    // Buffer flush may return ERROR_FINALIZED if rocprofiler has already finalized
+    // and flushed buffers - this is not an error
+    auto flush_status = rocprofiler_flush_buffer(client_buffer);
+    if(flush_status != ROCPROFILER_STATUS_SUCCESS &&
+       flush_status != ROCPROFILER_STATUS_ERROR_FINALIZED)
+    {
+        ROCPROFILER_CHECK(flush_status);
+    }
 
     auto* _call_stack = static_cast<call_stack_t*>(tool_data);
     _call_stack->emplace_back(source_location{__FUNCTION__, __FILE__, __LINE__, ""});
 
     print_call_stack(*_call_stack);
+
+    // Validate temporal ordering: retirement timestamps should be >= max(end_timestamps)
+    // for records with the same correlation ID. Use a small tolerance for clock domain
+    // differences between GPU and CPU timestamps.
+    constexpr uint64_t timestamp_tolerance_ns       = 1000;  // 1 microsecond tolerance
+    size_t             temporal_ordering_violations = 0;
+    for(const auto& [corr_id, max_end_ts] : client_corr_id_max_end_ts)
+    {
+        auto retirement_it = client_corr_id_retirement_ts.find(corr_id);
+        if(retirement_it != client_corr_id_retirement_ts.end())
+        {
+            uint64_t retirement_ts = retirement_it->second;
+            // Check if retirement timestamp is before (max_end_ts - tolerance)
+            // This means retirement happened too early
+            if(retirement_ts + timestamp_tolerance_ns < max_end_ts)
+            {
+                std::cerr << "temporal ordering violation: correlation id " << corr_id
+                          << " retired at timestamp " << retirement_ts
+                          << " but has record with end_timestamp " << max_end_ts
+                          << " (difference: " << (max_end_ts - retirement_ts) << " ns)\n"
+                          << std::flush;
+                ++temporal_ordering_violations;
+            }
+        }
+    }
+    std::cerr << "temporal ordering violations       : " << temporal_ordering_violations << "\n"
+              << std::flush;
 
     size_t unretired = 0;
     size_t unseen    = 0;
@@ -529,6 +577,8 @@ tool_fini(void* tool_data)
 
     if(unseen > 0) throw std::runtime_error{"unseen external correlation id data"};
     if(unretired > 0) throw std::runtime_error{"unretired internal correlation id values"};
+    if(temporal_ordering_violations > 0)
+        throw std::runtime_error{"temporal ordering violation in correlation id retirement"};
 
     delete _call_stack;
 }
@@ -549,7 +599,14 @@ shutdown()
 {
     if(client_id)
     {
-        ROCPROFILER_CHECK(rocprofiler_flush_buffer(client_buffer));
+        // Buffer flush may return ERROR_FINALIZED if rocprofiler has already finalized
+        // and flushed buffers - this is not an error
+        auto flush_status = rocprofiler_flush_buffer(client_buffer);
+        if(flush_status != ROCPROFILER_STATUS_SUCCESS &&
+           flush_status != ROCPROFILER_STATUS_ERROR_FINALIZED)
+        {
+            ROCPROFILER_CHECK(flush_status);
+        }
         client_fini_func(*client_id);
     }
 }

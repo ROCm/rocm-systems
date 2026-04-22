@@ -12,25 +12,14 @@
 #include "transport.h"
 #include "group.h"
 #include "api_trace.h"
-#ifdef ENABLE_MSCCLPP
-#include "mscclpp/mscclpp_nccl.h"
-#endif
 
 using namespace rccl;
 
-NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 0); // LWPCOMMLIBS-632: off by default for RCCL as unsupported feature.
-
-static ncclResult_t regFindHandleFromSymAddr(struct ncclComm* comm, void* baseSymPtr, struct ncclReg** handle) {
-  struct ncclRegCache* cache = &comm->regCache;
-  *handle = NULL;
-  for (int slot = 0; slot < cache->population; slot++) {
-    if (baseSymPtr == cache->slots[slot]->baseSymPtr) {
-      *handle = cache->slots[slot];
-      break;
-    }
-  }
-  return ncclSuccess;
-}
+#if HIP_VERSION >= 71260540
+NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 1);
+#else
+NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 0);
+#endif
 
 ncclResult_t ncclRegLocalIsValid(struct ncclReg *reg, bool *isValid) {
   if (reg && isValid) {
@@ -138,21 +127,6 @@ ncclResult_t ncclCommRegister_impl(const ncclComm_t comm, void* buff, size_t siz
   if (!ncclParamLocalRegister())
     *handle = NULL;
   else {
-    #ifdef ENABLE_MSCCLPP
-    if (comm->mscclppCompatible) {
-      if (comm->mscclCompatible && size > 0){
-        bool isManagedBuffer = false; 
-        CUDACHECK(hipPointerGetAttribute(&isManagedBuffer, HIP_POINTER_ATTRIBUTE_IS_MANAGED, const_cast<void*>(buff)));
-        if(!isManagedBuffer){
-          INFO(NCCL_INIT, "MSCCL++: ncclCommRegister");
-          NCCLCHECKGOTO(mscclpp_ncclCommRegister(comm->mscclpp_comm, buff, size, handle), ret, end);
-        }
-        else{
-          WARN("MSCCL++: Cannot register user-buffers on managed memory. RCCL user-buffer registration will occur.");
-        }
-      }
-    }
-    #endif
     INFO(NCCL_INIT, "RCCL: ncclCommRegister");
     NCCLCHECKGOTO(ncclRegister(comm, buff, size, false, handle), ret, end);
   }
@@ -196,16 +170,6 @@ NCCL_API(ncclResult_t, ncclCommDeregister, const ncclComm_t comm, void* handle);
 ncclResult_t ncclCommDeregister_impl(const ncclComm_t comm, void *handle) {
   NCCLCHECK(Recorder::instance().record(rrCommDeregister, comm, handle));
 
-  #ifdef ENABLE_MSCCLPP
-  if (comm->mscclppCompatible) {
-    const size_t size = mscclpp_BufferSize(comm->mscclpp_comm, handle);
-    if (comm->mscclCompatible && size > 0) {
-        NCCLCHECK(mscclpp_ncclCommDeregister(comm->mscclpp_comm, handle));
-      return ncclSuccess;
-    }
-  }
-  #endif
-
   NCCLCHECK(commDeregister(comm, false, (struct ncclReg*)handle));
   return ncclSuccess;
 }
@@ -213,105 +177,4 @@ ncclResult_t ncclCommDeregister_impl(const ncclComm_t comm, void *handle) {
 ncclResult_t ncclCommGraphDeregister(const ncclComm_t comm, struct ncclReg *handle) {
   NCCLCHECK(commDeregister(comm, true, handle));
   return ncclSuccess;
-}
-
-ncclResult_t ncclCommSymmetricRegisterInternal(struct ncclComm* comm, void* buff, size_t baseSize, size_t alignment, CUmemGenericAllocationHandle memHandle, struct ncclReg* regHandle) {
-  ncclResult_t ret = ncclSuccess;
-  void* regSymAddr = NULL;
-  ALIGN_SIZE(comm->symAllocHead, alignment);
-  NCCLCHECKGOTO(ncclIpcSymmetricMap(comm, comm->symAllocHead, baseSize, memHandle, &regSymAddr), ret, fail);
-  NCCLCHECKGOTO(ncclNvlsSymmetricMap(comm, comm->symAllocHead, baseSize, regSymAddr), ret, fail);
-  NCCLCHECKGOTO(bootstrapIntraNodeBarrier(comm->bootstrap, comm->localRankToRank, comm->localRank, comm->localRanks, comm->localRankToRank[0]), ret, fail);
-  comm->symAllocHead += baseSize;
-  regHandle->baseSymPtr = regSymAddr;
-  regHandle->symSize = baseSize;
-exit:
-  return ret;
-fail:
-  regHandle->baseSymPtr = NULL;
-  regHandle->symSize = 0;
-  goto exit;
-}
-
-NCCL_API(ncclResult_t, ncclCommWindowRegister, ncclComm_t comm, void* buff, size_t size, ncclWindow_t* win, int winFlags);
-ncclResult_t ncclCommWindowRegister_impl(ncclComm_t comm, void* buff, size_t size, ncclWindow_t* win, int winFlags) {
-  ncclResult_t ret = ncclSuccess;
-  CUmemGenericAllocationHandle memHandle;
-  size_t baseSize;
-  void* baseAddr = NULL;
-  struct ncclReg* regHandle = NULL;
-  int saveDev;
-
-  *win = NULL;
-
-  CUDACHECK(cudaGetDevice(&saveDev));
-  NCCLCHECK(ncclGroupStartInternal());
-  if (!ncclParamLocalRegister() || !ncclCuMemEnable()) {
-    goto exit;
-  }
-
-  NCCLCHECKGOTO(ncclCommEnsureReady(comm), ret, fail);
-
-  CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
-  if (comm && buff && size && win) {
-    size_t alignment = 0;
-    CUCHECKGOTO(cuMemGetAddressRange((CUdeviceptr*)&baseAddr, &baseSize, (CUdeviceptr)buff), ret, fail);
-    // size and alignment check
-    if (!((uintptr_t)baseAddr % NCCL_REC_PAGE_SIZE == 0 && baseSize % NCCL_REC_PAGE_SIZE == 0 && (uintptr_t)buff + size <= (uintptr_t)baseAddr + baseSize)) {
-      WARN("buffer %p (baseAddr %p align %d) size %zu (baseSize %ld align %d) does not satisfy symmetric registration requirements", buff, baseAddr, (uintptr_t)baseAddr % NCCL_REC_PAGE_SIZE == 0, size, baseSize, baseSize % NCCL_REC_PAGE_SIZE == 0);
-      goto fail;
-    }
-    NCCLCHECKGOTO(ncclRegister(comm, baseAddr, baseSize, false, (void**)&regHandle), ret, fail);
-    NCCLCHECKGOTO(ncclCalloc(win, 1), ret, fail);
-    (*win)->handle = regHandle;
-    regHandle->winFlags = winFlags;
-    if (regHandle->baseSymPtr == NULL && comm->symmetricSupport) {
-      struct ncclSymRegTask* task;
-      CUCHECKGOTO(cuMemRetainAllocationHandle(&memHandle, baseAddr), ret, fail);
-      CUCHECKGOTO(cuMemRelease(memHandle), ret, fail);
-      alignment = baseSize >= NCCL_REC_PAGE_SIZE * 72L ? NCCL_MAX_PAGE_SIZE : NCCL_REC_PAGE_SIZE;
-      NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
-      task->buff = buff;
-      task->baseSize = baseSize;
-      task->memHandle = memHandle;
-      task->regHandle = regHandle;
-      task->alignment = alignment;
-      ncclIntruQueueEnqueue(&comm->symRegTaskQueue, task);
-      ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
-    }
-  }
-
-exit:
-  ncclGroupErrCheck(ret);
-  NCCLCHECK(ret = ncclGroupEndInternal());
-  cudaSetDevice(saveDev);
-  return ret;
-fail:
-  free(*win);
-  *win = NULL;
-  goto exit;
-}
-
-NCCL_API(ncclResult_t, ncclCommWindowDeregister, ncclComm_t comm, ncclWindow_t win);
-ncclResult_t ncclCommWindowDeregister_impl(ncclComm_t comm, ncclWindow_t win) {
-  ncclResult_t ret = ncclSuccess;
-  int saveDev;
-  struct ncclReg* regHandle;
-  CUDACHECK(cudaGetDevice(&saveDev));
-  if (win == NULL) goto exit;
-  regHandle = win->handle;
-  if (regHandle && ncclParamLocalRegister() && ncclCuMemEnable()) {
-    if (regHandle->baseSymPtr) {
-      CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
-      NCCLCHECKGOTO(ncclNvlsSymmetricFree(comm, regHandle->symSize, regHandle->baseSymPtr), ret, fail);
-      NCCLCHECKGOTO(ncclIpcSymmetricFree(comm, regHandle->symSize, regHandle->baseSymPtr), ret, fail);
-    }
-    NCCLCHECKGOTO(commDeregister(comm, false, regHandle), ret, fail);
-  }
-  free(win);
-exit:
-  CUDACHECK(cudaSetDevice(saveDev));
-  return ret;
-fail:
-  goto exit;
 }

@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  * @addtogroup hipMemcpyAsync
@@ -133,7 +120,7 @@ static void testP2PUniDirMemPerf(const int iterations, const TIMING_MODE timingM
   int gpuCount = 0;
   HIP_CHECK(hipGetDeviceCount(&gpuCount));
   if (gpuCount < 1) {
-    fprintf(stderr, "Need at least 1 GPU, skipped!\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
     return;
   }
   vector<double> timeMs(gpuCount * gpuCount, 0.);
@@ -276,7 +263,7 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
   int gpuCount = 0;
   HIP_CHECK(hipGetDeviceCount(&gpuCount));
   if (gpuCount < 1) {
-    fprintf(stderr, "Need at least 1 GPU, skipped!\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
     return;
   }
   vector<double> timeMs(gpuCount * gpuCount, 0.);
@@ -444,25 +431,25 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
 /**
  * Test Description
  * ------------------------
- *  - Verify P2P uni-direction memcpy performance.
+ *  - Verify P2P uni-direction memcpy performance.
  *    To enable rocr kernel copying, export HSA_ENABLE_SDMA=0
  *    To enable SDMA copying, export HSA_ENABLE_SDMA=1 (by default)
  *    To specify devices to be tested, export HIP_VISIBLE_DEVICES=gpuid0, gupid1,...
  *      For example, to test first 2 devices, export HIP_VISIBLE_DEVICES=0,1
  * Test source
  * ------------------------
- *  - perftests/memory/hipPerfBufferCopySpeedP2P.cc
+ *  - perftests/memory/hipPerfBufferCopySpeedP2P.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 6.0
+ *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_hipTestP2PUniDirMemcpyAsync_test - Timing CPU") {
+HIP_TEST_CASE(Perf_hipTestP2PUniDirMemcpyAsync_test_Timing_CPU) {
   const int iterations =
       cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
   testP2PUniDirMemPerf(iterations, TIMING_MODE_CPU, true);
 }
 
-TEST_CASE("Perf_hipTestP2PUniDirMemcpyAsync_test - Timing GPU") {
+HIP_TEST_CASE(Perf_hipTestP2PUniDirMemcpyAsync_test_Timing_GPU) {
   const int iterations =
       cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
   testP2PUniDirMemPerf(iterations, TIMING_MODE_GPU, true);
@@ -471,23 +458,23 @@ TEST_CASE("Perf_hipTestP2PUniDirMemcpyAsync_test - Timing GPU") {
 /**
  * Test Description
  * ------------------------
- *  - Verify P2P uni-direction kernel copy performance.
+ *  - Verify P2P uni-direction kernel copy performance.
  *    To specify devices to be tested, export HIP_VISIBLE_DEVICES=gpuid0, gupid1,...
  *      For example, to test first 2 devices, export HIP_VISIBLE_DEVICES=0,1
  * Test source
  * ------------------------
- *  - perftests/memory/hipPerfBufferCopySpeedP2P.cc
+ *  - perftests/memory/hipPerfBufferCopySpeedP2P.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 6.0
+ *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_hipTestP2PUniDirKernelCopy_test - Timing CPU") {
+HIP_TEST_CASE(Perf_hipTestP2PUniDirKernelCopy_test_Timing_CPU) {
   const int iterations =
       cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
   testP2PUniDirMemPerf(iterations, TIMING_MODE_CPU, false);
 }
 
-TEST_CASE("Perf_hipTestP2PUniDirKernelCopy_test - Timing GPU") {
+HIP_TEST_CASE(Perf_hipTestP2PUniDirKernelCopy_test_Timing_GPU) {
   const int iterations =
       cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
   testP2PUniDirMemPerf(iterations, TIMING_MODE_GPU, false);
@@ -496,19 +483,19 @@ TEST_CASE("Perf_hipTestP2PUniDirKernelCopy_test - Timing GPU") {
 /**
  * Test Description
  * ------------------------
- *  - Verify P2P bi-direction memcpy performance.
+ *  - Verify P2P bi-direction memcpy performance.
  *    To enable rocr kernel copying, export HSA_ENABLE_SDMA=0
  *    To enable SDMA copying, export HSA_ENABLE_SDMA=1 (by default)
  *    To specify devices to be tested, export HIP_VISIBLE_DEVICES=gpuid0, gupid1,...
  *      For example, to test first 2 devices, export HIP_VISIBLE_DEVICES=0,1
  * Test source
  * ------------------------
- *  - perftests/memory/hipPerfBufferCopySpeedP2P.cc
+ *  - perftests/memory/hipPerfBufferCopySpeedP2P.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 6.0
+ *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_hipTestP2PBiDirMemcpyAsync_test") {
+HIP_TEST_CASE(Perf_hipTestP2PBiDirMemcpyAsync_test) {
   const int iterations =
       cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
   testP2PBiDirMemPerf(iterations, true);
@@ -517,17 +504,17 @@ TEST_CASE("Perf_hipTestP2PBiDirMemcpyAsync_test") {
 /**
  * Test Description
  * ------------------------
- *  - Verify P2P bi-direction kernel copy performance.
+ *  - Verify P2P bi-direction kernel copy performance.
  *    To specify devices to be tested, export HIP_VISIBLE_DEVICES=gpuid0, gupid1,...
  *      For example, to test first 2 devices, export HIP_VISIBLE_DEVICES=0,1
  * Test source
  * ------------------------
- *  - perftests/memory/hipPerfBufferCopySpeedP2P.cc
+ *  - perftests/memory/hipPerfBufferCopySpeedP2P.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 6.0
+ *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_hipTestP2PBiDirKernelCopy_test") {
+HIP_TEST_CASE(Perf_hipTestP2PBiDirKernelCopy_test) {
   const int iterations =
       cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
   testP2PBiDirMemPerf(iterations, false);
@@ -536,15 +523,15 @@ TEST_CASE("Perf_hipTestP2PBiDirKernelCopy_test") {
 /**
  * Test Description
  * ------------------------
- *  - Check support of peer to peer
+ *  - Check support of peer to peer
  * Test source
  * ------------------------
- *  - perftests/memory/hipPerfBufferCopySpeedP2P.cc
+ *  - perftests/memory/hipPerfBufferCopySpeedP2P.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 6.0
+ *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_hipCheckP2PSupport") { checkP2PSupport(); }
+HIP_TEST_CASE(Perf_hipCheckP2PSupport) { checkP2PSupport(); }
 
 /**
  * End doxygen group perfMemoryTest.

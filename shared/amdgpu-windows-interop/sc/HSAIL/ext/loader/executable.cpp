@@ -125,12 +125,12 @@ __loader_noinline__ static void _loader_debug_state() {
 // 6: New trap handler ABI. ttmp6[25:0] contains dispatch index modulo queue size
 // 7: New trap handler ABI. Send interrupts as a bitmask, coalescing concurrent exceptions.
 // 8: New trap handler ABI for gfx940: Initialize ttmp[4:5] if ttmp11[31] == 0.
-HSA_API r_debug _amdgpu_r_debug = {8,
+HSA_API r_debug _amdgpu_r_debug_w = {8,
                            nullptr,
                            reinterpret_cast<uintptr_t>(&_loader_debug_state),
                            r_debug::RT_CONSISTENT,
                            0};
-HSA_API r_debug *_amdgpu_r_debug_ptr = &_amdgpu_r_debug;
+HSA_API r_debug *_amdgpu_r_debug_ptr = &_amdgpu_r_debug_w;
 static link_map* r_debug_tail = nullptr;
 
 namespace amd {
@@ -214,8 +214,8 @@ Loader* Loader::Create(Context* context)
 void Loader::Destroy(Loader *loader)
 {
   // Loader resets the link_map, but the executables and loaded code objects are not deleted.
-  _amdgpu_r_debug.r_map = nullptr;
-  _amdgpu_r_debug.r_state = r_debug::RT_CONSISTENT;
+  _amdgpu_r_debug_w.r_map = nullptr;
+  _amdgpu_r_debug_w.r_state = r_debug::RT_CONSISTENT;
   r_debug_tail = nullptr;
   delete loader;
 }
@@ -235,7 +235,7 @@ static void AddCodeObjectInfoIntoDebugMap(link_map* map) {
       map->l_prev = r_debug_tail;
       map->l_next = nullptr;
   } else {
-      _amdgpu_r_debug.r_map = map;
+      _amdgpu_r_debug_w.r_map = map;
       map->l_prev = nullptr;
       map->l_next = nullptr;
   }
@@ -246,8 +246,8 @@ static void RemoveCodeObjectInfoFromDebugMap(link_map* map) {
   if (r_debug_tail == map) {
       r_debug_tail = map->l_prev;
   }
-  if (_amdgpu_r_debug.r_map == map) {
-      _amdgpu_r_debug.r_map = map->l_next;
+  if (_amdgpu_r_debug_w.r_map == map) {
+      _amdgpu_r_debug_w.r_map = map->l_next;
   }
 
   if (map->l_prev) {
@@ -269,14 +269,14 @@ hsa_status_t AmdHsaCodeLoader::FreezeExecutable(Executable *executable, const ch
 
   // Assuming runtime atomic implements C++ std::memory_order
   WriterLockGuard<ReaderWriterLock> writer_lock(rw_lock_);
-  atomic::store_relaxed(&_amdgpu_r_debug.r_state, r_debug::RT_ADD);
+  atomic::store_relaxed(&_amdgpu_r_debug_w.r_state, r_debug::RT_ADD);
   atomic::thread_fence_acquire_release();
   _loader_debug_state();
   atomic::thread_fence_acquire_release();
   for (auto &lco : reinterpret_cast<ExecutableImpl*>(executable)->loaded_code_objects) {
     AddCodeObjectInfoIntoDebugMap(&(lco->r_debug_info));
   }
-  atomic::store_release(&_amdgpu_r_debug.r_state, r_debug::RT_CONSISTENT);
+  atomic::store_release(&_amdgpu_r_debug_w.r_state, r_debug::RT_CONSISTENT);
   _loader_debug_state();
 
   return HSA_STATUS_SUCCESS;
@@ -285,14 +285,14 @@ hsa_status_t AmdHsaCodeLoader::FreezeExecutable(Executable *executable, const ch
 void AmdHsaCodeLoader::DestroyExecutable(Executable *executable) {
   // Assuming runtime atomic implements C++ std::memory_order
   WriterLockGuard<ReaderWriterLock> writer_lock(rw_lock_);
-  atomic::store_relaxed(&_amdgpu_r_debug.r_state, r_debug::RT_DELETE);
+  atomic::store_relaxed(&_amdgpu_r_debug_w.r_state, r_debug::RT_DELETE);
   atomic::thread_fence_acquire_release();
   _loader_debug_state();
   atomic::thread_fence_acquire_release();
   for (auto &lco : reinterpret_cast<ExecutableImpl*>(executable)->loaded_code_objects) {
     RemoveCodeObjectInfoFromDebugMap(&(lco->r_debug_info));
   }
-  atomic::store_release(&_amdgpu_r_debug.r_state, r_debug::RT_CONSISTENT);
+  atomic::store_release(&_amdgpu_r_debug_w.r_state, r_debug::RT_CONSISTENT);
   _loader_debug_state();
 
   executables[((ExecutableImpl*)executable)->id()] = nullptr;

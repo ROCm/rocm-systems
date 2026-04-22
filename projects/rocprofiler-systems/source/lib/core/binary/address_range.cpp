@@ -1,27 +1,9 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "binary/address_range.hpp"
-#include "debug.hpp"
+
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {
@@ -36,9 +18,11 @@ address_range::address_range(uintptr_t _low, uintptr_t _high)
 : low{ _low }
 , high{ _high }
 {
-    TIMEMORY_REQUIRE(high >= low)
-        << "Error! address_range high must be >= low. low=" << as_hex(low)
-        << ", high=" << as_hex(high) << "\n";
+    if(high < low)
+    {
+        throw std::invalid_argument(fmt::format(
+            "address_range high must be >= low. low={:X}, high={:X}", low, high));
+    }
 }
 
 bool
@@ -56,6 +40,19 @@ address_range::as_string(int _depth) const
     _ss.fill('0');
     _ss << "0x" << std::setw(16) << low << "-" << "0x" << std::setw(16) << high;
     return _ss.str();
+}
+
+std::string
+address_range::as_hex() const
+{
+    const auto c_width      = 16;
+    const auto _as_hex_util = [](auto _v, size_t _width) {
+        return fmt::format("0x{:0{}x}", _v, _width);
+    };
+
+    return (is_range()) ? fmt::format("{}-{}", _as_hex_util(low, c_width),
+                                      _as_hex_util(high, c_width))
+                        : _as_hex_util(low, c_width);
 }
 
 uintptr_t
@@ -171,8 +168,10 @@ address_range&
 address_range::operator+=(address_range _v)
 {
     if(!contiguous_with(_v))
-        throw exception<std::runtime_error>(
-            "attempting to add two address ranges that are not contiguous");
+    {
+        throw std::invalid_argument(
+            "Error! attempting to add two address ranges that are not contiguous");
+    }
 
     low  = std::min(low, _v.low);
     high = std::max(high, _v.high);

@@ -1,30 +1,10 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "core/common.hpp"
 #include "core/concepts.hpp"
-#include "core/debug.hpp"
 #include "core/defines.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
@@ -33,6 +13,8 @@
 
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/operations/types/get.hpp>
+
+#include "logger/debug.hpp"
 
 #include <type_traits>
 
@@ -88,7 +70,7 @@ add_perfetto_annotation(
         auto* _dbg = ctx.event()->add_debug_annotations();
         if(_idx >= 0)
         {
-            auto _arg_name = JOIN("", "arg", _idx, "-", std::forward<Np>(_name));
+            auto _arg_name = fmt::format("arg{}-{}", _idx, std::forward<Np>(_name));
             _dbg->set_name(_arg_name);
         }
         else
@@ -135,7 +117,7 @@ add_perfetto_annotation(
     }
     else if constexpr(concepts::can_stringify<value_type>::value)
     {
-        _get_dbg()->set_string_value(JOIN("", std::forward<Tp>(_val)));
+        _get_dbg()->set_string_value(fmt::format("{}", std::forward<Tp>(_val)));
     }
     else
     {
@@ -183,11 +165,12 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
             if(!(_annotation.type > ROCPROFSYS_VALUE_NONE &&
                  _annotation.type < ROCPROFSYS_VALUE_LAST))
             {
-                ROCPROFSYS_FAIL_F(
-                    "Error! annotation '%s' has an invalid type designation "
-                    "%lu which is outside of acceptable range [%i, %i]\n",
-                    _annotation.name, _annotation.type, ROCPROFSYS_VALUE_NONE + 1,
-                    ROCPROFSYS_VALUE_LAST - 1);
+                LOG_CRITICAL("Annotation '{}' has an invalid type designation "
+                             "{} which is outside of acceptable range [{}, {}]",
+                             _annotation.name, _annotation.type,
+                             ROCPROFSYS_VALUE_NONE + 1, ROCPROFSYS_VALUE_LAST - 1);
+                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                std::exit(1);
             }
         }
 
@@ -197,8 +180,7 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
         }
         else
         {
-            throw ::rocprofsys::exception<std::runtime_error>(
-                "invalid annotation value type");
+            throw std::runtime_error("Annotation value type is invalid");
         }
     }
 }

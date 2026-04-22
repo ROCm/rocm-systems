@@ -362,11 +362,11 @@ namespace code {
 
     class AmdHsaCodeManager {
     private:
-      typedef std::unordered_map<uint64_t, std::shared_ptr<AmdHsaCode>> CodeMap;
+      typedef std::unordered_map<uint64_t, std::unique_ptr<AmdHsaCode>> CodeMap;
       CodeMap codeMap;
 
     public:
-      const std::shared_ptr<AmdHsaCode>& FromHandle(hsa_code_object_t handle);
+      AmdHsaCode* FromHandle(hsa_code_object_t handle);
       bool Destroy(hsa_code_object_t handle);
     };
 

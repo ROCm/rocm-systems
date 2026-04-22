@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -26,9 +7,12 @@
 
 #include "common/join.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <numeric>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -197,7 +181,7 @@ remove_env(std::vector<char*>& _environ, std::string_view _env_var,
     {
         if(match(itr))
         {
-            free(itr);
+            std::free(itr);
             itr = nullptr;
         }
     }
@@ -264,6 +248,113 @@ discover_llvm_libdir_for_ompt(bool verbose = false)
     ROCPROFSYS_ENVIRON_LOG(verbose,
                            "libomptarget.so not found in candidate LLVM libdirs\n");
     return {};
+}
+
+inline bool
+is_python_interpreter(std::string_view executable)
+{
+    if(executable.empty()) return false;
+
+    const auto slash_pos = executable.rfind('/');
+    const auto basename  = (slash_pos != std::string_view::npos)
+                               ? executable.substr(slash_pos + 1)
+                               : executable;
+
+    if(basename == "python" || basename == "python3") return true;
+
+    constexpr std::string_view python3_prefix = "python3.";
+
+    const bool has_valid_prefix =
+        basename.size() > python3_prefix.size() &&
+        basename.substr(0, python3_prefix.size()) == python3_prefix;
+    if(!has_valid_prefix) return false;
+
+    const auto version_digits = basename.substr(python3_prefix.size());
+
+    return std::all_of(version_digits.begin(), version_digits.end(),
+                       [](unsigned char c) { return std::isdigit(c); });
+}
+
+inline std::string
+discover_torch_libpath(const std::string& python_binary, bool verbose = false)
+{
+    if(python_binary.empty()) return {};
+
+    const auto is_safe_executable_path = [](const std::string& path) {
+        // Allow only a conservative set of characters in the executable path to
+        // avoid injection when used in a shell command.
+        for(unsigned char c : path)
+        {
+            if(std::isalnum(c) != 0) continue;
+            switch(c)
+            {
+                case '/':
+                case '.':
+                case '_':
+                case '-':
+                case '+': break;
+                default: return false;
+            }
+        }
+        return true;
+    };
+
+    if(!is_safe_executable_path(python_binary))
+    {
+        ROCPROFSYS_ENVIRON_LOG(
+            verbose, "Unsafe characters detected in Python interpreter path: %s\n",
+            python_binary.c_str());
+        return {};
+    }
+
+    const auto cmd = "\"" + python_binary +
+                     "\" -c \"import torch; print(torch.__path__[0])\" 2>/dev/null";
+
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if(!pipe)
+    {
+        ROCPROFSYS_ENVIRON_LOG(verbose, "Failed to execute command: %s\n", cmd.c_str());
+        return {};
+    }
+
+    char        buffer[1024];
+    std::string result;
+    while(fgets(buffer, sizeof(buffer), pipe))
+    {
+        result.append(buffer);
+        // stop if we've read the full line (torch path is printed on a single line)
+        if(!result.empty() && result.back() == '\n') break;
+    }
+
+    int status = pclose(pipe);
+
+    if(status != 0 || result.empty())
+    {
+        ROCPROFSYS_ENVIRON_LOG(verbose, "torch not found for Python interpreter: %s\n",
+                               python_binary.c_str());
+        return {};
+    }
+
+    while(!result.empty() &&
+          (result.back() == '\n' || result.back() == '\r' || result.back() == ' '))
+    {
+        result.pop_back();
+    }
+
+    if(result.empty()) return {};
+
+    std::string torch_libdir = result + "/lib";
+
+    if(!::tim::filepath::direxists(torch_libdir))
+    {
+        ROCPROFSYS_ENVIRON_LOG(verbose, "torch lib directory does not exist: %s\n",
+                               torch_libdir.c_str());
+        return {};
+    }
+
+    ROCPROFSYS_ENVIRON_LOG(verbose, "Discovered torch library path: %s\n",
+                           torch_libdir.c_str());
+    return torch_libdir;
 }
 
 enum class update_mode : uint8_t
@@ -335,12 +426,198 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
         }
         else
         {
-            free(itr);
+            std::free(itr);
             itr = strdup(join('=', _env_var, _env_val_str).c_str());
         }
         return;
     }
     _environ.emplace_back(strdup(join('=', _env_var, _env_val_str).c_str()));
+}
+
+template <typename UpdatedEnvsT>
+inline void
+add_torch_library_path(std::vector<char*>& envp, const std::vector<char*>& argv,
+                       bool verbose, UpdatedEnvsT& updated_envs)
+{
+    if(argv.empty() || argv.front() == nullptr) return;
+    if(!is_python_interpreter(argv.front())) return;
+
+    auto torch_libpath = discover_torch_libpath(argv.front(), verbose);
+    if(torch_libpath.empty()) return;
+
+    std::unordered_set<std::string> seen{ torch_libpath };
+    std::string                     result = torch_libpath;
+
+    constexpr std::string_view ld_prefix = "LD_LIBRARY_PATH=";
+
+    auto is_ld_path = [&](char* entry) {
+        return entry &&
+               std::string_view{ entry }.substr(0, ld_prefix.length()) == ld_prefix;
+    };
+
+    for(auto& entry : envp)
+    {
+        if(!is_ld_path(entry)) continue;
+
+        std::istringstream stream{ std::string{ entry + ld_prefix.length() } };
+        for(std::string path; std::getline(stream, path, ':');)
+        {
+            if(!path.empty() && seen.insert(path).second) result += ":" + path;
+        }
+
+        std::free(entry);
+        entry = nullptr;
+    }
+
+    envp.erase(std::remove(envp.begin(), envp.end(), nullptr), envp.end());
+    envp.emplace_back(strdup(join("", ld_prefix, result).c_str()));
+
+    updated_envs.emplace(ld_prefix.substr(0, ld_prefix.length() - 1));
+}
+
+/// @brief Consolidates duplicate environment variable entries by merging their values.
+///
+/// When building an environment for execve(), multiple entries for the same variable
+/// may accumulate. This function merges them into single entries with unique values.
+///
+/// For most variables, values are split and joined using ':' (e.g., PATH,
+/// LD_LIBRARY_PATH). Certain variables that use ':' in their value syntax use ',' as the
+/// delimiter instead.
+///
+/// @param envp Vector of environment strings in "KEY=VALUE" format. Modified in place.
+///             Original strings are freed; new strings are allocated with strdup().
+///
+/// Example transformations:
+///   - PATH=/usr/bin + PATH=/usr/local/bin -> PATH=/usr/bin:/usr/local/bin
+///   - ROCPROFSYS_PAPI_EVENTS=perf::A + ROCPROFSYS_PAPI_EVENTS=perf::B
+///         -> ROCPROFSYS_PAPI_EVENTS=perf::A,perf::B
+inline void
+consolidate_env_entries(std::vector<char*>& envp)
+{
+    /// Returns the appropriate delimiter character for splitting/joining values.
+    /// Most variables use ':' (like PATH), but some use ':' in their value syntax
+    /// and need ',' instead:
+    /// - ROCPROFSYS_PAPI_EVENTS: uses perf::EVENT_NAME or net:::interface:metric syntax
+    /// - ROCPROFSYS_SAMPLING_OVERFLOW_EVENT: uses perf::EVENT_NAME syntax
+    /// - ROCPROFSYS_ROCM_EVENTS: uses EVENT_NAME:device=N syntax
+    auto get_delimiter = [](std::string_view key) -> char {
+        if(key == "ROCPROFSYS_PAPI_EVENTS" ||
+           key == "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT" || key == "ROCPROFSYS_ROCM_EVENTS")
+            return ',';
+        return ':';
+    };
+
+    /// Stores the parsed and deduplicated parts for a single environment variable.
+    struct key_data
+    {
+        std::vector<std::string> parts;  ///< Unique value parts in order of appearance
+        std::unordered_set<std::string> seen;  ///< Tracks seen parts for deduplication
+        char                            delim = ':';  ///< Delimiter for this variable
+
+        /// Adds a part if non-empty and not already seen.
+        void add_unique(std::string part)
+        {
+            if(!part.empty() && seen.insert(part).second)
+                parts.emplace_back(std::move(part));
+        }
+    };
+
+    /// Parses an environment entry string into key and value components.
+    /// @param entry String in "KEY=VALUE" format
+    /// @return Optional pair of (key, value) views, or nullopt if no '=' found
+    auto parse_entry = [](std::string_view entry)
+        -> std::optional<std::pair<std::string_view, std::string_view>> {
+        auto eq_pos = entry.find('=');
+        if(eq_pos == std::string_view::npos) return std::nullopt;
+        return std::make_pair(entry.substr(0, eq_pos), entry.substr(eq_pos + 1));
+    };
+
+    /// Reconstructs an environment entry string from key and value parts.
+    /// @param key   The environment variable name
+    /// @param parts The deduplicated value components
+    /// @param delim The delimiter to use when joining parts
+    /// @return String in "KEY=part1<delim>part2<delim>..." format
+    auto join_parts = [](std::string_view key, const std::vector<std::string>& parts,
+                         char delim) {
+        std::string result;
+
+        const auto total_parts_length = std::accumulate(
+            parts.begin(), parts.end(), std::size_t{ 0 },
+            [](std::size_t acc, const std::string& part) { return acc + part.size(); });
+
+        const auto delim_count       = parts.size() - 1;
+        const auto equal_sign_length = 1;
+
+        result.reserve(key.size() + equal_sign_length + total_parts_length + delim_count);
+        result.append(key);
+        result += '=';
+
+        // Join all parts with the delimiter
+        result =
+            std::accumulate(parts.begin(), parts.end(), std::move(result),
+                            [delim, &parts](std::string acc, const std::string& part) {
+                                if(part != parts.front()) acc += delim;
+                                acc.append(part);
+                                return acc;
+                            });
+
+        return result;
+    };
+
+    std::unordered_map<std::string_view, key_data> key_map;
+    std::vector<std::string_view>                  key_order;
+
+    // Phase 1: Parse all entries and aggregate values by key
+    for(auto* entry : envp)
+    {
+        if(!entry)
+        {
+            continue;
+        }
+
+        auto parsed = parse_entry(entry);
+        if(!parsed)
+        {
+            continue;
+        }
+
+        auto [key, value] = *parsed;
+
+        // Create new entry if key not seen before, recording its delimiter
+        auto [it, inserted] = key_map.try_emplace(key);
+        if(inserted)
+        {
+            key_order.emplace_back(key);
+            it->second.delim = get_delimiter(key);
+        }
+
+        // Split value by delimiter and add unique parts
+        auto&              data = it->second;
+        std::istringstream stream{ std::string{ value } };
+        for(std::string part; std::getline(stream, part, data.delim);)
+        {
+            data.add_unique(part);
+        }
+    }
+
+    // Phase 2: Build consolidated result
+    std::vector<char*> result;
+    result.reserve(key_order.size());
+
+    for(auto key : key_order)
+    {
+        const auto& data = key_map[key];
+        result.emplace_back(strdup(join_parts(key, data.parts, data.delim).c_str()));
+    }
+
+    // Phase 3: Free original entries and replace with consolidated result
+    for(auto* entry : envp)
+    {
+        std::free(entry);
+        entry = nullptr;
+    }
+
+    envp = std::move(result);
 }
 
 }  // namespace common

@@ -223,9 +223,9 @@ private:
     tile_mode = LINEAR;
   }
 
-  ~MipmappedArray() {}
-
 public:
+ ~MipmappedArray() {}
+
  /// @brief Create a MipmappedArray.
  /// Only internal metadata is allocated; image data must be provided by the user.
  static MipmappedArray* Create(hsa_agent_t agent);

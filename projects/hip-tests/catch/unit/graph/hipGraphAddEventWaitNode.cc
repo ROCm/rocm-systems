@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Testcase Scenarios :
@@ -55,7 +42,7 @@ both graphs.
 /**
  * Scenario 1
  */
-TEST_CASE("Unit_hipGraphAddEventWaitNode_Functional_Simple") {
+HIP_TEST_CASE(Unit_hipGraphAddEventWaitNode_Functional_Simple) {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -216,28 +203,28 @@ static void validate_hipGraphAddEventWaitNode_internodedep(int test, int nstep,
 /**
  * Scenario 2
  */
-TEST_CASE("Unit_hipGraphAddEventWaitNode_MultGraphMultStrmDependency") {
+HIP_TEST_CASE(Unit_hipGraphAddEventWaitNode_MultGraphMultStrmDependency) {
   validate_hipGraphAddEventWaitNode_internodedep(0, 1);
 }
 
 /**
  * Scenario 3
  */
-TEST_CASE("Unit_hipGraphAddEventWaitNode_MultipleRun") {
+HIP_TEST_CASE(Unit_hipGraphAddEventWaitNode_MultipleRun) {
   validate_hipGraphAddEventWaitNode_internodedep(0, 100);
 }
 
 /**
  * Scenario 4
  */
-TEST_CASE("Unit_hipGraphAddEventWaitNode_MultGraphOneStrmDependency") {
+HIP_TEST_CASE(Unit_hipGraphAddEventWaitNode_MultGraphOneStrmDependency) {
   validate_hipGraphAddEventWaitNode_internodedep(1, 1);
 }
 
 /**
  * Scenario 5
  */
-TEST_CASE("Unit_hipGraphAddEventWaitNode_differentFlags") {
+HIP_TEST_CASE(Unit_hipGraphAddEventWaitNode_differentFlags) {
   SECTION("flag = hipEventBlockingSync") {
     validate_hipGraphAddEventWaitNode_internodedep(0, 1, hipEventBlockingSync);
   }
@@ -249,7 +236,7 @@ TEST_CASE("Unit_hipGraphAddEventWaitNode_differentFlags") {
 /**
  * Scenario 6: Positive parameter tests
  */
-TEST_CASE("Unit_hipGraphAddEventWaitNode_Positive_Parameters") {
+HIP_TEST_CASE(Unit_hipGraphAddEventWaitNode_Positive_Parameters) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipEvent_t event;
@@ -288,7 +275,7 @@ TEST_CASE("Unit_hipGraphAddEventWaitNode_Positive_Parameters") {
 /**
  * Scenario 7
  */
-TEST_CASE("Unit_hipGraphAddEventWaitNode_Negative") {
+HIP_TEST_CASE(Unit_hipGraphAddEventWaitNode_Negative) {
   using namespace std::placeholders;
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));

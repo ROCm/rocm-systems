@@ -1,22 +1,8 @@
-/* Copyright (c) 2016 - 2023 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -227,7 +213,7 @@ class Image : public roc::Memory {
   size_t getDeviceDataAlignment() { return deviceImageInfo_.alignment; }
 
   hsa_ext_image_t getHsaImageObject() const { return hsaImageObject_; }
-  const hsa_ext_image_descriptor_t& getHsaImageDescriptor() const { return imageDescriptor_; }
+  const hsa_ext_image_descriptor_v2_t& getHsaImageDescriptor() const { return imageDescriptor_; }
 
   virtual const address cpuSrd() const {
     return reinterpret_cast<const address>(getHsaImageObject().handle);
@@ -263,7 +249,7 @@ class Image : public roc::Memory {
 
   void populateImageDescriptor();
 
-  hsa_ext_image_descriptor_t imageDescriptor_;
+  hsa_ext_image_descriptor_v2_t imageDescriptor_;
   hsa_access_permission_t permission_;
   hsa_ext_image_data_info_t deviceImageInfo_;
   hsa_ext_image_t hsaImageObject_;

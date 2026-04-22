@@ -52,6 +52,11 @@ def pytest_addoption(parser):
         help="Path to OTF2 trace file.",
     )
     parser.addoption(
+        "--otf2-sys-tree-input",
+        action="store",
+        help="Path to OTF2 trace file.",
+    )
+    parser.addoption(
         "--csv-input",
         action="store",
         nargs="+",
@@ -61,6 +66,26 @@ def pytest_addoption(parser):
         "--summary-input",
         action="store",
         help="Path to summary markdown file.",
+    )
+    parser.addoption(
+        "--summary-kernel-dir",
+        action="store",
+        help="Path to KERNEL category summary output directory.",
+    )
+    parser.addoption(
+        "--summary-hip-dir",
+        action="store",
+        help="Path to HIP category summary output directory.",
+    )
+    parser.addoption(
+        "--summary-multiple-dir",
+        action="store",
+        help="Path to multiple categories summary output directory.",
+    )
+    parser.addoption(
+        "--summary-none-dir",
+        action="store",
+        help="Path to NONE category summary output directory.",
     )
 
     pd.set_option("display.width", 2000)
@@ -77,14 +102,27 @@ def json_data(request):
 
 
 @pytest.fixture
-def pftrace_data(request):
+def pftrace_reader(request):
     filename = request.config.getoption("--pftrace-input")
-    return PerfettoReader(filename).read()[0]
+    return PerfettoReader(filename)
+
+
+@pytest.fixture
+def pftrace_data(pftrace_reader):
+    return pftrace_reader.read()[0]
 
 
 @pytest.fixture
 def otf2_data(request):
     filename = request.config.getoption("--otf2-input")
+    if not os.path.exists(filename):
+        raise FileExistsError(f"{filename} does not exist")
+    return OTF2Reader(filename).read()[0]
+
+
+@pytest.fixture
+def otf2_system_tree_node_data(request):
+    filename = request.config.getoption("--otf2-sys-tree-input")
     if not os.path.exists(filename):
         raise FileExistsError(f"{filename} does not exist")
     return OTF2Reader(filename).read()[0]
@@ -148,3 +186,24 @@ def summary_data(request):
     process_current_domain(current_name, current_list)
 
     return domains
+
+
+# Fixtures for region category summary tests
+@pytest.fixture
+def summary_kernel_dir(request):
+    return request.config.getoption("--summary-kernel-dir")
+
+
+@pytest.fixture
+def summary_hip_dir(request):
+    return request.config.getoption("--summary-hip-dir")
+
+
+@pytest.fixture
+def summary_multiple_dir(request):
+    return request.config.getoption("--summary-multiple-dir")
+
+
+@pytest.fixture
+def summary_none_dir(request):
+    return request.config.getoption("--summary-none-dir")

@@ -32,6 +32,8 @@
 extern "C" {
 #endif
 
+/* Forward declaration for debug trap ioctl arguments */
+struct kfd_ioctl_dbg_trap_args;
 
 /**
   "Opens" the HSA kernel driver for user-kernel mode communication.
@@ -131,6 +133,23 @@ hsaKmtGetNodeMemoryProperties(
     HSAuint32             NodeId,             //IN
     HSAuint32             NumBanks,           //IN
     HsaMemoryProperties*  MemoryProperties    //OUT
+    );
+
+/**
+  Retrieves the wall clock frequency of a specific HSA node.
+
+  The returned frequency is in hertz (Hz), i.e., KHz * 1000.
+  When possible, prefer using HsaNodeProperties.WallClockKHz from
+  hsaKmtGetNodeProperties(), as this function is mainly for compatibility
+  with clients that expect this API to exist.
+  Not all implementations are required to support this API.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetNodeWallclockFrequency(
+    HSAuint32 NodeId,      // IN
+    uint64_t* Frequency    // OUT (Hz)
     );
 
 /**
@@ -355,6 +374,26 @@ hsaKmtCreateQueueExt(
     );
 
 /**
+  Creates a GPU queue with user-mode access rights
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtCreateQueueV2(
+    HSAuint32           NodeId,                           //IN
+    HSA_QUEUE_TYPE      Type,                             //IN
+    HSAuint32           QueuePercentage,                  //IN
+    HSA_QUEUE_PRIORITY  Priority,                         //IN
+    HSAuint32           SdmaEngineId,                     //IN
+    void*               QueueAddress,                     //IN
+    HSAuint64           QueueSizeInBytes,                 //IN
+    HSAuint64           MetaDataPrefetchSizeInBytes,      //IN
+    HsaEvent*           Event,                            //IN
+    HsaQueueResource*   QueueResource                     //OUT
+    );
+
+
+/**
   Updates a queue
 */
 
@@ -396,6 +435,13 @@ HSAKMTAPI
 hsaKmtGetQueueInfo(
     HSA_QUEUEID QueueId,	//IN
     HsaQueueInfo *QueueInfo	//IN
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueueRingDoorbell(
+    HSA_QUEUEID QueueId,
+    HSAuint64 value
 );
 
 /**
@@ -547,6 +593,7 @@ hsaKmtExportDMABufHandle(
     HSAuint64 *Offset			//OUT
     );
 
+#if defined(_WIN32)
 /**
   Export GPU Memory handle
 */
@@ -558,6 +605,7 @@ hsaKmtGetMemoryHandle(
     HSAuint64 SizeInBytes,        // IN
     uint64_t* SharedMemoryHandle  // OUT
 );
+#endif
 
 /**
  Export a memory buffer for sharing with other processes
@@ -846,8 +894,10 @@ hsaKmtCheckRuntimeDebugSupport(
 /**
   Debug ops call primarily used for KFD testing
  */
-HSAKMT_STATUS HSAKMTAPI hsaKmtDebugTrapIoctl(
-    struct kfd_ioctl_dbg_trap_args *arg,
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtDebugTrapIoctl(
+    struct kfd_ioctl_dbg_trap_args *args,
     HSA_QUEUEID *Queues,
     HSAuint64 *DebugReturn
     );
@@ -1248,10 +1298,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(
 
 /**
  * Check if the HSA KMT Model is enabled
- * 
+ *
  *  Arguments:
  *   @enable (OUT) - true if the HSA KMT Model is enabled, false otherwise
- * 
+ *
  *  Return:
  *   HSAKMT_STATUS_ERROR             - failed
  *   HSAKMT_STATUS_SUCCESS           - successfully complete
@@ -1261,6 +1311,59 @@ HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtModelEnabled(
     bool* enable // OUT
+);
+
+
+/**
+ *  Experimental APIs to abstract DRM calls to thunk
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtHandleImport(
+    const HsaExternalHandleDesc* ImportDesc,
+    HsaHandleImportResult* ImportResult,
+    HsaHandleImportFlags* Flags
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryVaMap(
+    HsaMemoryObjectHandle Handle,
+    HSAuint64 offset,
+    HSAuint64 size,
+    HSAuint64 addr,
+    HsaMemoryMapFlags flags
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryVaUnmap(
+    HsaMemoryObjectHandle Handle,
+    HSAuint64 offset,
+    HSAuint64 size,
+    HSAuint64 addr
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryCpuMap(
+    HsaMemoryObjectHandle Handle,
+    void** out_cpu_ptr
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemHandleFree(
+    HsaMemoryObjectHandle Handle
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryGetCpuAddr(
+  HsaAMDGPUDeviceHandle DeviceHandle,
+  HsaMemoryObjectHandle MemoryHandle,
+  HSAint32* fd, // OUT
+  HSAuint64* cpu_addr // OUT
 );
 
 #ifdef __cplusplus

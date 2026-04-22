@@ -15,6 +15,7 @@
 #include "signals.h" // [RCCL]
 #include "param.h"
 #include "ras.h"
+#include <mutex>
 
 #define BOOTSTRAP_N_CHECK_ABORT           10000
 #define BOOTSTRAP_TAG_CONNECT             (0x1 << 31)
@@ -86,13 +87,13 @@ struct bootstrapRootArgs {
 static char bootstrapNetIfName[MAX_IF_NAME_SIZE+1];
 static union ncclSocketAddress bootstrapNetIfAddr;
 static int bootstrapNetInitDone = 0;
-pthread_mutex_t bootstrapNetLock = PTHREAD_MUTEX_INITIALIZER;
+static std::mutex bootstrapNetMutex;
 
 NCCL_PARAM(BootstrapNetEnable,"OOB_NET_ENABLE", 0);
 
 ncclResult_t bootstrapNetInit() {
   if (bootstrapNetInitDone == 0) {
-    pthread_mutex_lock(&bootstrapNetLock);
+    std::lock_guard<std::mutex> lock(bootstrapNetMutex);
     if (bootstrapNetInitDone == 0) {
       const char* env = ncclGetEnv("NCCL_COMM_ID");
       int nIfs = 0;
@@ -100,21 +101,18 @@ ncclResult_t bootstrapNetInit() {
         union ncclSocketAddress remoteAddr;
         if (ncclSocketGetAddrFromString(&remoteAddr, env) != ncclSuccess) {
           WARN("Invalid NCCL_COMM_ID, please use format: <ipv4>:<port> or [<ipv6>]:<port> or <hostname>:<port>");
-          pthread_mutex_unlock(&bootstrapNetLock);
           return ncclInvalidArgument;
         }
         NCCLCHECK(ncclFindInterfaceMatchSubnet(bootstrapNetIfName, &bootstrapNetIfAddr, &remoteAddr, MAX_IF_NAME_SIZE,
                                                &nIfs));
         if (nIfs <= 0) {
           WARN("NET/Socket : No usable listening interface found");
-          pthread_mutex_unlock(&bootstrapNetLock);
           return ncclSystemError;
         }
       } else {
         NCCLCHECK(ncclFindInterfaces(bootstrapNetIfName, &bootstrapNetIfAddr, MAX_IF_NAME_SIZE, 1, &nIfs));
         if (nIfs <= 0) {
           WARN("Bootstrap : no socket interface found");
-          pthread_mutex_unlock(&bootstrapNetLock);
           return ncclInvalidUsage;
         }
       }
@@ -124,7 +122,6 @@ ncclResult_t bootstrapNetInit() {
       INFO(NCCL_BOOTSTRAP, "Bootstrap: Using%s", line);
       bootstrapNetInitDone = 1;
     }
-    pthread_mutex_unlock(&bootstrapNetLock);
   }
   return ncclSuccess;
 }
@@ -486,7 +483,7 @@ static ncclResult_t getUDS(uint64_t* peerUDS) {
 static ncclResult_t netGetDevice(int rank, struct ncclComm* comm, int* dev) {
   static int devOOB = -1;
   if (devOOB < 0) {
-    pthread_mutex_lock(&bootstrapNetLock);
+    std::lock_guard<std::mutex> lock(bootstrapNetMutex);
     if (devOOB < 0) {
       const char* userIfEnv = ncclGetEnv("NCCL_OOB_NET_IFNAME");
       if (userIfEnv && strlen(userIfEnv) > 0) {
@@ -517,7 +514,6 @@ static ncclResult_t netGetDevice(int rank, struct ncclComm* comm, int* dev) {
             WARN("no device found matching %s%s, verify NCCL_OOB_NET_IFNAME", searchExact ? "exactly " : "", userIfEnv);
           else
             WARN("no device found after excluding %s%s, verify NCCL_OOB_NET_IFNAME", searchExact ? "exactly " : "", userIfEnv);
-          pthread_mutex_unlock(&bootstrapNetLock);
           return ncclInvalidArgument;
         }
       } else {
@@ -530,13 +526,12 @@ static ncclResult_t netGetDevice(int rank, struct ncclComm* comm, int* dev) {
       bool hasProp = res == ncclSuccess;
       INFO(NCCL_BOOTSTRAP, "Bootstrap: Using %s:%d", (hasProp) ? props.name : "N/A", (hasProp) ? props.port : -1);
     }
-    pthread_mutex_unlock(&bootstrapNetLock);
   }
   *dev = devOOB;
   return ncclSuccess;
 }
 
-static ncclResult_t netRingConnect(ncclNet_t* net, struct bootstrapListen_t* listen, char peerHandle[NCCL_NET_HANDLE_MAXSIZE],
+static ncclResult_t netRingConnect(void* ctx, ncclNet_t* net, struct bootstrapListen_t* listen, char peerHandle[NCCL_NET_HANDLE_MAXSIZE],
                                    void** sendComm, ncclNetDeviceHandle_t** sendDevHandle,
                                    void** recvComm, ncclNetDeviceHandle_t** recvDevHandle, volatile uint32_t* abortFlag) {
 
@@ -544,7 +539,7 @@ static ncclResult_t netRingConnect(ncclNet_t* net, struct bootstrapListen_t* lis
   do {
     NCCLCHECK(checkAbort(abortFlag, &abortCounter));
     if (!*sendComm)
-      NCCLCHECK(net->connect(listen->net.dev, NULL, peerHandle, sendComm, sendDevHandle));
+      NCCLCHECK(net->connect(ctx, listen->net.dev, peerHandle, sendComm, sendDevHandle));
     if (!*recvComm)
       NCCLCHECK(net->accept(listen->net.comm, recvComm, recvDevHandle));
   } while (!*sendComm || !*recvComm);
@@ -660,7 +655,7 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
   if (ncclParamBootstrapNetEnable()) {
     // Create net interface for other ranks to contact me (all gather)
     NCCLCHECK(netGetDevice(rank, comm, &STATE_LISTEN(state, net.dev)));
-    NCCLCHECK(state->net->listen(STATE_LISTEN(state, net.dev), STATE_LISTEN(state, net.handle), &STATE_LISTEN(state, net.comm)));
+    NCCLCHECK(state->net->listen(comm->netContext, STATE_LISTEN(state, net.dev), STATE_LISTEN(state, net.handle), &STATE_LISTEN(state, net.comm)));
     memcpy(info.connectInfo.handle, STATE_LISTEN(state, net.handle), NCCL_NET_HANDLE_MAXSIZE);
   } else {
     // create socket for ring neightbor to contact mee
@@ -714,7 +709,7 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
 
   // accept and connect the ring network
   if (ncclParamBootstrapNetEnable()) {
-    NCCLCHECK(netRingConnect(state->net, &state->listen, nextPeer.handle,
+    NCCLCHECK(netRingConnect(comm->netContext, state->net, &state->listen, nextPeer.handle,
                              &STATE_RING(state, net.sendComm), &STATE_RING(state, net.sendDevHandle),
                              &STATE_RING(state, net.recvComm), &STATE_RING(state, net.recvDevHandle), state->abortFlag));
   } else {
@@ -807,7 +802,7 @@ ncclResult_t bootstrapSplit(uint64_t magic, struct ncclComm* comm, struct ncclCo
   // create a handle for the others to reach out to me
   if (ncclParamBootstrapNetEnable()) {
     NCCLCHECKGOTO(netGetDevice(rank, comm, &STATE_LISTEN(state, net.dev)), ret, fail);
-    NCCLCHECKGOTO(state->net->listen(STATE_LISTEN(state, net.dev), STATE_LISTEN(state, net.handle), &STATE_LISTEN(state, net.comm)), ret, fail);
+    NCCLCHECKGOTO(state->net->listen(comm->netContext, STATE_LISTEN(state, net.dev), STATE_LISTEN(state, net.handle), &STATE_LISTEN(state, net.comm)), ret, fail);
     memcpy(info.handle, STATE_LISTEN(state, net.handle), NCCL_NET_HANDLE_MAXSIZE);
   } else {
     // create socket for ring neightbor to contact mee
@@ -826,7 +821,7 @@ ncclResult_t bootstrapSplit(uint64_t magic, struct ncclComm* comm, struct ncclCo
   NCCLCHECKGOTO(bootstrapSend(parent->bootstrap, prev, BOOTSTRAP_TAG_COMMSPLIT, &info, sizeof(union ringConnectInfo)), ret, fail);
   NCCLCHECKGOTO(bootstrapRecv(parent->bootstrap, next, BOOTSTRAP_TAG_COMMSPLIT, &nextPeer, sizeof(union ringConnectInfo)), ret, fail);
   if (ncclParamBootstrapNetEnable()) {
-    NCCLCHECKGOTO(netRingConnect(state->net, &state->listen, nextPeer.handle,
+    NCCLCHECKGOTO(netRingConnect(comm->netContext, state->net, &state->listen, nextPeer.handle,
                                  &STATE_RING(state, net.sendComm), &STATE_RING(state, net.sendDevHandle),
                                  &STATE_RING(state, net.recvComm), &STATE_RING(state, net.recvDevHandle), state->abortFlag),
                   ret, fail);

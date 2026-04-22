@@ -23,59 +23,56 @@
 #ifndef AMD_SMI_INCLUDE_IMPL_AMD_SMI_LIB_LOADER_H_
 #define AMD_SMI_INCLUDE_IMPL_AMD_SMI_LIB_LOADER_H_
 #include <dlfcn.h>
+
 #include <cstring>
 #include <iostream>
-#include <mutex>   //  NOLINT(build/c++11)
-#include "amd_smi/amdsmi.h"
+#include <mutex>  //  NOLINT(build/c++11)
 
+#include "amd_smi/amdsmi.h"
 
 namespace amd::smi {
 class AMDSmiLibraryLoader {
  public:
-     AMDSmiLibraryLoader();
+  AMDSmiLibraryLoader();
 
-     amdsmi_status_t load(const char* filename);
+  amdsmi_status_t load(const char* filename);
 
-     template<typename T> amdsmi_status_t load_symbol(T* func_handler,
-            const char* func_name);
+  template <typename T>
+  amdsmi_status_t load_symbol(T* func_handler, const char* func_name);
 
+  amdsmi_status_t unload();
 
-     amdsmi_status_t unload();
-
-     ~AMDSmiLibraryLoader();
+  ~AMDSmiLibraryLoader();
 
  private:
-     void* libHandler_;
-     std::mutex library_mutex_;
-     bool library_loaded_ = false;
+  void* libHandler_;
+  std::mutex library_mutex_;
+  bool library_loaded_ = false;
 };
 
-template<typename T> amdsmi_status_t AMDSmiLibraryLoader::load_symbol(
-            T* func_handler,
-            const char* func_name) {
-    if (!libHandler_) {
-        return AMDSMI_STATUS_FAIL_LOAD_MODULE;
-    }
+template <typename T>
+amdsmi_status_t AMDSmiLibraryLoader::load_symbol(T* func_handler, const char* func_name) {
+  if (!libHandler_) {
+    return AMDSMI_STATUS_FAIL_LOAD_MODULE;
+  }
 
-    if (!func_handler || !func_name) {
-        return AMDSMI_STATUS_FAIL_LOAD_SYMBOL;
-    }
+  if (!func_handler || !func_name) {
+    return AMDSMI_STATUS_FAIL_LOAD_SYMBOL;
+  }
 
-    std::lock_guard<std::mutex> guard(library_mutex_);
+  std::lock_guard<std::mutex> guard(library_mutex_);
 
-    *reinterpret_cast<void**>(func_handler) =
-            dlsym(libHandler_, func_name);
-    if (*func_handler == nullptr) {
-        char* error = dlerror();
-        std::cerr << "AMDSmiLibraryLoader: Fail to load the symbol "
-                    << func_name << ": " << error << std::endl;
-        return AMDSMI_STATUS_FAIL_LOAD_SYMBOL;
-    }
+  *reinterpret_cast<void**>(func_handler) = dlsym(libHandler_, func_name);
+  if (*func_handler == nullptr) {
+    char* error = dlerror();
+    std::cerr << "AMDSmiLibraryLoader: Fail to load the symbol " << func_name << ": " << error
+              << std::endl;
+    return AMDSMI_STATUS_FAIL_LOAD_SYMBOL;
+  }
 
-    return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
-} // namespace amd::smi
-
+}  // namespace amd::smi
 
 #endif  // AMD_SMI_INCLUDE_IMPL_AMD_SMI_LIB_LOADER_H_

@@ -43,24 +43,25 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/fan_read.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/fan_read.h"
 #include "rocm_smi_test/test_common.h"
 
 TestFanRead::TestFanRead() : TestBase() {
   set_title("RSMI Fan Read Test");
-  set_description("The Fan Read tests verifies that the fan monitors can be "
-                  "read properly.");
+  set_description(
+      "The Fan Read tests verifies that the fan monitors can be "
+      "read properly.");
 }
 
-TestFanRead::~TestFanRead(void) {
-}
+TestFanRead::~TestFanRead(void) {}
 
 void TestFanRead::SetUp(void) {
   TestBase::SetUp();
@@ -68,9 +69,7 @@ void TestFanRead::SetUp(void) {
   return;
 }
 
-void TestFanRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestFanRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestFanRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -82,7 +81,6 @@ void TestFanRead::Close() {
   // rsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
-
 
 void TestFanRead::Run(void) {
   uint64_t val_ui64;
@@ -98,19 +96,14 @@ void TestFanRead::Run(void) {
     for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
       PrintDeviceHeader(i);
 
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Current Fan Speed: ";
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**Current Fan Speed: "; }
       err = rsmi_dev_fan_speed_get(i, 0, &val_i64);
       if (err == RSMI_STATUS_NOT_SUPPORTED || err == RSMI_STATUS_UNEXPECTED_DATA) {
-        IF_VERB(STANDARD) {
-          std::cout << "\t** Not supported on this machine" << std::endl;
-        }
+        IF_VERB(STANDARD) { std::cout << "\t** Not supported on this machine" << std::endl; }
         return;
       } else {
         CHK_ERR_ASRT(err);
       }
-
 
       // Verify api support checking functionality is working
       err = rsmi_dev_fan_speed_get(i, 0, nullptr);
@@ -119,21 +112,17 @@ void TestFanRead::Run(void) {
       err = rsmi_dev_fan_speed_max_get(i, 0, &val_ui64);
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
-        std::cout << val_i64/static_cast<float>(val_ui64)*100;
-        std::cout << "% ("<< val_i64 << "/" << val_ui64 << ")" << std::endl;
+        std::cout << static_cast<float>(val_i64) / static_cast<float>(val_ui64) * 100;
+        std::cout << "% (" << val_i64 << "/" << val_ui64 << ")" << std::endl;
       }
       // Verify api support checking functionality is working
       err = rsmi_dev_fan_speed_max_get(i, 0, nullptr);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
 
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Current fan RPMs: ";
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**Current fan RPMs: "; }
       err = rsmi_dev_fan_rpms_get(i, 0, &val_i64);
       CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) {
-        std::cout << val_i64 << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << val_i64 << std::endl; }
 
       // Verify api support checking functionality is working
       err = rsmi_dev_fan_rpms_get(i, 0, nullptr);

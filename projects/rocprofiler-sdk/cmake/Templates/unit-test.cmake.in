@@ -16,6 +16,23 @@ set(_DISABLED "@RAUT_DISABLED@")
 set(_ENVIRONMENT "@RAUT_ENVIRONMENT@")
 set(_PREFIX "@RAUT_TEST_PREFIX@")
 
+function(rocprofiler_sdk_update_unit_test_environment _VAR _NAME)
+    set(_UPD) # temporary variable to hold updated list
+    foreach(_VAL IN LISTS ${_VAR})
+        if(_VAL MATCHES "^${_NAME}=(.*)$")
+            list(APPEND _UPD "${_VAL}:${ARGN}")
+        else()
+            list(APPEND _UPD "${_VAL}")
+        endif()
+    endforeach()
+    # propagate to parent scope
+    set(${_VAR} "${_UPD}" PARENT_SCOPE)
+endfunction()
+
+rocprofiler_sdk_update_unit_test_environment(_ENVIRONMENT "LD_LIBRARY_PATH" "$ENV{LD_LIBRARY_PATH}")
+rocprofiler_sdk_update_unit_test_environment(_ENVIRONMENT "ROCPROFILER_METRICS_PATH"
+                                             "$ENV{ROCPROFILER_METRICS_PATH}")
+
 # test sources are in a subfolder
 set(_TEST_SOURCES)
 foreach(_FILE ${_SOURCES})

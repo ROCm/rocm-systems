@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 #
 set(component_sources
     ${CMAKE_CURRENT_LIST_DIR}/backtrace.cpp
@@ -11,6 +14,8 @@ set(component_sources
     ${CMAKE_CURRENT_LIST_DIR}/kill_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/mpi_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/numa_gotcha.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/shmem_gotcha.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/ucx_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/vaapi_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/pthread_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/pthread_create_gotcha.cpp
@@ -32,6 +37,8 @@ set(component_headers
     ${CMAKE_CURRENT_LIST_DIR}/mpip.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mpi_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/numa_gotcha.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/shmem_gotcha.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/ucx_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/vaapi_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/pthread_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/pthread_create_gotcha.hpp
@@ -42,3 +49,7 @@ target_sources(
     rocprofiler-systems-object-library
     PRIVATE ${component_sources} ${component_headers}
 )
+
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()

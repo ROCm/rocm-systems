@@ -1,28 +1,10 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 #include "agent_manager.hpp"
 #include "config.hpp"
+#include "core/output_file_registry.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
@@ -50,20 +32,23 @@ class perfetto_processor_t : public processor_t<perfetto_processor_t>
 public:
     perfetto_processor_t(const std::shared_ptr<metadata_registry>& metadata,
                          const std::shared_ptr<agent_manager>& agent_mngr, int pid,
-                         int ppid);
+                         int ppid, output_file_registry& output_registry);
 
     void prepare_for_processing();
     void finalize_processing();
 
     void handle(const kernel_dispatch_sample& sample);
+    void handle(const scratch_memory_sample& sample);
     void handle(const memory_copy_sample& sample);
     void handle(const memory_allocate_sample& sample);
     void handle(const region_sample& sample);
     void handle(const in_time_sample& sample);
     void handle(const pmc_event_with_sample& sample);
-    void handle(const amd_smi_sample& sample);
+    void handle(const gpu_pmc_sample& sample);
+    void handle(const ainic_pmc_sample& sample);
     void handle(const cpu_freq_sample& sample);
     void handle(const backtrace_region_sample& sample);
+    void handle(const kfd_sample& sample);
 
 private:
     void       initialize_perfetto();
@@ -83,6 +68,7 @@ private:
     bool                                        m_use_annotations{ false };
 
     std::unordered_map<size_t, pmc_track_info> m_pmc_track_map;
+    output_file_registry&                      m_output_registry;
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

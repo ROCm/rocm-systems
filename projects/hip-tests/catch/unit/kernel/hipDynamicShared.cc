@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
@@ -76,7 +63,7 @@ template <typename T> void testExternShared(size_t N, unsigned groupElements) {
 
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
   unsigned blocks = N / threadsPerBlock;
-  assert(N == blocks * threadsPerBlock);
+  REQUIRE(N == blocks * threadsPerBlock);
 
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
@@ -124,7 +111,7 @@ template <typename T> void testExternShared(size_t N, unsigned groupElements) {
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE("Unit_hipDynamicShared") {
+HIP_TEST_CASE(Unit_hipDynamicShared) {
   SECTION("test case with float for least size") {
     testExternShared<float>(1024, 4);
     testExternShared<float>(1024, 8);
@@ -157,11 +144,14 @@ TEST_CASE("Unit_hipDynamicShared") {
     testExternShared<double>(65536, 64);
   }
 
+  // We can not allocate all of the LDS with ASAN
+#if !defined(ENABLE_ADDRESS_SANITIZER)
   SECTION("test case with float for max LDS size") {
     int maxLDS = 0;
     HIP_CHECK(hipDeviceGetAttribute(&maxLDS, hipDeviceAttributeMaxSharedMemoryPerBlock, 0));
     testExternShared<float>(1024, maxLDS / sizeof(float));
   }
+#endif
 }
 
 /**

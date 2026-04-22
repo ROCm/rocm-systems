@@ -33,7 +33,7 @@ if [ -n "${EXTERNAL_SYMBOLIZER_PATH}" ]; then
 fi
 
 : ${ASAN_OPTIONS="detect_leaks=0 use_sigaltstack=0 suppressions=${SUPPR_DIR}/address-sanitizer-suppr.txt"}
-: ${LSAN_OPTIONS="suppressions=${SUPPR_DIR}/leak-sanitizer-suppr.txt"}
+: ${LSAN_OPTIONS="fast_unwind_on_malloc=1 suppressions=${SUPPR_DIR}/leak-sanitizer-suppr.txt"}
 : ${TSAN_OPTIONS="history_size=5 detect_deadlocks=0 suppressions=${SUPPR_DIR}/thread-sanitizer-suppr.txt${EXTERNAL_SYMBOLIZER}"}
 : ${UBSAN_OPTIONS="print_stacktrace=1 suppressions=${SUPPR_DIR}/undef-behavior-sanitizer-suppr.txt${EXTERNAL_SYMBOLIZER}"}
 

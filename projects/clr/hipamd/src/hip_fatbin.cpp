@@ -1,40 +1,44 @@
 /*
-Copyright (c) 2023 - 2024 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "hip/hip_runtime_api.h"
 #include "hip_fatbin.hpp"
 #include "hip_global.hpp"
 #include <unordered_map>
+#include <mutex>
 #include "hip_code_object.hpp"
 #include "hip_platform.hpp"
 #include "comgrctx.hpp"
 #include "amd_hsa_elf.hpp"
 #include "hip_comgr_helper.hpp"
 
+#if ROCM_KPACK_ENABLED
+#include <rocm_kpack/kpack.h>
+#endif
+
 namespace hip {
 // Use ComgrUniqueHandle and type aliases from hip_comgr_helper.hpp
 using comgr_helper::ComgrDataSetUniqueHandle;
 using comgr_helper::ComgrActionInfoUniqueHandle;
 using comgr_helper::ComgrDataUniqueHandle;
+
+#if ROCM_KPACK_ENABLED
+namespace {
+// HIP process-global kpack cache - initialized on first use
+std::once_flag g_hipKpackCacheInitFlag;
+kpack_cache_t g_hipKpackCache = nullptr;
+
+void initHipKpackCache() { kpack_cache_create(&g_hipKpackCache); }
+
+kpack_cache_t getHipKpackCache() {
+  std::call_once(g_hipKpackCacheInitFlag, initHipKpackCache);
+  return g_hipKpackCache;
+}
+}  // namespace
+#endif
 
 FatBinaryInfo::FatBinaryInfo(const char* fname, const void* image)
     : foffset_(0), image_(image), image_mapped_(false), uri_(std::string()) {
@@ -47,6 +51,11 @@ FatBinaryInfo::FatBinaryInfo(const char* fname, const void* image)
   dev_programs_.resize(g_devices.size(), nullptr);
 }
 
+FatBinaryInfo::FatBinaryInfo(KpackParams kpack_params)
+    : FatBinaryInfo(kpack_params.binary_path.c_str(), nullptr) {
+  kpack_params_ = std::move(kpack_params);
+}
+
 FatBinaryInfo::~FatBinaryInfo() {
   // Release per device fat bin info.
   for (int dev_id = 0; dev_id < dev_programs_.size(); dev_id++) {
@@ -57,7 +66,16 @@ FatBinaryInfo::~FatBinaryInfo() {
   }
   // Release Code object allocations
   for (const auto& i : code_obj_allocations_) {
-    delete[] reinterpret_cast<const char*>(i);
+    if (kpack_params_.has_value()) {
+      // Kpack-allocated code objects must be freed via kpack API
+#if ROCM_KPACK_ENABLED
+      kpack_free_code_object(const_cast<void*>(i));
+#else
+      guarantee(false, "Kpack code object but ROCM_KPACK_ENABLED=OFF");
+#endif
+    } else {
+      delete[] reinterpret_cast<const char*>(i);
+    }
   }
   ReleaseImageAndFile();
 }
@@ -69,7 +87,7 @@ void FatBinaryInfo::ReleaseImageAndFile() {
       guarantee(false, "Cannot unmap the file");
     }
 
-    if (!PlatformState::instance().CloseUniqueFileHandle(ufd_)) {
+    if (!PlatformState::Instance().CloseUniqueFileHandle(ufd_)) {
       guarantee(false, "Cannot close file for fdesc: %d", ufd_->fdesc_);
     }
 
@@ -131,7 +149,7 @@ static std::string TargetGenericMap(const std::string& input) {
 }
 
 // For sramecc and xnack
-static std::string TargetFeatureCheck(const std::string& input, std::string feature) {
+static std::string TargetFeatureCheck(const std::string& input, const std::string &feature) {
   if (input.find(feature) != std::string::npos) {
     auto feature_p = feature + "+";  // feature present eg: xnack+
     auto feature_m = feature + "-";  // feature absent eg: xnack-
@@ -144,7 +162,7 @@ static std::string TargetFeatureCheck(const std::string& input, std::string feat
   return "";
 }
 
-static std::string TargetToGeneric(std::string input) {
+static std::string TargetToGeneric(const std::string &input) {
   auto sramecc = TargetFeatureCheck(input, "sramecc");
   auto xnack = TargetFeatureCheck(input, "xnack");
 
@@ -197,16 +215,13 @@ static bool UncompressAndPopulateCodeObject(
   };
 
   std::vector<std::string> bundle_ids_str;
-  std::set<std::string> unique_ids;
-
-  for (const auto& isa_name : unique_isa_names) {
-    bundle_ids_str.push_back(std::string(symbols::kOffloadKindHipv4_) + isa_name);
-  }
-
   std::vector<const char*> bundle_ids;
-  bundle_ids.reserve(bundle_ids_str.size());
-  for (auto& bundle_id_str : bundle_ids_str) {
-    bundle_ids.push_back(bundle_id_str.c_str());
+  bundle_ids_str.reserve(unique_isa_names.size());
+  bundle_ids.reserve(unique_isa_names.size());
+  for (const auto& isa_name : unique_isa_names) {
+    const std::string& bis =
+        bundle_ids_str.emplace_back(std::string(symbols::kOffloadKindHipv4_) + isa_name);
+    bundle_ids.push_back(bis.c_str());
   }
 
   const auto obheader = reinterpret_cast<const symbols::ClangOffloadBundleCompressedHeader*>(image);
@@ -394,7 +409,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       foffset_ = 0;
     }
   } else {
-    ufd_ = PlatformState::instance().GetUniqueFileHandle(fname_.c_str());
+    ufd_ = PlatformState::Instance().GetUniqueFileHandle(fname_.c_str());
     if (ufd_ == nullptr) {
       return hipErrorFileNotFound;
     }
@@ -407,7 +422,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     // If image_ is nullptr, then file path is passed via hipMod* APIs, so map the file.
     if (!amd::Os::MemoryMapFileDesc(ufd_->fdesc_, ufd_->fsize_, foffset_, &image_)) {
       LogError("Cannot map the file descriptor");
-      PlatformState::instance().CloseUniqueFileHandle(ufd_);
+      PlatformState::Instance().CloseUniqueFileHandle(ufd_);
       return hipErrorInvalidValue;
     }
 
@@ -424,9 +439,8 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     if (IsCodeObjectElf(image_)) {
       // Load the binary directly
       auto elf_size = amd::Elf::getElfSize(image_);
-      for (size_t i = 0; i < devices.size(); i++) {
-        if (hipSuccess != AddDevProgram(devices[i], image_, elf_size, 0))
-          return hipErrorInvalidImage;
+      for (auto* device : devices) {
+        if (hipSuccess != AddDevProgram(device, image_, elf_size, 0)) return hipErrorInvalidImage;
       }
       return hipSuccess;  // We are done since it was already ELF
     } else {
@@ -480,21 +494,16 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
       // If the size is not 0, that means we found the native isa code object
       if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        LogPrintfInfo("Using native code object for device: %s co: %s", device_name.c_str(),
-                      native_co->first.c_str());
         hip_status = AddDevProgram(device, native_co->second.first, native_co->second.second, 0);
         if (hip_status != hipSuccess) {
           break;
         }
       } else if (generic_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        LogPrintfInfo("Using generic code object for device: %s co: %s", device_name.c_str(),
-                      generic_co->first.c_str());
         hip_status = AddDevProgram(device, generic_co->second.first, generic_co->second.second, 0);
         if (hip_status != hipSuccess) {
           break;
         }
       } else if (spirv_isa_found) {
-        LogPrintfInfo("Using spirv code object for device: %s", device_name.c_str());
         std::string target_id = device->devices()[0]->isa().targetId();
         std::string isa = "amdgcn-amd-amdhsa--" + target_id;
 
@@ -640,6 +649,83 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   return hip_status;
 }
 
+// This function is always defined but errors if ROCM_KPACK_ENABLED=OFF
+// TODO: Extract SPIR-V translation from ExtractFatBinaryUsingCOMGR and call
+// it from both of these entry-points once we have enough testing in place
+// to ensure this advanced case is functional.
+hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& devices) {
+#if !ROCM_KPACK_ENABLED
+  LogError("Kpack binary detected but ROCM_KPACK_ENABLED=OFF");
+  return hipErrorNotSupported;
+#else
+  if (!kpack_params_.has_value()) {
+    LogError("ExtractKpackBinary called but kpack_params_ not set");
+    return hipErrorInvalidValue;
+  }
+
+  const auto& params = kpack_params_.value();
+  if (params.metadata == nullptr) {
+    LogError("HIPK metadata is null");
+    return hipErrorInvalidValue;
+  }
+
+  // Build architecture priority list from devices
+  // For each device, add native ISA first, then generic fallback.
+  // Reservation in the list is pessimistically assuming there is a generic fallback for each
+  // device.
+  std::vector<std::string> arch_list;
+  arch_list.reserve(devices.size() * 2);
+  for (auto device : devices) {
+    std::string device_name = device->devices()[0]->isa().isaName();
+    arch_list.push_back(device_name);
+
+    // Add generic fallback
+    auto generic_name = TargetToGeneric(device_name);
+    if (!generic_name.empty()) {
+      arch_list.push_back(generic_name);
+    }
+  }
+
+  // Convert to C-style array for kpack API
+  std::vector<const char*> arch_ptrs;
+  arch_ptrs.reserve(arch_list.size());
+  for (const auto& arch : arch_list) {
+    arch_ptrs.push_back(arch.c_str());
+  }
+
+  // Load code object from kpack archive
+  void* code_object = nullptr;
+  size_t code_object_size = 0;
+
+  // binary_path is used to resolve relative paths to kpack archives.
+  // bundle_index identifies which code object to load for multi-TU binaries.
+  // The kernel_name (used for TOC lookup) is embedded in the HIPK metadata.
+  kpack_error_t err =
+      kpack_load_code_object(getHipKpackCache(), params.metadata, fname_.c_str(),
+                             static_cast<uint32_t>(params.bundle_index),
+                             arch_ptrs.data(), arch_ptrs.size(), &code_object, &code_object_size);
+
+  if (err != KPACK_SUCCESS) {
+    LogPrintfError("kpack_load_code_object failed with error: %d", err);
+    return hipErrorInvalidImage;
+  }
+
+  // Add code object to all devices
+  for (auto device : devices) {
+    hipError_t hip_err = AddDevProgram(device, code_object, code_object_size, 0);
+    if (hip_err != hipSuccess) {
+      kpack_free_code_object(code_object);
+      return hip_err;
+    }
+  }
+
+  // Track allocation for cleanup in destructor
+  code_obj_allocations_.insert(code_object);
+
+  return hipSuccess;
+#endif
+}
+
 hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_image,
                                         size_t binary_size, size_t binary_offset) {
   int devID = device->deviceId();
@@ -668,6 +754,8 @@ hipError_t FatBinaryInfo::BuildProgram(const int device_id) {
 
   // If Program was already built skip this step and return success
   if (dev_programs_[device_id]->IsProgramBuilt(*g_devices[device_id]->devices()[0]) == false) {
+    constexpr bool kOptionChangeable = true;
+    constexpr bool kNewDevProg = false;
     if (CL_SUCCESS != dev_programs_[device_id]->build(g_devices[device_id]->devices(), nullptr,
                                                       nullptr, nullptr, kOptionChangeable,
                                                       kNewDevProg)) {

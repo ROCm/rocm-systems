@@ -48,6 +48,8 @@ $ ./MatrixTranspose
 Device name
 PASSED!
 ```
+## On TheRock build :
+Pass GPU arch to cmake i.e. -DHIP_HIPCC_FLAGS="--offload-arch=gfx1102" for windows.
 
 ## More Info:
 

@@ -325,7 +325,7 @@ static const GpuBlockInfo SqCounterBlockInfo = {
     SqCounterBlockNumCounters,
     SqCounterRegAddr,
     gfx11_cntx_prim::sq_select_value,
-    CounterBlockSeAttr | CounterBlockSqAttr | CounterBlockSaAttr,
+    CounterBlockSeAttr | CounterBlockSqAttr | CounterBlockSaAttr | CounterBlockWgpAttr,
     BLOCK_DELAY_NONE};
 // Counter block SX
 static const GpuBlockInfo SxCounterBlockInfo = {
@@ -358,7 +358,7 @@ static const GpuBlockInfo TcpCounterBlockInfo = {
     TcpCounterBlockNumCounters,
     TcpCounterRegAddr,
     gfx11_cntx_prim::select_value_TCP_PERFCOUNTER0_SELECT,
-    CounterBlockDfltAttr | CounterBlockSeAttr | CounterBlockSaAttr,
+    CounterBlockDfltAttr | CounterBlockSeAttr | CounterBlockSaAttr | CounterBlockWgpAttr,
     BLOCK_DELAY_NONE};
 // Counter block GL1A
 static const GpuBlockInfo Gl1aCounterBlockInfo = {

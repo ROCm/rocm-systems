@@ -11,7 +11,7 @@ paths:
   backups: .backups
 
   # Hash database file
-  hashes: tools/config_management/.config_hashes.json
+  hashes: src/utils/.config_hashes.json
 
   # Per-arch metric definitions output
   per_arch_metrics: tools/per_arch_metric_definitions

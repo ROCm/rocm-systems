@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -26,7 +7,6 @@
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/defines.hpp"
 #include "core/demangler.hpp"
 #include "core/perfetto.hpp"
@@ -51,9 +31,12 @@
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/types.hpp>
 
+#include "logger/debug.hpp"
+
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <ratio>
 #include <string>
 #include <type_traits>
@@ -85,6 +68,9 @@ extern ROCPROFSYS_HIDDEN_API bool debug_mark;
 
 std::unordered_map<hash_value_t, std::string>&
 get_perfetto_track_uuids();
+
+std::mutex&
+get_perfetto_track_uuids_mutex();
 
 void
 copy_timemory_hash_ids();
@@ -160,9 +146,9 @@ template <typename CategoryT, typename... Args>
 auto
 get_perfetto_category_uuid(Args&&... _args)
 {
-    return tim::hash::get_hash_id(
-        tim::hash::get_hash_id(JOIN('_', "rocprofsys", trait::name<CategoryT>::value)),
-        std::forward<Args>(_args)...);
+    return tim::hash::get_hash_id(tim::hash::get_hash_id(fmt::format(
+                                      "rocprofsys_{}", trait::name<CategoryT>::value)),
+                                  std::forward<Args>(_args)...);
 }
 
 template <typename CategoryT, typename TrackT = ::perfetto::Track, typename FuncT,
@@ -170,8 +156,11 @@ template <typename CategoryT, typename TrackT = ::perfetto::Track, typename Func
 auto
 get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
 {
-    auto  _uuid = get_perfetto_category_uuid<CategoryT>(std::forward<Args>(_args)...);
-    auto& _track_uuids = get_perfetto_track_uuids();
+    auto _uuid = get_perfetto_category_uuid<CategoryT>(std::forward<Args>(_args)...);
+
+    std::lock_guard<std::mutex> _lk{ get_perfetto_track_uuids_mutex() };
+    auto&                       _track_uuids = get_perfetto_track_uuids();
+
     if(_track_uuids.find(_uuid) == _track_uuids.end())
     {
         const auto _track = TrackT(_uuid, ::perfetto::ProcessTrack::Current());
@@ -181,10 +170,9 @@ get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
         _desc.set_name(_name);
         ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
 
-        ROCPROFSYS_VERBOSE_F(4, "[%s] Created %s(%zu) with description: \"%s\"\n",
-                             trait::name<CategoryT>::value,
-                             rocprofsys::utility::demangle<TrackT>().c_str(), _uuid,
-                             _name.c_str());
+        LOG_TRACE("[{}] Created {}({}) with description: \"{}\"",
+                  trait::name<CategoryT>::value, rocprofsys::utility::demangle<TrackT>(),
+                  _uuid, _name);
 
         _track_uuids.emplace(_uuid, _name);
     }
@@ -193,10 +181,13 @@ get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
     // overhead of generating string during releases
 #if defined(ROCPROFSYS_CI) && ROCPROFSYS_CI > 0
     auto _name = std::forward<FuncT>(_desc_generator)(std::forward<Args>(_args)...);
-    ROCPROFSYS_CI_THROW(_track_uuids.at(_uuid) != _name,
-                        "Error! Multiple invocations of UUID %zu produced different "
-                        "descriptions: \"%s\" and \"%s\"\n",
-                        _uuid, _track_uuids.at(_uuid).c_str(), _name.c_str());
+    if(get_is_continuous_integration() && _track_uuids.at(_uuid) != _name)
+    {
+        throw std::runtime_error(
+            fmt::format("Error! Multiple invocations of UUID {} produced different "
+                        "descriptions: \"{}\" and \"{}\"",
+                        _uuid, _track_uuids.at(_uuid), _name));
+    }
 #endif
 
     return TrackT(_uuid, ::perfetto::ProcessTrack::Current());
@@ -325,8 +316,7 @@ get_timemory(CategoryT, std::string_view name)
     auto& _data = tracing::get_instrumentation_bundles();
     if(ROCPROFSYS_UNLIKELY(_data == nullptr || _data->empty()))
     {
-        ROCPROFSYS_DEBUG("[%s] skipped %s :: empty bundle stack\n",
-                         "rocprofsys_pop_trace", name.data());
+        LOG_DEBUG("[rocprofsys_pop_trace] skipped {} :: empty bundle stack", name);
         return return_type{ nullptr, -1 };
     }
 

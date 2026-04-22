@@ -1,34 +1,91 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import os
 from pathlib import Path
 from typing import Optional
 
-from utils.utils import METRIC_ID_RE
+from utils.logger import console_warning
+from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
+
+
+class ExperimentalAction(argparse.Action):
+    """
+    Custom action that enforces experimental feature gating.
+    - Suppresses help text when experimental mode is disabled
+    - Errors if feature used without --experimental flag
+    - Warns when experimental feature is used
+    - Delegates to inner action for proper value storage
+    """
+
+    def __init__(
+        self,
+        option_strings: list[str],
+        help: str,
+        **kwargs,
+    ) -> None:
+        self.experimental_enabled = kwargs.pop("experimental_enabled", False)
+        self.feature_label = kwargs.pop("feature_label", None)
+
+        # Extract the base_action
+        base_action = kwargs.pop("base_action", None)
+        if base_action is None:
+            raise ValueError(
+                "base_action is required for ExperimentalAction. "
+                "Specify one of: store, store_const, store_true, store_false, "
+                "append, append_const, count, extend"
+            )
+
+        if self.experimental_enabled:
+            leading_whitespace = help[: len(help) - len(help.lstrip())]
+            help_content = help.lstrip()
+            help = f"{leading_whitespace}EXPERIMENTAL: {help_content}"
+        else:
+            help = argparse.SUPPRESS
+
+        super().__init__(
+            option_strings=option_strings,
+            help=help,
+            **kwargs,
+        )
+
+        # Map of action types to their __call__ methods
+        action_map = {
+            "store": argparse._StoreAction.__call__,
+            "store_const": argparse._StoreConstAction.__call__,
+            "store_true": argparse._StoreTrueAction.__call__,
+            "store_false": argparse._StoreFalseAction.__call__,
+            "append": argparse._AppendAction.__call__,
+            "append_const": argparse._AppendConstAction.__call__,
+            "count": argparse._CountAction.__call__,
+            "extend": argparse._ExtendAction.__call__,
+        }
+
+        if base_action not in action_map:
+            raise ValueError(f"Unsupported base_action: {base_action}")
+
+        self._base_action_call = action_map[base_action]
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values,  # noqa ANN001
+        option_string: Optional[str] = None,
+    ) -> None:
+        # Error if experimental feature used without --experimental flag
+        if not self.experimental_enabled:
+            parser.error(
+                f"{self.feature_label} is an experimental feature. "
+                f"Use --experimental to enable it."
+            )
+
+        console_warning(
+            f"{self.feature_label} is experimental and may change in future releases."
+        )
+
+        self._base_action_call(self, parser, namespace, values, option_string)
 
 
 def validate_block(value: str) -> str:
@@ -105,12 +162,24 @@ def add_general_group(
             "-s", "--specs", action="store_true", help="Print system specs and exit."
         )
 
+    general_group.add_argument(
+        "--experimental",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable experimental feature(s):\n"
+            "   Spatial multiplexing (--spatial-multiplexing)\n"
+            "   Torch trace (--torch-trace, --list-torch-operators, --torch-operator)\n"
+        ),
+    )
+
 
 def omniarg_parser(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
     supported_archs: dict[str, str],
     rocprof_compute_version: dict[str, Optional[str]],
+    experimental_enabled: bool = False,
 ) -> None:
     # -----------------------------------------
     # Parse arguments (dependent on mode)
@@ -119,7 +188,10 @@ def omniarg_parser(
     ## General Command Line Options
     ## ----------------------------
     add_general_group(
-        parser, rocprof_compute_home, supported_archs, rocprof_compute_version
+        parser,
+        rocprof_compute_home,
+        supported_archs,
+        rocprof_compute_version,
     )
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
@@ -155,7 +227,10 @@ Examples:
     profile_parser._optionals.title = "Help"
 
     add_general_group(
-        profile_parser, rocprof_compute_home, supported_archs, rocprof_compute_version
+        profile_parser,
+        rocprof_compute_home,
+        supported_archs,
+        rocprof_compute_version,
     )
     profile_group = profile_parser.add_argument_group("Profile Options")
     roofline_group = profile_parser.add_argument_group("Standalone Roofline Options")
@@ -166,7 +241,10 @@ Examples:
         type=str,
         metavar="",
         dest="name",
-        help="\t\t\tAssign a name to workload.",
+        help=(
+            "\t\t\tAssign a name to workload.\n"
+            "\t\t\t--name will be ignored if used together with --output-directory."
+        ),
     )
     profile_group.add_argument(
         "--target", type=str, default=None, help=argparse.SUPPRESS
@@ -205,7 +283,26 @@ Examples:
         default=str(Path.cwd() / "workloads"),
         required=False,
         help=(
-            f"\t\t\tSpecify path to save workload.\n\t\t\t(DEFAULT: {Path.cwd()}/workloads/<name>)"  # noqa: E501
+            f"\t\t\t(DEPRECATED) Specify path to save workload.\n\t\t\t(DEFAULT: {Path.cwd()}/workloads/<name>)\n"  # noqa: E501
+            "\t\t\t --path is deprecated. Use --output-directory instead."  # noqa: E501
+        ),
+    )
+    profile_group.add_argument(
+        "--output-directory",
+        metavar="",
+        type=str,
+        dest="output_directory",
+        default=str(Path.cwd() / "workloads"),
+        required=False,
+        help=(
+            "\t\t\tSpecify output directory to save workload.\n"
+            "\t\t\tOutput directory can also be parameterized with the following keywords:\n"  # noqa: E501
+            "\t\t\t   %%hostname%%: Host name\n"
+            "\t\t\t   %%gpumodel%%: GPU model\n"
+            "\t\t\t   %%rank%%: MPI process rank\n"
+            '\t\t\t   %%env{NAME}%%: Environment variable "NAME"\n'
+            "\t\t\t(DEFAULT: <current-working-directory>/workloads/<name>/%%gpumodel%%) without MPI,\n"  # noqa: E501
+            "\t\t\t <current-working-directory>/workloads/<name>/%%rank%% with MPI.)"
         ),
     )
     profile_group.add_argument(
@@ -216,18 +313,8 @@ Examples:
         default="gpu_model",
         required=False,
         help=(
-            "\t\t\tSpecify the type of subpath to save workload: node_name, gpu_model."
-        ),
-    )
-    profile_group.add_argument(
-        "--hip-trace",
-        dest="hip_trace",
-        required=False,
-        default=False,
-        action="store_true",
-        help=(
-            "\t\t\tHIP trace, execturion trace for the entire application at the HIP "
-            "level."
+            "\t\t\t(DEPRECATED) Specify the type of subpath to save workload: node_name, gpu_model."  # noqa: E501
+            "\n\t\t\t --subpath is deprecated. Use --output-directory with parameterization instead."  # noqa: E501
         ),
     )
     profile_group.add_argument(
@@ -238,6 +325,22 @@ Examples:
         action="store_true",
         help=argparse.SUPPRESS,
         # help="\t\t\tKokkos trace, traces Kokkos API calls.",
+    )
+    profile_group.add_argument(
+        "--torch-trace",
+        dest="torch_trace",
+        required=False,
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Torch trace",
+        help=(
+            "\t\t\tTorch Trace, maps PyTorch operators to performance counters.\n"
+            "\t\t\tShould be used only when profiling PyTorch applications."
+        ),
     )
     profile_group.add_argument(
         "-k",
@@ -354,16 +457,6 @@ Examples:
         help="\t\t\tProvide command for profiling after double dash.",
     )
     profile_group.add_argument(
-        "--spatial-multiplexing",
-        type=int,
-        metavar="",
-        nargs="+",
-        dest="spatial_multiplexing",
-        required=False,
-        default=None,
-        help="\t\t\tProvide Node ID and GPU number per node.",
-    )
-    profile_group.add_argument(
         "--format-rocprof-output",
         required=False,
         metavar="",
@@ -398,12 +491,14 @@ Examples:
     )
     profile_group.add_argument(
         "--rocprofiler-sdk-tool-path",
-        type=str,
+        type=resolve_rocm_library_path,
         dest="rocprofiler_sdk_tool_path",
         required=False,
-        default=str(
-            Path(os.getenv("ROCM_PATH", "/opt/rocm"))
-            / "lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+        default=resolve_rocm_library_path(
+            str(
+                Path(os.getenv("ROCM_PATH", "/opt/rocm"))
+                / "lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+            )
         ),
         help="\t\t\tSet the path to rocprofiler-sdk tool.",
     )
@@ -426,12 +521,13 @@ Examples:
         default=False,
         action="store_true",
         help=(
-            "\t\t\tRetain the large raw rocpd database in workload directory.\n"
-            "\t\t\tThis option requires --format-rocprof-output rocpd."
+            "\t\t\t(DEPRECATED) Retain the large raw rocpd database in workload directory.\n"
+            "\t\t\tThis option requires --format-rocprof-output rocpd.\n"
+            "\t\t\t --retain-rocpd-output is deprecated. .db files will be retained by default in a future release."  # noqa: E501
         ),
     )
 
-    ## Roofline Command Line Options
+    ## Roofline Command Line Options (profile: microbenchmark only)
     roofline_group.add_argument(
         "--roof-only",
         required=False,
@@ -443,36 +539,6 @@ Examples:
         ),
     )
     roofline_group.add_argument(
-        "--sort",
-        required=False,
-        metavar="",
-        type=str,
-        default="kernels",
-        choices=["kernels", "dispatches"],
-        help=(
-            "\t\t\tOverlay top kernels or top dispatches: (DEFAULT: kernels)\n"
-            "\t\t\t   kernels\n"
-            "\t\t\t   dispatches"
-        ),
-    )
-    roofline_group.add_argument(
-        "-m",
-        "--mem-level",
-        required=False,
-        choices=["HBM", "L2", "vL1D", "LDS"],
-        metavar="",
-        nargs="+",
-        type=str,
-        default="ALL",
-        help=(
-            "\t\t\tFilter by memory level: (DEFAULT: ALL)\n"
-            "\t\t\t   HBM\n"
-            "\t\t\t   L2\n"
-            "\t\t\t   vL1D\n"
-            "\t\t\t   LDS"
-        ),
-    )
-    roofline_group.add_argument(
         "--device",
         metavar="",
         required=False,
@@ -480,62 +546,39 @@ Examples:
         type=int,
         help="\t\t\tTarget GPU device ID. (DEFAULT: 0)",
     )
-    roofline_group.add_argument(
-        "-R",
-        "--roofline-data-type",
+
+    ## ----------------------------
+    # Experimental Features
+    ## ----------------------------
+
+    profile_group.add_argument(
+        "--spatial-multiplexing",
+        dest="spatial_multiplexing",
         required=False,
-        choices=[
-            "FP4",
-            "FP6",
-            "FP8",
-            "FP16",
-            "BF16",
-            "FP32",
-            "FP64",
-            "I8",
-            "I32",
-            "I64",
-        ],
+        default=None,
+        base_action="store",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Spatial multiplexing",
+        type=int,
+        nargs="*",
         metavar="",
-        nargs="+",
-        type=str,
-        default=["FP32"],
-        help=(
-            "\t\t\tChoose datatypes to view roofline HTMLs for: (DEFAULT: FP32)\n"
-            "\t\t\t   FP4\n"
-            "\t\t\t   FP6\n"
-            "\t\t\t   FP8\n"
-            "\t\t\t   FP16\n"
-            "\t\t\t   BF16\n"
-            "\t\t\t   FP32\n"
-            "\t\t\t   FP64\n"
-            "\t\t\t   I8\n"
-            "\t\t\t   I32\n"
-            "\t\t\t   I64\n"
-            "\t\t\t "
-        ),
+        help="\t\t\tProvide Node ID and GPU number per node.",
     )
 
-    # roofline_group.add_argument(
-    #     '-w', '--workgroups', required=False, default=-1, type=int,
-    #     help="\t\t\tNumber of kernel workgroups (DEFAULT: 1024)"
-    # )
-    # roofline_group.add_argument(
-    #     '--wsize', required=False, default=-1, type=int,
-    #     help="\t\t\tWorkgroup size (DEFAULT: 256)"
-    # )
-    # roofline_group.add_argument(
-    #     '--dataset', required=False, default=-1, type=int,
-    #     help="\t\t\tDataset size (DEFAULT: 536M)"
-    # )
-    # roofline_group.add_argument(
-    #     '-e', '--experiments', required=False, default=-1, type=int,
-    #     help="\t\t\tNumber of experiments (DEFAULT: 100)"
-    # )
-    # roofline_group.add_argument(
-    #     '--iter', required=False, default=-1, type=int,
-    #     help="\t\t\tNumber of iterations (DEFAULT: 10)"
-    # )
+    profile_group.add_argument(
+        "--membw-analysis",
+        dest="membw_analysis",
+        required=False,
+        default=False,
+        base_action="store_const",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Memory Bandwidth Analysis",
+        nargs=0,
+        const=True,
+        help="\t\t\tEnable block 30 (memory bandwidth specific) for profile mode.",
+    )
 
     ## Analyze Command Line Options
     ## ----------------------------
@@ -561,7 +604,10 @@ Examples:
     analyze_parser._optionals.title = "Help"
 
     add_general_group(
-        analyze_parser, rocprof_compute_home, supported_archs, rocprof_compute_version
+        analyze_parser,
+        rocprof_compute_home,
+        supported_archs,
+        rocprof_compute_version,
     )
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
     analyze_advanced_group = analyze_parser.add_argument_group("Advanced Options")
@@ -586,6 +632,49 @@ Examples:
         dest="list_available_metrics",
         help="\t\tList all available metrics for analysis on current arch",
         action="store_true",
+    )
+    analyze_group.add_argument(
+        "--list-torch-operators",
+        dest="list_torch_operators",
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="List torch operators",
+        help=(
+            "\t\tList PyTorch operators as a unified call tree grouped by "
+            "source location with kernel launch stats. "
+            "Recreates torch_trace output directory."
+        ),
+    )
+    analyze_group.add_argument(
+        "--torch-operator",
+        metavar="",
+        type=str,
+        dest="torch_operator",
+        nargs="*",
+        base_action="store",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Torch operator filter",
+        help=(
+            "\t\tFilter operators using PurePosixPath glob patterns,\n"
+            "\t\t\tselect their kernels, and display metrics.\n"
+            "\t\t\tWith no arguments, matches all operators (default: **).\n"
+            "\t\t\tExamples (operator hierarchy is /-separated):\n"
+            "\t\t\t  *relu               ends with relu\n"
+            "\t\t\t  *conv*              contains conv\n"
+            "\t\t\t  torch.nn.functional.relu   exact match\n"
+            "\t\t\t  */torch.nn.functional.relu two-level match\n"
+            "\t\t\t  */*functional*/*    intermediate component match\n"
+            "\t\t\t  all  or  '*'        match every operator\n"
+            "\t\t\tMultiple patterns (space or comma-separated):\n"
+            "\t\t\t  --torch-operator *relu,*conv*,*linear\n"
+            "\t\t\t  --torch-operator */*conv2d */*relu\n"
+            "\t\t\tCombine with -k to intersect with kernel IDs."
+        ),
     )
     analyze_group.add_argument(
         "-k",
@@ -623,14 +712,6 @@ Examples:
         help="\t\tSpecify GPU id(s) for filtering.",
     )
     analyze_group.add_argument(
-        "--spatial-multiplexing",
-        dest="spatial_multiplexing",
-        required=False,
-        default=False,
-        action="store_true",
-        help="\t\tMode of spatial multiplexing.",
-    )
-    analyze_group.add_argument(
         "--output-format",
         metavar="",
         dest="output_format",
@@ -650,7 +731,7 @@ Examples:
         metavar="",
         dest="output_name",
         help=(
-            "\t\tOverride the default output file name rocprof_compue_<uuid> "
+            "\t\tOverride the default output file name rocprof_compute_<uuid> "
             "with the specified name.\n"
             "\t\tThis is only applicable when --output-format txt/csv/db is used.\n"
         ),
@@ -672,6 +753,49 @@ Examples:
         "interact with rocprofiler-compute metrics.",
     )
     analyze_group.add_argument(
+        "--pc-sampling-sorting-type",
+        required=False,
+        metavar="",
+        dest="pc_sampling_sorting_type",
+        default="offset",
+        type=str,
+        help="\t\tSet the sorting type of pc sampling: "
+        "offset or count (DEFAULT: offset).",
+    )
+
+    ## Roofline Command Line Options (analyze: visualization)
+    roofline_group_analyze = analyze_parser.add_argument_group("Roofline Options")
+    roofline_group_analyze.add_argument(
+        "--sort",
+        required=False,
+        metavar="",
+        type=str,
+        default="kernels",
+        choices=["kernels", "dispatches"],
+        help=(
+            "\t\tOverlay top kernels or top dispatches: (DEFAULT: kernels)\n"
+            "\t\t   kernels\n"
+            "\t\t   dispatches"
+        ),
+    )
+    roofline_group_analyze.add_argument(
+        "-m",
+        "--mem-level",
+        required=False,
+        choices=["HBM", "L2", "vL1D", "LDS"],
+        metavar="",
+        nargs="+",
+        type=str,
+        default="ALL",
+        help=(
+            "\t\tFilter by memory level: (DEFAULT: ALL)\n"
+            "\t\t   HBM\n"
+            "\t\t   L2\n"
+            "\t\t   vL1D\n"
+            "\t\t   LDS"
+        ),
+    )
+    roofline_group_analyze.add_argument(
         "-R",
         "--roofline-data-type",
         required=False,
@@ -693,27 +817,17 @@ Examples:
         default=["FP32"],
         help=(
             "\t\tChoose datatypes to view roofline HTMLs for: (DEFAULT: FP32)\n"
-            "\t\t\t   FP4\n"
-            "\t\t\t   FP6\n"
-            "\t\t\t   FP8\n"
-            "\t\t\t   FP16\n"
-            "\t\t\t   BF16\n"
-            "\t\t\t   FP32\n"
-            "\t\t\t   FP64\n"
-            "\t\t\t   I8\n"
-            "\t\t\t   I32\n"
-            "\t\t\t   I64\n\t\t\t "
+            "\t\t   FP4\n"
+            "\t\t   FP6\n"
+            "\t\t   FP8\n"
+            "\t\t   FP16\n"
+            "\t\t   BF16\n"
+            "\t\t   FP32\n"
+            "\t\t   FP64\n"
+            "\t\t   I8\n"
+            "\t\t   I32\n"
+            "\t\t   I64\n"
         ),
-    )
-    analyze_group.add_argument(
-        "--pc-sampling-sorting-type",
-        required=False,
-        metavar="",
-        dest="pc_sampling_sorting_type",
-        default="offset",
-        type=str,
-        help="\t\tSet the sorting type of pc sampling: "
-        "offset or count (DEFAULT: offset).",
     )
 
     analyze_advanced_group.add_argument(
@@ -791,6 +905,19 @@ Examples:
         "-g", dest="debug", action="store_true", help="\t\tDebug single metric."
     )
     analyze_advanced_group.add_argument(
+        "--view",
+        dest="view",
+        metavar="NAME",
+        choices=["table"],  # future: e.g. "bar" for additional TTY views
+        default=None,
+        help=(
+            "\t\tTTY output view. "
+            "table: force plain tables and ignore cli_style from YAML "
+            "(e.g. mem_chart, Roofline charts as tables). "
+            "Additional views may be added in future releases."
+        ),
+    )
+    analyze_advanced_group.add_argument(
         "--dependency",
         action="store_true",
         help="\t\tList the installation dependency.",
@@ -830,4 +957,35 @@ Examples:
             "\t\tMulti-node option: filter with node names. "
             "Enable it without node names means ALL."
         ),
+    )
+
+    ## ----------------------------
+    # Experimental Features
+    ## ----------------------------
+    analyze_group.add_argument(
+        "--spatial-multiplexing",
+        dest="spatial_multiplexing",
+        required=False,
+        default=False,
+        base_action="store_const",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Spatial multiplexing",
+        nargs=0,
+        const=True,
+        help="\t\tMode of spatial multiplexing.",
+    )
+
+    analyze_group.add_argument(
+        "--membw-analysis",
+        dest="membw_analysis",
+        required=False,
+        default=False,
+        base_action="store_const",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Memory Bandwidth Analysis",
+        nargs=0,
+        const=True,
+        help="\t\tEnable block 30 (memory bandwidth specific) for analysis mode.",
     )

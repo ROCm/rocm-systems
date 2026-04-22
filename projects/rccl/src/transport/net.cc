@@ -12,6 +12,7 @@
 #include "proxy.h"
 #include "collectives.h"
 #include "gdrwrap.h"
+#include "rocmwrap.h"
 #include "shmutils.h"
 #include "p2p.h"
 #include "profiler.h"
@@ -25,11 +26,13 @@
 #if defined(ENABLE_NPKIT)
 #include "npkit/npkit.h"
 #endif
-#include "msccl/msccl_lifecycle.h"
+#include <stdio.h>
+#include <glob.h>
+#include <dirent.h>
+#include <linux/limits.h>
+#include <mutex>
 
 static_assert(sizeof(ncclNetHandle_t) <= CONNECT_SIZE, "NET Connect info is too large");
-
-#define RCCL_ANP_PLUGIN_STR  "RCCL-ANP"
 
 #define NCCL_NET_MAP_HOSTMEM 0
 #define NCCL_NET_MAP_DEVMEM 1
@@ -78,6 +81,7 @@ struct connectMapMem{
   ncclIpcDesc ipcDesc;
   ncclShmIpcDesc_t attachDesc;
   ncclShmIpcDesc_t createDesc;
+  int dmaBufFd;  // DMA-BUF fd for entire allocation (for cuMem VMM)
 };
 
 struct connectMap {
@@ -200,14 +204,242 @@ struct setupReq {
 
 NCCL_PARAM(NetOptionalRecvCompletion, "NET_OPTIONAL_RECV_COMPLETION", 1);
 
+static rcclIBNicInfo rcclPrimaryNicInfo = {rcclIBNicTypeUnknown, 0, 0};
+
+RCCL_PARAM(AinicRoce, "AINIC_ROCE", -1);
+static const char* sysfsIBPath = "/sys/class/infiniband";
+
+static int readIBNicRate(const char* devName) {
+  std::string basePath = std::string(sysfsIBPath) + "/" + devName + "/ports/";
+  DIR* dir = opendir(basePath.c_str());
+  if (dir == NULL) return 0;
+  struct dirent* entry;
+  int maxRate = 0;
+  while ((entry = readdir(dir)) != NULL) {
+    if (entry->d_name[0] == '.') continue;
+    std::string portPath = basePath + entry->d_name + "/rate";
+    std::ifstream portFile(portPath);
+    std::string rate;
+    if (!std::getline(portFile, rate)) continue;
+    char* end = nullptr;
+    long val = strtol(rate.c_str(), &end, 10);
+    if (end != rate.c_str() && val > 0) {
+      maxRate = std::max(maxRate, (int)val);
+    }
+  }
+  closedir(dir);
+  return maxRate;
+}
+
+static void rcclDetectIBNics() {
+  #define MAX_VENDOR_LEN 16
+  #define MAX_IB_DEVS 32
+  /* Map of vendor/device pairs to rcclIBNicType:
+   Note: Vendor ID should be exact value, device id can be a prefix or a wildcard*/
+  std::map<std::pair<std::string, std::string>, rcclIBNicType> vendorNames = {
+    {{"0x15b3", "*"}, rcclIBNicTypeMLX},
+    {{"0x1dd8", "0x10"}, rcclIBNicTypeAINIC},
+    {{"0x14e4", "0x1760"}, rcclIBNicTypeBNXT2}
+  };
+
+  int _Nnics[rcclIBNicTypeMax]{};
+  int _NicsRate[rcclIBNicTypeMax]{};
+  int totalNnics = 0;
+
+  /* respect user preference for AINIC */
+  if (rcclParamAinicRoce() == 1) {
+    INFO(NCCL_NET|NCCL_INIT, "RCCL: AINIC detection: enforced by user settings");
+  }
+
+  struct netIf userIfs[MAX_IB_DEVS];
+  const char* userIbEnv = ncclGetEnv("NCCL_IB_HCA");
+  bool searchNot = userIbEnv && userIbEnv[0] == '^';
+  if (searchNot) userIbEnv++;
+  if (userIbEnv && (userIbEnv[0] == '=')) userIbEnv++;
+  int nUserIfs = parseStringList(userIbEnv, userIfs, MAX_IB_DEVS);
+
+  
+  DIR* dir = opendir(sysfsIBPath);
+  if (dir == NULL) {
+    INFO(NCCL_NET|NCCL_INIT, "RCCL: No InfiniBand devices found (cannot open %s)", sysfsIBPath);
+    rcclPrimaryNicInfo.type = rcclIBNicTypeDefault;
+    return;
+  }
+
+  struct dirent* entry;
+  while ((entry = readdir(dir)) != NULL) {
+    bool detected = false;
+    if (entry->d_name[0] == '.') continue;
+    if (!matchIfList(entry->d_name, -1, userIfs, nUserIfs, false) ^ searchNot) {
+      continue;
+    }
+
+    std::string basePath = std::string(sysfsIBPath) + "/" + entry->d_name + "/device/";
+    std::ifstream vendorFile(basePath + "vendor");
+    std::ifstream deviceFile(basePath + "device");
+    std::string vendor, device;
+    if (!std::getline(vendorFile, vendor) || !std::getline(deviceFile, device)) {
+      continue;
+    }
+
+    for (const auto& [key, nicType] : vendorNames) {
+      const auto& [vendorId, deviceId] = key;
+      if (vendorId == vendor && (deviceId == "*" || device.rfind(deviceId, 0) == 0)) {
+        /* respect user preference for AINIC */
+        if ((nicType == rcclIBNicTypeAINIC) && (rcclParamAinicRoce() == 0)) {
+          continue;
+        } else if (rcclParamAinicRoce() == 1 && nicType != rcclIBNicTypeAINIC) {
+          continue;
+        }
+
+        _Nnics[nicType]++;
+        totalNnics++;
+        detected = true;
+        if (_NicsRate[nicType] == 0) {
+          _NicsRate[nicType] = readIBNicRate(entry->d_name);
+        }
+        break;
+      }
+    }
+    if (!detected) {
+    /* Unknown vendor/device pair or generic device */
+      _Nnics[rcclIBNicTypeDefault]++;
+      totalNnics++;
+    }
+  }
+  closedir(dir);
+
+  int maxCount = 0;
+  rcclIBNicType primaryNicsType = rcclIBNicTypeDefault;
+  for (int i = 0; i < rcclIBNicTypeMax; i++) {
+    if (_Nnics[i] > maxCount) {
+      maxCount = _Nnics[i];
+      primaryNicsType = static_cast<rcclIBNicType>(i);
+    }
+  }
+
+  INFO(NCCL_NET|NCCL_INIT, "RCCL: Detected %d IB devices, primary type: %d (count: %d)", 
+       totalNnics, primaryNicsType, maxCount);
+  rcclPrimaryNicInfo.type = primaryNicsType;
+  rcclPrimaryNicInfo.rate = _NicsRate[primaryNicsType];
+  rcclPrimaryNicInfo.count = maxCount;
+}
+
+static std::once_flag rcclDetectIBNicsOnce;
+
+bool rcclUseAinic() {
+  std::call_once(rcclDetectIBNicsOnce, rcclDetectIBNics);
+  return (rcclPrimaryNicInfo.type == rcclIBNicTypeAINIC);
+}
+
+rcclIBNicInfo rcclPrimaryNic() {
+  std::call_once(rcclDetectIBNicsOnce, rcclDetectIBNics);
+  return rcclPrimaryNicInfo;
+}
+
 static_assert(sizeof(ncclNetHandle_t) + sizeof(int) <= CONNECT_SIZE, "Not large enough ncclConnect to hold ncclNetHandle_t and useGdr flag");
+
+// Common function to initialize network attributes from a ncclComm
+static void populateCommNetAttrs(struct ncclComm* comm, struct ncclConnector* conn, ncclNetAttr_t* netAttr) {
+  *netAttr = NCCL_NET_ATTR_INIT;
+  netAttr->sendCommAttr.minConcurrentPeers = 1;
+  netAttr->sendCommAttr.minFlowsPerPeer = 1;
+
+  netAttr->recvCommAttr.minConcurrentPeers = 1;
+  netAttr->recvCommAttr.minFlowsPerPeer = 1;
+
+  if (conn->p2pOnly) {
+    size_t maxConcPeers = comm->p2pnChannels * NCCL_MAX_DEV_WORK_P2P_PER_BATCH;
+    if (comm->nRanks < maxConcPeers) maxConcPeers = comm->nRanks;
+
+    netAttr->sendCommAttr.maxConcurrentPeers = maxConcPeers;
+    netAttr->sendCommAttr.maxFlowsPerPeer = comm->p2pnChannelsPerPeer;
+    netAttr->recvCommAttr.maxConcurrentPeers = maxConcPeers;
+    netAttr->recvCommAttr.maxFlowsPerPeer = comm->p2pnChannelsPerPeer;
+    netAttr->op = BIT(ncclFuncSend) | BIT(ncclFuncRecv) |
+                  BIT(ncclFuncAlltoAll) | BIT(ncclFuncScatter) | BIT(ncclFuncGather);
+  } else {
+    size_t maxConcPeers = (NCCL_MAX_TREE_ARITY - 1) * 2;
+    if (comm->nRanks < maxConcPeers) maxConcPeers = comm->nRanks;
+    netAttr->sendCommAttr.maxConcurrentPeers = maxConcPeers;
+    netAttr->sendCommAttr.maxFlowsPerPeer = comm->nChannels;
+    netAttr->recvCommAttr.maxConcurrentPeers = maxConcPeers;
+    netAttr->recvCommAttr.maxFlowsPerPeer = comm->nChannels;
+  }
+}
+
+// Apply the netAttr to the netComm
+void setNetAttrs(struct ncclProxyState* proxyState, ncclNetAttr_t* netAttr)
+{
+  if (proxyState->ncclNet->setNetAttr) {
+    proxyState->ncclNet->setNetAttr(proxyState->netContext, netAttr);
+    proxyState->netAttr = *netAttr;
+  }
+}
+
+void printNetAttrs(ncclNetAttr_t* netAttr, const char *task)
+{
+  const int opBufLen = ncclNumFuncs*32;
+  char opBuf[opBufLen] = "";
+  const int algoBufLen = NCCL_NUM_ALGORITHMS*32;
+  char algoBuf[algoBufLen] = "";
+  const int protoBufLen = NCCL_NUM_PROTOCOLS*32;
+  char protoBuf[protoBufLen] = "";
+
+  ncclBitsToString(netAttr->op, MASK(ncclNumFuncs), (const char* (*)(int))ncclFuncToString, opBuf, opBufLen, "*");
+  ncclBitsToString(netAttr->algo, MASK(NCCL_NUM_ALGORITHMS), ncclAlgoToString, algoBuf, algoBufLen, "*");
+  ncclBitsToString(netAttr->proto, MASK(NCCL_NUM_PROTOCOLS), ncclProtoToString, protoBuf, protoBufLen, "*");
+
+  TRACE(NCCL_NET, "%s hints, send peers/flows: [%d-%d][%d-%d] recv peers/flows: [%d-%d][%d-%d] op: %s algo: %s proto: %s",
+        task, netAttr->sendCommAttr.minConcurrentPeers, netAttr->sendCommAttr.maxConcurrentPeers,
+        netAttr->sendCommAttr.minFlowsPerPeer, netAttr->sendCommAttr.maxFlowsPerPeer,
+        netAttr->recvCommAttr.minConcurrentPeers, netAttr->recvCommAttr.maxConcurrentPeers,
+        netAttr->recvCommAttr.minFlowsPerPeer, netAttr->recvCommAttr.maxFlowsPerPeer,
+        opBuf, algoBuf, protoBuf);
+}
+
+// Set the netAttr for a transfer operation
+void setXferNetAttrs(struct ncclProxyState* proxyState, struct ncclProxyArgs* args, int send)
+{
+  ncclNetAttr_t netAttr;
+
+  if (!proxyState->ncclNet->setNetAttr)
+    return;
+
+  netAttr = proxyState->netAttr;
+
+  if (send) {
+    netAttr.sendCommAttr.maxConcurrentPeers = args->nPeers;
+    netAttr.sendCommAttr.minConcurrentPeers = args->nPeers;
+    netAttr.sendCommAttr.maxFlowsPerPeer = args->nChannels;
+    netAttr.sendCommAttr.minFlowsPerPeer = args->nChannels;
+  } else {
+    netAttr.recvCommAttr.maxConcurrentPeers = args->nPeers;
+    netAttr.recvCommAttr.minConcurrentPeers = args->nPeers;
+    netAttr.recvCommAttr.maxFlowsPerPeer = args->nChannels;
+    netAttr.recvCommAttr.minFlowsPerPeer = args->nChannels;
+  }
+
+  netAttr.op = BIT(args->collAPI);
+  // algo/proto are undefined for p2p
+  if (args->collAPI < NCCL_NUM_FUNCTIONS) {
+    netAttr.algo = BIT(args->algorithm);
+    netAttr.proto = BIT(args->protocol);
+  }
+
+  if (memcmp(&proxyState->netAttr, &netAttr, sizeof(netAttr))) {
+    setNetAttrs(proxyState, &netAttr);
+    printNetAttrs(&netAttr, send ? "send" : "recv");
+  }
+}
+
 // Forward declaration
 static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct ncclProxyArgs* args);
 
 // Returns the flags to be used by a call to cuMemGetHandleForAddressRange.
 static inline int getHandleForAddressRangeFlags(ncclTopoGdrMode useGdr) {
   int flags = 0;
-#if CUDA_VERSION >= 12080
+#if CUDA_VERSION >= 12080 || HIP_VERSION >= 71260540
   // Force mapping on PCIe on systems with both PCI and C2C attachments.
   if (useGdr == ncclTopoGdrModePci) flags = CU_MEM_RANGE_FLAG_DMA_BUF_MAPPING_TYPE_PCIE;
 #endif
@@ -219,7 +451,7 @@ static inline int getHandleForAddressRangeFlags(ncclTopoGdrMode useGdr) {
 static ncclResult_t sendSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, struct ncclPeerInfo* myInfo, struct ncclPeerInfo* peerInfo, struct ncclConnect* connectInfo, struct ncclConnector* send, int channelId, int connIndex) {
   struct setupReq req = { 0 };
 
-  send->conn.shared = req.shared = (graph || connIndex == 0  || mscclIsCaller()) ? 0 : ncclParamNetSharedBuffers() != -2 ? ncclParamNetSharedBuffers() : 1;
+  send->conn.shared = req.shared = (graph || connIndex == 0) ? 0 : ncclParamNetSharedBuffers() != -2 ? ncclParamNetSharedBuffers() : 1;
   req.channelId = channelId;
   req.connIndex = connIndex;
   req.curr_hdp_reg = 0;
@@ -274,7 +506,7 @@ NCCL_PARAM(GdrCopyFlushEnable, "GDRCOPY_FLUSH_ENABLE", 0);
 static ncclResult_t recvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, struct ncclPeerInfo* myInfo, struct ncclPeerInfo* peerInfo, struct ncclConnect* connectInfo, struct ncclConnector* recv, int channelId, int connIndex) {
   struct setupReq req = { 0 };
 
-  recv->conn.shared = req.shared = (graph || connIndex == 0 || mscclIsCaller()) ? 0 : ncclParamNetSharedBuffers() != -2 ? ncclParamNetSharedBuffers() : 1;
+  recv->conn.shared = req.shared = (graph || connIndex == 0) ? 0 : ncclParamNetSharedBuffers() != -2 ? ncclParamNetSharedBuffers() : 1;
   req.channelId = channelId;
   req.connIndex = connIndex;
   req.netDev = -1;
@@ -290,7 +522,10 @@ static ncclResult_t recvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph
 
   // Determine whether we need to flush the GDR buffer on recv or not
   if (req.useGdr) {
-    NCCLCHECK(ncclTopoNeedFlush(comm, netId, req.netDev, myInfo->rank, &req.needFlush));
+    int managed;
+    // Flush is not needed when the hardware supports direct managed memory access from host
+    CUDACHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
+    NCCLCHECK(ncclTopoNeedFlush(comm, netId, req.netDev, myInfo->rank, (bool)managed, &req.needFlush));
     CUDACHECK(hipDeviceGetAttribute((int*)&req.curr_hdp_reg, hipDeviceAttributeHdpMemFlushCntl, myInfo->cudaDev));
     recv->conn.curr_hdp_reg = req.curr_hdp_reg;
   }
@@ -349,11 +584,12 @@ static ncclResult_t netDumpMap(struct connectMap* map) {
 
 struct netSendConnectArgs {
   ncclNetHandle_t handle;
-  int trafficClass;
+  ncclNetAttr_t netAttr;
 };
 
 struct netRecvConnectArgs {
   int proxyRank;
+  ncclNetAttr_t netAttr;
 };
 
 static ncclResult_t sendConnect(struct ncclComm* comm, struct ncclConnect* connectInfo, int nranks, int rank, struct ncclConnector* send) {
@@ -371,9 +607,11 @@ static ncclResult_t sendConnect(struct ncclComm* comm, struct ncclConnect* conne
     send->transportResources = map;
     opId = send;
     INFO(NCCL_PROXY, "sendConnect ncclProxyCallAsync opId=%p", opId);
-    netSendConnectArgs args = {{},0};
+    netSendConnectArgs args = {{},{}};
     memcpy(&args.handle, connectInfo, sizeof(ncclNetHandle_t));
-    args.trafficClass = comm->config.trafficClass;
+
+    populateCommNetAttrs(comm, send, &args.netAttr);
+
     NCCLCHECK(ncclProxyCallAsync(comm, &send->proxyConn, ncclProxyMsgConnect, &args, sizeof(netSendConnectArgs), sizeof(struct connectMap), opId));
   } else {
     opId =  send;
@@ -395,7 +633,7 @@ static ncclResult_t sendConnect(struct ncclComm* comm, struct ncclConnect* conne
       // Enable P2P access for Legacy IPC
       cudaError_t err = cudaDeviceEnablePeerAccess(map->cudaDev, 0);
       if (err == cudaErrorPeerAccessAlreadyEnabled) {
-        cudaGetLastError();
+        (void)cudaGetLastError();
       } else if (err != cudaSuccess) {
         WARN("failed to peer with device %d: %d %s", map->cudaDev, err, cudaGetErrorString(err));
         return ncclInternalError;
@@ -484,6 +722,9 @@ static ncclResult_t recvConnect(struct ncclComm* comm, struct ncclConnect* conne
       opId, &recv->proxyConn, connectInfo);
     netRecvConnectArgs args = {0};
     args.proxyRank = *((int*)connectInfo);
+
+    populateCommNetAttrs(comm, recv, &args.netAttr);
+
     NCCLCHECK(ncclProxyCallAsync(comm, &recv->proxyConn, ncclProxyMsgConnect, &args, sizeof(netRecvConnectArgs), sizeof(struct connectMap), opId));
   } else {
     opId = recv;
@@ -683,8 +924,17 @@ static ncclResult_t sendProxySetup(struct ncclProxyConnection* connection, struc
   resources->isP2p = req->isP2p;
   ncclNetProperties_t props;
   NCCLCHECK(proxyState->ncclNet->getProperties(req->netDev, &props));
-  /* DMA-BUF support */
-  resources->useDmaBuf = resources->useGdr && proxyState->dmaBufSupport && (props.ptrSupport & NCCL_PTR_DMABUF);
+  /* GDR mode selection: RCCL_FORCE_ENABLE_DMABUF=1 forces DMAbuf, otherwise prefer peermem.
+   * cuMem/VMM buffers cannot be registered with ibv_reg_mr (causes "Bad address"
+   * and corrupts VMM state), so dmabuf must always be used when cuMem is enabled. */
+  bool peermemAvailable = (props.ptrSupport & NCCL_PTR_CUDA);
+  bool dmabufAvailable = (props.ptrSupport & NCCL_PTR_DMABUF) && proxyState->dmaBufSupport;
+  bool forceDmaBuf = rcclParamForceEnableDMABUF();
+  if (forceDmaBuf || ncclCuMemEnable()) {
+    resources->useDmaBuf = resources->useGdr && dmabufAvailable;
+  } else {
+    resources->useDmaBuf = resources->useGdr && !peermemAvailable && dmabufAvailable;
+  }
   resources->maxRecvs = props.maxRecvs;
   resources->netDeviceVersion = props.netDeviceVersion;
   resources->netDeviceType = props.netDeviceType;
@@ -723,8 +973,17 @@ static ncclResult_t recvProxySetup(struct ncclProxyConnection* connection, struc
   resources->curr_hdp_reg = req->curr_hdp_reg;
   ncclNetProperties_t props;
   NCCLCHECK(proxyState->ncclNet->getProperties(req->netDev, &props));
-  /* DMA-BUF support */
-  resources->useDmaBuf = resources->useGdr && proxyState->dmaBufSupport && (props.ptrSupport & NCCL_PTR_DMABUF);
+  /* GDR mode selection: RCCL_FORCE_ENABLE_DMABUF=1 forces DMAbuf, otherwise prefer peermem.
+   * cuMem/VMM buffers cannot be registered with ibv_reg_mr (causes "Bad address"
+   * and corrupts VMM state), so dmabuf must always be used when cuMem is enabled. */
+  bool peermemAvailable = (props.ptrSupport & NCCL_PTR_CUDA);
+  bool dmabufAvailable = (props.ptrSupport & NCCL_PTR_DMABUF) && proxyState->dmaBufSupport;
+  bool forceDmaBuf = rcclParamForceEnableDMABUF();
+  if (forceDmaBuf || ncclCuMemEnable()) {
+    resources->useDmaBuf = resources->useGdr && dmabufAvailable;
+  } else {
+    resources->useDmaBuf = resources->useGdr && !peermemAvailable && dmabufAvailable;
+  }
   resources->maxRecvs = props.maxRecvs;
   resources->netDeviceVersion = props.netDeviceVersion;
   resources->netDeviceType = props.netDeviceType;
@@ -737,7 +996,7 @@ static ncclResult_t recvProxySetup(struct ncclProxyConnection* connection, struc
   }
 
   if (respSize != sizeof(ncclNetHandle_t)) return ncclInternalError;
-  NCCLCHECK(proxyState->ncclNet->listen(req->netDev, respBuff, &resources->netListenComm));
+  NCCLCHECK(proxyState->ncclNet->listen(proxyState->netContext, req->netDev, respBuff, &resources->netListenComm));
   *done = 1;
 
   return ncclSuccess;
@@ -768,18 +1027,27 @@ static ncclResult_t ncclNetGetDeviceHandle(ncclNetDeviceType type, int version, 
 static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
   ncclNet_ctxt_t ncclNetCtxt = {};
   struct sendNetResources* resources = (struct sendNetResources*)(connection->transportResources);
-  ncclNetCommConfig_t commConfig = {0};
+  bool rcclAinicRoce = rcclUseAinic();
   if (reqSize != sizeof(netSendConnectArgs)) return ncclInternalError;
   ncclResult_t ret = ncclSuccess;
   netSendConnectArgs* req = (netSendConnectArgs*) reqBuff;
-  commConfig.trafficClass = req->trafficClass == NCCL_CONFIG_UNDEF_INT ? NCCL_NET_TRAFFIC_CLASS_UNDEF : req->trafficClass;
+
+  setNetAttrs(proxyState, &req->netAttr);
+
   NCCLCHECK(ncclNetGetDeviceHandle(resources->netDeviceType, resources->netDeviceVersion, false /*isRecv*/, &resources->netDeviceHandle));
-  bool rccl_anp = !(strcmp(proxyState->ncclNet->name, RCCL_ANP_PLUGIN_STR));
   
   // Only call rcclNetP2pPolicy for ncclNetIb
   if (proxyState->ncclNet == &ncclNetIb) {
     NCCLCHECK(rcclNetP2pPolicy(req->handle, resources->isP2p));
   }
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  if (proxyState->ncclNet == &rocmNetIb) {
+    NCCLCHECK(rcclRocmNetP2pPolicy(req->handle, resources->isP2p));
+  } else if (proxyState->ncclNet == &netIbCast) {
+    NCCLCHECK(rcclCastNetP2pPolicy(req->handle, resources->isP2p));
+  }
+#endif
   
   if (resources->shared) {
     // Shared buffers
@@ -804,41 +1072,45 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
         comms->activeConnect[resources->channelId] = (resources->tpLocalRank + 1);
       if (comms->sendComm[resources->channelId] == NULL
           && comms->activeConnect[resources->channelId] == (resources->tpLocalRank + 1)) {
-        if (rccl_anp) {
+        if (rcclAinicRoce) {
           ncclNetCtxt.chId = resources->channelId;
-          ret = proxyState->ncclNet->connect(resources->netDev, &commConfig, req->handle,
+          ret = proxyState->ncclNet->connect(proxyState->netContext, resources->netDev, req->handle,
             comms->sendComm + resources->channelId, (ncclNetDeviceHandle_t **)&ncclNetCtxt);
         } else {
-          ret = proxyState->ncclNet->connect(resources->netDev, &commConfig, req->handle,
-              comms->sendComm + resources->channelId, &resources->netDeviceHandle);
+          ret = proxyState->ncclNet->connect(proxyState->netContext, resources->netDev, req->handle,
+            comms->sendComm + resources->channelId, &resources->netDeviceHandle);
         }
       }
       resources->netSendComm = comms->sendComm[resources->channelId];
       if (comms->sendComm[resources->channelId]) comms->sendRefCount[resources->channelId]++;
     } else {
-      if (rccl_anp) {
+      if (rcclAinicRoce) {
         ncclNetCtxt.chId = resources->channelId;
-        ret = proxyState->ncclNet->connect(resources->netDev, &commConfig, req->handle, &resources->netSendComm, (ncclNetDeviceHandle_t **)&ncclNetCtxt);
+        ret = proxyState->ncclNet->connect(proxyState->netContext, resources->netDev, req->handle, &resources->netSendComm, (ncclNetDeviceHandle_t **)&ncclNetCtxt);
       } else {
-        ret = proxyState->ncclNet->connect(resources->netDev, &commConfig, req->handle, &resources->netSendComm, &resources->netDeviceHandle);
+        ret = proxyState->ncclNet->connect(proxyState->netContext, resources->netDev, req->handle, &resources->netSendComm, &resources->netDeviceHandle);
       }
     }
   } else {
     // Connect to remote peer
-    if (rccl_anp) {
+    if (rcclAinicRoce) {
       ncclNetCtxt.chId = resources->channelId;
-      ret = proxyState->ncclNet->connect(resources->netDev, &commConfig, req->handle, &resources->netSendComm, (ncclNetDeviceHandle_t **)&ncclNetCtxt);
+      ret = proxyState->ncclNet->connect(proxyState->netContext, resources->netDev, req->handle, &resources->netSendComm, (ncclNetDeviceHandle_t **)&ncclNetCtxt);
     } else {
-      ret = proxyState->ncclNet->connect(resources->netDev, &commConfig, req->handle, &resources->netSendComm, &resources->netDeviceHandle);
+      ret = proxyState->ncclNet->connect(proxyState->netContext, resources->netDev, req->handle, &resources->netSendComm, &resources->netDeviceHandle);
     }
     connection->proxyAppendPtr = &connection->proxyAppend;
   }
 
-  NCCLCHECK(ret);
+  if (ret != ncclSuccess) {
+    if (resources->netSendComm) proxyState->ncclNet->closeSend(resources->netSendComm);
+    NCCLCHECK(ret);
+  }
   if (resources->netSendComm == NULL) {
     *done = 0;
     return ncclInProgress;
   }
+  printNetAttrs(&req->netAttr, "send connect");
   *done = 1;
 
   if (resources->netDeviceHandle) {
@@ -879,12 +1151,26 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
   NCCL_NET_MAP_ADD_POINTER(map, 0, 0, sizeof(struct ncclSendMem), sendMem);
   NCCL_NET_MAP_ADD_POINTER(map, 0, 0, sizeof(struct ncclRecvMem), recvMem);
 
+  map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1;  // Initialize to invalid fd
   if (map->mems[NCCL_NET_MAP_DEVMEM].size) {
     if (resources->shared == 0) {
       if (!map->sameProcess || ncclCuMemEnable()) {
         ALIGN_SIZE(map->mems[NCCL_NET_MAP_DEVMEM].size, CUDA_IPC_MIN);
         NCCLCHECK(ncclP2pAllocateShareableBuffer(map->mems[NCCL_NET_MAP_DEVMEM].size, 0, &map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc,
                                                 (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr));
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+        // Get DMA-BUF fd for cuMem VMM allocations via cuMemGetHandleForAddressRange.
+        // Required even when DMA-BUF is globally disabled: ibv_reg_mr on cuMem RDMA
+        // memory fails ("Bad address") and corrupts VMM state, so ibv_reg_dmabuf_mr
+        // must be used instead.
+        if (ncclCuMemEnable()) {
+          CUCHECK(cuMemGetHandleForAddressRange((void *)&map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd,
+                                                (CUdeviceptr)map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr,
+                                                map->mems[NCCL_NET_MAP_DEVMEM].size,
+                                                CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
+                                                getHandleForAddressRangeFlags(resources->useGdr)));
+        }
+#endif
       } else {
 #if defined(HIP_UNCACHED_MEMORY)
 #if defined(HIP_CONTIGUOUS_MEMORY)
@@ -934,14 +1220,20 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
   for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
     resources->buffers[p] = NCCL_NET_MAP_GET_POINTER(map, cpu, buffs[p]);
     if (resources->buffers[p]) {
-#if CUDA_VERSION >= 11070
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
       /* DMA-BUF support */
       int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
-      if (type == NCCL_PTR_CUDA && resources->useDmaBuf) {
-        int dmabuf_fd;
-        CUCHECK(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)resources->buffers[p], resources->buffSizes[p], CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)));
-        NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, resources->buffers[p], resources->buffSizes[p], type, 0ULL, dmabuf_fd, &resources->mhandles[p]));
-        (void)close(dmabuf_fd);
+      if (type == NCCL_PTR_CUDA && resources->useDmaBuf && ncclCuMemEnable()) {
+        int bank = NCCL_NET_MAP_OFFSET_BANK(map, buffs[p]);
+        if (bank == NCCL_NET_MAP_DEVMEM && map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd >= 0) {
+          uint64_t offset = (char*)resources->buffers[p] - map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr;
+          NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, resources->buffers[p], resources->buffSizes[p], type, offset, map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd, &resources->mhandles[p]));
+        } else {
+          int dmabuf_fd;
+          CUCHECK(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)resources->buffers[p], resources->buffSizes[p], CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)));
+          NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, resources->buffers[p], resources->buffSizes[p], type, 0ULL, dmabuf_fd, &resources->mhandles[p]));
+          (void)close(dmabuf_fd);
+        }
       } else // FALL-THROUGH to nv_peermem GDR path
 #else
       /* DMA-BUF support */
@@ -979,8 +1271,10 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   resources->tpRemoteProxyRank = req->proxyRank;
   ncclResult_t ret = ncclSuccess;
   ncclNet_ctxt_t ncclNetCtxt = {};
+  bool rcclAinicRoce = rcclUseAinic();
 
-  bool rccl_anp = !(strcmp(proxyState->ncclNet->name, RCCL_ANP_PLUGIN_STR));
+  setNetAttrs(proxyState, &req->netAttr);
+
   NCCLCHECK(ncclNetGetDeviceHandle(resources->netDeviceType, resources->netDeviceVersion, true /*isRecv*/, &resources->netDeviceHandle));
   // Finish connection establishment from remote peer
   if (resources->shared) {
@@ -1007,7 +1301,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
       //try connecting while comm is null
       if (comms->recvComm[resources->channelId] == NULL
          && comms->activeAccept[resources->channelId] == (resources->tpLocalRank + 1)) {
-        if (rccl_anp) {
+        if (rcclAinicRoce) {
           ncclNetCtxt.chId = resources->channelId;
           ret = proxyState->ncclNet->accept(resources->netListenComm,
             comms->recvComm+resources->channelId, (ncclNetDeviceHandle_t **)&ncclNetCtxt);
@@ -1019,7 +1313,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
       resources->netRecvComm = comms->recvComm[resources->channelId];
       if (comms->recvComm[resources->channelId]) comms->recvRefCount[resources->channelId]++;
     } else {
-      if (rccl_anp) {
+      if (rcclAinicRoce) {
         ncclNetCtxt.chId = resources->channelId;
         ret = proxyState->ncclNet->accept(resources->netListenComm, &resources->netRecvComm, (ncclNetDeviceHandle_t **)&ncclNetCtxt);
       } else {
@@ -1028,7 +1322,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
     }
   } else {
     // Connect to remote peer
-    if (rccl_anp) {
+    if (rcclAinicRoce) {
       ncclNetCtxt.chId = resources->channelId;
       ret = proxyState->ncclNet->accept(resources->netListenComm, &resources->netRecvComm, (ncclNetDeviceHandle_t **)&ncclNetCtxt);
     } else {
@@ -1042,6 +1336,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
     *done = 0;
     return ncclInProgress;
   }
+  printNetAttrs(&req->netAttr, "recv connect");
   *done = 1;
 
   if (resources->netDeviceHandle) {
@@ -1083,11 +1378,23 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
     resources->buffSizes[NCCL_PROTO_LL] = proxyState->buffSizes[NCCL_PROTO_LL];
   }
 
+  map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1;  // Initialize to invalid fd
   if (map->mems[NCCL_NET_MAP_DEVMEM].size) {
     if (resources->shared == 0) {
       if (ncclCuMemEnable()) {
         NCCLCHECK(ncclP2pAllocateShareableBuffer(map->mems[NCCL_NET_MAP_DEVMEM].size, 0, &map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc,
                                                 (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr));
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+        // Get DMA-BUF fd for cuMem VMM allocations. Required even when DMA-BUF is
+        // globally disabled to avoid ibv_reg_mr on VMM memory.
+        {
+          CUCHECK(cuMemGetHandleForAddressRange((void *)&map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd,
+                                                (CUdeviceptr)map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr,
+                                                map->mems[NCCL_NET_MAP_DEVMEM].size,
+                                                CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
+                                                getHandleForAddressRangeFlags(resources->useGdr)));
+        }
+#endif
       } else {
 #if defined(HIP_UNCACHED_MEMORY)
 #if defined(HIP_CONTIGUOUS_MEMORY)
@@ -1127,14 +1434,20 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
     resources->buffers[p] = NCCL_NET_MAP_GET_POINTER(map, cpu, buffs[p]);
     if (resources->buffers[p]) {
-#if CUDA_VERSION >= 11070
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
       /* DMA-BUF support */
       int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
-      if (type == NCCL_PTR_CUDA && resources->useDmaBuf) {
-        int dmabuf_fd;
-        CUCHECK(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)resources->buffers[p], resources->buffSizes[p], CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)));
-        NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, resources->buffers[p], resources->buffSizes[p], type, 0ULL, dmabuf_fd, &resources->mhandles[p]));
-        (void)close(dmabuf_fd);
+      if (type == NCCL_PTR_CUDA && resources->useDmaBuf && ncclCuMemEnable()) {
+        int bank = NCCL_NET_MAP_OFFSET_BANK(map, buffs[p]);
+        if (bank == NCCL_NET_MAP_DEVMEM && map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd >= 0) {
+          uint64_t offset = (char*)resources->buffers[p] - map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr;
+          NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, resources->buffers[p], resources->buffSizes[p], type, offset, map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd, &resources->mhandles[p]));
+        } else {
+          int dmabuf_fd;
+          CUCHECK(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)resources->buffers[p], resources->buffSizes[p], CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)));
+          NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, resources->buffers[p], resources->buffSizes[p], type, 0ULL, dmabuf_fd, &resources->mhandles[p]));
+          (void)close(dmabuf_fd);
+        }
       } else // FALL-THROUGH to nv_peermem GDR path
 #else
       /* DMA-BUF support */
@@ -1184,6 +1497,11 @@ static ncclResult_t sendProxyFree(struct ncclProxyConnection* connection, struct
     } else {
       NCCLCHECK(ncclShmIpcClose(&mems[NCCL_NET_MAP_HOSTMEM].createDesc));
     }
+    // Close cached DMA-BUF fd if it was opened
+    if (mems[NCCL_NET_MAP_DEVMEM].dmaBufFd >= 0) {
+      (void)close(mems[NCCL_NET_MAP_DEVMEM].dmaBufFd);
+      mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1;
+    }
     NCCLCHECK(ncclCudaFree(mems[NCCL_NET_MAP_DEVMEM].cpuPtr));
     if (!resources->map.sameProcess || ncclCuMemEnable()) {
       // cuMem API support
@@ -1225,6 +1543,11 @@ static ncclResult_t recvProxyFree(struct ncclProxyConnection* connection, struct
     }
     struct connectMapMem* mems = resources->map.mems;
     NCCLCHECK(ncclCudaHostFree(mems[NCCL_NET_MAP_HOSTMEM].cpuPtr));
+    // Close cached DMA-BUF fd if it was opened
+    if (mems[NCCL_NET_MAP_DEVMEM].dmaBufFd >= 0) {
+      (void)close(mems[NCCL_NET_MAP_DEVMEM].dmaBufFd);
+      mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1;
+    }
     NCCLCHECK(ncclCudaFree(mems[NCCL_NET_MAP_DEVMEM].cpuPtr));
     if (!resources->map.sameProcess || ncclCuMemEnable()) {
       // cuMem API support
@@ -1261,6 +1584,7 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_NET_COLLECT_POLL_CNT)
   g_npkit_net_poll_cnt++;
 #endif
+  int checkedNetAttr = 0;
   if (args->state == ncclProxyOpReady) {
     for (int s=0; s<args->nsubs; s++) {
       struct ncclProxySubArgs* sub = args->subs+s;
@@ -1271,9 +1595,16 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
       resources->step = sub->base + sub->nsteps;
       sub->posted = sub->transmitted = sub->done = 0;
       ncclProfilerRecordProxyOpEventState(s, args, ncclProfilerProxyOpInProgress_v4);
-      facebook_rccl::addNewProxyOp(proxyState->proxyTrace, sub->traceKey, 
-        sub->traceInfo,  facebook_rccl::ProxyOpType::SEND,
-        sub->channelId, sub->nsteps, sub->nbytes, sub->peer);
+      if (proxyState->proxyTrace) {
+        proxyState->proxyTrace->addNewProxyOp(
+            sub->traceKey, 
+            sub->traceInfo,  
+            facebook_rccl::ProxyOpType::SEND,
+            sub->channelId, 
+            sub->nsteps, 
+            sub->nbytes, 
+            sub->peer);
+      }
       if (!sub->reg)
         sub->sendMhandle = resources->mhandles[args->protocol];
     }
@@ -1314,7 +1645,10 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
           sub->posted += args->sliceSteps;
         }
         ncclProfilerRecordProxyStepEventState(s, args, postedStepId, ncclProfilerProxyStepSendGPUWait);
-        facebook_rccl::updateProxyOpCounter(proxyState->proxyTrace, sub->traceKey, facebook_rccl::ProxyCounterTypes::POSTED, sub->posted);
+        if (proxyState->proxyTrace) {
+          proxyState->proxyTrace->updateProxyOpCounter(sub->traceKey, facebook_rccl::ProxyCounterTypes::POSTED, sub->posted);
+          proxyState->proxyTrace->setProxyOpTimestamp(sub->traceKey, facebook_rccl::ProxyCounterTypes::POSTED);
+        }
         args->idle = 0;
         continue;
       }
@@ -1323,15 +1657,14 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
         int buffSlot = (sub->base+sub->transmitted)%NCCL_STEPS;
         volatile uint64_t* recvTail = &resources->recvMem->tail;
         uint64_t tail = sub->base + sub->transmitted;
-        facebook_rccl::updateProxyOpCounter(proxyState->proxyTrace, sub->traceKey,
-          facebook_rccl::ProxyCounterTypes::RECV_TAIL, *recvTail);
-
-        facebook_rccl::updateProxyOpCounter(proxyState->proxyTrace, sub->traceKey,
-          facebook_rccl::ProxyCounterTypes::TAIL_OR_HEAD, tail);
-
-        facebook_rccl::updateProxyOpCounter(
-          proxyState->proxyTrace, sub->traceKey,
-          facebook_rccl::ProxyCounterTypes::FIFO_SZ_OR_HEAD_CACHE, connFifo[buffSlot].size);
+        if (proxyState->proxyTrace) {
+          proxyState->proxyTrace->updateProxyOpCounter(sub->traceKey,
+            facebook_rccl::ProxyCounterTypes::RECV_TAIL, *recvTail);
+          proxyState->proxyTrace->updateProxyOpCounter(sub->traceKey,
+            facebook_rccl::ProxyCounterTypes::TAIL_OR_HEAD, tail);
+          proxyState->proxyTrace->updateProxyOpCounter(sub->traceKey,
+            facebook_rccl::ProxyCounterTypes::FIFO_SZ_OR_HEAD_CACHE, connFifo[buffSlot].size);
+        }
           
         if (connFifo[buffSlot].size != -1 && (*recvTail > tail || p == NCCL_PROTO_LL)) {
           // We have something to receive, let's check if it's completely ready.
@@ -1380,13 +1713,17 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
               *resources->curr_hdp_reg = 1;
             }
             ncclProfilerRecordProxyStepEventState(s, args, transmittedStepId, ncclProfilerProxyStepSendPeerWait_v4);
-            facebook_rccl::updateProxyOpCounter(proxyState->proxyTrace, sub->traceKey, 
-              facebook_rccl::ProxyCounterTypes::KERNEL_COPY_READY, sub->reg ? 1: sub->transmitted + args->sliceSteps);
+            if (proxyState->proxyTrace) {
+              proxyState->proxyTrace->updateProxyOpCounter(sub->traceKey, 
+                facebook_rccl::ProxyCounterTypes::KERNEL_COPY_READY, sub->reg ? 1: sub->transmitted + args->sliceSteps);
+            }
             // Data is ready, try to send.
             // Coverity complains about the size here as pointing to an out-of-scope temporary.  Which is nonsense,
             // since size is a plain integer.
             // coverity[use_invalid:FALSE]
             void* phandle = &sub->pHandles[DIVUP(transmittedStepId, args->sliceSteps)%NCCL_STEPS];
+            if (!checkedNetAttr++)
+              setXferNetAttrs(proxyState, args, 1);
             void **requestPtr = sub->requests+buffSlot;
             // for LL/LL128 protocols, completion event for write operation is not needed on the receiver side as
             // the LL flags are actively polled to detect if full data is received or not, so this hint can be used
@@ -1395,6 +1732,9 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
             if (ignoreCompletion) *requestPtr = (void *)NCCL_NET_OPTIONAL_RECV_COMPLETION;
             NCCLCHECK(proxyState->ncclNet->isend(resources->netSendComm, buff, size, resources->tpRank, sub->sendMhandle, phandle, requestPtr));
             if (*requestPtr != NULL) {
+              if (proxyState->proxyTrace) {
+                proxyState->proxyTrace->setProxyOpTimestamp(sub->traceKey, facebook_rccl::ProxyCounterTypes::KERNEL_COPY_READY);
+              }              
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_NET_SEND_ENTRY) && defined(ENABLE_NPKIT_EVENT_NET_SEND_EXIT)
               NpKit::CollectCpuEvent(
                   NPKIT_EVENT_NET_SEND_ENTRY,
@@ -1414,8 +1754,10 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
               sub->transSize = size;
               sub->transmitted += args->sliceSteps;
               ncclProfilerRecordProxyStepEventState(s, args, transmittedStepId, ncclProfilerProxyStepSendWait);
-              facebook_rccl::updateProxyOpCounter(proxyState->proxyTrace, sub->traceKey, 
-                facebook_rccl::ProxyCounterTypes::TRANSMITTED, sub->transmitted);
+              if (proxyState->proxyTrace) {
+                proxyState->proxyTrace->updateProxyOpCounter(sub->traceKey, 
+                  facebook_rccl::ProxyCounterTypes::TRANSMITTED, sub->transmitted);
+              }
               args->idle = 0;
               continue;
             }
@@ -1481,8 +1823,10 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
           TRACE(NCCL_NET, "sendProxy [%ld/%d/%d] request %p done", sub->done, buffSlot, sub->nsteps, sub->requests[buffSlot]);
           sub->done += args->sliceSteps;
           ncclProfilerStopProxyStepEvent(s, args, doneStepId);
-          facebook_rccl::updateProxyOpCounter(proxyState->proxyTrace, sub->traceKey, 
-            facebook_rccl::ProxyCounterTypes::DONE, sub->done);
+          if (proxyState->proxyTrace) {
+            proxyState->proxyTrace->updateProxyOpCounter(sub->traceKey,
+              facebook_rccl::ProxyCounterTypes::DONE, sub->done);
+          }
           if (resources->shared == 0) {
             volatile uint64_t* sendHead = resources->gdcSync ? resources->gdcSync : &resources->sendMem->head;
             *sendHead = sub->base + sub->done;
@@ -1513,6 +1857,7 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_NET_COLLECT_POLL_CNT)
   g_npkit_net_poll_cnt++;
 #endif
+  int checkedNetAttr = 0;
   if (args->state == ncclProxyOpReady) {
     // Initialize subs and group them by same recvComm.
     void* recvComm;
@@ -1549,8 +1894,16 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
       sub->regBufferReady = 0;
       for (int i=0; i<groupSize; i++) sub[-i].groupSize = groupSize;
       ncclProfilerRecordProxyOpEventState(s, args, ncclProfilerProxyOpInProgress_v4);
-      facebook_rccl::addNewProxyOp(proxyState->proxyTrace, sub->traceKey, sub->traceInfo,  
-        facebook_rccl::ProxyOpType::RECV, sub->channelId, sub->nsteps, sub->nbytes, sub->peer);
+      if (proxyState->proxyTrace) {
+        proxyState->proxyTrace->addNewProxyOp(
+            sub->traceKey, 
+            sub->traceInfo,  
+            facebook_rccl::ProxyOpType::RECV,
+            sub->channelId, 
+            sub->nsteps, 
+            sub->nbytes, 
+            sub->peer);
+      }
       if (!sub->reg)
         sub->recvMhandle = resources->mhandles[args->protocol];
     }
@@ -1620,6 +1973,8 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
         struct recvNetResources* resources = (struct recvNetResources*) (subGroup->connection->transportResources);
         void** requestPtr = subGroup->requests+(step%NCCL_STEPS);
         bool ignoreCompletion = ncclParamNetOptionalRecvCompletion() && ((args->protocol == NCCL_PROTO_LL128) || (args->protocol == NCCL_PROTO_LL)) && (subCount == 1);
+        if (!checkedNetAttr++)
+          setXferNetAttrs(proxyState, args, 0);
         if (ignoreCompletion) *requestPtr = (void *)NCCL_NET_OPTIONAL_RECV_COMPLETION;
         NCCLCHECK(proxyState->ncclNet->irecv(resources->netRecvComm, subCount, ptrs, sizes, tags, mhandles, phandles, requestPtr));
         if (*requestPtr) {
@@ -1647,8 +2002,10 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
 
             sub->posted += args->sliceSteps;
             ncclProfilerRecordProxyStepEventState(s+i, args, postedStepId, ncclProfilerProxyStepRecvWait);
-            facebook_rccl::updateProxyOpCounter(proxyState->proxyTrace, 
-              sub->traceKey, facebook_rccl::ProxyCounterTypes::POSTED, sub->posted);
+            if (proxyState->proxyTrace) {
+              proxyState->proxyTrace->updateProxyOpCounter(
+                sub->traceKey, facebook_rccl::ProxyCounterTypes::POSTED, sub->posted);
+            }
           }
           args->idle = 0;
         }
@@ -1696,7 +2053,9 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
             sub->transSize = sizes[i];
             sub->received += args->sliceSteps;
             ncclProfilerRecordProxyStepEventState(s+i, args, receivedStepId, ncclProfilerProxyStepRecvFlushWait);
-            facebook_rccl::updateProxyOpCounter(proxyState->proxyTrace, sub->traceKey, facebook_rccl::ProxyCounterTypes::RECEIVED, sub->received);
+            if (proxyState->proxyTrace) {
+              proxyState->proxyTrace->updateProxyOpCounter(sub->traceKey, facebook_rccl::ProxyCounterTypes::RECEIVED, sub->received);
+            }
             if (step < sub->nsteps) {
               struct recvNetResources* resources = (struct recvNetResources*) (sub->connection->transportResources);
               if (resources->useGdr) needFlush |= resources->needFlush;
@@ -1757,7 +2116,9 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
               if (subGroup->requests[step%NCCL_STEPS]){
                 for(int i=0; i<subGroup->groupSize; i++) {
                   struct ncclProxySubArgs* sub = subGroup + i;
-                  facebook_rccl::updateProxyOpCounter(proxyState->proxyTrace, sub->traceKey, facebook_rccl::ProxyCounterTypes::FLUSHED, sub->received);
+                  if (proxyState->proxyTrace) {
+                    proxyState->proxyTrace->updateProxyOpCounter(sub->traceKey, facebook_rccl::ProxyCounterTypes::FLUSHED, sub->received);
+                  }
                 }
               }
               if (once) {
@@ -1786,13 +2147,17 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
 
             sub->transmitted += args->sliceSteps;
             ncclProfilerRecordProxyStepEventState(s+i, args, transmittedStepId, ncclProfilerProxyStepRecvGPUWait);
-            facebook_rccl::updateProxyOpCounter(proxyState->proxyTrace, sub->traceKey, facebook_rccl::ProxyCounterTypes::TRANSMITTED, sub->transmitted);
+            if (proxyState->proxyTrace) {
+              proxyState->proxyTrace->updateProxyOpCounter(sub->traceKey, facebook_rccl::ProxyCounterTypes::TRANSMITTED, sub->transmitted);
+            }
             if (step < sub->nsteps) {
               __sync_synchronize();
               struct recvNetResources* resources = (struct recvNetResources*) (sub->connection->transportResources);
               volatile uint64_t* recvTail = resources->gdcSync ? resources->gdcSync : &resources->recvMem->tail;
               *recvTail = sub->base + sub->transmitted;
-              facebook_rccl::updateProxyOpCounter(proxyState->proxyTrace, sub->traceKey, facebook_rccl::ProxyCounterTypes::RECV_TAIL, *recvTail);
+              if (proxyState->proxyTrace) {
+                proxyState->proxyTrace->updateProxyOpCounter(sub->traceKey, facebook_rccl::ProxyCounterTypes::RECV_TAIL, *recvTail);
+              }
               if (resources->gdcSync) wc_store_fence(); // Flush out WC write
             }
           }
@@ -1811,8 +2176,10 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
           struct recvNetResources* resources = (struct recvNetResources*) (sub->connection->transportResources);
           volatile uint64_t* sendHead = &resources->sendMem->head;
           uint64_t done = *sendHead;
-          facebook_rccl::updateProxyOpCounter(proxyState->proxyTrace, sub->traceKey, facebook_rccl::ProxyCounterTypes::TAIL_OR_HEAD, done);
-          facebook_rccl::updateProxyOpCounter(proxyState->proxyTrace, sub->traceKey, facebook_rccl::ProxyCounterTypes::FIFO_SZ_OR_HEAD_CACHE, sub->base + sub->done);
+          if (proxyState->proxyTrace) {
+            proxyState->proxyTrace->updateProxyOpCounter(sub->traceKey, facebook_rccl::ProxyCounterTypes::TAIL_OR_HEAD, done);
+            proxyState->proxyTrace->updateProxyOpCounter(sub->traceKey, facebook_rccl::ProxyCounterTypes::FIFO_SZ_OR_HEAD_CACHE, sub->base + sub->done);
+          }
           while (done > sub->base + sub->done &&
               // LL and LL128 can acknowledge 0-bytes send before they even happen. Don't go past what we transmitted.
               sub->transmitted > sub->done) {
@@ -1825,7 +2192,10 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
             int doneStepId = sub->done;
             sub->done += args->sliceSteps;
             ncclProfilerStopProxyStepEvent(s+i, args, doneStepId);
-            facebook_rccl::updateProxyOpCounter(proxyState->proxyTrace, sub->traceKey, facebook_rccl::ProxyCounterTypes::DONE, sub->done);
+            if (proxyState->proxyTrace) {
+              proxyState->proxyTrace->updateProxyOpCounter(sub->traceKey,
+                facebook_rccl::ProxyCounterTypes::DONE, sub->done);
+            }
             args->idle = 0;
             if (sub->done == sub->nsteps) {
               args->done++;
@@ -1917,13 +2287,18 @@ ncclResult_t ncclNetLocalRegisterBuffer(ncclComm* comm, const void* userbuff, si
   ncclResult_t ret = ncclSuccess;
   struct ncclReg *regRecord = NULL;
   bool isValid = false;
+  void *base = NULL;
+  size_t baseSize = 0;
 
   *outRegBufFlag = 0;
   if (comm && userbuff && buffSize > 0 && nPeers > 0) {
     NCCLCHECKGOTO(ncclRegFind(comm, userbuff, buffSize, &regRecord), ret, fail);
     NCCLCHECKGOTO(ncclRegLocalIsValid(regRecord, &isValid), ret, fail);
-    if (isValid)
+    if (isValid) {
+      CUCHECKGOTO(cuMemGetAddressRange((CUdeviceptr *)&base, &baseSize, (CUdeviceptr)userbuff), ret, fail);
+      if ((uint64_t)base + baseSize < (uint64_t)userbuff + buffSize) goto exit;
       NCCLCHECKGOTO(netRegisterBuffer(comm, userbuff, buffSize, peerConns, nPeers, regRecord, outRegBufFlag, outHandle), ret, fail);
+    }
   }
 
 exit:
@@ -1950,13 +2325,14 @@ ncclResult_t ncclNetGraphRegisterBuffer(ncclComm* comm, const void* userbuff, si
   ncclResult_t ret = ncclSuccess;
   struct ncclNetCleanupCallback *record = NULL;
   struct ncclReg *regRecord = NULL;
-  void *baseSend;
-  size_t baseSendSize;
+  void *base = NULL;
+  size_t baseSize = 0;
 
   *outRegBufFlag = 0;
   if (comm && userbuff && buffSize > 0 && nPeers > 0) {
-    CUDACHECKGOTO(cuMemGetAddressRange((CUdeviceptr *)&baseSend, &baseSendSize, (CUdeviceptr)userbuff), ret, fail);
-    NCCLCHECKGOTO(ncclCommGraphRegister(comm, baseSend, baseSendSize, (void**)&regRecord), ret, fail);
+    CUCHECKGOTO(cuMemGetAddressRange((CUdeviceptr *)&base, &baseSize, (CUdeviceptr)userbuff), ret, fail);
+    if ((uint64_t)base + baseSize < (uint64_t)userbuff + buffSize) goto exit;
+    NCCLCHECKGOTO(ncclCommGraphRegister(comm, base, baseSize, (void**)&regRecord), ret, fail);
     NCCLCHECKGOTO(netRegisterBuffer(comm, userbuff, buffSize, peerConns, nPeers, regRecord, outRegBufFlag, outHandle), ret, fail);
     if (*outRegBufFlag) {
       NCCLCHECKGOTO(ncclCalloc(&record, 1), ret, fail);
@@ -1986,12 +2362,22 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
   assert(reqSize == sizeof(struct netRegInfo));
   assert(respSize == sizeof(void*));
 
-#if CUDART_VERSION >= 11070
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
   /* DMA-BUF support */
-  if (resources->useDmaBuf) {
+  if (resources->useDmaBuf && ncclCuMemEnable()) {
     int dmabuf_fd;
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)), ret, peermem);
     NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, 0ULL, dmabuf_fd, &handle), ret, peermem);
+    (void)close(dmabuf_fd);
+    needReg = false;
+  }
+peermem:
+#else
+  if (resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
+    int dmabuf_fd;
+    uint64_t offset;
+    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret, peermem);
+    NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, offset, dmabuf_fd, &handle), ret, peermem);
     (void)close(dmabuf_fd);
     needReg = false;
   }
@@ -2020,12 +2406,22 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
   assert(reqSize == sizeof(struct netRegInfo));
   assert(respSize == sizeof(void*));
 
-#if CUDART_VERSION >= 11070
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
   /* DMA-BUF support */
-  if (resources->useDmaBuf) {
+  if (resources->useDmaBuf && ncclCuMemEnable()) {
     int dmabuf_fd;
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)), ret, peermem);
     NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, 0ULL, dmabuf_fd, &handle), ret, peermem);
+    (void)close(dmabuf_fd);
+    needReg = false;
+  }
+peermem:
+#else
+  if (resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
+    int dmabuf_fd;
+    uint64_t offset;
+    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret, peermem);
+    NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, offset, dmabuf_fd, &handle), ret, peermem);
     (void)close(dmabuf_fd);
     needReg = false;
   }

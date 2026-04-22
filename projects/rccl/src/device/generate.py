@@ -3,9 +3,11 @@ import os
 import sys
 import subprocess
 from dataclasses import dataclass
+import shutil
 
 # Order of colls, redops, tys, protos, algos must match src/include/device.h
-all_colls     = ["Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce", "SendRecv", "", "", "AllToAllPivot"]
+# The empty entries are for collectives like Gather, Scatter, etc.
+all_colls     = ["Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce", "SendRecv", "", "", "", "", "", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]
 all_redops    = ["Sum","Prod","MinMax","PreMulSum","SumPostDiv"]
 all_tys       = ["i8","u8","i32","u32","i64","u64","f16","f32","f64","bf16","f8e4m3","f8e5m2"]
 all_protos    = ["LL","LL128","SIMPLE"]
@@ -24,8 +26,11 @@ gensrc = sys.argv[1]
 
 if os.path.exists(gensrc):
   for name in os.listdir(gensrc):
-    os.remove(os.path.join(gensrc, name))
-    #os.truncate(os.path.join(gensrc, name), 0)
+    path = os.path.join(gensrc, name)
+    if os.path.isfile(path):
+      os.remove(path)
+    elif os.path.isdir(path):
+      shutil.rmtree(path)
 else:
   os.makedirs(gensrc)
 
@@ -64,7 +69,7 @@ else:
 # make ONLY_FUNCS="AllReduce RING SIMPLE * *|ReduceScatter RING LL * f32"
 #                         --- or ---
 # make ONLY_FUNCS="AllReduce RING SIMPLE|ReduceScatter RING LL * f32"
-# make ONLY_FUNCS="AllReduce RING/TREE LL/SIMPLE Sum/MinMax i8/u8/f16/f32/f64/bf16/f8e4m3/f8e5m2|AllGather RING LL/SIMPLE Sum i8|AllToAllPivot RING SIMPLE Sum i8|Broadcast RING LL/SIMPLE Sum i8|Reduce RING LL/SIMPLE Sum/MinMax i8/u8/f16/f32/f64/bf16/f8e4m3/f8e5m2|ReduceScatter RING LL/SIMPLE Sum/MinMax i8/u8/f16/f32/f64/bf16/f8e4m3/f8e5m2|SendRecv RING SIMPLE Sum i8"
+# make ONLY_FUNCS="AllReduce RING/TREE LL/SIMPLE Sum/MinMax i8/u8/f16/f32/f64/bf16/f8e4m3/f8e5m2|AllGather RING LL/SIMPLE Sum i8|AlltoAllPivot RING SIMPLE Sum i8|Broadcast RING LL/SIMPLE Sum i8|Reduce RING LL/SIMPLE Sum/MinMax i8/u8/f16/f32/f64/bf16/f8e4m3/f8e5m2|ReduceScatter RING LL/SIMPLE Sum/MinMax i8/u8/f16/f32/f64/bf16/f8e4m3/f8e5m2|SendRecv RING SIMPLE Sum i8"
 
 # Paste all non-None arguments together with `sep`.
 def paste(sep, *args):
@@ -72,21 +77,29 @@ def paste(sep, *args):
 
 is_ifc             = 1 if sys.argv[2] == "ON" else 0
 is_colltrace       = 1 if sys.argv[3] == "ON" else 0
-is_msccl_kernels   = 1 if sys.argv[4] == "ON" else 0
+# sys.argv[4] reserved (was ENABLE_MSCCL_KERNEL; MSCCL device kernels removed)
 is_local_arch_only = 1 if sys.argv[5] == "ON" else 0
+is_rocshmem        = 1 if sys.argv[6] == "ON" else 0
 
-func_pattern = sys.argv[6:7]
+func_pattern = sys.argv[7:8]
+
 if func_pattern and func_pattern[0]:
   func_pattern = func_pattern[0]
 else:
-  func_pattern = "AllGather|AllReduce|AllToAllPivot|Broadcast|Reduce|ReduceScatter|SendRecv"
+  # GDA (rocSHMEM-based) kernels only when rocshmem build requested
+  if is_rocshmem:
+    func_pattern = "AllGather|AllReduce|AlltoAllPivot|AlltoAllGda|AlltoAllvGda|Broadcast|Reduce|ReduceScatter|SendRecv"
+  else:
+    func_pattern = "AllGather|AllReduce|AlltoAllPivot|Broadcast|Reduce|ReduceScatter|SendRecv"
 
 ################################################################################
 
 algos_of_coll = {
   "AllGather":             ["RING", "PAT"],
   "AllReduce":             ["RING", "TREE"],
-  "AllToAllPivot":         ["RING"],
+  "AlltoAllPivot":         ["RING"],
+  "AlltoAllGda":           ["RING"],
+  "AlltoAllvGda":          ["RING"],
   "Broadcast":             ["RING"],
   "Reduce":                ["RING"],
   "ReduceScatter":         ["RING", "PAT"],
@@ -96,7 +109,9 @@ algos_of_coll = {
 protos_of_coll = {
   "AllGather":              all_protos,
   "AllReduce":              all_protos,
-  "AllToAllPivot":          ["SIMPLE"],
+  "AlltoAllPivot":          ["SIMPLE"],
+  "AlltoAllGda":            ["SIMPLE"],
+  "AlltoAllvGda":           ["SIMPLE"],
   "Broadcast":              all_protos,
   "Reduce":                 all_protos,
   "ReduceScatter":          all_protos,
@@ -106,7 +121,9 @@ protos_of_coll = {
 redops_of_coll = {
   "AllGather":            ["Sum"],
   "AllReduce":            all_redops,
-  "AllToAllPivot":        ["Sum"],
+  "AlltoAllPivot":        ["Sum"],
+  "AlltoAllGda":          ["Sum"],
+  "AlltoAllvGda":         ["Sum"],
   "Broadcast":            ["Sum"],
   "Reduce":               all_redops,
   "ReduceScatter":        all_redops,
@@ -116,7 +133,9 @@ redops_of_coll = {
 tys_of_coll = {
   "AllGather":             ["i8"],
   "AllReduce":             all_tys,
-  "AllToAllPivot":         ["i8"],
+  "AlltoAllPivot":         ["i8"],
+  "AlltoAllGda":           ["i8"],
+  "AlltoAllvGda":          ["i8"],
   "Broadcast":             ["i8"],
   "Reduce":                all_tys,
   "ReduceScatter":         all_tys,
@@ -126,7 +145,9 @@ tys_of_coll = {
 acc_of_coll = {
   "AllGather":             ["0"],
   "AllReduce":             all_accs,
-  "AllToAllPivot":         ["0"],
+  "AlltoAllPivot":         ["0"],
+  "AlltoAllGda":           ["0"],
+  "AlltoAllvGda":          ["0"],
   "Broadcast":             ["0"],
   "Reduce":                ["0"],
   "ReduceScatter":         ["0"],
@@ -136,7 +157,9 @@ acc_of_coll = {
 pipelines_of_coll = {
   "AllGather":             ["0"],
   "AllReduce":             all_pipelines,
-  "AllToAllPivot":         ["0"],
+  "AlltoAllPivot":         ["0"],
+  "AlltoAllGda":           ["0"],
+  "AlltoAllvGda":          ["0"],
   "Broadcast":             ["0"],
   "Reduce":                all_pipelines,
   "ReduceScatter":         all_pipelines,
@@ -147,7 +170,9 @@ pipelined_types = ["bf16"]
 coll_camel_to_lower = {
   "AllGather":             "all_gather",
   "AllReduce":             "all_reduce",
-  "AllToAllPivot":         "alltoall_pivot",
+  "AlltoAllPivot":         "alltoall_pivot",
+  "AlltoAllGda":           "alltoall_gda",
+  "AlltoAllvGda":          "alltoallv_gda",
   "Broadcast":             "broadcast",
   "Reduce":                "reduce",
   "ReduceScatter":         "reduce_scatter",
@@ -215,11 +240,16 @@ def calc_unroll_and_pipeline_for_local_arch():
 # except for gfx950. For gfx950, we also disable pipelining.
 local_unroll, local_pipeline = calc_unroll_and_pipeline_for_local_arch()
 
+# rocSHMEM/GDA-based collectives: only generated when ENABLE_ROCSHMEM build is requested
+gda_colls = {"AlltoAllGda", "AlltoAllvGda"}
+
 # Helper function to check if the conditions for the collective is being met
 def func_validate(coll, algo, proto, redop, ty, acc,  pipeline, unroll):
   if redop == "SumPostDiv" and ty[0] not in ("i","u"):
     return False
   if coll == "" or algo == "":
+    return False
+  if not is_rocshmem and coll in gda_colls:
     return False
   if (algo not in algos_of_coll[coll] or
       proto not in protos_of_coll[coll] or
@@ -503,7 +533,7 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
       )
       if fn.coll == "Broadcast":
         key = ((coll_idx & 0x3F) | ((proto_idx & 0x3F) << 8))
-      if fn.coll in ["SendRecv", "AllToAllPivot"]:
+      if fn.coll in ["SendRecv", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]:
         key = ((coll_idx & 0x3F))
       
       out(f'  {{{key}, {fn_id}}}, {comment}\n')
@@ -580,17 +610,3 @@ for name in name_to_funcs.keys():
       if guard: 
         out("#endif\n")
 
-# Generate each <gensrc>/<msccl_impl>.cpp
-if is_msccl_kernels:
-  for redop in all_redops:
-    if redop in ("Sum", "Prod", "MinMax"):
-      for ty in all_tys:
-        with open(os.path.join(gensrc, f"msccl_kernel_{redop}_{ty}.cpp"), "w") as f:
-          print("-- Generating %s" % os.path.join(gensrc, f"msccl_kernel_{redop}_{ty}.cpp"))
-
-          out = f.write
-          out('#include "msccl_kernel_impl.h"\n#include "nccl_common.h"\n')
-          out(
-            "MSCCL_IMPL_KERNEL_ENTRY_FUNC_DEVREDOP_TYPE({redop}, {ty_cxx}, false);\n"
-            .format(redop=redop, ty_cxx=ty_to_cxx[ty])
-          )

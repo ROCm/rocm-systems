@@ -10,7 +10,7 @@ ENV DEB_BUILD_TEST="amd-smi-lib-tests*99999-local_amd64.deb"
 WORKDIR /home
 
 # Install necessary system packages
-RUN apt update && apt-get install -y git build-essential rpm pkg-config g++ python3 python3-pip python3-wheel python3-setuptools
+RUN apt update && apt-get install -y git build-essential libdrm-dev rpm pkg-config g++ python3 python3-pip python3-wheel python3-setuptools
 
 # Upgrade pip and install cmake and virtualenv using pip
 RUN python3 -m pip install --upgrade pip setuptools && \

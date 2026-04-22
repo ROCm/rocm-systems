@@ -1,29 +1,11 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "perf.hpp"
-#include "debug.hpp"
 
 #include <timemory/units.hpp>
+
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {
@@ -72,7 +54,8 @@ get_hw_config(std::string_view _v)
         return hw_config::reference_cpu_cycles;
     else
     {
-        ROCPROFSYS_THROW("Unknown perf hardware config: %s", _v.data());
+        throw std::runtime_error(
+            fmt::format("Unknown perf hardware config: {}", _v.data()));
     }
 
 #undef HW_CONFIG_REGEX
@@ -105,7 +88,8 @@ get_sw_config(std::string_view _v)
         return sw_config::emulation_faults;
     else
     {
-        ROCPROFSYS_THROW("Unknown perf hw cache config: %s", _v.data());
+        throw std::runtime_error(
+            fmt::format("Unknown perf hw cache config: {}", _v.data()));
     }
 
 #undef SW_CONFIG_REGEX
@@ -136,7 +120,8 @@ get_hw_cache_config(std::string_view _v)
     else if(HW_CACHE_CONFIG_REGEX("NODE"))
         _value |= static_cast<int>(hw_cache_config::node);
     else
-        ROCPROFSYS_THROW("Unknown perf software config: %s", _v.data());
+        throw std::runtime_error(
+            fmt::format("Unknown perf software config: {}", _v.data()));
 
 #undef HW_CACHE_CONFIG_REGEX
 #define HW_CACHE_OP_REGEX(KEY)                                                           \
@@ -197,7 +182,7 @@ config_overflow_sampling(struct perf_event_attr& _pe, std::string_view _event,
         case PERF_TYPE_MAX:
         default:
         {
-            ROCPROFSYS_THROW("unsupported perf type");
+            throw std::runtime_error("Unsupported perf type");
         }
     };
 

@@ -1,30 +1,12 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "state.hpp"
 #include "common/static_object.hpp"
 #include "config.hpp"
-#include "debug.hpp"
 #include "utility.hpp"
+
+#include "logger/debug.hpp"
 
 #include <atomic>
 #include <string>
@@ -79,16 +61,34 @@ get_thread_state()
 State
 set_state(State _n)
 {
-    ROCPROFSYS_CONDITIONAL_PRINT_F(get_debug_init(), "Setting state :: %s -> %s\n",
-                                   std::to_string(get_state()).c_str(),
-                                   std::to_string(_n).c_str());
+    if(get_debug_init())
+    {
+        LOG_DEBUG("Setting state :: {} -> {}", std::to_string(get_state()),
+                  std::to_string(_n));
+    }
     // state should always be increased, not decreased
-    ROCPROFSYS_CI_BASIC_THROW(
-        _n < get_state(), "State is being assigned to a lesser value :: %s -> %s",
-        std::to_string(get_state()).c_str(), std::to_string(_n).c_str());
+    if(get_is_continuous_integration() && _n < get_state())
+    {
+        throw std::runtime_error(
+            fmt::format("State is being assigned to a lesser value :: {} -> {}",
+                        std::to_string(get_state()), std::to_string(_n)));
+    }
+
     auto _v = get_state();
     get_state_value().store(_n, std::memory_order_relaxed);
     // std::swap(get_state_value(), _n);
+    return _v;
+}
+
+State
+reset_state()
+{
+    if(get_debug_init())
+    {
+        LOG_DEBUG("Resetting state :: {} -> PreInit", std::to_string(get_state()));
+    }
+    auto _v = get_state();
+    get_state_value().store(State::PreInit, std::memory_order_relaxed);
     return _v;
 }
 

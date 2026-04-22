@@ -74,6 +74,7 @@ struct ncclProxyOp {
   uint8_t /*ncclDataType_t*/ dtype;
   uint8_t /*ncclDevRedOp_t*/ redOp;
   uint8_t /*ncclFunc_t*/ coll;
+  uint8_t /*ncclFunc_t*/ collAPI;
   uint8_t /*ncclPattern_t*/ pattern;
   uint8_t protocol;
   uint8_t algorithm;
@@ -88,6 +89,8 @@ struct ncclProxyOp {
   int nextRank;
   int prevRank;
   union ncclProxyOpSpecifics specifics;
+  int nChannels;
+  int nPeers;
 
   // Profiler plugin
   union {
@@ -197,11 +200,14 @@ struct ncclProxyArgs {
   uint8_t /*ncclDevRedOp_t*/ redOp;
   uint8_t /*ncclPattern_t*/ pattern;
   uint8_t /*ncclFunc_t*/ coll;
+  uint8_t /*ncclFunc_t*/ collAPI;
   uint8_t protocol;
   uint8_t algorithm;
   int state;
   char* sharedBuff[NCCL_STEPS];
   int sharedSize[NCCL_STEPS];
+  int nChannels;
+  int nPeers;
 
   int idle;
   uint64_t hdp_flushed;
@@ -251,6 +257,7 @@ struct ncclProxySharedP2p {
   char* hostBuff;
   // CUDA IPC
   ncclIpcDesc ipcDesc;
+  int dmaBufFd;  // DMA-BUF fd for cuMem allocations
   struct ncclProxyArgs* proxyAppend[MAXCHANNELS]; // Separate send and recv
 };
 
@@ -366,14 +373,25 @@ struct ncclProxyState {
   // Progress thread
   struct ncclProxyProgressState progressState;
 
+  // Network plugin
+  void* netContext;
+  ncclNetAttr_t netAttr;
+  void* collNetContext;
+
   // Profiler plugin
   void* profilerContext;
+
+#ifdef ENABLE_ROCSHMEM
+  // When ROCshmem GDA is active, the proxy must busy-poll instead of sleeping
+  // to avoid OS scheduling delays at GDA-to-RCCL transitions.
+  bool rocshmemEnabled;
+#endif
 
   // Queue of expected responses from the proxy
   struct ncclExpectedProxyResponse* expectedResponses;
 
   // A handle to the proxy traces
-  std::unique_ptr<facebook_rccl::ProxyTrace> proxyTrace;
+  facebook_rccl::ProxyTrace* proxyTrace;
 };
 
 enum proxyConnectState {
@@ -447,5 +465,4 @@ ncclResult_t ncclProxyStop(struct ncclComm* comm);
 ncclResult_t ncclProxyShmUnlink(struct ncclComm* comm);
 ncclResult_t ncclProxyDestroy(struct ncclComm* comm);
 
-ncclResult_t mscclSaveProxy(struct ncclComm* comm, struct ncclChannel* channel, int type, int peer, struct ncclProxyOp* op, int connIndex);
 #endif

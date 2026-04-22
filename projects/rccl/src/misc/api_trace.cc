@@ -2,6 +2,9 @@
 #include "api_trace.h"
 #include "core.h"
 #include "nccl.h"
+#include "collectives.h"
+#include "nvtx_payload_schemas.h"
+#include "recorder.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -27,11 +30,11 @@ ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t count,
                    cudaStream_t stream);
 
 ncclResult_t
-ncclAllToAll_impl(const void* sendbuff, void* recvbuff, size_t count,
+ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t count,
                   ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
 
 ncclResult_t
-ncclAllToAllv_impl(const void* sendbuff, const size_t sendcounts[],
+ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
                    const size_t sdispls[], void* recvbuff, const size_t recvcounts[],
                    const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm,
                    hipStream_t stream);
@@ -138,20 +141,6 @@ ncclResult_t
 ncclMemFree_impl(void* ptr);
 
 ncclResult_t
-mscclLoadAlgo_impl(const char* mscclAlgoFilePath, mscclAlgoHandle_t* mscclAlgoHandle,
-                   int rank);
-
-ncclResult_t
-mscclRunAlgo_impl(const void* sendBuff, const size_t sendCounts[], const size_t sDisPls[],
-                  void* recvBuff, const size_t recvCounts[], const size_t rDisPls[],
-                  size_t count, ncclDataType_t dataType, int root, int peer,
-                  ncclRedOp_t op, mscclAlgoHandle_t mscclAlgoHandle, ncclComm_t comm,
-                  hipStream_t stream);
-
-ncclResult_t
-mscclUnloadAlgo_impl(mscclAlgoHandle_t mscclAlgoHandle);
-
-ncclResult_t
 ncclCommRegister_impl(const ncclComm_t comm, void* buff, size_t size, void** handle);
 
 ncclResult_t
@@ -167,6 +156,53 @@ ncclResult_t
 ncclAllReduceWithBias_impl(const void* sendbuff, void* recvbuff, size_t count,
                    ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
                    cudaStream_t stream, const void* acc);
+
+ncclResult_t
+mscclLoadAlgo_impl(const char* mscclAlgoFilePath, mscclAlgoHandle_t* mscclAlgoHandle, int rank)
+{
+  (void)mscclAlgoFilePath;
+  (void)mscclAlgoHandle;
+  (void)rank;
+  rccl::Recorder::instance().record("mscclLoadAlgo");
+  WARN("MSCCL support has been removed from RCCL; mscclLoadAlgo has no effect.");
+  return ncclSuccess;
+}
+
+ncclResult_t
+mscclRunAlgo_impl(const void* sendBuff, const size_t sendCounts[], const size_t sDisPls[],
+                  void* recvBuff, const size_t recvCounts[], const size_t rDisPls[],
+                  size_t count, ncclDataType_t dataType, int root, int peer, ncclRedOp_t op,
+                  mscclAlgoHandle_t mscclAlgoHandle, ncclComm_t comm, hipStream_t stream)
+{
+  (void)sendBuff;
+  (void)sendCounts;
+  (void)sDisPls;
+  (void)recvBuff;
+  (void)recvCounts;
+  (void)rDisPls;
+  (void)count;
+  (void)dataType;
+  (void)root;
+  (void)peer;
+  (void)op;
+  (void)mscclAlgoHandle;
+  (void)comm;
+  (void)stream;
+  rccl::Recorder::instance().record("mscclRunAlgo");
+  NVTX3_FUNC_WITH_PARAMS(MSCCL, NcclNvtxParamsMSCCL,
+    NVTX3_PAYLOAD(0, count * ncclTypeSize(dataType), op, dataType));
+  WARN("MSCCL support has been removed from RCCL; mscclRunAlgo has no effect.");
+  return ncclSuccess;
+}
+
+ncclResult_t
+mscclUnloadAlgo_impl(mscclAlgoHandle_t mscclAlgoHandle)
+{
+  (void)mscclAlgoHandle;
+  rccl::Recorder::instance().record("mscclUnloadAlgo");
+  WARN("MSCCL support has been removed from RCCL; mscclUnloadAlgo has no effect.");
+  return ncclSuccess;
+}
 
 namespace rccl
 {
@@ -231,11 +267,13 @@ RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclAllReduceWithBias_fn, 37);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommShrink_fn, 38);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommWindowRegister_fn, 39);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommWindowDeregister_fn, 40);
+RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclAlltoAll_fn, 41);
+RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclAlltoAllv_fn, 42);
 // DO NOT REORDER, ADD NEW ITEMS HERE
 
 #undef RCCL_ASSERT_OFFSET
 
-static_assert(sizeof(rcclApiFuncTable) == compute_table_size(41),
+static_assert(sizeof(rcclApiFuncTable) == compute_table_size(43),
               "Update table major/step version and add a new offset assertion if this "
               "fails to compile");
 
@@ -248,8 +286,8 @@ RcclGetFunctionTable_impl()
         new(m_buffer.data()) rcclApiFuncTable{ sizeof(rcclApiFuncTable),
                                                &ncclAllGather_impl,
                                                &ncclAllReduce_impl,
-                                               &ncclAllToAll_impl,
-                                               &ncclAllToAllv_impl,
+                                               nullptr,
+                                               nullptr,
                                                &ncclBroadcast_impl,
                                                &ncclGather_impl,
                                                &ncclReduce_impl,
@@ -286,7 +324,9 @@ RcclGetFunctionTable_impl()
                                                &ncclAllReduceWithBias_impl,
                                                &ncclCommShrink_impl,
                                                &ncclCommWindowRegister_impl,
-                                               &ncclCommWindowDeregister_impl
+                                               &ncclCommWindowDeregister_impl,
+                                               &ncclAlltoAll_impl,
+                                               &ncclAlltoAllv_impl
                                                // DO NOT REORDER, ADD NEW ITEMS HERE
                                              };
 
@@ -331,13 +371,21 @@ NCCL_API(ncclResult_t, ncclAllReduce, const void* sendbuff, void* recvbuff, size
 NCCL_API(ncclResult_t, ncclAllReduceWithBias, const void* sendbuff, void* recvbuff, size_t count,
          ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, hipStream_t stream, const void* acc);
 
-NCCL_API(ncclResult_t, ncclAllToAll, const void* sendbuff, void* recvbuff, size_t count,
+NCCL_API(ncclResult_t, ncclAlltoAll, const void* sendbuff, void* recvbuff, size_t count,
          ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
 
-NCCL_API(ncclResult_t, ncclAllToAllv, const void* sendbuff, const size_t sendcounts[],
+NCCL_API(ncclResult_t, ncclAllToAll, const void* sendbuff, void* recvbuff, size_t count,
+        ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
+
+NCCL_API(ncclResult_t, ncclAlltoAllv, const void* sendbuff, const size_t sendcounts[],
          const size_t sdispls[], void* recvbuff, const size_t recvcounts[],
          const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm,
          hipStream_t stream);
+
+NCCL_API(ncclResult_t, ncclAllToAllv, const void* sendbuff, const size_t sendcounts[],
+        const size_t sdispls[], void* recvbuff, const size_t recvcounts[],
+        const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm,
+        hipStream_t stream);
 
 NCCL_API(ncclResult_t, ncclBroadcast, const void* sendbuff, void* recvbuff, size_t count,
          ncclDataType_t datatype, int root, ncclComm_t comm, hipStream_t stream);
@@ -458,11 +506,30 @@ ncclAllReduceWithBias(const void* sendbuff, void* recvbuff, size_t count, ncclDa
 }
 
 ncclResult_t
+ncclAlltoAll(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+             ncclComm_t comm, hipStream_t stream)
+{
+    return ::rccl::RcclGetFunctionTable()->ncclAlltoAll_fn(sendbuff, recvbuff, count,
+                                                           datatype, comm, stream);
+}
+
+ncclResult_t
 ncclAllToAll(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
              ncclComm_t comm, hipStream_t stream)
 {
-    return ::rccl::RcclGetFunctionTable()->ncclAllToAll_fn(sendbuff, recvbuff, count,
+    WARN("Please note that ncclAllToAll is deprecated, please use ncclAlltoAll instead");
+    return ::rccl::RcclGetFunctionTable()->ncclAlltoAll_fn(sendbuff, recvbuff, count,
                                                            datatype, comm, stream);
+}
+
+ncclResult_t
+ncclAlltoAllv(const void* sendbuff, const size_t sendcounts[], const size_t sdispls[],
+              void* recvbuff, const size_t recvcounts[], const size_t rdispls[],
+              ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream)
+{
+    return ::rccl::RcclGetFunctionTable()->ncclAlltoAllv_fn(sendbuff, sendcounts, sdispls,
+                                                            recvbuff, recvcounts, rdispls,
+                                                            datatype, comm, stream);
 }
 
 ncclResult_t
@@ -470,7 +537,8 @@ ncclAllToAllv(const void* sendbuff, const size_t sendcounts[], const size_t sdis
               void* recvbuff, const size_t recvcounts[], const size_t rdispls[],
               ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream)
 {
-    return ::rccl::RcclGetFunctionTable()->ncclAllToAllv_fn(sendbuff, sendcounts, sdispls,
+    WARN("Please note that ncclAllToAllv is deprecated, please use ncclAlltoAllv instead");
+    return ::rccl::RcclGetFunctionTable()->ncclAlltoAllv_fn(sendbuff, sendcounts, sdispls,
                                                             recvbuff, recvcounts, rdispls,
                                                             datatype, comm, stream);
 }

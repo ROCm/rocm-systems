@@ -24,7 +24,7 @@
 #define SRC_CORE_PM4_FACTORY_H_
 
 #include <assert.h>
-#include <hsa/hsa_ext_amd.h>
+#include "hsa_includes.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -191,16 +191,15 @@ class Pm4Factory {
 
   virtual size_t GetNumEvents(uint32_t block_name) const {
     size_t se_number = GetShaderEnginesNumber() / GetXccNumber();
+    size_t sa_number = GetShaderArraysNumber();
     size_t block_samples_count = 1;
     auto* block_info = GetBlockInfo(block_name);
 
     if (block_info->attr & CounterBlockSeAttr)
       block_samples_count *= se_number;
     if (block_info->attr & CounterBlockSaAttr)
-      block_samples_count *= 2;
+      block_samples_count *= sa_number;
     if (block_info->attr & CounterBlockWgpAttr)
-      block_samples_count *= GetNumWGPs();
-    if ((block_info->attr & CounterBlockSqAttr) && IsGFX11()) // TODO: Move to CounterBlockWgpAttr
       block_samples_count *= GetNumWGPs();
     return block_samples_count;
   }

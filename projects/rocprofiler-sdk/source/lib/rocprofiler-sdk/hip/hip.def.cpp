@@ -650,6 +650,38 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetParamInfo, hipKernelGetParamInfo, hipKernelGetParamInfo_fn, kernel, paramIndex, paramOffset, paramSize);
 #endif
 
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 21
+HIP_API_INFO_DEFINITION_0(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipExtDisableLogging, hipExtDisableLogging, hipExtDisableLogging_fn);
+HIP_API_INFO_DEFINITION_0(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipExtEnableLogging, hipExtEnableLogging, hipExtEnableLogging_fn);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipExtSetLoggingParams, hipExtSetLoggingParams, hipExtSetLoggingParams_fn, log_level, log_size, log_mask);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 22
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemSetMemPool, hipMemSetMemPool, hipMemSetMemPool_fn, location, type, pool);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemGetMemPool, hipMemGetMemPool, hipMemGetMemPool_fn, pool, location, type);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 23
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMipmappedArrayGetMemoryRequirements, hipMipmappedArrayGetMemoryRequirements, hipMipmappedArrayGetMemoryRequirements_fn, memoryRequirements, mipmap, device);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 24
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetAttribute, hipKernelGetAttribute, hipKernelGetAttribute_fn, pi, attrib, kernel, dev);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 25
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelSetAttribute, hipKernelSetAttribute, hipKernelSetAttribute_fn, attrib, value, kernel, dev);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetFunction, hipKernelGetFunction, hipKernelGetFunction_fn, pFunc, kernel);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 26
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemPrefetchBatchAsync, hipMemPrefetchBatchAsync, hipMemPrefetchBatchAsync_fn, dev_ptrs, sizes, count, prefetch_locs, prefetch_loc_idxs, num_prefetch_locs, flags, stream);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 27
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipOccupancyMaxPotentialClusterSize, hipOccupancyMaxPotentialClusterSize, hipOccupancyMaxPotentialClusterSize_fn, clusterSize, f, config);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipOccupancyMaxActiveClusters, hipOccupancyMaxActiveClusters, hipOccupancyMaxActiveClusters_fn, numClusters, f, config);
+#endif
 // clang-format on
 
 #else

@@ -17,22 +17,22 @@ Panel Config:
           avg: AVG((SQ_INSTS_LDS / $denom))
           min: MIN((SQ_INSTS_LDS / $denom))
           max: MAX((SQ_INSTS_LDS / $denom))
-          unit: (instr + $normUnit)
+          unit: (Instructions + $normUnit)
         SALU:
           avg: AVG((SQ_INSTS_SALU / $denom))
           min: MIN((SQ_INSTS_SALU / $denom))
           max: MAX((SQ_INSTS_SALU / $denom))
-          unit: (instr + $normUnit)
+          unit: (Instructions + $normUnit)
         SMEM:
           avg: AVG((SQ_INSTS_SMEM / $denom))
           min: MIN((SQ_INSTS_SMEM / $denom))
           max: MAX((SQ_INSTS_SMEM / $denom))
-          unit: (instr + $normUnit)
+          unit: (Instructions + $normUnit)
         Branch:
           avg: AVG((SQ_INSTS_BRANCH / $denom))
           min: MIN((SQ_INSTS_BRANCH / $denom))
           max: MAX((SQ_INSTS_BRANCH / $denom))
-          unit: (instr + $normUnit)
+          unit: (Instructions + $normUnit)
   - metric_table:
       id: 1002
       title: VALU Arithmetic Instruction Mix
@@ -57,42 +57,42 @@ Panel Config:
           avg: AVG((TA_FLAT_WAVEFRONTS_sum / $denom))
           min: MIN((TA_FLAT_WAVEFRONTS_sum / $denom))
           max: MAX((TA_FLAT_WAVEFRONTS_sum / $denom))
-          unit: (instr + $normUnit)
+          unit: (Instructions + $normUnit)
         Global/Generic Read:
           avg: AVG((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
           min: MIN((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
           max: MAX((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
-          unit: (instr + $normUnit)
+          unit: (Instructions + $normUnit)
         Global/Generic Write:
           avg: AVG((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
           min: MIN((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
           max: MAX((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
-          unit: (instr + $normUnit)
+          unit: (Instructions + $normUnit)
         Global/Generic Atomic:
           avg: AVG((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
           min: MIN((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
           max: MAX((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
-          unit: (instr + $normUnit)
+          unit: (Instructions + $normUnit)
         Spill/Stack Instr:
           avg: AVG((TA_BUFFER_WAVEFRONTS_sum / $denom))
           min: MIN((TA_BUFFER_WAVEFRONTS_sum / $denom))
           max: MAX((TA_BUFFER_WAVEFRONTS_sum / $denom))
-          unit: (instr + $normUnit)
+          unit: (Instructions + $normUnit)
         Spill/Stack Read:
           avg: AVG((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
           min: MIN((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
           max: MAX((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
-          unit: (instr + $normUnit)
+          unit: (Instructions + $normUnit)
         Spill/Stack Write:
           avg: AVG((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
           min: MIN((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
           max: MAX((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
-          unit: (instr + $normUnit)
+          unit: (Instructions + $normUnit)
         Spill/Stack Atomic:
           avg: AVG((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
           min: MIN((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
           max: MAX((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
-          unit: (instr + $normUnit)
+          unit: (Instructions + $normUnit)
   - metric_table:
       id: 1004
       title: MFMA Arithmetic Instruction Mix

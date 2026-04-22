@@ -1823,9 +1823,10 @@ struct kfd_ioctl_pc_sample_args
 #define KFD_IOC_PROFILER_VERSION_NUM 1
 enum kfd_profiler_ops
 {
-    KFD_IOC_PROFILER_PMC       = 0,
-    KFD_IOC_PROFILER_PC_SAMPLE = 1,
-    KFD_IOC_PROFILER_VERSION   = 2,
+    KFD_IOC_PROFILER_PMC         = 0,
+    KFD_IOC_PROFILER_PC_SAMPLE   = 1,
+    KFD_IOC_PROFILER_VERSION     = 2,
+    KFD_IOC_PROFILER_PTL_CONTROL = 3,
 };
 
 /**
@@ -1838,6 +1839,12 @@ struct kfd_ioctl_pmc_settings
     __u32 perfcount_enable; /* Force Perfcount Enable for queues on GPU */
 };
 
+struct kfd_ioctl_ptl_control
+{
+    __u32 gpu_id; /* This is the user_gpu_id */
+    __u32 enable; /* 1 to enable PTL, 0 to disable PTL */
+};
+
 struct kfd_ioctl_profiler_args
 {
     __u32 op; /* kfd_profiler_op */
@@ -1846,6 +1853,7 @@ struct kfd_ioctl_profiler_args
         struct kfd_ioctl_pc_sample_args pc_sample;
         struct kfd_ioctl_pmc_settings   pmc;
         __u32                           version; /* KFD_IOC_PROFILER_VERSION_NUM */
+        struct kfd_ioctl_ptl_control    ptl;
     };
 };
 

@@ -1,29 +1,14 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "rocprof-sys-run.hpp"
 
+#include "common/argument_registration.hpp"
+#include "common/common_utils.hpp"
 #include "common/defines.h"
+#include "common/env_vars.hpp"
 #include "common/environment.hpp"
+#include "common/json_config.hpp"
 #include "common/path.hpp"
 #include "core/argparse.hpp"
 #include "core/timemory.hpp"
@@ -39,19 +24,14 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
-#include <cctype>
-#include <cmath>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <iostream>
-#include <regex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <sys/wait.h>
 #include <unistd.h>
-#include <vector>
 
 namespace color    = ::tim::log::color;
 namespace filepath = ::tim::filepath;  // NOLINT
@@ -59,19 +39,20 @@ namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace signals  = ::tim::signals;
 namespace path     = rocprofsys::common::path;
+namespace env      = rocprofsys::env_vars;
 using settings     = ::rocprofsys::settings;
 using namespace ::timemory::join;
 using ::tim::get_env;
 using ::tim::log::stream;
 
-namespace std
+int
+get_verbose(parser_data_t& _data)
 {
-std::string
-to_string(bool _v)
-{
-    return (_v) ? "true" : "false";
+    auto&       verbose    = _data.verbose;
+    const auto* _log_level = std::getenv(env::LOG_LEVEL.data());
+    if(_log_level != nullptr) verbose = env::log_level_to_verbose(_log_level);
+    return verbose;
 }
-}  // namespace std
 
 namespace
 {
@@ -79,16 +60,13 @@ using rocprofsys::common::update_mode;
 
 auto original_envs = std::unordered_set<std::string>{};
 
-int
-get_verbose(parser_data_t& _data)
+// Export configuration to JSON file or stdout
+void
+export_config(const parser_data_t& _parser_data, const std::string& preset_name,
+              const std::string& output_file = "")
 {
-    auto& verbose = _data.verbose;
-    verbose       = get_env("ROCPROFSYS_CAUSAL_VERBOSE",
-                            get_env<int>("ROCPROFSYS_VERBOSE", verbose, false));
-    auto _debug   = get_env("ROCPROFSYS_CAUSAL_DEBUG",
-                            get_env<bool>("ROCPROFSYS_DEBUG", false, false));
-    if(_debug) verbose += 8;
-    return verbose;
+    rocprofsys::common_utils::export_config(_parser_data.current, original_envs,
+                                            preset_name, "run", output_file);
 }
 
 parser_data_t&
@@ -109,9 +87,9 @@ get_initial_environment(parser_data_t& _data)
     auto _libexecpath = path::realpath(path::get_internal_script_path());
     if(!_libexecpath.empty())
     {
-        rocprofsys::common::update_env(_data.current, "ROCPROFSYS_SCRIPT_PATH",
-                                       _libexecpath, update_mode::REPLACE, ":",
-                                       _data.updated, original_envs);
+        rocprofsys::common::update_env(_data.current, env::SCRIPT_PATH, _libexecpath,
+                                       update_mode::REPLACE, ":", _data.updated,
+                                       original_envs);
     }
 
     const bool verbose = (get_verbose(_data) > 0);
@@ -141,18 +119,6 @@ toggle_suppression(std::tuple<bool, bool> _inp)
 // disable suppression when exe loads but store original values for restoration later
 auto initial_suppression = toggle_suppression({ true, true });
 }  // namespace
-
-void
-print_command(const parser_data_t& _data, std::string_view _prefix)
-{
-    auto        verbose = _data.verbose;
-    const auto& _argv   = _data.command;
-    if(verbose >= 1)
-        stream(std::cout, color::info())
-            << _prefix << "Executing '" << join(array_config{ " " }, _argv) << "'...\n";
-
-    std::cerr << color::end() << std::flush;
-}
 
 void
 prepare_command_for_run(char* _exe, parser_data_t& _data)
@@ -192,58 +158,10 @@ prepare_environment_for_run(parser_data_t& _data)
         rocprofsys::argparse::add_ld_preload(_data);
         rocprofsys::argparse::add_ld_library_path(_data);
     }
-}
 
-void
-print_updated_environment(parser_data_t& _data, std::string_view _prefix)
-{
-    auto _verbose = get_verbose(_data);
+    rocprofsys::argparse::add_torch_library_path(_data, _data.verbose > 0);
 
-    if(_verbose < 0) return;
-
-    auto        _env          = _data.current;
-    const auto& _updated_envs = _data.updated;
-
-    std::sort(_env.begin(), _env.end(), [](auto* _lhs, auto* _rhs) {
-        if(!_lhs) return false;
-        if(!_rhs) return true;
-        return std::string_view{ _lhs } < std::string_view{ _rhs };
-    });
-
-    std::vector<std::string_view> _updates = {};
-    std::vector<std::string_view> _general = {};
-
-    for(auto* itr : _env)
-    {
-        if(itr == nullptr) continue;
-
-        auto _is_omni = (std::string_view{ itr }.find("ROCPROFSYS") == 0);
-        auto _updated = false;
-        for(const auto& vitr : _updated_envs)
-        {
-            if(std::string_view{ itr }.find(vitr) == 0)
-            {
-                _updated = true;
-                break;
-            }
-        }
-
-        if(_updated)
-            _updates.emplace_back(itr);
-        else if(_verbose >= 1 && _is_omni)
-            _general.emplace_back(itr);
-    }
-
-    if(_general.size() + _updates.size() == 0 || _verbose < 0) return;
-
-    std::cerr << std::endl;
-
-    for(auto& itr : _general)
-        stream(std::cerr, color::source()) << _prefix << itr << "\n";
-    for(auto& itr : _updates)
-        stream(std::cerr, color::source()) << _prefix << itr << "\n";
-
-    std::cerr << color::end() << std::flush;
+    rocprofsys::common::consolidate_env_entries(_data.current);
 }
 
 parser_data_t&
@@ -271,8 +189,7 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data, bool& _fork_exec)
             std::cerr << std::flush;
         }
 
-        p.print_help();
-        exit(_pec);
+        rocprofsys::common_utils::dispatch_help(p, "run", _pec);
     };
 
     get_initial_environment(_parser_data);
@@ -298,7 +215,32 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data, bool& _fork_exec)
     signals::disable_signal_detection(signals::signal_settings::get_enabled());
 
     const auto* _desc = R"desc(
-    Command line interface to rocprof-sys configuration.
+Execute instrumented binaries with ROCm Systems Profiler configuration.
+QUICK REFERENCE:
+  Presets:  --preset=balanced (default), --preset=profile-only, --preset=trace-hpc, --preset=workload-trace
+  Domains:  --gpu, --rocm, --cpu, --parallel (composable with presets)
+  Output:   Results saved to rocprof-sys-output/ directory
+  Visualize: Open perfetto-trace.proto in https://ui.perfetto.dev
+EXAMPLES:
+  Quick Start:
+    rocprof-sys-run --preset=balanced -- ./myapp.inst
+  Workload-Specific Presets:
+    rocprof-sys-run --preset=trace-hpc -- ./hpc_app.inst         # HPC/MPI/OpenMP
+    rocprof-sys-run --preset=workload-trace -- ./gpu_app.inst    # AI/ML/GPU workloads
+    rocprof-sys-run --preset=profile-only -- ./myapp.inst        # Minimal overhead
+  Domain Flags (composable):
+    rocprof-sys-run --gpu -- ./myapp.inst                        # GPU metrics
+    rocprof-sys-run --preset=balanced --gpu=temp,power -- ./app  # Preset + specific GPU metrics
+    rocprof-sys-run --rocm=hip,kernel --cpu=100 -- ./app         # ROCm APIs + CPU sampling
+    rocprof-sys-run --parallel=mpi,openmp -- ./app               # MPI + OpenMP profiling
+  Custom Configuration File:
+    rocprof-sys-run --preset=./my-config.json -- ./myapp.inst
+  Export Configuration:
+    rocprof-sys-run --preset=balanced --gpu --export-config > my-config.json
+INSTRUMENTATION WORKFLOW:
+  1. Instrument: rocprof-sys-instrument -o app.inst -- ./app
+  2. Run:        rocprof-sys-run --preset=balanced -- ./app.inst
+  3. Analyze:    cat rocprof-sys-output/wall_clock.txt
     )desc";
 
     auto parser = parser_t{ basename(argv[0]), _desc };
@@ -308,7 +250,7 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data, bool& _fork_exec)
         exit(EXIT_FAILURE);
     });
 
-    parser.enable_help();
+    parser.enable_help().count(-1).min_count(0).max_count(1).dtype("topic");
     parser.enable_version("rocprof-sys-run", ROCPROFSYS_ARGPARSE_VERSION_INFO);
 
     auto _cols = std::get<0>(console::get_columns());
@@ -322,6 +264,17 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data, bool& _fork_exec)
     rocprofsys::argparse::add_core_arguments(parser, _parser_data);
     rocprofsys::argparse::add_extended_arguments(parser, _parser_data);
 
+    // Track preset and domain flag state for validation and export
+    rocprofsys::common_utils::domain_flag_state domain_state;
+
+    // Register shared preset and domain arguments
+    rocprofsys::common_utils::register_preset_and_domain_arguments(
+        parser, "run", domain_state, [&](std::string_view key, std::string_view val) {
+            rocprofsys::common::update_env(_parser_data.current, std::string{ key },
+                                           std::string{ val }, update_mode::REPLACE, ":",
+                                           _parser_data.updated, original_envs);
+        });
+
     parser.start_group("EXECUTION OPTIONS", "");
     parser.add_argument({ "--fork" }, "Execute via fork + execvpe instead of execvpe")
         .min_count(0)
@@ -329,36 +282,31 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data, bool& _fork_exec)
         .dtype("boolean")
         .action([&](parser_t& p) { _fork_exec = p.get<bool>("fork"); });
 
-    auto  _inpv = std::vector<char*>{};
-    auto& _outv = _parser_data.command;
-    bool  _hash = false;
-    for(int i = 0; i < argc; ++i)
-    {
-        if(argv[i] == nullptr)
-        {
-            continue;
-        }
-        else if(_hash)
-        {
-            _outv.emplace_back(strdup(argv[i]));
-        }
-        else if(std::string_view{ argv[i] } == "--")
-        {
-            _hash = true;
-        }
-        else
-        {
-            _inpv.emplace_back(strdup(argv[i]));
-        }
-    }
+    auto args =
+        rocprofsys::common_utils::translate_arguments(argc, argv, domain_state.registry);
+    _parser_data.command = std::move(args.command);
 
-    auto _cerr = parser.parse_args(_inpv.size(), _inpv.data());
+    auto _cerr = parser.parse_args(args.argv_ptrs.size(), args.argv_ptrs.data());
     if(help_check(parser, argc, argv))
         help_action(parser);
     else if(_cerr)
         throw std::runtime_error(_cerr.what());
 
     tim::log::monochrome() = _parser_data.monochrome;
+
+    // Handle export-config: output configuration and exit
+    if(domain_state.export_config_requested)
+    {
+        export_config(_parser_data, domain_state.active_preset_name,
+                      domain_state.export_config_file);
+        throw rocprofsys::common_utils::cli_done{ EXIT_SUCCESS };
+    }
+
+    rocprofsys::common_utils::run_post_parse_validation(
+        "run", domain_state.active_preset_name, domain_state.gpu_domain_enabled,
+        domain_state.rocm_domain_enabled, domain_state.cpu_domain_enabled,
+        domain_state.parallel_domain_enabled, _parser_data.verbose,
+        domain_state.registry);
 
     return _parser_data;
 }
@@ -376,7 +324,18 @@ parse_command(int argc, char** argv, parser_data_t& _parser_data)
     bool  _hash = false;
     for(int i = 1; i < argc; ++i)
     {
-        _outv.emplace_back(strdup(argv[i]));
+        if(argv[i] == nullptr)
+        {
+            continue;
+        }
+        else if(_hash)
+        {
+            _outv.emplace_back(strdup(argv[i]));
+        }
+        else if(std::string_view{ argv[i] } == "--")
+        {
+            _hash = true;
+        }
     }
 
     return _parser_data;

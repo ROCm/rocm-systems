@@ -150,7 +150,7 @@ static ncclResult_t canConnect(int* ret, struct ncclComm* comm, struct ncclTopoG
 // Returns the flags to be used by a call to cuMemGetHandleForAddressRange.
 static inline int getHandleForAddressRangeFlags(ncclTopoGdrMode useGdr) {
   int flags = 0;
-#if CUDA_VERSION >= 12080
+#if CUDA_VERSION >= 12080 || HIP_VERSION >= 71260540
   // Force mapping on PCIe on systems with both PCI and C2C attachments.
   if (useGdr == ncclTopoGdrModePci) flags = CU_MEM_RANGE_FLAG_DMA_BUF_MAPPING_TYPE_PCIE;
 #endif
@@ -196,7 +196,7 @@ static ncclResult_t recvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph
   NCCLCHECK(ncclTopoCheckGdr(comm->topo, myInfo->rank, netId, 0, &req.useGdr));
   recv->conn.flags |= req.useGdr ? NCCL_DIRECT_NIC : 0;
   // Determine whether we need to flush the GDR buffer on recv or not
-  if (req.useGdr) NCCLCHECK(ncclTopoNeedFlush(comm, netId, req.netDev, myInfo->rank, &req.needFlush));
+  if (req.useGdr) NCCLCHECK(ncclTopoNeedFlush(comm, netId, req.netDev, myInfo->rank, false, &req.needFlush));
 
   recv->proxyConn.tpLocalRank = comm->topParentLocalRanks[comm->localRank];
   NCCLCHECK(ncclProxyConnect(comm, TRANSPORT_COLLNET, 0, myInfo->rank, &recv->proxyConn));
@@ -358,7 +358,7 @@ static ncclResult_t sharedListen(struct ncclProxyState* proxyState, int netDev, 
     collNet->resources = resources;
   }
   if (resources->collNetComms[netDev] == NULL)
-    NCCLCHECK(proxyState->ncclCollNet->listen(netDev, collNetHandle, resources->collNetListenComms + netDev));
+    NCCLCHECK(proxyState->ncclCollNet->listen(proxyState->collNetContext, netDev, collNetHandle, resources->collNetListenComms + netDev));
   return ncclSuccess;
 }
 
@@ -526,21 +526,36 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
 
   int dmabuf_fd = -1;
   (void)dmabuf_fd; /*compiler warnings fix - unused variable*/
-#if CUDA_VERSION >= 11070
+  bool needReg = true;
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
   /* DMA-BUF support */
-  if (resources->useGdr && resources->useDmaBuf) {
-    CUCHECK(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)mapMem->cpuPtr, mapMem->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)));
+  if (resources->useGdr && resources->useDmaBuf && ncclCuMemEnable()) {
+    CUCHECKGOTO(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)mapMem->cpuPtr, mapMem->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)), ret, peermem_send);
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
                                                        NCCL_PTR_CUDA, 0ULL, dmabuf_fd,
                                                        &resources->sendMhandles[NCCL_PROTO_SIMPLE]),
-                  ret, fail);
+                  ret, peermem_send);
     (void)close(dmabuf_fd);
-  } else // FALL-THROUGH to nv_peermem GDR path
+    needReg = false;
+  }
+peermem_send:
+#else
+  if (resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf && proxyState->ncclCollNet->regMrDmaBuf) {
+    uint64_t offset;
+    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)mapMem->cpuPtr, mapMem->size, &dmabuf_fd, &offset), ret, peermem_send);
+    NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
+                                                       NCCL_PTR_CUDA, offset, dmabuf_fd,
+                                                       &resources->sendMhandles[NCCL_PROTO_SIMPLE]),
+                  ret, peermem_send);
+    (void)close(dmabuf_fd);
+    needReg = false;
+  }
+peermem_send:
 #endif
-  {
-    NCCLCHECK(proxyState->ncclCollNet->regMr(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
+  if (needReg) {
+    NCCLCHECKGOTO(proxyState->ncclCollNet->regMr(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
                                             resources->useGdr ? NCCL_PTR_CUDA : NCCL_PTR_HOST,
-                                            &resources->sendMhandles[NCCL_PROTO_SIMPLE]));
+                                            &resources->sendMhandles[NCCL_PROTO_SIMPLE]), ret, fail);
   }
 
   *((struct connectMap**)respBuff) = &resources->map;
@@ -605,21 +620,36 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   
   int dmabuf_fd = -1;
   (void)dmabuf_fd; /*compiler warnings fix - unused variable*/
-#if CUDA_VERSION >= 11070
+  bool needReg = true;
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
   /* DMA-BUF support */
-  if (resources->useGdr && resources->useDmaBuf) {
-    CUCHECK(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)mapMem->cpuPtr, mapMem->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)));
+  if (resources->useGdr && resources->useDmaBuf && ncclCuMemEnable()) {
+    CUCHECKGOTO(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)mapMem->cpuPtr, mapMem->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)), ret, peermem_recv);
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
                                                        NCCL_PTR_CUDA, 0ULL, dmabuf_fd,
                                                        &resources->mhandles[NCCL_PROTO_SIMPLE]),
-                  ret, fail);
+                  ret, peermem_recv);
     (void)close(dmabuf_fd);
-  } else // FALL-THROUGH to nv_peermem GDR path
+    needReg = false;
+  }
+peermem_recv:
+#else
+  if (resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf && proxyState->ncclCollNet->regMrDmaBuf) {
+    uint64_t offset;
+    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)mapMem->cpuPtr, mapMem->size, &dmabuf_fd, &offset), ret, peermem_recv);
+    NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
+                                                       NCCL_PTR_CUDA, offset, dmabuf_fd,
+                                                       &resources->mhandles[NCCL_PROTO_SIMPLE]),
+                  ret, peermem_recv);
+    (void)close(dmabuf_fd);
+    needReg = false;
+  }
+peermem_recv:
 #endif
-  {
-    NCCLCHECK(proxyState->ncclCollNet->regMr(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
+  if (needReg) {
+    NCCLCHECKGOTO(proxyState->ncclCollNet->regMr(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
                                             resources->useGdr ? NCCL_PTR_CUDA : NCCL_PTR_HOST,
-                                            &resources->mhandles[NCCL_PROTO_SIMPLE]));
+                                            &resources->mhandles[NCCL_PROTO_SIMPLE]), ret, fail);
   }
 
   // Pass info to send side
@@ -1231,14 +1261,19 @@ ncclResult_t ncclCollnetLocalRegisterBuffer(struct ncclComm* comm, const void* u
   ncclResult_t ret = ncclSuccess;
   struct ncclReg *regRecord = NULL;
   bool isValid = false;
+  void *base = NULL;
+  size_t baseSize = 0;
 
   *outRegBufFlag = 0;
   *outHandle = NULL;
   if (comm && userbuff && buffSize > 0) {
     NCCLCHECKGOTO(ncclRegFind(comm, userbuff, buffSize, &regRecord), ret, fail);
     NCCLCHECKGOTO(ncclRegLocalIsValid(regRecord, &isValid), ret, fail);
-    if (isValid)
-      NCCLCHECKGOTO(collnetRegisterBuffer(comm, userbuff, buffSize, type, regRecord, outRegBufFlag, outHandle), ret, fail);
+    if (isValid) {
+      CUCHECKGOTO(cuMemGetAddressRange((CUdeviceptr *)&base, &baseSize, (CUdeviceptr)userbuff), ret, fail);
+      if ((uint64_t)base + baseSize < (uint64_t)userbuff + buffSize) goto exit;
+    }
+    NCCLCHECKGOTO(collnetRegisterBuffer(comm, userbuff, buffSize, type, regRecord, outRegBufFlag, outHandle), ret, fail);
   }
 exit:
   return ret;
@@ -1264,17 +1299,22 @@ ncclResult_t ncclCollnetGraphRegisterBuffer(struct ncclComm* comm, const void* u
   ncclResult_t ret = ncclSuccess;
   struct ncclCollnetCleanupCallback* record = NULL;
   struct ncclReg *regRecord = NULL;
-  void *baseSend = NULL;
-  size_t baseSendSize = 0;
+  void *base = NULL;
+  size_t baseSize = 0;
 
   *outRegBufFlag = 0;
   if (comm && userbuff && buffSize > 0) {
-    CUDACHECKGOTO(cuMemGetAddressRange((CUdeviceptr *)&baseSend, &baseSendSize, (CUdeviceptr)userbuff), ret, fail);
-    NCCLCHECKGOTO(ncclCommGraphRegister(comm, baseSend, baseSendSize, (void**)&regRecord), ret, fail);
+    CUCHECKGOTO(cuMemGetAddressRange((CUdeviceptr *)&base, &baseSize, (CUdeviceptr)userbuff), ret, fail);
+    if ((uint64_t)base + baseSize < (uint64_t)userbuff + buffSize) goto exit;
+    NCCLCHECKGOTO(ncclCommGraphRegister(comm, base, baseSize, (void**)&regRecord), ret, fail);
     NCCLCHECKGOTO(collnetRegisterBuffer(comm, userbuff, buffSize, type, regRecord, outRegBufFlag, outHandle), ret, fail);
 
     if (*outRegBufFlag) {
       record = (struct ncclCollnetCleanupCallback*)malloc(sizeof(struct ncclCollnetCleanupCallback));
+      if (record == nullptr) {
+        WARN("Failed to allocate collnet cleanup callback");
+        return ncclSystemError;
+      }
       record->base.fn = cleanupCollnet;
       record->comm = comm;
       record->reg = regRecord;
@@ -1310,19 +1350,27 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
   assert(respSize == sizeof(void*));
 
   int dmabuf_fd = -1;
-#if CUDART_VERSION >= 11070
+  #if CUDART_VERSION >= 11070 || HIP_VERSION >= 71260540
   /* DMA-BUF support */
-  if (resources->useGdr && resources->useDmaBuf) {
+  if (resources->useGdr && resources->useDmaBuf && ncclCuMemEnable()) {
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)), ret, peermem);
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, 0ULL, dmabuf_fd, &handle), ret, peermem);
+    (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
+    needReg = false;
+  }
+peermem:
+#else
+  if (resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf && proxyState->ncclCollNet->regMrDmaBuf) {
+    uint64_t offset;
+    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret, peermem);
+    NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, offset, dmabuf_fd, &handle), ret, peermem);
+    (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
     needReg = false;
   }
 peermem:
 #endif
-  if (dmabuf_fd != -1) {
-    (void)close(dmabuf_fd);
-    dmabuf_fd = -1;
-  }
   if (needReg) {
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMr(resources->collNetComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, &handle), ret, fail);
   }
@@ -1345,19 +1393,27 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
 
   assert(reqSize == sizeof(struct collnetRegInfo));
   assert(respSize == sizeof(void*));
-  #if CUDART_VERSION >= 11070
   int dmabuf_fd = -1;
+#if CUDART_VERSION >= 11070 || HIP_VERSION >= 71260540
   /* DMA-BUF support */
-  if (resources->useGdr && resources->useDmaBuf) {
+  if (resources->useGdr && resources->useDmaBuf && ncclCuMemEnable()) {
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)), ret, peermem);
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, 0ULL, dmabuf_fd, &handle), ret, peermem);
+    (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
     needReg = false;
   }
 peermem:
-  if (dmabuf_fd != -1) {
+#else
+  if (resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf && proxyState->ncclCollNet->regMrDmaBuf) {
+    uint64_t offset;
+    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret, peermem);
+    NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, offset, dmabuf_fd, &handle), ret, peermem);
     (void)close(dmabuf_fd);
     dmabuf_fd = -1;
+    needReg = false;
   }
+peermem:
 #endif
   if (needReg) {
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMr(resources->collNetComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, &handle), ret, fail);
@@ -1481,11 +1537,7 @@ ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTop
   ncclResult_t ret = ncclSuccess;
   int rank = comm->rank;
   int collNetSetupFail = 0;
-  // Find all head ranks
-  int nHeadsUnique = 0;
-  int* headsUnique = NULL;
   bool share;
-  struct ncclTopoGraph* directGraph = graphs[NCCL_ALGO_COLLNET_DIRECT];
 
   struct collnetShareInfo {
     int headPosition;
@@ -1493,20 +1545,30 @@ ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTop
   };
   struct collnetShareInfo* infos = NULL;
 
-  NCCLCHECKGOTO(ncclCalloc(&headsUnique, directGraph->nChannels), ret, fail);
-  { uint64_t mask = 0;
+  struct ncclTopoGraph* collNetGraph;
+
+  if (!comm->nvlsSupport) {
+    collNetGraph = graphs[NCCL_ALGO_COLLNET_DIRECT];
+    NCCLCHECKGOTO(ncclCalloc(&comm->collNetHeads, collNetGraph->nChannels), ret, fail);
+    uint64_t mask = 0;
     // Head GPU index is always 0
-    for (int c = 0; c < directGraph->nChannels; c++) {
-      int head = directGraph->intra[c * comm->localRanks + 0];
+    for (int c = 0; c < collNetGraph->nChannels; c++) {
+      int head = collNetGraph->intra[c * comm->localRanks + 0];
       assert(comm->rankToNode[head] == comm->node);
       uint64_t mask0 = mask;
       mask |= 1ull<<comm->rankToLocalRank[head];
-      if (mask != mask0) headsUnique[nHeadsUnique++] = head;
+      if (mask != mask0) comm->collNetHeads[comm->collNetHeadsNum++] = head;
     }
+  } else {
+    // Use the NVLS graph to get the head ranks for collnet setup. comm->nvlsHeads already has unique heads.
+    // nHeads is the same on all the channels, see connectNvls function
+    collNetGraph = graphs[NCCL_ALGO_NVLS];
+    NCCLCHECKGOTO(ncclCalloc(&comm->collNetHeads, collNetGraph->nChannels), ret, fail);
+    comm->collNetHeadsNum = comm->channels[0].nvls.nHeads;
+    // Copy over comm->collNetHeads from comm->nvlsHeads since they are freed in different places.
+    memcpy(comm->collNetHeads, comm->nvlsHeads, comm->collNetHeadsNum * sizeof(int));
   }
 
-  comm->collNetHeads = headsUnique;
-  comm->collNetHeadsNum = nHeadsUnique;
   if (parent && parent->config.collnetEnable && parent->nNodes == comm->nNodes) {
     if (!parent->shareResources) {
       collNetSetupFail = 1;
@@ -1516,7 +1578,7 @@ ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTop
     /* check whether child can share collnet resources of parent. Since parent builds each collnet communicator
      * based on heads with the same head position in each node, as long as the collnet heads of child comm
      * can match parent's heads, we can let child communicator share parent's collnet resources. */
-    for (int h = 0; h < nHeadsUnique; ++h) {
+    for (int h = 0; h < comm->collNetHeadsNum; ++h) {
       int prev = INT_MIN;
       struct collnetShareInfo* myinfo;
 
@@ -1524,7 +1586,7 @@ ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTop
       myinfo = infos + comm->rank;
       memset(myinfo, 0, sizeof(struct collnetShareInfo));
       /* find the child head position in parent collnet heads. */
-      if (headsUnique[h] == comm->rank) {
+      if (comm->collNetHeads[h] == comm->rank) {
         myinfo->headPosition = -1;
         myinfo->isMaster = 1;
         for (int th = 0; th < parent->collNetHeadsNum; ++th)
@@ -1575,11 +1637,11 @@ ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTop
     for (int c = 0; c < comm->nChannels; c++) {
       struct ncclChannel* channel = comm->channels + c;
       NCCLCHECKGOTO(initCollnetChannel(comm, c, parent, false), ret, fail);
-      for (int h = 0; h < nHeadsUnique; h++) {
-        const int head = headsUnique[h];
+      for (int h = 0; h < comm->collNetHeadsNum; h++) {
+        const int head = comm->collNetHeads[h];
         ncclConnect connect;
-        collNetSetupFail |= ncclTransportCollNetSetup(comm, directGraph, channel, head, head, h, collNetRecv, &connect);
-        if (!collNetSetupFail) collNetSetupFail |= ncclTransportCollNetSetup(comm, directGraph, channel, head, head, h, collNetSend, &connect);
+        collNetSetupFail |= ncclTransportCollNetSetup(comm, collNetGraph, channel, head, head, h, collNetRecv, &connect);
+        if (!collNetSetupFail) collNetSetupFail |= ncclTransportCollNetSetup(comm, collNetGraph, channel, head, head, h, collNetSend, &connect);
       }
       // Verify CollNet setup across ranks after trying the first channel
       if (c == 0) {
@@ -1600,7 +1662,7 @@ ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTop
       bool isHead = false;
       matrix = nullptr;
       NCCLCHECKGOTO(ncclCalloc(&matrix, comm->nRanks), ret, matrix_end);
-      for (int h = 0; h < nHeadsUnique; h++) isHead |= (headsUnique[h] == comm->rank);
+      for (int h = 0; h < comm->collNetHeadsNum; h++) isHead |= (comm->collNetHeads[h] == comm->rank);
       if (isHead) {
         for (int ty=0; ty < ncclNumTypes; ty++) {
           for (int op=0; op < 4; op++) {

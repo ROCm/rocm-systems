@@ -27,7 +27,7 @@
 
 class TestVoltRead : public TestBase {
  public:
-    TestVoltRead();
+  TestVoltRead();
 
   // @Brief: Destructor for test case of TestVOltRead
   virtual ~TestVoltRead();
@@ -38,7 +38,7 @@ class TestVoltRead : public TestBase {
   // @Brief: Core measurement execution
   virtual void Run();
 
-  // @Brief: Clean up and retrive the resource
+  // @Brief: Clean up and retrieve the resource
   virtual void Close();
 
   // @Brief: Display  results

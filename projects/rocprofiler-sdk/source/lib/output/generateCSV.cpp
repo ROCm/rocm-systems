@@ -513,6 +513,13 @@ generate_csv(const output_config&                                               
 }
 
 void
+generate_csv(const output_config& /*cfg*/,
+             const metadata& /*tool_metadata*/,
+             const generator<tool_buffer_tracing_kfd_record_t>& /*data*/,
+             const stats_entry_t& /*stats*/)
+{}
+
+void
 generate_csv(const output_config&                                             cfg,
              const metadata&                                                  tool_metadata,
              const generator<rocprofiler_buffer_tracing_marker_api_record_t>& data,
@@ -603,8 +610,7 @@ generate_csv(const output_config&                    cfg,
     auto counter_id_to_name = std::unordered_map<rocprofiler_counter_id_t, std::string_view>{};
     for(const auto& itr : tool_metadata.get_counter_info())
     {
-        // Counter records now contain agent-encoded IDs (reconstructed in tool.cpp),
-        // so we use the full agent-encoded ID from metadata as the map key
+        // Use counter ID from metadata as the map key
         counter_id_to_name.emplace(itr.id, itr.name);
     }
 

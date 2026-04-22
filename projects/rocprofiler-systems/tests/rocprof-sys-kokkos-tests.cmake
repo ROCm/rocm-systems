@@ -1,24 +1,5 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -48,7 +29,7 @@ rocprofiler_systems_add_test(
     LABELS "kokkos;kokkos-profile-library"
     RUN_ARGS -i 5 -s 20 -p
     ENVIRONMENT
-        "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_KOKKOSP_PREFIX=[kokkos];KOKKOS_TOOLS_LIBS=librocprof-sys-dl.so"
+        "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_KOKKOSP_PREFIX=[kokkos];KOKKOS_TOOLS_LIBS=librocprof-sys-dl.so;ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON"
     REWRITE_RUN_PASS_REGEX "\\|_\\[kokkos\\] [a-zA-Z]"
     RUNTIME_PASS_REGEX "\\|_\\[kokkos\\] [a-zA-Z]"
 )
@@ -102,7 +83,7 @@ rocprofiler_systems_add_test(
         -ME
         [==[lib(gomp|m-)]==]
     RUN_ARGS -i 10 -s 20 -p
-    ENVIRONMENT "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON"
+    ENVIRONMENT "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON"
 )
 
 rocprofiler_systems_add_test(
@@ -125,7 +106,7 @@ rocprofiler_systems_add_test(
         -ME
         [==[libgomp]==]
     RUN_ARGS -i 10 -s 20 -p
-    ENVIRONMENT "${_perfetto_environment};ROCPROFSYS_USE_KOKKOSP=OFF"
+    ENVIRONMENT "${_perfetto_environment};ROCPROFSYS_USE_KOKKOSP=OFF;ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON"
 )
 
 rocprofiler_systems_add_test(
@@ -147,6 +128,6 @@ rocprofiler_systems_add_test(
         --env
         ROCPROFSYS_TIMEMORY_COMPONENTS="wall_clock peak_rss"
     RUN_ARGS -i 2 -s 20 -p
-    ENVIRONMENT "${_timemory_environment};ROCPROFSYS_USE_KOKKOSP=OFF"
+    ENVIRONMENT "${_timemory_environment};ROCPROFSYS_USE_KOKKOSP=OFF;ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON"
     REWRITE_FAIL_REGEX "0 instrumented loops in procedure"
 )

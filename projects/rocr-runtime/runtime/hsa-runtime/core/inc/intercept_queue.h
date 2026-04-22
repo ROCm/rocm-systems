@@ -66,7 +66,7 @@ class QueueWrapper : public Queue {
   explicit QueueWrapper(std::unique_ptr<Queue> queue)
       : Queue(static_cast<core::SharedQueue*>(core::Runtime::runtime_singleton_->system_allocator()(
                   sizeof(core::SharedQueue), 4096, 0, 0)),
-              0),
+              0, nullptr),
         wrapped(std::move(queue)) {
     memcpy(&amd_queue_, &wrapped->amd_queue_, sizeof(amd_queue_));
     wrapped->set_public_handle(wrapped.get(), public_handle_);
@@ -77,7 +77,7 @@ class QueueWrapper : public Queue {
   }
 
   hsa_status_t Inactivate() override { return wrapped->Inactivate(); }
-  hsa_status_t SetPriority(HSA_QUEUE_PRIORITY priority) override {
+  hsa_status_t SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) override {
     return wrapped->SetPriority(priority);
   }
   uint64_t LoadReadIndexAcquire() override { return wrapped->LoadReadIndexAcquire(); }

@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -39,9 +23,9 @@ typedef __hip_fp8_storage_t __hip_fp4_storage_t;
 typedef __hip_fp8_storage_t __hip_fp4x2_storage_t;
 typedef __hip_fp8x2_storage_t __hip_fp4x4_storage_t;
 
-static_assert(sizeof(__hip_fp4_storage_t[4]) == sizeof(uint32_t));
-static_assert(sizeof(__hip_fp4x2_storage_t[4]) == sizeof(uint32_t));
-static_assert(sizeof(__hip_fp4x4_storage_t[2]) == sizeof(uint32_t));
+static_assert(sizeof(__hip_fp4_storage_t[4]) == sizeof(uint32_t), "");
+static_assert(sizeof(__hip_fp4x2_storage_t[4]) == sizeof(uint32_t), "");
+static_assert(sizeof(__hip_fp4x4_storage_t[2]) == sizeof(uint32_t), "");
 
 enum __hip_fp4_interpretation_t {
   __HIP_E2M1 = 0,
@@ -278,7 +262,7 @@ struct __hip_fp4_e2m1 {
   }
 
   __FP4_HOST_DEVICE__ operator __hip_bfloat16_raw() const {
-    static_assert(sizeof(__hip_bfloat16_raw[2]) == sizeof(__amd_bf16x2_storage_t));
+    static_assert(sizeof(__hip_bfloat16_raw[2]) == sizeof(__amd_bf16x2_storage_t), "");
     union {
       __hip_bfloat16_raw bf16_raw[2];
       __amd_bf16x2_storage_t bf16x2;
@@ -336,7 +320,7 @@ struct __hip_fp4x2_e2m1 {
   }
 
   __FP4_HOST_DEVICE__ operator __hip_bfloat162_raw() const {
-    static_assert(sizeof(__hip_bfloat162_raw) == sizeof(__amd_bf16x2_storage_t));
+    static_assert(sizeof(__hip_bfloat162_raw) == sizeof(__amd_bf16x2_storage_t), "");
     union {
       __hip_bfloat162_raw bf162_raw;
       __amd_bf16x2_storage_t bf16x2;

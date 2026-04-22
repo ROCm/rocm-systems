@@ -1,25 +1,7 @@
-/**
- * MIT License
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  *
- * Copyright (c) 2019 - 2024 Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * SPDX-License-Identifier: MIT
  */
 
 /**
@@ -114,9 +96,9 @@
 #if !defined(__HIPCC_RTC__)
 static_assert(CHAR_BIT == 8, "byte size should be of 8 bits");
 #endif
-static_assert(sizeof(unsigned char) == 1);
-static_assert(sizeof(unsigned short int) == 2);
-static_assert(sizeof(unsigned int) == 4);
+static_assert(sizeof(unsigned char) == 1, "");
+static_assert(sizeof(unsigned short int) == 2, "");
+static_assert(sizeof(unsigned int) == 4, "");
 
 /**
  * \brief Describes FP8 interpretation
@@ -987,11 +969,20 @@ __FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t __hip_cvt_double_to_e8m0(
   __hip_fp8_storage_t e8m0;
   if (double_exp == 0x0U) {
     e8m0 = 0x0U;
-  } else if ((double_exp - 0x0380U) > 0x00FF) {  // if double is NaN/Inf/or too large
-    e8m0 = hip_detail::e8m0_NaN;
   } else {
-    e8m0 =
-        double_exp - 0x0380U;  // shift due to bias difference between double and single precision
+    // Use signed arithmetic to avoid unsigned underflow for small normal exponents
+    // 0x0380 is a bias difference between double and single precision (1023 - 127)
+    const int float_exp = static_cast<int>(double_exp) - 0x0380;
+    if (float_exp <= 0) {
+      // Underflow to subnormal/zero in float domain
+      e8m0 = 0x0U;
+    } else if (float_exp > 0x00FF) {
+      // NaN/Inf or overflow beyond 8-bit exponent range
+      e8m0 = hip_detail::e8m0_NaN;
+    } else {
+      // Valid finite range [1..254], 0xFF yields NaN and is later handled by saturation
+      e8m0 = static_cast<__hip_fp8_storage_t>(float_exp);
+    }
   }
 
   // If there is a mantissa and the exp wont overflow round up
@@ -2628,7 +2619,7 @@ struct __hip_fp8x2_e4m3 {
   __FP8_HOST__ operator float2() const {
 #endif
 #if HIP_FP8_CVT_FAST_PATH
-      return internal::cast_to_f32x2_from_f8x2(__x, __default_interpret);
+    return internal::cast_to_f32x2_from_f8x2(__x, __default_interpret);
 #else
     return float2(internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(__x & 0xFF),
                                                        __wm, __we),
@@ -2643,7 +2634,7 @@ struct __hip_fp8x2_e4m3 {
  * \brief struct representing four ocp fp8 numbers with e4m3 interpretation
  *
  * */
-struct __hip_fp8x4_e4m3 {
+ struct __hip_fp8x4_e4m3 {
   __hip_fp8x4_storage_t __x;  //! raw storage of four fp8 numbers
   static constexpr __hip_saturation_t __default_saturation = __HIP_SATFINITE;
   static constexpr __hip_fp8_interpretation_t __default_interpret = __HIP_E4M3;

@@ -24,8 +24,13 @@ THE SOFTWARE.
 #include "comm.h"
 #include "graph/topo.h"
 #include "enqueue.h"
-#include "rocm_smi/rocm_smi.h"
 #include <algorithm>
+#include "debug.h"
+#include "amdsmi_wrap.h"
+#include "include/graph.h"
+#include "register.h"
+
+
 // Use this param to experiment pipelining new data types besides bfloat16
 // Make sure you generate the device code with the new data type (i.e. in generate.py)
 RCCL_PARAM(PipelineAllDTypes, "PIPELINE_ALL_DATA_TYPES", 0);
@@ -34,6 +39,45 @@ RCCL_PARAM(PipelineAllDTypes, "PIPELINE_ALL_DATA_TYPES", 0);
 // Otherwise, it is automatically set for certain archs, datatypes and reduction collectives
 RCCL_PARAM(disableReduceCopyPipelining, "DISABLE_REDUCE_COPY_PIPELINING", 0);
 RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
+RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
+RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
+RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
+RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
+RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
+#ifdef ENABLE_WARP_SPEED
+RCCL_PARAM(WarpSpeedCuCount, "WARP_SPEED_CU_COUNT", 0);
+RCCL_PARAM(WarpSpeedAutoMode, "WARP_SPEED_AUTO", 1);
+RCCL_PARAM(WarpSpeedForceEnable, "WARP_SPEED_FORCE_ENABLE", 0);
+RCCL_PARAM(WarpSpeedAGThreshold, "WARP_SPEED_AG_THRESHOLD", 134217728);   // 128 MB for AllGather
+RCCL_PARAM(WarpSpeedRSThreshold, "WARP_SPEED_RS_THRESHOLD", 2147483648);  // 2 GB for ReduceScatter
+RCCL_PARAM(WarpSpeedARThreshold, "WARP_SPEED_AR_THRESHOLD", 67108864);  // 64 MB for AllReduce
+#endif
+
+static inline bool rcclCollSupportsRing(ncclFunc_t func) {
+  return (func == ncclFuncAllReduce ||
+          func == ncclFuncAllGather ||
+          func == ncclFuncReduceScatter ||
+          func == ncclFuncBroadcast ||
+          func == ncclFuncReduce);
+}
+
+int32_t rcclGetProtoForGfx12(ncclFunc_t collectiveFunc, size_t sizePerRank){
+  int returnVal = NCCL_PROTO_SIMPLE;
+  int SingleNodeLLCutoffs[] = {
+    /*ncclFuncBroadcast*/     1536,
+    /*ncclFuncReduce*/        8192,
+    /*ncclFuncAllGather*/     98304,
+    /*ncclFuncReduceScatter*/ 98304,
+    /*ncclFuncAllReduce*/     913532,
+    /*ncclFuncSendRecv*/      0,
+    /*ncclFuncSend*/          0,
+    /*ncclFuncRecv*/          0
+  };
+  if(collectiveFunc < sizeof(SingleNodeLLCutoffs)/sizeof(int)) {
+    returnVal = (sizePerRank <= SingleNodeLLCutoffs[collectiveFunc]) ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
+  }
+  return returnVal;
+}
 
 void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info) {
   // Honor user input for protocol choice
@@ -47,12 +91,14 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
   if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && (info->func == ncclFuncAllGather) && sizePerRank <= 88448) {
     // Change LL protocol threshold
     info->protocol = NCCL_PROTO_LL;
-  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 1048576) {
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 131072) {
     // Change LL protocol threshold
     info->protocol = NCCL_PROTO_LL;
   } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 352128) {
     // Change LL protocol threshold
     info->protocol = NCCL_PROTO_LL;
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx12") && comm->nNodes == 1){
+    info->protocol = rcclGetProtoForGfx12( info->func,sizePerRank);
   } else if(!userProtocolInput && comm->nNodes >= 2 && (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather || info->func == ncclFuncAllReduce || info->func == ncclFuncBroadcast || info->func == ncclFuncReduce)) {
     auto tunableIndex = rcclGetTunableIndex(info->func);
     auto llMin = comm->minMaxLLRange[tunableIndex][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX];
@@ -65,7 +111,6 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
     if ((ll128Max != RCCL_LL_LIMITS_UNDEFINED) || (llMax != RCCL_LL_LIMITS_UNDEFINED)) {
       // Keep it simple unless otherwise required
       info->protocol = NCCL_PROTO_SIMPLE;
-      size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
       if (sizePerRank <= llMax && sizePerRank > llMin) {
         info->protocol = NCCL_PROTO_LL;
       }
@@ -119,9 +164,14 @@ extern int64_t ncclParamMinNchannels();
 extern int64_t ncclParamMaxNchannels();
 RCCL_PARAM(ChannelTuningEnable, "CHANNEL_TUNING_ENABLE", 1);
 
-ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t nBytes, int& nc){
-  if(comm->nNodes < 2 || !rcclParamChannelTuningEnable()){
+ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t nBytes, int& nc) {
+  if(comm->nNodes < 2 || !rcclParamChannelTuningEnable()) {
     INFO(NCCL_TUNING, "RCCL Channel Tuning not applied");
+    return ncclSuccess;
+  }
+
+  if (comm->nRanks == comm->nNodes) {
+    INFO(NCCL_TUNING, "RCCL tuning model channel thresholds not applied for single GPU per node case");
     return ncclSuccess;
   }
 
@@ -133,8 +183,14 @@ ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t
 
   int minCTAs = comm->config.minCTAs;
   int maxCTAs = comm->config.maxCTAs;
+  int scalingFactor = 1;
+#ifdef ENABLE_WARP_SPEED
+  if(comm->topo->warpSpeedEnabled) {
+    scalingFactor = comm->warpSpeedChannelMultiplier; // each CU can handle 4 warps
+  }
+#endif
   int minNChannels = ncclParamMinNchannels();
-  int maxNChannels = std::max(comm->nChannels, static_cast<int>(ncclParamMaxNchannels()));
+  int maxNChannels = std::max(comm->nChannels / scalingFactor, static_cast<int>(ncclParamMaxNchannels()));
   size_t bytesPerRank = divUp(nBytes, comm->nRanks);
 
   for(int channelCountIndex = 0; channelCountIndex < RCCL_CHANNELS_TUNABLE_ENTRIES; ++channelCountIndex){
@@ -285,7 +341,7 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   if (coll == ncclFuncAllGather && rcclUseAllGatherDirect(comm, msgSize)) {
     *algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER;
     *protocol = NCCL_PROTO_SIMPLE; // TODO: consider LL for small messages
-    *maxChannels = comm->nChannels;
+    *maxChannels = comm->p2pnChannels;
     return ncclSuccess;
   }
   struct ncclTaskColl task;
@@ -293,9 +349,14 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   task.count = count;
   task.datatype = dataType;
   NCCLCHECK(getAlgoInfo(comm, &task, collNetSupport, nvlsSupport, numPipeOps));
-  *algo = task.algorithm;
   *protocol = task.protocol;
+#ifdef ENABLE_WARP_SPEED
+  *maxChannels = task.useWarpSpeed? task.nMaxChannels / task.nWarps : task.nMaxChannels;
+  *algo = task.useWarpSpeed? rcclAddonAlgos_t::RCCL_WARP_SPEED : task.algorithm;
+#else
   *maxChannels = task.nMaxChannels;
+  *algo = task.algorithm;
+#endif
   return ncclSuccess;
 }
 
@@ -309,12 +370,11 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
       case rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER:
         *algoName = "Direct";
         break;
-      case rcclAddonAlgos_t::RCCL_MSCCL:
-        *algoName = "MSCCL";
+#ifdef ENABLE_WARP_SPEED
+      case rcclAddonAlgos_t::RCCL_WARP_SPEED:
+        *algoName = "RING*"; // WarpSpeed (*) uses RING algorithm
         break;
-      case rcclAddonAlgos_t::RCCL_MSCCLPP:
-        *algoName = "MSCCLPP";
-        break;
+#endif
       default:
         WARN("Invalid algorithm value: %d", algo);
         return ncclInvalidArgument;
@@ -334,17 +394,48 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
   return ncclSuccess;
 }
 
+bool rcclUseAlltoAllGda(struct ncclComm* comm) {
+
+#ifdef ENABLE_ROCSHMEM
+  if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks/comm->nNodes == 8) && comm->rocshmemThreshold <= 1048576) {
+      INFO(NCCL_INIT, "Enabling GDA alltoall for RCCL");
+      return true;
+  }
+#endif
+  return false;
+}
+
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
+  // Check if user explicitly disabled direct AllGather
+  static int userDirectAllGatherInput = rcclParamDirectAllGatherDisable();
+  if (userDirectAllGatherInput != 0) {
+    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER has been disabled by environment variable.");
+    return false;
+  }
+
+  // Direct AllGather incompatible with UBR
+  if (ncclParamLocalRegister()) {
+    return false;
+  }
+
+  // Check if user explicitly set threshold
+  static int userThresholdInput = -2;
+  if (userThresholdInput == -2) {
+    const char *thresholdStr = getenv("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+    userThresholdInput = !thresholdStr ? 0 : 1;
+  }
+
   size_t threshold = rcclParamDirectAllGatherThreshold();
 
-  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && threshold != -1) {
-     if (comm->nNodes == 1) {
-        threshold = 8388608;
-     } else if (comm->nNodes < 64) {
-        threshold = comm->nNodes * 2097152;
-     }
-  } else if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && threshold != -1) {
-	threshold = 4194304;
+  // Only perform auto-selection if user didn't explicitly set the threshold and threshold is not -1
+  if (!userThresholdInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && threshold != -1) {
+    if (comm->nNodes == 1) {
+      threshold = 8388608;
+    } else if (comm->nNodes < 64) {
+      threshold = comm->nNodes * 2097152;
+    }
+  } else if (!userThresholdInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && threshold != -1) {
+	  threshold = 4194304;
   }
 
   comm->enableCustColl = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
@@ -355,6 +446,47 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   return (comm->enableCustColl && (msgSize <= threshold) && (threshold != -1) && !rankMultiple)
     ;
 }
+
+bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
+  // Direct ReduceScatter is supported for MI350 (gfx950):
+  // Only if PXN is enabled
+  // - 2 nodes: enable for 128KiB .. 2MiB
+  // - 4 nodes: enable up to 4MiB
+  // - 8 and 16 nodes: enable up to 8MiB
+  static int userDirectReduceScatterInput = rcclParamDirectReduceScatterDisable();
+  if (userDirectReduceScatterInput !=0) {
+    INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER has been disabled by environment variable.");
+    return false;
+  }
+  const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+  if (!archGfx950) return false;
+
+  // Check if PXN is disabled - Direct Reduce Scatter requires PXN to be enabled
+  if(ncclPxnDisable(comm) != 0) {
+    INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER disabled due to PXN being disabled.");
+    return false;
+  }
+
+  size_t threshold = rcclParamDirectReduceScatterThreshold();
+  if (threshold > -1) { 
+    // Set threshold to 8MiB hard limit
+    // NOTE: If the DirectReduceScatterThreshold / hard-limit is increased, ensure TEMP_BUFF_SIZE (init.cc)
+    // is increased accordingly -> TEMP_BUFF_SIZE >= 2 * (max enabled msgSize) for headroom.
+    threshold = std::min(threshold, (size_t)8388608);
+  } else {
+    threshold = 8388608;
+  }
+  INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER threshold set to: %zu", threshold);
+
+  if (msgSize > threshold) return false;
+  // for 2 nodes, enable if msgSize is in 128KiB .. 2MiB range
+  if (comm->nNodes == 2) return (msgSize >= (size_t)131072) && (msgSize <= (size_t)2097152);
+  // for 4 nodes, enable if msgSize is up to 4MiB
+  if (comm->nNodes == 4) return (msgSize <= (size_t)4194304);
+  if (comm->nNodes == 8 || comm->nNodes == 16) return true;
+  return false;
+}
+
 
 void rcclSetPxn(struct ncclComm* comm,  int& rcclPxnDisable) {
   static int pxnDisable = RCCL_VALUE_UNSET;
@@ -398,6 +530,134 @@ void rcclSetP2pNetChunkSize(struct ncclComm* comm,  int& rcclP2pNetChunkSize) {
   }
   rcclP2pNetChunkSize = p2pNetChunkSize;
 }
+#ifdef ENABLE_WARP_SPEED
+void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels) {
+  static int userChannelControlInput = RCCL_VALUE_UNSET;
+  int warpsPerBlock = threadsPerBlock / comm->WarpSize;
+  // only adjust channels for RING algorithm
+  if(algo != NCCL_ALGO_RING) {
+    return;
+  }
+  if (userChannelControlInput == RCCL_VALUE_UNSET) {
+    const char *inputStr = getenv("NCCL_THREAD_THRESHOLDS");
+    if (!inputStr) {
+      inputStr = getenv("NCCL_MAX_NCHANNELS");
+    }
+    if (!inputStr) {
+      inputStr = getenv("NCCL_MIN_NCHANNELS");
+    }
+    userChannelControlInput = !inputStr ? 0 : 1;
+  }
+  if(comm->topo->warpSpeedEnabled) {
+    if(!userChannelControlInput) {
+      if(rcclParamWarpSpeedCuCount() != 0) {
+        rcclWarpSpeedChannels = rcclParamWarpSpeedCuCount() * warpsPerBlock;
+        INFO(NCCL_INIT, "RCCL Warp CU count set to user defined %ld resulting in %d channels", (long)rcclParamWarpSpeedCuCount(), rcclWarpSpeedChannels);
+        return;
+      }
+    }
+    // reuse the existing channel tuning logic if possible
+    rcclWarpSpeedChannels = std::min(MAXCHANNELS, rcclWarpSpeedChannels * warpsPerBlock);
+    INFO(NCCL_INIT, "RCCL Warp Speed Channels set to %d. Warps per block is set to %d", rcclWarpSpeedChannels, warpsPerBlock);
+  }
+}
+
+bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) {
+  if (!comm->topo->warpSpeedEnabled) {
+    return false;
+  }
+
+  // WarpSpeed is not supported currently for the following cases:
+  // 1. if any work batch in the plan contains P2P work
+  // 2. or any collective task is not using RING algorithm
+  bool hasP2p = !ncclIntruQueueEmpty(&plan->p2pTaskQueue);
+  bool hasNonRing = false;
+  struct ncclTaskColl* task = ncclIntruQueueHead(&plan->collTaskQueue);
+  while (task != nullptr) {
+    if (task->algorithm != NCCL_ALGO_RING || !(task->useWarpSpeed)) {
+      hasNonRing = true;
+      break;
+    }
+    task = task->next;
+  }
+  return (!hasP2p && !hasNonRing);
+}
+
+bool rcclIsAboveWarpSpeedThreshold (struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes){
+  //single node, full subscription thresholds for AllGather and ReduceScatter
+  if(info->func == ncclFuncAllReduce && nBytes >= rcclParamWarpSpeedARThreshold()) {
+    return true;
+  }
+  else if(info->func == ncclFuncAllGather && nBytes >= rcclParamWarpSpeedAGThreshold()) {
+    return true;
+  }
+  else if(info->func == ncclFuncReduceScatter && nBytes >= rcclParamWarpSpeedRSThreshold()) {
+    return true;
+  }
+  INFO(NCCL_TUNING, "RCCL WarpSpeed not enabled for %s at %zu bytes as it below the warpSpeed threshold", ncclFuncToString(info->func), nBytes);
+  return false;
+  }
+
+bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes) {
+  return IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && (nNodes == 1) && (rcclParamWarpSpeedAutoMode() != 0);
+}
+
+ncclResult_t validChannelsForWarpSpeed(struct ncclComm* comm, struct ncclTaskColl* info){
+  if(info->useWarpSpeed && comm->nChannels > (MAXCHANNELS)/2){
+    WARN("WarpSpeed does not support more than %d channels. Current number of channels is %d. To avoid hang, run with RCCL_WARP_SPEED_AUTO=0", MAXCHANNELS/2, comm->nChannels);
+    return ncclInvalidArgument;
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
+  info->useWarpSpeed = false;
+  static bool unrollFactorSet = getenv("RCCL_UNROLL_FACTOR") != nullptr;
+  if(!comm->topo->warpSpeedEnabled) return ncclSuccess;
+  commSetUnrollFactor(comm);  // TODO: reset unroll factor per task rather than per comm
+  if(!rcclCollSupportsRing(info->func)) return ncclSuccess;
+  if (rcclParamWarpSpeedForceEnable() > 0) { // Manual performance mode
+    if(info->algorithm != NCCL_ALGO_RING) {
+      INFO(NCCL_TUNING, "Overriding %s algorithm with RING for nccl%s at %zu bytes as WarpSpeed is requested and only supports RING", ncclAlgoToString(info->algorithm), ncclFuncToString(info->func), nBytes);
+      info->algorithm = NCCL_ALGO_RING; // Force Ring when WarpSpeed is enabled in manual mode as it only supports Ring
+    }
+    // TODO: Remove unroll update when all collectives are optimized
+    if(!unrollFactorSet) comm->unroll =  NCCL_UNROLL_2;
+    info->useWarpSpeed = true;
+  } else if(rcclCanUseWarpSpeedAuto(comm, comm->nNodes)) { // Auto performance mode
+    // No early return based on the algorithm at the start of the function
+    // to allow unroll factor to be reverted to default.
+    // This can be changed once per-task unroll factor setting is implemented.
+    if(info->algorithm != NCCL_ALGO_RING) {
+      return ncclSuccess; // If Ring is not selected, assume it is suboptimal and return
+    }
+    if(info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter) {
+       // allReduce now benefits from unroll factor of 2 in all modes due to changing its slicing strategy
+       // TODO: Remove unroll update when all collectives are optimized
+      if(!unrollFactorSet) comm->unroll =  NCCL_UNROLL_2;
+    }
+    if(rcclIsAboveWarpSpeedThreshold(comm, info, nBytes)) 
+    {
+      info->nWarps = 4;
+      info->useWarpSpeed = true;
+    }
+  }
+  NCCLCHECK(validChannelsForWarpSpeed(comm, info));
+  return ncclSuccess;
+}
+
+int rcclGetMaxWarpsPerBlock(struct ncclComm* comm) {
+  int warpsPerBlock;
+  if(comm->nNodes == 1) {
+    warpsPerBlock = RCCL_SINGLE_NODE_MAX_NTHREADS / comm->WarpSize; // For single node, we use half the number of threads for perf reasons.
+  } else {
+    warpsPerBlock = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")?
+                                                          RCCL_GFX950_MAX_NTHREADS / comm->WarpSize:
+                                                          RCCL_DEFAULT_MAX_NTHREADS / comm->WarpSize;
+  }
+  return warpsPerBlock;
+}
+#endif
 
 void rcclGetMaxNthreads(struct ncclComm* comm, int maxNthreads[]) {
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
@@ -411,12 +671,27 @@ void rcclGetMaxNthreads(struct ncclComm* comm, int maxNthreads[]) {
 void rcclOptThreadBlockSize(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes, int& nThreads) {
   static int maxNthreads[NCCL_NUM_PROTOCOLS] = {0};
   if (maxNthreads[NCCL_PROTO_SIMPLE] == 0) rcclGetMaxNthreads(comm, maxNthreads);
+  if(rcclParamThreadsPerBlock() != -1) {
+    nThreads = rcclParamThreadsPerBlock();
+    if(nThreads % comm->WarpSize != 0) {
+      nThreads = ((nThreads / comm->WarpSize) + 1) * comm->WarpSize;
+      INFO(NCCL_INIT, "RCCL Threads per block adjusted to %d to be multiple of warp size %d", nThreads, comm->WarpSize);
+    }
+    if(nThreads > maxNthreads[NCCL_PROTO_SIMPLE]) {
+      nThreads = maxNthreads[NCCL_PROTO_SIMPLE];
+      INFO(NCCL_INIT, "RCCL Threads per block reduced to %d to match max threads", nThreads);
+    } else if (nThreads < 3 * comm->WarpSize) {
+      nThreads = 3 * comm->WarpSize; // min requirement for tree
+      INFO(NCCL_INIT, "RCCL Threads per block increased to %d to be at least one warp", nThreads);
+    }
+    return;
+  }
   if (info->algorithm == NCCL_ALGO_TREE) nThreads = maxNthreads[NCCL_PROTO_SIMPLE]; // Tree now uses all threads always.
   if (info->algorithm == NCCL_ALGO_PAT)  nThreads = maxNthreads[NCCL_PROTO_SIMPLE];
   if (comm->nNodes == 1) nThreads = RCCL_SINGLE_NODE_MAX_NTHREADS; // For single node, we use half the number of threads for perf reasons.
   // The following should be already set correctly by getNthreads
   // but need to override the changes for TREE and PAT in the previous lines
-  if (info->protocol == NCCL_PROTO_LL) nThreads =  maxNthreads[NCCL_PROTO_LL];
+  else if (info->protocol == NCCL_PROTO_LL) nThreads =  maxNthreads[NCCL_PROTO_LL];
   // ReduceScatter small count optimization
   if (info->func == ncclFuncReduceScatter && divUp(nBytes, comm->nRanks) <= 524288) nThreads = maxNthreads[NCCL_PROTO_LL];
 }
@@ -436,6 +711,15 @@ ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count,
 }
 
 ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
+  if( rcclParamUnrollFactor() != -1 ) {
+    comm->unroll = rcclParamUnrollFactor(); //-1 to map to 0 based indexing
+    if(comm->unroll < NCCL_UNROLL_1 || comm->unroll >= NCCL_NUM_UNROLLS) {
+      WARN("Invalid RCCL_UNROLL_FACTOR %d specified. Valid values are 0 to 2 corresponding to unroll factors of 1, 2, and 4 respectively.", comm->unroll);
+      return ncclInvalidArgument;
+    }
+    INFO(NCCL_INIT, "RCCL Unroll Factor (user set): %d", (int) (pow(2.0, (double)comm->unroll)));
+    return ncclSuccess;
+  }
   if(IsArchMatch(comm->archName, "gfx950")) {
     if(comm->nNodes == 1)
       comm->unroll = NCCL_UNROLL_1;
@@ -451,58 +735,29 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
   return ncclSuccess;
 }
 
-std::string trimString(const std::string& s) {
-  int sz = s.size();
-  int b = 0;
-  int e = sz - 1;
-  while (b < sz && isspace(s[b])) {
-    b++;
-  }
-  if (b >= sz) {
-    return "";
-  }
 
-  while (e >= b && e < sz && isspace(s[e])) {
-    e--;
+RCCL_PARAM(P2pChannelShiftSize, "P2P_SHIFT_SIZE", -1);
+ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm) {
+  int nP2pChannels = comm->p2pnChannels;
+  int nChannelsLog2 = countOneBits(nP2pChannels-1);
+  int shiftSize = rcclParamP2pChannelShiftSize();
+
+  // Use bit-reversal for default/invalid shiftSize (device uses shiftSize==-1 for that path).
+  if (shiftSize >= nChannelsLog2) {
+    comm->p2pChannelShiftSize = -1;
+  } else {
+    comm->p2pChannelShiftSize = shiftSize;
   }
-  if (b > e) {
-    return "";
-  }
-  return s.substr(b, e - b + 1);
+  return ncclSuccess;
 }
 
-std::vector<std::string> splitString(const std::string& s, char delimiter) {
-  std::vector<std::string> tokens;
-  std::stringstream ss(s);
-  std::string token;
-
-  while (std::getline(ss, token, delimiter)) {
-    tokens.push_back(trimString(token));
+int getFirmwareVersion() {
+  uint64_t fw_version = 0;
+  ncclResult_t res = amd_smi_getFirmwareVersion(0, &fw_version);
+  if (res != ncclSuccess) {
+    return -1;
   }
-  return tokens;
-}
-
-int parseFirmwareVersionImpl() {
-  uint64_t fw_version = -1;
-
-  // using rocm-smi APIs for now to query MEC FW version
-  // will switch to amd-smi APIs soon
-  rsmi_status_t ret;
-  ret = rsmi_init(0);
-  if (ret != RSMI_STATUS_SUCCESS) return -1;
-  ret = rsmi_dev_firmware_version_get(0, RSMI_FW_BLOCK_MEC, &fw_version);
-  if (ret != RSMI_STATUS_SUCCESS) return -1;
-
   return fw_version;
-}
-
-int parseFirmwareVersion() {
-  int version = -1;
-  try {
-    version = parseFirmwareVersionImpl();
-  } catch (const std::exception& ex) {
-  }
-  return version;
 }
 
 bool validHsaScratchEnvSetting(const char*hsaScratchEnv, int hipRuntimeVersion, int firmwareVersion, char const* archName) {

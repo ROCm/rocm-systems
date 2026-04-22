@@ -109,3 +109,30 @@ function(rocprofiler_sdk_pc_sampling_stochastic_disabled _VAR)
         endif()
     endif()
 endfunction()
+
+function(rocprofiler_sdk_spm_disabled _VAR)
+    cmake_parse_arguments(ARG "ECHO" "PREFIX" "" ${ARGN})
+
+    set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}]${ARG_PREFIX} ")
+
+    rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
+    list(GET rocprofiler-sdk-tests-gfx-info 0 spm-gpu-0-gfx-info)
+
+    if("${spm-gpu-0-gfx-info}" MATCHES "^gfx94[0-9]$")
+        # spm is enabled on this architecture.
+        set(${_VAR}
+            FALSE
+            PARENT_SCOPE)
+        if(ARG_ECHO)
+            message(STATUS "SPM is enabled for ${spm-gpu-0-gfx-info}")
+        endif()
+    else()
+        # SPM is disabled on this architecture.
+        set(${_VAR}
+            TRUE
+            PARENT_SCOPE)
+        if(ARG_ECHO)
+            message(STATUS "SPM is disabled for ${spm-gpu-0-gfx-info}")
+        endif()
+    endif()
+endfunction()

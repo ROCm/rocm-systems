@@ -1,39 +1,14 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 list(APPEND CMAKE_MESSAGE_CONTEXT "rccl-tests")
 
 project(rocprofiler-systems-rccl-example LANGUAGES CXX)
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
-
-    if(
-        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-    )
-        return()
-    endif()
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
 endif()
 
 # Find HIP
@@ -68,21 +43,69 @@ if(hip_FOUND AND rccl_FOUND)
         return()
     endif()
 
+    # Parse comment describing supported gfx targets from rccl src/Makefile
+    execute_process(
+        COMMAND grep "Currently, supports" ${rccl-tests_SOURCE_DIR}/src/Makefile
+        OUTPUT_VARIABLE _supported_line
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _rccl_grep_ret
+    )
+    if(NOT _rccl_grep_ret EQUAL 0)
+        message(
+            FATAL_ERROR
+            "This grep should never fail unless rccl-tests/src/Makefile was modified in an incompatible way"
+        )
+    endif()
+
+    # Extract just the gfx architectures
+    string(REGEX MATCHALL "gfx[0-9a-z]+" RCCL_SUPPORTED_TARGETS "${_supported_line}")
+    set(RCCL_GPU_TARGETS "")
+    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+        if(arch IN_LIST RCCL_SUPPORTED_TARGETS)
+            list(APPEND RCCL_GPU_TARGETS ${arch})
+        endif()
+    endforeach()
+    if(RCCL_GPU_TARGETS STREQUAL "")
+        message(AUTHOR_WARNING "rccl-tests skipped. No supported GPU targets found.")
+        return()
+    endif()
+
+    # Convert CMake list (;-separated) to space-separated string for make
+    list(JOIN RCCL_GPU_TARGETS " " RCCL_GPU_TARGETS_STR)
+
     # Copy source to build directory
     file(COPY ${rccl-tests_SOURCE_DIR}/ DESTINATION ${rccl-tests_BUILD_DIR})
 
     # Get RCCL root directory
     get_filename_component(rccl_ROOT_DIR "${rccl_INCLUDE_DIRS}" DIRECTORY)
 
-    # Create a custom target that builds rccl-tests at build-time
-    add_custom_target(
-        build-rccl-tests
-        ALL
-        COMMAND make HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR} -j
+    # Build rccl-tests at build-time (using add_custom_command with OUTPUT so
+    # CMake can skip the step when outputs are already up-to-date)
+    add_custom_command(
+        OUTPUT
+            ${rccl-tests_BUILD_DIR}/build/all_gather_perf
+            ${rccl-tests_BUILD_DIR}/build/all_reduce_perf
+            ${rccl-tests_BUILD_DIR}/build/alltoall_perf
+            ${rccl-tests_BUILD_DIR}/build/alltoallv_perf
+            ${rccl-tests_BUILD_DIR}/build/broadcast_perf
+            ${rccl-tests_BUILD_DIR}/build/gather_perf
+            ${rccl-tests_BUILD_DIR}/build/reduce_perf
+            ${rccl-tests_BUILD_DIR}/build/reduce_scatter_perf
+            ${rccl-tests_BUILD_DIR}/build/scatter_perf
+            ${rccl-tests_BUILD_DIR}/build/sendrecv_perf
+        COMMAND
+            make HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR}
+            "GPU_TARGETS=${RCCL_GPU_TARGETS_STR}" -j
         WORKING_DIRECTORY ${rccl-tests_BUILD_DIR}
         COMMENT
             "Building rccl-tests with HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR} ..."
-        BYPRODUCTS
+    )
+
+    # Thin custom target so other targets can depend on the rccl-tests build
+    add_custom_target(
+        build-rccl-tests
+        ALL
+        DEPENDS
             ${rccl-tests_BUILD_DIR}/build/all_gather_perf
             ${rccl-tests_BUILD_DIR}/build/all_reduce_perf
             ${rccl-tests_BUILD_DIR}/build/alltoall_perf
@@ -138,6 +161,14 @@ if(hip_FOUND AND rccl_FOUND)
         add_dependencies(rccl-tests::${_EXE_NAME} copy-${_EXE_NAME})
 
         list(APPEND _RCCL_TEST_TARGETS "rccl-tests::${_EXE_NAME}")
+
+        if(ROCPROFSYS_INSTALL_EXAMPLES)
+            install(
+                PROGRAMS ${_EXE_DEST_PATH}
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+                COMPONENT rocprofiler-systems-examples
+            )
+        endif()
     endforeach()
 
     set(RCCL_TEST_TARGETS "${_RCCL_TEST_TARGETS}" CACHE INTERNAL "rccl-test targets")

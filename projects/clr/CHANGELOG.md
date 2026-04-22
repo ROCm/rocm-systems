@@ -2,15 +2,88 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
-## HIP 8.0 for ROCm 8.0
+## HIP 7.12 for ROCm 7.12
 
 ### Added
 
 * New HIP APIs
-    - `hipKernelGetParamInfo`   returns the offset and size of a kernel parameter
+    - Library Management
+    Support for the following APIs for parity with the corresponding CUDA APIs.
+      * `hipKernelSetAttribute` sets an attribute for a kernel
+      * `hipKernelGetAttribute` returns information about a kernel
+      * `hipKernelGetFunction` returns a function handle
+    - Memory Management
+      * Added support for `hipMipmappedArrayGetMemoryRequirements`, which returns memory requirements for HIP mipmapped arrays and ensures parity with CUDA APIs.
+    - Cooperative Groups
+      * Support for `barrier` APIs `barrier_arrive` and `barrier_wait` has been added for both `grid_group` and `thread_block` to enable finer‑grained synchronization within cooperative groups.
+      * Support for `block_rank` in the class `grid_group`, returns the rank of the block in the calling thread
+    - Dynamic logging, no matching CUDA APIs exist
+      * `hipExtEnableLogging` enables HIP runtime logging
+      * `hipExtDisableLogging` disables HIP runtime logging
+      * `hipExtSetLoggingParams` sets HIP runtime logging parameters
 
-* New HIP supports
-    - `grid_group::block_rank()` returns the rank of the block in the calling thread
+* New HIP device attributes
+    - `hipDeviceAttributeExpertSchedMode` has been added to hipDeviceAttribute_t to indicate whether expert scheduling mode is supported on AMD GPUs.
+    - `hipDeviceAttributeDmaBufSupported` is now supported, enabling buffer sharing.
+
+### Removed
+* roc-obj* tools and Perl dependency.
+
+### Resolved issues
+
+* An error that occurred during HIP graph stream capture in thread‑local capture mode has been fixed. The HIP runtime now updates its validation logic to ensure that captures running in other threads on different streams no longer invalidate or block the thread‑local capture in the current thread.
+* A segmentation fault that occurred during HIP graph capture. The HIP runtime has updated its large‑graph handling mechanism to prevent stack overflow.
+* Incorrect return codes from `hipEventQuery` and `hipEventSynchronize` when invoked under mixed stream‑capture modes. The HIP runtime now correctly handles capture‑mode restrictions for event operations.
+* A segmentation fault that occurred when retrieving an allocation handle with `hipMemRetainAllocationHandle`. The HIP runtime now correctly retains the generic allocation object to prevent memory‑management issues.
+* Resolved a graph node scheduling issue in multistream execution that, in some cases, led to unnecessary kernel‑execution stalls.
+
+### Optimized
+
+* HIP log-level control capabilities HIP runtime adds dynamic logging functionalities, enabling applications to programmatically enable, disable, and configure logging at runtime without modifying environment variables or restarting the application. The result is more precise control over diagnostic output, making it easier to debug targeted code paths or minimize log noise during performance‑critical execution.
+* HIP Graph Segmented Execution: Graph nodes are grouped into segments and dispatched across multiple GPU streams to enable parallel execution.
+  - Batching: Each stream receives a single `AccumulateCommand` that aggregates all kernel dispatches and submits them efficiently as one batch.
+  - Synchronization: When a segment depends on work running on another stream, a hardware wait is inserted. At completion, all parallel streams synchronize back to the launch stream.
+  - Signaling: Segments emit hardware signals only when downstream segments require them—typically at fork points or when executing in parallel with other segments.
+
+This approach reduces dispatch overhead and improves GPU utilization by overlapping independent graph work across streams while preserving correct execution order.
+* Optimized graph stream synchronization by eliminating duplicate marker creation when syncing streams back to the launch stream. The runtime now tracks synchronized dependency segments to avoid redundant synchronization markers.
+* Optimized `hipMemcpyBatchAsync` with refactored code, new data structures, and an improved core implementation for better performance.
+
+## HIP 7.11 for ROCm 7.11
+
+### Added
+
+* New HIP API
+    - `hipKernelGetParamInfo` returns the offset and size of a kernel parameter.
+* New HIP flag
+    - `HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE` is now supported in the `hipPointerGetAttribute` API, providing parity with the equivalent CUDA attribute.
+
+### Resolved issues
+
+* A bug in inter‑GPU copy operations has been fixed by ensuring that the SDMA engine allocator is always queried for inter‑GPU transfers instead of reusing a previously cached engine. Because the allocator applies specialized logic to choose high‑bandwidth engines for each source–destination agent pair, reusing an engine selected for a different copy type could lead to reduced performance or incorrect behavior.
+* An error in `hipMemRangeGetAttribute` that occurred when memory was allocated with `hipMallocAsync` has been resolved. The HIP runtime now correctly handles coherency‑range mode for memory‑pool pointers in the ROCm device implementation.
+* A race condition in the packet batch‑write logic has been fixed, where the Command Processor (CP) fetcher could read malformed packets. The update now invalidates all packet headers before writing packet bodies and then validates the headers in a defined order to prevent the fetcher from accessing incomplete packets.
+* A deadlock that occurred when `hipMallocAsync` was used after launching a persistent or long‑running kernel in another stream has been resolved. The HIP runtime now removes the default‑stream wait during mapping operations, preventing the stall.
+* An incorrect granularity value returned for device memory when requesting the recommended granularity through the `hipMemGetAllocationGranularity` API has been fixed.
+
+### Optimized
+
+* HIP runtime implemented a global SDMA engine allocator with per‑stream affinity to improve memory copy performance.
+* Packet batch‑dispatch optimization: A new graph‑segment scheduling mechanism has been added to the HIP runtime to reduce CPU overhead during HIP graph launches. It uses hierarchical path discovery to construct execution segments that can be dispatched efficiently in parallel, replacing the traditional topological‑ordering approach.
+* Improved `hipGraphLaunch` parallelism for complex data‑parallel graphs. The HIP runtime now eliminates recursion, applies topological ordering, and removes an extra loop in `hipGraphLaunch` to streamline execution.
+
+## HIP 7.2.1 for ROCm 7.2.1
+
+### Resolved issues
+
+* Corrected the validation of stream capture in global‑capture mode. It is no longer affected by any thread‑local capture‑mode sequences occurring in other threads. 
+* Corrected the return value of `hipEventQuery` and `hipEventSynchronize`. The HIP runtime now properly handles and restricts stream capture within these APIs. 
+* Corrected an issue in the batch-dispatch doorbell for AQL packets to avoid a potential CPU hang.
+* To address potential delays in memory‑object destruction that could affect application logic, the HIP runtime disables memory‑object reference counting in direct‑dispatch mode.
+
+### Changed
+
+* The `AMD_DIRECT_DISPATCH` environment variable has been deprecated in the HIP runtime.
 
 ## HIP 7.2 for ROCm 7.2
 
@@ -27,6 +100,9 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipLibraryGetKernelCount` gets kernel count in library
     - `hipStreamCopyAttributes` copies attributes from source stream to destination stream
     - `hipOccupancyAvailableDynamicSMemPerBlock` returns dynamic shared memory available per block when launching numBlocks blocks on CU.
+    - `hipMemSetMemPool`        Sets the current memory pool for a memory location and allocation type
+    - `hipMemGetMemPool`        Gets the current memory pool for a memory location and of a particular allocation type
+    - `hipMemPrefetchBatchAsync` Prefetches a batch of memory ranges to the specified locations
 * New HIP flags
     - `hipMemLocationTypeHost`, enables handling virtual memory management in host memory location, in addition to device memory.
     - Support for flags in `hipGetProcAddress`, enables searching for the per-thread version symbols.
@@ -36,12 +112,12 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Resolved issues
 
-* Corrected the calculation of the value of maximum shared memory per multiprocessor, in HIP device properties. 
+* Corrected the calculation of the value of maximum shared memory per multiprocessor, in HIP device properties.
 
 ### Optimized
 
 * Graph node scaling:
-HIP runtime implements optimized doorbell ring mechanism for certain topologies of graph execution. It enables efficient batching of graph nodes. This enhancement provides better alignment with CUDA Graph optimizations. 
+HIP runtime implements optimized doorbell ring mechanism for certain topologies of graph execution. It enables efficient batching of graph nodes. This enhancement provides better alignment with CUDA Graph optimizations.
 HIP also adds a new performance test for HIP graphs with programmable topologies to measure graph performance across different structures. The test evaluates graph instantiation time, first launch time, repeat launch times, and end-to-end execution for various graph topologies. The test implements comprehensive timing measurements including CPU overhead and device execution time.
 * Back memory set (`memset`) optimization:
 HIP runtime now implements a back memory set (memset) optimization to improve how `memset` nodes are processed during graph execution. This enhancement specifically handles varying number of AQL (Architected Queue Language) packets for `memset` graph node due to graph node set params for AQL batch submission approach.

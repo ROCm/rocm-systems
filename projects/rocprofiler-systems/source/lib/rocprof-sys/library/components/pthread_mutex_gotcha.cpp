@@ -1,28 +1,8 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/components/pthread_mutex_gotcha.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/utility.hpp"
 #include "library/components/category_region.hpp"
 #include "library/runtime.hpp"
@@ -31,6 +11,8 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/utility/signals.hpp>
 #include <timemory/utility/types.hpp>
+
+#include "logger/debug.hpp"
 
 #include <cstdint>
 #include <pthread.h>
@@ -76,14 +58,16 @@ pthread_mutex_gotcha::get_hashes()
             else
             {
                 if(_skip.count(i) > 0) continue;
-                ROCPROFSYS_VERBOSE(
-                    1,
-                    "WARNING!!! pthread_mutex_gotcha tool id at index %zu was empty!\n",
-                    i);
+                LOG_WARNING("pthread_mutex_gotcha tool id at index {} was empty!", i);
             }
-            ROCPROFSYS_CI_FAIL(
-                _id.empty() || _init.at(i) == 0,
-                "pthread_mutex_gotcha tool id at index %zu has no hash value\n", i);
+
+            if(get_is_continuous_integration() && (_id.empty() || _init.at(i) == 0))
+            {
+                LOG_CRITICAL("pthread_mutex_gotcha tool id at index {} has no hash value",
+                             i);
+                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                std::abort();
+            }
         }
         return _init;
     }();
@@ -166,6 +150,22 @@ pthread_mutex_gotcha::shutdown()
     pthread_mutex_gotcha_t::disable();
 }
 
+std::mutex pthread_mutex_gotcha::s_mutex = {};
+
+void
+pthread_mutex_gotcha::pause()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    pthread_mutex_gotcha_t::set_ready(false);
+}
+
+void
+pthread_mutex_gotcha::resume()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    pthread_mutex_gotcha_t::set_ready(true);
+}
+
 pthread_mutex_gotcha::pthread_mutex_gotcha(const gotcha_data_t& _data)
 : m_data{ &_data }
 {}
@@ -183,7 +183,7 @@ pthread_mutex_gotcha::operator()(uintptr_t&&, int (*_callee)(Args...),
         {
             if(m_data)
             {
-                ROCPROFSYS_PRINT("Warning! nullptr to %s\n", m_data->tool_id.c_str());
+                LOG_WARNING("nullptr to {}", m_data->tool_id);
             }
             return EINVAL;
         }

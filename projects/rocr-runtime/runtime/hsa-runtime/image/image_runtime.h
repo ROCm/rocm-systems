@@ -171,7 +171,8 @@ class ImageRuntime {
   /// @brief Get the handle for a specific mipmap level in a mipmapped array.
   hsa_status_t GetMipmapArrayLevelHandle(
     hsa_agent_t agent, const hsa_ext_image_t& mipmapped_array,
-    uint32_t mip_level, hsa_ext_image_t& level_image_out);
+    uint32_t mip_level, const hsa_ext_image_descriptor_v2_t* image_descriptor,
+    hsa_ext_image_t& level_image_out);
 
   ImageManager* image_manager(hsa_agent_t agent) {
     std::map<uint64_t, ImageManager*>::iterator it = image_managers_.find(agent.handle);

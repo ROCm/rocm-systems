@@ -38,5 +38,9 @@ get_string_entry(size_t hash);
 
 size_t
 add_string_entry(std::string_view name);
+
+// Clear string entry cache (for attach/detach)
+void
+clear_string_entries();
 }  // namespace common
 }  // namespace rocprofiler

@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -42,6 +23,11 @@
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/utility/types.hpp>
+#include <tuple>
+
+#include "logger/debug.hpp"
+
+#include <spdlog/fmt/ranges.h>
 
 #include <string_view>
 #include <utility>
@@ -54,7 +40,7 @@ cache_region(uint64_t thread_id, const std::string& name, uint64_t start_ts,
              uint64_t end_ts, const std::string& category)
 {
     constexpr size_t      NO_CORRELATION_ID = 0;
-    constexpr const char* CALLSTACK         = "";
+    constexpr const char* CALLSTACK         = "{}";
     constexpr const char* ARGUMENTS         = "";
     rocprofsys::trace_cache::get_buffer_storage().store(
         rocprofsys::trace_cache::region_sample{
@@ -99,8 +85,8 @@ cache_stop(const char* name)
     auto      x = map_name_to_args.find(key);
     if(x != map_name_to_args.end())
     {
-        map_name_to_args.erase(key);
         auto timestamp = x->second;
+        map_name_to_args.erase(x);
 
         const auto end_ts =
             static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
@@ -207,7 +193,7 @@ struct category_region : comp::base<category_region<CategoryT>, void>
 
     static std::string label()
     {
-        return JOIN('_', "rocprofsys", category_name, "region");
+        return fmt::format("rocprofsys_{}_region", category_name);
     }
 
     template <typename... OptsT, typename... Args>
@@ -267,11 +253,12 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
     constexpr bool _ct_use_causal =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
 
-    ROCPROFSYS_CONDITIONAL_PRINT(
-        tracing::debug_push,
-        "[%s][PID=%i][state=%s][thread_state=%s] rocprofsys_push_region(%s)\n",
-        category_name, process::get_id(), std::to_string(get_state()).c_str(),
-        std::to_string(get_thread_state()).c_str(), name.data());
+    if(tracing::debug_push)
+    {
+        LOG_DEBUG("[{}][PID={}][state={}][thread_state={}] rocprofsys_push_region({})",
+                  category_name, process::get_id(), std::to_string(get_state()),
+                  std::to_string(get_thread_state()), name.data());
+    }
 
     if constexpr(is_one_of<CategoryT, tracing_count_categories_t>::value)
     {
@@ -329,11 +316,12 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
     constexpr bool _ct_use_causal =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
 
-    ROCPROFSYS_CONDITIONAL_PRINT(
-        tracing::debug_pop,
-        "[%s][PID=%i][state=%s][thread_state=%s] rocprofsys_pop_region(%s)\n",
-        category_name, process::get_id(), std::to_string(get_state()).c_str(),
-        std::to_string(get_thread_state()).c_str(), name.data());
+    if(tracing::debug_pop)
+    {
+        LOG_DEBUG("[{}][PID={}][state={}][thread_state={}] rocprofsys_pop_region({})",
+                  category_name, process::get_id(), std::to_string(get_state()),
+                  std::to_string(get_thread_state()), name.data());
+    }
 
     // only execute when active
     if(get_state() == State::Active)
@@ -376,10 +364,8 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
     }
     else
     {
-        static auto _debug = get_debug_env();
-        ROCPROFSYS_CONDITIONAL_BASIC_PRINT(
-            _debug, "[%s] rocprofsys_pop_region(%s) ignored :: state = %s\n",
-            category_name, name.data(), std::to_string(get_state()).c_str());
+        LOG_DEBUG("[{}] rocprofsys_pop_region({}) ignored :: state = {}", category_name,
+                  name.data(), std::to_string(get_state()));
     }
 }
 
@@ -408,11 +394,12 @@ category_region<CategoryT>::mark(std::string_view name, Args&&...)
 
     if(get_use_causal())
     {
-        ROCPROFSYS_CONDITIONAL_PRINT(
-            tracing::debug_mark,
-            "[%s][PID=%i][state=%s][thread_state=%s] rocprofsys_progress(%s)\n",
-            category_name, process::get_id(), std::to_string(get_state()).c_str(),
-            std::to_string(get_thread_state()).c_str(), name.data());
+        if(tracing::debug_mark)
+        {
+            LOG_DEBUG("[{}][PID={}][state={}][thread_state={}] rocprofsys_progress({})",
+                      category_name, process::get_id(), std::to_string(get_state()),
+                      std::to_string(get_thread_state()), name.data());
+        }
 
         causal::mark_progress_point(name);
     }
@@ -443,7 +430,9 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::outgoing,
 {
     stop<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
-            tracing::add_perfetto_annotation(ctx, "return", JOIN(", ", _args...));
+            tracing::add_perfetto_annotation(
+                ctx, "return",
+                fmt::format("{}", fmt::join(std::forward_as_tuple(_args...), ", ")));
     });
 }
 
@@ -472,7 +461,9 @@ category_region<CategoryT>::audit(std::string_view _name, audit::outgoing,
 {
     stop<OptsT...>(_name.data(), [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
-            tracing::add_perfetto_annotation(ctx, "return", JOIN(", ", _args...));
+            tracing::add_perfetto_annotation(
+                ctx, "return",
+                fmt::format("{}", fmt::join(std::forward_as_tuple(_args...), ", ")));
     });
 }
 

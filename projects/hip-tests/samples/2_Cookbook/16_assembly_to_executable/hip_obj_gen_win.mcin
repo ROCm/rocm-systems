@@ -1,0 +1,18 @@
+#       HIP Object Generator for Windows COFF
+# Use this generator to create a host bundled object file
+# with the input of an offload bundled fat binary.
+#
+# Input: Bundled Object file .hipfb file
+# Output: Host Bundled Object File .obj
+#
+# Add MC directives to embed target binaries. We ensure that each
+# section and image is 4096-byte aligned. This facilitates faster
+# loading of device binaries.
+#
+# Note: This is the Windows COFF version. log 2 of 4096 is 12.
+#
+  .section .hip_fatbin,"dr"
+  .globl __hip_fatbin
+  .p2align 12
+__hip_fatbin:
+  .incbin "offload_bundle.hipfb"

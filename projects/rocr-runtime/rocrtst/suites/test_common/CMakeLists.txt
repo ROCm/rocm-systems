@@ -112,7 +112,7 @@ endif()
 set(DEFAULT_TARGETS "gfx700;gfx701;gfx702;gfx801;gfx802;gfx803;gfx805;gfx810"
                     "gfx900;gfx902;gfx904;gfx906;gfx908;gfx909;gfx90a;gfx90c;gfx942;gfx950"
                     "gfx1010;gfx1011;gfx1012;gfx1013;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036"
-                    "gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
+                    "gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1200;gfx1201;gfx1250;gfx1251")
 
 #
 # Currently support for Windows platform is not present
@@ -255,11 +255,19 @@ else()
 endif()
 
 # Target devices configuration
-if (NOT DEFINED TARGET_DEVICES)
-  message("No target devices provided on command line")
-  message("  e.g., cmake -DTARGET_DEVICES=\"gfx803;gfx900;gfx...\" ..")
-  message("  Using default target of ${DEFAULT_TARGETS}")
-  list(APPEND TARGET_DEVICES ${DEFAULT_TARGETS})
+if(NOT DEFINED TARGET_DEVICES OR TARGET_DEVICES STREQUAL "")
+  if(DEFINED GPU_TARGETS AND NOT GPU_TARGETS STREQUAL "")
+    message(STATUS "Using GPU_TARGETS from build system: ${GPU_TARGETS}")
+    set(TARGET_DEVICES ${GPU_TARGETS})
+  elseif(DEFINED AMDGPU_TARGETS AND NOT AMDGPU_TARGETS STREQUAL "")
+    message(STATUS "Using AMDGPU_TARGETS from build system: ${AMDGPU_TARGETS}")
+    set(TARGET_DEVICES ${AMDGPU_TARGETS})
+  else()
+    message("No target devices provided on command line")
+    message("  e.g., cmake -DTARGET_DEVICES=\"gfx803;gfx900;gfx...\" ..")
+    message("  Using default target of ${DEFAULT_TARGETS}")
+    list(APPEND TARGET_DEVICES ${DEFAULT_TARGETS})
+  endif()
 endif()
 
 # Build type configuration
@@ -371,6 +379,14 @@ aux_source_directory(${ROCRTST_ROOT}/suites/negative negativeSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/stress stressSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/test_common testCommonSources)
 
+# Optional: enable NUMA async copy test (memory_async_copy_numa.cc)
+# Force disabled by default to avoid building the NUMA test source.
+set(ENABLE_COPY_NUMA OFF CACHE BOOL "Build Memory_Async_Copy_NUMA test" FORCE)
+list(FILTER performanceSources EXCLUDE REGEX ".*memory_async_copy_numa\\.cc$")
+
+# Optional: enable hwloc membind nodeset call in NUMA test
+set(ENABLE_COPY_NUMA_MEMBIND_NODESET OFF CACHE BOOL "Enable hwloc membind nodeset in NUMA test")
+
 # Header file include path
 
 include_directories(${ROCRTST_ROOT})
@@ -388,6 +404,7 @@ function(build_kernel S_NAME TARG_DEV)
   set(TARG_NAME "${S_NAME}_hsaco.${TARG_DEV}")
   set(HSACO_TARG_LIST ${HSACO_TARG_LIST} "${KERNEL_DIR}/${SNAME_KERNEL}" PARENT_SCOPE)
   string(SUBSTRING ${TARG_DEV} 3 -1 gfxNum)
+  string(REGEX REPLACE ":.*$" "" gfxNum "${gfxNum}")  # strip xnack+/xnack- and other suffixes
   separate_arguments(CLANG_ARG_LIST UNIX_COMMAND
    "-D ROCRTST_GPU=0x${gfxNum} -x cl -target amdgcn-amd-amdhsa -include ${OPENCL_INC_DIR}/opencl-c.h -mcpu=${TARG_DEV} ${BITCODE_ARGS} -cl-std=CL${OPENCL_VER} -mcode-object-version=4 ${CL_FILE_LIST} -o ${KERNEL_DIR}/${SNAME_KERNEL}")
   add_custom_command(OUTPUT "${KERNEL_DIR}/${SNAME_KERNEL}" COMMAND ${CLANG} ${CLANG_ARG_LIST} DEPENDS ${CL_FILE_LIST} ${CLANG} COMMENT "BUILDING ${KERNEL_DIR}/${SNAME_KERNEL}" VERBATIM)
@@ -400,6 +417,26 @@ function(build_sample_for_devices S_NAME)
   set(HSACO_TARG_LIST ${HSACO_TARG_LIST} PARENT_SCOPE)
 endfunction(build_sample_for_devices)
 
+# Use this function to build any samples that have kernels to be built
+function(build_kernel_kernarg_preload S_NAME TARG_DEV)
+  set(KERNEL_DIR ${PROJECT_BINARY_DIR}/${TARG_DEV})
+  set(SNAME_KERNEL "${S_NAME}_kernels_argpreload.hsaco")
+
+  set(TARG_NAME "${S_NAME}_hsaco.${TARG_DEV}")
+  set(HSACO_TARG_LIST ${HSACO_TARG_LIST} "${KERNEL_DIR}/${SNAME_KERNEL}" PARENT_SCOPE)
+  string(SUBSTRING ${TARG_DEV} 3 -1 gfxNum)
+  separate_arguments(CLANG_ARG_LIST UNIX_COMMAND
+  "-D ROCRTST_GPU=0x${gfxNum} -x cl -target amdgcn-amd-amdhsa -include ${OPENCL_INC_DIR}/opencl-c.h -mcpu=${TARG_DEV} ${BITCODE_ARGS} -cl-std=CL${OPENCL_VER} -mcode-object-version=4 -mllvm -amdgpu-kernarg-preload-count=16 ${CL_FILE_LIST} -o ${KERNEL_DIR}/${SNAME_KERNEL}")
+  add_custom_command(OUTPUT "${KERNEL_DIR}/${SNAME_KERNEL}" COMMAND ${CLANG} ${CLANG_ARG_LIST} DEPENDS ${CL_FILE_LIST} ${CLANG} COMMENT "BUILDING ${KERNEL_DIR}/${SNAME_KERNEL}" VERBATIM)
+endfunction(build_kernel_kernarg_preload)
+
+function(build_sample_for_devices_kernarg_preload S_NAME)
+  foreach(t ${TARGET_DEVICES})
+    build_kernel_kernarg_preload(${S_NAME} ${t})
+  endforeach(t)
+  set(HSACO_TARG_LIST ${HSACO_TARG_LIST} PARENT_SCOPE)
+endfunction(build_sample_for_devices_kernarg_preload)
+
 # Make directories for each possible target device
 # List of symlinks per directory
 set(ROCRTST_LINKS_LIST "")
@@ -407,7 +444,9 @@ foreach(td ${TARGET_DEVICES})
   file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/${td})
   add_custom_command(OUTPUT "${PROJECT_BINARY_DIR}/${td}/${ROCRTST}" COMMAND ${CMAKE_COMMAND} -E create_symlink "../${ROCRTST}" "${td}/${ROCRTST}" COMMENT "BUILDING ${td}/${ROCRTST}" VERBATIM)
   set(ROCRTST_LINKS_LIST ${ROCRTST_LINKS_LIST} "${PROJECT_BINARY_DIR}/${td}/${ROCRTST}")
-  install ( DIRECTORY ${PROJECT_BINARY_DIR}/${td} DESTINATION bin )
+  install ( DIRECTORY ${PROJECT_BINARY_DIR}/${td}
+            DESTINATION share/rocrtst
+            PATTERN "${ROCRTST}" EXCLUDE )
 endforeach(td)
 
 ######################
@@ -429,6 +468,11 @@ endif()
 set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
 set(CL_FILE_LIST "${KERNELS_DIR}/test_case_template_kernels.cl")
 build_sample_for_devices("test_case_template")
+
+## Test Case Template example
+set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
+set(CL_FILE_LIST "${KERNELS_DIR}/test_case_template_kernels.cl")
+build_sample_for_devices_kernarg_preload("test_case_template")
 
 # P2P Memory Access
 #set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
@@ -480,33 +524,88 @@ set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
 set(CL_FILE_LIST "${KERNELS_DIR}/cu_mask_kernels.cl")
 build_sample_for_devices("cu_mask")
 
-set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+# Configure RPATH settings before creating executable target
+set(CMAKE_BUILD_WITH_INSTALL_RPATH OFF)
+set(CMAKE_SKIP_BUILD_RPATH FALSE)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.14")
+  set(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE)
+endif()
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
-# Check for numa library and headers (same approach as libhsakmt)
+# Force disable NUMA copy functionality
+option(ENABLE_COPY_NUMA "Enable NUMA async copy tests" OFF)
+
+# Always exclude memory_async_copy_numa.cc since ENABLE_COPY_NUMA is forced OFF
+message(STATUS "ENABLE_COPY_NUMA is OFF - excluding memory_async_copy_numa.cc from build")
+list(FILTER performanceSources EXCLUDE REGEX ".*memory_async_copy_numa\\.cc$")
+
+# Check for numa library and header
 find_package(PkgConfig)
-find_package(NUMA)
-if(NUMA_FOUND)
-  set(NUMA_LIBS ${NUMA_LIBRARIES})
-  message(STATUS "Found NUMA package: ${NUMA_LIBRARIES}")
-  if(NUMA_INCLUDE_DIRS)
-    include_directories(${NUMA_INCLUDE_DIRS})
-    message(STATUS "NUMA include dirs: ${NUMA_INCLUDE_DIRS}")
-  endif()
-  set(HAVE_NUMA TRUE)
-else()
-  # Fallback to manual detection
-  find_library(NUMA_LIBRARY NAMES numa)
-  if(NUMA_LIBRARY)
-    set(NUMA_LIBS ${NUMA_LIBRARY})
-    message(STATUS "Found numa library (fallback): ${NUMA_LIBRARY}")
+set(HAVE_NUMA FALSE)
+set(NUMA_TARGET "")
+
+if(PKG_CONFIG_FOUND)
+  pkg_check_modules(NUMA_PC numa)
+  if(NUMA_PC_FOUND)
+    # Try to find the actual library file for SHARED IMPORTED target
+    find_library(NUMA_LIBRARY_FILE
+      NAMES numa rocm_sysdeps_numa
+      HINTS ${NUMA_PC_LIBRARY_DIRS}
+      NO_DEFAULT_PATH
+    )
+
+    if(NUMA_LIBRARY_FILE)
+      # Create SHARED IMPORTED target for proper RPATH handling
+      add_library(numa_imported SHARED IMPORTED)
+      set_target_properties(numa_imported PROPERTIES
+        IMPORTED_LOCATION "${NUMA_LIBRARY_FILE}"
+        INTERFACE_INCLUDE_DIRECTORIES "${NUMA_PC_INCLUDE_DIRS}"
+      )
+      message(STATUS "Found NUMA via pkg-config (SHARED): ${NUMA_LIBRARY_FILE}")
+    else()
+      # Fallback to INTERFACE target if we only have link flags
+      add_library(numa_imported INTERFACE IMPORTED)
+      set_target_properties(numa_imported PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${NUMA_PC_INCLUDE_DIRS}"
+        INTERFACE_LINK_LIBRARIES "${NUMA_PC_LIBRARIES}"
+        INTERFACE_LINK_DIRECTORIES "${NUMA_PC_LIBRARY_DIRS}"
+      )
+      message(STATUS "Found NUMA via pkg-config (INTERFACE): ${NUMA_PC_LIBRARIES}")
+    endif()
+
+    set(NUMA_TARGET numa_imported)
     set(HAVE_NUMA TRUE)
+    message(STATUS "  Include dirs: ${NUMA_PC_INCLUDE_DIRS}")
+    message(STATUS "  Library dirs: ${NUMA_PC_LIBRARY_DIRS}")
+  endif()
+endif()
+
+if(NOT HAVE_NUMA)
+  find_package(NUMA)
+  if(NUMA_FOUND)
+    add_library(numa_imported INTERFACE IMPORTED)
+    set_target_properties(numa_imported PROPERTIES
+      INTERFACE_INCLUDE_DIRECTORIES "${NUMA_INCLUDE_DIRS}"
+      INTERFACE_LINK_LIBRARIES "${NUMA_LIBRARIES}"
+    )
+    set(NUMA_TARGET numa_imported)
+    set(HAVE_NUMA TRUE)
+    message(STATUS "Found NUMA package: ${NUMA_LIBRARIES}")
   else()
-    message(WARNING "NUMA library not found. Building without numa support.")
-    message(WARNING "  Install libnuma-dev (Debian/Ubuntu) or numactl-devel (RHEL/CentOS)")
-    set(NUMA_LIBS "")
-    set(HAVE_NUMA FALSE)
-    # Exclude numa-dependent files from build
-    list(FILTER performanceSources EXCLUDE REGEX ".*memory_async_copy.*\\.cc$")
+    # Last resort: manual detection
+    find_library(NUMA_LIBRARY NAMES numa)
+    if(NUMA_LIBRARY)
+      add_library(numa_imported INTERFACE IMPORTED)
+      set_target_properties(numa_imported PROPERTIES
+        INTERFACE_LINK_LIBRARIES "${NUMA_LIBRARY}"
+      )
+      set(NUMA_TARGET numa_imported)
+      set(HAVE_NUMA TRUE)
+      message(STATUS "Found numa library (manual): ${NUMA_LIBRARY}")
+    else()
+      message(WARNING "NUMA library not found. Building without numa support.")
+      message(WARNING "  Install libnuma-dev (Debian/Ubuntu) or numactl-devel (RHEL/CentOS)")
+    endif()
   endif()
 endif()
 
@@ -517,48 +616,97 @@ add_executable(${ROCRTST} ${performanceSources} ${functionalSources} ${negativeS
 # Add HAVE_NUMA compile definition so code can conditionally compile NUMA features
 target_compile_definitions(${ROCRTST} PRIVATE HAVE_NUMA=$<BOOL:${HAVE_NUMA}>)
 
-# Find hwloc library (optional - only needed for certain performance tests)
-# Try pkg-config first (for super-project builds)
-if(PKG_CONFIG_FOUND)
-  pkg_check_modules(HWLOC QUIET hwloc)
-  if(HWLOC_FOUND)
-    set(HWLOC_LIBRARY ${HWLOC_LINK_LIBRARIES})
-    message(STATUS "Found hwloc via pkg-config: ${HWLOC_LIBRARY}")
-  endif()
+# Detect AddressSanitizer and define ROCRTST_ASAN
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-fsanitize=address" COMPILER_HAS_ASAN)
+if(COMPILER_HAS_ASAN AND (CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" OR CMAKE_C_FLAGS MATCHES "-fsanitize=address"))
+  target_compile_definitions(${ROCRTST} PRIVATE ROCRTST_ASAN=1)
+  message(STATUS "AddressSanitizer detected - defining ROCRTST_ASAN")
 endif()
 
-# If not found via pkg-config, check for bundled version (any version)
-if(NOT HWLOC_FOUND)
-  # Use file(GLOB) to find any libhwloc.so* file regardless of version
-  file(GLOB HWLOC_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/lib/libhwloc.so*")
-  if(HWLOC_LIBRARY)
-    list(GET HWLOC_LIBRARY 0 HWLOC_LIBRARY)  # Take first match if multiple versions exist
-    set(HWLOC_FOUND TRUE)
-    message(STATUS "Found bundled hwloc library: ${HWLOC_LIBRARY}")
-  else()
-    # Fall back to system hwloc
-    find_library(HWLOC_LIBRARY NAMES hwloc)
-    if(HWLOC_LIBRARY)
-      set(HWLOC_FOUND TRUE)
-      message(WARNING "Using system hwloc library: ${HWLOC_LIBRARY}")
-      message(WARNING "  Consider using bundled version to avoid compatibility issues")
+# Find hwloc library
+set(HAVE_HWLOC FALSE)
+set(HWLOC_TARGET "")
+
+# First priority: Try to find hwloc via CMake package (from TheRock sysdeps)
+find_package(hwloc QUIET CONFIG)
+if(hwloc_FOUND AND TARGET hwloc::hwloc)
+  set(HWLOC_TARGET hwloc::hwloc)
+  set(HAVE_HWLOC TRUE)
+  message(STATUS "Found hwloc via CMake package (TheRock sysdeps)")
+endif()
+
+# Second priority: Try pkg-config
+if(NOT HAVE_HWLOC AND PKG_CONFIG_FOUND)
+  pkg_check_modules(HWLOC_PC hwloc)
+  if(HWLOC_PC_FOUND)
+    # Try to find the actual library file for SHARED IMPORTED target
+    find_library(HWLOC_LIBRARY_FILE
+      NAMES hwloc
+      HINTS ${HWLOC_PC_LIBRARY_DIRS}
+      NO_DEFAULT_PATH
+    )
+
+    if(HWLOC_LIBRARY_FILE)
+      # Create SHARED IMPORTED target for proper RPATH handling
+      add_library(hwloc_imported SHARED IMPORTED)
+      set_target_properties(hwloc_imported PROPERTIES
+        IMPORTED_LOCATION "${HWLOC_LIBRARY_FILE}"
+        INTERFACE_INCLUDE_DIRECTORIES "${HWLOC_PC_INCLUDE_DIRS}"
+      )
+      set(HWLOC_TARGET hwloc_imported)
+      set(HAVE_HWLOC TRUE)
+      message(STATUS "Found hwloc via pkg-config (SHARED): ${HWLOC_LIBRARY_FILE}")
+      message(STATUS "  Include dirs: ${HWLOC_PC_INCLUDE_DIRS}")
+      message(STATUS "  Library dirs: ${HWLOC_PC_LIBRARY_DIRS}")
     endif()
   endif()
 endif()
 
-# Handle hwloc availability
-if(HWLOC_FOUND)
-  set(HWLOC_LIBS ${HWLOC_LIBRARY})
-  set(HAVE_HWLOC TRUE)
-  message(STATUS "hwloc support enabled")
-else()
-  message(FATAL_ERROR "hwloc library not found. Required for rocrtst build. Install libhwloc-dev (Debian/Ubuntu) or hwloc-devel (RHEL/CentOS)")
+if(NOT HAVE_HWLOC)
+  # Fallback: Search in thirdparty (may have symbol version incompatibilities with TheRock's numa)
+  find_library(HWLOC_LIBRARY
+    NAMES hwloc
+    HINTS ${ROCRTST_ROOT}/thirdparty/lib
+    PATH_SUFFIXES lib lib64
+    NO_DEFAULT_PATH
+  )
+
+  # If not found, try versioned library directly (e.g., libhwloc.so.5)
+  if(NOT HWLOC_LIBRARY)
+    find_file(HWLOC_LIBRARY
+      NAMES libhwloc.so.5 libhwloc.so.15
+      HINTS ${ROCRTST_ROOT}/thirdparty/lib
+      PATH_SUFFIXES lib lib64
+      NO_DEFAULT_PATH
+    )
+  endif()
+
+  if(HWLOC_LIBRARY)
+    add_library(hwloc_imported SHARED IMPORTED)
+    set_target_properties(hwloc_imported PROPERTIES
+      IMPORTED_LOCATION "${HWLOC_LIBRARY}"
+    )
+    set(HWLOC_TARGET hwloc_imported)
+    set(HAVE_HWLOC TRUE)
+    message(STATUS "Found hwloc library (fallback): ${HWLOC_LIBRARY}")
+    message(WARNING "Using pre-built hwloc from thirdparty/lib - may have symbol version incompatibilities with TheRock's numa")
+  else()
+    message(FATAL_ERROR "hwloc library not found. Install libhwloc-dev (Debian/Ubuntu) or hwloc-devel (RHEL/CentOS) or add hwloc as a TheRock dependency")
+  endif()
 endif()
 
 # Add HAVE_HWLOC compile definition
 target_compile_definitions(${ROCRTST} PRIVATE HAVE_HWLOC=$<BOOL:${HAVE_HWLOC}>)
 
-target_link_libraries(${ROCRTST} ${ROCRTST_LIBS} c stdc++ dl pthread rt ${NUMA_LIBS} ${HWLOC_LIBS})
+# Link libraries - CMake will automatically handle RPATH for imported targets
+target_link_libraries(${ROCRTST} ${ROCRTST_LIBS} c stdc++ dl pthread rt)
+if(HAVE_NUMA)
+  target_link_libraries(${ROCRTST} ${NUMA_TARGET})
+endif()
+if(HAVE_HWLOC)
+  target_link_libraries(${ROCRTST} ${HWLOC_TARGET})
+endif()
 
 #Build kernels
 add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
@@ -566,9 +714,13 @@ add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
 #Build symlinks
 add_custom_target(rocrtst_links ALL DEPENDS ${ROCRTST_LINKS_LIST} )
 
-## Set RUNPATH to pickup local copy of hwloc
-set_property(TARGET ${ROCRTST} PROPERTY INSTALL_RPATH "$ORIGIN;$ORIGIN/thirdparty/lib;$ORIGIN/../lib/rocrtst/thirdparty/lib" )
-set_property(TARGET ${ROCRTST} PROPERTY LINK_FLAGS "-Wl,--enable-new-dtags")
+# CMake automatically sets RPATH for linked libraries when CMAKE_INSTALL_RPATH_USE_LINK_PATH is TRUE
+# This works for SHARED IMPORTED targets (numa, hwloc) found via pkg-config
+set_target_properties(${ROCRTST} PROPERTIES
+  LINK_FLAGS "-Wl,--enable-new-dtags"
+  INSTALL_RPATH "$ORIGIN/../lib/rocrtst/lib;$ORIGIN/../lib/rocm_sysdeps/lib"
+  BUILD_RPATH "$ORIGIN/../../dist/lib/rocm_sysdeps/lib;$ORIGIN/../lib/rocrtst/lib"
+)
 
 install(TARGETS ${ROCRTST}
         ARCHIVE DESTINATION lib

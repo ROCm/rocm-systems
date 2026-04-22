@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 #include "core/trace_cache/cache_type_traits.hpp"
@@ -92,6 +73,12 @@ get_size(Type&& val)
 
         return total_size + sizeof(size_t);
     }
+    else if constexpr(type_traits::is_optional_v<DecayedType>)
+    {
+        static_assert(!type_traits::is_optional_v<typename DecayedType::value_type>,
+                      "Nested std::optional is not supported");
+        return sizeof(uint8_t) + (val.has_value() ? get_size(val.value()) : 0);
+    }
     else
     {
         return sizeof(DecayedType);
@@ -125,6 +112,17 @@ store_value(const Type& value, uint8_t* buffer, size_t& position)
         *reinterpret_cast<size_t*>(dest) = data_size;
         std::memcpy(dest + sizeof(size_t), value.data(), data_size);
         position += total_size;
+    }
+    else if constexpr(type_traits::is_optional_v<DecayedType>)
+    {
+        static_assert(!type_traits::is_optional_v<typename DecayedType::value_type>,
+                      "Nested std::optional is not supported");
+        buffer[position++] = value.has_value() ? 1 : 0;
+
+        if(value.has_value())
+        {
+            store_value(*value, buffer, position);
+        }
     }
     else
     {
@@ -167,6 +165,21 @@ parse_value(uint8_t*& data_pos, Type& arg)
         std::copy_n(reinterpret_cast<const typename ContainerType::value_type*>(data_pos),
                     total_size / item_size, std::back_inserter(arg));
         data_pos += total_size;
+    }
+    else if constexpr(type_traits::is_optional_v<DecayedType>)
+    {
+        static_assert(!type_traits::is_optional_v<typename DecayedType::value_type>,
+                      "Nested std::optional is not supported");
+        const bool has_value = *data_pos++;
+        if(has_value)
+        {
+            arg.emplace();
+            parse_value<typename DecayedType::value_type>(data_pos, *arg);
+        }
+        else
+        {
+            arg.reset();
+        }
     }
     else
     {

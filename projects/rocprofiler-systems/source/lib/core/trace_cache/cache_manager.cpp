@@ -1,27 +1,9 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "cache_manager.hpp"
 
+#include "core/output_file_registry.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/perfetto_processor.hpp"
 #include "core/trace_cache/rocpd_processor.hpp"
@@ -29,12 +11,14 @@
 
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/timemory.hpp"
 
 #include "library/runtime.hpp"
+#include "logger/debug.hpp"
 
 #include <algorithm>
 #include <cstring>
+#include <fstream>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -85,9 +69,9 @@ struct enabled_formats_t
             }
         }
 
-        ROCPROFSYS_PRINT(
-            "Generating [%s] format(s) with collected data from trace cache. This may "
-            "take a while..\n",
+        LOG_INFO(
+            "Generating [{}] format(s) with collected data from trace cache. This may "
+            "take a while..",
             ss.str().c_str());
 
         if(has_parallel_formats())
@@ -103,8 +87,7 @@ struct enabled_formats_t
                     first_parallel = false;
                 }
             }
-            ROCPROFSYS_PRINT("  - Using parallel processing for: %s\n",
-                             parallel_ss.str().c_str());
+            LOG_INFO("  - Using parallel processing for: {}", parallel_ss.str());
         }
 
         if(has_sequential_formats())
@@ -120,8 +103,8 @@ struct enabled_formats_t
                     first_sequential = false;
                 }
             }
-            ROCPROFSYS_PRINT("  - Using sequential processing for: %s\n",
-                             sequential_ss.str().c_str());
+            LOG_INFO("  - Using sequential processing for: {}",
+                     sequential_ss.str().c_str());
         }
     }
 
@@ -221,16 +204,16 @@ remove_if_exists(const std::string& fname)
         auto result = std::remove(fname.c_str());
         if(result == 0)
         {
-            ROCPROFSYS_DEBUG("Removed file: %s\n", fname.c_str());
+            LOG_DEBUG("Removed file: {}", fname);
         }
         else if(errno == ENOENT)
         {
-            ROCPROFSYS_DEBUG("File does not exist: %s\n", fname.c_str());
+            LOG_DEBUG("File does not exist: {}", fname);
         }
         else
         {
-            ROCPROFSYS_WARNING(0, "Failed to remove file: %s (errno: %d - %s)\n",
-                               fname.c_str(), errno, std::strerror(errno));
+            LOG_WARNING("Failed to remove file: {} (errno: {} - {})", fname, errno,
+                        std::strerror(errno));
         }
     }
 }
@@ -251,7 +234,7 @@ list_dir_files(const std::string& _path)
 
     if(!dir)
     {
-        ROCPROFSYS_THROW("Error opening directory: %s", _path.c_str());
+        throw std::runtime_error(fmt::format("Error opening directory: {}", _path));
     }
 
     data::directory_files_t result{};
@@ -317,96 +300,84 @@ get_cache_files(const pid_t&                   root_pid,
 void
 clear_cache_files(const data::mapped_cache_files_t& _cache_files)
 {
-    ROCPROFSYS_PRINT("Removing cached temporary files...\n");
+    LOG_DEBUG("Removing cached temporary files...");
     for(const auto& [_, files] : _cache_files)
     {
-        ROCPROFSYS_DEBUG("Removing cached temporary file: %s\n",
-                         files.buff_storage.c_str());
+        LOG_DEBUG("Removing cached temporary file: {}", files.buff_storage);
         filesystem_utils::remove_if_exists(files.buff_storage);
 
-        ROCPROFSYS_DEBUG("Removing cached temporary file: %s\n", files.metadata.c_str());
+        LOG_DEBUG("Removing cached temporary file: {}", files.metadata);
         filesystem_utils::remove_if_exists(files.metadata);
     }
 }
 
 void
-merge_perfetto_files(const std::vector<std::string>& perfetto_files,
-                     const std::string&              _filename)
+merge_perfetto_files()
 {
-    if(perfetto_files.empty())
+    // MPI merge: use merge script to combine traces from all MPI ranks
+    // This matches the legacy behavior in perfetto.cpp
+    //
+    //
+    // IMPORTANT: dmp::rank() returns 0 if MPI is not initialized/finalized.
+    // During shutdown, MPI may already be finalized, so we use
+    // settings::default_process_suffix() which was set to dmp::rank() during
+    // initialization
+
+    auto    suffix_variant  = settings::default_process_suffix();
+    int32_t cached_mpi_rank = 0;
+
+    if(std::holds_alternative<int>(suffix_variant))
     {
-        ROCPROFSYS_VERBOSE(
-            0, "perfetto trace data is empty. File '%s' will not be written...\n",
-            _filename.c_str());
-        return;
+        cached_mpi_rank = std::get<int>(suffix_variant);
     }
-
-    std::vector<char> trace_data;
-    size_t            total_size = 0;
-
-    // Calculate total size for reservation
-    for(const auto& file : perfetto_files)
+    else if(std::holds_alternative<std::string>(suffix_variant))
     {
-        std::ifstream ifs(file, std::ios::binary | std::ios::ate);
-        if(ifs)
+        try
         {
-            total_size += ifs.tellg();
+            cached_mpi_rank = std::stoi(std::get<std::string>(suffix_variant));
+        } catch(...)
+        {
+            cached_mpi_rank = 0;
         }
     }
 
-    trace_data.reserve(total_size);
+    LOG_DEBUG("Merging perfetto files: rank={} (from settings::default_process_suffix)",
+              cached_mpi_rank);
 
-    // Read and concatenate all files
-    for(const auto& file : perfetto_files)
+    // Only rank 0 performs the merge
+    if(cached_mpi_rank == 0)
     {
-        std::ifstream ifs(file, std::ios::binary);
-        if(!ifs)
+        auto _filename      = config::get_perfetto_output_filename();
+        auto _output_folder = tim::filepath::dirname(_filename);
+        auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
+        auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{}, false);
+
+        if(!_script_dir.empty())
         {
-            ROCPROFSYS_VERBOSE(-1, "Error opening '%s'...\n", file.c_str());
-            continue;
+            _script_path = fmt::format("{}/{}", _script_dir, _script_path);
         }
 
-        ifs.seekg(0, std::ios::end);
-        size_t file_size = ifs.tellg();
-        ifs.seekg(0, std::ios::beg);
-
-        size_t current_size = trace_data.size();
-        trace_data.resize(current_size + file_size);
-
-        ifs.read(trace_data.data() + current_size, file_size);
-    }
-
-    if(!trace_data.empty())
-    {
-        operation::file_output_message<tim::project::rocprofsys> _fom{};
-        // Write the trace into a file.
-        if(config::get_verbose() >= 0)
-            _fom(_filename, std::string{ "perfetto" },
-                 " (%.2f KB / %.2f MB / %.2f GB)... ",
-                 static_cast<double>(trace_data.size()) / units::KB,
-                 static_cast<double>(trace_data.size()) / units::MB,
-                 static_cast<double>(trace_data.size()) / units::GB);
-        std::ofstream ofs{};
-        if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
+        if(!tim::filepath::exists(_script_path))
         {
-            _fom.append("Error opening '%s'...", _filename.c_str());
+            LOG_WARNING("Merge script not found: {}", _script_path);
         }
         else
         {
-            // Write the trace into a file.
-            ofs.write(trace_data.data(), trace_data.size());
-            if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
+            auto _command = _script_path + " '" + _output_folder + "'";
+
+            int result = system(_command.c_str());
+
+            if(result != 0)
+            {
+                LOG_ERROR("Failed to execute merge script: {}", _command);
+            }
+            else
+            {
+                LOG_INFO("Successfully executed: {}", _command);
+            }
         }
-        ofs.close();
-    }
-    else
-    {
-        ROCPROFSYS_VERBOSE(
-            0, "perfetto trace data is empty. File '%s' will not be written...\n",
-            _filename.c_str());
     }
 }
-
 }  // namespace filesystem_utils
 
 namespace processing_utils
@@ -414,21 +385,22 @@ namespace processing_utils
 [[nodiscard]] data::processor_storage_t
 configure_processors(const std::shared_ptr<sample_processor_t>&       _type_processing,
                      const std::shared_ptr<data::processor_config_t>& _processor_config,
-                     const data::enabled_formats_t&                   _enabled_formats)
+                     const data::enabled_formats_t&                   _enabled_formats,
+                     output_file_registry&                            _output_registry)
 {
     data::processor_storage_t processor_storage;
     if(_enabled_formats.is_rocpd_enabled())
     {
         processor_storage.rocpd_processor = std::make_shared<rocpd_processor_t>(
             _processor_config->_metadata_registry, _processor_config->_agent_manager,
-            _processor_config->_pid, _processor_config->_ppid);
+            _processor_config->_pid, _processor_config->_ppid, _output_registry);
         _type_processing->add_handler(*processor_storage.rocpd_processor);
     }
     if(_enabled_formats.is_perfetto_enabled())
     {
         processor_storage.perfetto_processor = std::make_shared<perfetto_processor_t>(
             _processor_config->_metadata_registry, _processor_config->_agent_manager,
-            _processor_config->_pid, _processor_config->_ppid);
+            _processor_config->_pid, _processor_config->_ppid, _output_registry);
         _type_processing->add_handler(*processor_storage.perfetto_processor);
     }
     return processor_storage;
@@ -437,23 +409,30 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _type_proc
 void
 process_buffered_storage(
     const std::shared_ptr<data::processor_config_t>& _processor_config,
-    const std::string& _storage_filename, const data::enabled_formats_t& _enabled_formats)
+    const std::string& _storage_filename, const data::enabled_formats_t& _enabled_formats,
+    output_file_registry& _output_registry)
 {
+    LOG_DEBUG("Processing buffered storage: {} for pid={}", _storage_filename,
+              _processor_config->_pid);
+
     auto _processor_coordinator = std::make_shared<sample_processor_t>();
-    auto processor_storage =
-        configure_processors(_processor_coordinator, _processor_config, _enabled_formats);
+    auto processor_storage      = configure_processors(
+        _processor_coordinator, _processor_config, _enabled_formats, _output_registry);
     storage_parser_t _parser(_storage_filename);
 
     _processor_coordinator->prepare_for_processing();
     try
     {
         _parser.load(_processor_coordinator);
-
+        LOG_TRACE("Successfully loaded buffered storage: {}", _storage_filename);
     } catch(const std::runtime_error& exp)
     {
-        ROCPROFSYS_WARNING(1, "Error parsing buffered storage: %s\n", exp.what());
+        LOG_WARNING("Error parsing buffered storage {}: {}", _storage_filename,
+                    exp.what());
     }
     _processor_coordinator->finalize_processing();
+
+    LOG_DEBUG("Finished processing buffered storage: {}", _storage_filename);
 }
 
 std::vector<std::shared_ptr<data::processor_config_t>>
@@ -487,55 +466,67 @@ create_processor_configs(const data::mapped_cache_files_t& _cache_files,
 void
 multithreaded_processing(
     const std::vector<std::shared_ptr<data::processor_config_t>>& _processor_configs,
-    const data::enabled_formats_t&                                _enabled_formats)
+    const data::enabled_formats_t&                                _enabled_formats,
+    output_file_registry&                                         _output_registry)
 {
+    LOG_DEBUG("Starting multithreaded processing with {} configs",
+              _processor_configs.size());
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
     std::vector<std::thread> processing_threads;
     processing_threads.reserve(_processor_configs.size());
     for(const auto& processor_config : _processor_configs)
     {
+        LOG_TRACE("Spawning processing thread for pid={}", processor_config->_pid);
         processing_threads.emplace_back(
             process_buffered_storage, processor_config,
             utility::get_buffered_storage_filename(processor_config->_ppid,
                                                    processor_config->_pid),
-            _enabled_formats);
+            _enabled_formats, std::ref(_output_registry));
     }
 
+    LOG_TRACE("Waiting for {} processing threads to complete", processing_threads.size());
     for(auto& thread : processing_threads)
     {
         thread.join();
     }
+    LOG_DEBUG("Multithreaded processing completed");
 }
 
 void
 sequential_processing(
     const std::vector<std::shared_ptr<data::processor_config_t>>& _processor_configs,
-    const data::enabled_formats_t&                                _enabled_formats)
+    const data::enabled_formats_t&                                _enabled_formats,
+    output_file_registry&                                         _output_registry)
 {
+    LOG_DEBUG("Starting sequential processing with {} configs",
+              _processor_configs.size());
     for(const auto& processor_config : _processor_configs)
     {
+        LOG_TRACE("Processing config for pid={}", processor_config->_pid);
         process_buffered_storage(processor_config,
                                  utility::get_buffered_storage_filename(
                                      processor_config->_ppid, processor_config->_pid),
-                                 _enabled_formats);
+                                 _enabled_formats, _output_registry);
     }
+    LOG_DEBUG("Sequential processing completed");
 }
 
 void
 dispatch_processing(
     const std::vector<std::shared_ptr<data::processor_config_t>>& _processor_configs,
-    const data::enabled_formats_t&                                _enabled_formats)
+    const data::enabled_formats_t&                                _enabled_formats,
+    output_file_registry&                                         _output_registry)
 {
     if(_enabled_formats.has_sequential_formats())
     {
         auto sequential_formats = _enabled_formats.get_sequential_formats();
-        sequential_processing(_processor_configs, sequential_formats);
+        sequential_processing(_processor_configs, sequential_formats, _output_registry);
     }
     if(_enabled_formats.has_parallel_formats())
     {
         auto parallel_formats = _enabled_formats.get_parallel_formats();
-        multithreaded_processing(_processor_configs, parallel_formats);
+        multithreaded_processing(_processor_configs, parallel_formats, _output_registry);
     }
 }
 
@@ -549,88 +540,68 @@ cache_manager::get_instance()
 }
 
 void
-cache_manager::post_process_bulk()
+cache_manager::post_process_bulk(output_file_registry& _output_registry)
 {
+    LOG_TRACE("Starting trace cache bulk post-processing");
+
     if(!is_root_process())
     {
+        LOG_DEBUG("Not root process, skipping bulk post-processing");
         return;
     }
 
     if(m_storage.is_running())
     {
-        ROCPROFSYS_WARNING(2, "Postprocessing called without previously shutting down "
-                              "cache storage. Calling shutdown explicitly..\n");
+        LOG_WARNING(
+            "Post-processing called without previously shutting down cache storage"
+            "cache storage. Calling shutdown explicitly..");
         shutdown();
     }
 
     const auto root_pid = get_root_process_id();
+    LOG_DEBUG("Root process ID: {}", root_pid);
+
     const auto temp_directory_content =
         filesystem_utils::list_dir_files(trace_cache::tmp_directory);
+    LOG_TRACE("Found {} files in temp directory", temp_directory_content.size());
 
     const auto cache_files =
         filesystem_utils::get_cache_files(root_pid, temp_directory_content);
-    const data::enabled_formats_t enabled_formats;
-    enabled_formats.print();
+    LOG_DEBUG("Found {} cache file pairs to process", cache_files.size());
 
-    auto processor_configs =
-        processing_utils::create_processor_configs(cache_files, root_pid);
-
-    processor_configs.push_back(std::make_shared<data::processor_config_t>(
-        getpid(), root_pid, m_metadata,
-        std::make_shared<agent_manager>(get_agent_manager_instance().get_agents())));
-
-    processing_utils::dispatch_processing(processor_configs, enabled_formats);
-
-    if(enabled_formats.is_perfetto_enabled())
+    if(config::output_filtering::is_output_enabled_for_current_mpi_rank())
     {
-        std::vector<std::string> perfetto_files;
+        const data::enabled_formats_t enabled_formats;
+        enabled_formats.print();
 
-        for(const auto& config : processor_configs)
+        auto processor_configs =
+            processing_utils::create_processor_configs(cache_files, root_pid);
+
+        processor_configs.push_back(std::make_shared<data::processor_config_t>(
+            getpid(), root_pid, m_metadata,
+            std::make_shared<agent_manager>(get_agent_manager_instance().get_agents())));
+
+        LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
+        processing_utils::dispatch_processing(processor_configs, enabled_formats,
+                                              _output_registry);
+
+        if(enabled_formats.is_perfetto_enabled() && get_merge_perfetto_files())
         {
-            // Check for both naming styles: default (current process) and PID-suffixed
-            auto filename_default = config::get_perfetto_output_filename();
-            auto filename_suffix  = config::get_perfetto_output_filename_with_suffix(
-                std::to_string(config->_pid));
-
-            if(static_cast<pid_t>(config->_pid) == getpid() &&
-               tim::filepath::exists(filename_default))
-            {
-                perfetto_files.push_back(filename_default);
-            }
-            else if(tim::filepath::exists(filename_suffix))
-            {
-                perfetto_files.push_back(filename_suffix);
-            }
-        }
-
-        if(config::get_perfetto_combined_traces() && perfetto_files.size() > 1)
-        {
-            // Use base filename without suffix for merged output
-            auto _filename = config::get_perfetto_output_filename();
-            filesystem_utils::merge_perfetto_files(perfetto_files, _filename);
-        }
-        else if(perfetto_files.size() > 1)
-        {
-            ROCPROFSYS_VERBOSE(
-                0,
-                "Generated %zu separate perfetto trace files. "
-                "Set ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON to merge them.\n",
-                perfetto_files.size());
-
-            for(const auto& file : perfetto_files)
-            {
-                ROCPROFSYS_VERBOSE(1, "  - %s\n", file.c_str());
-            }
+            filesystem_utils::merge_perfetto_files();
         }
     }
 
     filesystem_utils::clear_cache_files(cache_files);
+
+    LOG_TRACE("Trace cache bulk post-processing completed");
 }
 
 void
 cache_manager::shutdown()
 {
+    LOG_DEBUG("Shutting down cache manager storage");
     m_storage.shutdown();
+    LOG_TRACE("Cache manager storage shutdown complete");
 }
 
 }  // namespace trace_cache

@@ -31,8 +31,8 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
-#include "glog/logging.h"
 #include "yaml-cpp/exceptions.h"
 #include "yaml-cpp/node/convert.h"
 #include "yaml-cpp/node/detail/impl.h"
@@ -46,6 +46,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <system_error>
 #include <vector>
 
 namespace rocprofiler
@@ -250,11 +251,23 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
 std::string
 findViaInstallPath(const std::string& filename)
 {
+    namespace fs = common::filesystem;
+
     Dl_info dl_info = {};
     ROCP_INFO << filename << " is being looked up via install path";
-    if(dladdr(reinterpret_cast<const void*>(rocprofiler_query_available_agents), &dl_info) != 0)
+    if(dladdr(reinterpret_cast<const void*>(rocprofiler_query_available_agents), &dl_info) != 0 &&
+       dl_info.dli_fname != nullptr)
     {
-        return common::filesystem::path{dl_info.dli_fname}.parent_path().parent_path() /
+        // Resolve symlinks to get the absolute physical path of the .so file.
+        auto     ec            = std::error_code{};
+        auto     lib_path      = fs::path{dl_info.dli_fname};
+        fs::path real_lib_path = fs::canonical(lib_path, ec);
+        if(!ec)
+        {
+            lib_path = real_lib_path;
+        }
+
+        return lib_path.parent_path().parent_path() /
                fmt::format("share/rocprofiler-sdk/{}", filename);
     }
     return filename;
@@ -265,17 +278,24 @@ locateMetricsFile(std::string_view name)
 {
     namespace fs = common::filesystem;
 
+    auto metric_env_path = std::string{"not set"};
+
     // 1) Try env var
     if(const char* env = std::getenv("ROCPROFILER_METRICS_PATH"))
     {
-        fs::path candidate = fs::path{env} / std::string{name};
-        if(fs::exists(candidate))
+        metric_env_path = env;
+        auto env_paths = sdk::parse::tokenize<std::vector<std::string>>(env, std::string_view{":"});
+        for(const auto& path : env_paths)
         {
-            ROCP_INFO << name << " found via ROCPROFILER_METRICS_PATH: " << candidate.string();
-            return candidate.string();
+            fs::path candidate = fs::path{path} / std::string{name};
+            if(fs::exists(candidate))
+            {
+                ROCP_INFO << name << " found via ROCPROFILER_METRICS_PATH: " << candidate.string();
+                return candidate.string();
+            }
         }
-        ROCP_WARNING << name << " not found at ROCPROFILER_METRICS_PATH (" << env
-                     << "). Falling back to install path.";
+        ROCP_INFO << name << " not found at ROCPROFILER_METRICS_PATH (" << env
+                  << "). Falling back to install path.";
     }
 
     // 2) Fall back to install path
@@ -286,9 +306,9 @@ locateMetricsFile(std::string_view name)
         return install_candidate;
     }
 
-    // 3) Neither found -> fatal
     ROCP_FATAL << "Metric file '" << name << "' not found.\n"
-               << "  Tried: ROCPROFILER_METRICS_PATH/" << name << " and " << install_candidate;
+               << "  Tried: ROCPROFILER_METRICS_PATH (" << metric_env_path << "), and"
+               << install_candidate;
     return {};
 }
 
@@ -318,7 +338,7 @@ loadMetrics(bool reload, const std::optional<ArchMetric> add_metric)
     }
 
     auto reload_func = [&]() {
-        auto counters_path = locateMetricsFile("counter_defs.yaml");
+        auto counters_path = locateMetricsFile("config.yaml");
         ROCP_FATAL_IF(!common::filesystem::exists(counters_path))
             << "metric xml file '" << counters_path << "' does not exist";
         return std::make_shared<counter_metrics_t>(loadYAML(counters_path, add_metric));
@@ -365,28 +385,7 @@ getMetricsForAgent(const rocprofiler_agent_t* agent)
     if(const auto* metric_ptr =
            rocprofiler::common::get_val(mets->arch_to_metric, std::string(agent->name)))
     {
-        // Clone metrics and encode agent-specific counter IDs
-        std::vector<Metric> agent_specific_metrics;
-        agent_specific_metrics.reserve(metric_ptr->size());
-
-        for(const auto& base_metric : *metric_ptr)
-        {
-            Metric agent_metric = base_metric;
-
-            // Encode agent into counter ID using agent's logical_node_id + AGENT_ENCODING_OFFSET.
-            // We add offset so that agent 0 has non-zero encoding and is detectable as
-            // agent-encoded. Only logical_node_id values 0-62 (i.e., 63 agents) are supported,
-            // since adding AGENT_ENCODING_OFFSET (1) results in encoded values 1-63, which fit in a
-            // 6-bit field.
-            rocprofiler_counter_id_t new_id{.handle = 0};
-            set_base_metric_in_counter_id(new_id, base_metric.id());
-            set_agent_in_counter_id(new_id, static_cast<uint8_t>(agent->logical_node_id));
-
-            agent_metric.set_id(new_id.handle);
-            agent_specific_metrics.push_back(agent_metric);
-        }
-
-        return agent_specific_metrics;
+        return *metric_ptr;
     }
 
     return std::vector<Metric>{};
@@ -398,13 +397,7 @@ checkValidMetric(const std::string& agent, const Metric& metric)
     auto        metrics   = loadMetrics();
     const auto* agent_map = common::get_val(metrics->arch_to_id, agent);
 
-    // Extract base metric ID if counter ID is agent-encoded
-    rocprofiler_counter_id_t counter_id{.handle = metric.id()};
-    uint64_t                 base_metric_id = is_agent_encoded_counter_id(counter_id)
-                                                  ? get_base_metric_from_counter_id(counter_id)
-                                                  : metric.id();
-
-    return agent_map != nullptr && agent_map->count(base_metric_id) > 0;
+    return agent_map != nullptr && agent_map->count(metric.id()) > 0;
 }
 
 bool

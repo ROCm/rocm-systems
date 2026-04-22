@@ -16,19 +16,19 @@ Panel Config:
             + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
             / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0)
             else None))
-          unit: Pct of Peak
+          unit: Percent
         Bandwidth Utilization:
           value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp
             - Start_Timestamp)))) / ((($max_sclk / 1000) * 128) * $cu_per_gpu))
-          unit: Pct of Peak
+          unit: Percent
         Utilization:
           value: AVG((((TCP_GATE_EN2_sum * 100) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
             != 0) else None))
-          unit: Pct of Peak
+          unit: Percent
         Coalescing:
           value: AVG(((((TA_TOTAL_WAVEFRONTS_sum * 64) * 100) / (TCP_TOTAL_ACCESSES_sum
             * 4)) if (TCP_TOTAL_ACCESSES_sum != 0) else None))
-          unit: Pct of Peak
+          unit: Percent
       comparable: false
       cli_style: simple_bar
       tui_style: simple_bar
@@ -85,17 +85,17 @@ Panel Config:
           avg: AVG((TCP_TOTAL_ACCESSES_sum / $denom))
           min: MIN((TCP_TOTAL_ACCESSES_sum / $denom))
           max: MAX((TCP_TOTAL_ACCESSES_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         Read Req:
           avg: AVG((TCP_TOTAL_READ_sum / $denom))
           min: MIN((TCP_TOTAL_READ_sum / $denom))
           max: MAX((TCP_TOTAL_READ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         Write Req:
           avg: AVG((TCP_TOTAL_WRITE_sum / $denom))
           min: MIN((TCP_TOTAL_WRITE_sum / $denom))
           max: MAX((TCP_TOTAL_WRITE_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         Atomic Req:
           avg: AVG(((TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum)
             / $denom))
@@ -103,7 +103,7 @@ Panel Config:
             / $denom))
           max: MAX(((TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum)
             / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         Cache BW:
           avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
           min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
@@ -122,12 +122,12 @@ Panel Config:
             + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
             / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0)
             else None))
-          unit: pct
+          unit: Percent
         Cache Accesses:
           avg: AVG((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))
           min: MIN((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))
           max: MAX((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         Cache Hits:
           avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum - (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
             + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
@@ -138,12 +138,12 @@ Panel Config:
           max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum - (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
             + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
             / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         Invalidations:
           avg: AVG((TCP_TOTAL_WRITEBACK_INVALIDATES_sum / $denom))
           min: MIN((TCP_TOTAL_WRITEBACK_INVALIDATES_sum / $denom))
           max: MAX((TCP_TOTAL_WRITEBACK_INVALIDATES_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         L1-L2 BW:
           avg: AVG(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum
             + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (End_Timestamp - Start_Timestamp)))
@@ -156,32 +156,32 @@ Panel Config:
           avg: AVG((TCP_TAGRAM0_REQ_sum / $denom))
           min: MIN((TCP_TAGRAM0_REQ_sum / $denom))
           max: MAX((TCP_TAGRAM0_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         Tag RAM 1 Req:
           avg: AVG((TCP_TAGRAM1_REQ_sum / $denom))
           min: MIN((TCP_TAGRAM1_REQ_sum / $denom))
           max: MAX((TCP_TAGRAM1_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         Tag RAM 2 Req:
           avg: AVG((TCP_TAGRAM2_REQ_sum / $denom))
           min: MIN((TCP_TAGRAM2_REQ_sum / $denom))
           max: MAX((TCP_TAGRAM2_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         Tag RAM 3 Req:
           avg: AVG((TCP_TAGRAM3_REQ_sum / $denom))
           min: MIN((TCP_TAGRAM3_REQ_sum / $denom))
           max: MAX((TCP_TAGRAM3_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         L1-L2 Read:
           avg: AVG((TCP_TCC_READ_REQ_sum / $denom))
           min: MIN((TCP_TCC_READ_REQ_sum / $denom))
           max: MAX((TCP_TCC_READ_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         L1-L2 Write:
           avg: AVG((TCP_TCC_WRITE_REQ_sum / $denom))
           min: MIN((TCP_TCC_WRITE_REQ_sum / $denom))
           max: MAX((TCP_TCC_WRITE_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         L1-L2 Atomic:
           avg: AVG(((TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)
             / $denom))
@@ -189,7 +189,7 @@ Panel Config:
             / $denom))
           max: MAX(((TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)
             / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         L1 Access Latency:
           avg: AVG((TCP_TCP_LATENCY_sum / $denom))
           min: MIN((TCP_TCP_LATENCY_sum / $denom))
@@ -223,84 +223,84 @@ Panel Config:
           avg: AVG((TCP_TCC_NC_READ_REQ_sum / $denom))
           min: MIN((TCP_TCC_NC_READ_REQ_sum / $denom))
           max: MAX((TCP_TCC_NC_READ_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         UC - Read:
           xfer: Read
           coherency: UC
           avg: AVG((TCP_TCC_UC_READ_REQ_sum / $denom))
           min: MIN((TCP_TCC_UC_READ_REQ_sum / $denom))
           max: MAX((TCP_TCC_UC_READ_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         CC - Read:
           xfer: Read
           coherency: CC
           avg: AVG((TCP_TCC_CC_READ_REQ_sum / $denom))
           min: MIN((TCP_TCC_CC_READ_REQ_sum / $denom))
           max: MAX((TCP_TCC_CC_READ_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         RW - Read:
           xfer: Read
           coherency: RW
           avg: AVG((TCP_TCC_RW_READ_REQ_sum / $denom))
           min: MIN((TCP_TCC_RW_READ_REQ_sum / $denom))
           max: MAX((TCP_TCC_RW_READ_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         RW - Write:
           xfer: Write
           coherency: RW
           avg: AVG((TCP_TCC_RW_WRITE_REQ_sum / $denom))
           min: MIN((TCP_TCC_RW_WRITE_REQ_sum / $denom))
           max: MAX((TCP_TCC_RW_WRITE_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         NC - Write:
           xfer: Write
           coherency: NC
           avg: AVG((TCP_TCC_NC_WRITE_REQ_sum / $denom))
           min: MIN((TCP_TCC_NC_WRITE_REQ_sum / $denom))
           max: MAX((TCP_TCC_NC_WRITE_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         UC - Write:
           xfer: Write
           coherency: UC
           avg: AVG((TCP_TCC_UC_WRITE_REQ_sum / $denom))
           min: MIN((TCP_TCC_UC_WRITE_REQ_sum / $denom))
           max: MAX((TCP_TCC_UC_WRITE_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         CC - Write:
           xfer: Write
           coherency: CC
           avg: AVG((TCP_TCC_CC_WRITE_REQ_sum / $denom))
           min: MIN((TCP_TCC_CC_WRITE_REQ_sum / $denom))
           max: MAX((TCP_TCC_CC_WRITE_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         NC - Atomic:
           xfer: Atomic
           coherency: NC
           avg: AVG((TCP_TCC_NC_ATOMIC_REQ_sum / $denom))
           min: MIN((TCP_TCC_NC_ATOMIC_REQ_sum / $denom))
           max: MAX((TCP_TCC_NC_ATOMIC_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         UC - Atomic:
           xfer: Atomic
           coherency: UC
           avg: AVG((TCP_TCC_UC_ATOMIC_REQ_sum / $denom))
           min: MIN((TCP_TCC_UC_ATOMIC_REQ_sum / $denom))
           max: MAX((TCP_TCC_UC_ATOMIC_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         CC - Atomic:
           xfer: Atomic
           coherency: CC
           avg: AVG((TCP_TCC_CC_ATOMIC_REQ_sum / $denom))
           min: MIN((TCP_TCC_CC_ATOMIC_REQ_sum / $denom))
           max: MAX((TCP_TCC_CC_ATOMIC_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
         RW - Atomic:
           xfer: Atomic
           coherency: RW
           avg: AVG((TCP_TCC_RW_ATOMIC_REQ_sum / $denom))
           min: MIN((TCP_TCC_RW_ATOMIC_REQ_sum / $denom))
           max: MAX((TCP_TCC_RW_ATOMIC_REQ_sum / $denom))
-          unit: (Req + $normUnit)
+          unit: (Requests + $normUnit)
   - metric_table:
       id: 1605
       title: L1 Unified Translation Cache (UTCL1)
@@ -315,12 +315,12 @@ Panel Config:
           avg: AVG((TCP_UTCL1_REQUEST_sum / $denom))
           min: MIN((TCP_UTCL1_REQUEST_sum / $denom))
           max: MAX((TCP_UTCL1_REQUEST_sum / $denom))
-          units: (Req + $normUnit)
+          units: (Requests + $normUnit)
         Inflight Req:
           avg: AVG((TCP_CLIENT_UTCL1_INFLIGHT_sum / $denom))
           min: MIN((TCP_CLIENT_UTCL1_INFLIGHT_sum / $denom))
           max: MAX((TCP_CLIENT_UTCL1_INFLIGHT_sum / $denom))
-          units: (Req + $normUnit)
+          units: (Requests + $normUnit)
         Hit Ratio:
           avg: AVG((((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum)
             if (TCP_UTCL1_REQUEST_sum != 0) else None))
@@ -328,27 +328,27 @@ Panel Config:
             if (TCP_UTCL1_REQUEST_sum != 0) else None))
           max: MAX((((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum)
             if (TCP_UTCL1_REQUEST_sum != 0) else None))
-          units: pct
+          units: Percent
         Hits:
           avg: AVG((TCP_UTCL1_TRANSLATION_HIT_sum / $denom))
           min: MIN((TCP_UTCL1_TRANSLATION_HIT_sum / $denom))
           max: MAX((TCP_UTCL1_TRANSLATION_HIT_sum / $denom))
-          units: (Req + $normUnit)
+          units: (Requests + $normUnit)
         Translation Misses:
           avg: AVG((TCP_UTCL1_TRANSLATION_MISS_sum / $denom))
           min: MIN((TCP_UTCL1_TRANSLATION_MISS_sum / $denom))
           max: MAX((TCP_UTCL1_TRANSLATION_MISS_sum / $denom))
-          units: (Req + $normUnit)
+          units: (Requests + $normUnit)
         Misses under Translation Miss:
           avg: AVG((TCP_UTCL1_TRANSLATION_MISS_UNDER_MISS_sum / $denom))
           min: MIN((TCP_UTCL1_TRANSLATION_MISS_UNDER_MISS_sum / $denom))
           max: MAX((TCP_UTCL1_TRANSLATION_MISS_UNDER_MISS_sum / $denom))
-          units: (Req + $normUnit)
+          units: (Requests + $normUnit)
         Permission Misses:
           avg: AVG((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
           min: MIN((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
           max: MAX((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
-          units: (Req + $normUnit)
+          units: (Requests + $normUnit)
   - metric_table:
       id: 1606
       title: L1D Addr Translation Stalls
@@ -416,6 +416,26 @@ Panel Config:
     Stalled on L2 Req: The ratio of the number of cycles where the vL1D is stalled
       waiting to issue a request for data to the L2 cache divided by the number of
       cycles where the vL1D is active.
+    Stalled on Address: >-
+      The ratio of the number of cycles where the vL1D is stalled waiting for the
+      address processing unit to send address information, divided by the number
+      of cycles where the vL1D is active.
+    Stalled on Data: >-
+      The ratio of the number of cycles where the vL1D is stalled waiting for the
+      address processing unit to send write/atomic data, divided by the number of
+      cycles where the vL1D is active.
+    Stalled on Latency FIFO: >-
+      The ratio of the number of cycles where the vL1D is stalled because the
+      latency FIFO (tracking outstanding requests) is full, divided by the number
+      of cycles where the vL1D is active.
+    Stalled on Request FIFO: >-
+      The ratio of the number of cycles where the vL1D is stalled because the
+      request FIFO (queuing memory requests) is full, divided by the number of
+      cycles where the vL1D is active.
+    Stalled on Read Return: >-
+      The ratio of the number of cycles where the vL1D is stalled waiting for read
+      data to return from L2 before it can write into the cache, divided by the
+      number of cycles where the vL1D is active.
     Tag RAM Stall (Read): The ratio of the number of cycles where the vL1D is stalled
       due to Read requests with conflicting tags being looked up concurrently, divided
       by the number of cycles where the vL1D is active.
@@ -454,6 +474,26 @@ Panel Config:
       value does not consider partial requests, so for instance, if only a single
       value is requested in a cache line, the data movement will still be counted
       as a full cache line.
+    Tag RAM 0 Req: >-
+      The total number of vL1D cache requests (cache line lookups) that mapped to
+      Tag RAM bank 0 during the vL1D tag lookup process, per normalization unit.
+      The vL1D cache uses multiple Tag RAM banks for parallel tag lookups.
+      Distribution across banks affects lookup efficiency.
+    Tag RAM 1 Req: >-
+      The total number of vL1D cache requests (cache line lookups) that mapped to
+      Tag RAM bank 1 during the vL1D tag lookup process, per normalization unit.
+      The vL1D cache uses multiple Tag RAM banks for parallel tag lookups.
+      Distribution across banks affects lookup efficiency.
+    Tag RAM 2 Req: >-
+      The total number of vL1D cache requests (cache line lookups) that mapped to
+      Tag RAM bank 2 during the vL1D tag lookup process, per normalization unit.
+      The vL1D cache uses multiple Tag RAM banks for parallel tag lookups.
+      Distribution across banks affects lookup efficiency.
+    Tag RAM 3 Req: >-
+      The total number of vL1D cache requests (cache line lookups) that mapped to
+      Tag RAM bank 3 during the vL1D tag lookup process, per normalization unit.
+      The vL1D cache uses multiple Tag RAM banks for parallel tag lookups.
+      Distribution across banks affects lookup efficiency.
     L1-L2 Read: The number of read requests for a vL1D cache line that were not satisfied
       by the vL1D and must be retrieved from the to the L2 Cache per normalization
       unit.
@@ -470,6 +510,38 @@ Panel Config:
     L1-L2 Write Latency: Calculated as the average number of cycles that the vL1D
       cache took to issue and receive acknowledgement of a write request to the L2
       Cache. This number also includes requests for atomics without return values.
+    Inflight Req: >-
+      The sum of inflight client-to-UTCL1 translation requests per cycle, per
+      normalization unit. Measures the average number of translation requests
+      actively being processed by the UTCL1 at any given time.
+    Misses under Translation Miss: >-
+      The number of translation requests that missed in the UTCL1 while another
+      miss for the same translation was already being processed, per normalization
+      unit. These are secondary misses that occur before the first miss completes.
+    Cache Full Stall: >-
+      The number of cycles the UTCL1 was stalled due to the inflight request
+      counter reaching its maximum capacity, per normalization unit. Indicates
+      the translation cache cannot accept more requests.
+    Cache Miss Stall: >-
+      The number of cycles the UTCL1 was stalled due to multiple cache misses
+      being arbitrated simultaneously, per normalization unit.
+    Serialization Stall: >-
+      The number of cycles the UTCL1 was stalled due to serializing translation
+      requests through the cache, per normalization unit.
+    Thrashing Stall: >-
+      The number of cycles the UTCL1 was stalled due to cache thrashing (rapid
+      eviction and reload of translations), per normalization unit. This is an
+      estimation when thrashing detection is active.
+    Latency FIFO Stall: >-
+      The number of cycles the UTCL1-to-UTCL2 latency-hiding FIFO was full,
+      per normalization unit. This FIFO queues requests to the L2 translation
+      cache (UTCL2).
+    Resident Page Full Stall: >-
+      The number of cycles the UTCL1 was stalled because the latency-hiding
+      FIFO output indicated a non-resident page, per normalization unit.
+    UTCL2 Stall: >-
+      The number of cycles the UTCL1 was stalled due to running out of request
+      credits for the UTCL2 (L2 translation cache), per normalization unit.
     NC - Read: Total read requests with NC mtype from this TCP to all TCCs Sum over
       TCP instances per normalization unit.
     UC - Read: Total read requests with UC mtype from this TCP to all TCCs Sum over

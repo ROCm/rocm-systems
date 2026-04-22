@@ -20,19 +20,22 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
-    if(
-        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-    )
-        return()
-    endif()
+project(rocprofiler-systems-thread-limit-example LANGUAGES CXX)
+
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
 endif()
 
 set(CMAKE_BUILD_TYPE "Release")
 find_package(Threads REQUIRED)
+
+# Default MAX_THREADS for standalone builds
+if(NOT DEFINED ROCPROFSYS_MAX_THREADS)
+    set(ROCPROFSYS_MAX_THREADS 64)
+endif()
 
 add_library(tests-compile-options INTERFACE)
 target_compile_options(tests-compile-options INTERFACE -g)
@@ -40,3 +43,11 @@ target_compile_options(tests-compile-options INTERFACE -g)
 add_executable(thread-limit thread-limit.cpp)
 target_compile_definitions(thread-limit PRIVATE MAX_THREADS=${ROCPROFSYS_MAX_THREADS})
 target_link_libraries(thread-limit PRIVATE Threads::Threads tests-compile-options)
+
+if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET thread-limit)
+    install(
+        TARGETS thread-limit
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+        COMPONENT rocprofiler-systems-examples
+    )
+endif()

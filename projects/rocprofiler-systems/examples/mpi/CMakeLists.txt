@@ -1,16 +1,13 @@
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 project(rocprofiler-systems-mpi-examples LANGUAGES C CXX)
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
-
-    if(
-        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-    )
-        return()
-    endif()
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
 endif()
 
 find_package(MPI)
@@ -77,16 +74,24 @@ add_executable(mpi-example mpi.cpp)
 target_link_libraries(mpi-example PRIVATE mpi-cxx-interface-library)
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(
-        TARGETS
-            mpi-example
-            mpi-allgather
-            mpi-bcast
-            mpi-all2all
-            mpi-reduce
-            mpi-scatter-gather
-            mpi-send-recv
-        DESTINATION bin
-        COMPONENT rocprofiler-systems-examples
+    set(MPI_EXAMPLES
+        mpi-example
+        mpi-allgather
+        mpi-bcast
+        mpi-all2all
+        mpi-reduce
+        mpi-scatter-gather
+        mpi-send-recv
+        mpi-allreduce
     )
+
+    foreach(MPI_EXAMPLE IN LISTS MPI_EXAMPLES)
+        if(TARGET ${MPI_EXAMPLE})
+            install(
+                TARGETS ${MPI_EXAMPLE}
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+                COMPONENT rocprofiler-systems-examples
+            )
+        endif()
+    endforeach()
 endif()

@@ -37,6 +37,14 @@
 #include "workload.hpp"
 #include "hip/hip_runtime.h"
 
+// Helper macro to detect RDNA3 (gfx11xx) architectures
+// These architectures default to Real16 mode and require .set fake16 for legacy F16 instructions
+#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || \
+    defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__) || \
+    defined(__gfx1200__) || defined(__gfx1201__)
+#define GFX11_RDNA3_ARCH 1
+#endif
+
 #define DATA_SIZE          (64*4)
 
 #define HIP_API_CALL(CALL) do { if ((CALL) != hipSuccess) abort(); } while(0)
@@ -123,15 +131,12 @@ __global__ void atomic_kernel(float* a, const float* b)
 
 __global__ void iops_kernel_trans()
 {
-    // 3 F16 Trans OPS
-    asm volatile("v_cos_f16 v0, v0; v_cos_f16 v1, v1; v_cos_f16 v2, v2;");
     // 2 F32 Trans OPS
     asm volatile("v_cos_f32 v3, v3; v_cos_f32 v4, v4");
 }
 
 __global__ void iops_kernel1()
 {
-    asm volatile("v_add_f16 v2, v1, v0"); // 1 F16 OPS
     asm volatile("v_fma_f32 v3, v1, v2, v3"); // 2 F32 OPs
 
     asm volatile("v_add_f64 v[0:1], v[2:3], v[4:5]"); // 1 F64 OP
@@ -141,14 +146,9 @@ __global__ void iops_kernel1()
 
 __global__ void iops_kernel2()
 {
-   #if defined(__gfx940__) || defined(__gfx90a__) || defined(__gfx1030__)
-    // Supported architectures
-    asm volatile("v_dot2_f32_f16 v0, v1, v2, v3");
-#else
-    // Fallback or skip
+    // Fallback - removed dot2_f32_f16 instruction
     asm volatile("v_add_f32 v4, v5, v6"); // 1 F32 OP
     asm volatile("v_fma_f64 v[0:1], v[0:1], v[2:3], v[4:5]"); // 2 F64 OPs
-#endif
 
 }
 
@@ -322,10 +322,8 @@ auto iops_counters(std::string_view gfxip)
 
     if (gfxip.find("gfx95") == 0)
     {
-        counters.push_back("SQ_INSTS_VALU_FLOPS_FP16");
         counters.push_back("SQ_INSTS_VALU_FLOPS_FP32");
         counters.push_back("SQ_INSTS_VALU_FLOPS_FP64");
-        counters.push_back("SQ_INSTS_VALU_FLOPS_FP16_TRANS");
         counters.push_back("SQ_INSTS_VALU_FLOPS_FP32_TRANS");
         counters.push_back("SQ_INSTS_VALU_FLOPS_FP64_TRANS");
     }

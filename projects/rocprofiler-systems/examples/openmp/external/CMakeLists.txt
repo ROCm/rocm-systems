@@ -25,7 +25,18 @@ endif()
 
 rocprofiler_systems_message(STATUS "Configuring OMPVV...")
 
+if(NOT ROCPROFSYS_GFX_TARGETS)
+    rocprofiler_systems_message(WARNING "No GPU targets detected/set. Disabling OMPVV offload tests...")
+    set(OMPVV_USE_OFFLOAD_TESTS FALSE)
+endif()
+
 # Master branch contains stable releases
+set(OMPVV_CHECKOUT_BRANCH
+    "master"
+    CACHE STRING
+    "Branch, tag, or SHA to checkout for OpenMP V&V suite"
+)
+
 rocprofiler_systems_checkout_git_submodule(
   RELATIVE_PATH
   external/ompvv
@@ -36,7 +47,7 @@ rocprofiler_systems_checkout_git_submodule(
   REPO_URL
   https://github.com/OpenMP-Validation-and-Verification/OpenMP_VV.git
   REPO_BRANCH
-  "master"
+  "${OMPVV_CHECKOUT_BRANCH}"
 )
 
 set(ROCPROFSYS_OMPVV_SUBMODULE_DIR "${PROJECT_SOURCE_DIR}/external/ompvv")
@@ -63,9 +74,6 @@ function(configure_ompvv_tests TEST_TYPE TEST_LIST_VAR)
     elseif(TEST_TYPE STREQUAL "OFFLOAD")
         set(TARGET_PREFIX "openmp-vv-offload")
         set(FOFFLOADING_FLAGS "-fopenmp")
-        foreach(arch IN LISTS DEFAULT_GPU_TARGETS)
-            set(FOFFLOADING_FLAGS "${FOFFLOADING_FLAGS} --offload-arch=${arch}")
-        endforeach()
     else()
         rocprofiler_systems_message(FATAL_ERROR "Unknown TEST_TYPE - Only HOST and OFFLOAD supported")
     endif()
@@ -76,6 +84,12 @@ function(configure_ompvv_tests TEST_TYPE TEST_LIST_VAR)
         get_filename_component(TEST_NAME ${TEST} NAME_WE)
         string(REPLACE "_" "-" TARGET_NAME ${TEST_NAME})
         set(TARGET_NAME "${TARGET_PREFIX}-${TARGET_NAME}")
+
+        if(TARGET_PREFIX STREQUAL "openmp-vv-offload")
+            foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+                set(FOFFLOADING_FLAGS "${FOFFLOADING_FLAGS} --offload-arch=${arch}")
+            endforeach()
+        endif()
 
         set(CUSTOM_FFLAGS "-lm ${FOFFLOADING_FLAGS}")
         set(CUSTOM_FLINKFLAGS "-lm ${FOFFLOADING_FLAGS}")
@@ -184,7 +198,7 @@ set(OMPVV_COMPILER
     CACHE FILEPATH
     "Fortran compiler used for OMPVV tests"
 )
-set(OMPVV_FC "amdflang")
+set(OMPVV_FC "${amdflang_EXECUTABLE}")
 
 execute_process(
     COMMAND ${amdflang_EXECUTABLE} --version
@@ -237,7 +251,7 @@ set(OMPVV_HOST_TESTS_TO_COMPILE
 # Set of offloading tests to be compiled (excluding reduction and simd_atomic
 # tests due to OMPVV test failure)
 set(OMPVV_OFFLOAD_TESTS_TO_COMPILE "")
-if(OMPVV_USE_OFFLOAD_TESTS)
+if(OMPVV_USE_OFFLOAD_TESTS AND AMDFLANG_VERSION_MAJOR GREATER_EQUAL 20)
     set(OMPVV_OFFLOAD_TESTS_TO_COMPILE
         "${OMPVV_TDIR}/target_simd/test_target_simd_if.F90"
         "${OMPVV_TDIR}/target_teams_distribute_parallel_for/test_target_teams_distribute_parallel_for_collapse.F90"
@@ -280,3 +294,19 @@ set(ROCPROFSYS_OMPVV_OFFLOAD_TESTS
 rocprofiler_systems_message(STATUS
                             "Successfully configured OMPVV"
 )
+
+if(ROCPROFSYS_INSTALL_EXAMPLES)
+    foreach(
+        test_target
+        IN
+        LISTS ROCPROFSYS_OMPVV_HOST_TESTS ROCPROFSYS_OMPVV_OFFLOAD_TESTS
+    )
+        if(TARGET "${test_target}-build")
+            install(
+                PROGRAMS "${OMPVV_BIN_DEST}/${test_target}"
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+                COMPONENT rocprofiler-systems-examples
+            )
+        endif()
+    endforeach()
+endif()

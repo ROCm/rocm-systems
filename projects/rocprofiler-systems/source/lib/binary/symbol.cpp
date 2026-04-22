@@ -1,27 +1,9 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "core/config.hpp"
-#include "core/debug.hpp"
+
+#include <spdlog/fmt/fmt.h>
 
 #if !defined(TIMEMORY_USE_BFD)
 #    error "BFD support not enabled"
@@ -120,7 +102,8 @@ symbol::operator()(const std::vector<scope_filter>& _filters) const
     return (sf::satisfies_filter(_filters, sf::FUNCTION_FILTER,
                                  rocprofsys::utility::demangle(func)) &&
             (sf::satisfies_filter(_filters, sf::SOURCE_FILTER, file) ||
-             sf::satisfies_filter(_filters, sf::SOURCE_FILTER, join(':', file, line))));
+             sf::satisfies_filter(_filters, sf::SOURCE_FILTER,
+                                  fmt::format("{}:{}", file, line))));
 }
 
 symbol&
@@ -289,7 +272,7 @@ symbol::get_inline_symbols(const std::vector<scope_filter>& _filters) const
                                 rocprofsys::utility::demangle(itr.func)) &&
            (sf::satisfies_filter(_filters, sf::SOURCE_FILTER, itr.file) ||
             sf::satisfies_filter(_filters, sf::SOURCE_FILTER,
-                                 join(':', itr.file, itr.line))))
+                                 fmt::format("{}:{}", itr.file, itr.line))))
         {
             if constexpr(concepts::is_unqualified_same<value_type, symbol>::value)
             {
@@ -326,7 +309,7 @@ symbol::get_debug_line_info(const std::vector<scope_filter>& _filters) const
         {
             if(sf::satisfies_filter(_filters, sf::SOURCE_FILTER, itr.file) ||
                sf::satisfies_filter(_filters, sf::SOURCE_FILTER,
-                                    join(':', itr.file, itr.line)))
+                                    fmt::format("{}:{}", itr.file, itr.line)))
             {
                 if constexpr(concepts::is_unqualified_same<value_type, symbol>::value)
                 {

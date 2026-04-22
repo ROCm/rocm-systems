@@ -207,8 +207,10 @@ struct ncclTopoSystem {
   int pivotA2ANumBiRings;
   bool treeDefined;
   bool ll128Enabled;
+#ifdef ENABLE_WARP_SPEED
+  bool warpSpeedEnabled;
+#endif
   float baseBw;
-  bool mscclEnabled;
 
   // [RCCL] Track hostIdx to support rail-optimized rings/trees
   int hostIdx;
@@ -226,12 +228,26 @@ ncclResult_t ncclTopoGetGpuMinPath(struct ncclTopoSystem* system, int type, int*
 ncclResult_t ncclTopoGetGpuMaxPath(struct ncclTopoSystem* system, int type, int* max);
 ncclResult_t ncclTopoSplitNvLink(struct ncclTopoSystem* system, int* splitNvLink);
 
-struct ncclTopoNetState {
-  int nVirtualNics;
-  int nPhysicalNics;
+struct ncclTopoNetInfo {
+  bool coll;
+  // communicator-specific information
+  int netPluginIndex;
+  bool dmaBufSupport;
+  // NIC fusion
+  int mergeLevel;
+  const char* forceMerge;
+  // dev count tracking functions (not part of ncclNet)
+  ncclResult_t (*getDevCount)(int, int*, int*);
+  ncclResult_t (*setVirtDevCount)(int, int);
+  // ncclNet API functions
   const char* name;
+  ncclResult_t (*getProperties)(int, ncclNetProperties_t*);
+  ncclResult_t (*makeVDevice)(int*, ncclNetVDeviceProps_t*);
+  ncclResult_t (*devices)(int*);
 };
-ncclResult_t ncclTopoProcessNet(ncclXml* xml, int coll, const char* dumpXmlFile, ncclTopoNetState* state, ncclResult_t (*getProperties)(int, ncclNetProperties_t*), ncclResult_t (*makeVDevice)(int*, ncclNetVDeviceProps_t*), ncclResult_t (*devices)(int*), const char* netName, bool dmaBufSupport);
+
+ncclResult_t ncclTopoProcessNet(ncclXml* xml, const char* dumpXmlFile, struct ncclTopoNetInfo* net);
+ncclResult_t ncclTopoGetFusionEnv(int* mergeLevel, const char** forceMerge);
 
 #define NCCL_TOPO_XML_MAX_NODES 8192
 #define NCCL_GRAPH_XML_MAX_NODES 8192
@@ -240,6 +256,8 @@ ncclResult_t ncclTopoGetGraphFromXml(struct ncclXmlNode *xmlGraphs, struct ncclT
 ncclResult_t ncclTopoGetXmlFromGraphs(int ngraphs, struct ncclTopoGraph** graphs, struct ncclTopoSystem* system, struct ncclXml *xml);
 
 ncclResult_t ncclTopoGetCompCap(struct ncclTopoSystem* system, int* ccMin, int* ccMax);
+
+void rcclApplyTuningOverrides(struct ncclTopoSystem* system);
 
 static ncclResult_t ncclTopoIdToIndex(struct ncclTopoSystem* system, int type, int64_t id, int* index) {
   *index = -1;
@@ -275,6 +293,8 @@ static ncclResult_t ncclTopoDevToRank(struct ncclTopoSystem* system, int dev, in
   }
   return ncclInternalError;
 }
+
+extern struct kvDict nicPathKvList[];
 
 static ncclResult_t ncclTopoIdToNetDev(struct ncclTopoSystem* system, int64_t id, int* netDev) {
   *netDev = -1;

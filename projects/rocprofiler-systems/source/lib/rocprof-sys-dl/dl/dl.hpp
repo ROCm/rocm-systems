@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef ROCPROFSYS_DL_HPP_
 #define ROCPROFSYS_DL_HPP_
@@ -51,10 +32,6 @@
 
 #if !defined(ROCPROFSYS_USE_OMPT)
 #    define ROCPROFSYS_USE_OMPT 0
-#endif
-
-#if !defined(ROCPROFSYS_USE_ROCM)
-#    define ROCPROFSYS_USE_ROCM 0
 #endif
 
 //--------------------------------------------------------------------------------------//
@@ -92,6 +69,8 @@ extern "C"
     void rocprofsys_progress(const char*) ROCPROFSYS_PUBLIC_API;
     void rocprofsys_annotated_progress(const char*, rocprofsys_annotation_t*,
                                        size_t) ROCPROFSYS_PUBLIC_API;
+    void rocprofsys_external_register_pause_callbacks(void (*)(),
+                                                      void (*)()) ROCPROFSYS_PUBLIC_API;
 
 #if defined(ROCPROFSYS_DL_SOURCE) && (ROCPROFSYS_DL_SOURCE > 0)
     void rocprofsys_preinit_library(void) ROCPROFSYS_HIDDEN_API;
@@ -173,10 +152,8 @@ extern "C"
                                               const char*) ROCPROFSYS_PUBLIC_API;
 #    endif
 
-#    if ROCPROFSYS_USE_ROCM > 0
     struct rocprofiler_tool_configure_result_t;
     struct rocprofiler_client_id_t;
-#    endif
 
 #endif  // ROCPROFSYS_DL_SOURCE
 }

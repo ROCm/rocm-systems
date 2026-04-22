@@ -22,6 +22,7 @@
 #include <poll.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <mutex>
 #define ENABLE_TIMER 0
 #include "timer.h"
 #include <sys/utsname.h>
@@ -34,6 +35,8 @@
 #define MAXNAMESIZE (64 + MAXSUFFIXSIZE)
 static char ncclIbIfName[MAX_IF_NAME_SIZE+1];
 static union ncclSocketAddress ncclIbIfAddr;
+
+static ncclNetCommConfig_t ibContext;
 
 struct ncclIbMr {
   uintptr_t addr;
@@ -73,7 +76,7 @@ const char* ibProviderName[] = {
 
 static int ncclNIbDevs = -1;
 struct alignas(64) ncclIbDev {
-  pthread_mutex_t lock;
+  std::mutex mutex;
   int device;
   uint64_t guid;
   uint8_t portNum;
@@ -105,8 +108,15 @@ struct alignas(64) ncclIbDev {
 #define MAX_IB_VDEVS MAX_IB_DEVS*8
 struct ncclIbMergedDev ncclIbMergedDevs[MAX_IB_VDEVS];
 struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
-pthread_mutex_t ncclIbLock = PTHREAD_MUTEX_INITIALIZER;
+static std::mutex ncclIbMutex;
 static int ncclIbRelaxedOrderingEnabled = 0;
+
+// With ncclNet_v11_t the NCCL core initializes the network plugin per-communicator
+// rather than once for all communicators. However, the internal plugin implementation
+// still assumes the plugin is initialized only once across all communicators. The ref
+// counter makes sure the plugin internally initializes only once. When per communicator
+// context support is added to the plugin the ref counter can be removed.
+static int netRefCount;
 
 #define NCCL_IB_LLSTR(ll) (((ll) == IBV_LINK_LAYER_INFINIBAND) ? "IB" : (((ll) == IBV_LINK_LAYER_ETHERNET) ? "RoCE" : "UNSPECIFIED"))
 
@@ -201,6 +211,9 @@ static void* ncclIbAsyncThreadMain(void* args) {
     case IBV_EVENT_SRQ_ERR:
       // SRQ are not used in NCCL
       WARN("NET/IB : %s:%d async fatal event on SRQ, unused for now (%p): %s", dev->devName, dev->portNum, srq, str);
+      break;
+    case IBV_EVENT_GID_CHANGE:
+      WARN("NET/IB : %s:%d GID table changed", dev->devName, dev->portNum);
       break;
     case IBV_EVENT_PATH_MIG_ERR:
     case IBV_EVENT_PORT_ERR:
@@ -472,7 +485,7 @@ NCCL_PARAM(IbDisable, "IB_DISABLE", 0);
 NCCL_PARAM(IbMergeVfs, "IB_MERGE_VFS", 1);
 NCCL_PARAM(IbMergeNics, "IB_MERGE_NICS", 1);
 
-// Returns 0 if this is the path of two VFs of the same physical device
+// Returns 1 if this is the path of two VFs of the same physical device
 static int ncclIbMatchVfPath(char* path1, char* path2) {
   // Merge multi-port NICs into the same PCI device
   if (ncclParamIbMergeVfs()) {
@@ -482,24 +495,46 @@ static int ncclIbMatchVfPath(char* path1, char* path2) {
   }
 }
 
+/**
+ * Assumes PCIe path ends with xxxx:xx:xx.x 
+ */
+static void ncclIbNormalizePciPath(const char* in, char* out, size_t out_size) {
+  if (!in || !out || out_size == 0) return;
+  // Safe copy with truncation
+  size_t len = strnlen(in, out_size - 1);
+  memmove(out, in, len);
+  out[len] = '\0';
+  if (len < 4) return;
+  // Merge multi-port NICs (.1/.2/.3 -> .0)
+  out[len - 1] = '0';
+  // Merge VFs if enabled
+  if (ncclParamIbMergeVfs()) {
+    out[len - 3] = '0';
+    out[len - 4] = '0';
+  }
+}
+
 static ncclResult_t ncclIbGetPciPath(char* devName, char** path, int* realPort) {
   char devicePath[PATH_MAX];
   snprintf(devicePath, PATH_MAX, "/sys/class/infiniband/%s/device", devName);
   char* p = realpath(devicePath, NULL);
+  // Keep real path unchanged
+  *path = p;
   if (p == NULL) {
     WARN("Could not find real path of %s (%s)", devName, devicePath);
   } else {
-    // Merge multi-port NICs into the same PCI device
-    p[strlen(p)-1] = '0';
-    // Also merge virtual functions (VF) into the same device
-    if (ncclParamIbMergeVfs()) p[strlen(p)-3] = p[strlen(p)-4] = '0';
+    char normalized[PATH_MAX];
+    ncclIbNormalizePciPath(p, normalized, PATH_MAX);
     // Keep the real port aside (the ibv port is always 1 on recent cards)
     *realPort = 0;
-    for (int d=0; d<ncclNIbDevs; d++) {
-      if (ncclIbMatchVfPath(p, ncclIbDevs[d].pciPath)) (*realPort)++;
+    for (int d = 0; d < ncclNIbDevs; d++) {
+      char otherNorm[PATH_MAX];
+      ncclIbNormalizePciPath(ncclIbDevs[d].pciPath, otherNorm, PATH_MAX);
+      if (ncclIbMatchVfPath(normalized, otherNorm)) {
+        (*realPort)++;
+      }
     }
   }
-  *path = p;
   return ncclSuccess;
 }
 
@@ -559,9 +594,113 @@ failure:
   return false;
 }
 
+/**
+ * Extract the PCIe root complex (domain:bus) from a Linux sysfs PCI device path.
+ *
+ * This function scans a sysfs PCI device path (e.g.
+ *   "/sys/devices/pci0000:80/0000:80:03.1/0000:81:00.0")
+ * and extracts the first occurrence of the PCI root host bridge identifier
+ * of the form "pciDDDD:BB", where:
+ *   - DDDD is the PCI domain (hex)
+ *   - BB   is the PCI bus number (hex)
+ *
+ * The extracted root is returned as a string formatted as "DDDD:BB".
+ *
+ * This helper is typically used to determine whether multiple NICs or devices
+ * reside under the same PCIe root complex, which is important for validating
+ * NIC merging and avoiding cross-root PCIe traffic.
+ *
+ * @param pciPath  NUL-terminated sysfs PCI device path
+ * @param root     Output buffer receiving the "DDDD:BB" PCI root identifier
+ * @param rootLen  Size of the output buffer; must be >= 8
+ *
+ * @return ncclSuccess on success
+ * @return ncclInvalidUsage if inputs are invalid or no PCI root is found
+ *
+ * Notes:
+ * - The function scans for the first valid "pciDDDD:BB" pattern in the path.
+ * - The loop is bounded by the length of the string and cannot hang.
+ * - This function does not allocate memory.
+ */
+static ncclResult_t ncclIbGetPciRootFromPath(
+    const char* pciPath,
+    char* root,
+    size_t rootLen
+) {
+    if (pciPath == NULL || root == NULL || rootLen < 8){
+        return ncclInvalidUsage;
+    }
+    const char* p = strstr(pciPath, "pci");
+    while (p != NULL) {
+        int domain, bus;
+        int chars_read = 0;
+        if (sscanf(p, "pci%4x:%2x%n", &domain, &bus, &chars_read) == 2 &&
+            chars_read == 10) {
+            snprintf(root, rootLen, "%04x:%02x", domain, bus);
+            return ncclSuccess;
+        }
+        p = strstr(p + 1, "pci");
+    }
+    return ncclInvalidUsage;
+}
+
+/**
+ * Determine the NUMA node associated with a PCI device from its sysfs path.
+ *
+ * This function reads the "numa_node" attribute from a PCI device's sysfs
+ * directory (e.g. "<pciPath>/numa_node") and returns the NUMA node ID.
+ *
+ * Linux sysfs convention:
+ *   - A non-negative integer indicates the NUMA node the device is local to
+ *   - "-1" indicates that the device has no specific NUMA affinity
+ *
+ * This helper is used to validate NUMA locality when merging NICs, ensuring
+ * that merged devices do not silently span NUMA nodes, which could negatively
+ * impact performance.
+ *
+ * @param pciPath  NUL-terminated sysfs PCI device path
+ *
+ * @return NUMA node ID (>= 0) on success
+ * @return -1 if the NUMA node cannot be determined, the file is missing,
+ *         unreadable, or contains invalid data
+ *
+ * Notes:
+ * - Uses open/read instead of stdio to avoid buffering and locale issues.
+ * - Uses strtol for robust numeric parsing and overflow detection.
+ * - A return value of -1 may indicate either "no NUMA affinity" or an error;
+ *   callers should treat it as "unknown or unspecified".
+ */
+static int ncclIbGetNumaNodeFromPath(const char* pciPath) {
+    if (pciPath == NULL) {
+        return -1;
+    }
+    char numaPath[PATH_MAX];
+    if (snprintf(numaPath, sizeof(numaPath), "%s/numa_node", pciPath) >= PATH_MAX) {
+        return -1; 
+    }
+
+    int fd = open(numaPath, O_RDONLY);
+    if (fd < 0) return -1;
+
+    char buf[32];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+
+    if (n <= 0) return -1;
+    buf[n] = '\0';
+    
+    char* endptr;
+    errno = 0;
+    long numa = strtol(buf, &endptr, 10);
+    if (endptr == buf || errno == ERANGE) {
+        return -1;
+    }
+    return (int)numa;
+}
+
 ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   if (ncclParamIbMergeNics() == 0 && props->ndevs > 1) {
-    INFO(NCCL_NET, "NET/IB : Skipping makeVDevice, NCCL_IB_MERGE_NICS=0");
+    WARN("NET/IB : Skipping makeVDevice, Please set NCCL_IB_MERGE_NICS=1");
     return ncclInvalidUsage;
   }
 
@@ -576,54 +715,88 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   }
 
   // Always count up number of merged devices
-  ncclIbMergedDev* mDev = ncclIbMergedDevs + ncclNMergedIbDevs;
-  mDev->vProps.ndevs = 0;
-  mDev->speed = 0;
-
+  ncclIbMergedDev tmp;
+  memset(&tmp,0,sizeof(tmp));
+  bool used[MAX_IB_DEVS] = {0};
   for (int i = 0; i < props->ndevs; i++) {
-    ncclIbDev* dev = ncclIbDevs + props->devs[i];
-    if (mDev->vProps.ndevs == NCCL_IB_MAX_DEVS_PER_NIC) return ncclInvalidUsage;
-    mDev->vProps.devs[mDev->vProps.ndevs++] = props->devs[i];
-    mDev->speed += dev->speed;
-    // Each successive time, copy the name '+' new name
-    if (mDev->vProps.ndevs > 1) {
-      snprintf(mDev->devName + strlen(mDev->devName), sizeof(mDev->devName) - strlen(mDev->devName), "+%s", dev->devName);
-    // First time, copy the plain name
-    } else {
-      strncpy(mDev->devName, dev->devName, MAXNAMESIZE);
-    }
-  }
-
-  // Check link layers
-  ncclIbDev* dev0 = ncclIbDevs + props->devs[0];
-  for (int i = 1; i < props->ndevs; i++) {
-    if (props->devs[i] >= ncclNIbDevs) {
+    if( props->devs[i]  < 0 || props->devs[i] >= ncclNIbDevs ) {
       WARN("NET/IB : Cannot use physical device %d, max %d", props->devs[i], ncclNIbDevs);
       return ncclInvalidUsage;
     }
-    ncclIbDev* dev = ncclIbDevs + props->devs[i];
+    if(used[props->devs[i]]) continue;
+    const ncclIbDev* dev = ncclIbDevs + props->devs[i];
+    if (tmp.vProps.ndevs == NCCL_IB_MAX_DEVS_PER_NIC) return ncclInvalidUsage;
+    tmp.vProps.devs[tmp.vProps.ndevs++] = props->devs[i];
+    tmp.speed += dev->speed;
+    // Each successive time, copy the name '+' new name
+    if (tmp.vProps.ndevs > 1) {
+      size_t off = strlen(tmp.devName);
+      snprintf(tmp.devName + off, sizeof(tmp.devName) - off, "+%s", dev->devName);
+    // First time, copy the plain name
+    } else {
+      strncpy(tmp.devName, dev->devName, MAXNAMESIZE-1);
+      tmp.devName[MAXNAMESIZE-1] = '\0';
+    }
+    used[props->devs[i]] = true;
+  }
+
+  // Check link layers
+  const ncclIbDev* dev0 = ncclIbDevs + tmp.vProps.devs[0];
+  for (int i = 1; i < tmp.vProps.ndevs; i++) {
+    const ncclIbDev* dev = ncclIbDevs + tmp.vProps.devs[i];
     if (dev->link != dev0->link) {
       WARN("NET/IB : Attempted to merge incompatible devices: [%d]%s:%d/%s and [%d]%s:%d/%s. Try selecting NICs of only one link type using NCCL_IB_HCA",
-        props->devs[0], dev0->devName, dev0->portNum, NCCL_IB_LLSTR(dev0->link), props->devs[i], dev->devName, dev->portNum, NCCL_IB_LLSTR(dev->link));
+        tmp.vProps.devs[0], dev0->devName, dev0->portNum, NCCL_IB_LLSTR(dev0->link),tmp.vProps.devs[i], dev->devName, dev->portNum, NCCL_IB_LLSTR(dev->link));
       return ncclInvalidUsage;
     }
   }
 
+  int numa0 = ncclIbGetNumaNodeFromPath(dev0->pciPath);
+  //format -> 0000:00 
+  char root0[8]; 
+  ncclIbGetPciRootFromPath(dev0->pciPath, root0, sizeof(root0));
+  for (int i = 1; i < tmp.vProps.ndevs; i++) {
+    const ncclIbDev* dev = ncclIbDevs + tmp.vProps.devs[i];
+    int numa_i = ncclIbGetNumaNodeFromPath(dev->pciPath);
+    if (numa0 >= 0 && numa_i >= 0 && numa_i != numa0) {
+      WARN("NET/IB : Merging NICs across NUMA nodes (%s numa=%d, %s numa=%d). "
+           "This may significantly reduce performance.",
+           dev0->devName, numa0, dev->devName, numa_i);
+      break;
+    }
+    char root_i[8];
+    ncclIbGetPciRootFromPath(dev->pciPath, root_i, sizeof(root_i));
+    if (strcmp(root_i, root0) != 0) {
+      WARN("NET/IB : Merging NICs across PCIe Root Complexes "
+           "(%s root=%s, %s root=%s). "
+           "GPUDirect RDMA and bandwidth aggregation may be impacted.",
+           dev0->devName, root0, dev->devName, root_i);
+      break;
+    }
+  }
+  ncclIbMergedDevs[ncclNMergedIbDevs] = tmp;
   *d = ncclNMergedIbDevs++;
-  INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d", *d, mDev->devName, mDev->speed, mDev->vProps.ndevs);
+  INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d", *d, tmp.devName, tmp.speed, tmp.vProps.ndevs);
   return ncclSuccess;
 }
 
 ncclResult_t ncclIbMakeVDevice(int* d, ncclNetVDeviceProps_t* props) {
-  pthread_mutex_lock(&ncclIbLock);
+  std::lock_guard<std::mutex> lock(ncclIbMutex);
   ncclResult_t res = ncclIbMakeVDeviceInternal(d, props);
-  pthread_mutex_unlock(&ncclIbLock);
   return res;
+
+}
+
+ncclResult_t ncclIbSetNetAttr(void *ctx, ncclNetAttr_t *netAttr) {
+  (void)ctx;
+  (void)netAttr;
+  return ncclSuccess;
 }
 
 static ncclProfilerCallback_t ncclProfilerFunction;
 
-ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config, ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+  if (netRefCount++) return ncclSuccess;
   ncclResult_t ret = ncclSuccess;
   ncclProfilerFunction = profFunction;
   if (ncclParamIbDisable()) return ncclInternalError;
@@ -636,7 +809,7 @@ ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction, ncclProfilerCallback_t pr
   struct ibv_device** devices = NULL;
 
   if (ncclNIbDevs == -1) {
-    pthread_mutex_lock(&ncclIbLock);
+    std::lock_guard<std::mutex> lock(ncclIbMutex);
     wrap_ibv_fork_init();
     if (ncclNIbDevs == -1) {
       int nIpIfs = 0;
@@ -662,25 +835,15 @@ ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction, ncclProfilerCallback_t pr
       if (ncclSuccess != wrap_ibv_get_device_list(&devices, &nIbDevs)) { ret = ncclInternalError; goto fail; }
 
       for (int d=0; d<nIbDevs && ncclNIbDevs<MAX_IB_DEVS; d++) {
-        struct ibv_context * context;
+        struct ibv_context * context = NULL;
         if (ncclSuccess != wrap_ibv_open_device(&context, devices[d]) || context == NULL) {
           WARN("NET/IB : Unable to open device %s", devices[d]->name);
           continue;
         }
-        enum ncclIbProvider ibProvider = IB_PROVIDER_NONE;
-        char dataDirectDevicePath[PATH_MAX];
-        int dataDirectSupported = 0;
-        int skipNetDevForDataDirect = 0;
-        if (wrap_mlx5dv_is_supported(devices[d])) {
-          ibProvider = IB_PROVIDER_MLX5;
-          snprintf(dataDirectDevicePath, PATH_MAX, "/sys");
-          if((ncclMlx5dvDmaBufCapable(context)) && (wrap_mlx5dv_get_data_direct_sysfs_path(context, dataDirectDevicePath + 4, PATH_MAX - 4) == ncclSuccess)) {
-            INFO(NCCL_INIT|NCCL_NET, "NET/IB: Data Direct DMA Interface is detected for device:%s", devices[d]->name);
-            // Now check whether Data Direct has been disabled by the user
-            if(ncclParamIbDataDirect() == 1) { dataDirectSupported = 1; skipNetDevForDataDirect = 1; }
-            if(ncclParamIbDataDirect() == 2) { dataDirectSupported = 1; skipNetDevForDataDirect = 0; }
-          }
-        }
+        char dataDirectDevicePath[PATH_MAX] = "/sys";
+        int devCount = /*undefined*/-1, devOffset = 0;
+        enum ncclIbProvider ibProvider = wrap_mlx5dv_is_supported(devices[d]) ? IB_PROVIDER_MLX5 : IB_PROVIDER_NONE;
+
         int nPorts = 0;
         struct ibv_device_attr devAttr;
         memset(&devAttr, 0, sizeof(devAttr));
@@ -694,77 +857,91 @@ ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction, ncclProfilerCallback_t pr
           continue;
         }
         for (int port_num = 1; port_num <= devAttr.phys_port_cnt; port_num++) {
-          // dataDirect = 0 exposes the devices normally, dataDirect = 1 exposes the devices through direct NIC
-          for (int dataDirect = skipNetDevForDataDirect; dataDirect < 1 + dataDirectSupported; ++dataDirect) {
             struct ibv_port_attr portAttr;
             if (ncclSuccess != wrap_ibv_query_port(context, port_num, &portAttr)) {
               WARN("NET/IB : Unable to query port_num %d", port_num);
               continue;
             }
             if (portAttr.state != IBV_PORT_ACTIVE) continue;
-            if (portAttr.link_layer != IBV_LINK_LAYER_INFINIBAND
-                && portAttr.link_layer != IBV_LINK_LAYER_ETHERNET) continue;
+            if (portAttr.link_layer != IBV_LINK_LAYER_INFINIBAND && portAttr.link_layer != IBV_LINK_LAYER_ETHERNET) continue;
 
             // check against user specified HCAs/ports
             if (! (matchIfList(devices[d]->name, port_num, userIfs, nUserIfs, searchExact) ^ searchNot)) {
               continue;
             }
-            pthread_mutex_init(&ncclIbDevs[ncclNIbDevs].lock, NULL);
-            ncclIbDevs[ncclNIbDevs].device = d;
-            ncclIbDevs[ncclNIbDevs].ibProvider = ibProvider;
-            ncclIbDevs[ncclNIbDevs].guid = devAttr.sys_image_guid;
-            ncclIbDevs[ncclNIbDevs].portAttr = portAttr;
-            ncclIbDevs[ncclNIbDevs].portNum = port_num;
-            ncclIbDevs[ncclNIbDevs].link = portAttr.link_layer;
-            if (portAttr.active_speed_ex)
-              // A non-zero active_speed_ex indicates XDR rate (0x100) or higher
-              ncclIbDevs[ncclNIbDevs].speed = ncclIbSpeed(portAttr.active_speed_ex) * ncclIbWidth(portAttr.active_width);
-            else
-              ncclIbDevs[ncclNIbDevs].speed = ncclIbSpeed(portAttr.active_speed) * ncclIbWidth(portAttr.active_width);
-            ncclIbDevs[ncclNIbDevs].context = context;
-            ncclIbDevs[ncclNIbDevs].pdRefs = 0;
-            ncclIbDevs[ncclNIbDevs].pd = NULL;
-            if (!dataDirect) {
-              strncpy(ncclIbDevs[ncclNIbDevs].devName, devices[d]->name, MAXNAMESIZE);
-              NCCLCHECKGOTO(ncclIbGetPciPath(ncclIbDevs[ncclNIbDevs].devName, &ncclIbDevs[ncclNIbDevs].pciPath, &ncclIbDevs[ncclNIbDevs].realPort), ret, fail);
-            } else {
-              snprintf(ncclIbDevs[ncclNIbDevs].devName, MAXNAMESIZE, "%s_dma", devices[d]->name);
-              NCCLCHECK(ncclCalloc(&ncclIbDevs[ncclNIbDevs].pciPath, PATH_MAX));
-              strncpy(ncclIbDevs[ncclNIbDevs].pciPath, dataDirectDevicePath, PATH_MAX);
-              ncclIbDevs[ncclNIbDevs].capsProvider.mlx5.dataDirect = 1;
+
+            // check for mlx5 data direct support only once for a each device
+            if (devCount == -1) {
+              devCount = 1;
+              devOffset = 0;
+              if (ncclParamIbDataDirect() > 0 && ibProvider == IB_PROVIDER_MLX5 && ncclMlx5dvDmaBufCapable(context)) {
+                int pathLen = strlen(dataDirectDevicePath);
+                ncclResult_t res = wrap_mlx5dv_get_data_direct_sysfs_path(context, dataDirectDevicePath + pathLen, sizeof(dataDirectDevicePath) - pathLen);
+                if (res == ncclSuccess) {
+                  // data direct devices are exposed twice: with the C2C + PCIe link and with the data direct link
+                  devCount = 2;
+                  // by default only expose the data direct NIC (devOffset = 1), unless set to 2 by the user
+                  devOffset = (ncclParamIbDataDirect() == 2) ? 0 : 1;
+                  INFO(NCCL_INIT | NCCL_NET, "NET/IB: Data Direct DMA Interface is detected for device %s", devices[d]->name);
+                } else if (res == ncclInvalidArgument) {
+                  TRACE(NCCL_NET, "NET/IB: Device %s does not support Data Direct DMA.", devices[d]->name);
+                } else {
+                  WARN("NET/IB: Error in mlx5dv_get_data_direct_sysfs_path with device %s", devices[d]->name);
+                  return res;
+                }
+              }
             }
-            ncclIbDevs[ncclNIbDevs].maxQp = devAttr.max_qp;
-            ncclIbDevs[ncclNIbDevs].mrCache.capacity = 0;
-            ncclIbDevs[ncclNIbDevs].mrCache.population = 0;
-            ncclIbDevs[ncclNIbDevs].mrCache.slots = NULL;
-            NCCLCHECK(ncclIbStatsInit(&ncclIbDevs[ncclNIbDevs].stats));
+            for (int dev = devOffset; dev < devCount; ++dev) {
+              ncclIbDevs[ncclNIbDevs].device = d;
+              ncclIbDevs[ncclNIbDevs].ibProvider = ibProvider;
+              ncclIbDevs[ncclNIbDevs].guid = devAttr.sys_image_guid;
+              ncclIbDevs[ncclNIbDevs].portAttr = portAttr;
+              ncclIbDevs[ncclNIbDevs].portNum = port_num;
+              ncclIbDevs[ncclNIbDevs].link = portAttr.link_layer;
+              if (portAttr.active_speed_ex) {
+                // A non-zero active_speed_ex indicates XDR rate (0x100) or higher
+                ncclIbDevs[ncclNIbDevs].speed = ncclIbSpeed(portAttr.active_speed_ex) * ncclIbWidth(portAttr.active_width);
+              } else {
+                ncclIbDevs[ncclNIbDevs].speed = ncclIbSpeed(portAttr.active_speed) * ncclIbWidth(portAttr.active_width);
+              }
+              ncclIbDevs[ncclNIbDevs].context = context;
+              ncclIbDevs[ncclNIbDevs].pdRefs = 0;
+              ncclIbDevs[ncclNIbDevs].pd = NULL;
+              if (dev == 0) {
+                strncpy(ncclIbDevs[ncclNIbDevs].devName, devices[d]->name, MAXNAMESIZE);
+                NCCLCHECKGOTO(ncclIbGetPciPath(ncclIbDevs[ncclNIbDevs].devName, &ncclIbDevs[ncclNIbDevs].pciPath, &ncclIbDevs[ncclNIbDevs].realPort), ret, fail);
+              } else {
+                snprintf(ncclIbDevs[ncclNIbDevs].devName, MAXNAMESIZE, "%s_dma", devices[d]->name);
+                NCCLCHECK(ncclCalloc(&ncclIbDevs[ncclNIbDevs].pciPath, PATH_MAX));
+                strncpy(ncclIbDevs[ncclNIbDevs].pciPath, dataDirectDevicePath, PATH_MAX);
+                ncclIbDevs[ncclNIbDevs].capsProvider.mlx5.dataDirect = 1;
+              }
+              ncclIbDevs[ncclNIbDevs].maxQp = devAttr.max_qp;
+              ncclIbDevs[ncclNIbDevs].mrCache.capacity = 0;
+              ncclIbDevs[ncclNIbDevs].mrCache.population = 0;
+              ncclIbDevs[ncclNIbDevs].mrCache.slots = NULL;
+              NCCLCHECK(ncclIbStatsInit(&ncclIbDevs[ncclNIbDevs].stats));
 
-            // Enable ADAPTIVE_ROUTING by default on IB networks
-            // But allow it to be overloaded by an env parameter
-            ncclIbDevs[ncclNIbDevs].ar = (portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) ? 1 : 0;
-            if (ncclParamIbAdaptiveRouting() != -2) ncclIbDevs[ncclNIbDevs].ar = ncclParamIbAdaptiveRouting();
+              // Enable ADAPTIVE_ROUTING by default on IB networks
+              // But allow it to be overloaded by an env parameter
+              ncclIbDevs[ncclNIbDevs].ar = (portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) ? 1 : 0;
+              if (ncclParamIbAdaptiveRouting() != -2) ncclIbDevs[ncclNIbDevs].ar = ncclParamIbAdaptiveRouting();
 
-            INFO(NCCL_NET,"NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d", d, devices[d]->name, devices[d]->dev_name, ncclIbDevs[ncclNIbDevs].portNum,
-                NCCL_IB_LLSTR(portAttr.link_layer), ibProviderName[ncclIbDevs[ncclNIbDevs].ibProvider], ncclIbDevs[ncclNIbDevs].speed, context, ncclIbDevs[ncclNIbDevs].pciPath, ncclIbDevs[ncclNIbDevs].ar);
+              INFO(NCCL_NET, "NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d", d, devices[d]->name, devices[d]->dev_name,
+                   ncclIbDevs[ncclNIbDevs].portNum, NCCL_IB_LLSTR(portAttr.link_layer), ibProviderName[ncclIbDevs[ncclNIbDevs].ibProvider], ncclIbDevs[ncclNIbDevs].speed, context,
+                   ncclIbDevs[ncclNIbDevs].pciPath, ncclIbDevs[ncclNIbDevs].ar);
 
-            PTHREADCHECKGOTO(pthread_create(&ncclIbAsyncThread, NULL, ncclIbAsyncThreadMain, ncclIbDevs + ncclNIbDevs), "pthread_create", ret, fail);
-            ncclSetThreadName(ncclIbAsyncThread, "NCCL IbAsync %2d", ncclNIbDevs);
-            PTHREADCHECKGOTO(pthread_detach(ncclIbAsyncThread), "pthread_detach", ret, fail); // will not be pthread_join()'d
-
-            // Add this plain physical device to the list of virtual devices
-            int vDev;
-            ncclNetVDeviceProps_t vProps = {0};
-            vProps.ndevs = 1;
-            vProps.devs[0] = ncclNIbDevs;
-            NCCLCHECK(ncclIbMakeVDeviceInternal(&vDev, &vProps));
-
-            ncclNIbDevs++;
-            nPorts++;
-          }
+              PTHREADCHECKGOTO(pthread_create(&ncclIbAsyncThread, NULL, ncclIbAsyncThreadMain, ncclIbDevs + ncclNIbDevs), "pthread_create", ret, fail);
+              ncclSetThreadName(ncclIbAsyncThread, "NCCL IbAsync %2d", ncclNIbDevs);
+              PTHREADCHECKGOTO(pthread_detach(ncclIbAsyncThread), "pthread_detach", ret, fail); // will not be pthread_join()'d
+              ncclNIbDevs++;
+              nPorts++;
+            }
         }
         if (nPorts == 0 && ncclSuccess != wrap_ibv_close_device(context)) { ret = ncclInternalError; goto fail; }
       }
-      if (ncclSuccess != wrap_ibv_free_device_list(devices)) { ret = ncclInternalError; goto fail;}
+
+      if (ncclSuccess != wrap_ibv_free_device_list(devices)) { ret = ncclInternalError; goto fail; }
     }
     if (ncclNIbDevs == 0) {
       INFO(NCCL_INIT|NCCL_NET, "NET/IB : No device found.");
@@ -776,20 +953,26 @@ ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction, ncclProfilerCallback_t pr
     // Determine whether RELAXED_ORDERING is enabled and possible
     ncclIbRelaxedOrderingEnabled = ncclIbRelaxedOrderingCapable();
     for (int d = 0; d < ncclNIbDevs; d++) {
-        snprintf(line+strlen(line), sizeof(line)-strlen(line), " [%d]%s:%d/%s", d, ncclIbDevs[d].devName,
-          ncclIbDevs[d].portNum, NCCL_IB_LLSTR(ncclIbDevs[d].link));
+      snprintf(line+strlen(line), sizeof(line)-strlen(line), " [%d]%s:%d/%s", d, ncclIbDevs[d].devName,
+        ncclIbDevs[d].portNum, NCCL_IB_LLSTR(ncclIbDevs[d].link));
+      // Add this plain physical device to the list of virtual devices
+      int vDev;
+      ncclNetVDeviceProps_t vProps = {0};
+      vProps.ndevs = 1;
+      vProps.devs[0] = d;
+      NCCLCHECK(ncclIbMakeVDeviceInternal(&vDev, &vProps)); 
     }
     char addrline[SOCKET_NAME_MAXLEN+1];
     INFO(NCCL_INIT|NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, ncclIbRelaxedOrderingEnabled ? "[RO]" : "",
           ncclIbIfName, ncclSocketToString(&ncclIbIfAddr, addrline));
 
-    pthread_mutex_unlock(&ncclIbLock);
   }
 exit:
+  ibContext.trafficClass = config->trafficClass;
+  *ctx = &ibContext;
   return ret;
 fail:
   if(ncclSuccess != wrap_ibv_free_device_list(devices)){WARN("NET/IB : Unable to free device list");}
-  pthread_mutex_unlock(&ncclIbLock);
   goto exit;
 }
 
@@ -881,8 +1064,8 @@ static void ibGdrSupportInitOnce() {
 }
 
 ncclResult_t ncclIbGdrSupport() {
-  static pthread_once_t once = PTHREAD_ONCE_INIT;
-  pthread_once(&once, ibGdrSupportInitOnce);
+  static std::once_flag once;
+  std::call_once(once, ibGdrSupportInitOnce);
   if (!ncclIbGdrModuleLoaded)
     return ncclSystemError;
   return ncclSuccess;
@@ -919,13 +1102,10 @@ failure:
 // ncclSuccess : DMA-BUF support is available
 // ncclSystemError : DMA-BUF is not supported by the kernel
 ncclResult_t ncclIbDmaBufSupport(int dev) {
-  struct oncewrap {
-    pthread_once_t once = PTHREAD_ONCE_INIT;
-  };
-  static oncewrap onces[MAX_IB_DEVS];
+  static std::once_flag onces[MAX_IB_DEVS];
   // init the device only once
   ibDmaSupportInitDev = dev;
-  pthread_once(&onces[dev].once, ibDmaBufSupportInitOnce);
+  std::call_once(onces[dev], ibDmaBufSupportInitOnce);
   ncclIbMergedDev* mergedDev = ncclIbMergedDevs + ibDmaSupportInitDev;
   ncclIbDev* ibDev = ncclIbDevs + mergedDev->vProps.devs[0];
   int dmaBufSupported = ibDev->dmaBufSupported;
@@ -937,7 +1117,7 @@ ncclResult_t ncclIbDmaBufSupport(int dev) {
 
 ncclResult_t ncclIbGetPhysProperties(int dev, ncclNetProperties_t* props) {
   struct ncclIbDev* ibDev = ncclIbDevs + dev;
-  pthread_mutex_lock(&ibDev->lock);
+  std::lock_guard<std::mutex> lock(ibDev->mutex);
   props->name = ibDev->devName;
   props->speed = ibDev->speed;
   props->pciPath = ibDev->pciPath;
@@ -961,7 +1141,8 @@ ncclResult_t ncclIbGetPhysProperties(int dev, ncclNetProperties_t* props) {
   props->netDeviceType    = NCCL_NET_DEVICE_HOST;
   props->netDeviceVersion = NCCL_NET_DEVICE_INVALID_VERSION;
   props->maxP2pBytes = NCCL_MAX_NET_SIZE_BYTES;
-  pthread_mutex_unlock(&ibDev->lock);
+  props->maxCollBytes = MAX_COLLNET_SIZE;
+  props->maxMultiRequestSize = 1;
   return ncclSuccess;
 }
 
@@ -1064,7 +1245,8 @@ struct ncclIbGidInfo {
 #define NCCL_NET_IB_REQ_SEND 1
 #define NCCL_NET_IB_REQ_RECV 2
 #define NCCL_NET_IB_REQ_FLUSH 3
-const char* reqTypeStr[] = { "Unused", "Send", "Recv", "Flush" };
+#define NCCL_NET_IB_REQ_FAILED 4
+const char* reqTypeStr[] = { "Unused", "Send", "Recv", "Flush", "Failed" };
 
 #define MAX_QPS_PER_REQ 8
 struct ncclProfilerInfo {
@@ -1097,6 +1279,14 @@ struct ncclIbRequest {
     } recv;
   };
 };
+
+// Check if request has any pending events (IBV operations in flight)
+static inline bool ncclIbRequestHasEvents(struct ncclIbRequest* r) {
+  for (int i = 0; i < NCCL_IB_MAX_DEVS_PER_NIC; i++) {
+    if (r->events[i] != 0) return true;
+  }
+  return false;
+}
 
 struct ncclIbNetCommDevBase {
   int ibDevN;
@@ -1231,18 +1421,13 @@ static void ncclIbAddEvent(struct ncclIbRequest* req, int devIndex, struct ncclI
 ncclResult_t ncclIbInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base, void* cq_context) {
   base->ibDevN = ibDevN;
   ncclIbDev* ibDev = ncclIbDevs + ibDevN;
-  pthread_mutex_lock(&ibDev->lock);
-  if (0 == ibDev->pdRefs++) {
-    ncclResult_t res;
-    NCCLCHECKGOTO(wrap_ibv_alloc_pd(&ibDev->pd, ibDev->context), res, failure);
-    if (0) {
-    failure:
-      pthread_mutex_unlock(&ibDev->lock);
-      return res;
+  {
+    std::lock_guard<std::mutex> lock(ibDev->mutex);
+    if (0 == ibDev->pdRefs++) {
+      NCCLCHECK(wrap_ibv_alloc_pd(&ibDev->pd, ibDev->context));
     }
+    base->pd = ibDev->pd;
   }
-  base->pd = ibDev->pd;
-  pthread_mutex_unlock(&ibDev->lock);
 
   // CQ is sized to accommodate the max SQ + RQ WQE completions. If each SQ WQE could be signaled, then,
   // for each QP, there can be 2*MAX_REQUESTS completions for SQ and MAX_REQUESTS completions for RQ. 
@@ -1252,17 +1437,13 @@ ncclResult_t ncclIbInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base
 }
 
 ncclResult_t ncclIbDestroyBase(struct ncclIbNetCommDevBase* base) {
-  ncclResult_t res;
   NCCLCHECK(wrap_ibv_destroy_cq(base->cq));
 
-  pthread_mutex_lock(&ncclIbDevs[base->ibDevN].lock);
+  std::lock_guard<std::mutex> lock(ncclIbDevs[base->ibDevN].mutex);
   if (0 == --ncclIbDevs[base->ibDevN].pdRefs) {
-    NCCLCHECKGOTO(wrap_ibv_dealloc_pd(ncclIbDevs[base->ibDevN].pd), res, returning);
+    NCCLCHECK(wrap_ibv_dealloc_pd(ncclIbDevs[base->ibDevN].pd));
   }
-  res = ncclSuccess;
-returning:
-  pthread_mutex_unlock(&ncclIbDevs[base->ibDevN].lock);
-  return res;
+  return ncclSuccess;
 }
 
 ncclResult_t ncclIbCreateQp(uint8_t ib_port, struct ncclIbNetCommDevBase* base, int access_flags, void* qp_context, struct ncclIbQp* qp) {
@@ -1350,7 +1531,7 @@ ncclResult_t ncclIbRtsQp(struct ibv_qp* qp) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclIbListen(int dev, void* opaqueHandle, void** listenComm) {
+ncclResult_t ncclIbListen(void* ctx, int dev, void* opaqueHandle, void** listenComm) {
   ncclResult_t ret = ncclSuccess;
   struct ncclIbListenComm* comm;
   NCCLCHECK(ncclCalloc(&comm, 1));
@@ -1371,7 +1552,7 @@ fail:
   goto exit;
 }
 
-ncclResult_t ncclIbConnect(int dev, ncclNetCommConfig_t* config, void* opaqueHandle, void** sendComm, ncclNetDeviceHandle_t** /*sendDevComm*/) {
+ncclResult_t ncclIbConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm, ncclNetDeviceHandle_t** /*sendDevComm*/) {
   ncclResult_t ret = ncclSuccess;
   struct ncclIbHandle* handle = (struct ncclIbHandle*) opaqueHandle;
   struct ncclIbCommStage* stage = &handle->stage;
@@ -1434,6 +1615,7 @@ ib_recv_dev_list:
   if (stage->offset != sizeof(ncclNetVDeviceProps_t)) return ncclSuccess;
   stage->offset = 0;
   ncclNetVDeviceProps_t remoteVProps;
+  ncclNetCommConfig_t* config;
   memcpy(&remoteVProps, stage->buffer, sizeof(ncclNetVDeviceProps_t));
   mergedDev = ncclIbMergedDevs + dev;
   comm->base.vProps = mergedDev->vProps;
@@ -1528,6 +1710,7 @@ ib_recv_dev_list:
       return ncclInternalError;
     }
   }
+  config = (ncclNetCommConfig_t*)ctx;
   meta.fifoAddr = (uint64_t)comm->fifo;
   meta.sl = (ncclParamIbSl() != -1) ? ncclParamIbSl() : (config && config->trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? config->trafficClass : NCCL_IB_SL_DEFAULT;
   meta.tc = (ncclParamIbTc() != -1) ? ncclParamIbTc() : (config && config->trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? config->trafficClass : NCCL_IB_TC_DEFAULT;
@@ -1683,6 +1866,13 @@ ncclResult_t ncclIbAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle
   struct ncclIbRecvComm* rComm = (struct ncclIbRecvComm*)stage->comm;
   int ready;
   int link_layer = IBV_LINK_LAYER_UNSPECIFIED;
+  // Pre-declare dmabuf variables because of goto
+  bool useDmaBuf = false;
+  bool peermemAvailable = false;
+  bool dmabufSupported = false;
+  bool dmabufEnabled = false;
+  bool dmabufAvailable = false;
+  bool forceDmaBuf = false;
   *recvComm = NULL;
 
   if (stage->state == ncclIbCommStateAccept)   goto ib_accept_check;
@@ -1756,7 +1946,6 @@ ib_recv:
   struct ncclIbRecvCommDev* rCommDev;
   struct ncclIbDevInfo* remDevInfo;
   struct ncclIbQp* qp;
-  bool useDmaBuf;
 
   mergedDev = ncclIbMergedDevs + lComm->dev;
   rComm->base.nRemDevs = remMeta.ndevs;
@@ -1838,8 +2027,36 @@ ib_recv:
     }
   }
 
-  useDmaBuf  = (ncclIbDmaBufSupport(lComm->dev) == ncclSuccess);
-  rComm->flushEnabled = ((ncclIbGdrSupport() == ncclSuccess || useDmaBuf)
+  // GDR mode selection logic
+  peermemAvailable = (ncclIbGdrSupport() == ncclSuccess);
+  dmabufSupported = (ncclIbDmaBufSupport(lComm->dev) == ncclSuccess);
+  dmabufEnabled = (ncclParamDmaBufEnable() != 0);
+  dmabufAvailable = dmabufSupported && dmabufEnabled;
+  forceDmaBuf = rcclParamForceEnableDMABUF();
+
+  if (forceDmaBuf) {
+    // RCCL_FORCE_ENABLE_DMABUF=1: always try DMAbuf, skip peermem
+    useDmaBuf = dmabufAvailable;
+    if (dmabufAvailable) {
+      INFO(NCCL_INIT|NCCL_NET, "NET/IB: Using GPU Direct RDMA (DMAbuf - forced) for device %d", lComm->dev);
+    } else {
+      WARN("NET/IB: RCCL_FORCE_ENABLE_DMABUF=1 but DMAbuf not available, GPU Direct RDMA disabled for device %d", lComm->dev);
+    }
+  } else {
+    // Normal path: prefer peermem over dmabuf
+    useDmaBuf = !peermemAvailable && dmabufAvailable;
+    if (peermemAvailable) {
+      INFO(NCCL_INIT|NCCL_NET, "NET/IB: Using GPU Direct RDMA (peermem) for device %d", lComm->dev);
+    } else if (useDmaBuf) {
+      WARN("NET/IB: Peermem not available, falling back to GPU Direct RDMA (DMAbuf) for device %d", lComm->dev);
+    } else if (!peermemAvailable && dmabufSupported && !dmabufEnabled) {
+      WARN("NET/IB: Peermem not available and DMAbuf is disabled (NCCL_DMABUF_ENABLE=0), GPU Direct RDMA disabled for device %d", lComm->dev);
+    } else {
+      WARN("NET/IB: GPU Direct RDMA not available for device %d", lComm->dev);
+    }
+  }
+
+  rComm->flushEnabled = ((peermemAvailable || useDmaBuf)
                             && (ncclParamIbGdrFlushDisable() == 0)) ? 1 : 0;              
   for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
     rCommDev = rComm->devs + i;
@@ -1853,7 +2070,31 @@ ib_recv:
 
     // Allocate Flush dummy buffer for GPU Direct RDMA
     if (rComm->flushEnabled) {
+      bool gpuFlushRegistered = false;
+      rCommDev->gpuFlush.gpuFlushGpuMem = nullptr;
+      rCommDev->gpuFlush.gpuMr = nullptr;
+      rCommDev->gpuFlush.dmabuf_fd = -1;
+
       if (rcclParamIbGdrFlushGpuMemNoRelaxedOrdering()) {
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+        if (ncclCuMemEnable()) {
+          NCCLCHECKGOTO(ncclMemAlloc((void**)&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int)), ret, fail);
+          CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&rCommDev->gpuFlush.dmabuf_fd,
+                      (CUdeviceptr)rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int),
+                      CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0), ret, cumem_flush_hsa);
+          NCCLCHECKGOTO(wrap_ibv_reg_dmabuf_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd,
+                        0, sizeof(int), (uint64_t)rCommDev->gpuFlush.gpuFlushGpuMem,
+                        rCommDev->gpuFlush.dmabuf_fd,
+                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ), ret, cumem_flush_hsa);
+          gpuFlushRegistered = true;
+          goto flush_reg_done;
+cumem_flush_hsa:
+          if (rCommDev->gpuFlush.dmabuf_fd >= 0) {
+            close(rCommDev->gpuFlush.dmabuf_fd);
+            rCommDev->gpuFlush.dmabuf_fd = -1;
+          }
+        }
+#else
 #if defined(HIP_UNCACHED_MEMORY)
         NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), hipDeviceMallocUncached), ret, fail);
 #else
@@ -1864,24 +2105,29 @@ ib_recv:
           uint64_t export_offset = 0;
           void *aligned_ptr = NULL;
           size_t aligned_size = 0;
-          get_aligned_ptr_and_size(rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int) /*devicebuffersize*/, &aligned_ptr, &aligned_size);
-          hsa_status_t export_status = pfn_hsa_amd_portable_export_dmabuf(aligned_ptr, aligned_size, &rCommDev->gpuFlush.dmabuf_fd, &export_offset);
-          if (rCommDev->gpuFlush.dmabuf_fd < 0 || export_status != HSA_STATUS_SUCCESS)
-          {
-            WARN("Failed to export DMA BUF");
-            goto fail;
+          get_aligned_ptr_and_size(rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), &aligned_ptr, &aligned_size);
+          HSACHECKGOTO(hsa_amd_portable_export_dmabuf(aligned_ptr, aligned_size, &rCommDev->gpuFlush.dmabuf_fd, &export_offset), ret, peermem_flush);
+          if (wrap_ibv_reg_dmabuf_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, export_offset, sizeof(int),
+                        (uint64_t)rCommDev->gpuFlush.gpuFlushGpuMem, rCommDev->gpuFlush.dmabuf_fd,
+                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ) != ncclSuccess) goto peermem_flush;
+          gpuFlushRegistered = true;
+          goto flush_reg_done;
+peermem_flush:
+          if (rCommDev->gpuFlush.dmabuf_fd >= 0) {
+            close(rCommDev->gpuFlush.dmabuf_fd);
+            rCommDev->gpuFlush.dmabuf_fd = -1;
           }
-          NCCLCHECKGOTO(wrap_ibv_reg_dmabuf_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, export_offset, sizeof(int), (uint64_t)rCommDev->gpuFlush.gpuFlushGpuMem /*iova*/, rCommDev->gpuFlush.dmabuf_fd, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ), ret, fail);
         }
-        else
-        {
+#endif
+flush_reg_done:
+        if (!gpuFlushRegistered) {
+          if (rCommDev->gpuFlush.gpuFlushGpuMem) {
+            ncclCudaFree(rCommDev->gpuFlush.gpuFlushGpuMem);
+            rCommDev->gpuFlush.gpuFlushGpuMem = nullptr;
+          }
+          rCommDev->gpuFlush.gpuMr = nullptr;
           rCommDev->gpuFlush.dmabuf_fd = -1;
-          NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ), ret, fail);
         }
-      } else {
-        rCommDev->gpuFlush.gpuFlushGpuMem = nullptr;
-        rCommDev->gpuFlush.gpuMr = nullptr;
-        rCommDev->gpuFlush.dmabuf_fd = -1;
       }
       NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->gpuFlush.hostMr, rCommDev->base.pd, &rComm->gpuFlushHostMem, sizeof(int), IBV_ACCESS_LOCAL_WRITE), ret, fail);
       rCommDev->gpuFlush.sge.addr = (uint64_t)&rComm->gpuFlushHostMem;
@@ -1989,13 +2235,12 @@ ncclResult_t ncclIbRegMrDmaBufInternal(ncclIbNetCommDevBase* base, void* data, s
   struct ncclIbMrCache* cache = &ncclIbDevs[base->ibDevN].mrCache;
   uintptr_t addr = (uintptr_t)data & -pageSize;
   size_t pages = ((uintptr_t)data + size - addr + pageSize-1)/pageSize;
-  ncclResult_t res;
-  pthread_mutex_lock(&ncclIbDevs[base->ibDevN].lock);
+  std::lock_guard<std::mutex> lock(ncclIbDevs[base->ibDevN].mutex);
   for (int slot=0; /*true*/; slot++) {
     if (slot == cache->population || addr < cache->slots[slot].addr) { // didn't find in cache
       if (cache->population == cache->capacity) { // must grow cache
         cache->capacity = cache->capacity < 32 ? 32 : 2*cache->capacity;
-        NCCLCHECKGOTO(ncclRealloc(&cache->slots, cache->population, cache->capacity), res, returning);
+        NCCLCHECK(ncclRealloc(&cache->slots, cache->population, cache->capacity));
       }
       // Deregister / register
       struct ibv_mr* mr;
@@ -2004,17 +2249,17 @@ ncclResult_t ncclIbRegMrDmaBufInternal(ncclIbNetCommDevBase* base, void* data, s
       if (fd != -1) {
         /* DMA-BUF support */
         if (!ncclIbDevs[base->ibDevN].capsProvider.mlx5.dataDirect) {
-          NCCLCHECKGOTO(wrap_ibv_reg_dmabuf_mr(&mr, base->pd, offset, pages*pageSize, addr, fd, flags), res, returning);
+          NCCLCHECK(wrap_ibv_reg_dmabuf_mr(&mr, base->pd, offset, pages*pageSize, addr, fd, flags));
         } else {
-          NCCLCHECKGOTO(wrap_mlx5dv_reg_dmabuf_mr(&mr, base->pd, offset, pages*pageSize, addr, fd, flags, MLX5DV_REG_DMABUF_ACCESS_DATA_DIRECT), res, returning);
+          NCCLCHECK(wrap_mlx5dv_reg_dmabuf_mr(&mr, base->pd, offset, pages*pageSize, addr, fd, flags, MLX5DV_REG_DMABUF_ACCESS_DATA_DIRECT));
         }
       } else {
         if (ncclIbRelaxedOrderingEnabled) {
           // Use IBVERBS_1.8 API - needed for IBV_ACCESS_RELAXED_ORDERING support
-          NCCLCHECKGOTO(wrap_ibv_reg_mr_iova2(&mr, base->pd, (void*)addr, pages*pageSize, addr, flags), res, returning);
+          NCCLCHECK(wrap_ibv_reg_mr_iova2(&mr, base->pd, (void*)addr, pages*pageSize, addr, flags));
         }
         else {
-          NCCLCHECKGOTO(wrap_ibv_reg_mr(&mr, base->pd, (void*)addr, pages*pageSize, flags), res, returning);
+          NCCLCHECK(wrap_ibv_reg_mr(&mr, base->pd, (void*)addr, pages*pageSize, flags));
         }
       }
       TRACE(NCCL_INIT|NCCL_NET,"regAddr=0x%lx size=%lld rkey=0x%x lkey=0x%x fd=%d", (unsigned long)addr, (long long)pages*pageSize, mr->rkey, mr->lkey, fd);
@@ -2025,19 +2270,15 @@ ncclResult_t ncclIbRegMrDmaBufInternal(ncclIbNetCommDevBase* base, void* data, s
       cache->slots[slot].mr = mr;
       cache->population += 1;
       *mhandle = mr;
-      res = ncclSuccess;
-      goto returning;
+      return ncclSuccess;
     } else if ((addr >= cache->slots[slot].addr) &&
         ((addr-cache->slots[slot].addr)/pageSize+pages) <= cache->slots[slot].pages) {
       cache->slots[slot].refs += 1;
       *mhandle = cache->slots[slot].mr;
-      res = ncclSuccess;
-      goto returning;
+      return ncclSuccess;
     }
   }
-returning:
-  pthread_mutex_unlock(&ncclIbDevs[base->ibDevN].lock);
-  return res;
+  return ncclSuccess;
 }
 
 struct ncclIbNetCommDevBase* ncclIbGetNetCommDevBase(ncclIbNetCommBase* base, int devIndex) {
@@ -2056,6 +2297,10 @@ ncclResult_t ncclIbRegMrDmaBuf(void* comm, void* data, size_t size, int type, ui
   assert(size > 0);
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*) comm;
   struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*) malloc(sizeof(struct ncclIbMrHandle));
+  if (mhandleWrapper == nullptr) {
+    WARN("Failed to allocate IB MR handle wrapper");
+    return ncclSystemError;
+  }
   for (int i = 0; i < base->vProps.ndevs; i++) {
     // Each ncclIbNetCommDevBase is at different offset in send and recv netComms
     struct ncclIbNetCommDevBase* devComm = ncclIbGetNetCommDevBase(base, i);
@@ -2075,8 +2320,7 @@ ncclResult_t ncclIbRegMr(void* comm, void* data, size_t size, int type, void** m
 
 ncclResult_t ncclIbDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle) {
   struct ncclIbMrCache* cache = &ncclIbDevs[base->ibDevN].mrCache;
-  ncclResult_t res;
-  pthread_mutex_lock(&ncclIbDevs[base->ibDevN].lock);
+  std::lock_guard<std::mutex> lock(ncclIbDevs[base->ibDevN].mutex);
   for (int i=0; i < cache->population; i++) {
     if (mhandle == cache->slots[i].mr) {
       if (0 == --cache->slots[i].refs) {
@@ -2086,17 +2330,13 @@ ncclResult_t ncclIbDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle) 
           cache->slots = NULL;
           cache->capacity = 0;
         }
-        NCCLCHECKGOTO(wrap_ibv_dereg_mr(mhandle), res, returning);
+        NCCLCHECK(wrap_ibv_dereg_mr(mhandle));
       }
-      res = ncclSuccess;
-      goto returning;
+      return ncclSuccess;
     }
   }
   WARN("NET/IB: could not find mr %p inside cache of %d entries", mhandle, cache->population);
-  res = ncclInternalError;
-returning:
-  pthread_mutex_unlock(&ncclIbDevs[base->ibDevN].lock);
-  return res;
+  return ncclInternalError;
 }
 
 ncclResult_t ncclIbDeregMr(void* comm, void* mhandle) {
@@ -2114,10 +2354,12 @@ ncclResult_t ncclIbDeregMr(void* comm, void* mhandle) {
 }
 
 NCCL_PARAM(IbSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
+RCCL_PARAM(IbSplitDataThreshold, "IB_SPLIT_DATA_THRESHOLD", 128);
 
 ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   struct ncclIbRequest** reqs = comm->fifoReqs[slot];
   volatile struct ncclIbSendFifo* slots = comm->fifo[slot];
+  ncclResult_t ret = ncclSuccess;
   int nreqs = slots[0].nreqs;
   if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
 
@@ -2173,6 +2415,12 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   // Multi-QP: make sure IB writes are multiples of 128B so that LL and LL128 protocols still work
   const int align = 128;
   int nqps = ncclParamIbSplitDataOnQps() ? comm->base.nqps : comm->base.nDataQps;
+
+  // For small messages (< splitDataThreshold) with multiple QPs, avoid splitting:
+  // send the entire payload through one QP selected via round-robin, post zero-length WRs on the rest.
+  int smallMsgActiveQp = comm->fifoHead % nqps;
+  int64_t splitDataThreshold = rcclParamIbSplitDataThreshold();
+
   for (int i = 0; i < nqps; i++) {
     int qpIndex = comm->base.qpIndex;
     ncclIbQp* qp = comm->base.qps + qpIndex;
@@ -2184,7 +2432,12 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
       // Select proper rkey (needed even for 0-size send)
       comm->wrs[r].wr.rdma.rkey = slots[r].rkeys[qp->remDevIdx];
 
-      int chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+      int chunkSize;
+      if (reqs[r]->send.size < splitDataThreshold) {
+        chunkSize = (i == smallMsgActiveQp) ? reqs[r]->send.size : 0;
+      } else {
+        chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+      }
       int length = std::min(reqs[r]->send.size-reqs[r]->send.offset, chunkSize);
       if (length <= 0) {
         comm->wrs[r].sg_list = NULL;
@@ -2225,10 +2478,22 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
       reqs[r]->pInfo[0].nEventHandles++;
     }
 #endif
-    NCCLCHECK(wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr));
+    ret = wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr);
+    if (ret != ncclSuccess) {
+      // Mark connection as fatal. DO NOT free requests here - the caller
+      // (ncclIbIsend) owns the requests and will handle cleanup.
+      // Some requests may have events from earlier QP iterations.
+      ncclIbStatsFatalError(&comm->base.stats);
+      return ret;
+    }
 
     for (int r=0; r<nreqs; r++) {
-      int chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+      int chunkSize;
+      if (reqs[r]->send.size < splitDataThreshold) {
+        chunkSize = (i == smallMsgActiveQp) ? reqs[r]->send.size : 0;
+      } else {
+        chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+      }
       reqs[r]->send.offset += chunkSize;
       comm->sges[r].addr += chunkSize;
       comm->wrs[r].wr.rdma.remote_addr += chunkSize;
@@ -2248,23 +2513,25 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
 
 ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle, void** request) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
+  ncclResult_t ret = ncclSuccess;
+  struct ncclIbRequest* req = NULL;
+  struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*) mhandle;
+  int nreqs = 0;
+  volatile struct ncclIbSendFifo* slots = NULL;
+  int slot = (comm->fifoHead) % MAX_REQUESTS;
+  struct ncclIbRequest** reqs = comm->fifoReqs[slot];
+  uint64_t idx = 0;
+
   if (comm->base.ready == 0) {
     WARN("NET/IB: ncclIbIsend() called when comm->base.ready == 0");
     *request = NULL;
     return ncclInternalError;
   }
-  NCCLCHECK(ncclIbStatsCheckFatalCount(&comm->base.stats,__func__));
-
-  struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*) mhandle;
+  NCCLCHECKGOTO(ncclIbStatsCheckFatalCount(&comm->base.stats,__func__), ret, fail);
 
   // Wait for the receiver to have posted the corresponding receive
-  int nreqs = 0;
-  volatile struct ncclIbSendFifo* slots;
-
-  int slot = (comm->fifoHead) % MAX_REQUESTS;
-  struct ncclIbRequest** reqs = comm->fifoReqs[slot];
   slots = comm->fifo[slot];
-  uint64_t idx = comm->fifoHead+1;
+  idx = comm->fifoHead+1;
   if (slots[0].idx != idx) { *request = NULL; return ncclSuccess; }
   nreqs = slots[0].nreqs;
   // Wait until all data has arrived
@@ -2284,8 +2551,7 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
       return ncclInternalError;
     }
 
-    struct ncclIbRequest* req;
-    NCCLCHECK(ncclIbGetRequest(&comm->base, &req));
+    NCCLCHECKGOTO(ncclIbGetRequest(&comm->base, &req), ret, fail);
     req->type = NCCL_NET_IB_REQ_SEND;
     req->sock = &comm->base.sock;
     req->base = &comm->base;
@@ -2325,7 +2591,7 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
     }
 
     TIME_START(0);
-    NCCLCHECK(ncclIbMultiSend(comm, slot));
+    NCCLCHECKGOTO(ncclIbMultiSend(comm, slot), ret, fail);
 
     // Clear slots[0]->nreqs, as well as other fields to help debugging and sanity checks
     memset((void*)slots, 0, sizeof(struct ncclIbSendFifo));
@@ -2337,6 +2603,28 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
 
   *request = NULL;
   return ncclSuccess;
+
+fail:
+  ncclIbStatsFatalError(&comm->base.stats);
+  if (req) {
+    // If events were added (IBV ops posted), we can't free immediately -
+    // completions may still arrive. Mark as failed and return it so
+    // caller can call Test to drain completions.
+    if (ncclIbRequestHasEvents(req)) {
+      req->type = NCCL_NET_IB_REQ_FAILED;
+      *request = req;
+      // Return success so caller proceeds to call Test() which will drain
+      // completions. The fatal error is recorded in stats and will be
+      // caught on the next operation.
+      return ncclSuccess;
+    } else {
+      ncclIbFreeRequest(req);
+      *request = NULL;
+    }
+  } else {
+    *request = NULL;
+  }
+  return ret;
 }
 
 ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, int n, void** data, size_t* sizes, int* tags, void** mhandles, struct ncclIbRequest* req) {
@@ -2410,7 +2698,13 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, int n, void** data, siz
   }
 
   struct ibv_send_wr* bad_wr;
-  NCCLCHECK(wrap_ibv_post_send(ctsQp->qp, &wr, &bad_wr));
+  ncclResult_t ret = wrap_ibv_post_send(ctsQp->qp, &wr, &bad_wr);
+  if (ret != ncclSuccess) {
+    // Mark connection as fatal. Don't free request here - caller owns it
+    // and will handle cleanup based on whether events were posted.
+    ncclIbStatsFatalError(&comm->base.stats);
+    return ret;
+  }
 
   TRACE(NCCL_VERBS, "Posted send wr_id=%lu, wr_indx=%d, qp_num=%d, src_nic=%d, dst_nic=%d, dlid=%lu, opcode=%d, send_flags=%d, imm_data=%d, remote_addr=%lx, rkey=%x, length=%d, lkey=%x",
         wr.wr_id, 0, ctsQp->qp->qp_num, comm->devs[ctsQp->devIndex].base.ibDevN, comm->base.remDevs[ctsQp->remDevIdx].ibv_dev_index, comm->base.remDevs[ctsQp->remDevIdx].lid,
@@ -2423,16 +2717,21 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, int n, void** data, siz
 
 ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles, void** request) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
+  ncclResult_t ret = ncclSuccess;
+  struct ncclIbRequest* req = NULL;
+  struct ibv_recv_wr wr;
+  struct ibv_recv_wr* bad_wr = NULL;
+  int nqps = 0;
+
   if (comm->base.ready == 0) {
     WARN("NET/IB: ncclIbIrecv() called when comm->base.ready == 0");
     *request = NULL;
     return ncclInternalError;
   }
   if (n > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
-  NCCLCHECK(ncclIbStatsCheckFatalCount(&comm->base.stats,__func__));
+  NCCLCHECKGOTO(ncclIbStatsCheckFatalCount(&comm->base.stats,__func__), ret, fail);
 
-  struct ncclIbRequest* req;
-  NCCLCHECK(ncclIbGetRequest(&comm->base, &req));
+  NCCLCHECKGOTO(ncclIbGetRequest(&comm->base, &req), ret, fail);
   req->type = NCCL_NET_IB_REQ_RECV;
   req->sock = &comm->base.sock;
   req->nreqs = n;
@@ -2444,7 +2743,6 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
     req->devBases[i] = &comm->devs[i].base;
   }
 
-  struct ibv_recv_wr wr;
   memset(&wr, 0, sizeof(wr));
   wr.wr_id = req - comm->base.reqs;
   wr.sg_list = NULL;
@@ -2452,10 +2750,9 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
 
   TIME_START(1);
   // Select either all QPs, or one qp per-device
-  const int nqps = ncclParamIbSplitDataOnQps() ? comm->base.nqps : comm->base.nDataQps;
+  nqps = ncclParamIbSplitDataOnQps() ? comm->base.nqps : comm->base.nDataQps;
 
   // Post recvs
-  struct ibv_recv_wr* bad_wr;
   for (int i = 0; i < nqps; i++) {
     struct ncclIbQp* qp = comm->base.qps + comm->base.qpIndex;
     ncclIbAddEvent(req, qp->devIndex, &comm->devs[qp->devIndex].base);
@@ -2475,7 +2772,7 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       req->pInfo[r].nEventHandles++;
     }
 #endif
-    NCCLCHECK(wrap_ibv_post_recv(qp->qp, &wr, &bad_wr));
+    NCCLCHECKGOTO(wrap_ibv_post_recv(qp->qp, &wr, &bad_wr), ret, fail);
     comm->base.qpIndex = (comm->base.qpIndex+1)%comm->base.nqps;
   }
 
@@ -2483,32 +2780,62 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
 
   // Post to FIFO to notify sender
   TIME_START(2);
-  NCCLCHECK(ncclIbPostFifo(comm, n, data, sizes, tags, mhandles, req));
+  NCCLCHECKGOTO(ncclIbPostFifo(comm, n, data, sizes, tags, mhandles, req), ret, fail);
   TIME_STOP(2);
 
   *request = req;
   return ncclSuccess;
+
+fail:
+  ncclIbStatsFatalError(&comm->base.stats);
+  if (req) {
+    // If events were added (IBV ops posted), we can't free immediately -
+    // completions may still arrive. Mark as failed and return it so
+    // caller can call Test to drain completions.
+    if (ncclIbRequestHasEvents(req)) {
+      req->type = NCCL_NET_IB_REQ_FAILED;
+      *request = req;
+      // Return success so caller proceeds to call Test() which will drain
+      // completions. The fatal error is recorded in stats and will be
+      // caught on the next operation.
+      return ncclSuccess;
+    } else {
+      ncclIbFreeRequest(req);
+      *request = NULL;
+    }
+  } else {
+    *request = NULL;
+  }
+  return ret;
 }
 
 ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void** mhandles, void** request) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
+  ncclResult_t ret = ncclSuccess;
+  struct ncclIbRequest* req = NULL;
+  struct ncclIbMrHandle* mhandle = NULL;
   int last = -1;
+
   for (int i=0; i<n; i++) if (sizes[i]) last = i;
   if (comm->flushEnabled == 0 || last == -1) return ncclSuccess;
 
   // Only flush once using the last non-zero receive
-  struct ncclIbRequest* req;
-  NCCLCHECK(ncclIbGetRequest(&comm->base, &req));
+  mhandle = (struct ncclIbMrHandle*) mhandles[last];
+  NCCLCHECKGOTO(ncclIbGetRequest(&comm->base, &req), ret, fail);
   req->type = NCCL_NET_IB_REQ_FLUSH;
   req->sock = &comm->base.sock;
-  struct ncclIbMrHandle* mhandle = (struct ncclIbMrHandle*) mhandles[last];
 
   // We don't know which devIndex the recv was on, so we flush on all devices
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
     struct ibv_send_wr wr;
+    // Check if GPU flush buffer was successfully registered
+    // If not, fall back to using user data buffer for flush
+    bool useGpuFlushMem = rcclParamIbGdrFlushGpuMemNoRelaxedOrdering() &&
+                          comm->devs[i].gpuFlush.gpuFlushGpuMem != nullptr &&
+                          comm->devs[i].gpuFlush.gpuMr != nullptr;
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = req - comm->base.reqs;
-    if (rcclParamIbGdrFlushGpuMemNoRelaxedOrdering()) {
+    if (useGpuFlushMem) {
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
       wr.sg_list = &comm->devs[i].gpuFlush.sge;
@@ -2516,11 +2843,11 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
       wr.opcode = IBV_WR_RDMA_WRITE;
       wr.send_flags = 0;
       struct ibv_send_wr* bad_wr;
-      NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr));
+      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr), ret, fail);
     }
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = req - comm->base.reqs;
-    if (rcclParamIbGdrFlushGpuMemNoRelaxedOrdering()) {
+    if (useGpuFlushMem) {
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
     } else {
@@ -2534,7 +2861,7 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
 
     TIME_START(4);
     struct ibv_send_wr* bad_wr;
-    NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr));
+    NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr), ret, fail);
     TIME_STOP(4);
 
     ncclIbAddEvent(req, i, &comm->devs[i].base);
@@ -2542,6 +2869,28 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
 
   *request = req;
   return ncclSuccess;
+
+fail:
+  ncclIbStatsFatalError(&comm->base.stats);
+  if (req) {
+    // If events were added (IBV ops posted), we can't free immediately -
+    // completions may still arrive. Mark as failed and return it so
+    // caller can call Test to drain completions.
+    if (ncclIbRequestHasEvents(req)) {
+      req->type = NCCL_NET_IB_REQ_FAILED;
+      *request = req;
+      // Return success so caller proceeds to call Test() which will drain
+      // completions. The fatal error is recorded in stats and will be
+      // caught on the next operation.
+      return ncclSuccess;
+    } else {
+      ncclIbFreeRequest(req);
+      *request = NULL;
+    }
+  } else {
+    *request = NULL;
+  }
+  return ret;
 }
 
 #define HCA_NAME(req, index) ((req)->devBases[(index)]->pd->context->device->name)
@@ -2558,12 +2907,22 @@ static int getReqQpIndex(struct ncclIbRequest* req, int request, int qpNumber) {
 
 ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
   struct ncclIbRequest *r = (struct ncclIbRequest*)request;
+  ncclResult_t ret = ncclSuccess;
+  int failDevIdx = -1;
   *done = 0;
   while (1) {
-    NCCLCHECK(ncclIbStatsCheckFatalCount(&r->base->stats,__func__));
+    NCCLCHECKGOTO(ncclIbStatsCheckFatalCount(&r->base->stats,__func__), ret, fail);
     if (r->events[0] == 0 && r->events[1] == 0 && r->events[2] == 0 && r->events[3] == 0) {
       TRACE(NCCL_NET, "r=%p done", r);
       *done = 1;
+      // If this was a failed request, we were just draining completions.
+      // Now that all events are done, free and return success.
+      if (r->type == NCCL_NET_IB_REQ_FAILED) {
+        NCCLCHECK(ncclIbFreeRequest(r));
+        // Return success since we successfully drained. The fatal error
+        // is already recorded in stats and will be caught on next operation.
+        return ncclSuccess;
+      }
       if (sizes && r->type == NCCL_NET_IB_REQ_RECV) {
         for (int i=0; i<r->nreqs; i++) {
           sizes[i] = r->recv.sizes[i];
@@ -2595,7 +2954,11 @@ ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
       TIME_START(3);
       // If we expect any completions from this device's CQ
       if (r->events[i]) {
-        NCCLCHECK(wrap_ibv_poll_cq(r->devBases[i]->cq, 4, wcs, &wrDone));
+        ret = wrap_ibv_poll_cq(r->devBases[i]->cq, 4, wcs, &wrDone);
+        if (ret != ncclSuccess) {
+          failDevIdx = i;
+          goto fail;
+        }
         totalWrDone += wrDone;
         if (wrDone == 0) { TIME_CANCEL(3); } else { TIME_STOP(3); }
         if (wrDone == 0) continue;
@@ -2617,7 +2980,9 @@ ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
             WARN("NET/IB: Got completion from peer %s with status=%d opcode=%d len=%u vendor err %u (%s)%s%s%s%s hca %s",
                 ncclSocketToString(&addr, line), wc->status, wc->opcode, wc->byte_len, wc->vendor_err, reqTypeStr[r->type],
                 localGidStr ?  " localGid ":"", localGidString, remoteGidStr ? " remoteGids":"", remoteGidString, hcaName);
-            return ncclRemoteError;
+            ret = ncclRemoteError;
+            failDevIdx = i;
+            goto fail;
           }
 
           union ncclSocketAddress addr;
@@ -2634,7 +2999,9 @@ ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
               struct ncclIbRequest* sendReq = r->base->reqs+((wc->wr_id >> (j*8)) & 0xff);
               if ((sendReq->events[i] <= 0)) {
                 WARN("NET/IB: sendReq(%p)->events={%d,%d,%d,%d}, i=%d, j=%d <= 0", sendReq, sendReq->events[0], sendReq->events[1], sendReq->events[2], sendReq->events[3], i, j);
-                return ncclInternalError;
+                ret = ncclInternalError;
+                failDevIdx = i;
+                goto fail;
               }
               sendReq->events[i]--;
 #ifdef NCCL_ENABLE_NET_PROFILING
@@ -2647,7 +3014,9 @@ ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
             if (req && wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM) {
               if (req->type != NCCL_NET_IB_REQ_RECV) {
                 WARN("NET/IB: wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM and req->type=%d", req->type);
-                return ncclInternalError;
+                ret = ncclInternalError;
+                failDevIdx = i;
+                goto fail;
               }
               if (req->nreqs == 1) {
                 req->recv.sizes[0] = wc->imm_data;
@@ -2665,13 +3034,28 @@ ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
         }
         // Once the IB fatal event is reported in the async thread, we want to propagate this error
         // to communicator and prevent further polling to reduce error pollution.
-        NCCLCHECK(ncclIbStatsCheckFatalCount(&ncclIbDevs[r->devBases[i]->ibDevN].stats,__func__));
+        ret = ncclIbStatsCheckFatalCount(&ncclIbDevs[r->devBases[i]->ibDevN].stats,__func__);
+        if (ret != ncclSuccess) {
+          failDevIdx = i;
+          goto fail;
+        }
       }
     }
 
     // If no CQEs found on any device, return and come back later
     if (totalWrDone == 0) return ncclSuccess;
   }
+
+fail:
+  // Mark connection and device as fatal
+  ncclIbStatsFatalError(&r->base->stats);
+  if (failDevIdx >= 0 && r->devBases[failDevIdx] != NULL) {
+    ncclIbStatsFatalError(&ncclIbDevs[r->devBases[failDevIdx]->ibDevN].stats);
+  }
+  // Mark request as failed so subsequent Test calls drain completions
+  r->type = NCCL_NET_IB_REQ_FAILED;
+  *done = 1;
+  return ret;
 }
 
 ncclResult_t ncclIbCloseSend(void* sendComm) {
@@ -2733,6 +3117,11 @@ ncclResult_t ncclIbCloseListen(void* listenComm) {
   return ncclSuccess;
 }
 
+ncclResult_t ncclIbFinalize(void* ctx) {
+  netRefCount--;
+  return ncclSuccess;
+}
+
 ncclResult_t rcclNetP2pPolicy(void* handle, int isP2p) {
   if (!handle) return ncclInvalidArgument;
   struct ncclIbHandle* ibHandle = (struct ncclIbHandle*)handle;
@@ -2761,7 +3150,9 @@ ncclNet_t ncclNetIb = {
   ncclIbCloseListen,
   NULL /* getDeviceMr */,
   NULL /* irecvConsumed */,
-  ncclIbMakeVDevice
+  ncclIbMakeVDevice,
+  ncclIbFinalize,
+  ncclIbSetNetAttr,
 };
 
 /*

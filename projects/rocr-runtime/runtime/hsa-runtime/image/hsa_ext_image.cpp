@@ -266,7 +266,7 @@ hsa_status_t hsa_ext_sampler_create(hsa_agent_t agent,
   }
   hsa_ext_sampler_descriptor_v2_t sampler_descriptor_v2 = {
       sampler_descriptor->coordinate_mode,
-      sampler_descriptor->filter_mode,
+     sampler_descriptor->filter_mode, HSA_EXT_SAMPLER_FILTER_MODE_NONE,
       {sampler_descriptor->address_mode,
           sampler_descriptor->address_mode, sampler_descriptor->address_mode}
   };
@@ -566,13 +566,15 @@ hsa_status_t hsa_ext_image_destroy_v2(hsa_agent_t agent, hsa_ext_image_t image) 
 
 // per-level view retrieval implementation
 hsa_status_t HSA_API hsa_ext_image_mipmap_array_get_level(hsa_agent_t agent,
-                                                          const hsa_ext_image_t* mipmapped_array,
-                                                          uint32_t mip_level,
-                                                          hsa_ext_image_t* level_image_out) {
+                                         const hsa_ext_image_t* mipmapped_array,
+                                         uint32_t mip_level,
+                                         const hsa_ext_image_descriptor_v2_t* image_descriptor,
+                                         hsa_ext_image_t* level_image_out) {
   TRY;
   if (!mipmapped_array || !level_image_out) { return HSA_STATUS_ERROR_INVALID_ARGUMENT; }
 
-  return ImageRuntime::instance()->GetMipmapArrayLevelHandle(agent, *mipmapped_array, mip_level, *level_image_out);
+  return ImageRuntime::instance()->GetMipmapArrayLevelHandle(agent, *mipmapped_array, mip_level,
+                                                             image_descriptor, *level_image_out);
 
   CATCH;
 }

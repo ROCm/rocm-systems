@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -31,15 +31,15 @@ set(_nic_perf_environment
     "ROCPROFSYS_TRACE_LEGACY=ON"
     "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/nic-performance"
     "ROCPROFSYS_USE_PID=OFF"
-    "ROCPROFSYS_VERBOSE=1"
+    "ROCPROFSYS_LOG_LEVEL=trace"
     "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
     "ROCPROFSYS_SAMPLING_FREQ=50"
     "ROCPROFSYS_SAMPLING_CPUS=none"
-    "ROCPROFSYS_USE_ROCM=OFF"
     "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,papi_array,network_stats"
     "ROCPROFSYS_NETWORK_INTERFACE=${_network_interface}"
     "ROCPROFSYS_PAPI_EVENTS=${_event_list}"
     "ROCPROFSYS_SAMPLING_DELAY=0.05"
+    "PAPI_NET_REFRESH_LATENCY=100000"
 )
 
 # Set _download_url to a large file that will give rocprof-sys-sample time to collect NIC

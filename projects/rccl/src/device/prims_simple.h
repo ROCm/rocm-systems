@@ -11,7 +11,6 @@
 #endif
 
 #include "rccl_metadata.h"
-#include "msccl/msccl_struct.h"
 #include "network/unpack/unpack.h"
 #include <cassert>
 
@@ -84,6 +83,7 @@ private:
     if (nthreads == WARP_SIZE)
       __syncwarp();
     else
+      // To be revisited for correctness on gfx1250
       #if defined(__gfx942__) || defined(__gfx950__)
         barrier_generic(__threadfence_block(), nworkers, barrier_next, barriers);
       #else
@@ -97,6 +97,7 @@ private:
   }
 
   inline __device__ void patBarrier() {
+    // To be revisited for correctness on gfx1250
     #if defined(__gfx942__) || defined(__gfx950__)
       barrier_generic(__threadfence_block(), NCCL_PAT_NWORKERS, barrier_next_pat, barriers_pat);
     #else
@@ -122,6 +123,8 @@ private:
     #endif
     // volatile is faster than acquire but not as correct. Make sure reduceCopy
     // loads data using volatile so it doesn't see stale data in L1.
+    //
+    // To be revisited for correctness on gfx1250
 #if defined(__gfx1200__) || defined(__gfx1201__)
     return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
 #else
@@ -214,17 +217,19 @@ private:
 
   template<int Recv, int Send>
   inline __device__ void postPeer(bool dataStored) {
-    if (skip_fence){
+    if (skip_fence) {
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
+#if defined(__gfx1250__)
+      // To be revisited for correctness and performance on gfx1250
+      barrier_generic(asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0"), nworkers, barrier_next, barriers);
+#else
       barrier_generic(asm volatile("s_waitcnt lgkmcnt(0) vmcnt(0)"), nworkers, barrier_next, barriers);
+#endif
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
     }
-    else if((flags & RolePostSend) && dataStored){
-#ifdef __GFX9__
-    __threadfence();
-#else
-    __threadfence_system();
-#endif
+
+    if ((flags & RolePostSend) && dataStored && !skip_fence) {
+      __threadfence_system();
     }
 
     if ((flags & Send*RolePostSend) && next_hdp_reg)
@@ -456,60 +461,24 @@ private:
     }
   }
 
-  template <int REDUCE, int COPY, int MULTISRCS, int MULTIDSTS>
-  __device__ __forceinline__ void mscclGenericOp(T** srcs, int nsrcs, T** dsts, int ndsts, int nelem) {
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_MSCCL_GENERIC_OP_ENTRY)
-    if (tid == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_MSCCL_GENERIC_OP_ENTRY, nelem*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
-    nelem = nelem < 0 ? 0 : nelem;
-    if (tid < nworkers) {
-      if (REDUCE){
-        srcs[nsrcs] = dsts[0];
-        nsrcs++;
-        if (MULTISRCS){
-          reduceCopy<Unroll, useAcc, RedOp, T, 0, 3, MSCCL_MAX_REDUCE_FUSION, 0, 1, 1, 0, Pipeline>
-            (tid, nworkers, ncclShmem.redOpArgs[0], ncclShmem.redOpArgs, false, nsrcs, (void **)srcs, 1, (void **)dsts, nelem);
-        } else {
-          reduceCopy<Unroll, useAcc, RedOp, T, 0, 2, 2, 0, 1, 1, 0, Pipeline>
-            (tid, nworkers, ncclShmem.redOpArgs[0], ncclShmem.redOpArgs, false, 2, (void **)srcs, 1, (void **)dsts, nelem);
-        }
-      }
-      if (COPY){
-        reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 0, 1, 1, 0>
-          (tid, nworkers, ncclShmem.redOpArgs[0], ncclShmem.redOpArgs, false, 1, (void **)srcs, 1, (void **)dsts, nelem);
-        if (MULTISRCS) {
-          for (int i = 1; i < nsrcs; i++){
-            reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 0, 1, 1, 0>
-              (tid, nworkers, ncclShmem.redOpArgs[0], ncclShmem.redOpArgs, false, 1, (void **)&srcs[i], 1, (void **)&dsts[i], nelem);
-          }
-        }
-      }
-    }
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_MSCCL_GENERIC_OP_EXIT)
-    if (tid == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_MSCCL_GENERIC_OP_EXIT, nelem*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
-    barrier();
-  }
-
 public:
   static inline __device__ void sendPeerNotify(int peer, int connIndex, int steps) {
+#ifdef ENABLE_WARP_SPEED
+    ncclDevChannelPeer* peerPtr = ncclShmem.warpChannel[threadIdx.x/WARP_SIZE].peers[peer];
+#else
     ncclDevChannelPeer* peerPtr = ncclShmem.channel.peers[peer];
+#endif
     peerPtr->send[connIndex].step += steps;
     st_relaxed_sys_global(peerPtr->send[connIndex].tail, peerPtr->send[connIndex].step);
   }
 
   static inline __device__ void recvPeerNotify(int peer, int connIndex, int steps) {
     int spins = 0;
+#ifdef ENABLE_WARP_SPEED
+    ncclDevChannelPeer* peerPtr = ncclShmem.warpChannel[threadIdx.x/WARP_SIZE].peers[peer];
+#else
     ncclDevChannelPeer* peerPtr = ncclShmem.channel.peers[peer];
+#endif
     peerPtr->recv[connIndex].step += steps;
     st_relaxed_sys_global(peerPtr->recv[connIndex].head, peerPtr->recv[connIndex].step);
     while (ld_volatile_global(peerPtr->recv[connIndex].tail) < peerPtr->recv[connIndex].step) {
@@ -770,13 +739,20 @@ public:
       struct ncclDevWorkP2p* p2pWork = nullptr, int stepSize_ = 0, int mode = primsModeDefault
     ):
     tid(tid), tidInBlock(threadIdx.x), nthreads(nthreads), /*compiler warnings*/
+#ifdef ENABLE_WARP_SPEED
+    stepSize(stepSize_ == 0 ? ncclShmem.comm.buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS/sizeof(T) : stepSize_), group(ncclShmem.warpComm? tidInBlock / WARP_SIZE : group), threadsPerBlock(blockDim.x){
+#else
     stepSize(stepSize_ == 0 ? ncclShmem.comm.buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS/sizeof(T) : stepSize_), group(group), threadsPerBlock(blockDim.x){
-
+#endif
     barriers = &ncclShmem.groups[group].barrier;
     // PAT uses the same barrier for each group
     barriers_pat = &ncclShmem.barrier_pat;
     this->nworkers = nthreads;
-
+#ifdef ENABLE_WARP_SPEED
+    auto *channel = &ncclShmem.warpChannel[tidInBlock/WARP_SIZE];
+#else
+    auto *channel = &ncclShmem.channel;
+#endif
     int peer = -1;
     flags = 0;
     index = -1;
@@ -831,9 +807,9 @@ public:
       }
 
       // coverity[overrun-call] => Coverity think prims.index can be greater than 1
-      if (flags & (RoleWaitRecv|RolePostRecv)) loadRecvConn(ncclShmem.channel.peers[peer], connIndexRecv, collWork ? collWork->direct : 0, recvIpcReg, recvNetReg);
+      if (flags & (RoleWaitRecv|RolePostRecv)) loadRecvConn(channel->peers[peer], connIndexRecv, collWork ? collWork->direct : 0, recvIpcReg, recvNetReg);
       // coverity[overrun-call] => Coverity think prims.index can be greater than 1
-      if (flags & (RoleWaitSend|RolePostSend)) loadSendConn(ncclShmem.channel.peers[peer], connIndexSend, collWork ? collWork->direct : 0, sendIpcReg, sendNetReg);
+      if (flags & (RoleWaitSend|RolePostSend)) loadSendConn(channel->peers[peer], connIndexSend, collWork ? collWork->direct : 0, sendIpcReg, sendNetReg);
 
       // if (barrierAny(flags & NetDeviceUnpack)) {
       //   flags |= AnyNetDeviceUnpack;
@@ -861,7 +837,7 @@ public:
         // Load recv peer
         int recvPeer = mode == primsModePatRs ? (rank - delta + nranks) % nranks : (rank + delta) % nranks;
         struct ncclPatPeer* peer = ((struct ncclPatPeer*)recvPeers)+tid;
-        struct ncclConnInfo* conn = peer->conn = ncclShmem.channel.peers[recvPeer]->recv+connIndexRecv;
+        struct ncclConnInfo* conn = peer->conn = channel->peers[recvPeer]->recv+connIndexRecv;
         peer->step = conn->step;
         peer->buff = conn->buffs[NCCL_PROTO_SIMPLE];
         peer->stepCache = loadStepValue(peer->tailPtr = conn->tail);
@@ -871,7 +847,7 @@ public:
         // Load send peer
         int sendPeer = mode == primsModePatAg ? (rank - delta + nranks) % nranks : (rank + delta) % nranks;
         peer = ((struct ncclPatPeer*)sendPeers)+tid;
-        conn = peer->conn = ncclShmem.channel.peers[sendPeer]->send+connIndexSend;
+        conn = peer->conn = channel->peers[sendPeer]->send+connIndexSend;
         peer->step = conn->step;
         peer->connFifo = conn->connFifo;
         peer->buff = conn->buffs[NCCL_PROTO_SIMPLE];
@@ -889,7 +865,23 @@ public:
     }
     if(collWork){
       skip_fence = !collWork -> gfx9CheapFenceOff;
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__GFX9__))
+      // DWORDX4 builtins use system-scope cache-bypassing stores, so the
+      // cheap s_waitcnt fence is sufficient when UBR is active.
+      if (collWork->regUsed || collWork->netRegUsed) {
+        skip_fence = true;
+      }
+#endif
     }
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__GFX9__))
+    else if(p2pWork) {
+      // the postPeer fence is gated by RolePostSend and protects
+      // send-side stores only.
+      if (p2pWork->sendIpcReg || p2pWork->sendNetReg) {
+        skip_fence = true;
+      }
+    }
+#endif
   }
 
   __forceinline__ __device__ ~Primitives() {
@@ -1046,7 +1038,6 @@ public:
     }
   }
 
-  // Set MSCCL data pointers
   __device__ __forceinline__ void setDataPtrs(void const *inputBuf, void *outputBuf = nullptr) {
     if (tid==0) {
       ncclShmem.groups[group].userInput = (T*)inputBuf;
@@ -1343,11 +1334,4 @@ public:
     }
   }
 
-  // MSCCL primitives
-  __device__ __forceinline__ void sendWithBarrier(intptr_t inpIx, int eltN) {
-    send(inpIx, eltN);
-  }
-  __device__ __forceinline__ void localCopy(T* srcs, T* dsts, int eltN) {
-    return mscclGenericOp<0,1,0,0>(&srcs, 1, &dsts, 1, eltN);
-  }
 };

@@ -30,7 +30,7 @@ ROCm Systems Profiler supports several modes of recording trace and profiling da
 |                             | dynamic library/executable, like ``pthread_mutex_lock`` |
 |                             | in ``libpthread.so`` or ``MPI_Init`` in the MPI library |
 +-----------------------------+---------------------------------------------------------+
-| User API                    | User-defined regions and controls for User API ROCm     |
+| User API (deprecated)       | User-defined regions and controls for User API ROCm     |
 |                             | Systems Profiler                                        |
 +-----------------------------+---------------------------------------------------------+
 

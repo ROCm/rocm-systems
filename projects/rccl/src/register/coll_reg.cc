@@ -1,10 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2024-2025, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2022-2025, NVIDIA CORPORATION. All rights reserved.
  * Modifications Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
-
 
 #include "register.h"
 #include "transport.h"
@@ -124,7 +123,7 @@ ncclResult_t ncclRegisterCollBuffers(
   info->regBufType = NCCL_REGULAR_BUFFER;
   *regNeedConnect = true;
   if (!(ncclParamLocalRegister() || (comm->planner.persistent && ncclParamGraphRegister()))) goto exit;
-#if CUDART_VERSION >= 11030
+#if CUDART_VERSION >= 11030 || HIP_VERSION >= 71260540
   if (info->algorithm == NCCL_ALGO_NVLS || info->algorithm == NCCL_ALGO_NVLS_TREE) {
     /* this part of nvls reg code is temporarily not used and obsolete. */
     if (!comm->nvlsRegSupport || info->opDev.op == ncclDevPreMulSum) goto exit;
@@ -183,8 +182,11 @@ ncclResult_t ncclRegisterCollBuffers(
   } else if (info->protocol == NCCL_PROTO_SIMPLE) {
     // IPC buffer registration
     if (info->func == ncclFuncReduceScatter && info->algorithm != NCCL_ALGO_COLLNET_DIRECT) goto exit;
+    // Skip IPC buffer registration for AllReduceWithBias
+    if (info->func == ncclFuncAllReduce && info->acc != nullptr) goto exit;
     if (info->algorithm == NCCL_ALGO_RING && ((info->func == ncclFuncAllReduce && info->sendbuff == info->recvbuff) || info->func == ncclFuncReduce)) goto exit;
-    if ((info->algorithm == NCCL_ALGO_TREE || info->algorithm == NCCL_ALGO_COLLNET_CHAIN) && info->sendbuff == info->recvbuff) goto exit;
+    if (info->algorithm == NCCL_ALGO_TREE && info->sendbuff == info->recvbuff) goto exit;
+    if (info->algorithm == NCCL_ALGO_COLLNET_CHAIN && info->sendbuff == info->recvbuff && comm->maxLocalRanks > 1) goto exit;
     if (info->func == ncclFuncAllGather && info->algorithm == NCCL_ALGO_PAT) goto exit;
 
     int peerRanks[NCCL_MAX_LOCAL_RANKS];

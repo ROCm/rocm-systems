@@ -1,38 +1,20 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/agent_manager.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
 #include "core/node_info.hpp"
+#include "core/output_file_registry.hpp"
 #include "core/rocpd/data_processor.hpp"
 #include "core/rocpd/data_storage/database.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/thread_info.hpp"
+#include "logger/debug.hpp"
 
 #include <cstdint>
 #include <limits>
@@ -41,11 +23,9 @@
 #include <stdexcept>
 #include <string>
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include "library/rocprofiler-sdk/fwd.hpp"
-#    include <rocprofiler-sdk/context.h>
-#    include <rocprofiler-sdk/version.h>
-#endif
+#include "library/rocprofiler-sdk/fwd.hpp"
+#include <rocprofiler-sdk/context.h>
+#include <rocprofiler-sdk/version.h>
 
 namespace rocprofsys
 {
@@ -54,24 +34,58 @@ namespace trace_cache
 namespace
 {
 
-#if ROCPROFSYS_USE_ROCM > 0
 auto
 get_handle_from_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
-#    if(ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     return code_object.agent_id.handle;
-#    else
+#else
     return code_object.rocp_agent.handle;
-#    endif
-}
 #endif
+}
+
+std::string
+generate_db_output_path(int pid)
+{
+    auto _tag    = std::to_string(pid);
+    auto db_name = std::string{ "rocpd" };
+    return rocprofsys::get_database_absolute_path(db_name, _tag);
+}
+
+using memory_operation = std::string;
+using memory_type      = std::string;
+std::pair<memory_operation, memory_type>
+parse_memory_operation_name(std::string_view memory_operation_name)
+{
+    static const std::unordered_map<std::string_view,
+                                    std::pair<memory_operation, memory_type>>
+        parsing_map{
+            { "MEMORY_ALLOCATION_NONE", { "NONE", "REAL" } },
+            { "MEMORY_ALLOCATION_ALLOCATE", { "ALLOC", "REAL" } },
+            { "MEMORY_ALLOCATION_VMEM_ALLOCATE", { "ALLOC", "VIRTUAL" } },
+            { "MEMORY_ALLOCATION_FREE", { "FREE", "REAL" } },
+            { "MEMORY_ALLOCATION_VMEM_FREE", { "FREE", "VIRTUAL" } },
+            { "SCRATCH_MEMORY_NONE", { "NONE", "SCRATCH" } },
+            { "SCRATCH_MEMORY_ALLOC", { "ALLOC", "SCRATCH" } },
+            { "SCRATCH_MEMORY_FREE", { "FREE", "SCRATCH" } },
+            { "SCRATCH_MEMORY_ASYNC_RECLAIM", { "ASYNC_RECLAIM", "SCRATCH" } },
+        };
+
+    auto item = parsing_map.find(memory_operation_name);
+    if(item == parsing_map.end())
+    {
+        LOG_WARNING("Unknown memory operation name: {}", memory_operation_name);
+        return { "UNKNOWN", "UNKNOWN" };
+    }
+
+    return item->second;
+}
 }  // namespace
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const kernel_dispatch_sample& _kds)
+rocpd_processor_t::handle(const kernel_dispatch_sample& _kds)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  agent_primary_key =
@@ -107,13 +121,49 @@ rocpd_processor_t::handle([[maybe_unused]] const kernel_dispatch_sample& _kds)
         _kds.workgroup_size_x, _kds.workgroup_size_y, _kds.workgroup_size_z,
         _kds.grid_size_x, _kds.grid_size_y, _kds.grid_size_z, region_name_primary_key,
         event_id);
-#endif
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const memory_copy_sample& _mcs)
+rocpd_processor_t::handle(const scratch_memory_sample& _sms)
 {
-#if ROCPROFSYS_USE_ROCM > 0
+    auto& n_info  = node_info::get_instance();
+    auto  process = m_metadata->get_process_info();
+
+    const auto* _name = m_metadata->get_buffer_name_info().at(
+        static_cast<rocprofiler_buffer_tracing_kind_t>(_sms.kind),
+        static_cast<rocprofiler_tracing_operation_t>(_sms.operation));
+
+    auto agent_primary_key =
+        m_agent_manager->get_agent_by_handle(_sms.agent_id_handle).base_id;
+
+    auto thread_primary_key =
+        m_data_processor->map_thread_id_to_primary_key(_sms.thread_id);
+
+    auto category_primary_key = m_data_processor->insert_string(
+        trait::name<category::rocm_scratch_memory>::value);
+
+    auto stack_id        = _sms.correlation_id_internal;
+    auto parent_stack_id = _sms.correlation_id_ancestor;
+    auto correlation_id  = 0;
+    auto address_value   = 0;
+
+    auto event_primary_key = m_data_processor->insert_event(
+        category_primary_key, stack_id, parent_stack_id, correlation_id);
+
+    auto [memory_operation, memory_type] = parse_memory_operation_name(_name);
+
+    auto extdata_json_str = fmt::format("{{\"flags\": {}}}", _sms.flags);
+
+    m_data_processor->insert_memory_alloc(
+        n_info.id, process.pid, thread_primary_key, agent_primary_key,
+        memory_operation.c_str(), memory_type.c_str(), _sms.start_timestamp,
+        _sms.end_timestamp, address_value, _sms.allocation_size, _sms.queue_id_handle,
+        _sms.stream_handle, event_primary_key, extdata_json_str.c_str());
+}
+
+void
+rocpd_processor_t::handle(const memory_copy_sample& _mcs)
+{
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
 
@@ -146,53 +196,12 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_copy_sample& _mcs)
         _mcs.end_timestamp, name_primary_key, dst_agent_primary_key,
         _mcs.dst_address_value, src_agent_primary_key, _mcs.src_address_value, _mcs.bytes,
         queue_id, _mcs.stream_handle, name_primary_key, event_primary_key);
-#endif
 }
 
 void
 rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
 {
-#if ROCPROFSYS_USE_ROCM > 0 && (ROCPROFILER_VERSION >= 600)
-    static auto memtype_to_db =
-        [](std::string_view memory_type) -> std::pair<std::string, std::string> {
-        constexpr auto MEMORY_PREFIX  = std::string_view{ "MEMORY_ALLOCATION_" };
-        constexpr auto SCRATCH_PREFIX = std::string_view{ "SCRATCH_MEMORY_" };
-        constexpr auto VMEM_PREFIX    = std::string_view{ "VMEM_" };
-        constexpr auto ASYNC_PREFIX   = std::string_view{ "ASYNC_" };
-
-        std::string _type;
-        std::string _level;
-        if(memory_type.find(MEMORY_PREFIX) == 0)
-        {
-            _type = memory_type.substr(MEMORY_PREFIX.length());
-            if(_type.find(VMEM_PREFIX) == 0)
-            {
-                _type  = _type.substr(VMEM_PREFIX.length());
-                _level = "VIRTUAL";
-            }
-            else
-            {
-                _level = "REAL";
-            }
-        }
-        else if(memory_type.find(SCRATCH_PREFIX) == 0)
-        {
-            _type  = memory_type.substr(SCRATCH_PREFIX.length());
-            _level = "SCRATCH";
-            if(memory_type.find(ASYNC_PREFIX) == 0)
-            {
-                _type = memory_type.substr(ASYNC_PREFIX.length());  // RECLAIM
-            }
-        }
-
-        if(_type == "ALLOCATE")
-        {
-            _type = "ALLOC";
-        }
-
-        return std::make_pair(_type, _level);
-    };
-
+#if(ROCPROFILER_VERSION >= 600)
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
@@ -210,7 +219,7 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
             static_cast<rocprofiler_buffer_tracing_kind_t>(_mas.kind),
             static_cast<rocprofiler_tracing_operation_t>(_mas.operation));
 
-        auto [type, level] = memtype_to_db(_name);
+        auto [memory_operation, memory_type] = parse_memory_operation_name(_name);
 
         auto stack_id        = _mas.correlation_id_internal;
         auto parent_stack_id = _mas.correlation_id_ancestor;
@@ -224,17 +233,17 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
             category_primary_key, stack_id, parent_stack_id, correlation_id);
 
         m_data_processor->insert_memory_alloc(
-            n_info.id, process.pid, thread_primary_key, agent_primary_key, type.c_str(),
-            level.c_str(), _mas.start_timestamp, _mas.end_timestamp, _mas.address_value,
-            _mas.allocation_size, queue_id, _mas.stream_handle, event_primary_key);
+            n_info.id, process.pid, thread_primary_key, agent_primary_key,
+            memory_operation.c_str(), memory_type.c_str(), _mas.start_timestamp,
+            _mas.end_timestamp, _mas.address_value, _mas.allocation_size, queue_id,
+            _mas.stream_handle, event_primary_key);
     }
 #endif
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const region_sample& _rs)
+rocpd_processor_t::handle(const region_sample& _rs)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
@@ -262,13 +271,11 @@ rocpd_processor_t::handle([[maybe_unused]] const region_sample& _rs)
     m_data_processor->insert_region(n_info.id, process.pid, thread_primary_key,
                                     _rs.start_timestamp, _rs.end_timestamp,
                                     name_primary_key, event_primary_key);
-#endif
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const backtrace_region_sample& _bts)
+rocpd_processor_t::handle(const backtrace_region_sample& _bts)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
@@ -285,13 +292,11 @@ rocpd_processor_t::handle([[maybe_unused]] const backtrace_region_sample& _bts)
                                     name_primary_key, event_primary_key);
     m_data_processor->insert_sample(_bts.track_name.c_str(), _bts.start_timestamp,
                                     event_primary_key);
-#endif
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const in_time_sample& _its)
+rocpd_processor_t::handle(const in_time_sample& _its)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto track_primary_key = m_data_processor->insert_string(_its.track_name.c_str());
 
     auto event_id = m_data_processor->insert_event(
@@ -299,18 +304,17 @@ rocpd_processor_t::handle([[maybe_unused]] const in_time_sample& _its)
         _its.call_stack.c_str(), _its.line_info.c_str(), _its.event_metadata.c_str());
     m_data_processor->insert_sample(_its.track_name.c_str(), _its.timestamp_ns, event_id,
                                     "{}");
-#endif
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
+rocpd_processor_t::handle(const pmc_event_with_sample& _pmc)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto track_primary_key = m_data_processor->insert_string(_pmc.track_name.c_str());
 
     auto agent_primary_key =
         m_agent_manager
-            ->get_agent_by_id(_pmc.device_id, static_cast<agent_type>(_pmc.device_type))
+            ->get_agent_by_type_index(_pmc.device_id,
+                                      static_cast<agent_type>(_pmc.device_type))
             .base_id;
 
     auto event_id = m_data_processor->insert_event(
@@ -320,216 +324,206 @@ rocpd_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
                                     "{}");
 
     m_data_processor->insert_pmc_event(event_id, agent_primary_key,
-                                       _pmc.pmc_info_name.c_str(), _pmc.value);
-#endif
+                                       _pmc.pmc_info_name.c_str(), _pmc.value,
+                                       _pmc.event_metadata.c_str());
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
+rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
 {
-#if ROCPROFSYS_USE_ROCM > 0
-
     const auto* _name            = trait::name<category::amd_smi>::value;
     auto        name_primary_key = m_data_processor->insert_string(_name);
     auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
 
     auto base_id =
-        m_agent_manager->get_agent_by_type_index(_amd_smi.device_id, agent_type::GPU)
+        m_agent_manager->get_agent_by_type_index(_gpu_pmc.device_id, agent_type::GPU)
             .base_id;
 
-    auto insert_event_and_sample = [&](bool enabled, const char* pmc_name,
-                                       const char* track_name, double value) {
+    auto insert_metric = [&](bool enabled, const char* pmc_name, const char* track_name,
+                             double value) {
         if(!enabled) return;
         m_data_processor->insert_pmc_event(event_id, base_id, pmc_name, value);
-        m_data_processor->insert_sample(track_name, _amd_smi.timestamp, event_id);
+        m_data_processor->insert_sample(track_name, _gpu_pmc.timestamp, event_id);
     };
 
-    using pos = trace_cache::amd_smi_sample::settings_positions;
-    std::bitset<8> settings_bits(_amd_smi.settings);
-    bool           is_busy_enabled  = settings_bits.test(static_cast<int>(pos::busy));
-    bool           is_temp_enabled  = settings_bits.test(static_cast<int>(pos::temp));
-    bool           is_power_enabled = settings_bits.test(static_cast<int>(pos::power));
-    bool is_mem_usage_enabled = settings_bits.test(static_cast<int>(pos::mem_usage));
+    const auto& m       = _gpu_pmc.metric_values;
+    const auto& enabled = _gpu_pmc.enabled_metric;
 
-    bool is_vcn_enabled  = settings_bits.test(static_cast<int>(pos::vcn_activity));
-    bool is_jpeg_enabled = settings_bits.test(static_cast<int>(pos::jpeg_activity));
-    bool is_xgmi_enabled = settings_bits.test(static_cast<int>(pos::xgmi));
-    bool is_pcie_enabled = settings_bits.test(static_cast<int>(pos::pcie));
+    auto insert_scalar = [&](const char* name, const std::string& track, bool is_enabled,
+                             double value) {
+        insert_metric(is_enabled, name, track.c_str(), value);
+    };
 
-    insert_event_and_sample(
-        is_busy_enabled, trait::name<category::amd_smi_gfx_busy>::value,
-        info::annotate_with_device_id<category::amd_smi_gfx_busy>(_amd_smi.device_id)
-            .c_str(),
-        _amd_smi.gfx_activity);
-    insert_event_and_sample(
-        is_busy_enabled, trait::name<category::amd_smi_umc_busy>::value,
-        info::annotate_with_device_id<category::amd_smi_umc_busy>(_amd_smi.device_id)
-            .c_str(),
-        _amd_smi.umc_activity);
-    insert_event_and_sample(
-        is_busy_enabled, trait::name<category::amd_smi_mm_busy>::value,
-        info::annotate_with_device_id<category::amd_smi_mm_busy>(_amd_smi.device_id)
-            .c_str(),
-        _amd_smi.mm_activity);
-    insert_event_and_sample(
-        is_temp_enabled, trait::name<category::amd_smi_temp>::value,
-        info::annotate_with_device_id<category::amd_smi_temp>(_amd_smi.device_id).c_str(),
-        _amd_smi.temperature);
+    insert_scalar(trait::name<category::amd_smi_gfx_busy>::value,
+                  info::format_track_name<category::amd_smi_gfx_busy>(),
+                  enabled.bits.gfx_activity, m.gfx_activity);
+    insert_scalar(trait::name<category::amd_smi_umc_busy>::value,
+                  info::format_track_name<category::amd_smi_umc_busy>(),
+                  enabled.bits.umc_activity, m.umc_activity);
+    insert_scalar(trait::name<category::amd_smi_mm_busy>::value,
+                  info::format_track_name<category::amd_smi_mm_busy>(),
+                  enabled.bits.mm_activity, m.mm_activity);
+    insert_scalar(trait::name<category::amd_smi_temp>::value,
+                  info::format_track_name<category::amd_smi_temp>(),
+                  enabled.bits.hotspot_temperature, m.hotspot_temperature);
+    insert_scalar(trait::name<category::amd_smi_power>::value,
+                  info::format_track_name<category::amd_smi_power>(),
+                  enabled.bits.current_socket_power || enabled.bits.average_socket_power,
+                  enabled.bits.current_socket_power ? m.current_socket_power
+                                                    : m.average_socket_power);
+    insert_scalar(trait::name<category::amd_smi_memory_usage>::value,
+                  info::format_track_name<category::amd_smi_memory_usage>(),
+                  enabled.bits.memory_usage, m.memory_usage / units::megabyte);
+    insert_scalar(trait::name<category::amd_smi_sdma_usage>::value,
+                  info::format_track_name<category::amd_smi_sdma_usage>(),
+                  enabled.bits.sdma_usage, m.sdma_usage);
 
-    insert_event_and_sample(
-        is_power_enabled, trait::name<category::amd_smi_power>::value,
-        info::annotate_with_device_id<category::amd_smi_power>(_amd_smi.device_id)
-            .c_str(),
-        _amd_smi.power);
-    insert_event_and_sample(
-        is_mem_usage_enabled, trait::name<category::amd_smi_memory_usage>::value,
-        info::annotate_with_device_id<category::amd_smi_memory_usage>(_amd_smi.device_id)
-            .c_str(),
-        _amd_smi.mem_usage);
-
-    if(!is_vcn_enabled && !is_jpeg_enabled && !is_xgmi_enabled && !is_pcie_enabled)
-        return;
-
-    gpu::gpu_metrics_t              gpu_metrics;
-    gpu::gpu_metrics_capabilities_t capabilities;
-    gpu::deserialize_gpu_metrics(_amd_smi.gpu_activity, gpu_metrics, is_vcn_enabled,
-                                 is_jpeg_enabled, is_xgmi_enabled, is_pcie_enabled,
-                                 capabilities);
-
-    // Insert VCN and JPEG activity metrics
-    auto insert_decode_vector_metrics = [&](auto category, bool _is_enabled,
-                                            const std::vector<uint16_t>& data,
-                                            std::optional<size_t> _idx = std::nullopt) {
-        if(!_is_enabled) return;
-
-        using Category = std::decay_t<decltype(category)>;
-
-        for(size_t i = 0; i < data.size(); ++i)
+    auto insert_xcp_metrics = [&](bool is_enabled, const auto& get_array,
+                                  const auto& format_name) {
+        if(!is_enabled) return;
+        for(size_t xcp = 0; xcp < m.xcp_stats.size(); ++xcp)
         {
-            const auto value = data[i];
-            if(value == std::numeric_limits<uint16_t>::max()) continue;
-
-            auto pmc_name = info::annotate_category<Category>(_idx, i);
-            auto track_name =
-                info::annotate_with_device_id<Category>(_amd_smi.device_id, _idx, i);
-
-            insert_event_and_sample(_is_enabled, pmc_name.c_str(), track_name.c_str(),
-                                    static_cast<double>(value));
+            const auto& arr = get_array(m.xcp_stats[xcp]);
+            for(size_t i = 0; i < arr.size(); ++i)
+            {
+                if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_16)
+                    continue;
+                auto name = format_name(static_cast<int>(xcp), static_cast<int>(i));
+                insert_metric(true, name.c_str(), name.c_str(), arr[i]);
+            }
         }
     };
 
-    // Insert XGMI read/write data metrics
-    auto insert_xgmi_vector_metrics = [&](auto category, bool _is_enabled,
-                                          const std::vector<uint64_t>& data,
-                                          std::optional<size_t> _idx = std::nullopt) {
-        if(!_is_enabled) return;
+    insert_xcp_metrics(
+        enabled.bits.vcn_busy,
+        [](const auto& xcp) -> const auto& { return xcp.vcn_busy; },
+        [](int xcp, int engine) {
+            return info::format_track_name<category::amd_smi_vcn_activity>(xcp, engine);
+        });
+    insert_xcp_metrics(
+        enabled.bits.jpeg_busy,
+        [](const auto& xcp) -> const auto& { return xcp.jpeg_busy; },
+        [](int xcp, int engine) {
+            return info::format_track_name<category::amd_smi_jpeg_activity>(xcp, engine);
+        });
 
-        using Category = std::decay_t<decltype(category)>;
-
-        for(size_t i = 0; i < data.size(); ++i)
+    auto insert_device_level_metrics = [&](const std::string_view base_name,
+                                           bool is_enabled, const auto& arr) {
+        if(!is_enabled) return;
+        for(size_t i = 0; i < arr.size(); ++i)
         {
-            const auto value = data[i];
-            if(value == std::numeric_limits<uint64_t>::max()) continue;
+            if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_16) continue;
 
-            auto pmc_name = info::annotate_category<Category>(_idx, i);
-            auto track_name =
-                info::annotate_with_device_id<Category>(_amd_smi.device_id, _idx, i);
+            auto suffix     = "_" + std::to_string(i);
+            auto pmc_name   = std::string(base_name) + suffix;
+            auto track_name = pmc_name;
 
-            insert_event_and_sample(_is_enabled, pmc_name.c_str(), track_name.c_str(),
-                                    static_cast<double>(value));
+            LOG_TRACE("Inserting metric: pmc_name: {}, track_name: {}, value: {}",
+                      pmc_name, track_name, arr[i]);
+            insert_metric(true, pmc_name.c_str(), track_name.c_str(), arr[i]);
         }
     };
 
-    // Insert VCN activity metrics
-    if(capabilities.flags.vcn_is_device_level_only)
-    {
-        // Device-level: use vcn_activity vector
-        insert_decode_vector_metrics(category::amd_smi_vcn_activity{}, is_vcn_enabled,
-                                     gpu_metrics.vcn_activity, std::nullopt);
-    }
-    else
-    {
-        // Per-XCP: iterate through actual XCPs in vcn_busy
-        for(size_t xcp = 0; xcp < gpu_metrics.vcn_busy.size(); ++xcp)
+    insert_device_level_metrics(info::format_track_name<category::amd_smi_vcn_activity>(),
+                                enabled.bits.vcn_activity, m.vcn_activity);
+
+    insert_device_level_metrics(
+        info::format_track_name<category::amd_smi_jpeg_activity>(),
+        enabled.bits.jpeg_activity, m.jpeg_activity);
+
+    insert_scalar(trait::name<category::amd_smi_pcie_link_width>::value,
+                  info::format_track_name<category::amd_smi_pcie_link_width>(),
+                  enabled.bits.pcie, m.pcie.link.width);
+    insert_scalar(trait::name<category::amd_smi_pcie_link_speed>::value,
+                  info::format_track_name<category::amd_smi_pcie_link_speed>(),
+                  enabled.bits.pcie, m.pcie.link.speed);
+    insert_scalar(trait::name<category::amd_smi_pcie_bandwidth_acc>::value,
+                  info::format_track_name<category::amd_smi_pcie_bandwidth_acc>(),
+                  enabled.bits.pcie, m.pcie.bandwidth.acc);
+    insert_scalar(trait::name<category::amd_smi_pcie_bandwidth_inst>::value,
+                  info::format_track_name<category::amd_smi_pcie_bandwidth_inst>(),
+                  enabled.bits.pcie, m.pcie.bandwidth.inst);
+
+    // XGMI metrics
+    insert_scalar(trait::name<category::amd_smi_xgmi_link_width>::value,
+                  info::format_track_name<category::amd_smi_xgmi_link_width>(),
+                  enabled.bits.xgmi, m.xgmi.link.width);
+    insert_scalar(trait::name<category::amd_smi_xgmi_link_speed>::value,
+                  info::format_track_name<category::amd_smi_xgmi_link_speed>(),
+                  enabled.bits.xgmi, m.xgmi.link.speed);
+
+    // XGMI data accumulators (per-link arrays)
+    auto insert_xgmi_link_metrics = [&](const std::string& base_track_name,
+                                        bool is_enabled, const auto& arr) {
+        if(!is_enabled) return;
+        for(size_t i = 0; i < arr.size(); ++i)
         {
-            insert_decode_vector_metrics(category::amd_smi_vcn_activity{}, is_vcn_enabled,
-                                         gpu_metrics.vcn_busy[xcp], xcp);
+            if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_64) continue;
+
+            std::string pmc_name = base_track_name + "_link" + std::to_string(i);
+            std::string track_name =
+                base_track_name + " [Link " + std::to_string(i) + "]";
+            insert_metric(true, pmc_name.c_str(), track_name.c_str(), arr[i]);
         }
-    }
+    };
 
-    // Insert JPEG activity metrics
-    if(capabilities.flags.jpeg_is_device_level_only)
-    {
-        // Device-level: use jpeg_activity vector
-        insert_decode_vector_metrics(category::amd_smi_jpeg_activity{}, is_jpeg_enabled,
-                                     gpu_metrics.jpeg_activity, std::nullopt);
-    }
-    else
-    {
-        // Per-XCP: iterate through actual XCPs in jpeg_busy
-        for(size_t xcp = 0; xcp < gpu_metrics.jpeg_busy.size(); ++xcp)
-        {
-            insert_decode_vector_metrics(category::amd_smi_jpeg_activity{},
-                                         is_jpeg_enabled, gpu_metrics.jpeg_busy[xcp],
-                                         xcp);
-        }
-    }
+    insert_xgmi_link_metrics(trait::name<category::amd_smi_xgmi_read_data>::value,
+                             enabled.bits.xgmi, m.xgmi.data_acc.read);
+    insert_xgmi_link_metrics(trait::name<category::amd_smi_xgmi_write_data>::value,
+                             enabled.bits.xgmi, m.xgmi.data_acc.write);
+}
 
-    // Insert XGMI metrics (scalar values)
-    insert_event_and_sample(
-        is_xgmi_enabled, trait::name<category::amd_smi_xgmi_link_width>::value,
-        info::annotate_with_device_id<category::amd_smi_xgmi_link_width>(
-            _amd_smi.device_id)
-            .c_str(),
-        gpu_metrics.xgmi_link_width);
+void
+rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
+{
+    // Insert NIC RDMA metrics into rocpd database
+    const auto* _name            = "ainic";
+    auto        name_primary_key = m_data_processor->insert_string(_name);
+    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
 
-    insert_event_and_sample(
-        is_xgmi_enabled, trait::name<category::amd_smi_xgmi_link_speed>::value,
-        info::annotate_with_device_id<category::amd_smi_xgmi_link_speed>(
-            _amd_smi.device_id)
-            .c_str(),
-        gpu_metrics.xgmi_link_speed);
+    // We should create a cache for this in the future
+    auto base_id =
+        m_agent_manager->get_agent_by_type_index(_nic_sample.device_id, agent_type::NIC)
+            .base_id;
 
-    insert_xgmi_vector_metrics(category::amd_smi_xgmi_read_data{}, is_xgmi_enabled,
-                               gpu_metrics.xgmi_read_data_acc, std::nullopt);
+    auto insert_metric = [&](bool enabled, const char* pmc_name, const char* track_name,
+                             uint64_t value) {
+        if(!enabled) return;
 
-    insert_xgmi_vector_metrics(category::amd_smi_xgmi_write_data{}, is_xgmi_enabled,
-                               gpu_metrics.xgmi_write_data_acc, std::nullopt);
+        LOG_TRACE("Inserting metric: pmc_name: {}, track_name: {}, value: {}", pmc_name,
+                  track_name, value);
 
-    insert_event_and_sample(
-        is_pcie_enabled, trait::name<category::amd_smi_pcie_link_width>::value,
-        info::annotate_with_device_id<category::amd_smi_pcie_link_width>(
-            _amd_smi.device_id)
-            .c_str(),
-        gpu_metrics.pcie_link_width);
+        m_data_processor->insert_pmc_event(event_id, base_id, pmc_name,
+                                           static_cast<double>(value));
+        m_data_processor->insert_sample(track_name, _nic_sample.timestamp, event_id);
+    };
 
-    insert_event_and_sample(
-        is_pcie_enabled, trait::name<category::amd_smi_pcie_link_speed>::value,
-        info::annotate_with_device_id<category::amd_smi_pcie_link_speed>(
-            _amd_smi.device_id)
-            .c_str(),
-        gpu_metrics.pcie_link_speed);
+    const auto& m       = _nic_sample.metric_values;
+    const auto& enabled = _nic_sample.enabled_metric;
 
-    insert_event_and_sample(
-        is_pcie_enabled, trait::name<category::amd_smi_pcie_bandwidth_acc>::value,
-        info::annotate_with_device_id<category::amd_smi_pcie_bandwidth_acc>(
-            _amd_smi.device_id)
-            .c_str(),
-        static_cast<double>(gpu_metrics.pcie_bandwidth_acc));
-
-    insert_event_and_sample(
-        is_pcie_enabled, trait::name<category::amd_smi_pcie_bandwidth_inst>::value,
-        info::annotate_with_device_id<category::amd_smi_pcie_bandwidth_inst>(
-            _amd_smi.device_id)
-            .c_str(),
-        static_cast<double>(gpu_metrics.pcie_bandwidth_inst));
-#endif
+    insert_metric(enabled.bits.rx_rdma_ucast_bytes,
+                  trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
+                  "ainic_rx_rdma_ucast_bytes", m.rx_rdma_ucast_bytes);
+    insert_metric(enabled.bits.tx_rdma_ucast_bytes,
+                  trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
+                  "ainic_tx_rdma_ucast_bytes", m.tx_rdma_ucast_bytes);
+    insert_metric(enabled.bits.rx_rdma_ucast_pkts,
+                  trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
+                  "ainic_rx_rdma_ucast_pkts", m.rx_rdma_ucast_pkts);
+    insert_metric(enabled.bits.tx_rdma_ucast_pkts,
+                  trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
+                  "ainic_tx_rdma_ucast_pkts", m.tx_rdma_ucast_pkts);
+    insert_metric(enabled.bits.rx_rdma_cnp_pkts,
+                  trait::name<category::amd_smi_nic_rx_cnp_pkts>::value,
+                  "ainic_rx_rdma_cnp_pkts", m.rx_rdma_cnp_pkts);
+    insert_metric(enabled.bits.tx_rdma_cnp_pkts,
+                  trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
+                  "ainic_tx_rdma_cnp_pkts", m.tx_rdma_cnp_pkts);
 }
 
 void
 rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_sample)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     struct core_freq_sample
     {
         size_t id;
@@ -567,19 +561,24 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
     };
 
     insert_event_and_sample(trait::name<category::process_page>::value,
-                            _cpu_freq_sample.page_rss);
+                            static_cast<double>(_cpu_freq_sample.page_rss) /
+                                units::megabyte);
     insert_event_and_sample(trait::name<category::process_virt>::value,
-                            _cpu_freq_sample.virt_mem_usage);
+                            static_cast<double>(_cpu_freq_sample.virt_mem_usage) /
+                                units::megabyte);
     insert_event_and_sample(trait::name<category::process_peak>::value,
-                            _cpu_freq_sample.peak_rss);
+                            static_cast<double>(_cpu_freq_sample.peak_rss) /
+                                units::megabyte);
     insert_event_and_sample(trait::name<category::process_context_switch>::value,
                             _cpu_freq_sample.context_switch_count);
     insert_event_and_sample(trait::name<category::process_page_fault>::value,
                             _cpu_freq_sample.page_faults);
     insert_event_and_sample(trait::name<category::process_user_mode_time>::value,
-                            _cpu_freq_sample.user_mode_time);
+                            static_cast<double>(_cpu_freq_sample.user_mode_time) /
+                                units::sec);
     insert_event_and_sample(trait::name<category::process_kernel_mode_time>::value,
-                            _cpu_freq_sample.kernel_mode_time);
+                            static_cast<double>(_cpu_freq_sample.kernel_mode_time) /
+                                units::sec);
 
     auto get_track_name = [](const auto& cpu_id) {
         return std::string(trait::name<category::cpu_freq>::value) + " [" +
@@ -589,42 +588,101 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
     auto core_freq_samples = deserialize_freqs(_cpu_freq_sample.freqs);
     for(const auto& core : core_freq_samples)
     {
-        insert_event_and_sample(get_track_name(core.id).c_str(), core.value);
+        insert_event_and_sample(get_track_name(core.id).c_str(),
+                                static_cast<double>(core.value));
     }
-#endif
+}
+
+void
+rocpd_processor_t::handle(const kfd_sample& _kfd)
+{
+    auto& n_info  = node_info::get_instance();
+    auto  process = m_metadata->get_process_info();
+    auto  thread_primary_key =
+        m_data_processor->map_thread_id_to_primary_key(_kfd.thread_id);
+
+    auto name_primary_key     = m_data_processor->insert_string(_kfd.name.c_str());
+    auto category_primary_key = m_data_processor->insert_string(_kfd.category.c_str());
+
+    size_t stack_id        = 0;
+    size_t parent_stack_id = 0;
+    size_t correlation_id  = 0;
+
+    auto event_primary_key = m_data_processor->insert_event(
+        category_primary_key, stack_id, parent_stack_id, correlation_id);
+
+    auto args = process_arguments_string(_kfd.args_str);
+    for(const auto& arg : args)
+    {
+        m_data_processor->insert_args(event_primary_key, arg.arg_number,
+                                      arg.arg_type.c_str(), arg.arg_name.c_str(),
+                                      arg.arg_value.c_str());
+    }
+
+    m_data_processor->insert_region(n_info.id, process.pid, thread_primary_key,
+                                    _kfd.start_timestamp, _kfd.end_timestamp,
+                                    name_primary_key, event_primary_key);
+
+    try
+    {
+        auto agent_primary_key =
+            m_agent_manager
+                ->get_agent_by_type_index(_kfd.device_id,
+                                          static_cast<agent_type>(_kfd.device_type))
+                .base_id;
+
+        m_data_processor->insert_pmc_event(event_primary_key, agent_primary_key,
+                                           _kfd.pmc_info_name.c_str(), _kfd.value, "{}");
+    } catch(const std::out_of_range& e)
+    {
+        LOG_WARNING("KFD PMC event skipped: agent lookup failed for device_id={}, "
+                    "device_type={}: {}",
+                    _kfd.device_id, _kfd.device_type, e.what());
+    }
 }
 
 rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,
                                      const std::shared_ptr<agent_manager>&     agent_mngr,
-                                     int pid, int ppid)
+                                     int pid, int ppid,
+                                     output_file_registry& output_registry)
 : processor_t<rocpd_processor_t>()
 , m_metadata(md)
 , m_agent_manager(agent_mngr)
-, m_data_processor(std::make_shared<rocpd::data_processor>(
-      std::make_shared<rocpd::data_storage::database>(pid, ppid)))
-{}
+, m_output_registry(output_registry)
+, m_db_output_path(generate_db_output_path(pid))
+{
+    m_data_processor = std::make_shared<rocpd::data_processor>(
+        std::make_shared<rocpd::data_storage::database>(pid, ppid, m_db_output_path));
+}
 
 void
 rocpd_processor_t::prepare_for_processing()
 {
+    LOG_DEBUG("Preparing rocpd processor for processing");
     post_process_metadata();
+    LOG_TRACE("Rocpd processor prepared for processing");
 }
 
 void
 rocpd_processor_t::finalize_processing()
 {
+    LOG_DEBUG("Finalizing rocpd processor");
     m_data_processor->flush();
+
+    m_output_registry.register_file(m_db_output_path, output_format::rocpd);
+
+    LOG_INFO("Rocpd processor finalized successfully");
 }
 
 void
 rocpd_processor_t::post_process_metadata()
 {
-#if ROCPROFSYS_USE_ROCM > 0
     if(!get_use_rocpd())
     {
+        LOG_TRACE("Rocpd not enabled, skipping metadata post-processing");
         return;
     }
-    ROCPROFSYS_DEBUG("Post processing metadata..\n");
+    LOG_DEBUG("Post-processing metadata for rocpd");
     auto n_info = node_info::get_instance();
 
     m_data_processor->insert_node_info(
@@ -633,17 +691,31 @@ rocpd_processor_t::post_process_metadata()
         n_info.machine.c_str(), n_info.domain_name.c_str());
 
     auto process_info = m_metadata->get_process_info();
-    m_data_processor->insert_process_info(n_info.id, process_info.ppid, process_info.pid,
-                                          0, 0, process_info.start, process_info.end,
-                                          process_info.command.c_str(), "{}");
+    m_data_processor->insert_process_info(
+        n_info.id, process_info.ppid, process_info.pid, 0, 0, process_info.start,
+        process_info.end, process_info.command.c_str(), process_info.environment.c_str(),
+        process_info.extdata.c_str());
 
     const auto& agents  = m_agent_manager->get_agents();
     int         counter = 0;
+
+    const auto type_to_string = [](agent_type type) -> std::optional<std::string> {
+        switch(type)
+        {
+            case agent_type::GPU: return "GPU";
+            case agent_type::CPU: return "CPU";
+            default: return std::nullopt;
+        }
+    };
+
     for(const auto& rocpd_agent : agents)
     {
+        const auto& agent_type_opt = type_to_string(rocpd_agent->type);
+        const char* agent_type =
+            agent_type_opt.has_value() ? agent_type_opt.value().c_str() : nullptr;
+
         auto _base_id = m_data_processor->insert_agent(
-            n_info.id, process_info.pid,
-            ((rocpd_agent->type == agent_type::GPU) ? "GPU" : "CPU"), counter++,
+            n_info.id, process_info.pid, agent_type, counter++,
             rocpd_agent->logical_node_id, rocpd_agent->logical_node_type_id,
             rocpd_agent->device_id, rocpd_agent->name.c_str(),
             rocpd_agent->model_name.c_str(), rocpd_agent->vendor_name.c_str(),
@@ -749,20 +821,47 @@ rocpd_processor_t::post_process_metadata()
     auto pmc_info_list = m_metadata->get_pmc_info_list();
     for(const auto& pmc_info : pmc_info_list)
     {
-        const auto agent_primary_key =
-            m_agent_manager
-                ->get_agent_by_type_index(pmc_info.agent_type_index, pmc_info.type)
-                .base_id;
+        constexpr std::array<agent_type, 2> agent_types = {
+            agent_type::GPU,
+            agent_type::CPU,
+        };
+
+        size_t agent_primary_key;
+
+        const bool is_cpu_gpu_agent = std::find(agent_types.begin(), agent_types.end(),
+                                                pmc_info.type) != agent_types.end();
+
+        if(is_cpu_gpu_agent)
+        {
+            agent_primary_key =
+                m_agent_manager
+                    ->get_agent_by_type_index(pmc_info.agent_type_index, pmc_info.type)
+                    .base_id;
+        }
+        else
+        {
+            agent_primary_key =
+                m_agent_manager->get_agent_by_id(pmc_info.agent_type_index, pmc_info.type)
+                    .base_id;
+        }
+
+        const auto* target_arch = pmc_info.target_arch.c_str();
+        if(!is_cpu_gpu_agent)
+        {
+            target_arch = nullptr;
+        }
+
+        LOG_TRACE("Inserting PMC description: agent_primary_key: {}, pmc_info: {}",
+                  agent_primary_key, pmc_info.name);
 
         m_data_processor->insert_pmc_description(
-            n_info.id, process_info.pid, agent_primary_key, pmc_info.target_arch.c_str(),
+            n_info.id, process_info.pid, agent_primary_key, target_arch,
             pmc_info.event_code, pmc_info.instance_id, pmc_info.name.c_str(),
             pmc_info.symbol.c_str(), pmc_info.description.c_str(),
             pmc_info.long_description.c_str(), pmc_info.component.c_str(),
             pmc_info.units.c_str(), pmc_info.value_type.c_str(), pmc_info.block.c_str(),
             pmc_info.expression.c_str(), pmc_info.is_constant, pmc_info.is_derived);
     }
-#endif
 }
 
 inline void

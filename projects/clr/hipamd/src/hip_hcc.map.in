@@ -602,6 +602,8 @@ global:
     hipLaunchKernelExC;
     hipDrvLaunchKernelEx;
     hipMemGetHandleForAddressRange;
+    hipOccupancyMaxPotentialClusterSize;
+    hipOccupancyMaxActiveClusters;
 local:
     *;
 } hip_6.4;
@@ -645,6 +647,16 @@ global:
     hipOccupancyAvailableDynamicSMemPerBlock;
     hipGetProcAddress_spt;
     hipKernelGetParamInfo;
+    hipExtDisableLogging;
+    hipExtEnableLogging;
+    hipExtSetLoggingParams;
+    hipMemSetMemPool;
+    hipMemGetMemPool;
+    hipMipmappedArrayGetMemoryRequirements;
+    hipKernelGetAttribute;
+    hipKernelSetAttribute;
+    hipKernelGetFunction;
+    hipMemPrefetchBatchAsync;
 local:
     *;
 } hip_7.1;

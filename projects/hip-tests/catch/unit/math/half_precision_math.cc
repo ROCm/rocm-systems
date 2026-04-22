@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "half_precision_common.hh"
 
@@ -45,7 +29,7 @@ MATH_UNARY_HP_KERNEL_DEF(hcos);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(hcos, static_cast<float (*)(float)>(std::cos),
-                            ULPValidatorBuilderFactory<float>(2));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 MATH_UNARY_HP_KERNEL_DEF(h2cos);
 
@@ -63,7 +47,7 @@ MATH_UNARY_HP_KERNEL_DEF(h2cos);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(h2cos, static_cast<float (*)(float)>(std::cos),
-                            ULPValidatorBuilderFactory<float>(2));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 
 MATH_UNARY_HP_KERNEL_DEF(hsin);
@@ -82,7 +66,7 @@ MATH_UNARY_HP_KERNEL_DEF(hsin);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(hsin, static_cast<float (*)(float)>(std::sin),
-                            ULPValidatorBuilderFactory<float>(2));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 MATH_UNARY_HP_KERNEL_DEF(h2sin);
 
@@ -100,7 +84,7 @@ MATH_UNARY_HP_KERNEL_DEF(h2sin);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(h2sin, static_cast<float (*)(float)>(std::sin),
-                            ULPValidatorBuilderFactory<float>(2));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 
 MATH_UNARY_HP_KERNEL_DEF(hexp);
@@ -119,7 +103,7 @@ MATH_UNARY_HP_KERNEL_DEF(hexp);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(hexp, static_cast<float (*)(float)>(std::exp),
-                            ULPValidatorBuilderFactory<float>(2));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 MATH_UNARY_HP_KERNEL_DEF(h2exp);
 
@@ -137,7 +121,7 @@ MATH_UNARY_HP_KERNEL_DEF(h2exp);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(h2exp, static_cast<float (*)(float)>(std::exp),
-                            ULPValidatorBuilderFactory<float>(2));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 
 MATH_UNARY_HP_KERNEL_DEF(hexp10);
@@ -156,7 +140,7 @@ MATH_UNARY_HP_KERNEL_DEF(hexp10);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(hexp10, static_cast<float (*)(float)>(exp10f),
-                            ULPValidatorBuilderFactory<float>(2));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 MATH_UNARY_HP_KERNEL_DEF(h2exp10);
 
@@ -174,7 +158,7 @@ MATH_UNARY_HP_KERNEL_DEF(h2exp10);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(h2exp10, static_cast<float (*)(float)>(exp10f),
-                            ULPValidatorBuilderFactory<float>(2));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 
 MATH_UNARY_HP_KERNEL_DEF(hexp2);
@@ -193,7 +177,7 @@ MATH_UNARY_HP_KERNEL_DEF(hexp2);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(hexp2, static_cast<float (*)(float)>(std::exp2),
-                            ULPValidatorBuilderFactory<float>(2));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 MATH_UNARY_HP_KERNEL_DEF(h2exp2);
 
@@ -211,7 +195,7 @@ MATH_UNARY_HP_KERNEL_DEF(h2exp2);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(h2exp2, static_cast<float (*)(float)>(std::exp2),
-                            ULPValidatorBuilderFactory<float>(2));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 
 MATH_UNARY_HP_KERNEL_DEF(hlog);
@@ -230,7 +214,7 @@ MATH_UNARY_HP_KERNEL_DEF(hlog);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(hlog, static_cast<float (*)(float)>(std::log),
-                            ULPValidatorBuilderFactory<float>(1));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 MATH_UNARY_HP_KERNEL_DEF(h2log);
 
@@ -248,7 +232,7 @@ MATH_UNARY_HP_KERNEL_DEF(h2log);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(h2log, static_cast<float (*)(float)>(std::log),
-                            ULPValidatorBuilderFactory<float>(1));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 
 MATH_UNARY_HP_KERNEL_DEF(hlog10);
@@ -267,7 +251,7 @@ MATH_UNARY_HP_KERNEL_DEF(hlog10);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(hlog10, static_cast<float (*)(float)>(std::log10),
-                            ULPValidatorBuilderFactory<float>(2));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 MATH_UNARY_HP_KERNEL_DEF(h2log10);
 
@@ -285,7 +269,7 @@ MATH_UNARY_HP_KERNEL_DEF(h2log10);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(h2log10, static_cast<float (*)(float)>(std::log10),
-                            ULPValidatorBuilderFactory<float>(2));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 
 MATH_UNARY_HP_KERNEL_DEF(hlog2);
@@ -304,7 +288,7 @@ MATH_UNARY_HP_KERNEL_DEF(hlog2);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(hlog2, static_cast<float (*)(float)>(std::log2),
-                            ULPValidatorBuilderFactory<float>(1));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 MATH_UNARY_HP_KERNEL_DEF(h2log2);
 
@@ -322,7 +306,7 @@ MATH_UNARY_HP_KERNEL_DEF(h2log2);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(h2log2, static_cast<float (*)(float)>(std::log2),
-                            ULPValidatorBuilderFactory<float>(1));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 
 MATH_UNARY_HP_KERNEL_DEF(hsqrt);
@@ -341,7 +325,7 @@ MATH_UNARY_HP_KERNEL_DEF(hsqrt);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(hsqrt, static_cast<float (*)(float)>(std::sqrt),
-                            ULPValidatorBuilderFactory<float>(1));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 MATH_UNARY_HP_KERNEL_DEF(h2sqrt);
 
@@ -359,7 +343,7 @@ MATH_UNARY_HP_KERNEL_DEF(h2sqrt);
  *    - HIP_VERSION >= 5.2
  */
 MATH_UNARY_HP_TEST_DEF_IMPL(h2sqrt, static_cast<float (*)(float)>(std::sqrt),
-                            ULPValidatorBuilderFactory<float>(1));
+                            ULPValidatorBuilderFactory<Float16>(1));
 
 
 MATH_UNARY_HP_KERNEL_DEF(hceil);
