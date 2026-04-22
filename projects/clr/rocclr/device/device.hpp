@@ -1475,13 +1475,15 @@ class MemObjMap : public AllStatic {
 
   //! Context::svmFree holds AllocatedLock_ exclusively; nested MemObjMap ops bump this to skip
   //! re-locking the same std::shared_mutex on the owning thread.
-  static void svmFreeMapBatchDepthInc() { ++svmFreeMapBatchDepth_; }
-  static void svmFreeMapBatchDepthDec() { --svmFreeMapBatchDepth_; }
-  //!< Shared read/write lock for all MemObjMap operations (including per-device maps)
-  static std::shared_mutex AllocatedLock_;
-
  private:
   friend class Context;
+  //! Context::svmFree holds AllocatedLock_ exclusively; nested MemObjMap ops bump this to skip
+  //! re-locking the same std::shared_mutex on the owning thread.
+  static void svmFreeMapBatchDepthInc() { ++svmFreeMapBatchDepth_; }
+  static void svmFreeMapBatchDepthDec() {
+    assert(svmFreeMapBatchDepth_ > 0);
+    --svmFreeMapBatchDepth_;
+  }
   //!< the mem object<->hostptr information container
   static std::map<uintptr_t, amd::Memory*> MemObjMap_;
   //!< the virtual mem object<->hostptr information container
