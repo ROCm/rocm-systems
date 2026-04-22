@@ -51,6 +51,12 @@ using profiling_time         = tracing::profiling_time;
 profiling_time
 get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_data);
 
+profiling_time
+get_dispatch_time_from_ticks(const queue_info_session_t& session,
+                             packet_data_t&              packet_data,
+                             uint64_t                    gpu_start_tick,
+                             uint64_t                    gpu_end_tick);
+
 void
 dispatch_complete(queue_info_session_t& session, packet_data_t& packet_data, profiling_time);
 }  // namespace kernel_dispatch

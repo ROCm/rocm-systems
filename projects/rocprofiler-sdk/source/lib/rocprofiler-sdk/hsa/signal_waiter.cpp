@@ -57,10 +57,7 @@ namespace
 amd_signal_t*
 get_amd_signal(hsa_signal_t signal)
 {
-    // hsa_signal_t::handle points to amd_signal_t::value (offset 8 from base).
-    // Subtract the offset to obtain the amd_signal_t pointer.
-    return reinterpret_cast<amd_signal_t*>(reinterpret_cast<char*>(signal.handle) -
-                                           offsetof(amd_signal_t, value));
+    return reinterpret_cast<amd_signal_t*>(signal.handle);
 }
 }  // namespace
 
@@ -205,11 +202,15 @@ SignalWaiter::run()
                     continue;
                 }
 
-                // Signal completed (value <= 0). Process this packet.
+                // Signal completed (value <= 0). Capture GPU timestamps immediately
+                // before the app can destroy and reuse the signal.
+                auto gpu_start = amd_sig->start_ts;
+                auto gpu_end   = amd_sig->end_ts;
 
                 if(registration::get_fini_status() <= 0)
                 {
-                    auto dispatch_time = kernel_dispatch::get_dispatch_time(session, packet);
+                    auto dispatch_time = kernel_dispatch::get_dispatch_time_from_ticks(
+                        session, packet, gpu_start, gpu_end);
                     kernel_dispatch::dispatch_complete(session, packet, dispatch_time);
 
                     auto session_ptr = active[si];

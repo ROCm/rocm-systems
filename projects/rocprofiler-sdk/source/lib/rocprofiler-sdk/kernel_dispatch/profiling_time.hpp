@@ -46,5 +46,12 @@ get_dispatch_time(hsa_agent_t             agent,
                   hsa_signal_t            signal,
                   rocprofiler_kernel_id_t kernel_id,
                   std::optional<uint64_t> baseline = {});
+
+profiling_time
+get_dispatch_time_from_ticks(hsa_agent_t             agent,
+                             uint64_t                gpu_start_tick,
+                             uint64_t                gpu_end_tick,
+                             rocprofiler_kernel_id_t kernel_id,
+                             std::optional<uint64_t> baseline = {});
 }  // namespace kernel_dispatch
 }  // namespace rocprofiler
