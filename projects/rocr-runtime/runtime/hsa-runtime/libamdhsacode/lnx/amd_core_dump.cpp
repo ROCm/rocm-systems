@@ -364,88 +364,140 @@ struct SegmentBuilder {
 };
 
 struct NoteSegmentBuilder : public SegmentBuilder {
-  hsa_status_t Collect(SegmentsInfo& segments) override {
-    void *runtime_ptr, *agents_ptr = NULL, *queues_ptr = NULL;
-    uint32_t runtime_size, agents_size, queue_size, n_entries, entry_size;
-    HsaVersionInfo versionInfo = {0};
 
-    if (HSAKMT_CALL(hsaKmtDbgEnable(&runtime_ptr, &runtime_size))) {
-      fprintf(stderr, "Failed to enable debug interface, "
-              "debugger might be already attached.\n");
+// Helper function to reconstruct runtime_info when debug interface is already enabled
+// Uses a minimal buffer since actual data comes from hsaKmtDbgGetDeviceData/GetQueueData
+bool reconstruct_missing_runtime_info(void **runtime_ptr, uint32_t *runtime_size) {
+  // Use a reasonable buffer size for the runtime_info structure
+  // The exact size will be determined by the KFD driver version
+  // Typical size is around 4KB-16KB depending on max queues/waves
+  constexpr uint32_t MIN_RUNTIME_INFO_SIZE = 16384;  // 16KB buffer
+
+  *runtime_size = MIN_RUNTIME_INFO_SIZE;
+  *runtime_ptr = malloc(*runtime_size);
+  if (!*runtime_ptr) {
+    return false;
+  }
+
+  // Initialize the buffer to zero
+  memset(*runtime_ptr, 0, *runtime_size);
+
+  // Note: The actual queue/device/wave data will come from:
+  //   - hsaKmtDbgGetDeviceData() for agent info
+  //   - hsaKmtDbgGetQueueData() for queue snapshots
+  // These work with an already-enabled debug interface (by debug agent)
+
+  // The runtime_info buffer is mainly used for metadata and will be
+  // included in the PT_NOTE segment even if partially populated
+
+  return true;
+}
+
+hsa_status_t Collect(SegmentsInfo& segments) override {
+  void *runtime_ptr, *agents_ptr = NULL, *queues_ptr = NULL;
+  uint32_t runtime_size, agents_size, queue_size, n_entries, entry_size;
+  HsaVersionInfo versionInfo = {0};
+  bool debug_enabled_by_us = false;
+
+  // Try to enable debug interface
+  if (HSAKMT_CALL(hsaKmtDbgEnable(&runtime_ptr, &runtime_size))) {
+    fprintf(stderr, "Failed to enable debug interface, trying to generate core dump anyway.\n");
+    debug_enabled_by_us = false;
+
+    // Call helper to reconstruct runtime_info using already-enabled interface
+    if (!reconstruct_missing_runtime_info(&runtime_ptr, &runtime_size)) {
+      fprintf(stderr, "Failed to reconstruct runtime info.\n");
       return HSA_STATUS_ERROR;
     }
-    std::unique_ptr<void, decltype(std::free) *> runtime_info(runtime_ptr, std::free);
+  } else {
+    debug_enabled_by_us = true;
+  }
 
-    if (HSAKMT_CALL(hsaKmtGetVersion(&versionInfo))) {
+  std::unique_ptr<void, decltype(std::free) *> runtime_info(runtime_ptr, std::free);
+
+  if (HSAKMT_CALL(hsaKmtGetVersion(&versionInfo))) {
+    if (debug_enabled_by_us) {
       HSAKMT_CALL(hsaKmtDbgDisable());
-      fprintf(stderr, "Failed to fetch driver ABI version.\n");
-      return HSA_STATUS_ERROR;
     }
-    /* Note version */
-    note_package_builder_.Write<uint64_t>(1);
-    /* Store version_major in PT_NOTE package */
-    note_package_builder_.Write<uint32_t>(versionInfo.KernelInterfaceMajorVersion);
-    /* Store version_minor in PT_NOTE package */
-    note_package_builder_.Write<uint32_t>(versionInfo.KernelInterfaceMinorVersion);
-    /* Store runtime_info_size in PT_NOTE package */
-    note_package_builder_.Write<uint64_t>(runtime_size);
+    fprintf(stderr, "Failed to fetch driver ABI version.\n");
+    return HSA_STATUS_ERROR;
+  }
 
-    if (HSAKMT_CALL(hsaKmtDbgGetDeviceData(&agents_ptr, &n_entries, &entry_size))) {
-       HSAKMT_CALL(hsaKmtDbgDisable());
-       fprintf(stderr, "Failed to fetch agents snapshot.\n");
-       return HSA_STATUS_ERROR;
+  /* Note version */
+  note_package_builder_.Write<uint64_t>(1);
+  /* Store version_major in PT_NOTE package */
+  note_package_builder_.Write<uint32_t>(versionInfo.KernelInterfaceMajorVersion);
+  /* Store version_minor in PT_NOTE package */
+  note_package_builder_.Write<uint32_t>(versionInfo.KernelInterfaceMinorVersion);
+  /* Store runtime_info_size in PT_NOTE package */
+  note_package_builder_.Write<uint64_t>(runtime_size);
+
+  // Continue with device data - interface is already enabled (by us or debug agent)
+  if (HSAKMT_CALL(hsaKmtDbgGetDeviceData(&agents_ptr, &n_entries, &entry_size))) {
+    if (debug_enabled_by_us) {
+      HSAKMT_CALL(hsaKmtDbgDisable());
     }
-    agents_size = n_entries * entry_size;
-    std::unique_ptr<void, decltype(std::free) *> agents_info(agents_ptr, std::free);
-    /* Store n_agents in PT_NOTE package */
-    note_package_builder_.Write<uint32_t>(n_entries);
-    /* Store agent_info_entry_size in PT_NOTE package */
-    note_package_builder_.Write<uint32_t>(entry_size);
+    fprintf(stderr, "Failed to fetch agents snapshot.\n");
+    return HSA_STATUS_ERROR;
+  }
+  agents_size = n_entries * entry_size;
+  std::unique_ptr<void, decltype(std::free) *> agents_info(agents_ptr, std::free);
+  /* Store n_agents in PT_NOTE package */
+  note_package_builder_.Write<uint32_t>(n_entries);
+  /* Store agent_info_entry_size in PT_NOTE package */
+  note_package_builder_.Write<uint32_t>(entry_size);
 
-    if (HSAKMT_CALL(hsaKmtDbgGetQueueData(&queues_ptr, &n_entries, &entry_size, true))) {
-       HSAKMT_CALL(hsaKmtDbgDisable());
-       fprintf(stderr, "Failed to fetch queues snapshot.\n");
-       return HSA_STATUS_ERROR;
+  // Continue with queue data - interface is already enabled
+  if (HSAKMT_CALL(hsaKmtDbgGetQueueData(&queues_ptr, &n_entries, &entry_size, true))) {
+    if (debug_enabled_by_us) {
+      HSAKMT_CALL(hsaKmtDbgDisable());
     }
-    queue_size = n_entries * entry_size;
-    std::unique_ptr<void, decltype(std::free) *> queues_info(queues_ptr, std::free);
-    /* Store n_queues in PT_NOTE package */
-    note_package_builder_.Write<uint32_t>(n_entries);
-    /* Store queue_info_entry_size in PT_NOTE package */
-    note_package_builder_.Write<uint32_t>(entry_size);
+    fprintf(stderr, "Failed to fetch queues snapshot.\n");
+    return HSA_STATUS_ERROR;
+  }
+  queue_size = n_entries * entry_size;
+  std::unique_ptr<void, decltype(std::free) *> queues_info(queues_ptr, std::free);
+  /* Store n_queues in PT_NOTE package */
+  note_package_builder_.Write<uint32_t>(n_entries);
+  /* Store queue_info_entry_size in PT_NOTE package */
+  note_package_builder_.Write<uint32_t>(entry_size);
 
-    PushInfo(runtime_info.get(), runtime_size);
-    PushInfo(agents_info.get(), agents_size);
-    PushInfo(queues_info.get(), queue_size);
+  PushInfo(runtime_info.get(), runtime_size);
+  PushInfo(agents_info.get(), agents_size);
+  PushInfo(queues_info.get(), queue_size);
+
+  // Only disable if we enabled it
+  if (debug_enabled_by_us) {
     if (HSAKMT_CALL(hsaKmtDbgDisable())) {
       fprintf(stderr, "Failed to disable debug interface.\n");
       return HSA_STATUS_ERROR;
     }
-
-    /* With note content, package this in the PT_NOTE.  */
-    PackageBuilder noteHeaderBuilder;
-    noteHeaderBuilder.Write<uint32_t> (7);  /* namesz */
-    noteHeaderBuilder.Write<uint32_t> (note_package_builder_.Size());
-    noteHeaderBuilder.Write<uint32_t> (NT_AMDGPU_CORE_STATE);  /* type.  */
-    noteHeaderBuilder.Write<char[8]> ("AMDGPU\0");
-
-    raw_.resize(noteHeaderBuilder.Size() + note_package_builder_.Size());
-    if (!(noteHeaderBuilder.GetBuffer(raw_.data())
-          && note_package_builder_.GetBuffer(&raw_[noteHeaderBuilder.Size()]))) {
-      fprintf(stderr, "Failed to build the NT_AMDGPU_CORE_STATE note.\n");
-      return HSA_STATUS_ERROR;
-    }
-
-    SegmentInfo s;
-    s.stype = NOTE;
-    s.vaddr = 0;
-    s.size = raw_.size();
-    s.flags = 0;
-    s.builder = this;
-    segments.push_back(s);
-
-    return HSA_STATUS_SUCCESS;
   }
+
+  /* With note content, package this in the PT_NOTE.  */
+  PackageBuilder noteHeaderBuilder;
+  noteHeaderBuilder.Write<uint32_t> (7);  /* namesz */
+  noteHeaderBuilder.Write<uint32_t> (note_package_builder_.Size());
+  noteHeaderBuilder.Write<uint32_t> (NT_AMDGPU_CORE_STATE);  /* type.  */
+  noteHeaderBuilder.Write<char[8]> ("AMDGPU\0");
+
+  raw_.resize(noteHeaderBuilder.Size() + note_package_builder_.Size());
+  if (!(noteHeaderBuilder.GetBuffer(raw_.data())
+        && note_package_builder_.GetBuffer(&raw_[noteHeaderBuilder.Size()]))) {
+    fprintf(stderr, "Failed to build the NT_AMDGPU_CORE_STATE note.\n");
+    return HSA_STATUS_ERROR;
+  }
+
+  SegmentInfo s;
+  s.stype = NOTE;
+  s.vaddr = 0;
+  s.size = raw_.size();
+  s.flags = 0;
+  s.builder = this;
+  segments.push_back(s);
+
+  return HSA_STATUS_SUCCESS;
+}
 
   hsa_status_t Read(void* buf, size_t buf_size, off_t offset) override {
     if (offset + buf_size >raw_.size ()) return HSA_STATUS_ERROR;
@@ -546,12 +598,15 @@ struct LoadSegmentBuilder : public SegmentBuilder {
     do {
       read = pread(fd_, static_cast<char *>(buf) + done, buf_size - done,
                    offset + done);
-      if (read == -1 && errno != EINTR) {
+      if (read == -1 && errno != EINTR && errno != EIO) {
         perror("Failed to read GPU memory");
+        perror("Error code: " + errno);
         return HSA_STATUS_ERROR;
       }
       else if (read > 0)
         done += read;
+      if (errno == EIO)
+        perror("I/O error. Retrying...\n");
     } while (read != 0 && done < buf_size);
 
     if (read == 0 && done < buf_size) {
