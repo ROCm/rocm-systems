@@ -1522,12 +1522,60 @@ const VCmpMeta *OpcodeMap::lookupVCmp(unsigned opcode) const {
 }
 
 void OpcodeMap::build(const MCInstrInfo &MCII) {
-  // Flatten the static kCanonTable into a DenseMap for O(1) lookups during the
-  // subsequent scan over every MC opcode.
+  // Flatten the static kCanonTable into a DenseMap for O(1) lookups
+  // during the subsequent scan over every MC opcode.  This flatten
+  // step also serves as a duplicate-key audit for `kCanonTable`: the
+  // earlier implementation used a plain `canonToSem.try_emplace` loop,
+  // which silently keeps the first insertion on key collision.  That
+  // silent-first-wins behaviour is exactly what let S_ADD_U64 get
+  // mapped twice (once as SOP2-block `E(S_ADD_U64, S_ADD_U64)` and
+  // once as gfx12-rename `E(S_ADD_U64, S_ADD_NC_U64)`) with the
+  // second row silently losing the routing race and leaving every
+  // `s_add_u64` lift routed through the wrong SemOp — see commit
+  // eaee0a0e88 for the repair.  The loop below now aborts loudly on
+  // duplicate keys so a future add that re-introduces the collision
+  // is caught at transpiler init time instead of quietly miscompiling
+  // everything under the duplicated opcode.
+  //
+  // `report_fatal_error` is used (rather than `assert`) so the check
+  // is active in release builds too — the cost is a single
+  // `try_emplace` per table row at process start, which is
+  // negligible for a ~800-entry table.
+  //
+  // "Same SemOp twice" is also rejected.  In principle a redundant
+  // row that maps the same MC opcode to the same SemOp is just
+  // noise the first-wins rule would swallow harmlessly, but we
+  // refuse it anyway so the `kCanonTable` stays honest — a
+  // redundant row is always an editing mistake, never an
+  // intentional design, and the abort makes the fix mechanical
+  // (delete one of the two rows).
   DenseMap<unsigned, SemOp> canonToSem;
   canonToSem.reserve(std::size(kCanonTable));
-  for (const Entry &e : kCanonTable)
-    canonToSem.try_emplace(e.opc, e.sem);
+  for (const Entry &e : kCanonTable) {
+    auto [existing, inserted] = canonToSem.try_emplace(e.opc, e.sem);
+    if (!inserted) {
+      std::string msg;
+      raw_string_ostream os(msg);
+      os << "opcode_map.cpp: kCanonTable maps MC opcode '"
+         << MCII.getName(e.opc)
+         << "' (enum value " << e.opc << ") to TWO SemOps: "
+         << "first = SemOp::" << semOpName(existing->second)
+         << ", second = SemOp::" << semOpName(e.sem);
+      if (existing->second == e.sem) {
+        os << ".  (Both targets are the same — the row is redundant; "
+              "remove one.)";
+      } else {
+        os << ".  `canonToSem.try_emplace` keeps the first insertion, "
+              "so every `"
+           << MCII.getName(e.opc)
+           << "` lift silently routes through SemOp::"
+           << semOpName(existing->second)
+           << " and the second row is dead.  Pick ONE SemOp target "
+              "and remove the loser row.";
+      }
+      report_fatal_error(msg.c_str());
+    }
+  }
 
   const unsigned numOpc = MCII.getNumOpcodes();
   const auto mcToPseudo  = buildMcToPseudoMap(numOpc);
