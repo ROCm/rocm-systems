@@ -31,7 +31,7 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
-static const int kOutputLineLength = 80;
+static const size_t kOutputLineLength = 80;
 static const char kLabelDelimiter[] = "####";
 static const char kDescriptionLabel[] = "TEST DESCRIPTION";
 static const char kTitleLabel[] = "TEST NAME";
@@ -115,7 +115,7 @@ void TestBase::SetUp(uint64_t init_flags) {
 
     if (!found_amdgpu || !found_amd_hsmp) {
       ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
-      exit(err);
+      exit(static_cast<int>(err));
     }
   }
   ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
@@ -331,7 +331,7 @@ void TestBase::DisplayTestInfo(void) {
 }
 
 void TestBase::set_description(std::string d) {
-  int le = kOutputLineLength - 4;
+  size_t le = kOutputLineLength - 4;
 
   description_ = d;
   size_t endlptr;
@@ -421,7 +421,7 @@ uint32_t TestBase::promptNumDevicesToTest(uint32_t current_num_devices) {
     }
   } while (true);
 
-  return_value = std::stoi(devices_to_test);
+  return_value = static_cast<uint32_t>(std::stoi(devices_to_test));
   if (return_value > current_num_devices) {
     std::cout << "Invalid input. Please enter a number between 0 and " << current_num_devices
               << std::endl;
