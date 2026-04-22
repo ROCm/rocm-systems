@@ -341,7 +341,7 @@ bool compileToExecutable(const comgr_helper::ComgrDataSetUniqueHandle& compileIn
 }
 
 bool compileToBitCode(const comgr_helper::ComgrDataSetUniqueHandle& compileInputs,
-                      const std::string& isa, std::vector<std::string>& compileOptions,
+                      const std::string& isa, const std::vector<std::string>& compileOptions,
                       std::string& buildLog, std::vector<char>& LLVMBitcode, DataKind bc_type) {
   amd_comgr_language_t lang = AMD_COMGR_LANGUAGE_HIP;
   comgr_helper::ComgrActionInfoUniqueHandle compileAction;

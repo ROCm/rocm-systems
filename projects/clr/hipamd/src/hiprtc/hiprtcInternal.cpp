@@ -160,7 +160,6 @@ bool RTCCompileProgram::transformOptions(std::vector<std::string>& compile_optio
       res != compile_options.end()) {
     auto isaName = getValueOf(*res);
     isa_ = "amdgcn-amd-amdhsa--" + isaName;
-    bc_type_ = hip::helpers::kLLVM;
     if (isaName == "amdgcnspirv") {
       isa_ = "spir64-amd-amdhsa--" + isaName;
       bc_type_ = hip::helpers::kSPIRV;

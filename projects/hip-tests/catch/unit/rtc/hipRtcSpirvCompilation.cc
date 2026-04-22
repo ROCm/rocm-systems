@@ -70,32 +70,29 @@ std::vector<char> compile_prog(const char* src) {
     HIPRTC_CHECK(hiprtcGetCode(prog, code.data()));
   } else {
     HIPRTC_CHECK(hiprtcGetBitcodeSize(prog, &codeSize));
-    code.resize(codeSize);
     REQUIRE(codeSize > 0);
+    code.resize(codeSize);
+    HIPRTC_CHECK(hiprtcGetBitcode(prog, code.data()));
   }
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   return code;
 }
 
-void* link_prog(std::vector<char> global_obj, std::vector<char> device_obj) {
-  hipLinkState_t state{};
-  HIP_CHECK(hipLinkCreate(0, nullptr, nullptr, &state));
+void* link_prog(std::vector<char> global_obj, std::vector<char> device_obj, hipLinkState_t *state) {
+  HIP_CHECK(hipLinkCreate(0, nullptr, nullptr, state));
 
-  HIP_CHECK(hipLinkAddData(state, hipJitInputSpirv, global_obj.data(),
+  HIP_CHECK(hipLinkAddData(*state, hipJitInputSpirv, global_obj.data(),
                            global_obj.size(), "globalfunc.spv", 0, nullptr,
                            nullptr));
 
-  HIP_CHECK(hipLinkAddData(state, hipJitInputSpirv, device_obj.data(),
+  HIP_CHECK(hipLinkAddData(*state, hipJitInputSpirv, device_obj.data(),
                            device_obj.size(), "devicefunc.spv", 0, nullptr,
                            nullptr));
 
   void *bin = nullptr;
   size_t binSize = 0;
-  HIP_CHECK(hipLinkComplete(state, &bin, &binSize));
+  HIP_CHECK(hipLinkComplete(*state, &bin, &binSize));
   REQUIRE(bin != nullptr);
-
-  HIP_CHECK(hipLinkDestroy(state));
-
   return bin;
 }
 
@@ -115,15 +112,15 @@ HIP_TEST_CASE(Unit_hiprtc_spirv_compilation) {
 HIP_TEST_CASE(Unit_hiprtc_spirv_linker) {
   std::vector<char> globalcode = compile_prog(globalfunc);
   std::vector<char> devicecode = compile_prog(devicefunc);
+  hipLinkState_t state{};
 
-  void* bin = link_prog(globalcode, devicecode);
+  void* bin = link_prog(globalcode, devicecode, &state);
   
   hipModule_t module = nullptr;
   hipFunction_t kernel = nullptr;
   HIP_CHECK(hipModuleLoadData(&module, bin));
 
   HIP_CHECK(hipModuleGetFunction(&kernel, module, "kernelfunc_int"));
-    throw std::runtime_error("failed to get function");
 
   // allocate input and output buffers
   static const size_t N = 10;
@@ -157,4 +154,9 @@ HIP_TEST_CASE(Unit_hiprtc_spirv_linker) {
   for(size_t i = 0; i < N; i++) {
     REQUIRE(out_host[i]  == in_host[i] * 2 + 1);
   }
+ 
+  HIP_CHECK(hipFree(in_device));
+  HIP_CHECK(hipFree(out_device));
+  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipLinkDestroy(state));
 }
