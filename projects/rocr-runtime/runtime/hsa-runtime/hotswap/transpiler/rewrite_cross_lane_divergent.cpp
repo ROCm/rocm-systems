@@ -1,7 +1,10 @@
 #include "rewrite_cross_lane_divergent.hpp"
 
+#include "SIDefines.h" // llvm::AMDGPU::DPP::DppCtrl
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
@@ -10,9 +13,9 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"
-#include "llvm/ADT/StringExtras.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -628,21 +631,58 @@ void rewriteReadlaneCall(CallInst *CI, Value *laneId,
 // DPP rewrite helpers
 // ============================================================================
 
+// Pure predicate: is `dpp_ctrl` in the supported family (QUAD_PERM /
+// ROW_SHL / ROW_SHR)?  Split out from `buildDppLaneMap` so the pre-
+// flight phase can answer "is this ctrl rewritable?" without running
+// an IRBuilder and without relying on IRBuilder's implicit constant-
+// folding to make the dummy-inputs decode into pure constants.
+//
+// Invariant: this must be the single source of truth for the
+// supported-ctrl set.  `buildDppLaneMap` handles the exact same
+// families and no others; adding a new ctrl requires updating both.
+//
+// Uses `AMDGPU::DPP::DppCtrl` enum constants from
+// `llvm/lib/Target/AMDGPU/SIDefines.h` so the per-family ranges are
+// self-documenting and track any future ISA extension without
+// silently drifting from raw hex.
+bool isDppCtrlRewritable(unsigned ctrl) {
+  using namespace llvm::AMDGPU::DPP;
+  // QUAD_PERM: every 8-bit value in [0, 0xFF] is a valid 4-nibble
+  // quad permutation — no "unused" encodings in this range.
+  if (ctrl <= QUAD_PERM_LAST)
+    return true;
+  // ROW_SHL:N with N in [1, 15].  Note ROW_SHL0 (0x100) is a
+  // shift-by-zero identity that the ISA marks as "unused" (same
+  // encoding as DPP_UNUSED1); we include it here for decode
+  // completeness and `buildDppLaneMap` handles it correctly as
+  // N=0 (identity: srcWithinRow == withinRow, always in-range).
+  if (ctrl >= ROW_SHL_FIRST && ctrl <= ROW_SHL_LAST)
+    return true;
+  // ROW_SHR:N with N in [1, 15].  Same identity-at-N=0 note as
+  // ROW_SHL above.
+  if (ctrl >= ROW_SHR_FIRST && ctrl <= ROW_SHR_LAST)
+    return true;
+  // Every other family (ROW_ROR, WAVE_*, ROW_MIRROR /
+  // ROW_HALF_MIRROR, BCAST15 / BCAST31, ROW_NEWBCAST / ROW_SHARE,
+  // ROW_XMASK) either crosses 16-lane row boundaries in a wave-
+  // size-dependent way OR has a correctness argument this rewrite
+  // has not yet codified.  Refusing loudly via this predicate
+  // surfaces new-corpus demand concretely — each "unsupported"
+  // refusal points at a specific ctrl to extend.
+  return false;
+}
+
 // Per-target-lane source-lane mapping for a supported `dpp_ctrl`
-// value.  `supported=false` signals the ctrl is outside the rewrite's
-// domain and the pass must refuse the function.
+// value.  Returned by `buildDppLaneMap` when the ctrl is in the
+// supported family; unsupported ctrls are filtered out upstream via
+// `isDppCtrlRewritable` before this is called.
 struct DppLaneMap {
   // i32: within-row source-lane index (0..15) — the ds_bpermute
-  // selector's intra-row bits.  Unused when `supported=false`.
+  // selector's intra-row bits.
   Value *srcWithinRow = nullptr;
   // i1: whether the mapping is valid for this target lane (false on
-  // out-of-row references per the DPP semantics).  Unused when
-  // `supported=false`.
+  // out-of-row references per the DPP semantics).
   Value *inRange = nullptr;
-  // False if `dpp_ctrl` is outside the supported family.  When
-  // false, the rewrite must bail and the caller surfaces a refusal
-  // via `report.unsupportedDppDetail`.
-  bool supported = false;
 };
 
 // Build the per-lane source-lane + in-range mapping for `dpp_ctrl`.
@@ -669,53 +709,57 @@ struct DppLaneMap {
 // on wave32 and wave64, which is precisely the wave-size-
 // obliviousness property the rewrite relies on.
 //
-// Unsupported families (refused loudly via `supported=false`):
+// Unsupported families (filtered upstream via
+// `isDppCtrlRewritable`; reaching this function with one fires
+// `report_fatal_error` at the trailing default case):
 //
-//   * 0x120..0x12F  — ROW_RR:N (row rotate right).  Rotation keeps
-//     data within a 16-lane row, but requires modular arithmetic
-//     that this helper could easily extend to.  Left off the
-//     supported list until a corpus kernel exercises it — adding it
-//     requires only another case below plus a lit fixture.
+//   * ROW_ROR:N (row rotate right).  Rotation keeps data within a
+//     16-lane row, but requires modular arithmetic this helper
+//     could easily extend to.  Left off the supported list until a
+//     corpus kernel exercises it — adding it requires updating
+//     `isDppCtrlRewritable`, adding another case below, and a lit
+//     fixture.
 //
-//   * 0x130..0x13F  — wave-wide shifts (WAVE_SHL / WAVE_ROL /
-//     WAVE_SHR / WAVE_ROR).  These cross 16-lane row boundaries
-//     within the source wave; under cross-widening the "wave"
-//     meaning diverges (wave32 = 32 lanes, wave64 = 64 lanes) and
-//     the translation is NOT the identity ctrl.  A future rewrite
-//     would compute the source-wave boundary via `(L & ~(W_s-1))`
-//     and clamp shifts accordingly, but today every Triton
-//     reduction we have expresses wave-width reductions via
-//     `row_shl/shr` + `permlane16` rather than the wave-wide DPP
-//     ctrls, so this family has no corpus demand.
+//   * WAVE_SHL1 / WAVE_ROL1 / WAVE_SHR1 / WAVE_ROR1 (wave-wide
+//     shifts).  These cross 16-lane row boundaries within the source
+//     wave; under cross-widening the "wave" meaning diverges
+//     (wave32 = 32 lanes, wave64 = 64 lanes) and the translation is
+//     NOT the identity ctrl.  A future rewrite would compute the
+//     source-wave boundary via `(L & ~(W_s-1))` and clamp shifts
+//     accordingly, but today every Triton reduction we have
+//     expresses wave-width reductions via `row_shl/shr` +
+//     `permlane16` rather than the wave-wide DPP ctrls, so this
+//     family has no corpus demand.
 //
-//   * 0x140 / 0x141 — ROW_MIRROR / ROW_HALF_MIRROR.  Within a
-//     16-lane row, so they WOULD be expressible here — but they
-//     also don't appear in the reduction corpus yet.  Easy to add
-//     when needed; keeping the initial rollout narrow.
+//   * ROW_MIRROR / ROW_HALF_MIRROR.  Within a 16-lane row, so
+//     expressible here — no corpus demand yet.
 //
-//   * 0x142 / 0x143 — BCAST15 / BCAST31 (gfx9-only).  These cross
-//     16- and 32-lane row boundaries respectively.  gfx1250 source
-//     cannot emit them (they were removed in RDNA), so refusing
-//     is no regression.
+//   * BCAST15 / BCAST31 (gfx9-only).  Cross 16- and 32-lane row
+//     boundaries respectively.  gfx1250 source cannot emit them
+//     (removed in RDNA), so refusing is no regression.
 //
-//   * 0x150..0x15F — ROW_SHARE:N (gfx10+).  Broadcasts lane N of
-//     each row to all other lanes in that row.  Expressible here
-//     (set srcWithinRow = N, inRange = true), but not yet required.
+//   * ROW_SHARE:N (gfx10+).  Broadcasts lane N of each row to all
+//     other lanes in that row.  Expressible via srcWithinRow = N,
+//     inRange = true — no corpus demand yet.
 //
-//   * 0x160..0x16F — ROW_XMASK:N (gfx10+).  Each lane reads from
-//     its XOR-N partner within the row.  Expressible here via
-//     `srcWithinRow = withinRow ^ N`, but not yet required.
+//   * ROW_XMASK:N (gfx10+).  Each lane reads from its XOR-N partner
+//     within the row.  Expressible via srcWithinRow = withinRow ^ N
+//     — no corpus demand yet.
 //
 // When extending this table, prefer a one-case-per-ctrl-family
 // layout and document the in-range predicate and source-lane
 // formula alongside each case — the correctness argument is local
-// per ctrl value.
+// per ctrl value.  Caller MUST have verified `isDppCtrlRewritable`;
+// this function asserts the invariant and `report_fatal_error`s
+// otherwise to turn an internal-invariant violation into a loud
+// failure rather than a silent "miscompile with default values".
 DppLaneMap buildDppLaneMap(IRBuilder<> &B, Value *withinRow,
                             unsigned ctrl) {
+  using namespace llvm::AMDGPU::DPP;
   DppLaneMap out;
   Type *i32Ty = B.getInt32Ty();
 
-  if (ctrl <= 0x0FF) {
+  if (ctrl <= QUAD_PERM_LAST) {
     // QUAD_PERM family. Decode the 4 two-bit selectors on-the-fly
     // so the rewrite works for every ctrl value in [0, 0x100)
     // without a 256-way switch.  The 4-lane quad the target lane
@@ -735,71 +779,85 @@ DppLaneMap buildDppLaneMap(IRBuilder<> &B, Value *withinRow,
                                    "cwd_dpp_quad_sel");
     out.srcWithinRow = B.CreateOr(quadBase, selector, "cwd_dpp_quad_src");
     out.inRange = ConstantInt::getTrue(B.getContext());
-    out.supported = true;
     return out;
   }
 
-  if (ctrl >= 0x101 && ctrl <= 0x10F) {
+  if (ctrl >= ROW_SHL_FIRST && ctrl <= ROW_SHL_LAST) {
     // ROW_SL:N.  Source within-row = withinRow + N; OOB iff the sum
     // falls outside [0, 16).  Use unsigned comparison — withinRow
     // is already masked to [0, 16) by the caller's `laneId & 0xF`,
     // so the addition cannot wrap.
-    unsigned N = ctrl - 0x100;
+    unsigned N = ctrl - ROW_SHL0;
     Value *nVal = ConstantInt::get(i32Ty, N);
     out.srcWithinRow = B.CreateAdd(withinRow, nVal, "cwd_dpp_sl_src");
     out.inRange = B.CreateICmpULT(out.srcWithinRow,
                                    ConstantInt::get(i32Ty, 16),
                                    "cwd_dpp_sl_inrange");
-    out.supported = true;
     return out;
   }
 
-  if (ctrl >= 0x111 && ctrl <= 0x11F) {
+  if (ctrl >= ROW_SHR_FIRST && ctrl <= ROW_SHR_LAST) {
     // ROW_SR:N.  Source within-row = withinRow - N; OOB iff
     // withinRow < N.  Compute srcWithinRow as a plain i32 subtract
     // — the select on `inRange` at the caller clamps the bogus
     // wrap-around result before it feeds the ds_bpermute selector.
-    unsigned N = ctrl - 0x110;
+    unsigned N = ctrl - ROW_SHR0;
     Value *nVal = ConstantInt::get(i32Ty, N);
     out.inRange = B.CreateICmpUGE(withinRow, nVal, "cwd_dpp_sr_inrange");
     out.srcWithinRow = B.CreateSub(withinRow, nVal, "cwd_dpp_sr_src");
-    out.supported = true;
     return out;
   }
 
-  // Unsupported — leave out.supported = false.
-  return out;
+  // Caller contract violation: `isDppCtrlRewritable` returned true
+  // for this ctrl but the decode here has no matching case.  That
+  // means the predicate and the decoder have drifted apart — a
+  // miscompile-by-omission shape.  Fail loudly rather than produce
+  // a zero-initialised DppLaneMap that would silently short-circuit
+  // the rewrite's correctness invariant.
+  report_fatal_error(
+      "buildDppLaneMap invariant: isDppCtrlRewritable said supported "
+      "but the decoder has no matching case. Extend both together.");
 }
 
 // Format a `dpp_ctrl` value as a human-readable name for the refusal
 // diagnostic.  Keeps the refusal message grep-able per control family
-// so triage doesn't need an ISA reference open.
+// so triage doesn't need an ISA reference open.  Range bounds use
+// the `AMDGPU::DPP::DppCtrl` enum from
+// `llvm/lib/Target/AMDGPU/SIDefines.h` so the classification tracks
+// any future ISA addition without silent drift.
 std::string describeDppCtrl(unsigned ctrl) {
+  using namespace llvm::AMDGPU::DPP;
   std::string s;
   raw_string_ostream os(s);
-  if (ctrl <= 0x0FF) {
+  if (ctrl <= QUAD_PERM_LAST) {
     os << "quad_perm:[" << (ctrl & 3) << "," << ((ctrl >> 2) & 3) << ","
        << ((ctrl >> 4) & 3) << "," << ((ctrl >> 6) & 3) << "]";
-  } else if (ctrl >= 0x101 && ctrl <= 0x10F) {
-    os << "row_shl:" << (ctrl - 0x100);
-  } else if (ctrl >= 0x111 && ctrl <= 0x11F) {
-    os << "row_shr:" << (ctrl - 0x110);
-  } else if (ctrl >= 0x120 && ctrl <= 0x12F) {
-    os << "row_ror:" << (ctrl - 0x120);
-  } else if (ctrl >= 0x130 && ctrl <= 0x13F) {
-    os << "wave-wide dpp_ctrl=0x" << utohexstr(ctrl);
-  } else if (ctrl == 0x140) {
+  } else if (ctrl >= ROW_SHL_FIRST && ctrl <= ROW_SHL_LAST) {
+    os << "row_shl:" << (ctrl - ROW_SHL0);
+  } else if (ctrl >= ROW_SHR_FIRST && ctrl <= ROW_SHR_LAST) {
+    os << "row_shr:" << (ctrl - ROW_SHR0);
+  } else if (ctrl >= ROW_ROR_FIRST && ctrl <= ROW_ROR_LAST) {
+    os << "row_ror:" << (ctrl - ROW_ROR0);
+  } else if (ctrl == WAVE_SHL1) {
+    os << "wave_shl:1";
+  } else if (ctrl == WAVE_ROL1) {
+    os << "wave_rol:1";
+  } else if (ctrl == WAVE_SHR1) {
+    os << "wave_shr:1";
+  } else if (ctrl == WAVE_ROR1) {
+    os << "wave_ror:1";
+  } else if (ctrl == ROW_MIRROR) {
     os << "row_mirror";
-  } else if (ctrl == 0x141) {
+  } else if (ctrl == ROW_HALF_MIRROR) {
     os << "row_half_mirror";
-  } else if (ctrl == 0x142) {
+  } else if (ctrl == BCAST15) {
     os << "row_bcast15 (gfx9-only)";
-  } else if (ctrl == 0x143) {
+  } else if (ctrl == BCAST31) {
     os << "row_bcast31 (gfx9-only)";
-  } else if (ctrl >= 0x150 && ctrl <= 0x15F) {
-    os << "row_share:" << (ctrl & 0xF);
-  } else if (ctrl >= 0x160 && ctrl <= 0x16F) {
-    os << "row_xmask:" << (ctrl & 0xF);
+  } else if (ctrl >= ROW_SHARE_FIRST && ctrl <= ROW_SHARE_LAST) {
+    os << "row_share:" << (ctrl - ROW_SHARE0);
+  } else if (ctrl >= ROW_XMASK_FIRST && ctrl <= ROW_XMASK_LAST) {
+    os << "row_xmask:" << (ctrl - ROW_XMASK0);
   } else {
     os << "dpp_ctrl=0x" << utohexstr(ctrl);
   }
@@ -807,18 +865,17 @@ std::string describeDppCtrl(unsigned ctrl) {
 }
 
 // Rewrite one `amdgcn.update.dpp.i32(old, src, dpp_ctrl, row_mask,
-// bank_mask, bound_ctrl)` call.  Returns `true` on success; on
-// failure (unsupported `dpp_ctrl`), leaves the call untouched,
-// writes the describe-string to `*unsupportedDetail`, and returns
-// `false`.  Caller must populate the report's
-// `unsupportedDppDetail` and refuse the function — symmetric with
-// the SGPR-forced classifier's all-or-nothing semantics.
+// bank_mask, bound_ctrl)` call.  CALLER CONTRACT: `isDppCtrlRewritable(
+// ctrl)` MUST be true — the pre-flight pass enforces this, and this
+// function `report_fatal_error`s if the invariant is broken at the
+// call site.  This is stricter than an assert (which would no-op in
+// release builds) because a silently-half-rewritten function is
+// exactly the "silent-fallback" shape the project rule forbids.
 //
 // Only called for i32-overloaded DPP.  i64 DPP sites are left to
 // the backend's native lowering (see the header's "@llvm.amdgcn.
 // update.dpp" paragraph for the i32-only scope rationale).
-bool rewriteUpdateDppI32Call(CallInst *CI, Value *laneId,
-                              std::string *unsupportedDetail) {
+void rewriteUpdateDppI32Call(CallInst *CI, Value *laneId) {
   IRBuilder<> B(CI);
   B.SetCurrentDebugLocation(CI->getDebugLoc());
   Module *M = CI->getModule();
@@ -839,6 +896,16 @@ bool rewriteUpdateDppI32Call(CallInst *CI, Value *laneId,
   unsigned bankMaskImm = bankMaskC->getZExtValue();
   bool boundCtrl = boundCtrlC->getZExtValue() != 0;
 
+  // Caller-contract enforcement BEFORE any IR emission.  If the pre-
+  // flight gate was somehow bypassed and we reach here with an
+  // unsupported ctrl, refuse to emit anything — an incomplete rewrite
+  // on one DPP site would violate the all-or-nothing symmetry across
+  // the function's cross-lane primitives.
+  if (!isDppCtrlRewritable(ctrl))
+    report_fatal_error(Twine("rewriteUpdateDppI32Call invariant: "
+                              "pre-flight missed unsupported dpp_ctrl ") +
+                        describeDppCtrl(ctrl));
+
   // Lane-topology values — derived once per rewrite, reused across
   // the three selects below.  `laneId` itself is memoised at the
   // function level by the caller (`buildTargetLaneId`), so the only
@@ -855,13 +922,9 @@ bool rewriteUpdateDppI32Call(CallInst *CI, Value *laneId,
   Value *rowBase = B.CreateAnd(laneId, ConstantInt::get(i32Ty, ~0xFu),
                                 "cwd_dpp_row_base");
 
-  // Per-ctrl source mapping.
+  // Per-ctrl source mapping.  `isDppCtrlRewritable` gated the call
+  // site — `buildDppLaneMap` is guaranteed to return a valid map.
   DppLaneMap m = buildDppLaneMap(B, withinRow, ctrl);
-  if (!m.supported) {
-    if (unsupportedDetail)
-      *unsupportedDetail = describeDppCtrl(ctrl);
-    return false;
-  }
 
   // Clamp the bogus wrap-around result on OOB so the ds_bpermute
   // selector always references a deterministic intra-row lane.  The
@@ -915,7 +978,6 @@ bool rewriteUpdateDppI32Call(CallInst *CI, Value *laneId,
 
   CI->replaceAllUsesWith(result);
   CI->eraseFromParent();
-  return true;
 }
 
 } // namespace
@@ -1029,41 +1091,30 @@ CrossLaneDivergentRewriteReport rewriteCrossLaneDivergent(
   // sites, call `buildDppLaneMap` with a dummy IRBuilder, check
   // `supported`.  Any failure populates the report and returns zero
   // rewrites across all three primitive families.
-  {
-    LLVMContext &ctx = F.getContext();
-    IRBuilder<> preflightBuilder(ctx);
-    // `buildDppLaneMap` only touches the builder for constant folding
-    // / no-op scaffolding that instcombine later removes; for the
-    // pre-flight we only care about the `supported` flag and the
-    // describe-string, so point the builder at the end of the
-    // function's entry block (guaranteed to exist) to keep any stray
-    // inserted ops well-formed.  They are never committed because
-    // the `DppLaneMap`-producing IRs are discarded if unsupported.
-    preflightBuilder.SetInsertPoint(&F.getEntryBlock(),
-                                     F.getEntryBlock().getFirstInsertionPt());
-    Value *dummyWithinRow =
-        ConstantInt::get(Type::getInt32Ty(ctx), 0);
-    for (CallInst *CI : dppI32Sites) {
-      unsigned ctrl =
-          cast<ConstantInt>(CI->getArgOperand(2))->getZExtValue();
-      DppLaneMap probe = buildDppLaneMap(preflightBuilder,
-                                          dummyWithinRow, ctrl);
-      if (!probe.supported) {
-        std::string msg;
-        raw_string_ostream os(msg);
-        os << "function '" << F.getName()
-           << "' has an update.dpp site with unsupported "
-           << describeDppCtrl(ctrl)
-           << ". The cross-widen rewrite only covers quad_perm, "
-              "row_shl:N and row_shr:N today (all stay within a "
-              "single 16-lane row, hence wave-size-oblivious). "
-              "Extending the supported set requires a per-ctrl "
-              "correctness argument in buildDppLaneMap and a new "
-              "lit fixture; refusing rather than silently miscompiling. "
-              "See hotswap/docs/wave-size-translation.md \u00a75.3.";
-        report.unsupportedDppDetail = os.str();
-        return report;
-      }
+  //
+  // Pre-flight is a pure predicate (`isDppCtrlRewritable`) on the
+  // immediate dpp_ctrl operand — no IRBuilder state, no dummy IR
+  // insertion.  Keeps the check cheap, decouples it from any
+  // implicit-constant-folding assumption about IRBuilder, and makes
+  // the "supported families" contract unmistakably single-sourced.
+  for (CallInst *CI : dppI32Sites) {
+    unsigned ctrl =
+        cast<ConstantInt>(CI->getArgOperand(2))->getZExtValue();
+    if (!isDppCtrlRewritable(ctrl)) {
+      std::string msg;
+      raw_string_ostream os(msg);
+      os << "function '" << F.getName()
+         << "' has an update.dpp site with unsupported "
+         << describeDppCtrl(ctrl)
+         << ". The cross-widen rewrite only covers quad_perm, "
+            "row_shl:N and row_shr:N today (all stay within a "
+            "single 16-lane row, hence wave-size-oblivious). "
+            "Extending the supported set requires a per-ctrl "
+            "correctness argument in buildDppLaneMap and a new "
+            "lit fixture; refusing rather than silently miscompiling. "
+            "See hotswap/docs/wave-size-translation.md \u00a75.3.";
+      report.unsupportedDppDetail = os.str();
+      return report;
     }
   }
 
@@ -1096,16 +1147,14 @@ CrossLaneDivergentRewriteReport rewriteCrossLaneDivergent(
     ++report.readlaneRewritten;
   }
   for (CallInst *CI : dppI32Sites) {
-    std::string unsupported;
-    // Pre-flight (Phase B) guaranteed every collected ctrl is
-    // supported, so this cannot fail; still thread the out-param
-    // through and assert on unexpected failure rather than risk
-    // producing a half-rewritten function.
-    bool ok = rewriteUpdateDppI32Call(CI, getLaneId(), &unsupported);
-    (void)ok;
-    assert(ok && "DPP pre-flight said all ctrls supported, but rewriteUpdateDppI32Call rejected one "
-                  "— buildDppLaneMap's supported check and rewriteUpdateDppI32Call's check "
-                  "disagreed, indicating a rewrite-pass invariant violation");
+    // Phase B above guaranteed `isDppCtrlRewritable(ctrl)`, and
+    // `rewriteUpdateDppI32Call` re-checks and `report_fatal_error`s
+    // on violation — defence in depth, release-build-safe (unlike
+    // `assert`, which no-ops under NDEBUG and would let a silent
+    // half-rewrite through).  The counter increments only AFTER the
+    // rewriter successfully returns; a hypothetical fatal-error (which
+    // aborts the whole process) cannot leave the report lying.
+    rewriteUpdateDppI32Call(CI, getLaneId());
     ++report.dppRewritten;
   }
 
