@@ -192,9 +192,12 @@ class TestCrossIsaAnalyzer:
                 assert len(encodings) == len(set(encodings)), (
                     f"Duplicate encodings in family '{family}' for v_mov_b32: {encodings}"
                 )
-                # At least VOP1 should be present
+                # Both VOP1 and VOP3 should be present
                 assert any('VOP1' in enc for enc in encodings), (
                     f"Expected VOP1 encoding for v_mov_b32 in family '{family}'"
+                )
+                assert any('VOP3' in enc for enc in encodings), (
+                    f"Expected VOP3 encoding for v_mov_b32 in family '{family}'"
                 )
 
     def test_v_cmpx_instructions_cannot_share_execute(self):

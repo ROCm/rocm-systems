@@ -266,7 +266,10 @@ class CrossIsaAnalyzer:
                 if len(group_isas) >= 2:
                     # Shareable across 2+ ISAs
                     family_name = self._classify_family(set(group_isas))
-                    # Find an entry that matches this group's signatures
+                    # Find an entry that matches this group's signatures.
+                    # _sem_key is not checked: semantics are derived from the
+                    # mnemonic, which is identical for all entries in this
+                    # inst_map bucket, so matching fsig + osig is sufficient.
                     next_match = next(
                         (e for e in entries
                          if e[0] == group_isas[0]
