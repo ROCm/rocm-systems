@@ -8,6 +8,7 @@ REPO_ROOT="$(git -C "$ASSETS_DIR" rev-parse --show-toplevel)"
 CONTAINER_NAME="${PERFXPERT_GUIDE_VHS_CONTAINER:-perfxpert-guide-vhs}"
 ROCM_IMAGE="${PERFXPERT_GUIDE_VHS_IMAGE:-rocm/dev-ubuntu-22.04:7.2.2}"
 declare -a tmp_tapes=()
+last_temp_tape=""
 
 cleanup() {
   rm -f "${tmp_tapes[@]:-}"
@@ -62,7 +63,8 @@ EOF
     { print }
   ' "$tape" > "$tmp_tape"
 
-  printf '%s\n' "$tmp_tape"
+  last_temp_tape="$tmp_tape"
+  return 0
 }
 
 declare -a tapes=()
@@ -95,8 +97,8 @@ fi
 
 cd "$TAPES_DIR"
 for tape in "${tapes[@]}"; do
-  if temp_tape="$(make_temp_tape "$tape")"; then
-    vhs "$(basename "$temp_tape")"
+  if make_temp_tape "$tape"; then
+    vhs "$(basename "$last_temp_tape")"
   else
     vhs "$(basename "$tape")"
   fi
