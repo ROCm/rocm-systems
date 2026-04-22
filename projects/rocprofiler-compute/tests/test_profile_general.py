@@ -146,7 +146,35 @@ SLURM_RANK_VAR, SLURM_SIZE_VAR = "SLURM_PROCID", "SLURM_NTASKS"
 test_utils.check_resource_allocation()
 
 # Get soc info
-soc = test_utils.gpu_soc()
+gpu_arch, soc = test_utils.gpu_soc()
+
+# Discover available set options for the current GPU arch
+AVAILABLE_SETS = []
+if gpu_arch:
+    import yaml
+
+    _root = Path(__file__).resolve().parent.parent
+    _sets_file = (
+        _root
+        / "src"
+        / "rocprof_compute_soc"
+        / "profile_configs"
+        / "sets"
+        / f"{gpu_arch}_sets.yaml"
+    )
+    if not _sets_file.exists():
+        _sets_file = (
+            _root
+            / "rocprof_compute_soc"
+            / "profile_configs"
+            / "sets"
+            / f"{gpu_arch}_sets.yaml"
+        )
+    if _sets_file.exists():
+        _data = yaml.safe_load(_sets_file.read_text())
+        AVAILABLE_SETS = [
+            s["set_option"] for s in _data.get("sets", []) if s.get("set_option")
+        ]
 
 # Set default profiler
 os.environ["ROCPROF"] = "rocprofiler-sdk"
@@ -2184,30 +2212,6 @@ def test_live_attach_detach_pc_sampling(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-def _discover_set_options() -> list[str]:
-    """Read valid set_option names from the sets YAML for the current GPU arch."""
-    arch = test_utils.gpu_arch()
-    if not arch:
-        return []
-    sets_file = (
-        Path(__file__).resolve().parent.parent
-        / "src"
-        / "rocprof_compute_soc"
-        / "profile_configs"
-        / "sets"
-        / f"{arch}_sets.yaml"
-    )
-    if not sets_file.exists():
-        return []
-    import yaml
-
-    data = yaml.safe_load(sets_file.read_text())
-    return [s["set_option"] for s in data.get("sets", []) if s.get("set_option")]
-
-
-_AVAILABLE_SETS = _discover_set_options()
-
-
 @pytest.mark.sets_func
 class TestSetsIntegration:
     # Auto-discovered from the sets YAML for the current GPU arch.
@@ -2216,7 +2220,7 @@ class TestSetsIntegration:
     # runtime path: CLI arg parsing -> YAML loading -> counter file
     # generation -> profiler invocation. It catches wiring bugs that
     # static validation cannot.
-    @pytest.mark.parametrize("set_name", _AVAILABLE_SETS, ids=lambda s: s)
+    @pytest.mark.parametrize("set_name", AVAILABLE_SETS, ids=lambda s: s)
     def test_set_profiling(
         self, binary_handler_profile_rocprof_compute, set_name, request
     ):

@@ -45,7 +45,10 @@ def resolve_metric_id(metric_id: str) -> tuple[int | None, int | None]:
     tokens = metric_id.split(".")
     if len(tokens) < 3:
         return None, None
-    x, y, z = int(tokens[0]), int(tokens[1]), int(tokens[2])
+    try:
+        x, y, z = int(tokens[0]), int(tokens[1]), int(tokens[2])
+    except ValueError:
+        return None, None
     return x * 100 + y, z
 
 
