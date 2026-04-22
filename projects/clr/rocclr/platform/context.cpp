@@ -13,10 +13,6 @@
 #include <functional>
 #include <shared_mutex>
 
-#include <pthread.h>
-#include <unistd.h>
-#include <sys/types.h>
-
 #ifdef _WIN32
 #include <d3d10_1.h>
 #include <dxgi.h>

@@ -1475,6 +1475,7 @@ class MemObjMap : public AllStatic {
 
   //! Context::svmFree holds AllocatedLock_ exclusively; nested MemObjMap ops bump this to skip
   //! re-locking the same std::shared_mutex on the owning thread.
+  static std::shared_mutex AllocatedLock_;
  private:
   friend class Context;
   //! Context::svmFree holds AllocatedLock_ exclusively; nested MemObjMap ops bump this to skip
@@ -1511,7 +1512,8 @@ class MemObjMap : public AllStatic {
     return f();
   }
 
-  static amd::Memory* findMemObjUnlocked(const void* k, size_t* offset = nullptr);
+  static amd::Memory* findMemObjUnlocked(const void* k, size_t* offset = nullptr,
+                                         Device* dev = nullptr);
   static amd::Memory* findVirtualMemObjUnlocked(const void* k);
 };
 

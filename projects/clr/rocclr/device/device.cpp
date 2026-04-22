@@ -14,10 +14,6 @@
 #include <cassert>
 #include <cstring>
 
-#include <pthread.h>
-#include <unistd.h>
-#include <sys/types.h>
-
 #if defined(WITH_HSA_DEVICE)
 #include "device/rocm/rocdevice.hpp"
 extern amd::AppProfile* rocCreateAppProfile();
@@ -350,36 +346,27 @@ std::map<MemObjMap::IpcMemHandle, amd::Memory*> MemObjMap::IpcHandleMemObjMap_ R
 
 thread_local int MemObjMap::svmFreeMapBatchDepth_ = 0;
 
-amd::Memory* MemObjMap::findMemObjUnlocked(const void* k, size_t* offset) {
+amd::Memory* MemObjMap::findMemObjUnlocked(const void* k, size_t* offset, Device* dev) {
   uintptr_t key = reinterpret_cast<uintptr_t>(k);
-
-  // First search the global map
   auto it = MemObjMap_.upper_bound(key);
-  if (it != MemObjMap_.begin()) {
-    --it;
-    amd::Memory* mem = it->second;
-    size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
-                          ? sizeof(mem->getUserData().hsa_handle)
-                          : mem->getSize();
-    if (key >= it->first && key < (it->first + mem_size)) {
-      if (offset != nullptr) {
-        *offset = key - it->first;
-      }
-      return mem;
-    }
+  if (it == MemObjMap_.begin()) {
+    return nullptr;
   }
 
   --it;
   amd::Memory* mem = it->second;
   size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM) ? sizeof(mem->getUserData().hsa_handle)
                                                              : mem->getSize();
-  if (key >= it->first && key < (it->first + mem_size)) {
-    if (offset != nullptr) {
-      *offset = key - it->first;
-    }
-    return mem;
+  if (key < it->first || key >= (it->first + mem_size)) {
+    return nullptr;
   }
-  return nullptr;
+  if (offset != nullptr) {
+    *offset = key - it->first;
+  }
+  if (dev != nullptr && mem->getDeviceMemory(*dev, false) == nullptr) {
+    return nullptr;
+  }
+  return mem;
 }
 
 amd::Memory* MemObjMap::findVirtualMemObjUnlocked(const void* k) {
@@ -414,8 +401,8 @@ void MemObjMap::RemoveMemObj(const void* k) {
   });
 }
 
-amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset) {
-  return runWithSharedAllocLock([&] { return findMemObjUnlocked(k, offset); });
+amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
+  return runWithSharedAllocLock([&] { return findMemObjUnlocked(k, offset, dev); });
 }
 
 void MemObjMap::UpdateAccess(amd::Device* peerDev) {
@@ -1108,31 +1095,12 @@ bool Device::IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* me
   auto dev_mem = static_cast<device::Memory*>(amd_mem_obj->getDeviceMemory(*this));
   auto result = dev_mem->ExportHandle(handle);
 
-  if (result) {
-    // 16 bytes * 2 (hex) + 1 (null terminator) = 33
-    char handleStr[33];
-    for (int i = 0; i < 16; ++i) {
-        snprintf(&handleStr[i * 2], 3, "%02x", (unsigned char)handle[i]);
-    }
-    LogPrintfError("[DEVICE][IpcCreate] PID: %d | TID: %lu | Ptr: %p | Handle: %s - SUCCESS", getpid(), (unsigned long)pthread_self(), dev_ptr, handleStr);
-
-  } else {
-    LogPrintfError("[DEVICE][IpcCreate] PID: %d, TID: %lu, Ptr: %p - FAILED at ExportHandle ", getpid(), (unsigned long)pthread_self(), dev_ptr);
-  }
-
   return result;
 }
 
 // ================================================================================================
 bool Device::IpcAttach(const char* handle, size_t mem_size, size_t mem_offset, unsigned int flags,
                        void** dev_ptr) const {
-
-  char handleStr[33];
-  for (int i = 0; i < 16; ++i) {
-      snprintf(&handleStr[i * 2], 3, "%02x", (unsigned char)handle[i]);
-  }
-  LogPrintfError("[DEVICE][IpcAttach] PID: %d | TID: %lu | Inbound Handle: %s | Size: %zu", getpid(), (unsigned long)pthread_self(), handleStr, mem_size);
-
   amd::Memory* amd_mem_obj = nullptr;
 
   // Create an amd Memory object for the handle
@@ -1143,11 +1111,6 @@ bool Device::IpcAttach(const char* handle, size_t mem_size, size_t mem_offset, u
   }
 
   if (!amd_mem_obj->create(nullptr)) {
-    for (int i = 0; i < 16; ++i) {
-        snprintf(&handleStr[i * 2], 3, "%02x", (unsigned char)handle[i]);
-    }
-    LogPrintfError("[DEVICE][IpcAttach] PID: %d | TID: %lu | Handle: %s FAILED at create a svm hidden buffer()", getpid(), (unsigned long)pthread_self(), handleStr);
-
     LogError("failed to create a svm hidden buffer!");
     amd_mem_obj->release();
     return false;
