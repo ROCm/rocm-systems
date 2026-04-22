@@ -44,7 +44,6 @@ def test_attachment_kernel_trace(kernel_input_data):
     kernel_threads = set()
     kernel_streams = set()
     NUM_KERNEL_THREADS = 8
-    expected_stream_ids = set([i for i in range(1, 9)])
 
     # Verify basic kernel properties
     for row in kernel_input_data:
@@ -67,14 +66,10 @@ def test_attachment_kernel_trace(kernel_input_data):
             assert int(row["Grid_Size_Z"]) >= 1
 
             thread_id = int(row["Thread_Id"])
-            stream_id = int(row["Stream_Id"])
             kernel_threads.add(thread_id)
-            kernel_streams.add(stream_id)
 
-    # Exactly 8 streams and 8 threads
+    # Exactly 8 threads
     assert len(kernel_threads) == NUM_KERNEL_THREADS
-    # Readd when JSON conversion is redone
-    # assert kernel_streams == expected_stream_ids
 
 
 def test_attachment_memory_copy_trace(memory_copy_input_data):
@@ -103,15 +98,15 @@ def test_attachment_memory_copy_trace(memory_copy_input_data):
             "MEMORY_COPY_DEVICE_TO_HOST" in row["Direction"] or "D2H" in row["Direction"]
         ):
             device_to_host_count += 1
+
         stream_id = int(row["Stream_Id"])
         memory_copy_streams.add(stream_id)
 
     # We should have both H2D and D2H copies
     assert host_to_device_count > 0, "No host-to-device memory copies captured"
     assert device_to_host_count > 0, "No device-to-host memory copies captured"
-
     # Exactly 8 streams
-    memory_copy_streams == expected_stream_ids
+    assert memory_copy_streams == expected_stream_ids
 
 
 def test_attachment_hsa_api_trace(hsa_input_data):

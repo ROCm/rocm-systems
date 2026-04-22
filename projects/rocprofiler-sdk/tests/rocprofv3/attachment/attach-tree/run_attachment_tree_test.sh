@@ -57,8 +57,6 @@ if [ -e /proc/sys/kernel/yama/ptrace_scope ]                             \
     exit 0
 fi
 
-echo "Starting attach-tree test (${OUTPUT_FORMAT} format)..."
-
 # Start the test application in the background. The test app forks a child
 # process, so attaching to the parent PID exercises tree attachment.
 echo "Launching test application: ${TEST_APP}"
@@ -82,24 +80,28 @@ if [ ! -f "${ROCPROFV3}" ]; then
     exit 1
 fi
 
-echo "Attaching profiler to PID $APP_PID and children for 5 seconds (${OUTPUT_FORMAT} format)..."
-
-# Output the command and environment for debugging
-echo "===== COMMAND TO EXECUTE ====="
-echo "${ROCPROFV3} --attach $APP_PID --attach-children --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out}"
-echo ""
-echo "===== ENVIRONMENT VARIABLES ====="
-env | grep "^ROCPROF" | sort
-echo "===== END ENVIRONMENT ====="
-echo ""
+echo "Attaching profiler to PID $APP_PID and children for 500 milliseconds..."
 
 # Run rocprofv3 with --attach and --attach-children options
-LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-children --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out}
+LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-children --attach-duration-msec 500 -s -f ${OUTPUT_FORMAT}  --stats --summary --group-by-queue --attach-sync-output -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out} &
+ROCPROF_PID=$!
+echo "rocprofv3 PID: $ROCPROF_PID"
 
-echo "${OUTPUT_FORMAT} profiler detached successfully"
+# Wait for the attach process to complete
+wait $ROCPROF_PID
+ROCPROF_EXIT_CODE=$?
 
-# Wait for the application to finish
-echo "Waiting for application to complete..."
+if [ $ROCPROF_EXIT_CODE -ne 0 ]; then
+    echo "rocprofv3_attach test failed with exit code $ROCPROF_EXIT_CODE"
+    kill $APP_PID 2>/dev/null
+    exit 1
+fi
+
+echo "Profiler detached successfully"
+
+# End the running application
+echo "Sending SIGINT to application..."
+kill -2 $APP_PID 2>/dev/null
 wait $APP_PID
 APP_EXIT_CODE=$?
 
@@ -129,8 +131,10 @@ for expected_file in "${EXPECTED_FILES[@]}"; do
     if [ ! -f "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file}" ]; then
         echo "Error: Expected output file ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file} not found"
         exit 1
+    else
+        echo "Found ${expected_file}"
     fi
 done
 
-echo "Attachment tree ${OUTPUT_FORMAT} test completed successfully"
+echo "Attachment tree test completed successfully"
 exit 0

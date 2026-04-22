@@ -11,7 +11,7 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 
 set(ROCPROFILER_MEMCHECK_TYPES "AddressSanitizer" "UndefinedBehaviorSanitizer"
-                               "ThreadSanitizer")
+                               "ThreadSanitizer" "LeakSanitizer")
 
 if(ROCPROFILER_MEMCHECK AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES)
     set(IS_DISABLED ON)
@@ -25,16 +25,11 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
-set(PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
-
 set(attachment-env
-    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH} AMD_LOG_LEVEL=7"
     )
 
-# Unconditionally disabled: intermittent failure caused by test app abort
-set(IS_DISABLED ON)
-
-# Test that launches the app and attaches to it (CSV format)
+# Test that launches the app and attaches to it
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-attachment-attach-once
     COMMAND
@@ -43,13 +38,13 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR} ${LOG_LEVEL} out
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 60
-    LABELS "integration-tests;attachment"
+    LABELS "attachment"
     DISABLED ${IS_DISABLED}
-    PRELOAD "${PRELOAD_ENV}"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${attachment-env}"
+    FAIL_REGULAR_EXPRESSION "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     SKIP_REGULAR_EXPRESSION "This test is skipped."
-    FIXTURES_SETUP rocprofv3-test-attachment-attach-once
-    FAIL_REGULAR_EXPRESSION "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    FIXTURES_SETUP rocprofv3-test-attachment-attach-once)
 
 # Validate the output from the attached profiling
 rocprofiler_add_integration_validate_test(
@@ -58,7 +53,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     TIMEOUT 30
-    LABELS "integration-tests;attachment"
+    LABELS "attachment"
     DISABLED ${IS_DISABLED}
     SKIP_REGULAR_EXPRESSION "SKIPPED"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-once
@@ -79,7 +74,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     TIMEOUT 30
-    LABELS "integration-tests;attachment"
+    LABELS "attachment"
     DISABLED ${IS_DISABLED}
     SKIP_REGULAR_EXPRESSION "SKIPPED"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-once
