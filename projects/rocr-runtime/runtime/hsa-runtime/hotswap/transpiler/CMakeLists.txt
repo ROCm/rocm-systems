@@ -222,6 +222,7 @@ set(TEST_SOURCES
   tests/batch_raise_test.cpp
   tests/corpus_test.cpp
   tests/c5_predicate_chain_test.cpp
+  tests/mc_context_inline_srcmgr_test.cpp
   tests/mxfp4_dequant_test.cpp
   tests/wave_projection_test.cpp
 )

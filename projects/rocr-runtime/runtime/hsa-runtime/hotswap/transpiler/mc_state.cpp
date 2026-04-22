@@ -46,6 +46,27 @@ bool initMCState(MCState &state, const std::string &targetISA) {
   state.ctx = std::make_unique<MCContext>(triple, state.asmInfo.get(),
                                          state.regInfo.get(),
                                          state.subtargetInfo.get());
+  // Defensive consistency with the legacy hotswap path
+  // (see `hotswap.cpp` / `hotswap/transpiler.cpp`'s companion
+  // `initInlineSourceManager` calls): the MCContext ctor defaults
+  // `SourceMgr *Mgr = nullptr`, so any MC-layer diagnostic that
+  // reaches `MCContext::reportCommon` or `MCContext::diagnose`
+  // with a valid SMLoc and no SrcMgr trips the
+  // `llvm_unreachable("Either SourceMgr should be available")`
+  // abort at `llvm/lib/MC/MCContext.cpp:1093` / `:1120`.
+  //
+  // Salmon's IR-raise pipeline doesn't currently exercise the MC
+  // assembler (codegen runs through `llc`/`lld` on lifted IR, not
+  // through this MCContext), so the abort doesn't fire on salmon
+  // today.  But the disassembler here can emit diagnostics on
+  // malformed instruction bytes, and any future reuse of this
+  // MCContext for an MC emission path (e.g. an assembly-based
+  // post-rewrite pass or a new cross-widening lowering that
+  // goes through MC) would hit the same abort.  Attaching an
+  // inline SourceMgr here keeps the failure mode graceful for
+  // both current and future callers — the cost is one pointer
+  // and one default-constructed SourceMgr per MCState.
+  state.ctx->initInlineSourceManager();
   state.disasm.reset(
       state.target->createMCDisassembler(*state.subtargetInfo, *state.ctx));
   state.printer.reset(state.target->createMCInstPrinter(
