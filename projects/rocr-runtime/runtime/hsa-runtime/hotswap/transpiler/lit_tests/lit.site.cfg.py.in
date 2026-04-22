@@ -206,6 +206,22 @@ config.fixtures = {
     # codegen quality loss.
     "v_med3_i32": r"@LIT_FIXTURE_V_MED3_I32_CO@",
     "v_mul_u64": r"@LIT_FIXTURE_V_MUL_U64_CO@",
+    # gfx1250-only VOP3 no-carry 64-bit multiply-adds.  The signed
+    # variant (`v_mad_nc_i64_i32`) blocks raise-time on the MXFP
+    # downcast kernels (`downcast_to_mxfp_{fp32,bf16}`) when the
+    # SemOp / decoder / handler trio is missing, surfacing as an
+    # `-> v_mad_nc_i64_i32 [VOP3]` opcode-class refusal.  Both
+    # variants share the same `VOP_I32_I32_I64_DPP` profile
+    # (VOP3Instructions.td:196 — `VOPProfile<[i64, i32, i32, i64]>`)
+    # and differ only in the widening direction (sext vs zext); the
+    # unsigned fixture is the belt-and-suspenders guard for a
+    # future MXFP kernel with unsigned tensor indexing (no
+    # producer yet, but the handler arm exists so the fixture
+    # exists too).  Handler back-references: `handle_valu.cpp`'s
+    # `V_MAD_NC_I64_I32` / `V_MAD_NC_U64_U32` arms next to the
+    # existing `V_MAD_CO_U64_U32` block.
+    "v_mad_nc_i64_i32": r"@LIT_FIXTURE_V_MAD_NC_I64_I32_CO@",
+    "v_mad_nc_u64_u32": r"@LIT_FIXTURE_V_MAD_NC_U64_U32_CO@",
     "c3_atomic_cas": r"@LIT_FIXTURE_C3_ATOMIC_CAS_CO@",
     # s_addk_i32 (SOPK_32TIE, renamed to `s_addk_co_i32` in gfx12+
     # assembly) — pins the correct operand-index contract for the

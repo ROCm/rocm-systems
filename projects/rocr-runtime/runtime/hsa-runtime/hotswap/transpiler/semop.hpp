@@ -520,6 +520,19 @@ enum class SemOp : uint16_t {
   // gfx1250 VOP2 64-bit unsigned multiply (low 64 bits of s0 * s1).
   V_MUL_U64,
   V_MAD_U64_U32, V_MAD_CO_U64_U32,
+  // gfx1250 no-carry 64-bit multiply-add VOP3 opcodes (VOP3Only_Realtriple_gfx1250,
+  // VOP3Instructions.td:2129 / 2130: encodings 0x2fa / 0x2fb).  Both widen
+  // two 32-bit sources into a 64-bit accumulator:
+  //     V_MAD_NC_U64_U32: D.u64 = zext(S0.u32)*zext(S1.u32) + S2.u64
+  //     V_MAD_NC_I64_I32: D.i64 = sext(S0.i32)*sext(S1.i32) + S2.i64
+  // Neither produces a carry/overflow output (hence the "nc" suffix).  The
+  // backend's AMDGPUISelDAGToDAG.cpp::SelectMad64_32 pattern-matches the
+  // canonical `add(mul(zext/sext s0, zext/sext s1), s2_i64)` IR we emit
+  // back into v_mad_(nc|co|_i64_i32) on whichever target the raise writes
+  // to — identical to how V_MAD_U64_U32 lowers today (see handle_valu.cpp
+  // v_mad_u64_u32 arm and opcode_map.cpp's "LLVM no longer exposes a
+  // distinct carry-out variant" comment for historical context).
+  V_MAD_NC_U64_U32, V_MAD_NC_I64_I32,
 
   // -- FLAT / GLOBAL / SCRATCH memory --
   FLAT_LOAD_UBYTE, FLAT_LOAD_SBYTE, FLAT_LOAD_USHORT, FLAT_LOAD_SSHORT,

@@ -523,6 +523,44 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // v_mad_nc_u64_u32 (gfx1250, VOP3Only_Realtriple_gfx1250 @ 0x2fa):
+  //   D.u64 = zext(S0.u32) * zext(S1.u32) + S2.u64   (no carry output)
+  //
+  // Semantically identical to V_MAD_CO_U64_U32's D-value above; the "nc"
+  // variant simply omits the VCC write (single dst, firstSrcIdx = 1 —
+  // the `writelane`-sibling double-dst shape from `v_mad_u64_u32` does
+  // not apply here).  The backend's `SelectMad64_32()` pattern matcher
+  // (AMDGPUISelDAGToDAG.cpp:1220) matches the canonical
+  // `add(mul(zext s0, zext s1), s2_i64)` and re-emits V_MAD_NC_U64_U32
+  // on gfx1250 targets or V_MAD_CO_U64_U32 (with VCC allocated to a
+  // scratch SGPR and discarded) on gfx942 — so the same IR here is
+  // correct for both the same-target and the cross-target lift paths.
+  if (sop == SemOp::V_MAD_NC_U64_U32) {
+    Value *a = ctx.B.CreateZExt(op.src(0), ctx.i64Ty);
+    Value *b = ctx.B.CreateZExt(op.src(1), ctx.i64Ty);
+    Value *res = ctx.B.CreateAdd(ctx.B.CreateMul(a, b), op.src64(2), "vmad_nc_u64");
+    ctx.writeReg64(op.dst(), res);
+    hr.handled = true;
+    return hr;
+  }
+  // v_mad_nc_i64_i32 (gfx1250, VOP3Only_Realtriple_gfx1250 @ 0x2fb):
+  //   D.i64 = sext(S0.i32) * sext(S1.i32) + S2.i64   (no carry output)
+  //
+  // Signed sibling of V_MAD_NC_U64_U32 above.  The 32→64 sign extension
+  // on both operand sources matters — on gfx942 the backend matches the
+  // `add(mul(sext s0, sext s1), s2_i64)` shape back to V_MAD_I64_I32
+  // (the signed-widening legacy MAD with a discarded VCC carry).  We
+  // emit the sign-preserving form here rather than going through an
+  // `i128` intermediate or explicit `smul.ext`; the pattern matches
+  // `SelectMad64_32(Signed=true)` on both source and target ISAs.
+  if (sop == SemOp::V_MAD_NC_I64_I32) {
+    Value *a = ctx.B.CreateSExt(op.src(0), ctx.i64Ty);
+    Value *b = ctx.B.CreateSExt(op.src(1), ctx.i64Ty);
+    Value *res = ctx.B.CreateAdd(ctx.B.CreateMul(a, b), op.src64(2), "vmad_nc_i64");
+    ctx.writeReg64(op.dst(), res);
+    hr.handled = true;
+    return hr;
+  }
   // v_mad_u32: D.u32 = S0.u32 * S1.u32 + S2.u32 (no carry)
   if (sop == SemOp::V_MAD_U32) {
     Value *res = ctx.B.CreateAdd(ctx.B.CreateMul(op.src(0), op.src(1)), op.src(2), "vmad_u32");

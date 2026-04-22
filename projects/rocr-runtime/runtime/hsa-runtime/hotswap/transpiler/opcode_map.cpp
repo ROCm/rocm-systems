@@ -565,6 +565,18 @@ static const Entry kCanonTable[] = {
     E(V_MAD_U64_U32_e64, V_MAD_U64_U32),
     // LLVM no longer exposes a distinct carry-out variant; `V_MAD_CO_U64_U32`
     // SemOp stays unmapped until one reappears.
+    // gfx1250-only no-carry 64-bit multiply-add opcodes
+    // (`VOP3Only_Realtriple_gfx1250` at VOP3Instructions.td:2129 / 2130,
+    // encodings 0x2fa / 0x2fb).  Unlike the older `V_MAD_U64_U32` /
+    // `V_MAD_I64_I32` family, these pseudos don't have an `_e64` suffix
+    // variant with a carry/overflow sink, so one MCOpcode ↔ one SemOp;
+    // see the `V_MAD_NC_*` block in `semop.hpp` for the semantics
+    // description and `handle_valu.cpp`'s handler arm for how the
+    // canonical `add(mul(sext/zext s0, sext/zext s1), s2_i64)` lowering
+    // re-enters the backend's `SelectMad64_32` pattern matcher on both
+    // gfx1250 and gfx942 targets.
+    E(V_MAD_NC_U64_U32_e64, V_MAD_NC_U64_U32),
+    E(V_MAD_NC_I64_I32_e64, V_MAD_NC_I64_I32),
 
     // ---------------------------------------------------------------------
     // FLAT
