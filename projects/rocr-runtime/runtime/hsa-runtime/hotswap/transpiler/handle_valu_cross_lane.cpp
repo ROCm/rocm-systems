@@ -303,12 +303,25 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
   // sites) makes both approaches deferrable; revisit when a
   // corpus kernel surfaces partial EXEC at a swap site.
   //
-  // V_PERMLANE32_SWAP_B32 (the wider variant) stays refused: it is
-  // a wave64-native instruction and would never appear in a wave32
-  // source kernel; the classifier marks it as P4_PermLaneSwap with
-  // rewriteImplemented=false and surfaces a precise pending
-  // diagnostic. Should a wave64-source same-wave lift ever
-  // encounter it, the handler refuses loudly here too.
+  // V_PERMLANE32_SWAP_B32 (the wider variant) is the wave64-native
+  // XOR-32 sibling.  Source kernels that emit it come from the
+  // gfx950-and-later wave64 ISAs where `FeaturePermlane32Swap`
+  // is enabled (the GFX950Insts feature block in
+  // llvm/lib/Target/AMDGPU/AMDGPU.td).  Same-wave lifts for those
+  // sources (gfx950 → gfx942) need an emulation because the gfx942
+  // target does NOT enable `FeaturePermlane32Swap` — gfx940 base
+  // features do not include it, so the instruction is unavailable
+  // natively on the compilation target.  The emulation uses the
+  // same `ds_bpermute(lane_id XOR <stride>, src)` shape as the
+  // XOR-16 handler above, with the XOR mask widened to 32; on
+  // wave64 that swaps lanes [0..31] with [32..63] exactly as
+  // `v_permlane32_swap_b32`'s native semantics specify.  Refusal
+  // is preserved only for the narrowing direction (wave64 source →
+  // wave32 target, which has no 64-lane neighbourhood to XOR
+  // against) and for the impossible wave32-source case (no wave32
+  // ISA enables the feature, so seeing it in wave32 source bytes
+  // indicates either a corrupted disassembly or a wave64 source
+  // mis-classified as wave32).
   case SemOp::V_PERMLANE16_SWAP_B32: {
     // Two output registers: vdst (op.dst(), MCInst index 0) and
     // src0_out (named OpName::src0_out, MCInst index 1). Two
@@ -368,20 +381,102 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
   case SemOp::V_PERMLANE32_SWAP_B32: {
-    // Wave64-native instruction with no wave32 analogue (XOR 32
-    // partner spans the two 32-lane halves of a wave64; on wave32
-    // the partner index would wrap the wave). A wave32 source
-    // kernel cannot encode this op meaningfully, so seeing it means
-    // the source is NOT wave32 (or the disassembly is corrupted).
-    // The cross-wave classifier already refuses via P4 pending; the
-    // same-wave path lands here and refuses loudly too.
-    hr.failure = RaiseFailure::unsupportedShape(
-        di, "VALU",
-        "v_permlane32_swap_b32 has no wave32 analogue (XOR-32 "
-        "partner spans wave64 32-lane halves); source is not "
-        "wave32 — see the P4 permlane32_swap entry in the pending-"
-        "rewrite table of hotswap/docs/wave-size-translation.md "
-        "\u00a77");
+    // Refuse the shapes where the XOR-32 neighbourhood has no
+    // hardware analogue.  Both predicates guard the *runtime*
+    // partner-lane computation — `laneId ^ 32` on a wave32 device
+    // (target wave32) would produce values >= 32 that
+    // `ds_bpermute` cannot deliver, and on a wave32 source the
+    // instruction is not in the decoder's opcode table at all
+    // (FeaturePermlane32Swap is gated on GFX950Insts), so seeing
+    // it here either means a corrupted disassembly or a wave64
+    // source mis-classified upstream.  Refusing both directions
+    // preserves the "refuse when uncertain" contract the P4
+    // pending row in hotswap/docs/wave-size-translation.md §5.3
+    // documents; the wave64 → wave64 path below is the positive
+    // case this handler now lifts.
+    if (ctx.targetIsa.isWave32()) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "VALU",
+          "v_permlane32_swap_b32 lift refused: target is wave32, "
+          "but the instruction's XOR-32 partner has no wave32 "
+          "analogue (the partner index wraps past the target "
+          "wave).  See the P4 permlane32_swap entry in the "
+          "pending-rewrite table of "
+          "hotswap/docs/wave-size-translation.md \u00a75.3.");
+      return hr;
+    }
+    if (ctx.isa.isWave32()) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "VALU",
+          "v_permlane32_swap_b32 in a wave32 source kernel — no "
+          "wave32 ISA enables FeaturePermlane32Swap (see "
+          "llvm/lib/Target/AMDGPU/AMDGPU.td), so this is either a "
+          "corrupted disassembly or a wave64 source mis-classified "
+          "as wave32 upstream.  Refusing rather than silently "
+          "emitting an XOR-32 partner that cannot exist in the "
+          "source's wave topology.");
+      return hr;
+    }
+    // Wave64 source → wave64 target: emulate via ds_bpermute with
+    // XOR-32 partner, structurally identical to the XOR-16
+    // V_PERMLANE16_SWAP_B32 arm above (same operand layout — both
+    // use the `VOP_PERMLANE_SWAP` profile in
+    // llvm/lib/Target/AMDGPU/VOP1Instructions.td — and same
+    // convergence semantics).  Only the XOR mask and the
+    // diagnostic SSA-name prefix (`pls32_*`) differ.
+    int src0OutIdx = AMDGPU::getNamedOperandIdx(
+        di.inst.getOpcode(), AMDGPU::OpName::src0_out);
+    if (src0OutIdx < 0 ||
+        static_cast<unsigned>(src0OutIdx) >= di.inst.getNumOperands() ||
+        !di.inst.getOperand(static_cast<unsigned>(src0OutIdx)).isReg()) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "VALU",
+          "v_permlane32_swap_b32 missing OpName::src0_out register "
+          "operand — operand-table mismatch");
+      return hr;
+    }
+    ParsedReg vdstReg = op.dst();
+    ParsedReg src0OutReg =
+        ctx.parseReg(di.getReg(static_cast<unsigned>(src0OutIdx)),
+                      static_cast<unsigned>(src0OutIdx));
+
+    // Snapshot BOTH input values up-front (same read-before-write
+    // ordering concern as V_PERMLANE16_SWAP_B32 above: `vdst_in`
+    // aliases `vdst`, so any `writeReg32` to vdstReg below would
+    // shadow this read if it happened first).
+    Value *vdstIn = ctx.regs.readReg32(ctx.B, vdstReg);
+    Value *src0In = op.src(0);
+
+    // Partner lane: L XOR 32.  Valid for every lane in a wave64
+    // (0..31 ↔ 32..63), which is the instruction's entire
+    // hardware-wave domain — no wrap or inactive-lane-sentinel
+    // concern at the wave-edge.  Byte-address shift by 2 is the
+    // standard ds_bpermute convention.
+    Value *laneId = ctx.emitLaneIdx();
+    Value *partner = ctx.B.CreateXor(laneId, ctx.B.getInt32(32),
+                                      "pls32_partner");
+    Value *bpermIdx = ctx.B.CreateShl(partner, ctx.B.getInt32(2),
+                                       "pls32_addr");
+
+    // Two convergent ds_bpermute calls — one per output VGPR —
+    // matching the V_PERMLANE16_SWAP_B32 emulation's convergence
+    // reasoning: emitted OUTSIDE `emitUnderExec` so all hardware
+    // lanes participate; `writeReg32` below wraps the stores for
+    // EXEC masking on the target side.  EXEC=full at the swap
+    // site is the same corpus invariant the XOR-16 variant
+    // assumes — AITER fmha kernels issue the XOR-32 swap as part
+    // of the main reduction body with EXEC=-1, matching the
+    // Triton-style butterfly-reduction pattern the P4.b note in
+    // §7 documents as deferred-fi-0 future-hardening territory.
+    Function *bperm = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_ds_bpermute);
+    Value *newVdst = ctx.B.CreateCall(bperm, {bpermIdx, src0In},
+                                       "pls32_new_vdst");
+    Value *newSrc0Out = ctx.B.CreateCall(bperm, {bpermIdx, vdstIn},
+                                          "pls32_new_src0_out");
+    ctx.writeReg32(vdstReg, newVdst);
+    ctx.writeReg32(src0OutReg, newSrc0Out);
+    hr.handled = true;
     return hr;
   }
 

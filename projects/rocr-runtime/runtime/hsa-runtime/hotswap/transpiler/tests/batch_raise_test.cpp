@@ -360,15 +360,19 @@ static std::vector<std::string> selectAiterRepresentativeSubset(
 // keeps wall-time on CTest well under the 120 s timeout while still
 // exercising every kernel family we ship against.
 //
-// Known-unsupported opcodes on the subset (tracked via expectedFailures):
-//   v_permlane32_swap_b32 — gfx950 cross-lane swap used by
-//     fmha_v3_fwd/fwd_hd128_bf16{,_causal,_causal_group}.co.  gfx942 has no
-//     native equivalent; a ds_bpermute-based cross-target emulation in
-//     handle_valu_cross_lane.cpp is pending (overlaps with the in-flight
-//     softmax / permlanex16 investigation, see
-//     hotswap/docs/triage-2026-04-20-softmax-matmul128.md §2).  When that
-//     lands, drop kSubsetExpectedFailures back to 0 (the test already warns
-//     when the actual count drops below the expectation).
+// Known-unsupported opcodes on the subset: none today.  The last known
+// gap — `v_permlane32_swap_b32` (gfx950 cross-lane swap used by
+// fmha_v3_fwd/fwd_hd128_bf16{,_causal,_causal_group}.co; gfx942 has no
+// native equivalent) — landed as a ds_bpermute-based wave64-to-wave64
+// emulation in handle_valu_cross_lane.cpp's V_PERMLANE32_SWAP_B32 arm:
+// partner = laneId XOR 32, two bpermutes per swap, structurally
+// identical to the V_PERMLANE16_SWAP_B32 arm but with the XOR mask
+// widened.  The emulation graduates the 3 fmha kernels that were
+// the subset's entire expected-failure budget, so
+// `kSubsetExpectedFailures` is now 0.  Bump up when a new
+// unsupported mnemonic legitimately lands in the subset; the helper
+// warns if actual < expected so unexpected graduations surface as a
+// prompt-for-update rather than as a silent miscount.
 //
 // Pass `--test-all` to sweep the full corpus (1,300+ kernels today).  The
 // full sweep is a pure coverage report (regression check disabled) and is
@@ -381,10 +385,12 @@ static std::vector<std::string> selectAiterRepresentativeSubset(
 //   # full sweep (coverage-only):
 //   ./build/transpiler_tests --gtest_filter=BatchRaise.AiterGfx950 --test-all
 TEST(BatchRaise, AiterGfx950) {
-  // Current known-failing kernels on the representative subset.  Bump up
-  // when a new mnemonic legitimately lands in the subset; bump down when
-  // raiser support expands (the helper warns if actual < expected).
-  constexpr int kSubsetExpectedFailures = 3;
+  // Current known-failing kernels on the representative subset.  Zero
+  // after the v_permlane32_swap_b32 graduation (see the comment block
+  // above for the graduation path).  Bump up when a new mnemonic
+  // legitimately lands in the subset; bump down when raiser support
+  // expands (the helper warns if actual < expected).
+  constexpr int kSubsetExpectedFailures = 0;
 
   std::string path = AITER_CORPUS_DIR;
   if (!fileExists(path))
