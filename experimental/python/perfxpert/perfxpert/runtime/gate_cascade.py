@@ -111,9 +111,7 @@ def _run_sol_gate(
             gfx_id=gfx_id,
         )
         # sol.sanity_check returns {"plausible": bool, "reason": str, "sol_peak": float}
-        r["ok"] = r["plausible"]
-        r["peak_ratio"] = claimed_speedup
-        return r
+        return {**r, "ok": r.get("plausible", False), "peak_ratio": claimed_speedup}
 
     # No absolute FLOPS available; tier-1 passed, so accept
     return {

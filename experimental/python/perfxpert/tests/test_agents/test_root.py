@@ -4,6 +4,7 @@ Each test scripts the mocked LLM response and asserts the routing /
 handoff / output shape.
 """
 
+from pathlib import Path
 import pytest
 from unittest.mock import MagicMock
 
@@ -11,8 +12,9 @@ from perfxpert.agents import root as root_module
 from perfxpert.agents import schemas
 from perfxpert.agents.framework import (
     Agent, AgentConstructionError, HandoffPolicyViolation, ToolAllowlistViolation,
-    FakeProviderResponse,
+    FakeProviderResponse, dispatch_tool,
 )
+from perfxpert.tools import tasks as tasks_tool
 
 
 # -- Construction ---------------------------------------------------------
@@ -26,6 +28,51 @@ def test_root_agent_builds():
 def test_root_tool_allowlist_size():
     agent = root_module.build_root_agent()
     assert len(agent.tools) <= 5
+
+
+def test_root_uses_real_task_store_functions():
+    agent = root_module.build_root_agent()
+    bindings = {tool.name: tool.fn for tool in agent.tools}
+    assert bindings["tasks.next"] is not None
+    assert bindings["tasks.create"] is not None
+    assert bindings["tasks.update"] is not None
+    assert bindings["tasks.close"] is not None
+    assert bindings["tasks.next"] is tasks_tool.next
+    assert bindings["tasks.create"] is tasks_tool.create
+    assert bindings["tasks.update"] is tasks_tool.update
+    assert bindings["tasks.close"] is tasks_tool.close
+
+
+def test_root_uses_source_dir_for_task_store(tmp_path: Path, monkeypatch):
+    source_dir = tmp_path / "project"
+    source_dir.mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    def fake_run_agent(agent, input_payload, **kwargs):
+        dispatch_tool(agent, "tasks.create", {"title": "from-root"})
+        return {
+            "structured_output": {
+                "narrative": "ok",
+                "recommendations": [],
+                "primary_bottleneck": "mixed",
+                "warnings": [],
+                "metadata": {},
+            }
+        }
+
+    monkeypatch.setattr(root_module, "run_agent", fake_run_agent)
+    root_module.run_root(
+        schemas.RootInput(
+            user_query="track this work",
+            source_dir=str(source_dir),
+            database_path=str(source_dir / "trace.db"),
+        ),
+        airgap=False,
+        provider="anthropic",
+    )
+
+    assert (source_dir / ".beads" / "tasks.db").exists()
+    assert not (tmp_path / ".beads" / "tasks.db").exists()
 
 
 def test_root_allowed_handoffs_exactly_three():

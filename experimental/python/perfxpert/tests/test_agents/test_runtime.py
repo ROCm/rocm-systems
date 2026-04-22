@@ -6,7 +6,7 @@ import pytest
 
 from perfxpert.agents import runtime as runtime_module
 from perfxpert.agents import schemas
-from perfxpert.runtime import RecursionGuardViolation
+from perfxpert.runtime import RecursionGuardViolation, recursion_guard
 
 
 def test_session_builds_with_anthropic(monkeypatch):
@@ -26,6 +26,12 @@ def test_session_rejects_opencode_recursion(monkeypatch):
     monkeypatch.setenv("PERFXPERT_IN_OPENCODE_SESSION", "1")
     with pytest.raises(RecursionGuardViolation):
         runtime_module.build_session(provider="opencode")
+
+
+def test_session_rejects_opencode_recursion_from_local_session_state():
+    with recursion_guard.opencode_session():
+        with pytest.raises(RecursionGuardViolation):
+            runtime_module.build_session(provider="opencode")
 
 
 def test_session_honors_PERFXPERT_AIRGAP(monkeypatch):

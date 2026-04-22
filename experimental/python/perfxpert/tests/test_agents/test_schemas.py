@@ -53,8 +53,32 @@ def test_recommendation_input_threads_findings():
         hot_kernels=[{"name": "[KERNEL_1]", "pct": 0.80}],
         counter_data_available=False,
     )
-    m = schemas.RecommendationInput(findings=findings, kernel_filter=None)
+    m = schemas.RecommendationInput(findings=findings, gfx_id="gfx942", kernel_filter=None)
     assert m.findings.primary_bottleneck == "compute"
+
+
+def test_recommendation_input_requires_gfx_id():
+    findings = schemas.AnalysisOutput(
+        primary_bottleneck="compute",
+        confidence=0.9,
+        time_breakdown={"kernel_pct": 0.9, "memcpy_pct": 0.0, "api_pct": 0.05, "idle_pct": 0.05},
+        hot_kernels=[{"name": "[KERNEL_1]", "pct": 0.80}],
+        counter_data_available=False,
+    )
+    with pytest.raises(ValidationError):
+        schemas.RecommendationInput(findings=findings)
+
+
+def test_recommendation_input_carries_gfx_id():
+    findings = schemas.AnalysisOutput(
+        primary_bottleneck="compute",
+        confidence=0.9,
+        time_breakdown={"kernel_pct": 0.9, "memcpy_pct": 0.0, "api_pct": 0.05, "idle_pct": 0.05},
+        hot_kernels=[{"name": "[KERNEL_1]", "pct": 0.80}],
+        counter_data_available=False,
+    )
+    m = schemas.RecommendationInput(findings=findings, gfx_id="gfx950")
+    assert m.gfx_id == "gfx950"
 
 
 def test_recommendation_output_carries_ranked_list():
@@ -106,8 +130,10 @@ def test_correctness_input_consumes_gate_verdict():
         gate_verdict=verdict,
         kernel_name="[KERNEL_1]",
         last_technique="launch_bounds",
+        source_dir="/tmp/project",
     )
     assert m.gate_verdict.status == "regressed"
+    assert m.source_dir == "/tmp/project"
 
 
 def test_correctness_output_action_enum():

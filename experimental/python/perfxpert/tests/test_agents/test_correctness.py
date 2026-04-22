@@ -42,7 +42,7 @@ def test_correctness_has_no_gate_tools():
 
 def test_correctness_no_allowed_handoffs():
     agent = cor_module.build_correctness_agent()
-    assert agent.allowed_handoffs == []
+    assert agent.allowed_handoffs == ()
 
 
 def test_correctness_pass_verdict_returns_accept(fake_provider):
@@ -86,7 +86,12 @@ def test_correctness_regressed_proposes_alternative(monkeypatch):
     """On regression → propose alternative NOT in tasks.query_by_kernel history."""
     # Prior attempt: launch_bounds. Alternative should differ.
     monkeypatch.setattr(cor_module, "_tasks_query_by_kernel",
-                        lambda kernel_name: [{"technique": "launch_bounds"}])
+                        lambda kernel_name, root=None: [{
+                            "meta": {
+                                "technique": "launch_bounds",
+                                "candidate_alternative": "occupancy_tune",
+                            }
+                        }])
     v = schemas.GateVerdictModel(
         status="regressed", failing_gate="regression",
         detail="total +12%", delta_pct=12.0,
@@ -102,13 +107,113 @@ def test_correctness_regressed_proposes_alternative(monkeypatch):
     # Alternative, if any, must not match the already-tried technique
     if result.alternative_technique:
         assert result.alternative_technique != "launch_bounds"
+        assert result.alternative_technique == "occupancy_tune"
+
+
+def test_correctness_regressed_does_not_create_follow_up_task(monkeypatch):
+    created = {}
+
+    def fake_create(**kw):
+        created["called"] = True
+        return "task_123"
+
+    monkeypatch.setattr(cor_module, "_tasks_create", fake_create)
+    monkeypatch.setattr(cor_module, "_tasks_query_by_kernel", lambda kernel_name, root=None: [])
+    v = schemas.GateVerdictModel(
+        status="regressed", failing_gate="regression",
+        detail="total +12%", delta_pct=12.0,
+    )
+    result = cor_module.run_correctness(
+        schemas.CorrectnessInput(gate_verdict=v, kernel_name="[K1]"),
+        airgap=True,
+    )
+    assert created == {}
+    assert result.follow_up_task_id is None
+
+
+def test_correctness_reject_requires_compatible_tasks_create_signature(monkeypatch):
+    def bad_create(title):
+        return title
+
+    monkeypatch.setattr(cor_module, "_tasks_create", bad_create)
+    v = schemas.GateVerdictModel(
+        status="reject", failing_gate="bitwise", detail="output diverged 0.1",
+    )
+    with pytest.raises(TypeError, match="tasks.create binding"):
+        cor_module.run_correctness(
+            schemas.CorrectnessInput(gate_verdict=v, kernel_name="[K1]"),
+            airgap=True,
+        )
+
+
+def test_correctness_llm_alternative_is_filtered_against_history(fake_provider, monkeypatch):
+    fake_provider.return_value = FakeProviderResponse(
+        structured_output={
+            "narrative": "Try launch_bounds again.",
+            "alternative_technique": "launch_bounds",
+        },
+    )
+    monkeypatch.setattr(
+        cor_module,
+        "_tasks_query_by_kernel",
+        lambda kernel_name, root=None: [{"meta": {"technique": "launch_bounds"}}],
+    )
+    v = schemas.GateVerdictModel(
+        status="regressed", failing_gate="regression",
+        detail="total +12%", delta_pct=12.0,
+    )
+    result = cor_module.run_correctness(
+        schemas.CorrectnessInput(
+            gate_verdict=v, kernel_name="[K1]", last_technique="launch_bounds",
+        ),
+        provider="anthropic",
+        airgap=False,
+    )
+    assert result.alternative_technique is None
+
+
+def test_correctness_uses_source_dir_task_store(tmp_path, monkeypatch):
+    project_dir = tmp_path / "project"
+    cwd_dir = tmp_path / "cwd"
+    project_dir.mkdir()
+    cwd_dir.mkdir()
+    monkeypatch.chdir(cwd_dir)
+
+    from perfxpert.tools import tasks as tasks_tool
+
+    tasks_tool.create_at(
+        str(project_dir),
+        "Tried launch_bounds",
+        meta={
+            "kernel": "[K1]",
+            "technique": "launch_bounds",
+            "candidate_alternative": "occupancy_tune",
+        },
+    )
+
+    v = schemas.GateVerdictModel(
+        status="regressed", failing_gate="regression",
+        detail="total +12%", delta_pct=12.0,
+    )
+    result = cor_module.run_correctness(
+        schemas.CorrectnessInput(
+            gate_verdict=v,
+            kernel_name="[K1]",
+            last_technique="launch_bounds",
+            source_dir=str(project_dir),
+        ),
+        airgap=True,
+    )
+
+    assert result.alternative_technique == "occupancy_tune"
+    assert not (cwd_dir / ".beads" / "tasks.db").exists()
 
 
 def test_correctness_airgap_narrative_is_deterministic_template(monkeypatch):
     """Air-gap narrative uses template: "Gate {id} {verdict}: {reason}"."""
     monkeypatch.setenv("PERFXPERT_AIRGAP", "1")
     monkeypatch.setattr(cor_module, "_tasks_query_by_kernel",
-                        lambda kernel_name: [])
+                        lambda kernel_name, root=None: [])
     v = schemas.GateVerdictModel(
         status="regressed", failing_gate="regression",
         detail="total +12%", delta_pct=12.0,

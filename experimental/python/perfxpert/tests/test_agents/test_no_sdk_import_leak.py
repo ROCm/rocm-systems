@@ -5,10 +5,8 @@ that none of them imports `openai_agents`, `openai.agents`, or similar —
 except framework.py itself.
 """
 
-import re
+import ast
 from pathlib import Path
-
-import pytest
 
 
 AGENT_PKG = Path(__file__).parent.parent.parent / "perfxpert" / "agents"
@@ -16,22 +14,24 @@ RUNTIME_PKG = Path(__file__).parent.parent.parent / "perfxpert" / "runtime"
 
 ALLOWED = {"framework.py"}
 
-SDK_IMPORT_RE = re.compile(
-    r"^\s*(from\s+openai_agents|import\s+openai_agents|"
-    r"from\s+openai\.agents|import\s+openai\.agents)",
-    re.MULTILINE,
-)
-
 
 def _scan_tree(root: Path) -> list:
     violators = []
     for py in root.rglob("*.py"):
         if py.name in ALLOWED:
             continue
-        text = py.read_text()
-        if SDK_IMPORT_RE.search(text):
+        tree = ast.parse(py.read_text(), filename=str(py))
+        if any(_is_sdk_import(node) for node in ast.walk(tree)):
             violators.append(str(py))
     return violators
+
+
+def _is_sdk_import(node: ast.AST) -> bool:
+    if isinstance(node, ast.Import):
+        return any(alias.name in {"openai_agents", "openai.agents"} for alias in node.names)
+    if isinstance(node, ast.ImportFrom):
+        return node.module in {"openai_agents", "openai.agents"}
+    return False
 
 
 def test_no_sdk_import_in_agents_package():

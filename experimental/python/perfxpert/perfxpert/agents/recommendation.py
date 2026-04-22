@@ -21,17 +21,13 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from perfxpert.agents import (
-    compute_specialist, latency_specialist, memory_specialist, schemas,
-)
+from perfxpert.agents import compute_specialist, latency_specialist, memory_specialist, schemas
 from perfxpert.agents.framework import Agent, ToolBinding, run_agent
-from perfxpert.tools import plateau, trace_fingerprint
+from perfxpert.tools import plateau, profiling, trace_fingerprint
 
 
 _FENCE_PATH = Path(__file__).parent / "fence" / "recommendation.md"
 
-
-# -- Data-insufficient warning -------------------------------------------
 
 _DATA_INSUFFICIENT_WARNING = """\
 ╔══════════════════════════════════════════════════════════════════════════╗
@@ -63,11 +59,8 @@ _DATA_INSUFFICIENT_WARNING = """\
 
 
 def _warn_data_insufficient() -> None:
-    """Print the data_insufficient warning to stderr. Extracted for test injection."""
     print(_DATA_INSUFFICIENT_WARNING, file=sys.stderr, flush=True)
 
-
-# -- Thin delegators (module-level for test injection) --------------------
 
 def _run_specialist_compute(payload, **kw):
     return compute_specialist.run_compute_specialist(payload, **kw)
@@ -85,13 +78,11 @@ def _plateau_check(history: List[Dict[str, Any]]) -> Dict[str, Any]:
     return plateau.check(history=history)
 
 
-# -- Builder --------------------------------------------------------------
-
 def build_recommendation_agent() -> Agent:
     tools = [
         ToolBinding(name="plateau.check", fn=_plateau_check),
         ToolBinding(name="trace_fingerprint.fingerprint", fn=trace_fingerprint.fingerprint),
-        ToolBinding(name="profiling.fill_gap", fn=lambda **kw: {}),  # placeholder stub
+        ToolBinding(name="profiling.fill_gap", fn=profiling.fill_gap),
     ]
     return Agent(
         name="Recommendation",
@@ -100,23 +91,12 @@ def build_recommendation_agent() -> Agent:
         input_schema=schemas.RecommendationInput,
         output_schema=schemas.RecommendationOutput,
         tools=tools,
-        allowed_handoffs=[
-            "compute_specialist", "memory_specialist", "latency_specialist",
-        ],
+        allowed_handoffs=["compute_specialist", "memory_specialist", "latency_specialist"],
         token_budget=4096,
     )
 
 
-# -- Dispatch + dedup -----------------------------------------------------
-
 def _hash_technique(t: Dict[str, Any]) -> str:
-    """Stable hash for dedup.
-
-    Uses only the ``name`` field as the key to avoid over-specifying.
-    This keeps the hash stable even when non-identity fields like ``rationale``
-    or ``estimated_impact`` are updated — matching the dedup contract used by
-    the session history tracker in agents/runtime.py.
-    """
     key = {"name": t.get("name", "")}
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()
 
@@ -124,6 +104,12 @@ def _hash_technique(t: Dict[str, Any]) -> str:
 def _dedup(techniques: List[Dict[str, Any]], seen: List[str]) -> List[Dict[str, Any]]:
     seen_set = set(seen)
     return [t for t in techniques if _hash_technique(t) not in seen_set]
+
+
+def _require_gfx_id(payload: schemas.RecommendationInput) -> str:
+    if not payload.gfx_id:
+        raise ValueError("RecommendationInput.gfx_id is required for specialist routing")
+    return payload.gfx_id
 
 
 def run_recommendation(
@@ -134,47 +120,43 @@ def run_recommendation(
 ) -> schemas.RecommendationOutput:
     """Route to the right specialist based on bottleneck, dedup results."""
     bottleneck = payload.findings.primary_bottleneck
-
-    # Plateau check (always runs — informs output flag)
     plateau_info = _plateau_check(payload.edit_history)
     plateau_detected = bool(plateau_info.get("plateau_detected", False))
 
-    # Dispatch
     if bottleneck == "data_insufficient":
-        # No hardware counters were collected — classifier was flying blind.
-        # Print a loud, actionable warning and return without recommendations.
         _warn_data_insufficient()
         specialist_used = "none"
         techniques = []
     elif bottleneck == "compute":
+        gfx_id = _require_gfx_id(payload)
         specialist_used = "compute"
         spec_input = schemas.ComputeSpecialistInput(
-            gfx_id="gfx942",   # inferred upstream; placeholder-safe
+            gfx_id=gfx_id,
             hot_kernels=payload.findings.hot_kernels,
             counter_data={},
         )
         spec_out = _run_specialist_compute(spec_input, provider=provider, airgap=airgap)
         techniques = list(spec_out.techniques)
     elif bottleneck == "memory_transfer":
+        gfx_id = _require_gfx_id(payload)
         specialist_used = "memory"
         spec_input = schemas.MemorySpecialistInput(
-            gfx_id="gfx942",
+            gfx_id=gfx_id,
             hot_kernels=payload.findings.hot_kernels,
         )
         spec_out = _run_specialist_memory(spec_input, provider=provider, airgap=airgap)
         techniques = list(spec_out.techniques)
     elif bottleneck in ("latency", "api_overhead"):
+        gfx_id = _require_gfx_id(payload)
         specialist_used = "latency"
         spec_input = schemas.LatencySpecialistInput(
-            gfx_id="gfx942",
+            gfx_id=gfx_id,
             hot_kernels=payload.findings.hot_kernels,
             api_overhead_pct=payload.findings.time_breakdown.get("api_pct", 0.0),
         )
         spec_out = _run_specialist_latency(spec_input, provider=provider, airgap=airgap)
         techniques = list(spec_out.techniques)
     elif bottleneck == "mixed":
-        # "mixed" is a valid classifier output — not an error.  Emit a triage
-        # recommendation directing the user to ATT or doctor for more detail.
         specialist_used = "none"
         techniques = [
             {
@@ -198,17 +180,13 @@ def run_recommendation(
             }
         ]
     else:
-        # Truly unrecognised bottleneck type — this is a programmer error, not a
-        # user-facing data condition. Raise immediately so it surfaces in tests.
         raise ValueError(
             f"unhandled bottleneck type {bottleneck!r}. "
             "Known types: compute | memory_transfer | latency | api_overhead | "
             "mixed | data_insufficient. Add a branch or fix the classifier."
         )
 
-    # Dedup against seen hashes
     techniques = _dedup(techniques, payload.seen_recommendation_hashes)
-
     return schemas.RecommendationOutput(
         recommendations=techniques,
         specialist_used=specialist_used,

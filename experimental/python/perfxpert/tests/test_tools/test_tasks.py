@@ -1,6 +1,6 @@
 """Tests for perfxpert.tools.tasks — beads_rust-compatible Python task store."""
 
-import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -138,3 +138,48 @@ def test_default_store_uses_perfxpert_task_root_env(tmp_path, monkeypatch):
 
     store = tasks_mod._default_store()
     assert store.root == custom_root
+
+
+def test_scoped_store_tracks_given_root(tmp_path: Path):
+    first = tmp_path / "one"
+    second = tmp_path / "two"
+    first.mkdir()
+    second.mkdir()
+
+    first_id = tasks.create_at(str(first), "First task")
+    second_id = tasks.create_at(str(second), "Second task")
+
+    first_store = tasks.TaskStore(first / ".beads")
+    second_store = tasks.TaskStore(second / ".beads")
+    try:
+        assert first_store.next()["id"] == first_id
+        assert second_store.next()["id"] == second_id
+    finally:
+        first_store.close()
+        second_store.close()
+
+
+def test_scoped_store_uses_separate_connections_per_thread(tmp_path: Path):
+    root = tmp_path / "threaded"
+    root.mkdir()
+
+    task_ids = [tasks.create_at(str(root), "main-thread task")]
+    errors = []
+
+    def worker():
+        try:
+            task_ids.append(tasks.create_at(str(root), "worker-thread task"))
+        except Exception as exc:  # pragma: no cover - assertion below inspects exact type
+            errors.append(exc)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join()
+
+    assert errors == []
+    store = tasks.TaskStore(root / ".beads")
+    try:
+        titles = {store.show(task_id)["title"] for task_id in task_ids}
+    finally:
+        store.close()
+    assert titles == {"main-thread task", "worker-thread task"}

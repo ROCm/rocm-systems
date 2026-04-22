@@ -104,6 +104,7 @@ class AnalysisOutput(_FrozenModel):
 
 class RecommendationInput(_FrozenModel):
     findings: AnalysisOutput
+    gfx_id: str
     kernel_filter: Optional[str] = None
     edit_history: List[Dict[str, Any]] = Field(default_factory=list)
     seen_recommendation_hashes: List[str] = Field(default_factory=list)
@@ -122,6 +123,7 @@ class CorrectnessInput(_FrozenModel):
     gate_verdict: GateVerdictModel
     kernel_name: Optional[str] = None
     last_technique: Optional[str] = None
+    source_dir: Optional[str] = None
     edit_history: List[Dict[str, Any]] = Field(default_factory=list)
 
 

@@ -231,7 +231,7 @@ def build_session(
     Args:
         provider: LLM provider name (anthropic/openai/ollama/private/opencode).
                   Ignored when airgap=True.
-        session_id: Explicit id for the task store; uuid4() if None.
+        session_id: Explicit session identifier; uuid4() if None.
         airgap: If True (or PERFXPERT_AIRGAP=1), skip LLM entirely.
         progress_callback: Accepted for compatibility with the public agent
                            wrappers. This runtime does not stream progress.

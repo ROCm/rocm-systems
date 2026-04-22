@@ -51,7 +51,7 @@ def test_analysis_classifies_compute_bound_fixture(compute_bound_db):
     assert out.counter_data_available is True
 
 
-def test_recommendation_dispatches_compute_specialist_in_airgap(compute_bound_db):
+def test_recommendation_dispatches_compute_specialist_in_airgap(compute_bound_db, test_gfx_id):
     """Compute bottleneck must route to compute_specialist — no skip allowed.
 
     This test uses the new compute_bound.db fixture (MFMA GEMM with --pmc counters)
@@ -66,7 +66,7 @@ def test_recommendation_dispatches_compute_specialist_in_airgap(compute_bound_db
         "Check compute_bound.db fixture — it should be the MFMA GEMM DB with PMC counters."
     )
     rec_out = session.run_recommendation(
-        schemas.RecommendationInput(findings=findings)
+        schemas.RecommendationInput(findings=findings, gfx_id=test_gfx_id)
     )
     assert rec_out.specialist_used == "compute"
 
@@ -89,7 +89,7 @@ def test_trace_only_classifies_data_insufficient(trace_only_elementwise_db):
     assert out.counter_data_available is False
 
 
-def test_data_insufficient_verdict_suppresses_recommendations(trace_only_elementwise_db, capsys):
+def test_data_insufficient_verdict_suppresses_recommendations(trace_only_elementwise_db, test_gfx_id, capsys):
     """When classifier returns data_insufficient, recommendation must print warning
     and return no techniques (specialist_used='none').
     """
@@ -100,7 +100,7 @@ def test_data_insufficient_verdict_suppresses_recommendations(trace_only_element
     assert findings.primary_bottleneck == "data_insufficient"
 
     rec_out = session.run_recommendation(
-        schemas.RecommendationInput(findings=findings)
+        schemas.RecommendationInput(findings=findings, gfx_id=test_gfx_id)
     )
     # No recommendations should be generated when data is insufficient
     assert rec_out.specialist_used == "none"

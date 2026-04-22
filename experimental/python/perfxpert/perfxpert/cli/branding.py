@@ -6,6 +6,8 @@ import os
 import shutil
 from typing import List, Optional
 
+from perfxpert.runtime import recursion_guard
+
 
 _AMD_RED = "#ED1C24"
 
@@ -87,8 +89,7 @@ def launch_opencode(
     if dry_run:
         return argv
 
-    env = dict(os.environ)
-    env["PERFXPERT_IN_OPENCODE_SESSION"] = "1"
+    env = recursion_guard.subprocess_env(os.environ)
     os.execvpe(binary, argv, env)
     return argv  # pragma: no cover (execvpe does not return)
 

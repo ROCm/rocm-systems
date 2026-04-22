@@ -8,6 +8,7 @@ from perfxpert.agents import schemas
 from perfxpert.agents.framework import (
     FakeProviderResponse, HandoffPolicyViolation, dispatch_handoff,
 )
+from perfxpert.tools import profiling
 
 
 def _findings(bottleneck: str = "compute") -> schemas.AnalysisOutput:
@@ -28,8 +29,14 @@ def test_recommendation_agent_builds():
 
 def test_recommendation_tool_count():
     agent = rec_module.build_recommendation_agent()
-    # 3 tools: plateau.check, trace.fingerprint, profiling.fill_gap
+    # 3 tools: plateau.check, trace_fingerprint.fingerprint, profiling.fill_gap
     assert 1 <= len(agent.tools) <= 5
+
+
+def test_recommendation_binds_real_fill_gap_tool():
+    agent = rec_module.build_recommendation_agent()
+    tool_map = {tool.name: tool.fn for tool in agent.tools}
+    assert tool_map["profiling.fill_gap"] is profiling.fill_gap
 
 
 def test_recommendation_no_execution_tools():
@@ -58,16 +65,18 @@ def test_recommendation_routes_compute_bottleneck_to_compute_specialist(monkeypa
     called = {}
     def fake_compute(payload, **kw):
         called["compute"] = True
+        called["payload"] = payload
         return schemas.ComputeSpecialistOutput(
             techniques=[{"name": "launch_bounds"}], confidence=0.9,
         )
     monkeypatch.setattr(rec_module, "_run_specialist_compute", fake_compute)
 
     result = rec_module.run_recommendation(
-        schemas.RecommendationInput(findings=_findings("compute")),
+        schemas.RecommendationInput(findings=_findings("compute"), gfx_id="gfx950"),
         airgap=True,   # skip LLM, exercise routing
     )
     assert called.get("compute") is True
+    assert called["payload"].gfx_id == "gfx950"
     assert result.specialist_used == "compute"
 
 
@@ -75,16 +84,18 @@ def test_recommendation_routes_memory_bottleneck_to_memory_specialist(monkeypatc
     called = {}
     def fake_memory(payload, **kw):
         called["memory"] = True
+        called["payload"] = payload
         return schemas.MemorySpecialistOutput(
             techniques=[{"name": "coalesce"}], confidence=0.9,
         )
     monkeypatch.setattr(rec_module, "_run_specialist_memory", fake_memory)
 
     result = rec_module.run_recommendation(
-        schemas.RecommendationInput(findings=_findings("memory_transfer")),
+        schemas.RecommendationInput(findings=_findings("memory_transfer"), gfx_id="gfx950"),
         airgap=True,
     )
     assert called.get("memory") is True
+    assert called["payload"].gfx_id == "gfx950"
     assert result.specialist_used == "memory"
 
 
@@ -92,16 +103,18 @@ def test_recommendation_routes_latency_bottleneck_to_latency_specialist(monkeypa
     called = {}
     def fake_latency(payload, **kw):
         called["latency"] = True
+        called["payload"] = payload
         return schemas.LatencySpecialistOutput(
             techniques=[{"name": "fuse_kernels"}], confidence=0.9,
         )
     monkeypatch.setattr(rec_module, "_run_specialist_latency", fake_latency)
 
     result = rec_module.run_recommendation(
-        schemas.RecommendationInput(findings=_findings("latency")),
+        schemas.RecommendationInput(findings=_findings("latency"), gfx_id="gfx950"),
         airgap=True,
     )
     assert called.get("latency") is True
+    assert called["payload"].gfx_id == "gfx950"
     assert result.specialist_used == "latency"
 
 
@@ -124,6 +137,7 @@ def test_recommendation_dedups_seen_hashes(monkeypatch):
     result = rec_module.run_recommendation(
         schemas.RecommendationInput(
             findings=_findings("compute"),
+            gfx_id="gfx950",
             seen_recommendation_hashes=[h],
         ),
         airgap=True,
@@ -142,7 +156,7 @@ def test_recommendation_plateau_detection(monkeypatch):
     monkeypatch.setattr(rec_module, "_run_specialist_compute", fake_compute)
 
     result = rec_module.run_recommendation(
-        schemas.RecommendationInput(findings=_findings("compute")),
+        schemas.RecommendationInput(findings=_findings("compute"), gfx_id="gfx950"),
         airgap=True,
     )
     assert result.plateau_detected is True
@@ -151,7 +165,7 @@ def test_recommendation_plateau_detection(monkeypatch):
 def test_recommendation_mixed_bottleneck_yields_no_specialist(monkeypatch):
     """Mixed/api_overhead falls through to 'none' specialist."""
     result = rec_module.run_recommendation(
-        schemas.RecommendationInput(findings=_findings("mixed")),
+        schemas.RecommendationInput(findings=_findings("mixed"), gfx_id="gfx950"),
         airgap=True,
     )
     assert result.specialist_used == "none"
@@ -160,7 +174,7 @@ def test_recommendation_mixed_bottleneck_yields_no_specialist(monkeypatch):
 def test_recommendation_mixed_bottleneck_emits_triage():
     """'mixed' bottleneck must produce a non-empty triage recommendation, not silent empty."""
     result = rec_module.run_recommendation(
-        schemas.RecommendationInput(findings=_findings("mixed")),
+        schemas.RecommendationInput(findings=_findings("mixed"), gfx_id="gfx950"),
         airgap=True,
     )
     assert result.specialist_used == "none"
@@ -188,9 +202,17 @@ def test_recommendation_raises_on_unknown_bottleneck(monkeypatch):
     # Bypass schema validation by replacing the frozen field via object.__setattr__
     object.__setattr__(findings, "primary_bottleneck", "totally_unknown_type")
 
-    payload = schemas.RecommendationInput(findings=_findings("compute"))
+    payload = schemas.RecommendationInput(findings=_findings("compute"), gfx_id="gfx950")
     # Patch findings on the payload to inject the unknown type
     object.__setattr__(payload.findings, "primary_bottleneck", "totally_unknown_type")
 
     with pytest.raises(ValueError, match="unhandled bottleneck type"):
         rec_module.run_recommendation(payload, airgap=True)
+
+
+def test_recommendation_requires_non_empty_gfx_id_for_specialist_routing():
+    with pytest.raises(ValueError, match="gfx_id"):
+        rec_module.run_recommendation(
+            schemas.RecommendationInput(findings=_findings("compute"), gfx_id=""),
+            airgap=True,
+        )

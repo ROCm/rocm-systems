@@ -114,24 +114,30 @@ class Agent:
     """
 
     name: str
-    layer: int  # 0=Root, 1=DecisionMaker, 2=Specialist
-    fence_path: Optional[str]  # None = no fence file (test/placeholder)
-    input_schema: Type  # Pydantic model (or dict for tests)
-    output_schema: Type  # Pydantic model (or dict for tests)
-    tools: List[ToolBinding] = field(default_factory=list)
-    allowed_handoffs: List[str] = field(default_factory=list)
+    layer: int                              # 0=Root, 1=DecisionMaker, 2=Specialist
+    fence_path: Optional[str]               # None = no fence file (test/placeholder)
+    input_schema: Type                      # Pydantic model (or dict for tests)
+    output_schema: Type                     # Pydantic model (or dict for tests)
+    tools: Tuple[ToolBinding, ...] = field(default_factory=tuple)
+    allowed_handoffs: Tuple[str, ...] = field(default_factory=tuple)
     token_budget: int = 4096
     fence_text: str = field(init=False, default="")
     fence_line_count: int = field(init=False, default=0)
 
     def __post_init__(self) -> None:
+        tools = tuple(self.tools)
+        allowed_handoffs = tuple(self.allowed_handoffs)
+        object.__setattr__(self, "tools", tools)
+        object.__setattr__(self, "allowed_handoffs", allowed_handoffs)
+
         if self.layer not in (0, 1, 2):
             raise AgentConstructionError(
-                f"Agent {self.name}: layer={self.layer} — must be 0 (Root), " "1 (DecisionMaker), or 2 (Specialist)"
+                f"Agent {self.name}: layer={self.layer} — must be 0 (Root), "
+                "1 (DecisionMaker), or 2 (Specialist)"
             )
 
-        if len(self.tools) > 5:
-            raise AgentConstructionError(f"Agent {self.name}: {len(self.tools)} tools declared (cap is 5)")
+        if len(tools) > 5:
+            raise AgentConstructionError(f"Agent {self.name}: {len(tools)} tools declared (cap is 5)")
 
         if self.fence_path is not None:
             text = Path(self.fence_path).read_text()
