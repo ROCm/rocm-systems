@@ -14,17 +14,16 @@
 namespace rocjitsu {
 namespace rdna2 {
 
-class ExpExp : public Exp
-{
-  public:
-   ExpExp(const MachineInst * inst);
+class ExpExp : public Exp {
+public:
+  ExpExp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand tgt;
   Operand vsrc0;
   Operand vsrc1;
   Operand vsrc2;
   Operand vsrc3;
-} ;
+};
 
 } // namespace rdna2
 } // namespace rocjitsu

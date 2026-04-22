@@ -14,48 +14,42 @@ namespace cdna1 {
 
 using MachineInst = uint32_t;
 
-struct Sop1MachineInst
-{
+struct Sop1MachineInst {
   uint32_t ssrc0 : 8;
   uint32_t op : 8;
   uint32_t sdst : 7;
   uint32_t encoding : 9;
-} ;
+};
 
-struct SopcMachineInst
-{
+struct SopcMachineInst {
   uint32_t ssrc0 : 8;
   uint32_t ssrc1 : 8;
   uint32_t op : 7;
   uint32_t encoding : 9;
-} ;
+};
 
-struct SoppMachineInst
-{
+struct SoppMachineInst {
   uint32_t simm16 : 16;
   uint32_t op : 7;
   uint32_t encoding : 9;
-} ;
+};
 
-struct SopkMachineInst
-{
+struct SopkMachineInst {
   uint32_t simm16 : 16;
   uint32_t sdst : 7;
   uint32_t op : 5;
   uint32_t encoding : 4;
-} ;
+};
 
-struct Sop2MachineInst
-{
+struct Sop2MachineInst {
   uint32_t ssrc0 : 8;
   uint32_t ssrc1 : 8;
   uint32_t sdst : 7;
   uint32_t op : 7;
   uint32_t encoding : 2;
-} ;
+};
 
-struct SmemMachineInst
-{
+struct SmemMachineInst {
   uint32_t sbase : 6;
   uint32_t sdata : 7;
   uint32_t pad_13 : 1;
@@ -68,45 +62,40 @@ struct SmemMachineInst
   uint32_t offset : 21;
   uint32_t pad_53_56 : 4;
   uint32_t soffset : 7;
-} ;
+};
 
-struct Vop1MachineInst
-{
+struct Vop1MachineInst {
   uint32_t src0 : 9;
   uint32_t op : 8;
   uint32_t vdst : 8;
   uint32_t encoding : 7;
-} ;
+};
 
-struct VopcMachineInst
-{
+struct VopcMachineInst {
   uint32_t src0 : 9;
   uint32_t vsrc1 : 8;
   uint32_t op : 8;
   uint32_t encoding : 7;
-} ;
+};
 
-struct Vop2MachineInst
-{
+struct Vop2MachineInst {
   uint32_t src0 : 9;
   uint32_t vsrc1 : 8;
   uint32_t vdst : 8;
   uint32_t op : 6;
   uint32_t encoding : 1;
-} ;
+};
 
-struct VintrpMachineInst
-{
+struct VintrpMachineInst {
   uint32_t vsrc : 8;
   uint32_t attrchan : 2;
   uint32_t attr : 6;
   uint32_t op : 2;
   uint32_t vdst : 8;
   uint32_t encoding : 6;
-} ;
+};
 
-struct Vop3pMachineInst
-{
+struct Vop3pMachineInst {
   uint32_t vdst : 8;
   uint32_t neg_hi : 3;
   uint32_t op_sel : 3;
@@ -119,10 +108,9 @@ struct Vop3pMachineInst
   uint32_t src2 : 9;
   uint32_t op_sel_hi : 2;
   uint32_t neg : 3;
-} ;
+};
 
-struct Vop3MachineInst
-{
+struct Vop3MachineInst {
   uint32_t vdst : 8;
   uint32_t abs : 3;
   uint32_t op_sel : 4;
@@ -134,10 +122,9 @@ struct Vop3MachineInst
   uint32_t src2 : 9;
   uint32_t omod : 2;
   uint32_t neg : 3;
-} ;
+};
 
-struct DsMachineInst
-{
+struct DsMachineInst {
   uint32_t offset0 : 8;
   uint32_t offset1 : 8;
   uint32_t gds : 1;
@@ -148,10 +135,9 @@ struct DsMachineInst
   uint32_t data0 : 8;
   uint32_t data1 : 8;
   uint32_t vdst : 8;
-} ;
+};
 
-struct MubufMachineInst
-{
+struct MubufMachineInst {
   uint32_t offset : 12;
   uint32_t offen : 1;
   uint32_t idxen : 1;
@@ -168,10 +154,9 @@ struct MubufMachineInst
   uint32_t pad_53_54 : 2;
   uint32_t tfe : 1;
   uint32_t soffset : 8;
-} ;
+};
 
-struct MtbufMachineInst
-{
+struct MtbufMachineInst {
   uint32_t offset : 12;
   uint32_t offen : 1;
   uint32_t idxen : 1;
@@ -187,10 +172,9 @@ struct MtbufMachineInst
   uint32_t slc : 1;
   uint32_t tfe : 1;
   uint32_t soffset : 8;
-} ;
+};
 
-struct MimgMachineInst
-{
+struct MimgMachineInst {
   uint32_t opm : 1;
   uint32_t pad_1_7 : 7;
   uint32_t dmask : 4;
@@ -209,10 +193,9 @@ struct MimgMachineInst
   uint32_t ssamp : 5;
   uint32_t pad_58_62 : 5;
   uint32_t d16 : 1;
-} ;
+};
 
-struct ExpMachineInst
-{
+struct ExpMachineInst {
   uint32_t en : 4;
   uint32_t tgt : 6;
   uint32_t compr : 1;
@@ -224,10 +207,9 @@ struct ExpMachineInst
   uint32_t vsrc1 : 8;
   uint32_t vsrc2 : 8;
   uint32_t vsrc3 : 8;
-} ;
+};
 
-struct FlatMachineInst
-{
+struct FlatMachineInst {
   uint32_t offset : 12;
   uint32_t pad_12 : 1;
   uint32_t lds : 1;
@@ -242,10 +224,9 @@ struct FlatMachineInst
   uint32_t saddr : 7;
   uint32_t nv : 1;
   uint32_t vdst : 8;
-} ;
+};
 
-struct FlatGlblMachineInst
-{
+struct FlatGlblMachineInst {
   uint32_t offset : 13;
   uint32_t lds : 1;
   uint32_t seg : 2;
@@ -259,10 +240,9 @@ struct FlatGlblMachineInst
   uint32_t saddr : 7;
   uint32_t nv : 1;
   uint32_t vdst : 8;
-} ;
+};
 
-struct FlatScratchMachineInst
-{
+struct FlatScratchMachineInst {
   uint32_t offset : 13;
   uint32_t lds : 1;
   uint32_t seg : 2;
@@ -276,56 +256,50 @@ struct FlatScratchMachineInst
   uint32_t saddr : 7;
   uint32_t nv : 1;
   uint32_t vdst : 8;
-} ;
+};
 
-struct Sop1InstLiteralMachineInst
-{
+struct Sop1InstLiteralMachineInst {
   uint32_t ssrc0 : 8;
   uint32_t op : 8;
   uint32_t sdst : 7;
   uint32_t encoding : 9;
   uint32_t simm32 : 32;
-} ;
+};
 
-struct Sop2InstLiteralMachineInst
-{
+struct Sop2InstLiteralMachineInst {
   uint32_t ssrc0 : 8;
   uint32_t ssrc1 : 8;
   uint32_t sdst : 7;
   uint32_t op : 7;
   uint32_t encoding : 2;
   uint32_t simm32 : 32;
-} ;
+};
 
-struct SopcInstLiteralMachineInst
-{
+struct SopcInstLiteralMachineInst {
   uint32_t ssrc0 : 8;
   uint32_t ssrc1 : 8;
   uint32_t op : 7;
   uint32_t encoding : 9;
   uint32_t simm32 : 32;
-} ;
+};
 
-struct SopkInstLiteralMachineInst
-{
+struct SopkInstLiteralMachineInst {
   uint32_t simm16 : 16;
   uint32_t sdst : 7;
   uint32_t op : 5;
   uint32_t encoding : 4;
   uint32_t simm32 : 32;
-} ;
+};
 
-struct Vop1InstLiteralMachineInst
-{
+struct Vop1InstLiteralMachineInst {
   uint32_t src0 : 9;
   uint32_t op : 8;
   uint32_t vdst : 8;
   uint32_t encoding : 7;
   uint32_t simm32 : 32;
-} ;
+};
 
-struct Vop1VopDppMachineInst
-{
+struct Vop1VopDppMachineInst {
   uint32_t src0 : 9;
   uint32_t op : 8;
   uint32_t vdst : 8;
@@ -340,10 +314,9 @@ struct Vop1VopDppMachineInst
   uint32_t src1_abs : 1;
   uint32_t bank_mask : 4;
   uint32_t row_mask : 4;
-} ;
+};
 
-struct Vop1VopSdwaMachineInst
-{
+struct Vop1VopSdwaMachineInst {
   uint32_t src0 : 9;
   uint32_t op : 8;
   uint32_t vdst : 8;
@@ -365,20 +338,18 @@ struct Vop1VopSdwaMachineInst
   uint32_t src1_abs : 1;
   uint32_t pad_62 : 1;
   uint32_t s1 : 1;
-} ;
+};
 
-struct Vop2InstLiteralMachineInst
-{
+struct Vop2InstLiteralMachineInst {
   uint32_t src0 : 9;
   uint32_t vsrc1 : 8;
   uint32_t vdst : 8;
   uint32_t op : 6;
   uint32_t encoding : 1;
   uint32_t simm32 : 32;
-} ;
+};
 
-struct Vop2VopDppMachineInst
-{
+struct Vop2VopDppMachineInst {
   uint32_t src0 : 9;
   uint32_t vsrc1 : 8;
   uint32_t vdst : 8;
@@ -394,10 +365,9 @@ struct Vop2VopDppMachineInst
   uint32_t src1_abs : 1;
   uint32_t bank_mask : 4;
   uint32_t row_mask : 4;
-} ;
+};
 
-struct Vop2VopSdwaMachineInst
-{
+struct Vop2VopSdwaMachineInst {
   uint32_t src0 : 9;
   uint32_t vsrc1 : 8;
   uint32_t vdst : 8;
@@ -420,10 +390,9 @@ struct Vop2VopSdwaMachineInst
   uint32_t src1_abs : 1;
   uint32_t pad_62 : 1;
   uint32_t s1 : 1;
-} ;
+};
 
-struct Vop2VopSdwaSdstEncMachineInst
-{
+struct Vop2VopSdwaSdstEncMachineInst {
   uint32_t src0 : 9;
   uint32_t vsrc1 : 8;
   uint32_t vdst : 8;
@@ -444,10 +413,9 @@ struct Vop2VopSdwaSdstEncMachineInst
   uint32_t src1_abs : 1;
   uint32_t pad_62 : 1;
   uint32_t s1 : 1;
-} ;
+};
 
-struct Vop3SdstEncMachineInst
-{
+struct Vop3SdstEncMachineInst {
   uint32_t vdst : 8;
   uint32_t sdst : 7;
   uint32_t clamp : 1;
@@ -458,10 +426,9 @@ struct Vop3SdstEncMachineInst
   uint32_t src2 : 9;
   uint32_t omod : 2;
   uint32_t neg : 3;
-} ;
+};
 
-struct Vop3pMfmaMachineInst
-{
+struct Vop3pMfmaMachineInst {
   uint32_t vdst : 8;
   uint32_t cbsz : 3;
   uint32_t abid : 4;
@@ -473,19 +440,17 @@ struct Vop3pMfmaMachineInst
   uint32_t src2 : 9;
   uint32_t acc : 2;
   uint32_t blgp : 3;
-} ;
+};
 
-struct VopcInstLiteralMachineInst
-{
+struct VopcInstLiteralMachineInst {
   uint32_t src0 : 9;
   uint32_t vsrc1 : 8;
   uint32_t op : 8;
   uint32_t encoding : 7;
   uint32_t simm32 : 32;
-} ;
+};
 
-struct VopcVopSdwaSdstEncMachineInst
-{
+struct VopcVopSdwaSdstEncMachineInst {
   uint32_t src0 : 9;
   uint32_t vsrc1 : 8;
   uint32_t op : 8;
@@ -505,7 +470,7 @@ struct VopcVopSdwaSdstEncMachineInst
   uint32_t src1_abs : 1;
   uint32_t pad_62 : 1;
   uint32_t s1 : 1;
-} ;
+};
 
 } // namespace cdna1
 } // namespace rocjitsu

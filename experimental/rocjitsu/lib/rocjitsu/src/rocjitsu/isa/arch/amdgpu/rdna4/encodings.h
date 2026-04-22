@@ -16,51 +16,46 @@
 namespace rocjitsu {
 namespace rdna4 {
 
-class Sop1 : public IsaInstruction<Isa>
-{
-  public:
-   Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn);
+class Sop1 : public IsaInstruction<Isa> {
+public:
+  Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn);
   bool default_encoding();
   bool has_lit_0();
   using OpEncoding = Sop1MachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Sopc : public IsaInstruction<Isa>
-{
-  public:
-   Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn);
+class Sopc : public IsaInstruction<Isa> {
+public:
+  Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn);
   bool default_encoding();
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_has_lit_1();
   using OpEncoding = SopcMachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Sopp : public IsaInstruction<Isa>
-{
-  public:
-   Sopp(std::string_view mnemonic, const SoppMachineInst *inst, ExecuteFn exec_fn);
+class Sopp : public IsaInstruction<Isa> {
+public:
+  Sopp(std::string_view mnemonic, const SoppMachineInst *inst, ExecuteFn exec_fn);
   bool default_encoding();
   using OpEncoding = SoppMachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Sopk : public IsaInstruction<Isa>
-{
-  public:
-   Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exec_fn);
+class Sopk : public IsaInstruction<Isa> {
+public:
+  Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exec_fn);
   bool default_encoding();
   bool hasImpliedLiteral();
   using OpEncoding = SopkMachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Sop2 : public IsaInstruction<Isa>
-{
-  public:
-   Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn);
+class Sop2 : public IsaInstruction<Isa> {
+public:
+  Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn);
   bool default_encoding();
   bool has_lit_0();
   bool has_lit_1();
@@ -68,21 +63,19 @@ class Sop2 : public IsaInstruction<Isa>
   bool hasImpliedLiteral();
   using OpEncoding = Sop2MachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Smem : public IsaInstruction<Isa>
-{
-  public:
-   Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn);
+class Smem : public IsaInstruction<Isa> {
+public:
+  Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn);
   void build_modifiers(std::string &out) const override;
   using OpEncoding = SmemMachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Vop1 : public IsaInstruction<Isa>
-{
-  public:
-   Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
+class Vop1 : public IsaInstruction<Isa> {
+public:
+  Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
   bool default_encoding();
   bool has_lit();
   using OpEncoding = Vop1MachineInst;
@@ -96,22 +89,20 @@ class Vop1 : public IsaInstruction<Isa>
   bool sdwa_src0_sext_ = false;
   uint32_t sdwa_dst_sel_ = 6;
   uint32_t sdwa_dst_unused_ = 0;
-} ;
+};
 
-class Vopc : public IsaInstruction<Isa>
-{
-  public:
-   Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn);
+class Vopc : public IsaInstruction<Isa> {
+public:
+  Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn);
   bool default_encoding();
   bool has_lit();
   using OpEncoding = VopcMachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Vop2 : public IsaInstruction<Isa>
-{
-  public:
-   Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
+class Vop2 : public IsaInstruction<Isa> {
+public:
+  Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
   bool default_encoding();
   bool has_lit();
   bool hasImpliedLiteral();
@@ -126,12 +117,11 @@ class Vop2 : public IsaInstruction<Isa>
   bool sdwa_src0_sext_ = false;
   uint32_t sdwa_dst_sel_ = 6;
   uint32_t sdwa_dst_unused_ = 0;
-} ;
+};
 
-class Vop3 : public IsaInstruction<Isa>
-{
-  public:
-   Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
+class Vop3 : public IsaInstruction<Isa> {
+public:
+  Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_has_lit_1();
@@ -141,12 +131,11 @@ class Vop3 : public IsaInstruction<Isa>
   bool has_lit_0_has_lit_1_has_lit_2();
   using OpEncoding = Vop3MachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Vop3p : public IsaInstruction<Isa>
-{
-  public:
-   Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn);
+class Vop3p : public IsaInstruction<Isa> {
+public:
+  Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn);
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_has_lit_1();
@@ -156,100 +145,89 @@ class Vop3p : public IsaInstruction<Isa>
   bool has_lit_0_has_lit_1_has_lit_2();
   using OpEncoding = Vop3pMachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Vinterp : public IsaInstruction<Isa>
-{
-  public:
-   Vinterp(std::string_view mnemonic, const VinterpMachineInst *inst, ExecuteFn exec_fn);
+class Vinterp : public IsaInstruction<Isa> {
+public:
+  Vinterp(std::string_view mnemonic, const VinterpMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = VinterpMachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Vdsdir : public IsaInstruction<Isa>
-{
-  public:
-   Vdsdir(std::string_view mnemonic, const VdsdirMachineInst *inst, ExecuteFn exec_fn);
+class Vdsdir : public IsaInstruction<Isa> {
+public:
+  Vdsdir(std::string_view mnemonic, const VdsdirMachineInst *inst, ExecuteFn exec_fn);
   bool default_encoding();
   using OpEncoding = VdsdirMachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Vds : public IsaInstruction<Isa>
-{
-  public:
-   Vds(std::string_view mnemonic, const VdsMachineInst *inst, ExecuteFn exec_fn);
+class Vds : public IsaInstruction<Isa> {
+public:
+  Vds(std::string_view mnemonic, const VdsMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = VdsMachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Vbuffer : public IsaInstruction<Isa>
-{
-  public:
-   Vbuffer(std::string_view mnemonic, const VbufferMachineInst *inst, ExecuteFn exec_fn);
+class Vbuffer : public IsaInstruction<Isa> {
+public:
+  Vbuffer(std::string_view mnemonic, const VbufferMachineInst *inst, ExecuteFn exec_fn);
   void build_modifiers(std::string &out) const override;
   using OpEncoding = VbufferMachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Vimage : public IsaInstruction<Isa>
-{
-  public:
-   Vimage(std::string_view mnemonic, const VimageMachineInst *inst, ExecuteFn exec_fn);
+class Vimage : public IsaInstruction<Isa> {
+public:
+  Vimage(std::string_view mnemonic, const VimageMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = VimageMachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Vsample : public IsaInstruction<Isa>
-{
-  public:
-   Vsample(std::string_view mnemonic, const VsampleMachineInst *inst, ExecuteFn exec_fn);
+class Vsample : public IsaInstruction<Isa> {
+public:
+  Vsample(std::string_view mnemonic, const VsampleMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = VsampleMachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Vexport : public IsaInstruction<Isa>
-{
-  public:
-   Vexport(std::string_view mnemonic, const VexportMachineInst *inst, ExecuteFn exec_fn);
+class Vexport : public IsaInstruction<Isa> {
+public:
+  Vexport(std::string_view mnemonic, const VexportMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = VexportMachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Vflat : public IsaInstruction<Isa>
-{
-  public:
-   Vflat(std::string_view mnemonic, const VflatMachineInst *inst, ExecuteFn exec_fn);
+class Vflat : public IsaInstruction<Isa> {
+public:
+  Vflat(std::string_view mnemonic, const VflatMachineInst *inst, ExecuteFn exec_fn);
   void build_modifiers(std::string &out) const override;
   using OpEncoding = VflatMachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Vscratch : public IsaInstruction<Isa>
-{
-  public:
-   Vscratch(std::string_view mnemonic, const VscratchMachineInst *inst, ExecuteFn exec_fn);
+class Vscratch : public IsaInstruction<Isa> {
+public:
+  Vscratch(std::string_view mnemonic, const VscratchMachineInst *inst, ExecuteFn exec_fn);
   void build_modifiers(std::string &out) const override;
   using OpEncoding = VscratchMachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Vglobal : public IsaInstruction<Isa>
-{
-  public:
-   Vglobal(std::string_view mnemonic, const VglobalMachineInst *inst, ExecuteFn exec_fn);
+class Vglobal : public IsaInstruction<Isa> {
+public:
+  Vglobal(std::string_view mnemonic, const VglobalMachineInst *inst, ExecuteFn exec_fn);
   void build_modifiers(std::string &out) const override;
   using OpEncoding = VglobalMachineInst;
   const OpEncoding inst_;
-} ;
+};
 
-class Vop3SdstEnc : public IsaInstruction<Isa>
-{
-  public:
-   Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
+class Vop3SdstEnc : public IsaInstruction<Isa> {
+public:
+  Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Vop3SdstEncMachineInst;
   const OpEncoding inst_;
-} ;
+};
 
 } // namespace rdna4
 } // namespace rocjitsu
