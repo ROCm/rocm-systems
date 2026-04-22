@@ -40,10 +40,10 @@ public:
     SignalWaiter();
     ~SignalWaiter();
 
-    SignalWaiter(const SignalWaiter&)            = delete;
+    SignalWaiter(const SignalWaiter&) = delete;
     SignalWaiter& operator=(const SignalWaiter&) = delete;
     SignalWaiter(SignalWaiter&&)                 = delete;
-    SignalWaiter& operator=(SignalWaiter&&)      = delete;
+    SignalWaiter& operator=(SignalWaiter&&) = delete;
 
     void enqueue(std::shared_ptr<queue_info_session_t> session);
     void stop();
@@ -51,11 +51,11 @@ public:
 private:
     void run();
 
-    int                                                    _kfd_fd  = -1;
-    std::atomic<bool>                                      _stopped = {false};
-    std::thread                                            _thread  = {};
-    std::mutex                                             _mutex   = {};
-    std::vector<std::shared_ptr<queue_info_session_t>>     _pending = {};
+    int                                                _kfd_fd  = -1;
+    std::atomic<bool>                                  _stopped = {false};
+    std::thread                                        _thread  = {};
+    std::mutex                                         _mutex   = {};
+    std::vector<std::shared_ptr<queue_info_session_t>> _pending = {};
 };
 }  // namespace hsa
 }  // namespace rocprofiler

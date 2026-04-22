@@ -66,18 +66,15 @@ get_amd_signal(hsa_signal_t signal)
 SignalWaiter::SignalWaiter()
 {
     _kfd_fd = ::open("/dev/kfd", O_RDWR | O_CLOEXEC);
-    ROCP_FATAL_IF(_kfd_fd < 0) << fmt::format(
-        "SignalWaiter: failed to open /dev/kfd: {}", std::strerror(errno));
+    ROCP_FATAL_IF(_kfd_fd < 0) << fmt::format("SignalWaiter: failed to open /dev/kfd: {}",
+                                              std::strerror(errno));
 
     internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
     _thread = std::thread{&SignalWaiter::run, this};
     internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
 }
 
-SignalWaiter::~SignalWaiter()
-{
-    stop();
-}
+SignalWaiter::~SignalWaiter() { stop(); }
 
 void
 SignalWaiter::stop()
@@ -151,12 +148,12 @@ SignalWaiter::run()
                 auto& packet = session.packet_data[pi];
                 if(packet.completion_signal.handle == 0) continue;
 
-                auto* amd_sig  = get_amd_signal(packet.completion_signal);
-                uint32_t eid   = amd_sig->event_id;
+                auto*    amd_sig = get_amd_signal(packet.completion_signal);
+                uint32_t eid     = amd_sig->event_id;
                 if(eid == 0) continue;
 
-                kfd_event_data ev = {};
-                ev.event_id       = eid;
+                kfd_event_data ev     = {};
+                ev.event_id           = eid;
                 ev.kfd_event_data_ext = 0;
                 event_data_buf.emplace_back(ev);
                 event_sources.push_back({si, pi});
@@ -174,7 +171,7 @@ SignalWaiter::run()
         kfd_ioctl_wait_events_args args = {};
         args.events_ptr                 = reinterpret_cast<uint64_t>(event_data_buf.data());
         args.num_events                 = static_cast<uint32_t>(event_data_buf.size());
-        args.wait_for_all               = 0;  // wait for ANY
+        args.wait_for_all               = 0;     // wait for ANY
         args.timeout                    = 1000;  // 1 second timeout
 
         int ret;
@@ -194,8 +191,8 @@ SignalWaiter::run()
         // First pass: mark each session as fully complete, then check packets.
         for(size_t si = 0; si < active.size(); ++si)
         {
-            auto& session         = *active[si];
-            bool  all_done        = true;
+            auto& session  = *active[si];
+            bool  all_done = true;
 
             for(size_t pi = 0; pi < session.packet_data.size(); ++pi)
             {
@@ -218,8 +215,7 @@ SignalWaiter::run()
                 if(registration::get_fini_status() > 0) continue;
 
                 // 7a. Collect timestamps and deliver tracing data.
-                auto dispatch_time =
-                    kernel_dispatch::get_dispatch_time(session, packet);
+                auto dispatch_time = kernel_dispatch::get_dispatch_time(session, packet);
                 kernel_dispatch::dispatch_complete(session, packet, dispatch_time);
 
                 // 7b. Signal completion callbacks.

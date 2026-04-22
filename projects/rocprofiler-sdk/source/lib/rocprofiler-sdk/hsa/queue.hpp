@@ -199,7 +199,7 @@ private:
     queue_state                          _state           = queue_state::normal;
     std::mutex                           _lock_queue      = {};
     hsa_signal_t                         _active_kernels  = {.handle = 0};
-    std::unique_ptr<SignalWaiter>         _signal_waiter   = {};
+    std::unique_ptr<SignalWaiter>        _signal_waiter   = {};
 };
 
 inline rocprofiler_queue_id_t
