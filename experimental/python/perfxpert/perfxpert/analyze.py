@@ -856,30 +856,6 @@ def _get_app_path_from_db(database_path: str) -> str:
     return ""
 
 
-def _run_interactive_session(
-    recommendations: List[Dict[str, Any]],
-    tier0_result: Optional[Any] = None,
-    database_path: str = "",
-    source_dir: str = "",
-    llm_provider: Optional[str] = None,
-    llm_api_key: Optional[str] = None,
-    llm_model: Optional[str] = None,
-    llm_local: Optional[str] = None,
-    llm_local_model: Optional[str] = None,
-    resume_session: Optional[str] = None,
-) -> None:
-    """Phase 6 deprecation: Interactive session removed.
-
-    The --interactive flag and legacy InteractiveSession have been deleted in Phase 6.
-    Users should use perfxpert-code instead, which provides an improved interactive TUI.
-    """
-    raise RuntimeError(
-        "The legacy --interactive flag and InteractiveSession have been removed in Phase 6. "
-        "Please use 'perfxpert-code' instead for interactive analysis: "
-        "https://github.com/ROCm/perfxpert#interactive-agentic-tui-perfxpert-code"
-    )
-
-
 def add_args(parser: argparse.ArgumentParser):
     """
     Add command-line arguments for AI analysis.
@@ -1102,36 +1078,43 @@ def execute(
     return _execute_agentic(input, config=config, **kwargs)
 
 
+def _normalize_agentic_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(kwargs)
+    if "format" in normalized and "output_format" not in normalized:
+        normalized["output_format"] = normalized.pop("format")
+    if "prompt" in normalized and "custom_prompt" not in normalized:
+        normalized["custom_prompt"] = normalized.pop("prompt")
+    if "llm" in normalized and "llm_provider" not in normalized:
+        normalized["llm_provider"] = normalized.pop("llm")
+    if "llm_thinking" in normalized and "llm_thinking_tokens" not in normalized:
+        normalized["llm_thinking_tokens"] = normalized.pop("llm_thinking")
+    normalized["enable_llm"] = bool(normalized.get("llm_provider"))
+    return normalized
+
+
+def _render_agentic_result(result: Any, output_format: str) -> str:
+    if output_format == "json":
+        return result.to_json()
+    if output_format == "markdown":
+        return result.to_markdown()
+    if output_format == "webview":
+        return result.to_webview()
+    return result.to_text()
+
+
 def _execute_agentic(
     input: Optional[RocpdImportData],
     config: Optional[output_config.output_config] = None,
     **kwargs: Any,
 ) -> Optional[RocpdImportData]:
-    """Agentic path: delegates to Phase 3 session API.
-
-    Builds an AnalysisSession, invokes run_root with a RootInput,
-    and formats the output according to the requested format.
-    """
-    try:
-        from perfxpert.agents import runtime
-    except ImportError as e:
-        raise RuntimeError(
-            "Agent runtime is not available. "
-            "This is a Phase 3 dependency. Set PERFXPERT_LEGACY=1 to use the legacy path."
-        ) from e
-    run_cli = getattr(runtime, "run_cli", None)
-    if run_cli is None:
-        raise RuntimeError(
-            "PERFXPERT_USE_AGENTS=1 is set but agent runtime is not available. "
-            "This is a Phase 3 dependency. Unset the env var to use the legacy path."
-        )
-    return run_cli(input=input, config=config, **kwargs)
+    """Agentic path: run analysis via the API wrapper, then reuse existing serializers."""
+    normalized_kwargs = _normalize_agentic_kwargs(kwargs)
 
     # Update config if provided
     if config is not None:
-        config = config.update(**kwargs)
+        config = config.update(**normalized_kwargs)
     else:
-        config = output_config.output_config(**kwargs)
+        config = output_config.output_config(**normalized_kwargs)
 
     # Get database path for display
     database_path = ""
@@ -1140,56 +1123,25 @@ def _execute_agentic(
             input._paths[0] if isinstance(input._paths, list) else input._paths
         )
 
-    # Get source_dir if provided (for Tier 0 analysis)
-    source_dir = kwargs.get("source_dir")
+    if input is None:
+        return _execute_legacy(input, config=config, **kwargs)
 
-    # Get custom prompt if provided
-    custom_prompt = kwargs.get("custom_prompt")
+    from .ai_analysis import api as ai_api
 
-    # Build session
-    enable_llm = kwargs.get("enable_llm", False)
-    llm_provider = kwargs.get("llm_provider")
-    session = runtime.build_session(
-        provider=llm_provider if enable_llm else None,
-        airgap=(not enable_llm),
+    result = ai_api.analyze_database(
+        database_path=database_path,
+        custom_prompt=normalized_kwargs.get("custom_prompt"),
+        enable_llm=normalized_kwargs.get("enable_llm", False),
+        llm_provider=normalized_kwargs.get("llm_provider"),
+        llm_api_key=normalized_kwargs.get("llm_api_key"),
+        llm_thinking_tokens=normalized_kwargs.get("llm_thinking_tokens"),
+        verbose=normalized_kwargs.get("verbose", False),
+        top_kernels=normalized_kwargs.get("top_kernels", 10),
+        att_dir=normalized_kwargs.get("att_dir"),
     )
 
-    # Build RootInput payload
-    try:
-        root_input = schemas.RootInput(
-            user_query=custom_prompt or "Analyze this GPU performance trace.",
-            database_path=database_path if input else None,
-            source_dir=source_dir,
-            provider=llm_provider if enable_llm else None,
-            airgap=(not enable_llm),
-            session_id=session.session_id,
-        )
-    except Exception as e:
-        raise RuntimeError(f"Failed to build RootInput: {e}") from e
-
-    # Run root analysis via Phase 3 session API
-    try:
-        root_output = session.run_root(root_input)
-    except Exception as e:
-        raise RuntimeError(f"Agentic root analysis failed: {e}") from e
-
-    # Format output according to requested format
-    output_format = kwargs.get("output_format", "text")
-    if output_format == "json":
-        import json
-        output = json.dumps(
-            {
-                "narrative": root_output.narrative,
-                "recommendations": root_output.recommendations,
-                "primary_bottleneck": root_output.primary_bottleneck,
-                "warnings": root_output.warnings,
-                "metadata": root_output.metadata,
-            },
-            indent=2,
-        )
-    else:
-        # text, markdown, webview — for now, just use the narrative
-        output = root_output.narrative
+    output_format = normalized_kwargs.get("output_format", "text")
+    output = _render_agentic_result(result, output_format)
 
     # Handle output writing
     _ext_map = {"json": ".json", "markdown": ".md", "webview": ".html", "text": ".txt"}

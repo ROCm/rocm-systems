@@ -59,18 +59,21 @@ def test_agents_fence_dir_exists():
     """The replacement split fence lives under agents/fence/."""
     pkg_root = Path(importlib.util.find_spec("perfxpert").origin).parent
     fence_dir = pkg_root / "agents" / "fence"
-    # Phase 2 deliverable — may not exist yet in some branches
-    if fence_dir.exists():
-        assert fence_dir.is_dir(), f"{fence_dir} must be a directory"
-        # At least the 7 per-agent files + always.md expected from Phase 2.
-        md_files = sorted(p.name for p in fence_dir.glob("*.md"))
-        expected = {"always.md", "root.md", "analysis.md", "recommendation.md",
-                    "correctness.md", "compute_specialist.md", "memory_specialist.md",
-                    "latency_specialist.md"}
-        missing = expected - set(md_files)
-        # Don't fail if fence directory doesn't exist; Phase 2 may be pending
-        if not missing:
-            pytest.skip("agents/fence not yet present (Phase 2 deliverable)")
-        assert not missing, f"missing agent fence files: {missing}"
-    else:
+    if not fence_dir.exists():
         pytest.skip("agents/fence not yet present (Phase 2 deliverable)")
+
+    assert fence_dir.is_dir(), f"{fence_dir} must be a directory"
+
+    md_files = sorted(p.name for p in fence_dir.glob("*.md"))
+    expected = {
+        "always.md",
+        "root.md",
+        "analysis.md",
+        "recommendation.md",
+        "correctness.md",
+        "compute_specialist.md",
+        "memory_specialist.md",
+        "latency_specialist.md",
+    }
+    missing = expected - set(md_files)
+    assert not missing, f"missing agent fence files: {missing}"

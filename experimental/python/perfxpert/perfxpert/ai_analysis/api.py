@@ -26,9 +26,8 @@ Example:
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Tuple, Union
 import os
-import sys
 import warnings
 
 try:
@@ -62,6 +61,10 @@ from .exceptions import (
     LLMAuthenticationError,
     LLMRateLimitError,
     SourceDirectoryNotFoundError,
+)
+from ..providers._exceptions import (
+    AuthError as ProviderAuthError,
+    RateLimitError as ProviderRateLimitError,
 )
 
 
@@ -516,9 +519,10 @@ class AnalysisResult:
 
 _LEGACY_WARNING = (
     "\n"
-    "⚠️  DEPRECATED: You are running perfxpert in LEGACY mode via PERFXPERT_LEGACY=1.\n"
-    "   The legacy Python TUI will be removed in the next minor release (vX.Y+1).\n"
-    "   Migrate to the agentic path (the default) before upgrading.\n"
+    "DEPRECATED: PERFXPERT_LEGACY=1 enables the legacy local-only analysis path.\n"
+    "LLM enhancement is unavailable in legacy mode.\n"
+    "The legacy path will be removed in the next minor release (vX.Y+1).\n"
+    "Migrate to the agentic path (the default) before upgrading.\n"
     "   See: docs/migration-to-agentic.md\n"
 )
 
@@ -535,11 +539,169 @@ def _is_legacy_mode() -> bool:
 
 
 def _emit_legacy_deprecation_once():
-    """Print deprecation warning to stderr once per process."""
+    """Emit a deprecation warning once per process."""
     if getattr(_emit_legacy_deprecation_once, "_emitted", False):
         return
-    print(_LEGACY_WARNING, file=sys.stderr)
+    warnings.warn(_LEGACY_WARNING, DeprecationWarning, stacklevel=2)
     _emit_legacy_deprecation_once._emitted = True
+
+
+def _raise_agentic_runtime_error(message: str, error: Exception) -> None:
+    raise RuntimeError(
+        f"{message}: {error}. "
+        "Set PERFXPERT_LEGACY=1 to use the deprecated legacy local-only path."
+    ) from error
+
+
+def _scale_agentic_pct(value: Any) -> float:
+    pct = float(value or 0.0)
+    return pct * 100.0 if 0.0 <= pct <= 1.0 else pct
+
+
+def _normalize_agentic_breakdown(time_breakdown: Dict[str, Any]) -> Dict[str, Any]:
+    kernel_pct = _scale_agentic_pct(
+        time_breakdown.get("kernel_pct", time_breakdown.get("kernel_percent", 0.0))
+    )
+    memcpy_pct = _scale_agentic_pct(
+        time_breakdown.get("memcpy_pct", time_breakdown.get("memcpy_percent", 0.0))
+    )
+    overhead_pct = _scale_agentic_pct(
+        time_breakdown.get("api_pct", time_breakdown.get("overhead_percent", 0.0))
+    )
+    idle_pct = _scale_agentic_pct(time_breakdown.get("idle_pct", 0.0))
+    total_pct = kernel_pct + memcpy_pct + overhead_pct + idle_pct
+    if total_pct > 100.0:
+        idle_pct = max(0.0, 100.0 - kernel_pct - memcpy_pct - overhead_pct)
+    return {
+        "kernel_percent": kernel_pct,
+        "memcpy_percent": memcpy_pct,
+        "overhead_percent": overhead_pct,
+        "idle_percent": idle_pct,
+        "total_runtime": 0,
+        "total_kernel_time": 0,
+        "total_memcpy_time": 0,
+    }
+
+
+def _normalize_agentic_hotspots(hot_kernels: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    normalized = []
+    for kernel in hot_kernels:
+        calls = int(kernel.get("calls", 1) or 1)
+        total_duration = int(
+            kernel.get(
+                "total_duration_ns",
+                kernel.get("duration_ns", kernel.get("total_duration", 0)),
+            )
+        )
+        avg_duration = int(
+            kernel.get("avg_duration_ns", kernel.get("avg_duration", 0))
+            or (total_duration / calls if calls else total_duration)
+        )
+        pct = kernel.get(
+            "percent_of_total",
+            kernel.get("pct_of_total", kernel.get("pct", 0.0)),
+        )
+        normalized.append(
+            {
+                "name": kernel.get("name", "unknown"),
+                "calls": calls,
+                "total_duration": total_duration,
+                "avg_duration": avg_duration,
+                "min_duration": int(kernel.get("min_duration_ns", avg_duration)),
+                "max_duration": int(kernel.get("max_duration_ns", total_duration)),
+                "percent_of_total": _scale_agentic_pct(pct),
+            }
+        )
+    return normalized
+
+
+def _format_agentic_impact(value: Any) -> str:
+    if value is None:
+        return "Unknown"
+    if isinstance(value, (int, float)):
+        if 0.0 <= value <= 1.0:
+            return f"{value:.0%} improvement"
+        return str(value)
+    return str(value)
+
+
+def _agentic_priority(index: int, recommendation: Dict[str, Any]) -> str:
+    explicit = str(recommendation.get("priority", "")).strip().upper()
+    if explicit in {"HIGH", "MEDIUM", "LOW", "INFO"}:
+        return explicit
+    impact = recommendation.get("expected_impact")
+    if isinstance(impact, (int, float)):
+        if impact >= 0.4:
+            return "HIGH"
+        if impact >= 0.15:
+            return "MEDIUM"
+        return "LOW"
+    if index == 0:
+        return "HIGH"
+    if index < 3:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _normalize_agentic_recommendations(
+    recommendations: List[Dict[str, Any]],
+    default_category: str,
+) -> Tuple[RecommendationSet, List[Dict[str, Any]]]:
+    rec_set = RecommendationSet()
+    raw_recommendations = []
+
+    for index, rec in enumerate(recommendations):
+        priority = _agentic_priority(index, rec)
+        category = str(rec.get("category") or default_category or "general")
+        title = str(rec.get("title") or rec.get("name") or "Optimization opportunity")
+        description = str(
+            rec.get("description") or rec.get("rationale") or rec.get("issue") or ""
+        )
+        impact = _format_agentic_impact(rec.get("expected_impact"))
+
+        next_steps = list(rec.get("actions") or [])
+        if not next_steps:
+            effort = rec.get("effort")
+            effort_factor = rec.get("effort_factor")
+            risk = rec.get("risk")
+            if effort:
+                next_steps.append(f"Estimated effort: {effort}")
+            elif effort_factor is not None:
+                next_steps.append(f"Effort factor: {effort_factor}")
+            if risk:
+                next_steps.append(f"Risk: {risk}")
+
+        recommendation = Recommendation(
+            id=f"agentic_rec_{index + 1:03d}",
+            priority=priority.lower(),
+            category=category,
+            title=title,
+            description=description,
+            estimated_impact=impact,
+            next_steps=next_steps,
+        )
+
+        raw_recommendations.append(
+            {
+                "priority": priority,
+                "category": category,
+                "issue": title,
+                "suggestion": description,
+                "actions": next_steps,
+                "estimated_impact": impact,
+                "confidence": rec.get("confidence"),
+                "commands": rec.get("commands", []),
+            }
+        )
+
+        if priority == "HIGH":
+            rec_set.high_priority.append(recommendation)
+        elif priority in {"MEDIUM", "INFO"}:
+            rec_set.medium_priority.append(recommendation)
+        else:
+            rec_set.low_priority.append(recommendation)
+
+    return rec_set, raw_recommendations
 
 
 def analyze_database(
@@ -653,14 +815,11 @@ def _route_to_agents(
             "This is a Phase 3 dependency. Set PERFXPERT_LEGACY=1 to use the legacy path."
         ) from e
 
-    # Build session with LLM provider if enabled
-    session = runtime.build_session(
-        provider=llm_provider if enable_llm else None,
-        airgap=(not enable_llm),  # airgap if LLM is disabled
-    )
-
-    # Run analysis via Phase 3 session API
     try:
+        session = runtime.build_session(
+            provider=llm_provider if enable_llm else None,
+            airgap=(not enable_llm),
+        )
         analysis_output = session.run_analysis(
             schemas.AnalysisInput(
                 database_path=str(database_path),
@@ -668,102 +827,30 @@ def _route_to_agents(
                 att_dir=att_dir,
             )
         )
-    except FileNotFoundError as e:
-        raise DatabaseNotFoundError(f"Database file not found: {database_path}") from e
-    except (
-        DatabaseNotFoundError,
-        DatabaseCorruptedError,
-        LLMAuthenticationError,
-        LLMRateLimitError,
-    ):
+        recommendation_output = session.run_recommendation(
+            schemas.RecommendationInput(findings=analysis_output)
+        )
+    except (LLMAuthenticationError, LLMRateLimitError):
         raise
+    except ProviderAuthError as e:
+        raise LLMAuthenticationError(str(e)) from e
+    except ProviderRateLimitError as e:
+        raise LLMRateLimitError(str(e)) from e
     except Exception as e:
-        raise DatabaseCorruptedError(f"Agentic analysis failed: {e}") from e
+        _raise_agentic_runtime_error("Agentic analysis failed", e)
 
-    # Reuse the legacy compatibility shell so callers still receive the full
-    # recommendation set, ATT/tier-3 state, and raw formatter payloads.
-    result = _route_to_legacy(
-        database_path,
+    # Convert AnalysisOutput back to legacy AnalysisResult shape
+    return _wrap_agentic_result(
+        analysis_output,
+        database_path=database_path,
         custom_prompt=custom_prompt,
-        enable_llm=False,
-        llm_provider=None,
-        llm_api_key=None,
-        llm_thinking_tokens=None,
-        output_format=output_format,
+        enable_llm=enable_llm,
+        llm_provider=llm_provider,
         verbose=verbose,
-        top_kernels=top_kernels,
-        att_dir=att_dir,
+        recommendation_output=recommendation_output,
     )
-    return _apply_agentic_overlay(result, analysis_output)
 
 
-def _apply_agentic_overlay(
-    result: AnalysisResult,
-    analysis_output: "schemas.AnalysisOutput",
-) -> AnalysisResult:
-    """Overlay agentic top-level findings onto a compatibility result."""
-
-    def _percent(value: float) -> float:
-        v = float(value or 0.0)
-        return v * 100.0 if 0.0 <= v <= 1.0 else v
-
-    time_breakdown_dict = analysis_output.time_breakdown
-    kernel_pct = _percent(time_breakdown_dict.get("kernel_pct", 0.0))
-    memcpy_pct = _percent(time_breakdown_dict.get("memcpy_pct", 0.0))
-    api_pct = _percent(time_breakdown_dict.get("api_pct", 0.0))
-    idle_pct = _percent(time_breakdown_dict.get("idle_pct", 0.0))
-    hot_kernels = analysis_output.hot_kernels or []
-    raw = getattr(result, "_raw", {}) or {}
-    total_runtime_ns = int(raw.get("time_breakdown", {}).get("total_runtime", 0) or 0)
-    kernel_time_ns = int(total_runtime_ns * kernel_pct / 100.0)
-    memcpy_time_ns = int(total_runtime_ns * memcpy_pct / 100.0)
-    api_overhead_ns = int(total_runtime_ns * api_pct / 100.0)
-    idle_time_ns = max(0, total_runtime_ns - kernel_time_ns - memcpy_time_ns - api_overhead_ns)
-
-    result.summary.primary_bottleneck = analysis_output.primary_bottleneck
-    result.summary.confidence = analysis_output.confidence
-    result.summary.key_findings = [
-        f"Total kernel execution time: {kernel_pct:.1f}%",
-        f"Memory copy overhead: {memcpy_pct:.1f}%",
-        f"Top kernel: {hot_kernels[0]['name'] if hot_kernels else 'N/A'}",
-    ]
-    result.execution_breakdown.kernel_time_ns = kernel_time_ns
-    result.execution_breakdown.kernel_time_pct = kernel_pct
-    result.execution_breakdown.memcpy_time_ns = memcpy_time_ns
-    result.execution_breakdown.memcpy_time_pct = memcpy_pct
-    result.execution_breakdown.api_overhead_ns = api_overhead_ns
-    result.execution_breakdown.api_overhead_pct = api_pct
-    result.execution_breakdown.idle_time_ns = idle_time_ns
-    result.execution_breakdown.idle_time_pct = idle_pct
-    if raw:
-        raw_breakdown = raw.get("time_breakdown", {})
-        raw["time_breakdown"] = {
-            **raw_breakdown,
-            "kernel_percent": kernel_pct,
-            "memcpy_percent": memcpy_pct,
-            "overhead_percent": api_pct,
-            "total_kernel_time": kernel_time_ns,
-            "total_memcpy_time": memcpy_time_ns,
-        }
-        if hot_kernels:
-            raw["hotspots"] = [
-                {
-                    "name": kernel.get("name"),
-                    "calls": int(kernel.get("calls", 0) or 0),
-                    "total_duration": int(
-                        kernel.get("duration_ns", kernel.get("total_duration", 0)) or 0
-                    ),
-                    "avg_duration": int(
-                        kernel.get("avg_duration_ns", kernel.get("avg_duration", 0)) or 0
-                    ),
-                    "percent_of_total": _percent(
-                        kernel.get("pct", kernel.get("percent_of_total", 0.0))
-                    ),
-                }
-                for kernel in hot_kernels
-            ]
-        result._raw = raw
-    return result
 def _route_to_legacy(
     database_path: Union[str, Path],
     *,
@@ -781,7 +868,7 @@ def _route_to_legacy(
     Analyze a rocpd database file and return AI-powered insights.
 
     This is the legacy (deprecated) implementation, opt-in via PERFXPERT_LEGACY=1.
-    Performs local analysis (always) and optional LLM enhancement.
+    Performs local analysis only; LLM enhancement is unavailable in legacy mode.
 
     Args:
         database_path: Path to .rpd or .db file
@@ -915,6 +1002,7 @@ def _route_to_legacy(
         )
         if verbose:
             print("[Analysis] LLM enhancement skipped (legacy mode does not support LLM)")
+
     return result
 
 
@@ -925,6 +1013,7 @@ def _wrap_agentic_result(
     enable_llm: bool = False,
     llm_provider: Optional[str] = None,
     verbose: bool = False,
+    recommendation_output: Optional["schemas.RecommendationOutput"] = None,
 ) -> AnalysisResult:
     """Convert agentic AnalysisOutput back to legacy AnalysisResult shape.
 
@@ -941,14 +1030,14 @@ def _wrap_agentic_result(
     """
     from datetime import datetime
 
-    def _percent(value: float) -> float:
-        v = float(value or 0.0)
-        return v * 100.0 if 0.0 <= v <= 1.0 else v
-
-    # Extract data from AnalysisOutput
-    time_breakdown_dict = analysis_output.time_breakdown
-    hot_kernels = analysis_output.hot_kernels or []
+    # Extract data from AnalysisOutput and normalize it to the legacy formatter shape.
+    time_breakdown_dict = _normalize_agentic_breakdown(analysis_output.time_breakdown)
+    hot_kernels = _normalize_agentic_hotspots(analysis_output.hot_kernels or [])
     has_counters = analysis_output.counter_data_available
+    rec_set, recommendations_raw = _normalize_agentic_recommendations(
+        list(recommendation_output.recommendations) if recommendation_output else [],
+        analysis_output.primary_bottleneck,
+    )
 
     # Build metadata
     metadata = AnalysisMetadata(
@@ -970,10 +1059,9 @@ def _wrap_agentic_result(
     )
 
     # Build summary
-    kernel_pct = _percent(time_breakdown_dict.get("kernel_pct", 0.0))
-    memcpy_pct = _percent(time_breakdown_dict.get("memcpy_pct", 0.0))
-    api_pct = _percent(time_breakdown_dict.get("api_pct", 0.0))
-    idle_pct = _percent(time_breakdown_dict.get("idle_pct", 0.0))
+    kernel_pct = time_breakdown_dict.get("kernel_percent", 0.0)
+    memcpy_pct = time_breakdown_dict.get("memcpy_percent", 0.0)
+    api_pct = time_breakdown_dict.get("overhead_percent", 0.0)
 
     summary = AnalysisSummary(
         overall_assessment=f"Analysis complete. {len(hot_kernels)} kernels analyzed.",
@@ -993,11 +1081,8 @@ def _wrap_agentic_result(
         memcpy_time_ns=0,  # Not available in agentic output
         memcpy_time_pct=memcpy_pct,
         api_overhead_pct=api_pct,
-        idle_time_pct=idle_pct,
+        idle_time_pct=time_breakdown_dict.get("idle_percent", 0.0),
     )
-
-    # Build recommendations — empty since agentic path handles this in Recommendation agent
-    rec_set = RecommendationSet()
 
     # Build warnings
     warnings = []
@@ -1024,123 +1109,8 @@ def _wrap_agentic_result(
         "time_breakdown": time_breakdown_dict,
         "hotspots": hot_kernels,
         "memory_analysis": {},  # Not available in agentic output
-        "recommendations_raw": [],  # Handled by Recommendation agent
-        "hardware_counters": {"has_counters": has_counters, "metrics": {}},
-        "database_path": str(database_path),
-    }
-
-    if verbose:
-        print(
-            f"[Analysis] Agentic analysis complete. Bottleneck: "
-            f"{analysis_output.primary_bottleneck}"
-        )
-
-    return result
-
-
-def _wrap_agentic_result(
-    analysis_output: "schemas.AnalysisOutput",
-    database_path: Union[str, Path],
-    custom_prompt: Optional[str] = None,
-    enable_llm: bool = False,
-    llm_provider: Optional[str] = None,
-    verbose: bool = False,
-) -> AnalysisResult:
-    """Convert agentic AnalysisOutput back to legacy AnalysisResult shape.
-
-    This allows existing callers and output formatters to work unchanged.
-    The AnalysisOutput schema (§4.3) provides:
-      - primary_bottleneck: str (compute | memory_transfer | latency | api_overhead | mixed)
-      - confidence: float (0.0 – 1.0)
-      - time_breakdown: Dict[str, float] (kernel_pct | memcpy_pct | api_pct | idle_pct)
-      - hot_kernels: List[Dict] ({name, pct, duration_ns, ...})
-      - counter_data_available: bool
-
-    We map this back to the legacy AnalysisResult structure with minimal fields
-    filled — enough for existing output formatters and callers to function.
-    """
-    from datetime import datetime
-
-    # Extract data from AnalysisOutput
-    time_breakdown_dict = analysis_output.time_breakdown
-    hot_kernels = analysis_output.hot_kernels or []
-    has_counters = analysis_output.counter_data_available
-
-    # Build metadata
-    metadata = AnalysisMetadata(
-        rocpd_version=_PERFXPERT_VERSION,
-        analysis_version="0.1.0",
-        database_file=str(database_path),
-        analysis_timestamp=datetime.now().isoformat(),
-        custom_prompt=custom_prompt,
-    )
-
-    # Build profiling info
-    profiling_mode = "sys_trace_with_counters" if has_counters else "sys_trace_only"
-    analysis_tier = 2 if has_counters else 1
-    profiling_info = ProfilingInfo(
-        total_duration_ns=0,  # Not available in agentic output
-        profiling_mode=profiling_mode,
-        analysis_tier=analysis_tier,
-        gpus=[],
-    )
-
-    # Build summary
-    kernel_pct = time_breakdown_dict.get("kernel_pct", 0.0)
-    memcpy_pct = time_breakdown_dict.get("memcpy_pct", 0.0)
-    api_pct = time_breakdown_dict.get("api_pct", 0.0)
-
-    summary = AnalysisSummary(
-        overall_assessment=f"Analysis complete. {len(hot_kernels)} kernels analyzed.",
-        primary_bottleneck=analysis_output.primary_bottleneck,
-        confidence=analysis_output.confidence,
-        key_findings=[
-            f"Total kernel execution time: {kernel_pct:.1f}%",
-            f"Memory copy overhead: {memcpy_pct:.1f}%",
-            f"Top kernel: {hot_kernels[0]['name'] if hot_kernels else 'N/A'}",
-        ],
-    )
-
-    # Build execution breakdown
-    execution_breakdown = ExecutionBreakdown(
-        kernel_time_ns=0,  # Not available in agentic output
-        kernel_time_pct=kernel_pct,
-        memcpy_time_ns=0,  # Not available in agentic output
-        memcpy_time_pct=memcpy_pct,
-        api_overhead_pct=api_pct,
-        idle_time_pct=time_breakdown_dict.get("idle_pct", 0.0),
-    )
-
-    # Build recommendations — empty since agentic path handles this in Recommendation agent
-    rec_set = RecommendationSet()
-
-    # Build warnings
-    warnings = []
-    if not has_counters:
-        warnings.append(
-            AnalysisWarning(
-                severity="warning",
-                message="No hardware counters collected. Analysis limited to Tier 1 (trace data only).",
-                recommendation="Collect counters with: rocprofv3 --pmc GRBM_COUNT SQ_WAVES -- ./app",
-            )
-        )
-
-    result = AnalysisResult(
-        metadata=metadata,
-        profiling_info=profiling_info,
-        summary=summary,
-        execution_breakdown=execution_breakdown,
-        recommendations=rec_set,
-        warnings=warnings,
-    )
-
-    # Minimal raw data cache for to_json()/to_webview() compatibility
-    result._raw = {
-        "time_breakdown": time_breakdown_dict,
-        "hotspots": hot_kernels,
-        "memory_analysis": {},  # Not available in agentic output
-        "recommendations_raw": [],  # Handled by Recommendation agent
-        "hardware_counters": {"has_counters": has_counters, "metrics": {}},
+        "recommendations_raw": recommendations_raw,
+        "hardware_counters": {"has_counters": has_counters, "metrics": {}, "counters": {}},
         "database_path": str(database_path),
     }
 

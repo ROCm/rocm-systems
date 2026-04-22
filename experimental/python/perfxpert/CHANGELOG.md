@@ -38,8 +38,9 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   architecture.
 
 ### Deprecated
-- **`PERFXPERT_LEGACY=1`**: new opt-in to pre-v0.2.0 behavior. One-minor-version
-  safety net; removed in vX.Y+1. See `docs/deprecation/PERFXPERT_LEGACY.md`.
+- **`PERFXPERT_LEGACY=1`**: new opt-in to the deprecated local-only path. LLM
+  enhancement is unavailable there. One-minor-version safety net; removed in
+  vX.Y+1. See `docs/deprecation/PERFXPERT_LEGACY.md`.
 - **`LLMAnalyzer` class**: kept as a deprecation stub that emits
   `DeprecationWarning`. Removal target: vX.Y+2.
 
@@ -67,8 +68,8 @@ See [docs/migration-to-agentic.md](docs/migration-to-agentic.md).
 
 - `LLMAnalyzer` class still importable, emits DeprecationWarning.
 - `PERFXPERT_USE_AGENTS` env var still recognized (no-op).
-- `PERFXPERT_LEGACY=1` reroutes to the pre-v0.2.0 path with a stderr warning
-  (requires user-supplied `ROCINSIGHT_LLM_REFERENCE_GUIDE`).
+- `PERFXPERT_LEGACY=1` reroutes to the deprecated local-only path and emits a
+  `DeprecationWarning`. LLM enhancement is unavailable in that mode.
 
 ---
 

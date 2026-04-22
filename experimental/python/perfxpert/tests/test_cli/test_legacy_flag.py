@@ -26,12 +26,13 @@ def test_perfxpert_analyze_help_does_not_mention_removed_flags():
 
 
 def test_PERFXPERT_LEGACY_1_prints_warning_on_cli(tmp_path):
-    """Running `perfxpert analyze` with PERFXPERT_LEGACY=1 must emit a stderr warning."""
+    """Running `perfxpert analyze` with warnings enabled must surface the deprecation warning."""
     db = tmp_path / "empty.db"
     db.write_bytes(b"SQLite format 3\x00" + b"\x00" * 100)  # minimal valid-looking stub
 
     env = os.environ.copy()
     env["PERFXPERT_LEGACY"] = "1"
+    env["PYTHONWARNINGS"] = "default"
 
     result = subprocess.run(
         _perfxpert_cli() + ["analyze", "-i", str(db)],

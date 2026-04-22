@@ -82,8 +82,8 @@ def test_PERFXPERT_LEGACY_1_routes_to_legacy(monkeypatch, tmp_path):
     agent_route.assert_not_called()
 
 
-def test_PERFXPERT_LEGACY_1_emits_deprecation_warning(monkeypatch, tmp_path, capsys):
-    """PERFXPERT_LEGACY=1 must print a visible deprecation warning to stderr."""
+def test_PERFXPERT_LEGACY_1_emits_deprecation_warning(monkeypatch, tmp_path):
+    """PERFXPERT_LEGACY=1 must emit a DeprecationWarning with legacy-mode caveats."""
     monkeypatch.setenv("PERFXPERT_LEGACY", "1")
 
     from perfxpert.ai_analysis import api
@@ -93,14 +93,14 @@ def test_PERFXPERT_LEGACY_1_emits_deprecation_warning(monkeypatch, tmp_path, cap
     db.touch()
 
     with patch.object(api, "_route_to_legacy", return_value=MagicMock()):
-        api.analyze_database(database_path=db)
+        with pytest.warns(DeprecationWarning, match="PERFXPERT_LEGACY") as caught:
+            api.analyze_database(database_path=db)
 
-    captured = capsys.readouterr()
-    combined = captured.err + captured.out
-    assert "DEPRECATED" in combined.upper()
-    assert "PERFXPERT_LEGACY" in combined
-    assert "vX.Y+1" in combined or "next minor release" in combined.lower() or \
-           "will be removed" in combined.lower()
+    message = str(caught[0].message)
+    assert "DEPRECATED" in message.upper()
+    assert "LLM enhancement is unavailable in legacy mode" in message
+    assert "vX.Y+1" in message or "next minor release" in message.lower() or \
+        "will be removed" in message.lower()
 
 
 def test_both_flags_set_LEGACY_wins(monkeypatch, tmp_path):

@@ -52,8 +52,8 @@ Everything ships inside one `pip install perfxpert` — including the bundled op
 | Flag | Default | Purpose |
 |------|---------|---------|
 | `PERFXPERT_USE_AGENTS=1` | noop (kept for back-compat) | Was the Phase-4 opt-in; agentic is now default |
-| `PERFXPERT_LEGACY=1` | unset | One-version safety net — routes through the pre-v0.2.0 path. Removed in vX.Y+1. |
-| `ROCINSIGHT_LLM_REFERENCE_GUIDE` | unset | Legacy-only — path to user-supplied monolithic guide |
+| `PERFXPERT_LEGACY=1` | unset | One-version safety net — routes through the deprecated local-only path. LLM enhancement is unavailable. Removed in vX.Y+1. |
+| `ROCINSIGHT_LLM_REFERENCE_GUIDE` | unset | Legacy compatibility knob for direct reference-guide loading; not used by the default analyze path |
 | `PERFXPERT_OPENCODE_PATH` | bundled | Override path to opencode binary |
 
 ## Supported GPUs

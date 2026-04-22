@@ -6,15 +6,14 @@
 ## What it does
 
 Setting `PERFXPERT_LEGACY=1` routes the perfxpert analyze pipeline through
-the pre-v0.2.0 "legacy" code path. This exists as a one-version safety net
+the deprecated local-only code path. This exists as a one-version safety net
 so users can roll back if the new agentic path has an unforeseen regression
 in their specific workflow.
 
 The variable also:
-- Emits a `DEPRECATED` warning to stderr on every `perfxpert analyze` invocation
+- Emits a `DeprecationWarning`
 - Causes `perfxpert doctor` to report `Mode: legacy (DEPRECATED)`
-- Requires `ROCINSIGHT_LLM_REFERENCE_GUIDE` to point to a user-supplied copy
-  of the legacy monolithic guide (the in-tree copy is deleted in v0.2.0)
+- Disables LLM enhancement in legacy mode
 
 ## Why it's being removed
 

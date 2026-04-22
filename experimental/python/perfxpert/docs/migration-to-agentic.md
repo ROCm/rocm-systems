@@ -57,10 +57,11 @@ which file controls which behavior.
 
 ## Emergency: I need the old behavior back
 
-Set `PERFXPERT_LEGACY=1`. This routes analyze_database() through the pre-v0.2.0
-path. You must also supply your own copy of the legacy monolithic guide via
-`ROCINSIGHT_LLM_REFERENCE_GUIDE=/path/to/your/copy.md` (the in-tree copy is
-deleted in v0.2.0).
+Set `PERFXPERT_LEGACY=1`. This routes `analyze_database()` through the
+deprecated local-only path.
+
+Legacy-mode caveat: LLM enhancement is unavailable there. Use the default
+agentic path or `perfxpert-code` if you need LLM-backed explanations.
 
 **This safety net will be removed in vX.Y+1.** Migrate before then.
 
