@@ -281,7 +281,7 @@ std::optional<std::vector<amd::smi::AMDSmiAINICDevice::AINICInfo>> get_nics() {
   uint32_t soc_count = 10;
   std::vector<amdsmi_socket_handle> sockets(soc_count);
   // Get the sockets of the system
-  amdsmi_status_t status = amdsmi_get_socket_handles(&soc_count, &sockets[0]);
+  amdsmi_status_t status = amdsmi_get_socket_handles(&soc_count, sockets.data());
   if (status != AMDSMI_STATUS_SUCCESS) {
     return std::nullopt;
   }

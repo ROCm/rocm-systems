@@ -10,7 +10,7 @@ This example creates a workload with mixed execution patterns to demonstrate tim
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - C++ compiler
 
 ## Building

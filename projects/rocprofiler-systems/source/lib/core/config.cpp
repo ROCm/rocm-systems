@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "config.hpp"
 #include "amd_smi.hpp"
@@ -432,7 +413,7 @@ configure_settings(bool _init)
         0.0, "trace", "profile", "perfetto", "timemory");
 
     ROCPROFSYS_CONFIG_SETTING(
-        std::string, "ROCPROFSYS_TRACE_REGION",
+        std::string, "ROCPROFSYS_SELECTED_REGIONS",
         "Comma-separated list of roctx region names. When set, only "
         "activity inside roctx regions matching one of these names "
         "(matched against roctxRangeStartA message). Uses process-wide "
@@ -884,6 +865,18 @@ configure_settings(bool _init)
     {
         kill_delay_config->set(0);
     }
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_RANK_FILTER_ID",
+        "Name of environment variable to read rank from for MPI output filtering",
+        std::string{}, "data", "io", "advanced");
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_RANK_FILTER_OUTPUT",
+        "Ranks for which file output is generated. Values should be separated by commas "
+        "and can be explicit or ranges, e.g. 0,1,5-8. An empty value enables output "
+        "for all ranks",
+        std::string{}, "data", "io", "advanced");
 
     // set the defaults
     _config->get_flamegraph_output()     = false;
@@ -1495,7 +1488,8 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
 }
 
 void
-handle_deprecated_setting(const std::string& _old, const std::string& _new, int _verbose)
+handle_deprecated_setting(const std::string& _old, const std::string& _new,
+                          int /*_verbose*/)
 {
     auto _config      = settings::shared_instance();
     auto _old_setting = _config->find(_old);
@@ -1512,7 +1506,7 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new, int 
     if(_old_setting->second->get_environ_updated() ||
        _old_setting->second->get_config_updated())
     {
-        auto _separator = [_verbose]() {
+        auto _separator = []() {
             std::array<char, 79> _v = {};
             _v.fill('=');
             _v.back() = '\0';
@@ -2425,7 +2419,7 @@ get_trace_thread_join()
 std::string
 get_trace_region()
 {
-    static auto _v = get_config()->find("ROCPROFSYS_TRACE_REGION");
+    static auto _v = get_config()->find("ROCPROFSYS_SELECTED_REGIONS");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
@@ -2595,6 +2589,97 @@ get_kill_delay()
     static auto _v = get_config()->find("ROCPROFSYS_KILL_DELAY");
     return static_cast<tim::tsettings<int>&>(*_v->second).get();
 }
+
+namespace
+{
+std::string
+get_rank_filter_id()
+{
+    static auto _v = get_config()->at("ROCPROFSYS_RANK_FILTER_ID");
+    return static_cast<tim::tsettings<std::string>&>(*_v).get();
+}
+
+std::string
+get_rank_filter_output()
+{
+    static auto _v = get_config()->at("ROCPROFSYS_RANK_FILTER_OUTPUT");
+    return static_cast<tim::tsettings<std::string>&>(*_v).get();
+}
+
+#if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
+    (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
+#    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 1
+#else
+#    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 0
+#endif
+
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
+std::optional<uint64_t>
+get_mpi_rank_from_env()
+{
+    const std::vector<std::string> rank_env_var_options = {
+        // rank env vars: user-provided then most generic to most runtime-specific
+        get_rank_filter_id(),  "MPI_RANK",
+        "MPI_LOCALRANKID",     "MPI_RANKID",
+        "MV2_COMM_WORLD_RANK", "OMPI_COMM_WORLD_RANK"
+    };
+
+    for(const auto& env_var : rank_env_var_options)
+    {
+        const std::string rank_str = get_env(env_var, std::string{}, false);
+
+        if(rank_str.empty()) continue;
+        try
+        {
+            const auto rank = std::stoul(rank_str);
+            LOG_DEBUG("MPI output filtering: using MPI rank = {} from {}", rank, env_var);
+            return rank;
+        } catch(const std::exception& e)
+        {
+            LOG_WARNING("MPI output filtering: failed to get MPI rank from {}='{}': {}",
+                        env_var, rank_str, e.what());
+        }
+    }
+
+    return std::nullopt;
+}
+#endif
+}  // namespace
+
+namespace output_filtering
+{
+bool
+is_output_enabled_for_current_mpi_rank()
+{
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
+    auto enabled_ranks_str = get_rank_filter_output();
+    rocprofsys::utility::trim_str(enabled_ranks_str);
+    for(auto& ch : enabled_ranks_str)
+        ch = std::tolower(ch);
+
+    if(enabled_ranks_str.empty() || enabled_ranks_str == "all") return true;
+    if(enabled_ranks_str == "none") return false;
+
+    const auto current_rank = get_mpi_rank_from_env();
+    if(!current_rank)
+    {
+        LOG_WARNING("MPI output filtering DISABLED: failed to get MPI rank");
+        return true;
+    }
+
+    const auto enabled_ranks =
+        rocprofsys::utility::parse_numeric_range<int64_t, std::unordered_set<int64_t>>(
+            enabled_ranks_str, "ranks", 1L);
+
+    const auto is_enabled = enabled_ranks.count(current_rank.value()) != 0;
+    LOG_DEBUG("Output for MPI rank {} is {}", current_rank.value(),
+              is_enabled ? "enabled" : "disabled");
+    return is_enabled;
+#else
+    return true;
+#endif
+}
+}  // namespace output_filtering
 
 tmp_file::tmp_file(std::string _v)
 : filename{ std::move(_v) }

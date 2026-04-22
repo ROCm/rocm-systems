@@ -151,6 +151,52 @@ It can be called before ``rocshmem_init``.
 This routine queries the PE ID of the caller.
 It can be called per thread with no performance penalty.
 
+ROCSHMEM_INFO_GET_VERSION
+-------------------------
+
+.. cpp:function:: __host__ void rocshmem_info_get_version(int *major, int *minor)
+
+  :param major: Returns ``ROCSHMEM_MAJOR_VERSION``.
+  :param minor: Returns ``ROCSHMEM_MINOR_VERSION``.
+  :returns: None.
+
+**Description:**
+This routine returns the major and minor version of the OpenSHMEM
+specification that this library implements.  Upon return, ``major``
+and ``minor`` contain ``ROCSHMEM_MAJOR_VERSION`` and
+``ROCSHMEM_MINOR_VERSION``, respectively.
+
+ROCSHMEM_INFO_GET_NAME
+----------------------
+
+.. cpp:function:: __host__ void rocshmem_info_get_name(char *name)
+
+  :param name: Buffer of at least ``ROCSHMEM_MAX_NAME_LEN`` bytes.
+               Receives ``ROCSHMEM_VENDOR_STRING``.
+  :returns: None.
+
+**Description:**
+This routine returns the vendor-defined string associated with this
+library.  The string is copied into the ``name`` argument, which must
+be able to hold at least ``ROCSHMEM_MAX_NAME_LEN`` bytes.  The string
+is null-terminated and contains the value of ``ROCSHMEM_VENDOR_STRING``.
+
+ROCSHMEM_VENDOR_GET_VERSION_INFO
+--------------------------------
+
+.. cpp:function:: __host__ void rocshmem_vendor_get_version_info(int *major, int *minor, int *patch)
+
+  :param major: Returns ``ROCSHMEM_VENDOR_MAJOR_VERSION``.
+  :param minor: Returns ``ROCSHMEM_VENDOR_MINOR_VERSION``.
+  :param patch: Returns ``ROCSHMEM_VENDOR_PATCH_VERSION``.
+  :returns: None.
+
+**Description:**
+This routine returns the vendor-specific version of rocSHMEM.  Upon
+return, ``major``, ``minor``, and ``patch`` contain
+``ROCSHMEM_VENDOR_MAJOR_VERSION``, ``ROCSHMEM_VENDOR_MINOR_VERSION``,
+and ``ROCSHMEM_VENDOR_PATCH_VERSION``, respectively.
+
 ROCSHMEM_PTR
 --------------
 

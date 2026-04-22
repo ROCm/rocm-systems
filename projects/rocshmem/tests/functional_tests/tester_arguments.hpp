@@ -35,8 +35,9 @@
 enum TeamSplitType {
   ROCSHMEM_TEST_TEAM_DUP = 0,    // Dup parent team
   ROCSHMEM_TEST_TEAM_SINGLE,     // each PE will be its own team
-  ROCSHMEM_TEST_TEAM_BLOCK,      // split parent into two halfs
+  ROCSHMEM_TEST_TEAM_BLOCK,      // split parent into two halves
   ROCSHMEM_TEST_TEAM_ODDEVEN,    // odd-even splitting
+  ROCSHMEM_TEST_TEAM_SHARED,     // predefined ROCSHMEM_TEAM_SHARED
 };
 
 /*-----------------------------------------

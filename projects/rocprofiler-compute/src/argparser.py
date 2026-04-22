@@ -275,19 +275,6 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "-p",
-        "--path",
-        metavar="",
-        type=str,
-        dest="path",
-        default=str(Path.cwd() / "workloads"),
-        required=False,
-        help=(
-            f"\t\t\t(DEPRECATED) Specify path to save workload.\n\t\t\t(DEFAULT: {Path.cwd()}/workloads/<name>)\n"  # noqa: E501
-            "\t\t\t --path is deprecated. Use --output-directory instead."  # noqa: E501
-        ),
-    )
-    profile_group.add_argument(
         "--output-directory",
         metavar="",
         type=str,
@@ -303,18 +290,6 @@ Examples:
             '\t\t\t   %%env{NAME}%%: Environment variable "NAME"\n'
             "\t\t\t(DEFAULT: <current-working-directory>/workloads/<name>/%%gpumodel%%) without MPI,\n"  # noqa: E501
             "\t\t\t <current-working-directory>/workloads/<name>/%%rank%% with MPI.)"
-        ),
-    )
-    profile_group.add_argument(
-        "--subpath",
-        metavar="",
-        type=str,
-        dest="subpath",
-        default="gpu_model",
-        required=False,
-        help=(
-            "\t\t\t(DEPRECATED) Specify the type of subpath to save workload: node_name, gpu_model."  # noqa: E501
-            "\n\t\t\t --subpath is deprecated. Use --output-directory with parameterization instead."  # noqa: E501
         ),
     )
     profile_group.add_argument(
@@ -521,8 +496,9 @@ Examples:
         default=False,
         action="store_true",
         help=(
-            "\t\t\tRetain the large raw rocpd database in workload directory.\n"
-            "\t\t\tThis option requires --format-rocprof-output rocpd."
+            "\t\t\t(DEPRECATED) Retain the large raw rocpd database in workload directory.\n"
+            "\t\t\tThis option requires --format-rocprof-output rocpd.\n"
+            "\t\t\t --retain-rocpd-output is deprecated. .db files will be retained by default in a future release."  # noqa: E501
         ),
     )
 

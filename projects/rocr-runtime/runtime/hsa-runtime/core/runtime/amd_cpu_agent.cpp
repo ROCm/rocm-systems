@@ -323,6 +323,9 @@ hsa_status_t CpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_EXT_AGENT_INFO_MAX_SAMPLER_HANDLERS:
       *((uint32_t*)value) = 0;
       break;
+    case HSA_EXT_AGENT_INFO_IMAGE_SUPPORT:
+      *((bool*)value) = false;
+      break;
     case HSA_AMD_AGENT_INFO_CHIP_ID:
       *((uint32_t*)value) = properties_.DeviceId;
       break;
@@ -432,7 +435,7 @@ hsa_status_t CpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
 hsa_status_t CpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                                    core::HsaEventCallback event_callback, void* data,
                                    uint32_t private_segment_size, uint32_t group_segment_size,
-                                   core::Queue** queue) {
+                                   bool metadata_queue, core::Queue** queue) {
   // No HW AQL packet processor on CPU device.
   return HSA_STATUS_ERROR;
 }

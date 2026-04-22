@@ -1841,7 +1841,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
             rocprofiler_sdk_tool_path="sdk_tool",
             roof_only=True,
             format_rocprof_output="format",
-            path="path",
+            output_directory="path",
             remaining="remaining",
             iteration_multiplexing=None,
             attach_pid=None,
@@ -5687,31 +5687,40 @@ def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
 
 
 @mock.patch("utils.utils_profile.capture_subprocess_output")
-@mock.patch("utils.utils_profile.console_error")
 @mock.patch("utils.utils_profile.console_debug")
 def test_pc_sampling_prof_subprocess_fails(
-    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
+    mock_console_debug, mock_capture_subprocess, tmp_path, monkeypatch
 ):
     """
     Edge Case: The capture_subprocess_output returns success=False.
     This should trigger the console_error("PC sampling failed.").
     """
+    console_error_calls = []
+
+    def mock_console_error(msg, exit=True):
+        console_error_calls.append(msg)
+        if exit:
+            raise RuntimeError("console_error called")
+
+    monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
+
     with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
         method = "stochastic"
         interval = 5000
         workload_dir = str(tmp_path)
         options = ["another_app"]
-        rocprofiler_sdk_tool_path = "/some/path/librocprofiler_sdk.so"  # noqa: F841
 
-        mock_capture_subprocess.return_value = (False, "Error output from subprocess")
+        with pytest.raises(RuntimeError, match="console_error called"):
+            utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
 
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
-
-        mock_capture_subprocess.assert_called_once()
-        mock_console_error.assert_called_once_with("PC sampling failed.")
+        mock_capture_subprocess.assert_not_called()
+        assert console_error_calls == [
+            "APP_CMD, the workload's executable must be provided "
+            "when not in live attach mode"
+        ]
 
     mock_capture_subprocess.reset_mock()
-    mock_console_error.reset_mock()
+    console_error_calls.clear()
     with mock.patch("utils.utils_common._rocprof_cmd", "rocprofiler-sdk"):
         options = {"APP_CMD": "another_app"}
         sdk_lib_dir = tmp_path / "rocm_sdk_fail" / "lib"
@@ -5728,10 +5737,11 @@ def test_pc_sampling_prof_subprocess_fails(
             "Error output from SDK subprocess",
         )
 
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
+        with pytest.raises(RuntimeError, match="console_error called"):
+            utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
 
         mock_capture_subprocess.assert_called_once()
-        mock_console_error.assert_called_once_with("PC sampling failed.")
+        assert console_error_calls == ["PC sampling failed."]
 
 
 @mock.patch("utils.utils_profile.capture_subprocess_output")
@@ -5779,6 +5789,31 @@ def test_pc_sampling_prof_empty_appcmd(
 
         assert mock_capture_subprocess.called
         assert mock_capture_subprocess.call_args[0][0] == ""
+        mock_console_error.assert_not_called()
+
+
+@mock.patch("utils.utils_profile.capture_subprocess_output")
+@mock.patch("utils.utils_profile.console_error")
+@mock.patch("utils.utils_profile.console_debug")
+def test_pc_sampling_prof_multiarg_appcmd(
+    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
+):
+    """All arguments after '--' in profiler_options must appear
+    in the subprocess call."""
+    with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
+        method = "host_trap"
+        interval = 100
+        workload_dir = str(tmp_path)
+        options = ["--kernel-trace", "--", "./myapp", "arg1", "arg2"]
+
+        mock_capture_subprocess.return_value = (True, "Success")
+
+        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
+
+        assert mock_capture_subprocess.called
+        options_list = mock_capture_subprocess.call_args[0][0]
+        separator_index = options_list.index("--")
+        assert options_list[separator_index:] == ["--", "./myapp", "arg1", "arg2"]
         mock_console_error.assert_not_called()
 
 
@@ -6310,7 +6345,7 @@ def test_noise_clamp_clamping_behavior():
     """Core behavior: positives unchanged, negatives clamped to 0."""
     import numpy as np
 
-    from utils.parser import to_noise_clamp
+    from utils.metrics.noise_clamper import to_noise_clamp
 
     # Scalar: positive unchanged
     assert to_noise_clamp(1000.0, 100000.0) == 1000.0
@@ -6333,7 +6368,7 @@ def test_noise_clamp_clamping_behavior():
 @pytest.mark.noise_clamp
 def test_noise_clamp_zero_reference():
     """Edge case: zero reference should not cause division by zero."""
-    from utils.parser import to_noise_clamp
+    from utils.metrics.noise_clamper import to_noise_clamp
 
     assert to_noise_clamp(-100.0, 0.0) == 0.0
     result = to_noise_clamp(pd.Series([-100.0]), pd.Series([0.0]))
@@ -6343,7 +6378,7 @@ def test_noise_clamp_zero_reference():
 @pytest.mark.noise_clamp
 def test_noise_clamp_warning_above_threshold():
     """Warning recorded when relative error >= 1%."""
-    from utils.parser import (
+    from utils.metrics.noise_clamper import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6362,7 +6397,7 @@ def test_noise_clamp_warning_above_threshold():
 @pytest.mark.noise_clamp
 def test_noise_clamp_no_warning_below_threshold():
     """No warning when relative error < 1%."""
-    from utils.parser import (
+    from utils.metrics.noise_clamper import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6379,7 +6414,7 @@ def test_noise_clamp_no_warning_below_threshold():
 @pytest.mark.noise_clamp
 def test_noise_clamp_empty_input():
     """Empty inputs should return empty without error."""
-    from utils.parser import to_noise_clamp
+    from utils.metrics.noise_clamper import to_noise_clamp
 
     result = to_noise_clamp(pd.Series([], dtype=float), pd.Series([], dtype=float))
     assert len(result) == 0
@@ -6388,7 +6423,7 @@ def test_noise_clamp_empty_input():
 @pytest.mark.noise_clamp
 def test_noise_clamp_threshold_boundary():
     """Exactly 1% error should trigger warning (>= not >)."""
-    from utils.parser import (
+    from utils.metrics.noise_clamper import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6406,7 +6441,7 @@ def test_noise_clamper_instance_isolation():
     """Separate NoiseClamper instances should have independent state."""
     import numpy as np
 
-    from utils.parser import NoiseClamper
+    from utils.metrics.noise_clamper import NoiseClamper
 
     clamper1 = NoiseClamper()
     clamper2 = NoiseClamper()

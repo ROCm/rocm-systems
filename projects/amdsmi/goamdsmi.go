@@ -40,7 +40,7 @@ import "unsafe"
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       GPU initialization is successful...
@@ -55,7 +55,7 @@ func GO_gpu_init() (bool) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_shutdown() {
 //       GPU shutdown is successful...
@@ -72,7 +72,7 @@ func GO_gpu_shutdown() (bool) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_shutdown() {
 //       GPU shutdown is successful...
@@ -90,7 +90,7 @@ func GO_gpu_num_monitor_devices() (uint) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -111,7 +111,7 @@ func GO_gpu_dev_name_get(i int) (*C.char) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -133,7 +133,7 @@ func GO_gpu_dev_id_get(i int) (C.uint16_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       dev_pci_id := int(goamdsmi.GO_gpu_dev_pci_id_get())
@@ -151,7 +151,7 @@ func GO_gpu_dev_pci_id_get(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       dev_pci_id := int(goamdsmi.GO_gpu_dev_pci_id_get())
@@ -169,7 +169,7 @@ func GO_gpu_dev_vbios_version_get(i int) (*C.char) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -191,7 +191,7 @@ func GO_gpu_dev_vendor_name_get(i int) (*C.char) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -211,7 +211,7 @@ func GO_gpu_dev_power_cap_get(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -236,7 +236,7 @@ func GO_gpu_dev_power_get(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -257,7 +257,7 @@ func GO_gpu_dev_temp_metric_get(i int, sensor int, metric int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -278,7 +278,7 @@ func GO_gpu_dev_perf_level_get(i int) (C.uint32_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -299,7 +299,7 @@ func GO_gpu_dev_overdrive_level_get(i int) (C.uint32_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -321,7 +321,7 @@ func GO_gpu_dev_mem_overdrive_level_get(i int) (C.uint32_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -343,7 +343,7 @@ func GO_gpu_dev_gpu_clk_freq_get_sclk(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -365,7 +365,7 @@ func GO_gpu_dev_gpu_clk_freq_get_mclk(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -387,7 +387,7 @@ func GO_gpu_od_volt_freq_range_min_get_sclk(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -409,7 +409,7 @@ func GO_gpu_od_volt_freq_range_min_get_mclk(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -431,7 +431,7 @@ func GO_gpu_od_volt_freq_range_max_get_sclk(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -452,7 +452,7 @@ func GO_gpu_od_volt_freq_range_max_get_mclk(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -474,7 +474,7 @@ func GO_gpu_dev_gpu_busy_percent_get(i int) (C.uint32_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -496,7 +496,7 @@ func GO_gpu_dev_gpu_memory_busy_percent_get(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -518,7 +518,7 @@ func GO_gpu_dev_gpu_memory_usage_get (i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -539,7 +539,7 @@ func GO_gpu_dev_gpu_memory_total_get (i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       CPU initialization is successful...
@@ -554,7 +554,7 @@ func GO_cpu_init() (bool) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_sockets := int(goamdsmi.GO_cpu_number_of_sockets_get())
@@ -569,7 +569,7 @@ func GO_cpu_number_of_sockets_get() (uint) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_threads := int(goamdsmi.GO_cpu_number_of_threads_get())
@@ -584,7 +584,7 @@ func GO_cpu_number_of_threads_get() (uint) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_threads_per_core := int(goamdsmi.GO_cpu_threads_per_core_get())
@@ -603,7 +603,7 @@ func GO_cpu_threads_per_core_get() (uint) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_threads := int(goamdsmi.GO_cpu_number_of_threads_get())
@@ -625,7 +625,7 @@ func GO_cpu_core_energy_get(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_threads := int(goamdsmi.GO_cpu_number_of_threads_get())
@@ -647,7 +647,7 @@ func GO_cpu_core_boostlimit_get(i int) (C.uint32_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_sockets := int(goamdsmi.GO_cpu_number_of_sockets_get())
@@ -669,7 +669,7 @@ func GO_cpu_socket_energy_get(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_sockets := int(goamdsmi.GO_cpu_number_of_sockets_get())
@@ -691,7 +691,7 @@ func GO_cpu_socket_power_get(i int) (C.uint32_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_sockets := int(goamdsmi.GO_cpu_number_of_sockets_get())
@@ -712,7 +712,7 @@ func GO_cpu_socket_power_cap_get(i int) (C.uint32_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_sockets := int(goamdsmi.GO_cpu_number_of_sockets_get())
@@ -740,7 +740,7 @@ func GO_cpu_prochot_status_get(i int) (C.uint32_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       var currentIdx, numOpts uint32
@@ -771,7 +771,7 @@ func GO_gpu_uma_carveout_info_get(device_index int, current_index *uint32, num_o
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       ret := goamdsmi.GO_gpu_uma_carveout_set(0, 3)
@@ -795,7 +795,7 @@ func GO_gpu_uma_carveout_set(device_index int, option_index uint32) int32 {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   var pages uint64
 //   ret := goamdsmi.GO_ttm_info_get(&pages)
@@ -818,7 +818,7 @@ func GO_ttm_info_get(current_pages *uint64) int32 {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   ret := goamdsmi.GO_ttm_pages_limit_set(3104239)
 //   if ret == 0 {
@@ -840,7 +840,7 @@ func GO_ttm_pages_limit_set(pages uint64) int32 {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   ret := goamdsmi.GO_ttm_pages_limit_reset()
 //   if ret == 0 {

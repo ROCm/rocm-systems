@@ -2,6 +2,8 @@
 ## Unreleased - rocSHMEM 3.3.0 for ROCm x.x.x
 ### Added
 * Added new APIs:
+   * `rocshmem_quiet_on_stream`
+   * `rocshmem_sync_all_on_stream`
    * `rocshmem_TYPENAME_alltoall_wg`
    * `rocshmem_TYPENAME_alltoallv_wg`
    * `rocshmem_team_my_pe`
@@ -9,8 +11,17 @@
    * `rocshmem_barrier`
    * `rocshmem_barrier_wave`
    * `rocshmem_barrier_wg`
+   * `rocshmem_info_get_version`
+   * `rocshmem_info_get_name`
+   * `rocshmem_vendor_get_version_info`
+* Added library constants: `ROCSHMEM_MAJOR_VERSION`, `ROCSHMEM_MINOR_VERSION`,
+  `ROCSHMEM_MAX_NAME_LEN`, `ROCSHMEM_VENDOR_STRING`, `ROCSHMEM_VERSION`,
+  `ROCSHMEM_VENDOR_MAJOR_VERSION`, `ROCSHMEM_VENDOR_MINOR_VERSION`,
+  `ROCSHMEM_VENDOR_PATCH_VERSION`
+* Added vendor string and backend metadata to `rocshmem_info` output
 * Added `ROCSHMEM_TEAM_WORLD` for the device code
-* Added new Enviroment variables:
+* Added `ROCSHMEM_TEAM_SHARED` predefined team for PEs sharing a common memory domain (same node)
+* Added new environment variables:
   * `OVERRIDE_NIC_FIRMWARE_CHECK`
   * `ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX`
   * `ROCSHMEM_GDA_NUM_QPS_PER_PE_USR_CTX`
@@ -65,7 +76,7 @@
    a shared memory region when the IPC transport is available to reach that region.
    Previously, it would return a null pointer.
 * `ROCSHMEM_RO_DISABLE_IPC` was renamed to `ROCSHMEM_DISABLE_MIXED_IPC`.
-  This enviroment variable was not documented for prior releases.
+  This environment variable was not documented for prior releases.
   It is now documented to inform users who were using this undocumented feature.
 
 ### Removed

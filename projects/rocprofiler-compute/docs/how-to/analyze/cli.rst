@@ -128,7 +128,7 @@ There are three high-level GPU analysis views:
    option. Or, build your own configuration following
    `config_template <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/panel_config_template.yaml>`_.
    The following snippet shows how to generate a report containing only metric 2
-   (:doc:`System Speed-of-Light </conceptual/system-speed-of-light>`).
+   (:doc:`System Speed-of-Light </conceptual/cdna/system-speed-of-light>`).
 
    .. code-block:: shell-session
 

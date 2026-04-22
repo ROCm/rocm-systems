@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/perfetto_processor.hpp"
 #include "core/agent_manager.hpp"
@@ -52,7 +33,7 @@ namespace
 {
 struct annotation_entry
 {
-    const char*                                                             key;
+    std::string                                                             key;
     std::variant<std::string, uint64_t, int64_t, double, int32_t, uint32_t> value;
 };
 
@@ -157,7 +138,7 @@ emit_xcp_array_metrics(uint32_t device_id, size_t ts, const char* metric_name,
     for(size_t i = 0; i < data.size(); ++i)
     {
         const auto value = data[i];
-        if(value == std::numeric_limits<uint16_t>::max()) continue;
+        if(value == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_16) continue;
 
         std::string track_name;
         if(xcp_idx.has_value())
@@ -1282,4 +1263,64 @@ perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
     }
 }
 
+void
+perfetto_processor_t::handle(const kfd_sample& _kfd)
+{
+    auto _beg_ts     = _kfd.start_timestamp;
+    auto _end_ts     = _kfd.end_timestamp;
+    auto _track_name = _kfd.track_name;
+    auto _name       = _kfd.name;
+    auto _category   = _kfd.category;
+    auto _track_hash = std::hash<std::string>{}(_track_name);
+
+    auto emit_kfd_event = [&](auto category_tag) {
+        using CategoryT = decltype(category_tag);
+        auto _track     = get_track(CategoryT{}, _track_name, _track_hash);
+
+        auto add_annotations = [&](::perfetto::EventContext ctx) {
+            if(!m_use_annotations) return;
+
+            std::vector<annotation_entry> annotations = {
+                { "begin_ns", _beg_ts },
+                { "end_ns", _end_ts },
+            };
+
+            auto args = process_arguments_string(_kfd.args_str);
+            for(const auto& arg : args)
+            {
+                annotations.push_back({ arg.arg_name.c_str(), arg.arg_value });
+            }
+
+            annotate_perfetto(ctx, annotations);
+        };
+
+        if(_beg_ts == _end_ts)
+        {
+            TRACE_EVENT_INSTANT(trait::name<CategoryT>::value,
+                                ::perfetto::DynamicString{ _name }, _track, _beg_ts,
+                                add_annotations);
+        }
+        else
+        {
+            tracing::push_perfetto_track(CategoryT{}, _name.c_str(), _track, _beg_ts,
+                                         add_annotations);
+            tracing::pop_perfetto_track(CategoryT{}, _name.c_str(), _track, _end_ts);
+        }
+    };
+
+    if(_category == trait::name<category::rocm_kfd_page_fault>::value)
+        emit_kfd_event(category::rocm_kfd_page_fault{});
+    else if(_category == trait::name<category::rocm_kfd_page_migrate>::value)
+        emit_kfd_event(category::rocm_kfd_page_migrate{});
+    else if(_category == trait::name<category::rocm_kfd_queue>::value)
+        emit_kfd_event(category::rocm_kfd_queue{});
+    else if(_category == trait::name<category::rocm_kfd_event_queue>::value)
+        emit_kfd_event(category::rocm_kfd_event_queue{});
+    else if(_category == trait::name<category::rocm_kfd_event_unmap_from_gpu>::value)
+        emit_kfd_event(category::rocm_kfd_event_unmap_from_gpu{});
+    else if(_category == trait::name<category::rocm_kfd_event_dropped_events>::value)
+        emit_kfd_event(category::rocm_kfd_event_dropped_events{});
+    else
+        LOG_WARNING("Unknown KFD category: {}", _category);
+}
 }  // namespace rocprofsys::trace_cache
