@@ -709,6 +709,166 @@ Recipe makeCanaryReadlaneLastLaneRecipe() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Recipe: canary_ds_swizzle_swap1 — P6 ds_swizzle_b32 SWAP-1 regression guard
+//
+// Canary for the `ds_swizzle_b32 ... offset:swizzle(SWAP,1)` imm shape
+// (BITMASK_PERM with and=0x1F, or=0, xor=1; offset=0x041F) — the exact
+// instruction GPT-OSS's `sum_bitmatrix_rows` emits 8× per kernel
+// invocation.  Complements the existing `Gfx1250Gpu.DsSwizzle` GPU
+// test (which uses SWAP-2 / offset=0x081F to catch imm-extraction
+// bugs that happen to round-trip SWAP-1) by pinning the SWAP-1 imm
+// with the same end-to-end correctness contract.
+//
+// Gold semantics = SWAP-1 within each 32-lane group: for lane L,
+//   out[L] = in[(L & ~31) | ((L & 31) ^ 1)]
+// This formula holds across wave32 source and wave64 target because
+// hardware `ds_swizzle_b32` preserves bit 5 of the lane id (the
+// wave64-family-wide contract documented in
+// `handle_ds.cpp::DS_SWIZZLE_B32`).
+//
+// Expected verdicts (all match) at landing:
+//   native : match.  hipcc -> gfx942 -> same `ds_swizzle_b32
+//            offset:swizzle(SWAP,1)` executed byte-for-byte; bit-5
+//            preservation yields per-32-lane-half SWAP-1.
+//   legacy : match.  Text transpiler copies the MCInst through.
+//   salmon : match.  P6 lift routes through
+//            `@llvm.amdgcn.ds.swizzle(src, 0x041F)` -> gfx942 backend
+//            re-lowers to the identical instruction.
+//
+// Regression contract: a `match` -> `WRONG` drift on salmon means
+// either (a) imm extraction in `decode.cpp::decodeDsSwizzleImm`
+// regressed, (b) the MODREP classifier in
+// `wave_projection.cpp::dsSwizzleSafeForModRep` started refusing
+// SWAP-1, or (c) the intrinsic-to-backend path broke.  A drift to
+// `EXIT=2` means the classifier moved from rewrite to refuse — only
+// intentional if a future ISA breaks the bit-5 contract.  See
+// `kernels/canary_ds_swizzle_swap1.hip` for the source shape and
+// `hotswap/docs/gpt-oss-derisking.md` §7.2 / §9.2 item 4 for the
+// P6 derisking write-up.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeCanaryDsSwizzleSwap1Recipe() {
+  Recipe r;
+  r.name = "canary_ds_swizzle_swap1";
+  // Fixed blockSize=64 for the same reason as canary_readlane_last_lane:
+  // exactly one target wave per workgroup keeps the per-32-lane-half
+  // SWAP-1 pattern easy to reason about in both the CPU reference and
+  // in post-mortem diff inspection.  N values above 64 cover multi-
+  // workgroup launches so a blockIdx-dependent miscompile (e.g. a
+  // future regression that drops blockIdx.x from the kernarg plumbing)
+  // would surface as a shape-dependent WRONG count.
+  r.defaultNs     = {64, 128, 256, 1024};
+  r.defaultBlocks = {64};
+  r.validate = [](int N, int blockSize) -> std::optional<std::string> {
+    if (blockSize != 64)
+      return std::string("blockSize must be 64 (the target wave64 width): "
+                         "ds_swizzle SWAP-1 operates on a single 32-lane "
+                         "group within a 64-lane wave, and blockSize=64 "
+                         "keeps the CPU reference's group arithmetic "
+                         "1:1 with one target wave per workgroup");
+    if (N % blockSize != 0)
+      return std::string("N must be a multiple of blockSize (64) to keep "
+                         "every workgroup full; ragged tails would make "
+                         "the last group's SWAP-1 read from an out-of-"
+                         "range lane whose behaviour is ISA-dependent");
+    return std::nullopt;
+  };
+  r.outputElemBytes = sizeof(float);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    std::vector<uint8_t> buf(N * sizeof(float));
+    auto *f = reinterpret_cast<float *>(buf.data());
+    for (int i = 0; i < N; ++i) f[i] = static_cast<float>(i) + 0.5f;
+    return buf;
+  };
+
+  // Gold: per-32-lane-group SWAP-1 (lane L reads from lane L XOR 1
+  // within the group).  Block-scoped because the kernel is launched
+  // with `grid = ceil(N / blockSize)`, so the swap is always within
+  // a workgroup (one 32-lane group per wave, two waves per block at
+  // blockSize=64, and each wave swaps within its own 32 lanes).
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N,
+                      int blockSize) {
+    const float *in = reinterpret_cast<const float *>(input.data());
+    std::vector<uint8_t> out(N * sizeof(float));
+    float *o = reinterpret_cast<float *>(out.data());
+    constexpr int kGroupSize = 32;  // ds_swizzle bit-5-preservation boundary.
+    for (int tid = 0; tid < N; ++tid) {
+      int wg_id = tid / blockSize;
+      int lane_in_wg = tid % blockSize;
+      int group_base = lane_in_wg & ~(kGroupSize - 1);
+      int lane_in_group = lane_in_wg & (kGroupSize - 1);
+      int swap_partner = lane_in_group ^ 1;
+      int src_tid = wg_id * blockSize + group_base + swap_partner;
+      // validate() pins N % blockSize == 0 so src_tid is always in
+      // range; the guard is defensive against a future validate()
+      // loosening that forgets this invariant.
+      o[tid] = (src_tid < N) ? in[src_tid] : 0.0f;
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "canary_ds_swizzle_swap1"));
+    float *dIn, *dOut;
+    size_t bytes = N * sizeof(float);
+    HIP_ASSERT(hipMalloc(&dIn, bytes));
+    HIP_ASSERT(hipMalloc(&dOut, bytes));
+    uint32_t sentinel = 0x7FC00000u;
+    std::vector<uint32_t> sentinelHost(N, sentinel);
+    HIP_ASSERT(hipMemcpy(dOut, sentinelHost.data(), bytes,
+                         hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dIn, input.data(), bytes, hipMemcpyHostToDevice));
+
+    struct alignas(8) Args {
+      const float *in;
+      float *out;
+    } args = {dIn, dOut};
+    size_t argSize = sizeof(args);
+    void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                      HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                      HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, config));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(bytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dOut, bytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dIn));
+    HIP_ASSERT(hipFree(dOut));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int outElems) {
+    const float *g = reinterpret_cast<const float *>(gold.data());
+    const float *a = reinterpret_cast<const float *>(actual.data());
+    int mismatches = 0;
+    double maxAbs = 0.0;
+    int firstIdx = -1;
+    double firstG = 0.0, firstA = 0.0;
+    for (int i = 0; i < outElems; ++i) {
+      if (g[i] != a[i]) {
+        if (firstIdx < 0) {
+          firstIdx = i;
+          firstG = g[i];
+          firstA = a[i];
+        }
+        double d = std::fabs(g[i] - a[i]);
+        if (d > maxAbs) maxAbs = d;
+        ++mismatches;
+      }
+    }
+    return std::make_tuple(mismatches, maxAbs, firstIdx, firstG, firstA);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helpers for the cvt_* recipes.  Both live here rather than in the kernels
 // because they define the CPU reference, not any device-side behaviour.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4393,6 +4553,7 @@ const std::vector<Recipe> &allRecipes() {
         makeMubufStoreB32Recipe(),
         makeSSetVgprMsbRecipe(),
         makeCanaryReadlaneLastLaneRecipe(),
+        makeCanaryDsSwizzleSwap1Recipe(),
     };
     for (const auto &t : allTritonRecipes())
       r.push_back(tritonToRecipe(t));
