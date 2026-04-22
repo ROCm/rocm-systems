@@ -36,6 +36,9 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
 
       # Install Change Log
       find_program ( DEB_GZIP_EXEC gzip )
+      if(NOT DEB_GZIP_EXEC)
+        message(FATAL_ERROR "gzip command not found: Failed to compress the changelog")
+      endif()
       if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian" )
         execute_process(
           COMMAND ${DEB_GZIP_EXEC} -f -n -9 "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"

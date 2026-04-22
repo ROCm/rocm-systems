@@ -271,6 +271,9 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
 
         # Install Change Log
         find_program ( DEB_GZIP_EXEC gzip )
+        if(NOT DEB_GZIP_EXEC)
+            message(FATAL_ERROR "gzip command not found: Failed to compress the changelog")
+        endif()
         if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian" )
             execute_process(
             COMMAND ${DEB_GZIP_EXEC} -f -n -9 "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
@@ -308,7 +311,7 @@ function( set_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DEB_MAINT
         OUTPUT_VARIABLE TIMESTAMP_T
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    set( DEB_TIMESTAMP                "${TIMESTAMP_T}" CACHE STRING "Current Time Stamp for Copyright/Changelog" )
+    set( DEB_TIMESTAMP "${TIMESTAMP_T}" CACHE STRING "Current Time Stamp for Copyright/Changelog" )
 
     # Get Copyright Year
     set(DEB_YEAR_FORMAT_OPTION "+%Y")

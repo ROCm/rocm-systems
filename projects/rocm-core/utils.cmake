@@ -146,6 +146,12 @@ function( set_variables )
 
 endfunction()
 
+# function to append content of IN_FILE to OUT_FILE
+function(append_file IN_FILE OUT_FILE)
+    file(READ "${IN_FILE}" CONTENTS)
+    file(APPEND "${OUT_FILE}" "${CONTENTS}")
+endfunction()
+
 ## Configure Copyright File for Debian Package
 function( configure_debian_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTAINER_NM_T MAINTAINER_EMAIL_T)
     # Check If Debian Platform
@@ -169,13 +175,6 @@ function( configure_debian_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T
       install ( FILES "${CMAKE_BINARY_DIR}/DEBIAN/copyright"
 	        DESTINATION "${CMAKE_INSTALL_DOCDIR}"
 	        COMPONENT ${COMPONENT_NAME_T} )
-
-      # Configure the changelog file
-      configure_file(
-        "${CMAKE_SOURCE_DIR}/DEBIAN/changelog.in"
-        "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
-        @ONLY
-      )
 
       if( BUILD_ENABLE_LINTIAN_OVERRIDES )
 	if(NOT BUILD_SHARED_LIBS)
@@ -202,8 +201,20 @@ function( configure_debian_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T
         )
       endif()
 
+      # Configure the changelog file
+      set(CHANGELOG_DATA_FILES "${CMAKE_SOURCE_DIR}/DEBIAN/changelog.in" "${CMAKE_SOURCE_DIR}/CHANGELOG.md")
+      set(CHANGELOG_DATA_APPENDED "${CMAKE_BINARY_DIR}/DEBIAN/changelog.in")
+      file(WRITE "${CHANGELOG_DATA_APPENDED}" "")
+      foreach(changelog_data ${CHANGELOG_DATA_FILES})
+        append_file("${changelog_data}" "${CHANGELOG_DATA_APPENDED}")
+      endforeach()
+      configure_file("${CHANGELOG_DATA_APPENDED}" "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian" @ONLY)
+
       # Install Change Log
       find_program ( DEB_GZIP_EXEC gzip )
+      if(NOT DEB_GZIP_EXEC)
+        message(FATAL_ERROR "gzip command not found: Failed to compress the changelog")
+      endif()
       if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian" )
         execute_process(
           COMMAND ${DEB_GZIP_EXEC} -f -n -9 "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"

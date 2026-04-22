@@ -1,3 +1,9 @@
+# function to append content of IN_FILE to OUT_FILE
+function(append_file IN_FILE OUT_FILE)
+    file(READ "${IN_FILE}" CONTENTS)
+    file(APPEND "${OUT_FILE}" "${CONTENTS}")
+endfunction()
+
 ## Configure Copyright File for Debian Package
 function(
     configure_pkg
@@ -59,6 +65,9 @@ function(
         )
         # Install Change Log
         find_program(DEB_GZIP_EXEC gzip)
+        if(NOT DEB_GZIP_EXEC)
+            message(FATAL_ERROR "gzip command not found: Failed to compress the changelog")
+        endif()
         if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/CHANGELOG.md")
             execute_process(
                 COMMAND

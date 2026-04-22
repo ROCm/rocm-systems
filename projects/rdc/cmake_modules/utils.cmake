@@ -170,14 +170,19 @@ function(
         )
 
         # Configure the changelog file
-        configure_file(
-            "${CMAKE_SOURCE_DIR}/CHANGELOG.md"
-            "${CMAKE_BINARY_DIR}/DEBIAN/CHANGELOG.md"
-            @ONLY
-        )
+        set(CHANGELOG_DATA_FILES "${CMAKE_SOURCE_DIR}/DEBIAN/changelog.in" "${CMAKE_SOURCE_DIR}/CHANGELOG.md")
+        set(CHANGELOG_DATA_APPENDED "${CMAKE_BINARY_DIR}/DEBIAN/changelog.in")
+        file(WRITE "${CHANGELOG_DATA_APPENDED}" "")
+        foreach(changelog_data ${CHANGELOG_DATA_FILES})
+            append_file("${changelog_data}" "${CHANGELOG_DATA_APPENDED}")
+        endforeach()
+        configure_file("${CHANGELOG_DATA_APPENDED}" "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian" @ONLY)
 
         # Install Change Log
         find_program(DEB_GZIP_EXEC gzip)
+        if(NOT DEB_GZIP_EXEC)
+            message(FATAL_ERROR "gzip command not found: Failed to compress the changelog")
+        endif()
         if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/CHANGELOG.md")
             execute_process(
                 COMMAND ${DEB_GZIP_EXEC} -f -n -9 "${CMAKE_BINARY_DIR}/DEBIAN/CHANGELOG.md"
@@ -192,7 +197,8 @@ function(
             install(
                 FILES "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
                 DESTINATION ${LINTIAN_DOCS_DIR}
-                COMPONENT ${COMPONENT_NAME_T})
+                COMPONENT ${COMPONENT_NAME_T}
+            )
         endif()
     endif()
 endfunction()
