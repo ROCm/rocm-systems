@@ -680,7 +680,7 @@ WriteInterceptor(const void* packets,
                 auto* ext_table = hsa::get_amd_ext_table();
                 for(auto& pkt : shared->packet_data)
                 {
-                    if(pkt.completion_signal.handle != 0 && !pkt.pooled_signal)
+                    if(pkt.completion_signal.handle != 0)
                     {
                         if(ext_table && ext_table->hsa_amd_signal_waiting_inc_fn)
                             ext_table->hsa_amd_signal_waiting_inc_fn(pkt.completion_signal);
