@@ -392,40 +392,63 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
 
   // Two disassembler shapes for the same SemOp, distinguished by the
   // instruction's GLC bit (encoding-level) and `di.numDefs`
-  // (decode-level):
+  // (decode-level).  The TableGen source of truth is
+  // `llvm/lib/Target/AMDGPU/SMInstructions.td`, class
+  // `SM_Pseudo_Atomic<..., bit isRet, ...>`:
   //
-  //   RTN     (GLC=1, numDefs=1): `(sdst, sbase, offset)` — TableGen
-  //           declares `$sdst_in` tied to `$sdst`, so the disassembler
-  //           elides the tied input and the decoded operand list is
-  //           (sdst, sbase, offset).  The atomic's input value (xchg
+  //     !if(isRet, (outs dataClass:$sdst), (outs))
+  //     (ins dataClass:$sdata, baseClass:$sbase, <offset>, CPolTy:$cpol)
+  //     let Constraints = !if(isRet, "$sdst = $sdata", "")
+  //
+  // i.e. both forms always carry `$sdata`, `$sbase`, the offset, and
+  // `$cpol` in the `ins` list; only RTN adds `$sdst` in the `outs`
+  // list and ties it to `$sdata` (which the MC layer then elides
+  // from the operand-print list, leaving the decoded MCInst as):
+  //
+  //   RTN     (GLC=1, numDefs=1, isRet=1):
+  //           `(sdst, sbase, offset, cpol)` — TableGen's tied
+  //           `"$sdst = $sdata"` constraint elides the tied input
+  //           from the operand list; the atomic's input value (xchg
   //           data for swap, wrap-threshold for dec) comes from the
   //           *pre-instruction* value of the dst SGPR; the post-
-  //           instruction value is the returned `old`.  The AITER
+  //           instruction value is the returned `old`.  AITER's
   //           split-k barrier keys its "am I the last workgroup?"
   //           branch on `old == 1`, so this is the hot path for
   //           `bf16gemm_*_splitk_clean.co` lowering.
   //
-  //   non-RTN (GLC=0, numDefs=0): `(sdata, sbase, offset)` — no dst
-  //           at all.  The atomic runs and the returned `old` is
-  //           dropped on the floor.  hipcc's inline-asm lowering of
-  //           `s_atomic_dec %[rmw], %[ptr], %[off]` (no `_rtn` suffix
-  //           in the mnemonic string) produces this shape even when
-  //           the `"+s"(rmw)` constraint suggests a tied in/out, so
-  //           the non-RTN arm has to exist for any HIP fixture that
-  //           spells the instruction via inline asm.  See
-  //           `lit_tests/s_atomic_dec/` for the canonical fixture
-  //           (split-k barrier reproducer).
+  //   non-RTN (GLC=0, numDefs=0, isRet=0):
+  //           `(sdata, sbase, offset, cpol)` — no dst at all; `sdata`
+  //           stays as an explicit source operand.  The atomic runs
+  //           and the returned `old` is dropped on the floor.  hipcc's
+  //           inline-asm lowering of `s_atomic_dec %[rmw], %[ptr],
+  //           %[off]` (no `_rtn` suffix in the mnemonic string)
+  //           produces this shape even when the `"+s"(rmw)`
+  //           constraint suggests a tied in/out, so the non-RTN arm
+  //           has to exist for any HIP fixture that spells the
+  //           instruction via inline asm.  See `lit_tests/s_atomic_dec/`
+  //           for the canonical fixture (split-k barrier reproducer).
   //
   // Common to both arms: the atomic binop (`rmwOp` above), the base
   // pointer in `sbase` (SGPR pair), a `soffset` that is either an
   // inline imm or an SGPR element index scaled by the dword width
   // when the `scale_offset` (CPol::SCAL) bit is set, and the
-  // explicit `Align(4)` / `AtomicOrdering::Monotonic` the RTN path
-  // already pins.
+  // explicit `Align(4)` / `AtomicOrdering::Monotonic`.  `cpol` is
+  // not consumed by the lift (the GLC bit it carries is already
+  // reflected in `di.numDefs`; the non-GLC CPol bits — DLC, SCOPE,
+  // SCAL — are either already threaded through `di.hasScaleOffset`
+  // or are cache-hint-only and thus lift-invariant).
+  //
+  // No SMEM atomic today has more than one def.  The assertion below
+  // pins that invariant so a hypothetical future 2-def form (none
+  // exists in any ISA the raiser targets) fails loudly rather than
+  // silently taking the RTN arm and mis-decoding `op.dst()` /
+  // `op.dst(1)`.
+  assert(di.numDefs <= 1 &&
+         "SMEM atomic with >1 defs is not a shape the lift recognises");
   ParsedReg base;
   unsigned offIdx;
   Value *data = nullptr;
-  ParsedReg dataDst;  // Valid only for the RTN arm.
+  ParsedReg dataDst;  // Set only on the RTN arm.
   if (di.numDefs == 0) {
     // Non-RTN: (sdata, sbase, offset).  Read sdata as the atomic's
     // input value; the returned `old` is intentionally discarded
@@ -437,8 +460,9 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
   } else {
     // RTN: (sdst_tied, sbase, offset).  Read the pre-instruction
     // value of sdst as the atomic's input (this is the tied-input
-    // slot TableGen's `$sdst_in` names), then write the returned
-    // `old` back to the same SGPR after the atomicrmw.
+    // slot TableGen's `"$sdst = $sdata"` constraint names), then
+    // write the returned `old` back to the same SGPR after the
+    // atomicrmw.
     dataDst = op.dst();
     base = op.srcReg(0);
     offIdx = op.srcIdx(1);
@@ -480,17 +504,13 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
   // callers.
   Value *old = ctx.B.CreateAtomicRMW(rmwOp, ptr, data, Align(4),
                                      AtomicOrdering::Monotonic);
-  if (di.numDefs != 0) {
-    // RTN arm: publish the pre-modification value to the tied sdst.
-    // Non-RTN arm: `old` is intentionally unused — the HW has already
-    // committed the new value to memory, which is all the non-RTN
-    // form guarantees.  `(void) old;` suppresses an unused-variable
-    // hint if a reviewer treats the RTN path as dead for a
-    // fixture that only emits the non-RTN shape.
+  // RTN arm only: publish the pre-modification value to the tied
+  // sdst SGPR.  The non-RTN arm has no write-back — the HW has
+  // already committed the new value to memory, which is all that
+  // form guarantees, and `old` is left as a dead SSA value that
+  // LLVM's DCE will remove in the usual way.
+  if (di.numDefs != 0)
     ctx.regs.storeSGPR32(ctx.B, dataDst.baseIdx, old);
-  } else {
-    (void)old;
-  }
   hr.handled = true;
   return hr;
 }
