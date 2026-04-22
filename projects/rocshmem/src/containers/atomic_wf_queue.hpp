@@ -40,7 +40,7 @@ namespace rocshmem {
 template <typename TYPE, typename ALLOCATOR = HIPDefaultFinegrainedAllocator>
 class AtomicWFQueue {
 
-  using MutexProxyType = ABQLBlockMutexProxy<ALLOCATOR>;
+  using MutexProxyType = ABQLBlockMutexProxy;
   using MutexType = ABQLBlockMutex;
 
   /**
