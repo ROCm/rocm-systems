@@ -220,7 +220,8 @@ def run_prof(
                     db_name,
                 )
                 console_debug(f"Updated rocpd db {db_name} with native tool counters.")
-        exported_counter_rows = rocpd_data.export_rocpd_csvs(
+        # Write counter, marker, and results CSVs from rocpd DBs
+        exported_counter_rows = rocpd_data.convert_dbs_to_csvs(
             rocpd_db_paths,
             workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv",
             workload_dir + f"/out/pmc_1/{fbase}_marker_api_trace.csv",

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from utils.rocpd_data import export_rocpd_csvs
+from utils.rocpd_data import convert_dbs_to_csvs
 
 COUNTERS_TABLE_DDL = """
 CREATE TABLE counters_collection (
@@ -120,7 +120,7 @@ def test_pid_dropped_from_counter_header(tmp_path, output_paths):
     ]
     _create_db(db_path, rows, [])
 
-    export_rocpd_csvs(
+    convert_dbs_to_csvs(
         [str(db_path)],
         str(output_paths["counter"]),
         str(output_paths["marker"]),
@@ -143,7 +143,7 @@ def test_dispatch_and_kernel_ids_assigned_sequentially(tmp_path, output_paths):
     ]
     _create_db(db_path, rows, [])
 
-    export_rocpd_csvs(
+    convert_dbs_to_csvs(
         [str(db_path)],
         str(output_paths["counter"]),
         str(output_paths["marker"]),
@@ -177,7 +177,7 @@ def test_kernel_ids_continuous_across_dbs(tmp_path, output_paths):
         [],
     )
 
-    export_rocpd_csvs(
+    convert_dbs_to_csvs(
         [str(db1), str(db2)],
         str(output_paths["counter"]),
         str(output_paths["marker"]),
@@ -212,7 +212,7 @@ def test_returns_total_row_count(tmp_path, output_paths):
         [],
     )
 
-    total = export_rocpd_csvs(
+    total = convert_dbs_to_csvs(
         [str(db1), str(db2)],
         str(output_paths["counter"]),
         str(output_paths["marker"]),
@@ -230,7 +230,7 @@ def test_results_csv_matches_counter_csv(tmp_path, output_paths):
     ]
     _create_db(db_path, rows, [])
 
-    export_rocpd_csvs(
+    convert_dbs_to_csvs(
         [str(db_path)],
         str(output_paths["counter"]),
         str(output_paths["marker"]),
@@ -254,7 +254,7 @@ def test_header_written_when_first_db_is_empty(tmp_path, output_paths):
         [],
     )
 
-    total = export_rocpd_csvs(
+    total = convert_dbs_to_csvs(
         [str(empty_db), str(populated_db)],
         str(output_paths["counter"]),
         str(output_paths["marker"]),
@@ -271,7 +271,7 @@ def test_header_written_when_first_db_is_empty(tmp_path, output_paths):
 
 def test_no_dbs_produces_empty_outputs(tmp_path, output_paths):
     """Calling with no DBs produces empty (header-less) output files."""
-    total = export_rocpd_csvs(
+    total = convert_dbs_to_csvs(
         [],
         str(output_paths["counter"]),
         str(output_paths["marker"]),
@@ -293,7 +293,7 @@ def test_same_kernel_different_pids_yields_distinct_dispatches(tmp_path, output_
     ]
     _create_db(db_path, rows, [])
 
-    export_rocpd_csvs(
+    convert_dbs_to_csvs(
         [str(db_path)],
         str(output_paths["counter"]),
         str(output_paths["marker"]),

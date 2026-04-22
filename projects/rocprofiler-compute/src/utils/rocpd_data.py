@@ -58,7 +58,7 @@ TABLE_NAME_PREFIX_QUERY = (
 INSERT_QUERY = "INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
 
 
-def export_rocpd_csvs(
+def convert_dbs_to_csvs(
     db_paths: list[str],
     counter_collection_csv_path: str,
     marker_trace_csv_path: str,
@@ -224,19 +224,15 @@ def _compose_output_row(
 ) -> tuple:
     """Return the output row tuple: PID dropped, IDs substituted in place."""
     pid_position = column_positions["PID"]
-    dispatch_position = column_positions["Dispatch_ID"]
-    kernel_position = column_positions["Kernel_ID"]
-    output_values = []
-    for position, value in enumerate(row):
-        if position == pid_position:
-            continue
-        if position == dispatch_position:
-            output_values.append(dispatch_id)
-        elif position == kernel_position:
-            output_values.append(kernel_id)
-        else:
-            output_values.append(value)
-    return tuple(output_values)
+    overrides = {
+        column_positions["Dispatch_ID"]: dispatch_id,
+        column_positions["Kernel_ID"]: kernel_id,
+    }
+    return tuple(
+        overrides.get(position, value)
+        for position, value in enumerate(row)
+        if position != pid_position
+    )
 
 
 def _regroup_counter_rows(
