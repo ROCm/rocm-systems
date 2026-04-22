@@ -33,7 +33,8 @@ static bool IfTestPassed = true;
 // Kernel functions
 __global__ void KrnlWth2MemTypes(int* Hmm, int* Dptr, size_t n) {
   size_t index = blockIdx.x * blockDim.x + threadIdx.x;
-  for (size_t i = index; i < n; i++) {
+  size_t stride = blockDim.x * gridDim.x;
+  for (size_t i = index; i < n; i += stride) {
     Hmm[i] = Dptr[i] + 10;
   }
 }
@@ -105,6 +106,9 @@ static void LaunchKrnl4(size_t NumElms, int InitVal) {
     INFO("Data Mismatch observedafter the Kernel: KernelMul_MngdMem!!\n");
     REQUIRE(false);
   }
+  HIP_CHECK(hipFree(Hmm));
+  HIP_CHECK(hipFree(Dptr));
+  HIP_CHECK(hipStreamDestroy(strm));
   delete[] Hstptr;
 }
 

@@ -41,12 +41,77 @@ try:
 except ImportError:
     raise ImportError(f'Could not import the "amdsmi" module from "{amdsmi_path}"')
 
+# Module-level default; __main__ overwrites this with the actual parsed value.
+# It must exist at module scope so setUpClass/setUp can reference it before
+# __main__ runs (e.g. when loaded by an external test runner).
+verbose = 1
+
 
 class TestAmdSmiCli(unittest.TestCase):
+    TMP_FILENAME = "_tmp.log"
+    TMP_FOLDER = "_tmp"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.common = common.Common(verbose)
+        cls.util = runcmd.Util("WARNING")
+
+        # Record starting values; running here (once per class) rather than in
+        # __init__ (once per test method) reduces setup overhead from O(N) to
+        # O(1) — N being the number of test methods in this class.
+        cmds = [
+            ("metric", "amd-smi metric --json"),
+            ("static", "amd-smi static --json"),
+            ("list", "amd-smi list --json"),
+            ("partition", "amd-smi partition --current --json"),
+        ]
+        for name, cmd in cmds:
+            (rc, data, std_err) = cls.util.RunCmdSync(cmd)
+            if rc:
+                raise RuntimeError(f'Error executing "{cmd}": {std_err}')
+            if not data:
+                raise RuntimeError(f'Empty JSON output from "{cmd}". stderr: {std_err}')
+            try:
+                setattr(cls, f"{name}_data", json.loads(data))
+            except (json.JSONDecodeError, TypeError) as e:
+                # TODO(amdsmi_team): Known issue — several AI NIC and CPU commands can produce
+                # malformed JSON/CSV/error output, causing parsing & other failures.
+                # We need to log tickets on these issues.
+
+                # Log warning but continue — malformed JSON output is a CLI bug,
+                # not a test infrastructure failure; tests that depend on this
+                # data will fail individually with a KeyError pointing to the
+                # missing key, making the root cause clear.
+                cls.common.print(f'\n\tERROR: Could not parse JSON from "{cmd}": {e}')
+                setattr(cls, f"{name}_data", {})
+
+        cls.gpus = ["all"]
+        for entry in cls.list_data:
+            cls.gpus.append(entry["gpu"])
+            if entry["gpu"] == 0:
+                # Only test bdf and uuid when gpu=0
+                cls.gpus.append(entry["bdf"])
+                cls.gpus.append(entry["uuid"])
+
+        # When parsing, expand each arg with array element
+        cls.sub_args = {
+            "CLOCK": ["SYS", "DF", "DCEF", "SOC", "MEM", "VCLK0", "VCLK1", "DCLK0", "DCLK1", "ALL"],
+            "PID": [123],
+            "NAME": ["AMD"],
+            "GPU": cls.gpus,
+            "FILE": [
+                cls.TMP_FILENAME,
+                f"{cls.TMP_FILENAME} --overwrite",
+                f"{cls.TMP_FILENAME} --append",
+            ],
+            "SEVERITY": ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"],
+            "FOLDER": [cls.TMP_FOLDER],
+            "FILE_LIMIT": [10],
+            #'LEVEL': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+        }
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.common = common.Common(verbose)
-        self.util = runcmd.Util("WARNING")
         self.Debug = False
         self.ReduceCmds = True
         self.PrintCmdsOnly = False
@@ -56,75 +121,16 @@ class TestAmdSmiCli(unittest.TestCase):
         self.AddWatchArgs = True
         self.AddLogLevel = "--loglevel DEBUG"
 
-        # Record starting values
-        cmd = "amd-smi metric --json"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.metric_data = json.loads(data)
-
-        cmd = "amd-smi static --json"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.static_data = json.loads(data)
-
-        cmd = "amd-smi list --json"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.list_data = json.loads(data)
-
-        cmd = "amd-smi partition --current --json"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.partition_data = json.loads(data)
-
-        global has_info_printed
-        if verbose and has_info_printed is False:
-            # Execute the following to print the asic and board info once
-            # per test run
-            has_info_printed = True
-            if self.Debug:
-                for i, gpu in enumerate(self.common.processors):
-                    msg = f"gpu={i}"
-                    self.common.print(msg)
-                    msg = f"virtualization mode(gpu={i})"
-                    self.common.print(msg, self.common.virt_mode[i])
-                    msg = f"asic info(gpu={i})"
-                    self.common.print(msg, self.common.asic_info[i])
-                    msg = f"board info(gpu={i})"
-                    self.common.print(msg, self.common.board_info[i])
-                    self.common.print("")
-
         self.PASS = 0
         self.FAIL = 1
         self.tab = "    "
-        self.tmp_filename = "_tmp.log"
-        self.tmp_folder = "_tmp"
+        self.tmp_filename = self.TMP_FILENAME
+        self.tmp_folder = self.TMP_FOLDER
 
         self.openBracket = "["
         self.closeBracket = "]"
         self.openCurlyBrace = "{"
         self.closeCurlyBrace = "}"
-
-        self.gpus = ["all"]
-        for data in self.list_data:
-            self.gpus.append(data["gpu"])
-            if data["gpu"] == 0:
-                # Only test bdf and uuid when gpu=0
-                self.gpus.append(data["bdf"])
-                self.gpus.append(data["uuid"])
-
-        # When parsing, expand each arg with array element
-        self.sub_args = {
-            "CLOCK": ["SYS", "DF", "DCEF", "SOC", "MEM", "VCLK0", "VCLK1", "DCLK0", "DCLK1", "ALL"],
-            "PID": [123],
-            "NAME": ["AMD"],
-            "GPU": self.gpus,
-            "FILE": [
-                self.tmp_filename,
-                f"{self.tmp_filename} --overwrite",
-                f"{self.tmp_filename} --append",
-            ],
-            "SEVERITY": ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"],
-            "FOLDER": [self.tmp_folder],
-            "FILE_LIMIT": [10],
-            #'LEVEL': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-        }
 
         self.perf_levels = [
             "AUTO",
@@ -690,7 +696,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 continue
             (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
             error_code = rc
-            if rc and len(std_err):
+            if rc and std_err:
                 items = std_err.split()
                 if "amdsmi_exception" in std_err:
                     # error code from amdsmi library exception
@@ -1398,7 +1404,6 @@ if __name__ == "__main__":
         verbose = 0
     elif "-v" in sys.argv or "--verbose" in sys.argv:
         verbose = 2
-    has_info_printed = False
 
     if verbose:
         print("AMD SMI CLI Tests")

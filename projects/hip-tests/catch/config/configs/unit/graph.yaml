@@ -79,12 +79,12 @@ graph:
     tags: [exec]
   Unit_hipGraphAddMemcpyNode_Positive_Basic:
     <<: *level_2
-    tags: [node]
+    tags: [node, image]
   Unit_hipGraphAddMemcpyNode_Negative_Parameters:
     <<: *level_2
     # NOTE: The following test is disabled due to defect - EXSWHTEC-245
     disabled: [amd_windows]
-    tags: [node]
+    tags: [node, image]
   Unit_hipGraphClone_Negative:
     <<: *level_2
     tags: [lifecycle]
@@ -244,7 +244,6 @@ graph:
     tags: [exec]
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative:
     <<: *level_2
-    tags: [node]
     tags: [node]
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Positive_Basic:
     <<: *level_2
@@ -580,10 +579,10 @@ graph:
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParams_Negative:
     <<: *level_2
-    tags: [exec]
+    tags: [exec, image]
   Unit_hipGraphExecMemcpyNodeSetParams_Functional:
     <<: *level_2
-    tags: [exec]
+    tags: [exec, image]
   Unit_hipStreamBeginCapture_Positive_Functional:
     <<: *level_2
     tags: [capture]
@@ -988,7 +987,8 @@ graph:
   Unit_hipGraphExecEventWaitNodeSetEvent_Negative:
     <<: *level_2
     tags: [exec]
-  Unit_hipGraphAddMemsetNode_Positive_Basic: *level_2
+  Unit_hipGraphAddMemsetNode_Positive_Basic:
+    <<: *level_2
   Unit_hipGraphAddMemsetNode_Negative_Parameters:
     <<: *level_2
     tags: [node]
@@ -1030,13 +1030,13 @@ graph:
     tags: [query]
   Unit_hipGraphMemcpyNodeGetParams_Negative:
     <<: *level_2
-    tags: [query]
+    tags: [query, image]
   Unit_hipGraphMemcpyNodeGetParams_Functional:
     <<: *level_2
-    tags: [query]
+    tags: [query, image]
   Unit_hipGraphMemcpyNodeSetParams_Positive_Basic:
     <<: *level_2
-    tags: [node]
+    tags: [node, image]
   Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters:
     <<: *level_2
     tags: [node]
@@ -1073,6 +1073,21 @@ graph:
     <<: *level_2
     tags: [exec]
   Unit_hipGraphLaunch_Functional_MultipleLaunch:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphLaunch_ProfilingTimestamps_SmallGraph:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphLaunch_ProfilingTimestamps_LargeGraph:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphLaunch_PerKernelTiming_SmallGraph:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphLaunch_TimingConsistency_SmallGraph:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphLaunch_TimingConsistency_LargeGraph:
     <<: *level_2
     tags: [exec]
   Unit_hipGraphMemcpyNodeSetParams1D_Positive_Basic:
@@ -1248,12 +1263,12 @@ graph:
     tags: [lifecycle]
   Unit_hipGraphClone_Test_hipGraphMemcpyNodeSetParams:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, image]
   Unit_hipGraphClone_Test_hipGraphExecMemcpyNodeSetParams:
     <<: *level_2
     # Below tests fail in stress test on 23/06/23
     disabled: [amd_wsl]
-    tags: [lifecycle]
+    tags: [lifecycle, image]
   Unit_hipGraphClone_Test_hipGraphMemcpyNodeSetParams1D_and_exec:
     <<: *level_2
     # Below tests fail in stress test on 23/06/23
@@ -1288,7 +1303,7 @@ graph:
     tags: [lifecycle]
   Unit_hipGraphClone_multi_GPU_test:
     <<: *level_2
-    tags: [lifecycle, multigpu]
+    tags: [lifecycle, multigpu, image]
   Unit_hipGraphClone_hipUserObject_hipGraphUserObject:
     <<: *level_2
     tags: [lifecycle]
@@ -1526,7 +1541,7 @@ graph:
     tags: [node]
   Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Array:
     <<: *level_2
-    tags: [node]
+    tags: [node, image]
   Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters:
     <<: *level_2
     tags: [node]
@@ -1578,7 +1593,7 @@ graph:
     tags: [node]
   Unit_hipGraphAddNodeTypeMemcpy_Positive_Basic:
     <<: *level_2
-    tags: [node]
+    tags: [node, image]
   Unit_hipGraphAddNodeTypeEventRecord_Positive_Basic:
     <<: *level_2
     tags: [node]
@@ -1591,7 +1606,8 @@ graph:
   Unit_hipGraphAddNode_Negative_Parameters:
     <<: *level_2
     tags: [node]
-  Unit_hipDrvGraphAddMemsetNode_Positive_Basic: *level_2
+  Unit_hipDrvGraphAddMemsetNode_Positive_Basic:
+    <<: *level_2
   Unit_hipDrvGraphAddMemsetNode_Negative_Parameters:
     <<: *level_2
     tags: [node]
@@ -1639,7 +1655,7 @@ graph:
     tags: [node]
   Unit_hipDrvGraphAddMemcpyNode_Positive_Array:
     <<: *level_2
-    tags: [node]
+    tags: [node, image]
   Unit_hipDrvGraphAddMemcpyNode_Negative_Parameters:
     <<: *level_2
     tags: [node]

@@ -454,6 +454,11 @@ class OmniAnalyze_Base:
             # Vertically concat (by rows) results_*.csv into pmc_perf.csv
             result_files = list(workload_dir.glob("results_*.csv"))
 
+            console_warning(
+                "Reading intermediate results_*.csv files is deprecated and "
+                "will be removed in a future release."
+            )
+
             with open(output_file, "w", newline="") as outfile:
                 writer = None
                 for file in result_files:

@@ -44,15 +44,15 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id, int gda_provide
 
   ctx_id_ = ctx_id;
   num_qps_per_pe = ctx_id_?
-      envvar::gda::num_qps_per_pe_usr_ctx.get_value() :
-      envvar::gda::num_qps_per_pe_default_ctx.get_value();
+      backend->qps_per_pe_usr_ctx_ :
+      backend->qps_per_pe_default_ctx_;
 
   num_qps = num_qps_per_pe * num_pes;
 
   // Calculate offset into the backend's GPU QP array
   int offset = (ctx_id_ > 0) *
-    (envvar::gda::num_qps_per_pe_default_ctx.get_value() +
-     envvar::gda::num_qps_per_pe_usr_ctx.get_value() * (ctx_id_ - 1));
+    (backend->qps_per_pe_default_ctx_ +
+     backend->qps_per_pe_usr_ctx_ * (ctx_id_ - 1));
   offset *= num_pes;
 
   CHECK_HIP(hipMalloc(&qp_counter, sizeof(uint32_t) * num_pes));
@@ -422,16 +422,15 @@ __device__ uint64_t GDAContext::signal_fetch(const uint64_t *sig_addr) {
 }
 
 __device__ uint64_t GDAContext::signal_fetch_wg(const uint64_t *sig_addr) {
-  __shared__ uint64_t value;
   if (is_thread_zero_in_block()) {
     ActiveWFInfo wf_info(my_pe, ThreadScope::wg);
     int qp_index = get_qp_index(my_pe, wf_info);
     uint64_t *dst = const_cast<uint64_t*>(sig_addr);
-    value = internal_amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, my_pe,
-              qp_index, wf_info);
+    wg_signal_scratch = internal_amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0,
+                                                         my_pe, qp_index, wf_info);
   }
-  __threadfence_block();
-  return value;
+  __syncthreads();
+  return wg_signal_scratch;
 }
 
 __device__ uint64_t GDAContext::signal_fetch_wave(const uint64_t *sig_addr) {

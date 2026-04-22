@@ -840,7 +840,7 @@ tool_code_object_callback(rocprofiler_callback_tracing_record_t record,
                 tool_data->kernel_symbol_records.wlock(
                     [ts, &record, &data_v](auto& _data) {
                         _data.emplace_back(
-                            new kernel_symbol_callback_record_t{ ts, record, data_v });
+                            kernel_symbol_callback_record_t{ ts, record, data_v });
                     });
                 trace_cache::get_metadata_registry().add_kernel_symbol(data_v);
             }
@@ -2796,6 +2796,19 @@ tool_fini(void* callback_data)
     flush();
     stop();
     finalize_sdk_common();
+
+    // Destroy buffers to drain in-flight async flush callbacks before
+    // deleting tool_data, which those callbacks may still be accessing.
+    // rocprofiler_destroy_buffer returns BUFFER_BUSY if a flush is still
+    // in progress, so retry until it succeeds or buffer is not found.
+    for(auto itr : tool_data->get_buffers())
+    {
+        while(itr.handle > 0 &&
+              rocprofiler_destroy_buffer(itr) == ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
+        {
+            std::this_thread::yield();
+        }
+    }
 
     auto* _data        = as_client_data(callback_data);
     _data->client_id   = nullptr;

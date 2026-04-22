@@ -327,7 +327,6 @@ protected:
      */
     ParserResult ParsePictureData(const uint8_t* p_stream, uint32_t pic_data_size);
 
-#if DBGINFO
     void PrintVps(HevcVideoParamSet *vps_ptr);
     void PrintSps(HevcSeqParamSet *sps_ptr);
     void PrintPps(HevcPicParamSet *pps_ptr);
@@ -336,7 +335,6 @@ protected:
     void PrintLtRefInfo(HevcLongTermRps *lt_info_ptr);
     void PrintDpb();
     void PrintVappiBufInfo();
-#endif // DBGINFO
 
 private:
     /*! \brief Callback function to notify decoder about new SPS.
