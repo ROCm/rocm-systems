@@ -264,6 +264,8 @@ bash scripts/clang_format.sh
 Hand-written files (`isa.h`, `insts.h`, `mfma_exec.h`, `addr_calc.h/.cpp`) are
 not overwritten by the generator.
 
+You can find the MR ISA in the artifacts directory.
+
 ## Usage examples
 
 ### Run a simulation
