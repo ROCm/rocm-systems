@@ -93,7 +93,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     } else if (arg == "-localbuftype") {
       i++;
 
-      if (argc > i + 1) {
+      if (argc < i + 1) {
         fprintf(stderr, "Invalid arguments for -localbuftype.\n");
         exit(-1);
       }
