@@ -17,10 +17,51 @@ Here are the benefits of using PC sampling:
 - Analyze code coverage
 - Find heavily executed code paths
 
-To try out the PC sampling feature, you can use the command-line tool ``rocprofv3`` or the ROCprofiler-SDK library on `ROCm 6.4` or later.
+To try out the PC sampling feature, you can use the command-line tool ``rocprofv3`` or the ROCprofiler-SDK library on ``ROCm 6.4`` or later.
 
-.. note::
-  PC sampling is ONLY supported on AMD GPUs with architectures gfx90a and later.
+Supported GPUs
+===============
+
+The following table lists the AMD Instinct™ GPUs supporting PC sampling and shows whether they support stochastic PC sampling and host-trap PC sampling:
+
+.. list-table::
+  :header-rows: 1
+
+  * - AMD Instinct GPU
+    - Stochastic PC sampling
+    - Host-trap PC sampling
+
+  * - MI210
+    - ❌
+    - ✅
+
+  * - MI250
+    - ❌
+    - ✅
+
+  * - MI250X
+    - ❌
+    - ✅
+
+  * - MI300A
+    - ✅
+    - ✅
+
+  * - MI300X
+    - ✅
+    - ✅
+
+  * - MI325X
+    - ✅
+    - ✅
+
+  * - MI350X
+    - ✅
+    - ✅
+
+  * - MI355X
+    - ✅
+    - ✅
 
 PC sampling availability and configuration
 ===========================================
@@ -228,10 +269,6 @@ offering more accurate performance insights.
 It is important to note that the skid issue inherent in host-trap PC sampling is not likely to be resolved
 in its current form. Therefore, to achieve more precise performance profiling, it is recommended to adopt stochastic PC sampling starting with the gfx942 architecture.
 
-.. note::
-
-  Host-trap PC sampling is supported on AMD Instinct MI200, MI300, MI325, MI350, and MI355.
-
 Hardware-based (stochastic) PC sampling method
 ===============================================
 
@@ -368,7 +405,3 @@ Fields starting with ``arb_state_`` are of particular interest as they indicate 
 For example, ``arb_state_issue_`` fields indicate the type of instructions issued by the arbiter at the time of sampling.
 On the other hand, ``arb_state_stall_`` fields indicate the type of instructions stalled at the time of sampling.
 This information is useful for understanding how many instructions per cycle (IPC) are issued.
-
-.. note::
-
-  The stochastic PC sampling is supported on AMD Instinct MI300, MI325, MI350, and MI355.
