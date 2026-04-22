@@ -136,15 +136,15 @@ uint32_t ProcessCmdline(AMDSMITstGlobals* test, int arg_cnt, char** arg_list) {
 
     switch (a) {
       case 'i':
-        test->num_iterations = std::stoi(optarg);
+        test->num_iterations = static_cast<uint32_t>(std::stoi(optarg));
         break;
 
       case 'v':
-        test->verbosity = std::stoi(optarg);
+        test->verbosity = static_cast<uint32_t>(std::stoi(optarg));
         break;
 
       case 'm':
-        test->monitor_verbosity = std::stoi(optarg);
+        test->monitor_verbosity = static_cast<uint32_t>(std::stoi(optarg));
         break;
 
       case 'r':

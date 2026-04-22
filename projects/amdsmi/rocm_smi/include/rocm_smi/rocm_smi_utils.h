@@ -412,8 +412,9 @@ class TagTextContents_t {
 
   decltype(auto) get_structured_data_subkey_last(const PrimaryKeyType& prim_key) {
     return (get_structured_value_by_keys(
-        prim_key, get_structured_data_subkey_by_position(
-                      prim_key, static_cast<int>((get_structured_subkeys_size(prim_key) - 1)))));
+        prim_key,
+        get_structured_data_subkey_by_position(
+            prim_key, static_cast<uint32_t>((get_structured_subkeys_size(prim_key) - 1)))));
   }
 
   void reset() {

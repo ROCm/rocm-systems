@@ -415,7 +415,7 @@ int IOLink::UpdateP2pCapability(void) {
       (flags_ & CRAT_IOLINK_FLAGS_NO_ATOMICS_64_BIT) ? cap_false : cap_true;
 
   link_cap_.is_iolink_bi_directional =
-      (flags_ & CRAT_IOLINK_FLAGS_BI_DIRECTIONAL) ? cap_true : cap_false;
+      (flags_ & static_cast<uint32_t>(CRAT_IOLINK_FLAGS_BI_DIRECTIONAL)) ? cap_true : cap_false;
 
   link_cap_.is_iolink_dma = (flags_ & CRAT_IOLINK_FLAGS_NO_PEER_TO_PEER_DMA) ? cap_false : cap_true;
 

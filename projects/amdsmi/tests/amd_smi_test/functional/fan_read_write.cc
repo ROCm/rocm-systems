@@ -124,7 +124,7 @@ void TestFanReadWrite::Run(void) {
     IF_VERB(STANDARD) { std::cout << "Setting fan speed to " << new_speed << std::endl; }
 
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_fan_speed", "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
-    ret = amdsmi_set_gpu_fan_speed(processor_handles_[dv_ind], 0, new_speed);
+    ret = amdsmi_set_gpu_fan_speed(processor_handles_[dv_ind], 0, static_cast<uint64_t>(new_speed));
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NO_PERM);
 

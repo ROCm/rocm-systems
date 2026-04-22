@@ -137,15 +137,14 @@ static const std::map<amdsmi_accelerator_partition_type_t, std::string> accelera
     {AMDSMI_ACCELERATOR_PARTITION_MAX, "AMDSMI_ACCELERATOR_PARTITION_MAX"},
 };
 
-static void system_wait(int seconds) {
+static void system_wait(uint32_t wait_time_seconds) {
   // Adding a delay - since changing partitions depends on gpus not
   // being in an active state, we'll wait a few seconds before starting
   // full testing
   auto start = std::chrono::high_resolution_clock::now();
-  int waitTime = seconds;
-  std::cout << "** Waiting for " << std::dec << waitTime << " seconds, for any GPU"
+  std::cout << "** Waiting for " << std::dec << wait_time_seconds << " seconds, for any GPU"
             << " activity to clear up. **" << std::endl;
-  sleep(waitTime);
+  sleep(wait_time_seconds);
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   std::cout << "** Waiting took " << duration.count() / 1000000 << " seconds **" << std::endl;

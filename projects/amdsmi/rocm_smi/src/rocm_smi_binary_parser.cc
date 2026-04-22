@@ -34,6 +34,9 @@
 namespace amd::smi {
 static uint64_t get_value(uint8_t** ptr, struct metric_field* field) {
   uint64_t v;
+// Warnings disabled as working at intended
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wcast-align"
   switch (field->field_type) {
     case FIELD_TYPE_U8:
       v = *(uint8_t*)(*ptr);
@@ -52,6 +55,7 @@ static uint64_t get_value(uint8_t** ptr, struct metric_field* field) {
       (*ptr) += 8;
       break;
   }
+#pragma clang diagnostic pop
   return v;
 }
 
@@ -183,10 +187,10 @@ top:
           }
           break;
         case FIELD_FLAG_NUM_INSTANCE:
-          num_instance = static_cast<int64_t>(v);
+          num_instance = static_cast<uint64_t>(v);
           break;
         case FIELD_FLAG_NUM_SMN:
-          num_smn = static_cast<int64_t>(v);
+          num_smn = static_cast<uint64_t>(v);
           if (v)
             skip_smn = 0;
           else
