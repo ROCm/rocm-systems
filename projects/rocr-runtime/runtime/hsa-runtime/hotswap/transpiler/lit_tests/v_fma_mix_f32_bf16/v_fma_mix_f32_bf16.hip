@@ -34,7 +34,7 @@ v_fma_mix_f32_bf16_kernel(unsigned int *out) {
   unsigned int a = (unsigned int)(uintptr_t)out;
   unsigned int b = (unsigned int)(uintptr_t)(out + 1);
   unsigned int c = (unsigned int)(uintptr_t)(out + 2);
-  unsigned int r_bf16, r_f16;
+  unsigned int r_bf16, r_f16, r_bf16_imm, r_bf16_imm_opsel1;
 
   asm volatile(
       "v_fma_mix_f32_bf16 %[d], %[s0], %[s1], %[s2] "
@@ -48,6 +48,32 @@ v_fma_mix_f32_bf16_kernel(unsigned int *out) {
       : [d] "=v"(r_f16)
       : [s0] "v"(a), [s1] "v"(b), [s2] "v"(c));
 
-  out[threadIdx.x * 2 + 0] = r_bf16;
-  out[threadIdx.x * 2 + 1] = r_f16;
+  // Pin the inline-constant narrow-half handling: src1 = inline bf16
+  // `1.0` with op_sel_hi[1]=1 (narrow) and op_sel[1]=0 (LO half).
+  // Triton's bf16 reductions emit this shape directly as
+  // `v_fma_mix_f32_bf16 v_acc, v_bf16, 1.0, v_acc`.  LLVM's AMDGPU
+  // disassembler pre-resolves the inline bf16 to `0x3F80` in the LOW
+  // 16 of the MC Imm.  Before the fix, the handler applied the
+  // op_sel-based half extraction unconditionally and (for op_sel[i]=1,
+  // the unused-but-symmetric case) pulled `0x0000` out of the upper
+  // half, producing bf16 `0.0`.  This fixture adds BOTH op_sel:[0,0,0]
+  // (low — the common case the corpus uses) AND op_sel:[0,1,0] (hi —
+  // to confirm the fix's "immediate → always use low 16 regardless of
+  // op_sel" branch fires correctly).
+  asm volatile(
+      "v_fma_mix_f32_bf16 %[d], %[s0], 1.0, %[s2] "
+      "op_sel:[0,0,0] op_sel_hi:[1,1,0]\n\t"
+      : [d] "=v"(r_bf16_imm)
+      : [s0] "v"(a), [s2] "v"(c));
+
+  asm volatile(
+      "v_fma_mix_f32_bf16 %[d], %[s0], 1.0, %[s2] "
+      "op_sel:[0,1,0] op_sel_hi:[1,1,0]\n\t"
+      : [d] "=v"(r_bf16_imm_opsel1)
+      : [s0] "v"(a), [s2] "v"(c));
+
+  out[threadIdx.x * 4 + 0] = r_bf16;
+  out[threadIdx.x * 4 + 1] = r_f16;
+  out[threadIdx.x * 4 + 2] = r_bf16_imm;
+  out[threadIdx.x * 4 + 3] = r_bf16_imm_opsel1;
 }

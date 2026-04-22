@@ -54,6 +54,28 @@
 ; CHECK-DAG: %fma_mix = call float @llvm.fma.f32(float %mix_cvt_bf16, float %mix_cvt_bf16{{[0-9]+}}, float %{{[0-9]+}})
 ; CHECK-DAG: %fma_mix{{[0-9]+}} = call float @llvm.fma.f32(float %mix_cvt, float %mix_cvt{{[0-9]+}}, float %{{[0-9]+}})
 
+; ----- Inline-constant narrow-half (bf16 `1.0` = 0x3F80 in the low 16 -----
+;
+; LLVM's AMDGPU disassembler stores narrow (bf16/fp16) inline constants
+; pre-resolved to the 16-bit value in the LOW 16 of the MCOperand Imm
+; (AMDGPUDisassembler.cpp::decodeMCOperand's OPERAND_REG_INLINE_C_BF16
+; arm; upper 16 is zero-extended).  The `op_sel[i]` bit is a VGPR-half
+; selector and has no effect on pre-resolved immediate values.  The
+; handler's fix: detect `!op.isSrcReg(i)` and always take LOW 16,
+; regardless of op_sel.
+;
+; BOTH op_sel:[0,0,0] (low) AND op_sel:[0,1,0] (hi) for the inline
+; source below MUST produce the same `bfloat 1.000000e+00` literal
+; feeding the fma.  The pre-fix bug silently produced `bfloat 0.0`
+; (and thus `fma(bf16, 0.0, acc) = acc` — every bf16 reduction step
+; silently dropped its multiplier) for the op_sel[1]=1 case.
+; CHECK-DAG: %fma_mix{{[0-9]+}} = call float @llvm.fma.f32(float %{{[^,]+}}, float 1.000000e+00, float %{{[^)]+}})
+; CHECK-DAG: %fma_mix{{[0-9]+}} = call float @llvm.fma.f32(float %{{[^,]+}}, float 1.000000e+00, float %{{[^)]+}})
+
+; Negative pin: no `float 0.0` feeds any fma.f32 call in this fixture
+; (the pre-fix miscompile shape).
+; CHECK-NOT: call float @llvm.fma.f32(float %{{[^,]+}}, float 0.000000e+00,
+
 ; Negative pins: no cross-target refusal, no BF16-specific MFMA/WMMA
 ; fallback — the BF16 narrow-half is handled by universal fpext, not
 ; a cross-target lowering.

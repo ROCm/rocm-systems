@@ -834,11 +834,38 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
       }
       if (raw->getType() == ctx.f32Ty) raw = ctx.B.CreateBitCast(raw, ctx.i32Ty);
       Value *bits;
-      if (opSel[i] == 0)
-        bits = ctx.B.CreateTrunc(raw, Type::getInt16Ty(ctx.C));
-      else
+      // `op_sel[i]` is a VGPR-half selector — it only makes sense
+      // when the source is a 32-bit VGPR that holds two packed
+      // 16-bit values.  For immediates (inline constants AND
+      // 32-bit literals), LLVM's AMDGPU disassembler pre-resolves
+      // narrow-width operands to their 16-bit value stored in the
+      // LOW 16 of the MCOperand's Imm (see
+      // `AMDGPUDisassembler.cpp::decodeMCOperand`'s
+      // `OPERAND_REG_INLINE_C_BF16` / `OPERAND_REG_IMM_BF16` arms
+      // and their `getInlineImmValBF16` / `getInlineImmValF16`
+      // helpers; upper 16 is zero-extended).  Applying the
+      // `op_sel[i]=1` high-half extraction to a pre-resolved
+      // narrow immediate silently truncates to bf16/fp16 `0.0`
+      // because the upper 16 is zero.  The bug surfaced as
+      // `v_fma_mix_f32_bf16 v9, v10, 1.0, v9 op_sel:[0,1,0]` (src1
+      // is inline bf16 `1.0` = MC Imm `0x3F80`; handler was
+      // extracting bits [31:16] = `0x0000`); the resulting
+      // `fma(bf16(v10), 0.0, v9) = v9` is a no-op, and every bf16
+      // reduction step silently dropped its multiplier.  Pinned
+      // end-to-end by `topk_forward_bisect_m1_const_in` (all-ones
+      // input produced output `1.0` instead of the expected sum
+      // `32.0`; b77e477908 lands that probe).
+      //
+      // Detection: `!op.isSrcReg(i)` — the logical source slot
+      // resolved to a non-register MCOperand (inline constant,
+      // literal, or expression).  For every such case the bits
+      // live in [15:0] of the MC Imm regardless of `op_sel[i]`.
+      bool isImmediateOperand = !op.isSrcReg(i);
+      if (!isImmediateOperand && opSel[i] == 1)
         bits = ctx.B.CreateTrunc(ctx.B.CreateLShr(raw, 16),
                                   Type::getInt16Ty(ctx.C));
+      else
+        bits = ctx.B.CreateTrunc(raw, Type::getInt16Ty(ctx.C));
       Value *narrowVal = ctx.B.CreateBitCast(bits, narrowTy);
       return ctx.B.CreateFPExt(narrowVal, ctx.f32Ty, cvtName);
     };
