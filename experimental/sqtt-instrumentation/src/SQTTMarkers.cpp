@@ -232,10 +232,8 @@ static bool isIgnorableBetweenMarkers(Instruction* I)
         case Intrinsic::dbg_value:
         case Intrinsic::dbg_label:
         case Intrinsic::lifetime_start:
-        case Intrinsic::lifetime_end:
-            return true;
-        default:
-            return false;
+        case Intrinsic::lifetime_end: return true;
+        default: return false;
     }
 }
 
@@ -263,8 +261,7 @@ bool SQTTInstrumentPass::wrapExistingMarkers(Function& F, GfxGen gen)
             Function* Callee = CI->getCalledFunction();
             if (!Callee) continue;
             auto IID = Callee->getIntrinsicID();
-            if (IID == Intrinsic::amdgcn_s_ttracedata || IID == Intrinsic::amdgcn_s_ttracedata_imm)
-                InBB.push_back(CI);
+            if (IID == Intrinsic::amdgcn_s_ttracedata || IID == Intrinsic::amdgcn_s_ttracedata_imm) InBB.push_back(CI);
         }
         if (!InBB.empty()) ByBB.push_back({&BB, std::move(InBB)});
     }
