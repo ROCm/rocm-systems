@@ -88,7 +88,7 @@ bool FileExists(char const* filename) {
   return (stat(filename, &buf) == 0);
 }
 
-static inline void debugFilesDiscovered(std::vector<std::string> files) {
+[[maybe_unused]] static inline void debugFilesDiscovered(std::vector<std::string> files) {
   std::ostringstream ss;
   int numberOfFilesFound = static_cast<int>(files.size());
   ss << "fileName.size() = " << numberOfFilesFound << "; Files discovered = {";

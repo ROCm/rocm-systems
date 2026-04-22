@@ -1227,10 +1227,8 @@ class AMDGpuDynamicMetrics_t {
    */
   class AMDGpuDynamicMetricsCursor_t {
    public:
-    AMDGpuDynamicMetricsCursor_t(const AMDGpuDynamicMetrics_t& metrics_data,
-                                 std::uint64_t start_offset = 0)
+    AMDGpuDynamicMetricsCursor_t(const AMDGpuDynamicMetrics_t& metrics_data)
         : m_metrics(metrics_data),
-          m_current_offset(start_offset),
           m_read_lock(metrics_data.m_mutex) {
       m_current_metric_attribute = m_metrics.m_dynamic_metrics_data_offsets.lower_bound(0);
     }
@@ -1239,7 +1237,6 @@ class AMDGpuDynamicMetrics_t {
 
    private:
     const AMDGpuDynamicMetrics_t& m_metrics;
-    std::uint64_t m_current_offset{0};
     AMDGpuDynamicMetricsOffsetIt_t m_current_metric_attribute;
     mutable std::shared_lock<std::shared_mutex> m_read_lock;
   };
