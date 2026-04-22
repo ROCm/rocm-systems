@@ -408,10 +408,12 @@ def main(argv: list[str] | None = None) -> int:
     # Run ctest with the generated dashboard.cmake script
     try:
         r = subprocess.run(ctest_argv, cwd=SOURCE_DIR, check=True, env=environ_vars)
+        return r.returncode
 
     # Log error
     except subprocess.CalledProcessError as e:
         logging.error(f"ctest failed: {e}")
+        return e.returncode
 
 
 if __name__ == "__main__":
