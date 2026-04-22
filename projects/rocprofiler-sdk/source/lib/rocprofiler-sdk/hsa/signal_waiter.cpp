@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/hsa/signal_waiter.hpp"
 
 #include "lib/common/logging.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
