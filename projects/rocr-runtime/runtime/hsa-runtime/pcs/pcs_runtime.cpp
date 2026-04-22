@@ -189,6 +189,12 @@ hsa_status_t PcsRuntime::PcSamplingSession::DataCopyCallback(uint8_t* buffer,
 hsa_status_t PcsRuntime::PcSamplingSession::HandleSampleData(uint8_t* buf1, size_t buf1_sz,
                                                              uint8_t* buf2, size_t buf2_sz,
                                                              size_t lost_sample_count) {
+  // Lock to prevent concurrent XCC threads from overwriting data_rdy while
+  // the callback is in progress. This serializes sample delivery but ensures
+  // correctness. The lock is held through the entire function including the
+  // user's callback, so the callback can safely use data_copy_callback.
+  std::lock_guard<std::mutex> lock(handle_sample_mutex_);
+
   data_rdy.buf1 = buf1;
   data_rdy.buf1_sz = buf1_sz;
   data_rdy.buf2 = buf2;
