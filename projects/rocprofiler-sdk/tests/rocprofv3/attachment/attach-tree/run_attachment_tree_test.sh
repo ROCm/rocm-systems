@@ -35,8 +35,6 @@ OUTPUT_FILENAME=${5:-out}
 export ROCP_TOOL_ATTACH=1
 
 OUTPUT_SUBDIR="attachment-output"
-# For CSV, we don't require specific files since different traces may or may not be generated
-# We'll just check if at least one CSV file was created
 EXPECTED_FILES=("${OUTPUT_FILENAME}_results.json" "${OUTPUT_FILENAME}_results.db")
 OUTPUT_FORMAT="csv json rocpd"
 
@@ -59,15 +57,16 @@ if [ -e /proc/sys/kernel/yama/ptrace_scope ]                             \
     exit 0
 fi
 
-echo "Starting attachment test (${OUTPUT_FORMAT} format)..."
+echo "Starting attach-tree test (${OUTPUT_FORMAT} format)..."
 
-# Start the test application in the background
+# Start the test application in the background. The test app forks a child
+# process, so attaching to the parent PID exercises tree attachment.
 echo "Launching test application: ${TEST_APP}"
 LD_PRELOAD=${ROCPROF_PRELOAD} ${TEST_APP} &
 APP_PID=$!
 
-# Wait a moment for the application to start
-sleep 1
+# Wait a moment for the application and its children to start
+sleep 2
 
 # Check if the application is still running
 if ! kill -0 $APP_PID 2>/dev/null; then
@@ -83,19 +82,19 @@ if [ ! -f "${ROCPROFV3}" ]; then
     exit 1
 fi
 
-echo "Attaching profiler to PID $APP_PID for 5 seconds (${OUTPUT_FORMAT} format)..."
+echo "Attaching profiler to PID $APP_PID and children for 5 seconds (${OUTPUT_FORMAT} format)..."
 
 # Output the command and environment for debugging
 echo "===== COMMAND TO EXECUTE ====="
-echo "${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out}"
+echo "${ROCPROFV3} --attach $APP_PID --attach-children --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out}"
 echo ""
 echo "===== ENVIRONMENT VARIABLES ====="
 env | grep "^ROCPROF" | sort
 echo "===== END ENVIRONMENT ====="
 echo ""
 
-# Run rocprofv3 with --attach option
-LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out}
+# Run rocprofv3 with --attach and --attach-children options
+LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-children --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out}
 
 echo "${OUTPUT_FORMAT} profiler detached successfully"
 
@@ -133,5 +132,5 @@ for expected_file in "${EXPECTED_FILES[@]}"; do
     fi
 done
 
-echo "Attachment ${OUTPUT_FORMAT} test completed successfully"
+echo "Attachment tree ${OUTPUT_FORMAT} test completed successfully"
 exit 0
