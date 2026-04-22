@@ -28,10 +28,10 @@ project(
     LANGUAGES CXX
     VERSION 0.0.0)
 
+find_package(rocprofiler-sdk REQUIRED)
+
 # Checking whether host-trap PC sampling is disabled. If so, skip the tests.
 rocprofiler_sdk_pc_sampling_disabled(IS_PC_SAMPLING_DISABLED)
-
-find_package(rocprofiler-sdk REQUIRED)
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
 
