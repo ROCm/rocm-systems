@@ -134,14 +134,76 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   // is only instantiated when `isa.isWave32() && !targetIsa.isWave32()`
   // — other directions fatal-error loudly to prevent a decider bug
   // from silently picking an unsupported shape.
+  //
+  // Phantom-lane fallback to MODREP.  WaveNative's `init_whole_wave`
+  // sets hardware EXEC = -1 and relies on SPE `emitUnderExec`
+  // diamonds (gated by `saved_exec`) to keep inactive source lanes
+  // from committing side effects.  That model is correct when every
+  // target-wavefront lane has a source-kernel workitem — i.e. when
+  // the HSACO's `max_flat_workgroup_size` is at least
+  // `targetWaveSize` so every launch fills the target wave.  When
+  // `max_flat_workgroup_size < targetWaveSize` (the phantom-lane
+  // regime, e.g. Triton's `num_warps=1` kernels whose source WG is
+  // 32 on wave32 compiled for a wave64 target), the "extra" target
+  // lanes have no source workitem: their `workitem.id.x()` is their
+  // hardware lane index (e.g. 32..63 for a 32-thread block on
+  // wave64), their VGPRs hold undef / dispatcher state, and their
+  // cross-lane ops (`ds_bpermute`, `ds_swizzle`, `permlane*`) read
+  // from / contribute to actively-masked source lanes with
+  // undef-derived values — producing addresses that fault on
+  // subsequent SPE-gated loads (the active lane's pointer
+  // arithmetic picks up undef data through a cross-lane op, then
+  // the gated load fires with that poisoned address).  Empirically
+  // surfaced by `compare_correctness`'s `matmul_fp16` /
+  // `matmul_fp16_16x16` Triton recipes (HIP error 700 on every
+  // shape under WaveNative; bumping `num_warps` to 2 fills the
+  // target wavefront and eliminates the fault, confirming the
+  // phantom-lane attribution).
+  //
+  // `ModuloReplicationProjection` leaves hardware EXEC at the
+  // dispatcher's boot state (the source-wave-sized active mask,
+  // with the target wave's upper lanes inactive) and uses
+  // `lane_id mod W_src` to project the target mask onto the source
+  // EXEC alloca.  Under MODREP, phantom lanes are hardware-inactive
+  // for the entire kernel body — every ISA instruction (VALU,
+  // cross-lane, memory, control flow) is HW-EXEC-masked — so
+  // undef-VGPR contamination can't escape into active lanes.  The
+  // trade-off is that MODREP cannot express WMMA → MFMA layout
+  // transposes that need all 64 target lanes active (see
+  // `wmma_lowering.cpp`); those kernels will refuse at lift time
+  // rather than silently running wrong.  That's the principled
+  // outcome for the phantom-lane regime.
+  const bool phantomLaneRegime =
+      meta.maxFlatWorkgroupSize > 0 &&
+      static_cast<unsigned>(meta.maxFlatWorkgroupSize) < targetIsa.waveSize;
+  const bool useWaveNative = enableWaveNative && isa.isWave32() &&
+                              !targetIsa.isWave32() && !phantomLaneRegime;
   std::unique_ptr<WaveProjection> projectionPtr;
-  if (enableWaveNative && isa.isWave32() && !targetIsa.isWave32())
+  if (useWaveNative)
     projectionPtr = std::make_unique<WaveNativeProjection>(isa, targetIsa,
                                                              i32Ty, i64Ty);
   else
     projectionPtr = std::make_unique<ModuloReplicationProjection>(
         isa, targetIsa, i32Ty, i64Ty);
   WaveProjection &projection = *projectionPtr;
+
+  if (enableWaveNative && phantomLaneRegime && isa.isWave32() &&
+      !targetIsa.isWave32()) {
+    // Log the fallback so operators can trace which kernels moved to
+    // MODREP and why.  A regression that silently flips WaveNative's
+    // selection on a phantom-lane kernel would then (re-)produce the
+    // HIP-700 miscompile this fallback guards against.
+    errs() << "transpiler: kernel '" << kernelName
+           << "' is in phantom-lane regime (max_flat_workgroup_size="
+           << meta.maxFlatWorkgroupSize << " < target wavefront width="
+           << targetIsa.waveSize
+           << "); falling back to ModuloReplicationProjection even "
+              "though enableWaveNative=true, so phantom target lanes "
+              "stay hardware-inactive and their undef-VGPR state "
+              "cannot contaminate active-lane pointer arithmetic via "
+              "cross-lane ops. See the block comment above in "
+              "`raiser.cpp` for the full rationale.\n";
+  }
 
   // Build opcode → SemOp map from MCInstrInfo
   OpcodeMap opcMap;
