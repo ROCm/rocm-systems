@@ -207,7 +207,7 @@ SignalWaiter::run()
 
                 // Signal completed (value <= 0). Process this packet.
 
-                if(registration::get_fini_status() == 0)
+                if(registration::get_fini_status() <= 0)
                 {
                     auto dispatch_time = kernel_dispatch::get_dispatch_time(session, packet);
                     kernel_dispatch::dispatch_complete(session, packet, dispatch_time);
