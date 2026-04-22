@@ -21,6 +21,10 @@ on:
         type: string
       artifact_run_id:
         type: string
+        
+concurrency:
+  group: ${{ inputs.amdgpu_families == 'gfx94X-dcgpu' && 'gfx94x-multinode-exclusive' || github.run_id }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
