@@ -19,7 +19,7 @@ GPU violations monitoring in AMD SMI tracks throttling events caused by power or
 
 **Violation API**: Historical throttling data as percentages and active/not-active status from `amdsmi_get_violation_status()`. Available on MI3x+ (MI300X and newer) via `amd-smi metric --violation` or `amd-smi monitor --violation`. Returns N/A or max_uint on older ASICs.
 
-**Sample rate**: Violations are sampled every 100ms (fastest rate the driver can update the metric cache).
+**Sample rate**: Violations are sampled every 100ms — the fastest rate the driver can update the metric cache. Set `AMDSMI_GPU_METRICS_CACHE_MS=0` to disable AMD SMI's internal cache and let the driver control when the cache updates. See [AMD SMI C++ library usage](../how-to/amdsmi-cpp-lib.md) for environment variable details.
 
 **gpu_metrics versions**: Navi/MI1x/MI2x use gpu_metrics v1.3 (fixed layout with `indep_throttle_status`). MI3x+ uses gpu_metrics v1.9+ (dynamic layout). The available fields differ between these versions.
 
@@ -125,6 +125,14 @@ These fields are 2D arrays indexed by `[XCP][XCC]` and require gpu_metrics v1.8 
 | GFX Clock Below Host Limit (Total) | `acc_gfx_clk_below_host_limit_total` | `active_gfx_clk_below_host_limit_total` | `per_gfx_clk_below_host_limit_total` | GFX clock limited below host limit for any reason |
 | Low Utilization | `acc_low_utilization` | `active_low_utilization` | `per_low_utilization` | Low GPU utilization detected |
 
+:::{note}
+**How `GFXCLK_*` and `LOW_UTIL*` differ from core PVIOL/TVIOL fields:**
+
+- **Scope**: These are per-XCP (Compute Partition) × per-XCC (Compute Complex) 2D arrays, not socket-level aggregates like PVIOL/TVIOL.
+- **What they measure**: `GFXCLK_*` tracks when the GFX clock is forced *below a host-set clock limit* due to power (`_pwr`) or thermal (`_thm`) reasons. `LOW_UTIL*` tracks periods of low GPU utilization — a clock reduction cause unrelated to power or thermal limits.
+- **Availability**: Require gpu_metrics v1.8 or newer; return max_uint on earlier drivers/ASICs.
+:::
+
 ### Metadata fields
 
 | Field | Type | Description |
@@ -160,14 +168,45 @@ This section documents key design decisions made during the implementation:
 
 ## NVML API Compatibility
 
-AMD SMI provides NVML-compatible violation monitoring. The table below shows the mapping between NVML and AMD SMI concepts:
+AMD SMI provides NVML-compatible violation monitoring. The tables below map NVML concepts to AMD SMI equivalents.
+
+### Instantaneous clock event reasons
+
+Equivalent to `nvmlDeviceGetCurrentClocksEventReasons()` / `nvidia-smi -q -d PERFORMANCE`:
+
+| NVML Flag | AMD SMI Equivalent | Notes |
+|-----------|-------------------|-------|
+| `nvmlClocksEventReasonGpuIdle` | `per_low_utilization` (per-XCP/XCC) | GPU idle / low utilization; v1.8+ only |
+| `nvmlClocksEventReasonSwPowerCap` | `active_ppt_pwr` / `per_ppt_pwr` | SW power cap throttling (PVIOL) |
+| `nvmlClocksThrottleReasonHwSlowdown` | `active_prochot_thrm` / `active_socket_thrm` | HW thermal or power brake slowdown |
+| `nvmlClocksThrottleReasonHwThermalSlowdown` | `active_socket_thrm` / `active_hbm_thrm` / `active_vr_thrm` | HW thermal slowdown (TVIOL) |
+| `nvmlClocksThrottleReasonHwPowerBrakeSlowdown` | `active_ppt_pwr` | HW power brake (PVIOL) |
+| `nvmlClocksEventReasonSwThermalSlowdown` | `active_prochot_thrm` | SW/firmware thermal (PROCHOT) |
+| `nvmlClocksEventReasonSyncBoost` | No direct equivalent | Not tracked by AMD SMI |
+| `nvidia-smi -q -d PERFORMANCE` (CLI) | `amd-smi metric --violation` or `amd-smi monitor --violation` | MI3x+ only |
+
+### Cumulative violation durations
+
+Equivalent to `nvmlDeviceGetFieldValues()` with `NVML_FI_DEV_PERF_POLICY_*` / `NVML_FI_DEV_CLOCKS_EVENT_REASON_*`:
+
+| NVML Field | AMD SMI Equivalent | Notes |
+|-----------|-------------------|-------|
+| `NVML_FI_DEV_CLOCKS_EVENT_REASON_SW_POWER_CAP` | `acc_ppt_pwr` / `per_ppt_pwr` | SW power cap duration (PVIOL) |
+| `NVML_FI_DEV_CLOCKS_EVENT_REASON_SW_THERM_SLOWDOWN` | `acc_prochot_thrm` / `per_prochot_thrm` | SW thermal (PROCHOT) duration |
+| `NVML_FI_DEV_CLOCKS_EVENT_REASON_SYNC_BOOST` | No direct equivalent | Not tracked by AMD SMI |
+| `NVML_FI_DEV_PERF_POLICY_BOARD_LIMIT` | `acc_ppt_pwr` / `per_ppt_pwr` | Board power limit (maps to PPT/PVIOL) |
+| `NVML_FI_DEV_PERF_POLICY_LOW_UTILIZATION` | `acc_low_utilization` / `per_low_utilization` | Low utilization; gpu_metrics v1.8+ only |
+| `NVML_FI_DEV_PERF_POLICY_RELIABILITY` | No direct equivalent | Not tracked by AMD SMI |
+| `NVML_FI_DEV_PERF_POLICY_TOTAL_BASE_CLOCKS` | `acc_gfx_clk_below_host_limit_total` / `per_gfx_clk_below_host_limit_total` | GFX clock below host limit; gpu_metrics v1.8+ only |
+
+### Compatibility summary
 
 | NVML Concept | AMD SMI Equivalent | Notes |
 |--------------|-------------------|-------|
 | `nvmlDeviceGetViolationStatus()` | `amdsmi_get_violation_status()` | Returns violation status and timestamp |
-| `PVIOL` (Power Violation) | `power_violation_pct` | Power throttling events tracked as percentage |
-| `TVIOL` (Thermal Violation) | `thermal_violation_pct` | Thermal throttling events tracked as percentage |
-| Percentage format (%) | Percentage format (%) | Compatible format (0-100%) |
+| `PVIOL` (Power Violation) | `per_ppt_pwr` | Power throttling percentage |
+| `TVIOL` (Thermal Violation) | `per_socket_thrm` | Thermal throttling percentage |
+| Percentage format (%) | Percentage format (%) | Compatible format (0–100%) |
 | `Not Supported` indicator | `N/A` or max_uint | Indicates feature unavailability |
 
 ## Usage
@@ -546,7 +585,12 @@ amd-smi monitor --violation
 # MI3x+: Continuous monitoring (update every 2 seconds)
 watch -n 2 'amd-smi monitor --violation'
 
+# MI3x+: Monitor power, temp, GFX clock, and utilization violations every second
+# AMDSMI_GPU_METRICS_CACHE_MS=0 disables the 100ms cache so the driver controls updates
+AMDSMI_GPU_METRICS_CACHE_MS=0 amd-smi monitor -ptV --watch 1
+
 # Navi/MI1x/MI2x: Check throttle status via power metrics
+# (MI3x+ shows N/A here; use metric --violation or monitor --violation instead)
 amd-smi metric --power
 
 # All architectures: Monitor temperatures alongside power
@@ -562,9 +606,15 @@ amd-smi metric --gpu all --power --temperature
 ### High PVIOL (Power Violations)?
 
 - Check power limit settings with `amdsmi_get_power_cap()`
+- View static power cap details (default, min, max): `amd-smi static --limit`
+- Monitor live power consumption: `amd-smi monitor --power`
 - Verify adequate PSU capacity for your system
 - Consider reducing workload intensity or power limits
 - Monitor with: `amd-smi metric --gpu all --power`
+
+:::{note}
+`amd-smi static --limit` shows power cap thresholds and thermal shutdown/slowdown limits. If your GPU is hitting these limits, it may throttle to stay within them, causing PVIOL/TVIOL. Adjusting power limits or improving cooling can help reduce Power or thermal related violations.
+:::
 
 ### High TVIOL (Thermal Violations)?
 
@@ -578,7 +628,33 @@ amd-smi metric --gpu all --power --temperature
 
 - **For violation fields (`metric --violation`) returning N/A:** The violation API is only supported on MI3x+ (MI300X and newer). On older ASICs (Navi/MI1x/MI2x), use `amd-smi metric --power` and check `THROTTLE_STATUS` instead.
 - **For `THROTTLE_STATUS` in `metric --power` showing N/A:** This field is available on Navi/MI1x/MI2x (gpu_metrics v1.3) but not on MI3x+. On MI3x+, use `amd-smi metric --violation` or `amd-smi monitor --violation` instead.
-- Check your ASIC generation with `amdsmi_get_gpu_asic_info()`
+- Check your ASIC generation with `amdsmi_get_gpu_asic_info()` or `amd-smi static --asic`
+
+## Adjusting Clock Limits (MI3x+)
+
+Some MI3x+ variants support adjusting the Graphics clock (SCLK) and memory clock (MCLK) min/max limits, which can help manage power violations by capping clock speeds before the hardware throttles.
+
+```shell
+# View available clock limit options
+amd-smi set -h
+
+# View current min/max clock ranges (Checks capabilities for your specific model)
+amd-smi static --clock
+
+# Set clock limits (--clk-limit / -L): adjust sclk or mclk min/max
+# Notes:
+#    - Not all MI3x+ models support adjusting clock limits for both SCLK and MCLK; check your model's capabilities with `amd-smi static --clock`
+#    - Recommend to set max limits, then adjust min limits.
+sudo amd-smi set --clk-limit <CLK_TYPE> <LIM_TYPE> <VALUE>
+
+# Confirm changes took place:
+amd-smi metric --clock
+
+# Reset clocks back to their default state
+sudo amd-smi reset --clocks
+```
+
+Lowering the SCLK maximum reduces peak power draw, which can reduce PVIOL percentage at the cost of peak compute throughput. See `amd-smi set -h` for the full list of supported options for your hardware.
 
 ## See Also
 
