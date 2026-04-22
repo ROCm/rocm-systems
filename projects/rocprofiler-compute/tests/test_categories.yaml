@@ -23,6 +23,7 @@ test_categories:
       - test_utils_profile_csv
       - test_autogen_config
       - test_import_guard
+      - test_mem_chart
     exclude:
       - test_profile_live_attach_detach
     labels:
@@ -61,6 +62,7 @@ test_categories:
       - test_pc_sampling_analysis
       - test_utils_profile_csv
       - test_profiler_base
+      - test_mem_chart
     exclude:
       - test_profile_live_attach_detach
     labels:
@@ -102,6 +104,7 @@ test_categories:
       - test_pc_sampling_analysis
       - test_utils_profile_csv
       - test_profiler_base
+      - test_mem_chart
     exclude:
       - test_profile_live_attach_detach
     labels:
@@ -143,6 +146,7 @@ test_categories:
       - test_pc_sampling_analysis
       - test_utils_profile_csv
       - test_profiler_base
+      - test_mem_chart
     exclude:
       - test_profile_live_attach_detach
     labels:
