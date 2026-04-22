@@ -5149,6 +5149,21 @@ except AmdSmiException as e:
 
 **Note:** This is a kernel UAPI feature (sysfs), not libdrm.
 
+**Supported ASICs and prerequisites:**
+
+- Only available on APU parts whose VBIOS exposes ATCS function 0xA
+  ("Set UMA Allocation Size") and an `integrated_system_info` table of
+  at least v2.3. In practice this covers Ryzen AI, Strix, and Strix Halo
+  (gfx1150/gfx1151/gfx1152), plus select Phoenix/Hawk Point APUs with an
+  updated VBIOS.
+- **Not available** on dedicated GPUs or Instinct MI-series accelerators
+  (including MI300A); the call returns `AMDSMI_STATUS_NOT_SUPPORTED` and
+  `amd-smi static --mem-carveout` prints
+  `MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)`.
+- Requires Linux kernel >= 6.17 (the `drm/amdgpu: add UMA carveout tuning
+  interfaces` series) and read access to
+  `/sys/class/drm/<card>/device/uma/carveout`.
+
 Description: Get UMA carveout (VRAM) configuration information for a GPU. Returns the current carveout index, total number of available options, and a list of option descriptions.
 
 Input parameters:
@@ -5229,6 +5244,21 @@ try:
 except AmdSmiException as e:
     print(e)
 ```
+
+### GTT (TTM `pages_limit`) APIs
+
+**Supported ASICs and prerequisites:**
+
+- Supported on every system running the amdgpu stack, including Ryzen
+  APUs (in-kernel amdgpu), Radeon dGPUs, and Instinct MI-series
+  accelerators with amdgpu-dkms (MI100 / MI200 / MI300 / MI300A).
+- The kernel TTM module may be named `ttm` (upstream), `amdttm` (older
+  amdgpu-dkms), or `amd-ttm` (newer amdgpu-dkms). amd-smi detects the
+  loaded module automatically by inspecting `/sys/module/` and writes the
+  corresponding `/etc/modprobe.d/<module>.conf`.
+- Writing `pages_limit` requires root and a reboot to take effect.
+  `dracut -f` is invoked automatically when available so that the change
+  is picked up by the initramfs.
 
 ### amdsmi_get_ttm_info
 
