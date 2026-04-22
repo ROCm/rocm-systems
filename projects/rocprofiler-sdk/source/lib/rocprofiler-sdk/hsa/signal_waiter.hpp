@@ -22,6 +22,10 @@
 
 #pragma once
 
+#include <hsa/hsa_api_trace_version.h>
+
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
+
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 
 #include <atomic>
@@ -59,3 +63,5 @@ private:
 };
 }  // namespace hsa
 }  // namespace rocprofiler
+
+#endif  // HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E

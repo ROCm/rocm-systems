@@ -174,7 +174,9 @@ public:
     }
     void sync() const;
 
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
     SignalWaiter* get_signal_waiter();
+#endif
 
     void register_callback(ClientID id, queue_callbacks_t callbacks);
     void remove_callback(ClientID id);
@@ -200,8 +202,10 @@ private:
     queue_state                          _state              = queue_state::normal;
     std::mutex                           _lock_queue         = {};
     hsa_signal_t                         _active_kernels     = {.handle = 0};
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
     std::once_flag                       _signal_waiter_init = {};
     std::unique_ptr<SignalWaiter>        _signal_waiter      = {};
+#endif
 };
 
 inline rocprofiler_queue_id_t

@@ -663,20 +663,19 @@ WriteInterceptor(const void* packets,
                 }
             }
 
-            if(all_tracing_only)
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
+            auto* ext_table = hsa::get_amd_ext_table();
+            if(all_tracing_only && ext_table && ext_table->hsa_amd_signal_waiting_inc_fn)
             {
-                auto* ext_table = hsa::get_amd_ext_table();
                 for(auto& pkt : shared->packet_data)
                 {
                     if(pkt.completion_signal.handle != 0)
-                    {
-                        if(ext_table && ext_table->hsa_amd_signal_waiting_inc_fn)
-                            ext_table->hsa_amd_signal_waiting_inc_fn(pkt.completion_signal);
-                    }
+                        ext_table->hsa_amd_signal_waiting_inc_fn(pkt.completion_signal);
                 }
                 queue.get_signal_waiter()->enqueue(std::move(shared));
             }
             else
+#endif
             {
                 auto* last_pooled_signal     = shared->packet_data.back().pooled_signal;
                 auto  last_completion_signal = shared->packet_data.back().completion_signal;
@@ -878,7 +877,9 @@ Queue::Queue(
 
 Queue::~Queue()
 {
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
     if(_signal_waiter) _signal_waiter->stop();
+#endif
     sync();
     _core_api.hsa_signal_destroy_fn(_active_kernels);
 }
@@ -973,6 +974,7 @@ Queue::sync() const
     }
 }
 
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
 SignalWaiter*
 Queue::get_signal_waiter()
 {
@@ -980,6 +982,7 @@ Queue::get_signal_waiter()
                    [this]() { _signal_waiter = std::make_unique<SignalWaiter>(); });
     return _signal_waiter.get();
 }
+#endif
 
 void
 Queue::register_callback(ClientID id, queue_callbacks_t callbacks)

@@ -22,6 +22,8 @@
 
 #include "lib/rocprofiler-sdk/hsa/signal_waiter.hpp"
 
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
+
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
@@ -305,3 +307,5 @@ SignalWaiter::run()
 
 }  // namespace hsa
 }  // namespace rocprofiler
+
+#endif  // HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
