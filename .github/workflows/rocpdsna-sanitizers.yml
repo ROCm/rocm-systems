@@ -1,0 +1,101 @@
+name: rocpdsna Sanitizers
+run-name: rocpdsna-sanitizers
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+      - sna-develop
+    paths:
+      - '.github/workflows/rocpdsna-sanitizers.yml'
+      - 'projects/rocpdsna/**'
+      - '!projects/rocpdsna/build/**'
+      - '!projects/rocpdsna/docs/**'
+      - '!projects/rocpdsna/README.md'
+  pull_request:
+    paths:
+      - '.github/workflows/rocpdsna-sanitizers.yml'
+      - 'projects/rocpdsna/**'
+      - '!projects/rocpdsna/build/**'
+      - '!projects/rocpdsna/docs/**'
+      - '!projects/rocpdsna/README.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  sanitizer:
+    name: ${{ matrix.sanitizer.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer:
+          - name: asan-ubsan
+            cflags: '-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all'
+            ldflags: '-fsanitize=address,undefined'
+            test_wrap: ''
+            runtime_env: 'ASAN_OPTIONS=detect_leaks=1:abort_on_error=0:halt_on_error=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1'
+          - name: tsan
+            cflags: '-fsanitize=thread -fno-omit-frame-pointer'
+            ldflags: '-fsanitize=thread'
+            test_wrap: 'setarch $(uname -m) -R'
+            runtime_env: 'TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1'
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocpdsna
+            .github/workflows
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            gcc g++ \
+            libsqlite3-dev libspdlog-dev libfmt-dev nlohmann-json3-dev \
+            libgtest-dev libgmock-dev libbenchmark-dev util-linux
+
+      - name: Configure
+        working-directory: projects/rocpdsna
+        env:
+          CC: gcc
+          CXX: g++
+        run: |
+          cmake --version
+          ${CXX} --version
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DROCPDSNA_BUILD_TESTS=ON \
+            -DROCPDSNA_BUILD_BENCHMARKS=OFF \
+            -DCMAKE_C_FLAGS="${{ matrix.sanitizer.cflags }}" \
+            -DCMAKE_CXX_FLAGS="${{ matrix.sanitizer.cflags }}" \
+            -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.sanitizer.ldflags }}" \
+            -DCMAKE_SHARED_LINKER_FLAGS="${{ matrix.sanitizer.ldflags }}"
+
+      - name: Build
+        working-directory: projects/rocpdsna
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Test
+        working-directory: projects/rocpdsna/build
+        run: |
+          env ${{ matrix.sanitizer.runtime_env }} \
+            ${{ matrix.sanitizer.test_wrap }} \
+            ctest --output-on-failure --output-junit test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sanitizer-results-${{ matrix.sanitizer.name }}
+          path: projects/rocpdsna/build/test-results.xml
+          if-no-files-found: warn
