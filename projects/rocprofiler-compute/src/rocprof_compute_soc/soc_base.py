@@ -952,7 +952,7 @@ class OmniSoC_Base:
             if not (Path(self.get_args().path) / "roofline.csv").is_file():
                 try:
                     bench = load_bench(self.get_args().device)
-                    result = bench.run_on_devices(self.get_args().device)
+                    result = bench.run_benchmark(self.get_args().device)
                     bench.dump_csv(result, f"{self.get_args().path}/roofline.csv")
                 except Exception as e:
                     console_error(

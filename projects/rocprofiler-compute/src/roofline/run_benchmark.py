@@ -73,5 +73,5 @@ if __name__ == "__main__":
     except RuntimeError as e:
         print(f"GPU benchmarking could not be executed: {e}")
         sys.exit(1)
-    metrics = bench.run_on_devices(device_id)
+    metrics = bench.run_benchmark(device_id)
     bench.dump_csv(metrics, "roofline.csv")

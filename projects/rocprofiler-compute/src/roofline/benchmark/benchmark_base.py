@@ -800,7 +800,10 @@ class Bench_base(ABC):
         return self.flops_bench(device, "INT64", "IOP", "GOPS")
 
     def run_benchmark(self, device: int) -> dict[PerfMetrics]:
-        """Run the roofline tests on the specified device."""
+        """
+        Run the roofline tests on the specified device.
+        Returns a dictionary mapping device ID to dictionary of metrics.
+        """
         with self.gpu_benchmark_lock(device):
             metrics_dict = {}
 
@@ -818,19 +821,8 @@ class Bench_base(ABC):
 
                 metrics_dict[name] = metrics
 
+            print("GPU Benchmarking completed")
             return metrics_dict
-
-    def run_on_devices(self, devices: list[str]) -> dict[dict[PerfMetrics]]:
-        """
-        Run the benchmark test on the all requested devices in a given list.
-        Returns a dictionary mapping device ID to dictionary of metrics.
-        """
-        metrics = {}
-        for d in devices:
-            metrics[d] = self.run_benchmark(int(d))
-
-        print("GPU Benchmarking completed")
-        return metrics
 
     def dump_csv(self, metrics: dict[dict[PerfMetrics]], file_path: str) -> None:
         """Generate a csv file containing the collected benchmark metrics."""
