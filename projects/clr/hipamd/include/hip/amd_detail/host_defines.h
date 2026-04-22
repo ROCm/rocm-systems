@@ -104,6 +104,15 @@ template <typename _Tp> struct is_signed<_Tp, true> : public true_or_false_type<
 template< class... >
 using void_t = void;
 
+#if defined(_WIN32)
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+#endif
+
 template <typename _Tp> struct numeric_limits {
   static constexpr bool is_specialized = false;
   static constexpr _Tp min() noexcept { return _Tp(); }
