@@ -59,10 +59,8 @@ create_queue(hsa_agent_t        agent,
             std::unique_ptr<Queue> new_queue;
             if(queue_intercept::is_intercepting_inline())
             {
-                // SDK-level interposition is active — create a regular HSA queue
-                // instead of an intercept queue. process_doorbell_impl calls
-                // WriteInterceptor directly; the Queue constructor skips
-                // set_write_interceptor when is_intercepting_inline().
+                ROCP_INFO << "[queue-intercept] creating queue via INLINE path for agent "
+                          << agent.handle;
                 auto status = controller->get_core_table().hsa_queue_create_fn(agent,
                                                                                size,
                                                                                type,
@@ -81,6 +79,8 @@ create_queue(hsa_agent_t        agent,
             }
             else
             {
+                ROCP_INFO << "[queue-intercept] creating queue via LEGACY path for agent "
+                          << agent.handle;
                 new_queue = std::make_unique<Queue>(agent_info,
                                                     size,
                                                     type,

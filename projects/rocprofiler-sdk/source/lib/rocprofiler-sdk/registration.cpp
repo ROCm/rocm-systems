@@ -1242,15 +1242,22 @@ rocprofiler_set_api_table(const char* name,
         {
             auto inline_intercept =
                 rocprofiler::common::get_env("ROCPROFILER_INLINE_INTERCEPT", true);
+            ROCP_INFO << "[queue-intercept] ROCPROFILER_INLINE_INTERCEPT="
+                      << (inline_intercept ? "true" : "false");
             if(inline_intercept)
             {
-                auto counter_att_contexts =
-                    context::get_registered_contexts([](const context::context* ctx) {
+                auto counter_att_contexts = rocprofiler::context::get_registered_contexts(
+                    [](const rocprofiler::context::context* ctx) {
                         return (ctx->dispatch_counter_collection != nullptr ||
                                 ctx->dispatch_thread_trace != nullptr);
                     });
+                ROCP_INFO << "[queue-intercept] counter/ATT contexts found: "
+                          << counter_att_contexts.size();
                 if(counter_att_contexts.empty())
                     rocprofiler::hsa::queue_intercept::install_intercept(*hsa_api_table->core_);
+                else
+                    ROCP_INFO << "[queue-intercept] skipping inline intercept — "
+                                 "counter/ATT contexts present";
             }
         }
 
