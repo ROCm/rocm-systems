@@ -16,9 +16,9 @@ class TestNativeTool:
         installed_compute_path: Path,
         installed_sdk_tool_path: Path,
     ) -> None:
-        lib_path = NativeTool().get_collector_library_path(
+        lib_path = NativeTool(
             installed_compute_path, installed_sdk_tool_path
-        )
+        ).get_collector_library_path()
         assert lib_path == installed_lib_path
 
     @pytest.mark.skip()
@@ -26,9 +26,9 @@ class TestNativeTool:
         self, installed_compute_path: Path, installed_sdk_tool_path
     ):
         with pytest.raises(RuntimeError):
-            NativeTool().get_collector_library_path(
+            NativeTool(
                 installed_compute_path, installed_sdk_tool_path
-            )
+            ).get_collector_library_path()
 
     def test_when_opt_lib_doesnt_exist_but_built_lib_exists__finds_it(
         self,
@@ -36,9 +36,9 @@ class TestNativeTool:
         sources_compute_path: Path,
         sources_lib_path: Path,
     ):
-        lib_path = NativeTool().get_collector_library_path(
+        lib_path = NativeTool(
             sources_compute_path, installed_sdk_tool_path
-        )
+        ).get_collector_library_path()
         assert lib_path == sources_lib_path
 
     def test_when_incorrect_compute_path_provided__asserts(
@@ -46,9 +46,9 @@ class TestNativeTool:
     ):
         lib_path = None
         with pytest.raises(AssertionError):
-            lib_path = NativeTool().get_collector_library_path(
+            lib_path = NativeTool(
                 Path("incorrect_compute_path"), installed_sdk_tool_path
-            )
+            ).get_collector_library_path()
         assert lib_path is None
 
     def test_when_incorrect_opt_path_provided__asserts(
@@ -56,9 +56,9 @@ class TestNativeTool:
     ):
         lib_path = None
         with pytest.raises(AssertionError):
-            lib_path = NativeTool().get_collector_library_path(
+            lib_path = NativeTool(
                 installed_compute_path, Path("incorrect_rocm_path")
-            )
+            ).get_collector_library_path()
         assert lib_path is None
 
     def test_when_no_lib_exists__builds_it(
@@ -73,9 +73,9 @@ class TestNativeTool:
                 NativeTool, "_build_cmake_project", side_effect=mock_build_collector
             ),
         ):
-            lib_path = NativeTool().get_collector_library_path(
+            lib_path = NativeTool(
                 sources_compute_path, installed_sdk_tool_path
-            )
+            ).get_collector_library_path()
         assert lib_path == sources_path / NativeTool.lib_relative_path
 
     @pytest.fixture
