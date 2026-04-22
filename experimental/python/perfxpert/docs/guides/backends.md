@@ -64,6 +64,11 @@ directory is silent. Changing the file set (e.g. adding
 
 ### Default: bundled opencode
 
+![perfxpert-code](assets/gifs/14-perfxpert-code.gif)
+
+*`perfxpert-code opencode --help` from the bundled AMD-branded
+launcher, with the MCP wiring pre-applied.*
+
 No subcommand, no extra install. The bundled opencode ships with AMD
 branding + the STRICT-TOOL-DISCIPLINE stanza + AMD red palette pre-applied;
 the launcher spawns the bundled binary with `perfxpert-mcp`

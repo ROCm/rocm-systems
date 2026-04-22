@@ -8,7 +8,7 @@
 
 Output ../gifs/10-progress-spinner.gif
 
-Set Shell "bash"
+Set Shell "./vhs-demo-shell.sh"
 Set FontSize 14
 Set Width 1200
 Set Height 600

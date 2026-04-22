@@ -4,7 +4,7 @@
 
 Output ../gifs/13-mcp-server.gif
 
-Set Shell "bash"
+Set Shell "./vhs-demo-shell.sh"
 Set FontSize 14
 Set Width 1200
 Set Height 500
@@ -27,6 +27,3 @@ Sleep 500ms
 Type "(perfxpert-mcp & MCP_PID=$!; sleep 3; kill $MCP_PID 2>/dev/null; wait 2>/dev/null) 2>&1 | head -5"
 Enter
 Sleep 5s
-Type "echo '# 56 tools = 8 agent-hierarchy + 47 classifier/knowledge + 1 trace_diff.diff_runs'"
-Enter
-Sleep 2s

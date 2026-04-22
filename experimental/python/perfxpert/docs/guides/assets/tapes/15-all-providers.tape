@@ -4,7 +4,7 @@
 
 Output ../gifs/15-all-providers.gif
 
-Set Shell "bash"
+Set Shell "./vhs-demo-shell.sh"
 Set FontSize 13
 Set Width 1200
 Set Height 700

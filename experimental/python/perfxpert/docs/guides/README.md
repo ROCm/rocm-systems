@@ -17,12 +17,15 @@ PerfXpert, jump to [../contributing/README.md](../contributing/README.md).
 
 Embedded throughout [getting-started.md](getting-started.md). Source
 `.tape` files are under [assets/tapes/](assets/tapes/) and rendered
-GIFs under [assets/gifs/](assets/gifs/) — regenerate any of them with
-`vhs assets/tapes/<NN>-<scenario>.tape`.
+GIFs under [assets/gifs/](assets/gifs/). Use
+`bash assets/render-gifs.sh` to regenerate the full set from a clean
+ROCm container, or pass one tape name to render a single scenario.
+
+![help overview](assets/gifs/02-help.gif)
 
 | # | scenario | gif |
 |---|----------|-----|
-| 01 | Install (scoped submodule wrapper) | [01-install.gif](assets/gifs/01-install.gif) |
+| 01 | Install (editable + bundled opencode build) | [01-install.gif](assets/gifs/01-install.gif) |
 | 02 | `perfxpert --help` + `analyze --help` | [02-help.gif](assets/gifs/02-help.gif) |
 | 03 | `perfxpert doctor` | [03-doctor.gif](assets/gifs/03-doctor.gif) |
 | 04 | `--format text` | [04-analyze-text.gif](assets/gifs/04-analyze-text.gif) |

@@ -4,7 +4,7 @@
 
 Output ../gifs/05-analyze-json.gif
 
-Set Shell "bash"
+Set Shell "./vhs-demo-shell.sh"
 Set FontSize 14
 Set Width 1200
 Set Height 700

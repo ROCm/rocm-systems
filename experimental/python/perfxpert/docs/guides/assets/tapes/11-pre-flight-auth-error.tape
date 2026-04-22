@@ -4,7 +4,7 @@
 
 Output ../gifs/11-pre-flight-auth-error.gif
 
-Set Shell "bash"
+Set Shell "./vhs-demo-shell.sh"
 Set FontSize 14
 Set Width 1200
 Set Height 500
@@ -24,6 +24,18 @@ Show
 Type "# Pre-flight auth check: fails fast, no empty output file"
 Enter
 Sleep 500ms
-Type "bash _preflight_demo.sh"
+Type "unset ANTHROPIC_API_KEY PERFXPERT_LLM_ANTHROPIC_KEY"
 Enter
-Sleep 5s
+Sleep 300ms
+Type "set +e"
+Enter
+Sleep 300ms
+Type "perfxpert analyze -i trace.db --llm anthropic --format webview -d . -o preflight"
+Enter
+Sleep 4s
+Type "echo rc=$?"
+Enter
+Sleep 800ms
+Type "test ! -f preflight.html && echo 'no output file written'"
+Enter
+Sleep 2s

@@ -9,7 +9,7 @@
 
 Output ../gifs/02-help.gif
 
-Set Shell "bash"
+Set Shell "./vhs-demo-shell.sh"
 Set FontSize 13
 Set Width 1200
 Set Height 750

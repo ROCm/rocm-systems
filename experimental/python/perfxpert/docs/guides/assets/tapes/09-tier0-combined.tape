@@ -4,7 +4,7 @@
 
 Output ../gifs/09-tier0-combined.gif
 
-Set Shell "bash"
+Set Shell "./vhs-demo-shell.sh"
 Set FontSize 14
 Set Width 1200
 Set Height 700
@@ -33,7 +33,7 @@ Sleep 3s
 Type "ls -lh combined.html"
 Enter
 Sleep 1500ms
-Type `grep -oE '<h2>[^<]+</h2>' combined.html | sed 's|<[^>]*>||g' | sed 's/^/  • /'`
+Type `grep -oE '<h2>[^<]+</h2>' combined.html | sed 's|<[^>]*>||g' | sed 's/^/  - /'`
 Enter
 Sleep 2s
 Type "grep -c -i 'Tier-0' combined.html"

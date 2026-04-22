@@ -66,6 +66,11 @@ result["summary"]["overlap_pct"]                   # comm/compute overlap %
 
 ## Quickstart
 
+![python API](assets/gifs/12-python-api.gif)
+
+*`perfxpert.api.agent_root(...)` returning a plain Python dict with the
+same high-level fields exposed by the CLI's JSON output.*
+
 ```python
 # SKIP-SAMPLE — illustrative Python API call (requires real trace.db / running session)
 from perfxpert import api

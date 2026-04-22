@@ -61,6 +61,11 @@ Use air-gap mode for:
 
 ## LLM-enabled mode
 
+![progress spinner](assets/gifs/10-progress-spinner.gif)
+
+*Live agent-phase progress for a deterministic `PERFXPERT_AIRGAP=1`
+analysis run with the LLM path selected.*
+
 Pick a provider explicitly:
 
 ```python
@@ -104,6 +109,12 @@ Behavior differences vs air-gap:
   proposes; a rewarded-hack still gets rejected at gate 2 (SOL).
 
 ## Provider ladder
+
+![all providers](assets/gifs/15-all-providers.gif)
+
+*The five supported provider choices come directly from the CLI's
+`--llm` registry: `anthropic`, `openai`, `ollama`, `private`,
+`opencode`.*
 
 `PROVIDER_REGISTRY` is defined in `perfxpert/agents/runtime.py` (with a
 hard-coded fallback there; `build_session` imports the richer copy

@@ -4,7 +4,7 @@
 
 Output ../gifs/04-analyze-text.gif
 
-Set Shell "bash"
+Set Shell "./vhs-demo-shell.sh"
 Set FontSize 12
 Set Width 1200
 Set Height 800

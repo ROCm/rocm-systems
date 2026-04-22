@@ -19,7 +19,8 @@ RDNA2 / RDNA3.
 
 ![install](assets/gifs/01-install.gif)
 
-*Scoped submodule init — 30 ms vs 3 min on stock rocm/dev-ubuntu images.*
+*Editable install in a clean `rocm/dev-ubuntu-22.04` container,
+including the bundled opencode build and CLI verification.*
 
 PerfXpert ships as a single Python wheel. The `setuptools` build hook
 in `setup.py` automatically compiles the AMD-branded bundled opencode

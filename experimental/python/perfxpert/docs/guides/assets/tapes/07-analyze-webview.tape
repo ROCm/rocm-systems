@@ -9,7 +9,7 @@
 
 Output ../gifs/07-analyze-webview.gif
 
-Set Shell "bash"
+Set Shell "./vhs-demo-shell.sh"
 Set FontSize 14
 Set Width 1200
 Set Height 650
@@ -30,7 +30,7 @@ Type "#!/usr/bin/env bash"
 Enter
 Type `printf 'sections: '; grep -c '<h2>' analysis.html`
 Enter
-Type `printf 'headings:\n'; grep -oE '<h2>[^<]+</h2>' analysis.html | sed 's|<[^>]*>||g' | sed 's/^/  • /'`
+Type `printf 'headings:\n'; grep -oE '<h2>[^<]+</h2>' analysis.html | sed 's|<[^>]*>||g' | sed 's/^/  - /'`
 Enter
 Type "EOF"
 Enter
