@@ -1,9 +1,8 @@
 """Tests for the `perfxpert config` subcommand."""
 
-import textwrap
-from io import StringIO
-from unittest.mock import patch
+import pytest
 
+from perfxpert.config import _cli
 from perfxpert.config._cli import run_config_show, run_config_set
 
 
@@ -49,3 +48,15 @@ def test_config_set_coerces_bool(tmp_path, monkeypatch):
     content = (tmp_path / ".config" / "perfxpert" / "config.yaml").read_text()
     assert "airgap" in content
     assert "true" in content.lower()
+
+
+def test_config_set_handles_unresolvable_home(monkeypatch, capsys):
+    def _raise_home_error():
+        raise RuntimeError("home is unavailable")
+
+    monkeypatch.delenv("HOME", raising=False)
+    monkeypatch.setattr(_cli.Path, "home", _raise_home_error)
+    with pytest.raises(SystemExit) as excinfo:
+        run_config_set("provider", "openai")
+    assert excinfo.value.code == 1
+    assert "cannot resolve home directory" in capsys.readouterr().err
