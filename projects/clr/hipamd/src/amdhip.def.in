@@ -190,7 +190,6 @@ hipProfilerStart
 hipProfilerStop
 hipProfilerEnableExt
 hipProfilerDisableExt
-hipProfilerResetExt
 hipProfilerGetRecordsExt
 hipRuntimeGetVersion
 hipGetDeviceFlags

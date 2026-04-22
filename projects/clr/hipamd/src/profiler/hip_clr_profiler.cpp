@@ -45,7 +45,6 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace hip { const HipDispatchTable* GetHipDispatchTable(); }
 
 extern "C" void hipRegisterTracerCallback(int (*function)(activity_domain_t domain,
                                                           uint32_t operation_id, void* data));
@@ -60,16 +59,16 @@ inline uint64_t NowNs() { return amd::Os::timeNanos(); }
 constexpr size_t kChunkSize = 10000;
 
 // Two independent enable paths:
-//   g_env_output_path — set by GPU_CLR_PROFILE_OUTPUT=<path> at Init(), never cleared.
-//   g_api_enabled     — toggled by hipProfilerEnableExt/Disable.
+//   g_env_output_path  — set by GPU_CLR_PROFILE_OUTPUT=<path> at Init(), never cleared.
+//   g_enable_refcount  — incremented by hipProfilerEnableExt, decremented by Disable.
 // Recording is active when EITHER is live.
-std::atomic<bool>        g_api_enabled{false};
+std::atomic<int>         g_enable_refcount{0};
 std::atomic<bool>        g_callback_registered{false};
 std::string              g_env_output_path;  // written once at init; read-only afterward
 
 inline bool IsProfilingActive() {
   return !g_env_output_path.empty() ||
-         g_api_enabled.load(std::memory_order_acquire);
+         g_enable_refcount.load(std::memory_order_acquire) > 0;
 }
 
 // Previously registered callback saved before we register ours.
@@ -89,8 +88,7 @@ std::mutex                                   g_kernel_names_mtx;
 // g_records[idx] without holding g_alloc_mtx (fast path).  If push_back ever
 // reallocates the pointer vector, those bare reads race with the reallocation —
 // undefined behaviour.  reserve() keeps capacity above the watermark so push_back
-// never triggers a realloc.  See also HipProfilerResetExt which re-applies the
-// reservation after clear().
+// never triggers a realloc.
 std::vector<HipApiRecordExt*> g_records;
 constexpr size_t kMaxChunks = 100000;  // hard cap: 100000 * 10000 = 1B records max
 std::atomic<size_t>           g_rec_counter{0};
@@ -478,6 +476,8 @@ HipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id) {
 // ============================================================
 // Internal API
 // ============================================================
+namespace hip { const HipDispatchTable* GetHipDispatchTable(); }
+
 // Shared helper — registers callback once and installs wrappers.
 static void EnsureCallbackAndWrappers() {
   {
@@ -501,6 +501,9 @@ static void EnsureCallbackAndWrappers() {
 }
 
 void HipProfilerInitExt() {
+  // Build the wrapper table once from the live dispatch table.
+  HipProfilerBuildWrapperTableExt(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()));
+
   // GPU_CLR_PROFILE_OUTPUT=<path>: presence (non-empty) enables profiling;
   // the value is the output file path written at process exit.
   if (flagIsDefault(GPU_CLR_PROFILE_OUTPUT)) return;
@@ -510,26 +513,31 @@ void HipProfilerInitExt() {
   EnsureCallbackAndWrappers();
 }
 
-void HipProfilerEnableExt() {
-  g_api_enabled.store(true, std::memory_order_release);
-  EnsureCallbackAndWrappers();
+uint64_t HipProfilerEnableExt() {
+  uint64_t start_id = g_rec_counter.load(std::memory_order_acquire);
+  int prev = g_enable_refcount.fetch_add(1, std::memory_order_acq_rel);
+  if (prev == 0) {
+    EnsureCallbackAndWrappers();
+  }
+  return start_id;
 }
 
-void HipProfilerDisableExt() {
-  // Drain all outstanding GPU work before clearing the flag so that
-  // ReportActivity callbacks for in-flight commands are delivered while
-  // the profiler callback is still active.
-  DrainAllDevices();
-  g_api_enabled.store(false, std::memory_order_release);
-  HipProfilerRemoveWrappersExt(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()));
-}
-
-void HipProfilerResetExt() {
-  std::lock_guard<std::mutex> lk(g_alloc_mtx);
-  for (auto* chunk : g_records) FreeChunk(chunk);
-  g_records.clear();
-  g_records.reserve(kMaxChunks);  // restore reservation so lock-free fast path stays valid
-  g_rec_counter.store(0, std::memory_order_relaxed);
+uint64_t HipProfilerDisableExt() {
+  int prev = g_enable_refcount.fetch_sub(1, std::memory_order_acq_rel);
+  if (prev <= 0) {
+    // Already disabled — clamp to zero and return current record ID.
+    g_enable_refcount.store(0, std::memory_order_relaxed);
+    return g_rec_counter.load(std::memory_order_acquire);
+  }
+  if (prev == 1) {
+    // Ref count hit zero: drain and deactivate.
+    // Drain all outstanding GPU work before clearing the flag so that
+    // ReportActivity callbacks for in-flight commands are delivered while
+    // the profiler callback is still active.
+    DrainAllDevices();
+    HipProfilerRemoveWrappersExt(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()));
+  }
+  return g_rec_counter.load(std::memory_order_acquire);
 }
 
 // ============================================================
@@ -537,9 +545,17 @@ void HipProfilerResetExt() {
 // ============================================================
 extern "C" {
 
-hipError_t hipProfilerEnableExt()  { HipProfilerEnableExt();  return hipSuccess; }
-hipError_t hipProfilerDisableExt() { HipProfilerDisableExt(); return hipSuccess; }
-hipError_t hipProfilerResetExt()   { HipProfilerResetExt();   return hipSuccess; }
+hipError_t hipProfilerEnableExt(uint64_t* start_record_id) {
+  uint64_t id = HipProfilerEnableExt();
+  if (start_record_id) *start_record_id = id;
+  return hipSuccess;
+}
+
+hipError_t hipProfilerDisableExt(uint64_t* end_record_id) {
+  uint64_t id = HipProfilerDisableExt();
+  if (end_record_id) *end_record_id = id;
+  return hipSuccess;
+}
 
 hipError_t hipProfilerGetRecordsExt(const HipApiRecordExt* const** chunks,
                                      size_t* chunk_count,

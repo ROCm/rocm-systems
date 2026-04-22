@@ -162,22 +162,38 @@ static_assert(sizeof(HipApiRecordExt) == 256, "HipApiRecordExt must be 256 bytes
 /**
  * @brief Enable built-in profiling at runtime.
  *
- * Equivalent to setting GPU_CLR_PROFILE_OUTPUT=<path> before process start,
- * but can be called at any time from application code.
+ * Increments an internal reference counter.  Profiling becomes active on the
+ * first call (ref count 0 → 1).  Subsequent calls increase the counter further,
+ * allowing multiple independent profiling sessions to coexist — profiling stays
+ * active until the matching number of hipProfilerDisableExt() calls has been
+ * made.
+ *
+ * @param[out] start_record_id  Set to the record counter value at the moment
+ *                              profiling was enabled (i.e. the index of the
+ *                              first record that will be attributed to this
+ *                              session).  May be NULL.
+ * @return hipSuccess
  */
-hipError_t hipProfilerEnableExt(void);
+hipError_t hipProfilerEnableExt(uint64_t* start_record_id);
 
 /**
  * @brief Disable built-in profiling.  Already-collected records are kept.
  *
- * Drains all pending GPU work before returning, ensuring that every in-flight
- * GPU activity callback has fired and all records are fully populated.
+ * Decrements the internal reference counter.  When the counter reaches zero
+ * all pending GPU work is drained before profiling is deactivated, ensuring
+ * that every in-flight GPU activity callback has fired and all records for
+ * this session are fully populated.
  *
- * Must be called before hipProfilerGetRecordsExt() or hipProfilerResetExt().
- * Calling either of those without a prior disable may return incomplete records
- * or free memory that is still being written by the GPU completion thread.
+ * Must be paired with a prior call to hipProfilerEnableExt().  Calling this
+ * function more times than hipProfilerEnableExt() has no effect once the
+ * counter is already zero.
+ *
+ * @param[out] end_record_id  Set to the record counter value at the moment
+ *                            profiling was disabled (i.e. one past the index
+ *                            of the last record for this session).  May be NULL.
+ * @return hipSuccess
  */
-hipError_t hipProfilerDisableExt(void);
+hipError_t hipProfilerDisableExt(uint64_t* end_record_id);
 
 /**
  * @brief Return the raw profiler chunk array without copying.
@@ -201,8 +217,7 @@ hipError_t hipProfilerDisableExt(void);
  * @endcode
  *
  * Lifetime: the returned pointers are owned by the profiler and remain valid
- * until the next call to hipProfilerResetExt().  Do NOT call
- * hipProfilerResetExt() while iterating.
+ * for the lifetime of the process.
  *
  * Note: HipApiRecordExt::_pad1 is used internally to store a spill vector for
  * multi-op graph launches.  Treat it as opaque; do not read or write it.
@@ -214,14 +229,9 @@ hipError_t hipProfilerDisableExt(void);
  * @param[out] total_count  Total number of valid records across all chunks.
  */
 hipError_t hipProfilerGetRecordsExt(const HipApiRecordExt* const** chunks,
-                                     size_t* chunk_count,
-                                     size_t* chunk_size,
-                                     size_t* total_count);
-
-/**
- * @brief Clear all accumulated records and free internal storage.
- */
-hipError_t hipProfilerResetExt(void);
+                                    size_t* chunk_count,
+                                    size_t* chunk_size,
+                                    size_t* total_count);
 
 #ifdef __cplusplus
 }
