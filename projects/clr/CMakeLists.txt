@@ -5,6 +5,33 @@
 cmake_minimum_required(VERSION 3.16.8)
 project(clr)
 
+# If the developer's environment exports CPLUS_INCLUDE_PATH / C_INCLUDE_PATH
+# pointing at a local ROCm install (e.g. setup.sh sets
+# CPLUS_INCLUDE_PATH=$ROCM_INSTALL_PATH/include), CMake's compiler detection
+# records that directory in CMAKE_{C,CXX}_IMPLICIT_INCLUDE_DIRECTORIES and then
+# SILENTLY DROPS any -isystem/-I pointing at the same path from the compile
+# commands. The result is that transitively-linked packages installed under
+# /opt/rocm (e.g. amd_comgr, rocprofiler-register) successfully inject
+# -isystem /opt/rocm/include, while the ROCM_INSTALL_PATH-based include is
+# relegated to environment-variable lookup - which is searched AFTER -isystem
+# in GCC. The end result is that headers (HSA in particular) get picked up
+# from /opt/rocm instead of from ROCM_INSTALL_PATH.
+#
+# Pull ROCM_INSTALL_PATH (and plain rocm_install/include) back out of the
+# implicit lists so that CMake generates explicit -isystem flags for it, which
+# are searched before the /opt/rocm ones.
+if(NOT ROCM_INSTALL_PATH AND DEFINED ENV{ROCM_INSTALL_PATH})
+    set(ROCM_INSTALL_PATH "$ENV{ROCM_INSTALL_PATH}")
+endif()
+if(ROCM_INSTALL_PATH)
+    foreach(_lang IN ITEMS C CXX)
+        if(DEFINED CMAKE_${_lang}_IMPLICIT_INCLUDE_DIRECTORIES)
+            list(REMOVE_ITEM CMAKE_${_lang}_IMPLICIT_INCLUDE_DIRECTORIES
+                "${ROCM_INSTALL_PATH}/include")
+        endif()
+    endforeach()
+endif()
+
 ##########
 # Defaults
 ##########

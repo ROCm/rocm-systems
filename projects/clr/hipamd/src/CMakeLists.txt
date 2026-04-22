@@ -250,7 +250,7 @@ if(USE_PROF_API)
   set(PROF_API_LOG "${PROJECT_BINARY_DIR}/hip_prof_gen.log.txt")
   set(PROF_API_NEWHDR "${PROJECT_BINARY_DIR}/new_header.h")
 
-  execute_process(COMMAND ${Python3_EXECUTABLE} -c "import CppHeaderParser"
+  execute_process(COMMAND python3 -c "import CppHeaderParser"
                   RESULT_VARIABLE CPP_HEADER_PARSER
                   OUTPUT_QUIET)
 
@@ -277,7 +277,7 @@ if(USE_PROF_API)
     COMMENT "Generating new header from hip_runtime_api.h")
 
   add_custom_command(OUTPUT ${PROF_API_STR}
-    COMMAND ${Python3_EXECUTABLE} ${PROF_API_GEN} -v -t --priv ${PROF_API_NEWHDR}.i ${PROF_API_SRC} ${PROF_API_STR_IN} ${PROF_API_STR}
+    COMMAND python3 ${PROF_API_GEN} -v -t --priv ${PROF_API_NEWHDR}.i ${PROF_API_SRC} ${PROF_API_STR_IN} ${PROF_API_STR}
     DEPENDS ${PROF_API_STR_IN} ${PROF_API_NEWHDR}.i ${PROF_API_GEN}
     COMMENT "Generating profiling primitives: ${PROF_API_STR}")
 
@@ -315,9 +315,14 @@ else()
 endif()
 
 if(HIP_ENABLE_ROCPROFILER_REGISTER)
+    # Allow ROCM_INSTALL_PATH to be supplied via the environment.
+    if(NOT ROCM_INSTALL_PATH AND DEFINED ENV{ROCM_INSTALL_PATH})
+      set(ROCM_INSTALL_PATH "$ENV{ROCM_INSTALL_PATH}")
+    endif()
     find_package(rocprofiler-register REQUIRED
-        HINTS $ENV{rocprofiler_register_ROOT} $ENV{ROCPROFILER_REGISTER_ROOT} ${CMAKE_INSTALL_PREFIX}
-        PATHS ${ROCM_PATH})
+        HINTS $ENV{rocprofiler_register_ROOT} $ENV{ROCPROFILER_REGISTER_ROOT}
+              ${ROCM_INSTALL_PATH} ${CMAKE_INSTALL_PREFIX}
+        PATHS ${ROCM_INSTALL_PATH} /opt/rocm)
 
     # don't use HIP_VERSION_PATCH because it is too large (> 100) for rocprofiler register
     target_compile_definitions(amdhip64 PRIVATE HIP_ROCPROFILER_REGISTER=1

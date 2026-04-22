@@ -2,10 +2,15 @@
 #
 # SPDX-License-Identifier: MIT
 
+# Allow ROCM_INSTALL_PATH to be supplied via the environment.
+if(NOT ROCM_INSTALL_PATH AND DEFINED ENV{ROCM_INSTALL_PATH})
+  set(ROCM_INSTALL_PATH "$ENV{ROCM_INSTALL_PATH}")
+endif()
+
 find_package(amd_comgr 2.9 CONFIG
   PATHS
-    ${ROCM_PATH}
     ${ROCM_INSTALL_PATH}
+    /opt/rocm/
   PATH_SUFFIXES
     cmake/amd_comgr
     lib/cmake/amd_comgr)
@@ -13,8 +18,8 @@ find_package(amd_comgr 2.9 CONFIG
 if (NOT amd_comgr_FOUND)
   find_package(amd_comgr 3.0 REQUIRED CONFIG
     PATHS
-      ${ROCM_PATH}
       ${ROCM_INSTALL_PATH}
+      /opt/rocm/
     PATH_SUFFIXES
       cmake/amd_comgr
       lib/cmake/amd_comgr)
