@@ -93,8 +93,6 @@ private:
 
 // Single global logger instance shared across all components. Log level is
 // controlled via the ROCJPEG_LOG_LEVEL environment variable (default: critical).
-// Meyer's singleton: initialized on first use (avoids static init order fiasco),
-// thread-safe by C++11 §6.7.
 inline RocJpegLogger& RocJpegGetLogger() {
     static RocJpegLogger instance;
     return instance;
