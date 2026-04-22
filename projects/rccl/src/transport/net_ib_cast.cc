@@ -117,7 +117,6 @@ struct ncclIbDev IbCastDevs[MAX_IB_DEVS];
 static std::mutex ncclIbMutex;
 static int ncclIbRelaxedOrderingEnabled = 0;
 static bool rcclAinicRoce = 0;
-static bool rcclCtsInlineData = 0;
 static bool rcclCtsOffloadEnabled = 0;
 static bool ncclIbUseInline = 0;
 static int ncclIbGdrFlushDisable = 0;
@@ -171,10 +170,14 @@ NCCL_PARAM(IbCastQpsPerConn, "IB_QPS_PER_CONNECTION", 2);
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
 NCCL_PARAM(IbCastGdrFlushDisable, "GDR_FLUSH_DISABLE", 0);
 // AMD AINIC
-RCCL_PARAM(IbCastCtsInlineData, "CTS_INLINE_DATA", -1);
 RCCL_PARAM(IbCastCtsOffloadEnabled, "CTS_OFFLOAD_ENABLED", -1);
+RCCL_PARAM(IbCastP2pDisableCts, "IB_P2P_DISABLE_CTS", 0);
 
 extern int64_t rcclParamAinicRoce();
+
+static inline bool rcclIsCtsOffloadEnabled(int isP2p) {
+  return rcclCtsOffloadEnabled && !(isP2p && rcclParamIbCastP2pDisableCts());
+}
 static ncclResult_t IbCastStatsInit(struct ncclIbStats* stat) {
   __atomic_store_n(&stat->fatalErrorCount, 0, __ATOMIC_RELAXED);
   return ncclSuccess;
@@ -783,13 +786,9 @@ ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
     }
   }
 
-  // CTS Offload and CTS Inline are not yet compatible with NIC Fusion
-  // (NCCL_IB_MERGE_NICS). Disable them when a multi-NIC vNIC is created.
+  // CTS Offload is not yet compatible with NIC Fusion
+  // (NCCL_IB_MERGE_NICS). Disable it when a multi-NIC vNIC is created.
   if (props->ndevs > 1) {
-      if (rcclCtsInlineData) {
-        INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion (ndevs=%d) - disabling CTS Inline Data (not yet supported with merge)", props->ndevs);
-        rcclCtsInlineData = false;
-      }
     if (rcclCtsOffloadEnabled) {
       INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion (ndevs=%d) - disabling CTS Offload (not yet supported with merge)", props->ndevs);
       rcclCtsOffloadEnabled = false;
@@ -1269,33 +1268,23 @@ ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
     rcclAinicRoce = rcclUseAinic();
     if (rcclAinicRoce) {
       // for AINIC, these params are defaulted to enabled unless user forces it to disable(0).
-      rcclCtsInlineData = ((rcclParamIbCastCtsInlineData() == 0) ? false : true);
+      // RCCL_CTS_OFFLOAD_ENABLED controls both CTS offload and CTS inline data.
+      // Default (-1) auto-enables on AINIC. Set to 0 to disable, 1 to force enable.
       rcclCtsOffloadEnabled = ((rcclParamIbCastCtsOffloadEnabled() == 0) ? false : true);
 
-      // CTS Offload and CTS Inline are mutually dependent — both must be
-      // enabled for either to function. Disable both if either is missing.
-      if (!rcclCtsOffloadEnabled || !rcclCtsInlineData) {
-        if (rcclCtsInlineData) {
-          INFO(NCCL_INIT|NCCL_NET, "NET/IB : CTS Inline disabled - disabling CTS Offload (requires CTS Inline)");
-        }
-        if (rcclCtsOffloadEnabled) {
-          INFO(NCCL_INIT|NCCL_NET, "NET/IB : CTS Offload disabled - disabling CTS Inline (requires CTS Offload)");
-        }
-        rcclCtsOffloadEnabled = false;
-        rcclCtsInlineData = false;
-      } else if (rcclParamIbCastQpSchedEnable()) {
-        INFO(NCCL_INIT|NCCL_NET, "NET/IB : CAST enabled - disabling CTS Inline Data and CTS Offload (not yet supported with CAST)");
-        rcclCtsInlineData = false;
+      if (rcclParamIbCastQpSchedEnable()) {
+        INFO(NCCL_INIT|NCCL_NET, "NET/IB : CAST enabled - disabling CTS Offload (not yet supported with CAST)");
         rcclCtsOffloadEnabled = false;
       }
       // for AINIC IbUseInline is enabled by default always
       ncclIbUseInline = true;
       // for AINIC GDR flush is disabled by default
       ncclIbGdrFlushDisable = 1;
-  
-      INFO(NCCL_INIT|NCCL_NET, "NET/IB : AINIC RoCEv2 optimizations enabled: CTS Inline Data: %s; CTS Offload: %s; "
-           "IB Use Inline: enabled; GDR Flush: disabled", rcclCtsInlineData ? "Enabled": "Disabled",
-           rcclCtsOffloadEnabled ? "Enabled": "Disabled");
+
+      INFO(NCCL_INIT|NCCL_NET, "NET/IB : AINIC RoCEv2 optimizations enabled: CTS Offload: %s; "
+           "IB Use Inline: enabled; GDR Flush: disabled; IB P2P Disable CTS: %s",
+           rcclCtsOffloadEnabled ? "Enabled": "Disabled",
+           rcclParamIbCastP2pDisableCts() ? "Yes" : "No");
     }
   }
 exit:
@@ -1730,6 +1719,7 @@ struct ncclIbSendComm {
   struct ncclIbRemSizesFifo remSizesFifo;
   uint64_t fifoHead;
   int ar; // Use adaptive routing when all merged devices have it enabled
+  bool useCtsOffload;
 };
 // The SendFifo needs to be 32-byte aligned and each element needs
 // to be a 32-byte multiple, so that an entry does not get split and
@@ -1775,6 +1765,7 @@ struct ncclIbRecvComm {
   int sizesFifo[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
   int gpuFlushHostMem;
   int flushEnabled;
+  bool useCtsOffload;
 };
 static_assert((offsetof(struct ncclIbRecvComm, remFifo) % 32) == 0, "ncclIbRecvComm fifo must be 32-byte aligned");
 
@@ -1816,7 +1807,8 @@ ncclResult_t IbCastDestroyBase(struct ncclIbNetCommDevBase* base) {
 
 ncclResult_t IbCastCreateQp(uint8_t ib_port, struct ncclIbNetCommDevBase* base,
                             int access_flags, void* qp_context, struct ncclIbQp* qp,
-                            int channel_id, bool data_qp, int8_t cts_qp_slot) {
+                            int channel_id, bool data_qp, int8_t cts_qp_slot,
+                            int isP2p = 0) {
   struct ibv_qp_init_attr qpInitAttr;
   enum ncclIbChannelType channel_type = (data_qp ? ncclIbChannelTypeData : ncclIbChannelTypeCts);
   memset(&qpInitAttr, 0, sizeof(struct ibv_qp_init_attr));
@@ -1825,6 +1817,7 @@ ncclResult_t IbCastCreateQp(uint8_t ib_port, struct ncclIbNetCommDevBase* base,
   qpInitAttr.recv_cq = base->cq;
   qpInitAttr.qp_type = IBV_QPT_RC;
 
+  bool qpCtsOffload = rcclIsCtsOffloadEnabled(isP2p);
   if (rcclAinicRoce) {
     if (!nccl_channel_ud_map[base->ibDevN][channel_id][channel_type].udAllocated) {
       bool lud = nccl_channel_last_ud[base->ibDevN][channel_type];
@@ -1845,7 +1838,7 @@ ncclResult_t IbCastCreateQp(uint8_t ib_port, struct ncclIbNetCommDevBase* base,
       qpInitAttr.sq_sig_all &= (~(1 << 17));
     }
     qpInitAttr.sq_sig_all |= (1 << 18);
-    if (rcclCtsOffloadEnabled) {
+    if (qpCtsOffload) {
       qpInitAttr.sq_sig_all |= (1 << 19);
     } else {
       qpInitAttr.sq_sig_all &= (~(1 << 19));
@@ -1858,7 +1851,7 @@ ncclResult_t IbCastCreateQp(uint8_t ib_port, struct ncclIbNetCommDevBase* base,
   qpInitAttr.cap.max_send_sge = 1;
   qpInitAttr.cap.max_recv_sge = 1;
 
-  if (rcclCtsInlineData) {
+  if (qpCtsOffload) {
     qpInitAttr.cap.max_inline_data = MAX_INLINE_DATA_SIZE;
   } else {
     qpInitAttr.cap.max_inline_data = ncclIbUseInline ? sizeof(struct ncclIbSendFifo) : 0;
@@ -2037,7 +2030,8 @@ ib_recv_dev_list:
 
   // Read isP2p from handle
   isP2p = handle->isP2p;
-  INFO(NCCL_NET, "NET/IB: IbCastConnect isP2p=%d", isP2p);
+  comm->useCtsOffload = rcclIsCtsOffloadEnabled(isP2p);
+  INFO(NCCL_NET, "NET/IB: IbCastConnect isP2p=%d useCtsOffload=%d (IbP2pDisableCts=%ld)", isP2p, comm->useCtsOffload, rcclParamIbCastP2pDisableCts());
   comm->base.nqps = ncclIbCalculateNqps(isP2p, comm->base.vProps.ndevs, 
                                          remoteVProps.ndevs, __func__);
 
@@ -2058,7 +2052,7 @@ ib_recv_dev_list:
   for (int q = 0; q < comm->base.nqps; q++) {
     ncclIbSendCommDev* commDev = comm->devs + devIndex;
     ncclIbDev* ibDev = IbCastDevs + commDev->base.ibDevN;
-    NCCLCHECKGOTO(IbCastCreateQp(ibDev->portNum, &commDev->base, IBV_ACCESS_REMOTE_WRITE, &comm->base.stats, comm->base.qps + q, channel_id, true, NCCL_CTS_QP_SLOT_INVALID), ret, fail);
+    NCCLCHECKGOTO(IbCastCreateQp(ibDev->portNum, &commDev->base, IBV_ACCESS_REMOTE_WRITE, &comm->base.stats, comm->base.qps + q, channel_id, true, NCCL_CTS_QP_SLOT_INVALID, isP2p), ret, fail);
     comm->base.qps[q].devIndex = devIndex;
     meta.qpInfo[q].qpn      = comm->base.qps[q].qp->qp_num;
     meta.qpInfo[q].devIndex = comm->base.qps[q].devIndex;
@@ -2083,7 +2077,11 @@ ib_recv_dev_list:
     devInfo->lid           = ibDev->portAttr.lid;
     devInfo->ibv_dev_index = commDev->base.ibDevN;
     // Prepare my fifo
-    NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->fifoMr, commDev->base.pd, comm->fifo, sizeof(struct ncclIbSendFifo)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS, IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
+    if (comm->useCtsOffload) {
+      NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->fifoMr, commDev->base.pd, comm->fifo_inline, sizeof(struct ncclIbSendFifoCtsInline)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS, IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
+    } else {
+      NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->fifoMr, commDev->base.pd, comm->fifo, sizeof(struct ncclIbSendFifo)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS, IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
+    }
     devInfo->fifoRkey = commDev->fifoMr->rkey;
 
     // Pack local GID info
@@ -2126,7 +2124,11 @@ ib_recv_dev_list:
     }
   }
   config = (ncclNetCommConfig_t*)ctx;
-  meta.fifoAddr = (uint64_t)comm->fifo;
+  if (comm->useCtsOffload) {
+    meta.fifoAddr = (uint64_t)comm->fifo_inline;
+  } else {
+    meta.fifoAddr = (uint64_t)comm->fifo;
+  }
   meta.sl = (ncclParamIbCastSl() != -1) ? ncclParamIbCastSl() : (config && config->trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? config->trafficClass : NCCL_IB_SL_DEFAULT;
   meta.tc = (ncclParamIbCastTc() != -1) ? ncclParamIbCastTc() : (config && config->trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? config->trafficClass : NCCL_IB_TC_DEFAULT;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
@@ -2377,6 +2379,8 @@ ib_recv:
 
   mergedDev = IbCastMergedDevs + lComm->dev;
   rComm->base.nRemDevs = remMeta.ndevs;
+  rComm->useCtsOffload = rcclIsCtsOffloadEnabled(remMeta.isP2p);
+  INFO(NCCL_NET, "NET/IB: IbCastAccept isP2p=%d useCtsOffload=%d (IbP2pDisableCts=%ld)", remMeta.isP2p, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts());
   rComm->base.nqps = ncclIbCalculateNqps(remMeta.isP2p, rComm->base.vProps.ndevs, 
                                           remMeta.ndevs, __func__);
   if (rComm->base.nRemDevs != rComm->base.vProps.ndevs) {
@@ -2431,7 +2435,7 @@ ib_recv:
     // Local ibDevN
     ibDevN = rComm->devs[devIndex].base.ibDevN;
     ibDev = IbCastDevs + ibDevN;
-    NCCLCHECKGOTO(IbCastCreateQp(ibDev->portNum, &rCommDev->base, IBV_ACCESS_REMOTE_WRITE, &rComm->base.stats, qp, channel_id, false, q), ret, fail);
+    NCCLCHECKGOTO(IbCastCreateQp(ibDev->portNum, &rCommDev->base, IBV_ACCESS_REMOTE_WRITE, &rComm->base.stats, qp, channel_id, false, q, remMeta.isP2p), ret, fail);
     qp->devIndex = devIndex;
     devIndex = (devIndex + 1) % rComm->base.vProps.ndevs;
 
@@ -2464,9 +2468,15 @@ ib_recv:
 
     // Retain remote fifo info and prepare my RDMA ops
     rComm->remFifo.addr = remMeta.fifoAddr;
-    NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->fifoMr, rCommDev->base.pd, &rComm->remFifo.elems,
-                                  sizeof(struct ncclIbSendFifo)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS,
-                                  IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
+    if (rComm->useCtsOffload) {
+      NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->fifoMr, rCommDev->base.pd, &rComm->remFifo.elems_cts_inline,
+                                    sizeof(struct ncclIbSendFifoCtsInline)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS,
+                                    IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
+    } else {
+      NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->fifoMr, rCommDev->base.pd, &rComm->remFifo.elems,
+                                    sizeof(struct ncclIbSendFifo)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS,
+                                    IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
+    }
     rCommDev->fifoSge.lkey = rCommDev->fifoMr->lkey;
     if (ncclIbUseInline) rComm->remFifo.flags = IBV_SEND_INLINE;
 
@@ -2938,7 +2948,7 @@ static ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int n
 
   if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
 
-  if (rcclCtsOffloadEnabled) {
+  if (comm->useCtsOffload) {
     nreqs = 1;
   }
 
@@ -2951,7 +2961,7 @@ static ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int n
     sge->addr=(uintptr_t)reqs[r]->send.data;
     wr->opcode = IBV_WR_RDMA_WRITE;
     wr->send_flags = 0;
-    if (rcclCtsOffloadEnabled) {
+    if (comm->useCtsOffload) {
       wr->wr.rdma.remote_addr = 0xdeadbeef;
     } else {
       wr->wr.rdma.remote_addr = slots[r].addr;
@@ -3010,7 +3020,7 @@ static ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int n
     int devIndex = qp->devIndex;
     for (int r=0; r<nreqs; r++) {
       // Select proper rkey (needed even for 0-size send)
-      if (rcclCtsOffloadEnabled) {
+      if (comm->useCtsOffload) {
         comm->wrs[r].wr.rdma.rkey = 0xbade;
       } else {
         comm->wrs[r].wr.rdma.rkey = slots[r].rkeys[qp->remDevIdx];
@@ -3216,13 +3226,13 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
   int nreqs = 0;
   volatile struct ncclIbSendFifo* slots;
 
-  if (rcclCtsOffloadEnabled) {
+  if (comm->useCtsOffload) {
     nreqs = 1;
   }
 
   int slot = (comm->fifoHead) % MAX_REQUESTS;
   struct ncclIbRequest** reqs = comm->fifoReqs[slot];
-  if (!rcclCtsOffloadEnabled) {
+  if (!comm->useCtsOffload) {
     slots = comm->fifo[slot];
     uint64_t idx = comm->fifoHead+1;
     if (slots[0].idx != idx) { *request = NULL; return ncclSuccess; }
@@ -3232,7 +3242,7 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
     __sync_synchronize(); // order the nreqsPtr load against tag/rkey/addr loads below
   }
   for (int r=0; r<nreqs; r++) {
-    if (!rcclCtsOffloadEnabled) {
+    if (!comm->useCtsOffload) {
       if (reqs[r] != NULL || slots[r].tag != tag) continue;
 
       if (size > slots[r].size) size = slots[r].size;
@@ -3309,7 +3319,7 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
     NCCLCHECK(IbCastMultiSend(comm, slot, nqps, startQpIndex, wrrSched, use_write_op));
 
     // Clear slots[0]->nreqs, as well as other fields to help debugging and sanity checks
-    if (!rcclCtsOffloadEnabled) {
+    if (!comm->useCtsOffload) {
       memset((void*)slots, 0, sizeof(struct ncclIbSendFifo));
     }
     memset(reqs, 0, NCCL_NET_IB_MAX_RECVS*sizeof(struct ncclIbRequest*));
@@ -3335,7 +3345,7 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, int n, void** data, siz
   int slot = comm->remFifo.fifoTail%MAX_REQUESTS;
   req->recv.sizes = comm->sizesFifo[slot];
   for (int i=0; i<n; i++) req->recv.sizes[i] = 0;
-  if (rcclCtsInlineData) {
+  if (comm->useCtsOffload) {
     localElemCtsInline = comm->remFifo.elems_cts_inline[slot];
   } else {
     localElem = comm->remFifo.elems[slot];
@@ -3353,7 +3363,7 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, int n, void** data, siz
 
   for (int i=0; i<n; i++) {
     struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*) mhandles[i];
-    if (rcclCtsInlineData) {
+    if (comm->useCtsOffload) {
       localElemCtsInline[i].addr = (uint64_t)data[i];
       
       // Send all applicable rkeys
@@ -3379,14 +3389,18 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, int n, void** data, siz
       localElemRef = (uint64_t)localElem;
     }
   }
-  wr.wr.rdma.remote_addr = comm->remFifo.addr + slot*NCCL_NET_IB_MAX_RECVS*sizeof(struct ncclIbSendFifo);
+  if (comm->useCtsOffload) {
+    wr.wr.rdma.remote_addr = comm->remFifo.addr + slot*NCCL_NET_IB_MAX_RECVS*sizeof(struct ncclIbSendFifoCtsInline);
+  } else {
+    wr.wr.rdma.remote_addr = comm->remFifo.addr + slot*NCCL_NET_IB_MAX_RECVS*sizeof(struct ncclIbSendFifo);
+  }
 
   // Lookup the correct fifoRkey
   wr.wr.rdma.rkey = comm->base.remDevs[ctsQp->remDevIdx].fifoRkey;
 
   // Set the correct sge properties
   comm->devs[ctsQp->devIndex].fifoSge.addr = localElemRef;
-  if (rcclCtsInlineData) {
+  if (comm->useCtsOffload) {
     comm->devs[ctsQp->devIndex].fifoSge.length = MAX_INLINE_DATA_SIZE;
   } else {
     comm->devs[ctsQp->devIndex].fifoSge.length = n*sizeof(struct ncclIbSendFifo);
