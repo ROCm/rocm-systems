@@ -178,79 +178,229 @@ AMD SMI provides tools to programmatically monitor GPU violations and throttling
 
 ::::{tab-item} C/C++
 
-The AMD SMI library provides APIs to query violation status.
+The AMD SMI library provides APIs to query violation status. See `example/amd_smi_drm_example.cc` for the complete integration example.
 
-```c
+```cpp
+#include <cstdint>
+#include <iostream>
+#include <limits>
+#include <string>
+#include <vector>
+
 #include "amd_smi/amdsmi.h"
-#include <stdio.h>
-#include <stdlib.h>
+
+#define CHK_AMDSMI_RET(RET)                                                                \
+  {                                                                                        \
+    if (RET != AMDSMI_STATUS_SUCCESS) {                                                    \
+      const char* err_str;                                                                 \
+      std::cout << "AMDSMI call returned " << RET << " at line " << __LINE__ << std::endl; \
+      amdsmi_status_code_to_string(RET, &err_str);                                         \
+      std::cout << err_str << std::endl;                                                   \
+      return RET;                                                                          \
+    }                                                                                      \
+  }
 
 int main() {
-    amdsmi_status_t ret;
-    uint32_t socket_count = 0;
-    uint32_t gpu_number = 0;
+  amdsmi_status_t ret;
+  uint32_t gpu_number = 0;
 
-    // Initialize AMD SMI for GPUs
-    ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
-    if (ret != AMDSMI_STATUS_SUCCESS) {
-        fprintf(stderr, "Failed to initialize AMD SMI\n");
-        return 1;
-    }
+  ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+  CHK_AMDSMI_RET(ret)
 
-    // Get socket count
-    ret = amdsmi_get_socket_handles(&socket_count, NULL);
-    if (ret != AMDSMI_STATUS_SUCCESS || socket_count == 0) {
-        fprintf(stderr, "Failed to get socket count\n");
-        amdsmi_shut_down();
-        return 1;
-    }
+  uint32_t socket_count = 0;
+  ret = amdsmi_get_socket_handles(&socket_count, nullptr);
+  CHK_AMDSMI_RET(ret)
 
-    amdsmi_socket_handle *sockets = malloc(socket_count * sizeof(amdsmi_socket_handle));
-    if (!sockets) {
-        amdsmi_shut_down();
-        return 1;
-    }
-    ret = amdsmi_get_socket_handles(&socket_count, sockets);
-    if (ret != AMDSMI_STATUS_SUCCESS) {
-        free(sockets);
-        amdsmi_shut_down();
-        return 1;
-    }
+  std::vector<amdsmi_socket_handle> sockets(socket_count);
+  ret = amdsmi_get_socket_handles(&socket_count, sockets.data());
+  CHK_AMDSMI_RET(ret)
 
-    // For each socket, get processor handles and query violation status
-    for (uint32_t i = 0; i < socket_count; i++) {
-        uint32_t device_count = 0;
-        ret = amdsmi_get_processor_handles(sockets[i], &device_count, NULL);
-        if (ret != AMDSMI_STATUS_SUCCESS || device_count == 0)
-            continue;
+  for (uint32_t i = 0; i < socket_count; i++) {
+    uint32_t device_count = 0;
+    ret = amdsmi_get_processor_handles(sockets[i], &device_count, nullptr);
+    CHK_AMDSMI_RET(ret)
 
-        amdsmi_processor_handle *processor_handles =
-            malloc(device_count * sizeof(amdsmi_processor_handle));
-        if (!processor_handles)
-            continue;
-        ret = amdsmi_get_processor_handles(sockets[i], &device_count, processor_handles);
-        if (ret != AMDSMI_STATUS_SUCCESS) {
-            free(processor_handles);
-            continue;
-        }
+    std::vector<amdsmi_processor_handle> processor_handles(device_count);
+    ret = amdsmi_get_processor_handles(sockets[i], &device_count, processor_handles.data());
+    CHK_AMDSMI_RET(ret)
 
-        for (uint32_t j = 0; j < device_count; j++) {
-            amdsmi_violation_status_t violation = {0};
-            ret = amdsmi_get_violation_status(processor_handles[j], &violation);
-            if (ret == AMDSMI_STATUS_SUCCESS) {
-                // PVIOL: per_ppt_pwr; TVIOL: per_socket_thrm (and other thermal % fields)
-                printf("GPU %u - PVIOL (PPT): %lu%%, TVIOL (socket): %lu%%\n",
-                       gpu_number, (unsigned long)violation.per_ppt_pwr,
-                       (unsigned long)violation.per_socket_thrm);
+    for (uint32_t device_index = 0; device_index < device_count; device_index++) {
+
+      // -------------------------------------------------------------------
+      // Violation Status (MI3x+ only; older ASICs may return NOT_SUPPORTED)
+      // Falls back to throttle_status via gpu_metrics on older ASICs.
+      // -------------------------------------------------------------------
+      std::cout << "\n    Output of amdsmi_get_violation_status (GPU " << gpu_number << "):\n";
+      amdsmi_violation_status_t violation_status = {};
+      ret = amdsmi_get_violation_status(processor_handles[device_index], &violation_status);
+      if (ret == AMDSMI_STATUS_SUCCESS) {
+        constexpr uint64_t kU64Max = std::numeric_limits<uint64_t>::max();
+        constexpr uint8_t kU8Max = std::numeric_limits<uint8_t>::max();
+
+        auto u64_str = [kU64Max](uint64_t v) -> std::string {
+          return (v == kU64Max) ? "N/A" : std::to_string(v);
+        };
+        // Matches CLI: active flags shown as ACTIVE / NOT ACTIVE / N/A
+        auto active_str = [kU8Max](uint8_t v) -> std::string {
+          if (v == kU8Max) return "N/A";
+          return v ? "ACTIVE" : "NOT ACTIVE";
+        };
+
+        std::cout << "\treference_timestamp (us since epoch): "
+                  << u64_str(violation_status.reference_timestamp) << "\n";
+        std::cout << "\tviolation_timestamp (ns):             "
+                  << u64_str(violation_status.violation_timestamp) << "\n";
+
+        // Accumulated counters — names match CLI output
+        std::cout << "\t-- Accumulated --\n";
+        std::cout << "\tACCUMULATION_COUNTER:        " << u64_str(violation_status.acc_counter) << "\n";
+        std::cout << "\tPROCHOT_ACCUMULATED:        " << u64_str(violation_status.acc_prochot_thrm) << "\n";
+        std::cout << "\tPPT_ACCUMULATED:            " << u64_str(violation_status.acc_ppt_pwr) << "\n";
+        std::cout << "\tSOCKET_THERMAL_ACCUMULATED: " << u64_str(violation_status.acc_socket_thrm) << "\n";
+        std::cout << "\tVR_THERMAL_ACCUMULATED:     " << u64_str(violation_status.acc_vr_thrm) << "\n";
+        std::cout << "\tHBM_THERMAL_ACCUMULATED:    " << u64_str(violation_status.acc_hbm_thrm) << "\n";
+
+        // Violation status (active flags) — names match CLI output
+        std::cout << "\t-- Violation Status --\n";
+        std::cout << "\tPROCHOT_VIOLATION_STATUS:        "
+                  << active_str(violation_status.active_prochot_thrm) << "\n";
+        std::cout << "\tPPT_VIOLATION_STATUS:            "
+                  << active_str(violation_status.active_ppt_pwr) << "\n";
+        std::cout << "\tSOCKET_THERMAL_VIOLATION_STATUS: "
+                  << active_str(violation_status.active_socket_thrm) << "\n";
+        std::cout << "\tVR_THERMAL_VIOLATION_STATUS:     "
+                  << active_str(violation_status.active_vr_thrm) << "\n";
+        std::cout << "\tHBM_THERMAL_VIOLATION_STATUS:    "
+                  << active_str(violation_status.active_hbm_thrm) << "\n";
+
+        // Violation activity (%) — names match CLI output
+        std::cout << "\t-- Violation Activity --\n";
+        std::cout << "\tPROCHOT_VIOLATION_ACTIVITY:        "
+                  << u64_str(violation_status.per_prochot_thrm) << " %\n";
+        std::cout << "\tPPT_VIOLATION_ACTIVITY:            "
+                  << u64_str(violation_status.per_ppt_pwr) << " %\n";
+        std::cout << "\tSOCKET_THERMAL_VIOLATION_ACTIVITY: "
+                  << u64_str(violation_status.per_socket_thrm) << " %\n";
+        std::cout << "\tVR_THERMAL_VIOLATION_ACTIVITY:     "
+                  << u64_str(violation_status.per_vr_thrm) << " %\n";
+        std::cout << "\tHBM_THERMAL_VIOLATION_ACTIVITY:    "
+                  << u64_str(violation_status.per_hbm_thrm) << " %\n";
+
+        // GPU metrics 1.8 per-XCP/XCC arrays.
+        // XCPs/XCCs where all fields are sentinel (unsupported) are skipped.
+        std::cout << "\t-- Per-XCP/XCC (GPU metrics 1.8, N/A = unsupported) --\n";
+
+        // Build "[xcc0, xcc1, ...]" string for a row, skipping trailing N/As.
+        auto xcc_u64_row = [&](const uint64_t* row) -> std::string {
+          int last = -1;
+          for (int xcc = 0; xcc < static_cast<int>(AMDSMI_MAX_NUM_XCC); ++xcc)
+            if (row[xcc] != kU64Max) last = xcc;
+          if (last < 0) return "N/A";
+          std::string s = "[";
+          for (int xcc = 0; xcc <= last; ++xcc) {
+            if (xcc) s += ", ";
+            s += u64_str(row[xcc]);
+          }
+          return s + "]";
+        };
+        auto xcc_active_row = [&](const uint8_t* row) -> std::string {
+          int last = -1;
+          for (int xcc = 0; xcc < static_cast<int>(AMDSMI_MAX_NUM_XCC); ++xcc)
+            if (row[xcc] != kU8Max) last = xcc;
+          if (last < 0) return "N/A";
+          std::string s = "[";
+          for (int xcc = 0; xcc <= last; ++xcc) {
+            if (xcc) s += ", ";
+            s += active_str(row[xcc]);
+          }
+          return s + "]";
+        };
+        auto xcc_pct_row = [&](const uint64_t* row) -> std::string {
+          int last = -1;
+          for (int xcc = 0; xcc < static_cast<int>(AMDSMI_MAX_NUM_XCC); ++xcc)
+            if (row[xcc] != kU64Max) last = xcc;
+          if (last < 0) return "N/A";
+          std::string s = "[";
+          for (int xcc = 0; xcc <= last; ++xcc) {
+            if (xcc) s += ", ";
+            s += u64_str(row[xcc]) + " %";
+          }
+          return s + "]";
+        };
+
+        for (uint32_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp) {
+          bool any_valid = false;
+          for (uint32_t xcc = 0; xcc < AMDSMI_MAX_NUM_XCC; ++xcc) {
+            if (violation_status.acc_gfx_clk_below_host_limit_total[xcp][xcc] != kU64Max ||
+                violation_status.acc_gfx_clk_below_host_limit_pwr[xcp][xcc] != kU64Max ||
+                violation_status.acc_gfx_clk_below_host_limit_thm[xcp][xcc] != kU64Max ||
+                violation_status.acc_low_utilization[xcp][xcc] != kU64Max) {
+              any_valid = true;
+              break;
             }
-            gpu_number++;
-        }
-        free(processor_handles);
-    }
+          }
+          if (!any_valid) continue;
 
-    free(sockets);
-    amdsmi_shut_down();
-    return 0;
+          std::cout << "\tXCP[" << xcp << "]:\n";
+          std::cout << "\t  -- Accumulated --\n";
+          std::cout << "\t  GFX_CLK_BELOW_HOST_LIMIT_POWER_ACCUMULATED:    "
+                    << xcc_u64_row(violation_status.acc_gfx_clk_below_host_limit_pwr[xcp]) << "\n";
+          std::cout << "\t  GFX_CLK_BELOW_HOST_LIMIT_THERMAL_ACCUMULATED:  "
+                    << xcc_u64_row(violation_status.acc_gfx_clk_below_host_limit_thm[xcp]) << "\n";
+          std::cout << "\t  TOTAL_GFX_CLK_BELOW_HOST_LIMIT_ACCUMULATED:    "
+                    << xcc_u64_row(violation_status.acc_gfx_clk_below_host_limit_total[xcp]) << "\n";
+          std::cout << "\t  LOW_UTILIZATION_ACCUMULATED:                   "
+                    << xcc_u64_row(violation_status.acc_low_utilization[xcp]) << "\n";
+          std::cout << "\t  -- Violation Status --\n";
+          std::cout << "\t  GFX_CLK_BELOW_HOST_LIMIT_POWER_VIOLATION_STATUS:    "
+                    << xcc_active_row(violation_status.active_gfx_clk_below_host_limit_pwr[xcp]) << "\n";
+          std::cout << "\t  GFX_CLK_BELOW_HOST_LIMIT_THERMAL_VIOLATION_STATUS:  "
+                    << xcc_active_row(violation_status.active_gfx_clk_below_host_limit_thm[xcp]) << "\n";
+          std::cout << "\t  TOTAL_GFX_CLK_BELOW_HOST_LIMIT_VIOLATION_STATUS:    "
+                    << xcc_active_row(violation_status.active_gfx_clk_below_host_limit_total[xcp]) << "\n";
+          std::cout << "\t  LOW_UTILIZATION_VIOLATION_STATUS:                   "
+                    << xcc_active_row(violation_status.active_low_utilization[xcp]) << "\n";
+          std::cout << "\t  -- Violation Activity --\n";
+          std::cout << "\t  GFX_CLK_BELOW_HOST_LIMIT_POWER_VIOLATION_ACTIVITY:    "
+                    << xcc_pct_row(violation_status.per_gfx_clk_below_host_limit_pwr[xcp]) << "\n";
+          std::cout << "\t  GFX_CLK_BELOW_HOST_LIMIT_THERMAL_VIOLATION_ACTIVITY:  "
+                    << xcc_pct_row(violation_status.per_gfx_clk_below_host_limit_thm[xcp]) << "\n";
+          std::cout << "\t  TOTAL_GFX_CLK_BELOW_HOST_LIMIT_VIOLATION_ACTIVITY:    "
+                    << xcc_pct_row(violation_status.per_gfx_clk_below_host_limit_total[xcp]) << "\n";
+          std::cout << "\t  LOW_UTILIZATION_VIOLATION_ACTIVITY:                   "
+                    << xcc_pct_row(violation_status.per_low_utilization[xcp]) << "\n";
+        }
+      } else if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+        // Navi/MI1x/MI2x: violation API not supported — fall back to gpu_metrics throttle_status
+        std::cout << "\tViolation API not supported on this ASIC. "
+                     "Falling back to gpu_metrics throttle_status.\n";
+        amdsmi_gpu_metrics_t smu = {};
+        amdsmi_status_t metrics_ret =
+            amdsmi_get_gpu_metrics_info(processor_handles[device_index], &smu);
+        if (metrics_ret == AMDSMI_STATUS_SUCCESS) {
+          // throttle_status: same field the CLI uses for amd-smi metric --power
+          constexpr uint32_t kU32Max = std::numeric_limits<uint32_t>::max();
+          if (smu.throttle_status == kU32Max) {
+            std::cout << "\tTHROTTLE_STATUS: N/A\n";
+          } else {
+            std::cout << "\tTHROTTLE_STATUS: "
+                      << (smu.throttle_status ? "THROTTLED" : "UNTHROTTLED") << "\n";
+          }
+        }
+      } else {
+        const char* err_str = nullptr;
+        amdsmi_status_code_to_string(ret, &err_str);
+        std::cout << "\tamdsmi_get_violation_status failed: "
+                  << (err_str ? err_str : "unknown error") << "\n";
+      }
+      std::cout << "\n-------------------------------------------------------------\n\n";
+      gpu_number++;
+    }
+  }
+
+  ret = amdsmi_shut_down();
+  CHK_AMDSMI_RET(ret)
+  return 0;
 }
 ```
 
@@ -258,29 +408,126 @@ int main() {
 
 ::::{tab-item} Python
 
-See related APIs for violations monitoring:
+See `example/amd_smi_violation_example.py` for the complete standalone example.
 
 ```python
 #!/usr/bin/env python3
+"""Standalone violation-status verification script.
+
+Calls amdsmi_get_violation_status() for every GPU and prints all fields.
+On older ASICs (Navi/MI1x/MI2x) where the violation API is not supported,
+falls back to throttle_status via amdsmi_get_gpu_metrics_info().
+N/A means the field is unsupported on this ASIC (max_uint sentinel).
+MI3x+ (MI300X and newer) is required for full violation data.
+"""
+
 import amdsmi
 
-try:
+
+def main() -> None:
     amdsmi.amdsmi_init()
-    processors = amdsmi.amdsmi_get_processor_handles()
-    
-    for i, processor in enumerate(processors):
-        # Get violation percentages
-        violation_status = amdsmi.amdsmi_get_violation_status(processor)
-        print(f"GPU {i} - PVIOL: {violation_status['power_violation_pct']:.2f}%")
-        print(f"GPU {i} - TVIOL: {violation_status['thermal_violation_pct']:.2f}%")
-        
-        # Get detailed throttle status
-        metrics = amdsmi.amdsmi_get_gpu_metrics_info(processor)
-        if metrics['throttle_status'] > 0:
-            print(f"GPU {i} - Active throttling: 0x{metrics['throttle_status']:x}")
-        
-finally:
-    amdsmi.amdsmi_shutdown()
+    try:
+        processors = amdsmi.amdsmi_get_processor_handles()
+        if not processors:
+            print("No processors found.")
+            return
+
+        for i, processor in enumerate(processors):
+            print(f"\n{'='*60}")
+            print(f"GPU {i} violation status")
+            print(f"{'='*60}")
+
+            try:
+                v = amdsmi.amdsmi_get_violation_status(processor)
+            except amdsmi.AmdSmiException as exc:
+                # Navi/MI1x/MI2x: violation API not supported — fall back to gpu_metrics
+                print(f"  amdsmi_get_violation_status failed: {exc}")
+                print("  Falling back to throttle_status via amdsmi_get_gpu_metrics_info()...")
+                try:
+                    m = amdsmi.amdsmi_get_gpu_metrics_info(processor)
+                    # throttle_status: same field the CLI uses for amd-smi metric --power
+                    ts = m.get("throttle_status", "N/A")
+                    if ts is True:
+                        print("  throttle_status: THROTTLED")
+                    elif ts is False:
+                        print("  throttle_status: UNTHROTTLED")
+                    else:
+                        print("  throttle_status: N/A")
+                except amdsmi.AmdSmiException as metrics_exc:
+                    print(f"  amdsmi_get_gpu_metrics_info also failed: {metrics_exc}")
+                continue
+
+            # -- Metadata --
+            print(f"  reference_timestamp (us since epoch): {v['reference_timestamp']}")
+            print(f"  violation_timestamp (ns):             {v['violation_timestamp']}")
+            print(f"  acc_counter:                          {v['acc_counter']}")
+
+            # -- Accumulated counters --
+            print("\n  -- Accumulated counters --")
+            print(f"  acc_prochot_thrm:  {v['acc_prochot_thrm']}")
+            print(f"  acc_ppt_pwr:       {v['acc_ppt_pwr']}")       # PVIOL
+            print(f"  acc_socket_thrm:   {v['acc_socket_thrm']}")   # TVIOL
+            print(f"  acc_vr_thrm:       {v['acc_vr_thrm']}")
+            print(f"  acc_hbm_thrm:      {v['acc_hbm_thrm']}")
+
+            # -- Violation % (>0% = throttled) --
+            print("\n  -- Violation % (>0% = throttled) --")
+            print(f"  per_prochot_thrm (%): {v['per_prochot_thrm']}")
+            print(f"  per_ppt_pwr (%):      {v['per_ppt_pwr']}")    # PVIOL
+            print(f"  per_socket_thrm (%):  {v['per_socket_thrm']}")  # TVIOL
+            print(f"  per_vr_thrm (%):      {v['per_vr_thrm']}")
+            print(f"  per_hbm_thrm (%):     {v['per_hbm_thrm']}")
+
+            # -- Active flags --
+            print("\n  -- Active flags (True=active, False=not active, N/A=unsupported) --")
+            print(f"  active_prochot_thrm: {v['active_prochot_thrm']}")
+            print(f"  active_ppt_pwr:      {v['active_ppt_pwr']}")
+            print(f"  active_socket_thrm:  {v['active_socket_thrm']}")
+            print(f"  active_vr_thrm:      {v['active_vr_thrm']}")
+            print(f"  active_hbm_thrm:     {v['active_hbm_thrm']}")
+
+            # -- GPU metrics v1.8 per-XCP/XCC 2D arrays --
+            # Each field is a list-of-lists indexed [xcp][xcc].
+            # Skip fields where every entry is "N/A" to keep output clean on pre-v1.8 drivers.
+            xcp_fields = [
+                "acc_gfx_clk_below_host_limit_pwr",
+                "acc_gfx_clk_below_host_limit_thm",
+                "acc_low_utilization",
+                "acc_gfx_clk_below_host_limit_total",
+                "per_gfx_clk_below_host_limit_pwr",
+                "per_gfx_clk_below_host_limit_thm",
+                "per_low_utilization",
+                "per_gfx_clk_below_host_limit_total",
+                "active_gfx_clk_below_host_limit_pwr",
+                "active_gfx_clk_below_host_limit_thm",
+                "active_low_utilization",
+                "active_gfx_clk_below_host_limit_total",
+            ]
+
+            any_xcp_printed = False
+            for field in xcp_fields:
+                rows = v[field]
+                if all(val == "N/A" for row in rows for val in row):
+                    continue
+                if not any_xcp_printed:
+                    print("\n  -- GPU metrics v1.8 per-XCP/XCC (N/A = unsupported) --")
+                    any_xcp_printed = True
+                print(f"  {field}:")
+                for xcp_idx, row in enumerate(rows):
+                    # Only print XCC rows that have at least one non-N/A value
+                    if all(val == "N/A" for val in row):
+                        continue
+                    print(f"    XCP[{xcp_idx}]: {row}")
+
+            if not any_xcp_printed:
+                print("\n  -- GPU metrics v1.8 per-XCP/XCC: all N/A (pre-v1.8 driver) --")
+
+    finally:
+        amdsmi.amdsmi_shut_down()
+
+
+if __name__ == "__main__":
+    main()
 ```
 
 ::::
