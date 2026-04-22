@@ -6,7 +6,7 @@ Zero runtime cost when disabled.
 
 ## Prerequisites
 
-- Rocm 7.13 or
+- ROCm 7.13 or
 - Rocprofiler-sdk built from develop.
 
 ## Building the pass plugin
@@ -270,9 +270,21 @@ directly via `getenv()`.
 
 ## Examples
 
-### User markers in a real kernel (`test/kernels/heavy.cpp`)
+### Shader wave trace as seen with auto instrumentation and user markers together
 
-The FP8 GEMM kernel in `heavy.cpp` uses named markers to annotate producer/consumer
+![Global view trace](docs/trace.png)
+
+### Coarse Flamegraph derived from the previous trace without instruction tracing
+
+![Coarse flamegraph](docs/globalflame.png)
+
+### Fine Flamegraph derived from the previous trace with instruction tracing
+
+![Fine flamegraph](docs/fineflame.png)
+
+### User markers (`test/kernels/heavy.cpp`)
+
+The kernel in `heavy.cpp` uses named markers to annotate producer/consumer
 threads and individual phases (memory loads, LDS stores, MFMA compute). Here is the
 consumer thread's inner loop, showing how markers bracket each phase:
 
@@ -307,21 +319,16 @@ for (int k1=0; k1 < KDIM; k1 += 2*SHMBLOCK)
 sqtt_marker_exit("Consumer Thread");
 ```
 
-Build with the pass plugin, capture a trace, and generate the flamegraph:
+Build with the pass plugin and capture a trace:
 
 ```bash
 hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/SQTTInstrumentPass.so \
       -I include/ test/kernels/heavy.cpp -o heavy
 
-rocprofv3 --att -d trace_heavy -- ./heavy
-python3 tools/sqtt_flamegraph.py trace_heavy/ --demangle --show
+rocprofv3 --att -d trace -- ./heavy
 ```
 
-The resulting flamegraph shows each phase as a nested scope under "Consumer Thread":
-
-![Flamegraph with user markers from heavy.cpp](docs/marker.png)
-
-### Automatic function instrumentation (`test/kernels/auto.hip`)
+### Automatic function instrumentation
 
 The `auto.hip` test contains a kernel calling device functions of varying size.
 Functions exceeding the threshold are automatically instrumented with entry/exit
@@ -353,73 +360,15 @@ __global__ void compute_kernel(float *out, const float *in, int size, int iters)
 }
 ```
 
-Build with automatic function instrumentation, capture a trace, and generate the flamegraph:
+Build with automatic function instrumentation and capture a trace:
 
 ```bash
 SQTT_INSTRUMENT_FUNCTIONS=10 \
 hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/SQTTInstrumentPass.so \
-      -I include/ test/kernels/auto.hip -o auto
+      -I include/ test/kernels/heavy.hip -o heavy
 
-rocprofv3 --att -d trace_auto -- ./auto
-python3 tools/sqtt_flamegraph.py trace_auto/ --demangle --show
+rocprofv3 --att -d trace -- ./heavy
 ```
-
-Both `heavy_compute` and `add_one` get automatic entry/exit markers:
-
-![Flamegraph with automatic function instrumentation from auto.hip](docs/function.png)
-
-## Generating flamegraphs
-
-After capturing an SQTT trace with rocprofv3, generate an interactive
-flamegraph:
-
-```bash
-# Capture trace
-rocprofv3 --att -d trace_output -- ./my_app
-
-# Generate flamegraph (folded stacks to stdout, SVG to disk)
-python3 tools/sqtt_flamegraph.py trace_output/ --demangle
-
-# Open in browser
-python3 tools/sqtt_flamegraph.py trace_output/ --demangle --show
-
-# Filter to specific CU/SIMD/wave
-python3 tools/sqtt_flamegraph.py trace_output/ --demangle --cu 0 --simd 0
-
-# Speedscope JSON output
-python3 tools/sqtt_flamegraph.py trace_output/ --format speedscope -o trace.json
-```
-
-The flamegraph tool:
-- Auto-discovers `ui_*/shaderdata_*.json` and `*code_object_id*.out` files
-- Processes each `ui_*` directory as an independent time domain
-- Resolves kernel names and dispatch IDs from occupancy data
-- Generates interactive SVG with search and hover tooltips
-- Point markers (barriers, memory ops, user points) are dropped from the
-  flamegraph -- they have no meaningful cycle attribution. Inspect them via
-  `sqtt_decode_funcmap.py`, the raw shaderdata records, or the Perfetto
-  exporter below.
-
-## Exporting to Perfetto
-
-For a per-wave timeline view that keeps point markers as instant events
-(barriers, memory ops, user points), export to Perfetto / Chrome JSON:
-
-```bash
-# One *.perfetto.json per ui_* directory, written next to each one
-python3 tools/sqtt_perfetto.py trace_output/ --demangle
-
-# Collect all outputs into one directory
-python3 tools/sqtt_perfetto.py trace_output/ -o /tmp/perfetto_out
-
-# Convert SQTT cycles to nanoseconds using a known clock rate
-python3 tools/sqtt_perfetto.py trace_output/ --clock-rate-ghz 2.1
-```
-
-Open the resulting JSON files at <https://ui.perfetto.dev> (drag & drop).
-Each dispatch becomes a "process" track; each `(CU, SIMD, wave_id, instance)`
-becomes a thread. Function entry/exit pairs render as duration slices, point
-markers as instant events on the same track.
 
 ## Decoding the function map
 

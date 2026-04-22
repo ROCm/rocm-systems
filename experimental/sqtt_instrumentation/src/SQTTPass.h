@@ -136,7 +136,12 @@ private:
     llvm::Value* buildScopeCheck(llvm::IRBuilder<>& B, GfxGen gen);
     llvm::Value* getOrCreateScopeCheck(llvm::Function& F, GfxGen gen);
     bool wrapExistingMarkers(llvm::Function& F, GfxGen gen);
-    void wrapWithScopeCheck(llvm::CallInst* CI, llvm::Function& F, GfxGen gen);
+    // Wraps a contiguous run of marker calls [First..Last] (inclusive, same
+    // basic block, separated only by ignorable instructions) in a single
+    // scope-check diamond.  Used by wrapExistingMarkers to coalesce adjacent
+    // markers that would otherwise produce a chain of identical-condition
+    // branches after inlining.
+    void wrapRangeWithScopeCheck(llvm::CallInst* First, llvm::CallInst* Last, llvm::Function& F, GfxGen gen);
 
     // -----------------------------------------------------------------
     // Barriers around existing markers
