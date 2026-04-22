@@ -12,6 +12,7 @@ import platform
 import re
 import shutil
 import socket
+import string
 import subprocess
 import sys
 from pathlib import Path
@@ -261,6 +262,17 @@ set(CTEST_COVERAGE_COMMAND "{shutil.which('gcov') or 'gcov'}")
 """
 
 
+class _DashboardTemplate(string.Template):
+    """Dashboard.cmake body: only ``@python_key`` is expanded by ``.substitute()``.
+
+    CMake syntax such as ``${ARGN}``, ``${CMAKE_CURRENT_LIST_DIR}``, and
+    ``${_ret}`` is left unchanged (this delimiter avoids Python f-string clashes
+    where ``${VAR}`` would otherwise interpolate as empty).
+    """
+
+    delimiter = "@"
+
+
 def _generate_dashboard(cmake_cmd: str) -> str:
     """Generate dashboard.cmake for CDash.
 
@@ -274,30 +286,21 @@ def _generate_dashboard(cmake_cmd: str) -> str:
         CMake script content for dashboard.cmake.
     """
 
-    # Define variables for dashboard submission
-    submit = "1"  # Submit to CDash or not
-    model = "Experimental"  # Model (Nightly, Experimental, Continuous)
-    group = "TheRock"  # Group for the dashboard
-    ARGN = "${ARGN}"  # Arguments for dashboard submission
-
     # TheRock superproject root (run-therock-ci.py lives at rocm-systems/.github/scripts/).
     repo_source_dir = str(Path(__file__).resolve().parents[3])
-    # Generate initial dashboard.cmake content with minimum necessary version and dashboard_submit macro
-    _script = f"""
+    return _DashboardTemplate(
+        """
     cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
     macro(dashboard_submit)
-        if("{submit}" GREATER 0)
-            ctest_submit({ARGN}
+        if("@submit" GREATER 0)
+            ctest_submit(${ARGN}
                             RETRY_COUNT 0
                             RETRY_DELAY 10
                             CAPTURE_CMAKE_ERROR _cdash_submit_err)
         endif()
     endmacro()
-    """
 
-    # Include custom CTest config and define a macro for standardized error handling and submit on error
-    _script += """
     include("${CMAKE_CURRENT_LIST_DIR}/CTestCustom.cmake")
 
     macro(handle_error _message _ret)
@@ -306,16 +309,13 @@ def _generate_dashboard(cmake_cmd: str) -> str:
             message(FATAL_ERROR "${_message} failed: ${${_ret}}")
         endif()
     endmacro()
-    """
 
-    # Run stages for configure, build, test, and submit to CDash
-    _script += f"""
     set(STAGES "START;UPDATE;CONFIGURE;BUILD;TEST;SUBMIT")
 
-    ctest_start({model} GROUP {group})
-    ctest_update(SOURCE "{repo_source_dir}" RETURN_VALUE _update_ret
+    ctest_start(@model GROUP @group)
+    ctest_update(SOURCE "@repo_source_dir" RETURN_VALUE _update_ret
                     CAPTURE_CMAKE_ERROR _update_err)
-    ctest_configure(BUILD "{BINARY_DIR}" RETURN_VALUE _configure_ret)
+    ctest_configure(BUILD "@BINARY_DIR" RETURN_VALUE _configure_ret)
     dashboard_submit(PARTS Start Update Configure RETURN_VALUE _submit_ret)
 
     if(NOT _update_err EQUAL 0)
@@ -325,21 +325,26 @@ def _generate_dashboard(cmake_cmd: str) -> str:
     handle_error("Configure" _configure_ret)
 
     if("BUILD" IN_LIST STAGES)
-        ctest_build(BUILD "{BINARY_DIR}" RETURN_VALUE _build_ret)
+        ctest_build(BUILD "@BINARY_DIR" RETURN_VALUE _build_ret)
         dashboard_submit(PARTS Build RETURN_VALUE _submit_ret)
         handle_error("Build" _build_ret)
     endif()
 
     if("TEST" IN_LIST STAGES)
-        ctest_test(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
+        ctest_test(BUILD "@BINARY_DIR" RETURN_VALUE _test_ret)
         dashboard_submit(PARTS Test RETURN_VALUE _submit_ret)
         handle_error("Testing" _test_ret)
     endif()
 
     dashboard_submit(PARTS Done RETURN_VALUE _submit_ret)
     """
-
-    return _script
+    ).substitute(
+        submit="1",
+        model="Experimental",
+        group="TheRock",
+        repo_source_dir=repo_source_dir,
+        BINARY_DIR=BINARY_DIR,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
