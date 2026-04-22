@@ -85,7 +85,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             )
             if not Path(rocprofiler_attach_library_path).exists():
                 console_debug(
-                    "New live attach library not found, trying old live attach library"
+                    "Latest live attach library not found, searching for legacy live attach library"
                 )
                 rocprofiler_attach_library_path = resolve_rocm_library_path(
                     str(
