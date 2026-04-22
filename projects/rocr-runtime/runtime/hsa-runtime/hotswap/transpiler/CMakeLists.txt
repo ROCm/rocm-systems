@@ -66,6 +66,7 @@ add_library(hotswap-transpiler STATIC
   wave_projection.cpp
   wave_size_obstruction.cpp
   rewrite_cross_lane_divergent.cpp
+  c5_predicate_chain_classifier.cpp
   sem_op_attrs.cpp
   raise_failure.cpp
   mc_state.cpp
@@ -219,6 +220,7 @@ set(TEST_SOURCES
   tests/test_main.cpp
   tests/batch_raise_test.cpp
   tests/corpus_test.cpp
+  tests/c5_predicate_chain_test.cpp
 )
 
 find_package(hip QUIET)

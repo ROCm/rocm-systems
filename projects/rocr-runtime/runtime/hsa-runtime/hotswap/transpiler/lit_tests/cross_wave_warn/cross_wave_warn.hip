@@ -30,8 +30,23 @@ extern "C" __global__ void cross_wave_writer_kernel(int *out) {
   int *addr = out + lane;
   int val = 0xAA;
   asm volatile(
-      // Divergent region: lanes 0..7 write 0xAA.
-      "v_cmpx_lt_u32_e64 %[lane], 8\n\t"
+      // Divergent region: bounds-check vs. 64 ≥ W_s (W_s-1 for gfx1250
+      // = 31). Using a constant ≥ W_s keeps this a structurally
+      // lane-position-INDEPENDENT comparison (the classifier in
+      // `c5_predicate_chain_classifier.cpp` accepts bounds checks
+      // whose constant exceeds W_s-1 because they cannot partition
+      // lanes by their in-wave position). The v_cmpx still writes
+      // EXEC — that is what the Phase 1.4 cross-wave gate is pinned
+      // to — it just no longer looks like a scan-stage / half-wave
+      // predicate that would miscompile under modulo-replication.
+      // See hotswap/docs/modrep-predicate-chain.md §5 narrow-O1 for
+      // the distinction between lane-position-scoped and bounds-
+      // check predicates. (Pre-C5-classifier this fixture used
+      // `v_cmpx_lt_u32_e64 lane, 8`; that was a genuine Class-5
+      // latent-bug kernel that the C5 classifier correctly now
+      // refuses. The fixture was updated rather than xfail'd so the
+      // cross-wave warning path still has an IR-generating producer.)
+      "v_cmpx_lt_u32_e64 %[lane], 64\n\t"
       "global_store_b32 %[addr], %[val], off\n\t"
       "s_wait_storecnt 0\n\t"
       "s_mov_b32 exec_lo, -1\n\t"

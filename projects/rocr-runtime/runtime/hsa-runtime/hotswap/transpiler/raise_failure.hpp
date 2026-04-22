@@ -52,6 +52,16 @@ enum class RaiseFailureReason : uint16_t {
   CrossWaveShuffleRewritePending,  // Class 2: shuffle with a §5.3 P-item whose handler has not landed.
   CrossWaveReplicaRace,            // Class 3: NonCommutativeAtomic.
   CrossWaveLanePredicatedExec,     // Class 4: CmpxFromLaneId / SaveExecFromLaneId.
+  CrossWavePredicateChain,         // Class 5: workitem.id.x() feeds a lane-
+                                   // position-scoped icmp (compile-time K
+                                   // ≤ W_s-1) that gates a side effect, and
+                                   // the chain was not AND-masked by W_s-1.
+                                   // Surfaced by the post-mem2reg classifier
+                                   // in `c5_predicate_chain_classifier.{hpp,cpp}`,
+                                   // not by the MC-level
+                                   // `buildObstructionReport` walk. See
+                                   // hotswap/docs/modrep-predicate-chain.md
+                                   // §5 (narrow-O1).
   // `HSA_SALMON_STRICT=1`-only refusal (see `pipeline.hpp::isStrictMode`).
   // A handler recognised the SemOp and *would* have lifted it under the
   // existing warn-and-continue policy, but strict mode requires the
@@ -150,6 +160,18 @@ struct RaiseFailure {
                                             const llvm::Twine &kindDetail);
   static RaiseFailure crossWaveLanePredicatedExec(const DecodedInst &di,
                                                    const llvm::Twine &kindDetail);
+
+  // Phase 6.6 (post-mem2reg) IR-level classifier for the Class-5
+  // predicate-chain refusal. No `DecodedInst` because
+  // `workitem.id.x()` is an IR-level intrinsic call, not an MC
+  // opcode. `kernelName` is captured for bucketing; `detail` names
+  // the first failing call's icmp + constant so
+  // `batch_raise_test` / `corpus_test` can surface attribution
+  // without parsing `detail`. See
+  // `c5_predicate_chain_classifier.{hpp,cpp}` and
+  // hotswap/docs/modrep-predicate-chain.md §5 (narrow-O1).
+  static RaiseFailure crossWavePredicateChain(llvm::StringRef kernelName,
+                                               const llvm::Twine &detail);
 
   // Post-raise safety net for the cross-lane writelane/readlane
   // rewrite path. Fires when the syntactic classifier (Phase 1.4.5)

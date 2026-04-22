@@ -1,9 +1,17 @@
 # MODREP predicate-chain class
 
-**Status.** Design proposal. Characterises a class of silent miscompiles
-that survive the [§7 obstruction classifier](wave-size-translation.md)
-of `wave-size-translation.md` and produce wrong output at runtime, and
-proposes four fix options to pick from. No implementation has landed.
+**Status.** Narrow-O1 classifier landed 2026-04-21 (see §5 O1's
+status line, §6's "Picked" paragraph, and the landed-regression-
+guards list at the end of §7). Catches the Kogge-Stone
+scan-stage-guard shape (`workitem.id.x()` → `icmp` against
+compile-time `K ≤ W_s − 1`), refusing one recipe
+(`canary_bpermute_scan_fp32`) that previously silently miscompiled.
+§5 O2 (mask rewrite) is explicitly deferred per the Phase-2 IR
+inspection in §9.6 — the proposed rewrite shape was shown to be
+semantically incorrect for the remaining failing recipes. The
+`swiglu_fp32` / `corpus_layernorm_fp32` miscompiles stay out of
+scope until a single-element trace establishes their actual
+mechanism; see §9.6 for the orthogonal-class diagnosis.
 
 **Scope.** One wave-size axis concern: kernels compiled for a source
 wave width `W_s` that reach cross-widening (`W_t > W_s`) under modulo-
@@ -538,41 +546,106 @@ actually established.
 
 ### O1. G1 classifier extension + loud refusal
 
-**Shape.** Add a new obstruction class to §6:
+**Status.** Landed 2026-04-21 as `transpiler/c5_predicate_chain_classifier.{hpp,cpp}`,
+wired into `raiser.cpp` Phase 6.6 (post-mem2reg). See `RaiseFailure::crossWavePredicateChain`,
+`ObstructionKind::WorkitemIdPredicateChain`, and
+`RaiseFailureReason::CrossWavePredicateChain`. Landed with the
+Phase-2-narrowed rule below rather than the original sweeping
+shape; §9.6 documents the narrowing evidence.
+
+**Shape (narrow-O1, as landed).** Refuse iff all three hold:
 
 > **C5. Wave-size-sensitive predicate chain.** Any
-> `llvm.amdgcn.workitem.id.x()` SSA value whose transitive uses
-> reach an `icmp` result that gates a `tl.store` / SPE diamond's
-> active-arm / address computation for a global-memory write,
-> without being AND-masked by `W_s - 1` somewhere on the chain.
+> `llvm.amdgcn.workitem.id.x()` SSA value whose forward use chain
+> reaches an `icmp` whose other operand is a compile-time constant
+> `K` with `0 < K <= W_s - 1`, and the chain from the intrinsic to
+> the icmp is NOT AND-masked by `(W_s - 1)` first.
 
-Then in §7's decision procedure, a C5 site with no rewrite is
+The compile-time-K narrowing is structural — it distinguishes
+lane-position gates (scan-stage `tid >= 2^s`, half-wave broadcasts,
+quad-level masks) from bounds-checks-against-kernargs
+(`tid < num_elements`, Triton `mask = offs < N`). The original
+O1 wording refused any `tid → icmp → side-effect` without a mask;
+Phase-2 IR inspection (§9.6) showed that rule would also refuse
+currently-passing baselines `vecadd_f16`, `rope_fp32`,
+`corpus_add_fp32`, `corpus_asin_fp32`, `canary_dpp_*`, which have
+structurally identical IR but compare against a dynamic kernarg.
+
+In §7's decision procedure, a C5 site surfaces as
 `CrossWavePredicateChain` — a new refusal diagnostic. G1 refuses;
-`rewriteImplemented = false` for now. Classifier marker:
-`WorkitemIdPredicateChain` / `C5_PredicateChain`.
+no rewrite is registered (§5 O2 is deferred per §9.6). Classifier
+marker: `WorkitemIdPredicateChain`; no `RewriteId` entry. Produced
+only by the IR-level classifier, never by
+`buildObstructionReport`'s MC walk (`workitem.id.x` is an IR-level
+intrinsic, not a source-side SemOp).
 
-**Coverage.** Flips all four failing recipes from silent-WRONG to
-loud-refused (matches corpus_softmax's current status). No
-additional kernels become translatable.
+**Coverage (as landed).** Refuses `canary_bpermute_scan_fp32`
+(silent-WRONG → loud-refused): its Kogge-Stone scan-stage guards
+emit `icmp ult i32 K, %tid` with K ∈ {1, 3, 7, 15}, all within
+`(0, W_s - 1]`. Does NOT refuse the other three originally-failing
+recipes (`rmsnorm_fp32` — separately fixed by another commit since
+§9.6 was opened; `swiglu_fp32` / `corpus_layernorm_fp32` — bug
+class is not predicate chain, see §9.6). Does NOT refuse any
+baseline (`vecadd_f16`, `rope_fp32`, `corpus_add_fp32`,
+`corpus_asin_fp32`, `canary_dpp_compound_add_fp32`,
+`canary_dpp_reduce_fp32`, `canary_permlanex16_rowmax_fp32`) —
+all confirmed end-to-end MATCH under the compare_correctness
+sweep post-landing.
 
-**Invasiveness.** Low: a new classifier pass, a new
-`ObstructionKind`, a new `CrossWave*` diagnostic, one new lit test
-per failing recipe. Estimate: ~150 LoC classifier + ~100 LoC test
-fixtures.
+**Regression guards.** Two lit fixtures
+(`lit_tests/c5_predicate_chain_{tid,masked}/`) pin both directions
+of the classifier's contract (refuse on K ≤ W_s-1, OK when
+AND-masked by 31 first). Ten unit tests
+(`tests/c5_predicate_chain_test.cpp`, `C5PredicateChain.*` gtest
+suite) audit the classifier in isolation: direction gate
+(same-wave / narrowing short-circuit), constant-K boundary
+(0 excluded, 32 excluded, 15 and 64 as the named cases), dynamic
+vs constant operand distinction, phi propagation, and
+mixed-masked/unmasked phi arm refusal.
 
-**Risk.** Over-approximation: any kernel with `workitem.id.x()`
-feeding ANY `icmp` that reaches a store would be refused, even if
-the predicate happens to be wave-size-oblivious (e.g., a bounds
-check `tid < num_elements` where `num_elements > W_t`). The
-taxonomy would need a soundness-preserving over-approximation
-similar to §7's existing syntactic over-approximations. `rope_fp32`
-and `vecadd_f16` — both currently passing — need to be verified to
-NOT match the new classifier, or the classifier needs to narrow
-enough to exclude them.
+**Invasiveness.** ~280 LoC classifier (.hpp + .cpp) + ~150 LoC
+lit fixtures + ~330 LoC unit tests, plus ~20 LoC wiring into
+raiser.cpp and the enum / RaiseFailure additions.
+
+**Risk (unresolved).** The classifier is sound-but-incomplete by
+construction: false positives (refusing a safe kernel whose
+predicate happens to match the narrow-O1 shape) are benign; false
+negatives (failing to refuse a kernel whose predicate chain IS
+wave-size-sensitive but compares against a dynamic value) would
+still let a silent miscompile through. Two currently-failing
+recipes (`swiglu_fp32`, `corpus_layernorm_fp32`) are in the latter
+category — their class is orthogonal to predicate chains (see
+§9.6) and is out of scope for this classifier.
 
 ### O2. Predicate-chain rewrite
 
-**Shape.** A post-raise pass that rewrites every
+**Status.** Explicitly deferred as of the narrow-O1 landing
+(2026-04-21). Phase-2 IR inspection (§9.6) established that
+the proposed `tid AND (W_s − 1)` rewrite is:
+
+- a structural no-op for `canary_bpermute_scan_fp32` and
+  `rmsnorm_fp32` on their actual launch shape (sub-case 2,
+  `blockDim.x = W_s`; active lanes already have
+  `tid ∈ [0, W_s)`);
+- semantically incorrect for `swiglu_fp32` and
+  `corpus_layernorm_fp32` on their actual launch shape
+  (`blockDim.x = 4·W_s`): target wavefront 0 spans WG `tid`
+  values `0..63`, and the source compile with `num_warps = 4`
+  expected source wave 1 to see WG `tid` values `32..63`.
+  Masking those lanes' `tid` by `31` forces their predicate to
+  evaluate on `0..31` where the source intended `32..63` — the
+  wrong semantic collapse.
+
+No currently-failing recipe is demonstrably improved by the
+rewrite. A principled O2 would need (a) a single-element trace
+of each failing recipe to establish what the actual miscompile
+mechanism is, and (b) a rewrite shape derived from that mechanism
+— not the `tid mod W_s` guess the doc originally proposed.
+
+If O2 is revisited, the shape below is the starting point:
+
+**Shape (originally proposed; semantically unsafe as written).**
+A post-raise pass that rewrites every
 `llvm.amdgcn.workitem.id.x()` value in a predicate chain
 (icmp operand or GEP index feeding a store) to
 `workitem.id.x() AND (W_s - 1)` — i.e., the source-wave-scoped
@@ -581,21 +654,10 @@ correctly depend on target-wave scope (e.g., SPE-internal
 `lane_mod` which is already masked, or uses that feed a
 wavefront-wide `mbcnt` that scales with target wave size).
 
-**Coverage.** Flips the **sub-case 1** failing recipes
-(`swiglu_fp32`, `corpus_layernorm_fp32`) to MATCH — their
-`blockDim.x = 4·W_s > W_t` dispatch spreads MODREP replicas
-across the physical wave, so target replica-1 lanes observe
-`tid ≥ W_s` and the mask `tid AND (W_s − 1)` materially
-changes predicate evaluation. **Sub-case 2** recipes
-(`canary_bpermute_scan_fp32`, `rmsnorm_fp32`, dispatched with
-`blockDim.x = W_s`) are NOT fixed by this rewrite: their active
-lanes already have `tid ∈ [0, W_s)` and the mask is a no-op
-there. They miscompile for the orthogonal reason tracked in
-§9 (5) (convergent-cross-lane-op inactive-lane leak), which is
-out of scope for this option. Verified by the Phase-0 launch-
-blockSize trace in §9 (2); the original sweeping claim
-("flips all four failing recipes to MATCH") was falsified by
-that trace and updated here.
+**Coverage under the Phase-2 finding.** No failing recipe is
+cleanly covered. The original claim ("flips all four failing
+recipes to MATCH") was falsified by §9 (2)'s Phase-0
+blockSize trace + §9.6's Phase-2 IR inspection.
 
 **Invasiveness.** Higher than O1: needs a use-chain forward
 classifier like §5.6.3's writelane/readlane rewrite pass (the
@@ -710,36 +772,107 @@ observations during implementation would reopen the decision:
   with its mixed bitmatrix / scan / writelane pattern). Forces
   O3 onto the roadmap.
 
-**Picked: O1 + O2 (2026-04-21).** Trigger: Phase-0 answer to
-§9 (2) confirmed two of four failing recipes hit sub-case 1
-(`swiglu_fp32`, `corpus_layernorm_fp32`) where O2's mask
-rewrite is a material fix, and two hit sub-case 2
-(`canary_bpermute_scan_fp32`, `rmsnorm_fp32`) where the O2
-mask is a structural no-op and the root cause (§9 (5)) is a
-different class altogether. The default recommendation's
-O1-first-then-O2 sequencing still holds:
+**Picked (as landed 2026-04-21): narrow-O1 only.** Trigger: the
+sequential falsification chain in §9:
 
-1. O1 is a strict improvement for every failing recipe —
-   silent-WRONG → loud-refused with a diagnostic naming the
-   C5 site. No recipe regresses; baselines
-   (`canary_dpp_compound_add_fp32`, `rope_fp32`, `vecadd_f16`,
-   `corpus_add_fp32`, `corpus_asin_fp32`) stay MATCH.
-2. O2 then recovers **two of the four** failing recipes —
-   `swiglu_fp32` + `corpus_layernorm_fp32` flip from
-   loud-refused to MATCH. The other two continue to
-   loud-refuse under the C5 classifier with the identical
-   diagnostic they get post-O1; O2 produces no change in the
-   raised IR for them (the mask is a no-op on sub-case 2).
-   §7 expected post-fix verdicts updated accordingly.
+1. **§9 (2) Phase-0 blockSize trace.** The salmon harness
+   launches `hipModuleLaunchKernel` with the gfx1250-sidecar
+   blockSize (matching the raised HSACO's kernel descriptor),
+   not the gfx942-sidecar value the doc's §4 assumed. All four
+   originally-failing recipes hit sub-case 2 of the doc's
+   §4.2/§4.3 taxonomy (target's active lanes have
+   `tid ∈ [0, num_warps × W_s)`), not a mix of sub-cases as the
+   earlier `o1_o2_partial` option text framed it.
+2. **§9 (5) sub-case-2 inactive-lane class.** The
+   `canary_bpermute_scan_fp32` failure mechanism is
+   convergent-cross-lane-op gathering sentinel VGPRs from
+   inactive target lanes (`W_s..W_t-1`), not predicate-chain
+   divergence. The predicate chain is mathematically correct on
+   the active lanes; the bpermute / permlanex16 reach is the
+   bug.
+3. **§9 (6) Phase-2 IR inspection.** `swiglu_fp32` and
+   `corpus_layernorm_fp32` have structurally identical tid-chains
+   to `vecadd_f16` and `rope_fp32` (both pass) — the difference
+   is orthogonal to predicate chains. The originally-proposed
+   O2 mask is semantically WRONG for them (would collapse
+   `tid 32..63` onto `0..31` against the source compile's
+   intent). An O1 classifier broad enough to refuse them would
+   also refuse the baselines.
 
-The two residual loud-refused recipes stay refused until the
-§9 (5) class lands — a separate, not-yet-scoped design
-investigation. That is strictly better than today's silent
-miscompile and matches the project's "soundness, not
-completeness" discipline from `wave-size-translation.md` §7.
-If future evidence (e.g. a GPT-OSS `scope_discovery` kernel)
-fires falsifying observation A or B, we re-pick then; for the
-evidence on the table today, O1 + O2 is the right pick.
+This narrows the principled outcome to "refuse exactly the
+recipes where the compile-time-K lane-position-gate signature
+appears in IR". That is one recipe today:
+`canary_bpermute_scan_fp32`.
+
+**What landed:**
+
+- Narrow-O1 classifier
+  (`transpiler/c5_predicate_chain_classifier.{hpp,cpp}`,
+  raiser.cpp Phase 6.6). Refuses iff the chain reaches
+  `icmp` against compile-time `K ∈ (0, W_s-1]` without an
+  AND-mask by `(W_s-1)` first.
+- `RaiseFailureReason::CrossWavePredicateChain` +
+  `RaiseFailure::crossWavePredicateChain` factory.
+- `ObstructionKind::WorkitemIdPredicateChain` entry + docstring
+  (no `RewriteId` pair — refuse-only).
+- Two lit fixtures
+  (`lit_tests/c5_predicate_chain_{tid,masked}/`) pinning
+  refuse + non-refuse paths.
+- `C5PredicateChain` gtest suite (10 cases) auditing the
+  classifier in isolation on synthesised IR.
+- Pre-existing `cross_wave_warn` and `v_cmpx_ballot` lit
+  fixtures updated to use `K ≥ W_s` (64 / 96) so they exercise
+  the cross-wave EXEC-writer / ballot machinery without
+  tripping the new C5 classifier on what were latent
+  wave-size-sensitive bounds checks.
+
+**What didn't land:**
+
+- §5 O2 (mask rewrite). Deferred — shape is unsafe for the
+  failing recipes per §9 (6). A future design iteration can
+  resurrect it once the norm-family miscompile mechanism has
+  a single-element trace.
+- §5 O3 (ThreadLoopProjection). Not triggered by any recipe.
+- §5 O4 (harness-side `num_warps` constraint). Not triggered.
+- Any fix for `swiglu_fp32`, `corpus_layernorm_fp32`, or the
+  §9.5 sub-case-2 class. All out of scope for this document;
+  tracked in §9.5 / §9.6 as separate design investigations.
+
+End-to-end verdict change for each recipe (compare_correctness
+sweep, 2026-04-21 post-landing):
+
+| recipe | pre-landing | post-landing |
+|---|---|---|
+| `canary_bpermute_scan_fp32` | WRONG 4/4 | **refused 4/4** (EXIT=2, C5 diagnostic) |
+| `swiglu_fp32` | WRONG 4/4 | WRONG 4/4 (out of scope, §9.6) |
+| `corpus_layernorm_fp32` | WRONG 4/4 | WRONG 4/4 (out of scope, §9.6) |
+| `rmsnorm_fp32` | WRONG 4/4 | match 4/4 (orthogonal recent fix, unrelated) |
+| `corpus_softmax_fp32` | CRASH (writelane safety-net) | refused 4/4 (same writelane safety-net) |
+| `vecadd_f16`, `rope_fp32`, `corpus_add_fp32`, `corpus_asin_fp32`, `canary_dpp_*`, `canary_permlanex16_*` | match 4/4 | match 4/4 (no classifier hit) |
+
+Net: 1 silent-WRONG → loud-refused, 0 regressions. Strict
+progress within the principled scope the Phase-0 + Phase-2
+findings allow.
+
+---
+
+## 6.1. Deferred options — reopening criteria
+
+O2 / O3 / O4 reopen the decision if:
+
+- **A.** A new corpus recipe appears whose `workitem.id.x()`
+  flows into an `icmp` against a compile-time constant in
+  `(0, W_s-1]` AND whose downstream miscompile mechanism is
+  demonstrably the predicate-chain class (not §9.5 /§9.6).
+  Triggers an O2 redesign with a real mechanism trace.
+- **B.** A corpus recipe is shown to need the
+  `ThreadLoopProjection` escape hatch (§5 O3). Triggers an
+  O3 scope paper.
+- **C.** A scope_discovery / GPT-OSS kernel requires a
+  fix-up beyond either O1's refusal or an eventual O2 mask
+  — e.g. `_bitmatrix_metadata_compute_stage1` with its mixed
+  bitmatrix / scan / writelane pattern. Triggers §5's O3
+  pick or an entirely new class doc.
 
 ---
 
@@ -747,56 +880,93 @@ evidence on the table today, O1 + O2 is the right pick.
 
 ### Existing canaries that pin this class
 
+Verdicts below reflect the actually-landed narrow-O1 state
+(2026-04-21). Per §6's "Picked: narrow-O1 only" paragraph, O2 is
+deferred — the "Post-O2: MATCH 4/4" cells the original doc
+proposed are NOT part of the landed contract and have been
+replaced with "out of scope / see §9.6" where applicable.
+
 - `canary_bpermute_scan_fp32` — pins the scan-predicate variant.
   Kernel: `tl.cumsum` over 128 elements per program with
-  `num_warps = 1`. Salmon launch shape per §9 (2):
-  `blockDim.x = 32 = W_s` (sub-case 2). Current verdict: WRONG
-  4/4. Expected post-fix-O1: loud refusal with
-  `CrossWavePredicateChain` (or whatever name the C5 classifier
-  settles on). Expected post-fix-O2: **still loud refusal** —
-  the O2 mask is a no-op on sub-case 2, so the C5 classifier
-  continues to refuse this recipe until the separate §9 (5)
-  class lands. The lit fixture for this recipe therefore has
-  *one* post-fix contract ("loud refusal, same as today once
-  O1 lands"), not a REFUSE/MATCH pair like the sub-case-1
-  recipes.
-- `rmsnorm_fp32` — pins the sentinel-leak variant at
-  `num_warps = 1`. Salmon launch shape per §9 (2):
-  `blockDim.x = 32 = W_s` (sub-case 2). Current: WRONG 4/4
-  with `0xA5A5A5A5` leak. Expected post-O1: loud refusal.
-  Post-O2: **still loud refusal** (same rationale as
-  `canary_bpermute_scan_fp32`).
-- `swiglu_fp32` — pins the predicate-chain variant at
-  `num_warps = 4`. Salmon launch shape per §9 (2):
-  `blockDim.x = 128 = 4·W_s > W_t` (sub-case 1). Current:
-  WRONG 4/4. Post-O1: refusal. Post-O2: MATCH 4/4.
-- `corpus_layernorm_fp32` — pins the norm-family variant at
-  `num_warps = 4`. Salmon launch shape per §9 (2):
-  `blockDim.x = 128 = 4·W_s > W_t` (sub-case 1). Current:
-  WRONG 4/4. Post-O1: refusal. Post-O2: MATCH 4/4.
-- `corpus_softmax_fp32` — already refused via the §5.6.3 writelane
-  safety net; listed here for completeness. The C5 classifier
-  should produce a distinct diagnostic so the refusal remains
-  attributable to the right cause.
+  `num_warps = 1`. Kogge-Stone scan-stage guards `icmp ult K, tid`
+  with K ∈ {1, 3, 7, 15}, all `≤ W_s - 1 = 31` — exactly the
+  narrow-O1 signature. Salmon launch shape per §9 (2):
+  `blockDim.x = 32 = W_s`. Pre-landing: WRONG 4/4. **Post-landing:
+  loud refusal 4/4 with `cross-wave-predicate-chain` diagnostic.**
+  The lit fixture contract is one-sided (the `c5_predicate_chain_tid`
+  fixture pins the refusal shape structurally, not the end-to-end
+  MATCH-after-fix assertion the original doc proposed).
+- `rmsnorm_fp32` — NOT a narrow-O1 match (its icmps compare
+  against dynamic `%arg4`, not a compile-time K). Was WRONG 4/4
+  at the start of this investigation; now MATCH 4/4 in the
+  compare_correctness sweep — fixed by an orthogonal commit
+  between Phase 0 and Phase 2 (likely `v_div_scale_f32` /
+  `v_rsq_f32` handler tightening per swiglu_fp32's docstring
+  commentary about the `_num_f*` lowering path). No C5 bearing.
+- `swiglu_fp32` — NOT a narrow-O1 match (dynamic-kernarg
+  icmps, structurally identical to `vecadd_f16`'s passing
+  shape). Pre-landing: WRONG 4/4. Post-landing: still WRONG
+  4/4. Bug class is not predicate-chain — see §9.6 for the
+  Phase-2 evidence and the orthogonal-class diagnosis. Out of
+  scope for this document.
+- `corpus_layernorm_fp32` — same as `swiglu_fp32`: not a
+  narrow-O1 match, stays WRONG 4/4 post-landing, out of scope.
+- `corpus_softmax_fp32` — already refused via the §5.6.3
+  writelane safety net; listed here for completeness. Not
+  additionally matched by the narrow-O1 classifier, but its
+  existing refusal diagnostic already attributes the failure
+  to the correct class (`writelane/readlane-post-raise-safety-net
+  [cross-wave-lane-id-leak]`). Future work could graduate it to
+  the C5 diagnostic if evidence shows the same
+  `workitem.id.x → icmp(K)` signature applies, but no such
+  evidence exists today.
 - `canary_dpp_compound_add_fp32` — the structural baseline that
   pins "reduction + broadcast + downstream use is safe when there
   is no `num_warps × W_s > W_t` gap and no VOP3P packed arithmetic".
-  Current: MATCH 4/4. Post-O1 / O2: MATCH 4/4 (classifier must not
-  refuse this recipe).
+  Pre- and post-landing: MATCH 4/4 (classifier must not
+  refuse this recipe; does not, per the compare_correctness
+  sweep).
+- `vecadd_f16`, `rope_fp32`, `corpus_add_fp32`,
+  `corpus_asin_fp32`, `canary_dpp_reduce_fp32`,
+  `canary_permlanex16_rowmax_fp32` — additional baselines
+  confirmed end-to-end MATCH 4/4 post-landing; none match the
+  narrow-O1 signature.
 
-### New lit-test fixtures to add when a fix lands
+### Landed regression guards (lit + gtest)
 
-- `lit_tests/c5_predicate_chain_tid/` — IR fixture pinning O1's
-  classifier: a synthetic kernel with `workitem.id.x()` → `icmp` →
-  `br` → `tl.store`; lit expects `FAIL ...
-  [cross-wave-predicate-chain]`.
-- `lit_tests/c5_predicate_chain_masked/` — same shape but with an
-  explicit `and %tid, 31` on the chain; lit expects OK 1/1. Pins
-  the "already-masked, don't refuse" negative case.
-- `lit_tests/c5_predicate_chain_rewrite/` (only if O2 lands) —
-  same synthetic kernel, runs through the rewrite pass, expects
-  the rewritten IR to contain `and %tid, 31` at the inserted
-  mask site.
+- `lit_tests/c5_predicate_chain_tid/` — REFUSAL sibling. Inline
+  asm emits `workitem.id.x() → icmp ult K=16, tid → cndmask →
+  store`; lit expects `cross-wave-predicate-chain` diagnostic,
+  `compile-time constant 16`, `Class 5 / WorkitemIdPredicateChain`
+  per-site trace, and raise_cli non-zero exit.
+- `lit_tests/c5_predicate_chain_masked/` — NON-REFUSAL sibling.
+  Same K=16 icmp, but preceded by `and tid, 31` (= W_s-1); lit
+  expects raise_cli success and the `and i32 ..., 31` anchor
+  in the emitted IR.
+- `tests/c5_predicate_chain_test.cpp` — `C5PredicateChain.*`
+  gtest suite (10 cases). Audits the classifier on synthesised
+  IR in isolation from the raiser's MC-level pipeline:
+  `TidDirectSmallConstRefuses`, `TidMaskedBeforeCmpAccepts`,
+  `TidSmallConstZeroAccepts`, `TidLargeConstAccepts`,
+  `TidDynamicCmpAccepts`, `SameWaveDirectionGate`,
+  `NarrowingDirectionGate`, `NoCallsIsNoOp`,
+  `PhiPropagatesTidDerivation`,
+  `MaskedPhiThroughUnmaskedArmRefuses`.
+- `lit_tests/cross_wave_warn/` and `lit_tests/v_cmpx_ballot/` —
+  updated in the same commit to use `K ≥ W_s` constants
+  (64 / 96) so their cross-wave EXEC-writer / ballot-routing
+  coverage is not conflated with the new C5 predicate-chain
+  coverage. Pre-update those fixtures exercised K ≤ W_s-1
+  predicates, which the narrow-O1 classifier correctly refuses
+  as latent-bug kernels.
+
+### Future lit fixture (only if O2 revisited)
+
+- `lit_tests/c5_predicate_chain_rewrite/` — reserved for a
+  future O2 landing. Would pin the rewritten IR shape (tid →
+  `and tid, 31` → unchanged icmp) for the same synthetic kernel
+  as the refusal sibling. Not implemented today; §5 O2 is
+  deferred per the Phase-2 findings in §9.6.
 
 ### Repro commands for this doc's evidence
 

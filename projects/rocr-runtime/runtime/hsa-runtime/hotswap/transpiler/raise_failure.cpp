@@ -26,6 +26,8 @@ const char *reasonString(RaiseFailureReason r) {
     return "cross-wave-replica-race";
   case RaiseFailureReason::CrossWaveLanePredicatedExec:
     return "cross-wave-lane-predicated-exec";
+  case RaiseFailureReason::CrossWavePredicateChain:
+    return "cross-wave-predicate-chain";
   case RaiseFailureReason::StrictUnsafeLowering:
     return "strict-unsafe-lowering";
   case RaiseFailureReason::MissingKernelDescriptor:
@@ -140,6 +142,18 @@ RaiseFailure RaiseFailure::crossWaveLanePredicatedExec(
     const DecodedInst &di, const llvm::Twine &kindDetail) {
   return makeCrossWaveFailure(
       RaiseFailureReason::CrossWaveLanePredicatedExec, di, kindDetail);
+}
+
+// see hotswap/docs/modrep-predicate-chain.md §5 (narrow-O1)
+RaiseFailure RaiseFailure::crossWavePredicateChain(
+    llvm::StringRef kernelName, const llvm::Twine &detail) {
+  RaiseFailure f;
+  f.reason = RaiseFailureReason::CrossWavePredicateChain;
+  f.mnemonic = "workitem.id.x-predicate-chain-classifier";
+  f.format = reasonString(RaiseFailureReason::CrossWavePredicateChain);
+  f.offset = 0;
+  f.detail = ("kernel '" + kernelName + "': " + detail).str();
+  return f;
 }
 
 RaiseFailure RaiseFailure::strictUnsafeLowering(const DecodedInst &di,

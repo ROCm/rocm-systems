@@ -242,6 +242,39 @@ config.fixtures = {
     # `--target-isa=gfx942` to match the canonical race pipeline.
     "s_atomic_dec": r"@LIT_FIXTURE_S_ATOMIC_DEC_CO@",
     "c4_lane_dep_cmpx": r"@LIT_FIXTURE_C4_LANE_DEP_CMPX_CO@",
+    # c5_predicate_chain_tid / c5_predicate_chain_masked — the narrow-O1
+    # Class-5 "wave-size-sensitive predicate chain" classifier
+    # (transpiler/c5_predicate_chain_classifier.{hpp,cpp}) pinned by
+    # a pair of siblings that assert both sides of the soundness-
+    # not-completeness contract (hotswap/docs/wave-size-translation.md
+    # §7 + hotswap/docs/modrep-predicate-chain.md §5 narrow-O1):
+    #
+    #   * `c5_predicate_chain_tid` — REFUSAL path. Inline-asm emits
+    #     `workitem.id.x() → icmp ult K=15, tid → v_cndmask → store`
+    #     with no AND-mask on the chain. Compile-time K = 15 is
+    #     within (0, W_s-1=31], so the classifier fires. Lit expects
+    #     `cross-wave-predicate-chain` diagnostic + the
+    #     `Class 5 / WorkitemIdPredicateChain` per-site trace + a
+    #     non-zero raise_cli exit code.
+    #
+    #   * `c5_predicate_chain_masked` — NON-REFUSAL path. Same
+    #     K=15 icmp, but the chain passes through `and tid, 31`
+    #     (= W_s-1) first. The classifier's `isSourceWaveMaskAnd`
+    #     recognises the mask as collapsing replica-1 onto
+    #     `[0, W_s)` and stops walking. Lit expects raise_cli to
+    #     succeed and the IR to carry the `and i32 ..., 31` anchor.
+    #
+    # Together the pair pins that (a) the classifier refuses exactly
+    # the compile-time-K < W_s unmasked shape, (b) masking first
+    # collapses the refusal, (c) passing-baseline patterns
+    # (`icmp <tid-derived>, <dynamic kernarg>`) are not matched by
+    # either fixture's RUN line because their constant is dynamic —
+    # the compare_correctness Triton sweep is the end-to-end fence
+    # for the baseline-non-refusal contract.
+    "c5_predicate_chain_tid":
+        r"@LIT_FIXTURE_C5_PREDICATE_CHAIN_TID_CO@",
+    "c5_predicate_chain_masked":
+        r"@LIT_FIXTURE_C5_PREDICATE_CHAIN_MASKED_CO@",
     # s_set_pc_i64 (SOP1) — four sibling fixtures, one per analysis
     # outcome class. See setpc_analysis.cpp / handle_sop1.cpp for the
     # Pattern A (DirectA, br) / Pattern B (IndirectB, indirectbr) /

@@ -41,7 +41,16 @@
 ; prior EXEC value; it may be an SSA load or a constant (e.g. -1
 ; when EXEC was just initialised), so allow both by matching "any
 ; non-comma up to the comma".
-; CHECK:      %[[CMPX_CMP:[^ ]+]] = icmp ult i32 %{{[^ ,]+}}, 16
+; Constants K=64 (V_CMPX RHS) and K=96 (V_CMP RHS): both ≥ W_s so the
+; Class-5 predicate-chain classifier in
+; `c5_predicate_chain_classifier.cpp` treats them as bounds checks,
+; not as lane-position gates. Pre-C5-classifier this fixture used
+; K=16 / K=8; those are the exact shape the C5 classifier now
+; refuses (see lit_tests/c5_predicate_chain_tid for the positive
+; refusal fixture). This fixture preserves ballot IR coverage while
+; no longer conflating two orthogonal classes (C5 predicate chain +
+; V_CMP SGPR-dest ballot routing).
+; CHECK:      %[[CMPX_CMP:[^ ]+]] = icmp ult i32 %{{[^ ,]+}}, 64
 ; CHECK-NEXT: %cmpx_ballot = call i64 @llvm.amdgcn.ballot.i64(i1 %[[CMPX_CMP]])
 ; CHECK-NEXT: %cmpx_exec = and i64 {{[^,]+}}, %cmpx_ballot
 
@@ -51,7 +60,7 @@
 ; see only the low 32 bits of the ballot; that residual lossy
 ; narrowing is documented in `wave_projection.cpp`'s
 ; `WaveNativeProjection::ballotI1ToWidth`.
-; CHECK:      %[[VCMP:[^ ]+]] = icmp ult i32 %{{[^ ,]+}}, 8
+; CHECK:      %[[VCMP:[^ ]+]] = icmp ult i32 %{{[^ ,]+}}, 96
 ; CHECK-NEXT: %vcmp_ballot = call i64 @llvm.amdgcn.ballot.i64(i1 %[[VCMP]])
 ; CHECK-NEXT: %vcmp_ballot_trunc = trunc i64 %vcmp_ballot to i32
 

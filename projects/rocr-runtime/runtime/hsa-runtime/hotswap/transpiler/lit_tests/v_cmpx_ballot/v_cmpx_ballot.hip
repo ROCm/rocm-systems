@@ -35,11 +35,22 @@ extern "C" __global__ void v_cmpx_ballot_kernel(int *out) {
   int val = 0xCC;
   asm volatile(
       // Region 1: V_CMPX narrows EXEC, divergent write, EXEC restore.
-      "v_cmpx_lt_u32_e64 %[lane], 16\n\t"
+      // Region 2: V_CMP writes an SGPR-destination wave mask.
+      //
+      // Both V_CMP / V_CMPX use a constant RHS ≥ W_s (64 / 96) so the
+      // Class-5 predicate-chain classifier in
+      // `c5_predicate_chain_classifier.cpp` treats them as bounds
+      // checks rather than lane-position gates (see hotswap/docs/
+      // modrep-predicate-chain.md §5 narrow-O1). Pre-C5-classifier
+      // this fixture used K=16 / K=8, which the classifier now
+      // correctly refuses as wave-size-sensitive; the constants were
+      // updated so the fixture keeps exercising the ballot IR shape
+      // under cross-wave without conflating two orthogonal classes
+      // (C5 predicate chain + V_CMP SGPR-dest ballot routing).
+      "v_cmpx_lt_u32_e64 %[lane], 64\n\t"
       "v_mov_b32 %[val], 0xAA\n\t"
       "s_mov_b32 exec_lo, -1\n\t"
-      // Region 2: V_CMP writes an SGPR-destination wave mask.
-      "v_cmp_lt_u32_e64 s4, %[lane], 8\n\t"
+      "v_cmp_lt_u32_e64 s4, %[lane], 96\n\t"
       : [val] "+v"(val)
       : [lane] "v"(lane)
       : "exec", "s4", "memory");

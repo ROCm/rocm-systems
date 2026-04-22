@@ -4,12 +4,21 @@
 ;
 ; Cross-wave translation (wave32 source → wave64 target) of a kernel
 ; whose only EXEC writer is lane-position-INDEPENDENT — here, a
-; `v_cmpx_lt_u32_e64 threadIdx.x, 8` bounds check where the LHS is
-; workitem_id_x (uniform-across-replicas, not derived from mbcnt).
-; The Phase 1.4.5 classifier in `wave_size_obstruction.cpp` should
-; classify this as outcome (a) oblivious: the v_cmpx is an EXEC
-; writer, but with no v_mbcnt_* in the kernel the syntactic
-; co-occurrence heuristic does not flag it, and no refusal fires.
+; `v_cmpx_lt_u32_e64 threadIdx.x, 64` bounds check. The constant 64
+; is structurally ≥ W_s so the Class-5 predicate-chain classifier
+; in `c5_predicate_chain_classifier.cpp` accepts it as a bounds
+; check rather than a lane-position gate. The Phase 1.4.5 MC-level
+; classifier in `wave_size_obstruction.cpp` similarly classifies it
+; as outcome (a) oblivious: the v_cmpx is an EXEC writer, but with
+; no v_mbcnt_* in the kernel the syntactic co-occurrence heuristic
+; does not flag it, and no refusal fires.
+;
+; Pre-C5-classifier-landing this fixture used K=8, exercising a
+; genuine lane-position-scoped predicate under cross-wave — the C5
+; classifier now refuses that exact shape (lit_tests/c5_predicate_chain_tid
+; is the principled positive fixture for the refusal). The fixture
+; was updated to K=64 rather than xfail'd so the cross-wave warning
+; path still has an IR-generating producer.
 ;
 ; This is the regression-fence counterpart to the c4_lane_dep_cmpx
 ; lit test, which uses exactly the same v_cmpx shape but adds an

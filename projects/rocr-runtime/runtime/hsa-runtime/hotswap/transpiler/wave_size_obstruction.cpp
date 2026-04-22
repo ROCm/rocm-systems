@@ -42,6 +42,9 @@ const char *obstructionKindName(ObstructionKind k) {
     return "TtmpWaveIdLeak (\u00a73 Class 1: source read of ttmp8 under cross-widening — wave_id_in_wg field)";
   case ObstructionKind::WaveIdLiftScalarized:
     return "WaveIdLiftScalarized (\u00a73 Class 1: canonical wave_id BFE lift + v_writelane/v_readlane + WMMA — cross-lane primitive scalarises the divergent lift, collapsing per-source-wave distinction)";
+  case ObstructionKind::WorkitemIdPredicateChain:
+    // see hotswap/docs/modrep-predicate-chain.md §5 (narrow-O1 classifier)
+    return "WorkitemIdPredicateChain (\u00a73 Class 5: workitem.id.x() feeds a lane-position-scoped icmp against compile-time constant K \u2264 W_s-1, gating a side effect \u2014 wave-size-sensitive predicate chain under modulo-replication)";
   case ObstructionKind::FullWaveRotate:
     return "FullWaveRotate (\u00a73 Class 2: unrewritable v_permlane64)";
   case ObstructionKind::LaneGroupShuffle:
@@ -1036,6 +1039,19 @@ RaiseFailure selectFailureFromReport(const ObstructionReport &report) {
     case ObstructionKind::None:
       llvm_unreachable("ObstructionKind classified as unrewritable but "
                        "buildObstructionReport never tags it that way");
+    case ObstructionKind::WorkitemIdPredicateChain:
+      // Produced only by the post-mem2reg IR-level classifier in
+      // `c5_predicate_chain_classifier.cpp`; that classifier surfaces
+      // its own `RaiseFailure::crossWavePredicateChain` directly from
+      // raiser.cpp Phase 6.6. buildObstructionReport's MC-level walk
+      // cannot see `workitem.id.x` emission (it's an IR-level
+      // intrinsic call, not a source-side SemOp), so tagging a
+      // DecodedInst with this kind is a contract violation.
+      // See hotswap/docs/modrep-predicate-chain.md §5.
+      llvm_unreachable(
+          "WorkitemIdPredicateChain is produced only by the IR-level "
+          "classifier (c5_predicate_chain_classifier.cpp); "
+          "buildObstructionReport must not tag a DecodedInst with it");
     }
     llvm_unreachable("unhandled ObstructionKind in selectFailureFromReport "
                      "(unrewritable branch)");

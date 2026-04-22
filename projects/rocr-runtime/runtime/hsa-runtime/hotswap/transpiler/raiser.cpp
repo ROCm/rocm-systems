@@ -20,6 +20,7 @@
 #include "wave_size_obstruction.hpp"
 #include "handlers.hpp"
 #include "rewrite_cross_lane_divergent.hpp"
+#include "c5_predicate_chain_classifier.hpp"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -793,6 +794,56 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
           kernelName, os.str());
       errs() << "transpiler: post-raise abort: " << f.format << " on '"
              << f.mnemonic << "' \u2014 " << f.detail << "\n";
+      result.failure = std::move(f);
+      return result;
+    }
+  }
+
+  // ==== Phase 6.6: Cross-widen predicate-chain classifier (C5) ====
+  //
+  // Post-mem2reg classifier for the Class-5 predicate-chain class
+  // documented in hotswap/docs/modrep-predicate-chain.md §5 (narrow-O1).
+  // Walks every `@llvm.amdgcn.workitem.id.x()` call in the function and
+  // refuses the lift if any call's forward use chain reaches an `icmp`
+  // against a compile-time constant K in `(0, W_s - 1]` without being
+  // AND-masked by `(W_s - 1)` first — i.e. a lane-position-scoped
+  // predicate (`tid < 2^s`, `tid < W_s/2`, quad-level masks) that would
+  // evaluate differently on target replica-1 lanes than source wave 0
+  // under modulo-replication despite sharing the source EXEC bit.
+  //
+  // Intentionally narrow: Phase-2 IR inspection (modrep-predicate-chain.md
+  // §9.6) established that the broader "any unmasked tid → icmp →
+  // side-effect refuses" rule would also refuse baselines
+  // `vecadd_f16` / `rope_fp32` / `canary_dpp_compound_add_fp32` (their
+  // IR has structurally identical shapes but with a dynamic kernarg as
+  // the icmp constant, not a compile-time K). The compile-time-K-only
+  // rule catches `canary_bpermute_scan_fp32`'s Kogge-Stone scan-stage
+  // predicates (K ∈ {1, 3, 7, 15}) while leaving the baselines green.
+  //
+  // Runs AFTER Phase 6 `PromoteMemToReg` so scratch-addrspace round-trips
+  // are gone and the forward use-chain classifier operates on clean SSA.
+  // Runs AFTER the Phase 6.5 writelane/readlane rewrite so the chain sees
+  // the post-rewrite shapes (relevant when a future iteration widens the
+  // classifier to audit additional users). Direction gate inside
+  // `classifyPredicateChain` short-circuits when
+  // `targetWaveSize <= sourceWaveSize`.
+  //
+  // No companion rewrite today. The design doc's §5 O2 "tid AND (W_s-1)"
+  // rewrite is deferred (§9.6 shows its semantics are not correct for
+  // the norm-family failing recipes and are a no-op for sub-case-2
+  // scan-shaped recipes). If a future design iteration adds a principled
+  // rewrite, pair it with a `RewriteId` alongside
+  // `ObstructionKind::WorkitemIdPredicateChain`.
+  {
+    PredicateChainClassifierReport predReport =
+        classifyPredicateChain(*F, isa.waveSize, targetIsa.waveSize);
+    if (predReport.refused) {
+      RaiseFailure f = RaiseFailure::crossWavePredicateChain(
+          kernelName, predReport.refusalDetail);
+      errs() << "transpiler: pre-translation abort: " << f.format << " on '"
+             << f.mnemonic << "' \u2014 " << f.detail << "\n";
+      errs() << "  outcome: (c) refuse \u2014 "
+                "WorkitemIdPredicateChain (\u00a73 Class 5)\n";
       result.failure = std::move(f);
       return result;
     }

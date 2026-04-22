@@ -134,6 +134,37 @@ enum class ObstructionKind : uint8_t {
                             // simultaneously), so there is no correct
                             // projection today. No rewrite.
 
+  WorkitemIdPredicateChain, // post-mem2reg IR-level class:
+                            // `llvm.amdgcn.workitem.id.x()` flows into an
+                            // `icmp` whose other operand is a compile-time
+                            // constant K with 0 < K <= W_s - 1, and the chain
+                            // from the intrinsic to the icmp has NOT been
+                            // AND-masked by (W_s - 1) somewhere. Such a
+                            // predicate is lane-position-scoped (it partitions
+                            // lanes by their position within a single source
+                            // wave), which is wave-size-sensitive under
+                            // modulo-replication: source wave 0's lane L and
+                            // target replica-1's lane L+W_s share the same
+                            // source EXEC but have different architectural
+                            // tids, so a predicate like `tid < 16` evaluates
+                            // differently between the replicas and the store-
+                            // gating it controls commits to different slots.
+                            // Only caught by the IR-level classifier in
+                            // `c5_predicate_chain_classifier.{hpp,cpp}`,
+                            // NOT by the MC-level obstruction walk
+                            // (`workitem.id.x` is emitted by the raiser's
+                            // Phase-4 init + handler lifts, never as a
+                            // source-side SemOp). `buildObstructionReport`
+                            // must never tag a `DecodedInst` with this kind.
+                            // See hotswap/docs/modrep-predicate-chain.md §5
+                            // (narrow-O1) for the principled derivation and
+                            // §9.6 for the Phase-2 finding that narrowed the
+                            // classifier from "any unmasked `tid → icmp →
+                            // side-effect`" to "compile-time K ≤ W_s-1" so
+                            // baseline Triton recipes
+                            // (`vecadd_f16`, `rope_fp32`,
+                            // `canary_dpp_compound_add_fp32`) don't refuse.
+
   // ── Class 2 (wave-size-translation.md §6): cross-lane shuffles whose
   //                                            semantics bake in the wave width ──
   FullWaveRotate,           // v_permlane64_b32 — no wave32 analogue, unrewritable.
