@@ -47,6 +47,17 @@ if [[ "$#" -lt 2 ]] ||
     exit 1
 fi
 
+# Get the number of GPUs on the node
+if command -v amd-smi >/dev/null && amd-smi version 2>&1 >/dev/null
+then
+  NUM_GPUS=${NUM_GPUS:-$(amd-smi list | grep GPU | wc -l)}
+elif command -v rocm-smi >/dev/null && rocm-smi --version 2>&1 >/dev/null
+then
+  NUM_GPUS=${NUM_GPUS:-$(rocm-smi --showserial | grep GPU | wc -l)}
+fi
+NUM_GPUS=${NUM_GPUS:-0}
+NUM_GPUS=$(($NUM_GPUS > 0? $NUM_GPUS: 8))
+
 driver_return_status=0
 binary_name=$1
 mode=$2
@@ -75,7 +86,10 @@ function run_mpirun {
 case $mode in
     all)
         test_with_two_pes="IPCImplSimpleCoarseTestFixture/*:IPCImplSimpleFineTestFixture/*:IPCImplTiledFineTestFixture/*:DegenerateTiledFine.*"
-        run_mpirun 4 "-$test_with_two_pes"
+        if [ $NUM_GPUS -ge 4 ]
+        then
+          run_mpirun 4 "-$test_with_two_pes"
+        fi
         #run_mpirun 2 "$test_with_two_pes"
         ;;
     custom)
