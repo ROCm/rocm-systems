@@ -45,16 +45,37 @@ perfxpert doctor
 └────────────────────────────────────────────────────────────┘
 ```
 
-Everything ships inside one `pip install perfxpert` — including the bundled opencode binary for `perfxpert-code`.
+Core analysis is self-contained — `pip install perfxpert` is sufficient for all
+profiling and recommendation features. `perfxpert-code` (`perfxpert-code`
+sub-command) requires **opencode** as a system dependency (bundling into the
+wheel is tracked as future work). Install opencode separately:
+
+```bash
+curl -fsSL https://opencode.ai/install | bash
+```
+
+Or point `PERFXPERT_OPENCODE_PATH` at an existing opencode binary.
+
+## Contributing
+
+perfxpert welcomes contributions. Start with [CONTRIBUTING.md](CONTRIBUTING.md)
+for the extension-surface matrix + governance. Per-surface guides under
+[docs/contributing/](docs/contributing/). Architectural changes go through
+an [RFC](docs/rfcs/README.md).
 
 ## Feature flags
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `PERFXPERT_USE_AGENTS=1` | noop (kept for back-compat) | Was the Phase-4 opt-in; agentic is now default |
-| `PERFXPERT_LEGACY=1` | unset | One-version safety net — routes through the deprecated local-only path. LLM enhancement is unavailable. Removed in vX.Y+1. |
-| `ROCINSIGHT_LLM_REFERENCE_GUIDE` | unset | Legacy compatibility knob for direct reference-guide loading; not used by the default analyze path |
-| `PERFXPERT_OPENCODE_PATH` | bundled | Override path to opencode binary |
+| `PERFXPERT_OPENCODE_PATH` | system PATH | Override path to opencode binary; must point to an existing file or launcher raises immediately |
+
+The agentic runtime is the sole execution path; no feature flag
+toggles it. Setting any of the following has no effect:
+
+- `PERFXPERT_USE_AGENTS` — removed.
+- `PERFXPERT_LEGACY` — removed.
+
+See [CHANGELOG.md](CHANGELOG.md) for the removal history.
 
 ## Supported GPUs
 
@@ -73,12 +94,11 @@ Everything ships inside one `pip install perfxpert` — including the bundled op
 
 ## Documentation
 
-- [Python API](perfxpert/ai_analysis/docs/AI_ANALYSIS_API.md)
-- [Analysis output JSON schema](perfxpert/ai_analysis/docs/analysis-output.schema.json)
-- [Migration guide from legacy path](docs/migration-to-agentic.md)
-- [`PERFXPERT_LEGACY` deprecation note](docs/deprecation/PERFXPERT_LEGACY.md)
+- [Architecture](docs/architecture.md)
+- [Getting started](docs/guides/getting-started.md)
+- [Historical migration notes](docs/archive/migration-to-agentic.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## Licensing
 
-MIT. Bundled opencode binary is also MIT (permissive redistribution).
+MIT. opencode (system dependency, not bundled in this release) is also MIT.

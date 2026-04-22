@@ -50,9 +50,7 @@ def _format_as_json(
     """Serialize analysis results to JSON conforming to the current schema version (v0.3.0 when TraceLens fields are present, v0.1.0 otherwise).
 
     The output document contains a top-level ``schema_version`` field that
-    consumers MUST check before parsing.  See
-    ``rocpd/ai_analysis/docs/analysis-output.schema.json`` for the
-    normative schema and ``SCHEMA_CHANGELOG.md`` for migration guidance.
+    consumers MUST check before parsing.
     """
     import json as _json
 

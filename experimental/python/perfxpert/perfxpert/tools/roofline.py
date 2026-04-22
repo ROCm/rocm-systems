@@ -59,7 +59,7 @@ def classify(flops: float, bytes: float, gfx_id: str) -> Dict[str, Any]:
     # Crude: normalized gap between actual AI and the higher of (ridge, AI)
     if regime == "compute":
         # Compute-bound → measured FLOPS vs peak FLOPS (caller would supply separately)
-        # Phase 1 stub: just return 0.5 placeholder; refined in Phase 3 when we have measured perf
+        # Stub: return 0.5 placeholder; refined when measured perf is wired in
         distance = 0.5
     else:
         distance = min(ai / ridge, 1.0)

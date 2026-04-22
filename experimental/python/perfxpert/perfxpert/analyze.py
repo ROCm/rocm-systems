@@ -35,10 +35,8 @@ thin orchestration and CLI layer.
 
 import argparse
 import os
-import re
-import shlex
 import sys
-from datetime import datetime
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 try:
@@ -110,7 +108,6 @@ __all__ = [
     "analyze_hardware_counters",
     "generate_recommendations",
     "format_analysis_output",
-    "analyze_performance",
     "add_args",
     "execute",
     "main",
@@ -139,721 +136,6 @@ from .formatters import (  # noqa: F401 -- re-exports for backward compat
 )
 
 
-def analyze_source_code(
-    source_dir: str,
-    prompt: Optional[str] = None,
-    llm: Optional[str] = None,
-    llm_api_key: Optional[str] = None,
-    llm_model: Optional[str] = None,
-    verbose: bool = False,
-) -> Any:
-    """
-    Run Tier 0 static source code analysis.
-
-    Args:
-        source_dir: Path to source directory
-        prompt: Optional user question to guide analysis
-        llm: LLM provider ("anthropic", "openai")
-        llm_api_key: API key for LLM provider
-        llm_model: Override LLM model name
-        verbose: Enable verbose logging
-
-    Returns:
-        SourceAnalysisResult from ai_analysis.api
-    """
-    from pathlib import Path as _Path
-    from .ai_analysis.source_analyzer import SourceAnalyzer
-    from .ai_analysis.api import _plan_to_source_result
-
-    _src_path = _Path(source_dir)
-    if not _src_path.exists() or not _src_path.is_dir():
-        from .ai_analysis.exceptions import SourceDirectoryNotFoundError
-
-        raise SourceDirectoryNotFoundError(
-            f"Source directory not found or not a directory: {source_dir}"
-        )
-
-    if verbose:
-        print(f"[Tier0] Scanning source directory: {source_dir}")
-
-    scanner = SourceAnalyzer(_src_path, verbose=verbose)
-    plan = scanner.analyze()
-
-    if verbose:
-        print(
-            f"[Tier0] Scanned {plan.files_scanned} files, "
-            f"{plan.kernel_count} kernels, model: {plan.programming_model}"
-        )
-
-    # Convert ProfilingPlan -> SourceAnalysisResult dataclass
-    result = _plan_to_source_result(plan)
-
-    if llm:
-        _prev = os.environ.get("PERFXPERT_LLM_MODEL")
-        try:
-            from .ai_analysis.llm_analyzer import LLMAnalyzer
-
-            if llm_model:
-                os.environ["PERFXPERT_LLM_MODEL"] = llm_model
-            try:
-                analyzer = LLMAnalyzer(provider=llm, api_key=llm_api_key, verbose=verbose)
-                from .ai_analysis.llm_analyzer import AnalysisContext as _AnalysisContext
-
-                _llm_ctx = _AnalysisContext(tier=0, custom_prompt=prompt)
-                _mdl = llm_model or os.environ.get("PERFXPERT_LLM_MODEL", "")
-                _mdl_str = f" ({_mdl})" if _mdl else ""
-                print(
-                    f"  Contacting {llm}{_mdl_str} for source analysis — please wait...",
-                    file=sys.stderr,
-                    flush=True,
-                )
-                result.llm_explanation = analyzer.analyze_source_with_llm(
-                    result, custom_prompt=prompt, context=_llm_ctx
-                )
-            finally:
-                if llm_model:
-                    if _prev is None:
-                        os.environ.pop("PERFXPERT_LLM_MODEL", None)
-                    else:
-                        os.environ["PERFXPERT_LLM_MODEL"] = _prev
-        except Exception as e:
-            print(f"⚠️  Tier 0 LLM enhancement failed: {e}", file=sys.stderr)
-
-    return result
-
-
-def analyze_performance(
-    connection: Optional[RocpdImportData],
-    prompt: Optional[str] = None,
-    top_kernels: int = 10,
-    min_duration: float = 0.0,
-    output_format: str = "text",
-    database_path: str = "",
-    llm: Optional[str] = None,
-    llm_api_key: Optional[str] = None,
-    llm_model: Optional[str] = None,
-    llm_thinking: Optional[int] = None,
-    verbose: bool = False,
-    source_dir: Optional[str] = None,
-    att_dir: Optional[str] = None,
-    _collect_result: Optional[Dict[str, Any]] = None,
-    **kwargs: Any,
-) -> str:
-    """
-    Main analysis orchestrator that runs all analyses and formats output.
-
-    Args:
-        connection: RocpdImportData database connection
-        prompt: Optional custom analysis prompt
-        top_kernels: Number of top kernels to analyze
-        min_duration: Minimum kernel duration threshold
-        output_format: Output format (text, json, markdown)
-        database_path: Path to database file
-        llm: LLM provider (anthropic or openai)
-        llm_api_key: API key for LLM provider
-        verbose: Enable verbose logging
-        **kwargs: Additional arguments
-
-    Returns:
-        Formatted analysis output string
-    """
-    # ------------------------------------------------------------------
-    # Tier 0 — static source code analysis (optional)
-    # ------------------------------------------------------------------
-    tier0_result = None
-    if source_dir:
-        tier0_result = analyze_source_code(
-            source_dir=source_dir,
-            prompt=prompt,
-            llm=llm,
-            llm_api_key=llm_api_key,
-            llm_model=llm_model,
-            verbose=verbose,
-        )
-
-    # ------------------------------------------------------------------
-    # Tier 1/2 — database analysis (only when a connection is provided)
-    # ------------------------------------------------------------------
-    source_only = connection is None
-    if not source_only:
-        time_breakdown = compute_time_breakdown(connection)
-        hotspots = identify_hotspots(
-            connection, top_n=top_kernels, min_duration=min_duration
-        )
-        memory_analysis = analyze_memory_copies(connection)
-        hardware_counters = analyze_hardware_counters(connection)  # Tier 2
-        warmup_issues = detect_warmup_issues(connection, hotspots)
-        kernel_resources = analyze_kernel_resources(connection, hotspots)
-        api_overhead_data = analyze_api_overhead(connection)
-        already_collected = _detect_already_collected(connection)
-        # Tier 3: ATT thread trace (optional — only when --att-dir is provided)
-        att_analysis: Dict[str, Any] = {}
-        if att_dir:
-            att_analysis = analyze_thread_trace(att_dir)
-            if verbose and not att_analysis.get("has_att_data"):
-                print(
-                    f"[ATT] {att_analysis.get('reason', 'No ATT data')}",
-                    file=sys.stderr,
-                )
-        # TraceLens-derived analysis (Phase 1)
-        interval_timeline = compute_interval_timeline(connection)
-        kernel_categories = analyze_kernels_by_category(
-            connection, interval_timeline["total_wall_ns"]
-        )
-        short_kernels_data = analyze_short_kernels(connection)
-        # Generate recommendations (redundant re-collection commands are filtered out)
-        recommendations = generate_recommendations(
-            time_breakdown,
-            hotspots,
-            memory_analysis,
-            hardware_counters,
-            already_collected=already_collected,
-            short_kernels=short_kernels_data,
-            interval_timeline=interval_timeline,
-            att_analysis=att_analysis if att_dir else None,
-            warmup_issues=warmup_issues,
-            api_overhead=api_overhead_data,
-        )
-    else:
-        time_breakdown = {}
-        hotspots = []
-        memory_analysis = {}
-        hardware_counters = {}
-        already_collected = frozenset()
-        att_analysis = {}
-        interval_timeline = {}
-        kernel_categories = []
-        short_kernels_data = {}
-        warmup_issues = None
-        kernel_resources = {"arch": None, "arch_specs": None, "kernels": []}
-        api_overhead_data = {}
-        recommendations = tier0_result.recommendations if tier0_result else []
-
-    # Format output
-    output = format_analysis_output(
-        time_breakdown=time_breakdown,
-        hotspots=hotspots,
-        memory_analysis=memory_analysis,
-        recommendations=recommendations,
-        hardware_counters=hardware_counters,
-        database_path=database_path,
-        output_format=output_format,
-        tier0_result=tier0_result,
-        source_only=source_only,
-        interval_timeline=interval_timeline,
-        kernel_categories=kernel_categories,
-        short_kernels=short_kernels_data,
-        att_analysis=att_analysis if att_analysis else None,
-        custom_prompt=prompt,
-        kernel_resources=kernel_resources,
-        api_overhead=api_overhead_data,
-    )
-
-    # Expose structured results to caller (used by interactive mode)
-    if _collect_result is not None:
-        _collect_result["recommendations"] = recommendations
-        _collect_result["tier0_result"] = tier0_result
-        _collect_result["database_path"] = database_path
-        _collect_result["kernel_resources"] = kernel_resources
-        _collect_result["api_overhead"] = api_overhead_data
-        _collect_result["att_analysis"] = att_analysis
-
-    # LLM enhancement (if enabled) — only for Tier 1/2; Tier 0 LLM runs in analyze_source_code()
-    if llm and not source_only:
-        # Initialize before try so the finally block can always reference these names safely.
-        _prev_model_env = os.environ.get("PERFXPERT_LLM_MODEL")
-        try:
-            if verbose:
-                print(f"[LLM] Enabling {llm} enhancement...")
-
-            from .ai_analysis.llm_analyzer import LLMAnalyzer
-
-            # If caller provided --llm-model, set it in the environment so
-            # LLMAnalyzer._call_anthropic/_call_openai can pick it up.
-            # We restore the original value afterwards.
-            if llm_model:
-                os.environ["PERFXPERT_LLM_MODEL"] = llm_model
-
-            _mdl = llm_model or os.environ.get("PERFXPERT_LLM_MODEL", "")
-            _mdl_str = f" ({_mdl})" if _mdl else ""
-            print(
-                f"  Contacting {llm}{_mdl_str} for trace analysis — please wait...",
-                file=sys.stderr,
-                flush=True,
-            )
-
-            # Initialize LLM analyzer
-            analyzer = LLMAnalyzer(
-                provider=llm,
-                api_key=llm_api_key,
-                verbose=verbose,
-                thinking_budget_tokens=llm_thinking,
-            )
-
-            # Prepare data for LLM
-            analysis_data = {
-                "gpu": {"name": "AMD GPU", "arch": "unknown"},  # TODO: Extract from DB
-                "execution_breakdown": {
-                    "kernel_time_pct": time_breakdown.get("kernel_percent", 0),
-                    "memcpy_time_pct": time_breakdown.get("memcpy_percent", 0),
-                    "api_overhead_pct": time_breakdown.get("overhead_percent", 0),
-                },
-                "kernels": [
-                    {
-                        "name": h.get("name", "unknown"),
-                        "dispatch_count": h.get("calls", 0),
-                        "pct_total_time": h.get("percent_of_total", 0),
-                        "avg_duration_ns": h.get("avg_duration", 0),
-                    }
-                    for h in hotspots[:5]  # Top 5 kernels
-                ],
-                "memory_ops": {
-                    direction: {
-                        "count": data.get("count", 0),
-                        "total_bytes": data.get("total_bytes", 0),
-                        "bandwidth_gbps": data.get("bandwidth_bytes_per_sec", 0) / 1e9,
-                    }
-                    for direction, data in memory_analysis.items()
-                },
-                "has_counters": bool(hardware_counters),
-                "has_pc_sampling": False,
-            }
-
-            # LLM enhancement not available in legacy batch mode (Phase 6)
-            # analyzer.analyze_with_llm() was deleted; use agentic mode or perfxpert-code instead
-            if verbose:
-                print(
-                    "[Warning] LLM enhancement not available in legacy batch mode. "
-                    "Switch to agentic mode or use perfxpert-code for LLM features.",
-                    file=sys.stderr,
-                )
-
-            if output_format == "text":
-                output += "\n\n" + "=" * 80 + "\n"
-                output += "NOTE: LLM enhancement requires agentic mode or perfxpert-code interactive".center(
-                    80
-                ) + "\n"
-                output += "=" * 80 + "\n\n"
-            elif output_format == "json":
-                # Parse JSON (no LLM explanation added)
-                import json
-
-                try:
-                    output_dict = json.loads(output)
-                    output_dict["llm_enhanced_explanation"] = llm_explanation
-                    output = json.dumps(output_dict, indent=2)
-                except (json.JSONDecodeError, ValueError, KeyError) as _je:
-                    print(
-                        f"Warning: Could not embed LLM explanation in JSON output: {_je}",
-                        file=sys.stderr,
-                    )
-
-            if verbose:
-                print("[LLM] Enhancement complete")
-
-        except Exception as e:
-            # Always show LLM failures on console (even without --verbose)
-            error_msg = f"⚠️  LLM enhancement failed: {e}"
-            print(error_msg, file=sys.stderr)
-
-            # Also add to output file
-            warning_msg = (
-                f"\n\n{error_msg}\n(Analysis completed with local results only)\n"
-            )
-            if output_format == "text":
-                output += warning_msg
-
-            # Show full traceback only in verbose mode
-            if verbose:
-                import traceback
-
-                traceback.print_exc()
-
-        finally:
-            # Restore the PERFXPERT_LLM_MODEL env var to its previous state
-            if llm_model:
-                if _prev_model_env is None:
-                    os.environ.pop("PERFXPERT_LLM_MODEL", None)
-                else:
-                    os.environ["PERFXPERT_LLM_MODEL"] = _prev_model_env
-
-    return output
-
-
-def _resolve_api_key(provider: Optional[str], explicit_key: Optional[str]) -> Optional[str]:
-    """Return the right API key for *provider*, preferring the explicit CLI value.
-
-    When the user passes ``--llm openai`` we must read ``OPENAI_API_KEY`` and
-    ignore ``ANTHROPIC_API_KEY`` even if both are exported.  Passing a raw
-    explicit key always wins over any environment variable.
-    """
-    if explicit_key:
-        return explicit_key
-    if provider == "anthropic":
-        return os.environ.get("ANTHROPIC_API_KEY")
-    if provider == "openai":
-        return os.environ.get("OPENAI_API_KEY")
-    # private / local providers: caller handles their own key lookup
-    return None
-
-
-def _call_llm_for_code(
-    provider: str,
-    api_key: Optional[str],
-    model: Optional[str],
-    prompt: str,
-) -> str:
-    """Call Anthropic or OpenAI to generate code-change suggestions."""
-    if provider == "anthropic":
-        try:
-            import anthropic
-        except ImportError:
-            raise ImportError(
-                "anthropic package not installed. Run: pip install anthropic"
-            )
-        key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if not key:
-            raise ValueError(
-                "No Anthropic API key. Set ANTHROPIC_API_KEY or pass --llm-api-key."
-            )
-        use_model = model or os.environ.get("PERFXPERT_LLM_MODEL", "claude-sonnet-4-20250514")
-        client = anthropic.Anthropic(api_key=key)
-        msg = client.messages.create(
-            model=use_model,
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return msg.content[0].text
-
-    elif provider in ("openai", "gpt"):
-        try:
-            import openai
-        except ImportError:
-            raise ImportError("openai package not installed. Run: pip install openai")
-        key = api_key or os.environ.get("OPENAI_API_KEY")
-        if not key:
-            raise ValueError(
-                "No OpenAI API key. Set OPENAI_API_KEY or pass --llm-api-key."
-            )
-        use_model = model or os.environ.get("PERFXPERT_LLM_MODEL", "gpt-4-turbo-preview")
-        client = openai.OpenAI(api_key=key)
-        try:
-            resp = client.chat.completions.create(
-                model=use_model,
-                messages=[{"role": "user", "content": prompt}],
-                max_completion_tokens=4096,
-            )
-        except Exception:
-            resp = client.chat.completions.create(
-                model=use_model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=4096,
-            )
-        return resp.choices[0].message.content
-
-    else:
-        raise ValueError(f"Unknown LLM provider: {provider!r}")
-
-
-def _apply_code_change_interactive(
-    rec: Dict[str, Any],
-    source_dir: str,
-    llm_provider: Optional[str],
-    llm_api_key: Optional[str],
-    llm_model: Optional[str],
-    colors: Dict[str, str],
-) -> None:
-    """Walk the user through applying a code-change recommendation."""
-    _os = os  # alias to keep existing _os.path.* calls working
-    import glob as _glob
-    import difflib
-    import shutil
-
-    C = colors["C"]
-    G = colors["G"]
-    Y = colors["Y"]
-    R = colors["R"]
-    DIM = colors["DIM"]
-    N = colors["N"]
-
-    cat = rec.get("category", "")
-    issue = rec.get("issue", "")
-    suggestion = rec.get("suggestion", "")
-    actions = rec.get("actions", [])
-    impact = rec.get("estimated_impact", "")
-
-    # -- Show recommendation details ------------------------------------------
-    print(f"\n{C}{'─' * 80}{N}")
-    print(f"{C}  Code Change Recommendation: {cat}{N}")
-    print(f"{C}{'─' * 80}{N}")
-    print(f"\n  {Y}Issue:{N}      {issue}")
-    print(f"  {Y}Suggestion:{N} {suggestion}")
-    if actions:
-        print(f"\n  {Y}Required Changes:{N}")
-        for i, action in enumerate(actions, 1):
-            print(f"    {i}. {action}")
-    if impact:
-        print(f"\n  {Y}Estimated Impact:{N} {impact}")
-    print()
-
-    if not source_dir:
-        print(f"  {DIM}Tip: run with --source-dir <path> to enable AI code editing.{N}\n")
-        return
-
-    # -- Find GPU source files ------------------------------------------------
-    source_files: List[str] = []
-    for ext in ("*.hip", "*.cpp", "*.cu", "*.cuh", "*.h"):
-        source_files.extend(
-            _glob.glob(_os.path.join(source_dir, "**", ext), recursive=True)
-        )
-    source_files = [f for f in source_files if _os.path.isfile(f)]
-
-    if not source_files:
-        print(f"  {DIM}No GPU source files found in {source_dir}/{N}\n")
-        return
-
-    # -- Auto-detect LLM provider from environment if not explicitly set ------
-    if not llm_provider:
-        if os.environ.get("ANTHROPIC_API_KEY"):
-            llm_provider = "anthropic"
-        elif os.environ.get("OPENAI_API_KEY"):
-            llm_provider = "openai"
-
-    # -- No LLM configured: show manual steps and offer $EDITOR ---------------
-    if not llm_provider:
-        print(
-            f"  {DIM}To enable AI code editing, set ANTHROPIC_API_KEY (or OPENAI_API_KEY) in your"
-            f" environment, or pass --llm anthropic to PerfXpert analyze.{N}"
-        )
-        print(f"\n  {Y}Manual steps:{N}")
-        for i, action in enumerate(actions, 1):
-            print(f"    {i}. {action}")
-        editor = _os.environ.get("EDITOR", "")
-        if editor and source_files:
-            try:
-                ans = input(f"\n  Open source files in {editor}? [y/N]: ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                ans = "n"
-            if ans in ("y", "yes"):
-                import subprocess
-
-                if not shutil.which(editor):
-                    print(f"  {Y}Editor '{editor}' not found on PATH.{N}")
-                else:
-                    subprocess.run([editor] + source_files[:3])
-        print()
-        return
-
-    # -- Ask user before invoking LLM ----------------------------------------
-    try:
-        ans = (
-            input(
-                f"  {Y}Would you like the AI to apply this change to your source code? [y/N]: {N}"
-            )
-            .strip()
-            .lower()
-        )
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return
-    if ans not in ("y", "yes"):
-        print()
-        return
-
-    # -- Read source files ----------------------------------------------------
-    MAX_FILES = 5
-    MAX_FILE_SIZE = 50_000  # bytes per file
-
-    print(f"\n  {DIM}Reading source files...{N}")
-    file_contents: Dict[str, str] = {}
-    for fpath in source_files[:MAX_FILES]:
-        try:
-            with open(fpath, "r", encoding="utf-8", errors="replace") as fh:
-                file_contents[fpath] = fh.read(MAX_FILE_SIZE)
-        except OSError:
-            pass
-
-    if not file_contents:
-        print(f"  {R}Could not read source files.{N}\n")
-        return
-
-    # -- Build LLM prompt -----------------------------------------------------
-    files_text = "\n\n".join(
-        f"=== {_os.path.relpath(fp, source_dir)} ===\n{content}"
-        for fp, content in file_contents.items()
-    )
-    changes_text = "\n".join(f"- {a}" for a in actions)
-
-    llm_prompt = (
-        "You are a GPU performance optimization expert. The following GPU source files "
-        "have a performance issue that needs to be fixed.\n\n"
-        f"ISSUE: {issue}\n"
-        f"SUGGESTION: {suggestion}\n"
-        f"REQUIRED CHANGES:\n{changes_text}\n\n"
-        f"SOURCE FILES:\n{files_text}\n\n"
-        "OUTPUT INSTRUCTIONS:\n"
-        "For each file that needs modification, output EXACTLY this format:\n"
-        "MODIFY_FILE: <relative_filename>\n"
-        "<<<ORIGINAL\n"
-        "<exact original code section to replace — copy verbatim from the source>\n"
-        "ORIGINAL\n"
-        "<<<REPLACEMENT\n"
-        "<new replacement code>\n"
-        "REPLACEMENT\n\n"
-        "Only output sections that need to change. Be precise — the ORIGINAL block must "
-        "match exactly what appears in the file (used for find-and-replace). "
-        "If no changes are needed, output: NO_CHANGES_NEEDED"
-    )
-
-    print(f"  {DIM}Calling {llm_provider} for code change suggestions...{N}")
-
-    try:
-        llm_response = _call_llm_for_code(
-            provider=llm_provider,
-            api_key=llm_api_key,
-            model=llm_model,
-            prompt=llm_prompt,
-        )
-    except Exception as exc:
-        print(f"  {R}LLM error: {exc}{N}\n")
-        return
-
-    if "NO_CHANGES_NEEDED" in llm_response:
-        print(f"  {G}AI analysis: no code changes are needed for this issue.{N}\n")
-        return
-
-    # -- Parse MODIFY_FILE blocks ---------------------------------------------
-    patches: List[tuple] = []
-    pattern = re.compile(
-        r"MODIFY_FILE:\s*(\S+)\s*<<<ORIGINAL\n(.*?)ORIGINAL\s*<<<REPLACEMENT\n(.*?)REPLACEMENT",
-        re.DOTALL,
-    )
-    for m in pattern.finditer(llm_response):
-        rel_path = m.group(1).strip()
-        original = m.group(2).strip()
-        replacement = m.group(3).strip()
-        abs_path = _os.path.join(source_dir, rel_path)
-        # Guard against path traversal (e.g. rel_path = "../../etc/passwd")
-        _resolved = _os.path.realpath(abs_path)
-        _src_resolved = _os.path.realpath(source_dir)
-        if (
-            not _resolved.startswith(_src_resolved + _os.sep)
-            and _resolved != _src_resolved
-        ):
-            continue  # reject: path escapes source_dir
-        if _os.path.isfile(abs_path) and abs_path in file_contents:
-            patches.append((abs_path, rel_path, original, replacement))
-
-    if not patches:
-        print(f"  {Y}AI did not produce actionable code changes.{N}")
-        print(f"  {DIM}Raw AI response (first 20 lines):{N}")
-        for line in llm_response.splitlines()[:20]:
-            print(f"    {DIM}{line}{N}")
-        print()
-        return
-
-    # -- Show unified diff ----------------------------------------------------
-    print(f"\n{C}{'─' * 80}{N}")
-    print(f"{C}  Proposed changes:{N}")
-    print(f"{C}{'─' * 80}{N}")
-
-    valid_patches: List[tuple] = []
-    for abs_path, rel_path, original, replacement in patches:
-        orig_content = file_contents[abs_path]
-        if original not in orig_content:
-            print(f"\n  {R}✗ Could not locate original code in {rel_path} — skipping.{N}")
-            continue
-        new_content = orig_content.replace(original, replacement, 1)
-        diff = list(
-            difflib.unified_diff(
-                orig_content.splitlines(keepends=True),
-                new_content.splitlines(keepends=True),
-                fromfile=f"a/{rel_path}",
-                tofile=f"b/{rel_path}",
-                n=3,
-            )
-        )
-        print(f"\n  File: {rel_path}")
-        for line in diff[:80]:
-            if line.startswith("+") and not line.startswith("+++"):
-                print(f"  {G}{line.rstrip()}{N}")
-            elif line.startswith("-") and not line.startswith("---"):
-                print(f"  {R}{line.rstrip()}{N}")
-            elif line.startswith("@@"):
-                print(f"  {C}{line.rstrip()}{N}")
-            else:
-                print(f"  {DIM}{line.rstrip()}{N}")
-        if len(diff) > 80:
-            print(f"  {DIM}  ... ({len(diff) - 80} more lines){N}")
-        valid_patches.append((abs_path, rel_path, orig_content, new_content))
-
-    if not valid_patches:
-        print()
-        return
-
-    print()
-    try:
-        ans = input(f"  {Y}Apply these changes? [y/N]: {N}").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return
-
-    if ans not in ("y", "yes"):
-        print(f"  {DIM}Changes not applied.{N}\n")
-        return
-
-    # -- Apply with backup ----------------------------------------------------
-    applied = 0
-    for abs_path, rel_path, orig_content, new_content in valid_patches:
-        backup_path = abs_path + ".perfxpert.bak"
-        try:
-            import shutil
-            shutil.copy2(abs_path, backup_path)
-            with open(abs_path, "w", encoding="utf-8") as fh:
-                fh.write(new_content)
-            print(
-                f"  {G}✓ Applied: {rel_path}  (backup: {_os.path.basename(backup_path)}){N}"
-            )
-            applied += 1
-        except OSError as exc:
-            print(f"  {R}✗ Failed to write {rel_path}: {exc}{N}")
-
-    if applied:
-        print(
-            f"\n  {G}✓ {applied} file(s) modified. Rebuild your application to test.{N}\n"
-        )
-        return True
-    else:
-        print(f"  {Y}No files were modified.{N}\n")
-        return False
-
-
-def _get_app_path_from_db(database_path: str) -> str:
-    """
-    Extract the profiled application's executable path from a rocpd database.
-
-    rocprofv3 writes the process command into rocpd_info_process_<uuid>.command.
-    Returns the path string, or "" if the database cannot be read or has no entry.
-    """
-    if not database_path:
-        return ""
-    try:
-        import sqlite3 as _sqlite3
-
-        with _sqlite3.connect(database_path) as con:
-            # Find all rocpd_info_process_* tables
-            tables = con.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_info_process_%'"
-            ).fetchall()
-            for (tname,) in tables:
-                row = con.execute(
-                    f'SELECT command FROM "{tname}" WHERE command IS NOT NULL LIMIT 1'
-                ).fetchone()
-                if row and row[0]:
-                    return row[0].strip()
-    except Exception:
-        pass
-    return ""
 
 
 def add_args(parser: argparse.ArgumentParser):
@@ -897,6 +179,7 @@ def add_args(parser: argparse.ArgumentParser):
     analysis_options.add_argument(
         "--format",
         type=str,
+        dest="output_format",
         choices=["text", "json", "markdown", "webview"],
         default="text",
         help="Output format: text, json, markdown, or webview (default: text). "
@@ -920,14 +203,16 @@ def add_args(parser: argparse.ArgumentParser):
     llm_options.add_argument(
         "--llm",
         type=str,
-        choices=["anthropic", "openai", "claude-code"],
+        dest="llm_provider",
+        choices=["anthropic", "openai", "opencode", "claude-code"],
         default=None,
         help=(
             "Enable LLM-powered analysis enhancement. "
             "'anthropic' uses the Anthropic API (requires ANTHROPIC_API_KEY). "
             "'openai' uses the OpenAI API (requires OPENAI_API_KEY). "
-            "'claude-code' uses the Claude Code CLI installed on this machine — "
-            "no API key needed, uses existing Claude Code credentials. "
+            "'opencode' uses the local opencode CLI installed on this machine — "
+            "no API key needed, uses existing opencode credentials. "
+            "'claude-code' is accepted as a deprecated alias for 'opencode'. "
             "Local analysis always runs first; LLM provides additional natural language insights."
         ),
     )
@@ -937,9 +222,10 @@ def add_args(parser: argparse.ArgumentParser):
         type=str,
         default=None,
         help="API key for LLM provider. Alternatively, set environment variable: "
-        "ANTHROPIC_API_KEY for Anthropic Claude, or OPENAI_API_KEY for OpenAI GPT. "
+        "PERFXPERT_LLM_ANTHROPIC_KEY or ANTHROPIC_API_KEY for Anthropic Claude, "
+        "or PERFXPERT_LLM_OPENAI_KEY or OPENAI_API_KEY for OpenAI GPT. "
         "Example: --llm anthropic --llm-api-key sk-ant-... "
-        "Or: export ANTHROPIC_API_KEY='sk-ant-...' && perfxpert analyze --llm anthropic",
+        "Or: export PERFXPERT_LLM_ANTHROPIC_KEY='sk-ant-...' && perfxpert analyze --llm anthropic",
     )
 
     llm_options.add_argument(
@@ -1016,15 +302,23 @@ def add_args(parser: argparse.ArgumentParser):
     )
 
     def process_args(input: RocpdImportData, args: argparse.Namespace):
-        """Process and return valid arguments as dictionary."""
+        """Process and return valid arguments as dictionary.
+
+        Arg names are chosen to match `_execute_agentic`'s kwarg
+        expectations directly (review E2E bug 1): ``output_format`` and
+        ``llm_provider`` are wired via argparse ``dest=`` overrides on the
+        `--format` / `--llm` flags. ``enable_llm`` is derived from
+        ``llm_provider`` being truthy so the agentic path activates the
+        live LLM session without a separate boolean flag.
+        """
         valid_args = [
             "source_dir",
             "att_dir",
             "prompt",
             "top_kernels",
-            "format",
+            "output_format",
             "min_duration",
-            "llm",
+            "llm_provider",
             "llm_api_key",
             "llm_model",
             "llm_thinking",
@@ -1032,24 +326,38 @@ def add_args(parser: argparse.ArgumentParser):
             "llm_local",
             "llm_local_model",
         ]
+        # Argparse defaults argparse emits for flags not passed by the
+        # user; we skip these so kwargs do not carry noise that the
+        # downstream agentic runtime has to special-case. Example: the
+        # `--verbose` store_true flag defaults to False, and the
+        # `--top-kernels` integer flag defaults to 10; passing them
+        # unconditionally would mask "user did not set this" from
+        # `_execute_agentic`.
+        _cli_defaults = {
+            "verbose": False,
+            "top_kernels": 10,
+            "min_duration": 0.0,
+        }
         ret = {}
         for itr in valid_args:
             if hasattr(args, itr):
                 val = getattr(args, itr)
-                if val is not None:
-                    ret[itr] = val
+                if val is None:
+                    continue
+                # Drop pure-default values so kwargs reflect what the user
+                # actually set on the CLI.
+                if itr in _cli_defaults and val == _cli_defaults[itr]:
+                    continue
+                ret[itr] = val
         # Convert min_duration from microseconds to nanoseconds
         if "min_duration" in ret:
             ret["min_duration"] = ret["min_duration"] * 1000
+        # Derive enable_llm: non-None llm_provider means the user asked for LLM
+        if ret.get("llm_provider"):
+            ret["enable_llm"] = True
         return ret
 
     return process_args
-
-
-def _is_agentic_enabled() -> bool:
-    """Feature flag: PERFXPERT_USE_AGENTS truthy values opt into the new path."""
-    import os
-    return os.environ.get("PERFXPERT_USE_AGENTS", "").strip().lower() in {"1", "true", "yes"}
 
 
 def execute(
@@ -1058,10 +366,7 @@ def execute(
     **kwargs: Any,
 ) -> Optional[RocpdImportData]:
     """
-    Public CLI entry point — dispatches to legacy or agentic implementation.
-
-    Default behavior (Phase 6+): AGENTIC. Set PERFXPERT_LEGACY=1
-    to opt into the legacy path (removed in vX.Y+1).
+    Public CLI entry point — delegates to the agentic implementation.
 
     Args:
         input: RocpdImportData object with database connection, or None for source-only mode
@@ -1071,10 +376,6 @@ def execute(
     Returns:
         The input RocpdImportData object (for chaining), or None in source-only mode
     """
-    from .ai_analysis.api import _is_legacy_mode, _emit_legacy_deprecation_once
-    if _is_legacy_mode():
-        _emit_legacy_deprecation_once()
-        return _execute_legacy(input, config=config, **kwargs)
     return _execute_agentic(input, config=config, **kwargs)
 
 
@@ -1082,24 +383,397 @@ def _normalize_agentic_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(kwargs)
     if "format" in normalized and "output_format" not in normalized:
         normalized["output_format"] = normalized.pop("format")
-    if "prompt" in normalized and "custom_prompt" not in normalized:
-        normalized["custom_prompt"] = normalized.pop("prompt")
     if "llm" in normalized and "llm_provider" not in normalized:
         normalized["llm_provider"] = normalized.pop("llm")
-    if "llm_thinking" in normalized and "llm_thinking_tokens" not in normalized:
-        normalized["llm_thinking_tokens"] = normalized.pop("llm_thinking")
+    if "custom_prompt" in normalized and "prompt" not in normalized:
+        normalized["prompt"] = normalized["custom_prompt"]
+    if "llm_thinking_tokens" in normalized and "llm_thinking" not in normalized:
+        normalized["llm_thinking"] = normalized["llm_thinking_tokens"]
+    if normalized.get("llm_provider") == "claude-code":
+        normalized["llm_provider"] = "opencode"
     normalized["enable_llm"] = bool(normalized.get("llm_provider"))
     return normalized
 
 
 def _render_agentic_result(result: Any, output_format: str) -> str:
+    serializer_name = {
+        "json": "to_json",
+        "markdown": "to_markdown",
+        "webview": "to_webview",
+        "text": "to_text",
+    }.get(output_format, "to_text")
+    serializer = getattr(result, serializer_name, None)
+    if callable(serializer):
+        return serializer()
+
+    if hasattr(result, "model_dump"):
+        payload = result.model_dump()
+    else:
+        payload = {
+            "narrative": getattr(result, "narrative", ""),
+            "recommendations": list(getattr(result, "recommendations", []) or []),
+            "primary_bottleneck": getattr(result, "primary_bottleneck", "mixed"),
+            "warnings": list(getattr(result, "warnings", []) or []),
+            "metadata": dict(getattr(result, "metadata", {}) or {}),
+        }
+
+    narrative = str(payload.get("narrative", "") or "").strip()
+    recommendations = list(payload.get("recommendations", []) or [])
+    warnings = list(payload.get("warnings", []) or [])
+    metadata = dict(payload.get("metadata", {}) or {})
+    primary_bottleneck = str(payload.get("primary_bottleneck", "mixed"))
+
     if output_format == "json":
-        return result.to_json()
+        import json
+
+        return json.dumps(
+            {
+                "narrative": narrative,
+                "recommendations": recommendations,
+                "primary_bottleneck": primary_bottleneck,
+                "warnings": warnings,
+                "metadata": metadata,
+            },
+            indent=2,
+        )
+
     if output_format == "markdown":
-        return result.to_markdown()
+        lines = ["# PerfXpert Analysis", ""]
+        lines.append(f"- Primary bottleneck: `{primary_bottleneck}`")
+        for key in ("intent", "routed_to"):
+            if metadata.get(key):
+                lines.append(f"- {key.replace('_', ' ').title()}: `{metadata[key]}`")
+        if narrative:
+            lines.extend(["", "## Narrative", "", narrative])
+        if recommendations:
+            lines.extend(["", "## Recommendations", ""])
+            for rec in recommendations:
+                priority = rec.get("priority", "INFO")
+                issue = rec.get("issue") or rec.get("suggestion") or rec.get("category") or "Recommendation"
+                lines.append(f"- [{priority}] {issue}")
+        if warnings:
+            lines.extend(["", "## Warnings", ""])
+            for warning in warnings:
+                lines.append(f"- {warning}")
+        return "\n".join(lines)
+
     if output_format == "webview":
-        return result.to_webview()
-    return result.to_text()
+        from html import escape
+
+        rec_items = "".join(
+            f"<li><strong>{escape(str(rec.get('priority', 'INFO')))}</strong>: "
+            f"{escape(str(rec.get('issue') or rec.get('suggestion') or rec.get('category') or 'Recommendation'))}</li>"
+            for rec in recommendations
+        )
+        warn_items = "".join(f"<li>{escape(str(warning))}</li>" for warning in warnings)
+        narrative_html = escape(narrative).replace("\n", "<br />")
+        return (
+            "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+            "<title>PerfXpert Analysis</title></head><body>"
+            f"<h1>PerfXpert Analysis</h1><p><strong>Primary bottleneck:</strong> {escape(primary_bottleneck)}</p>"
+            f"<p>{narrative_html or 'Analysis complete.'}</p>"
+            f"<h2>Recommendations</h2><ul>{rec_items or '<li>None</li>'}</ul>"
+            f"<h2>Warnings</h2><ul>{warn_items or '<li>None</li>'}</ul>"
+            "</body></html>"
+        )
+
+    lines = []
+    if narrative:
+        lines.append(narrative)
+    else:
+        lines.append("Analysis complete.")
+    lines.append(f"Primary bottleneck: {primary_bottleneck}")
+    if recommendations:
+        lines.append("")
+        lines.append("Recommendations:")
+        for rec in recommendations:
+            priority = rec.get("priority", "INFO")
+            issue = rec.get("issue") or rec.get("suggestion") or rec.get("category") or "Recommendation"
+            lines.append(f"- [{priority}] {issue}")
+    if warnings:
+        lines.append("")
+        lines.append("Warnings:")
+        for warning in warnings:
+            lines.append(f"- {warning}")
+    return "\n".join(lines)
+
+
+class _AgenticAnalysisReport:
+    """Formatter-backed wrapper for agentic Analysis/Recommendation outputs."""
+
+    def __init__(
+        self,
+        *,
+        analysis_output: Any,
+        recommendation_output: Any,
+        database_path: str,
+        custom_prompt: Optional[str] = None,
+    ) -> None:
+        self._time_breakdown = _normalize_agentic_breakdown(
+            getattr(analysis_output, "time_breakdown", {}) or {}
+        )
+        self._hotspots = _normalize_agentic_hotspots(
+            list(getattr(analysis_output, "hot_kernels", []) or [])
+        )
+        if self._time_breakdown["total_runtime"] <= 0:
+            estimated_total = _estimate_total_runtime_ns(self._hotspots)
+            if estimated_total > 0:
+                kernel_pct = self._time_breakdown["kernel_percent"] / 100.0
+                memcpy_pct = self._time_breakdown["memcpy_percent"] / 100.0
+                self._time_breakdown["total_runtime"] = estimated_total
+                self._time_breakdown["total_kernel_time"] = int(estimated_total * kernel_pct)
+                self._time_breakdown["total_memcpy_time"] = int(estimated_total * memcpy_pct)
+        self._recommendations = _normalize_agentic_recommendations(
+            list(getattr(recommendation_output, "recommendations", []) or []),
+            getattr(analysis_output, "primary_bottleneck", "mixed"),
+        )
+        has_counters = bool(getattr(analysis_output, "counter_data_available", False))
+        self._hardware_counters = {
+            "has_counters": has_counters,
+            "metrics": {},
+            "counters": {},
+        }
+        self._database_path = database_path
+        self._custom_prompt = custom_prompt
+
+    def _format(self, output_format: str) -> str:
+        return format_analysis_output(
+            time_breakdown=self._time_breakdown,
+            hotspots=self._hotspots,
+            memory_analysis={},
+            recommendations=self._recommendations,
+            hardware_counters=self._hardware_counters,
+            database_path=self._database_path,
+            output_format=output_format,
+            custom_prompt=self._custom_prompt,
+        )
+
+    def to_json(self) -> str:
+        return self._format("json")
+
+    def to_markdown(self) -> str:
+        return self._format("markdown")
+
+    def to_webview(self) -> str:
+        return self._format("webview")
+
+    def to_text(self) -> str:
+        return self._format("text")
+
+
+def _scale_agentic_pct(value: Any) -> float:
+    pct = float(value or 0.0)
+    return pct * 100.0 if 0.0 <= pct <= 1.0 else pct
+
+
+def _normalize_agentic_breakdown(time_breakdown: Dict[str, Any]) -> Dict[str, Any]:
+    kernel_pct = _scale_agentic_pct(
+        time_breakdown.get("kernel_pct", time_breakdown.get("kernel_percent", 0.0))
+    )
+    memcpy_pct = _scale_agentic_pct(
+        time_breakdown.get("memcpy_pct", time_breakdown.get("memcpy_percent", 0.0))
+    )
+    overhead_pct = _scale_agentic_pct(
+        time_breakdown.get("api_pct", time_breakdown.get("overhead_percent", 0.0))
+    )
+    idle_pct = _scale_agentic_pct(time_breakdown.get("idle_pct", 0.0))
+    total_pct = kernel_pct + memcpy_pct + overhead_pct + idle_pct
+    if total_pct > 100.0:
+        idle_pct = max(0.0, 100.0 - kernel_pct - memcpy_pct - overhead_pct)
+    return {
+        "kernel_percent": kernel_pct,
+        "memcpy_percent": memcpy_pct,
+        "overhead_percent": overhead_pct,
+        "idle_percent": idle_pct,
+        "total_runtime": int(time_breakdown.get("total_runtime", 0) or 0),
+        "total_kernel_time": int(time_breakdown.get("total_kernel_time", 0) or 0),
+        "total_memcpy_time": int(time_breakdown.get("total_memcpy_time", 0) or 0),
+    }
+
+
+def _normalize_agentic_hotspots(hot_kernels: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    normalized = []
+    for kernel in hot_kernels:
+        calls = int(kernel.get("calls", 1) or 1)
+        total_duration = int(
+            kernel.get(
+                "total_duration_ns",
+                kernel.get("duration_ns", kernel.get("total_duration", 0)),
+            )
+        )
+        avg_duration = int(
+            kernel.get("avg_duration_ns", kernel.get("avg_duration", 0))
+            or (total_duration / calls if calls else total_duration)
+        )
+        pct = kernel.get(
+            "percent_of_total",
+            kernel.get("pct_of_total", kernel.get("pct", 0.0)),
+        )
+        normalized.append(
+            {
+                "name": kernel.get("name", "unknown"),
+                "calls": calls,
+                "total_duration": total_duration,
+                "avg_duration": avg_duration,
+                "min_duration": int(kernel.get("min_duration_ns", avg_duration)),
+                "max_duration": int(kernel.get("max_duration_ns", total_duration)),
+                "percent_of_total": _scale_agentic_pct(pct),
+            }
+        )
+    return normalized
+
+
+def _format_agentic_impact(value: Any) -> str:
+    if value is None:
+        return "Unknown"
+    if isinstance(value, (int, float)):
+        if 0.0 <= value <= 1.0:
+            return f"{value:.0%} improvement"
+        return str(value)
+    return str(value)
+
+
+def _agentic_priority(index: int, recommendation: Dict[str, Any]) -> str:
+    explicit = str(recommendation.get("priority", "")).strip().upper()
+    if explicit in {"HIGH", "MEDIUM", "LOW", "INFO"}:
+        return explicit
+    impact = recommendation.get("expected_impact")
+    if isinstance(impact, (int, float)):
+        if impact >= 0.4:
+            return "HIGH"
+        if impact >= 0.15:
+            return "MEDIUM"
+        return "LOW"
+    if index == 0:
+        return "HIGH"
+    if index < 3:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _normalize_agentic_recommendations(
+    recommendations: List[Dict[str, Any]],
+    default_category: str,
+) -> List[Dict[str, Any]]:
+    raw_recommendations = []
+
+    for index, rec in enumerate(recommendations):
+        priority = _agentic_priority(index, rec)
+        category = str(rec.get("category") or default_category or "general")
+        title = str(rec.get("title") or rec.get("name") or "Optimization opportunity")
+        description = str(
+            rec.get("description") or rec.get("rationale") or rec.get("issue") or ""
+        )
+        impact = _format_agentic_impact(rec.get("expected_impact"))
+
+        next_steps = list(rec.get("actions") or [])
+        if not next_steps:
+            effort = rec.get("effort")
+            effort_factor = rec.get("effort_factor")
+            risk = rec.get("risk")
+            if effort:
+                next_steps.append(f"Estimated effort: {effort}")
+            elif effort_factor is not None:
+                next_steps.append(f"Effort factor: {effort_factor}")
+            if risk:
+                next_steps.append(f"Risk: {risk}")
+
+        raw_recommendations.append(
+            {
+                "priority": priority,
+                "category": category,
+                "issue": title,
+                "suggestion": description,
+                "actions": next_steps,
+                "estimated_impact": impact,
+                "confidence": rec.get("confidence"),
+                "commands": rec.get("commands", []),
+            }
+        )
+
+    return raw_recommendations
+
+
+def _estimate_total_runtime_ns(hotspots: List[Dict[str, Any]]) -> int:
+    estimates = []
+    for kernel in hotspots:
+        total_duration = int(kernel.get("total_duration", 0) or 0)
+        pct = float(kernel.get("percent_of_total", 0.0) or 0.0)
+        if total_duration > 0 and pct > 0.0:
+            estimates.append(total_duration / (pct / 100.0))
+    if not estimates:
+        return 0
+    estimates.sort()
+    return int(estimates[len(estimates) // 2])
+
+
+@contextmanager
+def _temporary_env(overrides: Dict[str, Optional[str]]):
+    saved = {key: os.environ.get(key) for key in overrides}
+    try:
+        for key, value in overrides.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _provider_env_overrides(
+    llm_provider: Optional[str],
+    normalized_kwargs: Dict[str, Any],
+) -> Dict[str, Optional[str]]:
+    overrides: Dict[str, Optional[str]] = {}
+    llm_model = normalized_kwargs.get("llm_model")
+    llm_api_key = normalized_kwargs.get("llm_api_key")
+
+    if llm_model:
+        overrides["PERFXPERT_LLM_MODEL"] = str(llm_model)
+
+    if llm_api_key and llm_provider == "anthropic":
+        overrides["PERFXPERT_LLM_ANTHROPIC_KEY"] = str(llm_api_key)
+    elif llm_api_key and llm_provider == "openai":
+        overrides["PERFXPERT_LLM_OPENAI_KEY"] = str(llm_api_key)
+
+    return overrides
+
+
+# -- known kwargs accepted by `_execute_agentic` ---------------------------
+# Any kwarg not in this set that is forwarded from `execute()` will emit a
+# WARNING so future argparse additions cannot silently drop through the
+# agentic pipeline.
+_KNOWN_EXECUTE_KWARGS = frozenset({
+    # Output routing
+    "format",
+    "output_format",
+    "output_file",
+    "output_path",
+    # LLM provider wiring
+    "llm",
+    "enable_llm",
+    "llm_provider",
+    "llm_api_key",
+    "llm_model",
+    "llm_thinking",
+    "llm_thinking_tokens",
+    "llm_local",
+    "llm_local_model",
+    # Analysis options forwarded through AnalysisInput.analysis_options
+    "source_dir",
+    "att_dir",
+    "prompt",
+    "custom_prompt",
+    "top_kernels",
+    "min_duration",
+    # Execution flags
+    "verbose",
+})
 
 
 def _execute_agentic(
@@ -1107,8 +781,33 @@ def _execute_agentic(
     config: Optional[output_config.output_config] = None,
     **kwargs: Any,
 ) -> Optional[RocpdImportData]:
-    """Agentic path: run analysis via the API wrapper, then reuse existing serializers."""
+    """Agentic path: delegates to the agents session API.
+
+    Database-backed analysis runs Analysis -> Recommendation and then
+    renders through the canonical formatter stack. Source-only mode
+    falls back to RootOutput rendering until Tier 0 regains a dedicated
+    agent-backed implementation.
+    """
+    try:
+        from perfxpert.agents import runtime, schemas
+    except ImportError as e:
+        raise RuntimeError(
+            "Agent runtime is not available. "
+            "perfxpert.agents must be importable for the agentic path."
+        ) from e
     normalized_kwargs = _normalize_agentic_kwargs(kwargs)
+
+    _unused = set(kwargs) - _KNOWN_EXECUTE_KWARGS
+    if _unused:
+        import warnings
+
+        warnings.warn(
+            "perfxpert.analyze: unused kwargs ignored by agentic runtime: "
+            f"{sorted(_unused)}. Wire them in _execute_agentic or drop the "
+            "corresponding --flag.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
     # Update config if provided
     if config is not None:
@@ -1123,25 +822,75 @@ def _execute_agentic(
             input._paths[0] if isinstance(input._paths, list) else input._paths
         )
 
-    if input is None:
-        return _execute_legacy(input, config=config, **kwargs)
+    # Get source_dir if provided (for Tier 0 analysis)
+    source_dir = normalized_kwargs.get("source_dir")
 
-    from .ai_analysis import api as ai_api
+    # Get custom prompt if provided. CLI emits `prompt` (argparse dest);
+    # accept `custom_prompt` as a back-compat alias for library callers.
+    custom_prompt = normalized_kwargs.get("prompt") or normalized_kwargs.get("custom_prompt")
 
-    result = ai_api.analyze_database(
-        database_path=database_path,
-        custom_prompt=normalized_kwargs.get("custom_prompt"),
-        enable_llm=normalized_kwargs.get("enable_llm", False),
-        llm_provider=normalized_kwargs.get("llm_provider"),
-        llm_api_key=normalized_kwargs.get("llm_api_key"),
-        llm_thinking_tokens=normalized_kwargs.get("llm_thinking_tokens"),
-        verbose=normalized_kwargs.get("verbose", False),
-        top_kernels=normalized_kwargs.get("top_kernels", 10),
-        att_dir=normalized_kwargs.get("att_dir"),
+    # Build session
+    enable_llm = normalized_kwargs.get("enable_llm", False)
+    llm_provider = normalized_kwargs.get("llm_provider")
+    session = runtime.build_session(
+        provider=llm_provider if enable_llm else None,
+        airgap=(not enable_llm),
     )
 
+    # Collect downstream analysis options as a side-channel dict on
+    # AnalysisInput so the LLM-facing analysis agent can still observe
+    # non-schema flags without blocking the deterministic path.
+    analysis_options: Dict[str, Any] = {}
+    for key in (
+        "top_kernels",
+        "att_dir",
+        "min_duration",
+        "llm_model",
+        "llm_thinking",
+        "llm_local",
+        "llm_local_model",
+        "verbose",
+    ):
+        val = normalized_kwargs.get(key)
+        if val is not None:
+            analysis_options[key] = val
+
     output_format = normalized_kwargs.get("output_format", "text")
-    output = _render_agentic_result(result, output_format)
+    env_overrides = _provider_env_overrides(llm_provider if enable_llm else None, normalized_kwargs)
+    with _temporary_env(env_overrides):
+        if input is None:
+            root_input = schemas.RootInput(
+                user_query=custom_prompt or "Analyze this GPU performance trace.",
+                database_path=None,
+                source_dir=source_dir,
+                provider=llm_provider if enable_llm else None,
+                airgap=(not enable_llm),
+                session_id=session.session_id,
+                analysis_options=analysis_options,
+            )
+            output = _render_agentic_result(
+                session.run_root(root_input),
+                output_format,
+            )
+        else:
+            analysis_input = schemas.AnalysisInput(
+                database_path=database_path,
+                top_kernels=normalized_kwargs.get("top_kernels", 10),
+                att_dir=normalized_kwargs.get("att_dir"),
+                min_duration=float(normalized_kwargs.get("min_duration", 0.0) or 0.0),
+                analysis_options=analysis_options,
+            )
+            analysis_output = session.run_analysis(analysis_input)
+            recommendation_output = session.run_recommendation(
+                schemas.RecommendationInput(findings=analysis_output)
+            )
+            report = _AgenticAnalysisReport(
+                analysis_output=analysis_output,
+                recommendation_output=recommendation_output,
+                database_path=database_path,
+                custom_prompt=custom_prompt,
+            )
+            output = _render_agentic_result(report, output_format)
 
     # Handle output writing
     _ext_map = {"json": ".json", "markdown": ".md", "webview": ".html", "text": ".txt"}
@@ -1174,85 +923,6 @@ def _execute_agentic(
     return input
 
 
-def _execute_legacy(
-    input: Optional[RocpdImportData],
-    config: Optional[output_config.output_config] = None,
-    **kwargs: Any,
-) -> Optional[RocpdImportData]:
-    """
-    Execute AI analysis on rocpd database and/or source directory (legacy implementation).
-
-    Args:
-        input: RocpdImportData object with database connection, or None for source-only mode
-        config: Optional output configuration
-        **kwargs: Analysis parameters (may include source_dir for Tier 0)
-
-    Returns:
-        The input RocpdImportData object (for chaining), or None in source-only mode
-    """
-    # Update config if provided
-    if config is not None:
-        config = config.update(**kwargs)
-    else:
-        config = output_config.output_config(**kwargs)
-
-    # Get database path for display
-    database_path = ""
-    if input is not None and hasattr(input, "_paths") and input._paths:
-        database_path = str(
-            input._paths[0] if isinstance(input._paths, list) else input._paths
-        )
-
-    # Map 'format' CLI key -> 'output_format' parameter expected by analyze_performance
-    if "format" in kwargs:
-        kwargs["output_format"] = kwargs.pop("format")
-
-    # Collect structured results so interactive mode can build its command menu
-    result_store: Dict[str, Any] = {}
-
-    # Run analysis
-    output = analyze_performance(
-        connection=input,
-        database_path=database_path,
-        _collect_result=result_store,
-        **kwargs,
-    )
-
-    # Determine file extension based on output format
-    _ext_map = {"json": ".json", "markdown": ".md", "webview": ".html", "text": ".txt"}
-    _fmt = kwargs.get("output_format", "text")
-    _ext = _ext_map.get(_fmt, ".txt")
-
-    # Handle output
-    # When -d is given without -o, auto-generate a default filename from the db name.
-    if config and config.output_path and not config.output_file:
-        if database_path:
-            config.output_file = os.path.splitext(os.path.basename(database_path))[0]
-        else:
-            config.output_file = "analysis"
-
-    if config and config.output_file and config.output_path:
-        base = config.output_file
-        # Append the format extension if the base name doesn't already have it
-        if not base.endswith(_ext):
-            base = base + _ext
-        output_file = os.path.join(config.output_path, base)
-        os.makedirs(config.output_path, exist_ok=True)
-        with open(output_file, "w") as f:
-            f.write(output)
-        print(f"Analysis written to: {output_file}")
-        if _fmt == "text":
-            print(
-                "Tip: use --format webview for an interactive HTML report, "
-                "--format json for machine-readable output, "
-                "or --format markdown for Markdown."
-            )
-    else:
-        print(output)
-
-    return input
-
-
 def main(argv=None) -> int:
     """
     Main entry point for standalone execution.
@@ -1264,7 +934,7 @@ def main(argv=None) -> int:
         Exit code (0 for success, non-zero for error)
     """
     parser = argparse.ArgumentParser(
-        prog="rocpd.analyze",
+        prog="perfxpert analyze",
         description="AI-powered performance analysis for GPU traces",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

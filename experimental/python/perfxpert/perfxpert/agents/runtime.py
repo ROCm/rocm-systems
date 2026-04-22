@@ -4,7 +4,7 @@ Single entry point shared by: batch CLI, library API, MCP server.
 
 Responsibilities:
 - Pick provider from arg / env / config
-- Validate against PROVIDER_REGISTRY (Phase 2 providers/__init__.py)
+- Validate against PROVIDER_REGISTRY (providers/__init__.py)
 - Call runtime.recursion_guard.ensure_not_recursive(provider)
 - Honor PERFXPERT_AIRGAP env var
 - Generate session_id if missing
@@ -22,7 +22,8 @@ from perfxpert.agents import analysis, correctness, recommendation, root, schema
 from perfxpert.runtime import ensure_not_recursive
 
 
-# Phase 2 exposes this — defensive import with fallback for Phase 3 isolation.
+# Defensive import — fallback registry keeps this module importable when
+# the providers package is not yet loaded in isolated test contexts.
 try:
     from perfxpert.providers import PROVIDER_REGISTRY  # type: ignore
 except ImportError:

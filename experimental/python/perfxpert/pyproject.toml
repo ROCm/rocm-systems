@@ -10,7 +10,7 @@ readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Advanced Micro Devices, Inc." }]
 requires-python = ">=3.10"
-# Phase 1 (agentic refactor) adds pydantic/pyyaml/jsonschema for structured
+# The agentic runtime uses pydantic/pyyaml/jsonschema for structured
 # knowledge loading and schema validation. LLM enhancement still requires
 # anthropic or openai (optional extras below).
 dependencies = [
@@ -52,8 +52,6 @@ packages = [
     "perfxpert",
     "perfxpert.analysis",
     "perfxpert.formatters",
-    "perfxpert.ai_analysis",
-    "perfxpert.ai_analysis.tests",
     "perfxpert.cli",
     "perfxpert.providers",
     "perfxpert.config",
@@ -63,10 +61,6 @@ packages = [
 
 [tool.setuptools.package-data]
 perfxpert = [
-    "ai_analysis/share/*.md",
-    "ai_analysis/share/*.png",
-    "ai_analysis/docs/*.md",
-    "ai_analysis/docs/*.json",
     "formatters/templates/*.html",
     "_bundled/**/*",
     "_bundled/opencode_config/*",
@@ -78,7 +72,6 @@ perfxpert = [
 
 [tool.pytest.ini_options]
 testpaths = [
-    "perfxpert/ai_analysis/tests",
     "tests",
 ]
 python_files = ["test_*.py"]

@@ -1,8 +1,15 @@
 """opencode_launcher — `perfxpert-code` entry point.
 
-Launches the bundled opencode binary with the AMD-themed config directory.
-Respects PERFXPERT_OPENCODE_PATH override.
-Prints an AMD banner before handing control over.
+Launches opencode (from PERFXPERT_OPENCODE_PATH / bundled wheel / system PATH
+in that order) with the AMD-themed config directory.
+
+opencode is a system dependency — it is NOT bundled inside the perfxpert wheel
+in this release (bundling is tracked as future work). Users must install it
+separately: ``curl -fsSL https://opencode.ai/install | bash``.
+
+PERFXPERT_OPENCODE_PATH, if set, must point to an existing executable file;
+the launcher raises FileNotFoundError immediately rather than silently
+falling back to bundled/PATH lookup.
 """
 
 from __future__ import annotations
@@ -11,13 +18,11 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 from importlib import resources
 from pathlib import Path
 from typing import Iterable
 
 from perfxpert.tools._tooldep import require_tool
-
 
 __all__ = ["main", "resolve_opencode_binary", "resolve_config_dir", "print_banner"]
 
@@ -29,32 +34,51 @@ _BRANDING_VERSION = "0.2.0"
 def _perfxpert_version() -> str:
     try:
         import perfxpert
+
         return getattr(perfxpert, "__version__", _BRANDING_VERSION)
     except ImportError:
         return _BRANDING_VERSION
 
 
+def _wellknown_opencode_paths() -> "list[Path]":
+    """Canonical well-known install locations for the `opencode` binary.
+
+    Covers the upstream installer (`~/.opencode/bin/opencode`) and any
+    common Linux package locations. The list is consulted AFTER the
+    explicit env override and the bundled wheel path, but BEFORE the
+    PATH fallback, so users who ran the upstream installer get a clean
+    `perfxpert doctor` report without having to `export PATH`.
+    """
+    home = Path.home()
+    return [
+        home / ".opencode" / "bin" / "opencode",
+        home / ".local" / "bin" / "opencode",
+        Path("/usr/local/bin/opencode"),
+        Path("/opt/opencode/bin/opencode"),
+    ]
+
+
 def resolve_opencode_binary() -> Path:
     """Locate the opencode binary.
 
-    Priority:
-    1. $PERFXPERT_OPENCODE_PATH (user override)
-    2. perfxpert/_bundled/opencode (per-platform wheel)
-    3. `which opencode` on PATH
-    4. Use require_tool with install hint
+    Priority (E2E bug 3 — doctor must autodiscover):
+    1. ``$PERFXPERT_OPENCODE_PATH`` (user override; must exist or raise)
+    2. ``perfxpert/_bundled/opencode`` (per-platform wheel)
+    3. ``$HOME/.opencode/bin/opencode`` and other well-known paths
+    4. ``shutil.which("opencode")`` on PATH
+    5. Final actionable error with install command hint.
     """
     override = os.environ.get("PERFXPERT_OPENCODE_PATH")
     if override:
         p = Path(override)
-        if p.is_file() and os.access(p, os.X_OK):
-            return p
-        print(
-            f"perfxpert-code: WARNING — PERFXPERT_OPENCODE_PATH={override} "
-            "is missing or not executable; falling back to bundled",
-            file=sys.stderr,
-        )
+        if not p.is_file():
+            raise FileNotFoundError(
+                f"PERFXPERT_OPENCODE_PATH={override!r} does not exist. "
+                "Correct the path or unset the variable to use bundled/PATH lookup."
+            )
+        return p
 
-    # Bundled binary
+    # Bundled binary (per-platform wheel ships this under _bundled/)
     try:
         with resources.as_file(resources.files("perfxpert") / "_bundled" / "opencode") as p:
             if p.is_file():
@@ -62,18 +86,21 @@ def resolve_opencode_binary() -> Path:
     except (ModuleNotFoundError, FileNotFoundError):
         pass
 
-    # PATH fallback with install helper
-    try:
-        require_tool("opencode", allow_install=True)
-        on_path = shutil.which("opencode")
-        if on_path:
-            return Path(on_path)
-    except Exception:
-        pass
+    # Well-known install locations (upstream installer puts it at ~/.opencode/bin/)
+    for candidate in _wellknown_opencode_paths():
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+
+    # PATH fallback (explicitly `shutil.which` — do NOT use require_tool here
+    # since the install hint is surfaced in the error below).
+    on_path = shutil.which("opencode")
+    if on_path:
+        return Path(on_path)
 
     raise FileNotFoundError(
-        "opencode binary not found. Set PERFXPERT_OPENCODE_PATH, "
-        "install a platform wheel that bundles opencode, or add opencode to PATH."
+        "opencode binary not found. Install it with:\n"
+        "  curl -fsSL https://opencode.ai/install.sh | bash\n"
+        "or set PERFXPERT_OPENCODE_PATH / install a platform wheel that bundles opencode."
     )
 
 
@@ -83,10 +110,7 @@ def resolve_config_dir() -> Path:
         with resources.as_file(resources.files("perfxpert") / "_bundled" / "opencode_config") as p:
             return Path(p)
     except (ModuleNotFoundError, FileNotFoundError) as e:
-        raise FileNotFoundError(
-            "perfxpert/_bundled/opencode_config not found. "
-            "Reinstall perfxpert."
-        ) from e
+        raise FileNotFoundError("perfxpert/_bundled/opencode_config not found. " "Reinstall perfxpert.") from e
 
 
 def print_banner(stream=sys.stderr) -> None:
@@ -115,24 +139,100 @@ def _handle_version_flag(argv: Iterable[str]) -> bool:
     return False
 
 
+# Subcommands owned by perfxpert (dispatched by `perfxpert`, NOT forwarded to
+# opencode). Listed here for help-banner discovery; `perfxpert-code` itself
+# is a thin launcher and does not dispatch these — users run `perfxpert doctor`,
+# `perfxpert stats`, etc. directly. Kept in sync with `perfxpert/__main__.py`.
+_PERFXPERT_SUBCOMMANDS: "dict[str, str]" = {
+    "analyze": "Analyze a rocprofiler-sdk trace database for GPU bottlenecks",
+    "config": "Show or set perfxpert configuration (~/.config/perfxpert/config.yaml)",
+    "doctor": "Health check: verify MCP server, LLM providers, and dependencies",
+    "providers": "List LLM providers and configuration status",
+}
+
+
+def _print_perfxpert_help(stream=None) -> None:
+    """Print the AMD PerfXpert help banner listing perfxpert-owned subcommands.
+
+    Called when `perfxpert-code --help` (or `-h`) appears BEFORE any
+    recognized opencode subcommand. After this banner, control falls
+    through to `opencode --help` for generic flags.
+
+    ``stream`` resolves to the live ``sys.stdout`` on each call so pytest's
+    capsys captures the banner correctly.
+    """
+    if stream is None:
+        stream = sys.stdout
+    version = _perfxpert_version()
+    lines = [
+        f"{_BRANDING_NAME} {version} — opencode wrapper",
+        "",
+        "Usage:",
+        "  perfxpert-code [opencode-args]      Launch the AMD-branded opencode TUI",
+        "  perfxpert-code --version | -V       Print perfxpert version and exit",
+        "  perfxpert-code --help | -h          Show this banner, then opencode help",
+        "",
+        "perfxpert-owned subcommands (invoke via `perfxpert <subcommand>`):",
+    ]
+    for name, desc in _PERFXPERT_SUBCOMMANDS.items():
+        lines.append(f"  {name:<10s}  {desc}")
+    lines.append("")
+    lines.append("Pass-through subcommands are routed to the bundled opencode binary.")
+    lines.append("For opencode-native flags (stats / run / auth / models / debug), see below:")
+    lines.append("")
+    stream.write("\n".join(lines) + "\n")
+    stream.flush()
+
+
+def _help_flag_precedes_subcommand(argv: Iterable[str]) -> bool:
+    """Return True when `--help` / `-h` appears with no prior positional token.
+
+    A help flag AFTER a positional arg (e.g. `perfxpert-code run --help`) is
+    a request for opencode's subcommand-specific help; we pass it through
+    verbatim. Only the bare `perfxpert-code --help` case should print our
+    banner.
+    """
+    for tok in argv:
+        if tok in {"--help", "-h"}:
+            return True
+        if not tok.startswith("-"):
+            return False
+    return False
+
+
+def _handle_help_flag(argv: Iterable[str]) -> bool:
+    """If `--help` / `-h` is the first non-flag token, print the perfxpert
+    banner. Return True so the caller can decide whether to fall through to
+    `opencode --help` for generic flag details.
+    """
+    if _help_flag_precedes_subcommand(argv):
+        _print_perfxpert_help()
+        return True
+    return False
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for `perfxpert-code`."""
-    from perfxpert.runtime import recursion_guard
-
     if argv is None:
         argv = sys.argv[1:]
 
     if _handle_version_flag(argv):
         return 0
 
+    # Print our banner when `--help`/`-h` precedes any opencode subcommand.
+    # We still fall through to `opencode --help` afterwards so the user sees
+    # the generic opencode flag reference appended to our perfxpert summary.
+    _printed_perfxpert_help = _handle_help_flag(argv)
+
     try:
-        recursion_guard.ensure_not_recursive("opencode")
         binary = resolve_opencode_binary()
         config_dir = resolve_config_dir()
-    except recursion_guard.RecursionGuardViolation as e:
-        print(f"\033[31mperfxpert-code: {e}\033[0m", file=sys.stderr)
-        return 1
     except FileNotFoundError as e:
+        # If we already printed perfxpert help, it's the user's expected
+        # happy path for discovery; don't surface a red-text error just
+        # because opencode isn't on disk yet.
+        if _printed_perfxpert_help:
+            return 0
         print(f"\033[31mperfxpert-code: {e}\033[0m", file=sys.stderr)
         return 1
 
@@ -143,88 +243,40 @@ def main(argv: list[str] | None = None) -> int:
     # opencode 1.4.x discovers `opencode.json` from cwd (no `--config` flag).
     # Copy the bundled config into a stable per-user dir and `cd` there before exec,
     # so MCP wiring + AGENTS.md instructions apply without polluting the user's cwd.
+    runtime_cfg_dir = _prepare_runtime_config_dir(config_dir)
+
     cmd = [str(binary), *argv]
 
     # Pass through most of the user env; opencode needs LLM API keys and rocprofv3 envs.
     # We do NOT use the EXECUTION-tool env whitelist here because opencode is the
     # user's interactive session and they explicitly consent to it.
+    env = dict(os.environ)
+    # Recursion guard marker (spec §5.8 / R10)
+    env["PERFXPERT_IN_OPENCODE_SESSION"] = "1"
+
     try:
-        cache_root = _runtime_cache_root()
-        with tempfile.TemporaryDirectory(prefix="opencode-", dir=str(cache_root)) as tmp_dir:
-            runtime_cfg_dir = _prepare_runtime_config_dir(config_dir, Path(tmp_dir))
-            try:
-                with recursion_guard.opencode_session():
-                    env = dict(os.environ)
-                    proc = subprocess.run(
-                        cmd,
-                        env=env,
-                        cwd=str(runtime_cfg_dir),
-                        check=False,
-                    )
-            finally:
-                _make_runtime_config_cleanup_safe(runtime_cfg_dir)
+        proc = subprocess.run(cmd, env=env, cwd=str(runtime_cfg_dir), check=False)
     except KeyboardInterrupt:
         return 130
-    except OSError as e:
-        print(f"\033[31mperfxpert-code: {e}\033[0m", file=sys.stderr)
-        return 1
     return proc.returncode
 
 
-def _runtime_cache_root() -> Path:
-    xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
-    if xdg_cache_home:
-        cache_base = Path(xdg_cache_home)
-    else:
-        home = os.environ.get("HOME")
-        if home:
-            cache_base = Path(home) / ".cache"
-        else:
-            try:
-                cache_base = Path.home() / ".cache"
-            except (RuntimeError, OSError):
-                cache_base = Path(tempfile.gettempdir()) / f"perfxpert-{os.getuid()}"
-    cache_root = cache_base / "perfxpert"
-    cache_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    cache_root.chmod(0o700)
-    return cache_root
-
-
-def _prepare_runtime_config_dir(src_config_dir: Path, runtime_dir: Path | None = None) -> Path:
+def _prepare_runtime_config_dir(src_config_dir: Path) -> Path:
     """Stage a read-only copy of the bundled config where opencode will pick it up.
 
     opencode 1.4.x has no `--config <path>` flag; it auto-discovers `opencode.json`
     from the current directory. We create a dedicated runtime dir so we can point
     opencode at our bundled config without forcing the user to run from a specific
-    directory or clobber their own `opencode.json`. The staged copy is created in a
-    private cache root and made read-only before launch so the runtime config is not
-    left behind as a mutable user-writable directory.
+    directory or clobber their own `opencode.json`.
     """
-    if runtime_dir is None:
-        runtime_dir = Path(
-            tempfile.mkdtemp(prefix="opencode-", dir=str(_runtime_cache_root()))
-        )
-    runtime_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    runtime_dir.chmod(0o700)
+    import shutil
+
+    runtime_dir = Path.home() / ".cache" / "perfxpert" / "opencode"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
     for f in src_config_dir.iterdir():
         if not f.is_file():
             continue
         target = runtime_dir / f.name
-        if target.is_symlink():
-            target.unlink()
-        elif target.exists():
-            target.chmod(0o600)
-            target.unlink()
-        shutil.copy2(f, target)
-        target.chmod(0o400)
-    runtime_dir.chmod(0o500)
+        if not target.exists() or target.read_bytes() != f.read_bytes():
+            shutil.copy2(f, target)
     return runtime_dir
-
-
-def _make_runtime_config_cleanup_safe(runtime_dir: Path) -> None:
-    if not runtime_dir.exists():
-        return
-    runtime_dir.chmod(0o700)
-    for child in runtime_dir.iterdir():
-        if child.is_file():
-            child.chmod(0o600)

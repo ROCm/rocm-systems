@@ -128,7 +128,6 @@ def test_analyze_module_has_all():
         "analyze_memory_copies",
         "generate_recommendations",
         "format_analysis_output",
-        "analyze_performance",
         "add_args",
         "execute",
         "main",
@@ -1711,44 +1710,6 @@ def test_init_overhead_not_emitted_when_low_occupancy_rec_exists():
     # Verify the Tier 2 rec DID fire
     occ_recs = [r for r in recs if r["category"] == "Low Occupancy"]
     assert len(occ_recs) == 1
-
-
-# ---------------------------------------------------------------------------
-# Editor validation in _apply_code_change_interactive
-# ---------------------------------------------------------------------------
-
-
-def test_editor_not_found_skips_subprocess():
-    """When shutil.which returns None for $EDITOR, subprocess.run must NOT be called."""
-    from unittest.mock import patch, MagicMock
-    from perfxpert.analyze import _apply_code_change_interactive
-
-    rec = {
-        "category": "Kernel Hotspot",
-        "issue": "Kernel is slow",
-        "suggestion": "Optimize it",
-        "actions": ["Do something"],
-        "estimated_impact": "20%",
-    }
-    colors = {"C": "", "G": "", "Y": "", "R": "", "DIM": "", "N": ""}
-
-    with (
-        patch("shutil.which", return_value=None) as mock_which,
-        patch("subprocess.run") as mock_run,
-        patch("os.environ.get", side_effect=lambda k, d="": "fake-editor" if k == "EDITOR" else d),
-        patch("builtins.input", return_value="y"),
-        patch("glob.glob", return_value=["/tmp/src/app.hip"]),
-        patch("os.path.isfile", return_value=True),
-    ):
-        _apply_code_change_interactive(
-            rec=rec,
-            source_dir="/tmp/src",
-            llm_provider=None,
-            llm_api_key=None,
-            llm_model=None,
-            colors=colors,
-        )
-    mock_run.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

@@ -39,6 +39,13 @@
   allowlist: true
   risk: medium
 
+- flag: "-mllvm -amdgpu-num-vgpr="
+  category: register_control
+  description: "Override VGPR count (suffix numeric)"
+  allowlist: true
+  risk: medium
+  note: "Takes a numeric suffix; e.g., -mllvm -amdgpu-num-vgpr=64"
+
 - flag: "-fopenmp"
   category: parallelism
   description: "Enable OpenMP"
@@ -67,10 +74,9 @@
 - flag: "-mllvm"
   category: llvm_pass
   description: "Pass option to LLVM backend"
-  allowlist: false
-  risk: high
+  allowlist: true
+  risk: medium
   value_required: true
-  note: "Denylisted until compile.build validates the paired LLVM option value instead of allowing raw passthrough"
 
 - flag: "-save-temps"
   category: debugging

@@ -19,9 +19,8 @@ Env var conventions (canonical):
     PERFXPERT_OPENCODE_PATH
     PERFXPERT_IN_OPENCODE_SESSION   (recursion guard marker)
 
-Legacy aliases (honored with DeprecationWarning):
-    ROCINSIGHT_LLM_*  → PERFXPERT_LLM_*
-    ROCPD_LLM_*       → PERFXPERT_LLM_*
+Back-compat env-var aliases (honored with DeprecationWarning):
+    ROCPD_LLM_*  → PERFXPERT_LLM_*   (pre-rename alias)
 """
 
 from perfxpert.providers._base import Provider, ProviderResponse

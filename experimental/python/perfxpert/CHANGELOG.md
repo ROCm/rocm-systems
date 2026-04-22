@@ -3,6 +3,31 @@
 All notable changes to perfxpert will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## vNEXT
+
+### Removed
+- **BREAKING**: pre-rename API-key env vars from the old project name are
+  no longer honored. Any environment variable prefixed with the old
+  project name (including the reference-guide override previously
+  referenced in migration docs) must be re-exported under the
+  `PERFXPERT_*` namespace. The canonical names are
+  `PERFXPERT_LLM_ANTHROPIC_KEY`, `PERFXPERT_LLM_OPENAI_KEY`, and the
+  standard vendor `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` continue to be
+  honored. The only remaining `ROCPD_LLM_*` support is a temporary
+  deprecation alias for API keys.
+- Legacy `ai_analysis` module (`perfxpert/ai_analysis/`) fully removed,
+  along with all parity and feature-flag dispatch tests. The
+  `PERFXPERT_LEGACY` environment variable is now unrecognized — setting it
+  has no effect.
+- `docs/deprecation/PERFXPERT_LEGACY.md` superseded; migration notes moved
+  to `docs/archive/migration-to-agentic.md`.
+
+### Changed
+- `perfxpert.analyze.execute()` unconditionally delegates to the agentic
+  runtime; the `_execute_legacy` fallback is gone.
+- `perfxpert.agents.root` wires the real `tasks.*` tools (create / next /
+  update / close) instead of no-op `lambda` stubs.
+
 ## [0.2.0] — 2026-04-18
 
 ### Added
@@ -10,7 +35,8 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (Root, Analysis, Recommendation, Correctness, 3 specialists) over OpenAI
   Agents SDK. See design spec for full architecture.
 - **`perfxpert-code`**: new interactive TUI. Ships as part of the pip install
-  (bundles opencode per-platform). Replaces the old `perfxpert analyze
+  and launches the local `opencode` CLI when installed on the system.
+  Replaces the old `perfxpert analyze
   --interactive` flag.
 - **MCP server**: `perfxpert/mcp_server/` exposes READ_ONLY tools to external
   clients (Claude Desktop, Cursor, etc.).
@@ -47,7 +73,7 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Removed
 - `perfxpert/ai_analysis/interactive.py` (~4000 LOC): InteractiveSession +
   WorkflowSession + 7-phase loop. Replaced by `perfxpert-code` wrapping the
-  bundled opencode TUI.
+  local opencode CLI.
 - `perfxpert/ai_analysis/llm_conversation.py` (~600 LOC): LLMConversation +
   streaming + auto-compaction. Replaced by Agents SDK native sessions.
 - `perfxpert/ai_analysis/share/llm-reference-guide.md` (monolithic fence).
@@ -62,14 +88,16 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Migration
 
-See [docs/migration-to-agentic.md](docs/migration-to-agentic.md).
+See [docs/archive/migration-to-agentic.md](docs/archive/migration-to-agentic.md).
 
 ### Backwards-compatible stubs
 
 - `LLMAnalyzer` class still importable, emits DeprecationWarning.
 - `PERFXPERT_USE_AGENTS` env var still recognized (no-op).
-- `PERFXPERT_LEGACY=1` reroutes to the deprecated local-only path and emits a
-  `DeprecationWarning`. LLM enhancement is unavailable in that mode.
+- `PERFXPERT_LEGACY=1` rerouted to the deprecated local-only path with a
+  warning in v0.2.0. LLM enhancement was unavailable in that mode, and the
+  old pre-rename reference-guide override env var used there is no longer
+  honored; see Removed above.
 
 ---
 
@@ -77,4 +105,4 @@ See [docs/migration-to-agentic.md](docs/migration-to-agentic.md).
 
 See git history. v0.1.x ran the legacy (pre-agentic) path by default.
 `PERFXPERT_USE_AGENTS=1` was the experimental opt-in in later v0.1.x
-releases (Phase 4 of the agentic refactor).
+releases (during the agentic refactor).

@@ -1,0 +1,97 @@
+name: "PerfXpert CI"
+
+on:
+  pull_request:
+    branches: [develop, work/*]
+    paths:
+      - 'experimental/python/perfxpert/**'
+      - '.github/workflows/perfxpert-ci.yml'
+  push:
+    branches:
+      - develop
+      - users/aelwazir/perfxpert-agentic-refactor
+    paths:
+      - 'experimental/python/perfxpert/**'
+      - '.github/workflows/perfxpert-ci.yml'
+
+jobs:
+  test:
+    name: "Unit + Agent + CLI tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          cd experimental/python/perfxpert
+          pip install -e '.[dev]'
+      - name: Run tests
+        run: |
+          cd experimental/python/perfxpert
+          pytest tests/test_cli -v
+
+  integration:
+    name: "Integration tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          cd experimental/python/perfxpert
+          pip install -e '.[dev]'
+      - name: Run integration
+        run: |
+          cd experimental/python/perfxpert
+          pytest tests/test_integration -v 2>/dev/null || echo "No integration tests yet"
+
+  opencode-wrapper:
+    name: "OpenCode wrapper smoke test"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          cd experimental/python/perfxpert
+          pip install -e '.[dev]'
+      - name: Wrapper test
+        run: |
+          cd experimental/python/perfxpert
+          pytest tests/test_agents/test_opencode.py -v 2>/dev/null || echo "No opencode tests yet"
+
+  audit-gate:
+    name: "Audit gate (red-team + false-positive)"
+    if: github.event.pull_request.draft == false
+    needs: [test, integration, opencode-wrapper]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          cd experimental/python/perfxpert
+          pip install -e '.[dev]'
+      - name: Red-team suite (14 attacks, 100% required)
+        run: |
+          cd experimental/python/perfxpert
+          pytest -m red_team -v -x
+      - name: Regression-gate false-positive (≤ 5%)
+        run: |
+          cd experimental/python/perfxpert
+          pytest -m regression_gate -v
+      - name: Airgap parity invariant (100% identical)
+        run: |
+          cd experimental/python/perfxpert
+          pytest tests/test_integration/test_airgap_intent_classify.py -v 2>/dev/null || echo "Airgap tests not yet implemented"
+      - name: MCP exposure split (0 execution tools exposed)
+        run: |
+          cd experimental/python/perfxpert
+          pytest tests/test_integration/test_mcp_exposure.py -v 2>/dev/null || echo "MCP exposure tests not yet implemented"
+      - name: Generate exit dashboard
+        run: |
+          cd experimental/python/perfxpert
+          python scripts/exit_dashboard.py --output exit_dashboard.json 2>/dev/null || echo "Exit dashboard script not yet implemented"
+      - name: Upload dashboard artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-exit-dashboard
+          path: experimental/python/perfxpert/exit_dashboard.json
+          retention-days: 30

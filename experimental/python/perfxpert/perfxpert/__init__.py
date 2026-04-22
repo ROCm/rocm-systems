@@ -11,14 +11,6 @@ Reads rocprofiler-sdk trace databases (.db files) and provides
 human-readable insights, bottleneck detection, and optimization
 recommendations without any C++ library dependency.
 
-Quick start
------------
-    from pathlib import Path
-    from perfxpert.ai_analysis import analyze_database
-
-    result = analyze_database(Path("trace.db"))
-    print(result.summary.overall_assessment)
-
 CLI
 ---
     python -m perfxpert analyze -i trace.db

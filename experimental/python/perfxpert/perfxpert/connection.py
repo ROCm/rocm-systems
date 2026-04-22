@@ -64,6 +64,14 @@ class PerfxpertConnection:
         "pmc_events",
     ]
 
+    # SQL views defined inside each rocpd database that analysis code queries
+    # directly (e.g. analysis/core.py uses "kernels", "memory_copies",
+    # "regions").  These live as VIEWs in each shard's sqlite_master, so
+    # ATTACHed multi-DB sessions must create a TEMP VIEW that UNIONs every
+    # shard — otherwise only db0's rows are visible (silent data loss).
+    # Ports rocm-systems#4982.
+    _ANALYSIS_VIEWS = ["kernels", "memory_copies", "regions"]
+
     def __init__(
         self,
         db_paths: Union[str, Path, List[Union[str, Path]]],
@@ -118,29 +126,75 @@ class PerfxpertConnection:
         return conn
 
     def _create_union_views(self, conn: sqlite3.Connection) -> None:
-        """Create UNION ALL views so multi-file queries are transparent."""
+        """Create UNION ALL views so multi-file queries are transparent.
+
+        Mixed-schema shards (e.g. mismatched rocpd versions) are handled
+        by taking the **intersection** of column names across every
+        shard that has the table. This means:
+          - Extra columns present on one shard but not others are
+            silently dropped at view-build time (explicit, intentional)
+            instead of raising ``OperationalError`` at query time.
+          - If the intersection is empty (no shared columns across
+            shards), the view is skipped and a warning is emitted so
+            the caller can surface a diagnostic instead of hitting a
+            confusing SQL error downstream.
+        """
+        import warnings
+
         n = len(self._paths)
         for table in self._PERFXPERT_TABLES:
-            # Check which schemas actually have this table
-            schemas_with_table = []
+            # Check which schemas actually have this table AND collect
+            # their column sets for the intersection.
+            schemas_with_table: list[str] = []
+            per_shard_cols: list[list[str]] = []
             for idx in range(n):
                 try:
-                    conn.execute(
-                        f"SELECT 1 FROM db{idx}.{table} LIMIT 1"
-                    )
-                    schemas_with_table.append(f"db{idx}")
+                    conn.execute(f"SELECT 1 FROM db{idx}.{table} LIMIT 1")
                 except sqlite3.OperationalError:
-                    pass
+                    continue
+                cursor = conn.execute(f"PRAGMA db{idx}.table_info({table})")
+                shard_cols = [row[1] for row in cursor.fetchall()]
+                if not shard_cols:
+                    continue
+                schemas_with_table.append(f"db{idx}")
+                per_shard_cols.append(shard_cols)
 
             if not schemas_with_table:
                 continue
 
-            # Get column list from first available schema
-            schema = schemas_with_table[0]
-            cursor = conn.execute(f"PRAGMA {schema}.table_info({table})")
-            cols = [row[1] for row in cursor.fetchall()]
+            # Intersect preserving the order of shard-0's column list so
+            # the view is stable across restarts.
+            first_cols = per_shard_cols[0]
+            common: set = set(first_cols)
+            for shard_cols in per_shard_cols[1:]:
+                common &= set(shard_cols)
+            cols = [c for c in first_cols if c in common]
             if not cols:
+                warnings.warn(
+                    f"perfxpert.connection: no common columns across shards "
+                    f"for table {table!r}; skipping unified view. "
+                    f"Per-shard column sets: "
+                    f"{[sorted(s) for s in per_shard_cols]}",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
                 continue
+
+            # If any shard had extra columns beyond the intersection,
+            # surface a warning once so the operator knows data is
+            # being trimmed. This is quiet by default (single warning
+            # per table) to avoid noise on happy-path multi-DB.
+            dropped_per_shard = [
+                sorted(set(s) - common) for s in per_shard_cols
+            ]
+            if any(dropped_per_shard):
+                warnings.warn(
+                    f"perfxpert.connection: schema-mixed shards for table "
+                    f"{table!r}; unified view uses the column intersection. "
+                    f"Dropped columns per shard: {dropped_per_shard}",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
 
             col_list = ", ".join(cols)
             parts = [
@@ -150,6 +204,90 @@ class PerfxpertConnection:
             union_sql = " UNION ALL ".join(parts)
             conn.execute(
                 f"CREATE TEMP VIEW IF NOT EXISTS {table} AS {union_sql}"
+            )
+
+        # Union analysis-facing views (kernels, memory_copies, regions)
+        # that are defined as SQL VIEWs inside each rocpd database
+        # file.  Without this, analysis code that queries `SELECT *
+        # FROM kernels` against a multi-DB session would see only the
+        # first shard's view.  Ports rocm-systems#4982.
+        #
+        # Mixed-schema shards: the analysis views (kernels, regions,
+        # memory_copies) expose a stable column vocabulary across
+        # rocpd versions, but if a shard diverges the bare ``SELECT *``
+        # UNION would fail at CREATE-VIEW time with "SELECTs to the
+        # left and right of UNION ALL do not have the same number of
+        # result columns". We intersect column names here too so
+        # schema-mixed shards are handled identically to base tables.
+        for view_name in self._ANALYSIS_VIEWS:
+            shards_with_view: list[str] = []
+            per_shard_cols: list[list[str]] = []
+            for idx in range(n):
+                alias = f"db{idx}"
+                try:
+                    check = conn.execute(
+                        f"SELECT COUNT(*) FROM {alias}.sqlite_master "
+                        f"WHERE (type='table' OR type='view') "
+                        f"AND name='{view_name}'"
+                    ).fetchone()
+                except sqlite3.OperationalError:
+                    continue
+                if not (check and check[0] > 0):
+                    continue
+                # PRAGMA table_info works on views as well as tables.
+                try:
+                    cursor = conn.execute(
+                        f"PRAGMA {alias}.table_info({view_name})"
+                    )
+                    shard_cols = [row[1] for row in cursor.fetchall()]
+                except sqlite3.OperationalError:
+                    shard_cols = []
+                if not shard_cols:
+                    continue
+                shards_with_view.append(alias)
+                per_shard_cols.append(shard_cols)
+
+            if not shards_with_view:
+                continue
+
+            first_cols = per_shard_cols[0]
+            common: set = set(first_cols)
+            for shard_cols in per_shard_cols[1:]:
+                common &= set(shard_cols)
+            cols = [c for c in first_cols if c in common]
+            if not cols:
+                warnings.warn(
+                    f"perfxpert.connection: no common columns across shards "
+                    f"for analysis view {view_name!r}; skipping unified "
+                    f"view. Per-shard column sets: "
+                    f"{[sorted(s) for s in per_shard_cols]}",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+                continue
+
+            dropped_per_shard = [
+                sorted(set(s) - common) for s in per_shard_cols
+            ]
+            if any(dropped_per_shard):
+                warnings.warn(
+                    f"perfxpert.connection: schema-mixed shards for analysis "
+                    f"view {view_name!r}; unified view uses the column "
+                    f"intersection. Dropped columns per shard: "
+                    f"{dropped_per_shard}",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+
+            col_list = ", ".join(cols)
+            parts = [
+                f"SELECT {col_list} FROM {alias}.{view_name}"
+                for alias in shards_with_view
+            ]
+            union_sql = " UNION ALL ".join(parts)
+            conn.execute(
+                f"CREATE TEMP VIEW IF NOT EXISTS [{view_name}] "
+                f"AS {union_sql}"
             )
 
 

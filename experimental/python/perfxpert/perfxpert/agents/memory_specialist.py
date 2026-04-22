@@ -23,7 +23,7 @@ def _fetch_catalog(gfx_id: str) -> List[Dict[str, Any]]:
         from perfxpert.tools import memory_techniques  # type: ignore
         return memory_techniques.catalog(gfx_id=gfx_id)
     except ImportError:
-        return []  # Phase 4 deliverable
+        return []  # defensive fallback if memory_techniques tool is absent
 
 
 def build_memory_specialist() -> Agent:
