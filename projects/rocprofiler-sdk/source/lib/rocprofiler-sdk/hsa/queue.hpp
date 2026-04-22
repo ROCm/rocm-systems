@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
+#include "lib/rocprofiler-sdk/hsa/signal_waiter.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 
 #include <rocprofiler-sdk/agent.h>
@@ -73,7 +74,6 @@ struct write_packet_t
 };
 
 class Queue;
-class SignalWaiter;
 
 using queue_batch_packets_callback_t = std::function<bool()>;
 
