@@ -5,6 +5,10 @@
 Provide low-overhead kernel dispatch tracing by pushing the minimum useful packet, completion, and
 code-object-lifetime data into a shared-memory stream that an SDK-side correlator can consume.
 
+In the target design, that shared-memory consumer is `rocprofiler-sdk`. The local reader and trace
+export samples in this directory exist only to validate the transport while the SDK integration is
+still under construction.
+
 The target design is driven by four constraints:
 
 1. minimum time before enqueue/publication

@@ -48,6 +48,9 @@ That design goes further than the current branch implementation:
 - minimal async completion handling
 - code-object lifetime records in the same shared-memory stream
 
+In the target design, `rocprofiler-sdk` is the intended consumer of that shared-memory stream. The
+sample reader and trace exporter in this directory are validation tools only.
+
 ## Current Scope
 
 What is implemented:
