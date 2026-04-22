@@ -208,11 +208,54 @@ Value* SQTTInstrumentPass::getOrCreateScopeCheck(Function& F, GfxGen gen)
     return CurScopeCheck;
 }
 
+// True for instructions that we are willing to leave inside a scope-check
+// trace block alongside grouped markers — i.e. their semantics are unchanged
+// (or harmless) when they only execute on the trace path:
+//   - other ttracedata calls (these are the markers themselves)
+//   - sched_barrier (compile-time scheduling hint, no runtime effect)
+//   - debug intrinsics, lifetime markers (no runtime effect)
+// Anything else between two markers prevents coalescing — we never want to
+// move arbitrary code (loads/stores/arithmetic visible after the merge
+// point) into a conditionally executed region.
+static bool isIgnorableBetweenMarkers(Instruction* I)
+{
+    auto* CI = dyn_cast<CallInst>(I);
+    if (!CI) return false;
+    Function* F = CI->getCalledFunction();
+    if (!F) return false;
+    switch (F->getIntrinsicID())
+    {
+        case Intrinsic::amdgcn_s_ttracedata:
+        case Intrinsic::amdgcn_s_ttracedata_imm:
+        case Intrinsic::amdgcn_sched_barrier:
+        case Intrinsic::dbg_declare:
+        case Intrinsic::dbg_value:
+        case Intrinsic::dbg_label:
+        case Intrinsic::lifetime_start:
+        case Intrinsic::lifetime_end:
+            return true;
+        default:
+            return false;
+    }
+}
+
 bool SQTTInstrumentPass::wrapExistingMarkers(Function& F, GfxGen gen)
 {
-    SmallVector<CallInst*, 8> Markers;
+    // Collect markers per BB, preserving instruction order. Wrapping each
+    // marker independently produces one diamond per marker; after the early
+    // phase + inlining flattens many tiny device functions into a hot
+    // region, you get a chain of N back-to-back condbrs all on the same
+    // cached scope-check predicate. SimplifyCFG would normally fold that,
+    // but we run at OptimizerLastEP — nothing simplifies after us.
+    //
+    // Instead, group runs of markers that are adjacent (only ignorable
+    // instructions between them in the same BB) and wrap each run with a
+    // single diamond. This is purely a CFG-shape optimization: marker
+    // ordering, IDs, and the cached predicate value are unchanged.
+    SmallVector<std::pair<BasicBlock*, SmallVector<CallInst*, 4>>, 8> ByBB;
     for (auto& BB : F)
     {
+        SmallVector<CallInst*, 4> InBB;
         for (auto& I : BB)
         {
             auto* CI = dyn_cast<CallInst>(&I);
@@ -221,23 +264,54 @@ bool SQTTInstrumentPass::wrapExistingMarkers(Function& F, GfxGen gen)
             if (!Callee) continue;
             auto IID = Callee->getIntrinsicID();
             if (IID == Intrinsic::amdgcn_s_ttracedata || IID == Intrinsic::amdgcn_s_ttracedata_imm)
-                Markers.push_back(CI);
+                InBB.push_back(CI);
+        }
+        if (!InBB.empty()) ByBB.push_back({&BB, std::move(InBB)});
+    }
+    if (ByBB.empty()) return false;
+
+    for (auto& [BB, Markers] : ByBB)
+    {
+        size_t i = 0;
+        while (i < Markers.size())
+        {
+            // Extend the group as long as Markers[j-1] and Markers[j] are
+            // separated only by ignorable instructions. We only check
+            // strictly-between instructions — the markers themselves are
+            // the things being grouped.
+            size_t j = i + 1;
+            while (j < Markers.size())
+            {
+                bool canExtend = true;
+                for (Instruction* I = Markers[j - 1]->getNextNode(); I && I != Markers[j]; I = I->getNextNode())
+                {
+                    if (!isIgnorableBetweenMarkers(I))
+                    {
+                        canExtend = false;
+                        break;
+                    }
+                }
+                if (!canExtend) break;
+                ++j;
+            }
+            wrapRangeWithScopeCheck(Markers[i], Markers[j - 1], F, gen);
+            i = j;
         }
     }
-    if (Markers.empty()) return false;
-
-    for (auto* CI : Markers) wrapWithScopeCheck(CI, F, gen);
     return true;
 }
 
-void SQTTInstrumentPass::wrapWithScopeCheck(CallInst* CI, Function& F, GfxGen gen)
+void SQTTInstrumentPass::wrapRangeWithScopeCheck(CallInst* First, CallInst* Last, Function& F, GfxGen gen)
 {
     Value* Ok = getOrCreateScopeCheck(F, gen);
 
-    BasicBlock* OrigBB = CI->getParent();
-    BasicBlock* TraceBB = OrigBB->splitBasicBlock(CI->getIterator(), "sqtt.trace");
+    BasicBlock* OrigBB = First->getParent();
+    BasicBlock* TraceBB = OrigBB->splitBasicBlock(First->getIterator(), "sqtt.trace");
 
-    BasicBlock* TailBB = TraceBB->splitBasicBlock(CI->getNextNode()->getIterator(), "sqtt.skip");
+    // After the first split, [First..Last] and everything after them lives
+    // in TraceBB. Split again immediately after Last so TailBB starts with
+    // the first non-grouped instruction.
+    BasicBlock* TailBB = TraceBB->splitBasicBlock(Last->getNextNode()->getIterator(), "sqtt.skip");
 
     OrigBB->getTerminator()->eraseFromParent();
     IRBuilder<> BrB(OrigBB);
