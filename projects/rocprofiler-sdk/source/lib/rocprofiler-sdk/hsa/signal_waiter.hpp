@@ -26,13 +26,13 @@
 
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
 
-#include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
+#    include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 
-#include <atomic>
-#include <memory>
-#include <mutex>
-#include <thread>
-#include <vector>
+#    include <atomic>
+#    include <memory>
+#    include <mutex>
+#    include <thread>
+#    include <vector>
 
 namespace rocprofiler
 {

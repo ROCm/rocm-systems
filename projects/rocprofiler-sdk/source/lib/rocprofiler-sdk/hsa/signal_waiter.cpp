@@ -24,31 +24,31 @@
 
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
 
-#include "lib/common/logging.hpp"
-#include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
-#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
-#include "lib/rocprofiler-sdk/internal_threading.hpp"
-#include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
-#include "lib/rocprofiler-sdk/registration.hpp"
+#    include "lib/common/logging.hpp"
+#    include "lib/rocprofiler-sdk/context/context.hpp"
+#    include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
+#    include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#    include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#    include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#    include "lib/rocprofiler-sdk/internal_threading.hpp"
+#    include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
+#    include "lib/rocprofiler-sdk/registration.hpp"
 
-#include <hsa/amd_hsa_signal.h>
-#include <hsa/hsa.h>
+#    include <hsa/amd_hsa_signal.h>
+#    include <hsa/hsa.h>
 
-#include <fmt/format.h>
+#    include <fmt/format.h>
 
-#include <fcntl.h>
-#include <sys/ioctl.h>
-#include <unistd.h>
+#    include <fcntl.h>
+#    include <sys/ioctl.h>
+#    include <unistd.h>
 
-#include <cerrno>
-#include <chrono>
-#include <cstddef>
-#include <cstring>
-#include <thread>
-#include <vector>
+#    include <cerrno>
+#    include <chrono>
+#    include <cstddef>
+#    include <cstring>
+#    include <thread>
+#    include <vector>
 
 namespace rocprofiler
 {

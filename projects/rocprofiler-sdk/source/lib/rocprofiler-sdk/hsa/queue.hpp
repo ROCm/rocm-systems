@@ -197,14 +197,14 @@ private:
     CoreApiTable                         _core_api             = {};
     AmdExtTable                          _ext_api              = {};
     const AgentCache&                    _agent;
-    common::Synchronized<callback_map_t> _callbacks          = {};
-    hsa_queue_t*                         _intercept_queue    = nullptr;
-    queue_state                          _state              = queue_state::normal;
-    std::mutex                           _lock_queue         = {};
-    hsa_signal_t                         _active_kernels     = {.handle = 0};
+    common::Synchronized<callback_map_t> _callbacks       = {};
+    hsa_queue_t*                         _intercept_queue = nullptr;
+    queue_state                          _state           = queue_state::normal;
+    std::mutex                           _lock_queue      = {};
+    hsa_signal_t                         _active_kernels  = {.handle = 0};
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
-    std::once_flag                       _signal_waiter_init = {};
-    std::unique_ptr<SignalWaiter>        _signal_waiter      = {};
+    std::once_flag                _signal_waiter_init = {};
+    std::unique_ptr<SignalWaiter> _signal_waiter      = {};
 #endif
 };
 
