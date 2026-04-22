@@ -8,6 +8,266 @@ Append-only. Newest on top.
 
 ---
 
+## 2026-04-22 — V_FMA_MIX inline-constant narrow-half: op_sel misapplied, silent bf16-reduction miscompile (closes topk_forward_bisect_m1_const_in)
+
+**Context.** Every bf16-in + reduction + bf16-out Triton kernel was
+silently miscompiled under cross-widening (gfx1250 → gfx942).  The
+end-to-end signature: feed a 32-column `tl.sum(axis=1)` of bf16
+`1.0`s — native writes `32.0`, salmon writes `1.0`.  Every reduction
+step's multiplier silently evaporated and every bf16 accumulation
+became a no-op.  Affected `topk_forward_bisect_m1..m4` and
+`topk_forward_bf16`; a multi-day sequence of false leads (DPP
+rewrite, EXEC-mask tracking, strict.wwm, d16_hi store) came and went
+before the all-ones probe localised it.
+
+**Root cause.** `V_FMA_MIX_F32` / `V_FMA_MIX_F32_BF16` encode narrow
+sources via an `op_sel_hi[i]=1` flag plus an `op_sel[i]` VGPR-half
+selector (0=low 16, 1=high 16).  `op_sel[i]` is a VGPR-half
+selector — it assumes the 32-bit source holds two packed 16-bit
+values so either half is a valid narrow datum.  For register
+sources the assumption holds.  For INLINE CONSTANTS (and 32-bit
+literals in narrow-operand slots) it does NOT:
+
+  LLVM's AMDGPU disassembler pre-resolves narrow inline constants
+  to the 16-bit value in the LOW 16 of the MCOperand Imm, upper 16
+  zero-extended — `AMDGPUDisassembler.cpp::decodeMCOperand`, under
+  `OPERAND_REG_INLINE_C_BF16` / `OPERAND_REG_IMM_BF16` /
+  `OPERAND_REG_INLINE_C_FP16` / `OPERAND_REG_IMM_FP16` arms and
+  their `getInlineImmValBF16` / `getInlineImmValF16` helpers.
+
+The pre-fix handler applied op_sel unconditionally:
+
+    if (opSel[i] == 0) bits = trunc(raw, i16);                // LO
+    else               bits = trunc(lshr(raw, 16), i16);      // HI
+
+For an inline bf16 `1.0` (= MC Imm `0x00003F80`) with
+`op_sel[i]=1`, the handler ran `trunc(lshr(0x3F80, 16)) = 0x0000 =
+bf16 0.0`.  The downstream shape `fma(bf16_val, 0.0, acc) = acc`
+was an identity over all 32 reduction steps.
+
+Triton's bf16 `tl.sum` / `tl.max` compiles to exactly this pattern
+on gfx1250: `v_fma_mix_f32_bf16 v_acc, v_bf16, 1.0, v_acc
+op_sel:[0,1,0] op_sel_hi:[1,1,0]`.  So every bf16 Triton kernel
+fed a field of zeros through its reduction while the raised IR
+looked structurally identical to native.
+
+**Fix (commit 0d002aecf2).** In
+`handle_valu_vop3p.cpp::readMixSrc`, when the operand slot is
+non-register (`!op.isSrcReg(i)` — inline constant, 32-bit literal,
+or expression), skip the op_sel-based half extraction and take the
+LOW 16 unconditionally.  Register sources retain op_sel.  The
+`op_sel` bit is VGPR-slot state; it has no meaning for a pre-
+resolved immediate whose bit pattern IS the narrow value.
+
+    bool isImmediateOperand = !op.isSrcReg(i);
+    if (!isImmediateOperand && opSel[i] == 1)
+      bits = trunc(lshr(raw, 16), i16);   // HI 16 (register half)
+    else
+      bits = trunc(raw, i16);             // LO 16 (immediate OR
+                                          // register op_sel[i]=0)
+
+**How it was pinned — the "constant-input probe" technique.**
+Random-input probes (`topk_forward_bisect_m1`) showed noisy,
+row-dependent wrong-to-right ratios (3.09x, 4.53x, 0.09x, ...) —
+not a clean "subset of K elements summed" signature, because
+partial sums of random values don't have stable ratios across rows.
+
+The crucial move: replace the random input with a CONSTANT.  With
+all X[r, c] = 1.0 and a 32-element `tl.sum(axis=1)`, the expected
+output is exactly 32.0 for every row.  Any deviation becomes
+VALUE-INDEPENDENT — the signature tells us HOW MANY elements
+salmon actually summed, not what mix of them.
+
+  * salmon writing `N × const` for some `N != 32` → reduction
+    tree dropping `(32 - N)` contributions.  Examine which
+    structural paths are skipped.
+  * salmon writing `const` (N=1) → reduction is a full identity.
+    The multiplier path is gone.  Inspect the CONSTANTS flowing
+    into the reduction ops in the lifted IR.
+
+Salmon wrote 1.0 (N=1).  Zero contributions.  Lifted-IR inspection
+found every `@llvm.fma.f32` had `float 0.000000e+00` as its second
+argument (should have been 1.0).  That constant literally doesn't
+come from anywhere other than the FMA_MIX handler's readMixSrc —
+root cause trivially localised from there.
+
+**Wrong hypotheses enumerated and ruled out (two-day chase).**
+
+- **H1 — DPP → ds_bpermute rewrite broke EXEC convergence.**  The
+  ds_bpermute emitted inside an `emitUnderExec` diamond reads 0
+  from EXEC-inactive source lanes (AMDGPU LDS bpermute semantics),
+  whereas native DPP reads VGPR content regardless of EXEC.
+  Plausible shape for the miscompile.  Ruled out by temporarily
+  gating the rewrite off (one-line comment in
+  `rewrite_cross_lane_divergent.cpp`'s site-collector): the
+  const-input probe still produced 1.0 with faithful-lift
+  `@llvm.amdgcn.update.dpp` in place.
+- **H2 — `strict.wwm` would force wave-wide EXEC around the
+  bperm.**  Followed from H1 as a candidate fix.  Wrapping the
+  bperm result in `@llvm.amdgcn.strict.wwm` changed nothing.
+  Reverted.
+- **H3 — `permlanex16` emulation mis-reads source lane.**  The
+  existing `canary_permlanex16_rowmax_fp32` matches, so the
+  emulation is sound in isolation.  The m1 miscompile surfaces
+  only in composition with FMA_MIX + packing, not in permlanex16
+  alone.  Composition-level suspicion was plausible but empirically
+  wrong — fixing FMA_MIX dropped m1's error by the full
+  accumulator magnitude, and the residual is bf16 reduction-order
+  drift.
+- **H4 — `s_pack_ll_b32_b16` produces wrong halves.**  The scalar
+  pack reads `low16 | (low16 << 16)` on two SGPR sources.  If one
+  source had garbage in its low 16, the pack would carry it.
+  Ruled out by tracing the pack's source SGPRs back to their
+  `v_readlane_b32 s, v, 31` producers: those readlanes were on
+  the downstream side of the reduction, not the source side.  A
+  pack-side bug would have shown a different signature (wrong
+  halves, not zero-accumulation).
+- **H5 — `emitUnderExec` models inactive lanes with UNDEF phis;
+  downstream cross-lane reads see UNDEF.**  Structurally possible
+  but not the active bug here: the FMA_MIX fix resolved the
+  symptom, proving the cross-lane read path was correct all
+  along.  Remains a reasonable concern to audit in isolation if
+  a future bug surfaces that FMA_MIX doesn't explain.
+
+**Graduation.**
+
+- `topk_forward_bisect_m1_const_in`: WRONG 2048/2048 (output 1.0)
+  → `match` (output 32.0).
+- `topk_forward_bisect_m1` (random): 2048/2048 WRONG `max|err|=39`
+  → 1300/2048 WRONG `max|err|=0.25` (≤ 2 bf16 ULPs at every
+  mismatched magnitude; 1404/2048 ≤ 1 ULP; residual is
+  non-associative bf16 reduction-order drift between Triton's
+  gfx1250 and gfx942 tree shapes — not a miscompile).  Relaxing
+  the comparator from `tol: 0.0` to a few bf16 ULPs would
+  graduate m1 to `match`; kept untouched here so the regression
+  surface stays bit-exact.
+- `topk_forward_bisect_m2..m4`, `topk_forward_bf16`: improved
+  proportionally; remaining mismatches are the same bf16
+  rounding drift composed with softmax / sort / argmax
+  sensitivity.
+- Canary grid (6 DPP / permlane / readlane / cvt recipes)
+  continues to match bit-exactly.
+- `lit_tests/v_fma_mix_f32_bf16/` extended with two
+  inline-constant FMA sites (`op_sel:[0,0,0]` and
+  `op_sel:[0,1,0]`) that MUST produce `float 1.000000e+00` as the
+  fma's second arg.  Negative pin rejects `float 0.000000e+00`
+  feeding any `fma.f32` call in this fixture — locks in the
+  pre-fix miscompile shape as a regression guard.
+
+**Generalised rule for the `readMixSrc`-like family.**  Any
+handler that reads an MCOperand and applies MC-encoding-specific
+post-processing (op_sel half extraction, sign extension, neg/abs
+modifier bits, packed-vs-unpacked interpretation) MUST branch on
+`op.isSrcReg(i)` vs the immediate forms.  MC's pre-resolution
+path is dtype-aware (`OperandType` → which inline-imm helper
+runs) and strips modifier state that would have applied to a
+VGPR operand.  Extending the current handler's op_sel /
+op_sel_hi logic into a new neg/abs-carrying variant without
+auditing the isSrcReg branch is how this class of bug returns.
+
+**The constant-input probe approach as a methodology.**  See the
+"Diagnostic technique — value-independent constant-input probes"
+entry below for mechanisation notes; this bug is the reference
+case the entry is written against.
+
+---
+
+## 2026-04-22 — Diagnostic technique — value-independent constant-input probes
+
+**Problem class.**  Cross-widening miscompiles whose symptom is
+noisy under random inputs — different rows show different
+wrong-to-right ratios with no clean structural pattern.  Examples
+from the corpus today include the FMA_MIX inline-constant bug
+(entry above), the `_D16_HI` store-upper-half bug (commits
+2ebfadeb95 / b827c55899), and the `topk_forward` / reduction
+miscompile class generally.  Random-input probes surface the
+symptom but can't localise it — the noise floor swamps every
+structural signal.
+
+**Technique.**  For any recipe that computes a deterministic
+function over its inputs, replace random inputs with a CONSTANT
+and compare salmon output to the analytically predicted result.
+
+  * For a reduction `tl.sum(axis=1)` over N elements of value v,
+    expected output = `N * v`.
+  * For a reduction `tl.max(axis=1)` over N elements of value v,
+    expected output = `v`.
+  * For an elementwise `y = f(x)`, expected output = `f(v)` per
+    slot.
+
+Salmon's deviation from the analytic prediction is now
+value-INDEPENDENT.  The deviation ITSELF carries structural
+information:
+
+  * Output = `v` for a reduction over N ≠ 1 → the reduction
+    tree is an identity over the multiplier; the mul path is
+    broken.  Inspect the CONSTANTS appearing in the lifted IR's
+    reduction ops.  Wrong-constant-at-a-specific-slot is the
+    smoking gun.
+  * Output = `K * v` for some `K < N` → the reduction drops
+    `(N - K)` contributions.  Inspect which structural paths are
+    skipped.  Does `K` equal a lane count, a warp count, a row
+    block count?  That's the dimension that was collapsed.
+  * Output = `v * scalar_not_in_N`s-divisor-set` → FP arithmetic
+    is happening but with the wrong multiplier somewhere.  Inspect
+    constants AND the modifier flags (neg, abs, scale_sel).
+  * Output = `v + offset` → an additive bias is leaking in.
+    Could be a prior register state not cleared, or an init-bias
+    (e.g. bf16 RNE `+0x7FFF`) surfacing into the output.
+
+**Mechanisation — tractable today.**  For every
+`compare_correctness` recipe with a deterministic reduction shape,
+auto-synthesise a `_const_in` sibling recipe:
+
+```python
+# Sibling generator: given a base recipe, emit a _const_in variant
+# with the same kernel but inputs filled to a single value.
+const_in_recipe = {
+  **base_recipe,
+  "name": base_recipe["name"] + "_const_in",
+  "inputs": [
+    {**inp, "range_lo": 1.0, "range_hi": 1.001}  # tight range
+    for inp in base_recipe["inputs"]
+  ],
+}
+```
+
+Run both the base recipe AND its _const_in sibling.  The _const_in
+verdict is binary (match / wrong) — and if WRONG, the pattern of
+deviation mechanically maps to a suspect class via the table
+above.  This can be a CI gate on every recipe that has a reduction
+primitive in its kernel AST.
+
+**Mechanisation — harder.**  Automated lifted-IR constant
+inspection: for any `@llvm.fma.f32` / `@llvm.fmuladd.f32` / other
+arithmetic intrinsic in the raised IR, flag any LITERAL constant
+operand that equals a "silently-damaging" value (0.0 as a
+multiplier, 1.0 as an addend, NaN anywhere, etc.) and print the
+MCInst operand it came from.  This is what a human does during
+triage — the Cursor / grep workflow is already mechanical-adjacent.
+A proper lint pass would live under `tools/ir_audit/` or similar
+and run as part of `raise_cli --audit`.
+
+**What NOT to mechanise (yet).**  Static analysis of handler
+source for "this code applies MC-encoding-dependent logic without
+checking isSrcReg first" — the static surface is too noisy;
+legitimate `op.srcF(i)` calls do not need the isSrcReg branch
+unless they read MC-encoding-state AFTER the read (op_sel, neg,
+abs, clamp, scale_sel).  Expressing that "after the read" condition
+cleanly in a linter is harder than just writing one _const_in
+probe per recipe.
+
+**Corollary — probe recipe hygiene.**  Every new recipe added to
+the direct-invocation corpus SHOULD include a `_const_in` sibling
+unless the kernel has no reduction or no element-wise op with a
+per-element closed form.  The cost is low (~20 lines of Python);
+the return is catching exactly this class of bug BEFORE it needs
+a multi-day hunt through EXEC / DPP / permlane / strict.wwm false
+leads.  See `topk_forward_bisect_m1_const_in.py` (commit
+b77e477908) for the reference template.
+
+---
+
 ## 2026-04-21 — Matmul128x128 residual: fixed by V_CMP → V_CNDMASK per-lane-i1 shadow (closes the whole family)
 
 **Context.** Follow-up (and close-out) to the `warp-3-specific, K-iter-0-
