@@ -125,12 +125,41 @@ Value *ModuloReplicationProjection::extractLaneBitFromWaveMask(
   Type *targetTy = waveMaskTy_;
   unsigned srcBits = v->getType()->getPrimitiveSizeInBits();
   unsigned dstBits = targetTy->getPrimitiveSizeInBits();
-  if (srcBits < dstBits)
-    v = B.CreateZExt(v, targetTy);
-  else if (srcBits > dstBits)
+  if (srcBits < dstBits) {
+    // Cross-widening case: a narrow source-wave-width mask (e.g. the
+    // 32-bit result of `ballotI1ToWidth(..., i32)` or a saved VCC-lo
+    // read via `loadSGPR32`) has to be widened to the target wave-mask
+    // width before the per-lane shift extracts a single bit.  A plain
+    // `zext` zeros the upper `dstBits - srcBits` positions, which
+    // under wave32 → wave64 makes target lanes 32..63 always read a
+    // zero (their `lane_id` shift lands in the zero-padded upper
+    // half), and downstream every narrow-mask-guarded `v_cndmask_b32`
+    // unconditionally picks its FALSE branch on those lanes.  In the
+    // Triton SwiGLU shape (`corpus_swiglu_fp32`) that FALSE branch is
+    // the 0x80000000 OOB-sentinel offset used to neutralise masked-
+    // out buffer accesses, so all target-wave-upper-half stores land
+    // out-of-bounds and the SRD bounds check silently drops them —
+    // the observed "half of every target wave64's outputs stay at
+    // their zero-initialised value" miscompile.  MODREP's contract
+    // (`wave-size-translation.md` §6 / class-"modulo-replication"
+    // policy) says target lane L reads bit `L mod W_src` of the source
+    // wave's mask, so the right widening *replicates* the narrow mask
+    // into the upper half rather than zero-extending.  That matches
+    // the `WaveNativeProjection::extractLaneBitFromWaveMask`
+    // widen-by-replication path and makes a narrow-mask round-trip on
+    // the consumer side symmetric with what both projections'
+    // narrow-EXEC writers already do on the producer side; the full-
+    // lane-id shift below then correctly selects the replicated bit
+    // for every target lane.
+    Value *zext = B.CreateZExt(v, targetTy);
+    Value *shifted = B.CreateShl(
+        zext, ConstantInt::get(targetTy, srcBits), "mask_widen_shl");
+    v = B.CreateOr(zext, shifted, "mask_widen_replicate");
+  } else if (srcBits > dstBits) {
     v = B.CreateTrunc(v, targetTy);
-  else if (v->getType() != targetTy)
+  } else if (v->getType() != targetTy) {
     v = B.CreateBitCast(v, targetTy);
+  }
   Value *laneIdx = emitLaneIdx(B);
   // Twine names are neutral (`mask_*`) rather than `vcc_*`: the helper
   // is called from every consumer that reads a wave mask as a per-lane

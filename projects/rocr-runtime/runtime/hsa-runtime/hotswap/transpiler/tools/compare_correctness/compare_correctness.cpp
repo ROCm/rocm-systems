@@ -4537,6 +4537,26 @@ RunResult runOne(const std::string &exe, const Recipe &r, int N, int blockSize) 
       mr.firstGold = g;
       mr.firstActual = a;
     }
+    // Optional preservation of per-mode output files for offline
+    // triage.  Set `HSA_SALMON_DUMP_DIFF=<dir>` to have each mode's
+    // output copied to `<dir>/<recipe>_N<N>_B<B>_<mode>.bin` before
+    // the harness tempfile is unlinked.  Intended for cases where the
+    // one-line `@idx=<I> ref=<X> actual=<Y> max|err|=<E>` summary
+    // doesn't disambiguate the miscompile pattern (per-lane /
+    // per-element / per-wave-half mismatches all compress to the same
+    // summary), and per-index numpy diffing is the faster path to a
+    // reproducer.  Cheap and side-effect-free when the env var is
+    // unset; survives across multiple recipes so a single run can
+    // populate `<dir>/` with a full gallery of diffs.
+    if (mr.output) {
+      const char *dd = std::getenv("HSA_SALMON_DUMP_DIFF");
+      if (dd && dd[0]) {
+        char buf[512];
+        std::snprintf(buf, sizeof(buf), "%s/%s_N%d_B%d_%s.bin", dd,
+                      r.name.c_str(), N, blockSize, tag.c_str());
+        writeFile(buf, *mr.output);
+      }
+    }
     unlink(outPath.c_str());
   };
 
