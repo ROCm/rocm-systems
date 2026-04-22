@@ -668,18 +668,102 @@ def _route_to_agents(
                 att_dir=att_dir,
             )
         )
+    except FileNotFoundError as e:
+        raise DatabaseNotFoundError(f"Database file not found: {database_path}") from e
+    except (
+        DatabaseNotFoundError,
+        DatabaseCorruptedError,
+        LLMAuthenticationError,
+        LLMRateLimitError,
+    ):
+        raise
     except Exception as e:
         raise DatabaseCorruptedError(f"Agentic analysis failed: {e}") from e
 
-    # Convert AnalysisOutput back to legacy AnalysisResult shape
-    return _wrap_agentic_result(
-        analysis_output,
-        database_path=database_path,
+    # Reuse the legacy compatibility shell so callers still receive the full
+    # recommendation set, ATT/tier-3 state, and raw formatter payloads.
+    result = _route_to_legacy(
+        database_path,
         custom_prompt=custom_prompt,
-        enable_llm=enable_llm,
-        llm_provider=llm_provider,
+        enable_llm=False,
+        llm_provider=None,
+        llm_api_key=None,
+        llm_thinking_tokens=None,
+        output_format=output_format,
         verbose=verbose,
+        top_kernels=top_kernels,
+        att_dir=att_dir,
     )
+    return _apply_agentic_overlay(result, analysis_output)
+
+
+def _apply_agentic_overlay(
+    result: AnalysisResult,
+    analysis_output: "schemas.AnalysisOutput",
+) -> AnalysisResult:
+    """Overlay agentic top-level findings onto a compatibility result."""
+
+    def _percent(value: float) -> float:
+        v = float(value or 0.0)
+        return v * 100.0 if 0.0 <= v <= 1.0 else v
+
+    time_breakdown_dict = analysis_output.time_breakdown
+    kernel_pct = _percent(time_breakdown_dict.get("kernel_pct", 0.0))
+    memcpy_pct = _percent(time_breakdown_dict.get("memcpy_pct", 0.0))
+    api_pct = _percent(time_breakdown_dict.get("api_pct", 0.0))
+    idle_pct = _percent(time_breakdown_dict.get("idle_pct", 0.0))
+    hot_kernels = analysis_output.hot_kernels or []
+    raw = getattr(result, "_raw", {}) or {}
+    total_runtime_ns = int(raw.get("time_breakdown", {}).get("total_runtime", 0) or 0)
+    kernel_time_ns = int(total_runtime_ns * kernel_pct / 100.0)
+    memcpy_time_ns = int(total_runtime_ns * memcpy_pct / 100.0)
+    api_overhead_ns = int(total_runtime_ns * api_pct / 100.0)
+    idle_time_ns = max(0, total_runtime_ns - kernel_time_ns - memcpy_time_ns - api_overhead_ns)
+
+    result.summary.primary_bottleneck = analysis_output.primary_bottleneck
+    result.summary.confidence = analysis_output.confidence
+    result.summary.key_findings = [
+        f"Total kernel execution time: {kernel_pct:.1f}%",
+        f"Memory copy overhead: {memcpy_pct:.1f}%",
+        f"Top kernel: {hot_kernels[0]['name'] if hot_kernels else 'N/A'}",
+    ]
+    result.execution_breakdown.kernel_time_ns = kernel_time_ns
+    result.execution_breakdown.kernel_time_pct = kernel_pct
+    result.execution_breakdown.memcpy_time_ns = memcpy_time_ns
+    result.execution_breakdown.memcpy_time_pct = memcpy_pct
+    result.execution_breakdown.api_overhead_ns = api_overhead_ns
+    result.execution_breakdown.api_overhead_pct = api_pct
+    result.execution_breakdown.idle_time_ns = idle_time_ns
+    result.execution_breakdown.idle_time_pct = idle_pct
+    if raw:
+        raw_breakdown = raw.get("time_breakdown", {})
+        raw["time_breakdown"] = {
+            **raw_breakdown,
+            "kernel_percent": kernel_pct,
+            "memcpy_percent": memcpy_pct,
+            "overhead_percent": api_pct,
+            "total_kernel_time": kernel_time_ns,
+            "total_memcpy_time": memcpy_time_ns,
+        }
+        if hot_kernels:
+            raw["hotspots"] = [
+                {
+                    "name": kernel.get("name"),
+                    "calls": int(kernel.get("calls", 0) or 0),
+                    "total_duration": int(
+                        kernel.get("duration_ns", kernel.get("total_duration", 0)) or 0
+                    ),
+                    "avg_duration": int(
+                        kernel.get("avg_duration_ns", kernel.get("avg_duration", 0)) or 0
+                    ),
+                    "percent_of_total": _percent(
+                        kernel.get("pct", kernel.get("percent_of_total", 0.0))
+                    ),
+                }
+                for kernel in hot_kernels
+            ]
+        result._raw = raw
+    return result
 
 
 def _route_to_legacy(

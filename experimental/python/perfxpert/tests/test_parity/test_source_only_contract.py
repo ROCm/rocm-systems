@@ -17,6 +17,10 @@ from .parity_runner import (
 SOURCE_ONLY_FIXTURES = available_source_only_fixtures()
 
 
+def test_source_only_fixture_inventory_nonempty() -> None:
+    assert SOURCE_ONLY_FIXTURES, "Tier 0 source-only fixtures are required for this contract"
+
+
 @pytest.mark.parametrize(
     "source_fx",
     SOURCE_ONLY_FIXTURES,

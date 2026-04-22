@@ -16,7 +16,7 @@ KNOWLEDGE_DIR = (
 )
 SCHEMAS_DIR = KNOWLEDGE_DIR / "_schemas"
 
-# The 21 YAML files expected per spec Appendix B
+# The checked-in knowledge YAML files expected in this tree.
 _EXPECTED_YAMLS = {
     "gpu_specs",
     "bottleneck_types",
@@ -39,6 +39,7 @@ _EXPECTED_YAMLS = {
     "vllm_rocm_api",
     "tracelens_metrics",
     "vgpr_occupancy_tables",
+    "proven_optimizations",
 }
 
 
@@ -56,7 +57,7 @@ def test_every_yaml_validates_against_its_schema(yaml_path):
     jsonschema.validate(data, schema)
 
 
-def test_all_21_expected_yaml_files_present():
+def test_all_expected_yaml_files_present():
     present = {p.stem for p in _all_yaml_files()}
     missing = _EXPECTED_YAMLS - present
     assert not missing, f"missing YAMLs: {missing}"

@@ -20,11 +20,10 @@ def test_bottleneck_classification_agrees(parity_runner: ParityRunner, fx) -> No
             dual.old.primary_bottleneck == fx.expected_bottleneck,
             dual.new.primary_bottleneck == fx.expected_bottleneck,
         ]
-        if not any(paths_hit_expected):
-            pytest.xfail(
-                f"Neither path matches expected bottleneck "
-                f"{fx.expected_bottleneck!r}; investigate fixture before parity"
-            )
+        assert any(paths_hit_expected), (
+            f"Neither path matches expected bottleneck "
+            f"{fx.expected_bottleneck!r}; investigate fixture before parity"
+        )
 
     # The actual parity assertion:
     assert dual.agree_bottleneck(), summarize_for_failure_message(dual)

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "proven_optimizations",
+  "type": "array",
+  "minItems": 10,
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "bottleneck",
+      "technique",
+      "measured_impact"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "bottleneck": {
+        "type": "string",
+        "enum": [
+          "compute",
+          "memory_transfer",
+          "latency"
+        ]
+      },
+      "technique": {
+        "type": "string",
+        "minLength": 1
+      },
+      "arch": {
+        "type": "string",
+        "minLength": 1
+      },
+      "measured_impact": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "min",
+          "max"
+        ],
+        "properties": {
+          "min": {
+            "type": "number",
+            "minimum": 0
+          },
+          "max": {
+            "type": "number",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}

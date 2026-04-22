@@ -42,3 +42,20 @@ def test_cli_flag_on_routes_to_agentic(fake_db, monkeypatch):
             analyze_mod.execute(input=mock.MagicMock(), format="text")
             agentic.assert_called_once()
             legacy.assert_not_called()
+
+
+def test_execute_agentic_propagates_runtime_attributeerror(monkeypatch):
+    def boom(**kwargs):
+        raise AttributeError("runtime failure")
+
+    monkeypatch.setattr("perfxpert.agents.runtime.run_cli", boom, raising=False)
+
+    with pytest.raises(AttributeError, match="runtime failure"):
+        analyze_mod._execute_agentic(input=None, format="json")
+
+
+def test_execute_agentic_missing_run_cli_raises_runtimeerror(monkeypatch):
+    monkeypatch.delattr("perfxpert.agents.runtime.run_cli", raising=False)
+
+    with pytest.raises(RuntimeError, match="agent runtime is not available"):
+        analyze_mod._execute_agentic(input=None, format="json")

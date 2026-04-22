@@ -1162,12 +1162,18 @@ def _execute_agentic(
     """Agentic path: delegates to Phase 3 runtime if available."""
     try:
         from perfxpert.agents import runtime
-        return runtime.run_cli(input=input, config=config, **kwargs)
-    except (ImportError, AttributeError) as e:
+    except ImportError as e:
         raise RuntimeError(
             "PERFXPERT_USE_AGENTS=1 is set but agent runtime is not available. "
             "This is a Phase 3 dependency. Unset the env var to use the legacy path."
         ) from e
+    run_cli = getattr(runtime, "run_cli", None)
+    if run_cli is None:
+        raise RuntimeError(
+            "PERFXPERT_USE_AGENTS=1 is set but agent runtime is not available. "
+            "This is a Phase 3 dependency. Unset the env var to use the legacy path."
+        )
+    return run_cli(input=input, config=config, **kwargs)
 
 
 def _execute_legacy(

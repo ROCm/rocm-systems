@@ -31,17 +31,15 @@ class ProvenOptimizationCase:
 
 class ProvenOptimizationRunner:
     def load_seed_cases(self) -> List[ProvenOptimizationCase]:
-        try:
-            entries = load_yaml("proven_optimizations")
-        except FileNotFoundError:
-            # Fixture not present yet; return empty list and tests will skip
-            return []
+        entries = load_yaml("proven_optimizations")
 
         cases = []
+        missing_fixture_dirs = []
         for entry in entries:
             case_dir = FIXTURES_DIR / entry["id"]
             if not case_dir.exists():
-                continue  # allow partial corpus in early development
+                missing_fixture_dirs.append(entry["id"])
+                continue
             cases.append(
                 ProvenOptimizationCase(
                     case_id=entry["id"],
@@ -51,6 +49,11 @@ class ProvenOptimizationRunner:
                     measured_impact_max=float(entry["measured_impact"]["max"]),
                     fixture_dir=case_dir,
                 )
+            )
+        if missing_fixture_dirs:
+            missing = ", ".join(sorted(missing_fixture_dirs))
+            raise FileNotFoundError(
+                f"missing proven-optimization fixtures for: {missing}"
             )
         return cases
 
@@ -63,7 +66,7 @@ class ProvenOptimizationRunner:
 
         total_baseline = sum(k.total_runtime_ns for k in baseline_runs)
         total_new = sum(k.total_runtime_ns for k in new_runs)
-        claimed_speedup = total_baseline / max(total_new, 1)
+        claimed_speedup = self.claimed_speedup(case)
 
         gate_input = GateInput(
             kernel_name=case.case_id,
@@ -81,3 +84,15 @@ class ProvenOptimizationRunner:
             skip_anchors=True,
         )
         return run_gate_cascade(gate_input)
+
+    def claimed_speedup(self, case: ProvenOptimizationCase) -> float:
+        baseline = case.fixture_dir / "baseline.db"
+        optimized = case.fixture_dir / "optimized.db"
+        baseline_runs = extract_kernel_runtimes_from_db(str(baseline))
+        new_runs = extract_kernel_runtimes_from_db(str(optimized))
+        total_baseline = sum(k.total_runtime_ns for k in baseline_runs)
+        total_new = sum(k.total_runtime_ns for k in new_runs)
+        return total_baseline / max(total_new, 1)
+
+    def measured_impact(self, case: ProvenOptimizationCase) -> float:
+        return self.claimed_speedup(case) - 1.0

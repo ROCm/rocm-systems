@@ -1,0 +1,69 @@
+- id: vgpr_reduction_compute_bound
+  bottleneck: compute
+  technique: reduce_vgpr
+  measured_impact:
+    min: 0.12
+    max: 0.18
+
+- id: mfma_enablement
+  bottleneck: compute
+  technique: mfma_enablement
+  measured_impact:
+    min: 0.60
+    max: 0.75
+
+- id: fast_math_compiler_flag
+  bottleneck: compute
+  technique: fast_math_flag
+  measured_impact:
+    min: 0.08
+    max: 0.14
+
+- id: memory_coalescing_stride_fix
+  bottleneck: memory_transfer
+  technique: memory_coalescing
+  measured_impact:
+    min: 0.15
+    max: 0.24
+
+- id: lds_tiling_matmul
+  bottleneck: memory_transfer
+  technique: lds_tiling
+  measured_impact:
+    min: 0.20
+    max: 0.30
+
+- id: hip_stream_overlap
+  bottleneck: latency
+  technique: hip_stream_overlap
+  measured_impact:
+    min: 0.18
+    max: 0.28
+
+- id: kernel_fusion_small_launches
+  bottleneck: latency
+  technique: kernel_fusion
+  measured_impact:
+    min: 0.30
+    max: 0.40
+
+- id: device_sync_removal
+  bottleneck: latency
+  technique: hip_stream_overlap
+  measured_impact:
+    min: 0.10
+    max: 0.18
+
+- id: warp_primitives_reduction
+  bottleneck: compute
+  technique: reduce_vgpr
+  measured_impact:
+    min: 0.12
+    max: 0.18
+
+- id: cache_blocking_kernel
+  bottleneck: memory_transfer
+  technique: lds_tiling
+  measured_impact:
+    min: 0.11
+    max: 0.20

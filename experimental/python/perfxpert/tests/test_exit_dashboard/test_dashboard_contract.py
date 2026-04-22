@@ -79,8 +79,10 @@ def test_dashboard_marks_go_only_when_all_thresholds_met(tmp_path: Path) -> None
         return True
 
     all_pass = all(_is_pass(k, v) for k, v in metrics.items())
+    has_pending = any(v in ("nightly-only", "pending") for v in metrics.values())
     if all_pass:
-        assert verdict == "GO", f"All metrics pass but verdict = {verdict}"
+        expected = "PARTIAL (pending)" if has_pending else "GO"
+        assert verdict == expected, f"All metrics pass but verdict = {verdict}"
     else:
         assert verdict in ("NO-GO", "PARTIAL (pending)")
 

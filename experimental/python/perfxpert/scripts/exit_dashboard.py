@@ -24,6 +24,7 @@ PARITY_SNAPSHOT = REPO_ROOT / "tests" / "test_parity" / "parity_snapshots" / "_a
 RED_TEAM_OUTCOMES = REPO_ROOT / "tests" / "test_red_team" / "_attack_outcomes"
 AIRGAP_SNAPSHOTS = REPO_ROOT / "tests" / "test_integration" / "_airgap_snapshots"
 FP_AGGREGATE = REPO_ROOT / "tests" / "test_regression_gate" / "_runner_outputs" / "_aggregate.json"
+NARROW_SCOPE_TEST = REPO_ROOT / "tests" / "test_agents" / "test_narrow_scope.py"
 
 
 def collect_parity() -> float | str:
@@ -67,9 +68,11 @@ def collect_false_positive() -> float | str:
 
 def collect_narrow_scope_violations() -> int | str:
     """Run per-agent narrow-scope CI check inline (fast subprocess)."""
+    if not NARROW_SCOPE_TEST.exists():
+        return "pending"
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "pytest", "tests/test_agents/test_narrow_scope.py",
+            [sys.executable, "-m", "pytest", str(NARROW_SCOPE_TEST.relative_to(REPO_ROOT)),
              "--tb=no", "-q"],
             capture_output=True, text=True, cwd=REPO_ROOT,
         )
