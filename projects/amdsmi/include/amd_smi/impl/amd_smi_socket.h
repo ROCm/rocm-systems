@@ -82,7 +82,8 @@ class AMDSmiSocket {
     }
   }
   amdsmi_status_t get_processor_count(uint32_t* processor_count) const;
-  amdsmi_status_t get_processor_count(amdsmi_processor_type_t type, uint32_t* processor_count) const;
+  amdsmi_status_t get_processor_count(amdsmi_processor_type_t type,
+                                      uint32_t* processor_count) const;
 
  private:
   uint32_t sindex_;
