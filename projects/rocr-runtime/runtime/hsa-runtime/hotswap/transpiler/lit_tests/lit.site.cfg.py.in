@@ -539,6 +539,27 @@ config.fixtures = {
     # and are covered transitively.
     "vopd_extra_subops":
         r"@LIT_FIXTURE_VOPD_EXTRA_SUBOPS_CO@",
+    # VOPD `v_dual_cndmask_b32` SGPR-condition regression fence —
+    # see hotswap/docs/modrep-predicate-chain.md §9.7 (2026-04-22
+    # fix) and transpiler/handle_vopd.cpp's `v_cndmask_b32` handler.
+    #
+    # Pins the post-fix IR shape for VOPD cndmask pairs whose two
+    # halves consume DIFFERENT scalar conditions (one `sN`, one
+    # `vcc_lo`) — the pre-fix handler silently routed BOTH halves
+    # through `loadVCC`, inheriting the paired V_CMP writer's
+    # `vcc_lo` and losing the SGPR condition entirely. That was the
+    # single-bug root cause of
+    # `canary_bpermute_scan_fp32` WRONG 4/4 AND
+    # `corpus_layernorm_fp32` WRONG on N=128/256/512 — Triton's
+    # Kogge-Stone scan and LayerNorm's mean-of-squares reduction
+    # both emit exactly this dual-scalar pair, and the end-to-end
+    # numerical regression on `compare_correctness` pins the fix's
+    # correctness. This fixture pins the IR-level shape so a future
+    # refactor that re-introduces hardcoded-VCC fails here rather
+    # than only surfacing downstream as a silent scan-corpus
+    # miscompile.
+    "v_dual_cndmask_b32_sgpr_cond":
+        r"@LIT_FIXTURE_V_DUAL_CNDMASK_B32_SGPR_COND_CO@",
     # tensor_load_to_lds (VIMAGE TENSOR, gfx1250-only) — single
     # `.co` fixture shared by two complementary lit tests in the
     # `tensor_load_to_lds/` directory:

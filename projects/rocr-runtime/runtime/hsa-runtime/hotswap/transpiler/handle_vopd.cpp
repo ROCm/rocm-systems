@@ -103,6 +103,33 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       Value *v = nullptr;
       int vidx = parseVRegIdx(name);
       if (vidx >= 0) { v = ctx.regs.loadVGPR32(ctx.B, vidx + msbOffset(srcSlot)); }
+      // TTMP SGPRs ("trap temps") — Triton-emitted kernels on gfx1250 use
+      // `ttmp9` in VOPD source slots to read the workgroup-id-X value the
+      // SPE prelude seeded into `regs.ttmp[9]` (see raiser.cpp's Phase 4
+      // `fnWorkgroupIdX` store).  TTMP lives in its own alloca bank and
+      // must be checked before the plain SGPR branch below, because
+      // `ttmp<N>` does not start with the letter 's' but the next
+      // `name.starts_with("s")` catch-all would otherwise let this fall
+      // through to the integer-literal parser (which fails loudly) rather
+      // than the register load that was intended.
+      else if (name.starts_with("ttmp")) {
+        int tidx = -1;
+        if (!name.drop_front(4).getAsInteger(10, tidx) &&
+            tidx >= 0 &&
+            static_cast<unsigned>(tidx) < ctx.regs.ttmp.size())
+          v = ctx.B.CreateLoad(ctx.i32Ty, ctx.regs.ttmp[tidx], "vopd_ttmp");
+      }
+      // VCC.lo as a scalar source — present in ~8 VOPD sites across the
+      // current corpus (workgroup-id distribution prologues and similar
+      // SPE fixtures).  VOPD is a wave32-only family, so `vcc_lo` is the
+      // entire VCC bitmask in the source ISA; we route through
+      // `readVCCAsWaveMask` so the wave-projection layer sees a
+      // principled VCC-as-scalar read and can re-project to the target
+      // wave width, instead of a width-specific half-slice that would
+      // silently miscompile under cross-widening.
+      else if (name == "vcc_lo") {
+        v = ctx.regs.readVCCAsWaveMask(ctx.B, ctx.i32Ty);
+      }
       else if (name.starts_with("s")) {
         int sidx = -1;
         if (!name.drop_front(1).getAsInteger(10, sidx))
@@ -170,7 +197,54 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       Value *s0 = readVOPDSrc(operands[1], 0);
       Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
-      Value *cond = ctx.regs.loadVCC(ctx.B);
+
+      // VOPD on gfx1250 encodes an EXPLICIT scalar condition operand
+      // (operands[3]) for each `v_dual_cndmask_b32` half. Ignoring it and
+      // defaulting to VCC (the previous behaviour) is a silent
+      // miscompile whenever the paired instruction writes `vcc_lo` and
+      // the cndmask's real condition source is a separate SGPR — which
+      // is exactly the shape Triton's `tl.cumsum` Kogge-Stone scan
+      // emits at distance-8 and distance-16: `v_dual_cndmask_b32 v<sel>,
+      // v<sel>, v<next_sel>, s<stage_guard> :: v_dual_cndmask_b32
+      // v<val>, v<val>, v<fadd>, vcc_lo` pairs the selector advance
+      // (guarded by `sN = (tid < 2^s)`) with the value update (guarded
+      // by `vcc = (tid > 2^s - 1)`). Hardcoding VCC for both halves
+      // conflates the two predicates and produces
+      // `canary_bpermute_scan_fp32`'s silent-WRONG scan output (the
+      // root-cause finding in hotswap/docs/modrep-predicate-chain.md
+      // §9.7, 2026-04-22: stage-3 lanes >= 8 read themselves instead of
+      // lane-8 partner, doubling their accumulator).
+      //
+      // Mirrors the non-VOPD `V_CNDMASK_B32` handler in
+      // handle_valu_vop3p.cpp — if the 3rd operand is an SGPR, prefer
+      // the fresh V_CMP shadow `i1` from the per-BB cache; else route
+      // through the projection's `extractLaneBitFromWaveMask` (lossy
+      // under wave32 → wave64 cross-widening if the producer truncated
+      // to source width, per the documented gap in
+      // hotswap/docs/sgpr-wave-mask-translation.md §3.1). Only if no
+      // scalar condition is specified (or the 3rd operand is
+      // `vcc_lo`/`vcc`) do we fall back to `loadVCC`.
+      Value *cond = nullptr;
+      if (operands.size() >= 4) {
+        StringRef condName = operands[3];
+        if (condName == "vcc_lo" || condName == "vcc") {
+          cond = ctx.regs.loadVCC(ctx.B);
+        } else if (condName.starts_with("s") && !condName.starts_with("scc")) {
+          int sidx = -1;
+          if (!condName.drop_front(1).getAsInteger(10, sidx) && sidx >= 0) {
+            if (Value *freshCmp = ctx.lookupSgprWaveMaskI1(sidx)) {
+              cond = freshCmp;
+            } else {
+              Value *condVal = ctx.isa.isWave32()
+                                   ? ctx.regs.loadSGPR32(ctx.B, sidx)
+                                   : ctx.regs.loadSGPR64(ctx.B, sidx);
+              cond = ctx.projection.extractLaneBitFromWaveMask(ctx.B,
+                                                                condVal);
+            }
+          }
+        }
+      }
+      if (!cond) cond = ctx.regs.loadVCC(ctx.B);
       ctx.storeVGPR32(dstIdx, ctx.B.CreateSelect(cond, s1, s0, "vopd_cndmask"));
       return true;
     }

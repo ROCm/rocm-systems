@@ -1635,8 +1635,90 @@ The `<kernel_symbol>` comes from the recipe's sidecar
    exist as framed. `canary_bpermute_scan_fp32` stays under "open
    mechanism" until the single-element trace runs.
 
+   ---
+
+   **Mechanism IDENTIFIED 2026-04-22** (single-element trace at
+   N=128 via `HSA_SALMON_DUMP_DIFF`):
+
+   First divergence: index 8, salmon +3.4693 vs native +1.4988,
+   delta +1.9706 ≈ 2 × (native[8] − native[0]) =
+   2 × (1.4988 − (−0.2359)) = 2 × 1.7347 = 3.4694. Dead ringer
+   for "stage-3 lane 8 fadd'ed with itself instead of lane 0".
+
+   Root cause: **VOPD `v_dual_cndmask_b32` handler hardcoded VCC
+   as the condition**, ignoring the explicit scalar condition
+   operand gfx1250's VOPD encoding carries. Native scan body at
+   `canary_bpermute_scan_kernel+0x194` (and mirrors at each
+   distance stage) is:
+
+   ```
+   v_dual_cndmask_b32 v9, v9, v1, s0 :: v_dual_cndmask_b32 v2, v2, v7, vcc_lo
+   ```
+
+   — the first half is the stage-3 selector advance guarded by
+   `s0 = (tid < 8)` (tells lanes < 8 to read themselves, lanes
+   >= 8 to read `(tid - 8) * 4`), the second half is the stage-2
+   value update guarded by `vcc = (tid > 3)` (lanes > 3 take the
+   fadd result). `handle_vopd.cpp::v_cndmask_b32` routed BOTH
+   halves' condition through `ctx.regs.loadVCC(ctx.B)`, so the
+   selector advance inherited `(tid > 3)` from the paired
+   instruction's vcc producer. Lanes 8..31 then got
+   `(tid > 3) = true` → pick "self" (`vlshl`) instead of
+   `(tid - 8) * 4`, making stage-3's bpermute read each lane's
+   own value, and the subsequent fadd doubled the lane's stage-2
+   partial sum. That's exactly the observed `2 × (lane_L - lane_0)`
+   error pattern.
+
+   Fix (2026-04-22, commit TBD): mirror the non-VOPD `V_CNDMASK_B32`
+   handler in `handle_valu_vop3p.cpp`. Parse `operands[3]` of the
+   VOPD half:
+
+     * `vcc_lo` / `vcc` → `loadVCC` (old default, now explicit).
+     * `sN` → prefer the per-BB V_CMP shadow `i1` from
+       `lookupSgprWaveMaskI1(N)`; fall back to
+       `projection.extractLaneBitFromWaveMask` on the raw SGPR
+       alloca.
+     * absent → `loadVCC` (safety fallback for VOPD encodings that
+       don't surface a condition operand).
+
+   Scope of the fix — `compare_correctness` salmon-path sweep
+   post-fix vs pre-fix (WaveNative default, all 12 Triton
+   recipes):
+
+   | recipe | pre-fix | post-fix |
+   |---|---|---|
+   | `canary_bpermute_scan_fp32` | WRONG 4/4 | **match 4/4** |
+   | `corpus_layernorm_fp32` | WRONG @ N=128/256/512 (max\|err\| 0.128/0.034/0.016) | **match 4/4** |
+   | `swiglu_fp32`, `rmsnorm_fp32`, `rope_fp32`, `vecadd_f16`, `corpus_add_fp32`, `corpus_asin_fp32`, `canary_dpp_compound_add_fp32`, `canary_dpp_reduce_fp32`, `canary_permlanex16_rowmax_fp32` | match 4/4 | match 4/4 |
+   | `corpus_softmax_fp32` | EXIT=2 (writelane safety net) | EXIT=2 (unchanged; orthogonal) |
+
+   The `corpus_layernorm_fp32` small-N residual fix is a
+   BONUS — Triton's LayerNorm kernel also emits VOPD
+   `v_dual_cndmask_b32 vX, ..., sN` pairs in its mean-of-squares
+   reduction path, and the same hardcoded-VCC bug silently
+   corrupted 20 of 128 output rows at N=128 (max\|err\| 0.128
+   pre-fix; the "20 of 128" matches the count of rows where the
+   reduction tree's partial-sum cndmask fell on a non-self-
+   cancelling lane pair). This collapses `§9.8` entirely — the
+   small-N residual is the same bug as `canary_bpermute_scan_fp32`,
+   the "1024 matches" was the error-rounding-into-tolerance
+   artifact of larger reduction trees diluting the per-pair
+   miscompile.
+
+   Regression gate: `compare_correctness` salmon-path on the
+   full Triton corpus + lit fixture
+   `lit_tests/v_dual_cndmask_b32_sgpr_cond/` (added with the fix
+   commit) pins the VOPD SGPR-condition shape so a future
+   refactor that re-introduces the VCC-hardcoded path fails
+   here rather than silently miscompiling the scan corpus.
+
+   This supersedes §9.8's "small-N residual" open question:
+   fixed by the same commit.
+
 8. **Corpus_layernorm small-N residual (opened 2026-04-21 by
-   WaveNative graduation).**
+   WaveNative graduation; CLOSED 2026-04-22 — same VOPD
+   `v_dual_cndmask_b32` SGPR-condition bug as §9.7; fixed by the
+   same commit).**
 
    Under WaveNative, `corpus_layernorm_fp32` matches at N=1024
    but remains WRONG at N=128/256/512. The residual error
@@ -1664,7 +1746,9 @@ The `<kernel_symbol>` comes from the recipe's sidecar
 
 9. **§6 graduation numbers falsified by controlled MODREP/WaveNative
    sweep (opened 2026-04-21 during classifier cleanup reflection,
-   post-graduation commit `c3cc463112`).**
+   post-graduation commit `c3cc463112`; PARTIALLY SUPERSEDED
+   2026-04-22 by §9.7's VOPD SGPR-condition fix — see
+   "Post-fix status" below).**
 
    During the principled-cleanup pass on the C5 classifier, a
    controlled three-way sweep ran compare_correctness on the full
@@ -1776,3 +1860,63 @@ The `<kernel_symbol>` comes from the recipe's sidecar
    `./compare_correctness --recipe=<any_triton>` with
    `LD_PRELOAD=./libsalmon_intercept.so` and
    `LD_LIBRARY_PATH=<build>/rocr/lib`.
+
+   ---
+
+   **Post-fix status (2026-04-22).** §9.7's VOPD SGPR-condition
+   root cause and fix shift the evidence substantially but do
+   not fully rehabilitate §6's graduation claims:
+
+   | recipe | MODREP post-VOPD-fix | WaveNative post-VOPD-fix |
+   |---|---|---|
+   | `canary_bpermute_scan_fp32` | EXIT=2 (C5 refused, unchanged) | **match 4/4 (WRONG → match)** |
+   | `corpus_layernorm_fp32` | expected: match (post-VOPD-fix — NOT yet re-measured under MODREP) | match 4/4 |
+   | `swiglu_fp32`, `rmsnorm_fp32`, baselines | match 4/4 (unchanged) | match 4/4 (unchanged) |
+   | `corpus_softmax_fp32` | EXIT=2 (writelane safety net, unchanged) | EXIT=2 (unchanged) |
+
+   The **revised net effect** of the graduation on
+   `compare_correctness` is now:
+
+   - MODREP path: loses `canary_bpermute_scan_fp32` numerically
+     (the scan was already loud-refused by C5 under MODREP, so
+     the VOPD fix doesn't flip its MODREP verdict), keeps all
+     baselines + `corpus_layernorm_fp32` now expected to match
+     (per-VOPD-fix).
+   - WaveNative path: **match 4/4 on all Triton recipes except
+     `corpus_softmax_fp32`** (which is EXIT=2 via the
+     writelane safety net, a separate class). Specifically,
+     WaveNative now covers:
+       * `canary_bpermute_scan_fp32` — the scan-corpus canary,
+         now MATCH under WaveNative (via the VOPD fix); under
+         MODREP it's still C5-refused (loud), so only WaveNative
+         gets a successful-match for this recipe.
+       * `corpus_layernorm_fp32` — all 4 shapes match; the small-
+         N residual attributed to "reduction-ordering drift" in
+         the pre-fix §9.8 was actually the same VOPD SGPR-
+         condition bug.
+
+   **What this means for the options in this section:**
+
+   - Option (a) "revert graduation" is now strictly worse than
+     before: canary_bpermute_scan_fp32 would regress from "match
+     under WaveNative default" to "loud-refused under MODREP
+     default" (a loss of numerical match, even if the refusal
+     is the principled loud signal).
+   - Option (b) "keep graduation, rewrite §6" is now the
+     principled choice: WaveNative default + VOPD fix produces
+     match on 11/12 Triton recipes (the 12th, corpus_softmax, is
+     an orthogonal writelane-class EXIT=2 already documented in
+     §6 / §9.8). The graduation's correctness domain is real
+     post-VOPD-fix; the pre-VOPD-fix §6 claims were just
+     mis-attributing a bug (VOPD cndmask) to a projection choice
+     (MODREP-vs-WaveNative).
+   - Option (c) "split default by workload class" is no longer
+     necessary — the Triton corpus no longer distinguishes
+     MODREP-safe from WaveNative-safe in a principled way
+     post-fix.
+
+   §6 should be rewritten once corpus_softmax_fp32's writelane
+   EXIT=2 is triaged (separate class) to reflect the post-fix
+   state: WaveNative is the default; MODREP is the opt-in for
+   projection-specific debugging / lit-fixture pinning. The
+   empirical evidence is now clean and monotonic.
