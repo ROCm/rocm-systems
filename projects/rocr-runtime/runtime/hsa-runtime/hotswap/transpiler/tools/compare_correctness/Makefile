@@ -63,6 +63,7 @@ TRITON_KERNELS := vecadd_f16 corpus_add_fp32 corpus_asin_fp32 \
                   canary_bpermute_scan_fp32 \
                   canary_dpp_reduce_fp32 \
                   canary_dpp_compound_add_fp32 \
+                  canary_dpp_compound_add_u32 \
                   canary_permlanex16_rowmax_fp32 \
                   rmsnorm_fp32 \
                   swiglu_fp32 \
