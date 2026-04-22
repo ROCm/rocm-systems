@@ -929,6 +929,7 @@ hsa_status_t hsa_amd_signal_waiting_inc(hsa_signal_t hsa_signal) {
   core::Signal* signal = core::Signal::Convert(hsa_signal);
   IS_VALID(signal);
 
+  signal->Retain();
   signal->WaitingInc();
   return HSA_STATUS_SUCCESS;
   CATCH;
@@ -942,6 +943,7 @@ hsa_status_t hsa_amd_signal_waiting_dec(hsa_signal_t hsa_signal) {
   IS_VALID(signal);
 
   signal->WaitingDec();
+  signal->Release();
   return HSA_STATUS_SUCCESS;
   CATCH;
 }
