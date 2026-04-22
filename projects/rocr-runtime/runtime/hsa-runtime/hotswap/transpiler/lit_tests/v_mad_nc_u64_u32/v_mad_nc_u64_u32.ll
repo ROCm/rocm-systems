@@ -33,3 +33,12 @@
 ; for unused intrinsics pulled in transitively by other passes.
 ; CHECK-NOT: call {{.*}}@llvm.umul.with.overflow
 ; CHECK-NOT: call {{.*}}@llvm.uadd.with.overflow
+
+; Negative: no saturating-add — this fixture's inline `asm volatile`
+; encodes `clamp = 0`, so the handler must take the plain `add i64`
+; fast-path.  The `clamp = 1` encoding is a raise-time refusal
+; today (see `handle_valu.cpp`'s V_MAD_NC_* block comment for the
+; `llvm.uadd.sat.i64` upgrade path when a corpus producer
+; surfaces); any appearance of the saturating intrinsic here
+; would mean the handler silently promoted without us noticing.
+; CHECK-NOT: call {{.*}}@llvm.uadd.sat.i64

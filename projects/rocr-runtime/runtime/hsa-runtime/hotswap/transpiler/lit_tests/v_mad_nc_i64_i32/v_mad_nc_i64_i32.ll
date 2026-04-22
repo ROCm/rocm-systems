@@ -65,3 +65,14 @@
 ;     against the specific i24 builtin that a mis-handler swap to
 ;     the narrow MAD family would introduce.
 ; CHECK-NOT: call {{.*}}@llvm.amdgcn.mul.i24
+;   - No saturating-add intrinsic.  The HIP `asm volatile` in the
+;     .hip file doesn't set the VOP3 clamp bit, so this fixture
+;     exercises the handler's `clamp = 0` fast-path (plain
+;     `add i64`).  If a future fixture encodes `clamp = 1` (or a
+;     corpus producer surfaces and we graduate the handler to
+;     emit saturation per the block comment in
+;     `handle_valu.cpp`'s V_MAD_NC_* arm), a sibling fixture will
+;     cover `llvm.sadd.sat.i64` emission.  Until then, any
+;     appearance here means the handler silently promoted to
+;     saturation and we need to investigate.
+; CHECK-NOT: call {{.*}}@llvm.sadd.sat.i64

@@ -523,40 +523,73 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
-  // v_mad_nc_u64_u32 (gfx1250, VOP3Only_Realtriple_gfx1250 @ 0x2fa):
-  //   D.u64 = zext(S0.u32) * zext(S1.u32) + S2.u64   (no carry output)
+  // v_mad_nc_{u64_u32,i64_i32} (gfx1250, VOP3Only_Realtriple_gfx1250
+  // @ 0x2fa / 0x2fb):
+  //   U form: D.u64 = zext(S0.u32) * zext(S1.u32) + S2.u64
+  //   I form: D.i64 = sext(S0.i32) * sext(S1.i32) + S2.i64
+  // No carry output (hence the "nc" suffix), single dst.  Shared
+  // clamp / widening dispatch below.
   //
-  // Semantically identical to V_MAD_CO_U64_U32's D-value above; the "nc"
-  // variant simply omits the VCC write (single dst, firstSrcIdx = 1 —
-  // the `writelane`-sibling double-dst shape from `v_mad_u64_u32` does
-  // not apply here).  The backend's `SelectMad64_32()` pattern matcher
+  // The backend's `SelectMad64_32()` pattern matcher
   // (AMDGPUISelDAGToDAG.cpp:1220) matches the canonical
-  // `add(mul(zext s0, zext s1), s2_i64)` and re-emits V_MAD_NC_U64_U32
-  // on gfx1250 targets or V_MAD_CO_U64_U32 (with VCC allocated to a
-  // scratch SGPR and discarded) on gfx942 — so the same IR here is
-  // correct for both the same-target and the cross-target lift paths.
-  if (sop == SemOp::V_MAD_NC_U64_U32) {
-    Value *a = ctx.B.CreateZExt(op.src(0), ctx.i64Ty);
-    Value *b = ctx.B.CreateZExt(op.src(1), ctx.i64Ty);
-    Value *res = ctx.B.CreateAdd(ctx.B.CreateMul(a, b), op.src64(2), "vmad_nc_u64");
-    ctx.writeReg64(op.dst(), res);
-    hr.handled = true;
-    return hr;
-  }
-  // v_mad_nc_i64_i32 (gfx1250, VOP3Only_Realtriple_gfx1250 @ 0x2fb):
-  //   D.i64 = sext(S0.i32) * sext(S1.i32) + S2.i64   (no carry output)
+  // `add(mul(widen s0, widen s1), s2_i64)` and re-emits
+  // V_MAD_NC_{U,I}64_{U,I}32 on gfx1250 targets or the legacy
+  // V_MAD_{CO_,}U64_U32 / V_MAD_I64_I32 (with VCC allocated to a
+  // scratch SGPR and discarded) on gfx942 — so the same IR here
+  // is correct for both same-target and cross-target lift paths.
   //
-  // Signed sibling of V_MAD_NC_U64_U32 above.  The 32→64 sign extension
-  // on both operand sources matters — on gfx942 the backend matches the
-  // `add(mul(sext s0, sext s1), s2_i64)` shape back to V_MAD_I64_I32
-  // (the signed-widening legacy MAD with a discarded VCC carry).  We
-  // emit the sign-preserving form here rather than going through an
-  // `i128` intermediate or explicit `smul.ext`; the pattern matches
-  // `SelectMad64_32(Signed=true)` on both source and target ISAs.
-  if (sop == SemOp::V_MAD_NC_I64_I32) {
-    Value *a = ctx.B.CreateSExt(op.src(0), ctx.i64Ty);
-    Value *b = ctx.B.CreateSExt(op.src(1), ctx.i64Ty);
-    Value *res = ctx.B.CreateAdd(ctx.B.CreateMul(a, b), op.src64(2), "vmad_nc_i64");
+  // Clamp handling: the `VOP_I32_I32_I64_DPP` profile sets
+  // `HasClamp = 1` (VOP3Instructions.td:196 profile body), so the
+  // hardware instruction CAN saturate the 64-bit sum (to
+  // INT64_{MIN,MAX} for the signed form, to UINT64_MAX for the
+  // unsigned form) when the encoding's clamp bit is set.  The
+  // corpus producers we've seen so far (`downcast_to_mxfp_*`,
+  // which use the signed MAD as part of pointer/offset widening
+  // arithmetic) all emit `clamp = 0`, relying on natural
+  // wraparound.  If a future corpus kernel surfaces with
+  // `clamp = 1`, the principled fix is to extend this handler to
+  // emit `llvm.{s,u}add.sat.i64` for the final accumulator add
+  // (the widening product is exact — `i32 * i32` fits in `i64`
+  // without overflow — so saturation reduces to the sum step
+  // only).  Until such a producer exists, refuse loudly rather
+  // than silently emit a wraparound that the source kernel's
+  // `clamp = 1` intent would not tolerate.  The refusal mirrors
+  // the `V_ADD_I32` / `V_SUB_I32` GFX9 handler up-file which
+  // already toggles between plain-add and `sadd_sat.i32` /
+  // `ssub_sat.i32` on the clamp bit — treating the clamp bit as
+  // raise-time-authoritative, not "observably ignorable".
+  if (sop == SemOp::V_MAD_NC_U64_U32 || sop == SemOp::V_MAD_NC_I64_I32) {
+    const bool isSigned = (sop == SemOp::V_MAD_NC_I64_I32);
+    const int clampIdx = AMDGPU::getNamedOperandIdx(
+        di.inst.getOpcode(), AMDGPU::OpName::clamp);
+    const bool clamped = clampIdx >= 0 && di.isImm(clampIdx) &&
+                         di.getImm(clampIdx) != 0;
+    if (clamped) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "VOP3",
+          isSigned
+              ? "v_mad_nc_i64_i32 with clamp=1 (signed 64-bit saturating MAD) "
+                "is not yet lifted: no corpus producer exercises this encoding, "
+                "and emitting the plain `add i64` form would silently drop the "
+                "saturation semantics the source kernel's clamp bit requests.  "
+                "Principled upgrade path when a producer surfaces: wrap the "
+                "accumulator add in `llvm.sadd.sat.i64` (the widening product "
+                "is exact in i64 so saturation reduces to the sum step only). "
+                "See the block comment above this refusal for the full audit."
+              : "v_mad_nc_u64_u32 with clamp=1 (unsigned 64-bit saturating "
+                "MAD) is not yet lifted: same rationale as the signed sibling "
+                "above — no corpus producer, and the upgrade path is "
+                "`llvm.uadd.sat.i64`.  See the V_MAD_NC_* block comment.");
+      return hr;
+    }
+    Value *a = isSigned
+                   ? ctx.B.CreateSExt(op.src(0), ctx.i64Ty)
+                   : ctx.B.CreateZExt(op.src(0), ctx.i64Ty);
+    Value *b = isSigned
+                   ? ctx.B.CreateSExt(op.src(1), ctx.i64Ty)
+                   : ctx.B.CreateZExt(op.src(1), ctx.i64Ty);
+    Value *res = ctx.B.CreateAdd(ctx.B.CreateMul(a, b), op.src64(2),
+                                 isSigned ? "vmad_nc_i64" : "vmad_nc_u64");
     ctx.writeReg64(op.dst(), res);
     hr.handled = true;
     return hr;
