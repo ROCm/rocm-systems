@@ -333,13 +333,7 @@ def _generate_dashboard(cmake_cmd: str) -> str:
     if("TEST" IN_LIST STAGES)
         ctest_test(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
         dashboard_submit(PARTS Test RETURN_VALUE _submit_ret)
-        if(NOT _test_ret EQUAL 0)
-            if(_test_ret EQUAL -1)
-                message(WARNING "ctest_test finished with code ${{_test_ret}} (test failures); not treating as dashboard failure")
-            else()
-                handle_error("Testing" _test_ret)
-            endif()
-        endif()
+        handle_error("Testing" _test_ret)
     endif()
 
     dashboard_submit(PARTS Done RETURN_VALUE _submit_ret)
@@ -409,5 +403,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    main()
-    sys.exit(0)
+    sys.exit(main())
