@@ -639,7 +639,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       } else {
         // We found neither a compatible code object nor SPIRV
         LogPrintfError(
-            "No compatible code objects with HIP_FORCE_SPIRV_CODEOBJECT: %d. Rebuild the application with option --offload-arch=%s",
+            "No compatible code objects found with HIP_FORCE_SPIRV_CODEOBJECT=%d. Rebuild the application with option --offload-arch=%s",
              HIP_FORCE_SPIRV_CODEOBJECT, device->devices()[0]->isa().targetId());
         break;
       }
