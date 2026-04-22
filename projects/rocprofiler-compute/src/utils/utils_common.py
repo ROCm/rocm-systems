@@ -384,17 +384,22 @@ def perform_attach_detach(new_env: dict[str, str], options: dict[str, Any]) -> N
             c_lib.rocattach_detach.argtypes = [ctypes.c_int]
         except Exception as e:
             console_debug(
-                f"Error setting new live attach API argument types: {e}, trying old API"
+                f"Error setting new live attach API argument types: {e}, trying legacy live attach API"
             )
             try:
                 # old live attach API
+                c_lib.attach.restype = ctypes.c_int
                 c_lib.attach.argtypes = [ctypes.c_uint]
+                c_lib.detach.restype = ctypes.c_int
+                c_lib.detach.argtypes = [ctypes.c_uint]
             except Exception as e:
                 console_error(f"Error setting live attach function argument types: {e}")
 
         pid = options["ROCPROF_ATTACH_PID"]
         if pid is None:
-            console_error("Mode of live attach must have setup for process ID")
+            console_error(
+                "Live attach mode requires a process ID (ROCPROF_ATTACH_PID)"
+            )
 
         try:
             # new live attach API
@@ -405,7 +410,7 @@ def perform_attach_detach(new_env: dict[str, str], options: dict[str, Any]) -> N
                     f"rocattach_attach returned {attach_status}"
                 )
         except Exception as e:
-            console_debug(f"Error attaching with new API: {e}, trying old API")
+            console_debug(f"Error attaching with latest live attach API: {e}, trying legacy live attach API")
             try:
                 # old live attach API
                 c_lib.attach(int(pid))
@@ -435,7 +440,7 @@ def perform_attach_detach(new_env: dict[str, str], options: dict[str, Any]) -> N
                     f"rocattach_detach returned {detach_status}"
                 )
         except Exception as e:
-            console_debug(f"Error detaching with new API: {e}, trying old API")
+            console_debug(f"Error detaching with latest live attach API: {e}, trying detach with legacy live attach API")
             try:
                 # old live attach API
                 c_lib.detach(int(pid))
