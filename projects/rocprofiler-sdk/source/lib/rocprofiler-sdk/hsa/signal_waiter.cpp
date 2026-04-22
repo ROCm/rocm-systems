@@ -129,8 +129,9 @@ SignalWaiter::run()
             continue;
         }
 
-        // 3-4. Collect event_ids from every packet in every active session.
+        // 3-4. Collect event_ids from InterruptSignals for IOCTL-based waiting.
         event_data_buf.clear();
+        bool has_default_signals = false;
 
         for(size_t si = 0; si < active.size(); ++si)
         {
@@ -142,7 +143,11 @@ SignalWaiter::run()
 
                 auto*    amd_sig = get_amd_signal(packet.completion_signal);
                 uint32_t eid     = amd_sig->event_id;
-                if(eid == 0) continue;
+                if(eid == 0)
+                {
+                    has_default_signals = true;
+                    continue;
+                }
 
                 kfd_event_data ev     = {};
                 ev.event_id           = eid;
@@ -151,28 +156,28 @@ SignalWaiter::run()
             }
         }
 
-        // If no valid event_ids were found (shouldn't normally happen), sleep and retry.
-        if(event_data_buf.empty())
+        // 5. Wait for signal completion.
+        if(!event_data_buf.empty())
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            continue;
+            // Use KFD IOCTL for InterruptSignals. Short timeout when DefaultSignals
+            // also need polling; longer timeout when IOCTL covers all signals.
+            kfd_ioctl_wait_events_args args = {};
+            args.events_ptr = reinterpret_cast<uint64_t>(event_data_buf.data());
+            args.num_events = static_cast<uint32_t>(event_data_buf.size());
+            args.wait_for_all = 0;
+            args.timeout      = has_default_signals ? 1 : 1000;
+
+            int ret;
+            do
+            {
+                ret = ::ioctl(_kfd_fd, AMDKFD_IOC_WAIT_EVENTS, &args);
+            } while(ret == -1 && (errno == EINTR || errno == EAGAIN));
         }
-
-        // 5. Wait for any signal to complete via KFD ioctl.
-        kfd_ioctl_wait_events_args args = {};
-        args.events_ptr                 = reinterpret_cast<uint64_t>(event_data_buf.data());
-        args.num_events                 = static_cast<uint32_t>(event_data_buf.size());
-        args.wait_for_all               = 0;     // wait for ANY
-        args.timeout                    = 1000;  // 1 second timeout
-
-        int ret;
-        do
+        else
         {
-            ret = ::ioctl(_kfd_fd, AMDKFD_IOC_WAIT_EVENTS, &args);
-        } while(ret == -1 && (errno == EINTR || errno == EAGAIN));
-
-        // On timeout or error, loop back to check _stopped and try again.
-        // Timeout is not an error — just means no signals completed within the window.
+            // All signals are DefaultSignals — poll with a short sleep.
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
 
         // 6-8. Check each signal value and process completions.
         // Track which sessions have at least one completed packet.
