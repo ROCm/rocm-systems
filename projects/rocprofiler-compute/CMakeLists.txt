@@ -502,8 +502,8 @@ add_test(
     NAME test_mem_chart
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_mem_chart.xml ${COV_OPTION}
-        tests/test_mem_chart.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_mem_chart.xml ${COV_OPTION} tests/test_mem_chart.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
