@@ -35,11 +35,8 @@ writer_impl_core<Policy>::writer_impl_core(std::shared_ptr<writer_context> ctx)
       std::make_unique<typename Policy::pmc_event_writer_t>(m_ctx, m_stmts, m_common_ops))
 {}
 
-// Explicitly instantiate both v3 and v4 implementations (always compiled)
 template class writer_impl_core<writer_policy_v3>;
 template class writer_impl_core<writer_policy_v4>;
-template class writer_impl_polymorphic<writer_policy_v3>;
-template class writer_impl_polymorphic<writer_policy_v4>;
 
 std::shared_ptr<writer_context>
 writer_t::impl::create_writer_context(storage_t& storage, version_t version)
@@ -67,33 +64,23 @@ writer_t::impl::create_writer_context(storage_t& storage, version_t version)
     return ctx;
 }
 
-/**
- * @brief Constructor with runtime schema selection
- *
- * Queries the storage instance for its configured schema version
- * and instantiates the appropriate writer implementation (v3 or v4).
- * Supports LATEST marker which resolves to the most recent schema.
- */
+writer_variant_t
+writer_t::impl::create_core(storage_t& storage, version_t version)
+{
+    auto ctx = create_writer_context(storage, version);
+
+    if(version == rocpdsna::version_t{ 4, 0, 0 })
+    {
+        return writer_impl_core<writer_policy_v4>(std::move(ctx));
+    }
+
+    return writer_impl_core<writer_policy_v3>(std::move(ctx));
+}
+
 writer_t::impl::impl(std::unique_ptr<rocpdsna::storage_t> storage)
 : m_storage(std::move(storage))
 , m_version(m_storage->get_storage_version())
-{
-    // Resolve LATEST marker to actual version
-    auto actual_version = m_version;
-
-    // Create writer context with schema version for proper initialization
-    auto ctx = create_writer_context(*m_storage, actual_version);
-
-    // Runtime dispatch based on schema version
-    if(actual_version == rocpdsna::version_t{ 4, 0, 0 })
-    {
-        m_impl = std::make_unique<writer_impl_polymorphic<writer_policy_v4>>(ctx);
-    }
-    else if(actual_version == rocpdsna::version_t{ 3, 0, 0 })
-    {
-        // Default to v3 (backward compatible)
-        m_impl = std::make_unique<writer_impl_polymorphic<writer_policy_v3>>(ctx);
-    }
-}
+, m_core(create_core(*m_storage, m_version))
+{}
 
 }  // namespace rocpdsna

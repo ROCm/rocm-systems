@@ -17,6 +17,7 @@
 #include "writers/schema_v4/writer_policy.hpp"
 
 #include <memory>
+#include <variant>
 
 namespace rocpdsna
 {
@@ -145,6 +146,11 @@ public:
 
     void flush_in_memory_data_to_disk() { m_ctx->backend->flush(); }
 
+    void set_sqlite_foreign_keys_enabled(bool enabled)
+    {
+        m_ctx->backend->set_foreign_keys_enabled(enabled);
+    }
+
 private:
     std::shared_ptr<writer_context>                            m_ctx;
     std::shared_ptr<stmts_t>                                   m_stmts;
@@ -157,246 +163,125 @@ private:
     std::unique_ptr<typename Policy::pmc_event_writer_t>       m_pmc_event_writer;
 };
 
-/**
- * @brief Base class for polymorphic dispatch
- */
-class writer_impl_base
-{
-public:
-    virtual ~writer_impl_base() = default;
-
-    virtual void register_node_info(const writer_types::node_info_t&)               = 0;
-    virtual void register_process_info(const writer_types::process_info_t&)         = 0;
-    virtual void register_agent_info(const writer_types::agent_info_t&)             = 0;
-    virtual void register_pmc_info(const writer_types::pmc_info_t&)                 = 0;
-    virtual void register_thread_info(const writer_types::thread_info_t&)           = 0;
-    virtual void register_stream_info(const writer_types::stream_info_t&)           = 0;
-    virtual void register_queue_info(const writer_types::queue_info_t&)             = 0;
-    virtual void register_code_object_info(const writer_types::code_object_info_t&) = 0;
-    virtual void register_kernel_symbol_info(
-        const writer_types::kernel_symbol_info_t&)                            = 0;
-    virtual void register_track_info(const writer_types::track_info_t&)       = 0;
-    virtual void register_string(std::string_view)                            = 0;
-    virtual void register_category_info(const writer_types::category_info_t&) = 0;
-    virtual void register_address_range_info(
-        const writer_types::address_range_info_t&)                                  = 0;
-    virtual void register_source_code_info(const writer_types::source_code_info_t&) = 0;
-    virtual void register_pc_info(const writer_types::pc_info_t&)                   = 0;
-    virtual void insert_region_data(const writer_types::region_data_t&,
-                                    const writer_types::trace_environment_t&)       = 0;
-    virtual void insert_pmc_event_data(const writer_types::pmc_event_data_t&,
-                                       const writer_types::pmc_info_unique_id_t&)   = 0;
-    virtual void insert_kernel_dispatch_data(
-        const writer_types::kernel_dispatch_data_t&,
-        const writer_types::trace_environment_t&)                                   = 0;
-    virtual void insert_memory_copy_data(const writer_types::memory_copy_data_t&,
-                                         const writer_types::trace_environment_t&)  = 0;
-    virtual void insert_memory_alloc_data(const writer_types::memory_alloc_data_t&,
-                                          const writer_types::trace_environment_t&) = 0;
-    virtual void flush_in_memory_data_to_disk()                                     = 0;
-};
+using writer_variant_t =
+    std::variant<writer_impl_core<writer_policy_v3>, writer_impl_core<writer_policy_v4>>;
 
 /**
- * @brief Polymorphic wrapper for writer_impl_core
- */
-template <typename Policy>
-class writer_impl_polymorphic : public writer_impl_base
-{
-public:
-    explicit writer_impl_polymorphic(std::shared_ptr<writer_context> ctx)
-    : m_core(ctx)
-    {}
-
-    void register_node_info(const writer_types::node_info_t& v) override
-    {
-        m_core.register_node_info(v);
-    }
-    void register_process_info(const writer_types::process_info_t& v) override
-    {
-        m_core.register_process_info(v);
-    }
-    void register_agent_info(const writer_types::agent_info_t& v) override
-    {
-        m_core.register_agent_info(v);
-    }
-    void register_pmc_info(const writer_types::pmc_info_t& v) override
-    {
-        m_core.register_pmc_info(v);
-    }
-    void register_thread_info(const writer_types::thread_info_t& v) override
-    {
-        m_core.register_thread_info(v);
-    }
-    void register_stream_info(const writer_types::stream_info_t& v) override
-    {
-        m_core.register_stream_info(v);
-    }
-    void register_queue_info(const writer_types::queue_info_t& v) override
-    {
-        m_core.register_queue_info(v);
-    }
-    void register_code_object_info(const writer_types::code_object_info_t& v) override
-    {
-        m_core.register_code_object_info(v);
-    }
-    void register_kernel_symbol_info(const writer_types::kernel_symbol_info_t& v) override
-    {
-        m_core.register_kernel_symbol_info(v);
-    }
-    void register_track_info(const writer_types::track_info_t& v) override
-    {
-        m_core.register_track_info(v);
-    }
-    void register_string(std::string_view v) override { m_core.register_string(v); }
-    void register_category_info(const writer_types::category_info_t& v) override
-    {
-        m_core.register_category_info(v);
-    }
-    void register_address_range_info(const writer_types::address_range_info_t& v) override
-    {
-        m_core.register_address_range_info(v);
-    }
-    void register_source_code_info(const writer_types::source_code_info_t& v) override
-    {
-        m_core.register_source_code_info(v);
-    }
-    void register_pc_info(const writer_types::pc_info_t& v) override
-    {
-        m_core.register_pc_info(v);
-    }
-    void insert_region_data(const writer_types::region_data_t&       a,
-                            const writer_types::trace_environment_t& b) override
-    {
-        m_core.insert_region_data(a, b);
-    }
-    void insert_pmc_event_data(const writer_types::pmc_event_data_t&     a,
-                               const writer_types::pmc_info_unique_id_t& b) override
-    {
-        m_core.insert_pmc_event_data(a, b);
-    }
-    void insert_kernel_dispatch_data(const writer_types::kernel_dispatch_data_t& a,
-                                     const writer_types::trace_environment_t& b) override
-    {
-        m_core.insert_kernel_dispatch_data(a, b);
-    }
-    void insert_memory_copy_data(const writer_types::memory_copy_data_t&  a,
-                                 const writer_types::trace_environment_t& b) override
-    {
-        m_core.insert_memory_copy_data(a, b);
-    }
-    void insert_memory_alloc_data(const writer_types::memory_alloc_data_t& a,
-                                  const writer_types::trace_environment_t& b) override
-    {
-        m_core.insert_memory_alloc_data(a, b);
-    }
-    void flush_in_memory_data_to_disk() override
-    {
-        m_core.flush_in_memory_data_to_disk();
-    }
-
-private:
-    writer_impl_core<Policy> m_core;
-};
-
-/**
- * @brief Writer implementation with runtime schema selection
+ * @brief Writer implementation with runtime schema selection via std::variant
  */
 struct writer_t::impl
 {
     explicit impl(std::unique_ptr<rocpdsna::storage_t> storage);
 
-    // Forward all operations to polymorphic implementation
     void register_node_info(const writer_types::node_info_t& v)
     {
-        m_impl->register_node_info(v);
+        dispatch([&](auto& c) { c.register_node_info(v); });
     }
     void register_process_info(const writer_types::process_info_t& v)
     {
-        m_impl->register_process_info(v);
+        dispatch([&](auto& c) { c.register_process_info(v); });
     }
     void register_agent_info(const writer_types::agent_info_t& v)
     {
-        m_impl->register_agent_info(v);
+        dispatch([&](auto& c) { c.register_agent_info(v); });
     }
     void register_pmc_info(const writer_types::pmc_info_t& v)
     {
-        m_impl->register_pmc_info(v);
+        dispatch([&](auto& c) { c.register_pmc_info(v); });
     }
     void register_thread_info(const writer_types::thread_info_t& v)
     {
-        m_impl->register_thread_info(v);
+        dispatch([&](auto& c) { c.register_thread_info(v); });
     }
     void register_stream_info(const writer_types::stream_info_t& v)
     {
-        m_impl->register_stream_info(v);
+        dispatch([&](auto& c) { c.register_stream_info(v); });
     }
     void register_queue_info(const writer_types::queue_info_t& v)
     {
-        m_impl->register_queue_info(v);
+        dispatch([&](auto& c) { c.register_queue_info(v); });
     }
     void register_code_object_info(const writer_types::code_object_info_t& v)
     {
-        m_impl->register_code_object_info(v);
+        dispatch([&](auto& c) { c.register_code_object_info(v); });
     }
     void register_kernel_symbol_info(const writer_types::kernel_symbol_info_t& v)
     {
-        m_impl->register_kernel_symbol_info(v);
+        dispatch([&](auto& c) { c.register_kernel_symbol_info(v); });
     }
     void register_track_info(const writer_types::track_info_t& v)
     {
-        m_impl->register_track_info(v);
+        dispatch([&](auto& c) { c.register_track_info(v); });
     }
-    void register_string(std::string_view v) { m_impl->register_string(v); }
+    void register_string(std::string_view v)
+    {
+        dispatch([&](auto& c) { c.register_string(v); });
+    }
     void register_category_info(const writer_types::category_info_t& v)
     {
-        m_impl->register_category_info(v);
+        dispatch([&](auto& c) { c.register_category_info(v); });
     }
     void register_address_range_info(const writer_types::address_range_info_t& v)
     {
-        m_impl->register_address_range_info(v);
+        dispatch([&](auto& c) { c.register_address_range_info(v); });
     }
     void register_source_code_info(const writer_types::source_code_info_t& v)
     {
-        m_impl->register_source_code_info(v);
+        dispatch([&](auto& c) { c.register_source_code_info(v); });
     }
     void register_pc_info(const writer_types::pc_info_t& v)
     {
-        m_impl->register_pc_info(v);
+        dispatch([&](auto& c) { c.register_pc_info(v); });
     }
     void insert_region_data(const writer_types::region_data_t&       a,
                             const writer_types::trace_environment_t& b)
     {
-        m_impl->insert_region_data(a, b);
+        dispatch([&](auto& c) { c.insert_region_data(a, b); });
     }
     void insert_pmc_event_data(const writer_types::pmc_event_data_t&     a,
                                const writer_types::pmc_info_unique_id_t& b)
     {
-        m_impl->insert_pmc_event_data(a, b);
+        dispatch([&](auto& c) { c.insert_pmc_event_data(a, b); });
     }
     void insert_kernel_dispatch_data(const writer_types::kernel_dispatch_data_t& a,
                                      const writer_types::trace_environment_t&    b)
     {
-        m_impl->insert_kernel_dispatch_data(a, b);
+        dispatch([&](auto& c) { c.insert_kernel_dispatch_data(a, b); });
     }
     void insert_memory_copy_data(const writer_types::memory_copy_data_t&  a,
                                  const writer_types::trace_environment_t& b)
     {
-        m_impl->insert_memory_copy_data(a, b);
+        dispatch([&](auto& c) { c.insert_memory_copy_data(a, b); });
     }
     void insert_memory_alloc_data(const writer_types::memory_alloc_data_t& a,
                                   const writer_types::trace_environment_t& b)
     {
-        m_impl->insert_memory_alloc_data(a, b);
+        dispatch([&](auto& c) { c.insert_memory_alloc_data(a, b); });
     }
-    void flush_in_memory_data_to_disk() { m_impl->flush_in_memory_data_to_disk(); }
+    void flush_in_memory_data_to_disk()
+    {
+        dispatch([](auto& c) { c.flush_in_memory_data_to_disk(); });
+    }
+    void set_sqlite_foreign_keys_enabled(bool enabled)
+    {
+        dispatch([&](auto& c) { c.set_sqlite_foreign_keys_enabled(enabled); });
+    }
 
 private:
+    template <typename F>
+    void dispatch(F&& f)
+    {
+        std::visit(std::forward<F>(f), m_core);
+    }
+
     static std::shared_ptr<writer_context> create_writer_context(storage_t& storage,
                                                                  version_t  version);
 
+    static writer_variant_t create_core(storage_t& storage, version_t version);
+
     std::unique_ptr<rocpdsna::storage_t> m_storage;
     version_t                            m_version;
-    std::unique_ptr<writer_impl_base>    m_impl;  // Polymorphic implementation
+    writer_variant_t                     m_core;
 };
 
 }  // namespace rocpdsna

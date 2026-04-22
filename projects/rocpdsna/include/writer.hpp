@@ -171,6 +171,15 @@ struct writer_t
      */
     void flush_in_memory_data_to_disk();
 
+    /***
+     * @brief Set SQLite PRAGMA foreign_keys for this writer's connection.
+     * @param enabled false for PRAGMA foreign_keys = OFF (less SQLite work on inserts).
+     * @note v3 schema DDL may enable foreign_keys; call after constructing writer to
+     * override.
+     * @note Does not disable rocpdsna insert_validator / entity_registry checks.
+     */
+    void set_sqlite_foreign_keys_enabled(bool enabled);
+
 private:
     struct impl;
     std::unique_ptr<impl> m_impl;
