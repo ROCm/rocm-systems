@@ -777,8 +777,8 @@ Benchmark only
 --------------
 
 If you only want to run the roofline microbenchmark without profiling an application
-or collecting any performance counters, use the ``--bench-only`` option. No workload
-command is required.
+or collecting any performance counters, use the ``--bench-only`` option. No
+application run is required.
 
 This is useful for:
 

@@ -147,21 +147,7 @@ class RocProfCompute:
                 "rocprof-compute requires you to pass a valid mode. Detected None."
             )
 
-        block = False
-        if (hasattr(self.__args, "filter_metrics") and self.__args.filter_metrics) or (
-            hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks
-        ):
-            block = True
-
-        if self.__args.list_metrics is not None and block:
-            console_error("Cannot use --list-metrics with --blocks")
-        if self.__args.list_blocks is not None and block:
-            console_error("Cannot use --list-blocks with --blocks")
-        if (
-            hasattr(self.__args, "list_available_metrics")
-            and self.__args.list_available_metrics
-        ) and block:
-            console_error("Cannot use --list-available-metrics with --blocks")
+        self._validate_list_option_exclusions()
 
         # Validate block 30 requires --membw-analysis and --experimental
         filter_list: list[str] = []
@@ -184,7 +170,7 @@ class RocProfCompute:
                     )
 
         if self.__mode == "profile":
-            self._validate_profile_mode_exclusions()
+            self._validate_profile_mode_arguments()
 
         # fallback to csv output format, if rocpd public api not available
         if self.__mode == "profile" and self.__args.format_rocprof_output == "rocpd":
@@ -524,8 +510,13 @@ class RocProfCompute:
         post_duration = int(time_end_post - time_end_prof)
         console_debug(f'time taken for "post_processing" was {post_duration} seconds')
 
-    def _validate_profile_mode_exclusions(self) -> None:
-        """Validate mutually exclusive profile mode options."""
+    def _validate_profile_mode_arguments(self) -> None:
+        """Validate that the profile-mode invocation is internally consistent.
+
+        Covers the mutual exclusion among action-selection flags
+        (--block, --set, --roof-only, --bench-only) and the
+        --bench-only / --no-roof conflict.
+        """
         args = self.__args
         if (
             sum((
@@ -545,13 +536,32 @@ class RocProfCompute:
         if getattr(args, "bench_only", False) and getattr(args, "no_roof", False):
             console_error("--bench-only cannot be used with --no-roof.")
 
+    def _validate_list_option_exclusions(self) -> None:
+        """Validate that list/discovery options aren't combined with --block.
+        Applies to both profile and analyze mode.
+        """
+        args = self.__args
+        block_active = bool(
+            getattr(args, "filter_blocks", None)
+            or getattr(args, "filter_metrics", None)
+        )
+        if not block_active:
+            return
+
+        if args.list_metrics is not None:
+            console_error("Cannot use --list-metrics with --blocks")
+        if args.list_blocks is not None:
+            console_error("Cannot use --list-blocks with --blocks")
+        if getattr(args, "list_available_metrics", False):
+            console_error("Cannot use --list-available-metrics with --blocks")
+
     @demarcate
     def _run_bench_only(self) -> None:
         """Orchestrate standalone roofline microbenchmark execution."""
         from roofline.run_benchmark import run_roofline_benchmark
         from utils.utils_common import validate_roofline_csv
 
-        output_dir = Path(self.__args.path)
+        output_dir = Path(self.__args.output_directory)
         if not output_dir.exists():
             output_dir.mkdir(parents=True, exist_ok=True)
 

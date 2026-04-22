@@ -497,7 +497,7 @@ Examples:
         default=False,
         action="store_true",
         help=(
-            "\t\t\t(DEPRECATED) Retain the large raw rocpd database in workload directory.\n"
+            "\t\t\t(DEPRECATED) Retain the large raw rocpd database in workload directory.\n"  # noqa: E501
             "\t\t\tThis option requires --format-rocprof-output rocpd.\n"
             "\t\t\t --retain-rocpd-output is deprecated. .db files will be retained by default in a future release."  # noqa: E501
         ),
@@ -522,7 +522,7 @@ Examples:
         help=(
             "\t\t\tRun roofline microbenchmark only.\n"
             "\t\t\tNo application profiling or counter collection.\n"
-            "\t\t\tWorkload command is not required.\n"
+            "\t\t\tNo application run is required.\n"
             "\t\t\tCannot be used with --block, --set, --roof-only, or --no-roof"
         ),
     )
