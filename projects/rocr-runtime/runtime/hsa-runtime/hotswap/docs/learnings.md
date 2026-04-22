@@ -8,6 +8,122 @@ Append-only. Newest on top.
 
 ---
 
+## 2026-04-22 — `topk_forward_bf16` root-caused to `tl.sort` / `tl.topk` cross-16 bitonic merge under wave32→wave64 projection (OPEN)
+
+**Context.** Continuation of the principled-tolerance thread.  The
+`topk_forward_bf16` recipe stayed WRONG after the m1..m4 thread
+closed, with a SYSTEMATIC bias on Yv[0]: 208 positive vs 32
+negative signed diffs on the 249 disagreeing rows (SNR +0.877).
+Systematic bias rules out bf16 rounding noise (which would be
+symmetric), so the residual is a real miscompile.
+
+**Bisect.**  The following probes (landing in this commit) narrow
+the bug one layer at a time:
+
+* `topk_forward_bisect_m2_strict` — `streaming_topk` with
+  `abs tol=0.0` on Yv.  WRONG 1542/2048, max\|err\|=1.48 at
+  magnitude 3.8.  Bug is inside `streaming_topk`, not downstream
+  (softmax / Yi write / Bits derivation).
+* `canary_tl_topk_bf16` / `canary_tl_topk_fp32` — a bare `tl.topk`
+  at the same shape (BLOCK_M=32, BLOCK_N=32, k=4).  Both WRONG
+  2048/2048.  Bug is not bf16-specific (rules out `fpval_to_key`
+  u16 bit-magic and the u32 `(value_key << 16) | index_key` pack).
+* `canary_tl_sort_fp32` — bare `tl.sort(dim=1, descending=True)`
+  at (BLOCK_M=32, BLOCK_N=32).  WRONG 15353/16384 (93.7%).  Bug
+  is in the shared `tl.sort` / `tl.topk` backbone.
+* `canary_tl_sort_fp32_n16` — same shape but BLOCK_N=16 (no
+  cross-16 merge needed).  WRONG only 1056/8192 (12.9%).
+  Confirms: the **cross-16 merge step** is the problem class.
+* `canary_tl_sort_fp32_deterministic` — input `X[r, c] = c` so
+  the sort output reads out exactly which lane's data each output
+  slot pulled from.  Expected: `[31, 30, ..., 1, 0]`.  Salmon
+  produces `[15, 14, ..., 0, 31, 30, ..., 16]` — TWO SORTED
+  HALVES.  Lanes 0..15 never exchanged with lanes 16..31.
+
+The signature "two sorted halves, no cross-16 merge" isolates the
+bug to the **final bitonic merge step that uses `v_permlane16_swap_b32`**
+(the hardware XOR-16 partner swap).
+
+**What `Gfx1250Gpu.Permlane16Swap` does NOT cover.**  The existing
+GPU regression test for `permlane16_swap` uses a wave64 source
+kernel (`__launch_bounds__(64)` on gfx1250).  It verifies wave64
+→ wave64 same-wave correctness.  The `tl.sort` case that breaks
+is wave32 → wave64 cross-widening — the `v_permlane16_swap`
+on the source wave32 side is compiled with wave32 semantics,
+and salmon's `emitPermLaneSwapEmulation` in
+`handle_valu_cross_lane.cpp` emits `ds_bpermute(lane_id ^ 16,
+src)` which LOOKS correct in isolation (per-32-lane-half
+independent swap) but produces "no exchange" under the
+specific cross-widening path Triton's `tl.sort` takes.
+
+**Candidate root causes (not yet root-caused).**  The bug is
+somewhere in the COMPOSITION of:
+
+1. `tl.sort`'s bitonic compare-and-cndmask pattern around
+   `v_permlane16_swap_b32`.  The assembly shows a specific
+   4-instruction dance: `v_dual_mov; permlane16_swap;
+   v_xor3_b32 (v3 = v3 ^ v4 ^ v2); v_cndmask based on vcc`.
+   The XOR3 restores `v3 = self_v2` and keeps `v4 = partner_v2`;
+   then the compare sets vcc from `self` vs `partner`, and
+   cndmask picks one for the output.  Under wave32 native this
+   works; under wave64 emulation, SOMEWHERE the partner value
+   fails to propagate.
+2. `emitPermLaneSwapEmulation` wraps the two `ds_bpermute` calls
+   in `emitUnderExec` gating.  `saved_exec = ballot(init_whole_wave())`
+   returns 0xFFFF_FFFF_FFFF_FFFF under WaveNativeProjection, so
+   every lane should be "active" and the swap should run, but
+   something downstream (possibly the `cndmask`'s VCC source,
+   which is a `v_cmp` whose EXEC-mask semantics differ under
+   wave32/wave64) is collapsing the swap into a no-op.
+3. The `v_cmp` that produces VCC for the cndmask may itself be
+   a `V_CMP_{LT,GT}_F32_e64` whose dual-dword encoding the
+   disassembler shows as `.long 0xd41b0002` — indicating that
+   the instruction's real structure isn't being surfaced by
+   objdump at this call site.  A different `v_cmp` lift under
+   cross-widening could be producing an always-false VCC, which
+   makes cndmask always pick `self` and the merge effectively
+   skip.
+
+**Handler gaps surfaced in the probes (filed separately):**
+
+* `v_pk_sub_i16` — VOP3P packed int16 subtract.  Hits on
+  `topk_forward_bisect_m2_idx` when writing i16 Yi outputs
+  directly (hitting a different instruction-selection path
+  than the production kernel).  The initial probe was retired
+  in favour of `topk_forward_bisect_m2_strict` which avoids
+  the handler gap by not emitting the i16 output.  The handler
+  gap itself remains open.
+
+**Committed probes stay as regression guards.**  After a fix,
+they all graduate:
+
+* `topk_forward_bisect_m2_strict` → match on `abs tol=0.0`
+* `canary_tl_topk_bf16`, `canary_tl_topk_bf16_nw1`,
+  `canary_tl_topk_fp32` → match on `rel-rms tol=0.02` / `1e-5`
+* `canary_tl_sort_fp32` → match on `abs tol=0.0`
+* `canary_tl_sort_fp32_n16` → match on `abs tol=0.0`
+  (the N=16 case currently has ~13% mismatch — narrower bisect
+  probe for a smaller-scale shape bug)
+* `canary_tl_sort_fp32_deterministic` → match on `abs tol=0.0`;
+  its input is lane-identifiable so a regression would reveal
+  the exact shuffle-network shape that broke
+
+**Next steps** (not yet done):
+
+1. Author a wave32-SOURCE HIP canary of `v_permlane16_swap_b32`
+   — directly mirrors `Gfx1250Gpu.Permlane16Swap` but with
+   `__launch_bounds__(32)`.  If this passes, the
+   `emitPermLaneSwapEmulation` is not the bug and the issue is
+   in the compare/cndmask shape around it.
+2. Trace the exact `v_cmp → v_cndmask` sequence in the raised
+   IR for a single bitonic compare-and-swap stage, confirming
+   the VCC-source value under wave32→wave64 lift.
+3. Cross-reference with the WaveNative projection's handling
+   of wave-sized compare ops (ballot.i32 → ballot.i64
+   widening, `V_CMP_*_e64` SGPR destination width, etc.).
+
+---
+
 ## 2026-04-22 — Principled bf16-reduction tolerances + open finding on `_topk_forward` Yi divergence
 
 **Context.** After closing the FMA_MIX / d16_hi / MODE-register /
