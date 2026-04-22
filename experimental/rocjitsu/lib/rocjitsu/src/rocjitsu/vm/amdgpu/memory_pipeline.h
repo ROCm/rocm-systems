@@ -12,7 +12,6 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <cstdint>
-#include <memory>
 #include <queue>
 
 namespace rocjitsu {
@@ -23,90 +22,68 @@ class L1VectorCache;
 class L2Cache;
 class Lds;
 
-/// @brief A queued entry in a memory pipeline, owning the instruction.
-struct PipelineEntry {
-  std::unique_ptr<Instruction> inst; ///< Owns the in-flight memory instruction.
-  Wavefront *wf;                     ///< The issuing wavefront.
-};
-
-/// @brief Abstract base for memory pipelines that track in-flight operations.
+/// @brief Base class for a memory pipeline stage (scalar, global, or local).
 ///
-/// @details Three concrete subclasses are used per Compute Unit: ScalarMemPipeline
-/// (SMEM), GlobalMemPipeline (FLAT/MUBUF/MTBUF + atomics), and LocalMemPipeline
-/// (DS). Each subclass knows which DynamicInstState subtype to cast to and which
-/// cache controller method to call.
-///
-/// The pipeline has two internal queues:
+/// @details Models the memory access pipeline as two FIFO queues:
 /// - issued_: instructions that need initiate_access() called
 /// - returned_: instructions whose memory response has arrived, awaiting
-///   complete_access() and counter decrement
+///   register writeback via complete_access().
 ///
-/// In the current synchronous implementation, initiate_access() gets an
+/// In functional mode, L1/L2/HBM accesses are synchronous and produce an
 /// immediate response, so instructions move from issued_ to returned_
-/// within the same tick().
+/// in a single tick() and then complete on the next tick().
 class MemoryPipeline {
 public:
-  /// @brief Construct a pipeline that tracks the given counter type.
-  /// @param counter_type The wait counter type this pipeline manages.
-  MemoryPipeline(WaitCounterType counter_type) : counter_type_(counter_type) {}
+  explicit MemoryPipeline(WaitCounterType type) : counter_type_(type) {}
   virtual ~MemoryPipeline() = default;
 
-  /// @brief Issue a memory instruction into the pipeline.
-  ///
-  /// Increments the wavefront's wait counter and enqueues the instruction.
-  /// Caller transfers ownership of the instruction.
-  /// @param inst The memory instruction (ownership transferred).
-  /// @param wf The issuing wavefront.
-  void issue(std::unique_ptr<Instruction> inst, Wavefront &wf) {
+  struct PipelineEntry {
+    Instruction *inst;
+    Wavefront *wf;
+  };
+
+  /// @brief Issue a memory instruction to this pipeline.
+  /// @param inst Raw instruction pointer (caller transfers ownership).
+  /// @param wf   The issuing wavefront.
+  void issue(Instruction *inst, Wavefront &wf) {
     wf.wait_counters().increment(counter_type_);
-    issued_.push({std::move(inst), &wf});
+    issued_.push({inst, &wf});
   }
 
   /// @brief Advance the pipeline by one cycle.
-  ///
-  /// Drains ALL returned instructions (complete_access + counter decrement),
-  /// then initiates ALL pending issued instructions. This eliminates the
-  /// artificial 2-tick minimum latency of the previous one-at-a-time approach.
   void tick() {
+    // Process returned instructions: decrement counters and complete.
     while (!returned_.empty()) {
-      auto &entry = returned_.front();
-      complete_access(*entry.inst, *entry.wf);
+      auto entry = returned_.front();
+      returned_.pop();
       entry.wf->wait_counters().decrement(counter_type_);
       if (entry.wf->state() == WfState::WAITCNT && entry.wf->wait_satisfied())
         entry.wf->set_state(WfState::RUNNING);
-      returned_.pop();
+      // If the wavefront is in ENDING state (s_endpgm executed but draining),
+      // halt it once all outstanding memory ops are complete.
+      if (entry.wf->state() == WfState::ENDING && entry.wf->wait_counters().empty())
+        entry.wf->halt();
+      complete_access(*entry.inst, *entry.wf);
+      delete entry.inst;
     }
 
+    // Initiate access for newly issued instructions.
     while (!issued_.empty()) {
-      auto entry = std::move(issued_.front());
+      auto entry = issued_.front();
       issued_.pop();
       initiate_access(*entry.inst, *entry.wf);
-      returned_.push(std::move(entry));
+      returned_.push(entry);
     }
   }
 
-  /// @brief Check whether the pipeline has any in-flight operations.
-  /// @retval true No instructions are in-flight.
-  /// @retval false One or more instructions are still being processed.
   bool empty() const { return issued_.empty() && returned_.empty(); }
 
-  /// @brief Return the counter type this pipeline manages.
-  /// @returns The wait counter type.
   WaitCounterType counter_type() const { return counter_type_; }
 
 protected:
-  /// @brief Send request to cache controller. Subclass casts inst.data()
-  /// to the appropriate DynamicInstState subtype.
-  /// @param inst The memory instruction to initiate.
-  /// @param wf The issuing wavefront.
   virtual void initiate_access(Instruction &inst, Wavefront &wf) = 0;
-
-  /// @brief Write results back to registers after memory response.
-  /// @param inst The completed memory instruction.
-  /// @param wf The issuing wavefront.
   virtual void complete_access(Instruction &inst, Wavefront &wf) = 0;
 
-private:
   WaitCounterType counter_type_;
   std::queue<PipelineEntry> issued_;
   std::queue<PipelineEntry> returned_;
@@ -130,16 +107,13 @@ private:
   L1ScalarCache *l1_;
 };
 
-/// @brief Global memory pipeline for FLAT/MUBUF/MTBUF instructions.
-///
-/// Routes loads/stores through L1 Vector Cache (V$). Atomic RMW operations
-/// bypass L1 and execute at L2 directly, matching real hardware behavior.
+/// @brief Global memory pipeline (V$ → L2 → HBM).
 class GlobalMemPipeline : public MemoryPipeline {
 public:
-  /// @param l1 L1 Vector Cache (V$), not owned.
-  /// @param l2 L2 cache (for atomic RMW), not owned.
   GlobalMemPipeline(L1VectorCache *l1, L2Cache *l2)
       : MemoryPipeline(WaitCounterType::VMCNT), l1_(l1), l2_(l2) {}
+
+  void set_l2(L2Cache *l2) { l2_ = l2; }
 
 protected:
   void initiate_access(Instruction &inst, Wavefront &wf) override;
@@ -150,12 +124,9 @@ private:
   L2Cache *l2_;
 };
 
-/// @brief Local memory pipeline for DS instructions.
-///
-/// Routes directly to the Local Data Share (LDS).
+/// @brief Local memory pipeline (LDS).
 class LocalMemPipeline : public MemoryPipeline {
 public:
-  /// @param lds Local Data Share, not owned.
   explicit LocalMemPipeline(Lds *lds) : MemoryPipeline(WaitCounterType::LGKMCNT), lds_(lds) {}
 
 protected:

@@ -32,14 +32,14 @@
 #include "envvar.hpp"
 #include "ipc_team.hpp"
 #include "mpi_instance.hpp"
+#include "log.hpp"
 
 namespace rocshmem {
 
 #define NET_CHECK(cmd)                                       \
   {                                                          \
     if (cmd != MPI_SUCCESS) {                                \
-      fprintf(stderr, "Unrecoverable error: MPI Failure\n"); \
-      abort() ;                                              \
+      LOG_ERROR_ABORT("Unrecoverable error: MPI Failure");   \
     }                                                        \
   }
 
@@ -73,9 +73,8 @@ IPCBackend::IPCBackend(MPI_Comm comm):  Backend(comm) {
    * All the PEs must be with in a node for IPC conduit
    */
   if(num_pes != ipcImpl.shm_size) {
-    fprintf(stderr, "rocSHMEM: IPC Backend selected but some PEs are non-local. This is not a supported configuration.\n"
-                    "  The GDA and RO backends mix off-node -and- IPC on-node communication as needed.\n");
-    exit(1);
+    LOG_ERROR_EXIT("IPC Backend selected but some PEs are non-local. This is not a supported configuration. "
+                   "The GDA and RO backends mix off-node and IPC on-node communication as needed.");
   }
 
   /* Initialize the host interface */
@@ -122,6 +121,8 @@ void IPCBackend::init() {
 
   setup_team_world();
 
+  setup_team_shared();
+
   TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
 
   default_context_proxy_ = IPCDefaultContextProxyT(this, tinfo);
@@ -140,8 +141,12 @@ IPCBackend::~IPCBackend() {
   // Close IPC handles for remote heap bases
   ipcImpl.ipcHostStop();
 
-  auto *team_world{team_tracker.get_team_world()};
-  team_world->~Team();
+  auto *team_shared{static_cast<IPCTeam*>(team_tracker.get_team_shared())};
+  team_shared->~IPCTeam();
+  CHECK_HIP(hipFree(team_shared));
+
+  auto *team_world{static_cast<IPCTeam*>(team_tracker.get_team_world())};
+  team_world->~IPCTeam();
   CHECK_HIP(hipFree(team_world));
 
   CHECK_HIP(hipFree(ctx_array));
@@ -217,6 +222,20 @@ void IPCBackend::setup_team_world() {
   set_team_world_device(host::ROCSHMEM_TEAM_WORLD);
 }
 
+void IPCBackend::setup_team_shared() {
+  TeamInfo team_info_wrt_parent(nullptr, 0, 1, num_pes);
+  TeamInfo team_info_wrt_world(nullptr, 0, 1, num_pes);
+
+  IPCTeam *team_shared{nullptr};
+  CHECK_HIP(hipMalloc(&team_shared, sizeof(IPCTeam)));
+  new (team_shared) IPCTeam(this, team_info_wrt_parent, team_info_wrt_world,
+                             num_pes, my_pe, backend_comm, 1);
+  team_tracker.set_team_shared(team_shared);
+
+  host::ROCSHMEM_TEAM_SHARED = reinterpret_cast<rocshmem_team_t>(team_shared);
+  set_team_shared_device(host::ROCSHMEM_TEAM_SHARED);
+}
+
 void IPCBackend::team_destroy(rocshmem_team_t team) {
   IPCTeam *team_obj = get_internal_ipc_team(team);
 
@@ -247,8 +266,7 @@ void IPCBackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_byte
   if (num_pes == backend_bootstr->getNranks() ) {
     backend_bootstr->allGather(tmp_buffer, num_bytes);
   } else {
-    printf("IPCBackend::create_new_team: non-mpi version only supports parent_teams that contain all processes. Aborting.\n");
-    abort();
+    LOG_ERROR_ABORT("create_new_team: non-mpi version only supports parent_teams that contain all processes");
   }
 
   for (size_t i = 0; i < num_bytes; i++) {
@@ -284,8 +302,7 @@ void IPCBackend::create_new_team([[maybe_unused]] Team *parent_team,
   int common_index = get_ls_non_zero_bit(team_reduced_bitmask_, max_num_teams);
   if (common_index < 0) {
     /* No team available */
-    printf("Could not create team, all bits in use. Aborting.\n");
-    abort();
+    LOG_ERROR_ABORT("Could not create team, all bits in use");
   }
 
   /* Mark the team as taken (by unsetting the bit in the pool bitmask) */
@@ -561,8 +578,8 @@ void IPCBackend::teams_init() {
 
   memset(team_pool_bitmask_, 0, team_bitmask_size_);
   memset(team_reduced_bitmask_, 0, team_bitmask_size_);
-  /* Set all to available except the 0th one (reserved for TEAM_WORLD) */
-  for (int bit_i = 1; bit_i < max_num_teams; bit_i++) {
+  /* Set all to available except reserved teams (TEAM_WORLD and TEAM_SHARED) */
+  for (int bit_i = TeamTracker::NUM_RESERVED_TEAMS; bit_i < max_num_teams; bit_i++) {
     int byte_i = bit_i / CHAR_BIT;
 
     team_pool_bitmask_[byte_i] |= 1 << (bit_i % CHAR_BIT);

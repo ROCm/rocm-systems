@@ -228,6 +228,68 @@ simulation tick, and a human-readable message. Components can call
 
 ---
 
+## KMD Emulation (`kmd/`)
+
+The `kmd/linux/` layer makes a real ROCm stack (ROCR + libhsakmt) run against the
+simulated GPU without any kernel driver. It is Linux-only and activated via
+`LD_PRELOAD`.
+
+### Architecture
+
+```
+ROCm application
+  └── ROCR / HIP runtime
+        └── libhsakmt
+              ├── open("/dev/kfd")    ──►  interposer.cpp intercepts
+              ├── ioctl(kfd_fd, …)   ──►  SimulatedDriver::ioctl()
+              ├── mmap(kfd_fd, …)    ──►  SimulatedDriver::mmap()
+              ├── fopen("/sys/…")    ──►  interposer.cpp redirects → Sysfs temp dir
+              └── close(kfd_fd)      ──►  SimulatedDriver::close()
+```
+
+### Components
+
+| File | Purpose |
+|------|---------|
+| `interposer.cpp` | LD_PRELOAD shim: intercepts `open`, `ioctl`, `mmap`, `munmap`, `fopen`, `close` via syscall |
+| `simulated_driver.h/cpp` | `SimulatedDriver`: handles all KFD ioctls, owns doorbell/event pages |
+| `sysfs.h/cpp` | `Sysfs`: generates a per-process `/tmp/rocjitsu_topology_*` directory that ROCR reads instead of the real `/sys/devices/virtual/kfd/kfd/topology` |
+
+### KFD ioctl surface
+
+| ioctl | Handler | Notes |
+|-------|---------|-------|
+| `GET_VERSION` | `get_version_ioctl` | Returns KFD_IOCTL_MAJOR/MINOR_VERSION |
+| `GET_PROCESS_APERTURES_NEW` | `get_apertures_ioctl` | Returns `default_apertures_` with per-instance `gpu_id` |
+| `ACQUIRE_VM` | `acquire_vm_ioctl` | No-op (VM is always acquired) |
+| `ALLOC_MEMORY_OF_GPU` | `alloc_memory_ioctl` | Allocates host memory, assigns GPU VA from a linear bump allocator |
+| `FREE_MEMORY_OF_GPU` | `free_memory_ioctl` | Frees host memory, removes VA mapping |
+| `MAP_MEMORY_TO_GPU` / `UNMAP` | map/unmap ioctls | No-op (host pointers serve as GPU VAs) |
+| `CREATE_QUEUE` | `create_queue_ioctl` | Registers an AQL ring with the CP; deferred until doorbell page is mapped |
+| `DESTROY_QUEUE` | `destroy_queue_ioctl` | Unregisters the ring from the CP |
+| `CREATE_EVENT` | `create_event_ioctl` | Allocates a slot in the memfd-backed signal page |
+| `DESTROY_EVENT` | `destroy_event_ioctl` | Removes event slot; wakes any WAIT_EVENTS callers |
+| `SET_EVENT` | `set_event_ioctl` | Marks slot non-zero with `memory_order_release`; notifies waiters |
+| `WAIT_EVENTS` | `wait_events_ioctl` | Waits up to 100ms then returns; simulates `wake_up_interruptible` |
+
+### Signal event page
+
+libhsakmt expects a memfd-backed page at the KFD mmap offset
+`KFD_MMAP_TYPE_EVENTS | gpu_id`. Each 64-bit slot corresponds to one
+`event_id`. libhsakmt polls `signal_page[event_id]` directly; non-zero means
+the event is pending. `close()` sets all slots to 1 to unblock any polling
+threads during shutdown.
+
+### Known limitations (P1)
+
+- `WAIT_EVENTS` always returns via timeout (100ms cap). The CP does not yet
+  fire an interrupt to drive `set_event_ioctl`. Signal completion is detected
+  by ROCR via direct memory polling of the signal value instead.
+- `AVAILABLE_MEMORY` ioctl returns uninitialized output.
+- `wait_events` ignores specific event IDs — wakes on any event.
+
+---
+
 ## C API (`rj_vm.h`)
 
 The C API wraps the VM behind an opaque `rj_vm_t` handle:

@@ -342,6 +342,7 @@ rsmi_status_t ErrnoToRsmiStatus(int err) {
       return RSMI_STATUS_PERMISSION;
     case EPERM:
     case ENOENT:
+    case ENOTSUP:
       return RSMI_STATUS_NOT_SUPPORTED;
     case EBADF:
     case EISDIR:

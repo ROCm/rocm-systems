@@ -823,6 +823,8 @@ process_t::suspend_queues (const std::vector<queue_t *> &queues,
   size_t num_all_stopped_queues = 0;
   std::vector<os_queue_id_t> queue_ids;
   queue_ids.reserve (queues.size ());
+  std::vector<queue_t *> queues_needing_update;
+  queues_needing_update.reserve (queues.size ());
 
   for (queue_t *queue : queues)
     {
@@ -845,6 +847,13 @@ process_t::suspend_queues (const std::vector<queue_t *> &queues,
           std::optional<os_queue_id_t> os_id = queue->os_queue_id ();
           dbgapi_assert (os_id.has_value ());
           queue_ids.emplace_back (os_id.value ());
+          /* After we suspend queues, we need to go and update the queue_info
+             for the PM4-based queues so we read the compute_tmpring_size value
+             out of the MQD.  This is not needed for AQL queues as we can find
+             this information in the amd_queue_t.  */
+          if (queue->type ()
+              == amd_dbgapi_os_queue_type_t::AMD_DBGAPI_OS_QUEUE_TYPE_AMD_PM4)
+            queues_needing_update.emplace_back (queue);
         }
     }
 
@@ -909,6 +918,10 @@ process_t::suspend_queues (const std::vector<queue_t *> &queues,
   for (queue_t *queue : queues)
     if (queue->is_valid ())
       queue->set_state (queue_t::state_t::suspended);
+
+  /* Refresh our knowledge of the queues, as some properties are only stable
+     when the queue is suspended (compute_tmpringsize for example).  */
+  update_queue_info (queues_needing_update);
 
   dbgapi_assert (
     (num_suspended_queues + num_invalid_queues) == queue_ids.size ()
@@ -1210,6 +1223,7 @@ process_t::update_queues ()
                   /* This isn't a new queue, and it is fully initialized.
                      Mark it as active, and continue to the next snapshot.  */
                   queue->set_mark (queue_mark);
+                  queue->update (queue_info);
                   continue;
                 }
             }
@@ -1251,6 +1265,55 @@ process_t::update_queues ()
       }
     else
       ++it;
+}
+
+void
+process_t::update_queue_info (const std::vector<queue_t *> &queues) const
+{
+  if (queues.empty ())
+    return;
+
+  std::vector<os_queue_snapshot_entry_t> snapshots;
+  size_t snapshot_count;
+
+  /* Prime the queue count with the current number of queues.  */
+  size_t queue_count = count<queue_t> ();
+
+  do
+    {
+      /* We should allocate enough memory for the snapshots. Let's start with
+         the current number of queues + 16.  */
+      snapshot_count = queue_count + 16;
+      snapshots.resize (snapshot_count);
+
+      /* Query the driver.  Unlike update_waves, we do not want handle new
+         queues, so make sure to not clear any exception status.  */
+      amd_dbgapi_status_t status = os_driver ().queue_snapshot (
+        snapshots.data (), snapshot_count, &queue_count, {});
+
+      if (status == AMD_DBGAPI_STATUS_ERROR_PROCESS_EXITED)
+        throw process_exited_exception_t (id ());
+      else if (status != AMD_DBGAPI_STATUS_SUCCESS)
+        fatal_error ("queue_snapshot failed (%s)", to_cstring (status));
+      snapshots.resize (std::min (queue_count, snapshot_count));
+    }
+  while (queue_count > snapshot_count);
+
+  for (auto &&queue : queues)
+    {
+      dbgapi_assert (queue->state () == queue_t::state_t::suspended);
+
+      auto it = std::find_if (snapshots.begin (), snapshots.end (),
+                              [&queue] (const os_queue_snapshot_entry_t &s)
+                              { return queue->os_queue_id () == s.queue_id; });
+
+      if (it == snapshots.end ())
+        fatal_error ("Suspended queue disapeared");
+      if ((it->exception_status & os_exception_mask_t::queue_new)
+          != os_exception_mask_t::none)
+        fatal_error ("Cannot have a suspended new queue");
+      queue->update (*it);
+    }
 }
 
 void

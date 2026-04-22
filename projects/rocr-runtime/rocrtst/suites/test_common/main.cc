@@ -81,6 +81,7 @@
 #include "suites/functional/concurrent_shutdown.h"
 #include "suites/functional/reference_count.h"
 #include "suites/functional/signal_concurrent.h"
+#include "suites/functional/metadata_prefetch.h"
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
@@ -146,6 +147,12 @@ TEST(rocrtst, Test_Example) {
 TEST(rocrtst, Test_Example_InterruptDisabled) {
   TestExample tst;
   rocrtst::SetEnv("HSA_ENABLE_INTERRUPT", "0");
+  RunGenericTest(&tst);
+}
+
+TEST(rocrtst, Test_MetadataPrefetchPacket) {
+  MetadataPrefetch tst;
+
   RunGenericTest(&tst);
 }
 
