@@ -50,8 +50,6 @@ Defined in `projects/clr/rocclr/utils/flags.hpp` via the CLR flag system.
 hipError_t hipProfilerEnableExt(void);
 hipError_t hipProfilerDisableExt(void);
 hipError_t hipProfilerResetExt(void);
-hipError_t hipProfilerWriteJsonExt(const char* filepath);  // NULL → "hip_clr_trace.json"
-
 hipError_t hipProfilerGetRecordsExt(const HipApiRecordExt* const** chunks,
                                      size_t* chunk_count,
                                      size_t* chunk_size,

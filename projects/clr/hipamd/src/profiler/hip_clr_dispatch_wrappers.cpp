@@ -3013,648 +3013,666 @@ static hipError_t hipOccupancyMaxPotentialBlockSizeLayer(int* gridSize, int* blo
 }
 
 // api_id = 334
-static hipError_t hipPeekAtLastErrorLayer(void) {
+static hipError_t hipOccupancyMaxActiveClustersLayer(int* numClusters, const void* f,
+                                                      const hipLaunchConfig_t* launchConfig) {
   auto* _rec = HipGetActiveRecordExt(334u);
-  auto _r = g_next.hipPeekAtLastError_fn();
+  auto _r = g_next.hipOccupancyMaxActiveClusters_fn(numClusters, f, launchConfig);
   _rec->end_ns = NowNs();
   return _r;
 }
 
 // api_id = 335
-static hipError_t hipPointerGetAttributeLayer(void* data, hipPointer_attribute attribute,
-                                               hipDeviceptr_t ptr) {
+static hipError_t hipOccupancyMaxPotentialClusterSizeLayer(int* clusterSize, const void* f,
+                                                            const hipLaunchConfig_t* config) {
   auto* _rec = HipGetActiveRecordExt(335u);
-  auto _r = g_next.hipPointerGetAttribute_fn(data, attribute, ptr);
+  auto _r = g_next.hipOccupancyMaxPotentialClusterSize_fn(clusterSize, f, config);
   _rec->end_ns = NowNs();
   return _r;
 }
 
 // api_id = 336
-static hipError_t hipPointerGetAttributesLayer(hipPointerAttribute_t* attributes, const void* ptr) {
+static hipError_t hipPeekAtLastErrorLayer(void) {
   auto* _rec = HipGetActiveRecordExt(336u);
-  auto _r = g_next.hipPointerGetAttributes_fn(attributes, ptr);
+  auto _r = g_next.hipPeekAtLastError_fn();
   _rec->end_ns = NowNs();
   return _r;
 }
 
 // api_id = 337
-static hipError_t hipPointerSetAttributeLayer(const void* value, hipPointer_attribute attribute,
+static hipError_t hipPointerGetAttributeLayer(void* data, hipPointer_attribute attribute,
                                                hipDeviceptr_t ptr) {
   auto* _rec = HipGetActiveRecordExt(337u);
-  auto _r = g_next.hipPointerSetAttribute_fn(value, attribute, ptr);
+  auto _r = g_next.hipPointerGetAttribute_fn(data, attribute, ptr);
   _rec->end_ns = NowNs();
   return _r;
 }
 
 // api_id = 338
-static hipError_t hipProfilerStartLayer(void) {
+static hipError_t hipPointerGetAttributesLayer(hipPointerAttribute_t* attributes, const void* ptr) {
   auto* _rec = HipGetActiveRecordExt(338u);
-  auto _r = g_next.hipProfilerStart_fn();
+  auto _r = g_next.hipPointerGetAttributes_fn(attributes, ptr);
   _rec->end_ns = NowNs();
   return _r;
 }
 
 // api_id = 339
-static hipError_t hipProfilerStopLayer(void) {
+static hipError_t hipPointerSetAttributeLayer(const void* value, hipPointer_attribute attribute,
+                                               hipDeviceptr_t ptr) {
   auto* _rec = HipGetActiveRecordExt(339u);
-  auto _r = g_next.hipProfilerStop_fn();
+  auto _r = g_next.hipPointerSetAttribute_fn(value, attribute, ptr);
   _rec->end_ns = NowNs();
   return _r;
 }
 
 // api_id = 340
-static hipError_t hipRuntimeGetVersionLayer(int* runtimeVersion) {
+static hipError_t hipProfilerStartLayer(void) {
   auto* _rec = HipGetActiveRecordExt(340u);
-  auto _r = g_next.hipRuntimeGetVersion_fn(runtimeVersion);
+  auto _r = g_next.hipProfilerStart_fn();
   _rec->end_ns = NowNs();
   return _r;
 }
 
 // api_id = 341
-static hipError_t hipSetDeviceLayer(int deviceId) {
+static hipError_t hipProfilerStopLayer(void) {
   auto* _rec = HipGetActiveRecordExt(341u);
-  auto _r = g_next.hipSetDevice_fn(deviceId);
+  auto _r = g_next.hipProfilerStop_fn();
   _rec->end_ns = NowNs();
   return _r;
 }
 
 // api_id = 342
-static hipError_t hipSetDeviceFlagsLayer(unsigned flags) {
+static hipError_t hipRuntimeGetVersionLayer(int* runtimeVersion) {
   auto* _rec = HipGetActiveRecordExt(342u);
-  auto _r = g_next.hipSetDeviceFlags_fn(flags);
+  auto _r = g_next.hipRuntimeGetVersion_fn(runtimeVersion);
   _rec->end_ns = NowNs();
   return _r;
 }
 
 // api_id = 343
-static hipError_t hipSetupArgumentLayer(const void* arg, size_t size, size_t offset) {
+static hipError_t hipSetDeviceLayer(int deviceId) {
   auto* _rec = HipGetActiveRecordExt(343u);
-  auto _r = g_next.hipSetupArgument_fn(arg, size, offset);
+  auto _r = g_next.hipSetDevice_fn(deviceId);
   _rec->end_ns = NowNs();
   return _r;
 }
 
 // api_id = 344
+static hipError_t hipSetDeviceFlagsLayer(unsigned flags) {
+  auto* _rec = HipGetActiveRecordExt(344u);
+  auto _r = g_next.hipSetDeviceFlags_fn(flags);
+  _rec->end_ns = NowNs();
+  return _r;
+}
+
+// api_id = 345
+static hipError_t hipSetupArgumentLayer(const void* arg, size_t size, size_t offset) {
+  auto* _rec = HipGetActiveRecordExt(345u);
+  auto _r = g_next.hipSetupArgument_fn(arg, size, offset);
+  _rec->end_ns = NowNs();
+  return _r;
+}
+
+// api_id = 346
 static hipError_t hipSignalExternalSemaphoresAsyncLayer(const hipExternalSemaphore_t* extSemArray, const hipExternalSemaphoreSignalParams* paramsArray,
     unsigned int numExtSems, hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(344u);
+  auto* _rec = HipGetActiveRecordExt(346u);
   _rec->stream = stream;
   auto _r = g_next.hipSignalExternalSemaphoresAsync_fn(extSemArray, paramsArray, numExtSems, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 345
+// api_id = 347
 static hipError_t hipStreamAddCallbackLayer(hipStream_t stream, hipStreamCallback_t callback,
                                              void* userData, unsigned int flags) {
-  auto* _rec = HipGetActiveRecordExt(345u);
+  auto* _rec = HipGetActiveRecordExt(347u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamAddCallback_fn(stream, callback, userData, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 346
+// api_id = 348
 static hipError_t hipStreamAttachMemAsyncLayer(hipStream_t stream, void* dev_ptr, size_t length,
                                                 unsigned int flags) {
-  auto* _rec = HipGetActiveRecordExt(346u);
+  auto* _rec = HipGetActiveRecordExt(348u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamAttachMemAsync_fn(stream, dev_ptr, length, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 347
+// api_id = 349
 static hipError_t hipStreamBeginCaptureLayer(hipStream_t stream, hipStreamCaptureMode mode) {
-  auto* _rec = HipGetActiveRecordExt(347u);
+  auto* _rec = HipGetActiveRecordExt(349u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamBeginCapture_fn(stream, mode);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 348
+// api_id = 350
 static hipError_t hipStreamCopyAttributesLayer(hipStream_t dst, hipStream_t src) {
-  auto* _rec = HipGetActiveRecordExt(348u);
+  auto* _rec = HipGetActiveRecordExt(350u);
   _rec->stream = dst;
   auto _r = g_next.hipStreamCopyAttributes_fn(dst, src);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 349
+// api_id = 351
 static hipError_t hipStreamCreateLayer(hipStream_t* stream) {
-  auto* _rec = HipGetActiveRecordExt(349u);
+  auto* _rec = HipGetActiveRecordExt(351u);
   auto _r = g_next.hipStreamCreate_fn(stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 350
+// api_id = 352
 static hipError_t hipStreamCreateWithFlagsLayer(hipStream_t* stream, unsigned int flags) {
-  auto* _rec = HipGetActiveRecordExt(350u);
+  auto* _rec = HipGetActiveRecordExt(352u);
   auto _r = g_next.hipStreamCreateWithFlags_fn(stream, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 351
+// api_id = 353
 static hipError_t hipStreamCreateWithPriorityLayer(hipStream_t* stream, unsigned int flags,
                                                     int priority) {
-  auto* _rec = HipGetActiveRecordExt(351u);
+  auto* _rec = HipGetActiveRecordExt(353u);
   auto _r = g_next.hipStreamCreateWithPriority_fn(stream, flags, priority);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 352
+// api_id = 354
 static hipError_t hipStreamDestroyLayer(hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(352u);
+  auto* _rec = HipGetActiveRecordExt(354u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamDestroy_fn(stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 353
+// api_id = 355
 static hipError_t hipStreamEndCaptureLayer(hipStream_t stream, hipGraph_t* pGraph) {
-  auto* _rec = HipGetActiveRecordExt(353u);
+  auto* _rec = HipGetActiveRecordExt(355u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamEndCapture_fn(stream, pGraph);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 354
+// api_id = 356
 static hipError_t hipStreamGetCaptureInfoLayer(hipStream_t stream,
                                                 hipStreamCaptureStatus* pCaptureStatus,
                                                 unsigned long long* pId) {
-  auto* _rec = HipGetActiveRecordExt(354u);
+  auto* _rec = HipGetActiveRecordExt(356u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamGetCaptureInfo_fn(stream, pCaptureStatus, pId);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 355
+// api_id = 357
 static hipError_t hipStreamGetCaptureInfo_v2Layer(hipStream_t stream, hipStreamCaptureStatus* captureStatus_out, unsigned long long* id_out,
     hipGraph_t* graph_out, const hipGraphNode_t** dependencies_out, size_t* numDependencies_out) {
-  auto* _rec = HipGetActiveRecordExt(355u);
+  auto* _rec = HipGetActiveRecordExt(357u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamGetCaptureInfo_v2_fn(stream, captureStatus_out, id_out, graph_out, dependencies_out, numDependencies_out);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 356
+// api_id = 358
 static hipError_t hipStreamGetDeviceLayer(hipStream_t stream, hipDevice_t* device) {
-  auto* _rec = HipGetActiveRecordExt(356u);
+  auto* _rec = HipGetActiveRecordExt(358u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamGetDevice_fn(stream, device);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 357
+// api_id = 359
 static hipError_t hipStreamGetFlagsLayer(hipStream_t stream, unsigned int* flags) {
-  auto* _rec = HipGetActiveRecordExt(357u);
+  auto* _rec = HipGetActiveRecordExt(359u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamGetFlags_fn(stream, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 358
+// api_id = 360
 static hipError_t hipStreamGetIdLayer(hipStream_t stream, unsigned long long* streamId) {
-  auto* _rec = HipGetActiveRecordExt(358u);
+  auto* _rec = HipGetActiveRecordExt(360u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamGetId_fn(stream, streamId);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 359
+// api_id = 361
 static hipError_t hipStreamGetPriorityLayer(hipStream_t stream, int* priority) {
-  auto* _rec = HipGetActiveRecordExt(359u);
+  auto* _rec = HipGetActiveRecordExt(361u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamGetPriority_fn(stream, priority);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 360
+// api_id = 362
 static hipError_t hipStreamIsCapturingLayer(hipStream_t stream,
                                              hipStreamCaptureStatus* pCaptureStatus) {
-  auto* _rec = HipGetActiveRecordExt(360u);
+  auto* _rec = HipGetActiveRecordExt(362u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamIsCapturing_fn(stream, pCaptureStatus);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 361
+// api_id = 363
 static hipError_t hipStreamQueryLayer(hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(361u);
+  auto* _rec = HipGetActiveRecordExt(363u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamQuery_fn(stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 362
+// api_id = 364
 static hipError_t hipStreamSynchronizeLayer(hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(362u);
+  auto* _rec = HipGetActiveRecordExt(364u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamSynchronize_fn(stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 363
+// api_id = 365
 static hipError_t hipStreamUpdateCaptureDependenciesLayer(hipStream_t stream,
                                                            hipGraphNode_t* dependencies,
                                                            size_t numDependencies,
                                                            unsigned int flags) {
-  auto* _rec = HipGetActiveRecordExt(363u);
+  auto* _rec = HipGetActiveRecordExt(365u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamUpdateCaptureDependencies_fn(stream, dependencies, numDependencies, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 364
+// api_id = 366
 static hipError_t hipStreamWaitEventLayer(hipStream_t stream, hipEvent_t event,
                                            unsigned int flags) {
-  auto* _rec = HipGetActiveRecordExt(364u);
+  auto* _rec = HipGetActiveRecordExt(366u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamWaitEvent_fn(stream, event, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 365
+// api_id = 367
 static hipError_t hipStreamWaitValue32Layer(hipStream_t stream, void* ptr, uint32_t value,
                                              unsigned int flags, uint32_t mask) {
-  auto* _rec = HipGetActiveRecordExt(365u);
+  auto* _rec = HipGetActiveRecordExt(367u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamWaitValue32_fn(stream, ptr, value, flags, mask);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 366
+// api_id = 368
 static hipError_t hipStreamWaitValue64Layer(hipStream_t stream, void* ptr, uint64_t value,
                                              unsigned int flags, uint64_t mask) {
-  auto* _rec = HipGetActiveRecordExt(366u);
+  auto* _rec = HipGetActiveRecordExt(368u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamWaitValue64_fn(stream, ptr, value, flags, mask);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 367
+// api_id = 369
 static hipError_t hipStreamWriteValue32Layer(hipStream_t stream, void* ptr, uint32_t value,
                                               unsigned int flags) {
-  auto* _rec = HipGetActiveRecordExt(367u);
+  auto* _rec = HipGetActiveRecordExt(369u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamWriteValue32_fn(stream, ptr, value, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 368
+// api_id = 370
 static hipError_t hipStreamWriteValue64Layer(hipStream_t stream, void* ptr, uint64_t value,
                                               unsigned int flags) {
-  auto* _rec = HipGetActiveRecordExt(368u);
+  auto* _rec = HipGetActiveRecordExt(370u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamWriteValue64_fn(stream, ptr, value, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 369
+// api_id = 371
 static hipError_t hipStreamBatchMemOpLayer(hipStream_t stream, unsigned int count,
                                             hipStreamBatchMemOpParams* paramArray,
                                             unsigned int flags) {
-  auto* _rec = HipGetActiveRecordExt(369u);
+  auto* _rec = HipGetActiveRecordExt(371u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamBatchMemOp_fn(stream, count, paramArray, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 370
+// api_id = 372
 static hipError_t hipTexObjectCreateLayer(hipTextureObject_t* pTexObject,
                                            const HIP_RESOURCE_DESC* pResDesc,
                                            const HIP_TEXTURE_DESC* pTexDesc,
                                            const HIP_RESOURCE_VIEW_DESC* pResViewDesc) {
-  auto* _rec = HipGetActiveRecordExt(370u);
+  auto* _rec = HipGetActiveRecordExt(372u);
   auto _r = g_next.hipTexObjectCreate_fn(pTexObject, pResDesc, pTexDesc, pResViewDesc);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 371
+// api_id = 373
 static hipError_t hipTexObjectDestroyLayer(hipTextureObject_t texObject) {
-  auto* _rec = HipGetActiveRecordExt(371u);
+  auto* _rec = HipGetActiveRecordExt(373u);
   auto _r = g_next.hipTexObjectDestroy_fn(texObject);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 372
+// api_id = 374
 static hipError_t hipTexObjectGetResourceDescLayer(HIP_RESOURCE_DESC* pResDesc,
                                                     hipTextureObject_t texObject) {
-  auto* _rec = HipGetActiveRecordExt(372u);
+  auto* _rec = HipGetActiveRecordExt(374u);
   auto _r = g_next.hipTexObjectGetResourceDesc_fn(pResDesc, texObject);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 373
+// api_id = 375
 static hipError_t hipTexObjectGetResourceViewDescLayer(HIP_RESOURCE_VIEW_DESC* pResViewDesc,
                                                         hipTextureObject_t texObject) {
-  auto* _rec = HipGetActiveRecordExt(373u);
+  auto* _rec = HipGetActiveRecordExt(375u);
   auto _r = g_next.hipTexObjectGetResourceViewDesc_fn(pResViewDesc, texObject);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 374
+// api_id = 376
 static hipError_t hipTexObjectGetTextureDescLayer(HIP_TEXTURE_DESC* pTexDesc,
                                                    hipTextureObject_t texObject) {
-  auto* _rec = HipGetActiveRecordExt(374u);
+  auto* _rec = HipGetActiveRecordExt(376u);
   auto _r = g_next.hipTexObjectGetTextureDesc_fn(pTexDesc, texObject);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 375
+// api_id = 377
 static hipError_t hipTexRefGetAddressLayer(hipDeviceptr_t* dev_ptr,
                                             const textureReference* texRef) {
-  auto* _rec = HipGetActiveRecordExt(375u);
+  auto* _rec = HipGetActiveRecordExt(377u);
   auto _r = g_next.hipTexRefGetAddress_fn(dev_ptr, texRef);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 376
+// api_id = 378
 static hipError_t hipTexRefGetAddressModeLayer(enum hipTextureAddressMode* pam,
                                                 const textureReference* texRef, int dim) {
-  auto* _rec = HipGetActiveRecordExt(376u);
+  auto* _rec = HipGetActiveRecordExt(378u);
   auto _r = g_next.hipTexRefGetAddressMode_fn(pam, texRef, dim);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 377
+// api_id = 379
 static hipError_t hipTexRefGetFilterModeLayer(enum hipTextureFilterMode* pfm,
                                                const textureReference* texRef) {
-  auto* _rec = HipGetActiveRecordExt(377u);
+  auto* _rec = HipGetActiveRecordExt(379u);
   auto _r = g_next.hipTexRefGetFilterMode_fn(pfm, texRef);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 378
+// api_id = 380
 static hipError_t hipTexRefGetFlagsLayer(unsigned int* pFlags, const textureReference* texRef) {
-  auto* _rec = HipGetActiveRecordExt(378u);
+  auto* _rec = HipGetActiveRecordExt(380u);
   auto _r = g_next.hipTexRefGetFlags_fn(pFlags, texRef);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 379
+// api_id = 381
 static hipError_t hipTexRefGetFormatLayer(hipArray_Format* pFormat, int* pNumChannels,
                                            const textureReference* texRef) {
-  auto* _rec = HipGetActiveRecordExt(379u);
+  auto* _rec = HipGetActiveRecordExt(381u);
   auto _r = g_next.hipTexRefGetFormat_fn(pFormat, pNumChannels, texRef);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 380
+// api_id = 382
 static hipError_t hipTexRefGetMaxAnisotropyLayer(int* pmaxAnsio, const textureReference* texRef) {
-  auto* _rec = HipGetActiveRecordExt(380u);
+  auto* _rec = HipGetActiveRecordExt(382u);
   auto _r = g_next.hipTexRefGetMaxAnisotropy_fn(pmaxAnsio, texRef);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 381
+// api_id = 383
 static hipError_t hipTexRefGetMipMappedArrayLayer(hipMipmappedArray_t* pArray,
                                                    const textureReference* texRef) {
-  auto* _rec = HipGetActiveRecordExt(381u);
+  auto* _rec = HipGetActiveRecordExt(383u);
   auto _r = g_next.hipTexRefGetMipMappedArray_fn(pArray, texRef);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 382
+// api_id = 384
 static hipError_t hipTexRefGetMipmapFilterModeLayer(enum hipTextureFilterMode* pfm,
                                                      const textureReference* texRef) {
-  auto* _rec = HipGetActiveRecordExt(382u);
+  auto* _rec = HipGetActiveRecordExt(384u);
   auto _r = g_next.hipTexRefGetMipmapFilterMode_fn(pfm, texRef);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 383
+// api_id = 385
 static hipError_t hipTexRefGetMipmapLevelBiasLayer(float* pbias, const textureReference* texRef) {
-  auto* _rec = HipGetActiveRecordExt(383u);
+  auto* _rec = HipGetActiveRecordExt(385u);
   auto _r = g_next.hipTexRefGetMipmapLevelBias_fn(pbias, texRef);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 384
+// api_id = 386
 static hipError_t hipTexRefGetMipmapLevelClampLayer(float* pminMipmapLevelClamp,
                                                      float* pmaxMipmapLevelClamp,
                                                      const textureReference* texRef) {
-  auto* _rec = HipGetActiveRecordExt(384u);
+  auto* _rec = HipGetActiveRecordExt(386u);
   auto _r = g_next.hipTexRefGetMipmapLevelClamp_fn(pminMipmapLevelClamp, pmaxMipmapLevelClamp, texRef);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 385
+// api_id = 387
 static hipError_t hipTexRefSetAddressLayer(size_t* ByteOffset, textureReference* texRef,
                                             hipDeviceptr_t dptr, size_t bytes) {
-  auto* _rec = HipGetActiveRecordExt(385u);
+  auto* _rec = HipGetActiveRecordExt(387u);
   auto _r = g_next.hipTexRefSetAddress_fn(ByteOffset, texRef, dptr, bytes);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 386
+// api_id = 388
 static hipError_t hipTexRefSetAddress2DLayer(textureReference* texRef,
                                               const HIP_ARRAY_DESCRIPTOR* desc, hipDeviceptr_t dptr,
                                               size_t Pitch) {
-  auto* _rec = HipGetActiveRecordExt(386u);
+  auto* _rec = HipGetActiveRecordExt(388u);
   auto _r = g_next.hipTexRefSetAddress2D_fn(texRef, desc, dptr, Pitch);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 387
+// api_id = 389
 static hipError_t hipTexRefSetAddressModeLayer(textureReference* texRef, int dim,
                                                 enum hipTextureAddressMode am) {
-  auto* _rec = HipGetActiveRecordExt(387u);
+  auto* _rec = HipGetActiveRecordExt(389u);
   auto _r = g_next.hipTexRefSetAddressMode_fn(texRef, dim, am);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 388
+// api_id = 390
 static hipError_t hipTexRefSetArrayLayer(textureReference* tex, hipArray_const_t array,
                                           unsigned int flags) {
-  auto* _rec = HipGetActiveRecordExt(388u);
+  auto* _rec = HipGetActiveRecordExt(390u);
   auto _r = g_next.hipTexRefSetArray_fn(tex, array, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 389
+// api_id = 391
 static hipError_t hipTexRefSetBorderColorLayer(textureReference* texRef, float* pBorderColor) {
-  auto* _rec = HipGetActiveRecordExt(389u);
+  auto* _rec = HipGetActiveRecordExt(391u);
   auto _r = g_next.hipTexRefSetBorderColor_fn(texRef, pBorderColor);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 390
+// api_id = 392
 static hipError_t hipTexRefSetFilterModeLayer(textureReference* texRef,
                                                enum hipTextureFilterMode fm) {
-  auto* _rec = HipGetActiveRecordExt(390u);
+  auto* _rec = HipGetActiveRecordExt(392u);
   auto _r = g_next.hipTexRefSetFilterMode_fn(texRef, fm);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 391
+// api_id = 393
 static hipError_t hipTexRefSetFlagsLayer(textureReference* texRef, unsigned int Flags) {
-  auto* _rec = HipGetActiveRecordExt(391u);
+  auto* _rec = HipGetActiveRecordExt(393u);
   auto _r = g_next.hipTexRefSetFlags_fn(texRef, Flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 392
+// api_id = 394
 static hipError_t hipTexRefSetFormatLayer(textureReference* texRef, hipArray_Format fmt,
                                            int NumPackedComponents) {
-  auto* _rec = HipGetActiveRecordExt(392u);
+  auto* _rec = HipGetActiveRecordExt(394u);
   auto _r = g_next.hipTexRefSetFormat_fn(texRef, fmt, NumPackedComponents);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 393
+// api_id = 395
 static hipError_t hipTexRefSetMaxAnisotropyLayer(textureReference* texRef, unsigned int maxAniso) {
-  auto* _rec = HipGetActiveRecordExt(393u);
+  auto* _rec = HipGetActiveRecordExt(395u);
   auto _r = g_next.hipTexRefSetMaxAnisotropy_fn(texRef, maxAniso);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 394
+// api_id = 396
 static hipError_t hipTexRefSetMipmapFilterModeLayer(textureReference* texRef,
                                                      enum hipTextureFilterMode fm) {
-  auto* _rec = HipGetActiveRecordExt(394u);
+  auto* _rec = HipGetActiveRecordExt(396u);
   auto _r = g_next.hipTexRefSetMipmapFilterMode_fn(texRef, fm);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 395
+// api_id = 397
 static hipError_t hipTexRefSetMipmapLevelBiasLayer(textureReference* texRef, float bias) {
-  auto* _rec = HipGetActiveRecordExt(395u);
+  auto* _rec = HipGetActiveRecordExt(397u);
   auto _r = g_next.hipTexRefSetMipmapLevelBias_fn(texRef, bias);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 396
+// api_id = 398
 static hipError_t hipTexRefSetMipmapLevelClampLayer(textureReference* texRef,
                                                      float minMipMapLevelClamp,
                                                      float maxMipMapLevelClamp) {
-  auto* _rec = HipGetActiveRecordExt(396u);
+  auto* _rec = HipGetActiveRecordExt(398u);
   auto _r = g_next.hipTexRefSetMipmapLevelClamp_fn(texRef, minMipMapLevelClamp, maxMipMapLevelClamp);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 397
+// api_id = 399
 static hipError_t hipTexRefSetMipmappedArrayLayer(textureReference* texRef,
                                                    struct hipMipmappedArray* mipmappedArray,
                                                    unsigned int Flags) {
-  auto* _rec = HipGetActiveRecordExt(397u);
+  auto* _rec = HipGetActiveRecordExt(399u);
   auto _r = g_next.hipTexRefSetMipmappedArray_fn(texRef, mipmappedArray, Flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 398
+// api_id = 400
 static hipError_t hipThreadExchangeStreamCaptureModeLayer(hipStreamCaptureMode* mode) {
-  auto* _rec = HipGetActiveRecordExt(398u);
+  auto* _rec = HipGetActiveRecordExt(400u);
   auto _r = g_next.hipThreadExchangeStreamCaptureMode_fn(mode);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 399
+// api_id = 401
 static hipError_t hipUnbindTextureLayer(const textureReference* tex) {
-  auto* _rec = HipGetActiveRecordExt(399u);
+  auto* _rec = HipGetActiveRecordExt(401u);
   auto _r = g_next.hipUnbindTexture_fn(tex);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 400
+// api_id = 402
 static hipError_t hipUserObjectCreateLayer(hipUserObject_t* object_out, void* ptr,
                                             hipHostFn_t destroy, unsigned int initialRefcount,
                                             unsigned int flags) {
-  auto* _rec = HipGetActiveRecordExt(400u);
+  auto* _rec = HipGetActiveRecordExt(402u);
   auto _r = g_next.hipUserObjectCreate_fn(object_out, ptr, destroy, initialRefcount, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 401
+// api_id = 403
 static hipError_t hipUserObjectReleaseLayer(hipUserObject_t object, unsigned int count) {
-  auto* _rec = HipGetActiveRecordExt(401u);
+  auto* _rec = HipGetActiveRecordExt(403u);
   auto _r = g_next.hipUserObjectRelease_fn(object, count);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 402
+// api_id = 404
 static hipError_t hipUserObjectRetainLayer(hipUserObject_t object, unsigned int count) {
-  auto* _rec = HipGetActiveRecordExt(402u);
+  auto* _rec = HipGetActiveRecordExt(404u);
   auto _r = g_next.hipUserObjectRetain_fn(object, count);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 403
+// api_id = 405
 static hipError_t hipWaitExternalSemaphoresAsyncLayer(const hipExternalSemaphore_t* extSemArray, const hipExternalSemaphoreWaitParams* paramsArray,
     unsigned int numExtSems, hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(403u);
+  auto* _rec = HipGetActiveRecordExt(405u);
   _rec->stream = stream;
   auto _r = g_next.hipWaitExternalSemaphoresAsync_fn(extSemArray, paramsArray, numExtSems, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 404
+// api_id = 406
 static hipChannelFormatDesc hipCreateChannelDescLayer(int x, int y, int z, int w,
                                                        hipChannelFormatKind f) {
-  auto* _rec = HipGetActiveRecordExt(404u);
+  auto* _rec = HipGetActiveRecordExt(406u);
   auto _r = g_next.hipCreateChannelDesc_fn(x, y, z, w, f);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 405
+// api_id = 407
 static hipError_t hipExtModuleLaunchKernelLayer(hipFunction_t f, uint32_t globalWorkSizeX,
                                                  uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
                                                  uint32_t localWorkSizeX, uint32_t localWorkSizeY,
@@ -3662,14 +3680,14 @@ static hipError_t hipExtModuleLaunchKernelLayer(hipFunction_t f, uint32_t global
                                                  hipStream_t hStream, void** kernelParams,
                                                  void** extra, hipEvent_t startEvent,
                                                  hipEvent_t stopEvent, uint32_t flags) {
-  auto* _rec = HipGetActiveRecordExt(405u);
+  auto* _rec = HipGetActiveRecordExt(407u);
   _rec->stream = hStream;
   auto _r = g_next.hipExtModuleLaunchKernel_fn(f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes, hStream, kernelParams, extra, startEvent, stopEvent, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 406
+// api_id = 408
 static hipError_t hipHccModuleLaunchKernelLayer(hipFunction_t f, uint32_t globalWorkSizeX,
                                                  uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
                                                  uint32_t localWorkSizeX, uint32_t localWorkSizeY,
@@ -3677,987 +3695,987 @@ static hipError_t hipHccModuleLaunchKernelLayer(hipFunction_t f, uint32_t global
                                                  hipStream_t hStream, void** kernelParams,
                                                  void** extra, hipEvent_t startEvent,
                                                  hipEvent_t stopEvent) {
-  auto* _rec = HipGetActiveRecordExt(406u);
+  auto* _rec = HipGetActiveRecordExt(408u);
   _rec->stream = hStream;
   auto _r = g_next.hipHccModuleLaunchKernel_fn(f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes, hStream, kernelParams, extra, startEvent, stopEvent);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 407
+// api_id = 409
 static hipError_t hipMemcpy_sptLayer(void* dst, const void* src, size_t sizeBytes,
                                       hipMemcpyKind kind) {
-  auto* _rec = HipGetActiveRecordExt(407u);
+  auto* _rec = HipGetActiveRecordExt(409u);
   auto _r = g_next.hipMemcpy_spt_fn(dst, src, sizeBytes, kind);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 408
+// api_id = 410
 static hipError_t hipMemcpyToSymbol_sptLayer(const void* symbol, const void* src, size_t sizeBytes,
                                               size_t offset, hipMemcpyKind kind) {
-  auto* _rec = HipGetActiveRecordExt(408u);
+  auto* _rec = HipGetActiveRecordExt(410u);
   auto _r = g_next.hipMemcpyToSymbol_spt_fn(symbol, src, sizeBytes, offset, kind);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 409
+// api_id = 411
 static hipError_t hipMemcpyFromSymbol_sptLayer(void* dst, const void* symbol, size_t sizeBytes,
                                                 size_t offset, hipMemcpyKind kind) {
-  auto* _rec = HipGetActiveRecordExt(409u);
+  auto* _rec = HipGetActiveRecordExt(411u);
   auto _r = g_next.hipMemcpyFromSymbol_spt_fn(dst, symbol, sizeBytes, offset, kind);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 410
+// api_id = 412
 static hipError_t hipMemcpy2D_sptLayer(void* dst, size_t dpitch, const void* src, size_t spitch,
                                         size_t width, size_t height, hipMemcpyKind kind) {
-  auto* _rec = HipGetActiveRecordExt(410u);
+  auto* _rec = HipGetActiveRecordExt(412u);
   auto _r = g_next.hipMemcpy2D_spt_fn(dst, dpitch, src, spitch, width, height, kind);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 411
+// api_id = 413
 static hipError_t hipMemcpy2DFromArray_sptLayer(void* dst, size_t dpitch, hipArray_const_t src,
                                                  size_t wOffset, size_t hOffset, size_t width,
                                                  size_t height, hipMemcpyKind kind) {
-  auto* _rec = HipGetActiveRecordExt(411u);
+  auto* _rec = HipGetActiveRecordExt(413u);
   auto _r = g_next.hipMemcpy2DFromArray_spt_fn(dst, dpitch, src, wOffset, hOffset, width, height, kind);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 412
+// api_id = 414
 static hipError_t hipMemcpy3D_sptLayer(const struct hipMemcpy3DParms* p) {
-  auto* _rec = HipGetActiveRecordExt(412u);
+  auto* _rec = HipGetActiveRecordExt(414u);
   auto _r = g_next.hipMemcpy3D_spt_fn(p);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 413
+// api_id = 415
 static hipError_t hipMemset_sptLayer(void* dst, int value, size_t sizeBytes) {
-  auto* _rec = HipGetActiveRecordExt(413u);
+  auto* _rec = HipGetActiveRecordExt(415u);
   auto _r = g_next.hipMemset_spt_fn(dst, value, sizeBytes);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 414
+// api_id = 416
 static hipError_t hipMemsetAsync_sptLayer(void* dst, int value, size_t sizeBytes,
                                            hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(414u);
+  auto* _rec = HipGetActiveRecordExt(416u);
   _rec->stream = stream;
   auto _r = g_next.hipMemsetAsync_spt_fn(dst, value, sizeBytes, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 415
+// api_id = 417
 static hipError_t hipMemset2D_sptLayer(void* dst, size_t pitch, int value, size_t width,
                                         size_t height) {
-  auto* _rec = HipGetActiveRecordExt(415u);
+  auto* _rec = HipGetActiveRecordExt(417u);
   auto _r = g_next.hipMemset2D_spt_fn(dst, pitch, value, width, height);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 416
+// api_id = 418
 static hipError_t hipMemset2DAsync_sptLayer(void* dst, size_t pitch, int value, size_t width,
                                              size_t height, hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(416u);
+  auto* _rec = HipGetActiveRecordExt(418u);
   _rec->stream = stream;
   auto _r = g_next.hipMemset2DAsync_spt_fn(dst, pitch, value, width, height, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 417
+// api_id = 419
 static hipError_t hipMemset3DAsync_sptLayer(hipPitchedPtr pitchedDevPtr, int value,
                                              hipExtent extent, hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(417u);
+  auto* _rec = HipGetActiveRecordExt(419u);
   _rec->stream = stream;
   auto _r = g_next.hipMemset3DAsync_spt_fn(pitchedDevPtr, value, extent, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 418
+// api_id = 420
 static hipError_t hipMemset3D_sptLayer(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent) {
-  auto* _rec = HipGetActiveRecordExt(418u);
+  auto* _rec = HipGetActiveRecordExt(420u);
   auto _r = g_next.hipMemset3D_spt_fn(pitchedDevPtr, value, extent);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 419
+// api_id = 421
 static hipError_t hipMemcpyAsync_sptLayer(void* dst, const void* src, size_t sizeBytes,
                                            hipMemcpyKind kind, hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(419u);
+  auto* _rec = HipGetActiveRecordExt(421u);
   _rec->stream = stream;
   auto _r = g_next.hipMemcpyAsync_spt_fn(dst, src, sizeBytes, kind, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 420
+// api_id = 422
 static hipError_t hipMemcpy3DAsync_sptLayer(const hipMemcpy3DParms* p, hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(420u);
+  auto* _rec = HipGetActiveRecordExt(422u);
   _rec->stream = stream;
   auto _r = g_next.hipMemcpy3DAsync_spt_fn(p, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 421
+// api_id = 423
 static hipError_t hipMemcpy2DAsync_sptLayer(void* dst, size_t dpitch, const void* src,
                                              size_t spitch, size_t width, size_t height,
                                              hipMemcpyKind kind, hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(421u);
+  auto* _rec = HipGetActiveRecordExt(423u);
   _rec->stream = stream;
   auto _r = g_next.hipMemcpy2DAsync_spt_fn(dst, dpitch, src, spitch, width, height, kind, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 422
+// api_id = 424
 static hipError_t hipMemcpyFromSymbolAsync_sptLayer(void* dst, const void* symbol,
                                                      size_t sizeBytes, size_t offset,
                                                      hipMemcpyKind kind, hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(422u);
+  auto* _rec = HipGetActiveRecordExt(424u);
   _rec->stream = stream;
   auto _r = g_next.hipMemcpyFromSymbolAsync_spt_fn(dst, symbol, sizeBytes, offset, kind, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 423
+// api_id = 425
 static hipError_t hipMemcpyToSymbolAsync_sptLayer(const void* symbol, const void* src,
                                                    size_t sizeBytes, size_t offset,
                                                    hipMemcpyKind kind, hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(423u);
+  auto* _rec = HipGetActiveRecordExt(425u);
   _rec->stream = stream;
   auto _r = g_next.hipMemcpyToSymbolAsync_spt_fn(symbol, src, sizeBytes, offset, kind, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 424
+// api_id = 426
 static hipError_t hipMemcpyFromArray_sptLayer(void* dst, hipArray_const_t src, size_t wOffsetSrc,
                                                size_t hOffset, size_t count, hipMemcpyKind kind) {
-  auto* _rec = HipGetActiveRecordExt(424u);
+  auto* _rec = HipGetActiveRecordExt(426u);
   auto _r = g_next.hipMemcpyFromArray_spt_fn(dst, src, wOffsetSrc, hOffset, count, kind);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 425
+// api_id = 427
 static hipError_t hipMemcpy2DToArray_sptLayer(hipArray_t dst, size_t wOffset, size_t hOffset,
                                                const void* src, size_t spitch, size_t width,
                                                size_t height, hipMemcpyKind kind) {
-  auto* _rec = HipGetActiveRecordExt(425u);
+  auto* _rec = HipGetActiveRecordExt(427u);
   auto _r = g_next.hipMemcpy2DToArray_spt_fn(dst, wOffset, hOffset, src, spitch, width, height, kind);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 426
+// api_id = 428
 static hipError_t hipMemcpy2DFromArrayAsync_sptLayer(void* dst, size_t dpitch,
                                                       hipArray_const_t src, size_t wOffsetSrc,
                                                       size_t hOffsetSrc, size_t width,
                                                       size_t height, hipMemcpyKind kind,
                                                       hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(426u);
+  auto* _rec = HipGetActiveRecordExt(428u);
   _rec->stream = stream;
   auto _r = g_next.hipMemcpy2DFromArrayAsync_spt_fn(dst, dpitch, src, wOffsetSrc, hOffsetSrc, width, height, kind, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 427
+// api_id = 429
 static hipError_t hipMemcpy2DToArrayAsync_sptLayer(hipArray_t dst, size_t wOffset, size_t hOffset,
                                                     const void* src, size_t spitch, size_t width,
                                                     size_t height, hipMemcpyKind kind,
                                                     hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(427u);
+  auto* _rec = HipGetActiveRecordExt(429u);
   _rec->stream = stream;
   auto _r = g_next.hipMemcpy2DToArrayAsync_spt_fn(dst, wOffset, hOffset, src, spitch, width, height, kind, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 428
+// api_id = 430
 static hipError_t hipStreamQuery_sptLayer(hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(428u);
+  auto* _rec = HipGetActiveRecordExt(430u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamQuery_spt_fn(stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 429
+// api_id = 431
 static hipError_t hipStreamSynchronize_sptLayer(hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(429u);
+  auto* _rec = HipGetActiveRecordExt(431u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamSynchronize_spt_fn(stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 430
+// api_id = 432
 static hipError_t hipStreamGetPriority_sptLayer(hipStream_t stream, int* priority) {
-  auto* _rec = HipGetActiveRecordExt(430u);
+  auto* _rec = HipGetActiveRecordExt(432u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamGetPriority_spt_fn(stream, priority);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 431
+// api_id = 433
 static hipError_t hipStreamWaitEvent_sptLayer(hipStream_t stream, hipEvent_t event,
                                                unsigned int flags) {
-  auto* _rec = HipGetActiveRecordExt(431u);
+  auto* _rec = HipGetActiveRecordExt(433u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamWaitEvent_spt_fn(stream, event, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 432
+// api_id = 434
 static hipError_t hipStreamGetFlags_sptLayer(hipStream_t stream, unsigned int* flags) {
-  auto* _rec = HipGetActiveRecordExt(432u);
+  auto* _rec = HipGetActiveRecordExt(434u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamGetFlags_spt_fn(stream, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 433
+// api_id = 435
 static hipError_t hipStreamAddCallback_sptLayer(hipStream_t stream, hipStreamCallback_t callback,
                                                  void* userData, unsigned int flags) {
-  auto* _rec = HipGetActiveRecordExt(433u);
+  auto* _rec = HipGetActiveRecordExt(435u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamAddCallback_spt_fn(stream, callback, userData, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 434
+// api_id = 436
 static hipError_t hipEventRecord_sptLayer(hipEvent_t event, hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(434u);
+  auto* _rec = HipGetActiveRecordExt(436u);
   _rec->stream = stream;
   auto _r = g_next.hipEventRecord_spt_fn(event, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 435
+// api_id = 437
 static hipError_t hipLaunchCooperativeKernel_sptLayer(const void* f, dim3 gridDim, dim3 blockDim,
                                                        void** kernelParams, uint32_t sharedMemBytes,
                                                        hipStream_t hStream) {
-  auto* _rec = HipGetActiveRecordExt(435u);
+  auto* _rec = HipGetActiveRecordExt(437u);
   _rec->stream = hStream;
   auto _r = g_next.hipLaunchCooperativeKernel_spt_fn(f, gridDim, blockDim, kernelParams, sharedMemBytes, hStream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 436
+// api_id = 438
 static hipError_t hipLaunchKernel_sptLayer(const void* function_address, dim3 numBlocks,
                                             dim3 dimBlocks, void** args, size_t sharedMemBytes,
                                             hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(436u);
+  auto* _rec = HipGetActiveRecordExt(438u);
   _rec->stream = stream;
   auto _r = g_next.hipLaunchKernel_spt_fn(function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 437
+// api_id = 439
 static hipError_t hipGraphLaunch_sptLayer(hipGraphExec_t graphExec, hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(437u);
+  auto* _rec = HipGetActiveRecordExt(439u);
   _rec->stream = stream;
   auto _r = g_next.hipGraphLaunch_spt_fn(graphExec, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 438
+// api_id = 440
 static hipError_t hipStreamBeginCapture_sptLayer(hipStream_t stream, hipStreamCaptureMode mode) {
-  auto* _rec = HipGetActiveRecordExt(438u);
+  auto* _rec = HipGetActiveRecordExt(440u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamBeginCapture_spt_fn(stream, mode);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 439
+// api_id = 441
 static hipError_t hipStreamEndCapture_sptLayer(hipStream_t stream, hipGraph_t* pGraph) {
-  auto* _rec = HipGetActiveRecordExt(439u);
+  auto* _rec = HipGetActiveRecordExt(441u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamEndCapture_spt_fn(stream, pGraph);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 440
+// api_id = 442
 static hipError_t hipStreamIsCapturing_sptLayer(hipStream_t stream,
                                                  hipStreamCaptureStatus* pCaptureStatus) {
-  auto* _rec = HipGetActiveRecordExt(440u);
+  auto* _rec = HipGetActiveRecordExt(442u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamIsCapturing_spt_fn(stream, pCaptureStatus);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 441
+// api_id = 443
 static hipError_t hipStreamGetCaptureInfo_sptLayer(hipStream_t stream,
                                                     hipStreamCaptureStatus* pCaptureStatus,
                                                     unsigned long long* pId) {
-  auto* _rec = HipGetActiveRecordExt(441u);
+  auto* _rec = HipGetActiveRecordExt(443u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamGetCaptureInfo_spt_fn(stream, pCaptureStatus, pId);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 442
+// api_id = 444
 static hipError_t hipStreamGetCaptureInfo_v2_sptLayer(hipStream_t stream, hipStreamCaptureStatus* captureStatus_out, unsigned long long* id_out,
     hipGraph_t* graph_out, const hipGraphNode_t** dependencies_out, size_t* numDependencies_out) {
-  auto* _rec = HipGetActiveRecordExt(442u);
+  auto* _rec = HipGetActiveRecordExt(444u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamGetCaptureInfo_v2_spt_fn(stream, captureStatus_out, id_out, graph_out, dependencies_out, numDependencies_out);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 443
+// api_id = 445
 static hipError_t hipLaunchHostFunc_sptLayer(hipStream_t stream, hipHostFn_t fn, void* userData) {
-  auto* _rec = HipGetActiveRecordExt(443u);
+  auto* _rec = HipGetActiveRecordExt(445u);
   _rec->stream = stream;
   auto _r = g_next.hipLaunchHostFunc_spt_fn(stream, fn, userData);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 444
+// api_id = 446
 static int hipGetStreamDeviceIdLayer(hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(444u);
+  auto* _rec = HipGetActiveRecordExt(446u);
   _rec->stream = stream;
   auto _r = g_next.hipGetStreamDeviceId_fn(stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 445
+// api_id = 447
 static hipError_t hipDrvGraphAddMemsetNodeLayer(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
                                                  const hipGraphNode_t* dependencies,
                                                  size_t numDependencies,
                                                  const hipMemsetParams* memsetParams, hipCtx_t ctx) {
-  auto* _rec = HipGetActiveRecordExt(445u);
+  auto* _rec = HipGetActiveRecordExt(447u);
   auto _r = g_next.hipDrvGraphAddMemsetNode_fn(phGraphNode, hGraph, dependencies, numDependencies, memsetParams, ctx);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 446
+// api_id = 448
 static hipError_t hipGetDevicePropertiesR0000Layer(hipDeviceProp_tR0000* prop, int device) {
-  auto* _rec = HipGetActiveRecordExt(446u);
+  auto* _rec = HipGetActiveRecordExt(448u);
   auto _r = g_next.hipGetDevicePropertiesR0000_fn(prop, device);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 447
+// api_id = 449
 static hipError_t hipGetDriverEntryPointLayer(const char* symbol, void** funcPtr,
                                                unsigned long long flags,
                                                hipDriverEntryPointQueryResult* status) {
-  auto* _rec = HipGetActiveRecordExt(447u);
+  auto* _rec = HipGetActiveRecordExt(449u);
   auto _r = g_next.hipGetDriverEntryPoint_fn(symbol, funcPtr, flags, status);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 448
+// api_id = 450
 static hipError_t hipGetDriverEntryPoint_sptLayer(const char* symbol, void** funcPtr,
                                                    unsigned long long flags,
                                                    hipDriverEntryPointQueryResult* status) {
-  auto* _rec = HipGetActiveRecordExt(448u);
+  auto* _rec = HipGetActiveRecordExt(450u);
   auto _r = g_next.hipGetDriverEntryPoint_spt_fn(symbol, funcPtr, flags, status);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 449
+// api_id = 451
 static hipError_t hipExtGetLastErrorLayer(void) {
-  auto* _rec = HipGetActiveRecordExt(449u);
+  auto* _rec = HipGetActiveRecordExt(451u);
   auto _r = g_next.hipExtGetLastError_fn();
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 450
+// api_id = 452
 static hipError_t hipTexRefGetBorderColorLayer(float* pBorderColor,
                                                 const textureReference* texRef) {
-  auto* _rec = HipGetActiveRecordExt(450u);
+  auto* _rec = HipGetActiveRecordExt(452u);
   auto _r = g_next.hipTexRefGetBorderColor_fn(pBorderColor, texRef);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 451
+// api_id = 453
 static hipError_t hipTexRefGetArrayLayer(hipArray_t* pArray, const textureReference* texRef) {
-  auto* _rec = HipGetActiveRecordExt(451u);
+  auto* _rec = HipGetActiveRecordExt(453u);
   auto _r = g_next.hipTexRefGetArray_fn(pArray, texRef);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 452
+// api_id = 454
 static hipError_t hipGetProcAddressLayer(const char* symbol, void** pfn, int hipVersion,
                                           uint64_t flags,
                                           hipDriverProcAddressQueryResult* symbolStatus) {
-  auto* _rec = HipGetActiveRecordExt(452u);
+  auto* _rec = HipGetActiveRecordExt(454u);
   auto _r = g_next.hipGetProcAddress_fn(symbol, pfn, hipVersion, flags, symbolStatus);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 453
+// api_id = 455
 static hipError_t hipGetProcAddress_sptLayer(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
                                               hipDriverProcAddressQueryResult* symbolStatus) {
-  auto* _rec = HipGetActiveRecordExt(453u);
+  auto* _rec = HipGetActiveRecordExt(455u);
   auto _r = g_next.hipGetProcAddress_spt_fn(symbol, pfn, hipVersion, flags, symbolStatus);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 454
+// api_id = 456
 static hipError_t hipStreamBeginCaptureToGraphLayer(hipStream_t stream, hipGraph_t graph,
                                                      const hipGraphNode_t* dependencies,
                                                      const hipGraphEdgeData* dependencyData,
                                                      size_t numDependencies,
                                                      hipStreamCaptureMode mode) {
-  auto* _rec = HipGetActiveRecordExt(454u);
+  auto* _rec = HipGetActiveRecordExt(456u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamBeginCaptureToGraph_fn(stream, graph, dependencies, dependencyData, numDependencies, mode);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 455
+// api_id = 457
 static hipError_t hipGetFuncBySymbolLayer(hipFunction_t* functionPtr, const void* symbolPtr) {
-  auto* _rec = HipGetActiveRecordExt(455u);
+  auto* _rec = HipGetActiveRecordExt(457u);
   auto _r = g_next.hipGetFuncBySymbol_fn(functionPtr, symbolPtr);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 456
+// api_id = 458
 static hipError_t hipSetValidDevicesLayer(int* device_arr, int len) {
-  auto* _rec = HipGetActiveRecordExt(456u);
+  auto* _rec = HipGetActiveRecordExt(458u);
   auto _r = g_next.hipSetValidDevices_fn(device_arr, len);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 457
+// api_id = 459
 static hipError_t hipMemcpyAtoDLayer(hipDeviceptr_t dstDevice, hipArray_t srcArray,
                                       size_t srcOffset, size_t ByteCount) {
-  auto* _rec = HipGetActiveRecordExt(457u);
+  auto* _rec = HipGetActiveRecordExt(459u);
   auto _r = g_next.hipMemcpyAtoD_fn(dstDevice, srcArray, srcOffset, ByteCount);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 458
+// api_id = 460
 static hipError_t hipMemcpyDtoALayer(hipArray_t dstArray, size_t dstOffset,
                                       hipDeviceptr_t srcDevice, size_t ByteCount) {
-  auto* _rec = HipGetActiveRecordExt(458u);
+  auto* _rec = HipGetActiveRecordExt(460u);
   auto _r = g_next.hipMemcpyDtoA_fn(dstArray, dstOffset, srcDevice, ByteCount);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 459
+// api_id = 461
 static hipError_t hipMemcpyAtoALayer(hipArray_t dstArray, size_t dstOffset, hipArray_t srcArray,
                                       size_t srcOffset, size_t ByteCount) {
-  auto* _rec = HipGetActiveRecordExt(459u);
+  auto* _rec = HipGetActiveRecordExt(461u);
   auto _r = g_next.hipMemcpyAtoA_fn(dstArray, dstOffset, srcArray, srcOffset, ByteCount);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 460
+// api_id = 462
 static hipError_t hipMemcpyAtoHAsyncLayer(void* dstHost, hipArray_t srcArray, size_t srcOffset,
                                            size_t ByteCount, hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(460u);
+  auto* _rec = HipGetActiveRecordExt(462u);
   _rec->stream = stream;
   auto _r = g_next.hipMemcpyAtoHAsync_fn(dstHost, srcArray, srcOffset, ByteCount, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 461
+// api_id = 463
 static hipError_t hipMemcpyHtoAAsyncLayer(hipArray_t dstArray, size_t dstOffset,
                                            const void* srcHost, size_t ByteCount,
                                            hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(461u);
+  auto* _rec = HipGetActiveRecordExt(463u);
   _rec->stream = stream;
   auto _r = g_next.hipMemcpyHtoAAsync_fn(dstArray, dstOffset, srcHost, ByteCount, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 462
+// api_id = 464
 static hipError_t hipMemcpy2DArrayToArrayLayer(hipArray_t dst, size_t wOffsetDst,
                                                 size_t hOffsetDst, hipArray_const_t src,
                                                 size_t wOffsetSrc, size_t hOffsetSrc, size_t width,
                                                 size_t height, hipMemcpyKind kind) {
-  auto* _rec = HipGetActiveRecordExt(462u);
+  auto* _rec = HipGetActiveRecordExt(464u);
   auto _r = g_next.hipMemcpy2DArrayToArray_fn(dst, wOffsetDst, hOffsetDst, src, wOffsetSrc, hOffsetSrc, width, height, kind);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 463
+// api_id = 465
 static hipError_t hipDrvGraphAddMemFreeNodeLayer(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
                                                   const hipGraphNode_t* dependencies,
                                                   size_t numDependencies, hipDeviceptr_t dptr) {
-  auto* _rec = HipGetActiveRecordExt(463u);
+  auto* _rec = HipGetActiveRecordExt(465u);
   auto _r = g_next.hipDrvGraphAddMemFreeNode_fn(phGraphNode, hGraph, dependencies, numDependencies, dptr);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 464
+// api_id = 466
 static hipError_t hipDrvGraphExecMemcpyNodeSetParamsLayer(hipGraphExec_t hGraphExec,
                                                            hipGraphNode_t hNode,
                                                            const HIP_MEMCPY3D* copyParams,
                                                            hipCtx_t ctx) {
-  auto* _rec = HipGetActiveRecordExt(464u);
+  auto* _rec = HipGetActiveRecordExt(466u);
   auto _r = g_next.hipDrvGraphExecMemcpyNodeSetParams_fn(hGraphExec, hNode, copyParams, ctx);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 465
+// api_id = 467
 static hipError_t hipDrvGraphExecMemsetNodeSetParamsLayer(hipGraphExec_t hGraphExec,
                                                            hipGraphNode_t hNode,
                                                            const hipMemsetParams* memsetParams,
                                                            hipCtx_t ctx) {
-  auto* _rec = HipGetActiveRecordExt(465u);
+  auto* _rec = HipGetActiveRecordExt(467u);
   auto _r = g_next.hipDrvGraphExecMemsetNodeSetParams_fn(hGraphExec, hNode, memsetParams, ctx);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 466
+// api_id = 468
 static hipError_t hipGraphExecGetFlagsLayer(hipGraphExec_t graphExec, unsigned long long* flags) {
-  auto* _rec = HipGetActiveRecordExt(466u);
+  auto* _rec = HipGetActiveRecordExt(468u);
   auto _r = g_next.hipGraphExecGetFlags_fn(graphExec, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 467
+// api_id = 469
 static hipError_t hipGraphNodeSetParamsLayer(hipGraphNode_t node, hipGraphNodeParams* nodeParams) {
-  auto* _rec = HipGetActiveRecordExt(467u);
+  auto* _rec = HipGetActiveRecordExt(469u);
   auto _r = g_next.hipGraphNodeSetParams_fn(node, nodeParams);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 468
+// api_id = 470
 static hipError_t hipGraphExecNodeSetParamsLayer(hipGraphExec_t graphExec, hipGraphNode_t node,
                                                   hipGraphNodeParams* nodeParams) {
-  auto* _rec = HipGetActiveRecordExt(468u);
+  auto* _rec = HipGetActiveRecordExt(470u);
   auto _r = g_next.hipGraphExecNodeSetParams_fn(graphExec, node, nodeParams);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 469
+// api_id = 471
 static hipError_t hipExternalMemoryGetMappedMipmappedArrayLayer(hipMipmappedArray_t* mipmap, hipExternalMemory_t extMem,
     const hipExternalMemoryMipmappedArrayDesc* mipmapDesc) {
-  auto* _rec = HipGetActiveRecordExt(469u);
+  auto* _rec = HipGetActiveRecordExt(471u);
   auto _r = g_next.hipExternalMemoryGetMappedMipmappedArray_fn(mipmap, extMem, mipmapDesc);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 470
+// api_id = 472
 static hipError_t hipDrvGraphMemcpyNodeGetParamsLayer(hipGraphNode_t hNode,
                                                        HIP_MEMCPY3D* nodeParams) {
-  auto* _rec = HipGetActiveRecordExt(470u);
+  auto* _rec = HipGetActiveRecordExt(472u);
   auto _r = g_next.hipDrvGraphMemcpyNodeGetParams_fn(hNode, nodeParams);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 471
+// api_id = 473
 static hipError_t hipDrvGraphMemcpyNodeSetParamsLayer(hipGraphNode_t hNode,
                                                        const HIP_MEMCPY3D* nodeParams) {
-  auto* _rec = HipGetActiveRecordExt(471u);
+  auto* _rec = HipGetActiveRecordExt(473u);
   auto _r = g_next.hipDrvGraphMemcpyNodeSetParams_fn(hNode, nodeParams);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 472
+// api_id = 474
 static hipError_t hipGraphAddBatchMemOpNodeLayer(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
                                                   const hipGraphNode_t* dependencies,
                                                   size_t numDependencies,
                                                   const hipBatchMemOpNodeParams* nodeParams) {
-  auto* _rec = HipGetActiveRecordExt(472u);
+  auto* _rec = HipGetActiveRecordExt(474u);
   auto _r = g_next.hipGraphAddBatchMemOpNode_fn(phGraphNode, hGraph, dependencies, numDependencies, nodeParams);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 473
+// api_id = 475
 static hipError_t hipGraphBatchMemOpNodeGetParamsLayer(hipGraphNode_t hNode,
                                                         hipBatchMemOpNodeParams* nodeParams_out) {
-  auto* _rec = HipGetActiveRecordExt(473u);
+  auto* _rec = HipGetActiveRecordExt(475u);
   auto _r = g_next.hipGraphBatchMemOpNodeGetParams_fn(hNode, nodeParams_out);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 474
+// api_id = 476
 static hipError_t hipGraphBatchMemOpNodeSetParamsLayer(hipGraphNode_t hNode,
                                                         hipBatchMemOpNodeParams* nodeParams) {
-  auto* _rec = HipGetActiveRecordExt(474u);
+  auto* _rec = HipGetActiveRecordExt(476u);
   auto _r = g_next.hipGraphBatchMemOpNodeSetParams_fn(hNode, nodeParams);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 475
+// api_id = 477
 static hipError_t hipGraphExecBatchMemOpNodeSetParamsLayer(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const hipBatchMemOpNodeParams* nodeParams) {
-  auto* _rec = HipGetActiveRecordExt(475u);
+  auto* _rec = HipGetActiveRecordExt(477u);
   auto _r = g_next.hipGraphExecBatchMemOpNodeSetParams_fn(hGraphExec, hNode, nodeParams);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 476
+// api_id = 478
 static hipError_t hipEventRecordWithFlagsLayer(hipEvent_t event, hipStream_t stream,
                                                 unsigned int flags) {
-  auto* _rec = HipGetActiveRecordExt(476u);
+  auto* _rec = HipGetActiveRecordExt(478u);
   _rec->stream = stream;
   auto _r = g_next.hipEventRecordWithFlags_fn(event, stream, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 477
+// api_id = 479
 static hipError_t hipLaunchKernelExCLayer(const hipLaunchConfig_t* config, const void* fPtr,
                                            void** args) {
-  auto* _rec = HipGetActiveRecordExt(477u);
+  auto* _rec = HipGetActiveRecordExt(479u);
   auto _r = g_next.hipLaunchKernelExC_fn(config, fPtr, args);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 478
+// api_id = 480
 static hipError_t hipDrvLaunchKernelExLayer(const HIP_LAUNCH_CONFIG* config, hipFunction_t f,
                                              void** params, void** extra) {
-  auto* _rec = HipGetActiveRecordExt(478u);
+  auto* _rec = HipGetActiveRecordExt(480u);
   auto _r = g_next.hipDrvLaunchKernelEx_fn(config, f, params, extra);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 479
+// api_id = 481
 static hipError_t hipMemGetHandleForAddressRangeLayer(void* handle, hipDeviceptr_t dptr,
                                                        size_t size,
                                                        hipMemRangeHandleType handleType,
                                                        unsigned long long flags) {
-  auto* _rec = HipGetActiveRecordExt(479u);
+  auto* _rec = HipGetActiveRecordExt(481u);
   auto _r = g_next.hipMemGetHandleForAddressRange_fn(handle, dptr, size, handleType, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 480
+// api_id = 482
 static hipError_t hipMemsetD2D8Layer(hipDeviceptr_t dst, size_t dstPitch, unsigned char value,
                                       size_t width, size_t height) {
-  auto* _rec = HipGetActiveRecordExt(480u);
+  auto* _rec = HipGetActiveRecordExt(482u);
   auto _r = g_next.hipMemsetD2D8_fn(dst, dstPitch, value, width, height);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 481
+// api_id = 483
 static hipError_t hipMemsetD2D8AsyncLayer(hipDeviceptr_t dst, size_t dstPitch, unsigned char value,
                                            size_t width, size_t height, hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(481u);
+  auto* _rec = HipGetActiveRecordExt(483u);
   _rec->stream = stream;
   auto _r = g_next.hipMemsetD2D8Async_fn(dst, dstPitch, value, width, height, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 482
+// api_id = 484
 static hipError_t hipMemsetD2D16Layer(hipDeviceptr_t dst, size_t dstPitch, unsigned short value,
                                        size_t width, size_t height) {
-  auto* _rec = HipGetActiveRecordExt(482u);
+  auto* _rec = HipGetActiveRecordExt(484u);
   auto _r = g_next.hipMemsetD2D16_fn(dst, dstPitch, value, width, height);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 483
+// api_id = 485
 static hipError_t hipMemsetD2D16AsyncLayer(hipDeviceptr_t dst, size_t dstPitch,
                                             unsigned short value, size_t width, size_t height,
                                             hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(483u);
+  auto* _rec = HipGetActiveRecordExt(485u);
   _rec->stream = stream;
   auto _r = g_next.hipMemsetD2D16Async_fn(dst, dstPitch, value, width, height, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 484
+// api_id = 486
 static hipError_t hipMemsetD2D32Layer(hipDeviceptr_t dst, size_t dstPitch, unsigned int value,
                                        size_t width, size_t height) {
-  auto* _rec = HipGetActiveRecordExt(484u);
+  auto* _rec = HipGetActiveRecordExt(486u);
   auto _r = g_next.hipMemsetD2D32_fn(dst, dstPitch, value, width, height);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 485
+// api_id = 487
 static hipError_t hipMemsetD2D32AsyncLayer(hipDeviceptr_t dst, size_t dstPitch, unsigned int value,
                                             size_t width, size_t height, hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(485u);
+  auto* _rec = HipGetActiveRecordExt(487u);
   _rec->stream = stream;
   auto _r = g_next.hipMemsetD2D32Async_fn(dst, dstPitch, value, width, height, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 486
+// api_id = 488
 static hipError_t hipStreamGetAttributeLayer(hipStream_t stream, hipStreamAttrID attr,
                                               hipStreamAttrValue* value_out) {
-  auto* _rec = HipGetActiveRecordExt(486u);
+  auto* _rec = HipGetActiveRecordExt(488u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamGetAttribute_fn(stream, attr, value_out);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 487
+// api_id = 489
 static hipError_t hipStreamSetAttributeLayer(hipStream_t stream, hipStreamAttrID attr,
                                               const hipStreamAttrValue* value) {
-  auto* _rec = HipGetActiveRecordExt(487u);
+  auto* _rec = HipGetActiveRecordExt(489u);
   _rec->stream = stream;
   auto _r = g_next.hipStreamSetAttribute_fn(stream, attr, value);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 488
+// api_id = 490
 static hipError_t hipMemcpyBatchAsyncLayer(void** dsts, void** srcs, size_t* sizes, size_t count,
                                             hipMemcpyAttributes* attrs, size_t* attrsIdxs,
                                             size_t numAttrs, size_t* failIdx, hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(488u);
+  auto* _rec = HipGetActiveRecordExt(490u);
   _rec->stream = stream;
   auto _r = g_next.hipMemcpyBatchAsync_fn(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs, failIdx, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 489
+// api_id = 491
 static hipError_t hipMemcpy3DBatchAsyncLayer(size_t numOps, struct hipMemcpy3DBatchOp* opList,
                                               size_t* failIdx, unsigned long long flags,
                                               hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(489u);
+  auto* _rec = HipGetActiveRecordExt(491u);
   _rec->stream = stream;
   auto _r = g_next.hipMemcpy3DBatchAsync_fn(numOps, opList, failIdx, flags, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 490
+// api_id = 492
 static hipError_t hipMemcpy3DPeerLayer(hipMemcpy3DPeerParms* p) {
-  auto* _rec = HipGetActiveRecordExt(490u);
+  auto* _rec = HipGetActiveRecordExt(492u);
   auto _r = g_next.hipMemcpy3DPeer_fn(p);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 491
+// api_id = 493
 static hipError_t hipMemcpy3DPeerAsyncLayer(hipMemcpy3DPeerParms* p, hipStream_t stream) {
-  auto* _rec = HipGetActiveRecordExt(491u);
+  auto* _rec = HipGetActiveRecordExt(493u);
   _rec->stream = stream;
   auto _r = g_next.hipMemcpy3DPeerAsync_fn(p, stream);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 492
+// api_id = 494
 static hipError_t hipLibraryLoadDataLayer(hipLibrary_t* library, const void* code,
                                            hipJitOption* jitOptions, void** jitOptionsValues,
                                            unsigned int numJitOptions,
                                            hipLibraryOption* libraryOptions,
                                            void** libraryOptionValues,
                                            unsigned int numLibraryOptions) {
-  auto* _rec = HipGetActiveRecordExt(492u);
+  auto* _rec = HipGetActiveRecordExt(494u);
   auto _r = g_next.hipLibraryLoadData_fn(library, code, jitOptions, jitOptionsValues, numJitOptions, libraryOptions, libraryOptionValues, numLibraryOptions);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 493
+// api_id = 495
 static hipError_t hipLibraryLoadFromFileLayer(hipLibrary_t* library, const char* fileName,
                                                hipJitOption* jitOptions, void** jitOptionsValues,
                                                unsigned int numJitOptions,
                                                hipLibraryOption* libraryOptions,
                                                void** libraryOptionValues,
                                                unsigned int numLibraryOptions) {
-  auto* _rec = HipGetActiveRecordExt(493u);
+  auto* _rec = HipGetActiveRecordExt(495u);
   auto _r = g_next.hipLibraryLoadFromFile_fn(library, fileName, jitOptions, jitOptionsValues, numJitOptions, libraryOptions, libraryOptionValues, numLibraryOptions);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 494
+// api_id = 496
 static hipError_t hipLibraryUnloadLayer(hipLibrary_t library) {
-  auto* _rec = HipGetActiveRecordExt(494u);
+  auto* _rec = HipGetActiveRecordExt(496u);
   auto _r = g_next.hipLibraryUnload_fn(library);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 495
+// api_id = 497
 static hipError_t hipLibraryGetKernelLayer(hipKernel_t* pKernel, hipLibrary_t library,
                                             const char* name) {
-  auto* _rec = HipGetActiveRecordExt(495u);
+  auto* _rec = HipGetActiveRecordExt(497u);
   auto _r = g_next.hipLibraryGetKernel_fn(pKernel, library, name);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 496
+// api_id = 498
 static hipError_t hipLibraryGetKernelCountLayer(unsigned int *count,
                                                  hipLibrary_t library) {
-  auto* _rec = HipGetActiveRecordExt(496u);
+  auto* _rec = HipGetActiveRecordExt(498u);
   auto _r = g_next.hipLibraryGetKernelCount_fn(count, library);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 497
+// api_id = 499
 static hipError_t hipLibraryEnumerateKernelsLayer(hipKernel_t* kernels, unsigned int numKernels,
                                                    hipLibrary_t library) {
-  auto* _rec = HipGetActiveRecordExt(497u);
+  auto* _rec = HipGetActiveRecordExt(499u);
   auto _r = g_next.hipLibraryEnumerateKernels_fn(kernels, numKernels, library);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 498
+// api_id = 500
 static hipError_t hipKernelGetLibraryLayer(hipLibrary_t* library, hipKernel_t kernel) {
-  auto* _rec = HipGetActiveRecordExt(498u);
+  auto* _rec = HipGetActiveRecordExt(500u);
   auto _r = g_next.hipKernelGetLibrary_fn(library, kernel);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 499
+// api_id = 501
 static hipError_t hipKernelGetNameLayer(const char** name, hipKernel_t kernel) {
-  auto* _rec = HipGetActiveRecordExt(499u);
+  auto* _rec = HipGetActiveRecordExt(501u);
   auto _r = g_next.hipKernelGetName_fn(name, kernel);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 500
+// api_id = 502
 static hipError_t hipOccupancyAvailableDynamicSMemPerBlockLayer(size_t* dynamicSmemSize, const void* f,
                                                                  int numBlocks, int blockSize) {
-  auto* _rec = HipGetActiveRecordExt(500u);
+  auto* _rec = HipGetActiveRecordExt(502u);
   auto _r = g_next.hipOccupancyAvailableDynamicSMemPerBlock_fn(dynamicSmemSize, f, numBlocks, blockSize);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 501
+// api_id = 503
 static hipError_t hipKernelGetParamInfoLayer(hipKernel_t kernel, size_t paramIndex,
                                               size_t* paramOffset, size_t* paramSize) {
-  auto* _rec = HipGetActiveRecordExt(501u);
+  auto* _rec = HipGetActiveRecordExt(503u);
   auto _r = g_next.hipKernelGetParamInfo_fn(kernel, paramIndex, paramOffset, paramSize);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 502
+// api_id = 504
 static hipError_t hipExtDisableLoggingLayer(void) {
-  auto* _rec = HipGetActiveRecordExt(502u);
+  auto* _rec = HipGetActiveRecordExt(504u);
   auto _r = g_next.hipExtDisableLogging_fn();
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 503
+// api_id = 505
 static hipError_t hipExtEnableLoggingLayer(void) {
-  auto* _rec = HipGetActiveRecordExt(503u);
+  auto* _rec = HipGetActiveRecordExt(505u);
   auto _r = g_next.hipExtEnableLogging_fn();
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 504
+// api_id = 506
 static hipError_t hipExtSetLoggingParamsLayer(size_t log_level, size_t log_size, size_t log_mask) {
-  auto* _rec = HipGetActiveRecordExt(504u);
+  auto* _rec = HipGetActiveRecordExt(506u);
   auto _r = g_next.hipExtSetLoggingParams_fn(log_level, log_size, log_mask);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 505
+// api_id = 507
 static hipError_t hipMemSetMemPoolLayer(hipMemLocation* location, hipMemAllocationType type,
                                          hipMemPool_t pool) {
-  auto* _rec = HipGetActiveRecordExt(505u);
+  auto* _rec = HipGetActiveRecordExt(507u);
   auto _r = g_next.hipMemSetMemPool_fn(location, type, pool);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 506
+// api_id = 508
 static hipError_t hipMemGetMemPoolLayer(hipMemPool_t* pool, hipMemLocation* location,
                                          hipMemAllocationType type) {
-  auto* _rec = HipGetActiveRecordExt(506u);
+  auto* _rec = HipGetActiveRecordExt(508u);
   auto _r = g_next.hipMemGetMemPool_fn(pool, location, type);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 507
+// api_id = 509
 static hipError_t hipKernelGetAttributeLayer(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
                                               hipDevice_t dev) {
-  auto* _rec = HipGetActiveRecordExt(507u);
+  auto* _rec = HipGetActiveRecordExt(509u);
   auto _r = g_next.hipKernelGetAttribute_fn(pi, attrib, kernel, dev);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 508
+// api_id = 510
 static hipError_t hipKernelSetAttributeLayer(hipFunction_attribute attrib,
                                          int value, hipKernel_t kernel, hipDevice_t dev) {
-  auto* _rec = HipGetActiveRecordExt(508u);
+  auto* _rec = HipGetActiveRecordExt(510u);
   auto _r = g_next.hipKernelSetAttribute_fn(attrib, value, kernel, dev);
   _rec->end_ns = NowNs();
   return _r;
 }
 
-// api_id = 509
+// api_id = 511
 static hipError_t hipKernelGetFunctionLayer(hipFunction_t* pFunc, hipKernel_t kernel) {
-  auto* _rec = HipGetActiveRecordExt(509u);
+  auto* _rec = HipGetActiveRecordExt(511u);
   auto _r = g_next.hipKernelGetFunction_fn(pFunc, kernel);
   _rec->end_ns = NowNs();
   return _r;
@@ -4999,6 +5017,8 @@ const char* const kHipApiNamesExt[] = {
   "hipOccupancyMaxActiveBlocksPerMultiprocessor",
   "hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
   "hipOccupancyMaxPotentialBlockSize",
+  "hipOccupancyMaxActiveClusters",
+  "hipOccupancyMaxPotentialClusterSize",
   "hipPeekAtLastError",
   "hipPointerGetAttribute",
   "hipPointerGetAttributes",
@@ -5176,7 +5196,7 @@ const char* const kHipApiNamesExt[] = {
   "hipKernelSetAttribute",
   "hipKernelGetFunction",
 };
-const size_t kHipApiNamesCountExt = 510;
+const size_t kHipApiNamesCountExt = 512;
 
 #include <cstring>
 
@@ -5518,6 +5538,8 @@ void HipProfilerInstallWrappersExt(HipDispatchTable* tbl) {
   wrapper_tbl.hipOccupancyMaxActiveBlocksPerMultiprocessor_fn = hipOccupancyMaxActiveBlocksPerMultiprocessorLayer;
   wrapper_tbl.hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_fn = hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlagsLayer;
   wrapper_tbl.hipOccupancyMaxPotentialBlockSize_fn = hipOccupancyMaxPotentialBlockSizeLayer;
+  wrapper_tbl.hipOccupancyMaxActiveClusters_fn = hipOccupancyMaxActiveClustersLayer;
+  wrapper_tbl.hipOccupancyMaxPotentialClusterSize_fn = hipOccupancyMaxPotentialClusterSizeLayer;
   wrapper_tbl.hipPeekAtLastError_fn = hipPeekAtLastErrorLayer;
   wrapper_tbl.hipPointerGetAttribute_fn = hipPointerGetAttributeLayer;
   wrapper_tbl.hipPointerGetAttributes_fn = hipPointerGetAttributesLayer;

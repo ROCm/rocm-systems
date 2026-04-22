@@ -169,6 +169,13 @@ hipError_t hipProfilerEnableExt(void);
 
 /**
  * @brief Disable built-in profiling.  Already-collected records are kept.
+ *
+ * Drains all pending GPU work before returning, ensuring that every in-flight
+ * GPU activity callback has fired and all records are fully populated.
+ *
+ * Must be called before hipProfilerGetRecordsExt() or hipProfilerResetExt().
+ * Calling either of those without a prior disable may return incomplete records
+ * or free memory that is still being written by the GPU completion thread.
  */
 hipError_t hipProfilerDisableExt(void);
 
@@ -215,13 +222,6 @@ hipError_t hipProfilerGetRecordsExt(const HipApiRecordExt* const** chunks,
  * @brief Clear all accumulated records and free internal storage.
  */
 hipError_t hipProfilerResetExt(void);
-
-/**
- * @brief Flush all accumulated records to a Chrome Trace Event JSON file.
- *
- * @param filepath  Destination file path, or NULL to use "hip_clr_trace.json".
- */
-hipError_t hipProfilerWriteJsonExt(const char* filepath);
 
 #ifdef __cplusplus
 }

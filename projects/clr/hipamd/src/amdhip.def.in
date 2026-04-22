@@ -191,7 +191,6 @@ hipProfilerStop
 hipProfilerEnableExt
 hipProfilerDisableExt
 hipProfilerResetExt
-hipProfilerWriteJsonExt
 hipProfilerGetRecordsExt
 hipRuntimeGetVersion
 hipGetDeviceFlags
@@ -263,13 +262,6 @@ hipTexRefSetMipmapFilterMode
 hipTexRefSetMipmapLevelBias
 hipTexRefSetMipmapLevelClamp
 hipTexRefSetMipmappedArray
-hipProfilerStart
-hipProfilerStop
-hipProfilerEnableExt
-hipProfilerDisableExt
-hipProfilerResetExt
-hipProfilerWriteJsonExt
-hipProfilerGetRecordsExt
 hipCreateSurfaceObject
 hipDestroySurfaceObject
 hipGetCmdName

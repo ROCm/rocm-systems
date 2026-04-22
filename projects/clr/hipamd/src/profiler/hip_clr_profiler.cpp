@@ -22,9 +22,8 @@
  *   No map, no TLS sentinel, no pending table.
  *
  * Chunk storage: g_records holds HipApiRecordExt arrays.
- *   _pad1[80] is repurposed to hold a std::vector<HipGpuActivityExt> (placement new).
- *   Op-1 lives in rec.gpu; ops 2..N spill into this vector (graph launches only).
- *   Accessed via GpuOps() helpers in hip_clr_profiler.hpp.
+ *   Op-1 lives in rec.gpu; ops 2..N spill into a heap-allocated HipGpuActivityExt[]
+ *   pointed to by rec.gpu.gpu_ops (graph launches only). Freed by FreeChunk via delete[].
  */
 
 #include "hip_clr_profiler.hpp"
@@ -37,6 +36,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -78,21 +78,28 @@ inline bool IsProfilingActive() {
 using activity_callback_t = int(*)(activity_domain_t, uint32_t, void*);
 std::atomic<activity_callback_t> g_prev_callback{nullptr};
 
-// Chunks of HipApiRecordExt.  _pad1[96] in each slot holds a
-// std::vector<HipGpuActivityExt> (placement-new'd by AllocChunk).
-// Pre-reserved so push_back never reallocates — required for the
-// lock-free fast path in HipGetActiveRecordExt (double-checked locking).
+// Kernel name interning table — maps the raw ar->kernel_name pointer (valid only
+// during the callback) to an owned std::string copy that outlives the kernel object.
+// Keyed by pointer so the JSON writer can look up the copy from rec->gpu.kernel_name.
+std::unordered_map<const char*, std::string> g_kernel_names;
+std::mutex                                   g_kernel_names_mtx;
+
+// Chunks of HipApiRecordExt.  Must be reserved to at least kMaxChunks before any
+// recording starts.  HipGetActiveRecordExt reads g_records.size() and dereferences
+// g_records[idx] without holding g_alloc_mtx (fast path).  If push_back ever
+// reallocates the pointer vector, those bare reads race with the reallocation —
+// undefined behaviour.  reserve() keeps capacity above the watermark so push_back
+// never triggers a realloc.  See also HipProfilerResetExt which re-applies the
+// reservation after clear().
 std::vector<HipApiRecordExt*> g_records;
-constexpr size_t kMaxChunks = 1024;  // 1024 * 10000 = 10M records max
+constexpr size_t kMaxChunks = 100000;  // hard cap: 100000 * 10000 = 1B records max
 std::atomic<size_t>           g_rec_counter{0};
 std::mutex                    g_alloc_mtx;
 
 
-std::unordered_map<const char*, std::string> g_kernel_names;
-std::mutex                                   g_kernel_names_mtx;
 
 // ============================================================
-// Chunk lifecycle — placement-new the gpu_ops vector in _pad1.
+// Chunk lifecycle
 // ============================================================
 HipApiRecordExt* AllocChunk() {
   void* raw = ::operator new[](kChunkSize * sizeof(HipApiRecordExt));
@@ -176,7 +183,7 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
 
   if (ar->op == OP_ID_DISPATCH && ar->kernel_name) {
     std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
-    g_kernel_names.emplace(ar->kernel_name, std::string(ar->kernel_name));
+    g_kernel_names.emplace(ar->kernel_name, ar->kernel_name);
   }
 
   if (rec->gpu.gpu_op_count == 0) {
@@ -193,7 +200,8 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
       rec->gpu.copy_kind = ToCopyKindExt(ar->kind);
     }
     // OP_ID_BARRIER: no payload fields — begin/end timestamps already written above.
-    rec->gpu.gpu_op_count = 1;
+    rec->gpu.gpu_op_count  = 1;
+    rec->has_gpu_activity  = 1;
   } else {
     // Subsequent op (graph launch): op-1 stays in rec->gpu; ops 2..N spill into gpu_ops.
     // spill_count = number of entries already in gpu_ops (gpu_op_count - 1).
@@ -257,7 +265,6 @@ void WriteJsonTraceImpl(const char* filepath) {
   trace << "{\n  \"traceEvents\": [";
 
   size_t total      = g_rec_counter.load(std::memory_order_acquire);
-  size_t event_id   = 0;
   // Track only the (device_id, gpu_tid) pairs that actually received events.
   // Key = device_id, Value = set of gpu tids (queue_id*2+sdma) with events.
   std::unordered_map<int, std::unordered_set<uint64_t>> device_gpu_tids;
@@ -309,12 +316,9 @@ void WriteJsonTraceImpl(const char* filepath) {
         // D2D, buffer↔image copies use the GPU blit/compute engine.
         int sdma = (op_idx == OP_ID_COPY) &&
                    hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(copy_kind)) ? 1 : 0;
-        uint64_t gpu_dur = (end_ns > begin_ns) ? (end_ns - begin_ns) / 1000 : 1;
+        uint64_t gpu_dur = (end_ns > begin_ns)
+                           ? std::max(uint64_t{1}, (end_ns - begin_ns) / 1000) : 1;
         uint64_t gpu_ts  = begin_ns / 1000;
-
-        trace << ",\n{\"ts\":" << s_time
-              << ",\"ph\":\"s\",\"id\":" << event_id
-              << ",\"pid\":1024,\"tid\":" << ctid << ",\"name\":\"dep\"}";
 
         const char* gpu_name_cstr = (op_idx == OP_ID_COPY) ? CopyKindName(copy_kind)
                                                             : kGpuEvents[op_idx];
@@ -334,14 +338,7 @@ void WriteJsonTraceImpl(const char* filepath) {
                 << "\",\"bytes\":" << bytes << "}";
         trace << "}";
 
-        trace << ",\n{\"ts\":" << gpu_ts
-              << ",\"ph\":\"f\",\"bp\":\"e\",\"id\":" << event_id
-              << ",\"pid\":" << device_id
-              << ",\"tid\":" << (queue_id * 2 + sdma)
-              << ",\"name\":\"dep\"}";
-
         device_gpu_tids[device_id].insert(queue_id * 2 + sdma);
-        ++event_id;
       };
 
       // Op-1 lives directly in rec.gpu; ops 2..N are in GpuOps(rec).
@@ -430,7 +427,9 @@ static void DrainAllDevices() {
 // atexit handler — registered only when GPU_CLR_PROFILE_OUTPUT is set.
 // Runs before static destructors so HIP devices are still alive for DrainAllDevices().
 static void ProfilerAtExit() {
-  DrainAllDevices();
+  // DrainAllDevices can crash on Windows KFD if streams are already partially
+  // torn down when the atexit handler fires. GPU work has already completed by
+  // the time the process exits normally, so skip the sync here.
   WriteJsonTraceImpl(g_env_output_path.c_str());
 }
 
@@ -453,8 +452,13 @@ HipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id) {
 
   if (idx == g_records.size()) {
     std::lock_guard<std::mutex> lk(g_alloc_mtx);
-    if (idx == g_records.size())
-      g_records.push_back(AllocChunk());
+    if (idx == g_records.size()) {
+      assert(idx < kMaxChunks && "HIP profiler record capacity exhausted (kMaxChunks reached)");
+      if (idx < kMaxChunks)
+        g_records.push_back(AllocChunk());
+      else
+        idx = kMaxChunks - 1;  // clamp: slots alias but g_records stays race-free
+    }
   }
 
   HipApiRecordExt* rec = &g_records[idx][slot % kChunkSize];
@@ -479,7 +483,9 @@ static void EnsureCallbackAndWrappers() {
   {
     std::lock_guard<std::mutex> lk(g_alloc_mtx);
     if (g_records.empty()) {
-      g_records.reserve(kMaxChunks);  // prevent reallocation; required for lock-free fast path
+      // Correctness requirement: prevents reallocation that would race with the
+      // lock-free reads of g_records.size() / g_records[idx] in HipGetActiveRecordExt.
+      g_records.reserve(kMaxChunks);
       g_records.push_back(AllocChunk());
     }
   }
@@ -522,11 +528,8 @@ void HipProfilerResetExt() {
   std::lock_guard<std::mutex> lk(g_alloc_mtx);
   for (auto* chunk : g_records) FreeChunk(chunk);
   g_records.clear();
+  g_records.reserve(kMaxChunks);  // restore reservation so lock-free fast path stays valid
   g_rec_counter.store(0, std::memory_order_relaxed);
-}
-
-void HipProfilerWriteJsonExt(const char* filepath) {
-  WriteJsonTraceImpl(filepath);
 }
 
 // ============================================================
@@ -537,11 +540,6 @@ extern "C" {
 hipError_t hipProfilerEnableExt()  { HipProfilerEnableExt();  return hipSuccess; }
 hipError_t hipProfilerDisableExt() { HipProfilerDisableExt(); return hipSuccess; }
 hipError_t hipProfilerResetExt()   { HipProfilerResetExt();   return hipSuccess; }
-
-hipError_t hipProfilerWriteJsonExt(const char* filepath) {
-  HipProfilerWriteJsonExt(filepath);
-  return hipSuccess;
-}
 
 hipError_t hipProfilerGetRecordsExt(const HipApiRecordExt* const** chunks,
                                      size_t* chunk_count,

@@ -1459,10 +1459,14 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
         const uint8_t pktType =
             extractAqlBits(hdr, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
         if (timestamp_ != nullptr) {
-          // When pre_patched, skip any slot whose completion_signal was already
-          // written by ApplyHwEventPatches (non-zero means pre-patched).
-          bool has_prepatched_signal = pre_patched && (slot->completion_signal.handle != 0);
-          if (!has_prepatched_signal) {
+          // For pre-patched graph packets do NOT overwrite completion_signal.
+          // ApplyHwEventPatches already placed HW event signals on segment-boundary
+          // packets; all other packets intentionally have signal.handle == 0.
+          // Overwriting those zeros breaks the segment-sync plan and causes
+          // hipStreamSynchronize to hang when profiling is enabled.
+          // The correlation_id was already patched into reserved2 by
+          // EnqueueSegmentedGraph before this function is called, so skip it here too.
+          if (!pre_patched) {
             slot->completion_signal =
                 Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, true);
             if (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH) {

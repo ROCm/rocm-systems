@@ -23,7 +23,6 @@ void HipProfilerInitExt();
 void HipProfilerEnableExt();
 void HipProfilerDisableExt();
 void HipProfilerResetExt();
-void HipProfilerWriteJsonExt(const char* filepath);
 
 // Called from each *Layer wrapper.
 HipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id);
