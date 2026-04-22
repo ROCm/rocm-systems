@@ -224,6 +224,7 @@ class TestOpenMPLU(RocprofsysTest):
 
 @pytest.mark.ci_disable("all")  # TODO: Deprecate once TheRock switches to CTest
 @pytest.mark.rocm
+@pytest.mark.class_name("openmp-target")
 class TestOpenMPTarget(RocprofsysTest):
     @pytest.mark.parametrize(
         "mode",
