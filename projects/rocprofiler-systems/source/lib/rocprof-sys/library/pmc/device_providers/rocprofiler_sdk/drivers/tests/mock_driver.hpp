@@ -4,6 +4,7 @@
 #pragma once
 
 #include <memory>
+#include <utility>
 
 #include <gmock/gmock.h>
 
@@ -50,7 +51,7 @@ public:
                 (rocprofiler_agent_id_t              agent_id,
                  rocprofiler_available_counters_cb_t callback, void* user_data));
 
-    MOCK_METHOD(rocprofiler_status_t, create_profile_config,
+    MOCK_METHOD(rocprofiler_status_t, create_counter_config,
                 (rocprofiler_agent_id_t agent_id, rocprofiler_counter_id_t* counters_list,
                  size_t counters_count, rocprofiler_counter_config_id_t* config_id));
 
@@ -62,15 +63,27 @@ public:
 
 /**
  * @brief Factory for creating mock driver instances in tests.
+ *
+ * Supports two modes:
+ * - Default: creates a new mock_driver each time (for device-level unit tests)
+ * - Injectable: set a shared mock via set_mock() before constructing a provider,
+ *   so the test can set expectations on the same instance the provider uses.
  */
 struct mock_driver_factory
 {
     using driver_t = mock_driver;
 
+    static inline std::shared_ptr<driver_t> s_mock{};
+
+    static void set_mock(std::shared_ptr<driver_t> mock) { s_mock = std::move(mock); }
+
     static std::shared_ptr<driver_t> create_driver()
     {
+        if(s_mock) return s_mock;
         return std::make_shared<driver_t>();
     }
+
+    static void reset() { s_mock.reset(); }
 };
 
 }  // namespace rocprofsys::pmc::drivers::rocprofiler_sdk::testing
