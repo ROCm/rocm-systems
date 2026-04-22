@@ -496,9 +496,9 @@ void MemObjMap::AddIpcHandleMemObj(const IpcMemHandle& k, amd::Memory* v) {
 
 void MemObjMap::RemoveIpcHandleMemObj(amd::Memory* v) {
   runWithUniqueAllocLock([&] {
-    for (const auto it : IpcHandleMemObjMap_) {
-      if (it.second == v) {
-        IpcHandleMemObjMap_.erase(it.first);
+    for (auto it = IpcHandleMemObjMap_.begin(); it != IpcHandleMemObjMap_.end(); ++it) {
+      if (it->second == v) {
+        IpcHandleMemObjMap_.erase(it);
         break;
       }
     }
