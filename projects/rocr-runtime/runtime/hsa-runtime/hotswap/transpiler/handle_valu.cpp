@@ -21,6 +21,138 @@
 using namespace llvm;
 
 namespace transpiler {
+
+namespace {
+
+// ============================================================================
+// Carry-chain scalar-operand routing for VOP2-CI / VOP3B-CI instructions.
+//
+// The V_{ADD,SUB,SUBREV}_CO_(CI_)U32 family exists in two encodings:
+//
+//   * e32: implicit VCC for both carry-in (ci variants) and carry-out.
+//     The MC operand table has no scalar operand; `op.nSrcs() == 2`
+//     (vsrc0, vsrc1) and `di.numDefs == 1` (vdst only).
+//
+//   * e64 / VOP3B: EXPLICIT scalar operand for both carry-in (ci
+//     variants, MC src index 2) and carry-out (MC def index 1). The
+//     scalar can be `vcc_lo` / `vcc` OR an arbitrary `sN` — the
+//     compiler picks based on SGPR pressure. `op.nSrcs() == 3` on ci
+//     variants and `di.numDefs == 2` on every co variant (ci or not).
+//
+// Pre-2026-04-22 the six carry-chain handlers in this file hardcoded
+// `ctx.regs.loadVCC` / `ctx.regs.storeVCC` for both endpoints,
+// silently ignoring the explicit scalar operand on e64 forms. That
+// matches the VOPD `v_dual_cndmask_b32` SGPR-condition bug that
+// miscompiled `canary_bpermute_scan_fp32` and `corpus_layernorm_fp32`
+// (hotswap/docs/modrep-predicate-chain.md §9.7). The current corpus
+// (Triton on gfx1250 / gfx942, AITER TensileLite) does not exercise
+// the non-VCC SGPR form of these instructions — Triton emits
+// `v_add_nc_u32` / `v_add_nc_u64` (no-carry) on gfx1250 and the
+// fused `v_lshl_add_u64` on gfx942, AITER emits `v_add_co_u32 ...,
+// vcc_lo, ...` exclusively. But the latent silent-miscompile is
+// strictly worse than the VOPD bug it mirrors, because it would
+// miscompile address arithmetic rather than a single predicate, and
+// the principled project rule is "never do silent fallbacks". The
+// helpers below mirror `V_CNDMASK_B32`'s SGPR-aware routing in
+// `handle_valu_vop3p.cpp` so these six handlers now share the
+// exact same scalar-operand semantics.
+// ============================================================================
+
+// Read the per-lane i1 carry-in for a carry-chain instruction.
+//
+// For e64 forms whose MC src at `srcIndex` is an explicit scalar register:
+//
+//   * `vcc_lo` / `vcc` → `loadVCC` (the same path e32 would take).
+//   * `sN` → prefer `lookupSgprWaveMaskI1(N)`'s fresh per-BB V_CMP
+//     shadow `i1` (populated by V_CMP_*_e64 writers in the same BB);
+//     fall back to `projection.extractLaneBitFromWaveMask` on the
+//     raw SGPR alloca (lossy under wave32 → wave64 cross-widening
+//     if the producer truncated to source width — same residual as
+//     the non-VOPD V_CNDMASK_B32 handler, see
+//     hotswap/docs/sgpr-wave-mask-translation.md §3.1).
+//   * NOREG (null ssrc2) → zero carry-in (hardware semantics for
+//     null scalar source; defensive — AMDGPU backends don't emit
+//     this in practice, but an i1 zero is the least-surprising
+//     interpretation if it ever appears).
+//
+// For e32 forms (no explicit scalar operand — `op.nSrcs() <= srcIndex`
+// or the operand is not a register) → `loadVCC` (the e32 implicit
+// VCC semantics).
+Value *readCarryInI1(RaiseContext &ctx, const DecodedInst &di,
+                      OpResolver &op, unsigned srcIndex) {
+  if (op.nSrcs() > srcIndex && di.isReg(op.srcIdx(srcIndex))) {
+    ParsedReg carryReg =
+        ctx.parseReg(di.getReg(op.srcIdx(srcIndex)), op.srcIdx(srcIndex));
+    switch (carryReg.kind) {
+    case ParsedReg::VCC:
+      return ctx.regs.loadVCC(ctx.B);
+    case ParsedReg::SGPR:
+      if (carryReg.baseIdx >= 0) {
+        if (Value *freshCmp = ctx.lookupSgprWaveMaskI1(carryReg.baseIdx))
+          return freshCmp;
+        Value *condVal = ctx.isa.isWave32()
+                             ? ctx.regs.loadSGPR32(ctx.B, carryReg.baseIdx)
+                             : ctx.regs.loadSGPR64(ctx.B, carryReg.baseIdx);
+        return ctx.projection.extractLaneBitFromWaveMask(ctx.B, condVal);
+      }
+      break;
+    case ParsedReg::NOREG:
+      return ConstantInt::getFalse(ctx.B.getInt1Ty());
+    default:
+      break;
+    }
+  }
+  return ctx.regs.loadVCC(ctx.B);
+}
+
+// Write the per-lane i1 carry-out for a carry-chain instruction.
+//
+// For e64 forms whose MC def at index 1 is an explicit scalar register:
+//
+//   * `vcc_lo` / `vcc` → `storeVCC` (the same path e32 would take).
+//   * `sN` → ballot the per-lane i1 up to source-wave-mask width via
+//     `projection.ballotI1ToWidth`, store the narrow mask to the
+//     SGPR via `writeRegExecWidth` (wave32-source single SGPR;
+//     wave64-source SGPR pair), AND record the fresh per-lane `i1`
+//     shadow via `recordSgprWaveMaskI1` so a same-BB consumer (e.g.
+//     a following V_CNDMASK_B32 or V_ADD_CO_CI_U32) can look it up
+//     without the lossy extract round-trip. Mirrors the V_CMP_*_e64
+//     SGPR-write path in `handle_valu_vcmp.cpp`.
+//   * NOREG (null sdst) → discard the carry-out (hardware semantics
+//     for null scalar destination).
+//
+// For e32 forms (no explicit destination — `di.numDefs < 2` or the
+// def is not a register) → `storeVCC` (the e32 implicit VCC
+// semantics).
+void writeCarryOutI1(RaiseContext &ctx, const DecodedInst &di,
+                      OpResolver &op, Value *carryI1) {
+  if (di.numDefs >= 2 && di.isReg(1)) {
+    ParsedReg carryDst = op.dst(1);
+    switch (carryDst.kind) {
+    case ParsedReg::VCC:
+      ctx.regs.storeVCC(ctx.B, carryI1);
+      return;
+    case ParsedReg::SGPR:
+      if (carryDst.baseIdx >= 0) {
+        Type *sourceWidth = ctx.projection.sourceWaveMaskTy();
+        Value *mask = ctx.projection.ballotI1ToWidth(
+            ctx.B, carryI1, sourceWidth, "carry_ballot");
+        ctx.writeRegExecWidth(carryDst, mask);
+        ctx.recordSgprWaveMaskI1(carryDst.baseIdx, carryI1,
+                                  /*isPair=*/carryDst.width >= 2);
+      }
+      return;
+    case ParsedReg::NOREG:
+      return;
+    default:
+      break;
+    }
+  }
+  ctx.regs.storeVCC(ctx.B, carryI1);
+}
+
+} // namespace
+
 HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
                         OpResolver &op) {
   HandlerResult hr;
@@ -85,64 +217,71 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
-  // Vector add with carry-out (GFX12: v_add_co_u32; VCC = carry)
+  // Vector add with carry-out (GFX12: v_add_co_u32; VCC or sN = carry).
+  // See `writeCarryOutI1` above for the SGPR-vs-VCC routing rationale.
   if (sop == SemOp::V_ADD_CO_U32) {
     Value *s0 = op.src(0), *s1 = op.src(1);
     Value *res = ctx.B.CreateAdd(s0, s1, "vadd_co");
     ctx.writeReg32(op.dst(), res);
     auto *ov = ctx.B.CreateIntrinsic(Intrinsic::uadd_with_overflow, {ctx.i32Ty}, {s0, s1});
-    ctx.regs.storeVCC(ctx.B, ctx.B.CreateExtractValue(ov, 1));
+    writeCarryOutI1(ctx, di, op, ctx.B.CreateExtractValue(ov, 1));
     hr.handled = true;
     return hr;
   }
-  // Vector sub with carry-out (GFX9: v_sub_u32; GFX10+: v_sub_co_u32)
+  // Vector sub with carry-out (GFX9: v_sub_u32; GFX10+: v_sub_co_u32).
   if (sop == SemOp::V_SUB_CO_U32) {
     Value *s0 = op.src(0), *s1 = op.src(1);
     Value *res = ctx.B.CreateSub(s0, s1, "vsub_co");
     ctx.writeReg32(op.dst(), res);
-    ctx.regs.storeVCC(ctx.B, ctx.B.CreateICmpULT(s0, s1));
+    writeCarryOutI1(ctx, di, op, ctx.B.CreateICmpULT(s0, s1));
     hr.handled = true;
     return hr;
   }
-  // Vector reversed sub with carry-out (GFX9: v_subrev_u32; GFX10+: v_subrev_co_u32)
+  // Vector reversed sub with carry-out (GFX9: v_subrev_u32; GFX10+: v_subrev_co_u32).
   if (sop == SemOp::V_SUBREV_CO_U32) {
     Value *s0 = op.src(0), *s1 = op.src(1);
     Value *res = ctx.B.CreateSub(s1, s0, "vsubrev_co");
     ctx.writeReg32(op.dst(), res);
-    ctx.regs.storeVCC(ctx.B, ctx.B.CreateICmpULT(s1, s0));
+    writeCarryOutI1(ctx, di, op, ctx.B.CreateICmpULT(s1, s0));
     hr.handled = true;
     return hr;
   }
-  // Vector sub with borrow-in/borrow-out (GFX9: v_subb_u32; GFX10+: v_sub_co_ci_u32)
+  // Vector sub with borrow-in/borrow-out (GFX9: v_subb_u32; GFX10+:
+  // v_sub_co_ci_u32). See `readCarryInI1` / `writeCarryOutI1` above for
+  // the SGPR-vs-VCC routing on both endpoints; the e64 form can bind
+  // either (or both!) of ssrc2 and sdst to an arbitrary `sN`.
   if (sop == SemOp::V_SUB_CO_CI_U32) {
     Value *s0 = op.src(0), *s1 = op.src(1);
-    Value *bin = ctx.B.CreateZExt(ctx.regs.loadVCC(ctx.B), ctx.i32Ty);
+    Value *bin = ctx.B.CreateZExt(readCarryInI1(ctx, di, op, /*srcIndex=*/2),
+                                   ctx.i32Ty);
     Value *diff1 = ctx.B.CreateSub(s0, s1);
     Value *diff2 = ctx.B.CreateSub(diff1, bin, "vsub_ci");
     Value *b1 = ctx.B.CreateICmpULT(s0, s1);
     Value *b2 = ctx.B.CreateICmpULT(diff1, bin);
     ctx.writeReg32(op.dst(), diff2);
-    ctx.regs.storeVCC(ctx.B, ctx.B.CreateOr(b1, b2));
+    writeCarryOutI1(ctx, di, op, ctx.B.CreateOr(b1, b2));
     hr.handled = true;
     return hr;
   }
-  // Vector reversed sub with borrow-in/borrow-out (v_subbrev_co_u32)
+  // Vector reversed sub with borrow-in/borrow-out (v_subbrev_co_u32).
   if (sop == SemOp::V_SUBREV_CO_CI_U32) {
     Value *s0 = op.src(0), *s1 = op.src(1);
-    Value *bin = ctx.B.CreateZExt(ctx.regs.loadVCC(ctx.B), ctx.i32Ty);
+    Value *bin = ctx.B.CreateZExt(readCarryInI1(ctx, di, op, /*srcIndex=*/2),
+                                   ctx.i32Ty);
     Value *diff1 = ctx.B.CreateSub(s1, s0);
     Value *diff2 = ctx.B.CreateSub(diff1, bin, "vsubrev_ci");
     Value *b1 = ctx.B.CreateICmpULT(s1, s0);
     Value *b2 = ctx.B.CreateICmpULT(diff1, bin);
     ctx.writeReg32(op.dst(), diff2);
-    ctx.regs.storeVCC(ctx.B, ctx.B.CreateOr(b1, b2));
+    writeCarryOutI1(ctx, di, op, ctx.B.CreateOr(b1, b2));
     hr.handled = true;
     return hr;
   }
-  // Vector add with carry-in/carry-out (GFX12: v_add_co_ci_u32)
+  // Vector add with carry-in/carry-out (GFX12: v_add_co_ci_u32).
   if (sop == SemOp::V_ADD_CO_CI_U32) {
     Value *s0 = op.src(0), *s1 = op.src(1);
-    Value *cin = ctx.B.CreateZExt(ctx.regs.loadVCC(ctx.B), ctx.i32Ty);
+    Value *cin = ctx.B.CreateZExt(readCarryInI1(ctx, di, op, /*srcIndex=*/2),
+                                   ctx.i32Ty);
     Function *uaddOv = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::uadd_with_overflow, {ctx.i32Ty});
     Value *step1 = ctx.B.CreateCall(uaddOv, {s0, s1});
     Value *sum1 = ctx.B.CreateExtractValue(step1, 0);
@@ -151,7 +290,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *res   = ctx.B.CreateExtractValue(step2, 0, "vadd_ci");
     Value *c2    = ctx.B.CreateExtractValue(step2, 1);
     ctx.writeReg32(op.dst(), res);
-    ctx.regs.storeVCC(ctx.B, ctx.B.CreateOr(c1, c2));
+    writeCarryOutI1(ctx, di, op, ctx.B.CreateOr(c1, c2));
     hr.handled = true;
     return hr;
   }

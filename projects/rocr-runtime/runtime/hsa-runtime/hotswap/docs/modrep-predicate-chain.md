@@ -1920,3 +1920,81 @@ The `<kernel_symbol>` comes from the recipe's sidecar
    state: WaveNative is the default; MODREP is the opt-in for
    projection-specific debugging / lit-fixture pinning. The
    empirical evidence is now clean and monotonic.
+
+10. **Carry-chain SGPR-operand silent fallback — class identified
+    + proactively closed 2026-04-22 (sibling of §9.7).**
+
+    Post-§9.7 audit of `loadVCC` / `storeVCC` call sites found six
+    handlers in `handle_valu.cpp` with the same latent bug shape as
+    the VOPD `v_dual_cndmask_b32` miscompile: the
+    V_{ADD,SUB,SUBREV}_CO_(CI_)U32 family's e64 / VOP3B encoding
+    carries an EXPLICIT scalar operand for carry-in (ci variants,
+    MC src index 2) and carry-out (MC def index 1) that can bind
+    to either `vcc_lo` / `vcc` OR an arbitrary `sN` — the compiler
+    picks based on SGPR pressure. Pre-fix the six handlers routed
+    both endpoints through `loadVCC` / `storeVCC` unconditionally,
+    silently mis-wiring any kernel that bound the carry to a
+    non-VCC SGPR.
+
+    **Empirical corpus exposure pre-fix: zero recipes.** Sweep of
+    every .co in the compare_correctness Triton corpus
+    (gfx1250 + gfx942), the AITER TensileLite corpus (~290
+    binaries), and the hotswap-testing reference kernels:
+
+    - Triton gfx1250: uses `v_add_nc_u32` / `v_add_nc_u64`
+      (gfx1250 added a native no-carry 64-bit add). No carry-chain
+      instruction in the disassembly of any recipe.
+    - Triton gfx942: uses `v_add_u32` (no-carry on gfx9) or the
+      fused `v_lshl_add_u64` for address arithmetic. No carry
+      chain.
+    - AITER TensileLite: uses `v_add_co_u32` / `v_add_co_ci_u32_e64`
+      but ALWAYS with `vcc_lo` as the scalar carry. The compiler's
+      default path when VCC is live-available.
+
+    So the latent bug was a pure silent fallback — correct in
+    practice on every kernel the corpus exercises today, wrong
+    if/when a compiler picks non-VCC SGPR carry (e.g. under VCC
+    pressure, or a compiler-backend-specific choice, or a
+    hand-written assembly kernel).
+
+    **Fix.** `handle_valu.cpp` grows two file-local helpers —
+    `readCarryInI1` and `writeCarryOutI1` — that mirror the
+    SGPR-aware routing the non-VOPD V_CNDMASK_B32 handler has
+    always done (`handle_valu_vop3p.cpp`'s e64 path):
+
+      * SGPR carry-IN: `ctx.lookupSgprWaveMaskI1(N)` fresh-shadow
+        lookup; fall back to
+        `projection.extractLaneBitFromWaveMask` on the raw SGPR
+        alloca (same lossy-under-cross-widening residual as the
+        V_CNDMASK_B32 consumer).
+      * SGPR carry-OUT: ballot i1 → source-wave-mask-width via
+        `projection.ballotI1ToWidth`; `writeRegExecWidth` into the
+        SGPR alloca; `recordSgprWaveMaskI1` to populate the fresh
+        shadow for same-BB consumers.
+      * VCC / NOREG / absent: preserve the pre-fix `loadVCC` /
+        `storeVCC` path bit-exactly (zero regression risk on the
+        all-VCC common case).
+
+    Applied to all six handlers: V_ADD_CO_U32, V_SUB_CO_U32,
+    V_SUBREV_CO_U32, V_ADD_CO_CI_U32, V_SUB_CO_CI_U32,
+    V_SUBREV_CO_CI_U32.
+
+    **Regression gate.** New lit fixture
+    `lit_tests/v_add_co_u32_sgpr_carry/` pins the post-fix IR
+    shape end-to-end: a kernel forces `v_add_co_u32 ..., s0, ...
+    :: v_add_co_ci_u32_e64 ..., s0, ..., s0` via inline asm (the
+    exact 64-bit address-chain shape a VCC-pressured compiler
+    would emit), and FileCheck verifies (a) the carry-out
+    ballots via `amdgcn.ballot.i64` into the SGPR path, (b) the
+    second add's carry-in reads the SAME `i1` SSA value the
+    first add produced (fresh-shadow forwarding — not a fresh
+    `load i1, ptr %vcc`), (c) no `load i1, ptr %vcc` across the
+    pair's span. A regression that re-introduces the
+    hardcoded-VCC path breaks the SSA chain and fails the
+    fixture loudly.
+
+    **Doesn't fix anything empirically today** — no corpus
+    kernel was silently miscompiling pre-fix. Closes the class
+    proactively because it's the SAME pattern as the VOPD
+    cndmask bug that DID miscompile end-to-end, and "never do
+    silent fallbacks" is a non-negotiable project rule.

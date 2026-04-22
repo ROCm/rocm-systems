@@ -560,6 +560,29 @@ config.fixtures = {
     # miscompile.
     "v_dual_cndmask_b32_sgpr_cond":
         r"@LIT_FIXTURE_V_DUAL_CNDMASK_B32_SGPR_COND_CO@",
+    # Carry-chain SGPR-operand regression fence —
+    # transpiler/handle_valu.cpp `readCarryInI1` / `writeCarryOutI1`
+    # helpers, same SGPR-vs-VCC routing as the non-VOPD
+    # V_CNDMASK_B32 handler in handle_valu_vop3p.cpp and the VOPD
+    # cndmask fix above. Pre-2026-04-22 the six
+    # V_{ADD,SUB,SUBREV}_CO_(CI_)U32 handlers hardcoded
+    # `loadVCC` / `storeVCC` for both the carry-in (ci variants,
+    # MC src index 2) and carry-out (MC def index 1), silently
+    # ignoring the explicit scalar operand on e64/VOP3B encodings.
+    # The latent bug has zero corpus exposure today — every
+    # Triton-gfx1250 / Triton-gfx942 / AITER-TensileLite corpus
+    # kernel uses either the no-carry encoding
+    # (`v_add_nc_u32` / `v_add_nc_u64` / fused `v_lshl_add_u64`)
+    # or `vcc_lo` for the carry — but is the same class as the
+    # VOPD-cndmask silent miscompile the canary/layernorm end-to-
+    # end regressions pinned, so we close it proactively. This
+    # fixture forces the e64 form via inline asm with an arbitrary
+    # SGPR carry (`s[4:5]` / `s0` depending on the instruction) so
+    # the IR-level routing is exercised end-to-end; a regression
+    # that re-introduces hardcoded-VCC collapses the two
+    # storeVCC/loadVCC paths and fails the CHECK pattern.
+    "v_add_co_u32_sgpr_carry":
+        r"@LIT_FIXTURE_V_ADD_CO_U32_SGPR_CARRY_CO@",
     # tensor_load_to_lds (VIMAGE TENSOR, gfx1250-only) — single
     # `.co` fixture shared by two complementary lit tests in the
     # `tensor_load_to_lds/` directory:
