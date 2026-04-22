@@ -8724,16 +8724,15 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
  *  @par Supported ASICs (UMA carveout)
  *  UMA carveout is only available on APU parts whose VBIOS exposes the
  *  ATCS function code 0xA ("Set UMA Allocation Size") together with an
- *  integrated_system_info table of at least v2.3. Currently this means:
- *    - Ryzen AI / Strix / Strix Halo (gfx1150, gfx1151, gfx1152)
- *    - Select Phoenix/Hawk Point Ryzen APUs with updated VBIOS
- *  Dedicated GPUs and Instinct MI-series accelerators (including MI300A)
- *  do NOT expose this interface, and amdsmi_get_gpu_uma_carveout_info()
- *  returns AMDSMI_STATUS_NOT_SUPPORTED on those devices. On the CLI this
- *  surfaces as "MEM_CARVEOUT: N/A".
+ *  integrated_system_info table of at least v2.3. Currently this means
+ *  Strix and later APUs (gfx1150, gfx1151, gfx1152). Dedicated GPUs and
+ *  Instinct MI-series accelerators do NOT expose this interface, and
+ *  amdsmi_get_gpu_uma_carveout_info() returns AMDSMI_STATUS_NOT_SUPPORTED
+ *  on those devices. On the CLI this surfaces as "MEM_CARVEOUT: N/A".
  *
  *  @par Prerequisites (UMA carveout)
- *    - Linux kernel >= 6.17 (drm/amdgpu UMA carveout tuning series)
+ *    - Linux kernel >= 7.0 (upstream commit 685b711, drm/amdgpu UMA
+ *      carveout tuning series); some distros may backport it earlier
  *    - APU VBIOS advertising ATCS 0xA + IGP info table v2.3
  *    - Write access to /sys/class/drm/<card>/device/uma/carveout (root)
  *    - A system reboot for any change to take effect

@@ -1623,9 +1623,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
             mem_carveout_help = (
                 "Display VRAM carveout memory options and current setting."
-                "\n\tSupported on APUs whose VBIOS exposes ATCS 0xA"
-                " (e.g. Ryzen AI / Strix). Not available on dGPUs or"
-                " Instinct MI-series (including MI300A)."
+                "\n\tOnly supported on some APUs."
             )
             static_parser.add_argument(
                 "-m", "--mem-carveout", action="store_true", required=False, help=mem_carveout_help
@@ -2632,9 +2630,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_mem_carveout_help = (
                     "Set VRAM carveout size by option index."
                     "\n\tUse `amd-smi static --mem-carveout` to see available options."
-                    "\n\tRequires an APU with VBIOS ATCS 0xA support"
-                    " (Ryzen AI / Strix / Strix Halo). A reboot is required"
-                    " after setting."
+                    "\n\tOnly supported on some APUs; a reboot is required after setting."
                 )
                 set_value_exclusive_group.add_argument(
                     "-m",

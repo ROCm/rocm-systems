@@ -1429,13 +1429,13 @@ interfaces (sysfs / modprobe.d) and do **not** require libdrm.
 
 | Feature | Hardware | Status |
 |---|---|---|
-| `--mem-carveout` (UMA carveout) | Ryzen AI / Strix / Strix Halo (gfx1150, gfx1151, gfx1152) and Phoenix / Hawk Point APUs with a VBIOS that exposes ATCS 0xA | Supported |
+| `--mem-carveout` (UMA carveout) | Strix and later APUs (gfx1150, gfx1151, gfx1152) whose VBIOS exposes ATCS 0xA | Supported |
 | `--mem-carveout` (UMA carveout) | Radeon dGPUs, Instinct MI-series (MI100, MI200, MI300, MI300A) | Not supported — reported as `MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)` |
 | `--gtt` (TTM `pages_limit`) | Any amdgpu system, including Instinct MI300A (`amdttm` / `amd-ttm`) and Ryzen APUs (`ttm`) | Supported |
 
 ### Prerequisites
 
-- **UMA carveout:** Linux kernel >= 6.17 (`drm/amdgpu: add UMA carveout tuning interfaces`), an APU VBIOS that advertises ATCS 0xA + IGP info table v2.3, root, and a reboot after changing the index.
+- **UMA carveout:** Linux kernel >= 7.0 (upstream commit [`685b711`](https://github.com/torvalds/linux/commit/685b711); some distros backport it to earlier kernels), an APU VBIOS that advertises ATCS 0xA + IGP info table v2.3, root, and a reboot after changing the index.
 - **GTT (TTM `pages_limit`):** root (to write `/etc/modprobe.d/<module>.conf`), optionally `dracut` (the tool will rebuild the initramfs automatically when `dracut` is present), and a reboot to apply the new limit. amd-smi auto-detects the TTM kernel module name (`ttm`, `amdttm`, or `amd-ttm`) and writes the matching `.conf`.
 
 ### Troubleshooting: `MEM_CARVEOUT: N/A`

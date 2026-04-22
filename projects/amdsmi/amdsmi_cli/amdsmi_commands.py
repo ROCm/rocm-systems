@@ -9284,15 +9284,14 @@ class AMDSMICommands:
                     e.get_error_code()
                     == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
                 ):
-                    # Same reason as the static -m branch: UMA carveout
-                    # requires an APU VBIOS that exposes ATCS 0xA. Surface
-                    # an actionable message instead of a raw error code.
+                    # Surface an actionable message instead of a raw error code.
+                    # Avoid naming specific products here so the message does not
+                    # age as new ASICs add or drop UMA carveout support.
                     self.logger.store_output(
                         args.gpu,
                         "mem_carveout",
-                        "Not supported: UMA carveout requires an APU with VBIOS ATCS 0xA"
-                        " (e.g. Ryzen AI / Strix). Not available on dGPUs or Instinct"
-                        " MI-series (including MI300A).",
+                        "Not supported: UMA carveout is only available on APUs whose"
+                        ' VBIOS exposes the ATCS "Set UMA Allocation Size" function.',
                     )
                 else:
                     self.logger.store_output(
