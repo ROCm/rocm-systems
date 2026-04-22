@@ -62,6 +62,26 @@ required:
    make package
    ```
 
+(library_loading)=
+## Python wrapper library loading
+
+The AMD SMI Python wrapper (`amdsmi_wrapper.py`) detects its installation
+context at import time and loads the correct shared library automatically:
+
+| Context | Detection | Library loaded |
+|---------|-----------|----------------|
+| System package (RPM / DEB) | `libamd_smi_python.so` is **absent** next to the wrapper | `<rocm_root>/lib/libamd_smi.so` |
+| pip wheel | `libamd_smi_python.so` is **present** next to the wrapper | `<package_dir>/libamd_smi_python.so` |
+
+For system packages the wrapper loads from `<rocm_root>/lib/libamd_smi.so`
+directly. When another library (such as PyTorch, which links `librocm_smi64.so`)
+has already mapped that path into the process, the OS deduplicates the DSO by
+inode — both callers share one global state and
+`amdsmi_get_processor_handles()` returns the correct GPU count regardless of
+import order (see
+[pytorch#175648](https://github.com/pytorch/pytorch/pull/175648) and
+[rocm-systems#3702](https://github.com/ROCm/TheRock/issues/3702)).
+
 (rebuild_py_wrapper)=
 ## Rebuild the Python wrapper
 

@@ -40,6 +40,14 @@ variable to the directory containing ``librocm_smi64.so`` (usually
 ```
 
 ```{note}
+The wrapper automatically detects whether it is running from a system package
+(RPM / DEB) or a pip wheel and loads the correct shared library. For system
+packages it loads directly from `<rocm_root>/lib/libamd_smi.so`, which allows
+the OS to deduplicate the DSO with any copy already mapped by another library
+(such as PyTorch). See [](../install/build.md#library_loading) for details.
+```
+
+```{note}
 The following environment variables can be set to control internal cache
 durations. They must be set **before** the AMDSMI library loads.
 
