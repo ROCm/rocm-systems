@@ -96,7 +96,7 @@ get_dispatch_time_from_ticks(hsa_agent_t             _hsa_agent,
         return profiling_time{HSA_STATUS_ERROR_INVALID_ARGUMENT, 0, 0};
     }
 
-    auto* ext_table  = hsa::get_amd_ext_table();
+    auto*    ext_table = hsa::get_amd_ext_table();
     uint64_t sys_start = 0;
     uint64_t sys_end   = 0;
 

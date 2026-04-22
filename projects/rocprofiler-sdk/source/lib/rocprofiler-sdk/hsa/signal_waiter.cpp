@@ -159,10 +159,10 @@ SignalWaiter::run()
             // Use KFD IOCTL for InterruptSignals. Short timeout when DefaultSignals
             // also need polling; longer timeout when IOCTL covers all signals.
             kfd_ioctl_wait_events_args args = {};
-            args.events_ptr = reinterpret_cast<uint64_t>(event_data_buf.data());
-            args.num_events = static_cast<uint32_t>(event_data_buf.size());
-            args.wait_for_all = 0;
-            args.timeout      = has_default_signals ? 1 : 1000;
+            args.events_ptr                 = reinterpret_cast<uint64_t>(event_data_buf.data());
+            args.num_events                 = static_cast<uint32_t>(event_data_buf.size());
+            args.wait_for_all               = 0;
+            args.timeout                    = has_default_signals ? 1 : 1000;
 
             int ret;
             do
@@ -217,8 +217,7 @@ SignalWaiter::run()
                     }
                     else
                     {
-                        dispatch_time =
-                            kernel_dispatch::get_dispatch_time(session, packet);
+                        dispatch_time = kernel_dispatch::get_dispatch_time(session, packet);
                     }
                     kernel_dispatch::dispatch_complete(session, packet, dispatch_time);
 

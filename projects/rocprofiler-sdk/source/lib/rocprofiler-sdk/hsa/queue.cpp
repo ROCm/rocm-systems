@@ -547,20 +547,11 @@ WriteInterceptor(const void* packets,
 
             const bool tracing_only = _packet_data.instrumentation_packets.empty();
 
-            if(!tracing_only)
+            if(!tracing_only || !existing_completion_signal)
             {
-                // INSTRUMENTATION PATH: create pooled signal for counter collection / ATT
                 _packet_data.pooled_signal =
                     queue.create_signal(0, &kernel_packet.kernel_dispatch.completion_signal, true);
             }
-            else if(!existing_completion_signal)
-            {
-                // TRACING-ONLY but no app signal: create one for timing
-                _packet_data.pooled_signal =
-                    queue.create_signal(0, &kernel_packet.kernel_dispatch.completion_signal, true);
-            }
-            // else: tracing-only with existing app signal — use it directly.
-            // waiting_inc is deferred until routing decision below.
 
             bool inserted_before = false;
             if(_packet_data.is_serialized)

@@ -65,9 +65,10 @@ get_dispatch_time_from_ticks(const queue_info_session_t& session,
     auto        _hsa_agent      = agent::get_hsa_agent(_rocp_agent);
     auto        _kern_id        = callback_record.dispatch_info.kernel_id;
 
-    return (_hsa_agent) ? get_dispatch_time_from_ticks(
-                              *_hsa_agent, gpu_start_tick, gpu_end_tick, _kern_id, session.enqueue_ts)
-                        : profiling_time{.status = HSA_STATUS_ERROR_INVALID_AGENT};
+    return (_hsa_agent)
+               ? get_dispatch_time_from_ticks(
+                     *_hsa_agent, gpu_start_tick, gpu_end_tick, _kern_id, session.enqueue_ts)
+               : profiling_time{.status = HSA_STATUS_ERROR_INVALID_AGENT};
 }
 
 void
