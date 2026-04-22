@@ -441,27 +441,39 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
           r.width = 1;
           return r;
         };
-        if (ds2WidthBits == 32) {
-          Value *v0 = ctx.B.CreateAlignedLoad(ctx.i32Ty, ptr0, access, "ds2_ld0");
-          Value *v1 = ctx.B.CreateAlignedLoad(ctx.i32Ty, ptr1, access, "ds2_ld1");
-          ctx.regs.writeReg32(ctx.B, subReg(0), v0);
-          ctx.regs.writeReg32(ctx.B, subReg(1), v1);
-        } else { // 64
-          Value *v0 = ctx.B.CreateAlignedLoad(ctx.i64Ty, ptr0, access, "ds2_ld0");
-          Value *v1 = ctx.B.CreateAlignedLoad(ctx.i64Ty, ptr1, access, "ds2_ld1");
-          Value *lo0 = ctx.B.CreateTrunc(v0, ctx.i32Ty, "ds2_ld0_lo");
-          Value *hi0 = ctx.B.CreateTrunc(
-              ctx.B.CreateLShr(v0, ConstantInt::get(ctx.i64Ty, 32)),
-              ctx.i32Ty, "ds2_ld0_hi");
-          Value *lo1 = ctx.B.CreateTrunc(v1, ctx.i32Ty, "ds2_ld1_lo");
-          Value *hi1 = ctx.B.CreateTrunc(
-              ctx.B.CreateLShr(v1, ConstantInt::get(ctx.i64Ty, 32)),
-              ctx.i32Ty, "ds2_ld1_hi");
-          ctx.regs.writeReg32(ctx.B, subReg(0), lo0);
-          ctx.regs.writeReg32(ctx.B, subReg(1), hi0);
-          ctx.regs.writeReg32(ctx.B, subReg(2), lo1);
-          ctx.regs.writeReg32(ctx.B, subReg(3), hi1);
-        }
+        // SPE-gate the pair of DS loads so phantom lanes (their
+        // tid-derived ptr0 / ptr1 addresses point to unmodelled
+        // offsets outside the WG's LDS allocation) don't execute
+        // the loads.  Matches the ds_write gating in the `else`
+        // branch below and the handle_flat.cpp global/flat-load
+        // fix from the same commit.
+        ctx.emitUnderExec([&] {
+          if (ds2WidthBits == 32) {
+            Value *v0 = ctx.B.CreateAlignedLoad(ctx.i32Ty, ptr0, access,
+                                                 "ds2_ld0");
+            Value *v1 = ctx.B.CreateAlignedLoad(ctx.i32Ty, ptr1, access,
+                                                 "ds2_ld1");
+            ctx.regs.writeReg32(ctx.B, subReg(0), v0);
+            ctx.regs.writeReg32(ctx.B, subReg(1), v1);
+          } else { // 64
+            Value *v0 = ctx.B.CreateAlignedLoad(ctx.i64Ty, ptr0, access,
+                                                 "ds2_ld0");
+            Value *v1 = ctx.B.CreateAlignedLoad(ctx.i64Ty, ptr1, access,
+                                                 "ds2_ld1");
+            Value *lo0 = ctx.B.CreateTrunc(v0, ctx.i32Ty, "ds2_ld0_lo");
+            Value *hi0 = ctx.B.CreateTrunc(
+                ctx.B.CreateLShr(v0, ConstantInt::get(ctx.i64Ty, 32)),
+                ctx.i32Ty, "ds2_ld0_hi");
+            Value *lo1 = ctx.B.CreateTrunc(v1, ctx.i32Ty, "ds2_ld1_lo");
+            Value *hi1 = ctx.B.CreateTrunc(
+                ctx.B.CreateLShr(v1, ConstantInt::get(ctx.i64Ty, 32)),
+                ctx.i32Ty, "ds2_ld1_hi");
+            ctx.regs.writeReg32(ctx.B, subReg(0), lo0);
+            ctx.regs.writeReg32(ctx.B, subReg(1), hi0);
+            ctx.regs.writeReg32(ctx.B, subReg(2), lo1);
+            ctx.regs.writeReg32(ctx.B, subReg(3), hi1);
+          }
+        });
         hr.handled = true;
         return hr;
       } else {
@@ -525,17 +537,36 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
 
     if (isDsRead) {
       ParsedReg dest = op.dst();
-      if (dwords == 0) {
-        Type *memTy = Type::getIntNTy(ctx.C, loadBits);
-        Value *v = ctx.B.CreateLoad(memTy, ptr, "ds_ld");
-        ctx.writeReg32(dest, isSigned ? ctx.B.CreateSExt(v, ctx.i32Ty)
-                                      : ctx.B.CreateZExt(v, ctx.i32Ty));
-      } else if (dwords == 1) {
-        ctx.writeReg32(dest, ctx.B.CreateLoad(ctx.i32Ty, ptr, "ds_ld"));
-      } else {
-        auto *vecTy = FixedVectorType::get(ctx.i32Ty, dwords);
-        ctx.writeRegVec(dest, ctx.B.CreateLoad(vecTy, ptr, "ds_ld"));
-      }
+      // SPE-gate the DS load itself, not just the VGPR write-back.
+      // The ds_write counterpart below (~line 547) is already wrapped
+      // in `emitUnderExec`; the asymmetric pre-2026-04-22 handling
+      // (loads outside, stores inside) meant WaveNative phantom
+      // lanes — whose VGPR-derived LDS addresses are `undef` /
+      // stale-slot data — would issue DS loads against arbitrary
+      // offsets.  Out-of-WG-LDS-allocation offsets are UB on the
+      // hardware (typically returning 0, but the specific WG's LDS
+      // slab could overlap another WG's and expose cross-WG data);
+      // in-range offsets would read from some *other* lane's slot
+      // within the same WG and silently corrupt downstream compute.
+      // Gating matches the global-load fix in `handle_flat.cpp`
+      // (same commit) that addressed the matmul_fp16 HIP-700 fault.
+      ctx.emitUnderExec([&] {
+        if (dwords == 0) {
+          Type *memTy = Type::getIntNTy(ctx.C, loadBits);
+          Value *v = ctx.B.CreateLoad(memTy, ptr, "ds_ld");
+          ctx.regs.writeReg32(
+              ctx.B, dest,
+              isSigned ? ctx.B.CreateSExt(v, ctx.i32Ty)
+                       : ctx.B.CreateZExt(v, ctx.i32Ty));
+        } else if (dwords == 1) {
+          ctx.regs.writeReg32(ctx.B, dest,
+                              ctx.B.CreateLoad(ctx.i32Ty, ptr, "ds_ld"));
+        } else {
+          auto *vecTy = FixedVectorType::get(ctx.i32Ty, dwords);
+          ctx.regs.writeRegVec(ctx.B, dest,
+                                ctx.B.CreateLoad(vecTy, ptr, "ds_ld"));
+        }
+      });
       hr.handled = true;
     return hr;
     }

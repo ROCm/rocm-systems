@@ -116,16 +116,35 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
     FlatAddr fa = decodeGlobalLoadAddr(ctx, di, op, isByte ? 1 : 2,
                                         "GLOBAL_LOAD sub-dword");
     Value *addr = fa.ptr;
-    Value *loaded = ctx.B.CreateAlignedLoad(loadTy, addr, loadAlign, "gload_sub");
-    bool isUnsigned = sop == SemOp::GLOBAL_LOAD_UBYTE || sop == SemOp::GLOBAL_LOAD_USHORT;
-    Value *ext = isUnsigned ? ctx.B.CreateZExt(loaded, ctx.i32Ty)
-                            : ctx.B.CreateSExt(loaded, ctx.i32Ty);
-    if (sop == SemOp::GLOBAL_LOAD_SHORT_D16_HI) {
-      Value *prev = ctx.regs.readReg32(ctx.B, dest);
-      ext = ctx.B.CreateOr(ctx.B.CreateAnd(prev, ConstantInt::get(ctx.i32Ty, 0xFFFF)),
-                       ctx.B.CreateShl(ext, 16), "d16hi");
-    }
-    ctx.writeReg32(dest, ext);
+    // SPE-gate the memory access itself, not just the VGPR write-back.
+    // The store counterparts (GLOBAL_STORE_*, ~line 196 below) are
+    // already wrapped in `emitUnderExec`; the asymmetric pre-2026-04-22
+    // handling where loads fired on every target lane — including
+    // WaveNative "phantom" lanes whose source-wave had no workitem at
+    // this position — caused HIP error 700 "illegal memory access"
+    // when phantom-lane pointer-arithmetic VGPRs held `undef` /
+    // stale-VGPR-slot values that pointed outside any allocated
+    // region. See `handle_flat.cpp::FLAT_LOAD_*` block comment below
+    // (and the matching audit of sub-dword, dword, and FLAT_LOAD
+    // variants) for the full rationale. `ctx.regs.writeReg32` (the
+    // low-level alloca path) is called inside the body rather than
+    // `ctx.writeReg32` (which would wrap the write in a nested
+    // `emitUnderExec` — harmless but redundant IR).
+    ctx.emitUnderExec([&] {
+      Value *loaded = ctx.B.CreateAlignedLoad(loadTy, addr, loadAlign,
+                                               "gload_sub");
+      bool isUnsigned = sop == SemOp::GLOBAL_LOAD_UBYTE ||
+                        sop == SemOp::GLOBAL_LOAD_USHORT;
+      Value *ext = isUnsigned ? ctx.B.CreateZExt(loaded, ctx.i32Ty)
+                              : ctx.B.CreateSExt(loaded, ctx.i32Ty);
+      if (sop == SemOp::GLOBAL_LOAD_SHORT_D16_HI) {
+        Value *prev = ctx.regs.readReg32(ctx.B, dest);
+        ext = ctx.B.CreateOr(
+            ctx.B.CreateAnd(prev, ConstantInt::get(ctx.i32Ty, 0xFFFF)),
+            ctx.B.CreateShl(ext, 16), "d16hi");
+      }
+      ctx.regs.writeReg32(ctx.B, dest, ext);
+    });
     hr.handled = true;
     return hr;
   }
@@ -143,18 +162,34 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
                                         "GLOBAL_LOAD dword");
     Value *addr = fa.ptr;
 
-    if (loadDwords == 1) {
-      ctx.writeReg32(dest, ctx.B.CreateBitCast(ctx.B.CreateLoad(ctx.f32Ty, addr, "gload"), ctx.i32Ty));
-    } else {
-      Type *vecTy = FixedVectorType::get(ctx.i32Ty, loadDwords);
-      Value *loaded = ctx.B.CreateLoad(vecTy, addr, "gload");
-      for (int d = 0; d < loadDwords; d++) {
-        ParsedReg sub = dest;
-        sub.baseIdx = dest.baseIdx + d;
-        sub.width = 1;
-        ctx.writeReg32(sub, ctx.B.CreateExtractElement(loaded, ctx.B.getInt32(d)));
+    // Same SPE-gating rationale as the GLOBAL_LOAD sub-dword block
+    // above: without `emitUnderExec` wrapping the `CreateLoad`, every
+    // target lane — including WaveNative "phantom" lanes whose
+    // pointer-arithmetic VGPRs hold `undef` / stale slot data —
+    // dereferences the addr VGPR pair and faults at runtime (HIP
+    // error 700).  For the vector-load case (`DWORDX{2,3,4}`), the
+    // single load + N extract-write pairs all go inside one
+    // emitUnderExec block so inactive lanes skip the whole sequence.
+    ctx.emitUnderExec([&] {
+      if (loadDwords == 1) {
+        ctx.regs.writeReg32(
+            ctx.B, dest,
+            ctx.B.CreateBitCast(
+                ctx.B.CreateLoad(ctx.f32Ty, addr, "gload"),
+                ctx.i32Ty));
+      } else {
+        Type *vecTy = FixedVectorType::get(ctx.i32Ty, loadDwords);
+        Value *loaded = ctx.B.CreateLoad(vecTy, addr, "gload");
+        for (int d = 0; d < loadDwords; d++) {
+          ParsedReg sub = dest;
+          sub.baseIdx = dest.baseIdx + d;
+          sub.width = 1;
+          ctx.regs.writeReg32(
+              ctx.B, sub,
+              ctx.B.CreateExtractElement(loaded, ctx.B.getInt32(d)));
+        }
       }
-    }
+    });
     hr.handled = true;
     return hr;
   }
@@ -510,10 +545,20 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
                                         ctx.B.getInt64(memOffset));
     }
     Type *loadTy = isByte ? ctx.i8Ty : Type::getInt16Ty(ctx.C);
-    Value *loaded = ctx.B.CreateLoad(loadTy, addr, "flat_load_sub");
-    bool isUnsigned = sop == SemOp::FLAT_LOAD_UBYTE || sop == SemOp::FLAT_LOAD_USHORT;
-    Value *ext = isUnsigned ? ctx.B.CreateZExt(loaded, ctx.i32Ty) : ctx.B.CreateSExt(loaded, ctx.i32Ty);
-    ctx.writeReg32(dest, ext);
+    // SPE-gate the memory access itself. Same rationale as the
+    // GLOBAL_LOAD sub-dword block above: unguarded loads fault on
+    // WaveNative phantom lanes whose pointer VGPRs hold `undef` or
+    // stale data. FLAT (plain-VGPR64) loads can legitimately reach
+    // LDS / private / global — an out-of-range phantom-lane pointer
+    // will still page-fault in whichever aperture it lands in.
+    ctx.emitUnderExec([&] {
+      Value *loaded = ctx.B.CreateLoad(loadTy, addr, "flat_load_sub");
+      bool isUnsigned = sop == SemOp::FLAT_LOAD_UBYTE ||
+                        sop == SemOp::FLAT_LOAD_USHORT;
+      Value *ext = isUnsigned ? ctx.B.CreateZExt(loaded, ctx.i32Ty)
+                              : ctx.B.CreateSExt(loaded, ctx.i32Ty);
+      ctx.regs.writeReg32(ctx.B, dest, ext);
+    });
     hr.handled = true;
     return hr;
   }
@@ -579,16 +624,32 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
     }
 
     ParsedReg dest = op.dst();
-    if (loadDwords == 1) {
-      ctx.writeReg32(dest, ctx.B.CreateBitCast(ctx.B.CreateLoad(ctx.f32Ty, addr, "flat_load"), ctx.i32Ty));
-    } else {
-      Type *vecTy = FixedVectorType::get(ctx.i32Ty, loadDwords);
-      Value *loaded = ctx.B.CreateLoad(vecTy, addr, "flat_load");
-      for (int d = 0; d < loadDwords; d++) {
-        ParsedReg sub = dest; sub.baseIdx = dest.baseIdx + d; sub.width = 1;
-        ctx.writeReg32(sub, ctx.B.CreateExtractElement(loaded, ctx.B.getInt32(d)));
+    // SPE-gate the memory access itself (same rationale as
+    // GLOBAL_LOAD dword above).  For DWORDX{2,3,4} the single vector
+    // load + N element-extract writes all live inside one
+    // `emitUnderExec` block so inactive lanes skip the whole
+    // sequence and the store phase's VGPR consumers observe the
+    // alloca state from the most recent active write.
+    ctx.emitUnderExec([&] {
+      if (loadDwords == 1) {
+        ctx.regs.writeReg32(
+            ctx.B, dest,
+            ctx.B.CreateBitCast(
+                ctx.B.CreateLoad(ctx.f32Ty, addr, "flat_load"),
+                ctx.i32Ty));
+      } else {
+        Type *vecTy = FixedVectorType::get(ctx.i32Ty, loadDwords);
+        Value *loaded = ctx.B.CreateLoad(vecTy, addr, "flat_load");
+        for (int d = 0; d < loadDwords; d++) {
+          ParsedReg sub = dest;
+          sub.baseIdx = dest.baseIdx + d;
+          sub.width = 1;
+          ctx.regs.writeReg32(
+              ctx.B, sub,
+              ctx.B.CreateExtractElement(loaded, ctx.B.getInt32(d)));
+        }
       }
-    }
+    });
     hr.handled = true;
     return hr;
   }
