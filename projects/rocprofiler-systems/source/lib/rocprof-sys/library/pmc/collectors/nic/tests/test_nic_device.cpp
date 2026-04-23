@@ -27,11 +27,30 @@ class NicDeviceTest : public ::testing::Test
 {
 protected:
     std::shared_ptr<MockDriver> mock_driver;
+<<<<<<< users/adjordje-amd/decouple-nic-device-from-amdsmi
     size_t                      test_index = 0;
+=======
+    amdsmi_processor_handle     test_handle{};
+    processor_type_t            test_processor_type{};
+    size_t                      test_index{};
+>>>>>>> develop
 
     void SetUp() override { mock_driver = std::make_shared<MockDriver>(); }
 
+<<<<<<< users/adjordje-amd/decouple-nic-device-from-amdsmi
     void SetupBaseNicInfo()
+=======
+    void TearDown() override
+    {
+        ::testing::Mock::VerifyAndClearExpectations(mock_driver.get());
+        mock_driver.reset();
+    }
+
+    /**
+     * @brief Configure mock to return NIC with full RDMA support.
+     */
+    void SetupFullRdmaSupport()
+>>>>>>> develop
     {
         EXPECT_CALL(*mock_driver, get_nic_asic_info())
             .Times(AtLeast(1))

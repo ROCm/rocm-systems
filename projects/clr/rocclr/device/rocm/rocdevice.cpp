@@ -2955,7 +2955,9 @@ void Device::getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* 
 }
 
 // ================================================================================================
-hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse) {
+hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
+                                      hsa_queue_t* preferred,
+                                      const std::unordered_set<uint64_t>* excluded_ids) {
   // Only reuse queues when we've reached the maximum limit, unless forced
   // Below the limit, return nullptr to allow creating new queues
   if (!force_reuse && queuePool_[qIndex].size() < settings().max_hw_queues_) {
@@ -2964,6 +2966,22 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse) {
 
   // We've hit the limit, must reuse - find the queue with lowest load metric
   if (qIndex < QueuePriority::Total && queuePool_[qIndex].size() > 0) {
+    // Best-effort preferred queue hint: for graph stream stability
+    // Skip preferred if it's in the excluded set
+    if (preferred != nullptr) {
+      bool preferred_excluded = excluded_ids && excluded_ids->count(preferred->id) > 0;
+      if (!preferred_excluded) {
+        auto it = queuePool_[qIndex].find(preferred);
+        if (it != queuePool_[qIndex].end()) {
+          it->second.refCount++;
+          ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+                  "Reusing preferred queue: %p refCount: %d",
+                  it->first->base_address, it->second.refCount);
+          return it->first;
+        }
+      }
+    }
+
     typedef decltype(queuePool_)::value_type::const_reference PoolRef;
 
     // Select queue based on dynamic_queues_ mode
@@ -2976,7 +2994,12 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse) {
 
     lowest = std::min_element(
         queuePool_[qIndex].begin(), queuePool_[qIndex].end(),
-        [mode, pipe_dist, num_pipes](PoolRef A, PoolRef B) {
+        [mode, pipe_dist, num_pipes, excluded_ids](PoolRef A, PoolRef B) {
+          // Exclusion filtering: prefer non-excluded queues over excluded ones
+          bool a_excluded = excluded_ids && excluded_ids->count(A.first->id) > 0;
+          bool b_excluded = excluded_ids && excluded_ids->count(B.first->id) > 0;
+          if (a_excluded != b_excluded) return b_excluded;
+
           if (mode >= 1) {
             // Mode 1+: Advanced weighted metric with dedicated queue penalty
             // Metric = dedicated_queue_penalty + (depth << 4) + refCount
@@ -2998,22 +3021,26 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse) {
 
     lowest->second.refCount++;
     ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
-            "Selected queue (mode=%u): %p refCount: %d, depth: %lu, metric: %lu, pipe: %d%s",
+            "Selected queue (mode=%u): %p refCount: %d, depth: %lu, metric: %lu, pipe: %d%s%s",
             mode, lowest->first->base_address, lowest->second.refCount,
             QueueInfo::GetHwQueueDepth(lowest->first),
             lowest->second.GetLoadMetric(lowest->first, mode),
             pipe_dist ? (lowest->first->id % num_pipes) : -1,
-            force_reuse ? " (forced)" : "");
+            force_reuse ? " (forced)" : "",
+            (excluded_ids && excluded_ids->count(lowest->first->id) > 0)
+                ? " (excluded-fallback)" : "");
     return lowest->first;
   }
   return nullptr;
 }
 
 // ================================================================================================
-hsa_queue_t* Device::AcquireActiveQueue(amd::CommandQueue::Priority priority) {
+hsa_queue_t* Device::AcquireActiveQueue(amd::CommandQueue::Priority priority,
+                                        hsa_queue_t* preferred,
+                                        const std::unordered_set<uint64_t>* excluded_ids) {
   uint32_t queue_size = ROC_AQL_QUEUE_SIZE;
   auto queue = acquireQueue(queue_size, false, std::vector<uint32_t>{},
-                            priority, true, false);
+                            priority, true, false, preferred, excluded_ids);
   return queue;
 }
 
@@ -3021,7 +3048,8 @@ hsa_queue_t* Device::AcquireActiveQueue(amd::CommandQueue::Priority priority) {
 hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
                                   const std::vector<uint32_t>& cuMask,
                                   amd::CommandQueue::Priority priority, bool managed,
-                                  bool dedicated_queue) {
+                                  bool dedicated_queue, hsa_queue_t* preferred,
+                                  const std::unordered_set<uint64_t>* excluded_ids) {
   hsa_amd_queue_priority_t queue_priority;
   uint qIndex;
   switch (priority) {
@@ -3073,7 +3101,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     // decide when to start reclaiming queues.
     if (!coop_queue && (cuMask.size() == 0) &&
         (queuePool_[qIndex].size() >= settings().max_hw_queues_)) {
-      hsa_queue_t* queue = getQueueFromPool(qIndex, false);
+      hsa_queue_t* queue = getQueueFromPool(qIndex, false, preferred, excluded_ids);
       if (queue != nullptr) {
         if (!managed) {
           num_queues_[qIndex]++;
@@ -3592,13 +3620,19 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
 
     // Patch the flat buffer copy (dispatched to GPU) directly.
     // The original dispatchPackets pointer is retained for UpdateAQLPacket matching.
-    auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(
-        patch.flat_packet ? patch.flat_packet : patch.packet);
-    if (patch.dep_slot < 0) {
-      // dep_slot == -1: patch the packet's completion signal (segment completion)
+    uint8_t* raw = patch.flat_packet ? patch.flat_packet : patch.packet;
+
+    if (patch.dep_slot == HwEventPatch::kExtDispatchDepSignal) {
+      // Patch dep_signal in hsa_amd_ext_kernel_dispatch_packet_t via offset-based
+      static constexpr size_t kExtDepSignalOffset =
+          offsetof(hsa_amd_ext_kernel_dispatch_packet_t, dep_signal);
+      memcpy(raw + kExtDepSignalOffset, &sig, sizeof(sig));
+    } else if (patch.dep_slot == HwEventPatch::kCompletionSignal) {
+      auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
       pkt->completion_signal = sig;
     } else {
-      // dep_slot >= 0: patch a dependency signal slot (cross-segment wait)
+      // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait)
+      auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
       pkt->dep_signal[patch.dep_slot] = sig;
     }
   }

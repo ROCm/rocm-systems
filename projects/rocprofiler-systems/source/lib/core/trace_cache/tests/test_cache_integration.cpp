@@ -385,8 +385,7 @@ TEST_F(trace_cache_module_integration_test, content_validation_edge_cases)
     std::vector<uint8_t> max_vector(10000, 0xFF);
     test_sample_3        large_payload(max_vector);
     test_sample_3        empty_payload;
-    std::vector<uint8_t> single_zero = { 0x00 };
-    test_sample_3        zero_payload(single_zero);
+    test_sample_3        zero_payload({ 0x00 });
 
     std::vector<test_sample_1> expected_1;
     std::vector<test_sample_2> expected_2;

@@ -5,8 +5,19 @@ add_library(pmc-nic-collector-tests OBJECT test_nic_device.cpp)
 
 target_link_libraries(
     pmc-nic-collector-tests
+<<<<<<< users/adjordje-amd/decouple-nic-device-from-amdsmi
     PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-logger
+=======
+    PUBLIC
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-logger
+        rocprofiler-systems::rocprofiler-systems-rocm
+>>>>>>> develop
 )
+
+if(ROCPROFSYS_BUILD_AINIC)
+    target_compile_definitions(pmc-nic-collector-tests PUBLIC ROCPROFSYS_BUILD_AINIC=1)
+endif()
 
 target_include_directories(
     pmc-nic-collector-tests
