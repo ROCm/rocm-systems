@@ -257,63 +257,29 @@ class TestExpression:
 class TestEvaluationPipeline:
     """Tests for utils.metrics.evaluation_pipeline."""
 
-    @pytest.mark.skip(reason="This test is not implemented yet.")
-    def test_analyze_with_debug_mode(self):
-        """Test analyze to cover debug paths in eval_metric via direct function call."""
-        mock_dfs = {
-            1: pd.DataFrame({
-                "Metric_ID": ["1.1.0"],
-                "Metric": ["Test Metric"],
-                "Expr": ["AVG(SQ_WAVES)"],
-                "coll_level": ["pmc_perf"],
-            }).set_index("Metric_ID")
+    def _build_eval_metric_inputs(self, metric_fields=None):
+        """Build the dfs/sys_info/raw_pmc_df fixture used by eval_metric tests.
+
+        Args:
+            metric_fields: Optional dict mapping metric-field column names to
+                cell values.
+                Defaults to a fixture with both 'Value' and 'Average=None'.
+        """
+        if metric_fields is None:
+            metric_fields = {
+                "Value": "to_sum(raw_pmc_df['pmc_perf']['SQ_WAVES'])",
+                "Average": None,
+            }
+
+        metric_field_columns = {
+            field_name: [field_value]
+            for field_name, field_value in metric_fields.items()
         }
 
-        mock_dfs_type = {1: "metric_table"}
-
-        class MockSysInfo:
-            ip_blocks = "standard"
-            se_per_gpu = 4
-            pipes_per_gpu = 4
-            cu_per_gpu = 64
-            simd_per_cu = 4
-            sqc_per_gpu = 16
-            lds_banks_per_cu = 32
-            cur_sclk = 1800.0
-            cur_mclk = 1200.0
-            max_sclk = 2100.0
-            max_mclk = 1600.0
-            max_waves_per_cu = 40
-            num_hbm_channels = 4
-            total_l2_chan = 32
-            num_xcd = 1
-            wave_size = 64
-
-        sys_info = MockSysInfo()
-
-        raw_pmc_df = {
-            "pmc_perf": pd.DataFrame({
-                "SQ_WAVES": [100, 200, 150],
-                "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
-                "End_Timestamp": [1000000, 2000000, 1500000],
-                "Start_Timestamp": [0, 1000000, 500000],
-            })
-        }
-
-        try:
-            eval_metric(
-                mock_dfs, mock_dfs_type, sys_info, raw_pmc_df, debug=True, config={}
-            )
-        except Exception:
-            pass
-
-    def _build_falsey_writeback_inputs(self):
-        """Build the dfs/sys_info/raw_pmc_df fixture for falsey-writeback tests."""
         metric_df = pd.DataFrame({
             "Metric_ID": ["1.1.0"],
             "Metric": ["Test Metric"],
-            "Value": ["to_sum(raw_pmc_df['pmc_perf']['SQ_WAVES'])"],
-            "Average": [None],
+            **metric_field_columns,
         }).set_index("Metric_ID")
         dfs = {1: metric_df}
         dfs_type = {1: "metric_table"}
@@ -344,10 +310,41 @@ class TestEvaluationPipeline:
         }
         return metric_df, dfs, dfs_type, sys_info, raw_pmc_df
 
+    def test_eval_metric_in_debug_mode(self):
+        """eval_metric with debug=True invokes debug_row_tracker and writes back."""
+        metric_df, dfs, dfs_type, sys_info, raw_pmc_df = self._build_eval_metric_inputs(
+            metric_fields={
+                "Value": "to_sum(raw_pmc_df['pmc_perf']['SQ_WAVES'])",
+            }
+        )
+        with (
+            patch("utils.metrics.evaluation_pipeline.BUILD_IN_VARS", {}),
+            patch(
+                "utils.metrics.evaluation_pipeline.debug_row_tracker"
+            ) as mock_debug_row_tracker,
+        ):
+            eval_metric(
+                dfs,
+                dfs_type,
+                sys_info,
+                pd.DataFrame(),
+                raw_pmc_df,
+                debug=True,
+                config={},
+            )
+
+        mock_debug_row_tracker.assert_called_once()
+        call_args = mock_debug_row_tracker.call_args
+        assert call_args.args[0] == "Value"
+        assert call_args.kwargs["show_inputs"] is True
+        assert metric_df.loc["1.1.0", "Value"] == 450
+
     def test_eval_metric_computes_value_from_expression(self):
         """eval_metric writes the computed Value back to the metric DataFrame."""
-        metric_df, dfs, dfs_type, sys_info, raw_pmc_df = (
-            self._build_falsey_writeback_inputs()
+        metric_df, dfs, dfs_type, sys_info, raw_pmc_df = self._build_eval_metric_inputs(
+            metric_fields={
+                "Value": "to_sum(raw_pmc_df['pmc_perf']['SQ_WAVES'])",
+            }
         )
         with patch("utils.metrics.evaluation_pipeline.BUILD_IN_VARS", {}):
             eval_metric(
@@ -363,8 +360,8 @@ class TestEvaluationPipeline:
 
     def test_eval_metric_normalizes_falsey_average_to_empty_string(self):
         """eval_metric replaces a falsey Average value with the empty string."""
-        metric_df, dfs, dfs_type, sys_info, raw_pmc_df = (
-            self._build_falsey_writeback_inputs()
+        metric_df, dfs, dfs_type, sys_info, raw_pmc_df = self._build_eval_metric_inputs(
+            metric_fields={"Average": None}
         )
         assert metric_df.loc["1.1.0", "Average"] is None
 
