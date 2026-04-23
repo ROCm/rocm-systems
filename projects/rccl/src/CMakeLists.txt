@@ -169,6 +169,7 @@ set(SRC_FILES
   include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
   include/nccl_device/ll_a2a.h
   include/nccl_device/lsa_barrier.h
+  include/nccl_device/mem_barrier.h
   include/nccl_device/ptr.h
   include/nccl_device/utility.h
   include/nccl_device/impl/comm__funcs.h
@@ -185,6 +186,8 @@ set(SRC_FILES
   include/nccl_device/impl/ll_a2a__types.h
   include/nccl_device/impl/lsa_barrier__funcs.h
   include/nccl_device/impl/lsa_barrier__types.h
+  include/nccl_device/impl/mem_barrier__funcs.h
+  include/nccl_device/impl/mem_barrier__types.h
   include/nccl_device/impl/ptr__funcs.h
   include/nccl_device/impl/ptr__types.h
   include/npkit/npkit.h
@@ -427,6 +430,17 @@ foreach(SRC_FILE ${SRC_FILES})
     )
   endif()
 endforeach()
+
+# Copy hip_compat.h as-is (no hipification — contains both CUDA and HIP paths)
+set(HIP_COMPAT_SRC "${RCCL_SOURCE_DIR}/src/include/nccl_device/hip_compat.h")
+set(HIP_COMPAT_DST "${HIPIFY_DIR}/src/include/nccl_device/hip_compat.h")
+add_custom_command(
+  OUTPUT ${HIP_COMPAT_DST}
+  COMMAND ${CMAKE_COMMAND} -E copy ${HIP_COMPAT_SRC} ${HIP_COMPAT_DST}
+  MAIN_DEPENDENCY ${HIP_COMPAT_SRC}
+  COMMENT "Copying hip_compat.h (no hipification)"
+)
+list(APPEND HIP_SOURCES ${HIP_COMPAT_DST})
 
 # Adding custom target to hipify all the source files
 # This is required to make sure that all the hipified source files are

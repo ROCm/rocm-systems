@@ -15,7 +15,7 @@ struct ncclGinBarrierHandle {
   ncclDevResourceHandle_t bufHandle;
 };
 
-#if __CUDACC__
+#if NCCL_DEVICE_COMPILE
 template<typename Coop>
 struct ncclGinBarrierSession_internal {
   Coop coop;

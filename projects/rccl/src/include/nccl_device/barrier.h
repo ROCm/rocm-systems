@@ -7,10 +7,14 @@
 #ifndef _NCCL_DEVICE_BARRIER_H_
 #define _NCCL_DEVICE_BARRIER_H_
 #include "impl/core__types.h"
+#if defined(NCCL_HIP_PLATFORM)
+#include "impl/mem_barrier__types.h"
+#else
 #include "impl/lsa_barrier__types.h"
+#endif
 #include "impl/gin_barrier__types.h"
 
-#if __CUDACC__
+#if NCCL_DEVICE_COMPILE
 template<typename Coop>
 struct ncclBarrierSession_internal;
 

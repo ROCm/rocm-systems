@@ -7,7 +7,11 @@
 #ifndef _NCCL_DEVICE_BARRIER__FUNCS_H_
 #define _NCCL_DEVICE_BARRIER__FUNCS_H_
 #include "barrier__types.h"
+#if defined(NCCL_HIP_PLATFORM)
+#include "mem_barrier__funcs.h"
+#else
 #include "lsa_barrier__funcs.h"
+#endif
 #include "gin_barrier__funcs.h"
 #include "../utility.h"
 
@@ -39,7 +43,7 @@ NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_DEVICE_COMPILE
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(
     Coop coop, ncclTeamTagLsa, ncclDevComm const& comm, uint32_t index, bool multimem
@@ -65,7 +69,7 @@ NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_DEVICE_COMPILE
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>& ncclBarrierSession<Coop>::lsaBarrier() {
   return this->innerLsaBar.thing;
