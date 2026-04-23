@@ -51,7 +51,7 @@ template<typename T> __global__ void fma_throughput(vec4<T>* buffer, int count)
     ptr[tid] = value0 + value1 + value2 + value3;
 }
 
-// MFMA instructions are available on selected CDNA targets, but not on gfx1151 or gfx1250.
+// MFMA instructions are available on selected CDNA targets, but not on gfx906, gfx1151, or gfx1250.
 #if !defined(__gfx906__) && !defined(__gfx1151__) && !defined(__gfx1250__)
 __global__ void matmul_fp16_throughput(vec4<float16>* inputs, vec4<float>* outputs, int count)
 {
@@ -113,7 +113,7 @@ __global__ void matmul_fp32_throughput(float* inputs, vec4<float>* outputs, int 
 #endif // !defined(__gfx906__) && !defined(__gfx1151__) && !defined(__gfx1250__)
 
 // SMFMAC (Sparse MFMA) instructions are only available on selected CDNA targets,
-// and are not available on gfx1151.
+// and this block is excluded on gfx906, gfx908, gfx90a, gfx1151, and gfx1250.
 #if !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__) && !defined(__gfx1151__) && !defined(__gfx1250__)
 __global__ void sparse_matmul_fp16_throughput(vec4<float16>* input0, vec8<float16>* input1, vec4<float>* outputs, int count)
 {
