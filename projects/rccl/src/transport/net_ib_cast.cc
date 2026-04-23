@@ -116,6 +116,9 @@ struct ncclIbMergedDev IbCastMergedDevs[MAX_IB_VDEVS];
 struct ncclIbDev IbCastDevs[MAX_IB_DEVS];
 static std::mutex ncclIbMutex;
 static int ncclIbRelaxedOrderingEnabled = 0;
+
+static ncclIbQpTracker ncclIbCastQpCount;
+
 static bool rcclAinicRoce = 0;
 static bool rcclCtsInlineData = 0;
 static bool rcclCtsOffloadEnabled = 0;
@@ -1874,6 +1877,7 @@ ncclResult_t IbCastCreateQp(uint8_t ib_port, struct ncclIbNetCommDevBase* base,
   qpAttr.port_num = ib_port;
   qpAttr.qp_access_flags = access_flags;
   NCCLCHECK(wrap_ibv_modify_qp(qp->qp, &qpAttr, IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS));
+  ncclIbCastQpCount.trackCreate();
   TRACE(NCCL_NET, "NET/IB : IbCastCreateQp port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qpn=%u pkey=%u pd=%p",
     ib_port, base->ibDevN, IbCastDevs[base->ibDevN].devName, ncclNIbDevs, ncclNMergedIbDevs, qp->qp->qp_num, qpAttr.pkey_index, base->pd);
   if (rcclAinicRoce) {
@@ -2222,6 +2226,7 @@ ib_connect:
   comm->base.ready = 1;
   stage->state = ncclIbCommStateConnected;
   stage->offset = 0;
+  ncclIbCastQpCount.log("IbCastConnect complete", comm->base.nqps);
 
 ib_send_ready:
   NCCLCHECKGOTO(ncclSocketProgress(NCCL_SOCKET_SEND, &comm->base.sock, &comm->base.ready, sizeof(int), &stage->offset), ret, fail);
@@ -2565,6 +2570,7 @@ ib_recv_ready:
   if (stage->offset != sizeof(int)) return ncclSuccess;
 
   *recvComm = rComm;
+  ncclIbCastQpCount.log("IbCastAccept complete", rComm->base.nqps);
 exit:
   /* reset lComm stage */
   if (stage->buffer) free(stage->buffer);
@@ -3781,8 +3787,13 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
   if (comm) {
     NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
-    for (int q = 0; q < comm->base.nqps; q++)
-      if (comm->base.qps[q].qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(comm->base.qps[q].qp));
+    for (int q = 0; q < comm->base.nqps; q++) {
+      if (comm->base.qps[q].qp != NULL) {
+        NCCLCHECK(wrap_ibv_destroy_qp(comm->base.qps[q].qp));
+        ncclIbCastQpCount.trackDestroy();
+      }
+    }
+    ncclIbCastQpCount.log("IbCastCloseSend", comm->base.nqps);
 
     for (int i = 0; i < comm->base.vProps.ndevs; i++) {
       struct ncclIbSendCommDev* commDev = comm->devs + i;
@@ -3801,8 +3812,12 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
   if (comm) {
     NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
-    for (int q = 0; q < comm->base.nqps; q++)
-      if (comm->base.qps[q].qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(comm->base.qps[q].qp));
+    for (int q = 0; q < comm->base.nqps; q++) {
+      if (comm->base.qps[q].qp != NULL) {
+        NCCLCHECK(wrap_ibv_destroy_qp(comm->base.qps[q].qp));
+        ncclIbCastQpCount.trackDestroy();
+      }
+    }
 
     for (int i = 0; i < comm->base.vProps.ndevs; i++) {
       struct ncclIbRecvCommDev* commDev = comm->devs + i;
@@ -3814,13 +3829,17 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
           commDev->gpuFlush.gpuMr = nullptr;
           if(commDev->gpuFlush.dmabuf_fd > 0) { close(commDev->gpuFlush.dmabuf_fd);}
         }
-        if (commDev->gpuFlush.qp.qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(commDev->gpuFlush.qp.qp));
+        if (commDev->gpuFlush.qp.qp != NULL) {
+          NCCLCHECK(wrap_ibv_destroy_qp(commDev->gpuFlush.qp.qp));
+          ncclIbCastQpCount.trackDestroy();
+        }
         if (commDev->gpuFlush.hostMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.hostMr));
       }
       if (commDev->fifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->fifoMr));
       if (commDev->sizesFifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->sizesFifoMr));
       NCCLCHECK(IbCastDestroyBase(&commDev->base));
     }
+    ncclIbCastQpCount.log("IbCastCloseRecv", comm->base.nqps);
     free(comm);
   }
   return ncclSuccess;
