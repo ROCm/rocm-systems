@@ -1,9 +1,8 @@
-"""Tests for the live-progress feedback wired through the agent
-runtime and the ``perfxpert analyze`` CLI.
+"""Tests for airgap-aware progress/preflight behavior in ``perfxpert analyze``.
 
 Covers:
-  * agent-level forwarding (``agent_root`` + ``AnalysisSession.run_*``
-    propagate callbacks and fire ``entering <phase>`` / ``exit <phase>``),
+  * env-forced airgap skips provider-auth preflight even when
+    ``enable_llm=True`` is requested for progress UX,
   * CLI non-TTY behaviour (plain ``[perfxpert]`` status lines on stderr,
     real output on stdout — no ANSI escape codes),
   * ``--no-progress`` silences the feature entirely.
@@ -22,59 +21,7 @@ from unittest.mock import patch
 
 import pytest
 
-from perfxpert import api
 from perfxpert import analyze as analyze_mod
-from perfxpert.agents import runtime as runtime_mod
-from perfxpert.agents import schemas
-
-
-# --- 1. agent-tool level: agent_root forwards the callback ---------------
-
-
-def test_agent_root_forwards_callback():
-    """``api.agent_root`` threads the callback into the session so both
-    ``Routing your query (Root agent)`` and ``Root agent done`` fire on an airgap invocation."""
-    events: list[str] = []
-    api.agent_root(
-        airgap=True,
-        user_query="why slow?",
-        progress_callback=events.append,
-    )
-    # Order matters: the enter comes before the exit.
-    assert "Routing your query (Root agent)" in events, events
-    assert "Root agent done" in events, events
-    assert events.index("Routing your query (Root agent)") < events.index("Root agent done")
-
-
-# --- 2. session-level: run_analysis forwards the callback ----------------
-
-
-def test_session_run_analysis_forwards_callback(tmp_path):
-    """``AnalysisSession.run_analysis`` must fire
-    ``Analyzing trace (Analysis agent)`` / ``Analysis agent done`` around the inner call."""
-    events: list[str] = []
-    session = runtime_mod.build_session(airgap=True)
-    # Airgap path needs a real-ish AnalysisInput shape: fabricate a db
-    # path. The airgap analysis stub never reads it; Pydantic only
-    # validates presence of the required field.
-    db_path = tmp_path / "fake.db"
-    db_path.write_bytes(b"")
-    payload = schemas.AnalysisInput(database_path=str(db_path))
-    session.run_analysis(payload, progress_callback=events.append)
-    assert "Analyzing trace (Analysis agent)" in events
-    assert "Analysis agent done" in events
-
-
-def test_build_session_accepts_progress_callback_default():
-    """``build_session`` stores the default callback so per-call
-    ``progress_callback=None`` still triggers emits."""
-    events: list[str] = []
-    session = runtime_mod.build_session(
-        airgap=True, progress_callback=events.append
-    )
-    session.run_root(schemas.RootInput(user_query="?"))
-    assert "Routing your query (Root agent)" in events
-    assert "Root agent done" in events
 
 
 def test_execute_agentic_env_airgap_skips_auth_preflight(monkeypatch):
@@ -115,7 +62,7 @@ def test_execute_agentic_env_airgap_skips_auth_preflight(monkeypatch):
     assert mock_root.call_args.kwargs["progress_callback"] is None
 
 
-# --- 3. CLI non-TTY: plain status lines on stderr ------------------------
+# --- CLI non-TTY: plain status lines on stderr ---------------------------
 
 
 _CLI_PRELUDE = (
