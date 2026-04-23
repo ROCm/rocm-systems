@@ -359,7 +359,14 @@ if [ -n "${_REF}" ]; then
   _VCS_TARGET="${_VCS_TARGET}@${_REF}"
 fi
 
-_SPEC="${_PACKAGE} @ ${_VCS_TARGET}#subdirectory=${_SUBDIRECTORY}"
+if [[ "${_REPO_URL}" == file://* ]]; then
+  # Older pip releases reject the PEP 508 direct-reference form for
+  # git+file URLs. Keep the customer HTTPS path on PEP 508, but use pip's
+  # VCS URL form for local validation and air-gap mirrors.
+  _SPEC="${_VCS_TARGET}#egg=${_PACKAGE}&subdirectory=${_SUBDIRECTORY}"
+else
+  _SPEC="${_PACKAGE} @ ${_VCS_TARGET}#subdirectory=${_SUBDIRECTORY}"
+fi
 
 echo "pip-install-from-git: installing ${_SPEC}" >&2
 
