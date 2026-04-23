@@ -7,6 +7,14 @@
 #ifndef _NCCL_DEVICE_GIN_PROXY_H_
 #define _NCCL_DEVICE_GIN_PROXY_H_
 
+#if defined(__HIP_PLATFORM_AMD__)
+// GIN proxy is not supported on HIP
+#else // !__HIP_PLATFORM_AMD__
+
+#if defined(__HIP_PLATFORM_AMD__)
+// GIN proxy is not supported on HIP
+#else // !__HIP_PLATFORM_AMD__
+
 //#include <config.h>
 
 #include <cstdint>
@@ -231,5 +239,9 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_PROXY> {
                                    signalOp, signalOpArg, false, 0, required, given);
   }
 };
+
+#endif // !__HIP_PLATFORM_AMD__
+
+#endif // !__HIP_PLATFORM_AMD__
 
 #endif

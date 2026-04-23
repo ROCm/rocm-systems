@@ -10,7 +10,27 @@
 #include "comm__types.h"
 #include "../utility.h"
 
-#define __CUDACC__ 0
+#if __CUDACC__
+#if __HIP_PLATFORM_AMD__
+NCCL_DEVICE_INLINE void amdLLA2aStoreLine(uint4* dst, uint32_t d0, uint32_t d1, uint32_t flag) {
+  unsigned int* p = reinterpret_cast<unsigned int*>(dst);
+  __builtin_nontemporal_store(d0,   p + 0);
+  __builtin_nontemporal_store(flag, p + 1);
+  __builtin_nontemporal_store(d1,   p + 2);
+  __builtin_nontemporal_store(flag, p + 3);
+}
+
+NCCL_DEVICE_INLINE uint4 amdLLA2aLoadLine(uint4 const* src) {
+  unsigned int const* p = reinterpret_cast<unsigned int const*>(src);
+  uint4 r;
+  r.x = __builtin_nontemporal_load(p + 0);
+  r.y = __builtin_nontemporal_load(p + 1);
+  r.z = __builtin_nontemporal_load(p + 2);
+  r.w = __builtin_nontemporal_load(p + 3);
+  return r;
+}
+#endif
+#endif
 
 #if __CUDACC__
 template<typename Coop>
@@ -51,10 +71,14 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::send(int peer, int elt, T data) 
   buf += this->slotsOffset + elt;
   #pragma unroll
   for (int u=0; u < divUp(sizeof(T), 8); u++) {
+#if __HIP_PLATFORM_AMD__
+    amdLLA2aStoreLine(buf + u*this->pitch, u32[u][0], u32[u][1], this->epoch);
+#else
     asm volatile("st.volatile.v4.u32 [%0],{%1,%3,%2,%3};" ::
       "l"(buf + u*this->pitch),
       "r"(u32[u][0]), "r"(u32[u][1]), "r"(this->epoch)
     );
+#endif
   }
 }
 #endif
@@ -65,6 +89,11 @@ template<typename T>
 NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::bcast(int elt, T data) {
   using nccl::utility::divUp;
   if (this->multimem) {
+#if __HIP_PLATFORM_AMD__
+    // NO HIP EQUIVALENT: multimem requires NVLINK multicast, fall through to unicast
+  }
+  {
+#else
     union { T tmp; uint32_t u32[divUp(sizeof(T),8)][2]; };
     tmp = data;
     uint4* bufmc = (uint4*)ncclGetResourceBufferMultimemPointer(this->comm, this->handle.bufHandle, this->mmHandle);
@@ -77,6 +106,7 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::bcast(int elt, T data) {
       );
     }
   } else {
+#endif
     union { T tmp; uint32_t u32[divUp(sizeof(T), 8)][2]; };
     tmp = data;
     int dr = 0;
@@ -89,10 +119,14 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::bcast(int elt, T data) {
         buf += this->slotsOffset + elt;
         #pragma unroll
         for (int u=0; u < divUp(sizeof(T),8); u++) {
+#if __HIP_PLATFORM_AMD__
+          amdLLA2aStoreLine(buf + u*this->pitch, u32[u][0], u32[u][1], this->epoch);
+#else
           asm volatile("st.volatile.v4.u32 [%0],{%1,%3,%2,%3};" ::
             "l"(buf + u*this->pitch),
             "r"(u32[u][0]), "r"(u32[u][1]), "r"(this->epoch)
           );
+#endif
         }
         r += 1;
         if (r == this->team.nRanks) r = 0;
@@ -105,10 +139,14 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::bcast(int elt, T data) {
       buf += this->slotsOffset + elt;
       #pragma unroll
       for (int u=0; u < divUp(sizeof(T),8); u++) {
+#if __HIP_PLATFORM_AMD__
+        amdLLA2aStoreLine(buf + u*this->pitch, u32[u][0], u32[u][1], this->epoch);
+#else
         asm volatile("st.volatile.v4.u32 [%0],{%1,%3,%2,%3};" ::
           "l"(buf + u*this->pitch),
           "r"(u32[u][0]), "r"(u32[u][1]), "r"(this->epoch)
         );
+#endif
       }
       r += 1;
       if (r == this->team.nRanks) r = 0;
@@ -143,9 +181,13 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::recvUnrolled(int eltStart, int e
       if (u < MinEltCount || u < eltCount) {
         #pragma unroll
         for (int v=0; v < divUp(sizeof(T), 8); v++) {
+#if __HIP_PLATFORM_AMD__
+          tmp[u][v] = amdLLA2aLoadLine(buf + u*eltStride + v*this->pitch);
+#else
           asm volatile("ld.volatile.v4.u32 {%0,%1,%2,%3},[%4];"
             : "=r"(tmp[u][v].x), "=r"(tmp[u][v].y), "=r"(tmp[u][v].z), "=r"(tmp[u][v].w)
             : "l"(buf + u*eltStride + v*this->pitch));
+#endif
         }
       }
     }

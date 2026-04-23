@@ -13,7 +13,7 @@ struct ncclGinBarrierHandle;
 
 NCCL_EXTERN_C __host__ ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, int nBarriers, ncclGinBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq);
 
-#if NCCL_DEVICE_COMPILE
+#if __CUDACC__
 enum class ncclGinFenceLevel {
   Relaxed
 };
@@ -30,7 +30,9 @@ struct ncclGinBarrierSession: ncclGinBarrierSession_internal<Coop> {
 
   ncclGinBarrierSession(ncclGinBarrierSession const&) = delete; // Sessions are not copyable
 
+#if !defined(__HIP_PLATFORM_AMD__)
   NCCL_DEVICE_INLINE void sync(Coop, cuda::memory_order, ncclGinFenceLevel);
+#endif
 };
 #endif
 

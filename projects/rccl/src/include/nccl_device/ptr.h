@@ -9,7 +9,6 @@
 #include "core_tmp.h"
 #include <stdint.h>
 
-#define __CUDACC__ 0
 
 #if __cplusplus
 template<typename T>

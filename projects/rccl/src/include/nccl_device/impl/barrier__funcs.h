@@ -85,13 +85,23 @@ NCCL_DEVICE_INLINE ncclGinBarrierSession<Coop>& ncclBarrierSession<Coop>::ginBar
 
 #if __CUDACC__
 template<typename Coop>
+#if __HIP_PLATFORM_AMD__
+NCCL_DEVICE_INLINE void ncclBarrierSession<Coop>::sync(Coop, std::memory_order ord, ncclGinFenceLevel fence) {
+#else
 NCCL_DEVICE_INLINE void ncclBarrierSession<Coop>::sync(Coop, cuda::memory_order ord, ncclGinFenceLevel fence) {
+#endif
   if (this->innerLsaBar.present) {
+#if __HIP_PLATFORM_AMD__
+    this->innerLsaBar.thing.sync(this->coop, ord);
+#else
     this->innerLsaBar.thing.sync(this->coop, this->outerGinBar.present ? nccl::utility::releaseOrderOf(ord) : ord);
+#endif
   }
+#if !defined(__HIP_PLATFORM_AMD__)
   if (this->outerGinBar.present) {
     this->outerGinBar.thing.sync(this->coop, this->innerLsaBar.present ? nccl::utility::acquireOrderOf(ord) : ord, fence);
   }
+#endif
 }
 #endif
 

@@ -45,7 +45,7 @@ struct ncclGinDescriptorSmem {
   alignas(16) char space[64];
 };
 
-#if NCCL_DEVICE_COMPILE
+#if __CUDACC__
 template <ncclNetDeviceType backend>
 struct ncclGinApi_Put {
   template <typename Coop>
@@ -96,7 +96,7 @@ struct ncclGinApi_Flush {
 };
 #endif
 
-#if NCCL_DEVICE_COMPILE
+#if __CUDACC__
 template <template <ncclNetDeviceType> typename ApiFn, unsigned beMask, typename... Arg>
 NCCL_DEVICE_INLINE static decltype(auto) ncclGinCall(ncclGinCtx_M<beMask> ctx, Arg&&... arg) {
   bool singleton = (beMask & (beMask - 1)) == 0;  // Only one bit set

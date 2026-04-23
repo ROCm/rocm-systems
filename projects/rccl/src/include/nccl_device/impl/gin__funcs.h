@@ -8,6 +8,12 @@
 #define _NCCL_DEVICE_GIN_SESSION__FUNCS_H_
 #include "gin__types.h"
 #include "ptr__types.h"
+
+// GIN is not supported on HIP — entire file is CUDA-only
+#if defined(__HIP_PLATFORM_AMD__)
+
+#else // !__HIP_PLATFORM_AMD__
+
 #if __CUDACC__
 #include "nccl_device/gin/gin_device_api.h"
 #endif
@@ -403,5 +409,7 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::resetSignal(ncclGinSignal_t
   this->_signalShadows[signal] = 0;
 }
 #endif
+
+#endif // !__HIP_PLATFORM_AMD__
 
 #endif // _NCCL_DEVICE_GIN_SESSION__FUNCS_H_
