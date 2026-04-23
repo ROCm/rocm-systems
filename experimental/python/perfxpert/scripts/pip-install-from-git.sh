@@ -9,7 +9,8 @@
 #   bash scripts/pip-install-from-git.sh --extras '' --no-deps
 #
 # Notes:
-#   - Requires `git` because pip shells out to `git clone` for VCS installs.
+#   - Uses the host package manager to install missing OS prerequisites when
+#     running as root or when sudo is available.
 #   - Requires Python 3 + `python -m pip` in the active environment.
 #   - On Ubuntu 24+ and other externally managed Python environments,
 #     create and activate a virtual environment first.
@@ -27,16 +28,16 @@ _print_python_prereqs() {
   cat <<'EOF'
 Install the prerequisites first:
   Ubuntu 22.04 / 24.04:
-    apt install -y curl git python3-venv python3-pip
+    apt install -y curl git unzip python3-venv python3-pip
     python3 -m venv .venv
   RHEL 9:
-    dnf install -y curl git python3.11 python3.11-pip
+    dnf install -y curl git unzip python3.11 python3.11-pip
     python3.11 -m venv .venv
   RHEL 10:
-    dnf install -y curl git python3 python3-pip
+    dnf install -y curl git unzip python3 python3-pip
     python3 -m venv .venv
   SLES 15:
-    zypper install -y curl git python311 python311-pip
+    zypper install -y curl git unzip python311 python311-pip
     python3.11 -m venv .venv
   . .venv/bin/activate
 EOF
@@ -64,24 +65,35 @@ Interpreter selection:
   already-installed `python3.10+` interpreter on PATH. It never downloads
   or installs a different Python runtime.
 
+OS prerequisite handling:
+  If curl, git, unzip, or a supported Python/pip pair is missing, the wrapper
+  installs the distro packages with apt-get, dnf, or zypper when it is running
+  as root or sudo is available. This is the package-manager install path.
+  Otherwise it prints the exact package-manager command to run first.
+
+Patched perfxpert-code guarantee:
+  The pip build hook bootstraps bun when needed, then builds the bundled
+  patched opencode binary from the pinned perfxpert submodule. The wrapper
+  exits non-zero if that bundled binary is still missing after install.
+
 Supported Ubuntu 24+ flow:
-  apt install -y curl git python3-venv python3-pip
+  apt install -y curl git unzip python3-venv python3-pip
   python3 -m venv .venv
   . .venv/bin/activate
   REF=develop; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
 
 Prerequisite package examples by distro:
   Ubuntu 22.04 / 24.04:
-    apt install -y curl git python3-venv python3-pip
+    apt install -y curl git unzip python3-venv python3-pip
     python3 -m venv .venv
   RHEL 9:
-    dnf install -y curl git python3.11 python3.11-pip
+    dnf install -y curl git unzip python3.11 python3.11-pip
     python3.11 -m venv .venv
   RHEL 10:
-    dnf install -y curl git python3 python3-pip
+    dnf install -y curl git unzip python3 python3-pip
     python3 -m venv .venv
   SLES 15:
-    zypper install -y curl git python311 python311-pip
+    zypper install -y curl git unzip python311 python311-pip
     python3.11 -m venv .venv
     # SLES ships the supported interpreter as python3.11 after installing
     # the python311 packages.
@@ -91,10 +103,9 @@ Pin a specific ref, tag, or commit hash:
   REF=v0.2.0; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
   REF=<SHA>; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
 
-If `perfxpert-code` later reports that `opencode` is missing, install bun and
-run `perfxpert-code install-patches`, or point `PERFXPERT_OPENCODE_PATH` at an
-existing opencode binary:
-  curl -fsSL https://bun.sh/install | bash
+If you are NOT using this wrapper and `perfxpert-code` later reports that
+the bundled opencode binary is missing, reinstall with the OS prerequisites
+available so pip can bootstrap bun and build the pinned submodule bundle.
 EOF
 }
 
@@ -102,6 +113,129 @@ _die() {
   echo "pip-install-from-git: $*" >&2
   exit 2
 }
+
+_supported_python_with_pip_available() {
+  local candidate
+  for candidate in python python3 python3.14 python3.13 python3.12 python3.11 python3.10; do
+    if ! command -v "${candidate}" >/dev/null 2>&1; then
+      continue
+    fi
+    if "${candidate}" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1 \
+      && "${candidate}" -m pip --version >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+_run_with_privilege() {
+  local uid
+  uid="${EUID:-$(id -u 2>/dev/null || echo 1)}"
+  if [ "${uid}" = "0" ]; then
+    "$@"
+    return
+  fi
+  if command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+    return
+  fi
+  return 127
+}
+
+_install_os_prereqs_if_needed() {
+  local -a missing
+  missing=()
+
+  for tool in curl git unzip; do
+    if ! command -v "${tool}" >/dev/null 2>&1; then
+      missing+=("${tool}")
+    fi
+  done
+
+  if ! _supported_python_with_pip_available; then
+    missing+=("python3.10+ with pip")
+  fi
+
+  if [ "${#missing[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  echo "pip-install-from-git: missing OS prerequisites: ${missing[*]}" >&2
+  echo "pip-install-from-git: attempting package-manager install" >&2
+
+  if command -v apt-get >/dev/null 2>&1; then
+    if ! _run_with_privilege apt-get update; then
+      _die "failed to run apt-get update. Install prerequisites manually:
+$(_print_python_prereqs)"
+    fi
+    if ! _run_with_privilege apt-get install -y curl git unzip python3-venv python3-pip; then
+      _die "failed to install prerequisites with apt-get. Install them manually:
+$(_print_python_prereqs)"
+    fi
+    return 0
+  fi
+
+  if command -v dnf >/dev/null 2>&1; then
+    local version_major
+    version_major=""
+    if [ -r /etc/os-release ]; then
+      # shellcheck disable=SC1091
+      . /etc/os-release
+      version_major="${VERSION_ID%%.*}"
+    fi
+    if [ "${version_major}" = "9" ]; then
+      if ! _run_with_privilege dnf install -y curl git unzip python3.11 python3.11-pip; then
+        _die "failed to install prerequisites with dnf. Install them manually:
+$(_print_python_prereqs)"
+      fi
+    else
+      if ! _run_with_privilege dnf install -y curl git unzip python3 python3-pip; then
+        _die "failed to install prerequisites with dnf. Install them manually:
+$(_print_python_prereqs)"
+      fi
+    fi
+    return 0
+  fi
+
+  if command -v zypper >/dev/null 2>&1; then
+    if ! _run_with_privilege zypper --non-interactive install -y curl git unzip python311 python311-pip; then
+      _die "failed to install prerequisites with zypper. Install them manually:
+$(_print_python_prereqs)"
+    fi
+    return 0
+  fi
+
+  _die "no supported package manager found for missing prerequisites. Install them manually:
+$(_print_python_prereqs)"
+}
+
+for _arg in "$@"; do
+  case "${_arg}" in
+    -h|--help)
+      _print_help
+      exit 0
+      ;;
+  esac
+done
+
+_verify_bundled_perfxpert_code() {
+  "${_PYTHON}" -c '
+from importlib import resources
+import os
+import sys
+
+path = resources.files("perfxpert") / "_bundled" / "opencode"
+if not path.is_file():
+    print(f"missing bundled opencode: {path}", file=sys.stderr)
+    raise SystemExit(1)
+if not os.access(path, os.X_OK):
+    print(f"bundled opencode is not executable: {path}", file=sys.stderr)
+    raise SystemExit(1)
+print(path)
+'
+}
+
+_install_os_prereqs_if_needed
 
 _PYTHON=""
 for _candidate in python python3 python3.14 python3.13 python3.12 python3.11 python3.10; do
@@ -117,6 +251,17 @@ done
 if [ -z "${_PYTHON}" ]; then
   {
     echo "pip-install-from-git: Python 3.10+ is required."
+    echo
+    _print_python_prereqs
+  } >&2
+  exit 2
+fi
+
+if ! command -v curl >/dev/null 2>&1; then
+  {
+    cat <<'EOF'
+pip-install-from-git: `curl` is required for the GitHub install path and bun bootstrap.
+EOF
     echo
     _print_python_prereqs
   } >&2
@@ -223,14 +368,15 @@ GIT_CONFIG_KEY_0=submodule.active \
 GIT_CONFIG_VALUE_0="${_SUBMODULE_SCOPE}" \
   "${_PYTHON}" -m pip install "${_PIP_ARGS[@]}" "${_SPEC}"
 
-if ! command -v bun >/dev/null 2>&1 && ! command -v opencode >/dev/null 2>&1 && [ -z "${PERFXPERT_OPENCODE_PATH:-}" ]; then
+if ! _BUNDLED_OPENCODE="$(_verify_bundled_perfxpert_code)"; then
   cat >&2 <<'EOF'
-pip-install-from-git: install completed, but `perfxpert-code` still needs an opencode binary.
+pip-install-from-git: install finished, but the bundled patched opencode binary was not produced.
 
-`perfxpert analyze`, `perfxpert-mcp`, and the Python API are ready now.
-To enable the interactive TUI, either:
-  1. install bun (`curl -fsSL https://bun.sh/install | bash`), then run `perfxpert-code install-patches`, or
-  2. install opencode separately and ensure it is on PATH, or
-  3. set PERFXPERT_OPENCODE_PATH=/path/to/opencode
+`perfxpert analyze`, `perfxpert-mcp`, and the Python API may still be installed,
+but this wrapper requires `perfxpert-code` to be ready end-to-end.
+Check the build output above, then retry the same command.
 EOF
+  exit 2
 fi
+
+echo "pip-install-from-git: bundled patched perfxpert-code ready at ${_BUNDLED_OPENCODE}" >&2

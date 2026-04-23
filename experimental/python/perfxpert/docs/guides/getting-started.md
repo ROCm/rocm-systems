@@ -19,25 +19,25 @@ RDNA2 / RDNA3.
 
 ![install](assets/gifs/01-install.gif)
 
-*Install in a clean ROCm container, then verify the CLI surfaces. If
-`bun` is absent, the library install still succeeds and only the bundled
-`opencode` build is skipped.*
+*Install in a clean ROCm container, then verify the CLI surfaces. The
+pip build hook bootstraps bun when needed so the bundled patched
+`perfxpert-code` build completes during install.*
 
 PerfXpert ships as a single Python wheel. The `setuptools` build hook
-in `setup.py` attempts to compile the AMD-branded bundled opencode
-binary during `pip install`, but it never downloads bun or clones a
-mutable upstream `opencode` source tree. If the local prerequisites are
-missing, install still succeeds and only the bundled launcher build is
-skipped.
+in `setup.py` compiles the AMD-branded bundled opencode binary during
+`pip install`. If bun is missing, pip bootstraps it into the user's home
+directory. If OS prerequisites such as `curl`, `git`, or `unzip` are
+missing, pip fails with the missing package-manager pieces instead of
+silently producing a broken `perfxpert-code`.
 
 ### Prerequisites
 
 - Python 3.10+
-- `curl`, `git`, `python3-venv`, and `python3-pip` for GitHub installs.
+- `curl`, `git`, `unzip`, `python3-venv`, and `python3-pip` for GitHub installs.
 - On Ubuntu 24+ and other externally managed Python environments,
   create and activate a virtual environment before invoking pip.
-- `bun` on PATH if you want the bundled AMD-branded `opencode` build
-  to happen during install.
+- `bun` on PATH, or `curl` + `unzip` so pip can bootstrap bun into the
+  user's home directory during install.
 - The repo-pinned `experimental/python/perfxpert/opencode` submodule
   populated if you are installing from a checkout without using the
   wrapper. The setup hook may attempt a scoped `git submodule update
@@ -47,22 +47,20 @@ skipped.
 #### Opt-out env vars
 
 - `PERFXPERT_SKIP_BUNDLED_BUILD=1` — skip the entire opencode build.
-  Library + analyze + MCP all still work; `perfxpert-code` will
-  fall back to whatever `opencode` is on PATH or exit with a helpful
-  error.
+  Use only in CI that intentionally skips the interactive TUI. The
+  default `perfxpert-code` command will not fall back to an arbitrary
+  upstream opencode binary.
 - `PERFXPERT_SKIP_OPENCODE_FETCH=1` — don't even attempt the scoped
   submodule init when the vendored `opencode/` checkout is empty.
-- `PERFXPERT_OPENCODE_PATH=/path/to/opencode` — last-resort override
-  pointing the launcher at a pre-built binary.
+- `PERFXPERT_OPENCODE_PATH=/path/to/opencode` — explicit user-owned
+  upstream escape hatch used only by `perfxpert-code opencode ...`.
 
 #### Note on Windows
 
-PerfXpert does not auto-download bun on Windows. If the bundled
-`opencode` build is not available on your host, install `perfxpert`
-without the bundled launcher (`PERFXPERT_SKIP_BUNDLED_BUILD=1 pip
-install …`) and use the multi-backend launcher
-(`perfxpert-code claude` / `codex` / `gemini`) against a native backend
-CLI instead.
+PerfXpert does not auto-bootstrap bun on Windows. If the bundled
+`opencode` build is not available on your host, use the multi-backend
+launcher (`perfxpert-code claude` / `codex` / `gemini`) against a native
+backend CLI instead.
 
 ### Distro package setup
 
@@ -71,28 +69,28 @@ differs slightly by distro:
 
 ```bash
 # SKIP-SAMPLE — Ubuntu 22.04 / 24.04
-apt install -y curl git python3-venv python3-pip
+apt install -y curl git unzip python3-venv python3-pip
 python3 -m venv .venv
 . .venv/bin/activate
 ```
 
 ```bash
 # SKIP-SAMPLE — RHEL 9
-dnf install -y curl git python3.11 python3.11-pip
+dnf install -y curl git unzip python3.11 python3.11-pip
 python3.11 -m venv .venv
 . .venv/bin/activate
 ```
 
 ```bash
 # SKIP-SAMPLE — RHEL 10
-dnf install -y curl git python3 python3-pip
+dnf install -y curl git unzip python3 python3-pip
 python3 -m venv .venv
 . .venv/bin/activate
 ```
 
 ```bash
 # SKIP-SAMPLE — SLES 15
-zypper install -y curl git python311 python311-pip
+zypper install -y curl git unzip python311 python311-pip
 python3.11 -m venv .venv
 . .venv/bin/activate
 ```
@@ -126,13 +124,17 @@ REF=develop; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${R
 # REF=develop; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}" --extras ''
 ```
 
-The GitHub install paths require `git` on PATH because pip shells out to
-`git clone`. The wrapper exits early if `git` or `python -m pip` is
-missing, and on externally managed system Python it tells the user to
-create a virtual environment first. It prefers the active `python`,
-then `python3`, and only falls back to another already-installed
-`python3.10+` binary on PATH when the distro default is too old; it
-never downloads a separate Python runtime.
+The GitHub install paths require `git` because pip shells out to
+`git clone`. The wrapper installs missing OS prerequisites with the host
+package manager when it is running as root or when sudo is available;
+otherwise it prints the exact package-manager command to run first. On
+externally managed system Python it tells the user to create a virtual
+environment first. It prefers the active `python`, then `python3`, and
+only falls back to another already-installed `python3.10+` binary on
+PATH when the distro default is too old; it never downloads a separate
+Python runtime. During the pip build, `setup.py` bootstraps bun when it
+is missing so the bundled patched opencode binary is built from the
+pinned perfxpert submodule.
 
 Pass the ref as the first argument after `bash -s --` when you need to
 pin a specific tag or commit hash.
@@ -151,11 +153,11 @@ The `[all]` extra pulls in `anthropic`, `openai`, `rich`, and
 The bundled `opencode` path is validated separately through the
 launcher/build flow. Omit `[all]` if you only want deterministic
 air-gap analysis (wrapper: pass `--extras ''` to skip extras entirely).
-If bun is absent during install, the library, `perfxpert analyze`, and
-`perfxpert-mcp` still work; `perfxpert-code` then needs either
-`perfxpert-code install-patches` once bun is available or an existing
-`opencode` binary via PATH / `PERFXPERT_OPENCODE_PATH`. Install bun with
-`curl -fsSL https://bun.sh/install | bash`.
+On the GitHub wrapper path, the wrapper exits non-zero if the bundled
+patched `perfxpert-code` binary is still absent after install. Direct
+pip/editable paths use the same `setup.py` build hook: pip bootstraps
+bun when the OS prerequisites are available, or fails with a
+distro-specific prerequisite message when they are not.
 
 ### 1.2 Why the wrapper: scoped submodule init
 
@@ -202,9 +204,9 @@ still works — they just pay the 3-6 min submodule-init penalty once.
 The `setup.py` build hook notices if the opencode submodule is still
 empty after pip's checkout (i.e. the user scoped submodule init out
 manually without including opencode), but it does **not** clone from
-the network during install. Instead it warns clearly and skips only the
-bundled `opencode` build; library + analyze + MCP paths still install
-successfully.
+the network during install. Instead it fails with the missing pinned
+submodule path so the default `perfxpert-code` install cannot silently
+fall back to an arbitrary opencode binary.
 
 Opt-outs:
 
@@ -222,19 +224,14 @@ bundled binary at `perfxpert/_bundled/opencode`. Subsequent `pip install`
 invocations skip the rebuild if the binary is already newer than every
 patch file.
 
-**Opt-out:** set `PERFXPERT_SKIP_BUNDLED_BUILD=1` to suppress the build
-(useful in offline / sandboxed CI). `perfxpert-code` will then fall back
-to whatever `opencode` is on `PATH`, which will NOT include our tool-
-priority gate or system prompt — library + analyze + MCP paths still
-work fine. A last-resort override `PERFXPERT_OPENCODE_PATH` points the
-launcher at an explicit binary.
+**Opt-out:** set `PERFXPERT_SKIP_BUNDLED_BUILD=1` only in offline /
+sandboxed CI that intentionally skips the interactive TUI build.
+Default `perfxpert-code` requires the bundled binary built from the
+pinned submodule.
 
-**Bun missing:** the install completes with a clear warning; only
-`perfxpert-code` (the interactive TUI) is affected. `perfxpert analyze`,
-`perfxpert-mcp`, and the Python API are ready immediately. To enable the
-TUI later, install bun (`curl -fsSL https://bun.sh/install | bash`) and
-run `perfxpert-code install-patches`, or set `PERFXPERT_OPENCODE_PATH`
-to an existing binary.
+**Bun missing:** pip bootstraps bun into the user's home directory when
+`curl` and `unzip` are available. If those OS prerequisites are missing,
+pip exits with distro-specific package-manager guidance.
 
 ## 2. Verify
 
@@ -267,12 +264,10 @@ doctor checks:
   `PERFXPERT_LLM_PRIVATE_URL` or `PRIVATE_LLM_ENDPOINT`,
   plus always-present `opencode`)
 
-If `opencode binary` reports missing, the install skipped the bundled
-build because bun (or another opencode source) was unavailable.
-`perfxpert analyze` and `perfxpert-mcp` still work. To enable
-`perfxpert-code`, install bun (`curl -fsSL https://bun.sh/install | bash`)
-and run `perfxpert-code install-patches`, or set
-`PERFXPERT_OPENCODE_PATH` to an existing patched binary.
+If `opencode binary` reports missing, the install skipped or failed the
+bundled build. Reinstall through the GitHub wrapper so the pinned
+submodule is populated and bun is bootstrapped before the wheel build
+finishes.
 
 ## 3. Three entry points
 
@@ -975,7 +970,7 @@ a one-line stderr WARNING so you know which credential is active):
 | `openai` | `OPENAI_API_KEY` | `PERFXPERT_LLM_OPENAI_KEY` | Either works |
 | `private` | `PERFXPERT_LLM_PRIVATE_API_KEY` | — | Plus `PERFXPERT_LLM_PRIVATE_URL` (required) |
 | `ollama` | — (no key) | — | Plus `PERFXPERT_LLM_LOCAL_URL` (default `http://localhost:11434`) |
-| `opencode` | — (no key) | — | Plus `PERFXPERT_OPENCODE_PATH` if not on `PATH` |
+| `opencode` | — (no key) | — | Default `perfxpert-code` uses the bundled binary; `PERFXPERT_OPENCODE_PATH` is only for `perfxpert-code opencode ...` |
 
 ```bash
 # SKIP-SAMPLE — requires a real trace.db and a live ANTHROPIC_API_KEY
@@ -1133,7 +1128,7 @@ wraps the same agent runtime the batch-mode `analyze` CLI uses.
 `perfxpert-mcp` pre-wired and the TUI ready at startup.*
 
 ```bash
-# SKIP-SAMPLE — requires a patched opencode path (repo-local build or bundled wheel)
+# SKIP-SAMPLE — requires the bundled submodule-built opencode binary
 perfxpert-code
 ```
 
@@ -1302,7 +1297,7 @@ perfxpert-code run -m anthropic/claude-haiku-4-5 "optimize ./app.cpp"
 Fully interactive (drop into the TUI):
 
 ```bash
-# SKIP-SAMPLE — requires a patched opencode path (repo-local build or bundled wheel)
+# SKIP-SAMPLE — requires the bundled submodule-built opencode binary
 perfxpert-code
 ```
 
@@ -1366,15 +1361,12 @@ confirms the negotiated protocol version.*
 
 ## 14. Troubleshooting
 
-**`perfxpert-code` launches the unpatched upstream binary.**
-Check that `PERFXPERT_OPENCODE_PATH` is either unset or points at a
-patched binary. The launcher search order is: explicit env override →
-locally built patched submodule copy (source/editable checkouts) →
-bundled wheel copy → well-known upstream install locations / `PATH`.
-If you're in a source checkout, run `perfxpert-code install-patches` to
-rebuild the patched binary from the pinned submodule. If you're using a
-wheel build, reinstall with bun available so the bundled build can
-complete. The launcher prints a warning on unpatched fallback.
+**`perfxpert-code` says the bundled opencode binary is missing.**
+The default TUI path only uses the repo-pinned submodule build. Reinstall
+through the GitHub wrapper so the pinned submodule is populated, bun is
+available, and the bundled binary is verified before install exits. If
+you intentionally want a user-owned upstream opencode binary, run
+`perfxpert-code opencode ...` explicitly.
 
 **LLM quota exhausted (429 / `insufficient_quota`).**
 Set `PERFXPERT_LLM_FALLBACK_CHAIN` to a comma-separated provider
@@ -1399,11 +1391,9 @@ Consult `perfxpert.counter_list_by_block` / `counter_lookup_info`
 before emitting a counter set.
 
 **`opencode binary not found` on `perfxpert doctor`.**
-Install bun (`curl -fsSL https://bun.sh/install | bash`), then run
-`perfxpert-code install-patches`, or point `PERFXPERT_OPENCODE_PATH` at
-an existing patched binary and retry. The launcher searches
-`$PERFXPERT_OPENCODE_PATH` → bundled wheel →
-`~/.opencode/bin/opencode` → `~/.local/bin/opencode` → `PATH`.
+Reinstall through the GitHub wrapper. Direct `pip install` also checks
+for missing OS prerequisites and exits with package-manager guidance
+when it cannot build the bundled `perfxpert-code` binary.
 
 **`claude mcp add perfxpert perfxpert-mcp` not finding the binary.**
 The client's `PATH` is narrower than your login shell. Use the

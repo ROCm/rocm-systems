@@ -16,24 +16,16 @@ AI-powered AMD ROCm GPU trace analysis.
 ### Prerequisites
 
 - Python 3.10+
-- `curl`, `git`, `python3-venv`, and `python3-pip` for the GitHub install
+- `curl`, `git`, `unzip`, `python3-venv`, and `python3-pip` for the GitHub install
   path. On Ubuntu 24+ and other externally managed Python environments,
   create and activate a virtual environment before running pip.
   For the RHEL 9/10 and SLES package-manager variants, see the detailed
   install guide; RHEL 9 and SLES use versioned Python package names.
-- `bun` on PATH if you want the patched `opencode` build produced during
-  `pip install`. Packaged installs bundle that build; source/editable
-  checkouts can rebuild the same pinned fork locally. The build hook
-  does not auto-download bun; if bun is missing, install still succeeds
-  and only the patched launcher build is skipped. `perfxpert analyze`,
-  `perfxpert-mcp`, and the Python API still work; `perfxpert-code`
-  needs either `perfxpert-code install-patches` once bun is available,
-  or an existing `opencode` binary on PATH / `PERFXPERT_OPENCODE_PATH`.
-  Install bun with `curl -fsSL https://bun.sh/install | bash` when you
-  need to enable the interactive TUI later.
-  See
-  [docs/guides/getting-started.md](docs/guides/getting-started.md)
-  for the exact install contract and opt-out envs.
+- No separate `opencode` install is needed when using the GitHub wrapper below.
+  The wrapper bootstraps the required build tool and verifies that the patched
+  bundled `perfxpert-code` binary was built from the pinned PerfXpert submodule.
+  See [docs/guides/getting-started.md](docs/guides/getting-started.md) for
+  source/editable install details and opt-out envs.
 - (Optional) `claude`, `codex`, or `gemini` CLI on PATH for multi-backend dispatch.
 
 ### Install
@@ -43,7 +35,7 @@ AI-powered AMD ROCm GPU trace analysis.
 >
 > ```bash
 > # SKIP-SAMPLE — host package install + virtual environment creation
-> apt install -y curl git python3-venv python3-pip
+> apt install -y curl git unzip python3-venv python3-pip
 > python3 -m venv .venv
 > . .venv/bin/activate
 > ```
@@ -62,8 +54,9 @@ pip install "perfxpert[all]"
 ```
 
 To install the latest development build direct from the rocm-systems
-monorepo on GitHub, use the wrapper script (~5 sec instead of
-~5 min — details below):
+monorepo on GitHub, use the wrapper script. It scopes submodule init to
+the pinned PerfXpert `opencode` submodule, builds the patched bundled
+binary, and verifies `perfxpert-code` before exiting:
 
 ```bash
 # SKIP-SAMPLE — latest develop branch, no local clone needed
@@ -85,17 +78,17 @@ the wrapper exits early on externally managed system Python and points
 users at `python3 -m venv`. It prefers the active `python`, then
 `python3`, and only falls back to another already-installed
 `python3.10+` binary on PATH when the distro default is too old; it
-never downloads a separate Python runtime.
+never downloads a separate Python runtime. During the pip build, `setup.py`
+bootstraps bun when needed so the bundled patched opencode binary is built
+from the pinned perfxpert submodule and `perfxpert-code` is ready end to
+end.
 
 `[all]` pulls in the optional LLM providers (`anthropic`, `openai`,
 `litellm`) plus `rich` for pretty terminal output. That covers the
 hosted/local SDK-backed provider paths; the default patched `opencode`
-path is validated separately through the launcher/build flow. If bun is
-absent during install, `perfxpert analyze`, `perfxpert-mcp`, and the
-Python API still install cleanly, but `perfxpert-code` will ask you to
-install bun with `curl -fsSL https://bun.sh/install | bash`, then run
-`perfxpert-code install-patches`, or point `PERFXPERT_OPENCODE_PATH` at
-an existing binary. Pick a provider with `--llm <name>`.
+path is validated separately through the launcher/build flow. The GitHub
+wrapper verifies that the bundled patched `perfxpert-code` build completes
+during install. Pick a provider with `--llm <name>`.
 
 ### Run
 
@@ -160,25 +153,18 @@ perfxpert doctor
 ```
 
 Core analysis is self-contained — `pip install perfxpert` handles all
-profiling + recommendation features. `perfxpert-code` defaults to the
-patched opencode path: packaged installs use the bundled AMD-branded
-binary, while source/editable checkouts can rebuild the same pinned
-`sst/opencode` fork locally from
-`experimental/python/perfxpert/opencode` plus our patch series
-(`experimental/python/perfxpert/.patches/`) when `bun` is on PATH.
+profiling + recommendation features. The default `perfxpert-code` path
+uses only the bundled AMD-branded opencode binary built from the pinned
+`experimental/python/perfxpert/opencode` submodule plus the local patch
+series. If the build prerequisites are missing, pip fails with the
+missing package-manager pieces instead of falling back to an arbitrary
+opencode binary.
 
-If `bun` is missing, the install still succeeds (library + analyze + MCP
-paths all work). Packaged installs then miss the bundled patched build,
-and source/editable checkouts cannot rebuild the repo-local patched
-binary until bun is available. As a last resort, set
-`PERFXPERT_OPENCODE_PATH` to point at a patched opencode binary.
-
-Advanced: for tightly-sandboxed CI where neither bun nor network access
-is available, set `PERFXPERT_SKIP_BUNDLED_BUILD=1` before
-`pip install` to suppress the build attempt entirely. When bun becomes
-available again, run `perfxpert-code install-patches` to build the
-repo-pinned patched binary, or point `PERFXPERT_OPENCODE_PATH` at an
-existing patched opencode binary.
+Advanced: `PERFXPERT_SKIP_BUNDLED_BUILD=1` is only for tightly-sandboxed
+CI that intentionally skips the interactive TUI build. Users who
+explicitly want their own upstream opencode can run
+`perfxpert-code opencode ...`; the default `perfxpert-code` command
+continues to require the bundled submodule-built binary.
 
 ## Contributing
 
@@ -191,7 +177,7 @@ an [RFC](docs/rfcs/README.md).
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `PERFXPERT_OPENCODE_PATH` | system PATH | Override path to opencode binary; point this at a patched build if you need the full perfxpert gate behavior |
+| `PERFXPERT_OPENCODE_PATH` | unset | Explicit upstream-opencode escape hatch used only by `perfxpert-code opencode ...`; the default TUI ignores it |
 
 The agentic runtime is the sole execution path; no feature flag
 toggles it. Setting any of the following has no effect:
