@@ -28,9 +28,8 @@ def gpu_connect_env() -> dict[str, str]:
         "ROCPROFSYS_SAMPLING_CPUS": "none",
         "ROCPROFSYS_SAMPLING_GPUS": "all",
         "ROCPROFSYS_USE_SAMPLING": "OFF",
-        "ROCPROFSYS_PROCESS_SAMPLING_FREQ": "500",
+        "ROCPROFSYS_PROCESS_SAMPLING_FREQ": "50",
         "ROCPROFSYS_CPU_FREQ_ENABLED": "OFF",
-        "NUM_ITERATIONS": "5",
     }
 
 
