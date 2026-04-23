@@ -22,7 +22,7 @@ Panel Config:
           value: ROUND(SUM(SQ_INSTS_SMEM) / SUM($denom), 0)
         VALU:
           value: ROUND(SUM(SQ_INSTS_VALU) / SUM($denom), 0)
-        MFMA:
+        Matrix Ops:
           value: ROUND(SUM(SQ_INSTS_MFMA) / SUM($denom), 0)
         VMEM:
           value: ROUND(SUM(SQ_INSTS_VMEM) / SUM($denom), 0)
