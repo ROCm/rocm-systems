@@ -94,7 +94,8 @@ class Bench_gfx90a(benchmark_gfx9_base.Bench_gfx9):
 
             for(int i = 0; i < iter; ++i)
             {
-                result = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a, a, result, 0, 0, 0);
+                result = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(
+                    a, a, result, 0, 0, 0);
             }
 
             if (result[0] != 2*result[0])
