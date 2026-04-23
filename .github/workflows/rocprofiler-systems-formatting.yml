@@ -38,7 +38,7 @@ jobs:
           test -f .markdownlint.yaml && echo "Using local config file" || curl --silent --show-error --fail --location https://raw.github.com/ROCm/rocm-docs-core/develop/.markdownlint.yaml -O
 
       - name: Use markdownlint-cli2
-        uses: DavidAnson/markdownlint-cli2-action@bb4bb94c73936643d73d345b48fead3e96f90a5e # v10.0.1
+        uses: DavidAnson/markdownlint-cli2-action@ce4853d43830c74c1753b39f3cf40f71c2031eb9 # v23.0.0
         with:
           globs: "projects/rocprofiler-systems/**/*.md"
 
@@ -62,7 +62,7 @@ jobs:
           sed -i "s|docs/\*\*/\*.md|projects/rocprofiler-systems/docs/**/*.md|g" .spellcheck.yaml
 
       - name: Run spellcheck
-        uses: rojopolis/spellcheck-github-actions@e7d2b8d65030d75d79a50c069a6ef30522e534eb # 0.46.0
+        uses: rojopolis/spellcheck-github-actions@e3cd8e9aec4587ec73bc0e60745aafd45c37aa2e # 0.60.0
 
       - name: On fail
         if: failure()
@@ -81,7 +81,7 @@ jobs:
         sparse-checkout: projects/rocprofiler-systems
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       with:
         python-version: ${{ matrix.python-version }}
 

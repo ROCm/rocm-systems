@@ -9,14 +9,14 @@ jobs:
     steps:
 #      - name: Generate a token
 #        id: generate-token
-#        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e
+#        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
 #        with:
 #          app-id: ${{ secrets.APP_ID }}
 #          private-key: ${{ secrets.APP_PRIVATE_KEY }}
 #          owner: ${{ github.repository_owner }}
 
       - name: Checkout code (initial)
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
           sparse-checkout: .github
@@ -24,7 +24,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: '3.12'
 
@@ -52,7 +52,7 @@ jobs:
 
       - name: Checkout full repo with changed subtrees
         if: steps.detect.outputs.subtrees
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
           sparse-checkout: |
