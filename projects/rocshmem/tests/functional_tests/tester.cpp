@@ -897,7 +897,13 @@ void* Tester::alloc_test_buffer(size_t size, enum UserBufType user_buf_type) {
       CHECK_HIP(hipExtMallocWithFlags(&buffer, size, hipDeviceMallocFinegrained));
       break;
     case USER_BUF_TYPE_UNCACHED:
+#ifdef HAVE_DEVICE_MALLOC_UNCACHED
       CHECK_HIP(hipExtMallocWithFlags(&buffer, size, hipDeviceMallocUncached));
+#else
+      std::cerr << "hipDeviceMallocUncached is unsupported. Please use another local memory type"
+                << std::endl;
+      exit(-1);
+#endif
       break;
     case USER_BUF_TYPE_MANAGED:
       CHECK_HIP(hipMallocManaged(&buffer, size, hipMemAttachGlobal));
