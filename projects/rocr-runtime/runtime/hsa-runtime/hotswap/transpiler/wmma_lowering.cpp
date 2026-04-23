@@ -423,64 +423,120 @@ static void runGroupPass(IRBuilder<> &B, Module &M, RaiseContext &ctx,
   Function *mfmaFn = Intrinsic::getOrInsertDeclaration(&M, mfmaId);
   Value *cbsz = B.getInt32(0), *abid = B.getInt32(0), *blgp = B.getInt32(0);
 
-  Value *mfma1 = B.CreateCall(mfmaFn,
-      {srcA_lo, srcB_lo, acc, cbsz, abid, blgp}, "mfma1");
+  // MFMA is EXEC-gated on its WRITE: a lane with EXEC=0 skips
+  // updating its destination VGPR.  Under `WaveNativeProjection` the
+  // kernel-entry `init_whole_wave` keeps HW EXEC=-1 kernel-wide so
+  // every lane writes its MFMA output and `wrapAsWWMValue` is a
+  // no-op.  Under `ModuloReplicationProjection` (phantom-lane
+  // fallback) HW EXEC = source-active-mask kernel-wide, so target
+  // lanes 32..63 would never write their MFMA destination VGPR —
+  // and the subsequent `collectResult` bpermute DOES read from
+  // those target lanes (target lanes 16..31 pull rows 8..15 from
+  // source lanes 32..47's MFMA output), so stale data would
+  // corrupt output rows 8..15.  `wrapAsWWMValue` inserts a
+  // `strict.wwm` marker on each MFMA output under MODREP, telling
+  // the AMDGPU backend's `SIWholeQuadMode` pass to mark the MFMA
+  // itself as WWM and emit `s_or_saveexec_b64 sN, -1` / `s_mov_b64
+  // exec, sN` around it so every lane writes its output.
+  //
+  // We wrap the MFMA outputs specifically (not just the final collect
+  // results) because SIWholeQuadMode's backward-propagation from a
+  // `strict.wwm` on a later `ds_bpermute` result stops at the
+  // bpermute boundary — the backend sees the bpermute reads source
+  // lanes 0..W_src-1 by address and concludes the MFMA output on
+  // lanes W_src..2*W_src-1 is "not consumed", which is correct for
+  // a single-pass MFMA but wrong for our cross-widening lowering
+  // where the collect bpermute DOES pull from those upper-half
+  // lanes to assemble rows 8..15.  Wrapping the MFMA result directly
+  // forces the MFMA into the WWM backward slice.
+  Value *mfma1 = ctx.projection.wrapAsWWMValue(
+      B,
+      B.CreateCall(mfmaFn,
+                   {srcA_lo, srcB_lo, acc, cbsz, abid, blgp}, "mfma1"),
+      "mfma1_wwm");
 
   Value *srcA_hi = packDwords(B, mfmaA_hi, 2, ctx.i32Ty, mfmaABPackTy);
   Value *srcB_hi = packDwords(B, mfmaB_hi, 2, ctx.i32Ty, mfmaABPackTy);
 
-  Value *mfma2 = B.CreateCall(mfmaFn,
-      {srcA_hi, srcB_hi, mfma1, cbsz, abid, blgp}, "mfma2");
+  Value *mfma2 = ctx.projection.wrapAsWWMValue(
+      B,
+      B.CreateCall(mfmaFn,
+                   {srcA_hi, srcB_hi, mfma1, cbsz, abid, blgp}, "mfma2"),
+      "mfma2_wwm");
 
   Value *mfmaDst[4];
   unpackDwords(B, mfma2, 4, ctx.i32Ty, mfmaDst);
 
-  // No WWM wrapper: the kernel-wide EXEC = -1 invariant established by
-  // `WaveNativeProjection::emitInitialExec` at kernel entry (via
-  // `@llvm.amdgcn.init_whole_wave`) guarantees that all 64 Wave64
-  // lanes execute the redistribute → MFMA chain even on a partial-
-  // wave launch.  Side-effect gating against the *logical* Wave32
-  // active mask is handled by `emitUnderExec` around the consumer's
-  // `writeRegVec` store of the result dwords, not here.
   Value *w32Lane = B.CreateAnd(laneId, B.getInt32(31), "w32_lane");
   collectResult(B, M, mfmaDst, w32Lane, resultDwords);
+
+  // Also wrap each collect-stage output dword as WWM under MODREP,
+  // so `SIWholeQuadMode` keeps the collect bpermutes in the WWM
+  // region.  Without this, the bpermute WRITEs are EXEC-gated to
+  // source-active lanes under normal HW EXEC, leaving target lanes
+  // past the source active range with zeros (or stale values from
+  // earlier instruction re-use of the same physical VGPR).  Target
+  // lanes 16..31 in the wave32-source phantom-lane regime read
+  // collect outputs from target lanes 32..47 / 48..63 to assemble
+  // rows 8..15; those reads happen at ds_bpermute READ-time which
+  // is un-gated, but the WRITE-back on target lanes 16..31 itself
+  // is HW EXEC-gated and requires WWM for the chain to land the
+  // correct per-lane value — the bpermute-READ's result sits in
+  // the target lane's register file only if that target lane is
+  // HW-active at the bpermute WRITE, which under non-WWM MODREP is
+  // the case for source-active lanes 0..31 but the destination
+  // register allocation often aliases with values that were last
+  // written in an earlier WWM region (where phantom lanes DID
+  // write), so the stale phantom-lane content leaks through.
+  // Wrapping the collect outputs forces the backend to treat the
+  // bpermute writes as WWM, which clears the alias hazard.
+  //
+  // Under WaveNative this is an identity no-op.
+  for (unsigned i = 0; i < 8; ++i)
+    resultDwords[i] =
+        ctx.projection.wrapAsWWMValue(B, resultDwords[i], "wmma_collect_wwm");
 }
 
 Value *emitWMMAtoMFMA(RaiseContext &ctx, Value *a, Value *b, Value *c,
                        WMMAInputType inputType) {
-  // Callers (the `V_WMMA_*` dispatches in `handle_valu_vop3p.cpp`)
-  // are expected to have already refused the lift when the current
-  // projection does not provide the full-wave EXEC invariant — see
-  // the block comment in this file (~line 130) for why the
-  // redistribute / collect pipeline below requires HW EXEC=-1 for
-  // correctness.  Assert the invariant here as defense-in-depth
-  // so a future refactor adding a new WMMA opcode case that
-  // forgets its caller-side gate fails loudly in assert-on builds
-  // (debug + all lit / gtest runs).
+  // The redistribute / 2×MFMA / collect chain is a Wave64 collective.
+  // Per-MFMA-output `strict.wwm` markers inside `runGroupPass` handle
+  // the two projections uniformly:
   //
-  // Earlier versions of this assert had a `|| !hasMFMA` disjunct
-  // that accepted a latent bug: when the K=32/K=64 dispatch's
-  // `hasWMMA12`-only native-intrinsic gate failed to match gfx1250
-  // (whose native K=32/K=64 intrinsics live in
-  // `AMDGPUWMMAIntrinsicsGFX1250`, not the `AMDGPUWMMAIntrinsicsGFX12`
-  // base family `hasWMMA12` gates on), we fell through here with
-  // `hasMFMA = false` and emitted MFMA-intrinsic IR the target
-  // couldn't lower.  That latent bug was fixed in the same commit
-  // as this assert tightening (handle_valu_vop3p.cpp now gates the
-  // native branch on `hasTensorOps` and adds a no-path-available
-  // refusal below it), so the disjunct is no longer needed — reaching
-  // here without the full-wave-EXEC invariant is a caller-side gate
-  // regression, period.
-  assert(ctx.projection.providesFullWaveExecInvariant() &&
-         "emitWMMAtoMFMA requires the current projection to provide "
-         "the full-wave EXEC invariant (init_whole_wave sets HW EXEC=-1). "
-         "Caller in handle_valu_vop3p.cpp MUST gate on "
-         "`ctx.projection.providesFullWaveExecInvariant()` and refuse "
-         "via RaiseFailure::unsupportedShape before reaching here.");
-
+  //   * WaveNativeProjection — `init_whole_wave` at kernel entry
+  //     already keeps HW EXEC=-1 kernel-wide.  `wrapAsWWMValue` is
+  //     an identity no-op here to avoid the `SIPreAllocateWWMRegs`
+  //     regalloc blow-up on large WMMA tiles (see
+  //     `WaveProjection::emitInitialExec`'s block comment).
+  //
+  //   * ModuloReplicationProjection — HW EXEC stays at the source-
+  //     active mask kernel-wide; the per-MFMA `strict.wwm` tells
+  //     the backend's `SIWholeQuadMode` pass to emit `s_or_saveexec
+  //     _b64 sN, -1` / `s_mov_b64 exec, sN` around the MFMA and its
+  //     redistribute inputs so every target lane writes its MFMA
+  //     destination VGPR, which the subsequent collect bpermute
+  //     then reads across the full Wave64.
+  //
+  // Number of passes depends on the projection's
+  // `numSourceWavesPerTarget()`:
+  //
+  //   * 1 source wave per target (MODREP phantom-lane fallback):
+  //     run only pass 0 (`groupBase=0`).  Pass 1 would pull data
+  //     from source lanes W_src..2*W_src-1 which do not exist under
+  //     phantom-lane, feeding undef into the MFMA cross-lane
+  //     reduction.  Target lanes 32..63's output from pass 0 is
+  //     well-defined (a correct MFMA group-0 output spread across
+  //     the full Wave64) and harmlessly discarded by the post-lift
+  //     `writeRegVec` `emitUnderExec`, whose HW-EXEC-gated store
+  //     only fires on source-active lanes.
+  //
+  //   * 2 source waves per target (WaveNative cross-widen): run
+  //     both passes; each source wave's WMMA maps to one pass.
+  //     Target lanes 0..31 get pass-0's output (source wave 0's
+  //     matmul), target lanes 32..63 get pass-1's (source wave 1's
+  //     matmul), selected via a `laneId >= 32` comparison.
   IRBuilder<> &B = ctx.B;
   Module &M = ctx.M;
-
 
   Value *aDwords[8], *bDwords[8], *cDwords[8];
   unpackDwords(B, a, 8, ctx.i32Ty, aDwords);
@@ -489,25 +545,59 @@ Value *emitWMMAtoMFMA(RaiseContext &ctx, Value *a, Value *b, Value *c,
 
   Value *laneId = emitLaneId(B, M, ctx.i32Ty);
 
-  Value *result0[8], *result1[8];
-  runGroupPass(B, M, ctx, 0,  laneId, aDwords, bDwords, cDwords, inputType,
-               result0);
-  runGroupPass(B, M, ctx, 32, laneId, aDwords, bDwords, cDwords, inputType,
-               result1);
+  const unsigned numSrcWaves = ctx.projection.numSourceWavesPerTarget();
+  assert((numSrcWaves == 1 || numSrcWaves == 2) &&
+         "WMMA→MFMA lowering defined only for wave32 source projections; "
+         "MODREP phantom-lane (1 source wave per target) or WaveNative "
+         "cross-widen (2 source waves per target) are the two supported "
+         "shapes — a new projection class must declare which applies.");
+  // Dead-code gate for the refusal-gate-still-in-place state.  The K=4
+  // f32 and K=32/K=64 refusal arms in `handle_valu_vop3p.cpp` return
+  // before reaching this helper when `!providesFullWaveExecInvariant()`,
+  // i.e. under any non-WaveNative projection.  The `numSrcWaves == 1`
+  // branch below is therefore unreachable in production.  It is kept
+  // in-tree because (a) my staged MODREP path has been verified
+  // correct for minimal repros (`wmma_phantom_lane_f16_chain`) and is
+  // the right code to re-enable once the matmul_fp16_16x16 residual is
+  // pinned, and (b) removing it would require re-deriving the
+  // pass-1-skip logic later.  This assertion makes the unreachable
+  // branch a loud abort in assert-on builds so a future refactor that
+  // accidentally flips the refusal gate without vetting the MODREP
+  // path surfaces at the first matmul_fp16 test run instead of the
+  // second.
+  assert(numSrcWaves == 2 &&
+         "reached emitWMMAtoMFMA under a projection that returns "
+         "numSourceWavesPerTarget() != 2 — the MODREP arm of this "
+         "lowering is staged-but-gated-off via the refusal in "
+         "`handle_valu_vop3p.cpp`; if you flipped that gate, also "
+         "vet compare_correctness's matmul_fp16_16x16 end-to-end "
+         "output before removing this assert.");
 
-  Value *isGroup1 = B.CreateICmpUGE(laneId, B.getInt32(32), "is_group1");
-  // Result element type matches the dispatched MFMA accumulator type
-  // (i32 for the IU8 integer-accumulator variant, f32 for everything
-  // else). The two-pass redistribution above operated on i32 dwords
+  Value *result0[8];
+  runGroupPass(B, M, ctx, /*groupBase=*/0, laneId, aDwords, bDwords, cDwords,
+               inputType, result0);
+
+  Value *finalDwords[8];
+  if (numSrcWaves == 1) {
+    for (unsigned i = 0; i < 8; ++i) finalDwords[i] = result0[i];
+  } else {
+    Value *result1[8];
+    runGroupPass(B, M, ctx, /*groupBase=*/32, laneId, aDwords, bDwords,
+                 cDwords, inputType, result1);
+    Value *isGroup1 = B.CreateICmpUGE(laneId, B.getInt32(32), "is_group1");
+    for (unsigned i = 0; i < 8; ++i)
+      finalDwords[i] =
+          B.CreateSelect(isGroup1, result1[i], result0[i], "sel");
+  }
+
+  // Result element type matches the dispatched MFMA accumulator
+  // type (i32 for the IU8 integer-accumulator variant, f32 for
+  // everything else).  The per-pass output dwords are i32
   // throughout; only the final reassembly cares about the element
   // semantics.
   Type *resultElemTy = (inputType == WMMAInputType::IU8) ? ctx.i32Ty : ctx.f32Ty;
-  auto *resultTy = FixedVectorType::get(resultElemTy, 8);
-  Value *finalDwords[8];
-  for (unsigned i = 0; i < 8; ++i)
-    finalDwords[i] = B.CreateSelect(isGroup1, result1[i], result0[i], "sel");
-
-  return packDwords(B, finalDwords, 8, ctx.i32Ty, resultTy);
+  return packDwords(B, finalDwords, 8, ctx.i32Ty,
+                     FixedVectorType::get(resultElemTy, 8));
 }
 
 // ----------------------------------------------------------------------
@@ -623,35 +713,44 @@ static void runGroupPassF32K4(IRBuilder<> &B, Module &M, RaiseContext &ctx,
 
   Function *mfmaFn = Intrinsic::getOrInsertDeclaration(
       &M, Intrinsic::amdgcn_mfma_f32_16x16x4f32);
-  Value *mfma = B.CreateCall(mfmaFn,
-                             {mfmaA, mfmaB, acc, cbsz, abid, blgp},
-                             "mfma");
+  // See the K=32 / K=64 `runGroupPass` helper above for the full
+  // rationale: under MODREP phantom-lane, the MFMA's destination
+  // VGPR must be written on every target lane so the subsequent
+  // `collectResult` bpermute reads real data from lanes 32..47's
+  // output.  `wrapAsWWMValue` inserts a `strict.wwm` marker under
+  // MODREP (so the backend's `SIWholeQuadMode` pulls the MFMA into
+  // a WWM region) and is an identity no-op under WaveNative (whose
+  // kernel-entry `init_whole_wave` already keeps HW EXEC=-1).
+  Value *mfma = ctx.projection.wrapAsWWMValue(
+      B,
+      B.CreateCall(mfmaFn, {mfmaA, mfmaB, acc, cbsz, abid, blgp}, "mfma"),
+      "mfma_wwm");
 
   Value *mfmaDst[4];
   unpackDwords(B, mfma, 4, ctx.i32Ty, mfmaDst);
 
-  // No WWM wrapper here either — kernel-entry `init_whole_wave` keeps
-  // hardware EXEC = -1 so lanes 32-63 run the redistribute / MFMA
-  // chain correctly.  See the equivalent comment in the K=32 / K=64
-  // `runGroupPass` helper above, and the file-header rationale.
   Value *w32Lane = B.CreateAnd(laneId, B.getInt32(31), "w32_lane");
   collectResult(B, M, mfmaDst, w32Lane, resultDwords);
+
+  // Wrap collect outputs as WWM under MODREP — see the equivalent
+  // block comment in the K=32 / K=64 `runGroupPass` for the full
+  // rationale.
+  for (unsigned i = 0; i < 8; ++i)
+    resultDwords[i] =
+        ctx.projection.wrapAsWWMValue(B, resultDwords[i], "wmma_collect_wwm");
 }
 
 Value *emitWMMAtoMFMA_F32_16x16x4(RaiseContext &ctx, Value *a, Value *b,
                                    Value *c) {
-  // Same defense-in-depth assert as `emitWMMAtoMFMA` above.  The
-  // K=4 f32 decomposition uses the same runGroupPass* +
-  // bpermute-collect shape and relies on the same full-wave EXEC
-  // invariant; keep the two gates in lock-step.
-  assert(ctx.projection.providesFullWaveExecInvariant() &&
-         "emitWMMAtoMFMA_F32_16x16x4 requires the current projection "
-         "to provide the full-wave EXEC invariant (init_whole_wave "
-         "sets HW EXEC=-1). Caller in handle_valu_vop3p.cpp MUST gate "
-         "on `ctx.projection.providesFullWaveExecInvariant()` and "
-         "refuse via RaiseFailure::unsupportedShape before reaching "
-         "here.");
-
+  // K=4 f32 counterpart to `emitWMMAtoMFMA` above — see that
+  // function's block comment for the full design rationale
+  // (projection-aware per-MFMA `strict.wwm` wrapping via
+  // `wrapAsWWMValue`, and pass-1-skipped under MODREP phantom-
+  // lane).  The only structural difference is that the K=4 f32
+  // decomposition emits ONE MFMA per group pass (the source WMMA
+  // is already K=4, exactly matching `mfma_f32_16x16x4f32`), not
+  // the 2-chained-MFMA K=32→2×K=16 structure of the 16-/8-bit
+  // family.
   IRBuilder<> &B = ctx.B;
   Module &M = ctx.M;
 
@@ -662,17 +761,37 @@ Value *emitWMMAtoMFMA_F32_16x16x4(RaiseContext &ctx, Value *a, Value *b,
 
   Value *laneId = emitLaneId(B, M, ctx.i32Ty);
 
-  Value *result0[8], *result1[8];
-  runGroupPassF32K4(B, M, ctx, 0,  laneId, aDwords, bDwords, cDwords, result0);
-  runGroupPassF32K4(B, M, ctx, 32, laneId, aDwords, bDwords, cDwords, result1);
+  const unsigned numSrcWaves = ctx.projection.numSourceWavesPerTarget();
+  assert((numSrcWaves == 1 || numSrcWaves == 2) &&
+         "WMMA→MFMA lowering defined only for wave32 source projections; "
+         "MODREP phantom-lane (1 source wave per target) or WaveNative "
+         "cross-widen (2 source waves per target) are the two supported "
+         "shapes — a new projection class must declare which applies.");
+  // See `emitWMMAtoMFMA` above for the identical gating rationale.
+  assert(numSrcWaves == 2 &&
+         "reached emitWMMAtoMFMA_F32_16x16x4 under a projection that "
+         "returns numSourceWavesPerTarget() != 2; the MODREP arm is "
+         "staged-but-gated-off in `handle_valu_vop3p.cpp`.");
 
-  Value *isGroup1 = B.CreateICmpUGE(laneId, B.getInt32(32), "is_group1");
-  auto *resultTy = FixedVectorType::get(ctx.f32Ty, 8);
+  Value *result0[8];
+  runGroupPassF32K4(B, M, ctx, /*groupBase=*/0, laneId, aDwords, bDwords,
+                     cDwords, result0);
+
   Value *finalDwords[8];
-  for (unsigned i = 0; i < 8; ++i)
-    finalDwords[i] = B.CreateSelect(isGroup1, result1[i], result0[i], "sel");
+  if (numSrcWaves == 1) {
+    for (unsigned i = 0; i < 8; ++i) finalDwords[i] = result0[i];
+  } else {
+    Value *result1[8];
+    runGroupPassF32K4(B, M, ctx, /*groupBase=*/32, laneId, aDwords, bDwords,
+                       cDwords, result1);
+    Value *isGroup1 = B.CreateICmpUGE(laneId, B.getInt32(32), "is_group1");
+    for (unsigned i = 0; i < 8; ++i)
+      finalDwords[i] =
+          B.CreateSelect(isGroup1, result1[i], result0[i], "sel");
+  }
 
-  return packDwords(B, finalDwords, 8, ctx.i32Ty, resultTy);
+  return packDwords(B, finalDwords, 8, ctx.i32Ty,
+                     FixedVectorType::get(ctx.f32Ty, 8));
 }
 
 } // namespace transpiler

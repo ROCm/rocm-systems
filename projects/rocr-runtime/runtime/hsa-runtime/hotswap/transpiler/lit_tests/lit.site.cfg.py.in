@@ -374,6 +374,15 @@ config.fixtures = {
         r"@LIT_FIXTURE_PHANTOM_LANE_MODREP_FALLBACK_CO@",
     "wmma_phantom_lane_refuse":
         r"@LIT_FIXTURE_WMMA_PHANTOM_LANE_REFUSE_CO@",
+    # Staged Phase-3 fixture — pins the current refusal diagnostic
+    # for the K=32/K=64 WMMA-under-MODREP gate and is marked `XFAIL:
+    # *` in the `.ll` during the refusal-gated period.  Flips to a
+    # lowering-shape fixture (with `strict.wwm` / `mfma.f32` IR
+    # CHECKs) once the matmul_fp16_16x16 residual is pinned and the
+    # gate flips in `handle_valu_vop3p.cpp`.  See the block comment
+    # in that fixture's `.ll` for the full flip protocol.
+    "wmma_phantom_lane_f16_chain":
+        r"@LIT_FIXTURE_WMMA_PHANTOM_LANE_F16_CHAIN_CO@",
     # s_set_pc_i64 (SOP1) — four sibling fixtures, one per analysis
     # outcome class. See setpc_analysis.cpp / handle_sop1.cpp for the
     # Pattern A (DirectA, br) / Pattern B (IndirectB, indirectbr) /

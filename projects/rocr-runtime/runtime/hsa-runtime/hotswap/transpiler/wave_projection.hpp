@@ -173,26 +173,102 @@ public:
                                                    llvm::Value *v) const = 0;
 
   // True iff this projection guarantees hardware EXEC = -1 between
-  // `emitUnderExec` diamonds.  That invariant is load-bearing for a
-  // specific class of cross-lane lowerings whose correctness requires
-  // all target-wave lanes to participate in the collective (most
-  // notably the WMMA → MFMA redistribute / collect pipeline in
-  // `wmma_lowering.cpp` — target lanes 32..63 on a partial-wave
-  // launch would never write their MFMA destination VGPRs without
-  // HW EXEC=-1, and the collect-stage bpermute's reads from the
-  // upper half would return garbage).  Handlers that rely on that
-  // invariant (such as the V_WMMA_* dispatches in
-  // `handle_valu_vop3p.cpp`) MUST consult this flag and either
-  // refuse loudly or emit a different lowering when it's false.
+  // `emitUnderExec` diamonds *kernel-wide*.  When this is true the
+  // WMMA → MFMA redistribute / MFMA / collect pipeline in
+  // `wmma_lowering.cpp` can run without any additional EXEC
+  // scaffolding because every target-wave lane is already HW-active
+  // for the entire kernel body.  When this is false the handler
+  // must route the pipeline through `emitUnderFullWaveExec` below,
+  // which emits per-dword `@llvm.amdgcn.strict.wwm` markers so the
+  // backend inserts a scoped EXEC save/set-minus-one/restore around
+  // the cross-lane collective.
   //
   // `ModuloReplicationProjection` returns false because it keeps
   // hardware EXEC at the source-wave active mask (see
   // `emitInitialExec`'s comment on why this is correct for the wave-
-  // size-oblivious class of kernels but unsafe for WMMA translation).
-  // `WaveNativeProjection` returns true because its
+  // size-oblivious class of kernels — phantom target lanes stay
+  // HW-inactive kernel-wide, which prevents undef-VGPR contamination
+  // of the source author's own cross-lane ops but means the WMMA
+  // lowering has to locally widen HW EXEC for its own synthesised
+  // cross-lane ops).  `WaveNativeProjection` returns true because its
   // `emitInitialExec` explicitly calls `@llvm.amdgcn.init_whole_wave`
   // to set HW EXEC=-1 for the kernel body.
   virtual bool providesFullWaveExecInvariant() const { return false; }
+
+  // Number of source waves whose per-lane fragment data is present in
+  // each target wave under this projection's mapping.  Callers that
+  // synthesise per-source-wave passes (most notably the WMMA → MFMA
+  // redistribute / MFMA / collect pipeline in `wmma_lowering.cpp`)
+  // iterate `groupBase ∈ {0, W_src, ..., (numSourceWavesPerTarget() -
+  // 1) * W_src}` so that each pass covers exactly one source wave's
+  // worth of data.
+  //
+  // `WaveNativeProjection` (wave32 → wave64 cross-widening) maps two
+  // source waves into one target wave (source wave 0 → target lanes
+  // 0..31, source wave 1 → target lanes 32..63) — returns 2.
+  //
+  // `ModuloReplicationProjection` in the cross-widening direction
+  // always fires under the phantom-lane regime
+  // (`max_flat_workgroup_size < targetWaveSize`, see `raiser.cpp`),
+  // which by definition has a single source wave (the workgroup is
+  // below one target wavefront, so the second "half" of the target
+  // wave has no source workitem — those lanes are phantom).  Same-
+  // wave MODREP instantiations (source == target wave width) also
+  // carry exactly one source wave per target.  Returns 1 in either
+  // case.  A future projection (`ThreadLoopProjection`) would answer
+  // this based on its wrap count.
+  //
+  // Pure virtual so every new projection must answer the question
+  // explicitly — a silent default would let a new cross-widening
+  // projection pick the wrong pass count in `wmma_lowering.cpp` and
+  // emit a bogus second-source-wave MFMA that read undef from
+  // phantom lanes.
+  virtual unsigned numSourceWavesPerTarget() const = 0;
+
+  // Return `v` wrapped in `@llvm.amdgcn.strict.wwm` iff the current
+  // projection does NOT already guarantee HW EXEC=-1 kernel-wide.
+  // On projections that DO provide the invariant (e.g.
+  // `WaveNativeProjection` via kernel-entry `init_whole_wave`),
+  // this is an identity: returning the input unchanged avoids the
+  // regalloc pressure that `SIPreAllocateWWMRegs` would impose if
+  // we emitted a redundant marker (see `WaveProjection::emitInitial
+  // Exec`'s block comment for the 128×128-matmul accumulator-ring
+  // failure mode).
+  //
+  // The marker tells the AMDGPU backend's `SIWholeQuadMode` pass
+  // that the producing instruction chain must execute under HW
+  // EXEC=-1.  EXEC save/restore materialises as
+  // `s_or_saveexec_b64 sN, -1` / `s_mov_b64 exec, sN` around the
+  // backward-dataflow-minimal region SIWholeQuadMode computes.
+  //
+  // Typing: `strict.wwm`'s overload set is `llvm_any_ty`, so this
+  // helper accepts any SSA type (scalar i32 for per-dword wrapping,
+  // `<4 x float>` for an MFMA accumulator, `<2 x half>` for a
+  // bitcast-ready operand pack, etc.).  WMMA→MFMA lowering uses
+  // i32 for per-dword result wrapping and `<4 x float>` / `<4 x
+  // i32>` for per-MFMA-output wrapping so the MFMA itself is
+  // dragged into the WWM backward slice.
+  //
+  // Why per-MFMA-output wrapping (and not only per-result-dword):
+  // SIWholeQuadMode's backward propagation from a `strict.wwm` on a
+  // `ds_bpermute` result stops at the bpermute boundary because
+  // `ds_bpermute`'s read is EXEC-independent — the backend sees
+  // that the bpermute picks up source lanes 0..W_src-1 by address
+  // and concludes that the MFMA output on lanes W_src..2*W_src-1
+  // is "not consumed".  That's correct under a single-pass MFMA,
+  // but WRONG for our cross-widening lowering: the MFMA OUTPUT
+  // lives in the SAME destination VGPR across all 64 target lanes,
+  // and the subsequent `collectResult` bpermute DOES read those
+  // upper-half lanes (target lanes 16..31 collect from source
+  // lanes 32..63's MFMA output to get rows 8..15 in WMMA layout).
+  // If the MFMA runs under HW EXEC=source-active-mask, target
+  // lanes 32..63 never write their MFMA destination VGPR, so the
+  // collect reads stale data and rows 8..15 of the output are
+  // corrupted.  Wrapping the MFMA output in `strict.wwm` forces
+  // SIWholeQuadMode to mark the MFMA itself as WWM, so it writes
+  // every lane's destination VGPR.
+  llvm::Value *wrapAsWWMValue(llvm::IRBuilder<> &B, llvm::Value *v,
+                               const llvm::Twine &name = "wwm") const;
 
 protected:
   ISAProfile src_;
@@ -234,6 +310,13 @@ public:
       const override;
   llvm::Value *extractLaneBitFromWaveMask(llvm::IRBuilder<> &B,
                                            llvm::Value *v) const override;
+
+  // MODREP in the cross-widening direction only instantiates when
+  // `raiser.cpp` routes phantom-lane kernels here as the fallback,
+  // and phantom-lane by definition has exactly one source wave per
+  // target wavefront.  Same-wave MODREP instantiations (source ==
+  // target wave width) are also one-source-wave-per-target.
+  unsigned numSourceWavesPerTarget() const override { return 1; }
 };
 
 // ============================================================================
@@ -287,6 +370,11 @@ public:
   // invariant that WMMA→MFMA lowering (and other
   // all-lanes-must-participate collectives) require.
   bool providesFullWaveExecInvariant() const override { return true; }
+  // Wave32 → wave64 cross-widening: two source waves stack into one
+  // target wave (source wave 0 → target lanes 0..31, source wave 1 →
+  // target lanes 32..63).  Callers emitting per-source-wave passes
+  // run two iterations under this projection.
+  unsigned numSourceWavesPerTarget() const override { return 2; }
 
   llvm::Value *emitInitialExec(llvm::IRBuilder<> &B) const override;
   llvm::Value *emitLaneActiveBit(llvm::IRBuilder<> &B,
@@ -352,6 +440,14 @@ public:
       const override;
   llvm::Value *extractLaneBitFromWaveMask(llvm::IRBuilder<> &B,
                                            llvm::Value *v) const override;
+
+  // `report_fatal_error` placeholder: the projection is not
+  // implemented (see the class docstring).  An override here keeps
+  // the base class's pure-virtual contract satisfied so we don't
+  // need to reintroduce a non-pure default — a value will never be
+  // observed because the constructor aborts before any instance is
+  // returned to a caller.
+  unsigned numSourceWavesPerTarget() const override;
 };
 
 // ============================================================================

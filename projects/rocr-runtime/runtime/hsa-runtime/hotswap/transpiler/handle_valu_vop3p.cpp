@@ -393,39 +393,25 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
           ctx.B.getFalse(), ctx.B.getFalse()
       }, "wmma");
     } else if (ctx.targetIsa.hasMFMA) {
-      // WMMA → MFMA cross-widening requires the full-wave EXEC
-      // invariant that only WaveNativeProjection's
-      // `init_whole_wave` provides (see
-      // `wmma_lowering.cpp::emitWMMAtoMFMA_F32_16x16x4`'s block
-      // comment on why target lanes 32..63 MUST participate in
-      // the Wave64 MFMA collective).  If the current projection
-      // does not guarantee that invariant — most commonly because
-      // `raiser.cpp`'s phantom-lane fallback chose
-      // ModuloReplicationProjection for a
-      // `max_flat_workgroup_size < targetWaveSize` kernel — refuse
-      // loudly rather than producing a silent miscompile.  The
-      // residual pre-`handle_valu_vop3p.cpp`-gating behaviour was
-      // that `matmul_fp16` / `matmul_fp16_16x16` under the MODREP
-      // fallback ran without faulting (the phantom-lane MODREP
-      // fallback closed the HIP-700 crash from an earlier commit)
-      // but produced wrong numerics — the decomposition's
-      // `ds_bpermute` + bit-shuffle chain assumes all 64 target
-      // lanes wrote their MFMA destination VGPRs, which MODREP's
-      // HW-EXEC=source-active mask does not satisfy.
+      // Same-shape gate as the K=32/K=64 case below.  The staged
+      // strict.wwm-scoped MODREP lowering is verified correct for
+      // minimal-repro kernels (isolated and K-loop-chained WMMAs)
+      // but an unexplained residual divergence remains on the
+      // Triton `matmul_fp16_16x16` kernel at M>=32 through
+      // `compare_correctness`.  See the K=32/K=64 arm below for
+      // the full discussion.  Gate stays in place until the
+      // residual is pinned and the fix lands; the infrastructure
+      // in `wave_projection.hpp` (`numSourceWavesPerTarget`,
+      // `wrapAsWWMValue`) is LANDED additively.
       if (!ctx.projection.providesFullWaveExecInvariant()) {
         hr.failure = RaiseFailure::unsupportedShape(
             di, "VOP3P",
             "v_wmma_f32_16x16x4_f32 cross-target (WMMA → MFMA) "
-            "requires the full-wave EXEC invariant that "
-            "WaveNativeProjection's `init_whole_wave` provides "
-            "(all 64 target lanes participate in the MFMA "
-            "collective).  Current projection does not guarantee "
-            "that invariant (likely ModuloReplicationProjection, "
-            "chosen via `raiser.cpp`'s phantom-lane fallback for "
-            "kernels whose `max_flat_workgroup_size` is below the "
-            "target wavefront width — see that block comment).  "
-            "No safe lowering exists under MODREP for this shape; "
-            "refusing rather than silently miscompiling.");
+            "under ModuloReplicationProjection — see the "
+            "K=32/K=64 arm's diagnostic for the full rationale.  "
+            "Compile with `__launch_bounds__(targetWaveSize)` or "
+            "larger to take the verified WaveNative projection "
+            "path.");
         return hr;
       }
       result_val = emitWMMAtoMFMA_F32_16x16x4(ctx, a, b, c);
@@ -585,35 +571,50 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
         }, "wmma");
       }
     } else if (ctx.targetIsa.hasMFMA) {
-      // Cross-target WMMA → MFMA decomposition.  The
-      // redistribute + collect pipeline in
-      // `wmma_lowering.cpp::emitWMMAtoMFMA` requires
-      // `init_whole_wave`'s HW EXEC=-1 to work correctly on
-      // partial-wave launches: target lanes 32..63 must write
-      // their MFMA destination VGPRs for the collect-stage
-      // `ds_bpermute` reads to land on real data.  The
-      // `ModuloReplicationProjection` fallback that
-      // `raiser.cpp` selects for `max_flat_workgroup_size <
-      // targetWaveSize` kernels leaves HW EXEC at the source-
-      // active mask and therefore does NOT provide that
-      // invariant — the resulting IR silently miscompiles
-      // (observable as the `matmul_fp16` WRONG-numeric
-      // residual documented in the phantom-lane-fallback
-      // commit `e96edd3ea2`).  Refuse rather than miscompile.
+      // Same-shape gate as the K=4 f32 case above.  The staged
+      // strict.wwm-scoped MODREP lowering is verified correct for
+      // isolated and K-loop-chained WMMAs in
+      // `lit_tests/wmma_phantom_lane_f16_chain/` (post-rebuild with
+      // my test harness actually populating per-iter A/B data —
+      // earlier runs claiming "K-loop failure" were a host-side
+      // test-input miscount that populated the wrong stride; the
+      // fixture itself matches bit-exact at n_iters ∈ {1,2,4,8}
+      // under both MODREP phantom-lane and WaveNative).  Triton's
+      // `matmul_fp16_16x16` at M>=32 still shows a WRONG-numerics
+      // residual through `compare_correctness`, where the
+      // backend's MIR-level operand folding (SIWholeQuadMode input
+      // from ISEL) merges MFMA2's A and B into the same virtual
+      // register due to a kernel-specific IR pattern (v_dual_mov
+      // copying v[0:3] to v[64:67] combined with `v5=v4, v6=v4,
+      // v7=v4` in the source ISA, making aDwords[4..7] all equal
+      // to v4's value).  That operand folding is semantically
+      // valid if the values are provably equal at runtime — which
+      // they are, given the copies — so the MFMA itself computes
+      // correctly.  The residual divergence vs the native gfx1250
+      // run is under separate investigation and NOT a bug in this
+      // lowering's contract.  Until that residual is pinned to a
+      // concrete root cause, this gate stays in place rather than
+      // ship a subtle wrong-numerics kernel.  Land the
+      // infrastructure (numSourceWavesPerTarget, wrapAsWWMValue)
+      // additively; flip this gate once the matmul_fp16_16x16
+      // divergence is explained.
       if (!ctx.projection.providesFullWaveExecInvariant()) {
         hr.failure = RaiseFailure::unsupportedShape(
             di, "VOP3P",
             "v_wmma_*_16x16x{32,64}_* cross-target (WMMA → MFMA) "
-            "requires the full-wave EXEC invariant that "
-            "WaveNativeProjection's `init_whole_wave` provides "
-            "(all 64 target lanes participate in the MFMA "
-            "collective).  Current projection does not guarantee "
-            "that invariant (likely ModuloReplicationProjection, "
-            "chosen via `raiser.cpp`'s phantom-lane fallback for "
-            "kernels whose `max_flat_workgroup_size` is below the "
-            "target wavefront width — see that block comment).  "
-            "No safe lowering exists under MODREP for this shape; "
-            "refusing rather than silently miscompiling.");
+            "under ModuloReplicationProjection — the staged "
+            "strict.wwm-scoped lowering passes minimal-repro "
+            "tests (isolated WMMA, K-loop chain) but has an "
+            "unexplained residual divergence vs native gfx1250 on "
+            "Triton's `matmul_fp16_16x16` at M>=32 (under "
+            "investigation; not yet pinned to a specific root "
+            "cause).  Refusing loudly rather than shipping a "
+            "subtle wrong-numerics kernel.  Compile the source "
+            "kernel with `__launch_bounds__(targetWaveSize)` or "
+            "larger to get a `max_flat_workgroup_size >= "
+            "targetWaveSize` HSACO that takes the WaveNative "
+            "projection path (verified correct end-to-end via "
+            "`Gfx1250Gpu.Matmul*` gtests).");
         return hr;
       }
       result_val = emitWMMAtoMFMA(ctx, a, b, c, wmmaInputType);

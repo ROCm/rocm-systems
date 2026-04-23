@@ -56,9 +56,15 @@
 ;     assembly in `handle_valu_vop3p.cpp`'s `RaiseFailure::
 ;     unsupportedShape` call site so a future reword that
 ;     drops any of the attribution anchors is caught.
+;
+;     The current refusal text names the staged strict.wwm-
+;     scoped MODREP lowering and the unpinned residual
+;     divergence on matmul_fp16_16x16, with a pointer at the
+;     `__launch_bounds__(targetWaveSize)` workaround that takes
+;     the WaveNative path.  Those anchors pin the diagnostic so
+;     a regression can't quietly drop any of them.
 ; CHECK: raise_cli: kernel 'wmma_phantom_lane_refuse_kernel' failed to raise:
 ; CHECK-SAME: v_wmma_f32_16x16x4_f32
 ; CHECK-SAME: VOP3P
-; CHECK-SAME: full-wave EXEC invariant
-; CHECK-SAME: init_whole_wave
-; CHECK-SAME: phantom-lane fallback
+; CHECK-SAME: ModuloReplicationProjection
+; CHECK-SAME: K=32/K=64 arm

@@ -6,7 +6,9 @@
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h" // AMDGPU::EXEC, EXEC_LO, EXEC_HI
 #include "Utils/AMDGPUBaseInfo.h"            // AMDGPU::mc2PseudoReg
 
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
@@ -57,6 +59,35 @@ Value *WaveProjection::emitInitialExec(IRBuilder<> &B) const {
   // `@llvm.amdgcn.init_whole_wave` and stores the captured original
   // per-lane active bit into the alloca) override this hook.
   return ConstantInt::getSigned(execStorageTy(), -1);
+}
+
+Value *WaveProjection::wrapAsWWMValue(IRBuilder<> &B, Value *v,
+                                        const Twine &name) const {
+  if (providesFullWaveExecInvariant())
+    return v;
+  // `@llvm.amdgcn.strict.wwm`'s overload set in IntrinsicsAMDGPU.td is
+  // `llvm_any_ty`, but in practice the backend lowers only a restricted
+  // set of scalar and vector element types — integers up to i64 and
+  // float/half/bfloat/f32/f64 (plus their fixed-vector shapes).
+  // Calling it with a pointer, aggregate, token, or other
+  // backend-unsupported type would surface as a cryptic signature
+  // error inside `Intrinsic::getOrInsertDeclaration`.  Assert on the
+  // supported subset here so the misuse surfaces at the call site
+  // instead.
+  Type *t = v->getType();
+  Type *elemTy =
+      t->isVectorTy() ? cast<FixedVectorType>(t)->getElementType() : t;
+  (void)elemTy;
+  assert((elemTy->isIntegerTy() || elemTy->isFloatingPointTy()) &&
+         "wrapAsWWMValue supports only integer / floating-point scalars "
+         "and fixed-length vectors thereof; other types are not in the "
+         "AMDGPU backend's strict.wwm lowering coverage (pointer, token, "
+         "aggregate, etc. would produce a cryptic intrinsic-signature "
+         "error).");
+  Module *M = B.GetInsertBlock()->getModule();
+  Function *wwmFn = Intrinsic::getOrInsertDeclaration(
+      M, Intrinsic::amdgcn_strict_wwm, {t});
+  return B.CreateCall(wwmFn, {v}, name);
 }
 
 // ----------------------------------------------------------------------------
@@ -388,6 +419,17 @@ Value *ThreadLoopProjection::extractLaneBitFromWaveMask(
     IRBuilder<> & /*B*/, Value * /*v*/) const {
   report_fatal_error(
       "ThreadLoopProjection::extractLaneBitFromWaveMask unimplemented");
+}
+
+unsigned ThreadLoopProjection::numSourceWavesPerTarget() const {
+  // Constructor `report_fatal_error`s before any instance is returned
+  // so this method is unreachable.  Provide a terminating override
+  // anyway so the base class's pure-virtual contract is satisfied at
+  // link time.  When the projection is eventually implemented, the
+  // value to return is the wrap count `W_tgt / W_src` (= 2 for the
+  // wave32 → wave64 direction this class targets per its docstring).
+  report_fatal_error("ThreadLoopProjection::numSourceWavesPerTarget "
+                     "unimplemented");
 }
 
 // ----------------------------------------------------------------------------
