@@ -5,8 +5,8 @@ from pydantic import ValidationError
 
 from perfxpert.agents import schemas
 
-
 # -- Root ------------------------------------------------------------------
+
 
 def test_root_input_minimal_construction():
     m = schemas.RootInput(user_query="why is this slow?", database_path=None)
@@ -24,6 +24,7 @@ def test_root_output_requires_narrative_and_recs():
 
 
 # -- Analysis --------------------------------------------------------------
+
 
 def test_analysis_input_accepts_db_and_top_n():
     m = schemas.AnalysisInput(database_path="/tmp/a.db", top_kernels=10)
@@ -43,6 +44,7 @@ def test_analysis_output_has_classification_and_metrics():
 
 # -- Recommendation --------------------------------------------------------
 
+
 def test_recommendation_input_threads_findings():
     findings = schemas.AnalysisOutput(
         primary_bottleneck="compute",
@@ -57,9 +59,7 @@ def test_recommendation_input_threads_findings():
 
 def test_recommendation_output_carries_ranked_list():
     m = schemas.RecommendationOutput(
-        recommendations=[
-            {"title": "Reduce VGPR count", "priority": "high", "category": "compute"}
-        ],
+        recommendations=[{"title": "Reduce VGPR count", "priority": "high", "category": "compute"}],
         specialist_used="compute",
     )
     assert m.specialist_used == "compute"
@@ -67,11 +67,18 @@ def test_recommendation_output_carries_ranked_list():
 
 # -- Specialists -----------------------------------------------------------
 
-@pytest.mark.parametrize("schema_name", [
-    "ComputeSpecialistInput", "ComputeSpecialistOutput",
-    "MemorySpecialistInput", "MemorySpecialistOutput",
-    "LatencySpecialistInput", "LatencySpecialistOutput",
-])
+
+@pytest.mark.parametrize(
+    "schema_name",
+    [
+        "ComputeSpecialistInput",
+        "ComputeSpecialistOutput",
+        "MemorySpecialistInput",
+        "MemorySpecialistOutput",
+        "LatencySpecialistInput",
+        "LatencySpecialistOutput",
+    ],
+)
 def test_specialist_schemas_exist(schema_name):
     assert hasattr(schemas, schema_name), f"schemas.{schema_name} missing"
 
@@ -86,6 +93,7 @@ def test_specialist_input_has_arch_and_metrics():
 
 
 # -- Correctness -----------------------------------------------------------
+
 
 def test_correctness_input_consumes_gate_verdict():
     verdict = schemas.GateVerdictModel(
@@ -123,6 +131,7 @@ def test_correctness_action_rejects_invalid():
 
 # -- Frozen / immutable ----------------------------------------------------
 
+
 def test_root_input_is_frozen():
     m = schemas.RootInput(user_query="x", database_path=None)
     with pytest.raises(ValidationError):
@@ -139,3 +148,82 @@ def test_analysis_output_is_frozen():
     )
     with pytest.raises(ValidationError):
         m.confidence = 0.5
+
+
+# -- Finding #4: Cross-field validators, confidence clamps, provider Literal --
+
+
+def test_gate_verdict_pass_requires_no_failing_gate():
+    """status='pass' with failing_gate set must raise ValidationError."""
+    with pytest.raises(ValidationError):
+        schemas.GateVerdictModel(status="pass", failing_gate="compile")
+
+
+def test_gate_verdict_reject_requires_failing_gate():
+    """status='reject' without failing_gate must raise ValidationError."""
+    with pytest.raises(ValidationError):
+        schemas.GateVerdictModel(status="reject")
+
+
+def test_gate_verdict_regressed_requires_failing_gate():
+    """status='regressed' without failing_gate must raise ValidationError."""
+    with pytest.raises(ValidationError):
+        schemas.GateVerdictModel(status="regressed")
+
+
+def test_gate_verdict_reject_with_failing_gate_passes():
+    m = schemas.GateVerdictModel(status="reject", failing_gate="sol")
+    assert m.status == "reject"
+    assert m.failing_gate == "sol"
+
+
+def test_correctness_output_pass_accept_valid():
+    m = schemas.CorrectnessOutput(verdict="pass", action="accept", narrative="ok")
+    assert m.action == "accept"
+
+
+def test_correctness_output_pass_revert_invalid():
+    """verdict='pass' with action='revert' must raise ValidationError."""
+    with pytest.raises(ValidationError):
+        schemas.CorrectnessOutput(verdict="pass", action="revert", narrative="n")
+
+
+def test_correctness_output_reject_revert_valid():
+    m = schemas.CorrectnessOutput(verdict="reject", action="revert", narrative="bad")
+    assert m.action == "revert"
+
+
+def test_analysis_output_confidence_clamped_below_zero():
+    """confidence < 0.0 must raise ValidationError."""
+    with pytest.raises(ValidationError):
+        schemas.AnalysisOutput(
+            primary_bottleneck="compute",
+            confidence=-0.1,
+            time_breakdown={},
+            hot_kernels=[],
+            counter_data_available=False,
+        )
+
+
+def test_analysis_output_confidence_clamped_above_one():
+    """confidence > 1.0 must raise ValidationError."""
+    with pytest.raises(ValidationError):
+        schemas.AnalysisOutput(
+            primary_bottleneck="compute",
+            confidence=1.01,
+            time_breakdown={},
+            hot_kernels=[],
+            counter_data_available=False,
+        )
+
+
+def test_root_input_provider_literal_valid():
+    for prov in ("anthropic", "openai", "ollama", "private", "opencode"):
+        m = schemas.RootInput(user_query="q", provider=prov)
+        assert m.provider == prov
+
+
+def test_root_input_provider_literal_invalid():
+    """provider='bad-provider' must raise ValidationError."""
+    with pytest.raises(ValidationError):
+        schemas.RootInput(user_query="q", provider="bad-provider")

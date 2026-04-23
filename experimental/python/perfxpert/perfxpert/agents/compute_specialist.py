@@ -2,9 +2,15 @@
 
 Filters + ranks compute optimization techniques for a compute-bound kernel.
 
-Tool allowlist (4 of 5 cap used):
+Tool allowlist (5 of 5 cap used after Phase 10 A):
   compute_techniques.catalog, arch.lookup_peaks, roofline.classify,
-  compiler.lookup_flags
+  compiler.lookup_flags, kernel_fusion.find_fusion_candidates
+
+Note: Phase 10 swapped pragma.suggest_pragmas_for_kernel out for
+kernel_fusion.find_fusion_candidates — pragma is still reachable via the
+MCP surface + via the --advanced CLI gate (which loads pragma off the
+specialist allowlist), but fusion candidates are a first-class input to
+compute-specialist ranking on every advisory call.
 
 Layer-2 rule: no Layer-2 → Layer-2 handoffs; returns to Recommendation.
 Air-gap fallback: sort catalog by expected_impact × (1/effort_factor),
@@ -17,8 +23,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from perfxpert.agents import schemas
+from perfxpert.agents._predict_attach import attach_predictions_to_techniques
 from perfxpert.agents.framework import Agent, ToolBinding, run_agent
-from perfxpert.tools import arch, compiler, roofline
+from perfxpert.tools import arch, compiler, kernel_fusion, roofline
 
 
 _FENCE_PATH = Path(__file__).parent / "fence" / "compute_specialist.md"
@@ -30,7 +37,7 @@ def _fetch_catalog(gfx_id: str) -> List[Dict[str, Any]]:
         from perfxpert.tools import compute_techniques  # type: ignore
         return compute_techniques.catalog(gfx_id=gfx_id)
     except ImportError:
-        return []  # Phase 4 deliverable
+        return []  # defensive fallback if compute_techniques tool is absent
 
 
 def build_compute_specialist() -> Agent:
@@ -39,6 +46,13 @@ def build_compute_specialist() -> Agent:
         ToolBinding(name="arch.lookup_peaks", fn=arch.lookup_peaks),
         ToolBinding(name="roofline.classify", fn=roofline.classify),
         ToolBinding(name="compiler.lookup_flags", fn=compiler.lookup_flags),
+        # Phase 10 A — adjacent-short-kernel fusion finder. Replaces the
+        # pragma tool in the cap-5 allowlist; pragma remains reachable
+        # via --advanced + the MCP surface for power users.
+        ToolBinding(
+            name="kernel_fusion.find_fusion_candidates",
+            fn=kernel_fusion.find_fusion_candidates,
+        ),
     ]
     return Agent(
         name="ComputeTechniquesSpecialist",
@@ -83,15 +97,18 @@ def run_compute_specialist(
 
     if raw.get("_mode") == "airgap":
         ranked = _rank_catalog_deterministic(catalog)
+        techniques = attach_predictions_to_techniques(ranked, payload)
         return schemas.ComputeSpecialistOutput(
-            techniques=ranked,
+            techniques=techniques,
             confidence=0.6,
             citations=[],
         )
 
     so = raw.get("structured_output") or {}
+    raw_techniques = so.get("techniques", _rank_catalog_deterministic(catalog))
+    techniques = attach_predictions_to_techniques(raw_techniques, payload)
     return schemas.ComputeSpecialistOutput(
-        techniques=so.get("techniques", _rank_catalog_deterministic(catalog)),
+        techniques=techniques,
         confidence=so.get("confidence", 0.6),
         citations=so.get("citations", []),
     )

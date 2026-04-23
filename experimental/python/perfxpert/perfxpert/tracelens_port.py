@@ -11,7 +11,7 @@ Ports interval arithmetic, kernel categorization, and short kernel detection
 from AMD TraceLens (https://github.com/AMD-AGI/TraceLens).
 
 All functions read from an existing RocpdImportData connection and return
-plain dict / list structures. No output formatting. No ai_analysis imports.
+plain dict / list structures. No output formatting.
 
 Call order dependency:
     timeline = compute_interval_timeline(conn)
@@ -307,7 +307,7 @@ def analyze_short_kernels(
 ) -> Dict[str, Any]:
     """Identify kernels below threshold_us microseconds (TraceLens short-kernel analysis).
 
-    threshold_us defaults to 10μs and is not configurable via CLI in Phase 1.
+    threshold_us defaults to 10μs and is not configurable via CLI.
 
     Edge cases:
     - No kernels below threshold → short_kernel_count=0, histogram=[], top_offenders=[]

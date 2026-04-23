@@ -80,10 +80,11 @@ import warnings as _warnings
 
 
 def _legacy_env_warn(legacy_name: str, canonical_name: str) -> None:
-    """Emit a DeprecationWarning when a legacy env var is still used.
+    """Emit a DeprecationWarning when a pre-rename env var alias is used.
 
-    Called by providers when they fall through to ROCINSIGHT_LLM_* or
-    ROCPD_LLM_* variables so users get a clear migration signal.
+    Providers call this when they fall through to a pre-rename alias so
+    users get a clear migration signal toward the canonical
+    PERFXPERT_LLM_* name.
     """
     _warnings.warn(
         (

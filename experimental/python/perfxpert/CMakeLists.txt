@@ -63,7 +63,6 @@ if(PERFXPERT_BUILD_TESTS AND BUILD_TESTING)
     add_test(
         NAME perfxpert_unit_tests
         COMMAND ${Python3_EXECUTABLE} -m pytest
-            "${CMAKE_CURRENT_SOURCE_DIR}/perfxpert/ai_analysis/tests"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests"
             --noconftest
             -v

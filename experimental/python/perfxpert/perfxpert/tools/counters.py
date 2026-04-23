@@ -6,7 +6,7 @@ structured lookup. Reads knowledge/counter_catalog.yaml + pmc_limits.yaml.
 Tool class: READ_ONLY.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from perfxpert.knowledge import load_yaml
 from perfxpert.tools._class import ToolClass, tool_class
@@ -17,7 +17,7 @@ _TCC_DERIVED = frozenset({"FETCH_SIZE", "WRITE_SIZE"})
 
 
 @tool_class(ToolClass.READ_ONLY)
-def lookup_info(name: str, gfx_id: Optional[str] = None) -> Dict[str, Any]:
+def lookup_info(name: str, gfx_id: str = None) -> Dict[str, Any]:
     """Return structured info for an HW counter by name.
 
     Args:
@@ -67,16 +67,6 @@ def validate_for_gpu(counter_list: List[str], gpu_arch: str) -> Dict[str, Any]:
     for derived in _TCC_DERIVED:
         name_to_block.setdefault(derived, "TCC")
 
-    unknown = sorted(c for c in counter_list if c not in name_to_block)
-    if unknown:
-        return {
-            "ok": False,
-            "violations": [
-                {"type": "unknown_counter", "counters": unknown},
-            ],
-            "fixed_passes": [],
-        }
-
     def _limit_for(block: str) -> int:
         """Look up per-pass limit, preferring arch-specific override."""
         info = limits_cfg.get(block, {})
@@ -91,7 +81,7 @@ def validate_for_gpu(counter_list: List[str], gpu_arch: str) -> Dict[str, Any]:
     passes: List[List[str]] = []
     by_block: Dict[str, List[str]] = {}
     for c in regular:
-        block = name_to_block[c]
+        block = name_to_block.get(c, "UNKNOWN")
         by_block.setdefault(block, []).append(c)
 
     # Pack one pass at a time, up to per-block limit

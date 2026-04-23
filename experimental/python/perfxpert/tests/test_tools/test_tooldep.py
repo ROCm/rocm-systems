@@ -14,8 +14,8 @@ from perfxpert.tools._tooldep import (
     offer_install,
 )
 
-
 # -- registry sanity --------------------------------------------------------
+
 
 def test_registry_contains_expected_externals():
     """The registry must enumerate every external dep used by the codebase."""
@@ -23,8 +23,8 @@ def test_registry_contains_expected_externals():
         "opencode",
         "rocprofv3",
         "amdclang++",
-        "rocprof-trace-decoder",   # ATT library
-        "mcp",                     # python
+        "rocprof-trace-decoder",  # ATT library
+        "mcp",  # python
         "pexpect",
     }
     registered = set(_tooldep._TOOL_REGISTRY.keys())
@@ -34,14 +34,69 @@ def test_registry_contains_expected_externals():
 
 # -- check_tool_available ---------------------------------------------------
 
+
 def test_check_binary_present_returns_true(monkeypatch, tmp_path):
     fake = tmp_path / "some-binary"
     fake.write_text("#!/bin/sh\n")
     fake.chmod(0o755)
     monkeypatch.setattr(_tooldep.shutil, "which", lambda name: str(fake))
+    # Stub subprocess.run so the smoke-test always succeeds
+    monkeypatch.setattr(
+        _tooldep.subprocess,
+        "run",
+        lambda cmd, **kw: mock.MagicMock(returncode=0),
+    )
     ok, detail = check_tool_available("opencode")
     assert ok is True
     assert str(fake) in detail
+
+
+def test_check_binary_smoke_test_oserror_returns_false(monkeypatch, tmp_path):
+    """Binary found on PATH but OSError during smoke-test → (False, msg)."""
+    fake = tmp_path / "broken-binary"
+    fake.write_text("#!/bin/sh\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(_tooldep.shutil, "which", lambda name: str(fake))
+
+    def _raise_oserror(cmd, **kw):
+        raise OSError("exec format error")
+
+    monkeypatch.setattr(_tooldep.subprocess, "run", _raise_oserror)
+    ok, detail = check_tool_available("opencode")
+    assert ok is False
+    assert "smoke-test failed" in detail
+
+
+def test_check_binary_smoke_test_nonzero_returns_false(monkeypatch, tmp_path):
+    """Binary found on PATH but smoke-test exits non-zero → (False, msg)."""
+    fake = tmp_path / "bad-opencode"
+    fake.write_text("#!/bin/sh\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(_tooldep.shutil, "which", lambda name: str(fake))
+    monkeypatch.setattr(
+        _tooldep.subprocess,
+        "run",
+        lambda cmd, **kw: mock.MagicMock(returncode=127),
+    )
+    ok, detail = check_tool_available("opencode")
+    assert ok is False
+    assert "exited 127" in detail
+
+
+def test_check_binary_smoke_test_timeout_returns_false(monkeypatch, tmp_path):
+    """Binary found on PATH but smoke-test times out → (False, msg)."""
+    fake = tmp_path / "hung-opencode"
+    fake.write_text("#!/bin/sh\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(_tooldep.shutil, "which", lambda name: str(fake))
+
+    def _raise_timeout(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, 2)
+
+    monkeypatch.setattr(_tooldep.subprocess, "run", _raise_timeout)
+    ok, detail = check_tool_available("opencode")
+    assert ok is False
+    assert "timed out" in detail
 
 
 def test_check_binary_missing_returns_false(monkeypatch):
@@ -52,7 +107,7 @@ def test_check_binary_missing_returns_false(monkeypatch):
 
 
 def test_check_pylib_present_returns_true():
-    # mcp is installed in this env (Phase 4 landed it)
+    # mcp is a required runtime dep and should be importable
     ok, detail = check_tool_available("mcp")
     # Either mcp is installed OR the test env doesn't have it — both are OK.
     assert isinstance(ok, bool)
@@ -66,6 +121,7 @@ def test_check_pylib_missing_returns_false(monkeypatch):
 
 
 # -- require_tool -----------------------------------------------------------
+
 
 def test_require_tool_raises_when_missing(monkeypatch):
     monkeypatch.setattr(_tooldep.shutil, "which", lambda name: None)
@@ -91,6 +147,7 @@ def test_require_tool_with_allow_install_offers(monkeypatch, capsys):
 
 # -- offer_install ----------------------------------------------------------
 
+
 def test_offer_install_declined_returns_false(monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda _: "n")
     ok = offer_install("opencode")
@@ -112,6 +169,7 @@ def test_offer_install_accepted_runs_command(monkeypatch, capsys):
 
 
 # -- ATT decoder (shared_lib kind) -----------------------------------------
+
 
 def test_att_decoder_check_searches_rocm_paths(monkeypatch, tmp_path):
     # Simulate the library existing under /opt/rocm

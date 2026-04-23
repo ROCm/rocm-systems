@@ -30,3 +30,8 @@
   unit: percent
   high_threshold: 0.75
   medium_threshold: 0.50
+
+# Phase-10 Feature F — MFMA vs VALU ratio lives in
+# `knowledge/matrix_meter.yaml` to preserve the "sol_metrics is a list"
+# schema contract. The Compute Specialist cross-references it via
+# `fence/compute_specialist.md::Matrix Meter`.

@@ -1,7 +1,8 @@
 """Memory-Techniques Specialist (Layer 2).
 
-Tool allowlist (3 of 5 used):
-  memory_techniques.catalog, arch.lookup_peaks, bottleneck.lookup_signatures
+Tool allowlist (5 of 5 used after Phase 10 C):
+  memory_techniques.catalog, arch.lookup_peaks, bottleneck.lookup_signatures,
+  predict_impact.predict_change_impact, unified_memory.analyze_paging
 """
 
 from __future__ import annotations
@@ -10,9 +11,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from perfxpert.agents import schemas
+from perfxpert.agents._predict_attach import attach_predictions_to_techniques
 from perfxpert.agents.compute_specialist import _rank_catalog_deterministic
 from perfxpert.agents.framework import Agent, ToolBinding, run_agent
-from perfxpert.tools import arch, bottleneck
+from perfxpert.tools import arch, bottleneck, predict_impact, unified_memory
 
 
 _FENCE_PATH = Path(__file__).parent / "fence" / "memory_specialist.md"
@@ -23,7 +25,7 @@ def _fetch_catalog(gfx_id: str) -> List[Dict[str, Any]]:
         from perfxpert.tools import memory_techniques  # type: ignore
         return memory_techniques.catalog(gfx_id=gfx_id)
     except ImportError:
-        return []  # Phase 4 deliverable
+        return []  # defensive fallback if memory_techniques tool is absent
 
 
 def build_memory_specialist() -> Agent:
@@ -31,6 +33,21 @@ def build_memory_specialist() -> Agent:
         ToolBinding(name="memory_techniques.catalog", fn=_fetch_catalog),
         ToolBinding(name="arch.lookup_peaks", fn=arch.lookup_peaks),
         ToolBinding(name="bottleneck.lookup_signatures", fn=bottleneck.lookup_signatures),
+        # Phase 10 — change-impact prediction. The specialist calls this
+        # once per surfaced technique before returning so each rec card
+        # carries a speedup bracket + confidence.
+        ToolBinding(
+            name="predict_impact.predict_change_impact",
+            fn=predict_impact.predict_change_impact,
+        ),
+        # Phase 10 C — MI300X unified-memory / cross-die penalty scan.
+        # Fills the 5th slot; called once per invocation to derive
+        # paging hot-spots + XCD fabric traffic totals for the
+        # memory_patterns.yaml signatures.
+        ToolBinding(
+            name="unified_memory.analyze_paging",
+            fn=unified_memory.analyze_paging,
+        ),
     ]
     return Agent(
         name="MemoryTechniquesSpecialist",
@@ -60,15 +77,20 @@ def run_memory_specialist(
     )
 
     if raw.get("_mode") == "airgap":
+        techniques = attach_predictions_to_techniques(
+            _rank_catalog_deterministic(catalog), payload
+        )
         return schemas.MemorySpecialistOutput(
-            techniques=_rank_catalog_deterministic(catalog),
+            techniques=techniques,
             confidence=0.6,
             citations=[],
         )
 
     so = raw.get("structured_output") or {}
+    raw_techniques = so.get("techniques", _rank_catalog_deterministic(catalog))
+    techniques = attach_predictions_to_techniques(raw_techniques, payload)
     return schemas.MemorySpecialistOutput(
-        techniques=so.get("techniques", _rank_catalog_deterministic(catalog)),
+        techniques=techniques,
         confidence=so.get("confidence", 0.6),
         citations=so.get("citations", []),
     )

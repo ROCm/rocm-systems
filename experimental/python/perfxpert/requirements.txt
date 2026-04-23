@@ -11,7 +11,6 @@ openai>=1.0
 # Rich terminal output
 rich>=13.0
 
-# claude-code provider: Claude Code CLI stored credentials
-# Install if you want --llm claude-code without an ANTHROPIC_API_KEY.
-# Requires the Claude Code CLI to be installed separately.
-# claude-agent-sdk>=0.1
+# --llm anthropic|openai|ollama|private|opencode are the supported
+# provider values; configure keys via ANTHROPIC_API_KEY / OPENAI_API_KEY /
+# PERFXPERT_LLM_PRIVATE_API_KEY (see docs/guides/getting-started.md §10).

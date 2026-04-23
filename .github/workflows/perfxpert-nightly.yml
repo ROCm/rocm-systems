@@ -1,0 +1,110 @@
+name: "PerfXpert Nightly Benchmarks"
+
+on:
+  schedule:
+    # Run nightly at 2 AM UTC
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  provider-smoke:
+    name: "LLM provider smoke test"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          cd experimental/python/perfxpert
+          pip install -e '.[dev]'
+      - name: Smoke test (airgap runtime)
+        run: |
+          cd experimental/python/perfxpert
+          mkdir -p /tmp/perfxpert-smoke
+          python3 -m perfxpert analyze \
+            -i tests/fixtures/compute_bound.db \
+            --format json \
+            -d /tmp/perfxpert-smoke \
+            -o smoke
+          python3 - << 'PY'
+          import json
+          payload = json.load(open("/tmp/perfxpert-smoke/smoke.json"))
+          assert payload["metadata"]["database_file"].endswith("compute_bound.db")
+          assert payload["summary"]["primary_bottleneck"] == "compute"
+          assert "recommendations" in payload
+          PY
+
+  benchmarks:
+    name: TritonBench + KernelBench analysis sweep
+    runs-on: linux-gfx942-1gpu-ossci-rocm
+    timeout-minutes: 180
+    needs: [provider-smoke]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install perfxpert
+        working-directory: experimental/python/perfxpert
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -e '.[dev]'
+          perfxpert doctor
+
+      - name: Run TritonBench-ROCm
+        working-directory: experimental/python/perfxpert
+        run: |
+          python3 tests/benchmarks/drive_tritonbench.py \
+            --suite-root benchmarks/tritonbench-rocm \
+            2>&1 | tee tritonbench-log.txt
+
+      - name: Run KernelBench-ROCm level-1
+        working-directory: experimental/python/perfxpert
+        run: |
+          python3 tests/benchmarks/drive_kernelbench.py \
+            --suite-root benchmarks/kernelbench-rocm \
+            --level level1 \
+            2>&1 | tee kernelbench-log.txt
+
+      - name: Summarize nightly sweep
+        working-directory: experimental/python/perfxpert
+        run: |
+          python3 << 'PY'
+          import json, pathlib
+          pathlib.Path("nightly_report").mkdir(exist_ok=True)
+          triton = json.load(open("benchmarks/tritonbench-rocm/analysis_summary.json"))
+          kernelbench = json.load(open("benchmarks/kernelbench-rocm/analysis_summary.json"))
+          all_results = list(triton.get("results", [])) + list(kernelbench.get("results", []))
+          succeeded = [r for r in all_results if r.get("analysis_succeeded")]
+          with_recommendations = [r for r in succeeded if int(r.get("recommendation_count", 0)) > 0]
+          summary = {
+              "sweep_mode": "analysis_only",
+              "note": (
+                  "The nightly sweep verifies that perfxpert analyze runs on benchmark traces. "
+                  "Automatic patch emission was removed from the CLI, so this job now gates on "
+                  "successful analysis coverage instead of applied-speedup results."
+              ),
+              "tritonbench_kernels": len(triton.get("results", [])),
+              "kernelbench_kernels": len(kernelbench.get("results", [])),
+              "analyses_succeeded": len(succeeded),
+              "kernels_with_recommendations": len(with_recommendations),
+          }
+          if summary["tritonbench_kernels"] == 0 or summary["kernelbench_kernels"] == 0:
+              raise SystemExit(
+                  "nightly sweep produced no benchmark results; inspect the TritonBench/KernelBench logs"
+              )
+          if len(succeeded) != len(all_results):
+              raise SystemExit(
+                  "nightly sweep had benchmark traces that failed perfxpert analyze; inspect the TritonBench/KernelBench logs"
+              )
+          pathlib.Path("nightly_report/summary.json").write_text(json.dumps(summary, indent=2))
+          pathlib.Path("nightly_report/tritonbench-results.json").write_text(json.dumps(triton, indent=2))
+          pathlib.Path("nightly_report/kernelbench-results.json").write_text(json.dumps(kernelbench, indent=2))
+          PY
+
+      - name: Upload nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perfxpert-nightly-${{ github.run_id }}
+          path: experimental/python/perfxpert/nightly_report/
+          retention-days: 30

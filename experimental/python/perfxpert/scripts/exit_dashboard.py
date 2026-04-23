@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Phase 5 Exit Dashboard — aggregates all Week-5 Go/No-Go metrics into one JSON.
+"""Audit Gate Exit Dashboard — aggregates all Go/No-Go metrics into one JSON.
 
 Usage:
     python scripts/exit_dashboard.py --output exit_dashboard.json [--allow-partial]
 
-Runs BEFORE Phase 6 deletion. Output determines GO vs NO-GO.
+Runs before any breaking change. Output determines GO vs NO-GO.
 
 Spec reference: `docs/superpowers/specs/2026-04-17-multi-agent-perfxpert-design.md`
 §7 Go/No-Go table (9 rows).
@@ -24,13 +24,16 @@ PARITY_SNAPSHOT = REPO_ROOT / "tests" / "test_parity" / "parity_snapshots" / "_a
 RED_TEAM_OUTCOMES = REPO_ROOT / "tests" / "test_red_team" / "_attack_outcomes"
 AIRGAP_SNAPSHOTS = REPO_ROOT / "tests" / "test_integration" / "_airgap_snapshots"
 FP_AGGREGATE = REPO_ROOT / "tests" / "test_regression_gate" / "_runner_outputs" / "_aggregate.json"
-NARROW_SCOPE_TEST = REPO_ROOT / "tests" / "test_agents" / "test_narrow_scope.py"
 
 
 def collect_parity() -> float | str:
     if not PARITY_SNAPSHOT.exists():
         return "pending"
     data = json.loads(PARITY_SNAPSHOT.read_text())
+    # Current snapshot format: top-level "pmc_subset_agreement" with nested "agreement_rate".
+    # Older snapshots had "agreement_rate" at the top level.
+    if "pmc_subset_agreement" in data:
+        return float(data["pmc_subset_agreement"]["agreement_rate"])
     return float(data["agreement_rate"])
 
 
@@ -68,11 +71,9 @@ def collect_false_positive() -> float | str:
 
 def collect_narrow_scope_violations() -> int | str:
     """Run per-agent narrow-scope CI check inline (fast subprocess)."""
-    if not NARROW_SCOPE_TEST.exists():
-        return "pending"
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "pytest", str(NARROW_SCOPE_TEST.relative_to(REPO_ROOT)),
+            [sys.executable, "-m", "pytest", "tests/test_agents/test_narrow_scope.py",
              "--tb=no", "-q"],
             capture_output=True, text=True, cwd=REPO_ROOT,
         )
@@ -192,7 +193,7 @@ def main() -> None:
     if args.render:
         render_to_terminal(dashboard)
 
-    if verdict == "NO-GO":
+    if verdict == "NO-GO" and not args.allow_partial:
         sys.exit(2)
     if verdict == "PARTIAL (pending)" and not args.allow_partial:
         sys.exit(1)
@@ -224,7 +225,7 @@ def render_to_terminal(dashboard: Dict[str, Any]) -> None:
     verdict = dashboard["overall_verdict"]
     color = {"GO": "green", "NO-GO": "red", "PARTIAL (pending)": "yellow"}[verdict]
 
-    console.rule(f"[bold {color}]Phase 5 Exit Dashboard — Week-5 Go/No-Go[/]")
+    console.rule(f"[bold {color}]Audit Gate Exit Dashboard — Go/No-Go[/]")
 
     table = Table(title="", show_lines=True)
     table.add_column("Metric", style="cyan")

@@ -30,9 +30,13 @@ def _parse_headers(raw: str) -> Dict[str, str]:
         return {}
     try:
         obj = json.loads(raw)
-    except json.JSONDecodeError:
-        return {}
-    return {str(k): str(v) for k, v in obj.items()} if isinstance(obj, dict) else {}
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"PERFXPERT_LLM_PRIVATE_HEADERS contains invalid JSON: {e}. " f"Value was: {raw[:80]!r}"
+        ) from e
+    if not isinstance(obj, dict):
+        raise ValueError(f"PERFXPERT_LLM_PRIVATE_HEADERS must be a JSON object, got {type(obj).__name__}")
+    return {str(k): str(v) for k, v in obj.items()}
 
 
 class PrivateProvider(Provider):
