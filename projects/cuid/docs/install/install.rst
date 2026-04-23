@@ -4,9 +4,9 @@
 
 .. _Building-cuid:
 
-**********************
+*****************************
 Building and installing CUID
-**********************
+*****************************
 
 This topic explains how to build and install the CUID library from source.
 
@@ -18,7 +18,7 @@ To build CUID from source, the following dependencies are required:
 - CMake v3.14 or later
 - G++ v5.0 or later
 - For Ubuntu or Debian: OpenSSL v1.1 or later
-- For Microsoft Windows: Bcrypt (Windows Native crypto library)
+- For Microsoft Windows: `Bcrypt <https://www.npmjs.com/package/bcrypt?activeTab=code>`_ (Windows Native crypto library)
 
 Building and installing CUID library
 =====================================

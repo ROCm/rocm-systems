@@ -86,7 +86,7 @@ The values present in the corresponding bit positions (first column in the prece
 
   * - 48:51
     - A fixed value of 8
-    - The value is fixed for [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562.html) compliance.
+    - The value is fixed for `RFC 9562 <https://www.rfc-editor.org/rfc/rfc9562.html>`_ compliance.
 
   * - 52:63
     - ID value (part 2)
@@ -94,7 +94,7 @@ The values present in the corresponding bit positions (first column in the prece
 
   * - 64:65
     - A fixed value of 10b
-    - The value is fixed for [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562.html) compliance.
+    - The value is fixed for `RFC 9562 <https://www.rfc-editor.org/rfc/rfc9562.html>`_ compliance.
 
   * - 66:127
     - ID value (part 3)
@@ -105,8 +105,8 @@ Because the device serial number is protected information, the primary CUID gene
 Derived CUID
 =============
 
-For typical day-to-day operations, the derived CUID is used. It is derived by hashing the primary CUID using HMAC-SHA2-256 (keyed hash) using a 256-bit key. The derived CUID obscures hardware details from lower-privilege software and prevents precomputed table attacks. 
+For typical day-to-day operations, the derived CUID is used. It is derived by hashing the primary CUID using HMAC-SHA2-256 (keyed hash) using a 256-bit key. The derived CUID obscures hardware details from lower-privilege software and prevents precomputed table attacks.
 
-To protect the serial number consisting sensitive information, the tool users must provide the 256-bit key required for the keyed hashing function, as described in FIPS 198-1, The Keyed-Hash Message Authentication Code (HMAC). This key must be unique, random, and protected from unauthorized use. The secure storage of the key might require additional management overhead. 
+To protect the serial number consisting sensitive information, the tool users must provide the 256-bit key required for the keyed hashing function, as described in FIPS 198-1, The Keyed-Hash Message Authentication Code (HMAC). This key must be unique, random, and protected from unauthorized use. The secure storage of the key might require additional management overhead.
 
 The key should be accessible only to privileged users or the privileged service, which can then use the key, along with the primary CUID, in the HMAC-SHA2-256 function to generate the derived CUID. Note that if the key changes due to key rotation, the derived CUID will also change. However, because the primary CUIDs always remain the same, these can always be used to trace the derived CUIDs back to their respective devices.

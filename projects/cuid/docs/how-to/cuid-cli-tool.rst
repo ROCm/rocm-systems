@@ -4,9 +4,9 @@
 
 .. _cuid-cli-tool:
 
-********************
-Using CUID CLI 
-********************
+****************
+Using CUID CLI
+****************
 
 The CUID library provides a command-line interface (CLI) for generating CUIDs and querying devices for their CUIDs. This topic discusses how to use this CUID CLI tool.
 
