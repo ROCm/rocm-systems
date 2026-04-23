@@ -66,6 +66,7 @@ add_library(hotswap-transpiler STATIC
   wave_projection.cpp
   wave_size_obstruction.cpp
   rewrite_cross_lane_divergent.cpp
+  rewrite_permlane16_xor3_partner.cpp
   c5_predicate_chain_classifier.cpp
   sem_op_attrs.cpp
   raise_failure.cpp

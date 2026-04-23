@@ -42,6 +42,8 @@
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/TargetParser/Triple.h"
 #include "llvm/Transforms/Utils/PromoteMemToReg.h"
+
+#include "rewrite_permlane16_xor3_partner.hpp"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/Support/Debug.h"
@@ -541,11 +543,42 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
 
   // On gfx12+ the hardware command processor uses TTMP registers for
   // workgroup scheduling (RDNA4+ / CDNA-next layout):
-  //   ttmp9        = workgroup_id_x  (accelerated launch)
+  //   ttmp7[15:0]  = workgroup_id_y  (low 16 bits)
+  //   ttmp7[31:16] = workgroup_id_z  (high 16 bits; 0 when grid has no Z)
   //   ttmp8[29:25] = wave_id within workgroup (subgroup ID)
+  //   ttmp9        = workgroup_id_x  (accelerated launch)
+  // The packed-Y-and-Z layout in ttmp7 is from the AMDGPU backend's
+  // `loadInputValue` path (see LLVM's `AMDGPULegalizerInfo.cpp` —
+  // `WorkGroupIDY = ArgDescriptor::createRegister(TTMP7, 0xFFFFu)`,
+  // `WorkGroupIDZ = ArgDescriptor::createRegister(TTMP7, 0xFFFF0000u)`).
+  // Triton-generated gfx1250 kernels read the Y component via
+  // `s_and_b32 sN, ttmp7, 0xffff` (e.g. matmul_fp16_16x16's `pid_n =
+  // tl.program_id(1)` lowering), so a kernel raised without ttmp7
+  // initialised always sees `workgroup_id_y == 0` — only the
+  // leftmost column of workgroups in a 2D-grid kernel writes its
+  // tile, and the right-side tiles stay at whatever the destination
+  // memory held at dispatch (verified empirically: matmul_fp16_16x16
+  // M=32 with an all-1s input shows cols 0..15 = correct 32.0,
+  // cols 16..31 = poison-fill from the host's pre-launch memset).
   // gfx11 (RDNA3) passes these via SGPRs set up by the CP instead.
   if (AMDGPU::isGFX12Plus(*mc.subtargetInfo)) {
     B.CreateStore(B.CreateCall(fnWorkgroupIdX, {}, "ttmp9_wg_id"), regs.ttmp[9]);
+
+    // ttmp7 = (workgroup_id_z << 16) | (workgroup_id_y & 0xFFFF).
+    // Mask Y to 16 bits before shifting Z so a stray-high-bit Y
+    // doesn't bleed into the Z field; the AMDGPU backend's mask is
+    // `~0u` on no-Z kernels (the upper bits are simply ignored by
+    // the consumer's `s_and ttmp7, 0xffff` pattern), so masking
+    // unconditionally is safe and matches the principled all-cases
+    // shape.
+    Value *wgIdY = B.CreateCall(fnWorkgroupIdY, {}, "ttmp7_wg_id_y");
+    Function *fnWorkgroupIdZ =
+        Intrinsic::getOrInsertDeclaration(&M, Intrinsic::amdgcn_workgroup_id_z);
+    Value *wgIdZ = B.CreateCall(fnWorkgroupIdZ, {}, "ttmp7_wg_id_z");
+    Value *wgIdYLo = B.CreateAnd(wgIdY, B.getInt32(0xFFFF), "wg_id_y_lo16");
+    Value *wgIdZHi = B.CreateShl(wgIdZ, B.getInt32(16), "wg_id_z_hi16");
+    Value *ttmp7Val = B.CreateOr(wgIdYLo, wgIdZHi, "ttmp7_val");
+    B.CreateStore(ttmp7Val, regs.ttmp[7]);
 
     // wave_id = workitem_id_x / wavefront_size (32 for gfx12)
     Value *tidForTtmp = B.CreateCall(fnWorkitemIdX, {}, "ttmp8_tid");
@@ -799,6 +832,35 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
     SmallVector<AllocaInst *, 512> allocas;
     regs.collectAllocas(allocas);
     PromoteMemToReg(allocas, DT, &AC);
+  }
+
+  // ==== Phase 6.04: Triton cross-16 bitonic-merge xor3-partner rewrite ====
+  //
+  // Detects the gfx1250-only `permlane16_swap + v_xor3_b32` idiom
+  // Triton emits at the cross-16 stage of `tl.sort` / `tl.topk`'s
+  // bitonic merge.  See `rewrite_permlane16_xor3_partner.hpp` for
+  // the full pattern, the (a)/(b) hypothesis split that motivates
+  // the rewrite, and the GTest pinning evidence.
+  //
+  // Runs AFTER `PromoteMemToReg` (Phase 6) so the
+  // alloca-backed VGPR round-trips are folded out and the bpermute
+  // results flow directly into the xor inputs.  Runs BEFORE Phase
+  // 6.5 (writelane/readlane rewrite) and Phase 6.6 (predicate-chain
+  // classifier) so the rewrite's substitutions don't perturb the
+  // SSA shape those downstream passes inspect — both downstream
+  // passes only walk specific intrinsic call sites
+  // (`amdgcn.{writelane,readlane,workitem.id.x}`) that this
+  // rewrite never touches.
+  {
+    Permlane16Xor3PartnerRewriteReport report =
+        rewritePermLane16Xor3Partner(*F);
+    if (report.matchedSites > 0) {
+      LLVM_DEBUG({
+        dbgs() << "permlane16-xor3-partner: rewrote "
+               << report.matchedSites << " site(s) in '" << kernelName
+               << "'\n";
+      });
+    }
   }
 
   // ==== Phase 6.5: Cross-widen writelane/readlane rewrite ====

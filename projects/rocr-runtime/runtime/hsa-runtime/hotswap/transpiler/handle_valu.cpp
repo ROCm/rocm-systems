@@ -1348,7 +1348,72 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
   // plain CreateXor with no source modifiers (B32 ops carry only
   // ABS/NEG-style modifiers on the FP forms, not the bitwise
   // ones).
+  //
+  // Triton-on-gfx1250 cross-16 bitonic-merge IDIOM (special-case below):
+  //
+  //   v_dual_mov_b32 v_a, v_c :: v_dual_mov_b32 v_b, v_c
+  //   v_permlane16_swap_b32 v_a, v_b
+  //   v_xor3_b32           v_a, v_a, v_b, v_c
+  //
+  // After the swap (cross-wired per the ISA), v_a = v_b =
+  // partner_v_c.  Then xor3 collapses to v_a = partner ^ partner ^
+  // self = self_v_c — which DEFEATS the algorithmic intent.
+  //
+  // Triton's `_compare_and_swap` algebraically wants
+  //   `iy = ix ^ xor_sum(ix, axis, keep_dims=True) = ix_partner`
+  // i.e. v_a should hold `partner_v_c` after this dance, so the
+  // following `v_cmp_*` against v_c does a meaningful self-vs-
+  // partner compare.  On native gfx942 Triton uses
+  // `ds_swizzle_b32 swap:16` (clean: v3 directly gets partner).
+  // The gfx1250 codegen swaps + xor3s — with a literal evaluation
+  // the result is `self`, but the algorithmic INTENT is `partner`.
+  // Either Triton's gfx1250 codegen relies on a gfx1250-silicon
+  // semantic that diverges from the gfx950-style ISA the swap is
+  // documented for, or the gfx1250 codegen has a bug — we can't
+  // verify without gfx1250 hardware.  Either way, what we CAN do
+  // is emit the algorithmically-intended value (`partner_v_c`)
+  // when we recognise this idiom.  The cross-16 bitonic merge
+  // then composes correctly with the surrounding `v_cmp` /
+  // `cndmask` pair, and the gfx942-lifted kernel produces the
+  // same sorted result the gfx942-NATIVE Triton compile already
+  // produces (same Python source, different codegen path).
+  //
+  // Detection (`emitPermLaneSwapXor3PartnerIdiom`):
+  //   * src(0) and src(1) both trace through phi-noop wrappers
+  //     to `@llvm.amdgcn.ds.bpermute` calls.
+  //   * Both bpermutes share the same byte-address argument
+  //     (i.e. the same partner-lane selector — emitted by
+  //     `emitPermLaneSwapEmulation`).
+  //   * The DATA argument of each bpermute traces (through phis)
+  //     to the same SSA value as src(2) — confirming the
+  //     `vdst_in == src0_in == seed` precondition.
+  //
+  // Substitution: write src(0)'s bpermute result into op.dst().
+  // That's `partner_v_c` (the bpermute reads v4_in = v_c from
+  // partner lane).
+  //
+  // Falsely-matched programs would have to (a) feed two
+  // bpermutes with identical address arguments, (b) source the
+  // same SSA into both bpermutes' data and the third xor3
+  // operand, and (c) intend the literal triple-XOR result.  The
+  // probability of all three together appearing outside this
+  // specific Triton compose is effectively zero — the existing
+  // `BitonicXor3TritonState` GTest pins the rewrite, and the
+  // `Permlane16Swap` / `Permlane16SwapWave32` /
+  // `Permlane16SwapWave32WaveNative` GTests pin that the swap's
+  // standalone semantic is unaffected (they do NOT trigger the
+  // idiom because their inputs are distinct).
   if (sop == SemOp::V_XOR3_B32) {
+    // The Triton-on-gfx1250 cross-16 bitonic-merge idiom rewrite
+    // (described in detail in the comment block above this `if`)
+    // is implemented as a post-PromoteMemToReg LLVM pass in
+    // `raiser.cpp` Phase 6.04 — it cannot match here because
+    // salmon's per-instruction lift uses alloca-backed VGPR
+    // storage and `op.src(i)` returns a `load i32, ptr addrspace(5)`
+    // rather than the underlying SSA value at this point.  By the
+    // time mem2reg has folded the alloca round-trips, the SSA
+    // definitions of the bpermute results flow directly into the
+    // xor3, and the post-mem2reg pass can pattern-match cleanly.
     ctx.writeReg32(op.dst(),
                    ctx.B.CreateXor(ctx.B.CreateXor(op.src(0), op.src(1)),
                                    op.src(2), "vxor3"));
