@@ -281,8 +281,8 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
         ROCmVersion_DIR
         ROCmVersion_ROOT
         ROCmVersion_ROOT_DIR
-        ROCPROFSYS_DEFAULT_ROCM_PATH
         ROCM_PATH
+        ROCPROFSYS_DEFAULT_ROCM_PATH
     )
         if(NOT DEFINED ${_PATH} AND DEFINED ENV{${_PATH}})
             set(_VAL "$ENV{${_PATH}}")
@@ -306,8 +306,8 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
             ${ROCmVersion_ROOT_DIR}
             $ENV{CMAKE_PREFIX_PATH}
             ${CMAKE_PREFIX_PATH}
-            ${ROCPROFSYS_DEFAULT_ROCM_PATH}
             ${ROCM_PATH}
+            ${ROCPROFSYS_DEFAULT_ROCM_PATH}
             /opt/rocm
         )
             if(EXISTS ${_DIR})
