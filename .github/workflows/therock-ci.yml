@@ -92,7 +92,7 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.linux_projects != '[]' && needs.setup.outputs.run_linux_rccl_ci != 'true' }}
+    if: ${{ needs.setup.outputs.linux_projects != '[]' }}
     strategy:
       fail-fast: false
       matrix:
@@ -133,7 +133,7 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.windows_projects != '[]' && needs.setup.outputs.run_linux_rccl_ci != 'true' }}
+    if: ${{ needs.setup.outputs.windows_projects != '[]' }}
     strategy:
       fail-fast: false
       matrix:
