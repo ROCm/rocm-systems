@@ -1,0 +1,102 @@
+# Compiler flag catalog with allowlist markers for §5.8 compile.build enforcement.
+# Ref: llm-reference-guide.md lines 1751-1998.
+
+- flag: "-O0"
+  category: optimization_level
+  description: "No optimization"
+  allowlist: true
+  risk: low
+  goals: ["debug"]
+  arches: ["all"]
+  kernel_classes: ["any"]
+- flag: "-O1"
+  category: optimization_level
+  description: "Basic optimization"
+  allowlist: true
+  risk: low
+  goals: ["build_speed"]
+  arches: ["all"]
+  kernel_classes: ["any"]
+- flag: "-O2"
+  category: optimization_level
+  description: "Standard optimization"
+  allowlist: true
+  risk: low
+  goals: ["general"]
+  arches: ["all"]
+  kernel_classes: ["any"]
+- flag: "-O3"
+  category: optimization_level
+  description: "Aggressive optimization"
+  allowlist: true
+  risk: low
+  goals: ["general", "throughput"]
+  arches: ["all"]
+  kernel_classes: ["any"]
+
+- flag: "--offload-arch="
+  category: target_selection
+  description: "Target a specific AMD GPU architecture"
+  allowlist: true
+  risk: low
+  note: "Use exact gfx target, e.g. --offload-arch=gfx942"
+  goals: ["mfma_enablement", "targeting"]
+  arches: ["gfx908", "gfx90a", "gfx942", "gfx950", "gfx1030", "gfx1100"]
+  kernel_classes: ["matrix", "generic"]
+
+- flag: "-ffast-math"
+  category: fast_math
+  description: "Enable IEEE-incompatible fast math"
+  allowlist: true
+  risk: medium
+  note: "Changes IEEE semantics; validate numerical results"
+  goals: ["math_throughput"]
+  arches: ["all"]
+  kernel_classes: ["compute", "vector_math", "reduction"]
+- flag: "-fno-math-errno"
+  category: fast_math
+  description: "Don't set errno on math errors"
+  allowlist: true
+  risk: low
+  goals: ["math_throughput"]
+  arches: ["all"]
+  kernel_classes: ["compute", "vector_math", "reduction"]
+- flag: "-freciprocal-math"
+  category: fast_math
+  description: "Allow x / y as x * (1/y)"
+  allowlist: true
+  risk: medium
+  goals: ["math_throughput"]
+  arches: ["all"]
+  kernel_classes: ["compute", "vector_math"]
+
+- flag: "-mllvm -amdgpu-num-vgpr="
+  category: register_control
+  description: "Override VGPR count (suffix numeric)"
+  allowlist: true
+  risk: medium
+  note: "Takes a numeric suffix; e.g., -mllvm -amdgpu-num-vgpr=64"
+  goals: ["occupancy"]
+  arches: ["gfx908", "gfx90a", "gfx942", "gfx950"]
+  kernel_classes: ["register_limited"]
+
+- flag: "-fopenmp"
+  category: parallelism
+  description: "Enable OpenMP"
+  allowlist: true
+  risk: low
+  goals: ["parallelism"]
+  arches: ["all"]
+  kernel_classes: ["host_parallel"]
+
+# Deny-listed (never auto-apply):
+- flag: "-Xlinker"
+  category: linker
+  description: "Pass to linker — unbounded attack surface"
+  allowlist: false
+  risk: high
+- flag: "-Wl,-rpath"
+  category: linker
+  description: "Run-time library path"
+  allowlist: false
+  risk: high

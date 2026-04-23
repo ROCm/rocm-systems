@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "flag",
+      "category",
+      "description",
+      "allowlist",
+      "risk"
+    ],
+    "properties": {
+      "flag": {
+        "type": "string"
+      },
+      "category": {
+        "type": "string"
+      },
+      "description": {
+        "type": "string"
+      },
+      "allowlist": {
+        "type": "boolean"
+      },
+      "risk": {
+        "type": "string",
+        "enum": [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "note": {
+        "type": "string"
+      },
+      "goals": {
+        "type": "array",
+        "items": {"type": "string"}
+      },
+      "arches": {
+        "type": "array",
+        "items": {"type": "string"}
+      },
+      "kernel_classes": {
+        "type": "array",
+        "items": {"type": "string"}
+      }
+    }
+  }
+}

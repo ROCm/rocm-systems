@@ -9,10 +9,16 @@ description = "AI-powered GPU trace analysis for rocprofiler-sdk databases"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Advanced Micro Devices, Inc." }]
-requires-python = ">=3.8"
-# Zero mandatory runtime dependencies — core analysis works with stdlib only.
-# LLM enhancement requires anthropic or openai (optional extras below).
-dependencies = []
+requires-python = ">=3.10"
+# Phase 1 (agentic refactor) adds pydantic/pyyaml/jsonschema for structured
+# knowledge loading and schema validation. LLM enhancement still requires
+# anthropic or openai (optional extras below).
+dependencies = [
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "jsonschema>=4.0",
+    "httpx>=0.25",
+]
 
 [project.optional-dependencies]
 llm  = ["anthropic>=0.18", "openai>=1.0"]
@@ -20,7 +26,7 @@ rich = ["rich>=13.0"]
 # claude-agent-sdk enables --llm claude-code using Claude Code's stored credentials
 # (falls back to ANTHROPIC_API_KEY if CLI not found)
 all  = ["anthropic>=0.18", "openai>=1.0", "rich>=13.0", "claude-agent-sdk>=0.1"]
-dev  = ["pytest", "flake8", "black"]
+dev  = ["pytest>=8.0", "pytest-asyncio>=0.21", "flake8", "black"]
 
 [project.scripts]
 perfxpert = "perfxpert.__main__:main"
