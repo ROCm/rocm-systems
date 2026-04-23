@@ -5,6 +5,7 @@ Documentation for rocJPEG is available at
 
 ## (Unreleased) rocJPEG 1.5.0
 
+
 ### Changed
 
 * rocJPEG is now delivered as part of [TheRock](https://github.com/ROCm/TheRock). All core dependencies are provided by the TheRock build.
