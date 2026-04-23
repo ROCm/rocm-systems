@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import threading
 import uuid
 from dataclasses import dataclass
 from typing import Callable, Iterator, Optional
@@ -60,12 +61,18 @@ _PROVIDER_CANONICAL_ENV = {
     "opencode": "PERFXPERT_LLM_OPENCODE_KEY",
 }
 
+_LIVE_CALL_ENV_LOCK = threading.RLock()
+
 
 @contextlib.contextmanager
 def _override_provider_env(
     provider: Optional[str], api_key: Optional[str]
 ) -> Iterator[None]:
-    """Temporarily inject ``api_key`` into the provider's canonical env var."""
+    """Temporarily inject ``api_key`` into the provider's canonical env var.
+
+    The override is protected by a process-wide re-entrant lock because
+    environment mutation is global to the interpreter.
+    """
     if not provider or not api_key:
         yield
         return
@@ -74,16 +81,17 @@ def _override_provider_env(
         yield
         return
 
-    sentinel = object()
-    previous = os.environ.get(env_name, sentinel)
-    os.environ[env_name] = api_key
-    try:
-        yield
-    finally:
-        if previous is sentinel:
-            os.environ.pop(env_name, None)
-        else:
-            os.environ[env_name] = previous  # type: ignore[assignment]
+    with _LIVE_CALL_ENV_LOCK:
+        sentinel = object()
+        previous = os.environ.get(env_name, sentinel)
+        os.environ[env_name] = api_key
+        try:
+            yield
+        finally:
+            if previous is sentinel:
+                os.environ.pop(env_name, None)
+            else:
+                os.environ[env_name] = previous  # type: ignore[assignment]
 
 
 @dataclass(frozen=True)
