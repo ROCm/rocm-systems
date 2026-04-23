@@ -255,7 +255,7 @@ rocprofiler_add_integration_execute_test(
             --att-gpu-index 0,1 -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
-    LABELS "integration-tests;exclusive-gpu"
+    LABELS "integration-tests;multi-gpu"
     DISABLED ${IS_DISABLED})
 
 # No machine has gpu index = 9999 The FAIL regex for this test is the ROCP_ERROR specific
