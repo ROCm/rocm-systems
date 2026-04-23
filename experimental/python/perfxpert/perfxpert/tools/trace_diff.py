@@ -116,15 +116,31 @@ def _airgap_narrative(result: Dict[str, Any]) -> str:
     regressions = result.get("primary_regressions", []) or []
     improvements = result.get("primary_improvements", []) or []
 
-    if wall_pct > 0.5:
-        headline = (
-            f"Runtime regressed by {wall_pct:+.2f}% "
-            f"({len(regressions)} kernel regression(s) detected)."
-        )
+    if regressions:
+        if wall_pct > 0.5:
+            headline = (
+                f"Runtime regressed by {wall_pct:+.2f}% "
+                f"({len(regressions)} kernel regression(s) detected)."
+            )
+        else:
+            headline = (
+                f"Kernel-level regressions detected while wall time stayed within "
+                f"noise ({wall_pct:+.2f}%)."
+            )
     elif wall_pct < -0.5:
         headline = (
             f"Runtime improved by {wall_pct:+.2f}% "
             f"({len(improvements)} kernel improvement(s) detected)."
+        )
+    elif improvements:
+        headline = (
+            f"Kernel-level improvements detected while wall time stayed within "
+            f"noise ({wall_pct:+.2f}%)."
+        )
+    elif wall_pct > 0.5:
+        headline = (
+            f"Runtime regressed by {wall_pct:+.2f}% "
+            f"({len(regressions)} kernel regression(s) detected)."
         )
     else:
         headline = (
