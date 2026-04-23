@@ -871,6 +871,72 @@ pass.  The bug surfaces only under the joint regime:
   A and B operand vregs after the swap;
 - Non-uniform B input so the swap'd-vreg data matters.
 
+### 12.4.1 Additional session findings (2026-04-22)
+
+Session 2 ran several directed experiments; the residual is still
+open, but the evidence pool has narrowed:
+
+  * **Mode-3 mis-layout is NOT a uniform ±16 shift.**  With
+    `A[i,k] = (i*32+k)/64` and `B = identity` (so the reference is
+    `C[i,j] = A[i,j]`), row 0 of the output is bitwise correct (all
+    32 cells), while row 1 shows a mixed pattern:
+      * `C[1, 0]` is correct (`0.5`);
+      * `C[1, 1..7]` return `0.0` (expected `A[1, 1..7]` ∈
+        `[0.5156, 0.6094]`);
+      * `C[1, 8..15]` return `A[1, j] + A[1, j+8]` (a SUM of two
+        matrix cells);
+      * `C[1, 16..23]` show the same values as `C[1, 8..15]`;
+      * rows 2..31 all fail.
+    This is not a single-axis shift; the interaction mixes values
+    across BOTH the row and column axes, which rules out the
+    simplest "fragment accidentally off by K" / "stride-by-one"
+    hypotheses.
+
+  * **MFMA-output `strict.wwm` wrap is NOT load-bearing for
+    correctness on single-WMMA kernels.**  Dropping the
+    `wrapAsWWMValue` calls on `mfma1` / `mfma2` results (keeping
+    only the collect-dword wrap) — leaving `SIWholeQuadMode` to
+    propagate WWM backward from the collect — keeps
+    `matmul_fp16_16x16` bitwise correct across all five shapes AND
+    does NOT change `matmul_fp16`'s mode-5 failure pattern (same
+    1024/1024 mismatches, same ±16 offset).  This falsifies
+    candidate #1's narrow form (MFMA-output WWM region collapse),
+    though a broader "WWM region interacts badly with multi-WMMA
+    regalloc" variant is still live.
+
+  * **LDS reads sit INSIDE the WWM region in both kernels.**
+    Disassembling the lifted HSACOs shows the `ds_read_b128` loading
+    the B fragment lives between `s_or_saveexec_b64 sN, -1` and
+    `s_mov_b64 exec, sN`.  Under `EXEC = -1`, all 64 target lanes
+    (including phantom lanes 32..63) execute the LDS read; the
+    phantom lanes compute LDS addresses from their own `lane_id` /
+    `mbcnt` output, which point past the LDS segment the source-
+    active lanes wrote — so those lanes read zero / uninitialised
+    LDS, and their MFMA output is whatever that data computes to.
+    This would naturally break target lanes 32..47 / 48..63, whose
+    collect-stage bperm reads feed source-active lanes 16..31 (the
+    second half of each wave32's output fragment).  `matmul_fp16_16x16`
+    has the same pattern but passes, so the phantom-LDS-read
+    hypothesis must have a mitigating factor on the 16×16 path —
+    perhaps because its collect doesn't need the phantom lanes'
+    MFMA output (the output tile is 16×16 so only the first 16 of
+    every 32 per-lane outputs are consumed via the store pattern).
+    VERIFY: trace `matmul_fp16_16x16`'s per-lane output STORE
+    addressing; if it never reads source-lanes 16..31 of the
+    collect (e.g. the Triton-emitted epilogue only stores lane 0..15
+    output to C because BLOCK_M=16), the phantom-LDS-read corruption
+    would land only in unused VGPR slots and not surface.
+
+  * **Hand-rolled `quad_wmma_kernel` / `single_wmma_kernel` repros
+    are INVALID.**  Each lane in my sketched repros loads `A0[0]`
+    uniformly (not per-lane fragment-distributed), so every lane
+    feeds the same <16 x half> into the WMMA and the intrinsic's
+    cross-lane aggregation returns a non-meaningful result (the
+    "all-15" / "all-0" per-lane output on mode-5 / mode-6 that I
+    couldn't interpret earlier).  A valid repro needs to manually
+    distribute the A/B matrix across lanes per the gfx12 wave32
+    WMMA fragment layout — this is the next concrete step.
+
 Candidate root causes to investigate next (ordered by suspicion,
 all unverified — these are TODOs, not localisations):
 
