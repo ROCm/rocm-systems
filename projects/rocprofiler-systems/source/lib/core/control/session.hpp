@@ -3,9 +3,10 @@
 
 #pragma once
 
+#include "subscriber.hpp"
+
 #include <atomic>
 #include <cstdint>
-#include <functional>
 #include <mutex>
 #include <set>
 #include <string>
@@ -15,8 +16,6 @@
 
 namespace rocprofsys::control
 {
-using callback_t = std::function<void()>;
-
 class session
 {
 public:
@@ -30,14 +29,17 @@ public:
 
     void shutdown();
 
-    void register_region_pause_resume_callbacks(callback_t resume_callback,
-                                                callback_t pause_callback);
+    void subscribe(subscriber sub);
 
     [[nodiscard]] bool region_filter_active() const noexcept
     {
         return m_region_filter_active.load(std::memory_order_relaxed);
     }
-    [[nodiscard]] bool should_write_markers() const;
+
+    [[nodiscard]] bool is_active() const noexcept
+    {
+        return m_active.load(std::memory_order_relaxed);
+    }
 
     void force_initial_pause();
 
@@ -52,13 +54,15 @@ private:
     std::atomic<bool>                  m_region_filter_active{ false };
     std::atomic<std::uint32_t>         m_active_region_count{ 0 };
     std::atomic<bool>                  m_user_paused{ false };
+    std::atomic<bool>                  m_active{ true };
 
-    std::vector<callback_t> m_resume_callbacks;
-    std::vector<callback_t> m_pause_callbacks;
+    std::vector<subscriber> m_subscribers;
 
     std::mutex m_region_mutex;
-    std::mutex m_callback_mutex;
+    std::mutex m_subscribers_mutex;
 
-    void trigger_callbacks(const std::vector<callback_t>& callbacks);
+    void recompute_active();
+    void notify_pause();
+    void notify_resume();
 };
 }  // namespace rocprofsys::control

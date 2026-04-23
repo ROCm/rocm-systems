@@ -3,7 +3,10 @@
 
 set(control_sources ${CMAKE_CURRENT_LIST_DIR}/session.cpp)
 
-set(control_headers ${CMAKE_CURRENT_LIST_DIR}/session.hpp)
+set(control_headers
+    ${CMAKE_CURRENT_LIST_DIR}/session.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/subscriber.hpp
+)
 
 target_sources(
     rocprofiler-systems-core-library

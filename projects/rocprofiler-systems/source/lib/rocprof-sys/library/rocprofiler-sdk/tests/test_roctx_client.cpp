@@ -132,7 +132,7 @@ TEST_F(roctx_client_test, should_write_no_filter)
 
     const roctx_client_config              config{ true, true, true, false, "" };
     const roctx_client<mock_marker_policy> client(config);
-    EXPECT_TRUE(client.get_session()->should_write_markers());
+    EXPECT_TRUE(client.get_session()->is_active());
 }
 
 TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
@@ -141,7 +141,7 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
 
     const roctx_client_config              config{ true, true, true, false, "Region 1" };
     const roctx_client<mock_marker_policy> client(config);
-    EXPECT_FALSE(client.get_session()->should_write_markers());
+    EXPECT_FALSE(client.get_session()->is_active());
 }
 
 // ============================================================================
@@ -150,7 +150,7 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
 // Each test creates a roctx_client, obtains its control::session via
 // get_session(), registers callback counters, and simulates events
 // by calling the controller's public handle_* methods. Assertions verify
-// ctrl->should_write_markers() returns the correct value at each point
+// ctrl->is_active() returns the correct value at each point
 // and that start/stop callbacks fire at the right times.
 // ============================================================================
 
@@ -165,15 +165,15 @@ protected:
 
     /// Create a client and register callback counters on its controller.
     /// Uses is_write_enabled=true with no backends (perfetto/timemory off)
-    /// so ctrl->should_write_markers() purely reflects controller state.
+    /// so ctrl->is_active() purely reflects controller state.
     std::unique_ptr<roctx_client_t> make_client(const std::string& regions)
     {
         const roctx_config_t config{ true, false, false, false, regions };
         auto                 client = std::make_unique<roctx_client_t>(config);
 
         auto ctrl = client->get_session();
-        ctrl->register_region_pauser_resume_callbacks([this]() { start_count++; },
-                                                      [this]() { stop_count++; });
+        ctrl->subscribe(
+            { [this]() { stop_count++; }, [this]() { start_count++; }, "test_counters" });
 
         return client;
     }
@@ -189,23 +189,27 @@ protected:
 //   CodeB            => NOT profiled (paused)
 //   roctx_resume     => start callback fires; should_write becomes true
 //   CodeC            => profiled
+//   CodeD            => profiled
+//
+// Without a region filter, is_active() always returns true.
+// Pause/resume only affects the main tracing context via callbacks.
 TEST_F(roctx_client_control_test, pause_resume_no_filter)
 {
     auto client = make_client("");
     auto ctrl   = client->get_session();
 
     EXPECT_FALSE(ctrl->region_filter_active());
-    EXPECT_TRUE(ctrl->should_write_markers());
+    EXPECT_TRUE(ctrl->is_active());
 
     // Pause: stop callback fires, should_write becomes false
     ctrl->handle_pause(std::uint64_t{ 1 });
     EXPECT_EQ(stop_count, 1);
-    EXPECT_FALSE(ctrl->should_write_markers());
+    EXPECT_TRUE(ctrl->is_active());
 
     // Resume: start callback fires, should_write becomes true
     ctrl->handle_resume(std::uint64_t{ 1 });
     EXPECT_EQ(start_count, 1);
-    EXPECT_TRUE(ctrl->should_write_markers());
+    EXPECT_TRUE(ctrl->is_active());
 }
 
 // ---------------------------------------------------------------------------
@@ -238,44 +242,44 @@ TEST_F(roctx_client_control_test, selective_region_normal)
     EXPECT_TRUE(ctrl->region_filter_active());
 
     // Code-Block A: outside target region
-    EXPECT_FALSE(ctrl->should_write_markers());
+    EXPECT_FALSE(ctrl->is_active());
 
     // Region-Start "Region 1"
     ctrl->handle_range_start(1, "Region 1");
     EXPECT_EQ(start_count, 1);
-    EXPECT_TRUE(ctrl->should_write_markers());  // B
+    EXPECT_TRUE(ctrl->is_active());  // B
 
     // Region-Start "Region 2" (not a target)
     ctrl->handle_range_start(2, "Region 2");
-    EXPECT_EQ(start_count, 1);                  // no new callback
-    EXPECT_TRUE(ctrl->should_write_markers());  // C (Region 1 still active)
+    EXPECT_EQ(start_count, 1);       // no new callback
+    EXPECT_TRUE(ctrl->is_active());  // C (Region 1 still active)
 
     // Region-Stop "Region 2" (not tracked)
     ctrl->handle_range_stop(2);
-    EXPECT_TRUE(ctrl->should_write_markers());  // D
+    EXPECT_TRUE(ctrl->is_active());  // D
 
     // Region-Stop "Region 1"
     ctrl->handle_range_stop(1);
     EXPECT_EQ(stop_count, 1);
-    EXPECT_FALSE(ctrl->should_write_markers());
+    EXPECT_FALSE(ctrl->is_active());
 
     // Region-Start "Region 3" (not a target)
     ctrl->handle_range_start(3, "Region 3");
-    EXPECT_FALSE(ctrl->should_write_markers());  // E: not profiled
+    EXPECT_FALSE(ctrl->is_active());  // E: not profiled
 
     // Region-Stop "Region 3"
     ctrl->handle_range_stop(3);
-    EXPECT_FALSE(ctrl->should_write_markers());
+    EXPECT_FALSE(ctrl->is_active());
 
     // Region-Start "Region 1" again (new range id)
     ctrl->handle_range_start(4, "Region 1");
     EXPECT_EQ(start_count, 2);
-    EXPECT_TRUE(ctrl->should_write_markers());  // F
+    EXPECT_TRUE(ctrl->is_active());  // F
 
     // Region-Stop "Region 1"
     ctrl->handle_range_stop(4);
     EXPECT_EQ(stop_count, 2);
-    EXPECT_FALSE(ctrl->should_write_markers());  // G: not profiled
+    EXPECT_FALSE(ctrl->is_active());  // G: not profiled
 }
 
 // ---------------------------------------------------------------------------
@@ -300,27 +304,27 @@ TEST_F(roctx_client_control_test, selective_region_pause_resume_inside)
     auto ctrl   = client->get_session();
 
     // CodeZ: outside region
-    EXPECT_FALSE(ctrl->should_write_markers());
+    EXPECT_FALSE(ctrl->is_active());
 
     // Push Region1
     ctrl->handle_range_start(1, "Region 1");
     EXPECT_EQ(start_count, 1);
-    EXPECT_TRUE(ctrl->should_write_markers());  // CodeA
+    EXPECT_TRUE(ctrl->is_active());  // CodeA
 
     // roctx_pause
     ctrl->handle_pause(std::uint64_t{ 1 });
     EXPECT_EQ(stop_count, 1);
-    EXPECT_FALSE(ctrl->should_write_markers());  // CodeB: not profiled
+    EXPECT_FALSE(ctrl->is_active());  // CodeB: not profiled
 
     // roctx_resume (paused is true, inside region => succeeds)
     ctrl->handle_resume(std::uint64_t{ 1 });
     EXPECT_EQ(start_count, 2);
-    EXPECT_TRUE(ctrl->should_write_markers());  // CodeC
+    EXPECT_TRUE(ctrl->is_active());  // CodeC
 
     // Pop Region1
     ctrl->handle_range_stop(1);
     EXPECT_EQ(stop_count, 2);
-    EXPECT_FALSE(ctrl->should_write_markers());  // CodeD
+    EXPECT_FALSE(ctrl->is_active());  // CodeD
 }
 
 // ---------------------------------------------------------------------------
@@ -349,27 +353,27 @@ TEST_F(roctx_client_control_test, selective_region_pause_outside_resume_inside)
     EXPECT_EQ(stop_count, 0);  // no callback fired
 
     // CodeZ: outside region
-    EXPECT_FALSE(ctrl->should_write_markers());
+    EXPECT_FALSE(ctrl->is_active());
 
     // Push Region1 (pause was ignored, so not paused)
     ctrl->handle_range_start(1, "Region 1");
     EXPECT_EQ(start_count, 1);
-    EXPECT_TRUE(ctrl->should_write_markers());  // CodeA
+    EXPECT_TRUE(ctrl->is_active());  // CodeA
 
     // CodeB: still profiled
-    EXPECT_TRUE(ctrl->should_write_markers());
+    EXPECT_TRUE(ctrl->is_active());
 
     // roctx_resume: not paused => ignored
     ctrl->handle_resume(std::uint64_t{ 1 });
     EXPECT_EQ(start_count, 1);  // no new callback
 
     // CodeC: still profiled
-    EXPECT_TRUE(ctrl->should_write_markers());
+    EXPECT_TRUE(ctrl->is_active());
 
     // Pop Region1
     ctrl->handle_range_stop(1);
     EXPECT_EQ(stop_count, 1);
-    EXPECT_FALSE(ctrl->should_write_markers());  // CodeD
+    EXPECT_FALSE(ctrl->is_active());  // CodeD
 }
 
 // ---------------------------------------------------------------------------
@@ -396,24 +400,24 @@ TEST_F(roctx_client_control_test, selective_region_pause_then_region_ends)
     // Push Region1
     ctrl->handle_range_start(1, "Region 1");
     EXPECT_EQ(start_count, 1);
-    EXPECT_TRUE(ctrl->should_write_markers());  // CodeA
+    EXPECT_TRUE(ctrl->is_active());  // CodeA
 
     // roctx_pause
     ctrl->handle_pause(std::uint64_t{ 1 });
     EXPECT_EQ(stop_count, 1);
-    EXPECT_FALSE(ctrl->should_write_markers());  // CodeC: not profiled
+    EXPECT_FALSE(ctrl->is_active());  // CodeC: not profiled
 
     // Pop Region1: region ends while paused.
     // handle_range_stop sees paused threads => logs warning,
     // clears paused set. Stop callbacks NOT fired (already fired by pause).
     ctrl->handle_range_stop(1);
-    EXPECT_EQ(stop_count, 1);                    // no double-stop
-    EXPECT_FALSE(ctrl->should_write_markers());  // CodeD: outside region
+    EXPECT_EQ(stop_count, 1);         // no double-stop
+    EXPECT_FALSE(ctrl->is_active());  // CodeD: outside region
 
     // roctx_resume: paused set was cleared by range_stop => ignored
     ctrl->handle_resume(std::uint64_t{ 1 });
     EXPECT_EQ(start_count, 1);  // no new callback
-    EXPECT_FALSE(ctrl->should_write_markers());
+    EXPECT_FALSE(ctrl->is_active());
 }
 
 // ---------------------------------------------------------------------------
@@ -433,8 +437,8 @@ TEST_F(roctx_client_control_test, double_pause_is_ignored)
     ctrl->handle_pause(tid);
     EXPECT_EQ(stop_count, 1);
 
-    // Calling thread is paused, so markers must not be written
-    EXPECT_FALSE(ctrl->should_write_markers());
+    // No region filter => should_write always true; pause only affects callbacks
+    EXPECT_TRUE(ctrl->is_active());
 }
 
 TEST_F(roctx_client_control_test, resume_without_pause_is_ignored)
@@ -445,7 +449,7 @@ TEST_F(roctx_client_control_test, resume_without_pause_is_ignored)
     // Resume without prior pause
     ctrl->handle_resume(std::uint64_t{ 1 });
     EXPECT_EQ(start_count, 0);
-    EXPECT_TRUE(ctrl->should_write_markers());
+    EXPECT_TRUE(ctrl->is_active());
 }
 
 TEST_F(roctx_client_control_test, nested_target_regions)
@@ -453,27 +457,27 @@ TEST_F(roctx_client_control_test, nested_target_regions)
     auto client = make_client("Region 1");
     auto ctrl   = client->get_session();
 
-    EXPECT_FALSE(ctrl->should_write_markers());
+    EXPECT_FALSE(ctrl->is_active());
 
     // First instance
     ctrl->handle_range_start(1, "Region 1");
     EXPECT_EQ(start_count, 1);
-    EXPECT_TRUE(ctrl->should_write_markers());
+    EXPECT_TRUE(ctrl->is_active());
 
     // Nested second instance (same region name, different range id)
     ctrl->handle_range_start(2, "Region 1");
     EXPECT_EQ(start_count, 1);  // already active, no extra callback
-    EXPECT_TRUE(ctrl->should_write_markers());
+    EXPECT_TRUE(ctrl->is_active());
 
     // Stop first - still have second
     ctrl->handle_range_stop(1);
     EXPECT_EQ(stop_count, 0);  // not yet empty
-    EXPECT_TRUE(ctrl->should_write_markers());
+    EXPECT_TRUE(ctrl->is_active());
 
     // Stop second - now empty
     ctrl->handle_range_stop(2);
     EXPECT_EQ(stop_count, 1);
-    EXPECT_FALSE(ctrl->should_write_markers());
+    EXPECT_FALSE(ctrl->is_active());
 }
 
 TEST_F(roctx_client_control_test, multiple_target_regions)
@@ -482,23 +486,23 @@ TEST_F(roctx_client_control_test, multiple_target_regions)
     auto ctrl   = client->get_session();
 
     EXPECT_TRUE(ctrl->region_filter_active());
-    EXPECT_FALSE(ctrl->should_write_markers());
+    EXPECT_FALSE(ctrl->is_active());
 
     ctrl->handle_range_start(1, "Region 1");
     EXPECT_EQ(start_count, 1);
-    EXPECT_TRUE(ctrl->should_write_markers());
+    EXPECT_TRUE(ctrl->is_active());
 
     ctrl->handle_range_start(2, "Region 2");
     EXPECT_EQ(start_count, 1);  // already active
-    EXPECT_TRUE(ctrl->should_write_markers());
+    EXPECT_TRUE(ctrl->is_active());
 
     ctrl->handle_range_stop(1);
     EXPECT_EQ(stop_count, 0);  // Region 2 still active
-    EXPECT_TRUE(ctrl->should_write_markers());
+    EXPECT_TRUE(ctrl->is_active());
 
     ctrl->handle_range_stop(2);
     EXPECT_EQ(stop_count, 1);
-    EXPECT_FALSE(ctrl->should_write_markers());
+    EXPECT_FALSE(ctrl->is_active());
 }
 
 TEST_F(roctx_client_control_test, shutdown_clears_state)
@@ -507,12 +511,12 @@ TEST_F(roctx_client_control_test, shutdown_clears_state)
     auto ctrl   = client->get_session();
 
     ctrl->handle_range_start(1, "Region 1");
-    EXPECT_TRUE(ctrl->should_write_markers());
+    EXPECT_TRUE(ctrl->is_active());
 
     ctrl->shutdown();
 
     EXPECT_FALSE(ctrl->region_filter_active());
-    EXPECT_TRUE(ctrl->should_write_markers());
+    EXPECT_TRUE(ctrl->is_active());
 }
 
 TEST_F(roctx_client_control_test, stop_unknown_range_is_noop)
@@ -522,7 +526,7 @@ TEST_F(roctx_client_control_test, stop_unknown_range_is_noop)
 
     ctrl->handle_range_stop(999);
     EXPECT_EQ(stop_count, 0);
-    EXPECT_FALSE(ctrl->should_write_markers());
+    EXPECT_FALSE(ctrl->is_active());
 }
 
 TEST_F(roctx_client_control_test, start_with_null_message_is_ignored)
@@ -532,7 +536,7 @@ TEST_F(roctx_client_control_test, start_with_null_message_is_ignored)
 
     ctrl->handle_range_start(1, nullptr);
     EXPECT_EQ(start_count, 0);
-    EXPECT_FALSE(ctrl->should_write_markers());
+    EXPECT_FALSE(ctrl->is_active());
 }
 
 // ============================================================================
