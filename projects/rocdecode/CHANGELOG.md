@@ -4,6 +4,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 
 ## (Unreleased) rocDecode 1.8.0
 
+
 ### Changed
 
 * rocDecode is now delivered as part of [TheRock](https://github.com/ROCm/TheRock). All core dependencies are provided by the TheRock build.
