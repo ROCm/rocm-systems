@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -211,8 +212,16 @@ struct CodeObjectInfo {
   std::string uri = {};
 };
 
+struct DispatchSignalLifetime {
+  std::mutex mutex = {};
+  std::condition_variable cv = {};
+  uint32_t active_pollers = 0;
+  bool destroyed = false;
+};
+
 struct DispatchSignalTracker {
   hsa_signal_t signal = {};
+  std::shared_ptr<DispatchSignalLifetime> signal_lifetime = {};
   hsa_agent_t agent = {};
   uint64_t queue_id = 0;
   uint64_t queue_ptr = 0;
@@ -568,13 +577,9 @@ class Monitor {
 
     {
       std::lock_guard<std::mutex> lk{signal_mutex_};
+      signal_lifetimes_.clear();
       signal_dispatches_.clear();
       wrapped_handlers_.clear();
-    }
-
-    {
-      std::lock_guard<std::mutex> lk{destroyed_signal_mutex_};
-      destroyed_signals_.clear();
     }
 
     completion_tracks_.reset();
@@ -913,9 +918,57 @@ class Monitor {
     queue.profiling_enabled.store(status == HSA_STATUS_SUCCESS, std::memory_order_release);
   }
 
-  void note_dispatch_signal(hsa_signal_t signal, const DispatchSignalTracker& tracker) {
+  std::shared_ptr<DispatchSignalLifetime> acquire_signal_lifetime(hsa_signal_t signal) {
+    std::lock_guard<std::mutex> lk{signal_mutex_};
+    auto& lifetime = signal_lifetimes_[signal.handle];
+    if(!lifetime) lifetime = std::make_shared<DispatchSignalLifetime>();
+    return lifetime;
+  }
+
+  bool begin_signal_poll(const DispatchSignalTracker& tracker) {
+    if(!tracker.signal_lifetime) return false;
+
+    std::unique_lock<std::mutex> lk{tracker.signal_lifetime->mutex};
+    if(tracker.signal_lifetime->destroyed) return false;
+
+    ++tracker.signal_lifetime->active_pollers;
+    return true;
+  }
+
+  void end_signal_poll(const DispatchSignalTracker& tracker) {
+    if(!tracker.signal_lifetime) return;
+
+    std::unique_lock<std::mutex> lk{tracker.signal_lifetime->mutex};
+    if(tracker.signal_lifetime->active_pollers == 0) return;
+
+    --tracker.signal_lifetime->active_pollers;
+    if(tracker.signal_lifetime->destroyed && tracker.signal_lifetime->active_pollers == 0) {
+      lk.unlock();
+      tracker.signal_lifetime->cv.notify_all();
+    }
+  }
+
+  struct SignalUseScope {
+    SignalUseScope(Monitor& input_monitor, const DispatchSignalTracker& input_tracker)
+    : monitor{input_monitor}
+    , tracker{input_tracker}
+    , active{monitor.begin_signal_poll(tracker)} {}
+
+    ~SignalUseScope() {
+      if(active) monitor.end_signal_poll(tracker);
+    }
+
+    explicit operator bool() const { return active; }
+
+    Monitor& monitor;
+    const DispatchSignalTracker& tracker;
+    bool active = false;
+  };
+
+  void note_dispatch_signal(hsa_signal_t signal, DispatchSignalTracker tracker) {
     if(signal.handle == 0) return;
 
+    tracker.signal_lifetime = acquire_signal_lifetime(signal);
     if(completion_tracks_ != nullptr && !completion_tracks_->push(tracker)) {
       trace_.add_dropped_packets();
     }
@@ -930,14 +983,29 @@ class Monitor {
   void note_signal_destroyed(hsa_signal_t signal) {
     if(signal.handle == 0) return;
 
+    std::shared_ptr<DispatchSignalLifetime> lifetime = {};
     {
       std::lock_guard<std::mutex> lk{signal_mutex_};
+      auto& slot = signal_lifetimes_[signal.handle];
+      if(!slot) slot = std::make_shared<DispatchSignalLifetime>();
+      lifetime = slot;
+      signal_lifetimes_.erase(signal.handle);
       signal_dispatches_.erase(signal.handle);
       wrapped_handlers_.erase(signal.handle);
     }
 
-    std::lock_guard<std::mutex> lk{destroyed_signal_mutex_};
-    destroyed_signals_.emplace_back(signal.handle);
+    std::unique_lock<std::mutex> lk{lifetime->mutex};
+    lifetime->destroyed = true;
+    const auto active_pollers = lifetime->active_pollers;
+    if(active_pollers != 0) {
+      debug_log("signal destroy wait signal=0x%llx active_pollers=%u\n",
+                static_cast<unsigned long long>(signal.handle), active_pollers);
+    }
+    lifetime->cv.wait(lk, [&]() { return lifetime->active_pollers == 0; });
+    if(active_pollers != 0) {
+      debug_log("signal destroy proceed signal=0x%llx\n",
+                static_cast<unsigned long long>(signal.handle));
+    }
   }
   void note_wrapped_handler(hsa_signal_t signal, hsa_amd_signal_handler handler, void* arg) {
     if(signal.handle == 0 || handler == nullptr) return;
@@ -1079,7 +1147,10 @@ class Monitor {
 
     DispatchSignalTracker tracker{};
     if(Monitor::instance().claim_dispatch_signal(wrapped.signal, &tracker)) {
-      Monitor::instance().handle_dispatch_completion(tracker, signal_value);
+      SignalUseScope signal_use{Monitor::instance(), tracker};
+      if(signal_use) {
+        Monitor::instance().handle_dispatch_completion(tracker, signal_value);
+      }
     }
 
     const bool keep_handler =
@@ -1229,14 +1300,22 @@ class Monitor {
     while(published < hint) {
       const uint64_t slot_index = queue_slot(published, queue.size, queue.mask);
       const auto& slot_meta = queue.slots[slot_index];
-      if(slot_meta.ticket.load(std::memory_order_acquire) != (published + 1)) break;
+      const auto ticket = slot_meta.ticket.load(std::memory_order_acquire);
+      // On the validated HIP/CLR publish path, some runtimes reserve large batches up front and
+      // then publish them in chunks, which can move this advisory per-slot metadata away from the
+      // currently committed slot. Publication therefore keys off the shadow doorbell watermark
+      // plus the slot header becoming valid for that runtime order. The ticket is only used to
+      // decide whether producer-side metadata like the TID is still attributable to this logical
+      // dispatch.
+      const bool slot_ticket_matches = (ticket == (published + 1));
 
       auto* slot = ring + (slot_index * AQLMON_PACKET_BYTES);
       auto* packet = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(slot);
       const uint16_t header = load_atomic(&packet->header);
       if(packet_type(header) == HSA_PACKET_TYPE_INVALID) break;
 
-      const uint32_t producer_tid = slot_meta.tid.load(std::memory_order_relaxed);
+      const uint32_t producer_tid =
+          slot_ticket_matches ? slot_meta.tid.load(std::memory_order_relaxed) : 0;
       const uint32_t record_pid = current_pid();
       const uint32_t record_tid = producer_tid;
       bool injected_signal = false;
@@ -1324,22 +1403,17 @@ class Monitor {
         }
       }
 
-      {
-        std::vector<uint64_t> destroyed = {};
-        {
-          std::lock_guard<std::mutex> lk{destroyed_signal_mutex_};
-          destroyed.swap(destroyed_signals_);
-        }
-        for(const auto signal_handle : destroyed) {
-          pending.erase(signal_handle);
-        }
-      }
-
       auto& api = real_api();
       for(auto itr = pending.begin(); itr != pending.end();) {
         auto& queue = itr->second;
         while(!queue.empty()) {
           const auto& tracker = queue.front();
+          SignalUseScope signal_use{*this, tracker};
+          if(!signal_use) {
+            queue.pop_front();
+            progress = true;
+            continue;
+          }
           const auto value =
               (api.signal_load_relaxed != nullptr) ? api.signal_load_relaxed(tracker.signal) : 1;
           if(value > 0) break;
@@ -1397,14 +1471,13 @@ class Monitor {
   SharedMemoryTrace trace_ = {};
   std::mutex registry_mutex_ = {};
   std::mutex signal_mutex_ = {};
-  std::mutex destroyed_signal_mutex_ = {};
   std::mutex injected_signal_mutex_ = {};
   std::unordered_map<uint64_t, std::shared_ptr<QueueState>> queues_ = {};
   std::unordered_map<uint64_t, std::shared_ptr<QueueState>> doorbells_ = {};
+  std::unordered_map<uint64_t, std::shared_ptr<DispatchSignalLifetime>> signal_lifetimes_ = {};
   std::unordered_map<uint64_t, std::deque<DispatchSignalTracker>> signal_dispatches_ = {};
   std::unordered_map<uint64_t, WrappedAsyncHandlerState> wrapped_handlers_ = {};
   std::unordered_map<uint64_t, std::vector<CodeObjectInfo>> executable_code_objects_ = {};
-  std::vector<uint64_t> destroyed_signals_ = {};
   std::vector<hsa_signal_t> free_injected_signals_ = {};
   std::unique_ptr<CompletionTrackQueue> completion_tracks_ = {};
   std::thread publisher_ = {};

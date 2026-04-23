@@ -24,8 +24,11 @@ Current validated slice:
 - `rocprofiler-sdk` can consume the AQLMON shm stream for kernel-dispatch tracing
 - runtime-owned mode works for plain launches
 - monitor-owned mode works for plain launches and the validated GraphBench process-launch case
+- pure `rocprofv3 --kernel-trace` GraphBench now completes on both the `2048` and `8192` large
+  replay cases instead of stalling after early dispatches
 - counter collection remains on the existing queue-intercept path
-- mixed counter sessions are not yet supported with AQLMON queue shadow enabled
+- mixed counter sessions are intentionally kept on the existing queue-intercept path in the current
+  slice
 
 ## Design Summary
 
@@ -64,6 +67,14 @@ write-pointer model:
 - `AQLMON` observes the packet, dumps the minimum packet data, then advances the real write pointer
 - CP only learns about the packet after `AQLMON` has seen it
 
+Current implementation note:
+
+- on the validated HIP/CLR publish order, the publisher advances from the shadow doorbell
+  watermark plus packet-header validity
+- per-slot reservation metadata is used only for optional producer metadata capture
+- reservation metadata is not a hard publish gate because graph replay can reserve large packet
+  ranges up front and then publish them in later chunks
+
 ## Activation And Ownership Negotiation
 
 ```mermaid
@@ -101,7 +112,8 @@ The contract is intentionally generic and runtime-facing.
 - `rocprofiler-register` does not embed `AQLMON` policy
 - the runtime asks `AQLMON` whether `AQLMON` wants to own completion-signal management
 - the runtime does not unilaterally decide who owns signals for a tool session
-- the answer is cached once for the session and then reduced to a cheap fast-path mode bit
+- the target design caches the answer once for the session and reduces it to a cheap fast-path
+  mode bit
 
 Target response semantics:
 
@@ -114,6 +126,12 @@ Target response semantics:
 
 The runtime depends only on the small contract library. The heavy monitor backend consumes the same
 cached session decision, but it is not part of the runtime link contract.
+
+Current implementation note:
+
+- the negotiated completion-signal mode is still process-global in the current slice
+- the runtime/link contract is versioned, but the session-scoped cache described above is still the
+  target design, not the final implementation state
 
 ## Queue Publication Model
 
@@ -177,6 +195,11 @@ Operational constraints for this path:
 - fixed-size record reservation only
 - contiguous batch publication only
 
+For the current implementation, "contiguous batch publication" is keyed off the shadow doorbell
+watermark and packet validity in the validated HIP/CLR publish order, not the producer reservation
+metadata. That distinction matters for graph replay paths that reserve a large range before later
+chunk publication.
+
 The enqueue path should not:
 
 - copy packet bodies
@@ -228,6 +251,22 @@ This is the preferred low-overhead path when the runtime can already provide com
 - completion timestamps come from the runtime-owned signal path
 - the runtime must use a completion-signal-only fast path and must not enable broader per-dispatch
   profiling work just to satisfy `AQLMON`
+
+## Current Session Routing Policy
+
+The current branch starts the SDK shm receiver for AQLMON early for eligible kernel-trace
+configurations, but it still preserves the legacy queue-intercept kernel path until the receiver
+is operational.
+
+- if a session is kernel-trace-only and does not request queue-intercept-dependent services, the
+  runtime attempts to start the AQLMON shm receiver before queue-controller setup
+- if the receiver becomes operational, kernel-dispatch tracing can stay on the AQLMON shm path
+- if the receiver is not operational, the legacy kernel-trace queue-intercept path remains the
+  fallback
+- if a session requests counters, PC sampling, thread trace, or other queue-intercept-dependent
+  services, kernel-dispatch tracing stays on the old queue-intercept path
+- the current implementation still applies this routing decision process-globally rather than as a
+  fully isolated per-session mode cache
 
 ## Minimal Async Signal-Handler Work
 

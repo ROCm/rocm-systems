@@ -339,8 +339,11 @@ start_context(rocprofiler_context_id_t context_id)
 
     auto status = ROCPROFILER_STATUS_SUCCESS;
 
+    // queue_controller_init() starts the receiver early for the common process-launch path.
+    // Keep this idempotent retry for contexts that start after queue-controller setup.
     if(cfg->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
-                              ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH))
+                              ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) &&
+       rocprofiler::kernel_dispatch::aqlmon_receiver_requested())
         rocprofiler::kernel_dispatch::aqlmon_receiver_start();
 
     if(cfg->dispatch_counter_collection) rocprofiler::counters::start_context(cfg);

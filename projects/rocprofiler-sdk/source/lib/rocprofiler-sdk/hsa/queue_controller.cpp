@@ -540,9 +540,12 @@ enable_queue_intercept()
 void
 queue_controller_init(HsaApiTable* table)
 {
-    CHECK_NOTNULL(get_queue_controller())->init(*table->core_, *table->amd_ext_);
-
+    // Start the SDK shm receiver before queue-controller init so queue routing can still fall
+    // back to the legacy intercept path if the receiver does not become operational. The same
+    // start call is retried later from start_context() for late-started contexts.
     if(kernel_dispatch::aqlmon_receiver_requested()) kernel_dispatch::aqlmon_receiver_start();
+
+    CHECK_NOTNULL(get_queue_controller())->init(*table->core_, *table->amd_ext_);
 
     if(enable_queue_intercept() && !queue_intercept_initialized())
     {

@@ -64,17 +64,37 @@ What is implemented:
 - current preload monitor consuming the negotiated mode
 - `rocprofiler-sdk` shm receiver for kernel-dispatch completion correlation
 - simple launcher for packet-dump validation
-- legacy queue-intercept fallback kept alive until the `rocprofiler-sdk` shm receiver is
-  operational
+- eligible kernel-trace-only sessions start the SDK shm receiver for AQLMON before
+  queue-controller setup
+- legacy kernel-intercept fallback is preserved until the receiver is actually operational
 - if a session requests counter collection or another queue-intercept-dependent service, kernel
-  dispatch tracing stays on the old queue-intercept path and AQLMON is not used for that session
+  dispatch tracing stays on the old queue-intercept path for that process state
+- validated pure `rocprofv3 --kernel-trace` GraphBench process-launch runs, including the large
+  graph batch path at `--size 8192`
+- on the validated HIP/CLR publish order, publish progression follows the shadow doorbell
+  watermark plus packet-header validity; per-slot reservation metadata is only advisory producer
+  metadata and is not used as a hard publish gate
 
 What is not implemented yet:
 
 - removing the current `LD_PRELOAD` dependency of the heavy monitor backend
 - automatic `rocprofv3` preload/policy selection for all session types
-- a fully supported mixed `kernel-trace + counter-collection` session on top of queue shadow
+- an AQLMON-backed mixed `kernel-trace + counter-collection` session; mixed sessions stay on the
+  old queue-intercept path by design in the current slice
 - runtime-owned graph replay completion coverage for zero-signal graph packets
+
+## Validation Snapshot
+
+Current branch validation has covered:
+
+- direct `rocprofv3 --kernel-trace` GraphBench process-launch runs on the fixed path
+- pure kernel-trace GraphBench at `--size 2048 --iters 1000 --topology straight`
+- pure kernel-trace GraphBench at `--size 8192 --iters 1000 --topology straight`
+- containerized GraphBench and PyTorch ROCm benchmark harness setup for local validation
+
+For local benchmarking and validation on this branch, `rocprofv3 -f json` is preferred. That
+keeps kernel-trace validation on the AQLMON path without depending on rocpd schema packaging in
+the local overlay.
 
 ## Build
 
@@ -174,6 +194,13 @@ The monitor publisher thread does the expensive work:
 - advances the real WDID
 - rings the real doorbell
 
+Current implementation note:
+
+- the completion lifetime fix still uses a mutex-protected lifetime map on the publisher-side
+  completion-tracking path
+- the current negotiation and routing decision is still process-global in the implementation slice
+- the long-term design target remains to reduce that to a cheaper cached fast path
+
 Completion handling is also off the producer thread:
 
 - runtime-provided completion signals are preferred when granted
@@ -186,11 +213,11 @@ Completion handling is also off the producer thread:
 - The current HIP integration only requests `KERNEL_DISPATCH_SIGNALS`.
 - Zero-signal packets are ignored when runtime-provided mode is active.
 - Multi-process fan-in to one shm object is still not coordinated.
+- Negotiation state is still process-global in the current implementation slice, not per
+  profiler session.
 - The validated `rocprofiler-sdk` shm path is currently for kernel-trace-oriented sessions.
 - Counter collection still uses the existing queue-intercept path. If counters are requested,
   kernel-dispatch tracing stays on that old path as well.
-- With the current POC, preloading `libaql_shm_monitor.so` into counter-collection sessions while
-  queue shadow is enabled can hang the workload.
-- For counter-only validation, `AQLMONITOR_DISABLE_QUEUE_SHADOW=1` restores the existing SDK
-  behavior. The intended long-term direction is to leave counter collection on the old path and
-  use AQLMON for kernel-dispatch tracing.
+- Preload-only counter sessions are not a supported validation mode for this branch. The intended
+  direction is to leave counter collection on the old path and use AQLMON for kernel-dispatch
+  tracing.
