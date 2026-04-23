@@ -53,7 +53,7 @@ The following table lists the stall reasons:
 Occupancy
 ==========
 
-``wave_cnt`` reports the number of active waves present on the CU (across all four SIMDs) at the time of sampling. This information helps to understand the CU occupancy evolution over time. The information includes details such as, whether the CU was fully loaded throughout the kernel execution, whether waves were draining towards the end, how occupancy affects the cost of stalls, and the occupancy at specific source or assembly lines at the time of sampling.
+``wave_cnt`` reports the number of active waves present on the CU (across all four SIMDs) at the time of sampling. This information helps explain the evolution of CU occupancy over time. The information includes details such as whether the CU was fully loaded throughout kernel execution, whether waves were draining towards the end, how occupancy affects the cost of stalls, and the occupancy at specific source or assembly lines at the time of sampling.
 
 Note that ``wave_cnt`` doesn't provide a full timeline trace. For full timeline tracing, use `Thread trace <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-thread-trace.html>`_.
 
