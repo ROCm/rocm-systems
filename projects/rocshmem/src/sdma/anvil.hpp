@@ -77,6 +77,7 @@ class AnvilLib {
  public:
   void init();
   bool connect(int srcDeviceId, int dstDeviceId, int numChannels = 1);
+  void disconnect();
   SdmaQueue* getSdmaQueue(int srcDeviceId, int dstDeviceId, int channel_idx = 0);
   SdmaQueue* createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
                              int* channelIdx = nullptr);

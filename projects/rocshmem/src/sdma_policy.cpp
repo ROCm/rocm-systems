@@ -71,7 +71,7 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, MPI_C
 
   // Create SDMA connections to all local PEs including self
   for (int i = 0; i < shm_size; i++) {
-    if (i != local_rank) {
+    if (i != deviceId) {
       anvil::EnablePeerAccess(deviceId, i);
     }
     anvil::anvil.connect(deviceId, i, numChannels);
@@ -131,7 +131,7 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, TcpBo
 
   // Create SDMA connections to all local PEs including self
   for (int i = 0; i < shm_size; i++) {
-    if (i != local_rank) {
+    if (i != deviceId) {
       anvil::EnablePeerAccess(deviceId, i);
     }
     anvil::anvil.connect(deviceId, i, numChannels);
@@ -169,6 +169,7 @@ __host__ void SdmaImpl::sdmaHostStop() {
     CHECK_HIP(hipFree(deviceHandles_d));
     deviceHandles_d = nullptr;
   }
+  anvil::anvil.disconnect();
 }
 
 #endif  // USE_SDMA

@@ -326,6 +326,12 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
   return true;
 }
 
+void AnvilLib::disconnect() {
+  // Destroy all SDMA queues. SdmaQueue destructor calls hsaKmtDestroyQueue.
+  sdma_channels_.clear();
+  LOG_TRACE("SDMA: Disconnected all queues");
+}
+
 SdmaQueue* AnvilLib::getSdmaQueue([[maybe_unused]] int srcDeviceId, int dstDeviceId,
                                   int channel_idx) {
   if (sdma_channels_.find(dstDeviceId) == sdma_channels_.end()) {
