@@ -226,3 +226,77 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
         "meta": json.loads(row["meta_json"] or "{}"),
         "created_at": row["created_at"],
     }
+
+
+def _store_for_root(root: str) -> TaskStore:
+    store = TaskStore(Path(root))
+    store.init()
+    return store
+
+
+def _store_root(root: Optional[str] = None) -> str:
+    if root is not None:
+        return str((Path(root) / ".beads").resolve())
+    return str((Path.cwd() / ".beads").resolve())
+
+
+def _with_store(method: str, *args, root: Optional[str] = None, **kwargs):
+    store = _store_for_root(_store_root(root))
+    try:
+        return getattr(store, method)(*args, **kwargs)
+    finally:
+        store.close()
+
+
+def create_at(root: str, *args, **kwargs) -> str:
+    return _with_store("create", *args, root=root, **kwargs)
+
+
+def create(*args, **kwargs) -> str:
+    return _with_store("create", *args, **kwargs)
+
+
+def next_at(root: str, exclude_ids: List[str] = None) -> Optional[Dict[str, Any]]:
+    return _with_store("next", exclude_ids=exclude_ids, root=root)
+
+
+def next(exclude_ids: List[str] = None) -> Optional[Dict[str, Any]]:
+    return _with_store("next", exclude_ids=exclude_ids)
+
+
+def update_at(
+    root: str,
+    task_id: str,
+    status: str = None,
+    assignee: str = None,
+    meta: Dict[str, Any] = None,
+) -> None:
+    _with_store("update", task_id, status=status, assignee=assignee, meta=meta, root=root)
+
+
+def update(task_id: str, status: str = None, assignee: str = None, meta: Dict[str, Any] = None) -> None:
+    _with_store("update", task_id, status=status, assignee=assignee, meta=meta)
+
+
+def close_at(root: str, task_id: str, reason: str = "done") -> None:
+    _with_store("close", task_id=task_id, reason=reason, root=root)
+
+
+def close(task_id: str, reason: str = "done") -> None:
+    _with_store("close", task_id=task_id, reason=reason)
+
+
+def query_by_kernel_at(root: str, kernel_name: str) -> List[Dict[str, Any]]:
+    return _with_store("query_by_kernel", kernel_name, root=root)
+
+
+def query_by_kernel(kernel_name: str) -> List[Dict[str, Any]]:
+    return _with_store("query_by_kernel", kernel_name)
+
+
+def show_at(root: str, task_id: str) -> Dict[str, Any]:
+    return _with_store("show", task_id, root=root)
+
+
+def show(task_id: str) -> Dict[str, Any]:
+    return _with_store("show", task_id)
