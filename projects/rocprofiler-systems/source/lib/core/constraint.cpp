@@ -2,12 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "constraint.hpp"
+#include "common/delimit.hpp"
 #include "config.hpp"
 #include "state.hpp"
 #include "utility.hpp"
-
-#include <timemory/units.hpp>
-#include <timemory/utility/delimit.hpp>
 
 #include "logger/debug.hpp"
 
@@ -26,7 +24,9 @@ namespace constraint
 {
 namespace
 {
-namespace units = ::tim::units;
+constexpr uint64_t nsec_per_usec = 1'000ULL;
+constexpr uint64_t nsec_per_msec = 1'000'000ULL;
+constexpr uint64_t nsec_per_sec  = 1'000'000'000ULL;
 
 using clock_type    = std::chrono::high_resolution_clock;
 using duration_type = std::chrono::duration<double, std::nano>;
@@ -129,12 +129,12 @@ get_clock_now(clockid_t clock_id) noexcept
 stages::stages()
 : init{ [](const spec&) { return get_state() < State::Finalized; } }
 , wait{ [](const spec& _spec) {
-    sleep(std::min<std::uint64_t>(100 * units::msec, _spec.delay * units::sec));
+    sleep(std::min<std::uint64_t>(100 * nsec_per_msec, _spec.delay * nsec_per_sec));
     return get_state() < State::Finalized;
 } }
 , start{ [](const spec&) { return get_state() < State::Finalized; } }
 , collect{ [](const spec& _spec) {
-    sleep(std::min<std::uint64_t>(100 * units::msec, _spec.duration * units::sec));
+    sleep(std::min<std::uint64_t>(100 * nsec_per_msec, _spec.duration * nsec_per_sec));
     return get_state() < State::Finalized;
 } }
 , stop{ [](const spec&) { return get_state() < State::Finalized; } }
@@ -227,7 +227,7 @@ spec::spec(const std::string& _line)
         config::get_setting_value<double>("ROCPROFSYS_TRACE_DELAY").value_or(0.0),
         config::get_setting_value<double>("ROCPROFSYS_TRACE_DURATION").value_or(0.0) }
 {
-    auto _delim = tim::delimit(_line, ":");
+    auto _delim = rocprofsys::common::delimit(_line, ":");
     if(!_delim.empty()) delay = utility::convert<double>(_delim.at(0));
     if(_delim.size() > 1) duration = utility::convert<double>(_delim.at(1));
     if(_delim.size() > 2) repeat = utility::convert<std::uint64_t>(_delim.at(2));
@@ -241,7 +241,7 @@ spec::operator()(const stages& _stages) const
     if(_n < 1) _n = std::numeric_limits<std::uint64_t>::max();
 
     while(get_state() < State::Active)
-        sleep(1 * units::usec);
+        sleep(1 * nsec_per_usec);
 
     for(std::uint64_t i = 0; i < _n; ++i)
     {
@@ -249,7 +249,7 @@ spec::operator()(const stages& _stages) const
         auto _wait = [_spec](const auto& _func, auto _dur) {
             auto _ret = true;
             auto _now = get_clock_now(_spec.clock_id.value);
-            auto _del = (_dur * units::sec);
+            auto _del = (_dur * nsec_per_sec);
             auto _end = _now + _del;
             while(get_clock_now(_spec.clock_id.value) < _end && (_ret = _func(_spec)))
             {
@@ -311,7 +311,7 @@ get_trace_specs()
                 .value_or("");
         if(!_periods_v.empty())
         {
-            for(auto itr : tim::delimit(_periods_v, " ;\t\n"))
+            for(auto itr : rocprofsys::common::delimit(_periods_v, " ;\t\n"))
                 _v.emplace_back(itr);
         }
     }
@@ -326,12 +326,12 @@ get_trace_stages()
 
     _v.init = [](const spec&) { return get_state() < State::Finalized; };
     _v.wait = [](const spec& _spec) {
-        sleep(std::min<std::uint64_t>(100 * units::msec, _spec.delay * units::sec));
+        sleep(std::min<std::uint64_t>(100 * nsec_per_msec, _spec.delay * nsec_per_sec));
         return get_state() < State::Finalized;
     };
     _v.start   = [](const spec&) { return get_state() < State::Finalized; };
     _v.collect = [](const spec& _spec) {
-        sleep(std::min<std::uint64_t>(100 * units::msec, _spec.duration * units::sec));
+        sleep(std::min<std::uint64_t>(100 * nsec_per_msec, _spec.duration * nsec_per_sec));
         return get_state() < State::Finalized;
     };
     _v.stop = [](const spec&) { return get_state() < State::Finalized; };

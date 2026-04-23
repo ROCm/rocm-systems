@@ -4,7 +4,6 @@
 set(rocprofiler_sdk_components_unit_tests_sources
     test_rccl_unit.cpp
     test_roctx_client.cpp
-    ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys/library/rocprofiler-sdk/trace_control.cpp
 )
 
 add_library(

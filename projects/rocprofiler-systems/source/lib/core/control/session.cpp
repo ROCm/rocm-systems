@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "library/rocprofiler-sdk/trace_control.hpp"
+#include "session.hpp"
 
 #include "common/delimit.hpp"
 
@@ -16,19 +16,11 @@
 #include "logger/debug.hpp"
 #include <spdlog/fmt/ranges.h>
 
-namespace rocprofsys
+namespace rocprofsys::control
 {
-namespace rocprofiler_sdk
+session::session(std::string_view trace_regions)
 {
-namespace control
-{
-
-trace_control::trace_control(std::string_view trace_regions)
-{
-    if(trace_regions.empty())
-    {
-        return;
-    }
+    if(trace_regions.empty()) return;
 
     const auto delimited = rocprofsys::common::delimit(std::string{ trace_regions }, ",");
     m_trace_regions.insert(delimited.begin(), delimited.end());
@@ -39,22 +31,16 @@ trace_control::trace_control(std::string_view trace_regions)
 }
 
 void
-trace_control::force_initial_pause()
+session::force_initial_pause()
 {
-    if(!region_filter_active())
-    {
-        return;
-    }
+    if(!region_filter_active()) return;
     trigger_callbacks(m_pause_callbacks);
 }
 
 void
-trace_control::handle_range_start(std::uint64_t range_id, const char* message)
+session::handle_range_start(std::uint64_t range_id, const char* message)
 {
-    if(message == nullptr || m_trace_regions.count(message) == 0)
-    {
-        return;
-    }
+    if(message == nullptr || m_trace_regions.count(message) == 0) return;
 
     bool was_empty = false;
     {
@@ -72,7 +58,7 @@ trace_control::handle_range_start(std::uint64_t range_id, const char* message)
 }
 
 void
-trace_control::handle_range_stop(std::uint64_t range_id)
+session::handle_range_stop(std::uint64_t range_id)
 {
     bool now_empty = false;
     {
@@ -104,7 +90,7 @@ trace_control::handle_range_stop(std::uint64_t range_id)
 }
 
 void
-trace_control::handle_pause()
+session::handle_pause()
 {
     if(region_filter_active())
     {
@@ -128,7 +114,7 @@ trace_control::handle_pause()
 }
 
 void
-trace_control::handle_resume()
+session::handle_resume()
 {
     if(!m_user_paused.load(std::memory_order_relaxed))
     {
@@ -152,7 +138,7 @@ trace_control::handle_resume()
 }
 
 void
-trace_control::shutdown()
+session::shutdown()
 {
     {
         std::scoped_lock const lk{ m_callback_mutex };
@@ -170,43 +156,29 @@ trace_control::shutdown()
 }
 
 void
-trace_control::register_region_pauser_resume_callbacks(callback_t start_callback,
-                                                       callback_t stop_callback)
+session::register_region_pauser_resume_callbacks(callback_t resume_callback,
+                                                 callback_t pause_callback)
 {
     std::scoped_lock const lk{ m_callback_mutex };
-    m_resume_callbacks.push_back(std::move(start_callback));
-    m_pause_callbacks.push_back(std::move(stop_callback));
+    m_resume_callbacks.push_back(std::move(resume_callback));
+    m_pause_callbacks.push_back(std::move(pause_callback));
 }
 
 bool
-trace_control::should_write_markers() const
+session::should_write_markers() const
 {
-    if(!region_filter_active())
-    {
-        return true;
-    }
-
-    if(m_user_paused.load(std::memory_order_relaxed))
-    {
-        return false;
-    }
-
+    if(!region_filter_active()) return true;
+    if(m_user_paused.load(std::memory_order_relaxed)) return false;
     return m_active_region_count.load(std::memory_order_relaxed) > 0;
 }
 
 void
-trace_control::trigger_callbacks(const std::vector<callback_t>& callbacks)
+session::trigger_callbacks(const std::vector<callback_t>& callbacks)
 {
     std::scoped_lock const lk{ m_callback_mutex };
     for(const auto& cb : callbacks)
     {
-        if(cb)
-        {
-            cb();
-        }
+        if(cb) cb();
     }
 }
-
-}  // namespace control
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::control
