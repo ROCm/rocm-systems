@@ -23,6 +23,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.metrics.expression import build_metric_value_string
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     is_workload_empty,
@@ -199,7 +200,7 @@ class OmniAnalyze_Base:
         target_filter = normalization_filter or args.normal_unit
 
         for arch_config in self._arch_configs.values():
-            parser.build_metric_value_string(
+            build_metric_value_string(
                 arch_config.dfs,
                 arch_config.dfs_type,
                 target_filter,
@@ -458,6 +459,11 @@ class OmniAnalyze_Base:
         if format_rocprof == "rocpd":
             # Vertically concat (by rows) results_*.csv into pmc_perf.csv
             result_files = list(workload_dir.glob("results_*.csv"))
+
+            console_warning(
+                "Reading intermediate results_*.csv files is deprecated and "
+                "will be removed in a future release."
+            )
 
             with open(output_file, "w", newline="") as outfile:
                 writer = None

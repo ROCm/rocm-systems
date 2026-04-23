@@ -49,10 +49,10 @@ BUILD_IN_VARS: dict[str, str] = {
     "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
     "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
     "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
-    "numActiveCUs": "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / \
-        $GRBM_GUI_ACTIVE_PER_XCD)), 0) / $max_waves_per_cu) * 8) + \
-        MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / \
-        $GRBM_GUI_ACTIVE_PER_XCD)), 0), $max_waves_per_cu), 8)), $cu_per_gpu))",
+    "numActiveCUs": "TO_INT(MIN(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) / \
+        SUM($GRBM_GUI_ACTIVE_PER_XCD), 0) / $max_waves_per_cu * 8 + \
+        MIN(MOD(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) / \
+        SUM($GRBM_GUI_ACTIVE_PER_XCD), 0), $max_waves_per_cu), 8), $cu_per_gpu))",
     "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / \
         1000) * $max_sclk)), 0)",
     "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
@@ -375,43 +375,47 @@ def perform_attach_detach(new_env: dict[str, str], options: dict[str, Any]) -> N
         except Exception as e:
             console_error(f"Error loading {libname}: {e}")
 
-        # Set argument and return types for attach/detach functions
+        # Set argument and return types for live attach functions
         try:
-            # old attach/detach API
-            c_lib.attach.argtypes = [ctypes.c_uint]
+            # new live attach API
+            c_lib.rocattach_attach.restype = ctypes.c_int
+            c_lib.rocattach_attach.argtypes = [ctypes.c_int]
+            c_lib.rocattach_detach.restype = ctypes.c_int
+            c_lib.rocattach_detach.argtypes = [ctypes.c_int]
         except Exception as e:
             console_debug(
-                "Error setting old attach/detach API argument "
-                f"types: {e}, trying new API"
+                "Error setting new live attach API argument "
+                f"types: {e}, trying legacy live attach API"
             )
             try:
-                # new attach/detach API
-                c_lib.rocattach_attach.restype = ctypes.c_int
-                c_lib.rocattach_attach.argtypes = [ctypes.c_int]
-                c_lib.rocattach_detach.restype = ctypes.c_int
-                c_lib.rocattach_detach.argtypes = [ctypes.c_int]
+                # old live attach API
+                c_lib.attach.restype = ctypes.c_int
+                c_lib.attach.argtypes = [ctypes.c_uint]
+                c_lib.detach.restype = ctypes.c_int
+                c_lib.detach.argtypes = [ctypes.c_uint]
             except Exception as e:
-                console_error(
-                    f"Error setting attach/detach function argument types: {e}"
-                )
+                console_error(f"Error setting live attach function argument types: {e}")
 
         pid = options["ROCPROF_ATTACH_PID"]
         if pid is None:
-            console_error("Mode of attach/detach must have setup for process ID")
+            console_error("Live attach mode requires a process ID (ROCPROF_ATTACH_PID)")
 
         try:
-            # old attach/detach API
-            c_lib.attach(int(pid))
+            # new live attach API
+            attach_status = c_lib.rocattach_attach(int(pid))
+            if attach_status != 0:
+                console_error(
+                    f"Error attaching to process {pid}, "
+                    f"rocattach_attach returned {attach_status}"
+                )
         except Exception as e:
-            console_debug(f"Error attaching with old API: {e}, trying new API")
+            console_debug(
+                "Error attaching with latest live attach "
+                f"API: {e}, trying legacy live attach API"
+            )
             try:
-                # new attach/detach API
-                attach_status = c_lib.rocattach_attach(int(pid))
-                if attach_status != 0:
-                    console_error(
-                        f"Error attaching to process {pid}, "
-                        f"rocattach_attach returned {attach_status}"
-                    )
+                # old live attach API
+                c_lib.attach(int(pid))
             except Exception as e:
                 console_error(f"Error attaching to process {pid}: {e}")
 
@@ -430,18 +434,21 @@ def perform_attach_detach(new_env: dict[str, str], options: dict[str, Any]) -> N
             time.sleep(int(duration) / 1000)
 
         try:
-            # old attach/detach API
-            c_lib.detach(int(pid))
+            # new live attach API
+            detach_status = c_lib.rocattach_detach(int(pid))
+            if detach_status != 0:
+                console_error(
+                    f"Error detaching from process {pid}, "
+                    f"rocattach_detach returned {detach_status}"
+                )
         except Exception as e:
-            console_debug(f"Error detaching with old API: {e}, trying new API")
+            console_debug(
+                f"Error detaching with latest live attach API: {e}, "
+                "trying detach with legacy live attach API"
+            )
             try:
-                # new attach/detach API
-                detach_status = c_lib.rocattach_detach(int(pid))
-                if detach_status != 0:
-                    console_error(
-                        f"Error detaching from process {pid}, "
-                        f"rocattach_detach returned {detach_status}"
-                    )
+                # old live attach API
+                c_lib.detach(int(pid))
             except Exception as e:
                 console_error(f"Error detaching from process {pid}: {e}")
 
@@ -947,30 +954,69 @@ def get_panel_alias() -> dict[str, str]:
     }
 
 
-def get_rank() -> Optional[str]:
-    rank_env_vars = [
-        "SLURM_PROCID",
-        "FLUX_TASK_RANK",
-        "PMI_RANK",
-        "PMIX_RANK",
-        "PALS_RANKID",
-        "OMPI_COMM_WORLD_RANK",
-        "MV2_COMM_WORLD_RANK",
-        "MPI_RANKID",
-        "MPI_LOCALRANKID",
-        "MPI_RANK",
-    ]
-    for env_var in rank_env_vars:
-        value = os.environ.get(env_var)
-        if value is not None:
-            return value
+def get_job_rank_and_size() -> tuple[Optional[str], Optional[int]]:
+    """Detect job rank and total ranks from runtime environment variables.
 
-    return None
+    Returns a (rank, total_ranks) tuple, ensuring both values come from the same
+    runtime.
+    """
+    # Note: PMIX_RANK is intentionally excluded. PMIx has no standard size env var,
+    # and PMIx is never a standalone launcher — it always runs behind SLURM, OpenMPI,
+    # PALS, etc., which set their own paired rank/size vars checked here. If only
+    # PMIX_RANK is set, the launcher also sets generic MPI_RANK/MPI_SIZE caught below.
+    rank_size_env_vars = [
+        ("PBS_NODENUM", "PBS_O_TASKNUM"),  # PBS/Torque
+        ("SLURM_PROCID", "SLURM_NTASKS"),  # SLURM
+        ("FLUX_TASK_RANK", "FLUX_JOB_SIZE"),  # Flux
+        ("PMI_RANK", "PMI_SIZE"),  # PMI
+        ("PALS_RANKID", "PALS_WORLD_SIZE"),  # PALS (HPE Cray)
+        ("OMPI_COMM_WORLD_RANK", "OMPI_COMM_WORLD_SIZE"),  # OpenMPI
+        ("MV2_COMM_WORLD_RANK", "MV2_COMM_WORLD_SIZE"),  # MVAPICH2
+        ("MPI_RANKID", "MPI_NRANKS"),  # Generic
+        ("MPI_LOCALRANKID", "MPI_LOCALNRANKS"),  # Generic (local)
+        ("MPI_RANK", "MPI_SIZE"),  # Generic
+    ]
+    matched_rank = None
+    matched_rank_var = None
+    matched_size = None
+    matched_size_var = None
+    for rank_var, size_var in rank_size_env_vars:
+        rank_value = os.environ.get(rank_var)
+        try:
+            _ = int(rank_value)
+        except (TypeError, ValueError):
+            continue
+
+        # Rank is valid; try to get a matching size for a complete pair
+        size_value = os.environ.get(size_var)
+        try:
+            matched_size = int(size_value)
+        except (TypeError, ValueError):
+            # Size missing or invalid — remember rank as fallback but keep
+            # searching for a runtime that provides both rank and size
+            if matched_rank is None:
+                matched_rank = rank_value
+                matched_rank_var = rank_var
+                matched_size_var = size_var
+            continue
+
+        # Complete pair found
+        matched_rank = rank_value
+        matched_rank_var = rank_var
+        matched_size_var = size_var
+        break
+
+    console_debug(
+        f"Parallel runtime detected: {matched_rank_var}='{matched_rank}',"
+        f" {matched_size_var}={matched_size}"
+    )
+
+    return (matched_rank, matched_size)
 
 
 def replace_rank(name: str) -> str:
     def rank(match: re.Match[str]) -> str:
-        value = get_rank()
+        value, _ = get_job_rank_and_size()
         if value is not None:
             return value + match.group(1)  # preserve trailing slash
         else:

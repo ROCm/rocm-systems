@@ -252,15 +252,8 @@ directory is derived from ``--name`` and the target system information:
 * Without MPI rank detection, the default is ``./workloads/<name>/<gpu_model>``.
 * With MPI rank detection, the default is ``./workloads/<name>/<rank>``.
 
-You can override the output directory with ``--output-directory``. The
-``--path`` (``-p``) argument is deprecated for profile mode. When ``--output-directory`` is
-explicitly provided, ``--name`` is ignored.
-
-.. note::
-
-   ``--path`` and ``--subpath`` are deprecated for profile mode and will be
-   removed in a future release. Use ``--output-directory`` with parameterized
-   placeholders instead.
+You can override the output directory with ``--output-directory``. When
+``--output-directory`` is explicitly provided, ``--name`` is ignored.
 
 The output directory can be parameterized with the following keywords:
 
@@ -386,6 +379,12 @@ of raw performance counter data produced by the underlying
    * The rocpd database files are converted to CSV files (``results_pmc_perf_0.csv``, ``results_pmc_perf_SQ_*.csv``, etc.) for each profiling run, after which the database files are removed.
    * These files are merged into a single ``pmc_perf.csv`` file when running ``rocprof-compute analyze``.
    * Use ``--retain-rocpd-output`` to preserve the ``rocpd`` database(s) in the workload folder for custom analysis.
+
+.. note::
+
+   Intermediate CSV generation (``results_*.csv``) in ``rocpd`` mode and
+   ``--retain-rocpd-output`` are deprecated and will be removed in a future release.
+   ``.db`` files will be retained by default and the analyze step will read them directly.
 
 
 .. _filtering:

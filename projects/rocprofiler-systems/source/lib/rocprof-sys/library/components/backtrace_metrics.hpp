@@ -148,22 +148,3 @@ backtrace_metrics::operator()(Tp) const
 }
 }  // namespace component
 }  // namespace rocprofsys
-
-#if !defined(ROCPROFSYS_EXTERN_COMPONENTS) ||                                            \
-    (defined(ROCPROFSYS_EXTERN_COMPONENTS) && ROCPROFSYS_EXTERN_COMPONENTS > 0)
-
-#    include <timemory/operations.hpp>
-
-ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_wall_clock>), true,
-    double)
-
-ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_cpu_clock>), true,
-    double)
-
-ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_fraction>), true,
-    double)
-
-#endif

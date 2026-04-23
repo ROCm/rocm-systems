@@ -262,19 +262,3 @@ ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_statistics, component::sampling_percent,
 
 // reporting categories (self)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_self, component::sampling_percent, false_type)
-
-#define ROCPROFSYS_DECLARE_EXTERN_COMPONENT(NAME, HAS_DATA, ...)                         \
-    TIMEMORY_DECLARE_EXTERN_TEMPLATE(                                                    \
-        struct tim::component::base<TIMEMORY_ESC(rocprofsys::component::NAME),           \
-                                    __VA_ARGS__>)                                        \
-    TIMEMORY_DECLARE_EXTERN_OPERATIONS(TIMEMORY_ESC(rocprofsys::component::NAME),        \
-                                       HAS_DATA)                                         \
-    TIMEMORY_DECLARE_EXTERN_STORAGE(TIMEMORY_ESC(rocprofsys::component::NAME))
-
-#define ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(NAME, HAS_DATA, ...)                     \
-    TIMEMORY_INSTANTIATE_EXTERN_TEMPLATE(                                                \
-        struct tim::component::base<TIMEMORY_ESC(rocprofsys::component::NAME),           \
-                                    __VA_ARGS__>)                                        \
-    TIMEMORY_INSTANTIATE_EXTERN_OPERATIONS(TIMEMORY_ESC(rocprofsys::component::NAME),    \
-                                           HAS_DATA)                                     \
-    TIMEMORY_INSTANTIATE_EXTERN_STORAGE(TIMEMORY_ESC(rocprofsys::component::NAME))

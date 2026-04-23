@@ -1234,7 +1234,7 @@ def test_parser_utility_functions():
     import numpy as np
     import pandas as pd
 
-    from utils.parser import (
+    from utils.metrics.aggregation import (
         to_concat,
         to_int,
         to_max,
@@ -1339,7 +1339,7 @@ def test_parser_error_handling():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from utils.parser import (
+    from utils.metrics.expression import (
         build_eval_string,
         update_denominator_string,
     )
@@ -1381,7 +1381,7 @@ def test_ast_transformer_edge_cases():
 
     import ast
 
-    from utils.parser import CodeTransformer
+    from utils.metrics.expression import CodeTransformer
 
     transformer = CodeTransformer()
 
@@ -1422,7 +1422,7 @@ def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
 
     import pandas as pd
 
-    from utils.parser import eval_metric
+    from utils.metrics.evaluation_pipeline import eval_metric
 
     mock_dfs = {
         1: pd.DataFrame({
@@ -1470,6 +1470,66 @@ def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
         )
     except Exception:
         pass
+
+
+@pytest.mark.misc
+def test_eval_metric_writes_back_falsey_supported_fields():
+    """Test eval_metric normalizes falsey supported fields on the DataFrame."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+    from utils.metrics.evaluation_pipeline import eval_metric
+
+    metric_df = pd.DataFrame({
+        "Metric_ID": ["1.1.0"],
+        "Metric": ["Test Metric"],
+        "Value": ["to_sum(raw_pmc_df['pmc_perf']['SQ_WAVES'])"],
+        "Average": [None],
+    }).set_index("Metric_ID")
+    dfs = {1: metric_df}
+    dfs_type = {1: "metric_table"}
+    sys_info = pd.Series({
+        "ip_blocks": "standard",
+        "gpu_arch": "gfx90a",
+        "se_per_gpu": 4,
+        "pipes_per_gpu": 4,
+        "cu_per_gpu": 64,
+        "simd_per_cu": 4,
+        "sqc_per_gpu": 16,
+        "lds_banks_per_cu": 32,
+        "cur_sclk": 1800.0,
+        "cur_mclk": 1200.0,
+        "max_sclk": 2100.0,
+        "max_mclk": 1600.0,
+        "max_waves_per_cu": 40,
+        "num_hbm_channels": 4,
+        "total_l2_chan": 32,
+        "num_xcd": 1,
+        "wave_size": 64,
+    })
+    raw_pmc_df = {
+        "pmc_perf": pd.DataFrame({
+            "SQ_WAVES": [100, 200, 150],
+            "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
+        })
+    }
+
+    assert metric_df.loc["1.1.0", "Average"] is None
+
+    with patch("utils.metrics.evaluation_pipeline.BUILD_IN_VARS", {}):
+        eval_metric(
+            dfs,
+            dfs_type,
+            sys_info,
+            pd.DataFrame(),
+            raw_pmc_df,
+            debug=False,
+            config={},
+        )
+
+    assert metric_df.loc["1.1.0", "Value"] == 450
+    assert metric_df.loc["1.1.0", "Average"] == ""
 
 
 @pytest.mark.misc
@@ -1623,7 +1683,7 @@ def test_build_dfs_edge_cases():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from utils.parser import gen_counter_list
+    from utils.metrics.expression import gen_counter_list
 
     visited, counters = gen_counter_list(None)
     assert not visited
@@ -1652,19 +1712,22 @@ def test_update_functions_coverage():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from utils.parser import update_denominator_string, update_normal_unit_string
+    from utils.metrics.expression import (
+        update_denominator_string,
+        update_normal_unit_string,
+    )
 
-    result = update_denominator_string("AVG(SQ_WAVES / $denom)", "per_wave")
+    result = update_denominator_string("SUM(SQ_WAVES) / SUM($denom)", "per_wave")
     assert "$denom" not in result
     assert "SQ_WAVES" in result
 
-    result = update_denominator_string("AVG(DATA / $denom)", "per_cycle")
+    result = update_denominator_string("SUM(DATA) / SUM($denom)", "per_cycle")
     assert "$GRBM_GUI_ACTIVE_PER_XCD" in result
 
-    result = update_denominator_string("AVG(DATA / $denom)", "per_second")
+    result = update_denominator_string("SUM(DATA) / SUM($denom)", "per_second")
     assert "End_Timestamp - Start_Timestamp" in result
 
-    result = update_denominator_string("AVG(DATA / $denom)", "unsupported_unit")
+    result = update_denominator_string("SUM(DATA) / SUM($denom)", "unsupported_unit")
     assert "$denom" in result
 
     result = update_normal_unit_string("(Prefix + $normUnit)", "per_wave")
@@ -1676,7 +1739,7 @@ def test_metric_evaluation_no_valid_data():
     """Test emetric evaluation with no valid data"""
     import numpy as np
 
-    from utils.parser import MetricEvaluator
+    from utils.metrics.metric_evaluator import MetricEvaluator
 
     metric_evaluator = MetricEvaluator({}, {}, {})
     with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
@@ -1706,6 +1769,146 @@ def test_metric_evaluation_no_valid_data():
             "'NoneType' object has no attribute 'get'"
         )
         assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
+
+
+@pytest.mark.misc
+def test_metric_evaluator_division_by_zero():
+    """Test MetricEvaluator.eval_expression handles division-by-zero cases.
+
+    The evaluator must gracefully handle all denominator-zero and NaN scenarios
+    that can arise from real counter data. This test exercises the checks around
+    parser.py eval_expression (None, NaN, inf detection).
+    """
+    import numpy as np
+    import pandas as pd
+
+    from utils.metrics.expression import build_eval_string
+    from utils.metrics.metric_evaluator import MetricEvaluator
+
+    # ---------------------------------------------------------------
+    # Helper: build a MetricEvaluator with the given pmc_perf columns
+    # ---------------------------------------------------------------
+    def make_evaluator(columns, sys_vars=None):
+        pmc_perf_df = pd.DataFrame(columns)
+        raw_pmc_df = {"pmc_perf": pmc_perf_df}
+        return MetricEvaluator(raw_pmc_df, sys_vars or {}, {})
+
+    # ---------------------------------------------------------------
+    # Helper: transform a YAML-style equation through the full pipeline
+    # ---------------------------------------------------------------
+    def to_eval_str(equation):
+        return build_eval_string(equation, "pmc_perf", config={})
+
+    # ---------------------------------------------------------------
+    # 1. Division by all-zero denominator → inf → "N/A"
+    # ---------------------------------------------------------------
+    evaluator = make_evaluator({
+        "NUMERATOR": [100.0, 200.0, 300.0],
+        "DENOMINATOR": [0.0, 0.0, 0.0],
+    })
+    eval_str = to_eval_str("MIN(NUMERATOR / DENOMINATOR)")
+    result = evaluator.eval_expression(eval_str)
+    assert result == "N/A", (
+        "Division by all-zero Series should produce inf, caught as N/A"
+    )
+
+    # ---------------------------------------------------------------
+    # 2. 0/0 scalar division → NaN → "N/A"
+    #    SUM of all-zero returns 0.0; 0.0 / 0.0 = NaN
+    # ---------------------------------------------------------------
+    evaluator = make_evaluator({
+        "NUMERATOR": [0.0, 0.0, 0.0],
+        "DENOMINATOR": [0.0, 0.0, 0.0],
+    })
+    eval_str = to_eval_str("SUM(NUMERATOR) / SUM(DENOMINATOR)")
+    result = evaluator.eval_expression(eval_str)
+    assert result == "N/A", "SUM(0) / SUM(0) should produce NaN, caught as N/A"
+
+    # ---------------------------------------------------------------
+    # 3. Normal case: all non-zero → valid numeric result
+    # ---------------------------------------------------------------
+    evaluator = make_evaluator({
+        "BUSY": [800.0, 600.0, 400.0],
+        "TOTAL": [1000.0, 1000.0, 1000.0],
+    })
+    eval_str = to_eval_str("SUM(100 * BUSY) / SUM(TOTAL)")
+    result = evaluator.eval_expression(eval_str)
+    assert isinstance(result, float), f"Expected float, got {type(result)}"
+    assert abs(result - 60.0) < 1e-9, (
+        f"SUM(100*[800,600,400]) / SUM([1000,1000,1000]) should be 60.0, got {result}"
+    )
+
+    # ---------------------------------------------------------------
+    # 4. All-NaN numerator → NaN propagation → "N/A"
+    #    SUM of all-NaN returns NaN; NaN / 60.0 = NaN
+    # ---------------------------------------------------------------
+    evaluator = make_evaluator({
+        "A_sum": [np.nan, np.nan, np.nan],
+        "B_sum": [10.0, 20.0, 30.0],
+    })
+    eval_str = to_eval_str("SUM(A_sum) / SUM(B_sum)")
+    result = evaluator.eval_expression(eval_str)
+    assert result == "N/A", (
+        "SUM(all-NaN) / SUM(valid) should produce NaN, caught as N/A"
+    )
+
+    # ---------------------------------------------------------------
+    # 5. All-NaN denominator → NaN propagation → "N/A"
+    #    600.0 / NaN = NaN
+    # ---------------------------------------------------------------
+    evaluator = make_evaluator({
+        "A_sum": [100.0, 200.0, 300.0],
+        "B_sum": [np.nan, np.nan, np.nan],
+    })
+    eval_str = to_eval_str("SUM(A_sum) / SUM(B_sum)")
+    result = evaluator.eval_expression(eval_str)
+    assert result == "N/A", (
+        "SUM(valid) / SUM(all-NaN) should produce NaN, caught as N/A"
+    )
+
+    # ---------------------------------------------------------------
+    # 6. Mixed NaN and valid values → NaN skipped by SUM, valid result
+    #    SUM skips NaN: SUM([100, NaN, 300]) = 400, SUM([10, 0, 30]) = 40
+    # ---------------------------------------------------------------
+    evaluator = make_evaluator({
+        "X_sum": [100.0, np.nan, 300.0],
+        "Y_sum": [10.0, 0.0, 30.0],
+    })
+    eval_str = to_eval_str("SUM(X_sum) / SUM(Y_sum)")
+    result = evaluator.eval_expression(eval_str)
+    assert isinstance(result, float), f"Expected float, got {type(result)}"
+    assert abs(result - 10.0) < 1e-9, (
+        f"SUM([100,NaN,300]) / SUM([10,0,30]) should be 10.0, got {result}"
+    )
+
+    # ---------------------------------------------------------------
+    # 7. System variable as denominator
+    # ---------------------------------------------------------------
+    evaluator = make_evaluator(
+        {"COUNTER": [100.0, 200.0]},
+        sys_vars={"ammolite__var": 5},
+    )
+    eval_str = to_eval_str("SUM(COUNTER) / $var")
+    result = evaluator.eval_expression(eval_str)
+    assert isinstance(result, float), f"Expected float, got {type(result)}"
+    assert abs(result - 60.0) < 1e-9, (
+        f"SUM([100, 200]) / 5 should be 60.0, got {result}"
+    )
+
+    # ---------------------------------------------------------------
+    # 8. Partial zeros in denominator → SUM aggregates past them
+    # ---------------------------------------------------------------
+    evaluator = make_evaluator({
+        "LEVEL": [100.0, 200.0, 300.0],
+        "REQ": [10.0, 0.0, 5.0],
+    })
+    eval_str = to_eval_str("SUM(LEVEL) / SUM(REQ)")
+    result = evaluator.eval_expression(eval_str)
+    # SUM([100,200,300]) / SUM([10,0,5]) = 600 / 15 = 40.0
+    assert isinstance(result, float)
+    assert abs(result - 40.0) < 1e-9, (
+        f"SUM(LEVEL) / SUM(REQ) should be 40.0, got {result}"
+    )
 
 
 @pytest.fixture

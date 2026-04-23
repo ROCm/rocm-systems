@@ -112,6 +112,12 @@ ROBackend::ROBackend(MPI_Comm comm)
       reinterpret_cast<rocshmem_team_t>(team_world_proxy_->get());
   set_team_world_device(host::ROCSHMEM_TEAM_WORLD);
 
+  /*
+   * setup_team_shared() must follow initIPC() because it uses
+   * ipcImpl.pes_with_ipc_avail to determine shared-memory membership.
+   */
+  setup_team_shared();
+
   default_block_handle_proxy_ = DefaultBlockHandleProxyT(
                                 g_ret_buffer_.get(),
                                 atomic_ret_buffer_.get(), &queue_,
@@ -200,6 +206,63 @@ __device__ bool ROBackend::create_ctx([[maybe_unused]] int64_t options, rocshmem
 
 __device__ void ROBackend::destroy_ctx(rocshmem_ctx_t *ctx) {
   ctx_free_list.get()->push_back(static_cast<ROContext *>(ctx->ctx_opaque));
+}
+
+void ROBackend::setup_team_shared() {
+#if defined(USE_IPC)
+  if (ipcImpl.pes_with_ipc_avail == nullptr) {
+    host::ROCSHMEM_TEAM_SHARED = ROCSHMEM_TEAM_INVALID;
+    set_team_shared_device(ROCSHMEM_TEAM_INVALID);
+    return;
+  }
+
+  int shm_size = ipcImpl.shm_size;
+  int shm_rank = ipcImpl.shm_rank;
+
+  /*
+   * Determine pe_start/stride from the IPC PE list. The list is on
+   * device memory, so copy it to host for inspection.
+   */
+  std::vector<int> team_shared_pes(shm_size);
+  CHECK_HIP(hipMemcpy(team_shared_pes.data(), ipcImpl.pes_with_ipc_avail,
+                       shm_size * sizeof(int), hipMemcpyDeviceToHost));
+
+  int pe_start = team_shared_pes[0];
+  int stride = (shm_size > 1) ? (team_shared_pes[1] - team_shared_pes[0]) : 1;
+  bool uniform = (stride > 0);
+  for (int i = 2; i < shm_size && uniform; i++) {
+    if (team_shared_pes[i] - team_shared_pes[i - 1] != stride) {
+      uniform = false;
+    }
+  }
+
+  if (!uniform) {
+    /*
+     * Node-local ranks are not uniformly strided, so TEAM_SHARED
+     * cannot be represented with pe_start/stride. Mark it invalid
+     * since context-based operations rely on the strided formula.
+     */
+    host::ROCSHMEM_TEAM_SHARED = ROCSHMEM_TEAM_INVALID;
+    set_team_shared_device(ROCSHMEM_TEAM_INVALID);
+    return;
+  }
+
+  TeamInfo wrt_parent(nullptr, 0, 1, shm_size);
+  TeamInfo wrt_world(nullptr, pe_start, stride, shm_size);
+
+  ROTeam *team_shared{nullptr};
+  CHECK_HIP(hipMalloc(&team_shared, sizeof(ROTeam)));
+  new (team_shared) ROTeam(this, wrt_parent, wrt_world,
+                           shm_size, shm_rank, MPI_COMM_NULL);
+
+  team_tracker.set_team_shared(team_shared);
+
+  host::ROCSHMEM_TEAM_SHARED = reinterpret_cast<rocshmem_team_t>(team_shared);
+  set_team_shared_device(host::ROCSHMEM_TEAM_SHARED);
+#else
+  host::ROCSHMEM_TEAM_SHARED = ROCSHMEM_TEAM_INVALID;
+  set_team_shared_device(ROCSHMEM_TEAM_INVALID);
+#endif
 }
 
 void ROBackend::team_destroy(rocshmem_team_t team) {
@@ -321,10 +384,19 @@ void ROBackend::ro_net_free_runtime() {
   // CHECK_HIP(hipFree(bp->profiler));
 
   /*
+   * Tear down team_shared (only allocated when IPC is enabled)
+   */
+  auto *team_shared{static_cast<ROTeam*>(team_tracker.get_team_shared())};
+  if (team_shared) {
+    team_shared->~ROTeam();
+    CHECK_HIP(hipFree(team_shared));
+  }
+
+  /*
    * Tear down team_world
    */
-  auto *team_world{team_tracker.get_team_world()};
-  team_world->~Team();
+  auto *team_world{static_cast<ROTeam*>(team_tracker.get_team_world())};
+  team_world->~ROTeam();
   // CHECK_HIP(hipFree(team_world));
 
   /*

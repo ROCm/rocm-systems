@@ -33,7 +33,7 @@ namespace
 {
 struct annotation_entry
 {
-    const char*                                                             key;
+    std::string                                                             key;
     std::variant<std::string, uint64_t, int64_t, double, int32_t, uint32_t> value;
 };
 
@@ -138,7 +138,7 @@ emit_xcp_array_metrics(uint32_t device_id, size_t ts, const char* metric_name,
     for(size_t i = 0; i < data.size(); ++i)
     {
         const auto value = data[i];
-        if(value == std::numeric_limits<uint16_t>::max()) continue;
+        if(value == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_16) continue;
 
         std::string track_name;
         if(xcp_idx.has_value())

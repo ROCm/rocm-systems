@@ -196,6 +196,18 @@ namespace envvar {
     const var<size_t> num_qps_per_pe_usr_ctx("NUM_QPS_PER_PE_USR_CTX",
       "Sets the number of Queue Pairs (QPs) to create per PE for each user context.",
       1);
+    const var<bool> merge_nics("MERGE_NICS",
+      "Enable automatic topology-based NIC fusion (multi-NIC). 0: Disabled; 1: Enabled",
+      false);
+    const var<std::string> net_merge_level("NET_MERGE_LEVEL",
+      "Maximum PCIe path type for auto-merge NIC selection (PIX/PXB/PHB/SYS)",
+      "PIX");
+    const var<std::string> net_force_merge("NET_FORCE_MERGE",
+      "Force-merge specific NICs by name. Comma-separated list, semicolon-separated rank groups");
+    const var<std::string> nic_policy("NIC_POLICY",
+      "NIC-to-QP binding mode. ROUND_ROBIN: QPs within a context spread across NICs; "
+      "PER_CONTEXT: all QPs in a context use one NIC, multi-NIC via multiple contexts",
+      "ROUND_ROBIN");
   }  // namespace gda
 
   namespace _detail {

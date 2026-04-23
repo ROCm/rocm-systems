@@ -738,7 +738,7 @@ class Runtime {
 
   struct PrefetchRange {
     PrefetchRange() {}
-    PrefetchRange(size_t Bytes, PrefetchOp* Op) : bytes(Bytes), op(Op) {}
+    PrefetchRange(size_t Bytes, PrefetchOp* Op) : bytes(Bytes), op(Op), prev{}, next{} {}
     size_t bytes;
     PrefetchOp* op;
     prefetch_map_t::iterator prev;

@@ -166,6 +166,7 @@ ssize_t
 Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buffer, size_t size,
                    hoff_t file_offset, hoff_t buffer_offset)
 {
+    StatsIoTracker ioTracker{type, StatsBackend::Fastpath};
     if (!Context<Configuration>::get()->fastpath()) {
         throw BackendDisabled();
     }
@@ -198,11 +199,11 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
     switch (type) {
         case IoType::Read:
             nbytes = Context<Hip>::get()->hipAmdFileRead(handle, devptr, size, file_offset);
-            statsAddFastPathRead(nbytes);
+            ioTracker.complete(nbytes);
             break;
         case IoType::Write:
             nbytes = Context<Hip>::get()->hipAmdFileWrite(handle, devptr, size, file_offset);
-            statsAddFastPathWrite(nbytes);
+            ioTracker.complete(nbytes);
             break;
         default:
             throw std::runtime_error("Invalid IoType");

@@ -153,7 +153,7 @@ __device__ void QueuePair::post_wqe_rma([[maybe_unused]] int pe, int32_t size, u
 }
 
 __device__ void QueuePair::post_wqe_rma_single([[maybe_unused]] int32_t size, uintptr_t laddr,
-    uintptr_t raddr, uint8_t opcode, bool ring_db) {
+    uintptr_t raddr, uint8_t opcode, [[maybe_unused]] bool ring_db) {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
@@ -175,7 +175,7 @@ __device__ void QueuePair::post_wqe_rma_single([[maybe_unused]] int32_t size, ui
   }
 }
 
-__device__ uint64_t QueuePair::post_wqe_amo(int32_t size, uintptr_t raddr,
+__device__ uint64_t QueuePair::post_wqe_amo([[maybe_unused]] int32_t size, uintptr_t raddr,
     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching, ActiveWFInfo &wf_info) {
   switch (gda_provider_) {

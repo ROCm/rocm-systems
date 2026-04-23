@@ -616,16 +616,4 @@ backtrace_metrics::cache_backtrace_data(int64_t _tid, uint64_t _ts) const
 }  // namespace component
 }  // namespace rocprofsys
 
-ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_wall_clock>), true,
-    double)
-
-ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_cpu_clock>), true,
-    double)
-
-ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_fraction>), true,
-    double)
-
 TIMEMORY_INITIALIZE_STORAGE(rocprofsys::component::backtrace_metrics)
