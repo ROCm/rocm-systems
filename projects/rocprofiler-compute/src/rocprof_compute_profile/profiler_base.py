@@ -449,10 +449,6 @@ class RocProfCompute_Base:
                 duration = self.profile(fname, options, total_runs)
                 total_profiling_time += duration
 
-        # Delete temporary native tool if created
-        if native_tool_path_str and native_tool_path_str.startswith("/tmp"):
-            shutil.rmtree(Path(native_tool_path_str).parent, ignore_errors=True)
-
         # PC sampling data is only collected when block "21" is specified
         if not "21" in args.filter_blocks:
             console_warning(
