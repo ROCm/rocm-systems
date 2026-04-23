@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "core/control/session.hpp"
 #include "core/timemory.hpp"
-#include "rocprofiler-sdk/trace_control.hpp"
 
 #include <memory>
 #include <vector>
@@ -42,8 +42,8 @@ pause();
 void
 resume();
 
-std::shared_ptr<control::trace_control>
-get_trace_controller();
+std::shared_ptr<control::session>
+get_session();
 
 void
 reset_sdk_session_guards();
