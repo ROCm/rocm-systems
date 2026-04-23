@@ -38,6 +38,7 @@ run_tests_all=false
 time_trace=false
 force_reduce_pipeline=false
 generate_sym_kernels=false
+device_linker=true
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 quiet_warnings=false
 build_rocshmem_support=false
@@ -57,6 +58,7 @@ function display_help()
     echo "       --debug                 Build debug library"
     echo "       --debug-fast            Build debug library with lto optimization disabled (fast build times)"
     echo "    -d|--dependencies          Install RCCL dependencies"
+    echo "       --device-linker         Build with assembly-extract device linker (default)"
     echo "       --disable-colltrace     Build without collective trace"
     echo "       --disable-roctx         Build without ROCTX logging"
     echo "       --disable-warp-speed    Disable WARP_SPEED kernel optimizations"
@@ -74,6 +76,7 @@ function display_help()
     echo "    -l|--local_gpu_only        Only compile for local GPU architecture"
     echo "       --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)"
     echo "       --no_clean              Don't delete files if they already exist"
+    echo "       --no-device-linker      Disable device linker, use standard -fgpu-rdc"
     echo "       --npkit-enable          Compile with npkit enabled"
     echo "       --openmp-test-enable    Enable OpenMP in rccl unit tests"
     echo "    -p|--package_build         Build RCCL package"
@@ -116,7 +119,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,disable-colltrace,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,no_clean,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -137,6 +140,7 @@ while true; do
          --debug)                    build_release=false;                                                                              shift ;;
          --debug-fast)               build_release=false; debug_fast=true;                                                             shift ;;
     -d | --dependencies)             install_dependencies=true;                                                                        shift ;;
+         --device-linker)            device_linker=true;                                                                               shift ;;
          --disable-colltrace)        collective_trace=false;                                                                           shift ;;
          --disable-roctx)            roctx_enabled=false;                                                                              shift ;;
          --disable-warp-speed)       warp_speed_enabled=false;                                                                         shift ;;
@@ -154,6 +158,7 @@ while true; do
     -l | --local_gpu_only)           build_local_gpu_only=true;                                                                        shift ;;
          --log-trace)                log_trace=true;                                                                                   shift ;;
          --no_clean)                 clean_build=false;                                                                                shift ;;
+         --no-device-linker)         device_linker=false;                                                                              shift ;;
          --npkit-enable)             npkit_enabled=true;                                                                               shift ;;
          --openmp-test-enable)       openmp_test_enabled=true;                                                                         shift ;;
     -p | --package_build)            build_package=true;                                                                               shift ;;
@@ -399,6 +404,12 @@ if [[ "${generate_sym_kernels}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DGENERATE_SYM_KERNELS=ON"
 fi
 
+# Device linker (assembly-extract pipeline, no -fgpu-rdc)
+# Enabled by default; pass -DENABLE_DEVICE_LINKER=OFF when explicitly disabled.
+if [[ "${device_linker}" == false ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_DEVICE_LINKER=OFF"
+fi
+
 # Enable NPKit
 if [[ "${npkit_enabled}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_NPKIT=ON"
@@ -429,10 +440,12 @@ fi
 
 check_exit_code "$?"
 
-# Enable ninja build for time tracing
+# Build system selection.  Ninja is used only when explicitly requested via
+# --time-trace (which requires it).  Default is Make for broadest compatibility
+# (Jenkins CI runs `make package` directly in the build directory).
 if [[ "${time_trace}" == true ]]; then
     if ! hash ninja &>/dev/null ; then
-        echo "ninja could not be found"
+        echo "ninja could not be found (required for --time-trace)"
         echo "Use \"${time_trace_ninja_msg}\" to install ninja"
         exit 1
     fi
