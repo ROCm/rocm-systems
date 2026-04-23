@@ -185,12 +185,18 @@ fi
 
 for VERSION in ${VERSIONS}
 do
+    BASE_IMAGE_ARG=""
+    if [ "${DISTRO}" = "ubuntu" ] && [ -n "${ROCM_VERSION}" ]; then
+        BASE_IMAGE_ARG="--build-arg BASE_IMAGE=rocm/dev-ubuntu-${VERSION}:${ROCM_VERSION}"
+    fi
+
     verbose-run docker build . \
         ${PULL} \
         -f docker/${DOCKER_FILE} \
         --tag ${USER}/rocprofiler-systems:ci-${TYPE}-${DISTRO}-${VERSION} \
         --build-arg DISTRO=${DISTRO_IMAGE} \
         --build-arg VERSION=${VERSION} \
+        ${BASE_IMAGE_ARG} \
         --build-arg NJOBS=${NJOBS} \
         --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" \
         --build-arg ELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_VERSION} \
