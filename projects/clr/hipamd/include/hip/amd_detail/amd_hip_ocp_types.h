@@ -1,26 +1,8 @@
 /*
-Copyright © Advanced Micro Devices, Inc., or its affiliates.
-
-SPDX-License-Identifier: MIT
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -57,6 +39,7 @@ typedef unsigned int __attribute__((ext_vector_type(2))) __amd_uintx2_storage_t;
 typedef uint8_t __attribute__((ext_vector_type(8))) __amd_fp8x8_storage_t;
 typedef __bf16 __attribute__((ext_vector_type(2))) __amd_bf16x2_storage_t;
 typedef __bf16 __attribute__((ext_vector_type(8))) __amd_bf16x8_storage_t;
+typedef __bf16 __attribute__((ext_vector_type(16))) __amd_bf16x16_storage_t;
 typedef __bf16 __attribute__((ext_vector_type(32))) __amd_bf16x32_storage_t;
 typedef float __attribute__((ext_vector_type(2))) __amd_floatx2_storage_t;
 typedef float __attribute__((ext_vector_type(8))) __amd_floatx8_storage_t;
@@ -64,7 +47,9 @@ typedef float __attribute__((ext_vector_type(16))) __amd_floatx16_storage_t;
 typedef float __attribute__((ext_vector_type(32))) __amd_floatx32_storage_t;
 typedef _Float16 __attribute__((ext_vector_type(2))) __amd_fp16x2_storage_t;
 typedef _Float16 __attribute__((ext_vector_type(8))) __amd_fp16x8_storage_t;
+typedef _Float16 __attribute__((ext_vector_type(16))) __amd_fp16x16_storage_t;
 typedef _Float16 __attribute__((ext_vector_type(32))) __amd_fp16x32_storage_t;
+typedef uint32_t __attribute__((ext_vector_type(3))) __amd_fp6x16_storage_t;
 typedef uint32_t __attribute__((ext_vector_type(6))) __amd_fp6x32_storage_t;
 typedef short __attribute__((ext_vector_type(2))) __amd_shortx2_storage_t;
 #elif defined(__GNUC__) && (__GNUC__ > 13)
@@ -73,6 +58,7 @@ typedef unsigned int __attribute__((vector_size(8))) __amd_uintx2_storage_t;
 typedef uint8_t __attribute__((vector_size(8))) __amd_fp8x8_storage_t;
 typedef __bf16 __attribute__((vector_size(4))) __amd_bf16x2_storage_t;
 typedef __bf16 __attribute__((vector_size(16))) __amd_bf16x8_storage_t;
+typedef __bf16 __attribute__((vector_size(32))) __amd_bf16x16_storage_t;
 typedef __bf16 __attribute__((vector_size(64))) __amd_bf16x32_storage_t;
 typedef float __attribute__((vector_size(8))) __amd_floatx2_storage_t;
 typedef float __attribute__((vector_size(32))) __amd_floatx8_storage_t;
@@ -80,7 +66,9 @@ typedef float __attribute__((vector_size(64))) __amd_floatx16_storage_t;
 typedef float __attribute__((vector_size(128))) __amd_floatx32_storage_t;
 typedef _Float16 __attribute__((vector_size(4))) __amd_fp16x2_storage_t;
 typedef _Float16 __attribute__((vector_size(16))) __amd_fp16x8_storage_t;
+typedef _Float16 __attribute__((vector_size(32))) __amd_fp16x16_storage_t;
 typedef _Float16 __attribute__((vector_size(64))) __amd_fp16x32_storage_t;
+typedef uint32_t __attribute__((vector_size(12))) __amd_fp6x16_storage_t;
 typedef uint32_t __attribute__((vector_size(24))) __amd_fp6x32_storage_t;
 typedef short __attribute__((vector_size(4))) __amd_shortx2_storage_t;
 #endif

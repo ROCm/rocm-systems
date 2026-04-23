@@ -43,85 +43,85 @@
 ## Parses the VERSION_STRING variable and places
 ## the first, second and third number values in
 ## the major, minor and patch variables.
-function( parse_version VERSION_STRING )
+function(parse_version VERSION_STRING)
+    string(FIND ${VERSION_STRING} "-" STRING_INDEX)
 
-    string ( FIND ${VERSION_STRING} "-" STRING_INDEX )
+    if(${STRING_INDEX} GREATER -1)
+        math(EXPR STRING_INDEX "${STRING_INDEX} + 1")
+        string(SUBSTRING ${VERSION_STRING} ${STRING_INDEX} -1 VERSION_BUILD)
+    endif()
 
-    if ( ${STRING_INDEX} GREATER -1 )
-        math ( EXPR STRING_INDEX "${STRING_INDEX} + 1" )
-        string ( SUBSTRING ${VERSION_STRING} ${STRING_INDEX} -1 VERSION_BUILD )
-    endif ()
+    string(REGEX MATCHALL "[0-9]+" VERSIONS ${VERSION_STRING})
+    list(LENGTH VERSIONS VERSION_COUNT)
 
-    string ( REGEX MATCHALL "[0-9]+" VERSIONS ${VERSION_STRING} )
-    list ( LENGTH VERSIONS VERSION_COUNT )
+    if(${VERSION_COUNT} GREATER 0)
+        list(GET VERSIONS 0 MAJOR)
+        set(VERSION_MAJOR ${MAJOR} PARENT_SCOPE)
+        set(TEMP_VERSION_STRING "${MAJOR}")
+    endif()
 
-    if ( ${VERSION_COUNT} GREATER 0)
-        list ( GET VERSIONS 0 MAJOR )
-        set ( VERSION_MAJOR ${MAJOR} PARENT_SCOPE )
-        set ( TEMP_VERSION_STRING "${MAJOR}" )
-    endif ()
+    if(${VERSION_COUNT} GREATER 1)
+        list(GET VERSIONS 1 MINOR)
+        set(VERSION_MINOR ${MINOR} PARENT_SCOPE)
+        set(TEMP_VERSION_STRING "${TEMP_VERSION_STRING}.${MINOR}")
+    endif()
 
-    if ( ${VERSION_COUNT} GREATER 1 )
-        list ( GET VERSIONS 1 MINOR )
-        set ( VERSION_MINOR ${MINOR} PARENT_SCOPE )
-        set ( TEMP_VERSION_STRING "${TEMP_VERSION_STRING}.${MINOR}" )
-    endif ()
+    if(${VERSION_COUNT} GREATER 2)
+        list(GET VERSIONS 2 PATCH)
+        set(VERSION_PATCH ${PATCH} PARENT_SCOPE)
+        set(TEMP_VERSION_STRING "${TEMP_VERSION_STRING}.${PATCH}")
+    endif()
 
-    if ( ${VERSION_COUNT} GREATER 2 )
-        list ( GET VERSIONS 2 PATCH )
-        set ( VERSION_PATCH ${PATCH} PARENT_SCOPE )
-        set ( TEMP_VERSION_STRING "${TEMP_VERSION_STRING}.${PATCH}" )
-    endif ()
-
-    set ( VERSION_STRING "${TEMP_VERSION_STRING}" PARENT_SCOPE )
-
-endfunction ()
+    set(VERSION_STRING "${TEMP_VERSION_STRING}" PARENT_SCOPE)
+endfunction()
 
 ## Gets the current version of the repository
 ## using versioning tags and git describe.
 ## Passes back a packaging version string
 ## and a library version string.
 function(get_version_from_tag DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
-    parse_version ( ${DEFAULT_VERSION_STRING} )
+    parse_version( ${DEFAULT_VERSION_STRING} )
 
-    if ( GIT )
-        execute_process ( COMMAND git describe --tags --dirty --long --match ${VERSION_PREFIX}-[0-9.]*
-                          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                          OUTPUT_VARIABLE GIT_TAG_STRING
-                          OUTPUT_STRIP_TRAILING_WHITESPACE
-                          RESULT_VARIABLE RESULT )
-        if ( ${RESULT} EQUAL 0 )
-            parse_version ( ${GIT_TAG_STRING} )
-        endif ()
+    if(GIT)
+        execute_process(
+            COMMAND git describe --tags --dirty --long --match ${VERSION_PREFIX}-[0-9.]*
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            OUTPUT_VARIABLE GIT_TAG_STRING
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE RESULT
+        )
+        if(${RESULT} EQUAL 0)
+            parse_version( ${GIT_TAG_STRING} )
+        endif()
+    endif()
 
-    endif ()
-
-    set( VERSION_STRING "${VERSION_STRING}" PARENT_SCOPE )
-    set( VERSION_MAJOR  "${VERSION_MAJOR}" PARENT_SCOPE )
-    set( VERSION_MINOR  "${VERSION_MINOR}" PARENT_SCOPE )
-    set( VERSION_PATCH  "${VERSION_PATCH}" PARENT_SCOPE )
+    set(VERSION_STRING "${VERSION_STRING}" PARENT_SCOPE)
+    set(VERSION_MAJOR "${VERSION_MAJOR}" PARENT_SCOPE)
+    set(VERSION_MINOR "${VERSION_MINOR}" PARENT_SCOPE)
+    set(VERSION_PATCH "${VERSION_PATCH}" PARENT_SCOPE)
 endfunction()
 
 function(num_change_since_prev_pkg VERSION_PREFIX)
-    find_program(get_commits NAMES version_util.sh
-                 PATHS ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules)
-    if (get_commits)
-       execute_process( COMMAND ${get_commits} -c ${VERSION_PREFIX}
-                          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                          OUTPUT_VARIABLE NUM_COMMITS
-                          OUTPUT_STRIP_TRAILING_WHITESPACE
-                          RESULT_VARIABLE RESULT )
+    find_program(get_commits NAMES version_util.sh PATHS ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules)
+    if(get_commits)
+        execute_process(
+            COMMAND ${get_commits} -c ${VERSION_PREFIX}
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            OUTPUT_VARIABLE NUM_COMMITS
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE RESULT
+        )
 
-        set(NUM_COMMITS "${NUM_COMMITS}" PARENT_SCOPE )
+        set(NUM_COMMITS "${NUM_COMMITS}" PARENT_SCOPE)
 
-        if ( ${RESULT} EQUAL 0 )
-          message("${NUM_COMMITS} were found since previous release")
+        if(${RESULT} EQUAL 0)
+            message("${NUM_COMMITS} were found since previous release")
         else()
-          message("Unable to determine number of commits since previous release")
+            message("Unable to determine number of commits since previous release")
         endif()
     else()
         message("WARNING: Didn't find version_util.sh")
-        set(NUM_COMMITS "unknown" PARENT_SCOPE )
+        set(NUM_COMMITS "unknown" PARENT_SCOPE)
     endif()
 endfunction()
 
@@ -129,7 +129,7 @@ function(get_package_version_number DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
     get_version_from_tag(${DEFAULT_VERSION_STRING} ${VERSION_PREFIX} GIT)
     num_change_since_prev_pkg(${VERSION_PREFIX})
     set(PKG_VERSION_STR "${VERSION_STRING}.${NUM_COMMITS}")
-    if (DEFINED ENV{ROCM_BUILD_ID})
+    if(DEFINED ENV{ROCM_BUILD_ID})
         set(VERSION_ID $ENV{ROCM_BUILD_ID})
     else()
         set(VERSION_ID "local-build-0")
@@ -137,25 +137,29 @@ function(get_package_version_number DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
 
     set(PKG_VERSION_STR "${PKG_VERSION_STR}-${VERSION_ID}")
 
-    if (GIT)
-        execute_process(COMMAND git rev-parse --short HEAD
-                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                        OUTPUT_VARIABLE VERSION_HASH
-                        OUTPUT_STRIP_TRAILING_WHITESPACE
-                        RESULT_VARIABLE RESULT )
-        if( ${RESULT} EQUAL 0 )
+    if(GIT)
+        execute_process(
+            COMMAND git rev-parse --short HEAD
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            OUTPUT_VARIABLE VERSION_HASH
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE RESULT
+        )
+        if(${RESULT} EQUAL 0)
             # Check for dirty workspace.
-            execute_process(COMMAND git diff --quiet
-                            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                            RESULT_VARIABLE RESULT )
+            execute_process(
+                COMMAND git diff --quiet
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                RESULT_VARIABLE RESULT
+            )
             if(${RESULT} EQUAL 1)
                 set(VERSION_HASH "${VERSION_HASH}-dirty")
             endif()
         else()
-            set( VERSION_HASH "unknown" )
+            set(VERSION_HASH "unknown")
         endif()
     else()
-        set( VERSION_HASH "unknown" )
+        set(VERSION_HASH "unknown")
     endif()
     set(PKG_VERSION_STR "${PKG_VERSION_STR}-${VERSION_HASH}")
     set(PKG_VERSION_STR ${PKG_VERSION_STR} PARENT_SCOPE)
@@ -183,12 +187,7 @@ function(
     # Check If Debian Platform
     find_file(DEBIAN debian_version debconf.conf PATHS /etc)
     if(DEBIAN)
-        set(BUILD_ENABLE_LINTIAN_OVERRIDES
-            ON
-            CACHE BOOL
-            "Enable/Disable Lintian Overrides"
-            FORCE
-        )
+        set(BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" FORCE)
         set(BUILD_DEBIAN_PKGING_FLAG
             ON
             CACHE BOOL
@@ -233,16 +232,11 @@ function(
         # Install Change Log
         find_program(DEB_GZIP_EXEC gzip)
         if(NOT DEB_GZIP_EXEC)
-            message(
-                FATAL_ERROR
-                "gzip command not found: Failed to compress the changelog"
-            )
+            message(FATAL_ERROR "gzip command not found: Failed to compress the changelog")
         endif()
         if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian")
             execute_process(
-                COMMAND
-                    ${DEB_GZIP_EXEC} -f -n -9
-                    "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
+                COMMAND ${DEB_GZIP_EXEC} -f -n -9 "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
                 WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/DEBIAN"
                 RESULT_VARIABLE result
                 OUTPUT_VARIABLE output
@@ -252,8 +246,7 @@ function(
                 message(FATAL_ERROR "Failed to compress: ${error}")
             endif()
             install(
-                FILES
-                    "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
+                FILES "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
                 DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}
                 COMPONENT ${COMPONENT_NAME_T}
             )
@@ -292,21 +285,9 @@ function(
     DEB_MAINTAINER_EMAIL_T
 )
     # Setting configure flags
-    set(DEB_PACKAGE_NAME
-        "${DEB_PACKAGE_NAME_T}"
-        CACHE STRING
-        "Debian Package Name"
-    )
-    set(DEB_PACKAGE_VERSION
-        "${DEB_PACKAGE_VERSION_T}"
-        CACHE STRING
-        "Debian Package Version String"
-    )
-    set(DEB_MAINTAINER_NAME
-        "${DEB_MAINTAINER_NM_T}"
-        CACHE STRING
-        "Debian Package Maintainer Name"
-    )
+    set(DEB_PACKAGE_NAME "${DEB_PACKAGE_NAME_T}" CACHE STRING "Debian Package Name")
+    set(DEB_PACKAGE_VERSION "${DEB_PACKAGE_VERSION_T}" CACHE STRING "Debian Package Version String")
+    set(DEB_MAINTAINER_NAME "${DEB_MAINTAINER_NM_T}" CACHE STRING "Debian Package Maintainer Name")
     set(DEB_MAINTAINER_EMAIL
         "${DEB_MAINTAINER_EMAIL_T}"
         CACHE STRING
@@ -346,11 +327,7 @@ function(
         OUTPUT_VARIABLE TIMESTAMP_T
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    set(DEB_TIMESTAMP
-        "${TIMESTAMP_T}"
-        CACHE STRING
-        "Current Time Stamp for Copyright/Changelog"
-    )
+    set(DEB_TIMESTAMP "${TIMESTAMP_T}" CACHE STRING "Current Time Stamp for Copyright/Changelog")
 
     # Get Copyright Year
     set(DEB_YEAR_FORMAT_OPTION "+%Y")
@@ -359,11 +336,7 @@ function(
         OUTPUT_VARIABLE DEB_COPYRIGHT_YEAR_T
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    set(DEB_COPYRIGHT_YEAR
-        "${DEB_COPYRIGHT_YEAR_T}"
-        CACHE STRING
-        "Debian Package Copyright Year"
-    )
+    set(DEB_COPYRIGHT_YEAR "${DEB_COPYRIGHT_YEAR_T}" CACHE STRING "Debian Package Copyright Year")
 
     message(STATUS "DEB_PACKAGE_NAME             : ${DEB_PACKAGE_NAME}")
     message(STATUS "DEB_PACKAGE_VERSION          : ${DEB_PACKAGE_VERSION}")
@@ -372,8 +345,5 @@ function(
     message(STATUS "DEB_COPYRIGHT_YEAR           : ${DEB_COPYRIGHT_YEAR}")
     message(STATUS "DEB_LICENSE                  : ${DEB_LICENSE}")
     message(STATUS "DEB_TIMESTAMP                : ${DEB_TIMESTAMP}")
-    message(
-        STATUS
-        "DEB_CHANGELOG_INSTALL_FILENM : ${DEB_CHANGELOG_INSTALL_FILENM}"
-    )
+    message(STATUS "DEB_CHANGELOG_INSTALL_FILENM : ${DEB_CHANGELOG_INSTALL_FILENM}")
 endfunction()

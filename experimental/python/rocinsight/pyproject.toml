@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rocinsight"
+version = "0.1.0"
+description = "AI-powered GPU trace analysis for rocprofiler-sdk databases"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Advanced Micro Devices, Inc." }]
+requires-python = ">=3.8"
+# Zero mandatory runtime dependencies — core analysis works with stdlib only.
+# LLM enhancement requires anthropic or openai (optional extras below).
+dependencies = []
+
+[project.optional-dependencies]
+llm  = ["anthropic>=0.18", "openai>=1.0"]
+rich = ["rich>=13.0"]
+# claude-agent-sdk enables --llm claude-code using Claude Code's stored credentials
+# (falls back to ANTHROPIC_API_KEY if CLI not found)
+all  = ["anthropic>=0.18", "openai>=1.0", "rich>=13.0", "claude-agent-sdk>=0.1"]
+dev  = ["pytest", "flake8", "black"]
+
+[project.scripts]
+rocinsight = "rocinsight.__main__:main"
+
+[project.urls]
+Homepage      = "https://github.com/ROCm/rocm-systems"
+Documentation = "https://rocm.docs.amd.com"
+
+[tool.setuptools]
+packages = [
+    "rocinsight",
+    "rocinsight.analysis",
+    "rocinsight.formatters",
+    "rocinsight.ai_analysis",
+    "rocinsight.ai_analysis.tests",
+]
+
+[tool.setuptools.package-data]
+rocinsight = [
+    "ai_analysis/share/*.md",
+    "ai_analysis/share/*.png",
+    "ai_analysis/docs/*.md",
+    "ai_analysis/docs/*.json",
+    "formatters/templates/*.html",
+]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "rocinsight/ai_analysis/tests",
+    "tests",
+]
+python_files = ["test_*.py"]
+addopts = "-ra"
+
+[tool.black]
+line-length = 120
+target-version = ["py38", "py310"]
+
+[tool.flake8]
+max-line-length = 120
+extend-ignore = ["E203", "W503"]

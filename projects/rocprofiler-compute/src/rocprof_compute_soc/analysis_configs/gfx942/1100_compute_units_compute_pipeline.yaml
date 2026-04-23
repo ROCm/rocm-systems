@@ -261,6 +261,10 @@ Panel Config:
       also presented as a percent of the peak theoretical IOPs achievable on the
       specific accelerator. Note: this does not include any integer operations from
       MFMA instructions.
+    MFMA FLOPs (F8): >-
+      The total number of 8-bit floating point MFMA operations executed per
+      second. This is also presented as a percent of the peak theoretical
+      F8 MFMA operations achievable on the specific accelerator.
     MFMA FLOPs (BF16): >-
       The total number of 16-bit brain floating point MFMA operations executed
       per second. Note: this does not include any 16-bit brain floating point operations
@@ -325,6 +329,8 @@ Panel Config:
       the VALU or MFMA units, per normalization unit.
     IOPs (Total): The total number of integer operations executed on either the VALU
       or MFMA units, per normalization unit.
+    F8 OPs: The total number of 8-bit floating-point MFMA operations executed, per
+      normalization unit.
     F16 OPs: The total number of 16-bit floating-point operations executed on either
       the VALU or MFMA units, per normalization unit.
     BF16 OPs: The total number of 16-bit brain floating-point operations executed

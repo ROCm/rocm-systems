@@ -57,14 +57,14 @@ __device__ bool thread_passing(int num_bins, uint32_t *bin_threads,
 __global__ void RandomAccessTest(int loop, int skip, long long int *start_time,
                                  long long int *end_time, int *s_buf,
                                  int *r_buf, size_t size, OpType type,
-                                 int coal_coef, int num_bins, int num_waves,
+                                 int coal_coef, int num_bins, [[maybe_unused]] int num_waves,
                                  uint32_t *threads_bins, uint32_t *off_bins,
                                  uint32_t *PE_bins, ShmemContextType ctx_type) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
-  int pe = rocshmem_ctx_my_pe(ctx);
+  [[maybe_unused]] int pe = rocshmem_ctx_my_pe(ctx);
   size_t offset;
   int PE;
 
@@ -132,7 +132,7 @@ __host__ void init_bins(int num_bins, int num_waves, uint32_t *off_bins,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 RandomAccessTester::RandomAccessTester(TesterArguments args) : Tester(args) {
-  int max_size = args.max_msg_size;
+  int max_size = max_msg_size;
   int wg_size = args.wg_size;
   _num_waves = (args.wg_size / 64) * args.num_wgs;
   _num_bins = args.thread_access / args.coal_coef;
@@ -165,8 +165,8 @@ RandomAccessTester::~RandomAccessTester() {
   CHECK_HIP(hipFree(_PE_bins));
 }
 
-void RandomAccessTester::resetBuffers(size_t size) {
-  for (size_t i = 0; i < args.max_msg_size / sizeof(int) * args.wg_size * space;
+void RandomAccessTester::resetBuffers([[maybe_unused]] size_t size) {
+  for (size_t i = 0; i < max_msg_size / sizeof(int) * args.wg_size * space;
        i++) {
     s_buf[i] = 1;
     r_buf[i] = 0;

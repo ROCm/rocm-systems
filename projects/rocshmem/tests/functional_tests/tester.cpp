@@ -26,6 +26,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include <cstdlib>
 #include <functional>
 #include <iostream>
 #include <rocshmem/rocshmem.hpp>
@@ -37,6 +38,7 @@
 #include "default_ctx_primitive_tester.hpp"
 #include "barrier_all_tester.hpp"
 #include "barrier_all_on_stream_tester.hpp"
+#include "quiet_on_stream_tester.hpp"
 #include "empty_tester.hpp"
 #include "getmem_on_stream_tester.hpp"
 #include "putmem_on_stream_tester.hpp"
@@ -52,6 +54,7 @@
 #include "sync_all_tester.hpp"
 #include "team_sync_tester.hpp"
 #include "team_alltoall_tester.hpp"
+#include "team_alltoallv_tester.hpp"
 #include "team_alltoallmem_on_stream_tester.hpp"
 #include "team_broadcastmem_on_stream_tester.hpp"
 #include "team_barrier_tester.hpp"
@@ -63,6 +66,10 @@
 #include "wavefront_primitives.hpp"
 #include "workgroup_primitives.hpp"
 #include "flood_tester.hpp"
+#include "flood_amo_tester.hpp"
+#include "hipmodule_init_tester.hpp"
+#include "device_bitcode_tester.hpp"
+#include "library_info_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -95,6 +102,59 @@ Tester::Tester(TesterArguments args) : args(args) {
   CHECK_HIP(hipMalloc((void**)&end_time, sizeof(long long int) * num_timers));
   CHECK_HIP(hipHostMalloc((void**)&verification_error, sizeof(bool)));
   *verification_error = false;
+
+  max_msg_size = args.max_msg_size;
+  if (args.max_volume_size) {
+    switch (_type) {
+      case GetTestType:
+      case GetNBITestType:
+      case PutTestType:
+      case PutNBITestType:
+      case PutSignalTestType:
+      case PutSignalNBITestType:
+      case DefaultCTXGetTestType:
+      case DefaultCTXGetNBITestType:
+      case DefaultCTXPutTestType:
+      case DefaultCTXPutNBITestType:
+      case DefaultCTXPTestType:
+      case DefaultCTXGTestType:
+        max_msg_size = args.max_volume_size / args.num_wgs / args.wg_size;
+        break;
+      case WAVEGetTestType:
+      case WAVEGetNBITestType:
+      case WAVEPutTestType:
+      case WAVEPutNBITestType:
+      case WAVEPutSignalTestType:
+      case WAVEPutSignalNBITestType:
+        max_msg_size = args.max_volume_size / args.num_wgs / num_warps;
+        break;
+      case WGGetTestType:
+      case WGGetNBITestType:
+      case WGPutTestType:
+      case WGPutNBITestType:
+      case WGPutSignalTestType:
+      case WGPutSignalNBITestType:
+        max_msg_size = args.max_volume_size / args.num_wgs;
+        break;
+      case TeamBroadcastTestType:
+      case TeamReductionTestType:
+      case TeamFCollectTestType:
+      case CollectTestType:
+      case TeamAllToAllTestType:
+      case TeamAllToAllvTestType:
+      case TeamAlltoallmemOnStreamTestType:
+        max_msg_size = args.max_volume_size / args.num_wgs / args.numprocs;
+        break;
+      default:
+        break;
+    }
+    if (max_msg_size == 0) {
+      if (args.myid == 0) {
+        std::cerr << "Requested communication volume is smaller than what is required to send at least 1 byte per operation, adjust -w, -z, and -v to match, or remove -v.";
+      }
+      exit(-1);
+    }
+  }
 }
 
 Tester::~Tester() {
@@ -176,6 +236,11 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       args.team_type = ROCSHMEM_TEST_TEAM_ODDEVEN;
       testers.push_back(new TeamCtxInfraTester(args));
       return testers;
+    case TeamCtxSharedInfraTestType:
+      if (rank == 0) std::cout << "Team Ctx Infra Shared test ###" << std::endl;
+      args.team_type = ROCSHMEM_TEST_TEAM_SHARED;
+      testers.push_back(new TeamCtxInfraTester(args));
+      return testers;
     case TeamCtxGetTestType:
       if (rank == 0) std::cout << "Blocking Team Ctx Gets ###" << std::endl;
       testers.push_back(new TeamCtxPrimitiveTester(args));
@@ -235,6 +300,12 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       }
       testers.push_back(new TeamAlltoallTester<float>(args));
       return testers;
+    case TeamAllToAllvTestType:
+      if (rank == 0) {
+        std::cout << "Alltoallv Test ###" << std::endl;
+      }
+      testers.push_back(new TeamAlltoallvTester<float>(args));
+      return testers;
     case TeamAlltoallmemOnStreamTestType:
       if (rank == 0)
         std::cout << "Alltoallmem_On_Stream ###" << std::endl;
@@ -244,6 +315,16 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0)
         std::cout << "Barrier_All_On_Stream ###" << std::endl;
       testers.push_back(new BarrierAllOnStreamTester(args));
+      return testers;
+    case QuietOnStreamTestType:
+      if (rank == 0)
+        std::cout << "Quiet_On_Stream ###" << std::endl;
+      testers.push_back(new QuietOnStreamTester(args));
+      return testers;
+    case SyncAllOnStreamTestType:
+      if (rank == 0)
+        std::cout << "Sync_All_On_Stream ###" << std::endl;
+      testers.push_back(new BarrierAllOnStreamTester(args, SYNC_ALL_OP));
       return testers;
     case TeamBroadcastmemOnStreamTestType:
       if (rank == 0)
@@ -555,6 +636,30 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "Flood G (multidirectional) ###" << std::endl;
       testers.push_back(new FloodTester(args));
       return testers;
+    case HipModuleInitTestType:
+      if (rank == 0) std::cout << "HIP Module Init Test ###" << std::endl;
+      testers.push_back(new HipModuleInitTester(args));
+      return testers;
+    case FloodAddTestType:
+      if (rank == 0) std::cout << "Flood Add (multidirectional) ###" << std::endl;
+      testers.push_back(new FloodAmoTester(args));
+      return testers;
+    case FloodFAddTestType:
+      if (rank == 0) std::cout << "Flood FAdd (multidirectional) ###" << std::endl;
+      testers.push_back(new FloodAmoTester(args));
+      return testers;
+    case FloodWaitAmoTestType:
+      if (rank == 0) std::cout << "Flood WaitAdd (multidirectional) ###" << std::endl;
+      testers.push_back(new FloodAmoTester(args));
+      return testers;
+    case DeviceBitcodeTestType:
+      if (rank == 0) std::cout << "Device Bitcode Test ###" << std::endl;
+      testers.push_back(new DeviceBitcodeTester(args));
+      return testers;
+    case LibraryInfoTestType:
+      if (rank == 0) std::cout << "Library Info Test ###" << std::endl;
+      testers.push_back(new LibraryInfoTester(args));
+      return testers;
     default:
       if (rank == 0) std::cout << "Empty Test ###" << std::endl;
       return testers;
@@ -565,20 +670,22 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
 void Tester::execute() {
   if (_type == InitTestType) return;
 
-  int num_loops = args.loop;
+  num_loops = args.loop;
 
   /**
    * Some tests loop through data sizes in powers of 2 and report the
    * results for those ranges.
    */
-  for (size_t size = args.min_msg_size; size <= args.max_msg_size;
+  for (size_t size = args.min_msg_size; size <= max_msg_size;
        size <<= 1) {
-    resetBuffers(size);
-
     /**
      * Restricts the number of iterations of really large messages.
      */
     if (size > args.large_message_size) num_loops = args.loop_large;
+
+    // Reset after num_loops is set so subclasses can size their
+    // buffers to the actual iteration count for this message size.
+    resetBuffers(size);
 
     barrier();
 
@@ -616,14 +723,16 @@ void Tester::execute() {
     postLaunchKernel();
 
     // data validation
-    verifyResults(size);
+    if (args.verif)
+      verifyResults(size);
 
     barrier();
 
     if (_type != TeamCtxInfraTestType       &&
         _type != TeamCtxInfraTestSingleType &&
         _type != TeamCtxInfraTestBlockType  &&
-        _type != TeamCtxInfraTestOddEvenType ) {
+        _type != TeamCtxInfraTestOddEvenType &&
+        _type != TeamCtxSharedInfraTestType ) {
       print(size);
     }
   }
@@ -645,7 +754,9 @@ bool Tester::peLaunchesKernel() {
     case TeamCtxInfraTestSingleType:
     case TeamCtxInfraTestBlockType:
     case TeamCtxInfraTestOddEvenType:
+    case TeamCtxSharedInfraTestType:
     case TeamAllToAllTestType:
+    case TeamAllToAllvTestType:
     case TeamFCollectTestType:
     case PingPongTestType:
     case BarrierAllTestType:
@@ -664,6 +775,8 @@ bool Tester::peLaunchesKernel() {
     case TeamWGBarrierTestType:
     case TeamAlltoallmemOnStreamTestType:
     case BarrierAllOnStreamTestType:
+    case QuietOnStreamTestType:
+    case SyncAllOnStreamTestType:
     case TeamBroadcastmemOnStreamTestType:
     case GetmemOnStreamTestType:
     case PutmemOnStreamTestType:
@@ -675,6 +788,11 @@ bool Tester::peLaunchesKernel() {
     case FloodGetTestType:
     case FloodGetNBITestType:
     case FloodGTestType:
+    case HipModuleInitTestType:
+    case FloodAddTestType:
+    case FloodFAddTestType:
+    case FloodWaitAmoTestType:
+    case DeviceBitcodeTestType:
       is_launcher = true;
       break;
     default:
@@ -690,31 +808,33 @@ void Tester::print(uint64_t size) {
   }
 
   /**
-   * Calculate total amount of data transfered
+   * Calculate total amount of data transferred
    */
-  uint64_t total_size = size * num_timed_msgs;
-  double timer_avg = timerAvgInMicroseconds();
+  size_t total_size = size_factor * size * num_timed_msgs;
+  size_t volume = total_size / num_loops;
 
+  [[maybe_unused]] double timer_avg = timerAvgInMicroseconds();
   double time_us = gpuCyclesToMicroseconds(max_end_time - min_start_time);
   double time_s = time_us / 1e6;
 
-  double latency_avg = time_us / num_timed_msgs;
+  double latency = time_us / num_loops / rtt_factor;
 
-  double avg_msg_rate = num_timed_msgs / time_s;
+  double msg_rate = num_timed_msgs / time_s;
 
-  double bandwidth_avg_gbs =
-      static_cast<double>(total_size * bw_factor) / time_s / pow(2, 30);
+  double bandwidth_gbs =
+      static_cast<double>(bw_factor * total_size) / time_s / pow(2, 30);
 
   float total_kern_time_ms;
   CHECK_HIP(hipEventElapsedTime(&total_kern_time_ms, start_event, stop_event));
-  float total_kern_time_s = total_kern_time_ms / 1000;
+  [[maybe_unused]] float total_kern_time_s = total_kern_time_ms / 1000;
 
   int field_width = 20;
   int float_precision = 2;
 
   if (_print_header) {
-    printf("%-*s%-*s%*s%*s%*s",
-           15, "# Size (B)",
+    printf("%-*s%-*s%-*s%*s%*s%*s",
+           15, "# Volume (B)",
+           15, "Msg Size (B)",
            15, "# of timed Msgs",
            field_width, "Latency (us)",
            field_width, "Bandwidth (GB/s)",
@@ -722,12 +842,13 @@ void Tester::print(uint64_t size) {
     _print_header = 0;
   }
 
-  printf("%-*lu%-*d%*.*f%*.*f%*.*f\n",
+  printf("%-*lu%-*lu%-*zu%*.*f%*.*f%*.*f\n",
+         15, volume,
          15, size,
          15, num_timed_msgs,
-         field_width, float_precision, latency_avg,
-         field_width, float_precision, bandwidth_avg_gbs,
-         field_width, float_precision, avg_msg_rate);
+         field_width, float_precision, latency,
+         field_width, float_precision, bandwidth_gbs,
+         field_width, float_precision, msg_rate);
 
   fflush(stdout);
 }

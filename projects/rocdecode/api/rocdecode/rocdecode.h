@@ -112,6 +112,11 @@ typedef enum rocDecVideoSurfaceFormat_enum {
     rocDecVideoSurfaceFormat_YUV422 = 6,       /**< Planar YUV [Y plane followed by U and V planes in 4:2:2 format] */
     rocDecVideoSurfaceFormat_YUV422_16Bit = 7, /**< 16 bit Planar YUV [Y plane followed by U and V planes in 4:2:2 format].
                                                 Can be used for 10 bit(LSB), 12 bit (LSB) */
+    rocDecVideoSurfaceFormat_Native = 8        /**< Sentinel value: output format is determined by the coded stream parameters
+                                                (chroma format and bit depth), and the decoder selects the appropriate surface
+                                                format automatically. This value will not appear in any output_format_mask (or
+                                                similar bitmask fields) and MUST NOT be used as a bit position when constructing
+                                                or interpreting format bitmasks. */
 } rocDecVideoSurfaceFormat;
 
 /**************************************************************************************************************/

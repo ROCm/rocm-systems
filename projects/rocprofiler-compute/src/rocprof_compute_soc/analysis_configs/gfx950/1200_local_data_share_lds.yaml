@@ -155,6 +155,24 @@ Panel Config:
       loaded from, stored to, or atomically updated in the LDS divided by total duration.
       Does not take into account the execution mask of the wavefront when the instruction
       was executed.
+    LDS LOAD Bandwidth: >-
+      The effective bandwidth of LDS load operations, accounting for the work-items
+      executed (execution mask). Calculated as the total bytes loaded from LDS
+      divided by the kernel duration.
+    LDS STORE Bandwidth: >-
+      The effective bandwidth of LDS store operations, accounting for the work-items
+      executed (execution mask). Calculated as the total bytes stored to LDS
+      divided by the kernel duration.
+    LDS ATOMIC Bandwidth: >-
+      The effective bandwidth of LDS atomic operations, accounting for the work-items
+      executed (execution mask). Calculated as the total bytes accessed by LDS
+      atomic operations divided by the kernel duration.
+    LDS LOAD: >-
+      The total number of LDS load instructions issued per normalization unit.
+    LDS STORE: >-
+      The total number of LDS store instructions issued per normalization unit.
+    LDS ATOMIC: >-
+      The total number of LDS atomic instructions issued per normalization unit.
     Bank Conflict Rate: Indicates the percentage of active LDS cycles that were spent
       servicing bank conflicts. Calculated as the ratio of LDS cycles spent servicing
       bank conflicts over the number of LDS cycles that would have been required to
@@ -184,3 +202,11 @@ Panel Config:
       The total number of out-of-bounds accesses made to the LDS, per normalization
       unit. This is unused and expected to be zero in most configurations for
       modern CDNA\u2122 accelerators.
+    LDS Command FIFO Full Rate: >-
+      The number of cycles where the LDS command FIFO was full, per normalization
+      unit. High values indicate backpressure in LDS instruction dispatch, which
+      may stall wavefronts waiting to issue LDS operations.
+    LDS Data FIFO Full Rate: >-
+      The number of cycles where the LDS data FIFO was full, per normalization
+      unit. High values indicate backpressure in LDS data return path, which may
+      stall wavefronts waiting for LDS read/atomic results.

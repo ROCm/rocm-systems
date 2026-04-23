@@ -129,8 +129,8 @@ __global__ void SignalFetchTest(int loop, int skip, long long int *start_time,
  *****************************************************************************/
 SignalingOperationsTester::SignalingOperationsTester(TesterArguments args)
   : Tester(args) {
-  s_buf = (char *)rocshmem_malloc(args.max_msg_size * args.wg_size);
-  r_buf = (char *)rocshmem_malloc(args.max_msg_size * args.wg_size);
+  s_buf = (char *)rocshmem_malloc(max_msg_size * args.wg_size);
+  r_buf = (char *)rocshmem_malloc(max_msg_size * args.wg_size);
   sig_addr = (uint64_t *)rocshmem_malloc(sizeof(uint64_t));
   CHECK_HIP(hipMallocManaged(&fetched_value, sizeof(uint64_t), hipMemAttachHost));
 }
@@ -148,9 +148,9 @@ SignalingOperationsTester::~SignalingOperationsTester() {
   CHECK_HIP(hipFree(fetched_value));
 }
 
-void SignalingOperationsTester::resetBuffers(size_t size) {
-  memset(s_buf, '0', args.max_msg_size * args.wg_size);
-  memset(r_buf, '1', args.max_msg_size * args.wg_size);
+void SignalingOperationsTester::resetBuffers([[maybe_unused]] size_t size) {
+  memset(s_buf, '0', max_msg_size * args.wg_size);
+  memset(r_buf, '1', max_msg_size * args.wg_size);
   *fetched_value = -1;
   *sig_addr = args.myid + 123;
 }
@@ -214,15 +214,15 @@ void SignalingOperationsTester::verifyResults(size_t size) {
         switch (_type) {
           case PutSignalTestType:
           case PutSignalNBITestType:
-            expected_value += ((args.skip + args.loop) * args.wg_size * args.num_wgs);
+            expected_value += ((args.skip + num_loops) * args.wg_size * args.num_wgs);
             break;
           case WGPutSignalTestType:
           case WGPutSignalNBITestType:
-            expected_value += ((args.skip + args.loop) * args.num_wgs);
+            expected_value += ((args.skip + num_loops) * args.num_wgs);
             break;
           case WAVEPutSignalTestType:
           case WAVEPutSignalNBITestType:
-            expected_value += ((args.skip + args.loop) * args.num_wgs * num_warps);
+            expected_value += ((args.skip + num_loops) * args.num_wgs * num_warps);
             break;
           default:
             fprintf(stderr, "Invalid Test\n");

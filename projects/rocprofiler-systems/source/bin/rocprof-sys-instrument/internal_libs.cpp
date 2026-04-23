@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "internal_libs.hpp"
 #include "binary/analysis.hpp"
@@ -324,7 +305,6 @@ get_internal_basic_libs_impl()
                                                    "libpapi.so",
                                                    "libpfm.so",
                                                    "libhsa-runtime64.so",
-                                                   "libomp.so",
                                                    "librocm_smi64.so",
                                                    "libroctx64.so",
                                                    "librocmtools.so",
@@ -336,15 +316,14 @@ get_internal_basic_libs_impl()
                                                    "libamd_smi.so",
                                                    "libamd_comgr.so" };
 
-    // shared libraries potentially used by timemory
-    const auto _3rdparty_libs = strview_init_t{ "libcaliper.so",
-                                                "liblikwid.so",
-                                                "libprofiler.so",
-                                                "libtcmalloc.so",
-                                                "libtcmalloc_and_profiler.so",
-                                                "libtcmalloc_debug.so",
-                                                "libtcmalloc_minimal.so",
-                                                "libtcmalloc_minimal_debug.so" };
+    const auto _3rdparty_libs = strview_init_t{
+        // shared libs potentially used by timemory
+        "libcaliper.so", "liblikwid.so", "libprofiler.so", "libtcmalloc.so",
+        "libtcmalloc_and_profiler.so", "libtcmalloc_debug.so", "libtcmalloc_minimal.so",
+        "libtcmalloc_minimal_debug.so",
+        // shared libs that Dyninst will fail to instrument correctly
+        "libclang-cpp.so", "libLLVM.so"
+    };
 
     for(const auto& gitr : { _gnu_libs, _dyn_libs, _rocprof_sys_libs, _3rdparty_libs })
     {

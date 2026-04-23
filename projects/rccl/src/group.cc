@@ -18,8 +18,6 @@
 #include "profiler.h"
 #include "nvtx.h"
 
-#include "msccl/msccl_lifecycle.h"
-
 using namespace rccl;
 
 #define GROUP_MAX_RECLAIM_STEPS 10
@@ -99,10 +97,7 @@ ncclResult_t ncclAsyncJobComplete(struct ncclAsyncJob* job) {
 
 NCCL_API(ncclResult_t, ncclGroupStart);
 ncclResult_t ncclGroupStart_impl() {
-  if (!mscclIsCaller())
-  {
-    NCCLCHECK(Recorder::instance().record(rrGroupStart, ncclGroupDepth));
-  }
+  NCCLCHECK(Recorder::instance().record(rrGroupStart, ncclGroupDepth));
   ncclResult_t ret = ncclSuccess;
   NCCL_NVTX3_FUNC_RANGE;
 
@@ -113,18 +108,12 @@ ncclResult_t ncclGroupStart_impl() {
 
 ncclResult_t ncclGroupStartInternal() {
   ncclGroupDepth++;
-  if (mscclAvailable() && !mscclIsCaller()) {
-    NCCLCHECK(mscclGroupStart());
-  }
   return ncclSuccess;
 }
 
 NCCL_API(ncclResult_t, ncclGroupEnd);
 ncclResult_t ncclGroupEnd_impl() {
-  if (!mscclIsCaller())
-  {
-    NCCLCHECK(Recorder::instance().record(rrGroupEnd, ncclGroupDepth));
-  }
+  NCCLCHECK(Recorder::instance().record(rrGroupEnd, ncclGroupDepth));
   ncclResult_t ret = ncclSuccess;
   NCCL_NVTX3_FUNC_RANGE;
   NCCLCHECKGOTO(ncclGroupEndInternal(), ret, exit);
@@ -135,10 +124,7 @@ exit:
 
 NCCL_API(ncclResult_t, ncclGroupSimulateEnd, ncclSimInfo_t* simInfo);
 ncclResult_t ncclGroupSimulateEnd(ncclSimInfo_t* simInfo) {
-  if (!mscclIsCaller())
-  {
-    Recorder::instance().record(ncclGroupDepth, simInfo);
-  }
+  Recorder::instance().record(ncclGroupDepth, simInfo);
   ncclResult_t ret = ncclSuccess;
   NCCL_NVTX3_FUNC_RANGE;
   NCCLCHECKGOTO(ncclGroupEndInternal(simInfo), ret, exit);
@@ -162,10 +148,15 @@ struct ncclPrepareTasksAndCollPreconnectJob {
 ncclResult_t ncclP2PPreconnectFunc(struct ncclAsyncJob* job_) {
   struct ncclPreconnectJob* job = (struct ncclPreconnectJob*)job_;
   struct ncclComm* comm = job->comm;
+  // Preconnect is not meant to be captured;
+  // swap to relaxed mode so CUDA graph capture works correctly.
+  cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+  CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   CUDACHECK(cudaSetDevice(comm->cudaDev));
   if (!job_->isThreadMain && CPU_COUNT(&comm->cpuAffinity)) sched_setaffinity(0, sizeof(cpu_set_t), &comm->cpuAffinity);
   NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 1));
   if (comm->p2pNet) NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
+  if (mode != cudaStreamCaptureModeRelaxed) CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   return ncclSuccess;
 }
 
@@ -223,7 +214,14 @@ ncclResult_t ncclPrepareTasksAndCollPreconnectFunc(struct ncclAsyncJob* job_) {
   CUDACHECK(cudaSetDevice(comm->cudaDev));
   if (!job_->isThreadMain && CPU_COUNT(&comm->cpuAffinity)) sched_setaffinity(0, sizeof(cpu_set_t), &comm->cpuAffinity);
   NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, job->simInfo));
-  if (comm->cuMemSupport && needConnect) NCCLCHECK(ncclCollPreconnect(comm, algoNeedConnect));
+  if (comm->cuMemSupport && needConnect) {
+    // Preconnect is not meant to be captured;
+    // swap to relaxed mode so CUDA graph capture works correctly.
+    cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+    CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+    NCCLCHECK(ncclCollPreconnect(comm, algoNeedConnect));
+    if (mode != cudaStreamCaptureModeRelaxed) CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+  }
   return ncclSuccess;
 }
 
@@ -231,12 +229,19 @@ ncclResult_t ncclCollPreconnectFunc(struct ncclAsyncJob* job_) {
   struct ncclPreconnectJob* job = (struct ncclPreconnectJob*)job_;
   struct ncclComm* comm = job->comm;
   ncclResult_t ret = ncclSuccess;
+  // Preconnect is not meant to be captured;
+  // swap to relaxed mode so HIP graph capture works correctly.
+  bool modeChanged = false;
 
   if (!job_->isThreadMain) CUDACHECK(cudaSetDevice(comm->cudaDev));
   if (!job_->isThreadMain && CPU_COUNT(&comm->cpuAffinity)) sched_setaffinity(0, sizeof(cpu_set_t), &comm->cpuAffinity);
+  cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+  CUDACHECKGOTO(cudaThreadExchangeStreamCaptureMode(&mode), ret, fail);
+  modeChanged = (mode != cudaStreamCaptureModeRelaxed);
   NCCLCHECKGOTO(ncclCollPreconnect(comm, job->algoNeedConnect), ret, fail);
 
 exit:
+  if (modeChanged) (void)cudaThreadExchangeStreamCaptureMode(&mode);
   free(job->algoNeedConnect);
   return ret;
 fail:
@@ -365,49 +370,49 @@ static inline void groupLocalResetJobState() {
   return;
 }
 
+/* Reclaim planner state after ncclGroupSimulateEnd or on group failure.
+ * Runs collCleanupQueue (buffer unregister), reclaims planQueue, resets planner. */
+static void reclaimPlannerState(struct ncclComm* comm) {
+  while (!ncclIntruQueueEmpty(&comm->planner.collCleanupQueue)) {
+    struct ncclCommCallback* cb = ncclIntruQueueDequeue(&comm->planner.collCleanupQueue);
+    (void)cb->fn(comm, cb);
+  }
+  comm->preconnectNext = reinterpret_cast<struct ncclComm*>(0x1);
+  for (int i = 0; i < comm->nRanks; i++) {
+    for (int j = 0; j < MAXCHANNELS/64; j++) {
+      comm->connectSend[i].masks[j] = 0UL;
+      comm->connectRecv[i].masks[j] = 0UL;
+    }
+  }
+  while (!ncclIntruQueueEmpty(&comm->planner.planQueue)) {
+    struct ncclKernelPlan* plan = ncclIntruQueueDequeue(&comm->planner.planQueue);
+    if (!plan->persistent) {
+      while (!ncclIntruQueueEmpty(&plan->proxyOpQueue)) {
+        struct ncclProxyOp* pxop = ncclIntruQueueDequeue(&plan->proxyOpQueue);
+        ncclMemoryPoolFree(&comm->memPool_ncclProxyOp, pxop);
+      }
+      ncclMemoryPoolFree(&comm->memPool_ncclKernelPlan, plan);
+    }
+  }
+  {
+    ncclKernelPlanner::Peer* tmp = comm->planner.peers;
+    memset(&comm->planner, 0, sizeof(comm->planner));
+    comm->planner.peers = tmp;
+    if (comm->planner.peers != NULL) memset(comm->planner.peers, 0, comm->nRanks * sizeof(comm->planner.peers[0]));
+  }
+}
+
 static void groupCleanup(struct ncclComm** groupCommHeadPtr, struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next>* asyncJobsPtr, ncclResult_t error) {
   struct ncclComm* comm;
   for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
     comm = groupCommHeadPtr[type];
-    // reset groupCommHeadPtr[type]
     groupCommHeadPtr[type] = nullptr;
     while (comm != nullptr) {
       struct ncclComm* next = comm->groupNext[type];
-      (void)ncclGroupCommLeave(comm, type); // overwrites comm->groupNext
-      // We don't know if preconnect succeeded or happened at all, so clear
-      // the flags that let `taskAppend()` skip over checking if preconnect
-      // is needed.
+      (void)ncclGroupCommLeave(comm, type);
       if (type == ncclGroupTaskTypeCollective) {
-        comm->preconnectNext = reinterpret_cast<struct ncclComm*>(0x1);
-        for (int i = 0; i < comm->nRanks; i++) {
-          for (int j = 0; j < MAXCHANNELS/64; j++) {
-            comm->connectSend[i].masks[j] = 0UL;
-            comm->connectRecv[i].masks[j] = 0UL;
-          }
-        }
-        // Reclaim abandoned kernel plan memory. Note ncclWork structs were already
-        // reclaimed by a `ncclMemoryStackPop(&comm->memScoped)` during `ncclGroupCommLeave()`.
-        while (!ncclIntruQueueEmpty(&comm->planner.planQueue)) {
-          struct ncclKernelPlan* plan = ncclIntruQueueDequeue(&comm->planner.planQueue);
-          // Persistent plans will be reclaimed via the callbackQueue when the
-          // graph drops its UserObject reference.
-          if (!plan->persistent) {
-            while (!ncclIntruQueueEmpty(&plan->proxyOpQueue)) {
-              struct ncclProxyOp* pxop = ncclIntruQueueDequeue(&plan->proxyOpQueue);
-              ncclMemoryPoolFree(&comm->memPool_ncclProxyOp, pxop);
-            }
-            ncclMemoryPoolFree(&comm->memPool_ncclKernelPlan, plan);
-          }
-        }
-
-        { // Reset comm->planner to empty.
-          ncclKernelPlanner::Peer* tmp = comm->planner.peers;
-          memset(&comm->planner, 0, sizeof(comm->planner));
-          comm->planner.peers = tmp;
-          if (comm->planner.peers != NULL) memset(comm->planner.peers, 0, comm->nRanks * sizeof(comm->planner.peers[0]));
-        }
+        reclaimPlannerState(comm);
       }
-
       if (!comm->config.blocking)
         (void)ncclCommSetAsyncError(comm, error);
       comm = next;
@@ -655,6 +660,9 @@ static ncclResult_t groupLaunch(struct ncclAsyncJob *job_, ncclSimInfo_t* simInf
         comm->reclaimSteps++;
       }
       (void)ncclGroupCommLeave(comm, type);
+      if (simInfo && type == ncclGroupTaskTypeCollective) {
+        reclaimPlannerState(comm);
+      }
       if (!comm->config.blocking) {
         (void)ncclCommSetAsyncError(comm, ret);
       }
@@ -689,10 +697,6 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
     goto exit;
   }
 
-  if (mscclAvailable() && !mscclIsCaller()) {
-    NCCLCHECK(mscclGroupEnd());
-  }
-  
   if (ncclProfilerApiState.profilerGroupDepth > 0) {
     ncclProfilerApiState.profilerGroupDepth--;
   }
@@ -723,18 +727,19 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
     }
   }
 
-  NCCLCHECKGOTO(ncclCalloc(&groupJob, 1), ret, fail);
-  ncclIntruQueueConstruct(&groupJob->asyncJobs);
-  groupJob->groupRefCount = 0;
-  groupJob->nonBlockingInit = false;
-  memcpy(groupJob->groupCommHead, ncclGroupCommHead, sizeof(ncclGroupCommHead));
-  groupJob->groupCommPreconnectHead = ncclGroupCommPreconnectHead;
-  groupJob->groupError = ncclSuccess;
-  groupJob->abortFlag = false;
-  groupJob->joined = false;
-  ncclIntruQueueTransfer(&groupJob->asyncJobs, &ncclAsyncJobs);
+  /* Only allocate groupJob if there is work to do */
+  if (hasCommHead || !ncclIntruQueueEmpty(&ncclAsyncJobs) || ncclGroupCommPreconnectHead != nullptr) {
+    NCCLCHECKGOTO(ncclCalloc(&groupJob, 1), ret, fail);
+    ncclIntruQueueConstruct(&groupJob->asyncJobs);
+    groupJob->groupRefCount = 0;
+    groupJob->nonBlockingInit = false;
+    memcpy(groupJob->groupCommHead, ncclGroupCommHead, sizeof(ncclGroupCommHead));
+    groupJob->groupCommPreconnectHead = ncclGroupCommPreconnectHead;
+    groupJob->groupError = ncclSuccess;
+    groupJob->abortFlag = false;
+    groupJob->joined = false;
+    ncclIntruQueueTransfer(&groupJob->asyncJobs, &ncclAsyncJobs);
 
-  if (hasCommHead || !ncclIntruQueueEmpty(&groupJob->asyncJobs) || ncclGroupCommPreconnectHead != nullptr) {
     /* make sure ncclGroupBlocking has been set. */
     assert(ncclGroupBlocking == 0 || ncclGroupBlocking == 1);
     if (ncclGroupBlocking == 0 && (ncclGroupCommPreconnectHead != nullptr || !ncclIntruQueueEmpty(&ncclAsyncJobs))) {

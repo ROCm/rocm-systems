@@ -75,9 +75,9 @@ def test_profiler_initialization(paths):
         is_valid, message = paths.validate_json_trace(trace_file)
         assert is_valid, f"Trace file {trace_file} validation failed: {message}"
         
-        # Check for Group events
-        group_events = paths.count_events_in_trace(trace_file, category="GROUP")
-        assert group_events > 0, f"Should have Group events in {trace_file}"
+        # Check for Group API events
+        group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
+        assert group_events > 0, f"Should have Group API events in {trace_file}"
         
         # Check for Reduce collective events
         reduce_events = paths.count_events_in_trace(trace_file, event_name="Reduce")
@@ -152,8 +152,8 @@ def test_invalid_mask_value(paths):
         assert is_valid, f"Trace file {trace_file} should still be valid JSON: {message}"
         
         # With mask=0, there should be no Group or Collective events
-        group_events = paths.count_events_in_trace(trace_file, category="GROUP")
-        assert group_events == 0, f"Should have no Group events with mask=0 in {trace_file}, found {group_events}"
+        group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
+        assert group_events == 0, f"Should have no Group API events with mask=0 in {trace_file}, found {group_events}"
         
         reduce_events = paths.count_events_in_trace(trace_file, event_name="Reduce")
         assert reduce_events == 0, f"Should have no Reduce events with mask=0 in {trace_file}, found {reduce_events}"
@@ -229,10 +229,10 @@ def test_single_node_detailed_profiling(paths):
         # With NCCL_PROFILE_EVENT_MASK=255, we capture all event types
         # However, single-node behavior differs significantly from multi-node
         
-        # Check for Group events
-        group_events = paths.count_events_in_trace(trace_file, category="GROUP")
+        # Check for Group API events
+        group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
         assert group_events > 0, \
-            f"Should have Group events in {trace_file}, found {group_events}"
+            f"Should have Group API events in {trace_file}, found {group_events}"
         
         # Check for Reduce events
         reduce_events = paths.count_events_in_trace(trace_file, event_name="Reduce")
@@ -364,15 +364,22 @@ def test_multinode_detailed_profiling(paths):
         f"Should have {total_processes} trace files (one per rank), found {len(trace_files)}: {trace_files}"
     
     # Validate each trace file
+    # Accumulate cross-node event counts across all ranks.
+    # Reduce is a tree-based collective so not every rank communicates
+    # across nodes — only boundary ranks generate NET/ScheduleSend/Recv events.
+    total_net_events = 0
+    total_schedule_send = 0
+    total_schedule_recv = 0
+
     for trace_file in trace_files:
         is_valid, message = paths.validate_json_trace(trace_file)
         assert is_valid, f"Trace file {trace_file} validation failed: {message}"
         
         # With NCCL_PROFILE_EVENT_MASK=255, we should capture all event types
         
-        # Check for Group events (one per Reduce call)
-        group_events = paths.count_events_in_trace(trace_file, category="GROUP")
-        assert group_events > 0, f"Should have Group events in {trace_file}, found {group_events}"
+        # Check for Group API events (one per Reduce call)
+        group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
+        assert group_events > 0, f"Should have Group API events in {trace_file}, found {group_events}"
         
         # Check for Reduce events
         reduce_events = paths.count_events_in_trace(trace_file, event_name="Reduce")
@@ -384,16 +391,10 @@ def test_multinode_detailed_profiling(paths):
         assert proxy_events > 0, \
             f"Should have Proxy events in {trace_file}, found {proxy_events}"
         
-        # With ProxyOp enabled (bit 3), check for Send and Recv operations
-        schedule_send_events = paths.count_events_in_trace(trace_file, event_name="ScheduleSend")
-        schedule_recv_events = paths.count_events_in_trace(trace_file, event_name="ScheduleRecv")
-        assert schedule_send_events > 0 or schedule_recv_events > 0, \
-            f"Should have ScheduleSend or ScheduleRecv events in {trace_file}, found Send={schedule_send_events}, Recv={schedule_recv_events}"
-        
-        # With ProxyStep enabled (bit 4), verify network step events exist
-        net_events = paths.count_events_in_trace(trace_file, category="NET")
-        assert net_events > 0, \
-            f"Should have NET events in {trace_file}, found {net_events}"
+        # Accumulate cross-node events (not every rank has these)
+        total_schedule_send += paths.count_events_in_trace(trace_file, event_name="ScheduleSend")
+        total_schedule_recv += paths.count_events_in_trace(trace_file, event_name="ScheduleRecv")
+        total_net_events += paths.count_events_in_trace(trace_file, category="NET")
         
         # With KernelCh enabled (bit 6), we should see GPU kernel channel events
         kernel_events = paths.count_events_in_trace(trace_file, category="GPU")
@@ -410,4 +411,10 @@ def test_multinode_detailed_profiling(paths):
         trace_file_size = os.path.getsize(trace_file)
         assert trace_file_size > 0, \
             f"Trace file {trace_file} is empty"
+
+    # Cross-node assertions: at least some ranks should have network events
+    assert total_schedule_send > 0 or total_schedule_recv > 0, \
+        f"Should have ScheduleSend or ScheduleRecv events across ranks, found Send={total_schedule_send}, Recv={total_schedule_recv}"
+    assert total_net_events > 0, \
+        f"Should have NET events across ranks, found {total_net_events}"
 

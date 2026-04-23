@@ -74,6 +74,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     ARGS --rocm-path ${rocprofiler-sdk_ROOT_DIR}
-    TIMEOUT 45 PRELOAD "${PRELOAD_ENV}"
+    TIMEOUT 45
+    PRELOAD "${PRELOAD_ENV}"
     LABELS "integration-tests"
     DISABLED "${IS_DISABLED}")

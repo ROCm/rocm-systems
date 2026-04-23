@@ -31,10 +31,10 @@
 #include <iostream>
 #include <istream>
 #include <iterator>
+#include <limits>
 #include <list>
 #include <mutex>
 #include <ostream>
-#include <source_location>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -142,16 +142,64 @@ namespace envvar {
   }  // namespace category
 
   namespace parser {
+    inline namespace _type_traits {
+      // see [basic.fundamental]/p7 for definition of 'narrow character type'
+      inline namespace _narrow_character {
+        template <typename T> struct _is_narrow_character      : std::false_type { };
+        template <> struct _is_narrow_character<char>          : std::true_type  { };
+        template <> struct _is_narrow_character<signed char>   : std::true_type  { };
+        template <> struct _is_narrow_character<unsigned char> : std::true_type  { };
+#if defined(__cpp_char8_t) || (defined(__cplusplus) && __cplusplus >= 202002L)
+        template <> struct _is_narrow_character<char8_t>       : std::true_type  { };
+#endif  // char8_t narrow character specialization
+
+        template <typename T>
+        struct is_narrow_character
+            : std::bool_constant<_is_narrow_character<std::remove_cv_t<T>>::value> { };
+
+        template <typename T>
+        inline constexpr bool is_narrow_character_v = is_narrow_character<T>::value;
+      }
+
+      // see [basic.fundamental]/p5 for definition of 'standard integer type'
+      inline namespace _standard_integer {
+        template <typename T> struct _is_standard_integer           : std::false_type { };
+        template <> struct _is_standard_integer<  signed char>      : std::true_type  { };
+        template <> struct _is_standard_integer<unsigned char>      : std::true_type  { };
+        template <> struct _is_standard_integer<  signed short>     : std::true_type  { };
+        template <> struct _is_standard_integer<unsigned short>     : std::true_type  { };
+        template <> struct _is_standard_integer<  signed int>       : std::true_type  { };
+        template <> struct _is_standard_integer<unsigned int>       : std::true_type  { };
+        template <> struct _is_standard_integer<  signed long>      : std::true_type  { };
+        template <> struct _is_standard_integer<unsigned long>      : std::true_type  { };
+        template <> struct _is_standard_integer<  signed long long> : std::true_type  { };
+        template <> struct _is_standard_integer<unsigned long long> : std::true_type  { };
+
+        template <typename T>
+        struct is_standard_integer
+            : std::bool_constant<_is_standard_integer<std::remove_cv_t<T>>::value> { };
+
+        template <typename T>
+        inline constexpr bool is_standard_integer_v = is_standard_integer<T>::value;
+      }
+    }
+
     // base parser template
     // calls operator>>(std::istream&, T&)
-    template <typename T>
+    template <typename T, int = 0, typename = void>
     struct parse {
       std::istream& operator()(std::istream& is, T& value) const {
-        // accept all bases for integer types
-        if constexpr (std::is_integral_v<T>) {
-          is >> std::setbase(0);
-        }
+        return is >> value;
+      }
+    };
 
+    // integer parser template
+    //   * check for negative inputs to unsigned T
+    //   * accept requested numeric bases: 0 = detect (default), 8 = octal, 10 = decimal, 16 = hex
+    //   * parse {un}signed char as integer instead of character
+    template <typename T, int Base>
+    struct parse<T, Base, std::enable_if_t<is_standard_integer_v<T>>> {
+      std::istream& operator()(std::istream& is, T& value) const {
         // check if input is negative: remove whitespace, then check if first char is '-'
         if constexpr (std::is_unsigned_v<T>) {
           is >> std::ws;
@@ -162,7 +210,29 @@ namespace envvar {
           }
         }
 
-        return is >> value;
+        // accept requested numeric base
+        is >> std::setbase(Base);
+
+        // operator>>(std::istream&, {un}signed char&) parses input as a character
+        // so signed or unsigned char need to be parsed as a larger type, then narrowed
+        if constexpr (is_narrow_character_v<T>) {
+          using parsechar_t = std::conditional_t<std::is_signed_v<T>, signed int, unsigned int>;
+          parsechar_t parse_value = 0;
+          is >> parse_value;
+          if (parse_value < std::numeric_limits<T>::min()) {
+            value = std::numeric_limits<T>::min();
+            is.setstate(std::ios_base::failbit);
+          } else if (parse_value > std::numeric_limits<T>::max()) {
+            value = std::numeric_limits<T>::max();
+            is.setstate(std::ios_base::failbit);
+          } else {
+            value = static_cast<T>(parse_value);
+          }
+        } else {
+          is >> value;
+        }
+
+        return is;
       }
     };
 
@@ -198,20 +268,12 @@ namespace envvar {
     }
 
     // decimal integer parser
-    template <typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
-    struct parse_decimal {
-      std::istream& operator()(std::istream& is, T& value) const {
-        return is >> std::dec >> value;
-      }
-    };
+    template <typename T>
+    using parse_decimal = parse<T, 10, std::enable_if_t<is_standard_integer_v<T>>>;
 
     // hexadecimal integer parser
-    template <typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
-    struct parse_hex {
-      std::istream& operator()(std::istream& is, T& value) const {
-        return is >> std::hex >> value;
-      }
-    };
+    template <typename T>
+    using parse_hex = parse<T, 16, std::enable_if_t<is_standard_integer_v<T>>>;
   }  // namespace parser
 
   // namespace for defining custom types, for parsing (mostly enums)
@@ -230,13 +292,36 @@ namespace envvar {
     inline namespace _debug {
       enum class debug_level {
         NONE,
-        VERSION,
+        ERROR,
         WARN,
+        ENV,
+        VERSION,
         INFO,
+        API,
         TRACE,
       };
       std::istream& operator>>(std::istream& is, debug_level& level);
       std::ostream& operator<<(std::ostream& os, const debug_level& level);
+
+      /**
+       * @brief Per-category suppression flags parsed from ROCSHMEM_DEBUG_LEVEL modifiers.
+       *
+       * Format: ROCSHMEM_DEBUG_LEVEL=<level>[:<modifier>]*
+       * Modifiers: noversion, noenv, noinfo, nowarn, notrace, env:all, env:full
+       */
+      enum class env_print_mode { MODIFIED, ALL, FULL };
+
+      struct debug_flags {
+        const bool show_error;
+        const bool show_version;
+        const bool show_env;
+        const env_print_mode env_mode;
+        const bool show_info;
+        const bool show_api;
+        const bool show_warn;
+        const bool show_trace;
+        const bool show_color;
+      };
     }  // inline namespace _debug
   }  // namespace types
 
@@ -264,7 +349,7 @@ namespace envvar {
           std::istringstream iss{std::string(env_value)};
           std::invoke(parse, iss, value);
           if (iss.fail()) {
-            std::cerr << std::source_location::current().function_name() << ": invalid argument "
+            std::cerr << __PRETTY_FUNCTION__ << ": invalid argument "
                       << name << "='" << env_value << "'" << std::endl;
             value = default_value;
           } else {
@@ -399,6 +484,9 @@ namespace envvar {
     _detail::var_list_t::const_iterator var_map_pos;
   };
 
+  /** Per-category suppression flags from ROCSHMEM_DEBUG_LEVEL modifiers */
+  extern const types::debug_flags log_flags;
+
   inline namespace _base {
     extern const var<bool> uniqueid_with_mpi;
     extern const var<types::debug_level> debug_level;
@@ -427,8 +515,8 @@ namespace envvar {
      */
     extern const var<size_t> max_wavefront_buffers;
 
-    extern const var<std::string> requested_dev;
-    extern const var<uint32_t> sq_size;
+    extern const var<std::string> requested_nic;
+    extern const var<std::string> hca_list;
   }  // inline namespace _base
 
   namespace bootstrap {
@@ -452,7 +540,74 @@ namespace envvar {
     extern const var<bool> alternate_qp_ports;
     extern const var<uint8_t> traffic_class;
     extern const var<bool> pcie_relaxed_ordering;
+    extern const var<bool> enable_dmabuf;
+    extern const var<bool> override_nic_firmware_check;
+    extern const var<std::string> alltoallv_wg_algo;
+    extern const var<uint32_t> sq_size;
+    // Number of QPs to create per PE for the default context
+    extern const var<size_t> num_qps_per_pe_default_ctx;
+    // Number of QPs to create per PE for each user context
+    extern const var<size_t> num_qps_per_pe_usr_ctx;
+    extern const var<bool> merge_nics;
+    extern const var<std::string> net_merge_level;
+    extern const var<std::string> net_force_merge;
+    extern const var<std::string> nic_policy;
   }  // namespace gda
+
+  /**
+   * @brief Print mode for environment variables
+   */
+  enum class print_mode {
+    /**
+     * Print only modified variables (name=value)
+     * Example: ROCSHMEM_HEAP_SIZE=2147483648
+     */
+    MODIFIED,
+
+    /**
+     * Print all variables with name and value
+     * Example: ROCSHMEM_HEAP_SIZE=1073741824
+     */
+    ALL_VALUES,
+
+    /**
+     * Print all variables with full documentation (name, description, default, current)
+     * Example:
+     *   ROCSHMEM_HEAP_SIZE
+     *     Description: Size of symmetric heap...
+     *     Default: 1073741824
+     *     Current: 1073741824 (using default)
+     */
+    FULL_DOCUMENTATION
+  };
+
+  /**
+   * @brief Print rocSHMEM environment variables
+   *
+   * This function prints rocSHMEM environment variables in different formats
+   * depending on the mode parameter.
+   *
+   * @param mode Print mode (MODIFIED, ALL_VALUES, or FULL_DOCUMENTATION)
+   * @param os Output stream to write to (defaults to std::cout)
+   *
+   * Example usage:
+   * @code
+   *   // Print only modified variables
+   *   rocshmem::envvar::print_envvars(rocshmem::envvar::print_mode::MODIFIED);
+   *
+   *   // Print all variables with values
+   *   rocshmem::envvar::print_envvars(rocshmem::envvar::print_mode::ALL_VALUES);
+   *
+   *   // Print full documentation
+   *   rocshmem::envvar::print_envvars(rocshmem::envvar::print_mode::FULL_DOCUMENTATION);
+   * @endcode
+   *
+   * @note This function is thread-safe and acquires a lock on the internal
+   *       environment variable map.
+   */
+  void print_envvars(print_mode mode = print_mode::MODIFIED,
+                     std::ostream& os = std::cout);
+
 }  // namespace envvar
 }  // namespace rocshmem
 

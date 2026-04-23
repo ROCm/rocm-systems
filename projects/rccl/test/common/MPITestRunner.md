@@ -195,6 +195,56 @@ salloc -N 2 -n 16 --time=01:00:00
 - **GPU assignment**: Each node independently assigns GPUs 0-N to local ranks 0-N
 - **Multi-node**: Script auto-generates hostfiles with proper slot counts from SLURM allocations
 
+### System-Specific Configuration (`--system`)
+
+The test runner supports per-system profiles for MPI arguments and environment variables via the `--system` flag. This allows a single JSON config to target multiple clusters with different network interfaces and MPI settings.
+
+```bash
+# Select a system profile at runtime
+python3 test_runner.py -c config.json --system <profile_name>
+```
+
+**JSON config fields used by `--system`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `mpi_args` | dict of strings | Maps profile names to MPI arguments (MCA params, binding, etc.) |
+| `system_env_variables` | dict of dicts | Maps profile names to environment variable overrides |
+| `auto_detect_hosts` | bool (optional) | If `true`, auto-detect hosts from SLURM via `scontrol show hostnames` |
+
+```json
+{
+  "auto_detect_hosts": true,
+  "mpi_args": {
+    "system_a": "--mca oob_tcp_if_include <iface1> --mca btl_tcp_if_include <iface1> --bind-to none",
+    "system_b": "--mca oob_tcp_if_include <iface2> --mca btl_tcp_if_include <iface2> --bind-to none"
+  },
+  "env_variables": {
+    "NCCL_DEBUG": "INFO"
+  },
+  "system_env_variables": {
+    "system_a": { "NCCL_SOCKET_IFNAME": "<iface1>" },
+    "system_b": { "NCCL_SOCKET_IFNAME": "<iface2>" }
+  }
+}
+```
+
+- When `--system <name>` is passed, `mpi_args[name]` is used for MPI launch args and `system_env_variables[name]` is merged on top of the global `env_variables`.
+- Without `--system`, the runner falls back to a default set of MCA parameters.
+- All three fields are optional. Configs that omit them continue to work unchanged.
+
+### MPICH Support (`--mpich`)
+
+By default the test runner uses OpenMPI syntax (`-x KEY=VALUE`) to pass environment variables to `mpirun`. Pass `--mpich` to switch to MPICH syntax (`-env KEY VALUE`).
+
+```bash
+# OpenMPI (default)
+python3 test_runner.py -c config.json --system <profile_name>
+
+# MPICH
+python3 test_runner.py -c config.json --system <profile_name> --mpich
+```
+
 **Important: Node Validation**
 
 Tests can specify node requirements to ensure they run in the correct environment:

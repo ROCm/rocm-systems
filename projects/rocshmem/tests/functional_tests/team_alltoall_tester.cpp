@@ -24,8 +24,8 @@
 
 /* Declare the template with a generic implementation */
 template <typename T>
-__device__ void wg_team_alltoall(rocshmem_ctx_t ctx, rocshmem_team_t team,
-                                 T *dest, const T *source, int nelem) {
+__device__ void wg_team_alltoall([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unused]] rocshmem_team_t team,
+                                 [[maybe_unused]] T *dest, [[maybe_unused]] const T *source, [[maybe_unused]] int nelem) {
   return;
 }
 
@@ -101,11 +101,14 @@ TeamAlltoallTester<T1>::TeamAlltoallTester(TesterArguments args)
   my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
+  bw_factor = n_pes;
+  size_factor = n_pes;
+
   // Number of elements per work group
-  int num_elems_wg = (args.max_msg_size / sizeof(T1)) * n_pes;
+  size_t num_elems_wg = size_factor * (max_msg_size / sizeof(T1));
   // Total number of elements in the GPU kernel
-  int total_elems = num_elems_wg * args.num_wgs;
-  int buff_size = total_elems * sizeof(T1);
+  size_t total_elems = num_elems_wg * args.num_wgs;
+  size_t buff_size = total_elems * sizeof(T1);
 
   source_buf = (T1 *)rocshmem_malloc(buff_size);
   dest_buf = (T1 *)rocshmem_malloc(buff_size);
@@ -136,8 +139,6 @@ TeamAlltoallTester<T1>::~TeamAlltoallTester() {
 
 template <typename T1>
 void TeamAlltoallTester<T1>::preLaunchKernel() {
-  bw_factor = n_pes;
-
   for (int team_i = 0; team_i < num_teams; team_i++) {
     team_alltoall_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
     rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
@@ -179,9 +180,9 @@ void TeamAlltoallTester<T1>::resetBuffers(size_t size) {
   int buff_size = num_elems * sizeof(T1) * args.num_wgs * n_pes;
   int idx = 0;
 
-  for(int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
+  for(unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
     for(int pe = 0; pe < n_pes; pe++) {
-      for(int i = 0; i < num_elems; i++) {
+      for(unsigned int i = 0; i < static_cast<unsigned int>(num_elems); i++) {
         idx = (wg_id * n_pes + pe) * num_elems + i;
         if constexpr (std::is_same<T1, char>::value ||
                       std::is_same<T1, signed char>::value ||
@@ -206,10 +207,10 @@ void TeamAlltoallTester<T1>::verifyResults(size_t size) {
   int num_elems = size / sizeof(T1);
   int idx = 0;
 
-  for(int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
+  for(unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
     for(int pe = 0; pe < n_pes; pe++) {
-      for(int i = 0; i < num_elems; i++) {
-        idx = (wg_id * n_pes + pe) * num_elems + i;
+      for(unsigned int i = 0; i < static_cast<unsigned int>(num_elems); i++) {
+        idx = (wg_id * n_pes + pe) * num_elems + static_cast<int>(i);
         if (dest_buf[idx] != source_buf[idx]) {
           std::cerr << "Data validation error at idx " << idx << std::endl;
           std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]

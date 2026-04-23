@@ -53,3 +53,18 @@ add_custom_command(
     COMMAND ${CMAKE_STRIP} $<TARGET_FILE:rocprofiler-sdk-c-tool>
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Stripping rocprofiler-sdk-c-tool...")
+
+# tool library supporting late initialization in the application
+add_library(rocprofiler-sdk-late-start-tool SHARED)
+target_sources(rocprofiler-sdk-late-start-tool PRIVATE late-start-tool.cpp)
+target_link_libraries(
+    rocprofiler-sdk-late-start-tool
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::rocprofiler-sdk-cereal
+            rocprofiler-sdk::tests-build-flags rocprofiler-sdk::tests-common-library)
+set_target_properties(
+    rocprofiler-sdk-late-start-tool
+    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
+               SOVERSION ${PROJECT_VERSION_MINOR}
+               VERSION
+               ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}
+               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")

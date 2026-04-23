@@ -62,6 +62,8 @@ struct bnxt_host_cq {
   uint64_t length;
   uint32_t depth;
   struct ibv_cq *cq;
+  uint64_t dmabuf_offset;
+  int dmabuf_fd;
 } __attribute__((packed));
 
 struct bnxt_host_qp {
@@ -72,6 +74,10 @@ struct bnxt_host_qp {
   void *rq_buf;
   void *msntbl;
   uint32_t msn_tbl_sz;
+  uint64_t sq_dmabuf_offset;
+  uint64_t rq_dmabuf_offset;
+  int sq_dmabuf_fd;
+  int rq_dmabuf_fd;
 } __attribute__((packed));
 
 /*****************************************************************************/

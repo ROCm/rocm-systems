@@ -42,9 +42,6 @@ RCCL build & installation helper script
        --debug                 Build debug library
        --enable_backtrace      Build with custom backtrace support
        --disable-colltrace     Build without collective trace
-       --enable-msccl-kernel   Build with MSCCL kernels
-       --enable-mscclpp        Build with MSCCL++ support
-       --enable-mscclpp-clip   Build MSCCL++ with clip wrapper on bfloat16 and half addition routines
        --disable-roctx         Build without ROCTX logging
     -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace, and collective trace support)
     -h|--help                  Prints this help message
@@ -63,6 +60,7 @@ RCCL build & installation helper script
        --static                Build RCCL as a static library instead of shared library
     -t|--tests_build           Build rccl unit tests, but do not run
        --time-trace            Plot the build time of RCCL (requires `ninja-build` package installed on the system)
+       --rocshmem              Build with rocSHMEM support (for GDA AllToAll)
        --verbose               Show compile commands
 ```
 
@@ -80,7 +78,7 @@ $ cd build
 $ cmake ..
 $ make -j 16      # Or some other suitable number of parallel jobs
 ```
-If you have already cloned, you can checkout the external submodules manually.
+If you have already cloned, you can check out the remaining git submodules manually. rocSHMEM is **not** a submodule; to build RCCL with rocSHMEM from CMake, set `ROCSHMEM_INSTALL_DIR` or `ROCSHMEM_SOURCE_DIR` as described under [rocSHMEM support](#rocshmem-support) below.
 ```shell
 $ git submodule update --init --recursive --depth=1
 ```
@@ -125,6 +123,42 @@ will run only AllReduce correctness tests with float16 datatype. A list of avail
 
 There are also other performance and error-checking tests for RCCL.  These are maintained separately at https://github.com/ROCm/rccl-tests.
 See the rccl-tests README for more information on how to build and run those tests.
+
+## rocSHMEM support
+
+RCCL can use rocSHMEM's GPU Direct Async (GDA) backend to accelerate the **AllToAll** collective on supported multi-node setups. This is the only collective that currently uses rocSHMEM GDA inside RCCL.
+
+Please consult the [rocSHMEM documentation](https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/install.html#gda-nic-dependencies) to see which NICs and drivers are required for GDA alltoall support. 
+
+**Building with rocSHMEM**
+
+- Using the install script:
+  ```shell
+  ./install.sh --rocshmem
+  ```
+  By default (without `ROCSHMEM_INSTALL_DIR`), the script creates a sparse git worktree of the mono-repo at a pinned commit and passes that rocSHMEM tree to CMake as `ROCSHMEM_SOURCE_DIR`, so RCCL builds rocSHMEM via CMake `ExternalProject`. To use an already-built rocSHMEM instead, set `ROCSHMEM_INSTALL_DIR` to its install prefix before running the script.
+
+- **Manual CMake (without `install.sh`)**  
+  You need InfiniBand Verbs development libraries on the system (`libibverbs`; e.g. `rdma-core` / `libibverbs-dev` on Debian/Ubuntu). Then enable rocSHMEM and supply **either** a pre-built install prefix **or** a path to the rocSHMEM CMake source tree (the directory that contains rocSHMEM’s top-level `CMakeLists.txt`, e.g. `projects/rocshmem` in the rocm-systems mono-repo):
+
+  ```shell
+  # Option A — link against an existing rocSHMEM installation
+  cmake -DENABLE_ROCSHMEM=ON -DROCSHMEM_INSTALL_DIR=/path/to/rocshmem/prefix ..
+
+  # Option B — build rocSHMEM from source as part of the RCCL build
+  cmake -DENABLE_ROCSHMEM=ON -DROCSHMEM_SOURCE_DIR=/path/to/rocshmem/source ..
+  ```
+
+  If neither `ROCSHMEM_INSTALL_DIR` (with a successful `find_package(rocshmem_static)`) nor `ROCSHMEM_SOURCE_DIR` is set, configuration fails with an error directing you to set `ROCSHMEM_SOURCE_DIR` (or use `install.sh --rocshmem`).
+
+**Runtime behavior**
+
+Users must set the following environment variables:
+
+- **`RCCL_ROCSHMEM_ENABLE`** (default: `1`): Set to `0` to disable rocSHMEM usage in RCCL.
+- **`RCCL_ROCSHMEM_THRESHOLD`** (default: `262144` bytes): Maximum AllToAll message size (in bytes) for which the GDA path is used. The GDA path is only considered when this value is ≤ 1 MiB (1048576); larger thresholds fall back to the standard AllToAll implementation.
+
+The GDA AllToAll path is selected only when all of the following hold: rocSHMEM is enabled at build and runtime, the GPU architecture is gfx942 (e.g. MI300X), the job is multi-node with 8 GPUs per node, and the AllToAll message size is ≤ `RCCL_ROCSHMEM_THRESHOLD`.
 
 ## Library and API Documentation
 

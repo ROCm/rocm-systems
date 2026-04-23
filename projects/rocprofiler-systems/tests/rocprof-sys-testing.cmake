@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 #
 # configuration and functions for testing
@@ -12,6 +12,13 @@ set(ROCPROFSYS_ABORT_FAIL_REGEX
     "Regex to catch abnormal exits when a PASS_REGULAR_EXPRESSION is set"
     FORCE
 )
+
+# Detect Docker/container at configure time (for tests that should be disabled in CI containers)
+include(DetectDocker)
+rocprofiler_systems_detect_docker(ROCPROFSYS_INSIDE_DOCKER)
+if(ROCPROFSYS_INSIDE_DOCKER)
+    rocprofiler_systems_message(STATUS "Configure is running inside a Docker/container; some tests may be disabled")
+endif()
 
 if(EXISTS /etc/os-release AND NOT IS_DIRECTORY /etc/os-release)
     file(READ /etc/os-release _OS_RELEASE_RAW)
@@ -292,7 +299,7 @@ endif()
 # -------------------------------------------------------------------------------------- #
 
 set(_VALID_GPU OFF)
-if(ROCPROFSYS_USE_ROCM AND (NOT DEFINED ROCPROFSYS_CI_GPU OR ROCPROFSYS_CI_GPU))
+if(NOT DEFINED ROCPROFSYS_CI_GPU OR ROCPROFSYS_CI_GPU)
     set(_VALID_GPU ON)
     find_program(
         ROCPROFSYS_AMD_SMI_EXE
@@ -390,7 +397,7 @@ ROCPROFSYS_DL_VERBOSE             = 1
 ROCPROFSYS_SAMPLING_FREQ          = 300
 ROCPROFSYS_SAMPLING_DELAY         = 0.05
 ROCPROFSYS_SAMPLING_CPUS          = 0-${NUM_SAMPLING_PROCS}
-ROCPROFSYS_SAMPLING_GPUS          = $env:HIP_VISIBLE_DEVICES
+ROCPROFSYS_SAMPLING_GPUS          = all
 
 # test-specific values
 ${_FILE_CONTENTS}
@@ -541,21 +548,8 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
 
     if(TEST_GPU)
         list(APPEND TEST_LABELS "gpu")
-
-        if(NOT "ROCPROFSYS_USE_ROCM=OFF" IN_LIST TEST_ENVIRONMENT)
-            list(APPEND TEST_LABELS "rocm")
-        endif()
-
-        if(NOT "ROCPROFSYS_USE_ROCM=OFF" IN_LIST TEST_ENVIRONMENT)
-            list(APPEND TEST_LABELS "amd-smi")
-        endif()
-    endif()
-
-    if(
-        "ROCPROFSYS_USE_ROCM=ON" IN_LIST TEST_ENVIRONMENT
-        AND NOT "rocm" IN_LIST TEST_ENVIRONMENT
-    )
         list(APPEND TEST_LABELS "rocm")
+        list(APPEND TEST_LABELS "amd-smi")
     endif()
 
     if(
@@ -1377,7 +1371,7 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
     cmake_parse_arguments(
         TEST
         "" # options
-        "NAME;TARGET;TIMEOUT;WORKING_DIRECTORY" # single value args
+        "NAME;TARGET;TIMEOUT;WORKING_DIRECTORY;DISABLED" # single value args
         "ARGS;ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;COMMAND" # multiple
         # value args
         ${ARGN}
@@ -1395,6 +1389,11 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
             "ROCPROFSYS_TIME_OUTPUT=OFF"
             "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}"
         )
+    endif()
+
+    if(NOT TEST_DISABLED)
+        # Default to enabled, if not set
+        set(TEST_DISABLED OFF)
     endif()
 
     # common
@@ -1454,6 +1453,7 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
                 FAIL_REGULAR_EXPRESSION "${TEST_FAIL_REGEX}"
                 SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
                 FIXTURES_REQUIRED rocprofsys-global-tmp-files
+                DISABLED ${TEST_DISABLED}
                 ${TEST_PROPERTIES}
         )
     elseif(TARGET ${TEST_TARGET})
@@ -1474,6 +1474,7 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
                 FAIL_REGULAR_EXPRESSION "${TEST_FAIL_REGEX}"
                 SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
                 FIXTURES_REQUIRED rocprofsys-global-tmp-files
+                DISABLED ${TEST_DISABLED}
                 ${TEST_PROPERTIES}
         )
     elseif(ROCPROFSYS_BUILD_TESTING)

@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include <timemory/log/color.hpp>
 //
@@ -40,6 +21,7 @@
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
+#include "core/output_file_registry.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/rocpd/data_processor.hpp"
 #include "core/timemory.hpp"
@@ -55,12 +37,15 @@
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
+#include "library/components/shmem_gotcha_policy.hpp"
 #include "library/components/ucx_gotcha.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
+#include "library/kokkosp.hpp"
 #include "library/process_sampler.hpp"
-#include "library/ptl.hpp"
 #include "library/rocprofiler-sdk.hpp"
+#include "library/rocprofiler-sdk/roctx_client.hpp"
+#include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
@@ -83,10 +68,10 @@
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <rocprofiler-sdk/agent.h>
-#    include <rocprofiler-sdk/registration.h>
-#endif
+#include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/registration.h>
+
+#include <nlohmann/json.hpp>
 
 #include "logger/debug.hpp"
 
@@ -118,8 +103,11 @@ setup() ROCPROFSYS_INTERNAL_API;
 
 namespace
 {
-auto _timemory_manager  = tim::manager::instance();
-auto _timemory_settings = tim::settings::shared_instance();
+std::atomic<bool>  rocprofsys_init_library_done{ false };
+std::atomic<pid_t> rocprofsys_init_tooling_done{ 0 };
+std::atomic<bool>  rocprofsys_finalization_done{ false };
+auto               _timemory_manager  = tim::manager::instance();
+auto               _timemory_settings = tim::settings::shared_instance();
 
 void
 set_metadata_process_start_timestamp(int64_t _ts)
@@ -135,6 +123,26 @@ set_metadata_process_end_timestamp(int64_t _ts)
     auto process_info = trace_cache::get_metadata_registry().get_process_info();
     process_info.end  = _ts;
     trace_cache::get_metadata_registry().set_process(process_info);
+}
+
+void
+set_metadata_environment_json(const std::string& _environment_json)
+{
+    auto process_info        = trace_cache::get_metadata_registry().get_process_info();
+    process_info.environment = _environment_json;
+    trace_cache::get_metadata_registry().set_process(process_info);
+}
+
+std::string
+escape_quotes(std::string str)
+{
+    std::string::size_type pos = 0;
+    while((pos = str.find('"', pos)) != std::string::npos)
+    {
+        str.replace(pos, 1, "\"\"");
+        pos += 2;
+    }
+    return str;
 }
 
 bool
@@ -356,15 +364,17 @@ read_command_line(pid_t _pid)
 void
 rocprofsys_preinit_cache()
 {
-    auto _cmd_line = read_command_line(getpid());
+    const auto        _cmd_line = read_command_line(getpid());
+    const std::string _command  = _cmd_line.empty()
+                                      ? "rocprofiler-systems"
+                                      : fmt::format("{}", fmt::join(_cmd_line, " "));
 
-    if(_cmd_line.empty())
-    {
-        _cmd_line.emplace_back("rocprofiler-systems");
-    }
+    std::stringstream _extdata_stream;
+    config::print_settings_json(_extdata_stream);
 
     trace_cache::get_metadata_registry().set_process(
-        { getpid(), getppid(), _cmd_line.at(0) });
+        { getpid(), getppid(), _command, "", escape_quotes(_extdata_stream.str()), 0,
+          0 });
 }
 
 void
@@ -380,7 +390,45 @@ rocprofsys_preinit_hidden()
     _preinit_callback();
     _preinit_callback = []() {};
 }
+
+using callback_t = void (*)();
+std::mutex              external_pause_resume_callbacks_mutex;
+std::vector<callback_t> external_pause_callbacks;
+std::vector<callback_t> external_resume_callbacks;
+
+void
+invoke_external_pause_callbacks()
+{
+    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+    for(auto* _fn : external_pause_callbacks)
+        _fn();
+}
+
+void
+invoke_external_resume_callbacks()
+{
+    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+    for(auto* _fn : external_resume_callbacks)
+        _fn();
+}
+
 }  // namespace
+
+extern "C" void
+rocprofsys_external_register_pause_callbacks(void (*pause_fn)(), void (*resume_fn)())
+{
+    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+
+    if(pause_fn)
+    {
+        external_pause_callbacks.emplace_back(pause_fn);
+    }
+
+    if(resume_fn)
+    {
+        external_resume_callbacks.emplace_back(resume_fn);
+    }
+}
 
 extern "C" void
 rocprofsys_set_mpi_hidden(bool use, bool attached)
@@ -431,8 +479,7 @@ rocprofsys_init_library_hidden()
     auto _tid = threading::get_id();
     (void) _tid;
 
-    static bool _once       = false;
-    auto        _debug_init = get_debug_init();
+    auto _debug_init = get_debug_init();
 
     int _selinux_mode = 0;
     {
@@ -460,8 +507,8 @@ rocprofsys_init_library_hidden()
             fmt::format("State is not PreInit :: {}", std::to_string(get_state())));
     }
 
-    if(get_state() != State::PreInit || get_state() == State::Init || _once) return;
-    _once = true;
+    if(get_state() != State::PreInit) return;
+    if(rocprofsys_init_library_done.exchange(true)) return;
 
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
@@ -515,26 +562,23 @@ rocprofsys_init_tooling_hidden(void)
         return false;
     }
 
-#if ROCPROFSYS_USE_ROCM > 0
     dynamic_library _amdhip64{ "ROCPROFSYS_ROCTRACER_LIBAMDHIP64",
                                find_library_path("libamdhip64.so",
                                                  { "ROCPROFSYS_ROCM_PATH", "ROCM_PATH" },
                                                  { ROCPROFSYS_DEFAULT_ROCM_PATH }) };
-#endif
 
-    static pid_t _once       = 0;
-    static auto  _debug_init = get_debug_init();
+    auto _debug_init = get_debug_init();
 
     if(_debug_init)
     {
         LOG_DEBUG("State is {}...", std::to_string(get_state()));
     }
 
-    if(get_state() != State::PreInit || get_state() == State::Init || _once == getpid())
-    {
+    if(get_state() != State::PreInit) return false;
+
+    pid_t expected = 0;
+    if(!rocprofsys_init_tooling_done.compare_exchange_strong(expected, getpid()))
         return false;
-    }
-    _once = getpid();
 
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
@@ -565,10 +609,19 @@ rocprofsys_init_tooling_hidden(void)
         // if set to finalized, don't continue
         if(get_state() > State::Active) return;
 
-#if !(ROCPROFSYS_USE_ROCM > 0)
-        rocprofsys_preinit_cpu_agents();
-#endif
         rocprofsys_preinit_cache();
+
+#if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
+    (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
+
+        component::mpi_gotcha::subscribe_to_init_event([](int rank, int size) {
+            nlohmann::json _environment_json;
+            _environment_json["MPI_COMM_WORLD_SIZE"] = size;
+            _environment_json["MPI_COMM_WORLD_RANK"] = rank;
+
+            set_metadata_environment_json(escape_quotes(_environment_json.dump()));
+        });
+#endif
 
         if(get_use_process_sampling())
         {
@@ -601,6 +654,43 @@ rocprofsys_init_tooling_hidden(void)
             trace_cache::get_buffer_storage().start(getpid());
         }
 
+        auto trace_controller = rocprofiler_sdk::get_trace_controller();
+        if(trace_controller)
+        {
+            auto pause_callback = [](void) {
+                LOG_DEBUG("Pause callback...");
+                rocprofiler_sdk::pause();
+                sampling::pause();
+                component::mpi_gotcha::pause();
+                component::ucx_gotcha::pause();
+                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause();
+                component::vaapi_gotcha::pause();
+                ::rocprofsys::pthread_gotcha::pause();
+                component::numa_gotcha::pause();
+                rocprofsys::kokkosp::pause();
+                process_sampler::pause();
+                invoke_external_pause_callbacks();
+            };
+            auto resume_callback = [](void) {
+                LOG_DEBUG("Resume callback...");
+                rocprofiler_sdk::resume();
+                sampling::resume();
+                component::mpi_gotcha::resume();
+                component::ucx_gotcha::resume();
+                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume();
+                component::vaapi_gotcha::resume();
+                ::rocprofsys::pthread_gotcha::resume();
+                component::numa_gotcha::resume();
+                rocprofsys::kokkosp::resume();
+                process_sampler::resume();
+                invoke_external_resume_callbacks();
+            };
+            trace_controller->register_region_pauser_resume_callbacks(resume_callback,
+                                                                      pause_callback);
+
+            trace_controller->force_initial_pause();
+        }
+
         set_state(State::Active);  // set to active as very last operation
     } };
 
@@ -618,6 +708,12 @@ rocprofsys_init_tooling_hidden(void)
         component::ucx_gotcha::start();
     }
 
+    if(get_use_shmem())
+    {
+        LOG_DEBUG("Setting up OpenSHMEM traces...\n");
+        component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::start();
+    }
+
     if(get_use_vaapi_tracing())
     {
         LOG_DEBUG("Setting up VA-API traces...");
@@ -632,8 +728,6 @@ rocprofsys_init_tooling_hidden(void)
         LOG_DEBUG("Setting up Perfetto...");
         rocprofsys::perfetto::setup();
     }
-
-    tasking::setup();
 
     if(get_use_causal()) causal::start_experimenting();
 
@@ -796,6 +890,13 @@ rocprofsys_reset_preload_hidden(void)
 extern "C" void
 rocprofsys_finalize_hidden(void)
 {
+    // Prevent multiple finalization calls (e.g., from atexit handlers after reset_state)
+    if(rocprofsys_finalization_done.exchange(true))
+    {
+        LOG_DEBUG("Finalization already completed. Skipping.");
+        return;
+    }
+
     // disable thread id recycling during finalization
     threading::recycle_ids() = false;
     // disable initialization callback
@@ -817,14 +918,11 @@ rocprofsys_finalize_hidden(void)
     {
         set_state(State::Finalized);
 
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
         // Flush buffered traces in case of child process
-        if(get_use_rocm())
-        {
-            LOG_DEBUG("Shutting down ROCm...");
-            rocprofiler_sdk::shutdown();
-        }
-#endif
+
+        LOG_DEBUG("Shutting down ROCm...");
+        rocprofiler_sdk::shutdown();
+
         auto&      _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         const auto _agents  = get_agent_manager_instance().get_agents();
         _manager.shutdown();
@@ -915,19 +1013,20 @@ rocprofsys_finalize_hidden(void)
         component::ucx_gotcha::shutdown();
     }
 
+    if(get_use_shmem())
+    {
+        LOG_DEBUG("Shutting down OpenSHMEM tracing...\n");
+        component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::shutdown();
+    }
+
     if(get_use_vaapi_tracing())
     {
         LOG_DEBUG("Shutting down VA-API tracing...");
         component::vaapi_gotcha::shutdown();
     }
 
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
-    if(get_use_rocm())
-    {
-        LOG_DEBUG("Shutting down ROCm...");
-        rocprofiler_sdk::shutdown();
-    }
-#endif
+    LOG_DEBUG("Shutting down ROCm...");
+    rocprofiler_sdk::shutdown();
 
     LOG_DEBUG("Stopping and destroying instrumentation bundles...");
     auto* _bundles = instrumentation_bundles::get();
@@ -1030,10 +1129,18 @@ rocprofsys_finalize_hidden(void)
         sampling::post_process();
     }
 
+    auto _output_registry = output_file_registry{};
+
     if(get_use_causal())
     {
         LOG_DEBUG("Finishing the causal experiments...");
         causal::finish_experimenting();
+
+        auto _base = config::get_causal_output_filename();
+        _output_registry.register_file(fmt::format("{}.json", _base),
+                                       output_format::causal_json);
+        _output_registry.register_file(fmt::format("{}.txt", _base),
+                                       output_format::causal_text);
     }
 
     if(get_use_process_sampling())
@@ -1041,10 +1148,6 @@ rocprofsys_finalize_hidden(void)
         LOG_DEBUG("Post-processing the system-level samples...");
         process_sampler::post_process();
     }
-
-    // shutdown tasking before timemory is finalized
-    LOG_DEBUG("Shutting down thread-pools...");
-    tasking::shutdown();
 
     if(get_use_code_coverage())
     {
@@ -1064,13 +1167,13 @@ rocprofsys_finalize_hidden(void)
     {
         LOG_DEBUG("Finalizing perfetto...");
         rocprofsys::perfetto::post_process(_timemory_manager.get(),
-                                           _perfetto_output_error);
+                                           _perfetto_output_error, _output_registry);
     }
 
     {
         auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         _manager.shutdown();
-        _manager.post_process_bulk();
+        _manager.post_process_bulk(_output_registry);
     }
 
     if(_timemory_manager && _timemory_manager != nullptr)
@@ -1088,6 +1191,24 @@ rocprofsys_finalize_hidden(void)
                tim::cereal::make_nvp("memory_maps", _maps));
         });
 
+        static auto* attach_add_session_id = getenv("ROCPROFSYS_REATTACH_ADD_SESSION_ID");
+        static auto  session_id            = 0;
+
+        if(attach_add_session_id)
+            settings::default_process_suffix() = fmt::format("%pid%-{}", session_id++);
+
+        // Disable Timemory file output for disabled ranks
+        if(!config::output_filtering::is_output_enabled_for_current_mpi_rank())
+        {
+            auto* _settings = tim::settings::instance();
+            if(_settings)
+            {
+                _settings->file_output() = false;
+                _settings->text_output() = false;
+                _settings->json_output() = false;
+            }
+        }
+
         LOG_DEBUG("Finalizing timemory...");
         tim::timemory_finalize(_timemory_manager.get());
 
@@ -1096,7 +1217,28 @@ rocprofsys_finalize_hidden(void)
         _cfg.suffix     = settings::default_process_suffix();
         _timemory_manager->write_metadata(settings::get_global_output_prefix(),
                                           "rocprofsys", _cfg);
+
+        if(config::get_use_timemory())
+        {
+            auto _components =
+                config::get_setting_value<std::string>("ROCPROFSYS_TIMEMORY_COMPONENTS")
+                    .value_or("wall_clock");
+
+            for(auto&& _comp_name : tim::delimit(_components, ",; "))
+            {
+                if(_comp_name.empty()) continue;
+
+                _output_registry.register_file(
+                    settings::compose_output_filename(_comp_name, "txt", _cfg),
+                    output_format::text, _comp_name);
+                _output_registry.register_file(
+                    settings::compose_output_filename(_comp_name, "json", _cfg),
+                    output_format::json, _comp_name);
+            }
+        }
     }
+
+    _output_registry.print_summary();
 
     categories::shutdown();
 
@@ -1128,6 +1270,26 @@ rocprofsys_finalize_hidden(void)
         [](int) {});
 
     common::destroy_static_objects();
+
+    // Note: rocprofsys_init_library_done, rocprofsys_init_tooling_done, and state are NOT
+    // reset here. They are only reset during re-attach (in rocprofiler-sdk.cpp) when
+    // explicitly preparing for a new session. Resetting them during normal exit
+    // can cause crashes if cleanup code triggers reinitialization.
+}
+
+extern "C" void
+rocprofsys_set_finalization_done_hidden(void)
+{
+    rocprofsys_finalization_done.store(true);
+}
+
+extern "C" void
+rocprofsys_reset_for_reattach_hidden(void)
+{
+    rocprofsys_finalization_done.store(false);
+    rocprofsys_init_library_done.store(false);
+    rocprofsys_init_tooling_done.store(0);
+    ::rocprofsys::reset_state();
 }
 
 //======================================================================================//

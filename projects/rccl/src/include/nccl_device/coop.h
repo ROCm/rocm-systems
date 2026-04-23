@@ -8,6 +8,7 @@
 #define _NCCL_DEVICE_COOP_H_
 #include "utility.h"
 
+#undef __CUDACC__
 #define __CUDACC__ 0
 
 // ncclCoop[Foo]: NCCL's versions of CUDA's Cooperative Groups. They conform

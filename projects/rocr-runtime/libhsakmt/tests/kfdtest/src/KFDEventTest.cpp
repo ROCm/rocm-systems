@@ -47,7 +47,7 @@ void KFDEventTest::TearDown() {
     for (int i = 0; i < MAX_GPU; i++) {
         if (m_pHsaEventGPU[i] != NULL) {
             // hsaKmtDestroyEvent moved to TearDown to make sure it is being called
-            EXPECT_SUCCESS(hsaKmtDestroyEvent(m_pHsaEventGPU[i]));
+            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, m_pHsaEventGPU[i]));
         }
     }
 
@@ -92,7 +92,7 @@ void KFDEventTest::CreateMaxEvents(int gpuNode) {
     }
 
     for (i = 0; i < MAX_EVENT_NUMBER; i++) {
-        EXPECT_SUCCESS_GPU(hsaKmtDestroyEvent(pHsaEvent[i]), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, pHsaEvent[i]), gpuNode);
     }
 }
 
@@ -131,9 +131,9 @@ void KFDEventTest::SignalEvent(int gpuNode) {
 
     queue.Wait4PacketConsumption();
 
-    EXPECT_SUCCESS_GPU(hsaKmtWaitOnEvent(m_pHsaEvent, g_TestTimeOut), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtWaitOnEvent, m_hsakmt_current_ctx, m_pHsaEvent, g_TestTimeOut), gpuNode);
 
-    EXPECT_SUCCESS_GPU(hsaKmtDestroyEvent(tmp_event), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, tmp_event), gpuNode);
 
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 }
@@ -177,36 +177,36 @@ void KFDEventTest::SignalEventExt(int gpuNode) {
     event_age = 1;
     queue.PlaceAndSubmitPacket(PM4ReleaseMemoryPacket(m_FamilyId, false,
                     m_pHsaEvent->EventData.HWData2, m_pHsaEvent->EventId));
-    EXPECT_SUCCESS_GPU(hsaKmtWaitOnEvent_Ext(m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtWaitOnEvent_Ext, m_hsakmt_current_ctx, m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
     ASSERT_EQ_GPU(event_age, 2, gpuNode);
     queue.PlaceAndSubmitPacket(PM4ReleaseMemoryPacket(m_FamilyId, false,
                     m_pHsaEvent->EventData.HWData2, m_pHsaEvent->EventId));
-    EXPECT_SUCCESS_GPU(hsaKmtWaitOnEvent_Ext(m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtWaitOnEvent_Ext, m_hsakmt_current_ctx, m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
     ASSERT_EQ_GPU(event_age, 3, gpuNode);
 
     /* 2. event wait return without sleep after the event signals */
     queue.PlaceAndSubmitPacket(PM4ReleaseMemoryPacket(m_FamilyId, false,
                     m_pHsaEvent->EventData.HWData2, m_pHsaEvent->EventId));
     sleep(1); /* wait for event signaling */
-    EXPECT_SUCCESS_GPU(hsaKmtWaitOnEvent_Ext(m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtWaitOnEvent_Ext, m_hsakmt_current_ctx, m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
     ASSERT_EQ_GPU(event_age, 4, gpuNode);
 
     /* 3. signaling from CPU */
-    hsaKmtSetEvent(m_pHsaEvent);
-    EXPECT_SUCCESS_GPU(hsaKmtWaitOnEvent_Ext(m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
+    HSAKMT_CALL(hsaKmtSetEvent, m_hsakmt_current_ctx, m_pHsaEvent);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtWaitOnEvent_Ext, m_hsakmt_current_ctx, m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
     ASSERT_EQ_GPU(event_age, 5, gpuNode);
 
     /* 4. when event_age is 0, hsaKmtWaitOnEvent_Ext always sleeps */
     event_age = 0;
-    ASSERT_EQ_GPU(HSAKMT_STATUS_WAIT_TIMEOUT, hsaKmtWaitOnEvent_Ext(m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
+    ASSERT_EQ_GPU(HSAKMT_STATUS_WAIT_TIMEOUT, HSAKMT_CALL(hsaKmtWaitOnEvent_Ext, m_hsakmt_current_ctx, m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
 
     /* 5. when event_age is 0, it always stays 0 after the event signals */
     queue.PlaceAndSubmitPacket(PM4ReleaseMemoryPacket(m_FamilyId, false,
                     m_pHsaEvent->EventData.HWData2, m_pHsaEvent->EventId));
-    EXPECT_SUCCESS(hsaKmtWaitOnEvent_Ext(m_pHsaEvent, g_TestTimeOut, &event_age));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtWaitOnEvent_Ext, m_hsakmt_current_ctx, m_pHsaEvent, g_TestTimeOut, &event_age));
     ASSERT_EQ(event_age, 0);
 
-    EXPECT_SUCCESS(hsaKmtDestroyEvent(tmp_event));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, tmp_event));
 
     EXPECT_SUCCESS(queue.Destroy());
 
@@ -274,7 +274,7 @@ class QueueAndSignalBenchmark {
         startTime = gettime();
         queue.SubmitPacket();
         for (int i = 0; i < eventCount; i++) {
-            r = hsaKmtWaitOnEvent(pHsaEvent[i], g_TestTimeOut);
+            r = HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, pHsaEvent[i], g_TestTimeOut);
 
             if (r != HSAKMT_STATUS_SUCCESS)
                 goto exit;
@@ -287,7 +287,7 @@ class QueueAndSignalBenchmark {
 exit:
         for (int i = 0; i < eventCount; i++) {
             if (pHsaEvent[i])
-                hsaKmtDestroyEvent(pHsaEvent[i]);
+                HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, pHsaEvent[i]);
         }
         queue.Destroy();
 
@@ -397,12 +397,12 @@ void KFDEventTest::SignalMultipleEventsWaitForAll(int gpuNode) {
         Delay(WAIT_BETWEEN_SUBMISSIONS_MS);
     }
 
-    EXPECT_SUCCESS_GPU(hsaKmtWaitOnMultipleEvents(pHsaEvent, EVENT_NUMBER, true, g_TestTimeOut), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtWaitOnMultipleEvents, m_hsakmt_current_ctx, pHsaEvent, EVENT_NUMBER, true, g_TestTimeOut), gpuNode);
 
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
     for (i = 0; i < EVENT_NUMBER; i++)
-        EXPECT_SUCCESS_GPU(hsaKmtDestroyEvent(pHsaEvent[i]), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, pHsaEvent[i]), gpuNode);
 }
 
 TEST_F(KFDEventTest, SignalMultipleEventsWaitForAll) {
@@ -453,7 +453,7 @@ void KFDEventTest::SignalInvalidEvent(int gpuNode) {
         HSAuint64 startTime = GetSystemTickCountInMicroSec();
         queue.SubmitPacket();
 
-        EXPECT_SUCCESS_GPU(hsaKmtWaitOnEvent(m_pHsaEvent, g_TestTimeOut), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtWaitOnEvent, m_hsakmt_current_ctx, m_pHsaEvent, g_TestTimeOut), gpuNode);
 
         duration[i] = GetSystemTickCountInMicroSec() - startTime;
         total += duration[i];
@@ -492,7 +492,7 @@ void KFDEventTest::SignalInvalidEvent(int gpuNode) {
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
     for (int i = 0; i < EVENT_NUMBER; i++)
-        EXPECT_SUCCESS_GPU(hsaKmtDestroyEvent(pHsaEvent[i]), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, pHsaEvent[i]), gpuNode);
 
 }
 

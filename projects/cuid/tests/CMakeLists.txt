@@ -28,15 +28,17 @@ find_package(OpenSSL REQUIRED)
 enable_testing()
 
 # Unit tests executable
-add_executable(amdcuid_test
-    unit/cuid_test.cc
+add_executable(
+    amdcuid_test
+    unit/cuid_api_test.cc
+    unit/cuid_misc_test.cc
+    functional/cuid_reverse_lookup_test.cc
 )
 
-target_include_directories(amdcuid_test PRIVATE
-    ${CMAKE_SOURCE_DIR}/lib
-)
+target_include_directories(amdcuid_test PRIVATE ${CMAKE_SOURCE_DIR}/lib)
 
-target_link_libraries(amdcuid_test
+target_link_libraries(
+    amdcuid_test
     amdcuid_static
     GTest::GTest
     GTest::Main
@@ -46,3 +48,13 @@ target_link_libraries(amdcuid_test
 
 # Register tests with CTest
 add_test(NAME cuid_unit_tests COMMAND amdcuid_test)
+
+# Platform-specific config directory
+if(WIN32)
+    set(TESTS_INSTALL_DIR "TESTS") # Relative to prefix
+else()
+    set(TESTS_INSTALL_DIR "${CMAKE_INSTALL_DATADIR}/amd_cuid/tests")
+endif()
+
+# Install the test binary
+install(TARGETS amdcuid_test DESTINATION ${TESTS_INSTALL_DIR} COMPONENT tests)

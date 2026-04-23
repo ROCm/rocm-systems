@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2022-2024 Advanced Micro Devices, Inc.
+# Copyright 2022-2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
 function(add_rccl_test TEST)
@@ -69,6 +69,8 @@ endfunction()
 #==================================================================================================
 set(COMMON_FILES
   git_version.h
+  collector.h
+  collector.cu
   common.h
   common.cu
   nccl1_compat.h
@@ -76,6 +78,8 @@ set(COMMON_FILES
   rccl_float8.h
   timer.h
   timer.cc
+  util.h
+  util.cu
   ../verifiable/verifiable.h
   ../verifiable/verifiable.cu
 )

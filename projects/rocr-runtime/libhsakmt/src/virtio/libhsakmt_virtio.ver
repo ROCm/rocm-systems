@@ -37,6 +37,7 @@ vhsaKmtWaitOnEvent;
 vhsaKmtWaitOnEvent_Ext;
 vhsaKmtWaitOnMultipleEvents_Ext;
 vhsaKmtSetTrapHandler;
+vhsaKmtCreateQueueV2;
 vhsaKmtCreateQueueExt;
 vhsaKmtCreateQueue;
 vhsaKmtDestroyQueue;

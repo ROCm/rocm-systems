@@ -122,7 +122,7 @@ __global__ void TeamCtxPrimitiveTest(int loop, int skip, long long int *start_ti
  *****************************************************************************/
 TeamCtxPrimitiveTester::TeamCtxPrimitiveTester(TesterArguments args)
     : Tester(args) {
-  size_t buff_size = args.max_msg_size * args.wg_size * args.num_wgs;
+  size_t buff_size = max_msg_size * args.wg_size * args.num_wgs;
   source = (char *)rocshmem_malloc(buff_size);
   dest = (char *)rocshmem_malloc(buff_size);
 

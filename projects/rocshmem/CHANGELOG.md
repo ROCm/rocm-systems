@@ -1,15 +1,45 @@
 # Changelog for rocSHMEM
-## Unreleased - rocSHMEM 3.x.x for ROCm 7.x.x
+## Unreleased - rocSHMEM 3.3.0 for ROCm x.x.x
 ### Added
 * Added new APIs:
+   * `rocshmem_quiet_on_stream`
+   * `rocshmem_sync_all_on_stream`
    * `rocshmem_TYPENAME_alltoall_wg`
-
-## Unreleased -- rocSHMEM 3.2.1 for ROCm x.x.x
-### Added
+   * `rocshmem_TYPENAME_alltoallv_wg`
+   * `rocshmem_team_my_pe`
+   * `rocshmem_team_n_pes`
+   * `rocshmem_barrier`
+   * `rocshmem_barrier_wave`
+   * `rocshmem_barrier_wg`
+   * `rocshmem_info_get_version`
+   * `rocshmem_info_get_name`
+   * `rocshmem_vendor_get_version_info`
+* Added library constants: `ROCSHMEM_MAJOR_VERSION`, `ROCSHMEM_MINOR_VERSION`,
+  `ROCSHMEM_MAX_NAME_LEN`, `ROCSHMEM_VENDOR_STRING`, `ROCSHMEM_VERSION`,
+  `ROCSHMEM_VENDOR_MAJOR_VERSION`, `ROCSHMEM_VENDOR_MINOR_VERSION`,
+  `ROCSHMEM_VENDOR_PATCH_VERSION`
+* Added vendor string and backend metadata to `rocshmem_info` output
+* Added `ROCSHMEM_TEAM_WORLD` for the device code
+* Added `ROCSHMEM_TEAM_SHARED` predefined team for PEs sharing a common memory domain (same node)
+* Added new environment variables:
+  * `OVERRIDE_NIC_FIRMWARE_CHECK`
+  * `ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX`
+  * `ROCSHMEM_GDA_NUM_QPS_PER_PE_USR_CTX`
+* Added VMM POSIX memory allocator (`USE_HEAP_DEVICE_VMM_POSIX`)
+   * Uses HIP Virtual Memory Management (VMM) APIs for fine-grained memory control
+   * Requires ROCm 7.0+ and Linux kernel 5.6+
+   * Not compatible with MPI-based initialization (use `ROCSHMEM_INIT_WITH_UNIQUEID` instead)
 ### Changed
-### Removed
-### Resolved issues
+* Use CQ collapsing for the Mellanox MLX5 GDA conduit
+
+## rocSHMEM 3.2.1 for ROCm 7.2.1
+### Added
+* Warn if large BAR is not available
+### Resolved Issues
+* GDA Backend will disable itself when no GDA compatible NICs are available rather than crashing
+* Fix memory coherency issues on gfx1201
 ### Known issues
+* Only 64bit rocSHMEM atomic APIs are implemented for the GDA conduit
 
 ## rocSHMEM 3.2.0 for ROCm 7.2.0
 ### Added
@@ -46,7 +76,7 @@
    a shared memory region when the IPC transport is available to reach that region.
    Previously, it would return a null pointer.
 * `ROCSHMEM_RO_DISABLE_IPC` was renamed to `ROCSHMEM_DISABLE_MIXED_IPC`.
-  This enviroment variable was not documented for prior releases.
+  This environment variable was not documented for prior releases.
   It is now documented to inform users who were using this undocumented feature.
 
 ### Removed

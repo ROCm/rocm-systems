@@ -44,7 +44,7 @@ amdcuid_status_t CuidPlatform::discover(std::vector<DevicePtr> &platforms) {
         // FILE NOT FOUND status given here, which means smbios info not available
         return AMDCUID_STATUS_UNSUPPORTED;
     }
-    uint16_t vendor_id = (uint16_t)strtol(vendor.c_str(), nullptr, 0);
+    uint16_t vendor_id = (uint16_t)strtol(vendor.c_str(), nullptr, 16);
     info.header.fields.platform.vendor_id = vendor_id;
 
     // Create platform device

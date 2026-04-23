@@ -153,6 +153,15 @@ Panel Config:
       translation.
     CPC Utilization: Percent of total cycles where the CPC was busy actively doing
       any work. The ratio of CPC busy cycles over total cycles counted by the CPC.
+    CPC SYNC FIFO Full Rate: Percent of CPC sync counter request FIFO busy cycles
+      where the FIFO was full. High values indicate backpressure in synchronization
+      counter processing.
+    CPC CANE Stall Rate: Percent of CPC CANE bus busy cycles where sync counter
+      requests were stalled. High values indicate contention on the CANE bus for
+      synchronization counter operations.
+    CPC ADC Utilization: Percent of ADC busy cycles spent dispatching thread groups.
+      The ADC is responsible for sending workgroups from the command processor to
+      the workgroup manager.
     CPC Stall Rate: Percent of CPC busy cycles where the CPC was stalled for any reason.
     CPC Packet Decoding Utilization: Percent of CPC busy cycles spent decoding commands
       for processing.

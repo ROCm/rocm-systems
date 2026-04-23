@@ -348,19 +348,22 @@ inline bool isMultiNodeTest()
         while(0)
 
     // MPI-Aware Assertion Macros (ASSERT_MPI_*)
+    //
+    // These macros coordinate across MPI ranks using MPI_Allreduce so that
+    // if ANY rank's assertion fails, ALL ranks exit together (preventing
+    // deadlocks in subsequent collective operations).
+    //
+    // Failure semantics:
+    //   - Failing rank:  FAIL()       -> test marked FAILED with error details
+    //   - Passing ranks: GTEST_SKIP() -> clean exit to avoid MPI deadlock
 
 /**
  * @def ASSERT_MPI_TRUE
  * @brief MPI-aware version of ASSERT_TRUE
  *
- * Checks condition on all ranks. If ANY rank fails, ALL ranks skip together
- * to prevent deadlock. This is critical for MPI tests where collective
- * operations require all ranks to participate.
- *
- * Behavior:
- * - Evaluates condition on each rank
- * - Uses MPI_Allreduce to check if all ranks passed
- * - If any rank fails, all ranks call GTEST_SKIP() together
+ * Checks condition on all ranks. If ANY rank fails:
+ * - Failing rank calls FAIL() (test marked FAILED)
+ * - Passing ranks call GTEST_SKIP() (clean coordinated exit)
  *
  * @param condition The condition to test
  */
@@ -374,17 +377,15 @@ inline bool isMultiNodeTest()
                                                                                               \
         if(_global_status == 0)                                                               \
         {                                                                                     \
-            /* At least one rank failed */                                                    \
             if(!_local_pass)                                                                  \
             {                                                                                 \
-                /* This rank failed - show the actual error */                                \
-                EXPECT_TRUE(condition)                                                        \
-                    << "Rank " << MPIEnvironment::world_rank << " failed assertion";      \
+                FAIL()                                                                        \
+                    << "Rank " << MPIEnvironment::world_rank                                  \
+                    << ": ASSERT_MPI_TRUE(" << #condition << ") failed";                      \
             }                                                                                 \
-            /* All ranks skip together */                                                     \
             GTEST_SKIP()                                                                      \
-                << "Rank " << MPIEnvironment::world_rank                                  \
-                << ": Skipping test due to failure on at least one rank (synchronized exit)"; \
+                << "Rank " << MPIEnvironment::world_rank                                      \
+                << ": Aborting - assertion failed on another rank";                            \
         }                                                                                     \
     }                                                                                         \
     while(0)
@@ -393,14 +394,15 @@ inline bool isMultiNodeTest()
  * @def ASSERT_MPI_FALSE
  * @brief MPI-aware version of ASSERT_FALSE
  */
-    #define ASSERT_MPI_FALSE(condition) ASSERT_MPI_TRUE(!(condition))
+#define ASSERT_MPI_FALSE(condition) ASSERT_MPI_TRUE(!(condition))
 
 /**
  * @def ASSERT_MPI_EQ
  * @brief MPI-aware version of ASSERT_EQ
  *
- * Checks if val1 == val2 on all ranks. If ANY rank fails,
- * ALL ranks skip together to prevent deadlock.
+ * Checks if val1 == val2 on all ranks. If ANY rank fails:
+ * - Failing rank calls FAIL() (test marked FAILED)
+ * - Passing ranks call GTEST_SKIP() (clean coordinated exit)
  *
  * @param val1 First value
  * @param val2 Second value
@@ -419,12 +421,13 @@ inline bool isMultiNodeTest()
         {                                                                                     \
             if(!_local_pass)                                                                  \
             {                                                                                 \
-                EXPECT_EQ(_v1, _v2)                                                           \
-                    << "Rank " << MPIEnvironment::world_rank << " failed assertion";      \
+                FAIL()                                                                        \
+                    << "Rank " << MPIEnvironment::world_rank                                  \
+                    << ": ASSERT_MPI_EQ(" << #val1 << ", " << #val2 << ") failed";            \
             }                                                                                 \
             GTEST_SKIP()                                                                      \
-                << "Rank " << MPIEnvironment::world_rank                                  \
-                << ": Skipping test due to failure on at least one rank (synchronized exit)"; \
+                << "Rank " << MPIEnvironment::world_rank                                      \
+                << ": Aborting - assertion failed on another rank";                            \
         }                                                                                     \
     }                                                                                         \
     while(0)
@@ -450,12 +453,49 @@ inline bool isMultiNodeTest()
         {                                                                                     \
             if(!_local_pass)                                                                  \
             {                                                                                 \
-                EXPECT_NE(_v1, _v2)                                                           \
-                    << "Rank " << MPIEnvironment::world_rank << " failed assertion";      \
+                FAIL()                                                                        \
+                    << "Rank " << MPIEnvironment::world_rank                                  \
+                    << ": ASSERT_MPI_NE(" << #val1 << ", " << #val2 << ") failed";            \
             }                                                                                 \
             GTEST_SKIP()                                                                      \
-                << "Rank " << MPIEnvironment::world_rank                                  \
-                << ": Skipping test due to failure on at least one rank (synchronized exit)"; \
+                << "Rank " << MPIEnvironment::world_rank                                      \
+                << ": Aborting - assertion failed on another rank";                            \
+        }                                                                                     \
+    }                                                                                         \
+    while(0)
+
+/**
+ * @def ASSERT_MPI_GT
+ * @brief MPI-aware version of ASSERT_GT
+ *
+ * Checks if val1 > val2 on all ranks. If ANY rank fails:
+ * - Failing rank calls FAIL() (test marked FAILED)
+ * - Passing ranks call GTEST_SKIP() (clean coordinated exit)
+ *
+ * @param val1 First value (expected to be greater)
+ * @param val2 Second value
+ */
+#define ASSERT_MPI_GT(val1, val2)                                                             \
+    do                                                                                        \
+    {                                                                                         \
+        auto _v1            = (val1);                                                         \
+        auto _v2            = (val2);                                                         \
+        bool _local_pass    = (_v1 > _v2);                                                    \
+        int  _local_status  = _local_pass ? 1 : 0;                                            \
+        int  _global_status = 0;                                                              \
+        MPI_Allreduce(&_local_status, &_global_status, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);  \
+                                                                                              \
+        if(_global_status == 0)                                                               \
+        {                                                                                     \
+            if(!_local_pass)                                                                  \
+            {                                                                                 \
+                FAIL()                                                                        \
+                    << "Rank " << MPIEnvironment::world_rank                                  \
+                    << ": ASSERT_MPI_GT(" << #val1 << ", " << #val2 << ") failed";            \
+            }                                                                                 \
+            GTEST_SKIP()                                                                      \
+                << "Rank " << MPIEnvironment::world_rank                                      \
+                << ": Aborting - assertion failed on another rank";                            \
         }                                                                                     \
     }                                                                                         \
     while(0)
@@ -464,8 +504,9 @@ inline bool isMultiNodeTest()
  * @def ASSERT_MPI_SUCCESS
  * @brief MPI-aware assertion for MPI operations
  *
- * Checks if MPI operation succeeded on all ranks. If ANY rank fails,
- * ALL ranks skip together. Provides better error messages for MPI operations.
+ * Checks if MPI operation succeeded on all ranks. If ANY rank fails:
+ * - Failing rank calls FAIL() with MPI error string
+ * - Passing ranks call GTEST_SKIP() (clean coordinated exit)
  *
  * @param expr Expression that returns an MPI error code
  */
@@ -485,11 +526,11 @@ inline bool isMultiNodeTest()
                 char _error_string[MPI_MAX_ERROR_STRING];                                      \
                 int  _len;                                                                     \
                 MPI_Error_string(_result, _error_string, &_len);                               \
-                EXPECT_EQ(_result, MPI_SUCCESS) << "Rank " << MPIEnvironment::world_rank   \
-                                                << " failed MPI operation: " << _error_string; \
+                FAIL() << "Rank " << MPIEnvironment::world_rank                                \
+                       << ": MPI operation failed: " << _error_string;                         \
             }                                                                                  \
-            GTEST_SKIP() << "Rank " << MPIEnvironment::world_rank                          \
-                         << ": Skipping test due to MPI failure on at least one rank";         \
+            GTEST_SKIP() << "Rank " << MPIEnvironment::world_rank                              \
+                         << ": Aborting - MPI failure on another rank";                        \
         }                                                                                      \
     }                                                                                          \
     while(0)

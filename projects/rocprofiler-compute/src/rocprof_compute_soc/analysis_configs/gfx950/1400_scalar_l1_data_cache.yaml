@@ -172,7 +172,7 @@ Panel Config:
     Read Req (Total): The total number of sL1D read requests of any size, per normalization
       unit.
     Atomic Req: The total number of atomic requests from sL1D to the L2, per normalization
-      unit. Typically unused on current CDNA accelerators.
+      unit. Atomic requests to the sL1D are typically unused on current CDNA accelerators.
     Read Req (1 DWord): The total number of sL1D read requests made for a single dword
       of data (4B), per normalization unit.
     Read Req (2 DWord): The total number of sL1D read requests made for a two dwords

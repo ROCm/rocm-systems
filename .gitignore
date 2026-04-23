@@ -1,2 +1,14 @@
 .cline_storage
 /projects/hip/_build
+
+# Visual Studio project files
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.vcxproj.user
+.vs/
+
+# Visual Studio Code settings
+.vscode/
+/.rocshmem-worktree

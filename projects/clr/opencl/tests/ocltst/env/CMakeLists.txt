@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 add_executable(ocltst)
 
 target_sources(ocltst PRIVATE
@@ -34,18 +38,18 @@ target_include_directories(ocltst
     PRIVATE
         $<TARGET_PROPERTY:Common,INTERFACE_INCLUDE_DIRECTORIES>)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake")
-find_package(AMD_ICD)
-find_library(AMD_ICD_LIBRARY OpenCL HINTS "${AMD_ICD_LIBRARY_DIR}")
-target_link_libraries(ocltst PRIVATE ${AMD_ICD_LIBRARY})
+target_link_libraries(ocltst PRIVATE ${OPENCL_ICD_LIB})
 
 if (NOT WIN32)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
   find_package(Threads REQUIRED)
   target_link_libraries(ocltst PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+  # ASAN with -shared-libsan requires explicit pthread linkage
+  if(THEROCK_SANITIZER MATCHES "ASAN" OR ENABLE_ADDRESS_SANITIZER)
+    target_link_options(ocltst PRIVATE -lpthread)
+  endif()
 endif()
 
 set_target_properties(ocltst PROPERTIES INSTALL_RPATH "$ORIGIN")
 
 INSTALL(TARGETS ocltst DESTINATION ${OCLTST_INSTALL_DIR} COMPONENT ocltst)
-

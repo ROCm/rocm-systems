@@ -1,0 +1,398 @@
+Rocprofiler-Compute version: 3.5.0
+Profiler choice: rocprofiler-sdk
+Path: /tmp/tt
+Target: MI350
+Command: python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py
+Kernel Selection: None
+Dispatch Selection: None
+Filtered sections: All
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Collecting Performance Counters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Using native counter collection tool: /tmp/rocprofiler-compute-tool-xwte8x4e/librocprofiler-compute-tool.so
+[profiling] Iteration multiplexing: Disabled
+[Run 1/20][Approximate profiling time left: pending first measurement...]
+[profiling] Current input file: /tmp/tt/perfmon/SQC_DCACHE_INFLIGHT_LEVEL.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:27:49.310604 140716510244608 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.179351 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:27:49.310932 140716510244608 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:27:51.012880 140716510244608 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:27:51.042122 140716510244608 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:27:54.888365 140716510244608 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     5.577433 sec
+   |-> [rocprofiler-sdk] E20260309 13:27:54.895654 140716510244608 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/160_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:27:54.899275 140716510244608 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/160_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:27:54.900029 140716510244608 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/160_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:27:54.901219 140716510244608 simple_timer.cpp:55] [rocprofv3] output generation ::     0.012201 sec
+   |-> [rocprofiler-sdk] W20260309 13:27:54.903163 140716510244608 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.014736 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/160_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/SQC_DCACHE_INFLIGHT_LEVEL/torch_trace_160_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/SQC_DCACHE_INFLIGHT_LEVEL/torch_trace_160_marker_api_trace.csv
+[Run 2/20][Approximate profiling time left: 2 minutes and 8 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/SQC_ICACHE_INFLIGHT_LEVEL.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:27:56.451448 139975223230208 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.180088 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:27:56.451762 139975223230208 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:27:58.146611 139975223230208 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:27:58.174574 139975223230208 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:28:01.171475 139975223230208 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.719713 sec
+   |-> [rocprofiler-sdk] E20260309 13:28:01.177114 139975223230208 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/239_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:01.180705 139975223230208 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/239_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:01.181459 139975223230208 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/239_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:28:01.182696 139975223230208 simple_timer.cpp:55] [rocprofv3] output generation ::     0.010589 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:01.184558 139975223230208 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.013023 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/239_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/SQC_ICACHE_INFLIGHT_LEVEL/torch_trace_239_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/SQC_ICACHE_INFLIGHT_LEVEL/torch_trace_239_marker_api_trace.csv
+[Run 3/20][Approximate profiling time left: 1 minute and 53 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/SQ_IFETCH_LEVEL.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:28:02.809843 140303564553984 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.200511 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:28:02.810173 140303564553984 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:04.496624 140303564553984 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:28:04.528709 140303564553984 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:28:07.498113 140303564553984 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.687940 sec
+   |-> [rocprofiler-sdk] E20260309 13:28:07.505383 140303564553984 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/318_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:07.508958 140303564553984 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/318_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:07.509706 140303564553984 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/318_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:28:07.510880 140303564553984 simple_timer.cpp:55] [rocprofv3] output generation ::     0.012149 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:07.513247 140303564553984 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.015078 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/318_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/SQ_IFETCH_LEVEL/torch_trace_318_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/SQ_IFETCH_LEVEL/torch_trace_318_marker_api_trace.csv
+[Run 4/20][Approximate profiling time left: 1 minute and 45 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/SQ_INST_LEVEL_LDS.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:28:09.079741 140230243606272 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.180463 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:28:09.080069 140230243606272 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:10.769433 140230243606272 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:28:10.797619 140230243606272 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:28:13.788619 140230243606272 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.708550 sec
+   |-> [rocprofiler-sdk] E20260309 13:28:13.794307 140230243606272 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/397_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:13.797916 140230243606272 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/397_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:13.798667 140230243606272 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/397_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:28:13.799861 140230243606272 simple_timer.cpp:55] [rocprofv3] output generation ::     0.010611 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:13.801760 140230243606272 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.013081 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/397_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/SQ_INST_LEVEL_LDS/torch_trace_397_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/SQ_INST_LEVEL_LDS/torch_trace_397_marker_api_trace.csv
+[Run 5/20][Approximate profiling time left: 1 minute and 37 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/SQ_INST_LEVEL_SMEM.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:28:15.336424 139791365570304 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.182023 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:28:15.336770 139791365570304 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:17.022659 139791365570304 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:28:17.051239 139791365570304 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:28:20.008332 139791365570304 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.671562 sec
+   |-> [rocprofiler-sdk] E20260309 13:28:20.013986 139791365570304 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/476_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:20.019310 139791365570304 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/476_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:20.020097 139791365570304 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/476_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:28:20.021301 139791365570304 simple_timer.cpp:55] [rocprofv3] output generation ::     0.012337 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:20.023583 139791365570304 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.015192 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/476_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/SQ_INST_LEVEL_SMEM/torch_trace_476_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/SQ_INST_LEVEL_SMEM/torch_trace_476_marker_api_trace.csv
+[Run 6/20][Approximate profiling time left: 1 minute and 30 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/SQ_INST_LEVEL_VMEM.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:28:21.573755 140285068902144 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.181637 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:28:21.574086 140285068902144 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:23.262098 140285068902144 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:28:23.290673 140285068902144 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:28:26.259528 140285068902144 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.685443 sec
+   |-> [rocprofiler-sdk] E20260309 13:28:26.265299 140285068902144 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/555_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:26.268932 140285068902144 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/555_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:26.269681 140285068902144 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/555_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:28:26.270896 140285068902144 simple_timer.cpp:55] [rocprofv3] output generation ::     0.010735 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:26.273122 140285068902144 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.013533 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/555_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/SQ_INST_LEVEL_VMEM/torch_trace_555_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/SQ_INST_LEVEL_VMEM/torch_trace_555_marker_api_trace.csv
+[Run 7/20][Approximate profiling time left: 1 minute and 23 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/SQ_LEVEL_WAVES.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:28:27.904597 139704405749504 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.194965 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:28:27.904938 139704405749504 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:29.550586 139704405749504 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:28:29.582050 139704405749504 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:28:32.765131 139704405749504 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.860194 sec
+   |-> [rocprofiler-sdk] E20260309 13:28:32.771730 139704405749504 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/634_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:32.775312 139704405749504 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/634_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:32.776062 139704405749504 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/634_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:28:32.777244 139704405749504 simple_timer.cpp:55] [rocprofv3] output generation ::     0.011438 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:32.780365 139704405749504 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.015180 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/634_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/SQ_LEVEL_WAVES/torch_trace_634_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/SQ_LEVEL_WAVES/torch_trace_634_marker_api_trace.csv
+[Run 8/20][Approximate profiling time left: 1 minute and 17 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/pmc_perf_0.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:28:34.450004 140408791174912 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.180411 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:28:34.450336 140408791174912 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:36.135461 140408791174912 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:28:36.165221 140408791174912 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:28:39.157410 140408791174912 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.707074 sec
+   |-> [rocprofiler-sdk] E20260309 13:28:39.163009 140408791174912 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/713_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:39.166780 140408791174912 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/713_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:39.167640 140408791174912 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/713_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:28:39.168964 140408791174912 simple_timer.cpp:55] [rocprofv3] output generation ::     0.010913 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:39.171072 140408791174912 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.013604 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/713_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/pmc_perf_0/torch_trace_713_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/pmc_perf_0/torch_trace_713_marker_api_trace.csv
+[Run 9/20][Approximate profiling time left: 1 minute and 10 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/pmc_perf_1.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:28:40.656888 139948603899648 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.167925 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:28:40.657224 139948603899648 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:42.358934 139948603899648 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:28:42.386877 139948603899648 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:28:45.333502 139948603899648 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.676279 sec
+   |-> [rocprofiler-sdk] E20260309 13:28:45.338973 139948603899648 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/792_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:45.342466 139948603899648 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/792_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:45.343212 139948603899648 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/792_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:28:45.344322 139948603899648 simple_timer.cpp:55] [rocprofv3] output generation ::     0.010180 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:45.345931 139948603899648 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.012367 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/792_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/pmc_perf_1/torch_trace_792_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/pmc_perf_1/torch_trace_792_marker_api_trace.csv
+[Run 10/20][Approximate profiling time left: 1 minute and 3 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/pmc_perf_10.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:28:46.764511 140099928284928 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.166497 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:28:46.764847 140099928284928 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:48.434025 140099928284928 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:28:48.464399 140099928284928 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:28:51.451561 140099928284928 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.686714 sec
+   |-> [rocprofiler-sdk] E20260309 13:28:51.457285 140099928284928 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/871_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:51.462566 140099928284928 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/871_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:51.463349 140099928284928 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/871_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:28:51.464593 140099928284928 simple_timer.cpp:55] [rocprofv3] output generation ::     0.012386 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:51.466712 140099928284928 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.015090 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/871_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/pmc_perf_10/torch_trace_871_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/pmc_perf_10/torch_trace_871_marker_api_trace.csv
+[Run 11/20][Approximate profiling time left: 57 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/pmc_perf_11.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:28:52.986579 140336543059712 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.182016 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:28:52.986927 140336543059712 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:54.673448 140336543059712 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:28:54.705254 140336543059712 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:28:57.703861 140336543059712 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.716934 sec
+   |-> [rocprofiler-sdk] E20260309 13:28:57.709585 140336543059712 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/950_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:57.713108 140336543059712 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/950_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:28:57.713855 140336543059712 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/950_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:28:57.715008 140336543059712 simple_timer.cpp:55] [rocprofv3] output generation ::     0.010479 sec
+   |-> [rocprofiler-sdk] W20260309 13:28:57.716877 140336543059712 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.012957 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/950_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/pmc_perf_11/torch_trace_950_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/pmc_perf_11/torch_trace_950_marker_api_trace.csv
+[Run 12/20][Approximate profiling time left: 50 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/pmc_perf_12.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:28:59.266166 140400530632448 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.180704 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:28:59.266486 140400530632448 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:00.946808 140400530632448 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:29:00.976069 140400530632448 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:29:03.951179 140400530632448 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.684694 sec
+   |-> [rocprofiler-sdk] E20260309 13:29:03.956827 140400530632448 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1029_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:03.960414 140400530632448 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1029_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:03.961165 140400530632448 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1029_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:29:03.962342 140400530632448 simple_timer.cpp:55] [rocprofv3] output generation ::     0.010523 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:03.964454 140400530632448 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.013213 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/1029_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/pmc_perf_12/torch_trace_1029_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/pmc_perf_12/torch_trace_1029_marker_api_trace.csv
+[Run 13/20][Approximate profiling time left: 44 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/pmc_perf_2.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:29:05.515212 140612266700544 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.180733 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:29:05.515563 140612266700544 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:07.187941 140612266700544 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:29:07.218050 140612266700544 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:29:10.228224 140612266700544 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.712661 sec
+   |-> [rocprofiler-sdk] E20260309 13:29:10.234711 140612266700544 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1108_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:10.238286 140612266700544 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1108_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:10.239042 140612266700544 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1108_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:29:10.240219 140612266700544 simple_timer.cpp:55] [rocprofv3] output generation ::     0.011369 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:10.242085 140612266700544 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.013801 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/1108_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/pmc_perf_2/torch_trace_1108_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/pmc_perf_2/torch_trace_1108_marker_api_trace.csv
+[Run 14/20][Approximate profiling time left: 38 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/pmc_perf_3.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:29:11.852450 139667620130560 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.194374 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:29:11.852782 139667620130560 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:13.546213 139667620130560 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:29:13.576234 139667620130560 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:29:16.584344 139667620130560 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.731562 sec
+   |-> [rocprofiler-sdk] E20260309 13:29:16.590042 139667620130560 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1187_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:16.593619 139667620130560 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1187_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:16.594368 139667620130560 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1187_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:29:16.595527 139667620130560 simple_timer.cpp:55] [rocprofv3] output generation ::     0.010539 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:16.598048 139667620130560 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.013644 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/1187_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/pmc_perf_3/torch_trace_1187_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/pmc_perf_3/torch_trace_1187_marker_api_trace.csv
+[Run 15/20][Approximate profiling time left: 31 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/pmc_perf_4.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:29:18.171978 139863928786688 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.181476 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:29:18.172313 139863928786688 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:19.848132 139863928786688 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:29:19.882732 139863928786688 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:29:22.899995 139863928786688 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.727683 sec
+   |-> [rocprofiler-sdk] E20260309 13:29:22.906744 139863928786688 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1266_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:22.910323 139863928786688 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1266_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:22.911090 139863928786688 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1266_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:29:22.912201 139863928786688 simple_timer.cpp:55] [rocprofv3] output generation ::     0.011563 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:22.914461 139863928786688 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.014404 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/1266_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/pmc_perf_4/torch_trace_1266_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/pmc_perf_4/torch_trace_1266_marker_api_trace.csv
+[Run 16/20][Approximate profiling time left: 25 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/pmc_perf_5.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:29:24.396832 140571077144320 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.165810 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:29:24.397165 140571077144320 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:26.087310 140571077144320 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:29:26.116184 140571077144320 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:29:29.116399 140571077144320 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.719234 sec
+   |-> [rocprofiler-sdk] E20260309 13:29:29.122072 140571077144320 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1345_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:29.125649 140571077144320 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1345_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:29.126408 140571077144320 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1345_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:29:29.127583 140571077144320 simple_timer.cpp:55] [rocprofv3] output generation ::     0.010564 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:29.129655 140571077144320 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.013197 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/1345_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/pmc_perf_5/torch_trace_1345_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/pmc_perf_5/torch_trace_1345_marker_api_trace.csv
+[Run 17/20][Approximate profiling time left: 18 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/pmc_perf_6.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:29:30.660987 140094648147712 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.183733 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:29:30.661315 140094648147712 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:32.378885 140094648147712 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:29:32.408772 140094648147712 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:29:35.423532 140094648147712 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.762217 sec
+   |-> [rocprofiler-sdk] E20260309 13:29:35.429235 140094648147712 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1424_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:35.432760 140094648147712 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1424_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:35.433523 140094648147712 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1424_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:29:35.434674 140094648147712 simple_timer.cpp:55] [rocprofv3] output generation ::     0.010522 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:35.437096 140094648147712 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.013502 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/1424_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/pmc_perf_6/torch_trace_1424_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/pmc_perf_6/torch_trace_1424_marker_api_trace.csv
+[Run 18/20][Approximate profiling time left: 12 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/pmc_perf_7.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:29:36.984785 140391005540096 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.178091 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:29:36.985125 140391005540096 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000001 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:38.658568 140391005540096 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:29:38.688444 140391005540096 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:29:41.690166 140391005540096 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.705041 sec
+   |-> [rocprofiler-sdk] E20260309 13:29:41.697067 140391005540096 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1503_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:41.700762 140391005540096 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1503_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:41.701544 140391005540096 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1503_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:29:41.702709 140391005540096 simple_timer.cpp:55] [rocprofv3] output generation ::     0.011931 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:41.704986 140391005540096 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.014760 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/1503_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/pmc_perf_7/torch_trace_1503_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/pmc_perf_7/torch_trace_1503_marker_api_trace.csv
+[Run 19/20][Approximate profiling time left: 6 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/pmc_perf_8.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:29:43.176137 139802156338944 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.168813 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:29:43.176481 139802156338944 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:44.821984 139802156338944 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:29:44.851113 139802156338944 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:29:47.867919 139802156338944 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.691438 sec
+   |-> [rocprofiler-sdk] E20260309 13:29:47.874500 139802156338944 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1582_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:47.878076 139802156338944 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1582_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:47.878842 139802156338944 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1582_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:29:47.880040 139802156338944 simple_timer.cpp:55] [rocprofv3] output generation ::     0.011501 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:47.882092 139802156338944 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.014116 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/1582_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/pmc_perf_8/torch_trace_1582_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/pmc_perf_8/torch_trace_1582_marker_api_trace.csv
+[Run 20/20][Approximate profiling time left: 0 seconds]...
+[profiling] Current input file: /tmp/tt/perfmon/pmc_perf_9.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   |-> [rocprofiler-sdk] W20260309 13:29:49.483906 139792213790464 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.192057 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20260309 13:29:49.484235 139792213790464 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:51.185646 139792213790464 tool.cpp:2422] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20260309 13:29:51.218071 139792213790464 tool.cpp:2422] MARKER (ROCTx) version 1.1.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] Training completed
+   |-> [rocprofiler-sdk] W20260309 13:29:54.202444 139792213790464 simple_timer.cpp:55] [rocprofv3] 'python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py' ::     4.718210 sec
+   |-> [rocprofiler-sdk] E20260309 13:29:54.208071 139792213790464 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1661_kernel_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:54.211627 139792213790464 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1661_marker_api_trace.csv
+   |-> [rocprofiler-sdk] E20260309 13:29:54.212380 139792213790464 output_stream.cpp:111] Opened result file: /tmp/tt/out/pmc_1/758a84fc40f1/1661_agent_info.csv
+   |-> [rocprofiler-sdk] W20260309 13:29:54.213521 139792213790464 simple_timer.cpp:55] [rocprofv3] output generation ::     0.010449 sec
+   |-> [rocprofiler-sdk] W20260309 13:29:54.216007 139792213790464 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.013504 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /tmp/tt/out/pmc_1/1661_native_counter_collection.csv
+[torch trace] Copied Counter Collection: /tmp/tt/pmc_perf_9/torch_trace_1661_counter_collection.csv
+[torch trace] Copied Marker API Trace: /tmp/tt/pmc_perf_9/torch_trace_1661_marker_api_trace.csv
+PC sampling data collection skipped as block 21 is not specified.
+[roofline] Skipping roofline
+[roofline] Skipping roofline

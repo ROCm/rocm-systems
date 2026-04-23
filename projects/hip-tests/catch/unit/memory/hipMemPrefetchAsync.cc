@@ -1,23 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <vector>
 
@@ -47,10 +32,11 @@ __global__ void MemPrefetchAsyncKernel(int* C_d, const int* A_d, size_t N) {
   }
 }
 
-TEST_CASE("Unit_hipMemPrefetchAsync_Basic", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Basic_AllDevices) {
   const auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
   }
 
   LinearAllocGuard<int> alloc1(LinearAllocs::hipMallocManaged, kPageSize);
@@ -76,10 +62,11 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Basic", "[multigpu]") {
   ArrayFindIfNot(alloc1.ptr(), fill_value, count);
 }
 
-TEST_CASE("Unit_hipMemPrefetchAsync_Sync_Behavior") {
+HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Sync_Behavior) {
   const auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
   }
   const auto device = supported_devices.front();
   const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
@@ -92,10 +79,11 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Sync_Behavior") {
   HIP_CHECK(hipStreamSynchronize(sg.stream()));
 }
 
-TEST_CASE("Unit_hipMemPrefetchAsync_Rounding_Behavior") {
+HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Rounding_Behavior) {
   auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
   }
   const auto device = supported_devices.front();
   LinearAllocGuard<uint8_t> alloc(LinearAllocs::hipMallocManaged, 3 * kPageSize);
@@ -124,10 +112,11 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Rounding_Behavior") {
           static_cast<int>(attribute));
 }
 
-TEST_CASE("Unit_hipMemPrefetchAsync_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Negative_Parameters) {
   auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
   }
   supported_devices.push_back(hipCpuDeviceId);
   const auto device = GENERATE_COPY(from_range(supported_devices));

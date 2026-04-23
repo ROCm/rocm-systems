@@ -216,6 +216,11 @@ Panel Config:
     Global/Generic Read Instructions: The total number of global & generic memory
       read instructions executed on all compute units on the accelerator, per normalization
       unit.
+    Global/Generic Read Instructions for LDS: >-
+      The total number of global & generic memory read instructions that return
+      data directly to LDS, executed on all compute units on the accelerator, per
+      normalization unit. These operations bypass the register file and write
+      results directly into LDS memory.
     Global/Generic Write Instructions: The total number of global & generic memory
       write instructions executed on all compute units on the accelerator, per normalization
       unit.
@@ -226,6 +231,11 @@ Panel Config:
       executed on all compute units on the accelerator, per normalization unit.
     Spill/Stack Read Instructions: The total number of spill/stack memory read instructions
       executed on all compute units on the accelerator, per normalization unit.
+    Spill/Stack Read Instructions for LDS: >-
+      The total number of spill/stack memory read instructions that return data
+      directly to LDS, executed on all compute units on the accelerator, per
+      normalization unit. These operations bypass the register file and write
+      results directly into LDS memory.
     Spill/Stack Write Instructions: The total number of spill/stack memory write instructions
       executed on all compute units on the accelerator, per normalization unit.
     Spill/Stack Atomic Instructions: The total number of spill/stack memory atomic

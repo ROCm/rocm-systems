@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*
  Test Scenarios :
@@ -66,7 +53,7 @@ template <class T, class F> void check_simple(F f, T expected, const char* file,
 /**
   Verification of absolute int64 operation performed at device.
  */
-TEST_CASE("Unit_abs_int64_Verification") {
+HIP_TEST_CASE(Unit_abs_int64_Verification) {
   using datatype_t = long long;  // NOLINT
 
   datatype_t *inputCPU{}, *outputCPU{};
@@ -120,7 +107,7 @@ TEST_CASE("Unit_abs_int64_Verification") {
 /**
   Verification of pow operations performed at device.
  */
-TEST_CASE("Unit_pown_Verification") {
+HIP_TEST_CASE(Unit_pown_Verification) {
   CHECK_SIMPLE([] __device__() { return powif(2.0f, 2); }, 4.0f);
   CHECK_SIMPLE([] __device__() { return powi(2.0, 2); }, 4.0);
   CHECK_SIMPLE([] __device__() { return pow(2.0f, 2); }, 4.0f);

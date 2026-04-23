@@ -25,7 +25,10 @@
 #ifndef LIBRARY_SRC_GDA_IBV_WRAPPER_HPP_
 #define LIBRARY_SRC_GDA_IBV_WRAPPER_HPP_
 
-#include <infiniband/verbs.h>
+#include "ibv_core.hpp"
+#include "memory/hip_allocator.hpp"
+#include <sys/types.h>
+#include <map>
 
 namespace rocshmem {
 
@@ -39,6 +42,8 @@ class IBVWrapper {
     virtual ~IBVWrapper();
 
     bool is_initialized{false};
+
+    int is_dmabuf_supported();
 
     struct ibv_device** get_device_list(int *num_devices);
     void free_device_list(struct ibv_device **list);
@@ -59,7 +64,7 @@ class IBVWrapper {
                                        struct ibv_parent_domain_init_attr *attr);
     int dealloc_pd(struct ibv_pd *pd);
 
-    struct ibv_mr* reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access);
+    struct ibv_mr* reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access, HIPAllocator *allocator = nullptr);
     int dereg_mr(struct ibv_mr *mr);
 
     struct ibv_cq_ex* create_cq_ex(struct ibv_context *context,
@@ -71,6 +76,11 @@ class IBVWrapper {
                                 struct ibv_qp_init_attr_ex *qp_init_attr);
     int modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask);
     int destroy_qp(struct ibv_qp *qp);
+
+    uint16_t flow_label_to_udp_sport(uint32_t fl);
+
+    struct ibv_ah* create_ah(struct ibv_pd *pd, struct ibv_ah_attr *attr);
+    int destroy_ah(struct ibv_ah *ah);
 
   private:
     struct ibv_funcs_t {
@@ -96,6 +106,9 @@ class IBVWrapper {
       int (*dealloc_pd)(struct ibv_pd *pd);
 
       struct ibv_mr* (*reg_mr)(struct ibv_pd *pd, void *addr, size_t length, int access);
+      struct ibv_mr* (*reg_dmabuf_mr)(struct ibv_pd *pd, uint64_t offset,
+                                      size_t length, uint64_t iova,
+                                      int fd, int access);
       struct ibv_mr* (*reg_mr_iova2)(struct ibv_pd *pd, void *addr, size_t length,
                                      uint64_t iova, unsigned int access);
       int (*dereg_mr)(struct ibv_mr *mr);
@@ -107,6 +120,9 @@ class IBVWrapper {
       struct ibv_qp* (*create_qp)(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr);
       int (*modify_qp)(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask);
       int (*destroy_qp)(struct ibv_qp *qp);
+
+      struct ibv_ah* (*create_ah)(struct ibv_pd *pd, struct ibv_ah_attr *attr);
+      int (*destroy_ah)(struct ibv_ah *ah);
     };
 
     /**
@@ -123,6 +139,23 @@ class IBVWrapper {
      * @brief initialize function table
      */
     int init_function_table();
+
+    /**
+     * @brief dmabuf support initialization
+     */
+    void init_dmabuf_support_flag();
+
+    /**
+     * @brief dmabuf support state
+     */
+    int dmabuf_is_supported = -1;
+
+    /**
+     * @brief dmabuf map so we can close fds
+     *        The key is ibv_mr pointer
+     *        The value is the fd
+     */
+    std::map<uintptr_t, int> dmabuf_fd_map;
 };
 
 } // namespace rocshmem

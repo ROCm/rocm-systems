@@ -132,6 +132,10 @@ amdcuid_status_t SmbiosUtil::get_uuid_from_smbios_table(uint8_t* uuid) {
         bool peek1, peek2;
         peek1 = peek2 = false;
         while (!peek1 || !peek2) {
+            if (struct_table.eof()) {
+                // reached end of file without finding the System Info structure
+                return AMDCUID_STATUS_SMBIOS_ERROR;
+            }
             peek1 = (struct_table.peek() == 0);
             struct_table.ignore(1);
             struct_offset++;

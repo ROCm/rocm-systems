@@ -42,4 +42,4 @@ Steps in decoding video content for applications (available in the rocDecode Too
    components (U and V) for color information.
 
 The preceding steps are demonstrated in the sample applications located in our
-`GitHub repository <https://github.com/ROCm/rocDecode/tree/develop/samples>`_ directory.
+`GitHub repository <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples>`_ directory.

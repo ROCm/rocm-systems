@@ -1,20 +1,7 @@
 /*
-   Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 /* Test Case Description:
@@ -29,6 +16,7 @@
 #include "hipMallocManagedCommon.hh"
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
+#include <string>
 
 
 // Kernel functions
@@ -57,7 +45,7 @@ static unsigned threadsPerBlock{256};
 /*
    This testcase verifies the hipMallocManaged basic scenario - supported on all devices
  */
-TEST_CASE("Unit_hipMallocManaged_Basic") {
+HIP_TEST_CASE(Unit_hipMallocManaged_Basic) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     WARN(
@@ -79,10 +67,10 @@ TEST_CASE("Unit_hipMallocManaged_Basic") {
    This testcase verifies the hipMallocManaged advanced scenario - supported only on HMM enabled
    devices
  */
-TEST_CASE("Unit_hipMallocManaged_Advanced") {
+HIP_TEST_CASE(Unit_hipMallocManaged_Advanced) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
@@ -151,7 +139,7 @@ TEST_CASE("Unit_hipMallocManaged_Advanced") {
    This testcase verifies that hipMallocManaged returns an OutOfMemory error for allocations much
    larger than the available memory - supported on all devices
  */
-TEST_CASE("Unit_hipMallocManaged_Large") {
+HIP_TEST_CASE(Unit_hipMallocManaged_Large) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     WARN(

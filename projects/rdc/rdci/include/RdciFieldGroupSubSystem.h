@@ -42,6 +42,7 @@ class RdciFieldGroupSubSystem : public RdciSubSystem {
     FIELD_GROUP_UNKNOWN = 0,
     FIELD_GROUP_HELP,
     FIELD_GROUP_CREATE,
+    FIELD_GROUP_ADD,
     FIELD_GROUP_DELETE,
     FIELD_GROUP_LIST,
     FIELD_GROUP_INFO

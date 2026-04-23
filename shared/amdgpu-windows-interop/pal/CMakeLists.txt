@@ -1,7 +1,7 @@
 ##
  #######################################################################################################################
  #
- #  Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ #  Copyright (c) 2026 Advanced Micro Devices, Inc. All Rights Reserved.
  #
  #  Permission is hereby granted, free of charge, to any person obtaining a copy
  #  of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@ set_target_properties(pal PROPERTIES
     POSITION_INDEPENDENT_CODE TRUE
 )
 target_compile_features(pal INTERFACE cxx_std_20)
-if (NOT PAL_CLIENT_INTERFACE_MAJOR_VERSION EQUAL 932)
+if (NOT PAL_CLIENT_INTERFACE_MAJOR_VERSION EQUAL 954)
     message(WARNING "PAL: PAL_CLIENT_INTERFACE_MAJOR_VERSION ${PAL_CLIENT_INTERFACE_MAJOR_VERSION} not supported !!!")
 endif()
 target_link_libraries(pal
@@ -73,7 +73,7 @@ target_link_libraries(pal
 )
 target_compile_definitions(pal
     INTERFACE
-        PAL_CLIENT_INTERFACE_MAJOR_VERSION=932
+        PAL_CLIENT_INTERFACE_MAJOR_VERSION=954
         GPUOPEN_CLIENT_INTERFACE_MAJOR_VERSION=42
         PAL_BUILD_RDF=1
         PAL_DEVELOPER_BUILD=0

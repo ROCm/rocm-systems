@@ -33,9 +33,7 @@ namespace rocprofiler
 namespace counters
 {
 /**
- * Test helper: Get metrics by architecture name without agent encoding.
- * This function is for internal testing purposes only and should not be used in production code.
- * Returns metrics with base IDs only (no agent-specific encoding).
+ * Test helper: Get metrics by architecture name.
  */
 inline std::vector<Metric>
 getMetricsForAgent(const std::string& agent_arch)

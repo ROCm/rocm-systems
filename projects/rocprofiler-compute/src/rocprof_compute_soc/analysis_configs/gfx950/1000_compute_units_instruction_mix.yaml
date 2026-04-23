@@ -297,6 +297,9 @@ Panel Config:
       per normalization unit.
     Spill/Stack Instr: The total number of spill/stack memory instructions executed
       on all compute units on the accelerator, per normalization unit.
+    Spill/Stack Coalesceable Instr: The total number of coalesceable spill/stack memory
+      instructions executed on all compute units, per normalization unit. Higher values
+      indicate better memory access patterns for private memory operations.
     Spill/Stack Read: The total number of spill/stack memory read instructions executed
       on all compute units on the accelerator, per normalization unit.
     Spill/Stack Write: The total number of spill/stack memory write instructions executed
@@ -318,3 +321,6 @@ Panel Config:
       normalization unit.
     MFMA-F64: The total number of 64-bit floating-point MFMA instructions issued per
       normalization unit.
+    MFMA-F6F4: The total number of 4-bit and 6-bit floating point MFMA instructions
+      issued per normalization unit. This is supported in AMD Instinct MI350 series
+      (gfx950) and later only.

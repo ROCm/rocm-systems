@@ -150,10 +150,7 @@ src/utils/.config_hashes.json
 > It is used to safely modify YAML files while preserving comments, ordering,
 > and formatting. The workflow scripts will not function correctly without it.
 >
-> Install it via:
-> ```bash
-> pip install ruamel.yaml
-> ```
+> See [Development dependencies](../../README.md#development-dependencies) for install instructions.
 
 ### 1. Validate the current state
 
@@ -274,3 +271,28 @@ All correctness flows through:
 ```bash
 master_config_workflow_script.py
 ```
+
+## Metric Descriptions
+
+Metric descriptions flow unidirectionally from panel YAMLs to documentation:
+
+```
+Panel YAMLs (src/) → Per-Arch YAMLs (tools/) → Docs YAMLs (docs/) → Sphinx HTML
+```
+
+**Files:**
+```bash
+tools/per_arch_metric_definitions/
+  ├── gfx{908,90a,942,950}_metrics_description.yaml   # plain + rst + unit
+
+docs/data/metrics/
+  └── gfx{908,90a,942,950}_metrics.yaml               # rst + unit (generated)
+```
+
+**After editing panel `metrics_description` sections:**
+```bash
+python tools/config_management/metric_description_manager.py --sync-all src/rocprof_compute_soc/analysis_configs
+python tools/config_management/metric_description_manager.py --generate-docs
+```
+
+**RST enhancement:** Edit per-arch YAMLs directly. Framework preserves manual edits (detects when `rst != plain`).

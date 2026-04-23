@@ -1,22 +1,8 @@
-/* Copyright (c) 2022 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "hip_mempool_impl.hpp"
 
@@ -199,21 +185,16 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
       // so the queue thread could process it, because creating a command from the queue thread
       // may block the execution
       event = new hip::Event(0);
-      if (event != nullptr) {
-        if (hipSuccess != event->addMarker(hip_stream, nullptr)) {
-          delete event;
-          event = nullptr;
-        } else {
-          // Make sure runtime sends a notification to the worker thread
-          auto result = event->ready();
-        }
+      if (hipSuccess != event->addMarker(hip_stream, nullptr)) {
+        delete event;
+        event = nullptr;
+      } else {
+        // Make sure runtime sends a notification to the worker thread
+        auto result = event->ready();
       }
     }
 
     auto cmd = new FreeAsyncCommand(*hip_stream, dev_ptr, event);
-    if (cmd == nullptr) {
-      HIP_RETURN(hipErrorUnknown);
-    }
     cmd->enqueue();
     cmd->release();
   }
@@ -328,9 +309,6 @@ hipError_t hipMemPoolCreate(hipMemPool_t* mem_pool, const hipMemPoolProps* pool_
   }
   auto device = g_devices[pool_props->location.id];
   auto pool = new hip::MemoryPool(device, pool_props);
-  if (pool == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
   *mem_pool = reinterpret_cast<hipMemPool_t>(pool);
   HIP_RETURN(hipSuccess);
 }
@@ -433,9 +411,6 @@ hipError_t hipMemPoolImportFromShareableHandle(hipMemPool_t* mem_pool, void* sha
 
   auto device = g_devices[0];
   auto pool = new hip::MemoryPool(device, nullptr, true);
-  if (pool == nullptr) {
-    HIP_RETURN(hipErrorOutOfMemory);
-  }
   // Note: The interface casts the integer value of file handle under Linux into void*,
   // but compiler may not allow to cast it back. Hence, make a cast with a union...
   union {

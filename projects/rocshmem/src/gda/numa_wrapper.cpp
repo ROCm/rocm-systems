@@ -22,6 +22,7 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
+#include "log.hpp"
 #include "numa_wrapper.hpp"
 #include "util.hpp"
 
@@ -44,14 +45,12 @@ NUMAWrapper::NUMAWrapper() {
   numa_handle = dlopen("libnuma.so", RTLD_NOW);
 
   if (!numa_handle) {
-    DPRINTF("Could not open libnuma. Returning\n");
-    exit(1);
+    LOG_ERROR_EXIT("Could not open libnuma. Returning");
   }
 
   err = init_function_table();
   if (err != ROCSHMEM_SUCCESS) {
-    DPRINTF("Could not construct libnuma function table \n");
-    exit(1);
+    LOG_ERROR_EXIT("Could not construct libnuma function table");
   }
 }
 
@@ -104,7 +103,7 @@ int NUMAWrapper::max_node(void) {
 
 long NUMAWrapper::move_pages(int pid, unsigned long count, void *pages[count],
                              const int nodes[count], int status[count], int flags) {
-  return move_pages(pid, count, pages, nodes, status, flags);
+  return numa.move_pages(pid, count, pages, nodes, status, flags);
 }
 
 int NUMAWrapper::distance(int node1, int node2) {

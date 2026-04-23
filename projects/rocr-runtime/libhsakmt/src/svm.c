@@ -23,10 +23,9 @@
  * DEALINGS IN THE SOFTWARE.
  */
 #include "libhsakmt.h"
-#include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <alloca.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <inttypes.h>

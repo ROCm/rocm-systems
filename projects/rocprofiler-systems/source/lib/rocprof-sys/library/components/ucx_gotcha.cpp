@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/components/ucx_gotcha.hpp"
 #include "core/common.hpp"
@@ -53,14 +34,10 @@ get_ucx_gotcha()
 void
 ucx_gotcha::configure()
 {
-    // don't emit warnings for missing UCX functions unless debug or verbosity >= 3
-    if(get_verbose_env() < 3 && !get_debug_env())
+    for(size_t i = 0; i < ucx_gotcha_t::capacity(); ++i)
     {
-        for(size_t i = 0; i < ucx_gotcha_t::capacity(); ++i)
-        {
-            auto* itr = ucx_gotcha_t::at(i);
-            if(itr) itr->verbose = -1;
-        }
+        auto* itr = ucx_gotcha_t::at(i);
+        if(itr) itr->verbose = -1;
     }
 
     ucx_gotcha_t::get_initializer() = []() {
@@ -256,6 +233,8 @@ ucx_gotcha::start()
     if(!get_ucx_gotcha().get<ucx_gotcha_t>()->get_is_running())
     {
         configure();
+        // Initializing comm_data metadata
+        comm_data::start();
         get_ucx_gotcha().start();
     }
 }
@@ -263,6 +242,22 @@ ucx_gotcha::start()
 void
 ucx_gotcha::stop()
 {}
+
+std::mutex ucx_gotcha::s_mutex = {};
+
+void
+ucx_gotcha::pause()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    ucx_gotcha_t::set_ready(false);
+}
+
+void
+ucx_gotcha::resume()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    ucx_gotcha_t::set_ready(true);
+}
 
 // Generic audit functions now handled by template in header
 

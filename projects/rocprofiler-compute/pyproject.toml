@@ -2,12 +2,6 @@
 name = "rocprof_compute"
 requires-python = ">=3.9"
 
-[project.optional-dependencies]
-developer = [
-    "ruff>=0.12.7",
-    "pre-commit",
-]
-
 [tool.ruff]
 line-length = 88
 
@@ -21,15 +15,14 @@ extend-exclude = [
     ".misc",
     "external",
     "build-rocprof_compute",
-    "src/rocprof_compute_analyze/analysis_db.py",
-    "src/rocprof_compute_tui/widgets/splitter.py"
+    "src/vendored",
 ]
 
 [tool.ruff.lint]
 # Enable Pyflakes (F), pycodestyle (E, W for PEP8), aisort (I),
 # type annotation (ANN), and f-string (UP) rules.
 select = ["E", "W", "F", "I", "ANN", "UP", "PTH"]
-ignore = ["E713", "E711", "UP045", "PTH123", "PTH207"]
+ignore = ["E713", "E711", "UP045", "PTH123", "PTH207", "ANN003"]
 fixable = ["ALL"]
 unfixable = []
 
@@ -65,6 +58,7 @@ docstring-code-line-length = "dynamic"
 [tool.pytest.ini_options]
 addopts = [
     "--import-mode=importlib",
+    "-rx",
 ]
 
 pythonpath = [
@@ -72,6 +66,7 @@ pythonpath = [
     "src",
     "src/rocprof_compute_soc",
     "src/utils",
+    "src/roofline",
     "src/rocprof_compute_analyze/utils",
     "tests"
 ]
@@ -101,15 +96,23 @@ markers = [
     "num_xcds_cli_output",
     "sets_func",
     "sets_perf",
-    "pc_sampling",
     "live_attach_detach",
     "roofline_1",
     "roofline_2",
     "path",
     "sci_notion",
+    "iteration_multiplexing",
     "iteration_multiplexing_1",
     "iteration_multiplexing_2",
     "iteration_multiplexing_stochastic",
     "noise_clamp",
     "torch_ops",
+    "torch_trace",
+    "multi_rank",
+    "experimental_feature",
+    "skip",
+    "time_unit_conversion",
+    "time_unit_edge_cases",
+    "time_unit_integration",
+    "tui",
 ]

@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -52,9 +33,16 @@ using worker_function_t = std::function<void(ofs_t& ofs, bool force)>;
 
 struct worker_synchronization_t
 {
+    // std::condition_variable::wait_for requires a std::mutex — that is a
+    // C++17 API constraint, not a guard on the atomic values themselves.
+    // Both mutexes must live here (not as stack-locals in the thread lambda)
+    // so they are never destroyed during thread TLS teardown, which would
+    // trigger a TSan DTLS_Destroy deadlock.
+    std::mutex              is_running_mutex;
     std::condition_variable is_running_condition;
     std::atomic_bool        is_running{ false };
 
+    std::mutex              exit_finished_mutex;
     std::condition_variable exit_finished_condition;
     std::atomic_bool        exit_finished{ false };
 
@@ -163,8 +151,16 @@ public:
 
         size_t sample_size      = get_size(value);
         size_t bytes_to_reserve = header_size<TypeIdentifierEnum> + sample_size;
-        auto*  buf              = reserve_memory_space(bytes_to_reserve);
-        size_t position         = 0;
+
+        // Hold the mutex for the entire reserve-and-write operation so that
+        // the flush worker thread never reads a buffer region whose write is
+        // still in flight.  Writers were already serialised through m_mutex
+        // for position management; extending the critical section to cover the
+        // actual memcpy closes the window that TSan (correctly) flags.
+        std::lock_guard scope{ m_mutex };
+
+        auto*  buf      = reserve_memory_space(bytes_to_reserve);
+        size_t position = 0;
         auto   type_identifier_value =
             static_cast<TypeIdentifierEnumUderlayingType>(Type::type_identifier);
 
@@ -182,25 +178,24 @@ public:
 private:
     void flush(ofs_t& ofs, bool force)
     {
-        size_t _head, _tail;
+        // Hold m_mutex for the full read so store() cannot write into the
+        // region we are draining to the file.
+        std::lock_guard guard{ m_mutex };
+
+        size_t _head = m_head;
+        size_t _tail = m_tail;
+
+        if(_head == _tail)
         {
-            std::lock_guard guard{ m_mutex };
-            _head = m_head;
-            _tail = m_tail;
-
-            if(_head == _tail)
-            {
-                return;
-            }
-
-            auto used_space =
-                m_head > m_tail ? (m_head - m_tail) : (buffer_size - m_tail + m_head);
-            if(!force && used_space < flush_threshold)
-            {
-                return;
-            }
-            m_tail = m_head;
+            return;
         }
+
+        auto used_space = _head > _tail ? (_head - _tail) : (buffer_size - _tail + _head);
+        if(!force && used_space < flush_threshold)
+        {
+            return;
+        }
+        m_tail = m_head;
 
         if(_head > _tail)
         {
@@ -234,23 +229,18 @@ private:
         m_head = 0;
     }
 
+    // Caller must hold m_mutex.
     ROCPROFSYS_INLINE uint8_t* reserve_memory_space(const size_t& number_of_bytes)
     {
-        size_t _size;
+        if(__builtin_expect((m_head + number_of_bytes + header_size<TypeIdentifierEnum>) >
+                                buffer_size,
+                            0))
         {
-            std::lock_guard scope{ m_mutex };
-
-            if(__builtin_expect((m_head + number_of_bytes +
-                                 header_size<TypeIdentifierEnum>) > buffer_size,
-                                0))
-            {
-                fragment_memory();
-            }
-            _size = m_head;
-            m_head += number_of_bytes;
+            fragment_memory();
         }
-
-        return m_buffer->data() + _size;
+        auto* ptr = m_buffer->data() + m_head;
+        m_head += number_of_bytes;
+        return ptr;
     }
 
 private:

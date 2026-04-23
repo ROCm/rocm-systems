@@ -36,16 +36,19 @@ profiling, how it supports performance analysis, and how to leverage its capabil
     * :doc:`Profiling <./how-to/general-tips-using-rocprof-sys>`
 
       * :doc:`Sampling the call stack <./how-to/sampling-call-stack>`
+      * :doc:`Attaching to a running process <./how-to/attaching-to-running-process>`
       * :doc:`Instrumenting and rewriting a binary application <./how-to/instrumenting-rewriting-binary-application>`
       * :doc:`Performing causal profiling <./how-to/performing-causal-profiling>`
       * :doc:`Profiling Python scripts <./how-to/profiling-python-scripts>`
       * :doc:`Communication runtime profiling <./how-to/communication-runtime-profiling>`
       * :doc:`Network performance profiling <./how-to/nic-profiling>`
+      * :doc:`Communication runtime profiling <./how-to/communication-runtime-profiling>`
       * :doc:`VCN and JPEG sampling and tracing <./how-to/vcn-jpeg-sampling>`
       * :doc:`XGMI and PCIe metrics monitoring <./how-to/xgmi-pcie-sampling>`
 
     * :doc:`Understanding the output <./how-to/understanding-rocprof-sys-output>`
-    * :doc:`Using the ROCm Systems Profiler API <./how-to/using-rocprof-sys-api>`
+    * :doc:`Use the preset profiles <./how-to/using-preset-profiles>`
+    * :doc:`Use the ROCm Systems Profiler API <./how-to/using-rocprof-sys-api>`
 
   .. grid-item-card:: Conceptual
 

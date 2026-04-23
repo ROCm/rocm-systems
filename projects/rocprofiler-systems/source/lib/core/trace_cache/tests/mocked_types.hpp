@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -34,6 +15,7 @@ enum class test_type_identifier_t : uint32_t
     sample_type_2    = 2,
     sample_type_3    = 3,
     sample_type_4    = 4,
+    sample_type_5    = 5,
     fragmented_space = 0xFFFF
 };
 struct test_sample_1 : public rocprofsys::trace_cache::cacheable_t
@@ -111,6 +93,21 @@ struct test_sample_4 : public rocprofsys::trace_cache::cacheable_t
     std::vector<uint32_t> data;
 
     bool operator==(const test_sample_4& other) const { return data == other.data; }
+};
+
+struct test_sample_5 : public rocprofsys::trace_cache::cacheable_t
+{
+    static constexpr test_type_identifier_t type_identifier =
+        test_type_identifier_t::sample_type_5;
+
+    test_sample_5() = default;
+    test_sample_5(std::optional<uint32_t> d)
+    : data(d)
+    {}
+
+    std::optional<uint32_t> data;
+
+    bool operator==(const test_sample_5& other) const { return data == other.data; }
 };
 
 template <>
@@ -201,6 +198,29 @@ rocprofsys::trace_cache::deserialize(uint8_t*& buffer)
 template <>
 inline size_t
 rocprofsys::trace_cache::get_size(const test_sample_4& item)
+{
+    return rocprofsys::trace_cache::utility::get_size(item.data);
+}
+
+template <>
+inline void
+rocprofsys::trace_cache::serialize(uint8_t* buffer, const test_sample_5& item)
+{
+    rocprofsys::trace_cache::utility::store_value(buffer, item.data);
+}
+
+template <>
+inline test_sample_5
+rocprofsys::trace_cache::deserialize(uint8_t*& buffer)
+{
+    test_sample_5 result;
+    rocprofsys::trace_cache::utility::parse_value(buffer, result.data);
+    return result;
+}
+
+template <>
+inline size_t
+rocprofsys::trace_cache::get_size(const test_sample_5& item)
 {
     return rocprofsys::trace_cache::utility::get_size(item.data);
 }

@@ -23,7 +23,7 @@ Panel Config:
           value: ROUND(AVG((SQ_INSTS_SMEM / $denom)), 0)
         VALU:
           value: ROUND(AVG((SQ_INSTS_VALU / $denom)), 0)
-        MFMA:
+        Matrix Ops:
           value: ROUND(AVG((SQ_INSTS_MFMA / $denom)), 0)
         VMEM:
           value: ROUND(AVG((SQ_INSTS_VMEM / $denom)), 0)
@@ -147,7 +147,7 @@ Panel Config:
     SMEM: Total number of SMEM (Scalar Memory Read) instructions issued normalization
       unit.
     VALU: The number of VALU (Vector ALU) instructions issued per normalization unit.
-    MFMA: Total number of MFMA (Matrix-Fused-Multiply-Add) instructions issued per
+    Matrix Ops: Total number of MFMA (Matrix-Fused-Multiply-Add) instructions issued per
       normalization unit.
     VMEM: The number of VMEM (GPU Memory) read instructions issued (including FLAT/scratch
       memory) per normalization unit.
@@ -213,6 +213,8 @@ Panel Config:
       normalization unit.
     sL1D Hit: The total number of sL1D requests that hit on a previously loaded cache
       line, per normalization unit.
+    sL1D Lat: The average number of cycles scalar L1D cache requests spent in
+      flight before data was returned to a CU.
     sL1D_L2 Rd: The total number of read requests from sL1D to the L2, per normalization
       unit.
     sL1D_L2 Wr: The total number of write requests from sL1D to the L2, per normalization

@@ -4,11 +4,17 @@ cmake_minimum_required(VERSION 3.16)
 
 message("Building rccl RAS client executable")
 
-add_executable(rcclras "${PROJECT_BINARY_DIR}/hipify/src/ras/client.cc")
+# NOTE:
+# The CMake migration work in this workspace can change when/if the hipify "src"
+# tree exists at configure time. Referencing a hipified path here makes CMake
+# fail early if that generated file isn't registered yet.
+#
+# For robustness, build the RAS client from the real source file.
+add_executable(rcclras "${CMAKE_SOURCE_DIR}/src/ras/client.cc")
 
 target_include_directories(rcclras PRIVATE ${PROJECT_BINARY_DIR}/include)
-target_include_directories(rcclras PRIVATE ${HIPIFY_DIR}/src)
-target_include_directories(rcclras PRIVATE ${HIPIFY_DIR}/src/include)
+target_include_directories(rcclras PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(rcclras PRIVATE ${CMAKE_SOURCE_DIR}/src/include)
 
 target_link_libraries(rcclras PRIVATE hip::host)
 target_link_libraries(rcclras PRIVATE dl)

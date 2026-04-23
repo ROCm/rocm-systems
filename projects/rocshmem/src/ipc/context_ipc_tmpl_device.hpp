@@ -28,6 +28,7 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
 #include "context_ipc_device.hpp"
+#include "log.hpp"
 #include "util.hpp"
 #include "ipc_team.hpp"
 #include "rocshmem_calc.hpp"
@@ -286,8 +287,6 @@ __device__ void IPCContext::internal_ring_allreduce(
     T *dst, const T *src, int nelems, IPCTeam *team_obj,  // NOLINT(runtime/int)
     int n_seg, int seg_size, int chunk_size) {
 
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int PE_start = team_obj->tinfo_wrt_world->pe_start;
   int PE_size = team_obj->tinfo_wrt_world->size;
   long *pSync = team_obj->reduce_pSync;
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
@@ -380,18 +379,21 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
       int n_seg_up = (nreduce - 1) / seg_size + 1;
       // recalculate chunk_size
       chunk_size = seg_size / PE_size;
-      if (n_seg == 0) {
-        n_seg = 1;
+
+      if (n_seg > 0) {
+        internal_ring_allreduce<T, Op>(dest, source, nreduce, team_obj, n_seg,
+                                       seg_size, chunk_size);
       }
-      internal_ring_allreduce<T, Op>(dest, source, nreduce, team_obj, n_seg,
-                                     seg_size, chunk_size);
       if (n_seg_up > n_seg) {
         T *p_dst = (dest + (n_seg * seg_size));
         const T *p_src = (source + (n_seg * seg_size));
         int p_count = nreduce - (n_seg * seg_size);
         int p_chunk = p_count / PE_size;
-        internal_ring_allreduce<T, Op>(p_dst, p_src, p_count, team_obj, 1,
-                                      (p_chunk * PE_size), p_chunk);
+        if (p_chunk > 0) {
+          internal_ring_allreduce<T, Op>(p_dst, p_src,
+                                         (p_chunk * PE_size), team_obj, 1,
+                                         (p_chunk * PE_size), p_chunk);
+        }
 
         if ((p_chunk * PE_size) < p_count) {
           // Final elements need to use direct_allreduce
@@ -403,7 +405,7 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
         }
       }
     } else {
-      GPU_DPRINTF("Unsupported reduction size for IPC conduit.\n");
+      LOGD_WARN("Unsupported reduction size for IPC conduit.");
       return ROCSHMEM_ERROR;
     }
   }
@@ -469,6 +471,15 @@ template <typename T>
 __device__ void IPCContext::alltoall(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
   alltoall_linear(team, dst, src, nelems);
+}
+
+template <typename T>
+__device__ void IPCContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
+                                      [[maybe_unused]] T *dest, [[maybe_unused]] const size_t dest_nelems[],
+                                      [[maybe_unused]] const size_t dest_displs[],
+                                      [[maybe_unused]] T *source, [[maybe_unused]] const size_t source_nelems[],
+                                      [[maybe_unused]] const size_t source_displs[]) {
+  LOGD_ERROR_ABORT("ipc:alltoallv not implemented");
 }
 
 template <typename T>

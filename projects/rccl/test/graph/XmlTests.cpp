@@ -6,6 +6,7 @@
 #include "graph/xml.h"
 #include "gtest/gtest.h"
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -575,7 +576,7 @@ TEST_F(XmlTest, xmlGetAttrLong_VeryLargeNegative) {
 
   int64_t result;
   EXPECT_EQ(xmlGetAttrLong(testNode, "minLong", &result), ncclSuccess);
-  EXPECT_EQ(result, -9223372036854775808LL);
+  EXPECT_EQ(result, INT64_MIN);
 }
 
 TEST_F(XmlTest, xmlGetAttrLong_Overflow) {
@@ -597,7 +598,7 @@ TEST_F(XmlTest, xmlGetAttrLong_Underflow) {
   int64_t result;
   EXPECT_EQ(xmlGetAttrLong(testNode, "underflowLong", &result), ncclSuccess);
   // Result will be INT64_MIN due to underflow in strtoll
-  EXPECT_EQ(result, -9223372036854775808LL);
+  EXPECT_EQ(result, INT64_MIN);
 }
 
 TEST_F(XmlTest, xmlGetAttrLong_LeadingWhitespace) {

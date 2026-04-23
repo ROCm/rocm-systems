@@ -62,8 +62,8 @@ __global__ void PrimitiveMRTest(int loop, long long int *start_time,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 PrimitiveMRTester::PrimitiveMRTester(TesterArguments args) : Tester(args) {
-  s_buf = (char *)rocshmem_malloc(args.max_msg_size * args.wg_size);
-  r_buf = (char *)rocshmem_malloc(args.max_msg_size * args.wg_size);
+  s_buf = (char *)rocshmem_malloc(max_msg_size * args.wg_size);
+  r_buf = (char *)rocshmem_malloc(max_msg_size * args.wg_size);
 }
 
 PrimitiveMRTester::~PrimitiveMRTester() {
@@ -71,9 +71,9 @@ PrimitiveMRTester::~PrimitiveMRTester() {
   rocshmem_free(r_buf);
 }
 
-void PrimitiveMRTester::resetBuffers(size_t size) {
-  memset(s_buf, '0', args.max_msg_size * args.wg_size);
-  memset(r_buf, '1', args.max_msg_size * args.wg_size);
+void PrimitiveMRTester::resetBuffers([[maybe_unused]] size_t size) {
+  memset(s_buf, '0', max_msg_size * args.wg_size);
+  memset(r_buf, '1', max_msg_size * args.wg_size);
 }
 
 void PrimitiveMRTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,

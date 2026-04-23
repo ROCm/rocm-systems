@@ -24,12 +24,19 @@
 cmake_minimum_required (VERSION 3.10)
 # ROCM Path
 if(DEFINED ENV{ROCM_PATH})
-  set(ROCM_PATH $ENV{ROCM_PATH} CACHE PATH "${White}${PROJECT_NAME}: Default ROCm installation path${ColourReset}")
+  set(ROCM_PATH $ENV{ROCM_PATH} CACHE PATH "Default ROCm installation path")
 elseif(ROCM_PATH)
-  message("-- ${White}${PROJECT_NAME} :ROCM_PATH Set -- ${ROCM_PATH}${ColourReset}")
+  message("-- INFO:ROCM_PATH Set -- ${ROCM_PATH}")
 else()
-  set(ROCM_PATH /opt/rocm CACHE PATH "${White}${PROJECT_NAME}: Default ROCm installation path${ColourReset}")
+  set(ROCM_PATH /opt/rocm CACHE PATH "Default ROCm installation path")
 endif()
+
+# Check if lib/rocm_sysdeps/lib exists in the ROCm path which indicates ROCm installation via TheRock
+set(USING_THE_ROCK OFF)
+if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+  set(USING_THE_ROCK ON)
+endif()
+
 # Set AMD Clang as default compiler
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
@@ -64,23 +71,26 @@ set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
 find_package(FFmpeg QUIET)
 find_package(rocdecode QUIET)
-find_package(rocdecode-host 1.0.0 QUIET)
 
 if(HIP_FOUND AND rocdecode_FOUND)
     # HIP
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
 
-    if(FFMPEG_FOUND)
+    if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
+      find_package(rocdecode-host 1.0.0 QUIET)
       # FFMPEG
       include_directories(${AVUTIL_INCLUDE_DIR} ${AVCODEC_INCLUDE_DIR}
                           ${AVFORMAT_INCLUDE_DIR})
       set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${FFMPEG_LIBRARIES})
     endif()
-    if(rocdecode-host_FOUND)
+    if(rocdecode-host_FOUND AND NOT USING_THE_ROCK)
       # rocdecode-host
       include_directories(${rocdecode-host_INCLUDE_DIR})
       set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocdecode::rocdecode-host)
     endif()
+
+    # STD Filesystem
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} stdc++fs)
 
     # rocdecode and utils
     include_directories(${rocdecode_INCLUDE_DIR} ${ROCM_PATH}/lib)
@@ -91,25 +101,24 @@ if(HIP_FOUND AND rocdecode_FOUND)
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} rocdecdecode.cpp)
     add_executable(${PROJECT_NAME} ${SOURCES})
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++17")
-    if(FFMPEG_FOUND AND rocdecode-host_FOUND)
+    if(FFMPEG_FOUND AND rocdecode-host_FOUND AND NOT USING_THE_ROCK)
       target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_HOST_DECODE=1)
     else()
       target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_HOST_DECODE=0)
     endif()
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
 else()
-    message("-- ERROR!: ${PROJECT_NAME} excluded! please install all the dependencies and try again!")
+    message("-- ERROR!: ${PROJECT_NAME} excluded! unmet dependencies")
     if (NOT HIP_FOUND)
-        message(FATAL_ERROR "-- ERROR!: HIP Not Found! - please install ROCm and HIP!")
+        message(FATAL_ERROR "-- ERROR!: HIP Not Found!")
     endif()
     if (NOT FFMPEG_FOUND)
-        message(FATAL_ERROR "-- ERROR!: FFMPEG Not Found! - please install FFMPEG!")
+        message(FATAL_ERROR "-- ERROR!: FFMPEG Not Found!")
     endif()
     if (NOT rocdecode_FOUND)
-        message(FATAL_ERROR "-- ERROR!: rocdecode Not Found! - please install rocdecode!")
+        message(FATAL_ERROR "-- ERROR!: rocdecode Not Found!")
     endif()
     if (NOT rocdecode-host_FOUND)
-        message(FATAL_ERROR "-- ERROR!: rocdecode-host Not Found! - please install rocdecode-host!")
+        message(FATAL_ERROR "-- ERROR!: rocdecode-host Not Found!")
     endif()
 endif()
-  

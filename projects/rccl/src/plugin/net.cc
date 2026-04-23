@@ -69,7 +69,7 @@ typedef struct netPluginLib {
 
 int pluginCount = 0;
 bool netPluginLibsInitialized = false;
-netPluginLib_t netPluginLibs[NCCL_NET_MAX_PLUGINS] = { 0 };
+netPluginLib_t netPluginLibs[NCCL_NET_MAX_PLUGINS] = {};
 static std::mutex netPluginMutex;
 static std::once_flag initPluginLibsOnceFlag;
 
@@ -233,7 +233,7 @@ static ncclResult_t ncclNetPluginDisableOtherExternal(int pluginIndex) {
 
 static void initPluginLibsOnceFunc() {
   char* netPluginName = nullptr;
-  const char* defaultNetPlugin = "libnccl-net.so";
+  const char* defaultNetPlugin = "librccl-net.so";
   const char* envNetPlugin = nullptr;
   char* envNetPluginList = nullptr;
   char* savePtr = nullptr;
@@ -276,15 +276,20 @@ static void initPluginLibsOnceFunc() {
 
   // Add 2 internal ib and socket plugins
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  if ((rcclParamAinicRoce() == 1) && !(envNetPlugin)) {
-    // For AINIC add rocm internal ib instead of default internal ib
-    netPluginLibs[pluginCounter].ncclNet = &rocmNetIb;
-    netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
-  } else {
+  {
+    const char* envNet = ncclGetEnv("NCCL_NET");
+    if (envNet && strcasecmp(envNet, "IB-CAST") == 0 && !(envNetPlugin)) {
+      netPluginLibs[pluginCounter].ncclNet = &netIbCast;
+      netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
+    } else if ((rcclUseAinic() == 1) && !(envNetPlugin)) {
+      netPluginLibs[pluginCounter].ncclNet = &rocmNetIb;
+      netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
+    } else {
 #endif
-    netPluginLibs[pluginCounter].ncclNet = &ncclNetIb;
-    netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
+      netPluginLibs[pluginCounter].ncclNet = &ncclNetIb;
+      netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    }
   }
 #endif
   netPluginLibs[pluginCounter].ncclNet = &ncclNetSocket;

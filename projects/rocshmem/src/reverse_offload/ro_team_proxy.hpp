@@ -27,7 +27,6 @@
 
 #include "device_proxy.hpp"
 #include "ro_net_team.hpp"
-#include "team_info_proxy.hpp"
 #include "mpi_instance.hpp"
 
 namespace rocshmem {
@@ -42,12 +41,15 @@ class ROTeamProxy {
    */
   ROTeamProxy(Backend* backend, MPI_Comm comm, int pe, int npes,
               size_t num_elems = 1)
-    : my_pe_(pe), team_size_(npes), proxy_{num_elems} {
+    : proxy_{num_elems} {
 
     mpilib_ftable_.Comm_dup(comm, &team_world_comm_);
 
-    new (proxy_.get()) ROTeam(backend, wrt_parent_.get(), wrt_world_.get(),
-                              team_size_, my_pe_, team_world_comm_);
+    TeamInfo wrt_parent(nullptr, 0, 1, npes);
+    TeamInfo wrt_world(nullptr, 0, 1, npes);
+
+    new (proxy_.get()) ROTeam(backend, wrt_parent, wrt_world,
+                              npes, pe, team_world_comm_);
   }
 
   ROTeamProxy(const ROTeamProxy& other) = delete;
@@ -78,44 +80,6 @@ class ROTeamProxy {
    * @brief Holds duplicated mpi world communicator.
    */
   MPI_Comm team_world_comm_;
-
-  /**
-   * @brief Used by TeamInfo members and the constructor to build ROTeam.
-   */
-
-  /**
-   * @brief Used for team information.
-   */
-  int my_pe_;
-
-  /**
-   * @brief Used for team information.
-   */
-  int team_size_;
-
-  /**
-   * @brief Input for TeamInfo proxies.
-   */
-  int pe_start_{0};
-
-  /**
-   * @brief Input for TeamInfo proxies.
-   */
-  int stride_{1};
-
-  /**
-   * @brief Used by the constructor to build out the ROTeam.
-   *
-   * @note This embedded proxy object manages its own memory.
-   */
-  TeamInfoProxyT wrt_parent_{nullptr, pe_start_, stride_, team_size_};
-
-  /**
-   * @brief Used by the constructor to build out the ROTeam.
-   *
-   * @note This embedded proxy object manages its own memory.
-   */
-  TeamInfoProxyT wrt_world_{nullptr, pe_start_, stride_, team_size_};
 
   /*
    * @brief Memory managed by the lifetime of this object

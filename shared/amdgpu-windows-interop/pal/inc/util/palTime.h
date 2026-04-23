@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,7 @@
 #pragma once
 
 #include <chrono>
+#include <time.h>
 
 namespace Util
 {
@@ -50,7 +51,9 @@ private:
     char m_data[64];
 };
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 873
+/// Returns the current time in the local timezone.
+struct tm GetCurrentLocalTime();
+
 /// Seconds stored as a float instead of an integer.
 using fseconds      = std::chrono::duration<float>;
 /// Milliseconds stored as a float instead of an integer.
@@ -82,6 +85,5 @@ constexpr DestDuration TimeoutCast(
         return std::chrono::duration_cast<DestDuration, Rep, Period>(d);
     }
 }
-#endif
 
 } // Util

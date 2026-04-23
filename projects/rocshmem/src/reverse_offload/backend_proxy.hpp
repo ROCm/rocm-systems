@@ -28,6 +28,8 @@
 #include <atomic>
 
 #include "device_proxy.hpp"
+#include "memory/window_info.hpp"
+#include "memory/symmetric_heap.hpp"
 #include "stats.hpp"
 #include "queue.hpp"
 

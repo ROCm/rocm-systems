@@ -135,10 +135,7 @@ perform_reduction(
         perform_reduction_to_single_instance(reduce_op, input_array, &result);
         input_array->clear();
         input_array->push_back(result);
-        // Preserve DIMENSION_AGENT when reducing to single instance
-        auto agent_dim = rec_to_dim_pos(result.id, ROCPROFILER_DIMENSION_AGENT);
         set_dim_in_rec(input_array->begin()->id, ROCPROFILER_DIMENSION_NONE, 0);
-        set_dim_in_rec(input_array->begin()->id, ROCPROFILER_DIMENSION_AGENT, agent_dim);
         return input_array;
     }
 
@@ -171,10 +168,7 @@ perform_reduction(
     }
     if(input_array->size() == 1)
     {
-        // Preserve DIMENSION_AGENT when reducing to single instance
-        auto agent_dim = rec_to_dim_pos(input_array->begin()->id, ROCPROFILER_DIMENSION_AGENT);
         set_dim_in_rec(input_array->begin()->id, ROCPROFILER_DIMENSION_NONE, 0);
-        set_dim_in_rec(input_array->begin()->id, ROCPROFILER_DIMENSION_AGENT, agent_dim);
     }
     return input_array;
 }
@@ -735,10 +729,6 @@ EvaluateAST::read_special_counters(
         if(!out_map[metric.id()].empty()) out_map[metric.id()].clear();
         auto& record = out_map[metric.id()].emplace_back();
         set_counter_in_rec(record.id, {.handle = metric.id()});
-        // Don't use DIMENSION_NONE as it overwrites the DIMENSION_AGENT field
-        // Instead, explicitly set DIMENSION_AGENT with the agent's logical_node_id
-        set_dim_in_rec(
-            record.id, ROCPROFILER_DIMENSION_AGENT, agent.logical_node_id + AGENT_ENCODING_OFFSET);
 
         record.counter_value = get_agent_property(metric.name(), agent);
     }
@@ -778,13 +768,6 @@ EvaluateAST::read_pkt(const aql::CounterPacketConstruct* pkt_gen, hsa::AQLPacket
             CHECK_EQ(aql_status, ROCPROFILER_STATUS_SUCCESS)
                 << rocprofiler_get_status_string(aql_status);
 
-            // Set DIMENSION_AGENT with the agent's logical_node_id
-            auto        agent_id = it.pkt_gen->agent();
-            const auto* agent    = CHECK_NOTNULL(rocprofiler::agent::get_agent(agent_id));
-            set_dim_in_rec(next_rec.id,
-                           ROCPROFILER_DIMENSION_AGENT,
-                           agent->logical_node_id + AGENT_ENCODING_OFFSET);
-
             // set_dim_in_rec(next_rec.id, ROCPROFILER_DIMENSION_NONE, vec.size() - 1);
             // Note: in the near future we need to use hw_counter here instead
             next_rec.counter_value = counter_value;
@@ -804,14 +787,7 @@ EvaluateAST::set_out_id(std::vector<rocprofiler_counter_record_t>& results) cons
 {
     for(auto& record : results)
     {
-        // Preserve the agent encoding from the instance record
-        auto agent_encoded = rec_to_dim_pos(record.id, ROCPROFILER_DIMENSION_AGENT);
-
-        // Update the counter ID (this will overwrite DIMENSION_AGENT)
         set_counter_in_rec(record.id, _out_id);
-
-        // Restore the agent encoding that was in the original record
-        set_dim_in_rec(record.id, ROCPROFILER_DIMENSION_AGENT, agent_encoded);
     }
 }
 

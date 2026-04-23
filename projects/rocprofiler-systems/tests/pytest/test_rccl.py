@@ -1,16 +1,20 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 """
 Tests for RCCL
-
-MPI is unsupported for RCCL tests.
 """
 
 from __future__ import annotations
 import pytest
+from conftest import RocprofsysTest
+from pathlib import Path
 
-pytestmark = [pytest.mark.rccl, pytest.mark.disable("all")]
+pytestmark = [
+    pytest.mark.rccl,
+    pytest.mark.mpi,
+    pytest.mark.gpu,
+]
 
 # =============================================================================
 # RCCL fixtures
@@ -34,6 +38,15 @@ def rccl_env() -> dict[str, str]:
         "OMP_PLACES": "threads",
         "OMP_NUM_THREADS": "2",
     }
+
+
+@pytest.fixture
+def rccl_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
+    """Get validation rules for RCCL rocpd tests."""
+    rules_dir = validation_rules_dir / "rccl"
+    return [
+        rules_dir / "rccl-comm-rules.json",
+    ]
 
 
 # =============================================================================
@@ -61,9 +74,7 @@ RCCL_TARGETS = [
     RCCL_TARGETS,
     ids=[t.replace("_", "-") for t in RCCL_TARGETS],
 )
-@pytest.mark.gpu
-class TestRCCL:
-
+class TestRCCL(RocprofsysTest):
     REWRITE_ARGS = [
         "-e",
         "-v",
@@ -76,7 +87,6 @@ class TestRCCL:
         "return",
         "args",
     ]
-
     RUNTIME_ARGS = [
         "-e",
         "-v",
@@ -93,7 +103,6 @@ class TestRCCL:
         "--log-file",
         "rccl-test.log",
     ]
-
     RUN_ARGS = [
         "-t",
         "1",
@@ -113,75 +122,31 @@ class TestRCCL:
         "1",
     ]
 
-    def test_sampling(
-        self,
-        rccl_target: str,
-        run_test,
-        rccl_env: dict[str, str],
-        assert_regex,
-        assert_perfetto,
-    ):
-        result = run_test(
+    @pytest.mark.parametrize(
+        "mode",
+        [
             "sampling",
-            target=rccl_target,
-            env=rccl_env,
-            run_args=self.RUN_ARGS,
-            timeout=300,
-        )
-        assert_regex(result)
-        assert_perfetto(
-            result,
-            categories=["rocm_rccl_api"],
-            counter_names=["RCCL Comm"],
-        )
-
-    def test_binary_rewrite(
-        self,
-        rccl_target: str,
-        run_test,
-        rccl_env: dict[str, str],
-        assert_regex,
-    ):
-        result = run_test(
             "binary_rewrite",
-            target=rccl_target,
+            pytest.param("sys_run", marks=pytest.mark.rocpd("rccl_env")),
+            pytest.param("runtime_instrument", marks=pytest.mark.slow),
+        ],
+    )
+    def test(self, mode, rccl_target, rccl_env, rccl_rocpd_rules):
+        result = self.run_test(
+            mode,
+            rccl_target,
             env=rccl_env,
-            run_args=self.RUN_ARGS,
             rewrite_args=self.REWRITE_ARGS,
-            timeout=300,
-        )
-        assert_regex(result)
-
-    @pytest.mark.slow
-    def test_runtime_instrument(
-        self,
-        rccl_target: str,
-        run_test,
-        rccl_env: dict[str, str],
-        assert_regex,
-    ):
-        result = run_test(
-            "runtime_instrument",
-            target=rccl_target,
-            env=rccl_env,
-            run_args=self.RUN_ARGS,
-            instrument_args=self.RUNTIME_ARGS,
-            timeout=300,
-        )
-        assert_regex(result)
-
-    def test_sys_run(
-        self,
-        rccl_target: str,
-        run_test,
-        rccl_env: dict[str, str],
-        assert_regex,
-    ):
-        result = run_test(
-            "sys_run",
-            target=rccl_target,
-            env=rccl_env,
+            runtime_args=self.RUNTIME_ARGS,
             run_args=self.RUN_ARGS,
             timeout=300,
+            mpi_ranks=1,
         )
-        assert_regex(result)
+        self.assert_regex(result)
+        if mode == "sys_run":
+            self.assert_perfetto(
+                result,
+                categories=["rocm_rccl_api"],
+                counter_names=["RCCL Comm"],
+            )
+            self.assert_rocpd(result, rules_files=rccl_rocpd_rules)

@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
     error_handling_common.cc
@@ -7,7 +11,6 @@ set(TEST_SRC
     hipDrvGetErrorString.cc
     hipGetLastError.cc
     hipPeekAtLastError.cc
-    hipDynamicLogging.cc
 )
 
 if(UNIX)
@@ -19,16 +22,13 @@ endif()
 add_executable(hipGetLastErrorEnv_Exe EXCLUDE_FROM_ALL hipGetLastErrorEnv_Exe.cc)
 add_executable(hipPeekAtLastErrorEnv_Exe EXCLUDE_FROM_ALL hipPeekAtLastErrorEnv_Exe.cc)
 
-set_source_files_properties(hipGetLastErrorEnv_Exe.cc PROPERTIES LANGUAGE HIP)
-set_source_files_properties(hipPeekAtLastErrorEnv_Exe.cc PROPERTIES LANGUAGE HIP)
-set_target_properties(hipGetLastErrorEnv_Exe PROPERTIES LINKER_LANGUAGE HIP)
-set_target_properties(hipPeekAtLastErrorEnv_Exe PROPERTIES LINKER_LANGUAGE HIP)
-target_link_libraries(hipGetLastErrorEnv_Exe hip::host hip::device)
-target_link_libraries(hipPeekAtLastErrorEnv_Exe hip::host hip::device)
+set_source_files_properties(hipGetLastErrorEnv_Exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+set_source_files_properties(hipPeekAtLastErrorEnv_Exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
 
 if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
       hipExtGetLastError.cc
+    hipDynamicLogging.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()

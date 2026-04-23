@@ -2,6 +2,8 @@
 # configure packaging settings
 #
 
+include(CPackComponent)
+
 function(rocprofiler_set_package_depends _VARIABLE _VALUE _INFO _REPLACE_PARENTHESIS)
     string(REPLACE ";" ", " _DEPENDS "${_VALUE}")
     if(_REPLACE_PARENTHESIS)
@@ -54,7 +56,7 @@ rocprofiler_add_feature(CPACK_PACKAGE_FILE_NAME "CPack filename")
 get_cmake_property(ROCPROFILER_PACKAGING_COMPONENTS COMPONENTS)
 
 rocprofiler_add_feature(ROCPROFILER_PACKAGING_COMPONENTS "Packaging components")
-list(REMOVE_ITEM ROCPROFILER_PACKAGING_COMPONENTS "Development" "Unspecified")
+list(REMOVE_ITEM ROCPROFILER_PACKAGING_COMPONENTS "Development" "Unspecified" "fmt_core")
 list(LENGTH ROCPROFILER_PACKAGING_COMPONENTS NUM_ROCPROFILER_PACKAGING_COMPONENTS)
 
 # the packages we will generate
@@ -85,13 +87,14 @@ set(COMPONENT_NAME_rocattach "rocprofiler-sdk-rocattach")
 set(COMPONENT_DEP_core
     "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})"
     "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})"
-    "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})")
+    "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})" "hsa-amd-aqlprofile (>= 1.0.0)")
 set(COMPONENT_DEP_docs "")
 set(COMPONENT_DEP_tests
     "rocprofiler-sdk (>= ${PROJECT_VERSION})"
     "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})"
     "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})"
-    "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})")
+    "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})"
+    "hsa-amd-aqlprofile (>= 1.0.0)")
 set(COMPONENT_DEP_roctx "rocprofiler-register")
 set(COMPONENT_DEP_rocpd "")
 set(COMPONENT_DEP_benchmark "rocprofiler-sdk (>= ${PROJECT_VERSION})")
@@ -133,6 +136,8 @@ endif()
 # support general cache variables
 list(APPEND _DEB_PACKAGE_DEPENDS ${ROCPROFILER_CPACK_DEBIAN_PACKAGE_DEPENDS})
 list(APPEND _RPM_PACKAGE_REQUIRES ${ROCPROFILER_CPACK_RPM_PACKAGE_REQUIRES})
+
+include(CPackComponent)
 
 foreach(COMPONENT_GROUP ${ROCPROFILER_COMPONENT_GROUPS})
     set(_DEP "${COMPONENT_DEP_${COMPONENT_GROUP}}")

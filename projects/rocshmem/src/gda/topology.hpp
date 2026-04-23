@@ -37,14 +37,12 @@
 #include <vector>
 #include <iostream>
 
-#include <infiniband/verbs.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <filesystem>
 #include <fstream>
 
@@ -61,6 +59,27 @@ namespace rocshmem
   using std::pair;
   using std::set;
   using std::vector;
+
+  /**
+   * PCIe path types between GPU and NIC, ordered by increasing distance.
+   */
+  enum NicPathType {
+    NIC_PATH_PIX, ///< Through a single PCIe switch
+    NIC_PATH_PXB, ///< Through multiple PCIe switches (same root complex)
+    NIC_PATH_PHB, ///< Through the PCIe host bridge (same NUMA node)
+    NIC_PATH_SYS, ///< Across NUMA nodes
+  };
+
+  NicPathType ParseNicMergeLevel(const std::string &level_str);
+
+  std::vector<std::string> ParseNicList(const std::string &csv);
+
+  std::string SelectRankGroup(const std::string &spec, int rank);
+
+  std::vector<std::string> BuildFilteredNicAddresses(const char *hca_list);
+
+  NicPathType ComputeGpuNicPathType(int gpuIndex, const std::string &nicBusId,
+                                    int nicNuma);
 
   /**
    * Enumeration of GID priority
@@ -139,6 +158,109 @@ namespace rocshmem
   inline bool IsGpuMemType(MemType m) { return (m == MEM_GPU); }
 
   /**
+   * Structure to track PCIe topology
+   */
+  struct PCIeNode
+  {
+    std::string         address;                   ///< PCIe address for this PCIe node
+    mutable std::string description;               ///< Description for this PCIe node
+    std::set<PCIeNode>  children;                  ///< Children PCIe nodes
+    mutable bool        is_virtual_p2p_link = false; ///< PCIe node is a virtual p2p link
+    mutable PCIeNode*   p2p_node = nullptr;        ///< Pointer to actual node of p2p link
+
+    // Default constructor
+    PCIeNode() : address(""), description("") {}
+
+    // Constructor
+    PCIeNode(std::string const& addr) : address(addr) {}
+
+    // Constructor
+    PCIeNode(std::string const& addr, std::string const& desc)
+      :address(addr), description(desc) {}
+
+    // Comparison operator for std::set
+    bool operator<(PCIeNode const& other) const {
+      return address < other.address;
+    }
+  };
+
+  /**
+   * Extract the bus number from a PCIe address (domain:bus:device.function)
+   *
+   * @param[in] pcieAddress PCIe address string (e.g., "0000:02:00.0")
+   * @returns Bus number in hex, or -1 if parsing fails
+   */
+  int ExtractBusNumber(std::string const& pcieAddress);
+
+  /**
+   * Compute the distance between two PCIe bus IDs
+   *
+   * @param[in] pcieAddress1 First PCIe address
+   * @param[in] pcieAddress2 Second PCIe address
+   * @returns Absolute difference between bus numbers, or -1 if either address is invalid
+   */
+  int GetBusIdDistance(std::string const& pcieAddress1,
+                       std::string const& pcieAddress2);
+
+  /**
+   * Find the lowest common ancestor in PCIe tree between two nodes
+   *
+   * @param[in] root Root of the PCIe tree
+   * @param[in] node1Address Address of first node
+   * @param[in] node2Address Address of second node
+   * @returns Pointer to the lowest common ancestor node, or nullptr if not found
+   */
+  PCIeNode const* GetLcaBetweenNodes(PCIeNode    const* root,
+                                     std::string const& node1Address,
+                                     std::string const& node2Address);
+
+  /**
+   * Get the depth of a node in the PCIe tree
+   *
+   * @param[in] targetBusID Address of the target node
+   * @param[in] node Root node to start search from
+   * @param[in] depth Current depth (default 0)
+   * @returns Depth of the node in the tree, or -1 if not found
+   */
+  int GetLcaDepth(std::string const&     targetBusID,
+                  PCIeNode const* const& node,
+                  int                    depth = 0);
+
+  /**
+   * Insert a PCIe path into the tree
+   *
+   * @param[in] pcieAddress PCIe address to insert
+   * @param[in] description Description for the node
+   * @param[in,out] root Root node of the tree
+   * @returns 0 on success, -1 on error
+   */
+  int InsertPCIePathToTree(std::string const& pcieAddress,
+                           std::string const& description,
+                           PCIeNode&          root);
+
+  /**
+   * Get nearest devices in PCIe tree based on topology (uses system PCIe tree)
+   *
+   * @param[in] targetBusId Target device PCIe address
+   * @param[in] candidateBusIdList List of candidate device addresses
+   * @returns Set of indices of nearest devices from candidate list
+   */
+  std::set<int> GetNearestDevicesInTree(std::string              const& targetBusId,
+                                        std::vector<std::string> const& candidateBusIdList);
+
+  /**
+   * Get nearest devices in PCIe tree based on topology (custom root)
+   *
+   * @param[in] targetBusId Target device PCIe address
+   * @param[in] candidateBusIdList List of candidate device addresses
+   * @param[in] root Custom PCIe tree root to use
+   * @returns Set of indices of nearest devices from candidate list
+   */
+  std::set<int> GetNearestDevicesInTree(std::string              const& targetBusId,
+                                        std::vector<std::string> const& candidateBusIdList,
+                                        PCIeNode                 const* root);
+
+  /**
    * Returns the index of the NUMA node closest to the given GPU
    *
    * @param[in] gpuIndex Index of the GPU to query
@@ -154,14 +276,42 @@ namespace rocshmem
    */
   int GetClosestCpuNumaToNic(int nicIndex);
 
+  struct IbvDevice {
+    void *devicePtr;
+    std::string name;
+    std::string busId;
+    bool hasActivePort;
+    int numaNode;
+    int gidIndex;
+    std::string gidDescriptor;
+    bool isRoce;
+  };
+
+  std::vector<IbvDevice> const &GetIbvDeviceList();
+
   /**
    * Returns the index of the NIC closest to the given GPU
    *
    * @param[in] gpuIndex Index of the GPU to query
-   * @param[out] dev_name Name of of IB Verbs capable NIC index closest to GPU gpuIndex
+   * @param[in] hca_list Include list of device names that can be used (Exclude if prefixed by ^)
+   * @param[out] dev_name Name of the IB Verbs capable NIC index closest to GPU gpuIndex
    * @returns index of IB Verbs capable NIC index closest to GPU gpuIndex, or -1 if unable to detect
    */
-  int GetClosestNicToGpu(int gpuIndex, const char** dev_name);
+  int GetClosestNicToGpu(int gpuIndex, const char *hca_list,
+                         std::string *dev_name);
+
+  /**
+   * Returns the names of NICs closest to the given GPU within a PCIe path limit.
+   *
+   * @param[in] gpuIndex Index of the GPU to query
+   * @param[in] hca_list Include list of device names (Exclude if prefixed by ^)
+   * @param[in] max_path_type Maximum PCIe path distance to include
+   * @param[out] nic_names Populated with names of matching NICs
+   * @returns number of NICs found, or -1 on error
+   */
+  int GetClosestNicsToGpu(int gpuIndex, const char *hca_list,
+                          NicPathType max_path_type,
+                          std::vector<std::string> &nic_names);
 
   /**
    * Returns information about number of available Devices
@@ -190,16 +340,6 @@ namespace rocshmem
       exit(EXIT_FAILURE);                                                     \
     }                                                                         \
 } while (0)
-
-#define CHECK_HSA(cmd)            \
-  do {                            \
-    hsa_status_t error = cmd;                                                      \
-    if (error != HSA_STATUS_SUCCESS) {                                        \
-      fprintf(stderr, "error: %d at %s:%d\n", error, __FILE__, __LINE__);     \
-      exit(EXIT_FAILURE);                                                     \
-    }                                                                         \
-} while (0)
-
 
 // Helper macros for calling RDMA functions and reporting errors
 #ifdef VERBS_DEBUG

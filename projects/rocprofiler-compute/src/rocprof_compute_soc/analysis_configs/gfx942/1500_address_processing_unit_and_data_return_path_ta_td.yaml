@@ -194,6 +194,15 @@ Panel Config:
       sending write/atomic data further into the vL1D pipeline.
     "Data-Processor \u2192 Address Stall": Percent of total CU cycles the address
       processor was stalled waiting to send command data to the data processor.
+    "Sequencer \u2192 TA Address Stall": The number of cycles the sequencer was stalled
+      waiting to send address requests to the address processor due to a full address
+      FIFO, per normalization unit.
+    "Sequencer \u2192 TA Command Stall": The number of cycles the sequencer was stalled
+      waiting to send commands to the address processor due to a full command FIFO,
+      per normalization unit.
+    "Sequencer \u2192 TA Data Stall": The number of cycles the sequencer was stalled
+      waiting to send write data to the address processor due to a full data FIFO,
+      per normalization unit.
     Total Instructions: The total number of memory instructions executed by the address
       processer over all compute units on the accelerator, per normalization unit.
     Global/Generic Instructions: The total number of global & generic memory instructions

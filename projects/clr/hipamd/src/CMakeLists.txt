@@ -1,29 +1,18 @@
-# Copyright (c) 2020 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 include(GNUInstallDirs)
 
 set(VERSION_MAJOR_AMDHIP ${HIP_VERSION_MAJOR})
 set(VERSION_MINOR_AMDHIP ${HIP_VERSION_MINOR})
 
-if(ADDRESS_SANITIZER)
+if(NOT DEFINED THEROCK_SANITIZER)
+  set(THEROCK_SANITIZER)
+endif()
+
+if(ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+  message(STATUS "Building with sanitizer")
   set(ASAN_LINKER_FLAGS "-fsanitize=address")
   set(ASAN_COMPILER_FLAGS "-fno-omit-frame-pointer -fsanitize=address")
 
@@ -36,10 +25,14 @@ if(ADDRESS_SANITIZER)
     endif()
   endif()
 
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${ASAN_COMPILER_FLAGS}")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ASAN_COMPILER_FLAGS}")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${ASAN_LINKER_FLAGS} -s -Wl,--build-id=sha1")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${ASAN_LINKER_FLAGS} -Wl,--build-id=sha1")
+  # If its being built by TheRock, CMAKE_<LANG>_FLAGS should have the sanitizer flags
+  # If not, we append it.
+  if(ADDRESS_SANITIZER)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${ASAN_COMPILER_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ASAN_COMPILER_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${ASAN_LINKER_FLAGS} -s -Wl,--build-id=sha1")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${ASAN_LINKER_FLAGS} -Wl,--build-id=sha1")
+  endif()
 endif()
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -48,8 +41,6 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
 endif()
-
-option(DISABLE_DIRECT_DISPATCH "Disable Direct Dispatch" OFF)
 
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
@@ -69,7 +60,6 @@ else()
 endif()
 
 set_target_properties(amdhip64 PROPERTIES
-  CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   POSITION_INDEPENDENT_CODE ON
@@ -77,6 +67,12 @@ set_target_properties(amdhip64 PROPERTIES
   # having hardcoded references to build/lib/libamdhip64.so
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib
   ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+
+if(WIN32)
+  set_target_properties(amdhip64 PROPERTIES CXX_STANDARD 20)
+else()
+  set_target_properties(amdhip64 PROPERTIES CXX_STANDARD 17)
+endif()
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
   set_target_properties(amdhip64 PROPERTIES OUTPUT_NAME "amdhip64")
@@ -137,7 +133,25 @@ endif()
 
 if(BUILD_SHARED_LIBS)
   if(WIN32)
-    target_sources(amdhip64 PRIVATE amdhip.def)
+    set(AMDHIP_DEF_OUTPUT "${PROJECT_BINARY_DIR}/amdhip.def")
+
+    # ROCCLR_ENABLE_HSA is known at configure time; use configure_file to
+    # conditionally include the HSA export block instead of invoking the C
+    # preprocessor at build time (cl.exe does not support GCC-style -E -P -o).
+    if(ROCCLR_ENABLE_HSA)
+      set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_LIST_DIR}/hsa_exports.def")
+      file(READ "${CMAKE_CURRENT_LIST_DIR}/hsa_exports.def" HSA_EXPORTS)
+    else()
+      set(HSA_EXPORTS "")
+    endif()
+
+    configure_file("${CMAKE_CURRENT_LIST_DIR}/amdhip.def.in" "${AMDHIP_DEF_OUTPUT}" @ONLY)
+
+    # For MSVC, pass the .def file directly to the linker with /DEF: flag
+    string(REPLACE "/" "\\" AMDHIP_DEF_OUTPUT_NATIVE "${AMDHIP_DEF_OUTPUT}")
+    target_link_options(amdhip64 PRIVATE "/DEF:${AMDHIP_DEF_OUTPUT_NATIVE}")
+    set_target_properties(amdhip64 PROPERTIES LINK_DEPENDS "${AMDHIP_DEF_OUTPUT}")
   else()
     target_link_libraries(amdhip64 PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_LIST_DIR}/hip_hcc.map.in")
     set_target_properties(amdhip64 PROPERTIES LINK_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/hip_hcc.map.in")
@@ -174,10 +188,6 @@ if(BUILD_SHARED_LIBS)
 else()
   target_compile_definitions(amdhip64 PRIVATE $<TARGET_PROPERTY:rocclr,COMPILE_DEFINITIONS>)
   target_include_directories(amdhip64 PRIVATE $<TARGET_PROPERTY:rocclr,INCLUDE_DIRECTORIES>)
-endif()
-
-if(DISABLE_DIRECT_DISPATCH)
-  target_compile_definitions(amdhip64 PRIVATE DISABLE_DIRECT_DISPATCH)
 endif()
 
 # Optional rocm-kpack support for kpack split artifacts

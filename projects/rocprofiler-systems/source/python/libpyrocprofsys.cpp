@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "libpyrocprofsys.hpp"
 #include "dl/dl.hpp"
@@ -44,6 +25,7 @@
 #include <pybind11/pybind11.h>
 #include <pyerrors.h>
 
+#include <atomic>
 #include <cctype>
 #include <cstdint>
 #include <exception>
@@ -56,6 +38,23 @@
 #define ROCPROFSYS_PYTHON_VERSION                                                        \
     ((10000 * PY_MAJOR_VERSION) + (100 * PY_MINOR_VERSION) + PY_MICRO_VERSION)
 
+namespace
+{
+std::atomic<bool> g_library_paused{ false };
+}  // namespace
+
+extern "C"
+{
+    void pyrocprofsys_pause_callback()
+    {
+        g_library_paused.store(true, std::memory_order_relaxed);
+    }
+
+    void pyrocprofsys_resume_callback()
+    {
+        g_library_paused.store(false, std::memory_order_relaxed);
+    }
+}
 namespace pyrocprofsys
 {
 namespace pyprofile
@@ -99,6 +98,8 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
         }
         return _use_mpi;
     };
+    rocprofsys_external_register_pause_callbacks(&pyrocprofsys_pause_callback,
+                                                 &pyrocprofsys_resume_callback);
 
     omni.def("is_initialized", []() { return _is_initialized; }, "Initialization state");
 
@@ -296,7 +297,7 @@ get_frame_code(PyFrameObject* frame)
 void
 profiler_function(py::object pframe, const char* swhat, py::object arg)
 {
-    if(get_paused() > 0) return;
+    if(get_paused() > 0 || g_library_paused.load(std::memory_order_relaxed)) return;
 
     static thread_local auto& _config  = get_config();
     static thread_local auto  _disable = false;
@@ -564,6 +565,7 @@ generate(py::module& _pymod)
             std::cerr << "[profiler_init]> " << e.what() << std::endl;
         }
         if(get_config().is_running) return;
+        rocprofsys_init_tooling();
         get_config().records.clear();
         get_config().base_stack_depth = -1;
         get_config().is_running       = true;
@@ -591,7 +593,8 @@ generate(py::module& _pymod)
     _prof.def(
         "profiler_resume",
         [_setprofile]() {
-            if(--get_paused() == 0) _setprofile(py::cpp_function{ profiler_function });
+            if(--get_paused() == 0 && !g_library_paused.load(std::memory_order_relaxed))
+                _setprofile(py::cpp_function{ profiler_function });
         },
         "Resume the profiler");
 

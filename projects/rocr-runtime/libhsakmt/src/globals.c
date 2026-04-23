@@ -35,7 +35,5 @@ bool hsakmt_is_dgpu;
 int hsakmt_page_size;
 int hsakmt_page_shift;
 
-/* whether to check all dGPUs in the topology support SVM API */
-bool hsakmt_is_svm_api_supported;
 /* zfb is mainly used during emulation */
 int hsakmt_zfb_support;
