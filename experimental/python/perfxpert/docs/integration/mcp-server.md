@@ -74,13 +74,14 @@ with **dotted** names because that's what `discover_read_only_tools()`
 returns; the equivalent wire names have the dots replaced by
 underscores.
 
-## Tools exposed (~34)
+## Tools exposed (56)
 
 Auto-discovered by `mcp_server._registry.discover_read_only_tools()`
 every boot. The registry walks `perfxpert.tools.*` modules but skips
-`_class` and `_safety` (hardcoded in `_registry.py:21`) because they
-are machinery, not tools. Current set (enumerate yourself at any time
-by running the Python snippet below):
+a small private `_`-prefixed skip list (currently `_class`; hardcoded
+in `_registry.py:21`) because those entries are machinery, not
+tools. Current set (enumerate yourself at any time by running the
+Python snippet below):
 
 ```python
 # Print every READ_ONLY tool the MCP server exposes at boot time.
@@ -89,7 +90,44 @@ for name in sorted(discover_read_only_tools()):
     print(name)
 ```
 
-Snapshot at v0.2.0 (34 tools):
+### Snapshot: agent-hierarchy tools (8)
+
+These are the eight agent entry points. Each is a READ_ONLY MCP tool
+AND a 1:1-mirrored callable on [`perfxpert.api`](../guides/python-api.md)
+— invoking `mcp__perfxpert__agent_root` from a client and calling
+`perfxpert.api.agent_root(...)` from Python produce the same output.
+
+```
+agents.root.agent_root
+agents.analysis.agent_analysis
+agents.recommendation.agent_recommendation
+agents.correctness.agent_correctness
+agents.compute.agent_compute_specialist
+agents.memory.agent_memory_specialist
+agents.latency.agent_latency_specialist
+agents.diff.agent_diff_specialist
+```
+
+On the MCP wire these become `perfxpert_agent_root`,
+`perfxpert_agent_analysis`, … (dot→underscore, see §"Naming
+convention"). Input/output schemas for each agent are defined in
+`perfxpert/agents/schemas.py` — see
+[../guides/python-api.md](../guides/python-api.md) for field-level
+examples.
+
+`perfxpert_agent_diff_specialist` is the 8th agent (Confluence row
+#7 follow-on): it wraps `trace_diff.diff_runs` + `regression.compare_runs`
++ `roofline.classify` and returns a structured run-to-run verdict
+(`improved` / `regressed` / `neutral`) + per-kernel deltas + narrative.
+Call it conversationally from any TUI backend ("diff this run against
+baseline.db", "what got slower since yesterday's trace?") instead of
+running `analyze` twice.
+
+### Snapshot: classifier / knowledge tools (48)
+
+Lower-level building blocks the agents themselves compose. External
+clients can call these directly when they want the raw classifier
+output without routing through the agent hierarchy.
 
 ```
 arch.lookup_peaks
@@ -102,7 +140,13 @@ compiler.explain_flag
 compiler.lookup_flags
 counters.lookup_info
 counters.validate_for_gpu
+dependency_graph.reconstruct_dag            # DAG critical-path / bubble finder
+gpu_runtime_monitor.analyze_thermal         # Thermal envelope
+gpu_runtime_monitor.parse_amd_smi_json      # amd-smi monitor log parser
+gpu_runtime_monitor.parse_rocm_smi_json     # rocm-smi log parser
 intent.classify
+interconnect.lookup_peaks
+kernel_fusion.find_fusion_candidates        # Adjacent-short-kernel fusion
 memory.classify_cache_performance
 metrics.compute_gpu_utilization
 metrics.compute_hbm_bandwidth
@@ -112,21 +156,104 @@ metrics.compute_latency
 occupancy.lookup_waves_per_eu
 occupancy.suggest_vgpr_reduction
 plateau.check
+pragma.explain_pragma
+pragma.lookup_pragmas
+pragma.suggest_pragmas_for_kernel
+predict_impact.explain_prediction
+predict_impact.list_supported_changes
+predict_impact.predict_change_impact
 profiling.fill_gap
+rccl_analysis.analyze_collectives
 regression.compare_runs
 regression.extract_kernel_runtimes_from_db
 regression.identify_hot_kernels
 roofline.classify
-roofline.lookup_peaks
+roofline.plot_points                        # Live-roofline per-kernel points
 sol.classify_utilization
-sol.lookup_peaks
 sol.sanity_check
 topdown.classify_overhead
+trace_diff.diff_runs
 trace_fingerprint.fingerprint
 tracelens.classify_overhead
 tracelens.lookup_metrics
+unified_memory.analyze_paging               # MI300X paging / XCD penalty
 workflow.next_step
 ```
+
+`trace_diff.diff_runs` is the newest READ_ONLY tool (Confluence row
+#7): compares two rocpd databases and returns a schema-0.3.1 diff dict.
+Same engine powers the `perfxpert diff` + `perfxpert ci` CLI
+subcommands, the `perfxpert analyze --baseline <db>` splice, and the
+gate-cascade `trace_diff_regression_rule` — one brain, one number.
+
+The `pragma.*` trio (advanced-recommendations tier): `pragma.lookup_pragmas`
+enumerates the 3 allowlisted LLVM loop-hint pragmas (+ 7 rejected
+entries for fence visibility), `pragma.explain_pragma` returns the
+full catalog entry for a given pragma id, and
+`pragma.suggest_pragmas_for_kernel` applies the Amdahl gate + trigger
+rules to return 0-N candidates for a given kernel. Rendering of
+pragma recs in `perfxpert analyze` output is gated behind the
+`--advanced` CLI flag (or `PERFXPERT_ADVANCED_RECS=1` env var) — see
+the getting-started guide "Advanced recommendations" section.
+
+Advanced-specialist additions (+13 tools over the prior 43-tool
+baseline, of which 8 were agent-hierarchy and 35 were classifier /
+knowledge at that time):
+
+- `kernel_fusion.find_fusion_candidates` (Feature A) — scans the kernel
+  timeline for adjacent short kernels (< 10 us each, gap <= 500 ns
+  default) with matching tensor-shape signatures and returns a ranked
+  list of fusion candidates with `(est_speedup_lo, est_speedup_hi)`
+  brackets. Bound into the Compute Specialist allowlist.
+- `gpu_runtime_monitor.parse_amd_smi_json` / `parse_rocm_smi_json` /
+  `analyze_thermal` (Feature B) — ingest a pre-captured `amd-smi
+  monitor --json` or `rocm-smi --json` log (set
+  `PERFXPERT_GPU_MONITOR_LOG=<path>`) and return a thermal envelope +
+  throttle-event summary. Available via the MCP surface only — not
+  bound to any specialist allowlist because thermal analysis is
+  diagnostic / out-of-band.
+- `unified_memory.analyze_paging` (Feature C) — detects CPU-resident
+  GPU-accessed pages (HtoD/DtoH spikes + page-fault events) and
+  quantifies MI300X cross-die (XCD-to-XCD) traffic totals. Bound into
+  the Memory Specialist allowlist.
+- `dependency_graph.reconstruct_dag` (Feature D) — builds a coarse DAG
+  from stream-local kernel ordering + sync events, then returns
+  `critical_path`, `bubbles`, `total_bubble_ns`, and `sync_event_count`
+  so the Latency Specialist can distinguish over-synchronisation from
+  inherent dependencies. Bound into the Latency Specialist allowlist.
+- `predict_impact.predict_change_impact` / `list_supported_changes` /
+  `explain_prediction` (Feature E — Change-Impact Prediction) — for a
+  given baseline DB + kernel + named change_type, return a
+  conservative speedup bracket (`hi × 0.85`), confidence, rationale,
+  and `source_citation` back to the seed entry in
+  `knowledge/proven_optimizations.yaml`. Seeded with 5 techniques
+  (`vgpr_reduction`, `lds_tiling`, `mfma_enablement`, `fast_math_flag`,
+  `hip_stream_overlap`); Amdahl (< 5%) + tier-2 (no counters) gates
+  enforced internally. Bound into the Memory Specialist allowlist; the
+  Compute + Latency Specialists attach predictions via a post-hook
+  helper after the agent tool loop returns. Rendering on rec cards is
+  always-on (no CLI gate) and bumps the JSON `schema_version` to
+  `0.3.3`.
+
+Features F-H (matrix meter, attention scope, live roofline) did not
+add new MCP tools — they extend specialist fences + pipeline with
+signatures drawn from existing `metrics.*` + `tracelens_port` +
+`roofline.plot_points` helpers.
+
+### Live Roofline (+1 tool)
+
+The Live Roofline work adds one more READ_ONLY tool on top of
+the advanced-specialist additions above:
+
+- `roofline.plot_points` — reads a rocpd database's `pmc_events` view,
+  aggregates per-kernel `SQ_INSTS_VALU` / `SQ_INSTS_VALU_MFMA` /
+  `FETCH_SIZE` / `WRITE_SIZE`, and returns a per-kernel `(ai,
+  achieved_flops_per_s, bottleneck_class)` list plus the arch ridge
+  point. The webview formatter uses this payload to draw the inline
+  SVG roofline (no external JS / CSS). Also surfaced in the JSON
+  format under the top-level `roofline` key, bumping `schema_version`
+  to `0.3.4`. See `perfxpert/tools/roofline.py::plot_points` and
+  the python-api guide entry for the full shape.
 
 ## Protocol examples
 
@@ -249,7 +376,7 @@ load-bearing for the security posture in spec §5.8.
 ## Client integration
 
 `perfxpert-mcp` speaks stdio MCP (JSON-RPC, protocol `2024-11-05`), so
-any MCP-compatible client can consume the 34 READ_ONLY tools. The
+any MCP-compatible client can consume the 56 READ_ONLY tools. The
 `command` field in every example below must resolve on the client's
 `PATH` — run `which perfxpert-mcp` to get an absolute path if your
 client launches with a narrower env than your login shell.
@@ -273,7 +400,7 @@ add a `perfxpert` entry under `mcpServers`:
 }
 ```
 
-Restart Claude Desktop. The 34 tools appear under the 🔌 panel with
+Restart Claude Desktop. The 56 tools appear under the 🔌 panel with
 `perfxpert_` name prefixes (underscored-on-the-wire — see §"Naming
 convention").
 
@@ -283,7 +410,7 @@ Register the server with the `claude mcp add` command:
 
 ```bash
 # SKIP-SAMPLE — requires a live claude CLI install
-claude mcp add perfxpert --scope project -- perfxpert-mcp
+claude mcp add perfxpert perfxpert-mcp
 ```
 
 This writes to `~/.claude.json`. Verify with `claude mcp list`; the
@@ -441,14 +568,16 @@ Surfaces per backend:
 
 - **Claude Code** — native `PreToolUse` hook inside
   `.claude/settings.json` with `permissionDecision: deny` +
-  `permissionDecisionReason`.
+  `permissionDecisionReason`. The decision record lives locally in
+  the contributor's working copy.
 - **Gemini** — `allowedTools: ["mcp_perfxpert_*"]` in
   `~/.gemini/settings.json` + runtime sidecar at
   `~/.gemini/runtime/perfxpert-gate-<session_id>.json`.
 - **Codex** — prompt-layer-only (rejection-language stanza in
   `.perfxpert/AGENTS.md`). Codex's native `PreToolUse` hook currently
   intercepts Bash only, not MCP / Write / other tools, so it cannot
-  satisfy the event-based gate contract.
+  satisfy the event-based gate contract. Rationale is captured in the
+  local Codex hook-surface decision record.
 - **opencode** — `{block, retryWith}` from patched
   `tool.execute.before` plugin (fork-only — patch 0020).
 

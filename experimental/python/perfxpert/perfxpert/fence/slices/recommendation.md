@@ -17,7 +17,7 @@ compute/memory/latency.
 ## Tool allowlist (max 5)
 
 - plateau.check
-- trace.fingerprint
+- trace_fingerprint.fingerprint
 - profiling.fill_gap
 
 ## Output schema (≤5 fields)

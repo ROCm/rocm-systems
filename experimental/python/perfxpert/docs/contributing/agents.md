@@ -59,6 +59,14 @@ async def run(context: Dict[str, Any]) -> NameHandoff:
 
 ### Fence skeleton
 
+Use `perfxpert/agents/fence/diff_specialist.md` as the canonical
+template — it has the definitive section layout (Purpose, Tools you
+can use, Instructions, Output contract, plus any agent-specific
+sub-sections). The Root (`root.md`) and Recommendation
+(`recommendation.md`) fences have been aligned to the same
+diff_specialist template during the final doc pass, so new agents
+should mirror that structure to stay consistent.
+
 ```markdown
 # <Name> Agent
 
@@ -71,6 +79,9 @@ async def run(context: Dict[str, Any]) -> NameHandoff:
 
 ## Instructions
 <Narrative instructions for the LLM on how to solve the problem using the tools.>
+
+## Output contract
+<Fields the agent MUST populate, matching the handoff schema.>
 ```
 
 ## Schema constraints (CI-enforced)

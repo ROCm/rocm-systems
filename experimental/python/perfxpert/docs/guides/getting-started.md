@@ -17,11 +17,66 @@ RDNA2 / RDNA3.
 
 ## 1. Install
 
-PerfXpert is a pure-Python package plus a bundled AMD-themed opencode
-binary. The install is two steps: pip-install the Python wheel, then
-build the bundled patched opencode (one-time, requires `bun`).
+![install](assets/gifs/01-install.gif)
 
-### Step 1: pip install
+*Editable install in a clean `rocm/dev-ubuntu-22.04` container,
+including the bundled opencode build and CLI verification.*
+
+PerfXpert ships as a single Python wheel. The `setuptools` build hook
+in `setup.py` automatically compiles the AMD-branded bundled opencode
+binary during `pip install` — no separate step to remember.
+
+### Prerequisites
+
+- Python 3.10+
+- Network access during `pip install` (the build hook downloads
+  opencode source + the bun runtime if not already on PATH).
+
+The setup.py build hook compiles the bundled AMD-branded opencode
+binary from the pinned `sst/opencode` submodule. This requires `bun`;
+if `bun` isn't on PATH the hook **auto-downloads** a prebuilt bun
+release into `~/.cache/perfxpert/bun/bin/` (or
+`%USERPROFILE%\.cache\perfxpert\bun\bin\` on Windows).
+
+#### Supported hosts for auto-bun-download
+
+| Host | bun asset downloaded |
+|------|---------------------|
+| Linux x64 glibc | `bun-linux-x64.zip` |
+| Linux x64 musl (Alpine) | `bun-linux-x64-musl.zip` |
+| Linux aarch64 glibc | `bun-linux-aarch64.zip` |
+| Linux aarch64 musl | `bun-linux-aarch64-musl.zip` |
+| macOS x64 | `bun-darwin-x64.zip` |
+| macOS arm64 | `bun-darwin-aarch64.zip` |
+| Windows x64 | `bun-windows-x64.zip` |
+| Windows arm64 | `bun-windows-aarch64.zip` |
+
+Offline installs fall back to a warn-skip; `perfxpert-code` will then
+print a helpful message on first launch explaining how to install bun
+manually.
+
+#### Opt-out env vars
+
+- `PERFXPERT_SKIP_BUN_DOWNLOAD=1` — don't auto-fetch bun; let the
+  hook warn-skip if bun isn't already on PATH.
+- `PERFXPERT_SKIP_BUNDLED_BUILD=1` — skip the entire opencode build.
+  Library + analyze + MCP all still work; `perfxpert-code` will
+  fall back to whatever `opencode` is on PATH or exit with a helpful
+  error.
+- `PERFXPERT_OPENCODE_PATH=/path/to/opencode` — last-resort override
+  pointing the launcher at a pre-built binary.
+
+#### Note on Windows
+
+Bun itself is supported and auto-downloaded, but the subsequent
+`bun build` of opencode inherits opencode's own platform-support
+matrix. If the build step fails on Windows, install `perfxpert`
+without the bundled launcher (`PERFXPERT_SKIP_BUNDLED_BUILD=1 pip
+install …`) and use the multi-backend launcher
+(`perfxpert-code claude` / `codex` / `gemini`) — those route to
+native backend CLIs and work anywhere.
+
+### Pip install
 
 > **Run this FIRST on stock Ubuntu / rocm/dev-ubuntu images**: those
 > images ship with pip 22.x and pre-PEP-621 setuptools, which fails the
@@ -37,47 +92,121 @@ build the bundled patched opencode (one-time, requires `bun`).
 > automatically; older pip does not.
 
 ```bash
-# SKIP-SAMPLE — destructive pattern filtered by scripts/test-samples.py
+# SKIP-SAMPLE — install from a local checkout (editable mode)
 pip install -e "experimental/python/perfxpert[all]"
 ```
 
-The `[all]` extra pulls in the optional LLM/provider integrations plus
-the MCP dependency, so the full interactive surface works out of the
-box. Omit it if you only want deterministic air-gap analysis.
-
-### Step 2: build the bundled patched opencode (one-time)
-
-The interactive TUI (`perfxpert-code`) wraps upstream opencode with 17
-AMD patches: branding, the AMD red color palette, the 7-agent prompt
-preamble, and the STRICT-TOOL-DISCIPLINE stanza that forces
-`perfxpert_intent_classify` → `perfxpert_workflow_next_step` as the
-first two tool calls. Apply them with:
+…or pull the latest build straight from GitHub using the fast-install
+wrapper (see §1.2 for why):
 
 ```bash
-# SKIP-SAMPLE — requires the opencode submodule and bun toolchain
-cd experimental/python/perfxpert
-git submodule update --init --recursive
-bash scripts/apply-opencode-patches.sh
+# SKIP-SAMPLE — clone root without recursing submodules, then run wrapper
+git clone --depth 1 --no-recurse-submodules https://github.com/ROCm/rocm-systems.git
+bash rocm-systems/experimental/python/perfxpert/scripts/pip-install-from-git.sh
 ```
 
-See `.patches/README.md` for the patch catalogue. Skip this step and
-`perfxpert-code` will still launch — it falls back to whatever
-`opencode` is on `PATH` — but you will NOT get the PerfXpert system
-prompt or the tool-priority gate.
+The `[all]` extra pulls in `anthropic`, `openai`, `rich`, and
+`litellm` so every LLM provider works out of the box. Omit it if you
+only want deterministic air-gap analysis (wrapper: pass
+`--extras ''` to skip extras entirely).
+
+### 1.2 Why the wrapper: scoped submodule init
+
+`pip install "perfxpert @ git+https://...rocm-systems.git#subdirectory=..."`
+triggers pip's built-in `git submodule update --init --recursive -q`
+on the cloned work-tree BEFORE the perfxpert build hook ever runs.
+The rocm-systems root `.gitmodules` declares ~34 submodules (mscclpp,
+perfetto, glog, fmt, gtest, dyninst, sqlite, …) shared by the other
+projects in the monorepo; pip dutifully fetches every one of them.
+PerfXpert itself only needs ONE of them — the `opencode` submodule at
+`experimental/python/perfxpert/opencode`, used by the build hook to
+compile the bundled AMD-branded opencode binary.
+
+Measured on a fast host against the live rocm-systems repo:
+
+| Step                                                  | Time      |
+|-------------------------------------------------------|-----------|
+| `git clone --filter=blob:none --depth 1` of rocm-systems | ~15 sec   |
+| `git submodule update --init --recursive -q` (pip default) | **141 sec** |
+| `git -c submodule.active=…/opencode submodule update --init --recursive -q` | **0.03 sec** |
+
+On stock `rocm/dev-ubuntu-22.04` with corporate-grade bandwidth the
+default step regularly runs 3-6 minutes — and the first 99% of that
+time is downloading dependencies of projects the PerfXpert wheel
+never touches.
+
+`scripts/pip-install-from-git.sh` wraps pip with these env vars set:
+
+```bash
+GIT_CONFIG_COUNT=1
+GIT_CONFIG_KEY_0=submodule.active
+GIT_CONFIG_VALUE_0=experimental/python/perfxpert/opencode
+```
+
+pip uses `os.environ.copy()` when it spawns git subprocesses, so
+those env vars propagate into `git submodule update --init
+--recursive -q` and the `submodule.active` config restricts init to
+the single path listed. All other submodules stay at zero bytes on
+disk. Documented under `git-config(1) "GIT_CONFIG_COUNT"` and
+`gitmodules(5) "submodule.<name>.active"`.
+
+If the user insists on the plain one-liner without the wrapper, pip
+still works — they just pay the 3-6 min submodule-init penalty once.
+The `setup.py` build hook notices if the opencode submodule is still
+empty after pip's checkout (i.e. the user scoped submodule init out
+manually without including opencode) and falls back to a direct
+shallow clone of `sst/opencode` at the pinned tag — so the install
+always completes regardless of how the user configured git.
+
+Opt-outs:
+
+- `PERFXPERT_SKIP_OPENCODE_FETCH=1` — don't attempt the fallback
+  clone; air-gap CI that intentionally skips the bundled opencode
+  build should set this AND `PERFXPERT_SKIP_BUNDLED_BUILD=1`.
+
+### What the build hook does
+
+It applies all 26 patches in `.patches/` (AMD branding, color palette,
+per-model system-prompt preambles with the STRICT-TOOL-DISCIPLINE
+stanza, the tool-priority gate, and the deep-rebrand session UI) to the
+pinned `opencode` submodule, then runs `bun build` to produce the
+bundled binary at `perfxpert/_bundled/opencode`. Subsequent `pip install`
+invocations skip the rebuild if the binary is already newer than every
+patch file.
+
+**Opt-out:** set `PERFXPERT_SKIP_BUNDLED_BUILD=1` to suppress the build
+(useful in offline / sandboxed CI). `perfxpert-code` will then fall back
+to whatever `opencode` is on `PATH`, which will NOT include our tool-
+priority gate or system prompt — library + analyze + MCP paths still
+work fine. A last-resort override `PERFXPERT_OPENCODE_PATH` points the
+launcher at an explicit binary.
+
+**Bun missing:** the install completes with a clear warning; only
+`perfxpert-code` (the interactive TUI) is affected.
 
 ## 2. Verify
+
+![help](assets/gifs/02-help.gif)
+
+*`perfxpert --help`, `perfxpert analyze --help`, and the first lines of
+`perfxpert doctor` — everything the CLI exposes is one flag away.*
 
 ```bash
 # SKIP-SAMPLE — requires perfxpert on PATH from the pip install above
 perfxpert doctor
 ```
 
+![doctor](assets/gifs/03-doctor.gif)
+
+*`perfxpert doctor` end-to-end: Python check, MCP server reachable
+(56 tools registered), 3/5 LLM providers configured, `ALL CLEAN`.*
+
 Expected output ends with `ALL CLEAN` when everything is wired. The
 doctor checks:
 
 - `perfxpert` version + Python ≥ 3.10
 - openai-agents SDK
-- MCP server reachable (`perfxpert-mcp` boots + 34 tools registered)
+- MCP server reachable (`perfxpert-mcp` boots + 56 tools registered — 8 agent-hierarchy + 47 classifier/knowledge + 1 `trace_diff.diff_runs`)
 - task store (`~/.perfxpert` or `$PERFXPERT_TASK_ROOT`)
 - bundled opencode binary + bundled opencode config dir
 - LLM providers configured (counts `N/5` against
@@ -96,11 +225,14 @@ agent runtime.
 - **`perfxpert analyze -i trace.db`** — non-interactive CLI. Consumes
   a rocprofv3 `.db`, emits a single report (text / JSON / markdown /
   webview HTML). Deterministic with `--llm` omitted; LLM-augmented
-  when `--llm` is provided.
-- **`perfxpert-mcp`** — stdio MCP server that re-exposes the 34
-  READ-ONLY analysis tools over JSON-RPC. Meant to be spawned by an
-  MCP client (Claude Desktop, Claude Code, Codex CLI, Gemini CLI,
-  opencode). See `../integration/mcp-server.md`.
+  with `--llm {anthropic,openai}`.
+- **`perfxpert-mcp`** — stdio MCP server that re-exposes the 56
+  READ-ONLY analysis tools over JSON-RPC (8 agent-hierarchy entry
+  points — Root, Analysis, Recommendation, Correctness, +3 technique
+  specialists, + diff specialist — plus 47 classifier / knowledge
+  tools and 1 `trace_diff.diff_runs`). Meant to be
+  spawned by an MCP client (Claude Desktop, Claude Code, Codex CLI,
+  Gemini CLI, opencode). See `../integration/mcp-server.md`.
 - **`perfxpert-code`** — interactive TUI (the patched opencode
   bundle). Conversational optimization loop with the Root → Analysis
   → Recommendation → Specialist agent hierarchy and gate-cascade
@@ -110,7 +242,7 @@ agent runtime.
 
 `perfxpert-code` is multi-backend: the same AMD-branded bundled
 opencode is the default, but it can also wrap the user's native
-Claude Code, Gemini CLI, or Codex TUI while still enforcing
+Claude Code, Gemini CLI, or (soon) Codex TUI while still enforcing
 the perfxpert tool-priority gate and registering the `perfxpert-mcp`
 server for free. Pick whichever matches your existing LLM workflow.
 
@@ -171,6 +303,79 @@ this as a separate step BEFORE MCP registration:
   non-zero. `ConfigClobber` is raised if `~/.codex/config.toml` is
   git-tracked or fails to parse.
 
+## 3.3 First run — `perfxpert init`
+
+New in Phase 8 (Confluence roadmap row #29). A single guided wizard
+that chains the four things every new user asks about into one flow
+so you don't have to discover them separately:
+
+1. **GPU detection** — `rocm-smi --showproductname --showmeminfo vram
+   --json` (fallback: `rocminfo`; manual `--arch gfx942` when neither
+   is available), looked up against the architecture catalog in
+   `perfxpert/knowledge/gpu_specs.yaml`.
+2. **Framework detection** — Tier-0 source scan (same scanner as
+   `analyze --source-dir`, same `.git` / `node_modules` filters) plus a
+   Python import probe for `torch`, `tensorflow`, `jax`, `cupy`.
+3. **Config generation** — writes
+   `~/.config/perfxpert/config.yaml` with the Pydantic-validated
+   defaults and the detected provider. When the file already exists
+   the wizard prints a unified diff and asks before overwriting
+   (skipped under `--non-interactive`).
+4. **Suggested first profiling command** — the lowest rung of the
+   cost-ordered ladder (`rocprofv3 --sys-trace`). When the source scan
+   found HIP kernels, a second `--pmc SQ_WAVES GRBM_COUNT
+   GRBM_GUI_ACTIVE` line is emitted too; when a Python framework is
+   detected, the target is `python train.py` instead of `./your_app`.
+
+```bash
+# SKIP-SAMPLE — requires perfxpert on PATH from the pip install above
+perfxpert init                              # interactive (confirms diffs)
+perfxpert init --non-interactive            # CI / scripting
+perfxpert init --source-dir ./my_project    # target a specific source tree
+perfxpert init --arch gfx942                # override GPU detection
+perfxpert init --provider openai            # pin the LLM provider
+perfxpert init --config-path /tmp/pxcfg.yaml --non-interactive   # sandbox
+```
+
+Sample transcript on an MI300X host with `ANTHROPIC_API_KEY` exported:
+
+```
+== perfxpert init — first-run wizard ==
+
+Step 1/4 — GPU detection
+  detected: gfx942 (MI300X, 304 CU)
+    peak FP32: 163.4 TFLOPS
+    peak HBM : 5.3 TB/s
+
+Step 2/4 — Framework detection
+  source dir: .
+  python deps: PyTorch importable ⇒ framework: PyTorch
+  source scan: 12 file(s), 3 kernel(s) ⇒ programming model: HIP
+  (both detected ⇒ mixed python+kernel workload)
+
+Step 3/4 — Config generation
+  provider  : anthropic
+  airgap    : false
+  max_tokens: 2048
+  target    : ~/.config/perfxpert/config.yaml
+
+Step 4/4 — Suggested first profiling command
+  primary : rocprofv3 --sys-trace -d ./profile_out -- python train.py
+  extra   : rocprofv3 --pmc SQ_WAVES GRBM_COUNT GRBM_GUI_ACTIVE -d ./profile_out_pmc -- python train.py
+  (--pc-sampling / --att are second-tier — run after Tier-1 identifies hot kernels)
+
+Then:
+  perfxpert analyze -i ./profile_out/*.db --source-dir . --format webview -o report
+
+Wizard complete. Your setup is ready.
+```
+
+`--non-interactive` never prompts; it always overwrites the config if
+one exists, so it's safe in CI. Provider detection order:
+`ANTHROPIC_API_KEY` → `OPENAI_API_KEY` →
+`PERFXPERT_LLM_PRIVATE_URL` → `OLLAMA_HOST` → bundled `opencode`
+(no key required).
+
 ## 4. First analysis (60 seconds)
 
 Profile a trivial HIP app, then analyze.
@@ -187,6 +392,12 @@ the bottleneck (compute-bound / memory-bound / latency-bound /
 idle-bound), ranks hot kernels by Amdahl weight, and emits
 recommendations.
 
+![analyze text](assets/gifs/04-analyze-text.gif)
+
+*Deterministic airgap analysis of the fixture `compute_bound.db` —
+SUMMARY, TIME BREAKDOWN, HOTSPOTS, HARDWARE COUNTERS, RECOMMENDATIONS,
+all in under a second.*
+
 Output formats:
 
 ```bash
@@ -196,9 +407,396 @@ perfxpert analyze -i trace.db --format markdown -d ./out -o report
 perfxpert analyze -i trace.db --format webview -d ./out -o report
 ```
 
-The webview format produces a self-contained HTML file (AMD dark
-theme, SVG gauges, collapsible recommendation cards) suitable for
-sharing over email.
+![analyze json](assets/gifs/05-analyze-json.gif)
+
+*`--format json | jq` — flat top-level keys make the report easy to
+drive from scripts or dashboards.*
+
+![analyze markdown](assets/gifs/06-analyze-markdown.gif)
+
+*`--format markdown` — drop straight into PR descriptions or a wiki.*
+
+![analyze webview](assets/gifs/07-analyze-webview.gif)
+
+*`--format webview` produces a self-contained `analysis.html` with the
+fixed 7 top-level sections (Overview, Summary, Execution, Hotspots,
+Hardware Counters, Recommendations, Tier-0 when `--source-dir` is
+set). AMD dark theme, SVG gauges, collapsible cards — email-ready.*
+
+#### Source-line correlation
+
+When `--source-dir` is supplied alongside `-i`, every row of the
+**Top Kernel Hotspots** table grows a `▾` chevron next to the kernel
+name. Clicking the chevron expands an inline panel — same visual
+style as the Recommendation card drawer — showing the kernel's
+**Definition** (file:line where the `__global__` symbol is declared)
+and every detected **Launch site** (file:line of each
+`hipLaunchKernelGGL` / triple-angle dispatch). Each line renders with
+a `Copy` button and a launch-type badge (`__global__`,
+`HIP_KERNEL_LAUNCH`, `<<< >>>`), VTune/NSight-style.
+
+When `--source-dir` is **not** supplied the panel is still present
+but explains how to enable the correlation. When the scanner did run
+but no symbol matches the hotspot's basename, the panel shows
+"No matching source location detected" — useful signal that the
+profiled binary and the `--source-dir` tree may be out of sync.
+
+Source-line correlation is data, not advice, so the panel ships
+regardless of the Tier-0 instrumentation-advice gate (`has_profiling`).
+The markdown and text formats append a compact
+`Source: file.hip:42 (definition), file.hip:88 (launch)` line under
+each hotspot row; the JSON format emits
+`hotspots[i].source_locations: [{file, line, kind}]` (schema
+`0.3.1`).
+
+#### ATT flame graph
+
+When the input DB carries Advanced Thread Trace (ATT) data — i.e.
+`perfxpert analyze -i trace.db --att-dir <att/>` — the Thread Trace
+scard renders a dependency-free **inline SVG flame graph** directly
+below the per-kernel stall table. One horizontal row per kernel, one
+stacked rectangle per stall category (VMEM latency / LDS conflict /
+dependency chain / branch divergence), width proportional to the
+weighted stall bucket. Colors reuse the webview stall-category
+palette, wide rects carry an inline `<label> <pct>%` tag, narrow ones
+fall back to the shared hover-tooltip.
+
+Click any rectangle to jump straight to the matching recommendation
+card (`id="rec-<kernel>"`), which briefly flashes to help you trace
+the visual signal back to the structured advice. Wheel-zoom works on
+the SVG `viewBox` (double-click to reset). The whole element is a
+single self-contained `<svg>` — no Speedscope, no D3, no Chart.js,
+no external CSS — so the report still opens correctly from any
+`file://` path in an airgapped viewer.
+
+```html
+<!-- shape (truncated) inside the Thread Trace `.scard` -->
+<div class="att-flame">
+  <svg class="att-flame-svg" viewBox="0 0 960 …" …>
+    <rect class="att-flame-rect" data-k="kernel_foo"
+          onclick="…scrollIntoView('rec-kernel_foo')…" fill="#ff8c00"/>
+    …
+  </svg>
+</div>
+```
+
+The flame graph is webview-only; the Markdown / text / JSON formats
+already surface the same data via the per-kernel stall table and
+`thread_trace` key respectively, so no schema bump was required.
+
+#### Live roofline chart
+
+When the input DB carries Tier-2 hardware counters (i.e.
+`rocprofv3 --pmc SQ_INSTS_VALU FETCH_SIZE WRITE_SIZE …`) the webview
+renders a **Live Roofline** `.scard` between Hardware Counters and
+Optimization Recommendations. The section is a dependency-free inline
+SVG with log-log axes (arithmetic intensity on X, achieved FLOPs/s on
+Y). One dot per top-K kernel, coloured by regime
+(compute-bound / memory-bound / balanced). Peak-compute horizontal
+ceilings per dtype — FP32 / FP16 / BF16 / FP8 / INT8 — are overlaid
+with the dominant dtype at full opacity and others dimmed. The HBM
+bandwidth diagonal (slope 1 in log-log space) and the ridge-point
+annotation (`gfx942 · 163 TF/s · 5.3 TB/s · ridge @ 30.8 FLOPs/B`) are
+drawn from `perfxpert/knowledge/gpu_specs.yaml`.
+
+Click any dot to jump straight to the matching recommendation card
+(`id="rec-<kernel_basename>"`) — same anchor convention as the ATT
+flame graph. Scroll-wheel to zoom the chart `viewBox`, double-click to
+reset. Dtype detection is a regex over the demangled kernel name
+(`_bf16`, `_fp16`, `_fp8`, `_int8`); pass `dtype_hint="bf16"` to the
+underlying `perfxpert.tools.roofline.plot_points` API to force a
+single dtype when your kernels don't follow that convention.
+
+The Markdown / text / JSON fallbacks carry the same data under
+`## Live Roofline` tables (kernel / AI / achieved GFLOPs/s / regime /
+dtype / confidence) and a `roofline` key at the top of the JSON
+document.
+
+### Report contents (every format)
+
+Every format — text, JSON, markdown, webview — carries the same
+dataset. The deterministic pass runs unconditionally (even with
+`--llm <prov>` or under airgap); the LLM supplies narrative +
+primary-bottleneck + recommendation prose on top. The four formats
+differ only in rendering, not in completeness. Every report
+contains:
+
+- **Agent narrative** — the LLM prose (or the airgap template in
+  deterministic mode), spliced at the top of the report under a
+  "Summary" heading.
+- **Primary bottleneck** — explicit label (compute / memory_transfer
+  / latency / mixed / data_insufficient).
+- **Time breakdown** — kernel / memcpy / API-overhead percentages
+  plus total runtime and kernel count. Multi-DB reports also surface a
+  normalized runtime for overlap-safe percentage math while preserving the
+  wall-clock total runtime separately.
+- **Hotspot list** — top-N kernels ranked by total duration, with
+  call count, avg / min / max duration, percent of total.
+- **Memory analysis** — H2D / D2H / D2D volumes, total duration, and
+  average bandwidth per direction.
+- **Hardware counters** — Tier-2 derived metrics (GPU utilization,
+  avg waves, HBM utilization) plus the raw collected counter table.
+  Shows a graceful "not collected" placeholder when the `.db` was
+  captured without `--pmc`.
+- **Kernel resources / occupancy** — VGPR / SGPR / LDS / scratch and
+  theoretical occupancy for each hotspot kernel when the trace
+  carries kernel-symbol metadata.
+- **API overhead breakdown** — top HIP / HSA API calls by total time
+  plus warmup outliers when detected.
+- **Thread-trace (Tier 3)** — included when `--att-dir` is set;
+  per-instruction stall ratio and bottleneck category (VMEM,
+  LDS-bank, dep-chain, branch-divergence).
+- **Communication analysis (RCCL)** — included when the trace carries
+  RCCL collectives (either `category='RCCL'` regions or RCCL-named
+  kernels matching the fallback regex). Surfaces per-collective
+  message bytes, duration, **bus bandwidth** (algorithm-adjusted;
+  factor is `2(N-1)/N` for AllReduce and `(N-1)/N` for
+  AllGather/ReduceScatter/AllToAll), achievable **peak** from the
+  per-arch XGMI spec, **efficiency %** (poor <40%, fair 40-70%,
+  good >70%), and **comm/compute overlap %** (time inside RCCL
+  kernels that coincides with non-RCCL work). When the DB lacks
+  `category='RCCL'` spans the section is still rendered, but
+  `summary.capture_incomplete=true` and `msg_bytes` is zero (install
+  rocprofv3 ≥ 6.2 for full RCCL arg capture).
+- **Tier-0 source findings** — included when `--source-dir` is set;
+  detected kernels, anti-patterns, suggested counters, and the
+  suggested first-profiling command.
+- **Recommendations (merged)** — LLM + deterministic recommendations
+  merged and deduped by target, each with category / issue /
+  suggestion / citation / code-snippet-before / code-snippet-after
+  (where available).
+- **Warnings** — alert block (empty when no warnings fire).
+- **Metadata** — GPU arch, DB path, kernel count, total runtime,
+  provider, model (footer).
+
+The JSON format exposes each section under a flat top-level key
+(`.time_breakdown`, `.hotspots`, `.memory_analysis`,
+`.hardware_counters`, `.kernel_resources`, `.api_overhead`,
+`.tier0_findings`, `.recommendations`, `.narrative`,
+`.primary_bottleneck`, `.warnings`, `.metadata`) — so `jq` pipelines
+can slice the report without reaching into nested schema shapes.
+
+For multi-DB inputs, `time_breakdown.total_runtime` remains the wall-clock
+runtime of the merged trace window. `execution_breakdown.normalized_runtime_ns`
+and the markdown/text "Normalized runtime" labels are the summed shard envelope
+used for percentage math so overlapping shards do not under-report API
+overhead or idle time.
+
+### Report structure
+
+Every report renders the same top-level sections in a fixed order. The
+main take-away: **the Tier-0 source scan always lives in its own
+section — NEVER folded into the main recommendations table**.
+
+The webview emits the following 8 top-level sections, in order:
+
+1. **Overview** — bottleneck verdict, total runtime, kernel-time KPI,
+   analysis tier (all inside the first `.scard` card right after the
+   `<header>`).
+2. **Summary** — agent narrative (findings-derived: dominant kernel +
+   metric evidence + primary-bottleneck verdict). Never routing prose.
+   Emitted as a `.scard` labelled "Summary" with the primary bottleneck
+   surfaced as a header pill and warnings as a findings list.
+3. **Execution Breakdown** — stacked kernel / memcpy / API-overhead /
+   GPU-idle bar + per-row details.
+4. **Top Kernel Hotspots** — top-N kernels by total duration.
+5. **Hardware Counters** — Tier-2 gauges (GPU utilization, wave
+   occupancy) + raw counter table. Renders a Tier-1 placeholder when
+   counters are missing.
+6. **Live Roofline** — log-log roofline chart (inline SVG), only when
+   Tier-2 counters are present. See "Live roofline chart" above.
+7. **Optimization Recommendations** — merged LLM + deterministic
+   recommendations, deduped by target. **Only real perf-issue items**
+   (e.g. hot-kernel triage, cache-unfriendly access, synchronous
+   hipMemcpy patterns). Instrumentation advice (what counters to
+   collect, what rocprofv3 command to run first) is **NOT** in this
+   list.
+8. **Tier-0 Source Scan** — only when `--source-dir` is set. Emitted
+   as a single wrapper `.scard` (id `tier0-scan`) containing
+   `<h3>Profiling Plan</h3>` (suggested `rocprofv3 --sys-trace …`
+   command, suggested counters, other instrumentation actions) and a
+   **Detected Code Patterns** table with actual code-level perf issues
+   found by the scanner (these ALSO appear in the main Recommendations
+   list so they don't get overlooked).
+
+The Markdown format mirrors this exactly: `# PerfXpert AI Performance
+Analysis` → `## Summary` (narrative + warnings) → `---` horizontal rule
+→ `**Database:**` / `**Analysis Date:**` / `**Analysis Tier:**`
+metadata block → `## Time Breakdown` → `## Top Kernel Hotspots` → …
+→ `## Recommendations` → (if `--source-dir`) `---` →
+`## Tier 0 — Source Scan`.
+
+The Text format prepends a SUMMARY banner (with the primary bottleneck,
+narrative, and warnings) above the TIME BREAKDOWN table, keeps every
+other section in the same order as the webview, and ends with the
+TIER-0: PROFILING PLAN + DETECTED CODE PATTERNS banners when
+`--source-dir` is set.
+
+The JSON format exposes each section under a flat top-level key
+(`.time_breakdown`, `.hotspots`, `.memory_analysis`,
+`.hardware_counters`, `.kernel_resources`, `.api_overhead`,
+`.tier0_findings`, `.recommendations`, `.narrative`,
+`.primary_bottleneck`, `.warnings`, `.metadata`). The Tier-0 block
+lives under `.tier0_findings.profiling_plan` +
+`.tier0_findings.code_patterns`. The document carries
+`"schema_version": "0.3.0"` on every agentic run. The version bumps
+additively along the chain **0.3.0 → 0.3.1 → 0.3.2 → 0.3.3 → 0.3.4
+→ 0.4.0** as richer data appears: `0.3.1` when `--source-dir` was
+supplied and at least one hotspot carries `source_locations`;
+`0.3.2` when RCCL / NIC `communication` data is present (from
+`rccl_analysis.analyze_collectives`); `0.3.3` when any rec carries a
+`predicted_impact_range` (Change-Impact Prediction); `0.3.4` when a
+top-level `roofline` key is emitted (Live Roofline, from
+`roofline.plot_points`); `0.4.0` when ATT data is present (ATT
+trumps the others).
+The legacy `.llm_enhanced_explanation` key mirrors `.narrative` for
+backwards compat; new consumers should read `.narrative` directly.
+
+### Severity legend — hotspot panel
+
+Each hotspot row (and expanded source panel) carries a severity
+class derived from its share of total runtime. The webview colors
+the left border + pill badge; the markdown / text formats emit a
+`[CRITICAL] / [HOT] / [WARM] / [COOL]` tag on the citation line.
+
+| Class | Threshold (% of total runtime) |
+|-------|-------------------------------|
+| CRITICAL | ≥ 20% |
+| HOT | 5% – 20% |
+| WARM | 1% – 5% |
+| COOL | < 1% |
+
+### Advanced recommendations (`--advanced`)
+
+The advanced tier is an opt-in set of recommendations that are too
+speculative to show by default but valuable to power users: LLVM
+loop-hint pragmas (`#pragma clang loop unroll[_count|disable]`).
+They are gated behind the `--advanced` CLI flag (or the
+`PERFXPERT_ADVANCED_RECS=1` environment variable).
+
+```bash
+# SKIP-SAMPLE — requires a real trace.db
+perfxpert analyze --advanced -i trace.db --format text
+# Equivalent (CI-friendly):
+PERFXPERT_ADVANCED_RECS=1 perfxpert analyze -i trace.db --format text
+```
+
+When the gate is ON, pragma recommendations surface alongside regular
+recs with a ``[advanced]`` badge next to the priority label and a
+mandatory `Verify with: perfxpert diff ...` footer. The knowledge
+base (``perfxpert/knowledge/compiler_pragmas.yaml``) allows exactly
+three pragmas: `clang_loop_unroll_full`, `clang_loop_unroll_count`,
+and `clang_loop_unroll_disable`. Seven other clang loop hints
+(vectorize, interleave, distribute, pipeline, vectorize_predicate)
+are explicitly rejected because the LLVM amdgpu backend ignores them
+on HIP device code.
+
+Hard rules enforced by the fence slice in
+``perfxpert/agents/fence/compute_specialist.md``:
+
+* Every pragma rec must carry a Tier-0 source anchor
+  (``source_file``/``source_line``) — no anchor, no rec.
+* ``unroll_count(N)`` only uses N from the YAML ``factor_sweep``
+  (``[2, 4, 8]``); the agent may never invent other factors.
+* Triton-generated kernels (source path contains ``.triton/``) are
+  skipped — the hint would evaporate on the next JIT invocation.
+
+Under the default (gate OFF) the report is unchanged; pragma recs are
+filtered out of the rendered output.
+
+### Kernel-fusion candidates
+
+When the Compute Specialist surfaces adjacent-short-kernel pairs with
+matching tensor-shape signatures, it cites a recipe from
+`perfxpert/knowledge/fusion_patterns.yaml`:
+
+- Elementwise + Elementwise → single kernel
+- Elementwise + Reduce → epilogue fuse
+- Normalization + Residual → single pass
+- GEMM + Bias-Add + Activation → fused epilogue
+
+Estimated speedup comes back as an `(est_speedup_lo, est_speedup_hi)`
+bracket. Verify with `perfxpert diff` after applying the fusion.
+
+### GPU runtime monitor (thermal / power)
+
+PerfXpert ingests pre-captured `amd-smi` / `rocm-smi` JSON logs — we
+do not shell out to the tools at analyze time. Capture in advance:
+
+```bash
+# SKIP-SAMPLE — capture a 30-second thermal log before analyze
+amd-smi monitor --json --interval 1 --duration 30 > /tmp/amd-smi.json
+export PERFXPERT_GPU_MONITOR_LOG=/tmp/amd-smi.json
+perfxpert analyze -i trace.db
+```
+
+Latency specialists consult the log opportunistically to flag
+thermal / power throttle as root cause vs contributing factor.
+
+### Unified-memory + MI300X cross-die
+
+The Memory Specialist now runs `unified_memory.analyze_paging(db_path)`
+on every memory-bound recommendation, surfacing:
+
+- CPU-resident GPU-accessed pages (HtoD/DtoH > 1 MiB spikes).
+- MI300X XCD-to-XCD fabric traffic totals and a per-access penalty
+  estimate (~30 ns/access).
+- Targeted recommendations — pin host buffers, `hipMemAdvise`, or
+  partition with `ROCR_VISIBLE_DEVICES`.
+
+### Dependency graph + GPU bubbles
+
+The Latency Specialist reconstructs a coarse DAG of kernel dispatches
+via `dependency_graph.reconstruct_dag(db_path)` and flags:
+
+- Per-stream idle gaps > 2 us as `bubbles`.
+- Over-synchronisation (`sync_event_count` > kernel_count / 4).
+- `critical_path` longer than 60% of wall time → structural
+  parallelism recommendation (stream partitioning, HIP graph capture).
+
+### Predicted impact on recommendations
+
+Every rec card whose category maps onto a recognised optimisation
+technique now carries a **Predicted** line bracketing the expected
+speedup and citing its source:
+
+```text
+[HIGH] Compute-Bound Kernel  (Confidence: 85%)
+  Issue: Kernel 'heavy_valu_kernel' dominates GPU time: 99.9%
+  Suggestion: Reduce VGPR pressure via __launch_bounds__
+  Predicted: 1.15-1.45x (conf 70%)
+```
+
+Rules (all enforced by `perfxpert.tools.predict_impact`):
+
+- **Amdahl guard** — kernels below 5% of total runtime never get a
+  prediction; the rec renders without a Predicted line.
+- **Tier-2 gate** — requires counter data (`--pmc basic` on the
+  baseline run). Tier-1 reports fall back to a "needs counters"
+  rationale and skip emission.
+- **Conservative bracket** — the emitted `hi` is `catalog_hi × 0.85`
+  so predictions always undersell.
+- **Provenance** — the `source_citation` field on the rec points back
+  to the seed entry in `knowledge/proven_optimizations.yaml`.
+
+Representative optimization examples include:
+
+| Technique | Typical trigger | Example recommendation shape |
+|-----------|------------------|------------------------------|
+| `vgpr_reduction` | high VALU pressure + low occupancy | add `__launch_bounds__`, trim live ranges, re-check occupancy |
+| `lds_tiling` | memory-bound kernel with reusable neighborhood loads | tile into LDS, reduce redundant global reads |
+| `mfma_enablement` | GEMM-like math dominated by VALU instead of MFMA | switch to MFMA-friendly data/layout path |
+| `fast_math_flag` | transcendental-heavy kernel with acceptable precision slack | test `-ffast-math` or narrower math flags |
+| `hip_stream_overlap` | high memcpy/API-overhead share with serialized transfers | move copies to async streams and synchronize only at the true dependency |
+
+For contributor-facing examples of how those cases are recorded, see
+`../contributing/proven_optimizations.md`.
+
+The prediction is always on when a technique is surfaced — there is no
+CLI gate. The JSON schema bumps to `0.3.3` when at least one rec
+carries `predicted_impact_range`; the Live Roofline payload
+(`roofline` top-level key) then bumps it to `0.3.4`, and ATT data
+(when present) pins it at `0.4.0`.
 
 ## 5. Multi-GPU / MPI workflows
 
@@ -254,6 +852,12 @@ returns bottleneck + narrative only (verbatim from the rule tables).
 
 ### LLM-enabled
 
+All five supported providers are selectable from the CLI with `--llm
+<name>`: `anthropic`, `openai`, `ollama`, `private`, `opencode`. The
+same five are also reachable from Python via
+`perfxpert.api.agent_root(..., provider=<name>)` — the CLI is a thin
+wrapper over the public Python API.
+
 ```bash
 # SKIP-SAMPLE — requires a real trace.db and an LLM credential
 export ANTHROPIC_API_KEY="sk-ant-..."
@@ -263,9 +867,153 @@ export OPENAI_API_KEY="sk-..."
 perfxpert analyze -i trace.db --llm openai
 ```
 
+An LLM analysis can take 1-5 minutes per call — PerfXpert draws a live
+progress spinner on stderr so you can see each agent phase as it
+enters / exits (`entering root`, `entering analysis`, etc.) and if the
+fallback chain cascades across providers. The spinner is stderr-only,
+so piping stdout to a file (e.g. `--format json > out.json`) still
+captures clean output.
+
+![progress spinner](assets/gifs/10-progress-spinner.gif)
+
+*Agent-phase narrative on stderr: `entering root` → `exit root` →
+`deterministic analysis: running` → `deterministic analysis: done` →
+report. (Shown under `PERFXPERT_AIRGAP=1` for a determinism; live
+`--llm anthropic` renders the identical phase format.)*
+
+Two opt-outs:
+
+- `--no-progress` — silent (useful for CI and log capture).
+- `--verbose` — full log lines instead of the compact spinner (unchanged
+  from prior releases).
+
+When stderr is not a TTY (piped / redirected / under a CI runner) the
+spinner degrades automatically to plain `[perfxpert] <phase>` status
+lines, with no ANSI escapes.
+
+For the full provider matrix, model-selection ladder, and fallback
+chain, see §11 LLM Providers below.
+
+### Credentials
+
+Each provider has a canonical env var PerfXpert reads at session
+boot; the `--llm-api-key` CLI flag is an equivalent one-shot
+override. If both are set and differ the flag wins (PerfXpert emits
+a one-line stderr WARNING so you know which credential is active):
+
+| `--llm` | Primary env var | PerfXpert alias | Notes |
+|---------|-----------------|-----------------|-------|
+| `anthropic` | `ANTHROPIC_API_KEY` | `PERFXPERT_LLM_ANTHROPIC_KEY` | Either works; alias kept for migration parity |
+| `openai` | `OPENAI_API_KEY` | `PERFXPERT_LLM_OPENAI_KEY` | Either works |
+| `private` | `PERFXPERT_LLM_PRIVATE_API_KEY` | — | Plus `PERFXPERT_LLM_PRIVATE_URL` (required) |
+| `ollama` | — (no key) | — | Plus `PERFXPERT_LLM_LOCAL_URL` (default `http://localhost:11434`) |
+| `opencode` | — (no key) | — | Plus `PERFXPERT_OPENCODE_PATH` if not on `PATH` |
+
+```bash
+# SKIP-SAMPLE — requires a real trace.db and a live ANTHROPIC_API_KEY
+# CLI flag — equivalent to exporting ANTHROPIC_API_KEY
+perfxpert analyze -i trace.db --llm anthropic --llm-api-key sk-ant-...
+
+# Env var — survives across invocations
+export ANTHROPIC_API_KEY="sk-ant-..."
+perfxpert analyze -i trace.db --llm anthropic
+```
+
+**Missing credentials surface a clean pre-flight error.** Starting
+with Phase 8, running `--llm anthropic` with no `ANTHROPIC_API_KEY`
+and no `--llm-api-key` raises a one-line stderr message like:
+
+```
+⚠ LLM auth failed for anthropic. Check ANTHROPIC_API_KEY is set correctly.
+```
+
+and exits with rc=2 BEFORE any network call or formatter pass runs.
+No empty HTML / markdown file is left behind — the previous
+"silently produces a blank report" failure mode is gone.
+
+![pre-flight auth error](assets/gifs/11-pre-flight-auth-error.gif)
+
+*`--llm anthropic` with no `ANTHROPIC_API_KEY` — one-line stderr error,
+`rc=2`, and no empty `preflight.html` left behind.*
+
 ---
 
-## 3. Tier 0: Source Code Scanning
+## 7. Compare runs + CI gating (`perfxpert diff` / `perfxpert ci`)
+
+Compare two rocpd databases — baseline vs new — and surface per-kernel
+deltas, wall-time delta, and a narrative summary. Two shapes:
+
+* **`perfxpert diff <baseline.db> <new.db>`** — informational. Always
+  returns `rc=0`. Four formats: `text` / `markdown` / `json` / `webview`.
+* **`perfxpert ci <baseline.db> <new.db>`** — gating wrapper. Returns
+  `rc=1` when `wall_delta_pct > --threshold` (default 5%; env override
+  `PERFXPERT_CI_REGRESSION_THRESHOLD`). Designed for CI systems.
+
+Both route through the same `trace_diff.diff_runs` engine under the
+hood — MCP clients, the `perfxpert analyze --baseline <db>` splice,
+and the agentic correctness gate all see the same numbers.
+
+```bash
+# SKIP-SAMPLE — requires two rocpd .db files
+# Informational diff (rc=0 always)
+perfxpert diff baseline.db new.db --format text
+perfxpert diff baseline.db new.db --format webview -d ./out -o diff
+perfxpert diff baseline.db new.db --format json > diff.json
+
+# CI-gating wrapper — rc=1 when wall regression > --threshold
+perfxpert ci baseline.db new.db --threshold 3.0 --format json > diff.json
+```
+
+The `--baseline` splice into `perfxpert analyze` produces a regular
+report plus a "Changed vs baseline" section at the bottom (or a
+top-level `trace_diff` key for `--format json`, schema `0.3.1`):
+
+```bash
+# SKIP-SAMPLE — requires an original baseline .db and a new .db
+perfxpert analyze -i new.db --baseline baseline.db --format webview \
+    -d ./out -o optimized_vs_baseline
+```
+
+### CI integration snippets
+
+**GitHub Actions:**
+
+```yaml
+# .github/workflows/perf.yml
+- name: Profile baseline
+  run: rocprofv3 --sys-trace -o baseline ./app && mv baseline_results.db baseline.db
+- name: Profile candidate
+  run: rocprofv3 --sys-trace -o new ./app && mv new_results.db new.db
+- name: PerfXpert regression gate
+  run: perfxpert ci baseline.db new.db --threshold 3.0 --format json > diff.json
+```
+
+**GitLab CI:**
+
+```yaml
+# .gitlab-ci.yml
+perf-gate:
+  script:
+    - rocprofv3 --sys-trace -o baseline ./app && mv baseline_results.db baseline.db
+    - rocprofv3 --sys-trace -o new ./app && mv new_results.db new.db
+    - perfxpert ci baseline.db new.db --threshold 3.0 --format json > diff.json
+  artifacts:
+    when: always
+    paths:
+      - diff.json
+```
+
+**Environment override** (same binary, different policy per branch):
+
+```bash
+# SKIP-SAMPLE — environment knob
+export PERFXPERT_CI_REGRESSION_THRESHOLD=1.5   # stricter for main; loose for topic branches
+perfxpert ci baseline.db new.db    # no --threshold needed
+```
+
+---
+
+## 8. Tier 0: Source Code Scanning
 
 Analyze your source code before profiling — no GPU or trace database needed.
 
@@ -278,6 +1026,18 @@ perfxpert analyze --source-dir ./my_app
 perfxpert analyze -i trace.db --source-dir ./my_app
 ```
 
+![tier 0 source-only](assets/gifs/08-tier0-source-only.gif)
+
+*Pure source scan (`--source-dir` only, no `-i`) detecting a synchronous
+`hipMemcpy` loop + `hipDeviceSynchronize` inside a hot loop, and
+emitting a rocprofv3 profiling plan.*
+
+![tier 0 combined](assets/gifs/09-tier0-combined.gif)
+
+*Combined mode: trace + source scan rendered into a single webview
+report. The Tier-0 block lives in its own `<section id="tier0-scan">`
+wrapper card — never folded into the main recommendations table.*
+
 PerfXpert scans `.hip`, `.cpp`, `.cu`, `.cl`, `.py`, `.h`, `.hpp` files and detects:
 - GPU kernel definitions and launch patterns
 - Memory operations (hipMemcpy, hipMemcpyAsync)
@@ -288,14 +1048,20 @@ PerfXpert scans `.hip`, `.cpp`, `.cu`, `.cl`, `.py`, `.h`, `.hpp` files and dete
 
 The output includes a profiling plan with the exact `rocprofv3` command to run, with counters pre-selected based on what was found in the source.
 
+
 ---
 
-## 4. Agentic TUI Workflow (The Star Feature)
+## 9. Agentic TUI Workflow (The Star Feature)
 
 The agentic TUI automates the full optimization loop: profile, analyze,
 AI-edit code, recompile, re-profile, compare. As of v0.2.0 this is the
 `perfxpert-code` command (AMD-themed bundled opencode TUI) — it wraps the
 same agent runtime the batch-mode `analyze` CLI uses.
+
+![perfxpert-code](assets/gifs/14-perfxpert-code.gif)
+
+*`perfxpert-code` — the AMD-branded bundled opencode TUI with
+`perfxpert-mcp` pre-wired, waiting at the interactive startup screen.*
 
 ```bash
 # SKIP-SAMPLE — requires bundled opencode binary on PATH
@@ -321,6 +1087,7 @@ scenes.
    blocks (see Gate Cascade doc for correctness guarantees)
 7. **Re-profile** — re-profile with the optimized code and compare
 
+
 ### AI Code Editing
 
 When the agent applies an optimization, the LLM generates targeted code
@@ -339,13 +1106,22 @@ truncation on large files and makes the diff easy to review:
 >>>>>>> REPLACE
 ```
 
+Typical examples the TUI is designed to propose when the trace evidence matches:
+
+- replace serialized `hipMemcpy` calls with `hipMemcpyAsync` on dedicated
+  streams when the trace shows transfer-heavy idle gaps
+- add `__launch_bounds__` or reduce temporary live ranges when a hot kernel is
+  occupancy-limited by VGPR pressure
+- suggest LDS tiling when a memory-bound stencil or GEMM-like kernel reloads
+  the same neighborhood repeatedly from global memory
+
 If the edit causes compilation errors, the Correctness agent reverts the
 change automatically; see `docs/architecture/gate-cascade.md` for the full
 5-gate correctness/regression contract.
 
 ---
 
-## 5. MPI Multi-GPU Profiling
+## 10. MPI Multi-GPU Profiling (detailed)
 
 PerfXpert auto-detects MPI launchers and restructures the profiling command so each rank gets its own profiler instance.
 
@@ -368,13 +1144,32 @@ The tool:
 - Auto-merges all per-rank databases into a single `merged_processes.db`
 - Analyzes the unified trace across all GPUs
 
+
 > **Note**: `--process-sync` (used for Python DDP/torchrun) is NOT used for MPI because OpenMPI strips LD_PRELOAD from child processes. PerfXpert handles this automatically.
 
 ---
 
-## 6. LLM Providers
+## 11. LLM Providers
 
-Five LLM providers are supported. LLM is optional — all analysis runs locally without internet.
+![all providers](assets/gifs/15-all-providers.gif)
+
+*`perfxpert analyze --help | grep -A 10 -- '--llm '` — the five provider
+choices rendered straight from argparse's `choices=` list:
+`anthropic,openai,ollama,private,opencode`.*
+
+All five LLM providers are selectable via `--llm <name>` on the CLI
+**and** via `provider=<name>` on `perfxpert.api.agent_root(...)` — the
+same registry backs both surfaces. LLM is optional; all analysis runs
+locally without internet when you omit `--llm` (or set
+`PERFXPERT_AIRGAP=1`).
+
+| `--llm` | Env vars | Purpose |
+|---------|----------|---------|
+| `anthropic` | `ANTHROPIC_API_KEY` | Claude API (production default) |
+| `openai` | `OPENAI_API_KEY` | OpenAI hosted API |
+| `ollama` | `OLLAMA_HOST` (default `http://localhost:11434`) | Local Ollama daemon — fully offline once the model is pulled |
+| `private` | `PERFXPERT_LLM_PRIVATE_URL`, `PERFXPERT_LLM_PRIVATE_MODEL`, optional `PERFXPERT_LLM_PRIVATE_API_KEY`, optional `PERFXPERT_LLM_PRIVATE_HEADERS` (JSON), optional `PERFXPERT_LLM_PRIVATE_VERIFY_SSL=false` | Any OpenAI-compatible endpoint (enterprise / self-hosted) |
+| `opencode` | none required (bundled) | Bundled opencode CLI — subprocess wrapper |
 
 ```bash
 # SKIP-SAMPLE — requires a real trace.db and an LLM credential
@@ -387,7 +1182,20 @@ perfxpert analyze -i trace.db --llm openai --llm-model gpt-4o
 # Private endpoint (any OpenAI-compatible server)
 export PERFXPERT_LLM_PRIVATE_URL="https://llm.corp.internal/v1"
 export PERFXPERT_LLM_PRIVATE_MODEL="llama-3-70b"
+# Optional: API key for endpoints that require Bearer auth
+export PERFXPERT_LLM_PRIVATE_API_KEY="..."
+# Optional: extra HTTP headers as a JSON object (corp gateways, traceability)
+export PERFXPERT_LLM_PRIVATE_HEADERS='{"X-Tenant-Id":"team-perf","X-Auth-Token":"..."}'
+# Optional: bypass TLS verification for self-signed CAs (off by default)
+export PERFXPERT_LLM_PRIVATE_VERIFY_SSL=false
 perfxpert analyze -i trace.db --llm private
+
+# Local Ollama (no network after model pull)
+export OLLAMA_HOST="http://localhost:11434"
+perfxpert analyze -i trace.db --llm ollama --llm-model llama3:70b
+
+# Bundled opencode (no credential — used internally by perfxpert-code)
+perfxpert analyze -i trace.db --llm opencode
 ```
 
 Model selection ladder (first hit wins, resolved at session boot):
@@ -415,7 +1223,7 @@ retry so the fallback chain takes over on the first 429. See
 `../guides/agentic-mode.md` for the full provider-resolution contract
 and the recursion-guard rules.
 
-## 7. Interactive sessions via `perfxpert-code`
+## 12. Interactive sessions via `perfxpert-code`
 
 One-shot non-interactive:
 
@@ -454,16 +1262,42 @@ Session state is auto-saved. List / resume with `perfxpert-code
 session list` and `perfxpert-code session <id>` (pass-through to the
 underlying opencode `session` subcommand).
 
-## 8. Connecting other MCP clients
+## 12.5 Embedding: the Python API
 
-Any MCP-compatible client can consume the 34 READ-ONLY tools exposed
-by `perfxpert-mcp`. Configuration snippets for Claude Desktop, Claude
-Code, Codex CLI, Gemini CLI, and generic stdio clients live in
+Everything the CLI does is reachable from Python via
+`perfxpert.api`. The 8 agent-hierarchy MCP tools map 1:1 to module
+functions (`agent_root`, `agent_analysis`, `agent_recommendation`,
+`agent_correctness`, `agent_compute_specialist`,
+`agent_memory_specialist`, `agent_latency_specialist`,
+`agent_diff_specialist`) so you can embed PerfXpert's analysis brain in
+your own notebooks, CI, or internal tooling.
+
+![python API](assets/gifs/12-python-api.gif)
+
+*`from perfxpert import api; api.agent_root(database_path='trace.db',
+airgap=True, ...)` — returns a plain dict with `primary_bottleneck`,
+`narrative`, `hotspots`, `recommendations`, etc. Same schema the CLI
+emits under `--format json`.*
+
+See `python-api.md` for the full surface.
+
+## 13. Connecting other MCP clients
+
+Any MCP-compatible client can consume the 56 READ-ONLY tools exposed
+by `perfxpert-mcp` (8 agent-hierarchy entry points + 47
+classifier/knowledge tools + 1 `trace_diff.diff_runs`). Configuration snippets for Claude Desktop,
+Claude Code, Codex CLI, Gemini CLI, and generic stdio clients live in
 `../integration/mcp-server.md` under §"Client integration". The
 bundled opencode inside `perfxpert-code` wires `perfxpert-mcp`
 automatically — no client-side setup required.
 
-## 9. Troubleshooting
+![mcp server](assets/gifs/13-mcp-server.gif)
+
+*Guide demo container MCP probe — a real `initialize` request runs
+through `perfxpert-mcp`, prints the discovered-tool banner, and
+confirms the negotiated protocol version.*
+
+## 14. Troubleshooting
 
 **`perfxpert-code` launches the unpatched upstream binary.**
 Check that `PERFXPERT_OPENCODE_PATH` is either unset or points at the
@@ -479,6 +1313,15 @@ list, e.g. `export PERFXPERT_LLM_FALLBACK_CHAIN="openai,anthropic"`.
 Combine with `PERFXPERT_DISABLE_RATE_LIMIT_RETRY=1` to skip the
 client-side retry entirely and fall through on first 429.
 
+**ATT says the decoder is missing even though the Python package imports fine.**
+PerfXpert gates ATT on the ROCprof Trace Decoder shared library that the
+runtime loads, not on whether `rocprof_trace_decoder` happens to be importable
+from the current Python environment. Install `librocprof-trace-decoder.so`
+under `/opt/rocm/lib*`, point `PERFXPERT_ROCPROF_TRACE_DECODER_PATH` at the
+library or its parent directory, or install the ROCm decoder package into a
+standard search path. See `../contributing/external-tools.md` for the exact
+lookup order.
+
 **PMC counter collection fails with a per-block limit error.**
 `FETCH_SIZE` and `WRITE_SIZE` each consume the full TCC budget — each
 MUST own its own `--pmc` pass, alone. Any other TCC-derived counter
@@ -492,14 +1335,25 @@ Either run the patch script (§1 step 2) or install upstream opencode
 launcher searches `$PERFXPERT_OPENCODE_PATH` → bundled wheel →
 `~/.opencode/bin/opencode` → `~/.local/bin/opencode` → `PATH`.
 
-**`claude mcp add perfxpert --scope project -- perfxpert-mcp` not finding the binary.**
+**`claude mcp add perfxpert perfxpert-mcp` not finding the binary.**
 The client's `PATH` is narrower than your login shell. Use the
 absolute path returned by `which perfxpert-mcp` when registering the
 server.
 
-## 10. Next steps
+## 15. Extending PerfXpert
 
-- `../architecture/agent-hierarchy.md` — 7-agent tier map + fence
+Want to add a new output format (say CSV for spreadsheet ingestion)
+or evolve the schema? See
+[Adding an output format](../contributing/output_formats.md) and
+[Evolving the schema](../contributing/schemas.md) for the end-to-end
+contribution walkthroughs — both live under `docs/contributing/` and
+are the canonical extension-point guides for the `--format` dispatcher
+and the three-layer schema stack (agent Pydantic / deterministic
+payload / public JSON).
+
+## 16. Next steps
+
+- `../architecture/agent-hierarchy.md` — 8-agent tier map + fence
   slices
 - `../architecture/gate-cascade.md` — 5-gate correctness/regression
   middleware
@@ -507,3 +1361,12 @@ server.
   integration
 - `../guides/agentic-mode.md` — air-gap vs LLM + provider ladder +
   fallback chain
+- `../guides/python-api.md` — `perfxpert.api` (1:1 mirror of the 7
+  agent MCP tools) for embedding PerfXpert's analysis brain in your
+  own tooling
+
+<!-- footer marker: perfxpert v0.2.0 — getting-started.md audit 2026-04-20 -->
+<!-- The footer marker above is moved in lockstep with the version bump in
+     pyproject.toml / perfxpert/__init__.py / CMakeLists.txt (see
+     CHANGELOG.md under [0.2.0]). Do not remove without bumping the
+     corresponding version entries. -->

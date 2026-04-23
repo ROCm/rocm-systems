@@ -12,8 +12,9 @@ MCP server (stdio, command `perfxpert-mcp`).
 
 2. **Two tool surfaces — know the scope of each.**
    - `perfxpert_*` MCP tools are READ-ONLY by design (spec §5.8). They
-     analyze traces, look up specs, and classify bottlenecks — they do
-     NOT compile, profile, or mutate anything.
+     analyze traces, look up specs, classify bottlenecks, and delegate
+     through the agent hierarchy — they do NOT compile, profile, or
+     mutate anything.
    - The backend's native tools (`bash`, `edit`, `write`, `read`) are
      EXECUTION-class and ARE available to you. §5.8 does NOT apply to
      them. The read-only restriction applies ONLY to the `perfxpert_*`
@@ -33,20 +34,77 @@ MCP server (stdio, command `perfxpert-mcp`).
      on the results. Don't ask the user to copy-paste commands you
      could run yourself.
 
-3. **Route intent via `perfxpert_intent_classify` first.** Use the
-   returned intent to pick downstream MCP calls:
-   - `analyze`  → `perfxpert_arch_lookup_peaks`,
-     `perfxpert_counters_lookup_info`, and other trace-analysis tools.
-   - `optimize` → use the workflow phase plus profiling facts to drive
-     backend-native `bash` / `edit` actions after the gate is lifted.
-   - `verify`   → `perfxpert_regression_compare_runs`,
-     `perfxpert_sol_sanity_check`.
-   - `explain`  → narrate using `perfxpert_arch_lookup_peaks`,
-     `perfxpert_counters_lookup_info`, and related lookup tools.
-   - `help`     → show the list of available MCP tools.
+3. **Route intent via `perfxpert_intent_classify` first.** Then pick
+   downstream tools freely — there is no forced handoff after intent
+   classification. The agent tools below each own one tier of the
+   hierarchy; call whichever one matches the work at hand.
 
-4. **Other perfxpert tools.** In addition to the gate and lookup tools
-   above, the MCP server exposes more pure-Python analysis helpers
+## The perfxpert agent hierarchy
+
+PerfXpert's analysis brain is organised as a three-layer hierarchy.
+Every layer is exposed as an MCP tool — you can call any of them
+directly. Root stays available for one-shot "analyze this trace end
+to end" calls; the lower-layer tools are for when you already know
+which layer of the decision you want.
+
+```
+Layer 0 — Root (delegates by intent)
+    └── Layer 1 decision-makers
+        ├── Analysis        (classify bottleneck from trace facts)
+        ├── Recommendation  (pick techniques for a bottleneck)
+        └── Correctness     (accept / revert / flag a patch)
+            └── Layer 2 specialists (called by Recommendation)
+                ├── Compute-Specialist  (VGPR / FMA / occupancy)
+                ├── Memory-Specialist   (HBM / cache / memcpy)
+                └── Latency-Specialist  (launch overhead / short kernels)
+```
+
+### Agent MCP tools — when to call each
+
+- **`perfxpert_agent_root`** — one-shot full pipeline.
+  Call this when the user asked a broad GPU-perf question and you
+  want Analysis → Recommendation → narrative in one round-trip.
+  Returns `{narrative, recommendations, primary_bottleneck,
+  warnings, metadata}`.
+
+- **`perfxpert_agent_analysis`** — classify the
+  primary bottleneck. Call this when you already have a trace and
+  only want the bottleneck verdict (no technique list yet).
+  Returns `{primary_bottleneck, confidence, time_breakdown,
+  hot_kernels, counter_data_available}`.
+
+- **`perfxpert_agent_recommendation`** — pick
+  optimization techniques for an analysis verdict. Call this when
+  you have the Analysis output and want the ranked technique list
+  without running Analysis again.
+
+- **`perfxpert_agent_correctness`** — decide on a
+  patch. Call this after you have run a gate-cascade probe (compile
+  / sol / bitwise / regression / anchors) and want a structured
+  accept-or-revert decision.
+
+- **`perfxpert_agent_compute_specialist`** —
+  compute-bound techniques. Call this directly if the kernel is
+  already known compute-bound and you want the technique list
+  without going through Root + Analysis + Recommendation.
+
+- **`perfxpert_agent_memory_specialist`** —
+  memory-bound techniques. Same idea, for HBM / cache-bound work.
+
+- **`perfxpert_agent_latency_specialist`** —
+  launch-overhead / short-kernel techniques. Same idea, for
+  latency-bound work.
+
+- **`perfxpert_agent_diff_specialist`** — when the user wants to
+  compare two profiling runs, call this instead of running analyze
+  twice. Inputs: `baseline_db`, `new_db`. Output: regression /
+  improvement verdict + per-kernel delta + narrative.
+
+You choose. Pick the tool that matches the decision you need —
+don't over-use Root if the user already gave you the bottleneck.
+
+4. **Non-agent perfxpert tools.** In addition to the 8 agent tools
+   above, the MCP server also exposes 48 pure-Python analysis tools
    (architecture peaks, counter lookups, bottleneck classification,
    roofline, regression compare, trace fingerprint, etc.). Those are
    safe to call at any time; they don't make LLM calls and they don't

@@ -46,7 +46,7 @@ It runs in two tiers:
 
 2. **Absolute-FLOPS check (optional)** — when
    `achieved_flops_per_sec` is known, the gate compares it to the
-   architecture's published peak (via `sol.lookup_peaks`). Any
+   architecture's published peak (via `arch.lookup_peaks`). Any
    optimized run that claims `flops > peak` is rejected.
 
 Either failing tier produces `GateVerdict(status="reject", failing_gate="sol", ...)`.
