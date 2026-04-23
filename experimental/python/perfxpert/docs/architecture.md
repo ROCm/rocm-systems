@@ -21,10 +21,13 @@ Root (intent router)
  │   ├─ compute_specialist
  │   ├─ memory_specialist
  │   └─ latency_specialist
- └─ Correctness (enforces 5 gates on proposed changes)
+ └─ Correctness (narrates immutable gate verdicts)
 ```
 
-8 agents total. Each has ≤ 400 lines of fence + ≤ 5 tools + ≤ 10 input / ≤ 5 output fields. Narrow scope is CI-enforced.
+The specialist list above is abbreviated; see
+[architecture/agent-hierarchy.md](architecture/agent-hierarchy.md) for
+the full tier map. Each shipped agent has ≤ 400 lines of fence + ≤ 5
+tools + ≤ 10 input / ≤ 5 output fields. Narrow scope is CI-enforced.
 
 See [architecture/agent-hierarchy.md](architecture/agent-hierarchy.md) for the tier-by-tier map, fence-slice pattern, and source-tree locations, and [architecture/gate-cascade.md](architecture/gate-cascade.md) for the 5-gate correctness middleware that sits between the agents. The full architecture docs index lives at [architecture/README.md](architecture/README.md).
 
@@ -73,11 +76,14 @@ All five verified nightly via `.github/workflows/perfxpert-nightly.yml`.
 user  →  perfxpert analyze -i trace.db
         → perfxpert.agents.runtime.build_session(...)
         → session.run_root(RootInput(...))
-        → agent runtime (Root → Analysis → bottleneck.classify …)
-        → Recommendation hands off to specialist
-        → Correctness runs 5 gates
+        → RootOutput + deterministic analysis payload
         → formatters → text / json / markdown / html
 ```
+
+Recommendation is exercised on optimize flows. Gate-cascade middleware
+and Correctness are exercised on verify / code-change evaluation flows.
+Those paths are not part of the default `perfxpert analyze` summary
+path above.
 
 ### Interactive / backend TUIs
 
@@ -128,11 +134,15 @@ Level 0 — Knowledge YAML (PR)         pytest tests/test_knowledge
 
 ## Correctness gates (spec §5)
 
-1. **Claims** — magnitude within proven_optimizations range
-2. **Sakana** — hardware-counter sanity
-3. **Schema** — output shape valid
-4. **Regression** — no hot kernel regressed > 5% (weighted-geomean definition)
-5. **Correctness** — semantic preservation (structural)
+Current gate names match `perfxpert/runtime/gate_cascade.py`; see
+[architecture/gate-cascade.md](architecture/gate-cascade.md) for the
+full reject conditions and verdict semantics.
+
+1. **Compile** — reject on build failure
+2. **SOL sanity (anti-Sakana)** — reject implausible claimed speedups
+3. **Bitwise / Numeric** — reject output drift beyond tolerance
+4. **Regression (weighted-geomean)** — return `regressed` on total, tail, or hot-kernel regressions
+5. **Test Anchors** — when `candidate_binary` is present, reject if previously passing anchor tests now fail
 
 ## What's NOT in this diagram
 
