@@ -1232,8 +1232,8 @@ HSAKMT_STATUS topology_get_node_props(HSAuint32 NodeId,
   // - ROCr same / newer   → rocr_node_props_size >= sizeof(HsaNodeProperties)
   //   All fields including the extended ones are filled in.
   size_t copySize;
-  if (dxg_runtime->detected_abi_.SizeOfHsaNodeProperties > 0)
-    copySize = std::min((size_t)dxg_runtime->detected_abi_.SizeOfHsaNodeProperties,
+  if (detected_abi_.SizeOfHsaNodeProperties > 0)
+    copySize = std::min((size_t)detected_abi_.SizeOfHsaNodeProperties,
                         sizeof(HsaNodeProperties));
   else
     copySize = 368;

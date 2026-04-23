@@ -548,7 +548,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_d
     HSAint32 fd;
     HsaExternalHandleType etype;
     amdgpu_device_handle devhandle;
-    HSAuint16 desc_size = dxg_runtime->detected_abi_.SizeOfHsaExternalHandleDesc;
+    HSAuint16 desc_size = detected_abi_.SizeOfHsaExternalHandleDesc;
     if (desc_size == sizeof(HsaExternalHandleDesc)) {
         // Current layout: int64 fd + mem field
         devhandle = (amdgpu_device_handle)import_desc->device_handle;

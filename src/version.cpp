@@ -35,6 +35,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetVersion(HsaVersionInfo *VersionInfo) {
   return HSAKMT_STATUS_SUCCESS;
 }
 
+HsaStructureSizes detected_abi_{};
 HSAKMT_STATUS HSAKMTAPI DxgAbiCheck(HsaStructureSizes *actual)
 {
   if (actual == nullptr)
@@ -54,7 +55,7 @@ HSAKMT_STATUS HSAKMTAPI DxgAbiCheck(HsaStructureSizes *actual)
     return HSAKMT_STATUS_INVALID_PARAMETER;
   }
 
-  dxg_runtime->detected_abi_ = *actual;
+  detected_abi_ = *actual;
 
   return HSAKMT_STATUS_SUCCESS;
 }

@@ -68,8 +68,7 @@ struct hsakmtRuntime {
     system_heap_space_size_(0),
     handle_aperture_start_(0),
     handle_aperture_size_(0),
-    default_node(1),
-    detected_abi_({}) {}
+    default_node(1) {}
 
   void HeapInit();
   void HeapFini();
@@ -135,11 +134,10 @@ struct hsakmtRuntime {
   uint64_t handle_aperture_start_;
   uint64_t handle_aperture_size_;
   std::unique_ptr<wsl::thunk::VaMgr> handle_aperture_mgr_;
-
-  HsaStructureSizes detected_abi_;
 };
 
 extern hsakmtRuntime *dxg_runtime;
+extern HsaStructureSizes detected_abi_;
 
 #undef HSAKMTAPI
 #define HSAKMTAPI __attribute__((visibility ("default")))
