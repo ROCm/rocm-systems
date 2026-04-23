@@ -62,6 +62,23 @@ class TestNativeTool:
             ).get_collector_library_path()
         assert lib_path == sources_path / NativeTool.lib_relative_path
 
+    def test_when_run_from_projects_dir__builds_and_returns_collector(
+        self, sources_path, installed_sdk_tool_path: Path, projects_compute_path: Path
+    ):
+        def mock_build_collector(_: Path) -> None:
+            self.__create_file(sources_path, Path(NativeTool.lib_relative_path))
+
+        with (
+            patch.object(NativeTool, "_generate_cmake_project", return_value=True),
+            patch.object(
+                NativeTool, "_build_cmake_project", side_effect=mock_build_collector
+            ),
+        ):
+            lib_path = NativeTool(
+                projects_compute_path, installed_sdk_tool_path
+            ).get_collector_library_path()
+        assert lib_path == sources_path / NativeTool.lib_relative_path
+
     def test_when_run_from_source_dir_and_generation_fails__returns_none(
         self, installed_sdk_tool_path: Path, sources_compute_path: Path
     ):
@@ -100,11 +117,18 @@ class TestNativeTool:
     @pytest.fixture
     def sources_path(self, tmp_path: Path) -> Path:
         sources_path = tmp_path / "src"
+        sources_path.mkdir()
         return sources_path
 
     @pytest.fixture()
     def sources_compute_path(self, sources_path: Path) -> Path:
         return self.__create_file(sources_path, Path("rocprof-compute"))
+
+    @pytest.fixture()
+    def projects_compute_path(self, tmp_path: Path) -> Path:
+        # In our tests rocprof-compute is placed in `projects` dir
+        # instead of `projects/src`
+        return self.__create_file(tmp_path, Path("rocprof-compute"))
 
     @pytest.fixture()
     def sources_lib_path(self, sources_path: Path) -> Path:
