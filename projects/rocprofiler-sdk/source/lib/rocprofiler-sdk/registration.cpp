@@ -1176,13 +1176,18 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
     {
         ROCP_INFO << "adding forced configure";
         forced_config = configure_func;
-        auto& _client = emplace_client(*rocprofiler::registration::get_clients(),
-                                       "(forced...)",
-                                       nullptr,
-                                       forced_config,
-                                       nullptr);
+        {
+            using scoped_lock_t = rocprofiler::registration::scoped_lock_t;
 
-        rocprofiler::registration::client_initialize(_client);
+            auto  _lk     = scoped_lock_t{rocprofiler::registration::get_registration_mutex()};
+            auto& _client = emplace_client(*rocprofiler::registration::get_clients(),
+                                           "(forced...)",
+                                           nullptr,
+                                           forced_config,
+                                           nullptr);
+
+            rocprofiler::registration::client_initialize(_client);
+        }
         return ROCPROFILER_STATUS_SUCCESS;
         // auto status = rocprofiler::registration::late::invoke_register_propagation();
         // return status;
