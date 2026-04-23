@@ -313,9 +313,57 @@ TEST(WaveProjectionContract, WrapAsWWMValueEmitsStrictWWMOnMODREP) {
   // One argument — the wrapped input.
   ASSERT_EQ(callInst->arg_size(), 1u);
   EXPECT_EQ(callInst->getArgOperand(0), s.arg);
+  // The overload resolution picked the i32 variant.
+  EXPECT_EQ(callInst->getType(), i32Ty)
+      << "wrapAsWWMValue returned a value of the wrong type for the "
+         "i32 input overload";
 
   // The emitted instruction should be the only one in the block.
   EXPECT_EQ(s.BB->size(), 1u)
       << "wrapAsWWMValue on MODREP should emit exactly one instruction; "
          "found " << s.BB->size();
+}
+
+// ----------------------------------------------------------------------------
+// Polymorphic-overload coverage for `wrapAsWWMValue`.  `wmma_lowering.cpp`
+// calls the helper with BOTH `i32` (collect output dwords) and
+// `<4 x float>` (MFMA outputs before the unpackDwords -> collect chain).
+// If a future LLVM version drops or narrows the `strict.wwm` overload set
+// for vector fp types, only the scalar-only coverage above would catch
+// the breakage — the MFMA-output path would silently fail to emit the
+// intrinsic, and SIWholeQuadMode would never pull the MFMA into a WWM
+// region, quietly reintroducing the rows-8..15-zero miscompile this
+// helper exists to prevent.  This test exercises the vector overload
+// directly by constructing a `<4 x float>` argument and asserting the
+// intrinsic is invoked with the matching overloaded type.
+// ----------------------------------------------------------------------------
+TEST(WaveProjectionContract, WrapAsWWMValueHandlesVectorFloatOverload) {
+  IRScaffold s;
+  auto *i32Ty = Type::getInt32Ty(s.ctx);
+  auto *i64Ty = Type::getInt64Ty(s.ctx);
+  auto *f32Ty = Type::getFloatTy(s.ctx);
+  auto *v4f32Ty = FixedVectorType::get(f32Ty, 4);
+
+  ISAProfile src = makeGfx1250Profile();
+  ISAProfile tgt = makeGfx942Profile();
+  ModuloReplicationProjection proj(src, tgt, i32Ty, i64Ty);
+
+  // Build a <4 x float> value inside the scaffold's entry block so
+  // `wrapAsWWMValue` has a local SSA Value to wrap.  The value itself
+  // doesn't matter — we only inspect the emitted intrinsic call.
+  Value *vec = PoisonValue::get(v4f32Ty);
+  Value *result = proj.wrapAsWWMValue(s.B, vec);
+
+  auto *callInst = dyn_cast<CallInst>(result);
+  ASSERT_NE(callInst, nullptr);
+  Function *callee = callInst->getCalledFunction();
+  ASSERT_NE(callee, nullptr);
+  EXPECT_EQ(callee->getIntrinsicID(), Intrinsic::amdgcn_strict_wwm);
+  EXPECT_EQ(callInst->getType(), v4f32Ty)
+      << "wrapAsWWMValue with a <4 x float> input must emit the "
+         "<4 x float>-overloaded strict.wwm variant";
+  ASSERT_EQ(callInst->arg_size(), 1u);
+  EXPECT_EQ(callInst->getArgOperand(0)->getType(), v4f32Ty)
+      << "operand type mismatch — strict.wwm's overload must match "
+         "the input type";
 }

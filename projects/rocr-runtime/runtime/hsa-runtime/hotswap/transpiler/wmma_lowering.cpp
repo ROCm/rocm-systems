@@ -182,6 +182,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
 
@@ -546,32 +547,35 @@ Value *emitWMMAtoMFMA(RaiseContext &ctx, Value *a, Value *b, Value *c,
   Value *laneId = emitLaneId(B, M, ctx.i32Ty);
 
   const unsigned numSrcWaves = ctx.projection.numSourceWavesPerTarget();
-  assert((numSrcWaves == 1 || numSrcWaves == 2) &&
-         "WMMA→MFMA lowering defined only for wave32 source projections; "
-         "MODREP phantom-lane (1 source wave per target) or WaveNative "
-         "cross-widen (2 source waves per target) are the two supported "
-         "shapes — a new projection class must declare which applies.");
-  // Dead-code gate for the refusal-gate-still-in-place state.  The K=4
-  // f32 and K=32/K=64 refusal arms in `handle_valu_vop3p.cpp` return
-  // before reaching this helper when `!providesFullWaveExecInvariant()`,
-  // i.e. under any non-WaveNative projection.  The `numSrcWaves == 1`
-  // branch below is therefore unreachable in production.  It is kept
-  // in-tree because (a) my staged MODREP path has been verified
-  // correct for minimal repros (`wmma_phantom_lane_f16_chain`) and is
-  // the right code to re-enable once the matmul_fp16_16x16 residual is
-  // pinned, and (b) removing it would require re-deriving the
-  // pass-1-skip logic later.  This assertion makes the unreachable
-  // branch a loud abort in assert-on builds so a future refactor that
-  // accidentally flips the refusal gate without vetting the MODREP
-  // path surfaces at the first matmul_fp16 test run instead of the
-  // second.
-  assert(numSrcWaves == 2 &&
-         "reached emitWMMAtoMFMA under a projection that returns "
-         "numSourceWavesPerTarget() != 2 — the MODREP arm of this "
-         "lowering is staged-but-gated-off via the refusal in "
-         "`handle_valu_vop3p.cpp`; if you flipped that gate, also "
-         "vet compare_correctness's matmul_fp16_16x16 end-to-end "
-         "output before removing this assert.");
+  if (numSrcWaves != 1 && numSrcWaves != 2)
+    report_fatal_error(
+        "WMMA→MFMA lowering defined only for wave32 source projections; "
+        "numSourceWavesPerTarget() must be 1 (MODREP phantom-lane) or 2 "
+        "(WaveNative cross-widen) — a new projection class must declare "
+        "which applies.");
+  // Refusal-gate-still-in-place staging guard.  The K=4 f32 and K=32/K=64
+  // refusal arms in `handle_valu_vop3p.cpp` return before reaching this
+  // helper when `!providesFullWaveExecInvariant()`, i.e. under any non-
+  // WaveNative projection.  The `numSrcWaves == 1` branch below is
+  // therefore unreachable in production today.  It is kept in-tree
+  // because (a) the staged MODREP path is verified correct for minimal
+  // repros (`lit_tests/wmma_phantom_lane_f16_chain/`) and is the right
+  // code to re-enable once the matmul_fp16_16x16 residual is pinned,
+  // and (b) removing it would require re-deriving the pass-1-skip
+  // logic later.  `report_fatal_error` (NOT `assert`) is used here
+  // because an `NDEBUG` / release build still needs to trap a refusal-
+  // gate regression that reaches this code path — silently running
+  // the un-vetted MODREP branch would re-open the wrong-numerics
+  // residual that the gate is specifically guarding against.
+  if (numSrcWaves != 2)
+    report_fatal_error(
+        "reached emitWMMAtoMFMA under a projection that returns "
+        "numSourceWavesPerTarget() != 2 — the MODREP arm of this "
+        "lowering is staged-but-gated-off via the refusal in "
+        "`handle_valu_vop3p.cpp`.  If you flipped that gate, also "
+        "vet compare_correctness's matmul_fp16_16x16 end-to-end "
+        "output before removing this guard (see the K=32/K=64 arm's "
+        "block comment in `handle_valu_vop3p.cpp` for the handoff).");
 
   Value *result0[8];
   runGroupPass(B, M, ctx, /*groupBase=*/0, laneId, aDwords, bDwords, cDwords,
@@ -762,16 +766,20 @@ Value *emitWMMAtoMFMA_F32_16x16x4(RaiseContext &ctx, Value *a, Value *b,
   Value *laneId = emitLaneId(B, M, ctx.i32Ty);
 
   const unsigned numSrcWaves = ctx.projection.numSourceWavesPerTarget();
-  assert((numSrcWaves == 1 || numSrcWaves == 2) &&
-         "WMMA→MFMA lowering defined only for wave32 source projections; "
-         "MODREP phantom-lane (1 source wave per target) or WaveNative "
-         "cross-widen (2 source waves per target) are the two supported "
-         "shapes — a new projection class must declare which applies.");
-  // See `emitWMMAtoMFMA` above for the identical gating rationale.
-  assert(numSrcWaves == 2 &&
-         "reached emitWMMAtoMFMA_F32_16x16x4 under a projection that "
-         "returns numSourceWavesPerTarget() != 2; the MODREP arm is "
-         "staged-but-gated-off in `handle_valu_vop3p.cpp`.");
+  if (numSrcWaves != 1 && numSrcWaves != 2)
+    report_fatal_error(
+        "WMMA→MFMA lowering defined only for wave32 source projections; "
+        "numSourceWavesPerTarget() must be 1 (MODREP phantom-lane) or 2 "
+        "(WaveNative cross-widen) — a new projection class must declare "
+        "which applies.");
+  // See `emitWMMAtoMFMA` above for the identical staging-guard rationale
+  // (release-build-safe `report_fatal_error` instead of `assert`).
+  if (numSrcWaves != 2)
+    report_fatal_error(
+        "reached emitWMMAtoMFMA_F32_16x16x4 under a projection that "
+        "returns numSourceWavesPerTarget() != 2; the MODREP arm is "
+        "staged-but-gated-off in `handle_valu_vop3p.cpp` (see the K=4 "
+        "f32 arm's diagnostic for the investigation handoff).");
 
   Value *result0[8];
   runGroupPassF32K4(B, M, ctx, /*groupBase=*/0, laneId, aDwords, bDwords,

@@ -655,7 +655,80 @@ T5 in parallel. T3, then T4.
   architectures, compare bit-for-bit where feasible and
   element-wise otherwise.
 
-## 12. Relationship to other axes
+## 12. Staging state — ModuloReplicationProjection-aware lowering (2026-04-22)
+
+> **Status:** infrastructure landed, lowering staged-but-gated-off.
+> End-to-end enable blocked on `matmul_fp16_16x16` residual
+> investigation (commit `b532077af4`).
+
+The WMMA → MFMA lowering in `wmma_lowering.cpp` now supports TWO
+projections:
+
+1. **`WaveNativeProjection`** — the original baseline. Kernel-entry
+   `@llvm.amdgcn.init_whole_wave` provides HW `EXEC = -1` kernel-
+   wide, so the `runGroupPass` pipeline runs with every target lane
+   participating. `Gfx1250Gpu.Matmul128x128*` gtests pass end-to-end
+   on this path; it is the verified production path today.
+
+2. **`ModuloReplicationProjection`** (phantom-lane fallback for
+   `max_flat_workgroup_size < targetWaveSize`) — NEW, staged. HW
+   EXEC stays at the source-active mask kernel-wide, so target lanes
+   past the source-wave width are HW-inactive for the rest of the
+   kernel body (which is the whole point of the phantom-lane
+   fallback — their undef VGPRs can't contaminate cross-lane ops).
+   The WMMA lowering scopes a local HW-EXEC = -1 region around just
+   the redistribute / MFMA / collect chain by wrapping the MFMA
+   outputs and each collect-output dword in `@llvm.amdgcn.strict.wwm`,
+   which the AMDGPU backend's `SIWholeQuadMode` pass expands into
+   a proper scoped region (materialising as `s_or_saveexec_b64 sN,
+   -1` entry / `s_mov_b64 exec, sN` exit in the final HSACO).
+
+The MODREP path is correct on minimal repros (isolated and K-loop-
+chained WMMAs, verified via `lit_tests/wmma_phantom_lane_f16_chain/`)
+but an unexplained residual divergence remains on Triton's
+`matmul_fp16_16x16` kernel at M>=32 through `compare_correctness`.
+Until that residual is pinned, both WMMA arms in
+`handle_valu_vop3p.cpp` keep the `!providesFullWaveExecInvariant()`
+refusal gate. The infrastructure is landed additively so the next
+investigation has a known-good baseline to compare against.
+
+### 12.1 Infrastructure summary
+
+| Symbol | Signature | Semantics |
+|---|---|---|
+| `WaveProjection::numSourceWavesPerTarget()` | `virtual unsigned` — pure virtual | Returns 1 under MODREP (phantom-lane = single source wave) or same-wave projections; 2 under `WaveNativeProjection` wave32→wave64 cross-widen; `report_fatal_error` under the unimplemented `ThreadLoopProjection`. Pure so every new projection class must answer the question explicitly. |
+| `WaveProjection::wrapAsWWMValue(B, v)` | `Value *` helper | No-op under projections that guarantee HW EXEC=-1 kernel-wide (`WaveNativeProjection`); emits a per-value `@llvm.amdgcn.strict.wwm` call otherwise. Accepts any scalar/fixed-vector integer or floating-point type supported by the intrinsic's overload set; asserts on other types. |
+| `emitWMMAtoMFMA*` (internal) | — | Now iterates `runGroupPass` for `numSourceWavesPerTarget()` passes and wraps MFMA outputs + collect-output dwords via `wrapAsWWMValue`. Release-build-safe `report_fatal_error` guards catch a refusal-gate regression that flips the gate without vetting the MODREP path. |
+
+### 12.2 Gate-flip protocol
+
+When the `matmul_fp16_16x16` residual is pinned and the MODREP path
+is ready to enable:
+
+1. **Prove correctness** on `compare_correctness --recipe=matmul_fp16
+   {,_16x16}`: all shapes must match, not just `EXIT=2`. Run both
+   recipes through the full sweep.
+2. **Drop the refusal gates** in `handle_valu_vop3p.cpp` (both the
+   K=4 f32 arm and the K=32/K=64 arm). The `!providesFullWaveExec
+   Invariant()` check and its `RaiseFailure::unsupportedShape`
+   branch are the only pieces removed; the rest of the dispatch
+   (native `hasTensorOps` path, `hasMFMA` cross-target path, no-
+   path-available refusal) stays exactly as-is.
+3. **Flip the lit fixture**
+   `lit_tests/wmma_phantom_lane_f16_chain/wmma_phantom_lane_f16_chain.ll`
+   from refusal-CHECKs to affirmative IR-shape CHECKs. The fixture
+   header spells out the specific anchors the flipped version
+   should pin (strict.wwm markers, single-pass runGroupPass output,
+   MFMA chain).
+4. **Flip the lit fixture**
+   `lit_tests/wmma_phantom_lane_refuse/wmma_phantom_lane_refuse.ll`
+   similarly — the K=4 f32 variant.
+5. **Drop the release-build-safe guards** in `emitWMMAtoMFMA*`
+   (`if (numSrcWaves != 2) report_fatal_error(...)`) once the
+   `numSrcWaves == 1` branch is live. Keep the `numSrcWaves ∉ {1,
+   2}` guard — that's a contract check for new projection classes.
+
+## 13. Relationship to other axes
 
 - **SPE / wave-size** (`wave-size-translation.md`): WMMA sites require uniform
   reachability (G3). The two-pass lowering is itself the
