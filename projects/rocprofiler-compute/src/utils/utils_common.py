@@ -10,7 +10,6 @@ import locale
 import os
 import re
 import select
-import selectors
 import shutil
 import subprocess
 import sys
@@ -492,30 +491,8 @@ def capture_subprocess_output(
         )
     )
 
-    # Create callback function for process output
+    # Create buffer for captured process output
     buf = io.StringIO()
-
-    def handle_output(stream: io.TextIOWrapper, _mask) -> None:
-        try:
-            # Because the process' output is line buffered, there's only ever one
-            # line to read when this function is called
-            line = stream.readline()
-            if not line:
-                return
-            buf.write(line)
-            if enable_logging:
-                if profileMode:
-                    console_log(get_rocprof_cmd(), line.strip(), indent_level=1)
-                else:
-                    console_log(line.strip())
-        except UnicodeDecodeError:
-            # Skip this line
-            pass
-
-    # Register callback for an "available for read" event from subprocess' stdout stream
-    selector = selectors.DefaultSelector()
-    if process.stdout is not None:
-        selector.register(process.stdout, selectors.EVENT_READ, handle_output)
 
     def forward_input() -> None:
         """
@@ -554,19 +531,28 @@ def capture_subprocess_output(
     input_thread = threading.Thread(target=forward_input, daemon=True)
     input_thread.start()
 
-    # Loop until subprocess is terminated
-    while process.poll() is None:
-        # Wait for events and handle them with their registered callbacks
-        events = selector.select()
-        for key, mask in events:
-            callback = key.data
-            callback(key.fileobj, mask)
+    # Read until the pipe closes, not until the child exits. Otherwise lines
+    # still buffered in the pipe at exit time are dropped.
+    if process.stdout is not None:
+        while True:
+            try:
+                line = process.stdout.readline()
+            except UnicodeDecodeError:
+                continue
+            if not line:
+                break
+            buf.write(line)
+            if not enable_logging:
+                continue
+            if profileMode:
+                console_log(get_rocprof_cmd(), line.strip(), indent_level=1)
+            else:
+                console_log(line.strip())
 
     input_thread.join(timeout=1)
 
     # Get process return code
     return_code = process.wait()
-    selector.close()
 
     success = return_code == 0
 
