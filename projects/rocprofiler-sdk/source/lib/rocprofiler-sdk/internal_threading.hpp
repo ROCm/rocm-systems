@@ -58,11 +58,13 @@ public:
     TaskGroup& operator=(TaskGroup&&) noexcept = delete;
 
     void exec(std::function<void()>&&);
+    void async(std::function<void()>&&);
     void wait();
     void join();
 
 private:
     std::mutex                             m_mutex           = {};
+    std::atomic<uint64_t>                  m_tasks_count     = 0;
     thread_pool_t*                         m_pool            = nullptr;
     std::deque<std::shared_ptr<task_type>> m_tasks           = {};
     std::deque<std::shared_ptr<task_type>> m_completed_tasks = {};

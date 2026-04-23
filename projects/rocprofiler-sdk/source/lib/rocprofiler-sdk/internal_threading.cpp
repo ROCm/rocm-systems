@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/common/container/stable_vector.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
@@ -33,6 +34,8 @@
 
 #include <pthread.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -92,8 +95,26 @@ TaskGroup::exec(std::function<void()>&& _func)
 }
 
 void
+TaskGroup::async(std::function<void()>&& _func)
+{
+    ++m_tasks_count;
+    auto _async_func = [func = std::move(_func)](std::atomic<uint64_t>* tasks_count) {
+        // ensure m_tasks_count is decremented even if func throws
+        auto _dtor = common::scope_destructor{[tasks_count]() { --(*tasks_count); }};
+        func();
+    };
+    parent_type::async(std::move(_async_func), &m_tasks_count);
+}
+
+void
 TaskGroup::wait()
 {
+    while(m_tasks_count.load(std::memory_order_relaxed) > 0)
+    {
+        std::this_thread::yield();
+        std::this_thread::sleep_for(std::chrono::microseconds{100});
+    }
+
     auto lk = std::unique_lock<std::mutex>{m_mutex};
     for(auto& itr : m_tasks)
         itr->wait();
