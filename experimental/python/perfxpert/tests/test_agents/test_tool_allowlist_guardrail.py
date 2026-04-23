@@ -12,6 +12,7 @@ from perfxpert.agents import (
     build_recommendation_agent,
     build_correctness_agent,
     build_compute_specialist,
+    build_diff_specialist,
     build_memory_specialist,
     build_latency_specialist,
 )
@@ -23,6 +24,7 @@ AGENT_BUILDERS = [
     build_recommendation_agent,
     build_correctness_agent,
     build_compute_specialist,
+    build_diff_specialist,
     build_memory_specialist,
     build_latency_specialist,
 ]
@@ -49,3 +51,10 @@ def test_no_execution_tool_in_allowlist(builder):
 def test_allowlist_within_cap(builder):
     agent = builder()
     assert len(agent.tools) <= 5, f"{agent.name} has {len(agent.tools)} tools (cap 5)"
+
+
+def test_agents_package_re_exports_diff_specialist_surface():
+    from perfxpert import agents
+
+    assert "build_diff_specialist" in agents.__all__
+    assert "run_diff_specialist" in agents.__all__
