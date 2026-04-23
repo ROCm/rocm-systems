@@ -1,6 +1,6 @@
 """Tests for perfxpert.tools.tasks — beads_rust-compatible Python task store."""
 
-import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -106,3 +106,53 @@ def test_is_read_only_class():
     # that they don't modify user source or run processes. They're MCP-safe.
     # This is a design choice documented in the spec.
     assert True  # placeholder — actual class markers on TaskStore methods
+
+
+def test_module_level_store_tracks_current_working_directory(tmp_path: Path, monkeypatch):
+    first = tmp_path / "one"
+    second = tmp_path / "two"
+    first.mkdir()
+    second.mkdir()
+
+    monkeypatch.chdir(first)
+    first_id = tasks.create("First task")
+
+    monkeypatch.chdir(second)
+    second_id = tasks.create("Second task")
+
+    first_store = tasks.TaskStore(first / ".beads")
+    second_store = tasks.TaskStore(second / ".beads")
+    assert first_store.next()["id"] == first_id
+    assert second_store.next()["id"] == second_id
+
+
+def test_module_level_store_uses_separate_connections_per_thread(tmp_path: Path, monkeypatch):
+    root = tmp_path / "threaded"
+    root.mkdir()
+    monkeypatch.chdir(root)
+
+    task_ids = [tasks.create("main-thread task")]
+    errors = []
+
+    def worker():
+        try:
+            task_ids.append(tasks.create("worker-thread task"))
+        except Exception as exc:  # pragma: no cover - assertion below inspects exact type
+            errors.append(exc)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join()
+
+    assert errors == []
+    store = tasks.TaskStore(root / ".beads")
+    try:
+        titles = {store.show(task_id)["title"] for task_id in task_ids}
+    finally:
+        store.close()
+    assert titles == {"main-thread task", "worker-thread task"}
+
+
+def test_module_level_close_requires_task_id():
+    with pytest.raises(TypeError):
+        tasks.close()

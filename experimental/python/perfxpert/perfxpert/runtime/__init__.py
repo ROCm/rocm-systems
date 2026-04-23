@@ -1,9 +1,15 @@
-"""Deterministic runtime middleware.
+"""Deterministic runtime middleware."""
 
-Phase 3 introduces:
-- gate_cascade.py — 5-gate correctness pipeline (§5.0)
-- intent_classifier.py — rule-based routing for air-gap mode (C2)
-- recursion_guard.py — opencode-in-opencode detection (N8)
+from perfxpert.runtime.gate_cascade import GateVerdict, evaluate as evaluate_gates
+from perfxpert.runtime.intent_classifier import IntentVerdict, classify_intent
+from perfxpert.runtime.recursion_guard import (
+    RecursionGuardViolation,
+    ensure_not_recursive,
+    opencode_session,
+)
 
-Phase 1: package marker only.
-"""
+__all__ = [
+    "GateVerdict", "evaluate_gates",
+    "IntentVerdict", "classify_intent",
+    "RecursionGuardViolation", "ensure_not_recursive", "opencode_session",
+]

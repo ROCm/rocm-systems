@@ -1,1 +1,1 @@
-"""Cross-module integration tests for perfxpert — Phase 2."""
+"""Integration tests — full-flow + cross-cutting CI guardrails."""
