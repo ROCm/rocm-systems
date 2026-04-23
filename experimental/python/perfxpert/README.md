@@ -1,1195 +1,223 @@
-# ROCm PerfXpert
+# PerfXpert
 
-**AI-powered GPU trace analysis for AMD ROCm — no C++ dependency required.**
+AI-powered AMD ROCm GPU trace analysis.
 
-perfxpert is a standalone Python package that reads rocprofiler-sdk SQLite trace databases
-(`.db` files) and produces human-readable performance insights, bottleneck detection,
-and actionable optimization recommendations.  It was extracted from the rocprofiler-sdk
-`rocpd` tool so it can be installed and run independently — without compiling any C++
-extensions (`libpyrocpd`).
+## Quickstart
 
----
+### Prerequisites
 
-**New to perfxpert?** Check out the [Getting Started Guide](docs/guides/getting-started.md) with animated demos for every feature.
+- Python 3.10+
+- `bun` — if not on PATH, the pip-install build hook auto-downloads it
+  into `~/.cache/perfxpert/bun/`. See
+  [docs/guides/getting-started.md](docs/guides/getting-started.md)
+  for the supported-host matrix + opt-out envs.
+- (Optional) `claude`, `codex`, or `gemini` CLI on PATH for multi-backend dispatch.
 
-## Table of Contents
+### Install
 
-1. [Why perfxpert?](#why-perfxpert)
-2. [Quick Start](#quick-start)
-3. [Installation](#installation)
-4. [CLI Reference](#cli-reference)
-5. [Python API](#python-api)
-6. [Analysis Tiers](#analysis-tiers)
-7. [Output Formats](#output-formats)
-8. [LLM Enhancement](#llm-enhancement)
-9. [Interactive Session](#interactive-session)
-10. [Environment Variables](#environment-variables)
-11. [Project Structure](#project-structure)
-12. [Architecture: PerfxpertConnection](#architecture-perfxpertconnection)
-13. [JSON Schema](#json-schema)
-14. [Building with CMake](#building-with-cmake)
-15. [Testing](#testing)
-16. [Differences from rocpd](#differences-from-rocpd)
-17. [Contributing](#contributing)
-
----
-
-## Why perfxpert?
-
-The `rocpd` tool that ships with rocprofiler-sdk requires `libpyrocpd` — a compiled
-C++ extension — to open `.db` trace files.  This means:
-
-- The SDK must be **built from source** (or an exact binary match installed) before any
-  analysis can run.
-- The package cannot be installed on machines that only have the `.db` output files.
-- CI/CD pipelines or post-processing jobs cannot use the Python API without a full
-  SDK build.
-
-**perfxpert solves this** by replacing `libpyrocpd` with a pure-Python `sqlite3` adapter
-(`PerfxpertConnection`) that reads the same `.db` files with zero compiled dependencies.
-All analysis logic, LLM integration, interactive sessions, and output formatters are
-identical to the rocprofiler-sdk version.
-
----
-
-## Quick Start
+> **First-time tip (stock Ubuntu / `rocm/dev-ubuntu-22.04` images):** the
+> default pip (22.x) misreads perfxpert's PEP-621 metadata and aborts the
+> wheel build. Upgrade pip once before installing:
+>
+> ```bash
+> pip install -U pip setuptools wheel
+> ```
 
 ```bash
-# Install directly from git — no clone needed, no C++ compiler required
-pip install 'perfxpert @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/perfxpert'
-
-# With LLM extras
-pip install 'perfxpert[llm] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/perfxpert'
-
-# Or from a local clone
-pip install experimental/python/perfxpert
-
-# Analyze a trace database
-perfxpert analyze -i trace.db
-
-# Generate an interactive HTML report
-perfxpert analyze -i trace.db --format webview -d ./reports -o my_trace
-
-# Analyze multiple databases (multi-process run)
-perfxpert analyze -i run_0.db run_1.db run_2.db
-
-# Tier 0: scan source code before you have a trace
-perfxpert analyze --source-dir ./my_app
-
-# Full interactive workflow (profile → analyze → optimize loop)
-perfxpert analyze -i trace.db --interactive --llm anthropic
+# SKIP-SAMPLE — install from PyPI (when published)
+pip install "perfxpert[all]"
 ```
 
----
-
-## Installation
-
-### Option 1: pip from git (recommended — no clone needed)
+To install the latest development build direct from the rocm-systems
+monorepo on GitHub, use the wrapper script (~5 sec instead of
+~5 min — details below):
 
 ```bash
-# Core (stdlib only — no C++ required)
-pip install 'perfxpert @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/perfxpert'
-
-# With LLM support (Anthropic + OpenAI)
-pip install 'perfxpert[llm] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/perfxpert'
-
-# All optional extras
-pip install 'perfxpert[all] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/perfxpert'
-
-# Pin to a specific commit
-pip install 'perfxpert @ git+https://github.com/ROCm/rocm-systems.git@<commit>#subdirectory=experimental/python/perfxpert'
+# SKIP-SAMPLE — first clone the repo (no recursive submodules), then run
+git clone --depth 1 --no-recurse-submodules https://github.com/ROCm/rocm-systems.git
+bash rocm-systems/experimental/python/perfxpert/scripts/pip-install-from-git.sh
+# Pass a ref / pip flags as positional args:
+#   scripts/pip-install-from-git.sh v0.2.0
+#   scripts/pip-install-from-git.sh <SHA> --user
 ```
 
-### Option 2: pip from local clone (development install)
+Or invoke pip directly with the submodule-scope env vars set
+(equivalent to the wrapper, just verbose):
 
 ```bash
-cd rocm-systems-dev/experimental/python/perfxpert
-pip install -e .                      # Core analysis (stdlib only)
-pip install -e ".[llm]"               # + Anthropic + OpenAI support
-pip install -e ".[all]"               # + rich terminal output
-pip install -e ".[dev]"               # + pytest / flake8 / black
+# SKIP-SAMPLE — pip directly, scoped submodule init
+GIT_CONFIG_COUNT=1 \
+GIT_CONFIG_KEY_0=submodule.active \
+GIT_CONFIG_VALUE_0=experimental/python/perfxpert/opencode \
+  pip install "perfxpert[all] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/perfxpert"
 ```
 
-### Option 3: pip (non-editable, from super-repo root)
+The plain `pip install "perfxpert @ git+…"` one-liner still works but
+triggers pip's full recursive submodule init over the ~34 unrelated
+submodules declared at the rocm-systems repo root — 3-6 min of wasted
+network on stock `rocm/dev-ubuntu-22.04`. The wrapper script scopes
+the init down to just the opencode submodule perfxpert's build hook
+actually needs; see `docs/guides/getting-started.md` §1.2 for the
+measurements.
+
+`[all]` pulls in the optional LLM providers (anthropic, openai,
+litellm) plus rich for pretty terminal output. All five providers
+— `anthropic`, `openai`, `ollama`, `private`, `opencode` — work
+out of the box; pick one with `--llm <name>`.
+
+### Run
 
 ```bash
-pip install ./experimental/python/perfxpert
+# SKIP-SAMPLE — requires an existing rocprofv3 trace DB
+# One-shot analysis (batch mode)
+perfxpert analyze -i trace.db --llm anthropic --format webview -o report.html
+
+# SKIP-SAMPLE — launches interactive TUI
+# Interactive agentic TUI (AMD-branded bundled opencode)
+perfxpert-code
+
+# SKIP-SAMPLE — multi-backend dispatch (requires the native CLI installed)
+# Claude / Codex / Gemini native CLIs with perfxpert MCP wired in:
+perfxpert-code claude   # installs perfxpert MCP + gate into Claude Code, execs claude
+perfxpert-code codex    # same for Codex CLI (trust-gate workflow)
+perfxpert-code gemini   # same for Gemini CLI
+perfxpert-code claude --dry-run "analyze this trace"   # preview, write nothing
+perfxpert-code uninstall claude   # reverses install (refuses on marker drift)
+
+# SKIP-SAMPLE — requires an existing rocprofv3 trace DB
+# Air-gap mode (no LLM; deterministic rule-based analysis only)
+PERFXPERT_AIRGAP=1 perfxpert analyze -i trace.db --format markdown -o report.md
+
+# SKIP-SAMPLE — requires two rocprofv3 trace DBs (baseline + candidate)
+# Diff two runs (schema-0.3.1 trace_diff block — per-kernel deltas + verdict)
+perfxpert diff --baseline baseline.db --candidate candidate.db --format markdown
+
+# SKIP-SAMPLE — CI wrapper; rc=1 on regression, rc=0 otherwise
+# Regression gate for CI pipelines (wraps `diff` + fails the build if slower)
+perfxpert ci --baseline baseline.db --candidate candidate.db --threshold 0.05
+
+# Health check
+perfxpert doctor
 ```
 
-### Option 4: CMake (as part of the super-repo build)
+## Architecture (v0.2.0+)
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  User shell                                                 │
+│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │ perfxpert   │  │ perfxpert-   │  │ Library API       │  │
+│  │ analyze     │  │ code (TUI)   │  │ (Python)          │  │
+│  └──────┬──────┘  └──────┬───────┘  └────────┬──────────┘  │
+│         │                │                    │             │
+│         └────────────────┴────────────────────┘             │
+│                          │                                   │
+│                          ▼                                   │
+│             OpenAI Agents SDK hierarchy                      │
+│   (Root → Analysis → Recommendation → Specialists)           │
+│   — all 8 agents callable via MCP + perfxpert.api            │
+│                          │                                   │
+│                          ▼                                   │
+│    Deterministic middleware (gate_cascade, intent router)    │
+│                          │                                   │
+│                          ▼                                   │
+│  56 READ_ONLY MCP tools (8 agent + 47 classifier + 1 diff)   │
+│            + ~22 knowledge YAMLs                             │
+│                                                              │
+└────────────────────────────────────────────────────────────┘
+```
+
+Core analysis is self-contained — `pip install perfxpert` handles all
+profiling + recommendation features. `perfxpert-code` ships an
+AMD-branded opencode binary bundled directly into the wheel: the
+pip-install build hook compiles it from the pinned `sst/opencode`
+submodule + our patch series (`experimental/python/perfxpert/.patches/`)
+during install, provided `bun` is on PATH.
+
+If `bun` is missing, the install still succeeds (library + analyze + MCP
+paths all work); `perfxpert-code` itself won't launch until you install
+bun and rerun the install. As a last resort, set
+`PERFXPERT_OPENCODE_PATH` to point at a pre-built opencode binary.
+
+Advanced: for tightly-sandboxed CI where neither bun nor network access
+is available, set `PERFXPERT_SKIP_BUNDLED_BUILD=1` before
+`pip install` to suppress the build attempt entirely:
 
 ```bash
-cmake -B build \
-      -DCMAKE_INSTALL_PREFIX=/opt/rocm \
-      experimental/python/perfxpert
-
-cmake --build build
-sudo cmake --install build
+# SKIP-SAMPLE — actual installer; scripts/test-samples.py must not execute this
+curl -fsSL https://opencode.ai/install | bash
 ```
 
-This installs the `perfxpert` script to `/opt/rocm/bin/` and the Python package to
-`/opt/rocm/lib/python3.x/site-packages/perfxpert/`.
-
-### Dependencies
-
-| Dependency | Required for | How to install |
-|---|---|---|
-| Python ≥ 3.8 | Everything | — |
-| `anthropic >= 0.18` | `--llm anthropic` | `pip install anthropic` |
-| `openai >= 1.0` | `--llm openai` / `--llm private` | `pip install openai` |
-| `rich >= 13.0` | Colored terminal output | `pip install rich` |
-| `httpx` | `PERFXPERT_LLM_PRIVATE_VERIFY_SSL=0` (SSL skip) | `pip install httpx` |
-| `pytest` | Running tests | `pip install pytest` |
-
-Core analysis (Tier 0–3) requires **no third-party packages** — only Python stdlib.
-
----
-
-## CLI Reference
-
-All commands use the `perfxpert analyze` subcommand.
-
-### Synopsis
-
-```
-perfxpert analyze [-i DB [DB ...]] [--source-dir DIR] [OPTIONS]
-```
-
-At least one of `-i` (database) or `--source-dir` (source directory) is required.
-
-### Input options
-
-| Flag | Description |
-|---|---|
-| `-i DB [DB ...]` | One or more rocprofiler-sdk `.db` trace files.  When multiple files are given they are opened via SQLite ATTACH and unioned transparently. |
-| `--source-dir DIR` | Path to GPU source code directory for Tier 0 static analysis.  Can be combined with `-i` for a combined Tier 0 + Tier 1/2 report. |
-| `--att-dir DIR` | Directory containing `stats_*.csv` files from a `rocprofv3 --att` run.  Enables Tier 3 ATT stall analysis. |
-
-### Output options
-
-| Flag | Default | Description |
-|---|---|---|
-| `--format FORMAT` | `text` | Output format: `text`, `json`, `markdown`, `webview` |
-| `-o NAME` | — | Base name for output file (extension added automatically) |
-| `-d DIR` | `.` | Output directory |
-
-When `-o` is not given, output is printed to stdout.
-
-### Analysis options
-
-| Flag | Default | Description |
-|---|---|---|
-| `--top-kernels N` | `10` | Number of hotspot kernels to show |
-| `--prompt TEXT` | — | Natural language question to guide analysis |
-| `--verbose` | off | Show debug information |
-
-### LLM options
-
-| Flag | Description |
-|---|---|
-| `--llm PROVIDER` | Enable LLM enhancement.  Providers: `anthropic`, `openai`, `private` |
-| `--llm-model MODEL` | Override default model (e.g. `claude-opus-4-6`, `gpt-4o`) |
-| `--llm-private-model MODEL` | Model name for `--llm private` |
-
-### Interactive session options
-
-| Flag | Description |
-|---|---|
-| `--interactive` | Launch menu-driven analysis loop (`InteractiveSession`) |
-| `--interactive "CMD"` | Launch 7-phase automated workflow (`WorkflowSession`) with the given app command |
-| `--resume-session ID` | Resume a previously saved `InteractiveSession` by session ID |
-| `--llm-compact-every N` | Compact LLM conversation history every N turns (default: 10) |
-
-### Usage examples
-
-```bash
-# ── Tier 1: basic trace analysis ────────────────────────────────
-perfxpert analyze -i output.db
-
-# ── Tier 1 + Tier 2: with hardware counters ──────────────────────
-# (trace must have been collected with --pmc)
-perfxpert analyze -i output.db
-
-# ── Multiple databases (multi-process / multi-rank run) ──────────
-perfxpert analyze -i results_0.db results_1.db results_2.db
-
-# ── Tier 0: source code scan (no .db required) ───────────────────
-perfxpert analyze --source-dir ./my_hip_app
-
-# ── Combined Tier 0 + Tier 1 ─────────────────────────────────────
-perfxpert analyze -i output.db --source-dir ./my_hip_app
-
-# ── Tier 3: ATT instruction-level stall analysis ─────────────────
-# First collect (run on a machine with AMD GPU):
-#   rocprofv3 --att --att-library-path /opt/rocm/lib \
-#             --att-target-cu 0 -d ./att_out -o trace -- ./app
-perfxpert analyze -i ./att_out/trace*.db --att-dir ./att_out
-
-# ── Output formats ────────────────────────────────────────────────
-perfxpert analyze -i output.db --format json     -d ./out -o analysis  # → analysis.json
-perfxpert analyze -i output.db --format markdown -d ./out -o analysis  # → analysis.md
-perfxpert analyze -i output.db --format webview  -d ./out -o analysis  # → analysis.html
-
-# ── LLM enhancement ───────────────────────────────────────────────
-export ANTHROPIC_API_KEY="sk-ant-..."
-perfxpert analyze -i output.db --llm anthropic
-
-export OPENAI_API_KEY="sk-..."
-perfxpert analyze -i output.db --llm openai
-
-# Private/enterprise OpenAI-compatible server
-export PERFXPERT_LLM_PRIVATE_URL="https://llm.corp.example.com/openai"
-export PERFXPERT_LLM_PRIVATE_HEADERS='{"Ocp-Apim-Subscription-Key": "abc123"}'
-perfxpert analyze -i output.db --llm private --llm-private-model gpt-4o
-
-# ── Custom analysis prompt ─────────────────────────────────────────
-perfxpert analyze -i output.db --prompt "Why is my matmul kernel slow?"
-perfxpert analyze -i output.db --prompt "Focus on memory bandwidth bottlenecks"
-
-# ── Interactive session ───────────────────────────────────────────
-perfxpert analyze -i output.db --interactive
-perfxpert analyze -i output.db --interactive --llm anthropic
-
-# 7-phase workflow (profile → analyze → optimize loop)
-perfxpert analyze --interactive "./my_app arg1 arg2" --llm anthropic
-
-# Resume a saved session
-perfxpert analyze -i output.db --interactive \
-    --resume-session 2026-03-10_14-23-01_myapp
-```
-
----
-
-## Python API
-
-Import from `perfxpert.ai_analysis` (not `rocpd.ai_analysis`):
-
-```python
-from perfxpert.ai_analysis import (
-    analyze_database,
-    analyze_database_to_json,
-    analyze_source,
-    get_recommendations,
-    validate_database,
-    AnalysisResult,
-    SourceAnalysisResult,
-    OutputFormat,
-    LLMAnalyzer,
-    LLMAuthenticationError,
-    LLMRateLimitError,
-)
-from pathlib import Path
-```
-
-### `analyze_database()`
-
-```python
-def analyze_database(
-    database_path: Path,
-    *,
-    custom_prompt: Optional[str] = None,
-    enable_llm: bool = False,
-    llm_provider: Optional[str] = None,   # "anthropic" | "openai" | "private"
-    llm_api_key: Optional[str] = None,
-    output_format: OutputFormat = OutputFormat.PYTHON_OBJECT,
-    verbose: bool = False,
-    top_kernels: int = 10,
-    att_dir: Optional[Path] = None,        # Tier 3 ATT directory
-) -> AnalysisResult
-```
-
-**Examples:**
-
-```python
-# Basic analysis — local mode, no internet
-result = analyze_database(Path("output.db"))
-print(result.summary.overall_assessment)
-print(f"Primary bottleneck: {result.summary.primary_bottleneck}")
-
-# High-priority recommendations
-for rec in result.recommendations.high_priority:
-    print(f"[{rec.priority}] {rec.title}")
-    print(f"  {rec.description}")
-    print(f"  Impact: {rec.estimated_impact}")
-
-# Save webview report
-Path("report.html").write_text(result.to_webview())
-
-# With LLM
-result = analyze_database(
-    Path("output.db"),
-    enable_llm=True,
-    llm_provider="anthropic",
-    custom_prompt="Why is kernel X slow?",
-)
-print(result.llm_enhanced_explanation)
-
-# Tier 3: ATT analysis
-result = analyze_database(
-    Path("att_out/trace0.db"),
-    att_dir=Path("att_out"),
-)
-```
-
-### `analyze_source()`
-
-Tier 0: static analysis of GPU source code — no `.db` required.
-
-```python
-def analyze_source(
-    source_dir: Path,
-    *,
-    custom_prompt: Optional[str] = None,
-    enable_llm: bool = False,
-    llm_provider: Optional[str] = None,
-    llm_api_key: Optional[str] = None,
-    verbose: bool = False,
-) -> SourceAnalysisResult
-```
-
-```python
-from perfxpert.ai_analysis import analyze_source
-from pathlib import Path
-
-plan = analyze_source(Path("./my_hip_app"))
-print(plan.suggested_first_command)
-print(f"Detected {plan.kernel_count} GPU kernels")
-for pat in plan.detected_patterns:
-    print(f"[{pat['severity'].upper()}] {pat['description']}")
-```
-
-### `analyze_database_to_json()`
-
-```python
-json_str = analyze_database_to_json(
-    database_path=Path("output.db"),
-    output_json_path=Path("analysis.json"),   # optional — also saves to file
-)
-```
-
-### `get_recommendations()`
-
-```python
-from perfxpert.ai_analysis import get_recommendations
-
-recs = get_recommendations(
-    Path("output.db"),
-    priority_filter="high",       # "high" | "medium" | "low" | None (all)
-    category_filter="memory",     # optional substring match on category
-)
-for rec in recs:
-    print(rec.title, rec.estimated_impact)
-```
-
-### `validate_database()`
-
-```python
-from perfxpert.ai_analysis import validate_database
-
-info = validate_database(Path("output.db"))
-# info keys: is_valid, tier, has_kernels, has_memory_copies,
-#            has_pmc_counters, tables, error
-print(f"Valid: {info['is_valid']}, Tier: {info['tier']}")
-```
-
-### `AnalysisResult` dataclass
-
-```python
-@dataclass
-class AnalysisResult:
-    metadata: AnalysisMetadata            # version, db path, timestamp, custom_prompt
-    profiling_info: ProfilingInfo         # duration_ns, mode, tier, gpus
-    summary: AnalysisSummary             # bottleneck, confidence, key_findings
-    execution_breakdown: ExecutionBreakdown  # kernel%, memcpy%, api%, idle%
-    recommendations: RecommendationSet   # .high_priority / .medium_priority / .low_priority
-    warnings: List[AnalysisWarning]
-    errors: List[str]
-    llm_enhanced_explanation: Optional[str]
-    tier0: Optional[SourceAnalysisResult]  # when --source-dir also used
-    _raw: dict                            # internal; used by to_json() / to_webview()
-
-    # Serialization methods
-    def to_dict() -> dict
-    def to_json(indent: int = 2) -> str   # schema-conformant JSON (v0.1.0 / v0.3.0)
-    def to_text() -> str
-    def to_markdown() -> str
-    def to_webview() -> str               # self-contained HTML report
-```
-
-### `SourceAnalysisResult` dataclass
-
-```python
-@dataclass
-class SourceAnalysisResult:
-    source_dir: str
-    analysis_timestamp: str              # ISO 8601
-    programming_model: str               # "HIP", "HIP+ROCm_Libraries", "PyTorch_HIP", …
-    files_scanned: int
-    files_skipped: int
-    detected_kernels: List[Dict]         # {name, file, line, launch_type}
-    kernel_count: int
-    detected_patterns: List[Dict]        # {pattern_id, severity, category, description, count, locations}
-    risk_areas: List[str]
-    already_instrumented: bool           # ROCTx markers found
-    roctx_marker_count: int
-    recommendations: List[Dict]          # same shape as generate_recommendations() output
-    suggested_counters: List[str]
-    suggested_first_command: str         # ready-to-run rocprofv3 command
-    llm_explanation: Optional[str]
-```
-
-### Exception hierarchy
-
-```
-AnalysisError
-├── DatabaseNotFoundError
-├── DatabaseCorruptedError
-├── MissingDataError
-├── UnsupportedGPUError
-├── LLMAuthenticationError       ← propagates; not swallowed
-├── LLMRateLimitError            ← propagates; not swallowed
-├── ReferenceGuideNotFoundError
-├── SourceDirectoryNotFoundError
-└── SourceAnalysisError
-```
-
-### `LLMConversation` — persistent multi-turn session
-
-```python
-from perfxpert.ai_analysis.llm_conversation import LLMConversation
-
-conv = LLMConversation(provider="anthropic", api_key="sk-ant-...")
-conv.initialize("You are a GPU performance expert.")
-
-response = conv.send("What is wave occupancy?")
-print(response)
-
-response2 = conv.send("How does it relate to LDS usage?")
-# LLM has full context from previous message
-
-# Serialize / restore across sessions
-state = conv.to_dict()          # excludes api_key
-restored = LLMConversation.from_dict(state, api_key="sk-ant-...")
-```
-
----
-
-## Analysis Tiers
-
-perfxpert implements a progressive five-tier analysis model:
-
-| Tier | Data Required | Collection Command | Key Insights |
-|---|---|---|---|
-| **0** | Source code (`--source-dir`) | *(none — static analysis)* | Detected kernels, profiling plan, suggested first command |
-| **1** | Trace DB (`-i db.db`) | `rocprofv3 --sys-trace -- ./app` | Kernel hotspots, time breakdown, memory copy overhead, idle time |
-| **2** | Trace DB + PMC counters | `rocprofv3 --pmc GRBM_COUNT SQ_WAVES FETCH_SIZE -- ./app` | GPU utilization %, wave occupancy, HBM bandwidth (Roofline/SOL) |
-| **3** | Trace DB + ATT output | `rocprofv3 --att --att-library-path /opt/rocm/lib --att-target-cu 0 -d ./att_out -o trace -- ./app` | Per-instruction stall cycles, VMEM latency, LDS bank conflicts, branch divergence |
-| **4** | External (rocprof-compute) | `rocprof-compute profile -- ./app` | Full micro-architecture breakdown (external tool) |
-
-Tiers 0–3 are fully implemented in perfxpert.  Tier 4 is handled by `rocprof-compute`
-(Omniperf) which perfxpert recommends when appropriate.
-
-### Tier 3: ATT Instruction-Level Stall Analysis
-
-ATT (Advanced Thread Trace) captures per-instruction hardware events at collection time
-via the decode library bundled with rocprofiler-sdk.  The decoder runs **inside**
-`rocprofv3` — there is no separate decode step.
-
-**Collection:**
-```bash
-rocprofv3 --att \
-          --att-library-path /opt/rocm/lib \
-          --att-target-cu 0 \
-          -d ./att_output \
-          -o trace \
-          -- ./my_app
-# Produces: att_output/trace.db  AND  att_output/stats_*.csv
-```
-
-**Analysis:**
-```bash
-perfxpert analyze -i ./att_output/trace*.db --att-dir ./att_output
-```
-
-ATT is **auto-detected** in interactive sessions: perfxpert checks the `.db` parent
-directory for `stats_*.csv` files and passes `att_dir` automatically — no manual flag needed.
-
-**ATT outputs:**
-- Per-instruction stall ratio and hit count
-- Weighted stall metric combining frequency and severity
-- Bottleneck classification: `VMEM Latency`, `LDS Bank Conflict`, `Dependency Chain`,
-  `Branch Divergence`
-- HIGH priority recommendations when `stall_ratio >= 0.40` or `hitcount >= 6400`
-- INFO recommendation when ATT ran successfully but no significant stalls were found
-
----
-
-## Output Formats
-
-| `--format` | File extension | Description |
-|---|---|---|
-| `text` | `.txt` (or stdout) | ASCII bar charts, fixed-width tables.  Human-readable terminal output. |
-| `json` | `.json` | Schema-conformant JSON document (see [JSON Schema](#json-schema)).  Machine-parseable for CI pipelines and integrations. |
-| `markdown` | `.md` | GitHub-Flavored Markdown with tables and priority emoji (🔴 HIGH, 🟠 MEDIUM, 🟡 LOW, ℹ INFO). |
-| `webview` | `.html` | Fully self-contained, offline-capable interactive HTML report (see below). |
-
-### Webview Report Features
-
-The `--format webview` output is a single `.html` file with no external dependencies.
-Open it in any browser — no web server required.
-
-- **Light/Dark theme toggle** — persisted in `localStorage`; AMD dark theme by default
-- **Status summary badges** — Critical/Warning/Low/Info counts at a glance in the header
-- **Metric pills** — Runtime (ms), kernel dispatch count, analysis tier, timestamp, DB path
-- **Status-colored KPI cards** — color-coded top border (green/amber/red) reflecting health
-- **SVG donut gauges** — hardware counter utilization at a glance
-- **Priority icons on recommendations** — 🔴 HIGH, 🟠 MEDIUM, 🟡 LOW, ℹ INFO
-- **Hover tooltips on every element** — gauges, bars, table headers, and hardware counter
-  rows each explain the metric, target thresholds, and next steps
-- **Collapsible recommendation cards**
-- **FAB scroll-to-top button**
-- **Staggered fade-in animations**
-- Full embedded JSON payload (`var ANALYSIS = {...}`) for programmatic extraction
-
----
-
-## LLM Enhancement
-
-All core analysis runs locally with no internet connection.  LLM enhancement is an
-**opt-in layer** that generates natural language explanations, interprets results
-in application context, and answers targeted questions.
-
-Sensitive data is **automatically redacted** before any LLM API call:
-
-| Original value | Sent to LLM |
-|---|---|
-| `conv2d_forward_kernel` | `[KERNEL_1]` |
-| `[256, 256, 1]` (grid size) | `[GRID_SIZE]` |
-| `/home/user/my_app.cpp` | `[REDACTED]` |
-
-Aggregated metrics (time percentages, bottleneck class) are preserved as-is.
-
-### Supported Providers
-
-#### Anthropic Claude (recommended)
-
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-perfxpert analyze -i output.db --llm anthropic
-```
-
-Default model: `claude-sonnet-4-20250514`.  Override with `PERFXPERT_LLM_MODEL` or
-`--llm-model claude-opus-4-6`.
-
-#### OpenAI GPT
-
-```bash
-export OPENAI_API_KEY="sk-..."
-perfxpert analyze -i output.db --llm openai
-```
-
-Default model: `gpt-4-turbo-preview`.
-
-#### Private / enterprise OpenAI-compatible server
-
-For HPC centers, air-gapped environments, or enterprise deployments that run a
-locally-hosted OpenAI-compatible API:
-
-```bash
-export PERFXPERT_LLM_PRIVATE_URL="https://llm-api.example.com/OpenAI"
-export PERFXPERT_LLM_PRIVATE_HEADERS='{"Ocp-Apim-Subscription-Key": "abc123", "api-version": "preview"}'
-perfxpert analyze -i output.db --llm private --llm-private-model gpt-4o
-```
-
-The `user` HTTP header is automatically set to `os.getlogin()` (the logged-in OS user)
-unless already present in `PERFXPERT_LLM_PRIVATE_HEADERS`.
-
-Disable SSL verification for internal CAs:
-```bash
-export PERFXPERT_LLM_PRIVATE_VERIFY_SSL=0   # requires httpx
-```
-
-#### Local Ollama
-
-```bash
-ollama serve &
-ollama pull codellama:13b
-
-perfxpert analyze -i output.db --llm-local ollama --llm-local-model codellama:13b
-```
-
-Default Ollama URL: `http://localhost:11434/v1`.  Override with `PERFXPERT_LLM_LOCAL_URL`.
-
-### The LLM Reference Guide ("Fence")
-
-The LLM reference guide is a **user-modifiable markdown file** that is loaded as the
-LLM system prompt.  It defines:
-
-- Correct ROCm tool names and commands (`rocprofv3`, `rocprof-compute`, `rocprof-sys`)
-- AMD GPU hardware specifications (MI100, MI200 series, MI300 series, MI350 series, RDNA2/3)
-- Hardware counter per-block limits (hard constraints that prevent error code 38 crashes)
-- Performance analysis models (Roofline, Speed-of-Light, Top-Down)
-- Recommendation quality standards
-- Prohibited behaviors (no fabricated metrics, no deprecated tools)
-
-**File location (lookup order):**
-1. `PERFXPERT_LLM_REFERENCE_GUIDE` environment variable (if set)
-2. Package-relative: `perfxpert/ai_analysis/share/llm-reference-guide.md`
-3. System install: `/opt/rocm/share/rocprofiler-sdk/llm-reference-guide.md`
-
-**To change LLM behavior, just edit the guide — no code changes needed:**
-
-```bash
-# Find the guide
-python3 -c "from perfxpert.ai_analysis.llm_analyzer import get_reference_guide_path; print(get_reference_guide_path())"
-
-# Edit it
-nano <path-from-above>
-# Changes take effect immediately on the next analysis run
-```
-
----
-
-## Interactive Session
-
-The interactive session (`--interactive`) is an iterative profiling-and-optimization loop
-that maintains a persistent LLM conversation across all actions within a session.
-
-### Menu-Driven Mode (`InteractiveSession`)
-
-Launched when `--interactive` is given **without** an app command:
-
-```bash
-perfxpert analyze -i output.db --interactive --llm anthropic
-```
-
-```
-  [p]  Profile   — run a new rocprofv3 command and analyze the output
-  [a]  Analyze   — re-analyze current .db and refresh recommendations
-  [o]  Optimize  — ask the LLM for specific optimization advice
-  [s]  Save      — save session state to disk
-  [q]  Quit
-```
-
-The `LLMConversation` object is shared across all `[a]`, `[o]`, and code-edit LLM calls
-within a session, so the LLM accumulates full context and doesn't repeat itself.
-
-**Source file deduplication**: Files already sent to the LLM in a prior `[o]` call are
-not re-transmitted.  The set of sent files is serialized into the session JSON and
-restored on `--resume-session`.
-
-**Automatic compaction**: Every `--llm-compact-every N` turns (default 10), older messages
-are replaced by an LLM-generated summary.  The most recent 6 turns are always kept verbatim.
-
-**Session resume:**
-```bash
-# List saved sessions
-ls ~/.perfxpert/sessions/*.json
-
-# Resume by session ID (format: YYYY-MM-DD_HH-MM-SS_<source_dir>)
-perfxpert analyze -i output.db --interactive \
-    --resume-session 2026-03-10_14-23-01_myapp
-
-# Auto-resume prompt when source-dir matches a previous session
-perfxpert analyze -i output.db --source-dir ./my_app --interactive
-```
-
-### 7-Phase Workflow Mode (`WorkflowSession`)
-
-Launched when `--interactive` is given **with** an app command string:
-
-```bash
-perfxpert analyze --interactive "./my_app arg1 arg2" --llm anthropic
-```
-
-The workflow automates the full profiling loop:
-
-| Phase | Name | What happens |
-|---|---|---|
-| 1 | Validate source paths | Warns if `--source` paths are missing |
-| 1b | Quick workload analysis | Classifies app type; picks best starter flags |
-| 2 | Generate + confirm profiling command | Builds tailored `rocprofv3` command; user approves |
-| 3 | Run profiler | Streams stdout; records `TraceRun` on success |
-| 4 | AI trace analysis | Runs `analyze_database()` → prints report |
-| 5 | Recommendations menu | Adapts options based on priority |
-| 6 | Apply changes | AI rewrites source files; `.bak` backup created |
-| 7 | Re-profiling prompt | Choose same / edit / AI-recommended command |
-
-**Phase 1b — Quick Workload Analysis:**
-
-Before presenting the profiling command, the tool inspects the app command:
-
-| Detected type | Binary pattern | Extra flags added |
-|---|---|---|
-| `python_ml` | `python` + PyTorch/JAX/TF | `--hip-trace` |
-| `llm_inference` | `vllm`, `ollama`, LLM keywords | `--hip-trace` |
-| `python_generic` | `python` without ML keywords | *(default)* |
-| `hip_compute` | compiled binary | *(default)* |
-| `mpi_multi` | `mpirun`, `srun`, `mpiexec` | `--process-sync` |
-
-When `--source-dir` is also set, Phase 1b runs `SourceAnalyzer` on the source and
-uses the recommended flags from its highest-priority profiling recommendation.
-
-**Multi-process support**: When `mpirun`, `torchrun`, DeepSpeed, or DDP keywords are
-detected (`uses_fork=True`), the workflow adds `--process-sync` and uses
-`-o results_%nid%` so each process writes its own `.db`.  After the run,
-`merge_sqlite_dbs()` merges all per-process databases into `merged_processes.db`.
-
-**Phase 5 — INFO vs. Actionable split:**
-
-- All recommendations are INFO (profiling guidance): shows `[r] Re-profile` only — not
-  `[a] AI optimization` (which would incorrectly try to edit source for a data gap)
-- Any HIGH/MEDIUM recommendation: shows `[a] Address all with AI optimization`
-- Once all Tier 1/2 data is collected: shows deeper-tier escalation options:
-  - `[d]` → PC sampling (Tier 3 stochastic): `ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1 rocprofv3 --pc-sampling ...`
-  - `[t]` → ATT (Tier 3 deterministic): `rocprofv3 --att --att-library-path /opt/rocm/lib ...`
-  - `[t]` is hidden once ATT has already been run in the current session
-
-**Phase 6 — AI-edit revert:**
-
-When the AI modifies source files, a `.bak` backup is created automatically.
-Typing `revert` / `undo` / `v` at the recompile prompt triggers:
-
-1. Prompt for error output (if none was pasted yet)
-2. Immediate restore from `.bak`
-3. LLM analysis: root cause of failed edit + suggested alternative
-4. Offer to apply the alternative
-5. What-next menu: `[f] Try a different fix` / `[p] Continue to re-profiling` / `[q] Quit`
-
-**Cycle prevention**: The session maintains a fingerprint of all flags and counters
-collected across **all** previous runs.  A suggested command that adds nothing new is
-cleared before it reaches Phase 7, preventing sys-trace ↔ pmc cycling.
-
-### Session Persistence
-
-| Session type | Save triggers | File location |
-|---|---|---|
-| `InteractiveSession` | `[s]`, `[q]`, Ctrl+C | `~/.perfxpert/sessions/<ts>_<source>.json` |
-| `WorkflowSession` | Phase 3 success, Phase 6 edit, exit | `~/.perfxpert/sessions/workflow_<ts>_<app>.json` |
-
-`WorkflowSession` saves are for audit/debugging; resume (`--resume-session`) applies
-only to `InteractiveSession`.
-
----
-
-## Environment Variables
-
-| Variable | Purpose | Default |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | Anthropic Claude API key | — |
-| `OPENAI_API_KEY` | OpenAI GPT API key | — |
-| `PERFXPERT_LLM_MODEL` | Override default model for `--llm anthropic` or `--llm openai` | Provider default |
-| `PERFXPERT_LLM_REFERENCE_GUIDE` | Path to custom LLM reference guide | Package `share/llm-reference-guide.md` |
-| `PERFXPERT_LLM_PRIVATE_URL` | Base URL for private OpenAI-compatible server (**required** for `--llm private`) | — |
-| `PERFXPERT_LLM_PRIVATE_MODEL` | Model name for private server | — |
-| `PERFXPERT_LLM_PRIVATE_API_KEY` | API key for private server | `"dummy"` |
-| `PERFXPERT_LLM_PRIVATE_HEADERS` | Extra HTTP headers as JSON or Python-dict (e.g. `{"Ocp-Apim-Subscription-Key": "..."}`) | — |
-| `PERFXPERT_LLM_PRIVATE_VERIFY_SSL` | Set to `0` or `false` to skip SSL certificate verification (requires `httpx`) | enabled |
-| `PERFXPERT_LLM_LOCAL_URL` | Ollama base URL | `http://localhost:11434/v1` |
-| `PERFXPERT_LLM_LOCAL_MODEL` | Ollama model name | `codellama:13b` |
-
-### `PERFXPERT_LLM_PRIVATE_HEADERS` format
-
-Both JSON and Python-dict formats are accepted and single-quoted keys are normalized:
-
-```bash
-# JSON (double-quoted keys)
-export PERFXPERT_LLM_PRIVATE_HEADERS='{"Ocp-Apim-Subscription-Key": "abc123", "api-version": "preview"}'
-
-# Python dict (single-quoted keys — normalized automatically)
-export PERFXPERT_LLM_PRIVATE_HEADERS="{'Ocp-Apim-Subscription-Key': 'abc123'}"
-```
-
----
-
-## Project Structure
-
-```
-experimental/python/perfxpert/
-├── README.md                          ← this file
-├── pyproject.toml                     ← PEP 517 package metadata; entry point: perfxpert
-├── CMakeLists.txt                     ← pip-based install target + ctest wiring
-├── tests/                             ← integration tests (use real .db files)
-│
-└── python/
-    └── perfxpert/                    ← Python package
-│   ├── __init__.py                    ← version="0.1.0"; exports PerfxpertConnection
-│   ├── __main__.py                    ← entry point for python -m perfxpert
-│   ├── connection.py                  ← PerfxpertConnection (pure-sqlite3, no C++)
-│   ├── output_config.py               ← minimal replacement for libpyrocpd.output_config
-│   ├── analyze.py                     ← ~6000-line analysis orchestrator + formatters
-│   ├── tracelens_port.py              ← TraceLens interval arithmetic + kernel categorization
-│   │
-│   └── ai_analysis/                   ← AI analysis subpackage
-│       ├── __init__.py                ← public API exports
-│       ├── api.py                     ← analyze_database(), analyze_source(), AnalysisResult
-│       ├── exceptions.py              ← AnalysisError hierarchy
-│       ├── llm_analyzer.py            ← LLMAnalyzer: single-shot LLM calls with "fence"
-│       ├── llm_conversation.py        ← LLMConversation: persistent multi-turn streaming
-│       ├── source_analyzer.py         ← Tier 0: SourceAnalyzer, ProfilingPlan
-│       ├── interactive.py             ← InteractiveSession + WorkflowSession
-│       ├── README.md                  ← ai_analysis module documentation
-│       ├── share/
-│       │   └── llm-reference-guide.md ← user-modifiable LLM "fence"
-│       ├── docs/
-│       │   ├── analysis-output.schema.json  ← JSON output schema
-│       │   ├── AI_ANALYSIS_API.md           ← Python API reference
-│       │   ├── SCHEMA_CHANGELOG.md          ← schema version history
-│       │   └── LLM_REFERENCE_GUIDE.md       ← fence documentation
-│       └── tests/
-│           ├── __init__.py
-│           ├── test_api_standalone.py       ← 23 API unit tests
-│           ├── test_interactive_context.py  ← interactive session tests
-│           ├── test_llm_conversation.py     ← 51 LLMConversation tests
-│           ├── test_local_llm.py            ← local Ollama integration tests
-│           └── test_tracelens_port.py       ← TraceLens tests
-│
-└── tests/                             ← integration tests (use real .db files)
-    ├── test_analyze.py
-    ├── test_analyze_schema.py
-    ├── test_ai_analysis_standalone.py
-    └── test_guide_filter_standalone.py
-```
-
----
-
-## Architecture: PerfxpertConnection
-
-`PerfxpertConnection` (`perfxpert/connection.py`) is the pure-Python replacement for
-`libpyrocpd.RocpdImportData`.  It gives the analysis layer a `sqlite3.Connection`-like
-interface without any compiled extension.
-
-### Single database
-
-```python
-from perfxpert import PerfxpertConnection
-
-with PerfxpertConnection("trace.db") as conn:
-    rows = conn.execute("SELECT * FROM rocpd_kernel_dispatch LIMIT 5").fetchall()
-```
-
-Opens the file directly — zero overhead, no ATTACH.
-
-### Multiple databases (multi-process runs)
-
-```python
-conn = PerfxpertConnection(["results_0.db", "results_1.db", "results_2.db"])
-```
-
-Creates an in-memory SQLite database and ATTACHes each file as `db0`, `db1`, `db2`.
-Then creates UNION ALL views for each standard rocpd table so all analysis queries work
-unchanged:
-
-```sql
--- Automatically created for each of:
--- rocpd_kernel_dispatch, rocpd_memory_copy, rocpd_api,
--- rocpd_agent, rocpd_metadata, pmc_events
-CREATE TEMP VIEW rocpd_kernel_dispatch AS
-    SELECT col1, col2, ... FROM db0.rocpd_kernel_dispatch
-    UNION ALL
-    SELECT col1, col2, ... FROM db1.rocpd_kernel_dispatch
-    UNION ALL
-    SELECT col1, col2, ... FROM db2.rocpd_kernel_dispatch
-```
-
-Tables that don't exist in a particular shard are skipped gracefully.
-
-### `merge_sqlite_dbs()`
-
-For permanent merges (as opposed to the in-memory UNION ALL view):
-
-```python
-from perfxpert import merge_sqlite_dbs
-
-merged_path = merge_sqlite_dbs(
-    ["results_0.db", "results_1.db", "results_2.db"],
-    output_path="merged_processes.db",   # optional; defaults to sibling file
-)
-```
-
-Copies the first database, then ATTACHes each subsequent source and
-`INSERT OR IGNORE INTO main.<table> SELECT * FROM src<N>.<table>` for every table.
-
-### `execute_statement()`
-
-Compatibility shim used by `analyze.py`:
-
-```python
-from perfxpert import execute_statement
-
-# Works with both PerfxpertConnection and bare sqlite3.Connection
-cursor = execute_statement(conn, "SELECT COUNT(*) FROM rocpd_kernel_dispatch")
-```
-
----
-
-## JSON Schema
-
-perfxpert emits versioned JSON documents.  The schema file lives at:
-
-```
-perfxpert/ai_analysis/docs/analysis-output.schema.json
-```
-
-| `schema_version` | Produced by | Key additions |
-|---|---|---|
-| `"0.1.0"` | Tier 1/2 trace analysis (no counters or ATT) | Base fields |
-| `"0.2.0"` | Tier 0 source-only (`--source-dir`) | `tier0` field; nullable `execution_breakdown` |
-| `"0.3.0"` | Tier 1/2 with TraceLens fields | `interval_timeline`, `kernel_categories`, `short_kernels` |
-| `"0.4.0"` | Tier 3 ATT analysis | ATT stall data in recommendations |
-
-### Validate a JSON output document
-
-```bash
-pip install jsonschema
-python3 -m jsonschema \
-  --instance analysis.json \
-  perfxpert/ai_analysis/docs/analysis-output.schema.json
-```
-
-```python
-import json, jsonschema, importlib.resources as pkg
-
-schema = json.loads(
-    (pkg.files("perfxpert.ai_analysis") / "docs/analysis-output.schema.json").read_text()
-)
-with open("analysis.json") as f:
-    doc = json.load(f)
-jsonschema.validate(instance=doc, schema=schema)
-```
-
-Full schema history: [`perfxpert/ai_analysis/docs/SCHEMA_CHANGELOG.md`](perfxpert/ai_analysis/docs/SCHEMA_CHANGELOG.md)
-
----
-
-## Building with CMake
-
-perfxpert is a pure-Python package.  The CMakeLists.txt provides:
-- A `cmake --install` target that runs `pip install --prefix $CMAKE_INSTALL_PREFIX`
-- A CTest registration for unit and integration tests
-
-```bash
-# Standalone build
-cmake -B build -DCMAKE_INSTALL_PREFIX=/opt/rocm experimental/python/perfxpert
-cmake --build build
-sudo cmake --install build
-
-# As part of the rocm-systems super-repo build
-cmake -B super-build \
-      -DPERFXPERT_INSTALL_PYTHON=ON \
-      -DPERFXPERT_BUILD_TESTS=ON \
-      rocm-systems-dev
-
-cmake --build super-build --target perfxpert_unit_tests
-ctest --test-dir super-build -R perfxpert
-```
-
-CMake options:
-
-| Option | Default | Description |
-|---|---|---|
-| `PERFXPERT_INSTALL_PYTHON` | `ON` | Install Python package via pip |
-| `PERFXPERT_BUILD_TESTS` | `ON` | Register pytest as CTest test |
-
----
-
-## Testing
-
-perfxpert has two test suites: **unit tests** (no GPU or real .db required) and
-**integration tests** (use a real rocprofv3 .db file).
-
-### Quick start
-
-```bash
-# 1. Install perfxpert in editable mode (once)
-cd experimental/python/perfxpert
-pip install -e ".[dev]"
-
-# 2. Run all unit tests
-pytest experimental/python/perfxpert/ai_analysis/tests -v
-
-# 3. Run all integration tests (need a real .db)
-pytest tests -v --db-path /path/to/trace.db
-```
-
-### Unit tests (no GPU required)
-
-Unit tests live in `experimental/python/perfxpert/perfxpert/ai_analysis/tests/`.
-They mock all external I/O and cover the full API surface without needing a GPU or
-a real profiling database.
-
-```bash
-# From the repo root
-cd experimental/python/perfxpert
-pytest experimental/python/perfxpert/ai_analysis/tests -v
-
-# Run a specific file
-pytest experimental/python/perfxpert/ai_analysis/tests/test_api_standalone.py -v
-
-# Run with coverage report
-pytest experimental/python/perfxpert/ai_analysis/tests -v --cov=perfxpert --cov-report=term-missing
-
-# If not installed in editable mode, set PYTHONPATH manually
-PYTHONPATH=python python3 -m pytest experimental/python/perfxpert/ai_analysis/tests -v
-```
-
-Test files and what they cover:
-
-| File | Coverage |
-|---|---|
-| `test_api_standalone.py` | `analyze_database()`, `AnalysisResult` dataclass, all output formats (text/json/markdown/webview), schema validation |
-| `test_connection.py` | `PerfxpertConnection` single/multi-DB, UNION ALL views, `merge_sqlite_dbs()`, error handling |
-| `test_analyze_core.py` | `compute_time_breakdown()`, `identify_hotspots()`, `analyze_memory_copies()`, `analyze_hardware_counters()`, `_split_pmc_into_passes()` (TCC derived counter isolation), `generate_recommendations()` |
-| `test_interactive_context.py` | `InteractiveSession` menu logic, context persistence across menu selections |
-| `test_interactive.py` | Full interactive session 7-phase workflow, session save/resume |
-| `test_llm_conversation.py` | `LLMConversation` send/compact/serialize, multi-provider mocking (anthropic/openai/private/local) |
-| `test_local_llm.py` | Ollama local model integration |
-| `test_workflow.py` | `WorkflowSession` 7-phase loop, auto-save, revert-on-failure |
-| `test_tracelens_port.py` | TraceLens interval arithmetic and kernel category classification |
-
-### Integration tests (require a real .db file)
-
-Integration tests in `tests/` run against a real rocprofv3 SQLite database.
-
-```bash
-# Run all integration tests
-cd experimental/python/perfxpert
-pytest tests -v --db-path /path/to/trace.db
-
-# A real test database is available after building rocprofiler-sdk:
-DB=rocm-systems-dev/projects/rocprofiler-sdk/build/tests/rocprofv3/rocpd/rocpd-input-data/merged_db.db
-pytest tests -v --db-path $DB
-
-# Run specific integration test file
-pytest tests/test_analyze.py -v --db-path $DB
-pytest tests/test_analyze_schema.py -v --db-path $DB
-```
-
-Integration test files:
-
-| File | What it covers |
-|---|---|
-| `test_analyze.py` | End-to-end analysis pipeline against a real .db file |
-| `test_analyze_schema.py` | JSON output schema validation against real trace data |
-| `test_ai_analysis_standalone.py` | `analyze_database()` API with real database |
-| `test_guide_filter_standalone.py` | LLM reference guide loading and filtering |
-
-### CTest (within CMake super-build)
-
-```bash
-# Register and run tests via CTest
-cmake -B build -DPERFXPERT_BUILD_TESTS=ON experimental/python/perfxpert
-cmake --build build
-ctest --test-dir build -R perfxpert -V
-
-# Or inside the full super-repo build
-cmake --build super-build --target perfxpert_unit_tests
-ctest --test-dir super-build -R perfxpert
-```
-
----
-
-## Differences from rocpd
-
-| Feature | rocpd | perfxpert |
-|---|---|---|
-| **C++ dependency** | `libpyrocpd` required | None — pure Python stdlib |
-| **Database opener** | `RocpdImportData` (C++) | `PerfxpertConnection` (sqlite3) |
-| **Entry point** | `python -m rocpd analyze` | `perfxpert analyze` or `python -m perfxpert analyze` |
-| **Import path** | `from rocpd.ai_analysis import ...` | `from perfxpert.ai_analysis import ...` |
-| **Output config** | `libpyrocpd.output_config` | `perfxpert.output_config` (pure Python) |
-| **Multi-DB merge** | `rocpd.merge.merge_sqlite_dbs` | `perfxpert.merge_sqlite_dbs` (same logic, no C++) |
-| **Analysis logic** | Identical | Identical |
-| **LLM providers** | Identical | Identical |
-| **Interactive session** | Identical | Identical |
-| **Installation** | Requires full SDK build | `pip install ./experimental/python/perfxpert` |
-
-All analysis functions, recommendation rules, output formats, LLM integration, and the
-interactive session are **identical** between rocpd and perfxpert — only the database
-connection layer differs.
-
----
-
-## Interactive TUI: `perfxpert-code`
-
-```bash
-perfxpert-code          # launches AMD-themed opencode TUI with perfxpert MCP pre-wired
-perfxpert-code --version  # prints "AMD ROCm PerfXpert X.Y.Z (opencode wrapper)"
-```
-
-The TUI speaks to the Python brain via an MCP stdio server (`perfxpert-mcp`).
-Only READ_ONLY tools are exposed; code modifications and subprocess calls
-stay in-process (see [design spec §5.8](../../docs/superpowers/specs/2026-04-17-multi-agent-perfxpert-design.md)).
-
-## Feature flag (Phase 4-5)
-
-The new hierarchical-agent path is opt-in during Phase 4:
-
-```bash
-export PERFXPERT_USE_AGENTS=1     # opt in (Phase 4/5)
-perfxpert analyze -i trace.db     # now routes through the agent runtime
-```
-
-Default behavior (`PERFXPERT_USE_AGENTS` unset or `0`) is the legacy path.
-Phase 6 flips the default; `PERFXPERT_LEGACY=1` becomes the one-minor-version
-safety net for the legacy path.
-
-## MCP server
-
-```bash
-perfxpert-mcp    # stdio MCP server; intended to be spawned by MCP clients
-```
-
-External MCP clients (opencode, Claude Desktop, Cursor) can register it via:
-
-```json
-{"mcpServers": {"perfxpert": {"command": "perfxpert-mcp"}}}
-```
-
----
+Or point `PERFXPERT_OPENCODE_PATH` at an existing opencode binary.
 
 ## Contributing
 
-### Code style
+perfxpert welcomes contributions. Start with [CONTRIBUTING.md](CONTRIBUTING.md)
+for the extension-surface matrix + governance. Per-surface guides under
+[docs/contributing/](docs/contributing/). Architectural changes go through
+an [RFC](docs/rfcs/README.md).
 
-- Python: PEP 8, max line length 120 (`black --line-length 120 --target-version py38,py310`)
-- Type hints on all public functions
-- Google-style docstrings on public classes and functions
+## Feature flags
 
-```bash
-# Format
-python3 -m black --line-length 120 --target-version py310 perfxpert/
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `PERFXPERT_OPENCODE_PATH` | system PATH | Override path to opencode binary; must point to an existing file or launcher raises immediately |
 
-# Lint
-python3 -m flake8 --max-line-length 120 --extend-ignore E203,W503 perfxpert/
-```
+The agentic runtime is the sole execution path; no feature flag
+toggles it. Setting any of the following has no effect:
 
-### Adding new analysis rules
+- `PERFXPERT_USE_AGENTS` — removed in Phase 7.1.
+- `PERFXPERT_LEGACY` — removed in Phase 7.1.
 
-1. Add the rule in `analyze.py:generate_recommendations()` (follows existing pattern)
-2. Update `ai_analysis/api.py:_build_analysis_result()` if a new field is exposed
-3. Update the LLM reference guide if the LLM should reference the new metric
-4. Add a unit test in `ai_analysis/tests/test_api_standalone.py`
-5. Update `SCHEMA_CHANGELOG.md` if the JSON output structure changes
+See [CHANGELOG.md](CHANGELOG.md) for the removal history.
 
-### Modifying LLM behavior
+## Supported GPUs
 
-Edit `perfxpert/ai_analysis/share/llm-reference-guide.md` — no code changes required.
-See [`AI_ANALYSIS_API.md`](perfxpert/ai_analysis/docs/AI_ANALYSIS_API.md) for details.
+| Arch | GPU | CDNA/RDNA |
+|------|-----|-----------|
+| gfx908 | MI100 | CDNA1 |
+| gfx90a | MI210/MI250/MI250X | CDNA2 |
+| gfx942 | MI300A/MI300X/MI325X | CDNA3 |
+| gfx950 | MI350X/MI355X | CDNA4 |
+| gfx1030 | RX 6900 XT | RDNA2 |
+| gfx1100 | RX 7900 XTX | RDNA3 |
 
----
+## Output formats
 
-## License
+`--format` accepts: `text` (default), `json`, `markdown`, `webview` (AMD-themed HTML).
 
-MIT License — Copyright (c) 2025 Advanced Micro Devices, Inc.
+## Documentation
 
----
+- **Getting started**
+  - [Getting started guide](docs/guides/getting-started.md)
+  - [Agentic mode: air-gap vs LLM, provider ladder](docs/guides/agentic-mode.md)
+  - [Multi-backend launcher (`perfxpert-code claude|gemini|codex`)](docs/guides/backends.md)
+    — register perfxpert with your native Claude Code / Gemini CLI
+    TUI while keeping the perfxpert tool-priority gate.
+- **Architecture (v0.2.0+)**
+  - [Architecture overview](docs/architecture.md)
+  - [Architecture index](docs/architecture/README.md)
+    - [Agent hierarchy (Root / Analysis / Recommendation / specialists)](docs/architecture/agent-hierarchy.md)
+    - [Gate cascade (5 correctness gates as middleware)](docs/architecture/gate-cascade.md)
+    - [BackendAdapter protocol (multi-backend launcher)](docs/architecture/backend-adapter.md)
+- **Integration**
+  - [Integration index](docs/integration/README.md)
+    - [MCP server (`perfxpert-mcp`) — 56 READ_ONLY tools (8 agent-hierarchy + 47 knowledge/classifier + 1 trace_diff)](docs/integration/mcp-server.md)
+    - [Python API (`perfxpert.api`) — 1:1 mirror of the 8 agent MCP tools](docs/guides/python-api.md)
+- **Contributing**
+  - [CONTRIBUTING.md](CONTRIBUTING.md)
+  - [Contributing index](docs/contributing/README.md)
+    - [External-tool dependencies (`require_tool`)](docs/contributing/external-tools.md)
+- **Other**
+  - [Historical migration notes](docs/archive/migration-to-agentic.md)
 
-## See Also
+## Caution
 
-- [`perfxpert/ai_analysis/README.md`](perfxpert/ai_analysis/README.md) — ai_analysis subpackage documentation
-- [`perfxpert/ai_analysis/docs/AI_ANALYSIS_API.md`](perfxpert/ai_analysis/docs/AI_ANALYSIS_API.md) — Python API reference
-- [`perfxpert/ai_analysis/docs/SCHEMA_CHANGELOG.md`](perfxpert/ai_analysis/docs/SCHEMA_CHANGELOG.md) — JSON schema version history
-- [`perfxpert/ai_analysis/share/llm-reference-guide.md`](perfxpert/ai_analysis/share/llm-reference-guide.md) — LLM fence document
-- [ROCprofiler-SDK documentation](https://rocm.docs.amd.com/projects/rocprofiler-sdk/)
-- [ROCm systems GitHub](https://github.com/ROCm/rocm-systems)
+> **Experimental software.** PerfXpert is still evolving and is provided
+> without warranties or guarantees. AI-generated analysis, explanations, and
+> recommendations can be incomplete or incorrect, so verify important results
+> before relying on them in production or performance-critical workflows.
+
+## Licensing
+
+MIT. opencode is also MIT — bundled into the wheel via the build hook (`setup.py`) from the pinned upstream submodule.

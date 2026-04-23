@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from perfxpert.providers._exceptions import AuthError, DryRunResponse
+import perfxpert.providers.openai_provider as _oaimod
 
 
 def _fake_response(text="hi", model="gpt-4o-mini", inp=3, out=4):
@@ -20,7 +21,8 @@ def test_dry_run_returns_singleton(monkeypatch):
     monkeypatch.setenv("PERFXPERT_LLM_OPENAI_KEY", "sk-test")
     from perfxpert.providers.openai_provider import OpenAIProvider
 
-    with patch("perfxpert.providers.openai_provider.openai") as mock_sdk:
+    mock_sdk = MagicMock()
+    with patch.object(_oaimod, "_SDK", mock_sdk):
         prov = OpenAIProvider()
         assert prov.complete([], dry_run=True) is DryRunResponse
         # dry_run must not perform the network-bearing API call.
@@ -35,7 +37,9 @@ def test_complete_returns_response(monkeypatch):
     fake.chat.completions.create.return_value = _fake_response(
         text="greetings", inp=8, out=12, model="gpt-4o"
     )
-    with patch("perfxpert.providers.openai_provider.openai.OpenAI", return_value=fake):
+    mock_sdk = MagicMock()
+    mock_sdk.OpenAI.return_value = fake
+    with patch.object(_oaimod, "_SDK", mock_sdk):
         p = OpenAIProvider()
         r = p.complete(
             [{"role": "user", "content": "hi"}],
@@ -50,7 +54,7 @@ def test_complete_returns_response(monkeypatch):
 
 
 def test_falls_back_to_max_tokens_on_bad_request(monkeypatch):
-    """Older API path: max_completion_tokens unsupported → retry with max_tokens."""
+    """Older API path: max_completion_tokens unsupported \u2192 retry with max_tokens."""
     monkeypatch.setenv("PERFXPERT_LLM_OPENAI_KEY", "sk-test")
     import openai as real_openai
 
@@ -67,7 +71,10 @@ def test_falls_back_to_max_tokens_on_bad_request(monkeypatch):
         body={"error": {"code": "unknown_parameter"}},
     )
     fake.chat.completions.create.side_effect = [err, _fake_response()]
-    with patch("perfxpert.providers.openai_provider.openai.OpenAI", return_value=fake):
+    mock_sdk = MagicMock()
+    mock_sdk.OpenAI.return_value = fake
+    mock_sdk.BadRequestError = real_openai.BadRequestError
+    with patch.object(_oaimod, "_SDK", mock_sdk):
         p = OpenAIProvider()
         r = p.complete([{"role": "user", "content": "hi"}], max_tokens=256)
         assert r.content == "hi"
@@ -82,9 +89,10 @@ def test_env_precedence(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-fallback")
     from perfxpert.providers.openai_provider import OpenAIProvider
 
-    with patch("perfxpert.providers.openai_provider.openai.OpenAI") as mock_ctor:
+    mock_sdk = MagicMock()
+    with patch.object(_oaimod, "_SDK", mock_sdk):
         OpenAIProvider()
-        assert mock_ctor.call_args.kwargs["api_key"] == "sk-perfxpert"
+        assert mock_sdk.OpenAI.call_args.kwargs["api_key"] == "sk-perfxpert"
 
 
 def test_missing_key_raises_auth(monkeypatch):
@@ -101,3 +109,19 @@ def test_registered_under_openai(monkeypatch):
     import perfxpert.providers.openai_provider  # noqa: F401
 
     assert "openai" in registry.list_providers()
+
+
+def test_missing_sdk_raises_external_tool_missing(monkeypatch):
+    """N28: absent openai SDK raises ExternalToolMissing, not ImportError."""
+    from perfxpert.providers.openai_provider import OpenAIProvider
+    from perfxpert.tools._tooldep import ExternalToolMissing
+
+    with patch("perfxpert.providers.openai_provider.require_tool") as mock_rt:
+        mock_rt.side_effect = ExternalToolMissing(
+            name="openai", install_hint="pip install openai",
+        )
+        monkeypatch.setenv("PERFXPERT_LLM_OPENAI_KEY", "sk-test")
+        with pytest.raises(ExternalToolMissing) as exc_info:
+            OpenAIProvider()
+        assert exc_info.value.name == "openai"
+        assert "pip install openai" in exc_info.value.install_hint

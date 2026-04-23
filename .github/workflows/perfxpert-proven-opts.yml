@@ -1,0 +1,52 @@
+name: perfxpert-proven-opts
+
+on:
+  pull_request:
+    paths:
+      - 'experimental/python/perfxpert/**'
+      - '.github/workflows/perfxpert-proven-opts.yml'
+  push:
+    branches:
+      - users/aelwazir/perfxpert-agentic-refactor
+      - develop
+    paths:
+      - 'experimental/python/perfxpert/**'
+      - '.github/workflows/perfxpert-proven-opts.yml'
+
+jobs:
+  proven-opts-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install perfxpert + dev deps
+        working-directory: experimental/python/perfxpert
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+
+      - name: Run proven-optimizations integration tests
+        working-directory: experimental/python/perfxpert
+        run: |
+          pytest tests/test_integration/test_proven_optimizations.py -v \
+                 --junitxml=proven-opts-results.xml
+
+      - name: Run proven-optimizations schema tests
+        working-directory: experimental/python/perfxpert
+        run: |
+          pytest tests/test_knowledge/test_proven_optimizations.py -v
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proven-opts-results
+          path: experimental/python/perfxpert/proven-opts-results.xml

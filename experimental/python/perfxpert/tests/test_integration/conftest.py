@@ -1,8 +1,8 @@
 """Shared fixtures for integration tests.
 
-Discovers fixture .db files shipped by Phase 1 (tests/fixtures/).
-If a fixture is missing, the dependent test is skipped rather than fails —
-this prevents phase-ordering false-negatives in CI.
+Discovers fixture .db files under tests/fixtures/. If a fixture is
+missing, the dependent test is skipped rather than fails — this keeps
+CI green when fixtures haven't been regenerated locally.
 """
 
 from pathlib import Path
@@ -24,7 +24,16 @@ def _find_fixture(name: str) -> Path:
 def compute_bound_db():
     p = _find_fixture("compute_bound.db")
     if p is None:
-        pytest.skip("compute_bound.db fixture not present (Phase 1 backfill)")
+        pytest.skip("compute_bound.db fixture not present")
+    return p
+
+
+@pytest.fixture
+def trace_only_elementwise_db():
+    """Trace-only DB (no --pmc counters) — expected to yield data_insufficient verdict."""
+    p = _find_fixture("trace_only_elementwise.db")
+    if p is None:
+        pytest.skip("trace_only_elementwise.db fixture not present")
     return p
 
 
@@ -32,7 +41,7 @@ def compute_bound_db():
 def memory_bound_db():
     p = _find_fixture("memory_bound.db")
     if p is None:
-        pytest.skip("memory_bound.db fixture not present (Phase 1 backfill)")
+        pytest.skip("memory_bound.db fixture not present")
     return p
 
 
@@ -40,7 +49,7 @@ def memory_bound_db():
 def latency_bound_db():
     p = _find_fixture("latency_bound.db")
     if p is None:
-        pytest.skip("latency_bound.db fixture not present (Phase 1 backfill)")
+        pytest.skip("latency_bound.db fixture not present")
     return p
 
 
@@ -50,7 +59,7 @@ def regression_db_pair():
     b = _find_fixture("baseline.db")
     c = _find_fixture("regressed.db")
     if b is None or c is None:
-        pytest.skip("regression fixture pair not present (Phase 1 backfill)")
+        pytest.skip("regression fixture pair not present")
     return (b, c)
 
 

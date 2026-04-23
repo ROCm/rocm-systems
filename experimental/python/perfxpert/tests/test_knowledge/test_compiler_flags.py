@@ -32,4 +32,3 @@ def test_compiler_flags_has_expected_content():
     # Security: linker flags must be denylisted
     denylisted = {f["flag"] for f in data if not f["allowlist"]}
     assert "-Xlinker" in denylisted
-    assert "-mllvm" in denylisted

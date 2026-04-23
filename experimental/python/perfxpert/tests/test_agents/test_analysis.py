@@ -78,7 +78,7 @@ def test_analysis_airgap_uses_deterministic_classifier(monkeypatch):
     # Stub the time breakdown + hotspots tools
     monkeypatch.setattr(
         analysis_module, "_collect_deterministic_metrics",
-        lambda db, top_n=10: {
+        lambda db, top_n=10, min_duration=0.0: {
             "time_breakdown": {"kernel_pct": 0.90, "memcpy_pct": 0.05, "api_pct": 0.03, "idle_pct": 0.02},
             "hot_kernels": [],
             "metrics_for_classifier": {"valu_util_pct": 0.85},

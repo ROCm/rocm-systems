@@ -16,9 +16,9 @@ compute/memory/latency.
 
 ## Tool allowlist (max 5)
 
-- tasks.create
-- tasks.query_by_kernel
-- bottleneck.lookup_signatures
+- plateau.check
+- trace_fingerprint.fingerprint
+- profiling.fill_gap
 
 ## Output schema (≤5 fields)
 

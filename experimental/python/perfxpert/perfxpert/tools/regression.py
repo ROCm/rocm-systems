@@ -9,9 +9,18 @@ Tool class: READ_ONLY (pure analysis, no modification).
 
 import math
 import sqlite3
+from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from perfxpert.tools._class import ToolClass, tool_class
+
+
+@dataclass(frozen=True)
+class KernelRuntime:
+    """Simple kernel runtime snapshot for testing and analysis."""
+    kernel_name: str
+    total_runtime_ns: int
+    share: float
 
 
 HOT_COVERAGE_PCT = 0.80
@@ -20,16 +29,56 @@ REGRESSION_THRESHOLD_PCT = 0.10    # a hot kernel > 10% worse = regression
 
 
 def _kernel_durations(db_path: str) -> Dict[str, float]:
-    """Total duration_ns per kernel name."""
+    """Total duration_ns per kernel name.
+
+    Handles both legacy (duration_ns column) and rocprofv3 (end-start) schemas.
+    """
     conn = sqlite3.connect(db_path)
-    rows = conn.execute("""
-        SELECT name, SUM(duration_ns) AS total_ns
-        FROM rocpd_kernel_dispatch
-        GROUP BY name
-        ORDER BY total_ns DESC
-    """).fetchall()
-    conn.close()
-    return {name: float(total) for name, total in rows}
+
+    # Find the kernel_dispatch table (may have UUID suffix)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_kernel_dispatch%'"
+    )
+    kt_result = cursor.fetchone()
+    if not kt_result:
+        conn.close()
+        return {}
+
+    kernel_table = kt_result[0]
+
+    # Extract UUID from kernel_table name
+    # Format is rocpd_kernel_dispatch_<UUID>
+    # UUID is everything after the underscore following "dispatch_"
+    uuid = kernel_table.replace("rocpd_kernel_dispatch_", "")
+
+    info_kernel_table = f"rocpd_info_kernel_symbol_{uuid}"
+
+    # Try to query using real rocprofv3 schema first (end-start + info_kernel join)
+    try:
+        rows = conn.execute(f"""
+            SELECT iks.display_name, SUM(kd.end - kd.start) as total_ns
+            FROM {kernel_table} kd
+            JOIN {info_kernel_table} iks ON kd.kernel_id = iks.id
+            GROUP BY kd.kernel_id
+            ORDER BY total_ns DESC
+        """).fetchall()
+        conn.close()
+        return {name: float(total) for name, total in rows}
+    except Exception as e:
+        # Fall back to legacy schema
+        try:
+            rows = conn.execute(f"""
+                SELECT name, SUM(duration_ns) AS total_ns
+                FROM {kernel_table}
+                GROUP BY name
+                ORDER BY total_ns DESC
+            """).fetchall()
+            conn.close()
+            return {name: float(total) for name, total in rows}
+        except Exception:
+            conn.close()
+            return {}
 
 
 @tool_class(ToolClass.READ_ONLY)
@@ -161,3 +210,27 @@ def compare_runs(
         "per_kernel_deltas": per_kernel,
         "threshold_pct": threshold,
     }
+
+
+@tool_class(ToolClass.READ_ONLY)
+def extract_kernel_runtimes_from_db(db_path: str) -> List[KernelRuntime]:
+    """Extract kernel runtimes from a rocpd database.
+
+    Returns:
+        List of KernelRuntime ordered by total_runtime_ns (descending).
+    """
+    durations = _kernel_durations(db_path)
+    total = sum(durations.values())
+    if total == 0:
+        return []
+
+    result = []
+    for kernel_name, total_ns in sorted(durations.items(), key=lambda x: x[1], reverse=True):
+        result.append(
+            KernelRuntime(
+                kernel_name=kernel_name,
+                total_runtime_ns=int(total_ns),
+                share=total_ns / total,
+            )
+        )
+    return result

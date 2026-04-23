@@ -4,7 +4,7 @@ Dispatches to one of the three Layer-2 specialists (compute / memory / latency)
 based on findings.primary_bottleneck; ranks + dedups outputs.
 
 Tool allowlist (3 of 5 used):
-  plateau.check, trace.fingerprint, profiling.fill_gap
+  plateau.check, trace_fingerprint.fingerprint, profiling.fill_gap
 
 Handoff whitelist: compute_specialist, memory_specialist, latency_specialist
 (Layer 2 only). Cannot handoff to Layer 1 peers (Analysis / Correctness).
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -28,6 +29,42 @@ from perfxpert.tools import plateau, trace_fingerprint
 
 
 _FENCE_PATH = Path(__file__).parent / "fence" / "recommendation.md"
+
+
+# -- Data-insufficient warning -------------------------------------------
+
+_DATA_INSUFFICIENT_WARNING = """\
+╔══════════════════════════════════════════════════════════════════════════╗
+║  WARNING: Bottleneck classifier returned data_insufficient              ║
+║                                                                          ║
+║  The trace database contains no hardware counter data (--pmc was not    ║
+║  used when profiling). PerfXpert cannot classify the bottleneck type     ║
+║  without counter evidence, and will NOT generate recommendations that   ║
+║  might be wrong.                                                         ║
+║                                                                          ║
+║  ACTION: Re-profile your workload with hardware counters enabled.        ║
+║  Run three separate passes (TCC isolation rule — FETCH_SIZE and          ║
+║  WRITE_SIZE must each be in their own --pmc pass):                      ║
+║                                                                          ║
+║    Pass 1 (compute utilization):                                        ║
+║      rocprofv3 --sys-trace \\                                            ║
+║        --pmc SQ_WAVES,SQ_INSTS_VALU,SQ_INSTS_VALU_MFMA,GRBM_GUI_ACTIVE,GRBM_COUNT \\
+║        -- ./your_app                                                    ║
+║                                                                          ║
+║    Pass 2 (HBM fetch bandwidth — isolated):                             ║
+║      rocprofv3 --sys-trace --pmc FETCH_SIZE -- ./your_app              ║
+║                                                                          ║
+║    Pass 3 (HBM write bandwidth — isolated):                             ║
+║      rocprofv3 --sys-trace --pmc WRITE_SIZE -- ./your_app              ║
+║                                                                          ║
+║  Then merge the output databases before re-running analysis.            ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
+
+def _warn_data_insufficient() -> None:
+    """Print the data_insufficient warning to stderr. Extracted for test injection."""
+    print(_DATA_INSUFFICIENT_WARNING, file=sys.stderr, flush=True)
 
 
 # -- Thin delegators (module-level for test injection) --------------------
@@ -53,8 +90,8 @@ def _plateau_check(history: List[Dict[str, Any]]) -> Dict[str, Any]:
 def build_recommendation_agent() -> Agent:
     tools = [
         ToolBinding(name="plateau.check", fn=_plateau_check),
-        ToolBinding(name="trace.fingerprint", fn=trace_fingerprint.fingerprint),
-        ToolBinding(name="profiling.fill_gap", fn=lambda **kw: {}),  # Phase 1 placeholder
+        ToolBinding(name="trace_fingerprint.fingerprint", fn=trace_fingerprint.fingerprint),
+        ToolBinding(name="profiling.fill_gap", fn=lambda **kw: {}),  # placeholder stub
     ]
     return Agent(
         name="Recommendation",
@@ -73,9 +110,13 @@ def build_recommendation_agent() -> Agent:
 # -- Dispatch + dedup -----------------------------------------------------
 
 def _hash_technique(t: Dict[str, Any]) -> str:
-    """Stable hash for dedup."""
-    # Use only the "name" field as the key to avoid over-specifying; matches
-    # the existing _hash_recommendation pattern in interactive.py.
+    """Stable hash for dedup.
+
+    Uses only the ``name`` field as the key to avoid over-specifying.
+    This keeps the hash stable even when non-identity fields like ``rationale``
+    or ``estimated_impact`` are updated — matching the dedup contract used by
+    the session history tracker in agents/runtime.py.
+    """
     key = {"name": t.get("name", "")}
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()
 
@@ -99,7 +140,13 @@ def run_recommendation(
     plateau_detected = bool(plateau_info.get("plateau_detected", False))
 
     # Dispatch
-    if bottleneck == "compute":
+    if bottleneck == "data_insufficient":
+        # No hardware counters were collected — classifier was flying blind.
+        # Print a loud, actionable warning and return without recommendations.
+        _warn_data_insufficient()
+        specialist_used = "none"
+        techniques = []
+    elif bottleneck == "compute":
         specialist_used = "compute"
         spec_input = schemas.ComputeSpecialistInput(
             gfx_id="gfx942",   # inferred upstream; placeholder-safe
@@ -125,9 +172,39 @@ def run_recommendation(
         )
         spec_out = _run_specialist_latency(spec_input, provider=provider, airgap=airgap)
         techniques = list(spec_out.techniques)
-    else:
+    elif bottleneck == "mixed":
+        # "mixed" is a valid classifier output — not an error.  Emit a triage
+        # recommendation directing the user to ATT or doctor for more detail.
         specialist_used = "none"
-        techniques = []
+        techniques = [
+            {
+                "name": "mixed_bottleneck_triage",
+                "category": "triage",
+                "priority": "medium",
+                "title": "Mixed bottleneck — no single dominant stall source",
+                "description": (
+                    "The classifier did not find one dominant bottleneck. "
+                    "Multiple subsystems are contributing roughly equally. "
+                    "Re-profile with ATT (--att) to identify the dominant stall "
+                    "source at instruction level, or run `perfxpert doctor` to "
+                    "verify counter coverage and ensure all required --pmc passes "
+                    "were collected."
+                ),
+                "rationale": (
+                    "Bottleneck classification is mixed. "
+                    "ATT or broader counter coverage needed to isolate root cause."
+                ),
+                "estimated_impact": "Unknown until dominant stall source is identified",
+            }
+        ]
+    else:
+        # Truly unrecognised bottleneck type — this is a programmer error, not a
+        # user-facing data condition. Raise immediately so it surfaces in tests.
+        raise ValueError(
+            f"unhandled bottleneck type {bottleneck!r}. "
+            "Known types: compute | memory_transfer | latency | api_overhead | "
+            "mixed | data_insufficient. Add a branch or fix the classifier."
+        )
 
     # Dedup against seen hashes
     techniques = _dedup(techniques, payload.seen_recommendation_hashes)

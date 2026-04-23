@@ -7,6 +7,7 @@ MCP-compatible client.
 ## Start
 
 ```bash
+# SKIP-SAMPLE — server is intended to be spawned by an MCP client
 perfxpert-mcp
 ```
 

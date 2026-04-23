@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "perfxpert"
-version = "0.1.0"
+version = "0.2.0"
 description = "AI-powered GPU trace analysis for rocprofiler-sdk databases"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Advanced Micro Devices, Inc." }]
 requires-python = ">=3.10"
-# Phase 1 (agentic refactor) adds pydantic/pyyaml/jsonschema for structured
+# The agentic runtime uses pydantic/pyyaml/jsonschema for structured
 # knowledge loading and schema validation. LLM enhancement still requires
 # anthropic or openai (optional extras below).
 dependencies = [
@@ -19,15 +19,46 @@ dependencies = [
     "jsonschema>=4.0",
     "httpx>=0.25",
     "mcp>=1.0",
+    # numpy is used by perfxpert.runtime.gate_cascade for the regression
+    # aggregation math; loaded eagerly during `perfxpert doctor` and any
+    # `perfxpert analyze` invocation. Required (not optional).
+    "numpy>=1.24",
+    # openai-agents is the agentic-runtime SDK (imported as `agents`) that
+    # perfxpert.agents.framework lazily loads whenever the agentic path
+    # dispatches an LLM-backed action. `perfxpert doctor` also reports
+    # its install status, so keep it as a required runtime dep.
+    "openai-agents>=0.1",
+    # tomlkit is used by the Codex backend adapter to round-trip edits
+    # to ~/.codex/config.toml while preserving user comments/formatting.
+    # Required (not optional) so `perfxpert-code codex` works out of the box.
+    "tomlkit>=0.12",
 ]
 
 [project.optional-dependencies]
 llm  = ["anthropic>=0.18", "openai>=1.0"]
 rich = ["rich>=13.0"]
-# claude-agent-sdk enables --llm claude-code using Claude Code's stored credentials
-# (falls back to ANTHROPIC_API_KEY if CLI not found)
-all  = ["anthropic>=0.18", "openai>=1.0", "rich>=13.0", "claude-agent-sdk>=0.1"]
-dev  = ["pytest>=8.0", "pytest-asyncio>=0.21", "flake8", "black", "pexpect>=4.8"]
+# litellm routes non-OpenAI providers (anthropic, ollama, private) through
+# the openai-agents SDK via agents.extensions.models.litellm_model.LitellmModel.
+# Without it, framework._sdk_invoke() silently routes every model string to
+# OpenAI's endpoint and fails with "requested model does not exist" for
+# Anthropic/Ollama models (Phase 8 fix).
+litellm = ["litellm>=1.50"]
+all  = [
+    "anthropic>=0.18",
+    "openai>=1.0",
+    "rich>=13.0",
+    "litellm>=1.50",
+]
+dev  = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.21",
+    "flake8",
+    "black",
+    "pexpect>=4.8",
+    "pytest-xdist>=3.5",    # parallel red-team / parity execution
+    "hypothesis>=6.100",    # property-based fuzz for sanitizer
+    "rich>=13.0",           # exit-dashboard rendering (already a runtime dep; dev pin kept for parity)
+]
 
 [project.scripts]
 perfxpert = "perfxpert.__main__:main"
@@ -39,25 +70,19 @@ Homepage      = "https://github.com/ROCm/rocm-systems"
 Documentation = "https://rocm.docs.amd.com"
 
 [tool.setuptools]
-packages = [
-    "perfxpert",
-    "perfxpert.analysis",
-    "perfxpert.formatters",
-    "perfxpert.ai_analysis",
-    "perfxpert.ai_analysis.tests",
-    "perfxpert.cli",
-    "perfxpert.providers",
-    "perfxpert.config",
-    "perfxpert.runtime",
-    "mcp_server",
-]
+# Auto-discover every perfxpert.* subpackage + mcp_server. The explicit
+# list was fragile — new subpackages (perfxpert.tools, perfxpert.agents,
+# perfxpert.knowledge, perfxpert.fence, perfxpert.conversation,
+# perfxpert.cli._backend, perfxpert.cli._gate_hooks) silently dropped
+# from the wheel, so a fresh `pip install perfxpert` would import-fail
+# at runtime on `from perfxpert.tools._tooldep import require_tool`.
+
+[tool.setuptools.packages.find]
+include = ["perfxpert*", "mcp_server*"]
+exclude = ["tests*", "opencode*"]
 
 [tool.setuptools.package-data]
 perfxpert = [
-    "ai_analysis/share/*.md",
-    "ai_analysis/share/*.png",
-    "ai_analysis/docs/*.md",
-    "ai_analysis/docs/*.json",
     "formatters/templates/*.html",
     "_bundled/**/*",
     "_bundled/opencode_config/*",
@@ -65,15 +90,23 @@ perfxpert = [
     "knowledge/_schemas/*.json",
     "agents/fence/*.md",
     "agents/templates/*",
+    "../NOTICE",
+    "../opencode/LICENSE",
 ]
 
 [tool.pytest.ini_options]
 testpaths = [
-    "perfxpert/ai_analysis/tests",
     "tests",
 ]
 python_files = ["test_*.py"]
 addopts = "-ra"
+markers = [
+    "parity: parity (new-path vs old-path) tests — can be slow",
+    "red_team: adversarial tests; every one MUST pass",
+    "regression_gate: proven-optimization false-positive tests",
+    "dashboard: exit-dashboard contract tests",
+    "slow: runs > 10s; excluded from default CI",
+]
 
 [tool.black]
 line-length = 120
