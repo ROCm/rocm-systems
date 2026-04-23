@@ -269,6 +269,7 @@ void WriteJsonTraceImpl(const char* filepath) {
   // Map raw hash thread ids to compact sequential ints (JS safe-integer limit)
   std::unordered_map<uint64_t, uint32_t> tid_map;
   uint32_t next_tid = 0;
+  uint64_t flow_id  = 0;  // unique id for each CPU→GPU flow arrow pair
   bool first = true;
 
   auto compact_tid = [&](uint64_t raw) -> uint32_t {
@@ -290,7 +291,7 @@ void WriteJsonTraceImpl(const char* filepath) {
 
       uint64_t s_time  = rec.start_ns / 1000;  // ns → µs
       uint64_t dur_us  = (rec.end_ns > rec.start_ns)
-                         ? (rec.end_ns - rec.start_ns) / 1000 : 1;
+                         ? std::max(uint64_t{1}, (rec.end_ns - rec.start_ns) / 1000) : 1;
 
       if (!first) trace << ",";
       first = false;
@@ -303,15 +304,13 @@ void WriteJsonTraceImpl(const char* filepath) {
         trace << ",\"args\":{\"stream\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(rec.stream) << std::dec << "\"}";
       trace << "}";
 
-      // Emit one GPU op event (flow arrow + X event + flow finish).
-      // Called for op-1 (from rec.gpu) and ops 2..N (from GpuOps vector).
+      // Emit one GPU op event: flow start (ph:s) on CPU side, GPU X event,
+      // flow finish (ph:t) on GPU side.  The shared flow_id links the arrow.
       auto emit_gpu_op = [&](uint32_t op, uint64_t begin_ns, uint64_t end_ns,
                               int device_id, uint64_t queue_id,
                               const char* kernel_name, size_t bytes,
                               uint32_t copy_kind) {
         uint32_t op_idx  = op < 3 ? op : 3;
-        // H2D / D2H transfers cross PCIe → SDMA engine.
-        // D2D, buffer↔image copies use the GPU blit/compute engine.
         int sdma = (op_idx == OP_ID_COPY) &&
                    hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(copy_kind)) ? 1 : 0;
         uint64_t gpu_dur = (end_ns > begin_ns)
@@ -327,6 +326,15 @@ void WriteJsonTraceImpl(const char* filepath) {
           if (it != g_kernel_names.end()) gpu_name = it->second;
         }
 
+        // Only draw flow arrow when GPU timestamps are valid (begin_ns == 0
+        // means ReportActivity never populated the record — no arrow to draw).
+        const bool has_ts = (begin_ns > 0);
+        uint64_t fid = has_ts ? flow_id++ : 0;
+        if (has_ts)
+          trace << ",\n{\"ph\":\"s\",\"id\":" << fid
+                << ",\"pid\":1024,\"tid\":" << ctid
+                << ",\"ts\":" << s_time << ",\"name\":\"dep\"}";
+        // GPU X event (always emitted when gpu_op_count > 0)
         trace << ",\n{\"name\":\"" << gpu_name
               << "\",\"ph\":\"X\",\"pid\":" << device_id
               << ",\"tid\":" << (queue_id * 2 + sdma)
@@ -335,6 +343,11 @@ void WriteJsonTraceImpl(const char* filepath) {
           trace << ",\"args\":{\"copy_kind\":\"" << CopyKindName(copy_kind)
                 << "\",\"bytes\":" << bytes << "}";
         trace << "}";
+        if (has_ts)
+          trace << ",\n{\"ph\":\"t\",\"id\":" << fid
+                << ",\"pid\":" << device_id
+                << ",\"tid\":" << (queue_id * 2 + sdma)
+                << ",\"ts\":" << gpu_ts << ",\"name\":\"dep\"}";
 
         device_gpu_tids[device_id].insert(queue_id * 2 + sdma);
       };
