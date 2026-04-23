@@ -14,17 +14,23 @@ All four resolve into the same session/runtime layer in
 
 ## Agents (spec §2)
 
-```
-Root (intent router)
- ├─ Analysis  (classifies bottleneck, gathers metrics)
- ├─ Recommendation (hands off to specialists)
- │   ├─ compute_specialist
- │   ├─ memory_specialist
- │   └─ latency_specialist
- └─ Correctness (enforces 5 gates on proposed changes)
-```
+**Tier 0**
+- `Root` — intent classify
 
-8 agents total. Each has ≤ 400 lines of fence + ≤ 5 tools + ≤ 10 input / ≤ 5 output fields. Narrow scope is CI-enforced.
+**Tier 1**
+- `Analysis` — classifies bottlenecks and gathers metrics
+- `Recommendation` — proposes optimization techniques
+- `Correctness` — narrates gate verdicts
+
+**Tier 2 specialists**
+- `compute_specialist`
+- `memory_specialist`
+- `latency_specialist`
+- `diff_specialist`
+
+8 agents total. See
+[architecture/agent-hierarchy.md](architecture/agent-hierarchy.md) for
+the detailed tier map, per-agent guardrails, and handoff details.
 
 See [architecture/agent-hierarchy.md](architecture/agent-hierarchy.md) for the tier-by-tier map, fence-slice pattern, and source-tree locations, and [architecture/gate-cascade.md](architecture/gate-cascade.md) for the 5-gate correctness middleware that sits between the agents. The full architecture docs index lives at [architecture/README.md](architecture/README.md).
 
