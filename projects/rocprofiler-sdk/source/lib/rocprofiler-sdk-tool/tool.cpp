@@ -1810,8 +1810,6 @@ initialize_rocprofv3()
                          "force configuration");
     }
 
-    // Skip initialization in child processes that should not open the device.
-    if(getenv("ROCPROFV3_PLAYBACK_CHILD") != nullptr) return;
     ROCP_FATAL_IF(!client_identifier) << "nullptr to client identifier!";
     ROCP_FATAL_IF(!client_finalizer && !tool::get_config().list_metrics)
         << "nullptr to client finalizer!";  // exception for listing metrics
@@ -3228,7 +3226,7 @@ bool signal_handler_exit =
 #define ROCPROFV3_INTERNAL_API __attribute__((visibility("internal")));
 
 std::optional<int>
-wait_pid(pid_t _pid, int _opts = 0, bool _timed = false)
+wait_pid(pid_t _pid, int _opts = 0)
 {
     auto this_pid  = getpid();
     auto this_ppid = getppid();
@@ -3245,19 +3243,12 @@ wait_pid(pid_t _pid, int _opts = 0, bool _timed = false)
     int   _status = 0;
     pid_t _pid_v  = -1;
     _opts |= WUNTRACED;
-    // Timeout is only applied when _timed=true to avoid abandoning a legitimately slow child.
-    auto _deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
     do
     {
         if((_opts & WNOHANG) > 0)
         {
             std::this_thread::yield();
             std::this_thread::sleep_for(std::chrono::milliseconds{100});
-            if(_timed && std::chrono::steady_clock::now() > _deadline)
-            {
-                ROCP_WARNING << fmt::format("wait_pid timeout waiting for child {}", _pid);
-                return std::nullopt;
-            }
         }
         _pid_v = waitpid(_pid, &_status, _opts);
     } while(_pid_v == 0);
@@ -3426,9 +3417,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
         // wait for children
         for(auto itr : _children)
         {
-            // Only apply timeout when _timed=true to break potential deadlock.
-            // On other signals we wait indefinitely to avoid abandoning a slow child.
-            auto status = wait_pid(itr, WUNTRACED | WNOHANG, signo == SIGABRT);
+            auto status = wait_pid(itr, WUNTRACED | WNOHANG);
             if(status) diagnose_status(itr, status.value());
         }
 
@@ -3440,21 +3429,8 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
             this_func,
             signo);
 
-        // HSA may already be torn down when this signal is received.
-        // Skip finalize to avoid re-entrant signal and write output directly.
-        if(signo != SIGABRT)
-        {
-            finalize_rocprofv3(this_func);
-            if(tool::get_config().enable_process_sync) wait_peer_finished(this_pid, this_ppid);
-        }
-        else
-        {
-            ROCP_WARNING << "HSA may already be torn down, skipping finalize "
-                            "to avoid re-entrant signal. Flushing output directly.";
-            flush();
-            generate_output(cleanup_mode::destroy);
-            _exit(128 + SIGABRT);  // Unix convention: 128 + signal number
-        }
+        finalize_rocprofv3(this_func);
+        if(tool::get_config().enable_process_sync) wait_peer_finished(this_pid, this_ppid);
 
         ROCP_INFO << fmt::format(
             "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal {}... complete",
@@ -3464,8 +3440,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
             this_func,
             signo);
 
-        // Skip chained handler for SIGABRT to avoid re-entrant abort.
-        if(signo != SIGABRT && get_chained_signals().at(signo))
+        if(get_chained_signals().at(signo))
         {
             ROCP_INFO << fmt::format(
                 "[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained signal handler for {}",

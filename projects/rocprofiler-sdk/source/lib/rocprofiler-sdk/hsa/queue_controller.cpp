@@ -544,10 +544,7 @@ void
 queue_controller_fini()
 {
     if(get_queue_controller())
-        get_queue_controller()->iterate_queues([](const Queue* _queue) {
-            // Skip sync in child processes where HSA may already be torn down.
-            if(getenv("ROCPROFV3_PLAYBACK_CHILD") == nullptr) _queue->sync();
-        });
+        get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
 
     // finalize queue data (e.g. clean up signal pool)
     if(enable_queue_intercept()) queue_fini();
