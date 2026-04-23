@@ -7,6 +7,7 @@
 Decoding a JPEG stream with rocJPEG
 ********************************************************************
 
+
 rocJPEG provides two functions, ``rocJpegDecode()`` and ``rocJpegDecodeBatched()``, for decoding JPEG image. 
 
 .. code:: cpp
