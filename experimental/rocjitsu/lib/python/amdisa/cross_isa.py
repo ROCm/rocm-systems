@@ -122,6 +122,37 @@ CDNA_ISAS = CDNA_GFX9  # All CDNA ISAs currently share one generation.
 RDNA_ISAS = RDNA_GFX10 | RDNA_GFX11 | RDNA_GFX12
 ALL_ISAS = CDNA_ISAS | RDNA_ISAS
 
+# Family table used by _classify_family() to pick the tightest-fitting
+# bucket for a set of ISAs.  Order is informational only — the lookup
+# picks the entry with the smallest ``members`` set that is a superset
+# of the input.  On exact-size ties (e.g., CDNA_GFX9 vs CDNA_ISAS today,
+# both size 4), the first matching entry wins, so finest-first ordering
+# is preferred.
+#
+# Note for Tony (re commit 2316f85): you introduced an equivalent
+# `_FAMILIES` table and a smallest-fits ``_classify_family`` in your
+# v_pack_b32_f16 commit.  This branch adopts that same shape so your
+# rebase/merge should be near-trivial here.  The deliberate differences
+# vs. your version are the bucket *names* — we use ``rdna_gfx10``,
+# ``cdna_gfx9``, etc. instead of bare ``gfx10`` / ``cdna``, because the
+# generated code reads more clearly with the family prefix and our new
+# tests in ``tests/test_cross_isa_analyzer.py`` hardcode these names.
+# If you'd rather keep your shorter names, just rename the strings here
+# and update the matching assertions in
+# tests/test_cross_isa_analyzer.py (test_classify_family_sub_families,
+# test_rdna_cross_generation_no_collision, and
+# test_family_shared_uses_sub_family_keys) — the algorithm is identical.
+_FAMILIES: list[tuple[str, frozenset[str]]] = [
+    # Sub-families (finest) — encoding layouts are identical within these.
+    ('rdna_gfx12', RDNA_GFX12),
+    ('rdna_gfx11', RDNA_GFX11),
+    ('rdna_gfx10', RDNA_GFX10),
+    ('cdna_gfx9',  CDNA_GFX9),
+    # Coarse families — spans sub-families but stays within one family.
+    ('rdna',       RDNA_ISAS),
+    ('cdna',       CDNA_ISAS),
+]
+
 
 class CrossIsaAnalyzer:
     """Analyze instruction overlap across multiple ISA specs."""
@@ -324,25 +355,22 @@ class CrossIsaAnalyzer:
 
     @staticmethod
     def _classify_family(isas: set[str]) -> str:
-        """Return a family name for a set of ISAs.
+        """Return the family name for a set of ISAs.
 
-        Checks sub-families first (finest grouping) and falls back to
-        coarse family names when a group spans multiple sub-families
-        within the same family.
+        Picks the smallest entry from ``_FAMILIES`` that contains all
+        input ISAs.  This avoids collisions where, e.g., {rdna1, rdna2}
+        and {rdna3, rdna3_5} would otherwise both map to the coarse
+        ``'rdna'`` bucket and overwrite each other in
+        ``family_shared``.  Falls back to a joined ISA-name string for
+        sets that cross families (e.g., {cdna1, rdna1}).
         """
-        # Sub-family (finest) — encoding layouts are identical within these.
-        if isas <= RDNA_GFX12:
-            return 'rdna_gfx12'
-        if isas <= RDNA_GFX11:
-            return 'rdna_gfx11'
-        if isas <= RDNA_GFX10:
-            return 'rdna_gfx10'
-        if isas <= CDNA_GFX9:
-            return 'cdna_gfx9'
-        # Coarse family — spans sub-families but stays within one family.
-        if isas <= RDNA_ISAS:
-            return 'rdna'
-        if isas <= CDNA_ISAS:
-            return 'cdna'
-        # Mixed CDNA + RDNA — use a descriptive name.
-        return '_'.join(sorted(isas))
+        # See the note above _FAMILIES re commit 2316f85.  This loop
+        # body is the same shape as Tony's; the difference is purely
+        # the bucket-name strings in the table.
+        best_name = '_'.join(sorted(isas))
+        best_size = float('inf')
+        for name, members in _FAMILIES:
+            if isas <= members and len(members) < best_size:
+                best_name = name
+                best_size = len(members)
+        return best_name
