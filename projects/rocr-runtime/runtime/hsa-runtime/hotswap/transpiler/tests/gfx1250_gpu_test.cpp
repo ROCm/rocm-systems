@@ -1116,6 +1116,124 @@ static void doTestPermlane16SwapWave32WaveNative() {
          "`topk_forward_bf16` for context.";
 }
 
+// ----- Diagnostic probe: gfx1250 bitonic cross-16 compare-and-swap dance -----
+//
+// Pins the VGPR state after the 4-instruction sequence Triton's
+// `tl.sort` emits for its distance-16 bitonic step on gfx1250
+// (see comment block at the top of
+// `test_data/gfx1250/bitonic_cross16_probe_kernel.hip`).  The
+// compare instruction at `.long 0xd41b0002` is a gfx1250-new
+// single-dword VOP3 encoding that the upstream llvm-mc in ROCm
+// 7.2.1 does not recognise; salmon's decoder raises it as
+// `fcmp ule v2, v3` but the empirical `canary_tl_sort_fp32_
+// deterministic` result shows this lift produces a wrong sort.
+// Either the decoded operand set is wrong, or the post-xor3
+// `v3` value is different from what the textbook semantic
+// of `v_permlane16_swap_b32 + v_xor3_b32` predicts.
+//
+// This probe runs THE EXACT INSTRUCTION SEQUENCE (via inline asm)
+// with known-distinct inputs (v2=L, v3=100+L, v4=200+L) and dumps
+// all three registers after the sequence, so the hardware trace
+// pins the semantics without requiring a manual decode of the new
+// VOP3 encoding.
+//
+// Expected under the cross-wired-swap + standard-xor3 model:
+//
+//   After swap:
+//     v1 = src0_in[L XOR 16] = 200 + (L XOR 16)
+//     v2 = vdst_in[L XOR 16] = 100 + (L XOR 16)
+//   After xor3 (v3 = v1 ^ v2 ^ v0 where v0 = L):
+//     v3 = (200 + (L XOR 16)) ^ (100 + (L XOR 16)) ^ L
+//
+// This test is a NATIVE-HARDWARE probe — we run the gfx1250 kernel
+// DIRECTLY (without salmon lifting) on wave64 hardware by
+// compiling the .hip for the target arch.  Wait — that requires
+// gfx1250 hardware.  Let me reroute: we lift through salmon and
+// compare salmon's output against the textbook prediction.  If
+// they diverge, the bug is pinned to salmon's lift of the opcode.
+// If they match but the deterministic sort still fails, the
+// textbook prediction is wrong on native hardware (the opcode's
+// actual semantics are different from the cross-wired-swap +
+// standard-xor3 model).
+static void doTestBitonicCross16Probe() {
+  printf("--- bitonic_cross16_probe_kernel ---\n");
+  std::string path = std::string(GFX1250_DATA_DIR) +
+                     "/bitonic_cross16_probe_gfx1250.hsaco";
+  auto data = transpiler::readFile(path);
+  ASSERT_FALSE(data.empty()) << "Cannot read " << path;
+
+  auto result = transpiler::runPipeline(data, "gfx1250", "gfx942",
+                                         "bitonic_cross16_probe_kernel");
+  ASSERT_TRUE(result.success)
+      << "Pipeline failed for bitonic_cross16_probe";
+  printf("  Pipeline: raised %d/%d insts, HSACO=%zu bytes\n",
+         result.liftedCount, result.totalCount, result.hsaco.size());
+
+  constexpr int N = 32;
+  auto meta = transpiler::extractKernelMeta(
+      data, "bitonic_cross16_probe_kernel");
+
+  std::vector<int> hV2(N, -1), hV3(N, -1), hV4(N, -1);
+  int *dV2, *dV3, *dV4;
+  HIP_ASSERT(hipMalloc(&dV2, N * sizeof(int)));
+  HIP_ASSERT(hipMalloc(&dV3, N * sizeof(int)));
+  HIP_ASSERT(hipMalloc(&dV4, N * sizeof(int)));
+  HIP_ASSERT(hipMemset(dV2, 0xff, N * sizeof(int)));
+  HIP_ASSERT(hipMemset(dV3, 0xff, N * sizeof(int)));
+  HIP_ASSERT(hipMemset(dV4, 0xff, N * sizeof(int)));
+
+  hipModule_t mod;
+  HIP_ASSERT(hipModuleLoadData(&mod, result.hsaco.data()));
+  hipFunction_t func;
+  HIP_ASSERT(hipModuleGetFunction(&func, mod,
+                                   "bitonic_cross16_probe_kernel"));
+
+  std::vector<uint8_t> argBuf(meta.kernargSegmentSize, 0);
+  memcpy(argBuf.data() + 0, &dV2, 8);
+  memcpy(argBuf.data() + 8, &dV3, 8);
+  memcpy(argBuf.data() + 16, &dV4, 8);
+  size_t argSz = argBuf.size();
+  void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, argBuf.data(),
+                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSz,
+                    HIP_LAUNCH_PARAM_END};
+  HIP_ASSERT(hipModuleLaunchKernel(func, /*grid*/ 1, 1, 1,
+                                   /*block*/ N, 1, 1,
+                                   meta.groupSegmentFixedSize, nullptr,
+                                   nullptr, config));
+  HIP_ASSERT(hipDeviceSynchronize());
+  HIP_ASSERT(hipMemcpy(hV2.data(), dV2, N * sizeof(int),
+                       hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipMemcpy(hV3.data(), dV3, N * sizeof(int),
+                       hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipMemcpy(hV4.data(), dV4, N * sizeof(int),
+                       hipMemcpyDeviceToHost));
+  (void)hipFree(dV2);
+  (void)hipFree(dV3);
+  (void)hipFree(dV4);
+  (void)hipModuleUnload(mod);
+
+  // Dump all 32 lanes so the pattern is visible in CI logs.
+  printf("  Per-lane trace after "
+         "v_permlane16_swap + v_xor3_b32:\n");
+  printf("  %3s  %5s  %5s  %5s  "
+         "%-26s\n",
+         "L", "v2", "v3", "v4", "expected (cross-wired swap)");
+  for (int L = 0; L < N; L++) {
+    int partner = L ^ 16;
+    int expSwapV1 = 200 + partner;  // new v3 = partner's v4 = 200 + partner
+    int expSwapV2 = 100 + partner;  // new v4 = partner's v3 = 100 + partner
+    int expXor3 = expSwapV1 ^ expSwapV2 ^ L;
+    printf("  %3d  %5d  %5d  %5d  v3_exp=%d v4_exp=%d\n",
+           L, hV2[L], hV3[L], hV4[L], expXor3, expSwapV2);
+  }
+  // Not asserting specific values — the printf above is the
+  // diagnostic.  The TEST PASSING means the pipeline + dispatch
+  // succeeded; the REAL payoff is inspecting the printed trace
+  // to decide which hypothesis (cross-wired-swap + xor3, or
+  // something else) matches the actual values.
+  SUCCEED();
+}
+
 // ----- P5: DPP modifier → llvm.amdgcn.update.dpp lift -----
 //
 // Spec: raise_context.cpp::emitUpdateDpp + the OpResolver
@@ -1284,6 +1402,7 @@ TEST_F(Gfx1250Gpu, Softmax)        { doTestSoftmax(); }        // P2 (permlanex1
 TEST_F(Gfx1250Gpu, Permlane16Swap) { doTestPermlane16Swap(); } // P4 explicit
 TEST_F(Gfx1250Gpu, Permlane16SwapWave32) { doTestPermlane16SwapWave32(); } // P4 wave32 source
 TEST_F(Gfx1250Gpu, Permlane16SwapWave32WaveNative) { doTestPermlane16SwapWave32WaveNative(); } // P4 WaveNative
+TEST_F(Gfx1250Gpu, BitonicCross16Probe) { doTestBitonicCross16Probe(); } // diagnostic — prints trace
 TEST_F(Gfx1250Gpu, DppQuadPerm)    { doTestDppQuadPerm(); }    // P5 explicit
 TEST_F(Gfx1250Gpu, DsSwizzle)      { doTestDsSwizzle(); }      // P6 explicit
 

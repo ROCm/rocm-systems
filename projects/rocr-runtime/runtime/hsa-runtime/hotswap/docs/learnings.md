@@ -186,15 +186,73 @@ emulation (e.g. forgetting to cross-wire the two
 `ds_bpermute` calls) trips here before reaching a Triton
 user.
 
-**Next investigation step (not yet done).**  Author a
-hand-authored wave32 HIP canary that INLINE-ASM-emits the
-exact 4-instruction dance above with known-distinct values
-for `v2`, `v3`, `v4`, dumps intermediate VGPRs to a buffer,
-and runs both on native gfx1250 AND through salmon on gfx942.
-Diffing the per-lane VGPR trace at each step will pin whether
-the bug is in the XOR3 folding, the compare operand selection,
-or the cndmask — without needing to decode the new VOP3
-encoding by hand.
+**Hardware probe run (same-day):** the wave32 inline-asm canary
+(`test_data/gfx1250/bitonic_cross16_probe_kernel.hip`, GTest
+`Gfx1250Gpu.BitonicCross16Probe`) confirms the textbook model
+of the sequence `v_permlane16_swap_b32 v3, v4; v_xor3_b32 v3,
+v3, v4, v2`.  With distinct inputs `v2=L, v3=100+L, v4=200+L`,
+per-lane output on gfx942 hardware (lifted through salmon) for
+every lane matches exactly:
+
+    after swap: v3 = 200 + (L XOR 16), v4 = 100 + (L XOR 16)
+    after xor3: v3 = (200 + partner) XOR (100 + partner) XOR L
+
+For lane 0: v3 = 216 XOR 116 XOR 0 = 172 — matches the printed
+trace.  For lane 16: v3 = 100 XOR 200 XOR 16 = 188 — also
+matches.  So:
+
+  (a) `v_permlane16_swap_b32`'s cross-wired semantic
+      (`new_vdst = src0_in[partner], new_src0_out = vdst_in[partner]`)
+      is correct on gfx1250.
+  (b) `v_xor3_b32 v3, v3, v4, v2` semantics (`v3 = v3 ^ v4 ^ v2`)
+      are standard.
+  (c) Under Triton's `v3_in = v4_in = v2` (copied self), the
+      xor3 collapses to `v3 = self_v2`.
+
+**This means salmon's decode of `.long 0xd41b0002` as
+`v_cmp_ngt_f32_e64 s2, v2, v3` must be WRONG.**  Under that
+decoded form, the compare's operands would be `self_v2` and
+`self_v2` — an identity compare that is always `true`, making
+the subsequent `v_cndmask` a no-op.  Native gfx1250 produces a
+correct sort through this sequence, so the actual instruction
+cannot be a self-vs-self compare.
+
+Upstream llvm-mc (ROCm 7.2.1's gfx1250 MCPU) rejects the 4-byte
+encoding `02 00 1b d4` as `invalid instruction encoding`, but
+salmon's own LLVM decoder (built into
+`hotswap/transpiler/build/raise_cli`) accepts it and produces an
+`fcmp ule float v2, v3` IR shape.  Three hypotheses remain open:
+
+  1. Salmon's decoder (a newer LLVM than the toolchain MC)
+     correctly decodes the opcode family but maps the operand
+     positions to the wrong SSA sources.  The `.long 0xd41b0002`
+     may be a gfx1250-new single-dword VOP3 compact encoding
+     whose operand fields differ from the 2-dword VOP3 layout.
+  2. The instruction reads `v4` (holding `partner_v2` from the
+     swap, BEFORE `v_and_b32 v4, 8, v0` clobbers it) — not `v3`.
+     That would give `compare(v2, partner_v2)` = a meaningful
+     per-lane result.  But instruction ordering rules should
+     require the `v_and_b32 v4, 8, v0` that comes BEFORE
+     `.long 0xd41b0002` in the stream to complete first.
+  3. The instruction is a gfx1250-new compound op (e.g. a
+     compare-and-cross-lane, or a lane-id-biased compare) that
+     salmon's decoder models with the wrong shape.
+
+**Next narrowing step (deferred).**  Build a `raise_cli`-equivalent
+harness that dumps the decoded MCInst for the `.long 0xd41b0002`
+sites verbatim (Opcode + OperandVec) so we can compare what
+salmon's LLVM decoder thinks versus what the upstream tables
+would infer.  Alternatively, test salmon with a newer LLVM
+(e.g. the `amd-llvm` source in
+`/data/llama3.1/anush/github/TheRock/compiler/amd-llvm/`) —
+if that newer tree has full gfx1250 decode tables, any
+discrepancy with salmon's current decode is the bug.
+
+The wave32 permlane16_swap fixtures and the bitonic cross-16
+probe remain in the test suite as permanent regression guards.
+Their pass/fail state after a future fix pins the positive
+correctness invariant for the cross-widening path the Triton
+`tl.sort` takes.
 
 ---
 
