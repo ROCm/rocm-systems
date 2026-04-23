@@ -469,24 +469,41 @@ def capture_subprocess_output(
         }
     )
 
-    # PTY (not a pipe) so the child sees a terminal and line-buffers its
-    # output. Prevents partial lines from one writer getting glued onto
-    # complete lines from another writer sharing the same fd.
-    pty_parent_fd, pty_child_fd = pty.openpty()
-    # env=None is Popen's default (inherit parent env), so passing
-    # sanitized_env directly handles both the None and dict cases.
-    process = subprocess.Popen(
-        subprocess_args,
-        stdin=subprocess.PIPE,
-        stdout=pty_child_fd,
-        stderr=pty_child_fd,
-        universal_newlines=True,
-        env=sanitized_env,
-    )
-    os.close(pty_child_fd)
-    # buffering=1 for line-buffered reads, errors="replace" so bad bytes
-    # don't crash the read loop.
-    process_stdout = os.fdopen(pty_parent_fd, "r", buffering=1, errors="replace")
+    # Use a PTY in profile mode to prevent instrumentation output from
+    # being interleaved with workload output.
+    if profileMode:
+        pty_parent_fd, pty_child_fd = pty.openpty()
+        stdout_arg = pty_child_fd
+        stderr_arg = pty_child_fd
+    else:
+        stdout_arg = subprocess.PIPE
+        stderr_arg = subprocess.STDOUT
+
+    # env=None is Popen's default (inherit parent env).
+    try:
+        process = subprocess.Popen(
+            subprocess_args,
+            stdin=subprocess.PIPE,
+            stdout=stdout_arg,
+            stderr=stderr_arg,
+            universal_newlines=True,
+            errors="replace",
+            env=sanitized_env,
+        )
+    except BaseException:
+        # Close PTY fds if Popen fails.
+        if profileMode:
+            os.close(pty_parent_fd)
+            os.close(pty_child_fd)
+        raise
+
+    if profileMode:
+        # Close the child end; parent only reads. errors="replace" skips
+        # bad bytes instead of crashing the read loop.
+        os.close(pty_child_fd)
+        process_stdout = os.fdopen(pty_parent_fd, "r", errors="replace")
+    else:
+        process_stdout = process.stdout
 
     # Create buffer for captured process output
     buf = io.StringIO()
@@ -528,9 +545,8 @@ def capture_subprocess_output(
     input_thread = threading.Thread(target=forward_input, daemon=True)
     input_thread.start()
 
-    # Read until the child closes its end. On Linux, reading a closed PTY
-    # parent end raises OSError(EIO) instead of returning an empty string,
-    # so that's how we detect end-of-stream here.
+    # Read until the child closes its end. Pipes signal EOF with an empty
+    # string; PTYs signal it with OSError(EIO). The two never overlap.
     while True:
         try:
             line = process_stdout.readline()
@@ -538,6 +554,8 @@ def capture_subprocess_output(
             if e.errno == errno.EIO:
                 break
             raise
+        if not line:
+            break
         buf.write(line)
         if not enable_logging:
             continue
