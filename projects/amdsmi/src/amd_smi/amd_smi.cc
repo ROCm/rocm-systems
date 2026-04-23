@@ -8486,7 +8486,6 @@ amdsmi_status_t amdsmi_reset_ttm_pages_limit(void) {
       }
     }
     if (!found) {
-      // No config file exists, nothing to do
       return AMDSMI_STATUS_SUCCESS;
     }
   }
