@@ -62,7 +62,7 @@ Note that ``wave_cnt`` doesn't provide a full timeline trace. For full timeline 
 Execution pipelines
 ====================
 
-The following table lists the execution pipelines available on CDNA3/4 architectures:
+The following table lists the execution pipelines available on CDNA3 and CDNA4 architectures:
 
 .. list-table:: Execution pipelines
   :header-rows: 1
