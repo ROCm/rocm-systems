@@ -236,14 +236,15 @@ def add_args(parser: argparse.ArgumentParser):
         "--llm",
         type=str,
         dest="llm_provider",
-        choices=["anthropic", "openai", "ollama", "private", "opencode"],
+        choices=["anthropic", "openai", "ollama", "private", "opencode", "claude-code"],
         default=None,
         help=(
             "Enable LLM-powered analysis enhancement. Choose one of: "
             "'anthropic' (ANTHROPIC_API_KEY), 'openai' (OPENAI_API_KEY), "
             "'ollama' (local daemon, PERFXPERT_LLM_LOCAL_URL), "
             "'private' (self-hosted OpenAI-compatible endpoint, PERFXPERT_LLM_PRIVATE_URL + _API_KEY), "
-            "'opencode' (bundled opencode CLI, PERFXPERT_OPENCODE_PATH). "
+            "'opencode' (bundled opencode CLI, PERFXPERT_OPENCODE_PATH), "
+            "'claude-code' (compatibility alias for opencode). "
             "Local analysis always runs first; LLM provides additional natural language insights."
         ),
     )
@@ -1108,6 +1109,7 @@ def _format_agentic_output(
         doc["narrative"] = narrative
         doc["primary_bottleneck"] = primary_bottleneck
         doc["warnings"] = warnings
+        doc.setdefault("summary", {})["primary_bottleneck"] = primary_bottleneck
         # Preserve a flat ``recommendations`` key in addition to the
         # structured ``recommendations`` inside the schema so callers that
         # do ``jq '.recommendations | length'`` continue to work.
@@ -1554,6 +1556,7 @@ def _warn_if_flag_overrides_env(provider: str, flag_api_key: str) -> None:
 # agentic pipeline (cycle-2 I-1 regression guard).
 _KNOWN_EXECUTE_KWARGS = frozenset({
     # Output routing
+    "format",
     "output_format",
     "output_file",
     "output_path",
@@ -1651,10 +1654,26 @@ def _execute_agentic(
     att_dir = kwargs.get("att_dir")
     top_kernels = int(kwargs.get("top_kernels") or 10)
     min_duration = float(kwargs.get("min_duration") or 0.0)
+    analysis_options = {
+        key: value
+        for key, value in {
+            "top_kernels": top_kernels,
+            "att_dir": att_dir,
+            "min_duration": min_duration,
+            "llm_model": kwargs.get("llm_model"),
+            "llm_thinking": kwargs.get("llm_thinking"),
+            "llm_local": kwargs.get("llm_local"),
+            "llm_local_model": kwargs.get("llm_local_model"),
+            "verbose": verbose if verbose else None,
+        }.items()
+        if value is not None
+    }
     env_forces_airgap = os.environ.get("PERFXPERT_AIRGAP", "0") == "1"
     effective_airgap = env_forces_airgap or (not requested_llm)
     llm_active = requested_llm and (not effective_airgap)
     effective_provider = None if effective_airgap else llm_provider
+    if effective_provider == "claude-code":
+        effective_provider = "opencode"
     effective_api_key = None if effective_airgap else llm_api_key
 
     # Bug 3 — pre-flight auth check. Surface a clean ``AuthError`` BEFORE
@@ -1710,6 +1729,7 @@ def _execute_agentic(
                 source_dir=source_dir,
                 provider=effective_provider,
                 airgap=effective_airgap,
+                analysis_options=analysis_options,
                 progress_callback=progress_cb,
                 api_key=effective_api_key,
             )
@@ -1773,7 +1793,7 @@ def _execute_agentic(
     # Wire them to the agentic RootOutput so `--format markdown` emits
     # real Markdown (not raw narrative prose) and `--format webview`
     # emits a real HTML report (not a plaintext narrative).
-    output_format = kwargs.get("output_format", "text")
+    output_format = kwargs.get("output_format") or kwargs.get("format", "text")
     advanced_effective = _resolve_advanced_flag(kwargs.get("advanced"))
     output = _format_agentic_output(
         root_output,
@@ -1933,8 +1953,10 @@ def _render_cli_error(exc: BaseException) -> int:
     from perfxpert.providers._exceptions import (
         AuthError,
         FatalError,
+        ProviderChainExhausted,
         QuotaExceededError,
         RateLimitError,
+        TimeoutError,
         TransientError,
     )
 
@@ -1958,6 +1980,8 @@ def _render_cli_error(exc: BaseException) -> int:
             "anthropic": "ANTHROPIC_API_KEY",
             "ollama": "PERFXPERT_LLM_LOCAL_URL",
             "private": "PERFXPERT_LLM_PRIVATE_API_KEY",
+            "opencode": "PERFXPERT_OPENCODE_PATH",
+            "claude-code": "PERFXPERT_OPENCODE_PATH",
         }.get(prov, f"{prov.upper()}_API_KEY")
         print(
             f"⚠ LLM auth failed for {prov}. "
@@ -1969,6 +1993,15 @@ def _render_cli_error(exc: BaseException) -> int:
         print(
             f"⚠ LLM rate-limited on {prov}; retry in a minute, or set "
             f"PERFXPERT_LLM_FALLBACK_CHAIN to cascade providers.",
+            file=sys.stderr,
+        )
+    elif isinstance(exc, TimeoutError):
+        prov = getattr(exc, "provider", "<unknown>")
+        timeout_seconds = getattr(exc, "timeout_seconds", 0.0)
+        timeout_detail = f" after {timeout_seconds}s" if timeout_seconds else ""
+        print(
+            f"⚠ LLM provider {prov} timed out{timeout_detail}; "
+            f"retry, switch provider, or PERFXPERT_AIRGAP=1.",
             file=sys.stderr,
         )
     elif isinstance(exc, TransientError):
@@ -1983,6 +2016,14 @@ def _render_cli_error(exc: BaseException) -> int:
         prov = getattr(exc, "provider", "<unknown>")
         raw = getattr(exc, "raw_message", "") or str(exc)
         print(f"⚠ LLM provider {prov} failed: {raw}", file=sys.stderr)
+    elif isinstance(exc, ProviderChainExhausted):
+        attempted = " -> ".join(getattr(exc, "providers", ()) or ("<none>",))
+        last_error = getattr(exc, "last_error", None)
+        suffix = f" Last error: {last_error}" if last_error else ""
+        print(
+            f"⚠ LLM fallback chain exhausted after {attempted}.{suffix}",
+            file=sys.stderr,
+        )
     else:
         print(f"Error: {exc}", file=sys.stderr)
 

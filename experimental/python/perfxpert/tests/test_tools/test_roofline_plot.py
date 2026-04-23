@@ -92,6 +92,45 @@ def test_plot_points_detects_bf16_dtype_from_kernel_name(tmp_path: Path) -> None
     assert rf["dtype_confidence"] == "from_kernel_name"
 
 
+def test_plot_points_prefers_mops_counters_over_legacy_mfma(
+    tmp_path: Path,
+) -> None:
+    db = _build_db(
+        tmp_path,
+        [
+            ("gemm_bf16_kernel", "SQ_INSTS_VALU", 1_000, 1_000_000),
+            ("gemm_bf16_kernel", "SQ_INSTS_VALU_MFMA", 123_456, 1_000_000),
+            ("gemm_bf16_kernel", "SQ_INSTS_VALU_MFMA_MOPS_BF16", 10_000, 1_000_000),
+            ("gemm_bf16_kernel", "FETCH_SIZE", 1024, 1_000_000),
+            ("gemm_bf16_kernel", "WRITE_SIZE", 512, 1_000_000),
+        ],
+    )
+    rf = roofline.plot_points(str(db), top_k=5)
+
+    assert rf["kernels"], "kernel was unexpectedly filtered out"
+    entry = rf["kernels"][0]
+    assert entry["fp_type"] == "bf16"
+    assert entry["flops"] == pytest.approx((1_000 * 64) + (10_000 * 512))
+
+
+def test_plot_points_falls_back_to_legacy_mfma_counter(tmp_path: Path) -> None:
+    db = _build_db(
+        tmp_path,
+        [
+            ("gemm_bf16_kernel", "SQ_INSTS_VALU", 1_000, 1_000_000),
+            ("gemm_bf16_kernel", "SQ_INSTS_VALU_MFMA", 10, 1_000_000),
+            ("gemm_bf16_kernel", "FETCH_SIZE", 1024, 1_000_000),
+            ("gemm_bf16_kernel", "WRITE_SIZE", 512, 1_000_000),
+        ],
+    )
+    rf = roofline.plot_points(str(db), top_k=5)
+
+    assert rf["kernels"], "kernel was unexpectedly filtered out"
+    entry = rf["kernels"][0]
+    assert entry["fp_type"] == "bf16"
+    assert entry["flops"] == pytest.approx((1_000 * 64) + (10 * 4096))
+
+
 def test_plot_points_default_fp32_when_no_regex_match(tmp_path: Path) -> None:
     db = _build_db(
         tmp_path,

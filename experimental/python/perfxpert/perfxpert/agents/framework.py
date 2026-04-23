@@ -28,7 +28,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
-from perfxpert.providers._exceptions import ProviderError
+from perfxpert.providers._exceptions import (
+    AuthError,
+    FatalError,
+    ProviderError,
+    QuotaExceededError,
+    RateLimitError,
+    TimeoutError,
+    TransientError,
+)
 
 # SDK import is lazy + isolated to this file — never in agent modules.
 #
@@ -61,7 +69,7 @@ _LOG = logging.getLogger(__name__)
 _DEFAULT_MODELS: Dict[str, str] = {
     "openai": "gpt-4o-mini",
     "anthropic": "claude-sonnet-4-20250514",
-    "ollama": "ollama/llama3.1",
+    "ollama": "llama3.1",
     "private": "gpt-4o-mini",
     "opencode": "gpt-4o-mini",
 }
@@ -189,12 +197,133 @@ def _resolve_model(provider: str) -> str:
       3. Built-in default from :data:`_DEFAULT_MODELS`
     """
     specific = os.environ.get(f"PERFXPERT_AGENTS_MODEL_{provider.upper()}")
-    if specific:
-        return specific
     generic = os.environ.get("PERFXPERT_LLM_MODEL")
-    if generic:
-        return generic
-    return _DEFAULT_MODELS.get(provider, _DEFAULT_MODELS["openai"])
+    model = specific or generic or _DEFAULT_MODELS.get(provider, _DEFAULT_MODELS["openai"])
+    if "/" in model:
+        return model
+    if provider == "anthropic":
+        return f"litellm/anthropic/{model}"
+    if provider == "ollama":
+        return f"litellm/ollama/{model}"
+    if provider == "private":
+        return f"private/{model}"
+    return model
+
+
+def _build_sdk_run_config(provider: str) -> Any:
+    """Build the SDK RunConfig with provider-specific routing when needed."""
+    kwargs: Dict[str, Any] = {}
+
+    if provider in {"anthropic", "ollama", "private"}:
+        from agents.models.multi_provider import MultiProvider, MultiProviderMap  # type: ignore[import-not-found]
+
+        provider_map = MultiProviderMap()
+
+        if provider in {"anthropic", "ollama"}:
+            try:
+                from agents.extensions.models.litellm_provider import LitellmProvider  # type: ignore[import-not-found]
+            except ImportError as exc:
+                raise RuntimeError(
+                    "framework: LiteLLM provider support missing; install perfxpert[litellm] "
+                    "or perfxpert[all]"
+                ) from exc
+            provider_map.add_provider(provider, LitellmProvider())
+        elif provider == "private":
+            from agents.models.openai_provider import OpenAIProvider  # type: ignore[import-not-found]
+
+            base_url = (os.environ.get("PERFXPERT_LLM_PRIVATE_URL") or "").rstrip("/")
+            if not base_url:
+                raise AuthError("private", "no endpoint configured (set PERFXPERT_LLM_PRIVATE_URL)")
+            provider_map.add_provider(
+                "private",
+                OpenAIProvider(
+                    api_key=os.environ.get("PERFXPERT_LLM_PRIVATE_API_KEY") or "dummy",
+                    base_url=base_url,
+                    use_responses=False,
+                ),
+            )
+
+        kwargs["model_provider"] = MultiProvider(provider_map=provider_map)
+
+    return SdkRunConfig(**kwargs)
+
+
+def _map_exception_by_message(provider: str, exc: BaseException) -> ProviderError | None:
+    """Best-effort string fallback when the SDK wraps or erases concrete types."""
+    msg = str(exc)
+    low = msg.lower()
+    if "insufficient_quota" in low or ("quota" in low and "exceed" in low):
+        return QuotaExceededError(provider, message=msg)
+    if "rate limit" in low or "429" in low or "too many requests" in low:
+        return RateLimitError(provider, message=msg)
+    if (
+        "invalid_api_key" in low
+        or "authentication" in low
+        or "unauthorized" in low
+        or "permission denied" in low
+        or "401" in low
+        or "403" in low
+    ):
+        return AuthError(provider, msg)
+    if "timeout" in low or "timed out" in low:
+        return TimeoutError(provider, 0.0, msg)
+    if (
+        "connection" in low
+        or "temporarily unavailable" in low
+        or "try again later" in low
+        or "503" in low
+        or "504" in low
+        or "502" in low
+    ):
+        return TransientError(provider, kind="transport", message=msg)
+    return None
+
+
+def _normalize_provider_exception(provider: str, exc: BaseException) -> ProviderError | None:
+    """Map SDK/backend exceptions into the shared provider taxonomy."""
+    if isinstance(exc, ProviderError):
+        return exc
+
+    try:
+        import openai as _openai_sdk  # type: ignore[import-not-found]
+    except Exception:  # pragma: no cover - optional runtime dep
+        _openai_sdk = None  # type: ignore[assignment]
+
+    try:
+        import anthropic as _anthropic_sdk  # type: ignore[import-not-found]
+    except Exception:  # pragma: no cover - optional runtime dep
+        _anthropic_sdk = None  # type: ignore[assignment]
+
+    text = str(exc)
+    if _openai_sdk is not None:
+        if isinstance(exc, (_openai_sdk.AuthenticationError, _openai_sdk.PermissionDeniedError)):
+            return AuthError(provider, text)
+        if isinstance(exc, _openai_sdk.RateLimitError):
+            if "quota" in text.lower():
+                return QuotaExceededError(provider, message=text)
+            retry = getattr(exc, "retry_after", 0.0) or 0.0
+            return RateLimitError(provider, retry_after=retry, message=text)
+        if isinstance(exc, _openai_sdk.APITimeoutError):
+            return TimeoutError(provider, 0.0, text)
+        if isinstance(exc, (_openai_sdk.APIConnectionError, _openai_sdk.InternalServerError)):
+            return TransientError(provider, kind="sdk", message=text)
+        if isinstance(exc, _openai_sdk.BadRequestError):
+            return FatalError(provider, text)
+
+    if _anthropic_sdk is not None:
+        if isinstance(exc, (_anthropic_sdk.AuthenticationError, _anthropic_sdk.PermissionDeniedError)):
+            return AuthError(provider, text)
+        if isinstance(exc, _anthropic_sdk.RateLimitError):
+            if "quota" in text.lower():
+                return QuotaExceededError(provider, message=text)
+            retry = getattr(exc, "retry_after", 0.0) or 0.0
+            return RateLimitError(provider, retry_after=retry, message=text)
+        if isinstance(exc, _anthropic_sdk.APITimeoutError):
+            return TimeoutError(provider, 0.0, text)
+        if isinstance(exc, (_anthropic_sdk.APIConnectionError, _anthropic_sdk.InternalServerError)):
+            return TransientError(provider, kind="sdk", message=text)
+
+    return _map_exception_by_message(provider, exc)
 
 
 def _serialize_input(input_payload: Any) -> str:
@@ -353,7 +482,7 @@ def _sdk_invoke(agent: "Agent", input_payload: Any, provider: str) -> FakeProvid
     input_str = _serialize_input(input_payload)
 
     try:
-        run_config = SdkRunConfig()
+        run_config = _build_sdk_run_config(provider)
         run_result = SdkRunner.run_sync(
             starting_agent=sdk_agent,
             input=input_str,
@@ -363,6 +492,9 @@ def _sdk_invoke(agent: "Agent", input_payload: Any, provider: str) -> FakeProvid
     except ProviderError:
         raise
     except Exception as exc:
+        mapped = _normalize_provider_exception(provider, exc)
+        if mapped is not None:
+            raise mapped from exc
         raise RuntimeError(f"framework: SDK Runner.run_sync failed: {exc}") from exc
 
     return FakeProviderResponse(

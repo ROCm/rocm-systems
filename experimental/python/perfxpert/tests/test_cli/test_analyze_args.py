@@ -66,11 +66,21 @@ def test_llm_flag_propagates():
     assert "llm" not in kwargs
 
 
-@pytest.mark.parametrize("provider", ["anthropic", "openai", "opencode", "claude-code"])
-def test_llm_flag_all_choices_propagate(provider):
+@pytest.mark.parametrize(
+    "provider",
+    ["anthropic", "openai", "ollama", "private", "opencode"],
+)
+def test_llm_flag_all_supported_providers_propagate(provider):
     process_args, ns = _build_parsed_args(["--llm", provider])
     kwargs = process_args(_FakeConn(), ns)
     assert kwargs["llm_provider"] == provider
+    assert kwargs["enable_llm"] is True
+
+
+def test_llm_flag_accepts_claude_code_compatibility_alias():
+    process_args, ns = _build_parsed_args(["--llm", "claude-code"])
+    kwargs = process_args(_FakeConn(), ns)
+    assert kwargs["llm_provider"] == "claude-code"
     assert kwargs["enable_llm"] is True
 
 

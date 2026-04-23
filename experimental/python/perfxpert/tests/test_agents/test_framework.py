@@ -321,6 +321,7 @@ def test_sdk_invoke_wires_openai_agents_sdk(monkeypatch):
         def run_sync(*, starting_agent, input, max_turns, run_config):
             captured["input"] = input
             captured["max_turns"] = max_turns
+            captured["run_config"] = run_config
             return _FakeRunResult()
 
     def _fake_function_tool(fn, *, name_override, strict_mode):
@@ -329,7 +330,7 @@ def test_sdk_invoke_wires_openai_agents_sdk(monkeypatch):
     monkeypatch.setattr(framework, "_SDK_AVAILABLE", True)
     monkeypatch.setattr(framework, "SdkAgent", _FakeSdkAgent)
     monkeypatch.setattr(framework, "SdkRunner", _FakeRunner)
-    monkeypatch.setattr(framework, "SdkRunConfig", lambda: object())
+    monkeypatch.setattr(framework, "SdkRunConfig", lambda **kwargs: {"kwargs": kwargs})
     monkeypatch.setattr(framework, "sdk_function_tool", _fake_function_tool)
 
     from perfxpert.agents.framework import Agent, ToolBinding, _sdk_invoke, FakeProviderResponse
@@ -356,6 +357,7 @@ def test_sdk_invoke_wires_openai_agents_sdk(monkeypatch):
     assert captured["max_turns"] == 10
     # Model resolved from _DEFAULT_MODELS["openai"]
     assert captured["model"] == "gpt-4o-mini"
+    assert captured["run_config"] == {"kwargs": {}}
 
 
 def test_sdk_invoke_raises_runtime_error_when_sdk_missing(monkeypatch):
@@ -394,7 +396,7 @@ def test_sdk_invoke_preserves_provider_taxonomy(monkeypatch):
     monkeypatch.setattr(framework, "_SDK_AVAILABLE", True)
     monkeypatch.setattr(framework, "SdkAgent", _FakeSdkAgent)
     monkeypatch.setattr(framework, "SdkRunner", _FakeRunner)
-    monkeypatch.setattr(framework, "SdkRunConfig", lambda: object())
+    monkeypatch.setattr(framework, "SdkRunConfig", lambda **kwargs: {"kwargs": kwargs})
     monkeypatch.setattr(framework, "sdk_function_tool", lambda fn, **kwargs: {"fn": fn, **kwargs})
 
     agent = Agent(
@@ -407,4 +409,136 @@ def test_sdk_invoke_preserves_provider_taxonomy(monkeypatch):
     )
 
     with pytest.raises(AuthError):
+        framework._sdk_invoke(agent, {"user_query": "?"}, provider="openai")
+
+
+@pytest.mark.parametrize(
+    ("provider", "expected"),
+    [
+        ("openai", "gpt-4o-mini"),
+        ("anthropic", "litellm/anthropic/claude-sonnet-4-20250514"),
+        ("ollama", "litellm/ollama/llama3.1"),
+        ("private", "private/gpt-4o-mini"),
+    ],
+)
+def test_resolve_model_qualifies_non_openai_providers(provider, expected):
+    assert framework._resolve_model(provider) == expected
+
+
+def test_resolve_model_preserves_explicit_prefixed_override(monkeypatch):
+    monkeypatch.setenv(
+        "PERFXPERT_AGENTS_MODEL_ANTHROPIC",
+        "litellm/anthropic/claude-3-7-sonnet-latest",
+    )
+    assert framework._resolve_model("anthropic") == "litellm/anthropic/claude-3-7-sonnet-latest"
+
+
+def test_sdk_invoke_builds_litellm_route_for_anthropic(monkeypatch):
+    captured = {}
+
+    class _FakeSdkAgent:
+        def __init__(self, *, name, instructions, tools, model):
+            captured["model"] = model
+
+    class _FakeRunResult:
+        def __init__(self):
+            self.final_output = {"narrative": "ok"}
+            self.new_items = []
+
+    class _FakeRunner:
+        @staticmethod
+        def run_sync(*, starting_agent, input, max_turns, run_config):
+            captured["run_config"] = run_config
+            return _FakeRunResult()
+
+    monkeypatch.setattr(framework, "_SDK_AVAILABLE", True)
+    monkeypatch.setattr(framework, "SdkAgent", _FakeSdkAgent)
+    monkeypatch.setattr(framework, "SdkRunner", _FakeRunner)
+    monkeypatch.setattr(framework, "SdkRunConfig", lambda **kwargs: {"kwargs": kwargs})
+    monkeypatch.setattr(framework, "sdk_function_tool", lambda fn, **kwargs: {"fn": fn, **kwargs})
+
+    agent = Agent(
+        name="T",
+        layer=1,
+        fence_path=None,
+        input_schema=dict,
+        output_schema=dict,
+        tools=[],
+    )
+
+    framework._sdk_invoke(agent, {"user_query": "?"}, provider="anthropic")
+
+    assert captured["model"] == "litellm/anthropic/claude-sonnet-4-20250514"
+    assert "model_provider" in captured["run_config"]["kwargs"]
+
+
+def test_sdk_invoke_private_provider_uses_custom_openai_base_url(monkeypatch):
+    captured = {}
+
+    class _FakeSdkAgent:
+        def __init__(self, *, name, instructions, tools, model):
+            captured["model"] = model
+
+    class _FakeRunResult:
+        def __init__(self):
+            self.final_output = {"narrative": "ok"}
+            self.new_items = []
+
+    class _FakeRunner:
+        @staticmethod
+        def run_sync(*, starting_agent, input, max_turns, run_config):
+            captured["run_config"] = run_config
+            return _FakeRunResult()
+
+    monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_URL", "https://llm.example/v1")
+    monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_API_KEY", "sk-private")
+    monkeypatch.setattr(framework, "_SDK_AVAILABLE", True)
+    monkeypatch.setattr(framework, "SdkAgent", _FakeSdkAgent)
+    monkeypatch.setattr(framework, "SdkRunner", _FakeRunner)
+    monkeypatch.setattr(framework, "SdkRunConfig", lambda **kwargs: {"kwargs": kwargs})
+    monkeypatch.setattr(framework, "sdk_function_tool", lambda fn, **kwargs: {"fn": fn, **kwargs})
+
+    agent = Agent(
+        name="T",
+        layer=1,
+        fence_path=None,
+        input_schema=dict,
+        output_schema=dict,
+        tools=[],
+    )
+
+    framework._sdk_invoke(agent, {"user_query": "?"}, provider="private")
+
+    assert captured["model"] == "private/gpt-4o-mini"
+    assert "model_provider" in captured["run_config"]["kwargs"]
+
+
+def test_sdk_invoke_maps_rate_limit_like_runtime_errors(monkeypatch):
+    from perfxpert.providers._exceptions import RateLimitError
+
+    class _FakeSdkAgent:
+        def __init__(self, **_kwargs):
+            pass
+
+    class _FakeRunner:
+        @staticmethod
+        def run_sync(**_kwargs):
+            raise RuntimeError("429 rate limit from upstream gateway")
+
+    monkeypatch.setattr(framework, "_SDK_AVAILABLE", True)
+    monkeypatch.setattr(framework, "SdkAgent", _FakeSdkAgent)
+    monkeypatch.setattr(framework, "SdkRunner", _FakeRunner)
+    monkeypatch.setattr(framework, "SdkRunConfig", lambda **kwargs: {"kwargs": kwargs})
+    monkeypatch.setattr(framework, "sdk_function_tool", lambda fn, **kwargs: {"fn": fn, **kwargs})
+
+    agent = Agent(
+        name="T",
+        layer=1,
+        fence_path=None,
+        input_schema=dict,
+        output_schema=dict,
+        tools=[],
+    )
+
+    with pytest.raises(RateLimitError):
         framework._sdk_invoke(agent, {"user_query": "?"}, provider="openai")

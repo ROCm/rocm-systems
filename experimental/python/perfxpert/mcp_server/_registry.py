@@ -24,7 +24,16 @@ import perfxpert.tools as _tools_pkg
 from perfxpert.tools._class import ToolClass
 
 
-_SKIP_MODULES = {"_class", "_safety"}
+_SKIP_MODULES = {
+    "_class",
+    "_safety",
+    # Specialist-internal catalog shims. These exist so the layer-2 agents can
+    # fetch deterministic recommendation catalogs, but they are not part of the
+    # user-facing MCP surface.
+    "compute_techniques",
+    "memory_techniques",
+    "latency_techniques",
+}
 
 
 def discover_read_only_tools() -> Dict[str, Callable]:

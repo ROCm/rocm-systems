@@ -6,6 +6,12 @@ import pytest
 
 from perfxpert.agents import runtime as runtime_module
 from perfxpert.agents import schemas
+from perfxpert.providers._exceptions import (
+    AuthError,
+    ProviderChainExhausted,
+    RateLimitError,
+    TransientError,
+)
 from perfxpert.runtime import RecursionGuardViolation, recursion_guard
 
 
@@ -14,6 +20,7 @@ def test_session_builds_with_anthropic(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake")
     s = runtime_module.build_session(provider="anthropic")
     assert s.provider == "anthropic"
+    assert s.providers == ("anthropic",)
     assert s.session_id is not None
 
 
@@ -43,6 +50,25 @@ def test_session_honors_PERFXPERT_AIRGAP(monkeypatch):
 def test_session_unknown_provider_raises():
     with pytest.raises(ValueError, match="unknown provider"):
         runtime_module.build_session(provider="my-fake-llm")
+
+
+def test_session_parses_fallback_chain_with_primary_first(monkeypatch):
+    monkeypatch.setenv("PERFXPERT_LLM_FALLBACK_CHAIN", "openai, anthropic, openai, private")
+    session = runtime_module.build_session(provider="anthropic")
+    assert session.providers == ("anthropic", "openai", "private")
+
+
+def test_session_rejects_unknown_provider_in_fallback_chain(monkeypatch):
+    monkeypatch.setenv("PERFXPERT_LLM_FALLBACK_CHAIN", "openai,not-real")
+    with pytest.raises(ValueError, match="unknown provider 'not-real'"):
+        runtime_module.build_session(provider="anthropic")
+
+
+def test_session_applies_recursion_guard_to_all_fallback_candidates(monkeypatch):
+    monkeypatch.setenv("PERFXPERT_LLM_FALLBACK_CHAIN", "opencode")
+    with recursion_guard.opencode_session():
+        with pytest.raises(RecursionGuardViolation):
+            runtime_module.build_session(provider="anthropic")
 
 
 def test_session_generates_session_id_if_missing():
@@ -146,3 +172,65 @@ def test_session_live_call_scopes_explicit_api_key(monkeypatch):
     ) == expected
     assert seen["during"] == "sk-new"
     assert os.environ.get("OPENAI_API_KEY") == "sk-old"
+
+
+def test_session_live_call_cascades_on_retryable_provider_error(monkeypatch):
+    expected = schemas.RootOutput(
+        narrative="ok",
+        recommendations=[],
+        primary_bottleneck="mixed",
+        warnings=[],
+        metadata={},
+    )
+    seen = []
+
+    def _fake_run_root(payload, *, provider="anthropic", airgap=None):
+        seen.append(provider)
+        if provider == "anthropic":
+            raise RateLimitError("anthropic", retry_after=0.5, message="slow down")
+        assert provider == "openai"
+        return expected
+
+    monkeypatch.setenv("PERFXPERT_LLM_FALLBACK_CHAIN", "openai")
+    monkeypatch.setattr(runtime_module.root, "run_root", _fake_run_root)
+
+    session = runtime_module.build_session(provider="anthropic")
+    out = session.run_root(schemas.RootInput(user_query="why slow?", database_path=None))
+
+    assert out == expected
+    assert seen == ["anthropic", "openai"]
+
+
+def test_session_live_call_raises_chain_exhausted_after_retryables(monkeypatch):
+    seen = []
+
+    def _fake_run_root(payload, *, provider="anthropic", airgap=None):
+        seen.append(provider)
+        raise TransientError(provider, kind="transport", message="temporary failure")
+
+    monkeypatch.setenv("PERFXPERT_LLM_FALLBACK_CHAIN", "openai")
+    monkeypatch.setattr(runtime_module.root, "run_root", _fake_run_root)
+
+    session = runtime_module.build_session(provider="anthropic")
+    with pytest.raises(ProviderChainExhausted) as exc_info:
+        session.run_root(schemas.RootInput(user_query="why slow?", database_path=None))
+
+    assert exc_info.value.providers == ("anthropic", "openai")
+    assert seen == ["anthropic", "openai"]
+
+
+def test_session_live_call_surfaces_non_retryable_provider_error(monkeypatch):
+    seen = []
+
+    def _fake_run_root(payload, *, provider="anthropic", airgap=None):
+        seen.append(provider)
+        raise AuthError(provider, "bad key")
+
+    monkeypatch.setenv("PERFXPERT_LLM_FALLBACK_CHAIN", "openai")
+    monkeypatch.setattr(runtime_module.root, "run_root", _fake_run_root)
+
+    session = runtime_module.build_session(provider="anthropic")
+    with pytest.raises(AuthError):
+        session.run_root(schemas.RootInput(user_query="why slow?", database_path=None))
+
+    assert seen == ["anthropic"]

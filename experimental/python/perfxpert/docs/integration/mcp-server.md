@@ -246,8 +246,10 @@ The Live Roofline work adds one more READ_ONLY tool on top of
 the advanced-specialist additions above:
 
 - `roofline.plot_points` — reads a rocpd database's `pmc_events` view,
-  aggregates per-kernel `SQ_INSTS_VALU` / `SQ_INSTS_VALU_MFMA` /
-  `FETCH_SIZE` / `WRITE_SIZE`, and returns a per-kernel `(ai,
+  aggregates per-kernel `SQ_INSTS_VALU`, the rocprofv3 v1.2.1
+  `SQ_INSTS_VALU_MFMA_MOPS_*` counters when present (falling back to
+  legacy `SQ_INSTS_VALU_MFMA`), plus `FETCH_SIZE` / `WRITE_SIZE`, and
+  returns a per-kernel `(ai,
   achieved_flops_per_s, bottleneck_class)` list plus the arch ridge
   point. The webview formatter uses this payload to draw the inline
   SVG roofline (no external JS / CSS). Also surfaced in the JSON

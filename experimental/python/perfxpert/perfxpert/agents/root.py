@@ -42,7 +42,7 @@ def build_root_agent() -> Agent:
     """
     tools = [
         ToolBinding(name="intent.classify", fn=intent_tool.classify),
-        ToolBinding(name="tasks.next", fn=tasks_tool.next),
+        ToolBinding(name="tasks.next", fn=tasks_tool.next_task),
         ToolBinding(name="tasks.create", fn=tasks_tool.create),
         ToolBinding(name="tasks.update", fn=tasks_tool.update),
         ToolBinding(name="tasks.close", fn=tasks_tool.close),

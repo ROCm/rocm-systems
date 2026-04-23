@@ -296,11 +296,64 @@ def _build_summary(
     }
 
 
+def _normalize_hw_counter_escalation(hw: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Normalize optional multi-pass counter guidance for formatter consumption."""
+    raw = hw.get("escalation")
+    if not isinstance(raw, dict):
+        return None
+
+    passes: List[Dict[str, Any]] = []
+    for idx, entry in enumerate(raw.get("passes") or [], start=1):
+        if not isinstance(entry, dict):
+            continue
+        counters = [str(counter) for counter in (entry.get("counters") or []) if counter]
+        if not counters:
+            continue
+        passes.append(
+            {
+                "index": int(entry.get("index", idx)),
+                "counters": counters,
+                "pmc": str(entry.get("pmc") or " ".join(counters)),
+            }
+        )
+
+    pmc_groups = [str(line) for line in (raw.get("pmc_groups") or []) if str(line).strip()]
+    if not pmc_groups:
+        pmc_groups = [f"pmc: {entry['pmc']}" for entry in passes]
+
+    commands: List[Dict[str, str]] = []
+    for command in raw.get("commands") or []:
+        if not isinstance(command, dict):
+            continue
+        commands.append(
+            {
+                "tool": str(command.get("tool") or ""),
+                "description": str(command.get("description") or ""),
+                "full_command": str(command.get("full_command") or ""),
+            }
+        )
+
+    return {
+        "required": bool(raw.get("required", bool(passes))),
+        "reason": str(raw.get("reason") or ""),
+        "gpu_arch": str(raw.get("gpu_arch") or ""),
+        "pass_count": int(raw.get("pass_count") or len(passes)),
+        "passes": passes,
+        "pmc_groups_path": str(raw.get("pmc_groups_path") or "pmc_groups.txt"),
+        "pmc_groups": pmc_groups,
+        "commands": commands,
+    }
+
+
 def _build_hw_counters_json(hw: Dict[str, Any]) -> Dict[str, Any]:
     """Convert hardware_counters internal dict to schema-compliant form."""
     has_counters = bool(hw.get("has_counters", False))
+    escalation = _normalize_hw_counter_escalation(hw)
     if not has_counters:
-        return {"has_counters": False, "metrics": None, "counters": None}
+        doc = {"has_counters": False, "metrics": None, "counters": None}
+        if escalation:
+            doc["escalation"] = escalation
+        return doc
 
     raw_metrics = hw.get("metrics", {}) or {}
     metrics: Dict[str, Any] = {
@@ -322,7 +375,10 @@ def _build_hw_counters_json(hw: Dict[str, Any]) -> Dict[str, Any]:
         for name, s in raw_counters.items()
     }
 
-    return {"has_counters": True, "metrics": metrics, "counters": counters}
+    doc = {"has_counters": True, "metrics": metrics, "counters": counters}
+    if escalation:
+        doc["escalation"] = escalation
+    return doc
 
 
 def _build_recommendations_json(

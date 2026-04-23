@@ -12,7 +12,10 @@ from typing import Any, Dict, List, Optional
 
 from perfxpert.agents import schemas
 from perfxpert.agents._predict_attach import attach_predictions_to_techniques
-from perfxpert.agents.compute_specialist import _rank_catalog_deterministic
+from perfxpert.agents.compute_specialist import (
+    _promote_named_technique,
+    _rank_catalog_deterministic,
+)
 from perfxpert.agents.framework import Agent, ToolBinding, run_agent
 from perfxpert.tools import arch, bottleneck, predict_impact, unified_memory
 
@@ -26,6 +29,13 @@ def _fetch_catalog(gfx_id: str) -> List[Dict[str, Any]]:
         return memory_techniques.catalog(gfx_id=gfx_id)
     except ImportError:
         return []  # defensive fallback if memory_techniques tool is absent
+
+
+def _rank_memory_catalog(catalog: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    ranked = _rank_catalog_deterministic(catalog)
+    # Recommendation routes to this specialist only for the memory_transfer
+    # bottleneck, so overlap recommendations should lead the deterministic path.
+    return _promote_named_technique(ranked, "hip_stream_overlap")
 
 
 def build_memory_specialist() -> Agent:
@@ -78,7 +88,7 @@ def run_memory_specialist(
 
     if raw.get("_mode") == "airgap":
         techniques = attach_predictions_to_techniques(
-            _rank_catalog_deterministic(catalog), payload
+            _rank_memory_catalog(catalog), payload
         )
         return schemas.MemorySpecialistOutput(
             techniques=techniques,
@@ -87,7 +97,7 @@ def run_memory_specialist(
         )
 
     so = raw.get("structured_output") or {}
-    raw_techniques = so.get("techniques", _rank_catalog_deterministic(catalog))
+    raw_techniques = so.get("techniques", _rank_memory_catalog(catalog))
     techniques = attach_predictions_to_techniques(raw_techniques, payload)
     return schemas.MemorySpecialistOutput(
         techniques=techniques,

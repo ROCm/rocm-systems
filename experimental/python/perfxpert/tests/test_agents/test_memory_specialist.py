@@ -66,3 +66,26 @@ def test_memory_specialist_airgap_sorts_deterministically(monkeypatch):
         airgap=True,
     )
     assert result.techniques[0]["name"] == "Y"
+
+
+def test_memory_specialist_airgap_promotes_stream_overlap(monkeypatch):
+    monkeypatch.setenv("PERFXPERT_AIRGAP", "1")
+    monkeypatch.setattr(ms_module, "_fetch_catalog", lambda gfx_id: [
+        {
+            "name": "memory_coalescing_stride_fix",
+            "expected_impact": 4.0,
+            "effort_factor": 2.0,
+            "risk": "medium",
+        },
+        {
+            "name": "hip_stream_overlap",
+            "expected_impact": 0.7,
+            "effort_factor": 2.0,
+            "risk": "low",
+        },
+    ])
+    result = ms_module.run_memory_specialist(
+        schemas.MemorySpecialistInput(gfx_id="gfx942", hot_kernels=[]),
+        airgap=True,
+    )
+    assert result.techniques[0]["name"] == "hip_stream_overlap"

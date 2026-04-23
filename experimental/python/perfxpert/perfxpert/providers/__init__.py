@@ -9,7 +9,9 @@ Public API:
     list_providers() -> Dict[str, str]
     Provider, ProviderResponse         (base types, Task 2)
     DryRunResponse                     (singleton, Task 1)
-    ProviderError, AuthError, RateLimitError, TimeoutError  (taxonomy, Task 1)
+    ProviderError, AuthError, RateLimitError, QuotaExceededError,
+    TransientError, FatalError, TimeoutError, ProviderChainExhausted
+                                    (taxonomy, Task 1)
 
 Env var conventions (canonical):
     PERFXPERT_LLM_ANTHROPIC_KEY
@@ -27,20 +29,28 @@ from perfxpert.providers._base import Provider, ProviderResponse
 from perfxpert.providers._exceptions import (
     AuthError,
     DryRunResponse,
+    FatalError,
+    ProviderChainExhausted,
     ProviderError,
+    QuotaExceededError,
     RateLimitError,
     TimeoutError,
+    TransientError,
 )
 from perfxpert.providers.registry import get_provider, list_providers, register
 
 __all__ = [
     "AuthError",
     "DryRunResponse",
+    "FatalError",
+    "ProviderChainExhausted",
     "ProviderError",
     "Provider",
     "ProviderResponse",
+    "QuotaExceededError",
     "RateLimitError",
     "TimeoutError",
+    "TransientError",
     "get_provider",
     "list_providers",
     "register",

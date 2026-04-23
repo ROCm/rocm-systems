@@ -2,7 +2,7 @@
 
 ## What you're adding
 
-A new node in the 7-agent hierarchy that orchestrates tools to solve a
+A new node in the 8-agent hierarchy that orchestrates tools to solve a
 narrowly-scoped problem. Agents route via typed handoffs and run within the
 5-gate correctness cascade.
 

@@ -25,7 +25,7 @@ pytest -m red_team -v
 pytest -m regression_gate -v
 
 # 5. Run the airgap parity test
-pytest tests/test_integration/test_airgap.py tests/test_integration/test_airgap_intent_classify.py -v
+pytest tests/test_integration/test_airgap_parity.py tests/test_integration/test_airgap_intent_classify.py -v
 
 # 6. Generate the exit dashboard
 python scripts/exit_dashboard.py --output exit_dashboard.json --render

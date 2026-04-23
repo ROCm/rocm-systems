@@ -108,9 +108,10 @@ Behavior differences vs air-gap:
 
 ![all providers](assets/gifs/15-all-providers.gif)
 
-*The five supported provider choices come directly from the CLI's
-`--llm` registry: `anthropic`, `openai`, `ollama`, `private`,
-`opencode`.*
+*The five primary providers come directly from the CLI's `--llm`
+registry: `anthropic`, `openai`, `ollama`, `private`, `opencode`.
+The CLI also accepts `claude-code` as a compatibility alias for the
+bundled opencode backend.*
 
 `PROVIDER_REGISTRY` is defined in `perfxpert/agents/runtime.py` (with a
 hard-coded fallback there; `build_session` imports the richer copy
@@ -151,9 +152,13 @@ surface in this tree is:
 
 | Exception | Meaning |
 |-----------|---------|
-| `RateLimitError` | HTTP 429 / short-term throttle |
+| `RateLimitError` | HTTP 429 / short-term throttle; eligible for fallback cascade |
+| `QuotaExceededError` | Hard quota / billing exhaustion; surfaces immediately |
+| `TransientError` | Retryable provider/network/API blip; eligible for fallback cascade |
+| `FatalError` | Non-retryable provider failure or malformed provider response |
 | `TimeoutError` | Per-call timeout budget exceeded |
 | `AuthError` | Bad API key / missing credential |
+| `ProviderChainExhausted` | Every provider in the configured fallback chain failed |
 | `ProviderError` | Generic provider failure when no narrower typed subclass applies |
 
 The `recursion_guard` still applies to each candidate — `opencode`

@@ -87,7 +87,9 @@ def tier0_dict_to_ns(d: Dict[str, Any]) -> Any:
 # This is the dict shape the formatters' tier0 helpers (already present in
 # ``perfxpert/formatters/``) expect when a tier-0-capable result is passed in.
 
-_GPU_EXTS = frozenset({".hip", ".cu", ".cuh", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".cl"})
+_GPU_EXTS = frozenset(
+    {".hip", ".cu", ".cuh", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".cl", ".py"}
+)
 _SKIP_DIRS = frozenset({
     ".git", ".svn", "build", "_build", ".build", "__pycache__",
     "node_modules", ".cache", ".tox", ".mypy_cache", ".pytest_cache",
@@ -101,6 +103,10 @@ _HIP_LAUNCH_RE = re.compile(r"hipLaunchKernelGGL\s*\(\s*(\w+)")
 _TRIPLE_LAUNCH_RE = re.compile(r"(\w+)\s*<<<[^>]*>>>\s*\(")
 _SYNCHRONIZE_RE = re.compile(r"hipDeviceSynchronize|cudaDeviceSynchronize|hipStreamSynchronize")
 _HIPMEMCPY_RE = re.compile(r"\bhipMemcpy\b|\bcudaMemcpy\b")
+_ASYNC_MEMCPY_RE = re.compile(r"\bhipMemcpyAsync\b|\bcudaMemcpyAsync\b")
+_STREAM_CREATE_RE = re.compile(
+    r"\b(?:hip|cuda)Stream(?:Create|CreateWithFlags|CreateWithPriority)\b"
+)
 _ROCTX_RE = re.compile(r"roctxRangePush|roctxRangePop|roctxMark")
 
 
@@ -141,6 +147,9 @@ def scan_tier0_sources(source_dir: str) -> Optional[Dict[str, Any]]:
     roctx_count = 0
     has_hip = False
     has_opencl = False
+    launch_locations: List[tuple[str, int]] = []
+    saw_async_memcpy = False
+    saw_stream_api = False
 
     for dirpath, dirnames, filenames in os.walk(root):
         # Skip unwanted directories in place
@@ -163,6 +172,8 @@ def scan_tier0_sources(source_dir: str) -> Optional[Dict[str, Any]]:
                 continue
             files_scanned += 1
             rel = str(fpath.relative_to(root))
+            saw_async_memcpy = saw_async_memcpy or bool(_ASYNC_MEMCPY_RE.search(text))
+            saw_stream_api = saw_stream_api or bool(_STREAM_CREATE_RE.search(text))
 
             # detect kernels
             for m in _KERNEL_RE.finditer(text):
@@ -172,10 +183,12 @@ def scan_tier0_sources(source_dir: str) -> Optional[Dict[str, Any]]:
             for m in _HIP_LAUNCH_RE.finditer(text):
                 line = text[: m.start()].count("\n") + 1
                 detected_kernels.append({"name": m.group(1), "file": rel, "line": line, "launch_type": "HIP_KERNEL_LAUNCH"})
+                launch_locations.append((rel, line))
                 has_hip = True
             for m in _TRIPLE_LAUNCH_RE.finditer(text):
                 line = text[: m.start()].count("\n") + 1
                 detected_kernels.append({"name": m.group(1), "file": rel, "line": line, "launch_type": "TRIPLE_ANGLE_LAUNCH"})
+                launch_locations.append((rel, line))
                 has_hip = True
             if ".cl" == ext:
                 has_opencl = True
@@ -192,6 +205,11 @@ def scan_tier0_sources(source_dir: str) -> Optional[Dict[str, Any]]:
             for m in _ROCTX_RE.finditer(text):
                 roctx_count += 1
 
+    if launch_locations and not saw_async_memcpy and not saw_stream_api:
+        rel, line = launch_locations[0]
+        pattern_counts["default_stream"] = 1
+        pattern_locations["default_stream"] = [f"{rel}:{line}"]
+
     # derive programming model
     if has_opencl:
         model = "OpenCL"
@@ -206,6 +224,7 @@ def scan_tier0_sources(source_dir: str) -> Optional[Dict[str, Any]]:
         cat = {
             "memcpy_sync": ("medium", "memory_transfer", "Synchronous hipMemcpy calls may block the CPU"),
             "device_sync": ("low", "synchronization", "Explicit device synchronization points"),
+            "default_stream": ("medium", "launch_overhead", "Kernel launches stay on the default stream"),
         }.get(pid, ("info", "pattern", pid.replace("_", " ")))
         patterns.append({
             "pattern_id": pid,
@@ -246,12 +265,26 @@ def scan_tier0_sources(source_dir: str) -> Optional[Dict[str, Any]]:
             "suggestion": "Start with a --sys-trace baseline then add --pmc for hardware counters.",
             "actions": [suggested_cmd] if suggested_cmd else [],
         })
-    if pattern_counts.get("memcpy_sync", 0) >= 3:
+    if pattern_counts.get("memcpy_sync", 0) >= 1:
         code_patterns.append({
             "priority": "MEDIUM",
             "category": "Memory Transfer",
             "issue": "Multiple synchronous hipMemcpy calls detected — may bottleneck end-to-end time.",
             "suggestion": "Consider pinned memory + hipMemcpyAsync with an explicit stream.",
+        })
+    if pattern_counts.get("device_sync", 0) >= 1:
+        code_patterns.append({
+            "priority": "MEDIUM",
+            "category": "Synchronization",
+            "issue": "Repeated hipDeviceSynchronize calls serialize work and add avoidable latency.",
+            "suggestion": "Remove device-wide syncs from the hot path and synchronize only at true dependencies.",
+        })
+    if pattern_counts.get("default_stream", 0) >= 1:
+        code_patterns.append({
+            "priority": "MEDIUM",
+            "category": "No Streams",
+            "issue": "Kernel launches appear to stay on the default stream, limiting overlap opportunities.",
+            "suggestion": "Move copies and launches onto explicit non-default streams so transfer and compute can overlap.",
         })
 
     # Build the ``profiling_plan`` dict surfaced under

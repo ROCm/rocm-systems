@@ -41,6 +41,7 @@ from .json_fmt import (
     _build_warnings_json,
     _format_as_json,
     _format_tier0_json,
+    _normalize_hw_counter_escalation,
     _tier0_to_dict,
 )
 from .markdown import _format_as_markdown, _format_tier0_markdown
@@ -364,8 +365,10 @@ def format_analysis_output(
 
         lines.append("")
 
+    escalation = _normalize_hw_counter_escalation(hardware_counters or {})
+
     # Hardware Counters (Tier 2)
-    if hardware_counters and hardware_counters.get("has_counters"):
+    if (hardware_counters and hardware_counters.get("has_counters")) or escalation:
         lines.append("\u2501" * width)
         lines.append("HARDWARE COUNTERS (Tier 2)".center(width))
         lines.append("\u2501" * width)
@@ -392,6 +395,9 @@ def format_analysis_output(
                 lines.append(f"  Max Wave Occupancy:     {max_waves:6.1f} waves")
 
             lines.append("")
+        elif not hardware_counters.get("has_counters"):
+            lines.append("No hardware counter samples were present in this report.")
+            lines.append("")
 
         # Display raw counters
         if counters:
@@ -412,6 +418,33 @@ def format_analysis_output(
                 )
 
             lines.append("")
+
+        if escalation:
+            lines.append("Counter Collection Escalation:")
+            lines.append("")
+            if escalation.get("reason"):
+                lines.append(f"  {escalation['reason']}")
+                lines.append("")
+            lines.append(f"  Pass Count: {int(escalation.get('pass_count', 0))}")
+            pmc_groups_path = escalation.get("pmc_groups_path")
+            if pmc_groups_path:
+                lines.append(f"  PMC Groups File: {pmc_groups_path}")
+            lines.append("")
+            if escalation.get("pmc_groups"):
+                lines.append("  pmc_groups contents:")
+                for line in escalation["pmc_groups"]:
+                    lines.append(f"    {line}")
+                lines.append("")
+            for command in escalation.get("commands", []):
+                tool = command.get("tool", "")
+                desc = command.get("description", "")
+                label = f"[{tool}] {desc}".strip()
+                if label:
+                    lines.append(f"  {label}")
+                full_command = command.get("full_command", "")
+                if full_command:
+                    lines.append(f"    $ {full_command}")
+                lines.append("")
 
     # Phase 10: Live Roofline text table
     if roofline and roofline.get("kernels"):

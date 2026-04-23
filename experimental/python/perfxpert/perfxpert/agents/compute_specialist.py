@@ -79,6 +79,33 @@ def _rank_catalog_deterministic(catalog: List[Dict[str, Any]]) -> List[Dict[str,
     return sorted(catalog, key=score)
 
 
+def _promote_named_technique(
+    ranked: List[Dict[str, Any]],
+    technique_name: str,
+) -> List[Dict[str, Any]]:
+    promoted = [entry for entry in ranked if entry.get("name") == technique_name]
+    if not promoted:
+        return ranked
+    return promoted + [entry for entry in ranked if entry.get("name") != technique_name]
+
+
+def _rank_compute_catalog(
+    catalog: List[Dict[str, Any]],
+    payload: schemas.ComputeSpecialistInput,
+) -> List[Dict[str, Any]]:
+    ranked = _rank_catalog_deterministic(catalog)
+    hot_kernel_names = [
+        str(kernel.get("name", "")).lower() for kernel in (payload.hot_kernels or [])
+    ]
+    if any(
+        token in kernel_name
+        for kernel_name in hot_kernel_names
+        for token in ("gemm", "matmul", "mfma", "mma")
+    ):
+        ranked = _promote_named_technique(ranked, "mfma_enablement")
+    return ranked
+
+
 def run_compute_specialist(
     payload: schemas.ComputeSpecialistInput,
     *,
@@ -96,7 +123,7 @@ def run_compute_specialist(
     )
 
     if raw.get("_mode") == "airgap":
-        ranked = _rank_catalog_deterministic(catalog)
+        ranked = _rank_compute_catalog(catalog, payload)
         techniques = attach_predictions_to_techniques(ranked, payload)
         return schemas.ComputeSpecialistOutput(
             techniques=techniques,
@@ -105,7 +132,7 @@ def run_compute_specialist(
         )
 
     so = raw.get("structured_output") or {}
-    raw_techniques = so.get("techniques", _rank_catalog_deterministic(catalog))
+    raw_techniques = so.get("techniques", _rank_compute_catalog(catalog, payload))
     techniques = attach_predictions_to_techniques(raw_techniques, payload)
     return schemas.ComputeSpecialistOutput(
         techniques=techniques,

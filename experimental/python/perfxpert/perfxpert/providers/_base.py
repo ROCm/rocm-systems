@@ -63,7 +63,8 @@ class Provider(ABC):
             ProviderResponse on success, DryRunResponse if dry_run.
 
         Raises:
-            AuthError, RateLimitError, TimeoutError, ProviderError.
+            AuthError, RateLimitError, QuotaExceededError, TransientError,
+            FatalError, TimeoutError, ProviderChainExhausted, ProviderError.
         """
         raise NotImplementedError
 

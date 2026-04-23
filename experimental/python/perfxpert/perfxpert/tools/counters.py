@@ -16,6 +16,52 @@ from perfxpert.tools._class import ToolClass, tool_class
 _TCC_DERIVED = frozenset({"FETCH_SIZE", "WRITE_SIZE"})
 
 
+def _build_multi_pass_escalation(
+    passes: List[List[str]], gpu_arch: str
+) -> Dict[str, Any]:
+    """Return concrete guidance for multi-pass counter collection."""
+    pass_specs = [
+        {
+            "index": idx,
+            "counters": list(counter_pass),
+            "pmc": " ".join(counter_pass),
+        }
+        for idx, counter_pass in enumerate(passes, start=1)
+    ]
+    pmc_groups = [f"pmc: {spec['pmc']}" for spec in pass_specs]
+    return {
+        "required": True,
+        "reason": (
+            f"Requested counters require {len(pass_specs)} profiling passes on "
+            f"{gpu_arch}; a single rocprofv3 --pmc invocation would exceed "
+            "per-block or isolation limits."
+        ),
+        "gpu_arch": gpu_arch,
+        "pass_count": len(pass_specs),
+        "passes": pass_specs,
+        "pmc_groups_path": "pmc_groups.txt",
+        "pmc_groups": pmc_groups,
+        "commands": [
+            {
+                "tool": "rocprof-compute",
+                "description": (
+                    "Use rocprof-compute when you want the profiler to handle "
+                    "the required multi-pass hardware collection for you."
+                ),
+                "full_command": "rocprof-compute profile -- ./app",
+            },
+            {
+                "tool": "rocprofv3",
+                "description": (
+                    "Write one pmc group per line, then collect the requested "
+                    "passes with rocprofv3 -i."
+                ),
+                "full_command": "rocprofv3 -i pmc_groups.txt -- ./app",
+            },
+        ],
+    }
+
+
 @tool_class(ToolClass.READ_ONLY)
 def lookup_info(name: str, gfx_id: str = None) -> Dict[str, Any]:
     """Return structured info for an HW counter by name.
@@ -56,7 +102,12 @@ def validate_for_gpu(counter_list: List[str], gpu_arch: str) -> Dict[str, Any]:
         gpu_arch: Architecture (e.g., "gfx942").
 
     Returns:
-        {"ok": bool, "violations": [...], "fixed_passes": [[counter,...], ...]}
+        {
+          "ok": bool,
+          "violations": [...],
+          "fixed_passes": [[counter,...], ...],
+          "escalation": {...} | None,
+        }
     """
     limits_cfg = load_yaml("pmc_limits")["per_block_limits"]
     catalog = load_yaml("counter_catalog")
@@ -102,4 +153,10 @@ def validate_for_gpu(counter_list: List[str], gpu_arch: str) -> Dict[str, Any]:
     for d in derived:
         passes.append([d])
 
-    return {"ok": True, "violations": [], "fixed_passes": passes}
+    escalation = _build_multi_pass_escalation(passes, gpu_arch) if len(passes) > 1 else None
+    return {
+        "ok": True,
+        "violations": [],
+        "fixed_passes": passes,
+        "escalation": escalation,
+    }

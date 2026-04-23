@@ -1,4 +1,4 @@
-"""Agent hierarchy — 7 agents on a deterministic tool floor (spec §2)."""
+"""Agent hierarchy — 8 agents on a deterministic tool floor (spec §2)."""
 
 from perfxpert.agents.runtime import AnalysisSession, build_session, DEFAULT_PROVIDER
 from perfxpert.agents.schemas import (

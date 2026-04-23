@@ -71,6 +71,9 @@ _OPENCODE_SUBCOMMANDS = frozenset({
 # `_print_perfxpert_help()` for bare `perfxpert-code --help` discovery.
 _PERFXPERT_SUBCOMMANDS: "dict[str, str]" = {
     "analyze": "Analyze a rocprofiler-sdk trace database for GPU bottlenecks",
+    "init": "First-run wizard: detect GPU, write config, and suggest rocprofv3 commands",
+    "diff": "Compare baseline vs new trace databases and emit a diff report",
+    "ci": "CI wrapper over diff; returns non-zero on regressions above a threshold",
     "config": "Show or set perfxpert configuration (~/.config/perfxpert/config.yaml)",
     "doctor": "Health check: verify MCP server, LLM providers, and dependencies",
     "install-patches": "(deprecated) Build the patched opencode submodule into perfxpert/_bundled/opencode",
@@ -79,10 +82,11 @@ _PERFXPERT_SUBCOMMANDS: "dict[str, str]" = {
 }
 
 # Subcommand names the launcher itself dispatches to `python -m perfxpert`
-# or handles inline. ``doctor`` and ``install-patches`` must short-circuit
-# BEFORE resolve_opencode_binary() (so they work on a fresh install, without
-# opencode on disk — install-patches is precisely what produces opencode).
-_PERFXPERT_DISPATCH_SUBCOMMANDS = frozenset({"doctor", "install-patches", "uninstall"})
+# or handles inline. These must short-circuit BEFORE resolve_opencode_binary()
+# so they work on a fresh install without opencode on disk.
+_PERFXPERT_DISPATCH_SUBCOMMANDS = frozenset(
+    {"init", "diff", "ci", "doctor", "install-patches", "uninstall"}
+)
 
 
 # Cycle-2 Task 2: third-party agent backends the launcher dispatches to via

@@ -306,8 +306,7 @@ def next_task(exclude_ids: Optional[List[str]] = None) -> Optional[Dict[str, Any
     return _default_store().next(exclude_ids=exclude_ids)
 
 
-def next(exclude_ids: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
-    return next_task(exclude_ids=exclude_ids)
+next = next_task
 
 
 def update(task_id: str, **kwargs: Any) -> None:

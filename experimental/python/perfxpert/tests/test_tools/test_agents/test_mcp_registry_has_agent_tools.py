@@ -133,3 +133,11 @@ def test_total_tool_count_is_56() -> None:
         "interconnect.lookup_peaks",
     ):
         assert k in reg, f"phase-10 comm tool {k} missing from registry"
+    # Specialist catalog loaders are internal helpers for the layered agent
+    # runtime, not standalone MCP tools.
+    for k in (
+        "compute_techniques.catalog",
+        "memory_techniques.catalog",
+        "latency_techniques.catalog",
+    ):
+        assert k not in reg, f"internal helper {k} leaked into MCP registry"

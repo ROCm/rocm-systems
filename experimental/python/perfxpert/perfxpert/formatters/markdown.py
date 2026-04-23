@@ -29,6 +29,7 @@ Markdown formatting functions for PerfXpert analysis results.
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from .json_fmt import _normalize_hw_counter_escalation
 from ._source_correlation import (
     correlate_hotspots_with_source,
     format_source_citation_inline,
@@ -57,6 +58,7 @@ def _format_as_markdown(
     breakdown = time_breakdown or {}
     hw = hardware_counters or {}
     has_counters = bool(hw.get("has_counters", False))
+    escalation = _normalize_hw_counter_escalation(hw)
 
     total_runtime_ms = breakdown.get("total_runtime", 0) / 1e6
     kernel_pct = breakdown.get("kernel_percent", 0)
@@ -154,19 +156,58 @@ def _format_as_markdown(
             )
         lines.append("")
 
-    if has_counters:
+    if has_counters or escalation:
         metrics = hw.get("metrics", {}) or {}
         lines.append("## Hardware Counters (Tier 2)")
         lines.append("")
-        if "gpu_utilization_percent" in metrics:
-            lines.append(
-                f"- **GPU Utilization:** {metrics['gpu_utilization_percent']:.1f}%"
-            )
-        if "avg_waves" in metrics:
-            lines.append(f"- **Avg Wave Occupancy:** {metrics['avg_waves']:.1f} waves")
-            lines.append(
-                f"- **Max Wave Occupancy:** {metrics.get('max_waves', 0):.1f} waves"
-            )
+        if has_counters:
+            if "gpu_utilization_percent" in metrics:
+                lines.append(
+                    f"- **GPU Utilization:** {metrics['gpu_utilization_percent']:.1f}%"
+                )
+            if "avg_waves" in metrics:
+                lines.append(f"- **Avg Wave Occupancy:** {metrics['avg_waves']:.1f} waves")
+                lines.append(
+                    f"- **Max Wave Occupancy:** {metrics.get('max_waves', 0):.1f} waves"
+                )
+        else:
+            lines.append("- No hardware counter samples were present in this report.")
+        if escalation:
+            lines.append("")
+            lines.append("### Counter Collection Escalation")
+            lines.append("")
+            if escalation.get("reason"):
+                lines.append(escalation["reason"])
+                lines.append("")
+            lines.append(f"- **Pass count:** {int(escalation.get('pass_count', 0))}")
+            pmc_groups_path = escalation.get("pmc_groups_path")
+            if pmc_groups_path:
+                lines.append(f"- **PMC groups file:** `{pmc_groups_path}`")
+            lines.append("")
+            if escalation.get("pmc_groups"):
+                lines.append("**pmc_groups contents:**")
+                lines.append("")
+                lines.append("```text")
+                lines.extend(str(line) for line in escalation["pmc_groups"])
+                lines.append("```")
+                lines.append("")
+            commands = escalation.get("commands", [])
+            if commands:
+                lines.append("**Collection commands:**")
+                lines.append("")
+                for command in commands:
+                    tool = command.get("tool", "")
+                    desc = command.get("description", "")
+                    if tool or desc:
+                        label = f"{tool}: {desc}" if tool and desc else tool or desc
+                        lines.append(f"- {label}")
+                    full_command = command.get("full_command", "")
+                    if full_command:
+                        lines.append("")
+                        lines.append("```bash")
+                        lines.append(full_command)
+                        lines.append("```")
+                lines.append("")
         lines.append("")
 
     if recommendations:

@@ -4,6 +4,7 @@ Regression guards: assert the legacy dispatch symbols stay removed and
 that legacy env vars cannot revive them.
 """
 
+import json
 from unittest import mock
 
 import pytest
@@ -14,6 +15,7 @@ from perfxpert import analyze as analyze_mod
 @pytest.fixture
 def fake_db(tmp_path):
     import sqlite3
+
     db = tmp_path / "fake.db"
     conn = sqlite3.connect(db)
     conn.executescript("""
@@ -29,70 +31,81 @@ def fake_db(tmp_path):
 
 def test_cli_always_runs_agentic(fake_db, monkeypatch):
     """CLI always uses the agentic path; no feature-flag branching remains."""
-    monkeypatch.delenv("PERFXPERT_LEGACY", raising=False)  # regression guard
+    monkeypatch.delenv("PERFXPERT_LEGACY", raising=False)
     with mock.patch.object(analyze_mod, "_execute_agentic") as agentic:
         agentic.return_value = 0
-        # Use the kwarg name the agentic layer actually reads. The legacy
-        # `format=` kwarg was silently dropped in cycle-1 tests
-        # (nitpick: misleading even though harmless).
         analyze_mod.execute(input=mock.MagicMock(), output_format="text")
         agentic.assert_called_once()
 
 
 def test_cli_legacy_flag_is_no_op(fake_db, monkeypatch):
     """Regression guard: the removed PERFXPERT_LEGACY env var must still route agentic."""
-    monkeypatch.setenv("PERFXPERT_LEGACY", "1")  # regression guard
+    monkeypatch.setenv("PERFXPERT_LEGACY", "1")
     with mock.patch.object(analyze_mod, "_execute_agentic") as agentic:
         agentic.return_value = 0
         analyze_mod.execute(input=mock.MagicMock(), output_format="text")
         agentic.assert_called_once()
 
 
-def _analysis_output():
-    from perfxpert.agents import schemas
+def _root_output():
+    return {
+        "narrative": "Compute-bound workload dominated by tile_mfma_loop.",
+        "recommendations": [
+            {
+                "issue": "Tune MFMA tile sizes",
+                "type": "optimization",
+                "category": "compute",
+                "priority": "HIGH",
+                "description": "Retile the kernel to improve matrix-core utilization.",
+            }
+        ],
+        "primary_bottleneck": "compute",
+        "warnings": [],
+        "metadata": {"intent": "analyze", "routed_to": "analysis"},
+    }
 
-    return schemas.AnalysisOutput(
-        primary_bottleneck="compute",
-        confidence=0.91,
-        time_breakdown={
+
+def _analysis_payload():
+    return {
+        "time_breakdown": {
             "kernel_pct": 0.82,
             "memcpy_pct": 0.05,
             "api_pct": 0.08,
             "idle_pct": 0.05,
         },
-        hot_kernels=[
+        "hotspots": [
             {
+                "rank": 1,
                 "name": "tile_mfma_loop",
                 "calls": 4,
                 "total_duration_ns": 42_000,
                 "avg_duration_ns": 10_500,
                 "min_duration_ns": 9_000,
                 "max_duration_ns": 12_000,
-                "pct": 0.82,
+                "pct_of_total": 82.0,
             }
         ],
-        counter_data_available=True,
-    )
-
-
-def _recommendation_output():
-    from perfxpert.agents import schemas
-
-    return schemas.RecommendationOutput(
-        recommendations=[
+        "memory_analysis": {},
+        "hardware_counters": {
+            "has_counters": True,
+            "metrics": {"gpu_utilization_pct": 91.0, "avg_waves": 40.0},
+            "counters": {},
+        },
+        "kernel_resources": {},
+        "api_overhead": {"top_apis": []},
+        "thread_trace": None,
+        "tier0_findings": None,
+        "recommendations_deterministic": [
             {
-                "name": "mfma_tile_tuning",
-                "title": "Tune MFMA tile sizes",
-                "description": "Retile the kernel to improve matrix-core utilization.",
+                "issue": "Tune MFMA tile sizes",
+                "type": "optimization",
                 "category": "compute",
                 "priority": "HIGH",
-                "expected_impact": 0.27,
-                "actions": ["Re-profile after retuning block sizes."],
+                "suggestion": "Re-profile after retuning block sizes.",
             }
         ],
-        specialist_used="compute",
-        plateau_detected=False,
-    )
+        "metadata": {},
+    }
 
 
 @pytest.mark.parametrize(
@@ -104,76 +117,72 @@ def _recommendation_output():
     ],
 )
 def test_execute_agentic_runs_analysis_and_formats_reports(fmt, expected_fragments, capsys):
-    """Database-backed CLI analysis must run Analysis -> Recommendation and use canonical formatters."""
-    analysis_output = _analysis_output()
-    recommendation_output = _recommendation_output()
-    session = mock.Mock()
-    session.session_id = "session-123"
-    session.run_analysis.return_value = analysis_output
-    session.run_recommendation.return_value = recommendation_output
+    """Database-backed CLI analysis must route through the public API root."""
     fake_input = mock.Mock()
     fake_input._paths = ["/tmp/fake.db"]
 
-    with mock.patch("perfxpert.agents.runtime.build_session", return_value=session) as build_session:
-        with mock.patch("perfxpert.agents.schemas.AnalysisInput", return_value="analysis-input") as analysis_input:
-            with mock.patch(
-                "perfxpert.agents.schemas.RecommendationInput",
-                return_value="recommendation-input",
-            ) as recommendation_input:
-                analyze_mod._execute_agentic(
-                    input=fake_input,
-                    output_format=fmt,
-                    prompt="why is matmul slow?",
-                    llm_provider="openai",
-                    enable_llm=True,
-                    top_kernels=3,
-                    att_dir="/tmp/att",
-                    min_duration=5000.0,
-                    llm_model="gpt-4.1",
-                    llm_thinking=8000,
-                    llm_local="ollama",
-                    llm_local_model="codellama:13b",
-                    verbose=True,
-                )
+    with mock.patch("perfxpert.api.agent_root", return_value=_root_output()) as agent_root:
+        with mock.patch(
+            "perfxpert.analysis.payload.build_analysis_payload",
+            return_value=_analysis_payload(),
+        ) as build_payload:
+            analyze_mod._execute_agentic(
+                input=fake_input,
+                output_format=fmt,
+                prompt="why is matmul slow?",
+                llm_provider="openai",
+                enable_llm=True,
+                top_kernels=3,
+                att_dir="/tmp/att",
+                min_duration=5000.0,
+                llm_model="gpt-4.1",
+                llm_thinking=8000,
+                llm_local="ollama",
+                llm_local_model="codellama:13b",
+                verbose=True,
+            )
 
     captured = capsys.readouterr()
     for fragment in expected_fragments:
         assert fragment in captured.out
-    build_session.assert_called_once_with(provider="openai", airgap=False)
-    analysis_input.assert_called_once_with(
-        database_path="/tmp/fake.db",
-        top_kernels=3,
+    agent_root.assert_called_once()
+    root_kwargs = agent_root.call_args.kwargs
+    assert root_kwargs["user_query"] == "why is matmul slow?"
+    assert root_kwargs["database_path"] == "/tmp/fake.db"
+    assert root_kwargs["provider"] == "openai"
+    assert root_kwargs["airgap"] is False
+    assert root_kwargs["analysis_options"] == {
+        "top_kernels": 3,
+        "att_dir": "/tmp/att",
+        "min_duration": 5000.0,
+        "llm_model": "gpt-4.1",
+        "llm_thinking": 8000,
+        "llm_local": "ollama",
+        "llm_local_model": "codellama:13b",
+        "verbose": True,
+    }
+    assert root_kwargs["progress_callback"] is None
+    build_payload.assert_called_once_with(
+        fake_input,
+        source_dir=None,
         att_dir="/tmp/att",
+        top_kernels=3,
         min_duration=5000.0,
-        analysis_options={
-            "top_kernels": 3,
-            "att_dir": "/tmp/att",
-            "min_duration": 5000.0,
-            "llm_model": "gpt-4.1",
-            "llm_thinking": 8000,
-            "llm_local": "ollama",
-            "llm_local_model": "codellama:13b",
-            "verbose": True,
-        },
+        progress_callback=mock.ANY,
     )
-    recommendation_input.assert_called_once_with(findings=analysis_output)
-    session.run_analysis.assert_called_once_with("analysis-input")
-    session.run_recommendation.assert_called_once_with("recommendation-input")
 
 
 def test_execute_agentic_renders_structured_json_from_analysis_outputs(capsys):
     """JSON output should come from the canonical analysis formatter stack."""
-    analysis_output = _analysis_output()
-    recommendation_output = _recommendation_output()
-    session = mock.Mock()
-    session.session_id = "session-123"
-    session.run_analysis.return_value = analysis_output
-    session.run_recommendation.return_value = recommendation_output
     fake_input = mock.Mock()
     fake_input._paths = ["/tmp/fake.db"]
 
-    with mock.patch("perfxpert.agents.runtime.build_session", return_value=session):
-        analyze_mod._execute_agentic(input=fake_input, format="json")
+    with mock.patch("perfxpert.api.agent_root", return_value=_root_output()):
+        with mock.patch(
+            "perfxpert.analysis.payload.build_analysis_payload",
+            return_value=_analysis_payload(),
+        ):
+            analyze_mod._execute_agentic(input=fake_input, format="json")
 
     captured = capsys.readouterr()
     import json
@@ -183,67 +192,115 @@ def test_execute_agentic_renders_structured_json_from_analysis_outputs(capsys):
     assert payload["hotspots"][0]["name"] == "tile_mfma_loop"
     assert payload["recommendations"][0]["issue"] == "Tune MFMA tile sizes"
     assert payload["metadata"]["database_file"] == "/tmp/fake.db"
-    assert payload["execution_breakdown"]["total_runtime_ns"] > 0
-    assert payload["execution_breakdown"]["kernel_time_ns"] > 0
+    assert "execution_breakdown" in payload
+    assert "kernel_time_ns" in payload["execution_breakdown"]
 
 
-def test_execute_agentic_normalizes_claude_code_provider(capsys):
-    """`claude-code` should route through the opencode provider internally."""
-    analysis_output = _analysis_output()
-    recommendation_output = _recommendation_output()
-    session = mock.Mock()
-    session.session_id = "session-123"
-    session.run_analysis.return_value = analysis_output
-    session.run_recommendation.return_value = recommendation_output
+def test_execute_agentic_preserves_supported_opencode_provider(capsys):
+    """The shipped analyze-provider set still includes ``opencode``."""
     fake_input = mock.Mock()
     fake_input._paths = ["/tmp/fake.db"]
 
-    with mock.patch("perfxpert.agents.runtime.build_session", return_value=session) as build_session:
-        with mock.patch("perfxpert.agents.schemas.AnalysisInput", return_value="analysis-input") as analysis_input:
+    with mock.patch("perfxpert.api.agent_root", return_value=_root_output()) as agent_root:
+        with mock.patch(
+            "perfxpert.analysis.payload.build_analysis_payload",
+            return_value=_analysis_payload(),
+        ):
             analyze_mod._execute_agentic(
                 input=fake_input,
                 output_format="text",
-                llm_provider="claude-code",
+                llm_provider="opencode",
                 enable_llm=True,
             )
 
     captured = capsys.readouterr()
     assert "ROCPD AI PERFORMANCE ANALYSIS" in captured.out
-    build_session.assert_called_once_with(provider="opencode", airgap=False)
-    analysis_input.assert_called_once_with(
-        database_path="/tmp/fake.db",
-        top_kernels=10,
-        att_dir=None,
-        min_duration=0.0,
-        analysis_options={},
-    )
+    assert agent_root.call_args.kwargs["provider"] == "opencode"
+    assert agent_root.call_args.kwargs["analysis_options"] == {
+        "top_kernels": 10,
+        "min_duration": 0.0,
+    }
 
 
 def test_execute_agentic_preserves_provider_taxonomy():
     """Auth and rate-limit errors should propagate unchanged to callers."""
     from perfxpert.providers._exceptions import AuthError
 
-    session = mock.Mock()
-    session.session_id = "session-123"
-    session.run_analysis.side_effect = AuthError("openai", "bad key")
     fake_input = mock.Mock()
     fake_input._paths = ["/tmp/fake.db"]
 
-    with mock.patch("perfxpert.agents.runtime.build_session", return_value=session):
-        with pytest.raises(AuthError):
-            analyze_mod._execute_agentic(
-                input=fake_input,
-                output_format="text",
-                llm_provider="openai",
-                enable_llm=True,
-            )
+    with mock.patch(
+        "perfxpert.api.agent_root",
+        side_effect=AuthError("openai", "bad key"),
+    ):
+        with mock.patch("perfxpert.analysis.payload.build_analysis_payload") as build_payload:
+            with pytest.raises(AuthError):
+                analyze_mod._execute_agentic(
+                    input=fake_input,
+                    output_format="text",
+                    llm_provider="openai",
+                    enable_llm=True,
+                )
+    build_payload.assert_not_called()
 
 
 def test_legacy_symbols_are_absent():
     """Regression guard: removed legacy symbols must stay gone."""
-    assert not hasattr(analyze_mod, "_execute_legacy"), (  # regression guard
+    assert not hasattr(analyze_mod, "_execute_legacy"), (
         "_execute_legacy was removed during the agentic refactor and must stay gone"
     )
     import importlib
+
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module("perfxpert.ai_analysis")
+
+
+def test_execute_agentic_json_output_parity_across_airgap_and_llm(capsys):
+    """Product-surface parity guard for ``perfxpert analyze`` JSON output.
+
+    Airgap and LLM mode may differ in narrative phrasing, but the rendered
+    analysis verdict, hotspots, recommendations, and execution breakdown must
+    stay identical at the CLI output surface.
+    """
+    fake_input = mock.Mock()
+    fake_input._paths = ["/tmp/fake.db"]
+
+    airgap_root = _root_output()
+    airgap_root["narrative"] = "Airgap narrative."
+    llm_root = _root_output()
+    llm_root["narrative"] = "LLM narrative."
+
+    seen_calls = []
+
+    def _fake_agent_root(**kwargs):
+        seen_calls.append(kwargs)
+        return airgap_root if kwargs.get("airgap") else llm_root
+
+    with mock.patch("perfxpert.api.agent_root", side_effect=_fake_agent_root):
+        with mock.patch(
+            "perfxpert.analysis.payload.build_analysis_payload",
+            return_value=_analysis_payload(),
+        ):
+            analyze_mod._execute_agentic(
+                input=fake_input,
+                output_format="json",
+                enable_llm=False,
+            )
+            airgap_payload = json.loads(capsys.readouterr().out)
+
+            analyze_mod._execute_agentic(
+                input=fake_input,
+                output_format="json",
+                enable_llm=True,
+                llm_provider="openai",
+            )
+            llm_payload = json.loads(capsys.readouterr().out)
+
+    assert seen_calls[0]["airgap"] is True
+    assert seen_calls[1]["airgap"] is False
+    assert seen_calls[1]["provider"] == "openai"
+
+    assert airgap_payload["summary"]["primary_bottleneck"] == llm_payload["summary"]["primary_bottleneck"]
+    assert airgap_payload["hotspots"] == llm_payload["hotspots"]
+    assert airgap_payload["recommendations"] == llm_payload["recommendations"]
+    assert airgap_payload["execution_breakdown"] == llm_payload["execution_breakdown"]

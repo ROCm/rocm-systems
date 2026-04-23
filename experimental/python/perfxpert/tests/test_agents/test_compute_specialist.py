@@ -100,3 +100,33 @@ def test_compute_specialist_empty_catalog_returns_empty(monkeypatch):
         airgap=True,
     )
     assert result.techniques == []
+
+
+def test_compute_specialist_airgap_promotes_mfma_for_matmul(monkeypatch):
+    monkeypatch.setenv("PERFXPERT_AIRGAP", "1")
+    monkeypatch.setattr(
+        cs_module,
+        "_fetch_catalog",
+        lambda gfx_id: [
+            {
+                "name": "fast_math_compiler_flag",
+                "expected_impact": 2.5,
+                "effort_factor": 0.5,
+                "risk": "medium",
+            },
+            {
+                "name": "mfma_enablement",
+                "expected_impact": 9.0,
+                "effort_factor": 3.0,
+                "risk": "medium",
+            },
+        ],
+    )
+    result = cs_module.run_compute_specialist(
+        schemas.ComputeSpecialistInput(
+            gfx_id="gfx942",
+            hot_kernels=[{"name": "matmul", "pct": 1.0}],
+        ),
+        airgap=True,
+    )
+    assert result.techniques[0]["name"] == "mfma_enablement"

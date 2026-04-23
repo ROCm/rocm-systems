@@ -97,6 +97,17 @@ _DTYPE_PATTERNS: List[tuple] = [
     (re.compile(r"(_fp16|_f16\b|_half)", re.IGNORECASE), "fp16"),
 ]
 
+_LEGACY_MFMA_COUNTER = "SQ_INSTS_VALU_MFMA"
+_MFMA_MOPS_FLOPS_PER_COUNT = 512.0
+_MOPS_COUNTERS = {
+    "SQ_INSTS_VALU_MFMA_MOPS_BF16": "bf16",
+    "SQ_INSTS_VALU_MFMA_MOPS_F16": "fp16",
+    "SQ_INSTS_VALU_MFMA_MOPS_F32": "fp32",
+    "SQ_INSTS_VALU_MFMA_MOPS_F64": "fp64",
+    "SQ_INSTS_VALU_MFMA_MOPS_I8": "int8",
+    "SQ_INSTS_VALU_MFMA_MOPS_F8": "fp8",
+}
+
 
 def _detect_dtype(kernel_name: str) -> str:
     if not kernel_name:
@@ -138,7 +149,8 @@ def _detect_gfx_id(conn: sqlite3.Connection) -> str:
 def _fetch_kernel_counters(conn: sqlite3.Connection) -> Dict[str, Dict[str, Any]]:
     wanted = (
         "SQ_INSTS_VALU",
-        "SQ_INSTS_VALU_MFMA",
+        _LEGACY_MFMA_COUNTER,
+        *_MOPS_COUNTERS,
         "FETCH_SIZE",
         "WRITE_SIZE",
     )
@@ -168,6 +180,21 @@ def _fetch_kernel_counters(conn: sqlite3.Connection) -> Dict[str, Dict[str, Any]
     return out
 
 
+def _mfma_flops_from_counters(
+    ctrs: Dict[str, Any], fp_type: str, mfma_table: Dict[str, Any]
+) -> float:
+    mops_flops = sum(
+        float(ctrs.get(counter_name, 0)) * _MFMA_MOPS_FLOPS_PER_COUNT
+        for counter_name in _MOPS_COUNTERS
+    )
+    if mops_flops > 0:
+        return mops_flops
+
+    legacy_mfma = float(ctrs.get(_LEGACY_MFMA_COUNTER, 0))
+    mfma_flops_per_inst = float(mfma_table.get(fp_type, 0))
+    return legacy_mfma * mfma_flops_per_inst
+
+
 @tool_class(ToolClass.READ_ONLY)
 def plot_points(
     db_path: str,
@@ -179,6 +206,8 @@ def plot_points(
     Formula (deterministic — no LLM involved)::
 
         flops = SQ_INSTS_VALU * 64
+              + sum(SQ_INSTS_VALU_MFMA_MOPS_* * 512)
+        # fallback when only legacy MFMA instruction counts are present
               + SQ_INSTS_VALU_MFMA * mfma_flops_per_inst[dtype]
         bytes = (FETCH_SIZE + WRITE_SIZE) * 1024      # TCC KiB -> bytes
         ai    = flops / bytes
@@ -244,7 +273,6 @@ def plot_points(
 
     for name, ctrs in per_kernel.items():
         valu = float(ctrs.get("SQ_INSTS_VALU", 0))
-        mfma = float(ctrs.get("SQ_INSTS_VALU_MFMA", 0))
         fetch = float(ctrs.get("FETCH_SIZE", 0))
         write = float(ctrs.get("WRITE_SIZE", 0))
         duration_ns = int(ctrs.get("_duration_ns", 0))
@@ -262,8 +290,7 @@ def plot_points(
             continue
         confidence = "low" if (fetch == 0) ^ (write == 0) else "high"
 
-        mfma_flops_per_inst = float(mfma_table.get(fp_type, 0))
-        flops = valu * 64.0 + mfma * mfma_flops_per_inst
+        flops = valu * 64.0 + _mfma_flops_from_counters(ctrs, fp_type, mfma_table)
         if flops <= 0:
             continue
 

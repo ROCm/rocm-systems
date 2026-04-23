@@ -86,7 +86,9 @@ prompt at `.perfxpert/AGENTS.md`, writes a pointer at
 `CLAUDE.local.md` (at the project root), and installs the native
 `PreToolUse` hook inside `.claude/settings.json`.
 
-*Animated Claude Code launch capture coming soon.*
+*Claude Code support is implemented in-tree and covered by the backend
+adapter plus dispatcher tests. A refreshed launch GIF is still a
+separate docs asset task.*
 
 ```bash
 # SKIP-SAMPLE — requires claude CLI ≥ 2.1.59 on PATH
@@ -115,7 +117,9 @@ perfxpert under `mcpServers`. The adapter **never** touches the
 user's `GEMINI.md` — list-append in `context.fileName` is the
 supported extension point.
 
-*Animated Gemini launch capture coming soon.*
+*Gemini support is implemented in-tree and covered by the backend
+adapter plus dispatcher tests. A refreshed launch GIF is still a
+separate docs asset task.*
 
 ```bash
 # SKIP-SAMPLE — requires gemini CLI ≥ 0.2.0 on PATH
@@ -131,7 +135,9 @@ trusted via the `[projects."<abs-cwd>"]` TOML table (required — Codex
 refuses to run agents in untrusted projects). Writes preserve
 comments + key ordering via lazy-imported `tomlkit`.
 
-*Animated Codex CLI launch capture coming soon.*
+*Codex support is implemented in-tree and covered by the backend
+adapter plus dispatcher tests. A refreshed launch GIF is still a
+separate docs asset task.*
 
 ```bash
 # SKIP-SAMPLE — requires codex CLI ≥ 0.7.0 on PATH

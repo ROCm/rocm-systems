@@ -7,10 +7,12 @@ AI-powered AMD ROCm GPU trace analysis.
 ### Prerequisites
 
 - Python 3.10+
-- `bun` — if not on PATH, the pip-install build hook auto-downloads it
-  into `~/.cache/perfxpert/bun/`. See
+- `bun` on PATH if you want the bundled AMD-branded `opencode` build
+  produced during `pip install`. The build hook does not auto-download
+  bun; if bun is missing, install still succeeds and only the bundled
+  launcher build is skipped. See
   [docs/guides/getting-started.md](docs/guides/getting-started.md)
-  for the supported-host matrix + opt-out envs.
+  for the exact install contract and opt-out envs.
 - (Optional) `claude`, `codex`, or `gemini` CLI on PATH for multi-backend dispatch.
 
 ### Install
@@ -60,10 +62,11 @@ the init down to just the opencode submodule perfxpert's build hook
 actually needs; see `docs/guides/getting-started.md` §1.2 for the
 measurements.
 
-`[all]` pulls in the optional LLM providers (anthropic, openai,
-litellm) plus rich for pretty terminal output. All five providers
-— `anthropic`, `openai`, `ollama`, `private`, `opencode` — work
-out of the box; pick one with `--llm <name>`.
+`[all]` pulls in the optional LLM providers (`anthropic`, `openai`,
+`litellm`) plus `rich` for pretty terminal output. That covers the
+hosted/local SDK-backed provider paths; the bundled `opencode` path is
+validated separately through the launcher/build flow. Pick a provider
+with `--llm <name>`.
 
 ### Run
 
@@ -90,11 +93,11 @@ PERFXPERT_AIRGAP=1 perfxpert analyze -i trace.db --format markdown -o report.md
 
 # SKIP-SAMPLE — requires two rocprofv3 trace DBs (baseline + candidate)
 # Diff two runs (schema-0.3.1 trace_diff block — per-kernel deltas + verdict)
-perfxpert diff --baseline baseline.db --candidate candidate.db --format markdown
+perfxpert diff baseline.db candidate.db --format markdown
 
 # SKIP-SAMPLE — CI wrapper; rc=1 on regression, rc=0 otherwise
 # Regression gate for CI pipelines (wraps `diff` + fails the build if slower)
-perfxpert ci --baseline baseline.db --candidate candidate.db --threshold 0.05
+perfxpert ci baseline.db candidate.db --threshold 3.0
 
 # Health check
 perfxpert doctor

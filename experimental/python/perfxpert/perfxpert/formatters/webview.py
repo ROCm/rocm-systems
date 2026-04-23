@@ -37,7 +37,12 @@ from ._att_flamegraph import _slug as _rec_slug
 from ._att_flamegraph import render_att_flamegraph
 from ._roofline_svg import render_roofline_svg
 from ._source_correlation import correlate_hotspots_with_source
-from .json_fmt import _build_summary, _format_as_json, _tier0_to_dict
+from .json_fmt import (
+    _build_summary,
+    _format_as_json,
+    _normalize_hw_counter_escalation,
+    _tier0_to_dict,
+)
 
 
 def _rec_anchor_id(rec: Dict[str, Any], idx: int) -> str:
@@ -142,6 +147,7 @@ def _format_as_webview(
     breakdown = time_breakdown or {}
     hw = hardware_counters or {}
     has_counters = bool(hw.get("has_counters", False))
+    escalation = _normalize_hw_counter_escalation(hw)
     total_ns = float(breakdown.get("total_runtime", 0))
     total_ms = total_ns / 1e6
     kernel_pct = float(breakdown.get("kernel_percent", 0))
@@ -588,16 +594,70 @@ def _format_as_webview(
         else ""
     )
 
+    escalation_html = ""
+    if escalation:
+        pmc_groups = escalation.get("pmc_groups") or []
+        pmc_groups_text = "\n".join(str(line) for line in pmc_groups)
+        pmc_groups_path = escalation.get("pmc_groups_path") or "pmc_groups.txt"
+        groups_html = ""
+        if pmc_groups_text:
+            groups_html = (
+                f'<p class="hint" style="margin-top:.5rem">'
+                f'Write these lines to <code>{_h(pmc_groups_path)}</code>:</p>'
+                f'<pre style="margin:.35rem 0 0; padding:.8rem 1rem; '
+                f'background:rgba(255,255,255,.03); border:1px solid var(--bdr); '
+                f'border-radius:12px; overflow:auto;"><code>{_h(pmc_groups_text)}</code></pre>'
+            )
+        command_rows = []
+        for idx, command in enumerate(escalation.get("commands") or []):
+            full_command = command.get("full_command", "")
+            if not full_command:
+                continue
+            cid = f"hw-esc-{idx}"
+            tool = command.get("tool", "")
+            desc = command.get("description", "")
+            label = ""
+            if tool or desc:
+                label = (
+                    f'<p class="hint" style="margin-top:.75rem"><strong>{_h(tool)}</strong>'
+                    f' - {_h(desc)}</p>'
+                )
+            command_rows.append(
+                f"{label}"
+                f'<div class="cmd-row" id="{cid}">'
+                f"<code>{_h(full_command)}</code>"
+                f'<button class="cp-btn" onclick="cpCmd(\'{cid}\')">Copy</button>'
+                f"</div>"
+            )
+        reason_html = ""
+        if escalation.get("reason"):
+            reason_html = f'<p class="hint">{_h(escalation["reason"])}</p>'
+        escalation_html = (
+            '<div style="margin-top:1rem">'
+            '<p class="g-hint warn">Counter Collection Escalation</p>'
+            f"{reason_html}"
+            f'<p class="hint">Pass count: {int(escalation.get("pass_count", 0))}</p>'
+            f"{groups_html}"
+            f"{''.join(command_rows)}"
+            "</div>"
+        )
+
     hw_inner = (
-        f'<div class="gauges">{gauges_html}</div>{ctr_table}'
+        f'<div class="gauges">{gauges_html}</div>{ctr_table}{escalation_html}'
         if has_counters
         else (
             '<p class="dim">No hardware counter data \u2014 Tier 1 (trace-only) analysis.</p>'
-            '<p class="hint" style="margin-top:.5rem">Collect counters with:</p>'
-            '<div class="cmd-row" id="hw-hint">'
-            "<code>rocprofv3 --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -- ./app</code>"
-            '<button class="cp-btn" onclick="cpCmd(\'hw-hint\')">Copy</button>'
-            "</div>"
+            + (
+                escalation_html
+                if escalation_html
+                else (
+                    '<p class="hint" style="margin-top:.5rem">Collect counters with:</p>'
+                    '<div class="cmd-row" id="hw-hint">'
+                    "<code>rocprofv3 --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -- ./app</code>"
+                    '<button class="cp-btn" onclick="cpCmd(\'hw-hint\')">Copy</button>'
+                    "</div>"
+                )
+            )
         )
     )
 

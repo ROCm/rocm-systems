@@ -10,6 +10,8 @@ used by air-gap mode + cost estimation.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 
 class ProviderError(Exception):
     """Base class for all provider failures."""
@@ -36,6 +38,39 @@ class RateLimitError(ProviderError):
         )
 
 
+class QuotaExceededError(ProviderError):
+    """Provider rejected the request because the account quota is exhausted."""
+
+    def __init__(self, provider: str, model: str | None = None, message: str = "") -> None:
+        self.provider = provider
+        self.model = model
+        self.raw_message = message
+        model_detail = f" model={model}" if model else ""
+        detail = f": {message}" if message else ""
+        super().__init__(f"[{provider}] quota exceeded{model_detail}{detail}")
+
+
+class TransientError(ProviderError):
+    """Retryable provider or network failure."""
+
+    def __init__(self, provider: str, kind: str = "transient", message: str = "") -> None:
+        self.provider = provider
+        self.kind = kind
+        self.raw_message = message
+        detail = f": {message}" if message else ""
+        super().__init__(f"[{provider}] transient error ({kind}){detail}")
+
+
+class FatalError(ProviderError):
+    """Non-retryable provider failure."""
+
+    def __init__(self, provider: str, message: str = "") -> None:
+        self.provider = provider
+        self.raw_message = message
+        detail = f": {message}" if message else ""
+        super().__init__(f"[{provider}] fatal error{detail}")
+
+
 class TimeoutError(ProviderError):
     """Request exceeded the per-call timeout budget."""
 
@@ -46,6 +81,21 @@ class TimeoutError(ProviderError):
         super().__init__(
             f"[{provider}] timed out after {timeout_seconds}s{detail}"
         )
+
+
+class ProviderChainExhausted(ProviderError):
+    """Every provider in a fallback chain failed."""
+
+    def __init__(
+        self,
+        providers: Sequence[str],
+        last_error: BaseException | None = None,
+    ) -> None:
+        self.providers = tuple(providers)
+        self.last_error = last_error
+        chain = " -> ".join(self.providers) if self.providers else "<empty>"
+        detail = f": {last_error}" if last_error is not None else ""
+        super().__init__(f"fallback chain exhausted after {chain}{detail}")
 
 
 class _DryRunResponseType:
@@ -72,7 +122,11 @@ __all__ = [
     "ProviderError",
     "AuthError",
     "RateLimitError",
+    "QuotaExceededError",
+    "TransientError",
+    "FatalError",
     "TimeoutError",
+    "ProviderChainExhausted",
     "DryRunResponse",
 ]
 

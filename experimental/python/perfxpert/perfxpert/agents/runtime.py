@@ -64,6 +64,21 @@ _PROVIDER_CANONICAL_ENV = {
 _LIVE_CALL_ENV_LOCK = threading.RLock()
 
 
+def _parse_fallback_chain(primary: str) -> tuple[str, ...]:
+    """Return the ordered provider ladder for this session.
+
+    The explicitly selected provider always stays first; the env var only
+    contributes additional fallbacks. Empty / duplicate entries are ignored.
+    """
+    chain = [primary]
+    raw = os.environ.get("PERFXPERT_LLM_FALLBACK_CHAIN", "")
+    for item in raw.split(","):
+        candidate = item.strip()
+        if candidate and candidate not in chain:
+            chain.append(candidate)
+    return tuple(chain)
+
+
 @contextlib.contextmanager
 def _override_provider_env(
     provider: Optional[str], api_key: Optional[str]
@@ -101,15 +116,39 @@ class AnalysisSession:
     session_id: str
     provider: Optional[str]
     airgap: bool
+    providers: tuple[str, ...] = ()
     api_key: Optional[str] = None
 
     def _provider_name(self) -> str:
         return self.provider or DEFAULT_PROVIDER
 
     def _run_live(self, fn: Callable[[str], object]) -> object:
-        provider = self._provider_name()
-        with _override_provider_env(provider, self.api_key):
-            return fn(provider)
+        from perfxpert.providers._exceptions import (
+            ProviderChainExhausted,
+            ProviderError,
+            RateLimitError,
+            TransientError,
+        )
+
+        providers = self.providers or (self._provider_name(),)
+        attempted: list[str] = []
+        last_retryable: BaseException | None = None
+
+        for idx, provider in enumerate(providers):
+            attempted.append(provider)
+            candidate_key = self.api_key if provider == self.provider else None
+            try:
+                with _override_provider_env(provider, candidate_key):
+                    return fn(provider)
+            except (RateLimitError, TransientError) as exc:
+                last_retryable = exc
+                if idx == len(providers) - 1:
+                    raise ProviderChainExhausted(attempted, last_error=exc) from exc
+                continue
+            except ProviderError:
+                raise
+
+        raise ProviderChainExhausted(attempted, last_error=last_retryable)
 
     def run_root(
         self,
@@ -247,16 +286,20 @@ def build_session(
 
     if not is_airgap:
         prov = provider or DEFAULT_PROVIDER
-        if prov not in PROVIDER_REGISTRY:
-            valid = ", ".join(PROVIDER_REGISTRY.keys())
-            raise ValueError(f"unknown provider {prov!r}; valid: {valid}")
-        ensure_not_recursive(prov)
+        providers = _parse_fallback_chain(prov)
+        valid = ", ".join(PROVIDER_REGISTRY.keys())
+        for candidate in providers:
+            if candidate not in PROVIDER_REGISTRY:
+                raise ValueError(f"unknown provider {candidate!r}; valid: {valid}")
+            ensure_not_recursive(candidate)
     else:
         prov = None
+        providers = ()
 
     return AnalysisSession(
         session_id=session_id or str(uuid.uuid4()),
         provider=prov,
+        providers=providers,
         airgap=is_airgap,
         api_key=None if is_airgap else api_key,
     )

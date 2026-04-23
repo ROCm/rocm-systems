@@ -11,10 +11,13 @@ Entry point for both ``python -m perfxpert`` and the ``perfxpert`` script.
 
 Usage
 -----
+    perfxpert init
     perfxpert analyze -i trace.db
     perfxpert analyze -i trace.db --format json -d ./out -o report
     perfxpert analyze --source-dir ./my_app
     perfxpert analyze -i trace.db --llm anthropic
+    perfxpert diff baseline.db new.db --format text
+    perfxpert ci baseline.db new.db --threshold 3.0
     perfxpert-code    (interactive TUI; launches the AMD-branded opencode session)
 """
 
@@ -118,10 +121,66 @@ def main(argv=None):
     # ------------------------------------------------------------------
     # doctor subcommand
     # ------------------------------------------------------------------
-    doctor_parser = subparsers.add_parser(
+    subparsers.add_parser(
         "doctor",
         help="Health check: verify MCP server, LLM providers, and dependencies",
     )
+
+    # ------------------------------------------------------------------
+    # init subcommand
+    # ------------------------------------------------------------------
+    from perfxpert.cli import init_cmd as _init_cmd
+
+    init_parser = subparsers.add_parser(
+        "init",
+        help=(
+            "First-run wizard: detect GPU + framework, generate "
+            "config, and print a suggested rocprofv3 command"
+        ),
+        description=(
+            "Guided first-run wizard.\n"
+            "  1. GPU detection via rocm-smi (fallback: rocminfo)\n"
+            "  2. Framework detection from Tier-0 source scan + Python imports\n"
+            "  3. Config generation at ~/.config/perfxpert/config.yaml\n"
+            "  4. Suggested first rocprofv3 command\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _init_cmd.add_args(init_parser)
+
+    # ------------------------------------------------------------------
+    # diff subcommand
+    # ------------------------------------------------------------------
+    from perfxpert.cli import diff_cmd as _diff_cmd
+
+    diff_parser = subparsers.add_parser(
+        "diff",
+        help="Compare two trace databases and emit a diff report",
+        description=(
+            "Compare a baseline trace database with a new one and emit\n"
+            "a report with per-kernel deltas, wall-time delta, and a\n"
+            "summary narrative. Always returns rc=0."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _diff_cmd.add_args(diff_parser)
+
+    # ------------------------------------------------------------------
+    # ci subcommand
+    # ------------------------------------------------------------------
+    from perfxpert.cli import ci_cmd as _ci_cmd
+
+    ci_parser = subparsers.add_parser(
+        "ci",
+        help="CI wrapper: fail when runtime regresses above a threshold",
+        description=(
+            "Thin gating wrapper over `perfxpert diff`. Produces the same\n"
+            "report shape but returns rc=1 when wall_delta_pct exceeds\n"
+            "the configured threshold."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _ci_cmd.add_args(ci_parser)
 
     if argv is None:
         argv = sys.argv[1:]
@@ -191,6 +250,12 @@ def main(argv=None):
             return 0
     elif args.subcommand == "doctor":
         sys.exit(_run_doctor())
+    elif args.subcommand == "init":
+        sys.exit(_init_cmd.run_init(args))
+    elif args.subcommand == "diff":
+        sys.exit(_diff_cmd.run_diff(args))
+    elif args.subcommand == "ci":
+        sys.exit(_ci_cmd.run_ci(args))
     else:
         parser.print_help()
         sys.exit(1)

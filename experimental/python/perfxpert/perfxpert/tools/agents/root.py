@@ -32,6 +32,7 @@ def agent_root(
     provider: Optional[str] = None,
     airgap: bool = False,
     session_id: Optional[str] = None,
+    analysis_options: Optional[Dict[str, Any]] = None,
     progress_callback: Optional[Callable[[str], None]] = None,
     api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -55,6 +56,9 @@ def agent_root(
             provider call and return the deterministic airgap narrative.
         session_id: Re-use an existing session id. A UUID is generated
             when unset.
+        analysis_options: CLI-side analysis knobs forwarded through the
+            public RootInput surface so batch CLI, library API, and MCP
+            all share the same entry-point contract.
         progress_callback: Optional ``Callable[[str], None]`` that receives
             short phase-transition messages (e.g. ``"entering root"``,
             ``"exit root"``) so UI consumers (CLI spinner, MCP streaming
@@ -92,9 +96,16 @@ def agent_root(
         provider=provider,
         airgap=airgap,
         session_id=session.session_id,
+        analysis_options=dict(analysis_options or {}),
     )
 
-    output = session.run_root(payload, progress_callback=progress_callback)
+    try:
+        output = session.run_root(payload, progress_callback=progress_callback)
+    except TypeError as exc:
+        if "progress_callback" in str(exc):
+            output = session.run_root(payload)
+        else:
+            raise
 
     # RootOutput is a frozen Pydantic model; ``model_dump`` gives us the
     # documented schema-shaped dict. Fall back to attribute reads if the

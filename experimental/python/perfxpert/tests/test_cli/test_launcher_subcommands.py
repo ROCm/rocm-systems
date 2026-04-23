@@ -3,8 +3,9 @@
 Covers two distinct review findings:
 
 * Review-finding I4: `perfxpert-code --help` must surface the
-  perfxpert-owned subcommands (`doctor`, `analyze`, `config`, `providers`)
-  so users can discover them, not silently forward to opencode.
+  perfxpert-owned subcommands (`init`, `diff`, `ci`, `doctor`, `analyze`,
+  `config`, `providers`) so users can discover them, not silently forward
+  to opencode.
 * Issue 2: `perfxpert-code doctor` errored with
   ``Failed to change directory to .../doctor`` because opencode
   interpreted ``doctor`` as a positional CWD. The launcher now routes
@@ -33,8 +34,8 @@ from perfxpert.cli.opencode_launcher import (
 class TestHelpFlag:
     """Bare `perfxpert-code --help` must print the perfxpert-owned banner.
 
-    Per review I4: help flag discovery must list doctor / analyze / config
-    / providers BEFORE falling through to opencode's generic help.
+    Per review I4: help flag discovery must list the documented
+    perfxpert subcommands before falling through to opencode's generic help.
     """
 
     @pytest.mark.parametrize("flag", ["--help", "-h"])
@@ -54,7 +55,7 @@ class TestHelpFlag:
 
         assert rc == 0, "help should exit 0 even when opencode binary absent"
         # The perfxpert subcommand list must be visible.
-        for sub in ("analyze", "config", "doctor", "providers"):
+        for sub in ("analyze", "init", "diff", "ci", "config", "doctor", "providers"):
             assert sub in out, f"help output must mention {sub!r}"
         # And the branding line must be there.
         assert "perfxpert" in out.lower() or "PerfXpert" in out
@@ -87,10 +88,13 @@ class TestHelpFlag:
         assert opencode_launcher._help_flag_precedes_subcommand(["run"]) is False
 
     def test_perfxpert_subcommands_registry_is_non_empty(self):
-        """The perfxpert subcommand catalog must list at least doctor + analyze."""
+        """The perfxpert subcommand catalog must list the documented CLI surface."""
         subs = opencode_launcher._PERFXPERT_SUBCOMMANDS
         assert "doctor" in subs, "doctor must be listed for review I4"
         assert "analyze" in subs
+        assert "init" in subs
+        assert "diff" in subs
+        assert "ci" in subs
         # Each description must be a non-empty string so `--help` is useful.
         for name, desc in subs.items():
             assert isinstance(desc, str) and desc.strip(), name
@@ -111,6 +115,13 @@ def test_route_doctor_is_perfxpert_owned() -> None:
     kind, out = route_subcommand(["doctor"])
     assert kind == "perfxpert"
     assert out == ["doctor"]
+
+
+@pytest.mark.parametrize("subcommand", ["init", "diff", "ci"])
+def test_route_restored_cli_subcommands_are_perfxpert_owned(subcommand: str) -> None:
+    kind, out = route_subcommand([subcommand])
+    assert kind == "perfxpert"
+    assert out == [subcommand]
 
 
 @pytest.mark.parametrize("sub", sorted(_OPENCODE_SUBCOMMANDS))

@@ -23,58 +23,42 @@ RDNA2 / RDNA3.
 including the bundled opencode build and CLI verification.*
 
 PerfXpert ships as a single Python wheel. The `setuptools` build hook
-in `setup.py` automatically compiles the AMD-branded bundled opencode
-binary during `pip install` — no separate step to remember.
+in `setup.py` attempts to compile the AMD-branded bundled opencode
+binary during `pip install`, but it never downloads bun or clones a
+mutable upstream `opencode` source tree. If the local prerequisites are
+missing, install still succeeds and only the bundled launcher build is
+skipped.
 
 ### Prerequisites
 
 - Python 3.10+
-- Network access during `pip install` (the build hook downloads
-  opencode source + the bun runtime if not already on PATH).
-
-The setup.py build hook compiles the bundled AMD-branded opencode
-binary from the pinned `sst/opencode` submodule. This requires `bun`;
-if `bun` isn't on PATH the hook **auto-downloads** a prebuilt bun
-release into `~/.cache/perfxpert/bun/bin/` (or
-`%USERPROFILE%\.cache\perfxpert\bun\bin\` on Windows).
-
-#### Supported hosts for auto-bun-download
-
-| Host | bun asset downloaded |
-|------|---------------------|
-| Linux x64 glibc | `bun-linux-x64.zip` |
-| Linux x64 musl (Alpine) | `bun-linux-x64-musl.zip` |
-| Linux aarch64 glibc | `bun-linux-aarch64.zip` |
-| Linux aarch64 musl | `bun-linux-aarch64-musl.zip` |
-| macOS x64 | `bun-darwin-x64.zip` |
-| macOS arm64 | `bun-darwin-aarch64.zip` |
-| Windows x64 | `bun-windows-x64.zip` |
-| Windows arm64 | `bun-windows-aarch64.zip` |
-
-Offline installs fall back to a warn-skip; `perfxpert-code` will then
-print a helpful message on first launch explaining how to install bun
-manually.
+- `bun` on PATH if you want the bundled AMD-branded `opencode` build
+  to happen during install.
+- The repo-pinned `experimental/python/perfxpert/opencode` submodule
+  populated if you are installing from a checkout without using the
+  wrapper. The setup hook may attempt a scoped `git submodule update
+  --init --depth 1 -- experimental/python/perfxpert/opencode`, but it
+  will not clone an arbitrary upstream tag during install.
 
 #### Opt-out env vars
 
-- `PERFXPERT_SKIP_BUN_DOWNLOAD=1` — don't auto-fetch bun; let the
-  hook warn-skip if bun isn't already on PATH.
 - `PERFXPERT_SKIP_BUNDLED_BUILD=1` — skip the entire opencode build.
   Library + analyze + MCP all still work; `perfxpert-code` will
   fall back to whatever `opencode` is on PATH or exit with a helpful
   error.
+- `PERFXPERT_SKIP_OPENCODE_FETCH=1` — don't even attempt the scoped
+  submodule init when the vendored `opencode/` checkout is empty.
 - `PERFXPERT_OPENCODE_PATH=/path/to/opencode` — last-resort override
   pointing the launcher at a pre-built binary.
 
 #### Note on Windows
 
-Bun itself is supported and auto-downloaded, but the subsequent
-`bun build` of opencode inherits opencode's own platform-support
-matrix. If the build step fails on Windows, install `perfxpert`
+PerfXpert does not auto-download bun on Windows. If the bundled
+`opencode` build is not available on your host, install `perfxpert`
 without the bundled launcher (`PERFXPERT_SKIP_BUNDLED_BUILD=1 pip
 install …`) and use the multi-backend launcher
-(`perfxpert-code claude` / `codex` / `gemini`) — those route to
-native backend CLIs and work anywhere.
+(`perfxpert-code claude` / `codex` / `gemini`) against a native backend
+CLI instead.
 
 ### Pip install
 
@@ -106,9 +90,10 @@ bash rocm-systems/experimental/python/perfxpert/scripts/pip-install-from-git.sh
 ```
 
 The `[all]` extra pulls in `anthropic`, `openai`, `rich`, and
-`litellm` so every LLM provider works out of the box. Omit it if you
-only want deterministic air-gap analysis (wrapper: pass
-`--extras ''` to skip extras entirely).
+`litellm`, which covers the hosted/local SDK-backed provider paths.
+The bundled `opencode` path is validated separately through the
+launcher/build flow. Omit `[all]` if you only want deterministic
+air-gap analysis (wrapper: pass `--extras ''` to skip extras entirely).
 
 ### 1.2 Why the wrapper: scoped submodule init
 
@@ -225,7 +210,7 @@ agent runtime.
 - **`perfxpert analyze -i trace.db`** — non-interactive CLI. Consumes
   a rocprofv3 `.db`, emits a single report (text / JSON / markdown /
   webview HTML). Deterministic with `--llm` omitted; LLM-augmented
-  with `--llm {anthropic,openai}`.
+  with `--llm {anthropic,openai,ollama,private,opencode}`.
 - **`perfxpert-mcp`** — stdio MCP server that re-exposes the 56
   READ-ONLY analysis tools over JSON-RPC (8 agent-hierarchy entry
   points — Root, Analysis, Recommendation, Correctness, +3 technique
@@ -242,7 +227,7 @@ agent runtime.
 
 `perfxpert-code` is multi-backend: the same AMD-branded bundled
 opencode is the default, but it can also wrap the user's native
-Claude Code, Gemini CLI, or (soon) Codex TUI while still enforcing
+Claude Code, Gemini CLI, or Codex CLI while still enforcing
 the perfxpert tool-priority gate and registering the `perfxpert-mcp`
 server for free. Pick whichever matches your existing LLM workflow.
 
@@ -852,11 +837,13 @@ returns bottleneck + narrative only (verbatim from the rule tables).
 
 ### LLM-enabled
 
-All five supported providers are selectable from the CLI with `--llm
+All five primary providers are selectable from the CLI with `--llm
 <name>`: `anthropic`, `openai`, `ollama`, `private`, `opencode`. The
-same five are also reachable from Python via
-`perfxpert.api.agent_root(..., provider=<name>)` — the CLI is a thin
-wrapper over the public Python API.
+CLI also accepts `claude-code` as a compatibility alias for the
+bundled opencode backend. The same five primary providers are also
+reachable from Python via `perfxpert.api.agent_root(...,
+provider=<name>)` — the CLI is a thin wrapper over the public Python
+API.
 
 ```bash
 # SKIP-SAMPLE — requires a real trace.db and an LLM credential
@@ -1123,29 +1110,27 @@ change automatically; see `docs/architecture/gate-cascade.md` for the full
 
 ## 10. MPI Multi-GPU Profiling (detailed)
 
-PerfXpert auto-detects MPI launchers and restructures the profiling command so each rank gets its own profiler instance.
+The supported CLI workflow is still the explicit two-step flow: profile
+each rank with the launcher outside `rocprofv3`, then analyze the
+merged trace database.
 
 ```bash
 # SKIP-SAMPLE — requires a built MPI application + openmpi
-# Batch-mode analyze that profiles an MPI workload end-to-end
-perfxpert analyze \
-  --llm anthropic \
-  --source-dir ./src \
-  --run "mpirun -n 8 ./multi_gpu_demo"
+mpirun -n 8 rocprofv3 --sys-trace -d ./out -o results_%q{MPI_RANK} -- ./multi_gpu_demo
+perfxpert analyze -i ./out/merged_processes.db --llm anthropic --source-dir ./src
 ```
 
-Inside `perfxpert-code` you can describe the same workload in natural
-language ("profile mpirun -n 8 ./multi_gpu_demo") and the Analysis agent
-will drive the same detection logic.
+Inside `perfxpert-code` you can still ask for the MPI profiling plan in
+natural language, but the batch CLI does not expose a `--run`
+launcher-wrapper flag today.
 
-The tool:
-- Detects `mpirun`/`srun`/`jsrun` and wraps each rank: `mpirun -n 8 rocprofv3 <flags> -- ./binary`
-- Uses `%nid%` per-rank output naming to avoid SQLite collisions
-- Auto-merges all per-rank databases into a single `merged_processes.db`
-- Analyzes the unified trace across all GPUs
+The supported MPI pattern is:
+- MPI launcher outside `rocprofv3`, so each rank gets its own profiler instance
+- `%q{MPI_RANK}` or `%nid%` in the output name to avoid SQLite collisions
+- `merged_processes.db` as the input to `perfxpert analyze` after ranks are combined
+- no `--process-sync` with OpenMPI, because `LD_PRELOAD` is stripped from child ranks
 
-
-> **Note**: `--process-sync` (used for Python DDP/torchrun) is NOT used for MPI because OpenMPI strips LD_PRELOAD from child processes. PerfXpert handles this automatically.
+> **Note**: the canonical MPI rules also live in `../../perfxpert/_bundled/opencode_config/AGENTS.md`, which is what the bundled TUI guidance follows.
 
 ---
 
@@ -1153,15 +1138,17 @@ The tool:
 
 ![all providers](assets/gifs/15-all-providers.gif)
 
-*`perfxpert analyze --help | grep -A 10 -- '--llm '` — the five provider
-choices rendered straight from argparse's `choices=` list:
-`anthropic,openai,ollama,private,opencode`.*
+*`perfxpert analyze --help | grep -A 10 -- '--llm '` — the five primary
+providers plus the `claude-code` compatibility alias rendered straight
+from argparse's `choices=` list:
+`anthropic,openai,ollama,private,opencode,claude-code`.*
 
-All five LLM providers are selectable via `--llm <name>` on the CLI
-**and** via `provider=<name>` on `perfxpert.api.agent_root(...)` — the
-same registry backs both surfaces. LLM is optional; all analysis runs
-locally without internet when you omit `--llm` (or set
-`PERFXPERT_AIRGAP=1`).
+All five primary LLM providers are selectable via `--llm <name>` on the
+CLI **and** via `provider=<name>` on `perfxpert.api.agent_root(...)` —
+the same registry backs both surfaces. `claude-code` is accepted on the
+CLI as a compatibility alias for the bundled opencode backend. LLM is
+optional; all analysis runs locally without internet when you omit
+`--llm` (or set `PERFXPERT_AIRGAP=1`).
 
 | `--llm` | Env vars | Purpose |
 |---------|----------|---------|

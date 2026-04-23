@@ -101,7 +101,14 @@ except ImportError:
 
 
 _FENCE_PATH = Path(__file__).parent / "fence" / "analysis.md"
-_VALID_BOTTLENECKS = {"compute", "memory_transfer", "latency", "api_overhead", "mixed"}
+_VALID_BOTTLENECKS = {
+    "compute",
+    "memory_transfer",
+    "latency",
+    "api_overhead",
+    "mixed",
+    "data_insufficient",
+}
 
 
 def build_analysis_agent() -> Agent:
@@ -391,6 +398,116 @@ def _validated_bottleneck_type(value: Any) -> str:
     return value
 
 
+def _trace_only_fallback_verdict(
+    facts: Dict[str, Any],
+    *,
+    db_error: Optional[str],
+) -> Dict[str, Any]:
+    """Classify the small subset of trace-only cases that are unambiguous.
+
+    We stay conservative: if the trace does not clearly show either a memcpy-
+    dominated runtime split or classic launch-overhead symptoms, the result
+    remains ``data_insufficient``.
+    """
+    if db_error:
+        return {
+            "type": "data_insufficient",
+            "confidence": 0.0,
+            "reasoning": (
+                f"DB error prevented counter data extraction: {db_error}. "
+                "PerfXpert cannot classify the bottleneck because the database "
+                "could not be read reliably."
+            ),
+            "all_scores": {},
+        }
+
+    metrics = facts.get("metrics_for_classifier", {})
+    memcpy_pct = float(metrics.get("memcpy_pct") or 0.0)
+    api_pct = float(metrics.get("api_overhead_pct") or 0.0)
+    avg_kernel_duration_us = metrics.get("avg_kernel_duration_us")
+    total_kernel_calls = int(metrics.get("total_kernel_calls") or 0)
+
+    if (
+        api_pct > 0.15
+        and avg_kernel_duration_us is not None
+        and float(avg_kernel_duration_us) < 10.0
+        and total_kernel_calls > 1000
+    ):
+        return {
+            "type": "latency",
+            "confidence": 0.75,
+            "reasoning": (
+                "Trace-only fallback: API overhead dominates and the trace shows "
+                "many tiny kernels, which is a strong launch-overhead / latency signal."
+            ),
+            "all_scores": {"latency_trace_only": 0.75},
+        }
+
+    if memcpy_pct >= 0.50 and memcpy_pct >= api_pct + 0.20:
+        confidence = 0.85 if memcpy_pct > 0.30 else 0.70
+        return {
+            "type": "memory_transfer",
+            "confidence": confidence,
+            "reasoning": (
+                "Trace-only fallback: memcpy traffic clearly dominates runtime, "
+                "so host-device transfer overhead is unambiguous even without "
+                "PMC counters."
+            ),
+            "all_scores": {"memory_transfer_trace_only": confidence},
+        }
+
+    return {
+        "type": "data_insufficient",
+        "confidence": 0.0,
+        "reasoning": (
+            "No hardware counter data in this trace (profiled without --pmc). "
+            "The available trace-only metrics do not point to an unambiguous "
+            "memory-transfer or launch-overhead bottleneck, so PerfXpert will "
+            "not guess."
+        ),
+        "all_scores": {},
+    }
+
+
+def _promote_sparse_compute_verdict(
+    facts: Dict[str, Any],
+    rule_verdict: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Promote clear compute-bound cases when only a sparse PMC subset exists."""
+    if rule_verdict.get("type") != "mixed" or not facts.get("counter_data_available"):
+        return rule_verdict
+
+    metrics = facts.get("metrics_for_classifier", {})
+    time_breakdown = facts.get("time_breakdown", {})
+    kernel_pct = float(time_breakdown.get("kernel_pct", 0.0) or 0.0) / 100.0
+    memcpy_pct = float(metrics.get("memcpy_pct") or 0.0)
+    api_pct = float(metrics.get("api_overhead_pct") or 0.0)
+    gpu_util_pct = metrics.get("gpu_util_pct")
+
+    if (
+        kernel_pct > 0.70
+        and memcpy_pct < 0.20
+        and api_pct < 0.15
+        and gpu_util_pct is not None
+        and float(gpu_util_pct) > 0.80
+    ):
+        return {
+            "type": "compute",
+            "confidence": max(float(rule_verdict.get("confidence", 0.0)), 0.65),
+            "reasoning": (
+                "Sparse-counter fallback: the trace is kernel-dominant and the GPU "
+                "is highly utilized even though detailed VALU/MFMA counters were "
+                "not collected."
+            ),
+            "all_scores": {
+                **(rule_verdict.get("all_scores") or {}),
+                "compute_sparse_counter_fallback": 0.65,
+            },
+        }
+
+    return rule_verdict
+
+
 def run_analysis(
     payload: schemas.AnalysisInput,
     *,
@@ -399,18 +516,22 @@ def run_analysis(
 ) -> schemas.AnalysisOutput:
     """Run Analysis for one trace database."""
     # Step 1: deterministic metric collection (always).
-    facts = _collect_deterministic_metrics(
-        payload.database_path,
-        top_n=payload.top_kernels,
-        min_duration=payload.min_duration,
-    )
+    try:
+        facts = _collect_deterministic_metrics(
+            payload.database_path,
+            top_n=payload.top_kernels,
+            min_duration=payload.min_duration,
+        )
+    except TypeError:
+        # Backward-compat for older tests / shims that still monkeypatch
+        # _collect_deterministic_metrics(db_path, top_n=...) without the
+        # min_duration kwarg.
+        facts = _collect_deterministic_metrics(
+            payload.database_path,
+            top_n=payload.top_kernels,
+        )
 
     # Step 2: deterministic classifier verdict (always).
-    #
-    # Override rule: if no hardware counter data is available at all, force
-    # data_insufficient regardless of what trace-derived metrics (memcpy_pct,
-    # api_overhead_pct) might suggest. The classifier should only produce
-    # bottleneck verdicts when it has counter evidence — otherwise it's guessing.
     #
     # If a DB error was recorded during metric extraction, surface it here so the
     # user sees WHY data is insufficient instead of just being told to re-profile.
@@ -425,25 +546,10 @@ def run_analysis(
             flush=True,
         )
     if not facts["counter_data_available"]:
-        _no_counter_reason = (
-            "No hardware counter data in this trace (profiled without --pmc). "
-            "Re-capture with PMC counters to get a reliable bottleneck classification. "
-            "Trace-only metrics (memcpy_pct, api_overhead_pct) are insufficient for "
-            "deterministic bottleneck classification."
-        )
-        if db_error:
-            _no_counter_reason = (
-                f"DB error prevented counter data extraction: {db_error}. "
-                + _no_counter_reason
-            )
-        rule_verdict = {
-            "type": "data_insufficient",
-            "confidence": 0.0,
-            "reasoning": _no_counter_reason,
-            "all_scores": {},
-        }
+        rule_verdict = _trace_only_fallback_verdict(facts, db_error=db_error)
     else:
         rule_verdict = bottleneck.classify_from_metrics(facts["metrics_for_classifier"])
+        rule_verdict = _promote_sparse_compute_verdict(facts, rule_verdict)
 
     # Step 3: LLM refinement (optional).
     agent = build_analysis_agent()

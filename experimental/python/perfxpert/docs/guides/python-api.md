@@ -384,7 +384,9 @@ for k in rf["kernels"]:
 Formula — deterministic, no LLM involvement:
 
 ```text
-flops = SQ_INSTS_VALU × 64 + SQ_INSTS_VALU_MFMA × mfma_flops_per_inst[dtype]
+flops = SQ_INSTS_VALU × 64 + sum(SQ_INSTS_VALU_MFMA_MOPS_* × 512)
+      # fallback when only the legacy aggregate counter is present:
+      + SQ_INSTS_VALU_MFMA × mfma_flops_per_inst[dtype]
 bytes = (FETCH_SIZE + WRITE_SIZE) × 1024       # TCC KiB → bytes
 ai    = flops / bytes
 rate  = flops / (duration_ns / 1e9)
