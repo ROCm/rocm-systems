@@ -211,6 +211,13 @@ See [CHANGELOG.md](CHANGELOG.md) for the removal history.
 - **Other**
   - [Historical migration notes](docs/archive/migration-to-agentic.md)
 
+## Caution
+
+> **Experimental software.** PerfXpert is still evolving and is provided
+> without warranties or guarantees. AI-generated analysis, explanations, and
+> recommendations can be incomplete or incorrect, so verify important results
+> before relying on them in production or performance-critical workflows.
+
 ## Licensing
 
 MIT. opencode is also MIT — bundled into the wheel via the build hook (`setup.py`) from the pinned upstream submodule.

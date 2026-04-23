@@ -133,7 +133,10 @@ If none of those contain `librocprof-trace-decoder.so`, the tool that
 called `require_tool("rocprof-trace-decoder")` gets the exact install
 hint above — no guessing about which ROCm subdirectory to look in.
 
-Once registered, ATT-using tools never reimplement the lookup:
+Once registered, ATT-using tools never reimplement the lookup. This is also
+the contract tests should follow: ATT availability is defined by whether the
+runtime can resolve `librocprof-trace-decoder.so`, not by whether a Python
+wrapper module imports in the current environment.
 
 ```python
 from perfxpert.tools._tooldep import require_tool
