@@ -252,10 +252,13 @@ int main(int argc, char **argv) {
     }
 
     std::cout << "Decoding started with " << num_threads << " threads, please wait!" << std::endl;
+    auto overall_start_time = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < num_threads; ++i) {
         thread_pool.ExecuteJob(std::bind(DecodeImages, std::ref(decode_info_per_thread[i]), rocjpeg_utils, std::ref(decode_params), save_images, std::ref(output_file_path), batch_size, device_id));
     }
     thread_pool.JoinThreads();
+    auto overall_end_time = std::chrono::high_resolution_clock::now();
+    double total_wall_time_in_sec = std::chrono::duration<double>(overall_end_time - overall_start_time).count();
 
     uint64_t total_decoded_images = 0;
     double total_images_per_sec = 0;
@@ -297,6 +300,14 @@ int main(int argc, char **argv) {
         std::cout << "Average processing time per image (ms): " << 1000 / total_images_per_sec << std::endl;
         std::cout << "Average decoded images per sec (Images/Sec): " << total_images_per_sec << std::endl;
         std::cout << "Average decoded images size (Mpixels/Sec): " << total_image_size_in_mpixels_per_sec << std::endl;
+    }
+
+    if (total_wall_time_in_sec >= 3600) {
+        std::cout << "Total wall time (hours): " << total_wall_time_in_sec / 3600 << std::endl;
+    } else if (total_wall_time_in_sec >= 60) {
+        std::cout << "Total wall time (min): " << total_wall_time_in_sec / 60 << std::endl;
+    } else {
+        std::cout << "Total wall time (sec): " << total_wall_time_in_sec << std::endl;
     }
 
     for (int i = 0; i < num_threads; i++) {

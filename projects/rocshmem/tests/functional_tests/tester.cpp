@@ -236,6 +236,11 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       args.team_type = ROCSHMEM_TEST_TEAM_ODDEVEN;
       testers.push_back(new TeamCtxInfraTester(args));
       return testers;
+    case TeamCtxSharedInfraTestType:
+      if (rank == 0) std::cout << "Team Ctx Infra Shared test ###" << std::endl;
+      args.team_type = ROCSHMEM_TEST_TEAM_SHARED;
+      testers.push_back(new TeamCtxInfraTester(args));
+      return testers;
     case TeamCtxGetTestType:
       if (rank == 0) std::cout << "Blocking Team Ctx Gets ###" << std::endl;
       testers.push_back(new TeamCtxPrimitiveTester(args));
@@ -726,7 +731,8 @@ void Tester::execute() {
     if (_type != TeamCtxInfraTestType       &&
         _type != TeamCtxInfraTestSingleType &&
         _type != TeamCtxInfraTestBlockType  &&
-        _type != TeamCtxInfraTestOddEvenType ) {
+        _type != TeamCtxInfraTestOddEvenType &&
+        _type != TeamCtxSharedInfraTestType ) {
       print(size);
     }
   }
@@ -748,6 +754,7 @@ bool Tester::peLaunchesKernel() {
     case TeamCtxInfraTestSingleType:
     case TeamCtxInfraTestBlockType:
     case TeamCtxInfraTestOddEvenType:
+    case TeamCtxSharedInfraTestType:
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
     case TeamFCollectTestType:

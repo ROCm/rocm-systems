@@ -35,7 +35,8 @@ jobs:
           "test_script": "python build_tools/github_actions/test_executable_scripts/test_rocdecode.py",
           "shard_arr": [1],
           "total_shards": 1,
-          "test_type": "full"
+          "test_type": "full",
+          "container_image": "ghcr.io/rocm/no_rocm_image_ubuntu24_04_media@sha256:d715ae2db664b055c90343e00588ce9ac3eec387513fe359396e5e08e75521ca"
         }
 
   test_rocjpeg:
