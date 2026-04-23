@@ -19,7 +19,7 @@ Here are the benefits of using PC sampling:
 
 To try out the PC sampling feature, you can use the ``rocprofv3`` command-line tool or the ROCprofiler-SDK library on ROCm 6.4 and later.
 
-Supported GPUs
+Supported AMD Instinct GPUs
 ===============
 
 The following table lists the AMD Instinct™ GPUs supporting PC sampling and shows whether they support stochastic PC sampling and host-trap PC sampling:
