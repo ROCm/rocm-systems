@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 import uuid
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from perfxpert.agents import analysis, correctness, recommendation, root, schemas
 from perfxpert.runtime import ensure_not_recursive
@@ -46,19 +46,36 @@ class AnalysisSession:
     provider: Optional[str]
     airgap: bool
 
-    def run_root(self, payload: schemas.RootInput) -> schemas.RootOutput:
+    def run_root(
+        self,
+        payload: schemas.RootInput,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> schemas.RootOutput:
+        # ``progress_callback`` is accepted for compatibility with the
+        # newer agent-tool wrappers restored during PR cleanup. This
+        # rebased runtime does not stream progress yet, so the callback
+        # is intentionally unused here.
+        del progress_callback
         if self.airgap:
             return root.run_root(payload, airgap=True)
         return root.run_root(payload, provider=self.provider or DEFAULT_PROVIDER)
 
-    def run_analysis(self, payload: schemas.AnalysisInput) -> schemas.AnalysisOutput:
+    def run_analysis(
+        self,
+        payload: schemas.AnalysisInput,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> schemas.AnalysisOutput:
+        del progress_callback
         if self.airgap:
             return analysis.run_analysis(payload, airgap=True)
         return analysis.run_analysis(payload, provider=self.provider or DEFAULT_PROVIDER)
 
     def run_recommendation(
-        self, payload: schemas.RecommendationInput
+        self,
+        payload: schemas.RecommendationInput,
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> schemas.RecommendationOutput:
+        del progress_callback
         if self.airgap:
             return recommendation.run_recommendation(payload, airgap=True)
         return recommendation.run_recommendation(
@@ -66,8 +83,11 @@ class AnalysisSession:
         )
 
     def run_correctness(
-        self, payload: schemas.CorrectnessInput
+        self,
+        payload: schemas.CorrectnessInput,
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> schemas.CorrectnessOutput:
+        del progress_callback
         if self.airgap:
             return correctness.run_correctness(payload, airgap=True)
         return correctness.run_correctness(
@@ -84,6 +104,8 @@ def build_session(
     provider: Optional[str] = None,
     session_id: Optional[str] = None,
     airgap: Optional[bool] = None,
+    progress_callback: Optional[Callable[[str], None]] = None,
+    api_key: Optional[str] = None,
 ) -> AnalysisSession:
     """Build an AnalysisSession handle.
 
@@ -92,11 +114,17 @@ def build_session(
                   Ignored when airgap=True.
         session_id: Explicit id for the task store; uuid4() if None.
         airgap: If True (or PERFXPERT_AIRGAP=1), skip LLM entirely.
+        progress_callback: Accepted for API compatibility with newer
+                           stacked-PR wrappers. Unused in this runtime.
+        api_key: Accepted for API compatibility with newer stacked-PR
+                 wrappers. Unused in this runtime.
 
     Raises:
         ValueError: unknown provider.
         RecursionGuardViolation: provider='opencode' inside an opencode session.
     """
+    del progress_callback
+    del api_key
     is_airgap = airgap if airgap is not None else _airgap_from_env()
 
     if not is_airgap:

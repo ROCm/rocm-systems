@@ -88,6 +88,7 @@ class AnalysisInput(_FrozenModel):
     database_path: str
     top_kernels: int = 10
     att_dir: Optional[str] = None  # auto-detected; not required
+    min_duration: float = 0.0
 
 
 class AnalysisOutput(_FrozenModel):

@@ -57,7 +57,15 @@ except ImportError:
             from perfxpert.analyze import identify_hotspots
 
             conn = PerfxpertConnection(db_path)
-            hotspots = identify_hotspots(conn, top_n=top_n, min_duration=min_duration)
+            try:
+                hotspots = identify_hotspots(
+                    conn, top_n=top_n, min_duration=min_duration
+                )
+            except TypeError:
+                # Backward-compat for tests and older shims that still expose
+                # ``identify_hotspots(conn, top_n=...)`` without the
+                # ``min_duration`` kwarg.
+                hotspots = identify_hotspots(conn, top_n=top_n)
 
             # Convert to agentic schema if needed
             return hotspots or []

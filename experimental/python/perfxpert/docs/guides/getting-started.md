@@ -17,10 +17,6 @@ RDNA2 / RDNA3.
 
 ## 1. Install
 
-![install](assets/gifs/01-install.gif)
-
-*Scoped submodule init — 30 ms vs 3 min on stock rocm/dev-ubuntu images.*
-
 PerfXpert ships as a single Python wheel. The `setuptools` build hook
 in `setup.py` automatically compiles the AMD-branded bundled opencode
 binary during `pip install` — no separate step to remember.
@@ -185,20 +181,10 @@ launcher at an explicit binary.
 
 ## 2. Verify
 
-![help](assets/gifs/02-help.gif)
-
-*`perfxpert --help`, `perfxpert analyze --help`, and the first lines of
-`perfxpert doctor` — everything the CLI exposes is one flag away.*
-
 ```bash
 # SKIP-SAMPLE — requires perfxpert on PATH from the pip install above
 perfxpert doctor
 ```
-
-![doctor](assets/gifs/03-doctor.gif)
-
-*`perfxpert doctor` end-to-end: Python check, MCP server reachable
-(56 tools registered), 3/5 LLM providers configured, `ALL CLEAN`.*
 
 Expected output ends with `ALL CLEAN` when everything is wired. The
 doctor checks:
@@ -391,12 +377,6 @@ the bottleneck (compute-bound / memory-bound / latency-bound /
 idle-bound), ranks hot kernels by Amdahl weight, and emits
 recommendations.
 
-![analyze text](assets/gifs/04-analyze-text.gif)
-
-*Deterministic airgap analysis of the fixture `compute_bound.db` —
-SUMMARY, TIME BREAKDOWN, HOTSPOTS, HARDWARE COUNTERS, RECOMMENDATIONS,
-all in under a second.*
-
 Output formats:
 
 ```bash
@@ -405,22 +385,6 @@ perfxpert analyze -i trace.db --format json -d ./out -o report
 perfxpert analyze -i trace.db --format markdown -d ./out -o report
 perfxpert analyze -i trace.db --format webview -d ./out -o report
 ```
-
-![analyze json](assets/gifs/05-analyze-json.gif)
-
-*`--format json | jq` — flat top-level keys make the report easy to
-drive from scripts or dashboards.*
-
-![analyze markdown](assets/gifs/06-analyze-markdown.gif)
-
-*`--format markdown` — drop straight into PR descriptions or a wiki.*
-
-![analyze webview](assets/gifs/07-analyze-webview.gif)
-
-*`--format webview` produces a self-contained `analysis.html` with the
-fixed 7 top-level sections (Overview, Summary, Execution, Hotspots,
-Hardware Counters, Recommendations, Tier-0 when `--source-dir` is
-set). AMD dark theme, SVG gauges, collapsible cards — email-ready.*
 
 #### Source-line correlation
 
@@ -852,13 +816,6 @@ fallback chain cascades across providers. The spinner is stderr-only,
 so piping stdout to a file (e.g. `--format json > out.json`) still
 captures clean output.
 
-![progress spinner](assets/gifs/10-progress-spinner.gif)
-
-*Agent-phase narrative on stderr: `entering root` → `exit root` →
-`deterministic analysis: running` → `deterministic analysis: done` →
-report. (Shown under `PERFXPERT_AIRGAP=1` for a determinism; live
-`--llm anthropic` renders the identical phase format.)*
-
 Two opt-outs:
 
 - `--no-progress` — silent (useful for CI and log capture).
@@ -908,11 +865,6 @@ and no `--llm-api-key` raises a one-line stderr message like:
 and exits with rc=2 BEFORE any network call or formatter pass runs.
 No empty HTML / markdown file is left behind — the previous
 "silently produces a blank report" failure mode is gone.
-
-![pre-flight auth error](assets/gifs/11-pre-flight-auth-error.gif)
-
-*`--llm anthropic` with no `ANTHROPIC_API_KEY` — one-line stderr error,
-`rc=2`, and no empty `preflight.html` left behind.*
 
 ---
 
@@ -1004,18 +956,6 @@ perfxpert analyze --source-dir ./my_app
 perfxpert analyze -i trace.db --source-dir ./my_app
 ```
 
-![tier 0 source-only](assets/gifs/08-tier0-source-only.gif)
-
-*Pure source scan (`--source-dir` only, no `-i`) detecting a synchronous
-`hipMemcpy` loop + `hipDeviceSynchronize` inside a hot loop, and
-emitting a rocprofv3 profiling plan.*
-
-![tier 0 combined](assets/gifs/09-tier0-combined.gif)
-
-*Combined mode: trace + source scan rendered into a single webview
-report. The Tier-0 block lives in its own `<section id="tier0-scan">`
-wrapper card — never folded into the main recommendations table.*
-
 PerfXpert scans `.hip`, `.cpp`, `.cu`, `.cl`, `.py`, `.h`, `.hpp` files and detects:
 - GPU kernel definitions and launch patterns
 - Memory operations (hipMemcpy, hipMemcpyAsync)
@@ -1035,12 +975,6 @@ The agentic TUI automates the full optimization loop: profile, analyze,
 AI-edit code, recompile, re-profile, compare. As of v0.2.0 this is the
 `perfxpert-code` command (AMD-themed bundled opencode TUI) — it wraps the
 same agent runtime the batch-mode `analyze` CLI uses.
-
-![perfxpert-code](assets/gifs/14-perfxpert-code.gif)
-
-*`perfxpert-code opencode --help` — the AMD-branded bundled opencode
-exposing its full subcommand tree (`run`, `mcp`, `providers`, `agent`,
-`serve`, `upgrade`, etc.) with the `perfxpert-mcp` server pre-wired.*
 
 ```bash
 # SKIP-SAMPLE — requires bundled opencode binary on PATH
@@ -1120,12 +1054,6 @@ The tool:
 ---
 
 ## 11. LLM Providers
-
-![all providers](assets/gifs/15-all-providers.gif)
-
-*`perfxpert analyze --help | grep -A 10 -- '--llm '` — the five provider
-choices rendered straight from argparse's `choices=` list:
-`anthropic,openai,ollama,private,opencode`.*
 
 All five LLM providers are selectable via `--llm <name>` on the CLI
 **and** via `provider=<name>` on `perfxpert.api.agent_root(...)` — the
@@ -1242,13 +1170,6 @@ functions (`agent_root`, `agent_analysis`, `agent_recommendation`,
 `agent_diff_specialist`) so you can embed PerfXpert's analysis brain in
 your own notebooks, CI, or internal tooling.
 
-![python API](assets/gifs/12-python-api.gif)
-
-*`from perfxpert import api; api.agent_root(database_path='trace.db',
-airgap=True, ...)` — returns a plain dict with `primary_bottleneck`,
-`narrative`, `hotspots`, `recommendations`, etc. Same schema the CLI
-emits under `--format json`.*
-
 See `python-api.md` for the full surface.
 
 ## 13. Connecting other MCP clients
@@ -1260,12 +1181,6 @@ Claude Code, Codex CLI, Gemini CLI, and generic stdio clients live in
 `../integration/mcp-server.md` under §"Client integration". The
 bundled opencode inside `perfxpert-code` wires `perfxpert-mcp`
 automatically — no client-side setup required.
-
-![mcp server](assets/gifs/13-mcp-server.gif)
-
-*`perfxpert-mcp` launched in foreground — the stderr banner reports
-the 56 read-only tools it registers (8 agent-hierarchy + 47
-classifier / knowledge + 1 `trace_diff.diff_runs`).*
 
 ## 14. Troubleshooting
 
