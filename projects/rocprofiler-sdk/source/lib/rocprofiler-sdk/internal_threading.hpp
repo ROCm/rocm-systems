@@ -59,8 +59,8 @@ public:
 
     void exec(std::function<void()>&&);
     void async(std::function<void()>&&);
-    void wait();
-    void join();
+    void wait(bool async_only = false);
+    void join(bool async_only = false);
 
 private:
     std::mutex                             m_mutex           = {};
@@ -68,6 +68,7 @@ private:
     thread_pool_t*                         m_pool            = nullptr;
     std::deque<std::shared_ptr<task_type>> m_tasks           = {};
     std::deque<std::shared_ptr<task_type>> m_completed_tasks = {};
+    std::atomic<bool>                      m_async_only      = true;
 };
 
 using task_group_t = TaskGroup;
@@ -93,5 +94,8 @@ task_group_t* get_task_group(rocprofiler_callback_thread_t);
 // returns a task group with the given pool size
 std::unique_ptr<task_group_t>
 create_task_group(size_t pool_size = 1);
+
+task_group_t*
+create_task_group(void* addr, size_t pool_size = 1);
 }  // namespace internal_threading
 }  // namespace rocprofiler

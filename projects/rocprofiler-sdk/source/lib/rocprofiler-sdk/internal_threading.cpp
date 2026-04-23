@@ -91,6 +91,7 @@ void
 TaskGroup::exec(std::function<void()>&& _func)
 {
     auto lk = std::unique_lock<std::mutex>{m_mutex};
+    m_async_only.store(false, std::memory_order_release);
     m_tasks.emplace_back(parent_type::async(std::move(_func)));
 }
 
@@ -107,13 +108,15 @@ TaskGroup::async(std::function<void()>&& _func)
 }
 
 void
-TaskGroup::wait()
+TaskGroup::wait(bool async_only)
 {
     while(m_tasks_count.load(std::memory_order_relaxed) > 0)
     {
         std::this_thread::yield();
         std::this_thread::sleep_for(std::chrono::microseconds{100});
     }
+
+    if(async_only || m_async_only.load(std::memory_order_acquire)) return;
 
     auto lk = std::unique_lock<std::mutex>{m_mutex};
     for(auto& itr : m_tasks)
@@ -127,9 +130,9 @@ TaskGroup::wait()
 }
 
 void
-TaskGroup::join()
+TaskGroup::join(bool async_only)
 {
-    wait();
+    wait(async_only);
 }
 
 namespace
@@ -336,6 +339,21 @@ create_task_group(size_t pool_size)
 
     // construct the task group to use the newly created thread pool
     auto _tg = std::make_unique<task_group_t>(pool_size);
+
+    // notify that rocprofiler library finished creating an internal thread
+    notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
+
+    return _tg;
+}
+
+task_group_t*
+create_task_group(void* addr, size_t pool_size)
+{
+    // notify that rocprofiler library is about to create an inernal thread
+    notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
+
+    // placement new to construct task group at provided address
+    auto* _tg = new(addr) task_group_t{pool_size};
 
     // notify that rocprofiler library finished creating an internal thread
     notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
