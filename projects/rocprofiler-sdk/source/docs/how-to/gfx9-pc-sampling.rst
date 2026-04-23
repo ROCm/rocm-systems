@@ -140,9 +140,9 @@ ARBITER_NOT_WIN stalls
 
 To diagnose the ARBITER_NOT_WIN stalls, check the ``arbiter_state_issue_PIPE`` value:
 
-- ``arbiter_state_issue_PIPE`` = true: Another wave won the arbitration for that PIPE in the sampled cycle. This confirms the classic multiwave contention scenario. To determine whether the winning wave's instruction actually began execution, check ``arbiter_state_stall_PIPE``. Also, look out for pipeline hotspotting as high contention on a single pipe is not always beneficial.
+- ``arbiter_state_issue_PIPE`` = true: Another wave won the arbitration for that PIPE in the sampled cycle. This confirms the classic multiwave contention scenario. To determine whether the winning wave's instruction actually began execution, check ``arbiter_state_stall_PIPE``. Also, look for pipeline hotspotting, as high contention on a single pipe is not always beneficial.
 
-- ``arbiter_state_issue_PIPE`` = false: No wave was issued on that PIPE in the sampled cycle. This indicates that the PIPE wasn't ready to accept an instruction in the sampled cycle. This is a rare scenario.
+- ``arbiter_state_issue_PIPE`` = false: No wave was issued on that PIPE in the sampled cycle. This indicates that the PIPE wasn't ready to accept an instruction in the sampled cycle and is a rare scenario.
 
 .. _latency_stalls:
 
