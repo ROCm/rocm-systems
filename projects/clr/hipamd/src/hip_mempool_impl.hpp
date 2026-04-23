@@ -137,6 +137,17 @@ class Heap : public amd::EmbeddedObject {
   /// Get the size of all allocations in the heap
   uint64_t GetTotalSize() const { return total_size_; }
 
+  /// Get the total size of allocations with refcount > 0 (graph-cached, VA-mapped)
+  uint64_t GetRefcountedSize() const {
+    uint64_t size = 0;
+    for (const auto& it : allocations_) {
+      if (it.second.refcount_ > 0) {
+        size += it.first.first;
+      }
+    }
+    return size;
+  }
+
   /// Get the size of all allocations in the heap
   uint64_t GetMaxTotalSize() const { return max_total_size_; }
 

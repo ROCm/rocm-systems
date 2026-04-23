@@ -435,8 +435,9 @@ hipError_t MemoryPool::GetAttribute(hipMemPoolAttr attr, void* value) {
           (state_.use_vm_heap_) ? MaxMappedSize() : max_total_size_;
       break;
     case hipMemPoolAttrUsedMemCurrent:
-      // Total currently used memory by the pool
-      *reinterpret_cast<uint64_t*>(value) = busy_heap_.GetTotalSize();
+      // Total currently used memory by the pool, including graph-cached entries in free_heap_
+      *reinterpret_cast<uint64_t*>(value) =
+          busy_heap_.GetTotalSize() + free_heap_.GetRefcountedSize();
       break;
     case hipMemPoolAttrUsedMemHigh:
       // High watermark of all used memoryS, since the last reset
