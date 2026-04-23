@@ -1,6 +1,43 @@
 // Post-PromoteMemToReg pass that rewrites the Triton-on-gfx1250
 // cross-16 bitonic-merge idiom.
 //
+// STATUS: TRANSITIONAL (2026-04-22).  Remove when either of the
+// two conditions below is met — see the block comment below for
+// the full justification.
+//
+//   (a) AMD publishes gfx1250 ISA documentation confirming the
+//       silicon semantic of `v_permlane16_swap_b32` under the
+//       `vdst_in == src0_in` initializer.  If the silicon
+//       differs from the gfx950-documented cross-wire (produces
+//       `partner` instead of `self` after the xor3), move the
+//       fix UP the stack: update `emitPermLaneSwapEmulation` in
+//       `handle_valu_cross_lane.cpp` to model the gfx1250
+//       silicon semantic.  This pass then becomes dead code
+//       (harmless — it'll still match, substituting an already-
+//       correct partner value for itself).
+//
+//   (b) Triton's gfx1250 codegen changes to stop emitting this
+//       idiom (e.g. switches to `ds_swizzle_b32 swap:16`, which
+//       gfx942 codegen already uses).  The fingerprint stops
+//       appearing in lifted IR and the pass becomes dead code.
+//
+// Under either condition we also delete the `--enable-/--disable-
+// permlane16-xor3-partner` raise_cli flag and the
+// `enablePermLane16Xor3PartnerRewrite` parameter threaded through
+// `raiser.hpp` + `pipeline.hpp`.
+//
+// Regression pins:
+//   * `Gfx1250Gpu.BitonicXor3TritonState` — hardware probe whose
+//     per-lane summary flips from "32 self" (pre-rewrite) to
+//     "32 partner" (post-rewrite).
+//   * `canary_tl_sort_fp32_deterministic` — end-to-end sort
+//     canary that graduates WRONG 16384/16384 → MATCH under
+//     the rewrite.
+//   * `Gfx1250Gpu.Permlane16Swap{,Wave32,Wave32WaveNative}` and
+//     `Gfx1250Gpu.BitonicCross16Probe` — pin that the swap's
+//     standalone semantic is unaffected (these probes' inputs
+//     are distinct enough to NOT trigger the idiom).
+//
 // Background
 // ==========
 //

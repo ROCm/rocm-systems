@@ -8,6 +8,106 @@ Append-only. Newest on top.
 
 ---
 
+## 2026-04-22 — Triton gfx1250 cross-16 bitonic-merge xor3-partner rewrite (TRANSITIONAL)
+
+`canary_tl_sort_fp32_deterministic` now matches (was `WRONG 16384/16384`).
+The new `rewrite_permlane16_xor3_partner` pass fires after
+PromoteMemToReg and pattern-matches the specific Triton
+compose
+
+    v_dual_mov v_a, v_c :: v_dual_mov v_b, v_c
+    v_permlane16_swap v_a, v_b
+    v_xor3 v_a, v_a, v_b, v_c
+
+which, under gfx950-documented swap semantics and standard
+3-way xor, algebraically collapses `v_a = partner ^ partner ^
+self = self` — yet Triton's gfx942-native compile of the same
+Python source produces a correct sort (using `ds_swizzle_b32
+swap:16` instead of permlane16_swap+xor3).  So either:
+
+  (a) gfx1250 silicon diverges from gfx950 for the identical-
+      input initialiser and really does yield `partner` from
+      this idiom, OR
+  (b) Triton's gfx1250 codegen has a bug and the whole idiom is
+      a no-op that happens to work on real gfx1250 hardware
+      for some other reason.
+
+Without gfx1250 hardware or AMD ISA docs for this specific
+edge case we can't discriminate.  What we CAN do is emit the
+value the algorithm NEEDS (`partner_v_c`) regardless of which
+scenario is true — that matches the gfx942-native compile
+and the bitonic-sort math, and the fingerprint we match
+(two ds.bpermute calls with matching first operand plus an
+outer xor of their xor with the shared seed) is salmon-local
+and structurally impossible to produce outside this exact
+Triton compose.
+
+**The rewrite is a COMPAT BRIDGE, not a principled primitive-
+semantic fix.**  Under both hypotheses, the principled fix is
+in a different layer:
+
+  (a) → `emitPermLaneSwapEmulation` in
+        `handle_valu_cross_lane.cpp` — teach the primitive
+        lift about the gfx1250 silicon's divergent semantic.
+        The composition-level rewrite then becomes harmless
+        dead code (the pattern still matches, substituting an
+        already-correct partner for itself).
+  (b) → file against Triton.  When gfx1250 codegen stops
+        emitting this idiom, the rewrite fingerprint stops
+        appearing in lifted IR and the pass is dead code.
+
+Both dead-code states are actually a feature: if we delete the
+pass prematurely (before the correct-layer fix lands) we
+silently regress `canary_tl_sort_fp32_deterministic` back to
+`WRONG 16384/16384`.  Keeping the bridge around during the
+transition period is zero-risk because:
+
+  * The fingerprint is exact: two bpermutes with identical
+    first operand and seed-equivalent second operands feeding
+    an outer xor with the shared seed.  No non-Triton salmon
+    lift produces this shape.
+  * `Gfx1250Gpu.BitonicXor3TritonState` probe verifies the
+    per-lane transformation.  `Permlane16Swap*` GTests pin the
+    standalone swap semantic.  `canary_dpp_reduce_fp32` +
+    `canary_permlanex16_rowmax_fp32` pin other cross-lane
+    primitives.  None regress.
+  * `--disable-permlane16-xor3-partner` raise_cli flag audits
+    the pre-rewrite shape for anyone characterising the
+    baseline.
+
+**Explicit TRANSITIONAL markers everywhere the pass and its
+flag are referenced** (rewrite_permlane16_xor3_partner.hpp
+block comment, raiser.hpp / pipeline.hpp flag doc, raise_cli.cpp
+top-of-file + usage string).  Each marker cites the two
+removal conditions (a/b) and the pass-level / flag-level /
+probe-level artifacts that should be deleted together when the
+condition is met.
+
+The failed experiment recorded above (the env-gated fcmp-src1
+partner-read injection at every `V_CMP_NGT_F32_e64_gfx12` site)
+was the piece-of-the-puzzle move that made us realise:
+
+  1. the whole bytes are a single 8-byte `v_cmp_ngt_f32_e64`
+     (newer AMD LLVM 23.0.0git decodes cleanly — older objdump
+     just didn't know the gfx1250 decoder namespace); and
+  2. the semantic mismatch is in the xor3 composition UPSTREAM
+     of the compare, not in the compare itself.
+
+`canary_tl_sort_fp32_deterministic` is the one recipe in the
+suite that triggers the idiom (Triton's deterministic-input
+codegen hits `v_a_in == v_b_in == v_c`).  `canary_tl_sort_fp32`
+with random input, `canary_tl_topk_*`, `topk_forward_bf16`, and
+`topk_forward_bisect_m2_strict` use a DIFFERENT codegen path
+where the swap operands are distinct VGPRs — the xor3 collapse
+doesn't apply.  They're SEPARATE bugs to be investigated.
+
+Commits for this thread: 2bd4381028 (the rewrite pass itself),
+and the follow-up that adds the `--disable-permlane16-xor3-
+partner` audit flag, the TRANSITIONAL markers, and this
+learnings entry.
+
+---
+
 ## 2026-04-22 — Failed experiment: inject `ds_bpermute(lane ^ 16)` on V_CMP_NGT_F32_e64_gfx12 src1
 
 After the xor3-triton-state probe (`Gfx1250Gpu.BitonicXor3TritonState`)

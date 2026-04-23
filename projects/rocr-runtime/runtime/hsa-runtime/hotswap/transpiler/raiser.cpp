@@ -71,7 +71,8 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
                       uint64_t kernelOffset,
                       const std::string &compilationTargetISA,
                       bool enableWritelaneRewrite,
-                      bool enableWaveNative) {
+                      bool enableWaveNative,
+                      bool enablePermLane16Xor3PartnerRewrite) {
   RaiseResult result;
 
   // NOTE. The `HSA_SALMON_WAVE_NATIVE=1` process-environment override
@@ -565,12 +566,21 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
     B.CreateStore(B.CreateCall(fnWorkgroupIdX, {}, "ttmp9_wg_id"), regs.ttmp[9]);
 
     // ttmp7 = (workgroup_id_z << 16) | (workgroup_id_y & 0xFFFF).
-    // Mask Y to 16 bits before shifting Z so a stray-high-bit Y
-    // doesn't bleed into the Z field; the AMDGPU backend's mask is
-    // `~0u` on no-Z kernels (the upper bits are simply ignored by
-    // the consumer's `s_and ttmp7, 0xffff` pattern), so masking
-    // unconditionally is safe and matches the principled all-cases
-    // shape.
+    // We mask Y to 16 bits before shifting Z so a stray-high-bit Y
+    // doesn't bleed into the Z field.  CAVEAT: upstream's mask is
+    // conditional — `AMDGPULegalizerInfo::loadInputValue` uses `~0u`
+    // on no-Z-grid entry-function kernels (letting a consumer that
+    // reads ttmp7 unmasked see the FULL 32-bit workgroup_id_y, for
+    // Y up to UINT_MAX).  Our unconditional 16-bit mask clips Y on
+    // no-Z grids with Y >= 65536, which is a hypothetical silent
+    // miscompile.  We have not observed a lifted kernel that does
+    // this in practice — every Triton-emitted consumer I surveyed
+    // reads via `s_and ttmp7, 0xffff` — but if a Y >= 65536 no-Z
+    // kernel shows up we'll need to either thread `hasWorkGroupIDZ`
+    // through `meta` and emit the conditional mask here, or switch
+    // to the `~0u` mask and let `s_and ttmp7, 0xffff` consumers
+    // tolerate the Z bits bleeding into their read (they already do
+    // per the consumer pattern definition).
     Value *wgIdY = B.CreateCall(fnWorkgroupIdY, {}, "ttmp7_wg_id_y");
     Function *fnWorkgroupIdZ =
         Intrinsic::getOrInsertDeclaration(&M, Intrinsic::amdgcn_workgroup_id_z);
@@ -851,7 +861,13 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   // passes only walk specific intrinsic call sites
   // (`amdgcn.{writelane,readlane,workitem.id.x}`) that this
   // rewrite never touches.
-  {
+  //
+  // Gated by `enablePermLane16Xor3PartnerRewrite` (default on;
+  // raise_cli opt-out: `--disable-permlane16-xor3-partner`).  See
+  // the flag's raiser.hpp block comment for the TRANSITIONAL
+  // status and the two conditions ((a) gfx1250 ISA docs / (b)
+  // Triton codegen change) that will let us delete this phase.
+  if (enablePermLane16Xor3PartnerRewrite) {
     Permlane16Xor3PartnerRewriteReport report =
         rewritePermLane16Xor3Partner(*F);
     if (report.matchedSites > 0) {

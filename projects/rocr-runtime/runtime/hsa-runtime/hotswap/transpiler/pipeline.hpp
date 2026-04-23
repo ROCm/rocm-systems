@@ -63,12 +63,20 @@ struct PipelineResult {
 /// under standard conversions).  Callers repeat the ISA string
 /// instead; the ~5 single-ISA call sites that did this pre-fix are
 /// all updated to the two-string form.
+///
+/// `enablePermLane16Xor3PartnerRewrite` plumbs through to
+/// `raiseToIR(..., enablePermLane16Xor3PartnerRewrite)` — see
+/// raiser.hpp for the full TRANSITIONAL rationale and
+/// `rewrite_permlane16_xor3_partner.{hpp,cpp}` for the pattern.
+/// Default **on**.  Callers auditing the pre-rewrite shape pass
+/// `false` explicitly.
 PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
                            const std::string &sourceISA,
                            const std::string &targetISA,
                            const std::string &kernelName,
                            bool enableWritelaneRewrite = true,
-                           bool enableWaveNative = true);
+                           bool enableWaveNative = true,
+                           bool enablePermLane16Xor3PartnerRewrite = true);
 
 /// Raise and lower ALL kernels in a code object, producing a single merged
 /// HSACO containing every kernel.  Returns success only if every kernel was
@@ -78,7 +86,8 @@ PipelineResult runPipelineAllKernels(const std::vector<uint8_t> &codeObjectData,
                                      const std::string &sourceISA,
                                      const std::string &targetISA,
                                      bool enableWritelaneRewrite = true,
-                                     bool enableWaveNative = true);
+                                     bool enableWaveNative = true,
+                                     bool enablePermLane16Xor3PartnerRewrite = true);
 
 /// Process-global "strict mode" toggle, controlled by the
 /// `HSA_SALMON_STRICT` environment variable. When set to a non-empty

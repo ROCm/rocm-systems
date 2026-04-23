@@ -91,6 +91,52 @@ struct RaiseResult {
 // fixtures that pin MODREP-shape IR invariants) rely on. If a
 // future need for a global toggle arises, add a proper
 // `PipelineConfig` field.
+//
+// `enablePermLane16Xor3PartnerRewrite` toggles the
+// `rewrite_permlane16_xor3_partner` pass that substitutes
+// `partner_seed` for the xor3 result at Triton's gfx1250
+// cross-16 bitonic-merge idiom (see that header's top-of-file
+// block comment for the full (a)/(b) hypothesis split).
+//
+// Default **on** because:
+//   * The pass's fingerprint (two bpermutes with identical
+//     first-operand + outer xor with their xor and the shared
+//     seed) is an IR shape salmon does not emit through any
+//     other lift path, so false positives are structurally
+//     impossible.
+//   * The `canary_tl_sort_fp32_deterministic` regression guard
+//     depends on it — without the rewrite the canary reports
+//     `WRONG 16384/16384` for Triton's cross-16 bitonic merge.
+//
+// TRANSITIONAL — remove when either of the two conditions below
+// is met (whichever comes first):
+//
+//   (a) AMD publishes gfx1250 ISA documentation confirming the
+//       silicon semantic of `v_permlane16_swap_b32` under the
+//       `vdst_in == src0_in` initializer.  If the silicon
+//       differs from the gfx950-documented cross-wire (produces
+//       `partner` instead of `self` after the xor3), the
+//       principled fix moves UP the stack: update
+//       `emitPermLaneSwapEmulation` in
+//       `handle_valu_cross_lane.cpp` to model the gfx1250
+//       silicon semantic, at which point this pass becomes
+//       harmless dead code (the xor3 will already produce
+//       `partner` through the standard lift).
+//
+//   (b) Triton's gfx1250 codegen changes to stop emitting the
+//       `permlane16_swap + xor3` idiom (e.g. switches to
+//       `ds_swizzle_b32 swap:16` like the gfx942 codegen path
+//       already uses).  The rewrite's fingerprint stops
+//       appearing in lifted kernels; the pass becomes dead code.
+//
+// In both cases the `Gfx1250Gpu.BitonicXor3TritonState` GTest
+// and the `canary_tl_sort_fp32_deterministic` recipe pin
+// whether the rewrite still fires or has been obsoleted by the
+// upstream change.  Callers that want to audit the pre-rewrite
+// behaviour (to characterise how many recipes would regress
+// without the bridge) pass `enablePermLane16Xor3PartnerRewrite
+// = false` explicitly — raise_cli exposes this as
+// `--disable-permlane16-xor3-partner`.
 RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
                       const std::string &sourceISA,
                       const std::string &kernelName,
@@ -98,7 +144,8 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
                       uint64_t kernelOffset = 0,
                       const std::string &compilationTargetISA = "",
                       bool enableWritelaneRewrite = true,
-                      bool enableWaveNative = true);
+                      bool enableWaveNative = true,
+                      bool enablePermLane16Xor3PartnerRewrite = true);
 
 } // namespace transpiler
 
