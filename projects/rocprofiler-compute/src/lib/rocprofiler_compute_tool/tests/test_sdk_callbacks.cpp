@@ -180,6 +180,11 @@ TEST_P(TestSdkCallbacksKernelFiltering, ProvidedKernelFilteringEnabled_ReturnsKe
     EXPECT_EQ(*m_tool_data->target_kernel_ids.cbegin(), kernel_id_0);
 }
 
+TEST_F(TestSdkCallbacks, ProvidedCallbackTracingRecord_StoresCodeObjectInformation)
+{
+    
+}
+
 //////////////////////////////////////////////////////////////////////////
 /// TestSdkCallbacks
 void TestSdkCallbacks::SetUp()

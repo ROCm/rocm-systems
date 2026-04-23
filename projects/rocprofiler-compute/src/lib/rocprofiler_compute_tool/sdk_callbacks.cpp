@@ -356,6 +356,97 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
     }
 }
 
+#ifdef 0
+// reference code from SDK (to be deleted after implementation
+void SdkCallbacksImpl::code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
+                                                    rocprofiler_user_data_t*              user_data,
+                                                    void*                                 data)
+{
+    if (record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
+        record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
+    {
+        if (record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
+        {
+            auto* obj_data = static_cast<tool::rocprofiler_code_object_info_t*>(record.payload);
+
+            CHECK_NOTNULL(tool_metadata)->add_code_object(*obj_data);
+            if (tool::get_config().pc_sampling_host_trap || tool::get_config().pc_sampling_stochastic)
+            {
+                CHECK_NOTNULL(tool_metadata)->add_decoder(obj_data);
+            }
+
+            if (obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY &&
+                tool::get_config().advanced_thread_trace)
+            {
+                const char* gpu_name      = tool_metadata->agents_map.at(obj_data->rocp_agent).name;
+                auto        filename      = fmt::format("{}_code_object_id_{}",
+                                            std::string(gpu_name),
+                                            std::to_string(obj_data->code_object_id));
+                auto        output_stream = get_output_stream(tool::get_config(), filename, ".out");
+                std::string output_filename = get_output_filename(tool::get_config(), filename, ".out");
+
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                output_stream.stream->write(reinterpret_cast<char*>(obj_data->memory_base),
+                                            obj_data->memory_size);
+                tool_metadata->code_object_load.wlock(
+                    [](auto& data_vec, std::string file_name, tool::rocprofiler_code_object_info_t* obj_data_v)
+                    {
+                        data_vec.push_back({std::move(file_name),
+                                            obj_data_v->code_object_id,
+                                            obj_data_v->load_base,
+                                            obj_data_v->load_size});
+                    },
+                    output_filename,
+                    obj_data);
+            }
+            else if (obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE &&
+                     tool::get_config().advanced_thread_trace)
+            {
+                const char* gpu_name      = tool_metadata->agents_map.at(obj_data->rocp_agent).name;
+                auto        filename      = fmt::format("{}_code_object_id_{}",
+                                            std::string(gpu_name),
+                                            std::to_string(obj_data->code_object_id));
+                auto        output_stream = get_output_stream(tool::get_config(), filename, ".out");
+                std::string output_filename = get_output_filename(tool::get_config(), filename, ".out");
+
+                uint8_t*      binary      = nullptr;
+                size_t        buffer_size = 0;
+                std::ifstream code_object_file(obj_data->uri, std::ios::binary | std::ios::ate);
+                if (code_object_file.good())
+                {
+                    buffer_size = code_object_file.tellg();
+                    code_object_file.seekg(0, std::ios::beg);
+                    binary = new (std::nothrow) uint8_t[buffer_size];
+                    if (binary && !code_object_file.read(reinterpret_cast<char*>(binary), buffer_size))
+                    {
+                        delete[] binary;
+                        binary = nullptr;
+                    }
+                }
+                // NOLINTBEGIN(performance-no-int-to-ptr)
+                output_stream.stream->write(reinterpret_cast<char*>(obj_data->memory_base),
+                                            obj_data->memory_size);
+                // NOLINTEND(performance-no-int-to-ptr)
+                tool_metadata->code_object_load.wlock(
+                    [](auto& data_vec, std::string file_name, tool::rocprofiler_code_object_info_t* obj_data_v)
+                    {
+                        data_vec.push_back({std::move(file_name),
+                                            obj_data_v->code_object_id,
+                                            obj_data_v->load_base,
+                                            obj_data_v->load_size});
+                    },
+                    output_filename,
+                    obj_data);
+            }
+        }
+    }
+}
+#endif
+
+void SdkCallbacksImpl::code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
+                                                    rocprofiler_user_data_t*              user_data,
+                                                    void* data){}
+
 std::string SdkCallbacksImpl::truncate_name(std::string_view name)
 {
     // The function extracts the kernel name from
