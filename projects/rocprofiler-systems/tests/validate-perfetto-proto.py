@@ -5,7 +5,10 @@
 
 import sys
 import os
+import time
 import argparse
+from collections import defaultdict
+
 from perfetto.trace_processor import TraceProcessor, TraceProcessorConfig
 
 
@@ -37,8 +40,6 @@ def load_trace(inp, max_tries=5, retry_wait=1, bin_path=None):
             if tries >= max_tries:
                 raise
             else:
-                import time
-
                 time.sleep(retry_wait)
         finally:
             tries += 1
@@ -65,14 +66,19 @@ def validate_perfetto(data, labels, counts, depths, useSubstringForLabels=False)
     if not data and labels:
         raise RuntimeError("Data is empty but labels are not")
 
-    expected = []
-    for litr, citr, ditr in zip(labels, counts, depths):
-        entry = []
-        _label = litr
-        if ditr > 0:
-            _label = "{}".format(litr)
-        entry = [_label, citr, ditr]
-        expected.append(entry)
+    if len(labels) != len(counts) or len(labels) != len(depths):
+        raise RuntimeError(
+            "labels, counts, and depths must have the same length "
+            f"(got {len(labels)}, {len(counts)}, {len(depths)})"
+        )
+
+    expected = [[litr, citr, ditr] for litr, citr, ditr in zip(labels, counts, depths)]
+
+    if len(data) != len(expected):
+        raise RuntimeError(
+            f"Expected {len(expected)} aggregated slice rows in order, got {len(data)} "
+            "(must match labels/counts/depths one-to-one)"
+        )
 
     for ditr, eitr in zip(data, expected):
         _label = ditr["label"]
@@ -82,11 +88,13 @@ def validate_perfetto(data, labels, counts, depths, useSubstringForLabels=False)
         if useSubstringForLabels:
             if eitr[0] not in _label:
                 raise RuntimeError(
-                    f"Mismatched prefix: {_label} does not contain {eitr[0]}"
+                    f"Mismatched label (substring): {_label!r} does not contain {eitr[0]!r}"
                 )
         else:
             if _label != eitr[0]:
-                raise RuntimeError(f"Mismatched prefix: {_label} vs. {eitr[0]}")
+                raise RuntimeError(
+                    f"Mismatched label (exact): {_label!r} vs expected {eitr[0]!r}"
+                )
 
         if _count != eitr[1]:
             raise RuntimeError(f"Mismatched count: {_count} vs. {eitr[1]}")
@@ -94,21 +102,15 @@ def validate_perfetto(data, labels, counts, depths, useSubstringForLabels=False)
             raise RuntimeError(f"Mismatched depth: {_depth} vs. {eitr[2]}")
 
 
-def _slice_row_matches_expected_label(
-    row_label: str, expected_label: str, use_substring: bool
-) -> bool:
-    if use_substring:
-        return expected_label in row_label
-    return row_label == expected_label
-
-
-def validate_perfetto_by_expected_entry(
+def validate_perfetto_by_label(
     data,
     labels,
     counts,
     useSubstringForLabels=False,
 ):
     """
+    Validate slice rows by matching each expected label to trace names (see ``--match-by-label``).
+
     For each expected label, find matching slice rows in ``data`` by label (exact or
     substring). Matching slice counts are summed **across all depths** so stack depth is
     not part of validation. Trace rows whose names do not match any expected label are
@@ -128,14 +130,15 @@ def validate_perfetto_by_expected_entry(
             "counts must have one entry per label, or be omitted for presence-only mode"
         )
 
+    totals_by_slice_name = defaultdict(int)
+    for srow in data:
+        totals_by_slice_name[srow["label"]] += srow["count"]
+
     for i, litr in enumerate(labels):
-        total = 0
-        for srow in data:
-            if not _slice_row_matches_expected_label(
-                srow["label"], litr, useSubstringForLabels
-            ):
-                continue
-            total += srow["count"]
+        if useSubstringForLabels:
+            total = sum(cnt for name, cnt in totals_by_slice_name.items() if litr in name)
+        else:
+            total = totals_by_slice_name.get(litr, 0)
 
         if presence_only:
             if total < 1:
@@ -239,6 +242,12 @@ if __name__ == "__main__":
             "The same number of labels, counts, and depths must be specified"
         )
 
+    if args.key_names or args.key_counts:
+        if len(args.key_names) != len(args.key_counts):
+            raise RuntimeError(
+                "--key-names and --key-counts must have the same number of entries"
+            )
+
     tp = load_trace(args.input, bin_path=args.trace_processor_shell)
 
     if tp is None:
@@ -279,9 +288,9 @@ if __name__ == "__main__":
 
     ret = 0
     try:
-        use_substrings = args.label_substrings is not None
+        use_substrings = bool(args.label_substrings)
         if args.match_by_label:
-            validate_perfetto_by_expected_entry(
+            validate_perfetto_by_label(
                 perfetto_data,
                 labels,
                 args.counts,
