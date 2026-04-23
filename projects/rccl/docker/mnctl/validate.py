@@ -8,6 +8,11 @@ import os
 import sys
 from typing import List
 
+from .checks import (
+    SSH_KEY_MISSING, POST_SETUP_MISSING, POST_SETUP_EMPTY,
+    hostfile_status, ssh_key_status, post_setup_status,
+    resolve_dockerfile, list_available_dockerfiles,
+)
 from .config import Action, Config
 from .utils import warn, error
 
@@ -21,7 +26,8 @@ def validate(cfg):
 
     # --- Hostfile required for multi-node actions ---
     if action in (Action.LAUNCH_ALL, Action.STOP_ALL, Action.VERIFY):
-        if not os.path.isfile(cfg.hostfile):
+        exists, _hosts = hostfile_status(cfg)
+        if not exists:
             errors.append(
                 "Hostfile not found: {hf}\n"
                 "  Required by: --{act}\n"
@@ -41,9 +47,10 @@ def validate(cfg):
         )
 
     # --- SSH key existence ---
-    if cfg.ssh.key:
-        priv = cfg.ssh.priv_key
-        pub = cfg.ssh.pub_key
+    status, priv, pub = ssh_key_status(cfg)
+    if status == SSH_KEY_MISSING:
+        # SSH_KEY_MISSING means at least one of the pair is absent;
+        # report each one individually so the user knows what to fix.
         if priv and not os.path.isfile(priv):
             errors.append("SSH private key not found: {}".format(priv))
         if pub and not os.path.isfile(pub):
@@ -51,45 +58,32 @@ def validate(cfg):
 
     # --- Dockerfile existence for build actions ---
     if action in (Action.BUILD, Action.RUN, Action.LAUNCH_ALL, Action.SETUP_DEPS):
-        if os.path.isabs(cfg.dockerfile):
-            df_path = cfg.dockerfile
-        else:
-            df_path = os.path.join(cfg.script_dir, cfg.dockerfile)
+        df_path = resolve_dockerfile(cfg)
         if not os.path.isfile(df_path):
-            available = [
-                f for f in os.listdir(cfg.script_dir)
-                if f.startswith("Dockerfile.")
-            ]
+            available = list_available_dockerfiles(cfg)
             errors.append(
                 "Dockerfile not found: {df}\n"
                 "  Available in {sd}/:\n"
                 "    {avail}".format(
                     df=df_path,
                     sd=cfg.script_dir,
-                    avail="\n    ".join(sorted(available)) if available
-                    else "(none)",
+                    avail="\n    ".join(available) if available else "(none)",
                 )
             )
 
     # --- Post-setup directory ---
     if cfg.post_setup_dir:
-        if not os.path.isdir(cfg.post_setup_dir):
+        ps_status, _files = post_setup_status(cfg)
+        if ps_status == POST_SETUP_MISSING:
             errors.append(
                 "Post-setup directory not found: {}".format(cfg.post_setup_dir)
             )
-        else:
-            has_setup = os.path.isfile(
-                os.path.join(cfg.post_setup_dir, "setup.sh")
-            )
-            has_env = os.path.isfile(
-                os.path.join(cfg.post_setup_dir, "env.sh")
-            )
-            if not has_setup and not has_env:
-                errors.append(
-                    "Post-setup dir must contain setup.sh and/or env.sh: {}".format(
-                        cfg.post_setup_dir
-                    )
+        elif ps_status == POST_SETUP_EMPTY:
+            errors.append(
+                "Post-setup dir must contain setup.sh and/or env.sh: {}".format(
+                    cfg.post_setup_dir
                 )
+            )
 
     # --- Report ---
     for w in warnings:

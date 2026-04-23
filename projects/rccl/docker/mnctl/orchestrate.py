@@ -19,6 +19,7 @@ from .config import Config
 from .ssh import install_ssh_keys
 from .utils import (
     log, log_verbose, parse_hostfile, get_local_hostnames, Timer,
+    ssh_opts, host_ssh_cmd, run_parallel,
 )
 
 
@@ -78,25 +79,12 @@ def setup_host(cfg):
 # ---------------------------------------------------------------------------
 def _ssh_base_cmd(cfg, host):
     # type: (Config, str) -> List[str]
-    """Build the SSH prefix for reaching *host*.
+    """Build the SSH prefix for reaching *host* (host-level SSH).
 
-    Uses the generated/shared key from cfg.ssh.key_dir when available,
-    so that host-level SSH works after --ssh / --ssh-keygen setup.
+    Thin wrapper around :func:`utils.host_ssh_cmd` that returns the
+    command list without a remote command appended.
     """
-    cmd = [
-        "ssh",
-        "-p", str(cfg.host_ssh_port),
-        "-o", "StrictHostKeyChecking=no",
-        "-o", "UserKnownHostsFile=/dev/null",
-        "-o", "ConnectTimeout=10",
-        "-o", "BatchMode=yes",
-        "-o", "LogLevel=ERROR",
-    ]
-    host_key = os.path.join(cfg.ssh.key_dir, "id_rsa")
-    if os.path.isfile(host_key):
-        cmd += ["-i", host_key]
-    cmd.append(host)
-    return cmd
+    return host_ssh_cmd(cfg, host)
 
 
 # ---------------------------------------------------------------------------
@@ -114,18 +102,17 @@ def _push_pubkey_to_remotes(cfg, remote_hosts, pub_key_path):
 
     use_copy_id = shutil.which("ssh-copy-id") is not None
 
-    procs = {}  # type: Dict[str, subprocess.Popen]
+    # ssh-copy-id reuses our canonical SSH options but skips BatchMode
+    # (it may need to prompt for a password on first contact) and the
+    # ConnectTimeout option (handled internally).
+    copy_id_opts = ssh_opts(
+        cfg.host_ssh_port, batch=False, connect_timeout=None,
+    )
+
+    jobs = {}  # type: Dict[str, List[str]]
     for host in remote_hosts:
         if use_copy_id:
-            cmd = [
-                "ssh-copy-id",
-                "-i", pub_key_path,
-                "-p", str(cfg.host_ssh_port),
-                "-o", "StrictHostKeyChecking=no",
-                "-o", "UserKnownHostsFile=/dev/null",
-                "-o", "LogLevel=ERROR",
-                host,
-            ]
+            cmd = ["ssh-copy-id", "-i", pub_key_path] + copy_id_opts + [host]
         else:
             remote_cmd = (
                 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && "
@@ -134,26 +121,19 @@ def _push_pubkey_to_remotes(cfg, remote_hosts, pub_key_path):
                 "chmod 600 ~/.ssh/authorized_keys"
             ).format(key=pub_data)
             cmd = _ssh_base_cmd(cfg, host) + [remote_cmd]
-        procs[host] = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
+        jobs[host] = cmd
+    results = run_parallel(jobs)
 
     ok_count = 0
     for host in remote_hosts:
-        proc = procs[host]
-        proc.wait()
-        if proc.returncode == 0:
+        r = results[host]
+        if r.ok:
             ok_count += 1
             log_verbose("  Public key installed on {}".format(host))
         else:
-            err = ""
-            if proc.stderr:
-                err = proc.stderr.read().decode(
-                    "utf-8", errors="replace"
-                ).strip()
             log_verbose(
                 "  Key push to {} returned {}: {}".format(
-                    host, proc.returncode, err[:200]
+                    host, r.returncode, r.stderr_text().strip()[:200]
                 )
             )
 
@@ -194,11 +174,14 @@ def _distribute_files(cfg, remote_hosts):
     if os.path.isfile(pub_key):
         _push_pubkey_to_remotes(cfg, remote_hosts, pub_key)
 
-    rsh = "ssh -p {} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o LogLevel=ERROR".format(
+    # rsync --rsh expects a single string; build it from our canonical
+    # SSH options. ConnectTimeout is omitted to match the original behavior.
+    rsh_parts = ["ssh"] + ssh_opts(
         cfg.host_ssh_port,
+        identity=host_key if os.path.isfile(host_key) else None,
+        connect_timeout=None,
     )
-    if os.path.isfile(host_key):
-        rsh += " -i {}".format(host_key)
+    rsh = " ".join(rsh_parts)
 
     # (local_path, is_dir, label)
     items = [
@@ -218,20 +201,18 @@ def _distribute_files(cfg, remote_hosts):
         else:
             remote_dirs.add(os.path.dirname(local_path))
 
-    mkdir_procs = {}  # type: Dict[str, subprocess.Popen]
-    for host in remote_hosts:
-        mkdir_procs[host] = subprocess.Popen(
-            _ssh_base_cmd(cfg, host) + ["mkdir", "-p"] + sorted(remote_dirs),
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
-    for host, proc in mkdir_procs.items():
-        proc.wait()
-        if proc.returncode != 0 and cfg.verbose:
-            err = proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else ""
-            log_verbose("mkdir on {}: {}".format(host, err[:200]))
+    mkdir_jobs = {
+        host: _ssh_base_cmd(cfg, host) + ["mkdir", "-p"] + sorted(remote_dirs)
+        for host in remote_hosts
+    }
+    for host, r in run_parallel(mkdir_jobs).items():
+        if not r.ok and cfg.verbose:
+            log_verbose(
+                "mkdir on {}: {}".format(host, r.stderr_text().strip()[:200])
+            )
 
     # Phase 2: rsync each item to each remote host (parallel)
-    procs = {}  # type: Dict[Tuple[str, str], subprocess.Popen]
+    rsync_jobs = {}  # type: Dict[Tuple[str, str], List[str]]
     for host in remote_hosts:
         for local_path, is_dir, label in items:
             if is_dir:
@@ -240,27 +221,24 @@ def _distribute_files(cfg, remote_hosts):
             else:
                 src = local_path
                 dest = "{}:{}".format(host, local_path)
-
-            cmd = [
+            rsync_jobs[(host, label)] = [
                 "rsync", "-a", "--exclude", "__pycache__",
                 "--rsh", rsh,
                 src, dest,
             ]
-            procs[(host, label)] = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            )
+    rsync_results = run_parallel(rsync_jobs)
 
     # Collect results
     failed = []  # type: List[Tuple[str, str]]
-    for key in sorted(procs.keys()):
-        proc = procs[key]
-        proc.wait()
+    for key in sorted(rsync_results.keys()):
+        r = rsync_results[key]
         host, label = key
-        if proc.returncode == 0:
+        if r.ok:
             log_verbose("  [OK] {} -> {}".format(label, host))
         else:
-            err = proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else ""
-            log("  [FAIL] {} -> {}: {}".format(label, host, err[:200]))
+            log("  [FAIL] {} -> {}: {}".format(
+                label, host, r.stderr_text().strip()[:200],
+            ))
             failed.append(key)
 
     if failed:
@@ -283,9 +261,21 @@ def _distribute_files(cfg, remote_hosts):
 # ---------------------------------------------------------------------------
 # Forward-argument assembly for remote invocations
 # ---------------------------------------------------------------------------
-def _build_forward_args(cfg, action="--run"):
-    # type: (Config, str) -> List[str]
-    """Build CLI args to forward when invoking per-node setup."""
+def _build_forward_args(cfg, action="--run",
+                        force_rebuild=None, force_replace=None):
+    # type: (Config, str, bool, bool) -> List[str]
+    """Build CLI args to forward when invoking per-node setup.
+
+    *force_rebuild* / *force_replace* default to the values on *cfg* but
+    callers may pass explicit overrides (e.g. to convert a host-level
+    ``--rebuild`` into a per-node ``--replace`` for the ``--run`` phase).
+    Passing overrides avoids the need to mutate *cfg* across calls.
+    """
+    if force_rebuild is None:
+        force_rebuild = cfg.force_rebuild
+    if force_replace is None:
+        force_replace = cfg.force_replace
+
     args = [
         action,
         "--name", cfg.container_name,
@@ -300,9 +290,9 @@ def _build_forward_args(cfg, action="--run"):
         args += ["--gpus", cfg.gpus]
     if cfg.dockerfile != "Dockerfile.Multinode.Ubuntu":
         args += ["--dockerfile", cfg.dockerfile]
-    if cfg.force_rebuild:
+    if force_rebuild:
         args.append("--rebuild")
-    elif cfg.force_replace:
+    elif force_replace:
         args.append("--replace")
     if cfg.verbose:
         args.append("--verbose")
@@ -362,16 +352,15 @@ def launch_all(cfg):
         # Build compound command: setup-deps (idempotent) then run.
         # python3 -u disables output buffering so lines stream in real time.
         # --setup-deps gets --rebuild (image build happens here).
-        # --run gets --replace instead of --rebuild so it reuses the image
-        # that --setup-deps just built, avoiding a redundant full rebuild.
+        # --run reuses the image that --setup-deps just built, so we
+        # downgrade any --rebuild request to a container --replace to
+        # avoid a redundant full image rebuild on every node.
         deps_args = _build_forward_args(cfg, action="--setup-deps")
-
-        saved_rebuild = cfg.force_rebuild
-        if cfg.force_rebuild:
-            cfg.force_rebuild = False
-            cfg.force_replace = True
-        run_args = _build_forward_args(cfg, action="--run")
-        cfg.force_rebuild = saved_rebuild
+        run_args = _build_forward_args(
+            cfg, action="--run",
+            force_rebuild=False,
+            force_replace=cfg.force_rebuild or cfg.force_replace,
+        )
 
         def _quote_cmd(args):
             # type: (List[str]) -> str
@@ -502,29 +491,23 @@ def stop_all(cfg):
     stop_cmd = cfg.runtime.get_stop_cmd()
 
     # Spawn all stop commands at once
-    procs = {}  # type: Dict[str, subprocess.Popen]
+    jobs = {}  # type: Dict[str, List[str]]
     for host in hosts:
         if host in local_names:
-            procs[host] = subprocess.Popen(
-                stop_cmd, shell=True,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            )
+            jobs[host] = ["sh", "-c", stop_cmd]
         else:
-            procs[host] = subprocess.Popen(
-                _ssh_base_cmd(cfg, host) + [stop_cmd],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            )
+            jobs[host] = _ssh_base_cmd(cfg, host) + [stop_cmd]
+    results = run_parallel(jobs)
 
-    # Collect results (all procs are already running concurrently)
+    # Collect results (all procs ran concurrently)
     unreachable = []
     for host in hosts:
-        proc = procs[host]
-        stdout, stderr = proc.communicate()
-        output = stdout.decode("utf-8", errors="replace").strip() if stdout else ""
-        if proc.returncode != 0:
-            err = stderr.decode("utf-8", errors="replace").strip() if stderr else ""
+        r = results[host]
+        output = r.stdout_text().strip()
+        if not r.ok:
+            err = r.stderr_text().strip()
             output = "[UNREACHABLE] {}".format(
-                err[:200] if err else "exit {}".format(proc.returncode)
+                err[:200] if err else "exit {}".format(r.returncode)
             )
             unreachable.append(host)
         log("  {:<20} {}".format(host, output))

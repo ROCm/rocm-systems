@@ -99,6 +99,55 @@ def _resolve_dockerfile_base(dockerfile_path):
 
 
 # ---------------------------------------------------------------------------
+# Host -> container environment-variable mapping
+# ---------------------------------------------------------------------------
+def _container_env_pairs(cfg, render_gid):
+    # type: (object, str) -> List[tuple]
+    """Build the (NAME, value) pairs injected as ``-e`` flags on ``docker run``.
+
+    This is the **single source of truth** for how mnctl's host-side
+    settings reach the container's entrypoint and post-setup scripts.
+    The naming convention is intentional:
+
+      * On the **host**, all mnctl-controlled settings are namespaced
+        ``MNCTL_*`` (e.g. ``MNCTL_GPUS``, ``MNCTL_NIC_TYPE``) so they
+        cannot collide with the user's existing environment.
+      * Inside the **container**, the prefix is dropped because these
+        variables are consumed by user-maintained shell scripts
+        (entrypoint, post-setup) where short, conventional names are
+        more ergonomic. The container side is "private" to mnctl, so
+        collision is not a concern.
+
+    Mapping reference (host -> container)::
+
+        MNCTL_GPUS         -> GPUS
+        MNCTL_VERBOSE      -> VERBOSE             (only set when truthy)
+        MNCTL_NIC_TYPE     -> NIC_TYPE
+        MNCTL_GPU_TARGETS  -> GPU_TARGETS         (only set when non-empty)
+        (derived)          -> HOST_UID, HOST_GID, RENDER_GID
+        (derived)          -> FORCE_POST_SETUP    (when --rebuild/--replace)
+
+    To add a new pair: append it here AND document it in the epilog of
+    ``__main__.py`` and (for end-user-visible settings) in
+    ``post-setup/`` script docs.
+    """
+    pairs = [
+        ("GPUS", cfg.gpus),
+        ("HOST_UID", str(os.getuid())),
+        ("HOST_GID", str(os.getgid())),
+        ("RENDER_GID", render_gid),
+        ("NIC_TYPE", cfg.nic_type),
+    ]
+    if cfg.verbose:
+        pairs.append(("VERBOSE", "1"))
+    if cfg.gpu_targets:
+        pairs.append(("GPU_TARGETS", cfg.gpu_targets))
+    if cfg.force_rebuild or cfg.force_replace:
+        pairs.append(("FORCE_POST_SETUP", "1"))
+    return pairs
+
+
+# ---------------------------------------------------------------------------
 # DockerRuntime
 # ---------------------------------------------------------------------------
 class DockerRuntime(ContainerRuntime):
@@ -111,10 +160,12 @@ class DockerRuntime(ContainerRuntime):
 
     # --- Image management ---
 
-    def image_exists(self):
-        # type: () -> bool
+    def image_exists(self, tag=None):
+        # type: (Optional[str]) -> bool
+        """Return True if *tag* (or ``cfg.image_tag``) is present locally."""
+        target = tag or self.cfg.image_tag
         result = subprocess.run(
-            ["docker", "image", "inspect", self.cfg.image_tag],
+            ["docker", "image", "inspect", target],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         return result.returncode == 0
@@ -336,7 +387,7 @@ class DockerRuntime(ContainerRuntime):
     def _ensure_base_image(self, base):
         # type: (str) -> None
         """Verify the base image is available locally; pull if needed."""
-        if self._image_exists_local(base):
+        if self.image_exists(base):
             log_verbose("Base image '{}' found locally".format(base))
             return
 
@@ -366,15 +417,6 @@ class DockerRuntime(ContainerRuntime):
         log("    3. Use a different base image:")
         log("       python3 -m mnctl <other-image>")
         raise SystemExit(1)
-
-    @staticmethod
-    def _image_exists_local(tag):
-        # type: (str) -> bool
-        result = subprocess.run(
-            ["docker", "image", "inspect", tag],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
-        return result.returncode == 0
 
     def _remove_container(self):
         # type: () -> None
@@ -423,7 +465,11 @@ class DockerRuntime(ContainerRuntime):
 
     def _assemble_run_args(self):
         # type: () -> List[str]
-        """Build the full argument list for ``docker run``."""
+        """Build the full argument list for ``docker run``.
+
+        See :func:`_container_env_pairs` (module-level) for the
+        authoritative host-to-container environment-variable mapping.
+        """
         cfg = self.cfg
         render_gid = _get_render_gid()
 
@@ -441,22 +487,10 @@ class DockerRuntime(ContainerRuntime):
             "--ipc", "host",
             "--shm-size", cfg.shm_size,
             "--ulimit", "memlock=-1",
-            "-e", "GPUS={}".format(cfg.gpus),
-            "-e", "HOST_UID={}".format(os.getuid()),
-            "-e", "HOST_GID={}".format(os.getgid()),
-            "-e", "RENDER_GID={}".format(render_gid),
         ]
 
-        if cfg.verbose:
-            args += ["-e", "VERBOSE=1"]
-
-        args += ["-e", "NIC_TYPE={}".format(cfg.nic_type)]
-
-        if cfg.gpu_targets:
-            args += ["-e", "GPU_TARGETS={}".format(cfg.gpu_targets)]
-
-        if cfg.force_rebuild or cfg.force_replace:
-            args += ["-e", "FORCE_POST_SETUP=1"]
+        for name, value in _container_env_pairs(cfg, render_gid):
+            args += ["-e", "{}={}".format(name, value)]
 
         if os.path.exists("/dev/kfd"):
             args += ["--device", "/dev/kfd"]

@@ -13,7 +13,10 @@ import sys
 from typing import Dict, Optional, Tuple
 
 from .config import Config
-from .utils import log, log_verbose, get_local_hostnames, Timer
+from .utils import (
+    log, log_verbose, get_local_hostnames, Timer,
+    ssh_opts, ssh_cmd, host_ssh_cmd, run_parallel,
+)
 
 
 def write_ssh_config(cfg):
@@ -187,15 +190,10 @@ def verify_ssh(cfg):
 
         log_verbose("Using SSH key: {}".format(ssh_key))
 
-        ssh_opts = [
-            "-p", str(cfg.ssh.port),
-            "-i", ssh_key,
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
-            "-o", "ConnectTimeout=5",
-            "-o", "BatchMode=yes",
-            "-o", "LogLevel=ERROR",
-        ]
+        # Container-side SSH (cfg.ssh.port = container sshd port)
+        container_ssh_opts = ssh_opts(
+            cfg.ssh.port, identity=ssh_key, connect_timeout=5,
+        )
 
         container_user = _detect_container_user(cfg) or cfg.container_user
         test_users = ["root", container_user]
@@ -207,34 +205,27 @@ def verify_ssh(cfg):
             )
         )
 
-        # Spawn all checks at once
-        procs = {}  # type: Dict[Tuple[str, str], subprocess.Popen]
-        for host in hosts:
-            for user in test_users:
-                procs[(host, user)] = subprocess.Popen(
-                    ["ssh"] + ssh_opts
-                    + ["{}@{}".format(user, host), "hostname"],
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                )
-
-        # Collect results (all procs already running concurrently)
-        results = {}  # type: Dict[Tuple[str, str], bool]
-        for key, proc in procs.items():
-            proc.wait()
-            results[key] = proc.returncode == 0
+        # Spawn all (host, user) checks at once
+        jobs = {
+            (host, user): (
+                ["ssh"] + container_ssh_opts
+                + ["{}@{}".format(user, host), "hostname"]
+            )
+            for host in hosts for user in test_users
+        }
+        results = run_parallel(jobs)
 
         # Print in hostfile order
         failed = False
         for host in hosts:
             for user in test_users:
-                ok = results[(host, user)]
-                if ok:
+                if results[(host, user)].ok:
                     log("  [OK]   {}@{}".format(user, host))
                 else:
                     log("  [FAIL] {}@{}".format(user, host))
                     failed = True
                     if cfg.verbose:
-                        _log_ssh_debug(ssh_opts, user, host)
+                        _log_ssh_debug(container_ssh_opts, user, host)
 
         if failed:
             _print_ssh_fix_hints(cfg)
@@ -263,61 +254,42 @@ def _verify_self_ssh(cfg, hosts):
     Returns True if any host failed.
     """
     local_names = get_local_hostnames()
-    self_ssh_cmd = [
-        "ssh",
-        "-p", str(cfg.ssh.port),
-        "-o", "StrictHostKeyChecking=no",
-        "-o", "UserKnownHostsFile=/dev/null",
-        "-o", "BatchMode=yes",
-        "-o", "LogLevel=ERROR",
-        "localhost", "hostname",
-    ]
-    exec_cmd = ["docker", "exec", cfg.container_name] + self_ssh_cmd
 
-    host_ssh_base = [
-        "ssh",
-        "-p", str(cfg.host_ssh_port),
-        "-o", "StrictHostKeyChecking=no",
-        "-o", "UserKnownHostsFile=/dev/null",
-        "-o", "ConnectTimeout=10",
-        "-o", "BatchMode=yes",
-        "-o", "LogLevel=ERROR",
-    ]
+    # Inside-container: ssh localhost hostname (container sshd port).
+    self_ssh = ssh_cmd(
+        cfg.ssh.port, "localhost",
+        remote="hostname", connect_timeout=None,
+    )
+    exec_cmd = ["docker", "exec", cfg.container_name] + self_ssh
 
-    procs = {}  # type: dict
+    jobs = {}
     for host in hosts:
         if host in local_names:
-            procs[host] = subprocess.Popen(
-                exec_cmd,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            )
+            jobs[host] = exec_cmd
         else:
-            procs[host] = subprocess.Popen(
-                host_ssh_base + [host] + exec_cmd,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            )
+            # Wrap exec_cmd with host-level SSH so it runs on the remote.
+            jobs[host] = host_ssh_cmd(cfg, host, remote=exec_cmd)
+    results = run_parallel(jobs)
 
     failed = False
     for host in hosts:
-        proc = procs[host]
-        proc.wait()
-        if proc.returncode == 0:
+        r = results[host]
+        if r.ok:
             log("  [OK]   {} -> localhost".format(host))
         else:
             log("  [FAIL] {} -> localhost (container cannot SSH to itself)".format(host))
             failed = True
             if cfg.verbose:
-                stderr = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
-                for line in stderr.splitlines()[-10:]:
+                for line in r.stderr_text().splitlines()[-10:]:
                     log_verbose("  {}".format(line))
     return failed
 
 
-def _log_ssh_debug(ssh_opts, user, host):
+def _log_ssh_debug(opts, user, host):
     # type: (list, str, str) -> None
     log_verbose("SSH debug for {}@{}:".format(user, host))
     debug_result = subprocess.run(
-        ["ssh", "-v"] + ssh_opts + ["{}@{}".format(user, host), "hostname"],
+        ["ssh", "-v"] + opts + ["{}@{}".format(user, host), "hostname"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     stderr = debug_result.stderr.decode("utf-8", errors="replace")

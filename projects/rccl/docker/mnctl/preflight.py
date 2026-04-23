@@ -12,70 +12,84 @@ import subprocess
 import sys
 from typing import List
 
+from .checks import (
+    SSH_KEY_OK, SSH_KEY_KEYGEN, SSH_KEY_MISSING, SSH_KEY_NONE,
+    POST_SETUP_OK, POST_SETUP_MISSING, POST_SETUP_EMPTY,
+    hostfile_status, ssh_key_status, post_setup_status,
+    resolve_dockerfile,
+)
 from .config import Action, Config
-from .utils import log, log_verbose, parse_hostfile, get_local_hostnames
+from .utils import (
+    log, log_verbose, parse_hostfile, get_local_hostnames,
+    host_ssh_cmd, run_parallel,
+)
 
 
-_passed = 0
-_failed = 0
-_warned = 0
+class PreflightReport(object):
+    """Accumulates pass/fail/warn results from a single preflight run.
 
+    Each check function receives a ``PreflightReport`` instance and records
+    its outcome through the ``ok`` / ``fail`` / ``warn`` methods.  This
+    keeps the module reentrant and makes the data flow explicit, replacing
+    the previous module-level ``_passed/_failed/_warned`` globals.
+    """
 
-def _ok(msg):
-    # type: (str) -> None
-    global _passed
-    _passed += 1
-    log("  [OK]   {}".format(msg))
+    __slots__ = ("passed", "failed", "warned")
 
+    def __init__(self):
+        self.passed = 0
+        self.failed = 0
+        self.warned = 0
 
-def _fail(msg):
-    # type: (str) -> None
-    global _failed
-    _failed += 1
-    log("  [FAIL] {}".format(msg))
+    def ok(self, msg):
+        # type: (str) -> None
+        self.passed += 1
+        log("  [OK]   {}".format(msg))
 
+    def fail(self, msg):
+        # type: (str) -> None
+        self.failed += 1
+        log("  [FAIL] {}".format(msg))
 
-def _warn(msg):
-    # type: (str) -> None
-    global _warned
-    _warned += 1
-    log("  [WARN] {}".format(msg))
+    def warn(self, msg):
+        # type: (str) -> None
+        self.warned += 1
+        log("  [WARN] {}".format(msg))
 
 
 def run_preflight(cfg):
     # type: (Config) -> None
     """Run all pre-flight checks for the configured action, then exit."""
-    global _passed, _failed, _warned
-    _passed = _failed = _warned = 0
+    report = PreflightReport()
 
     action = cfg.action
     log("=== Dry run: pre-flight checks for --{} ===".format(action.value))
     log("")
 
-    _check_docker_local()
-    _check_gpus(cfg)
+    _check_docker_local(report)
+    _check_gpus(cfg, report)
 
     needs_build = action in (
         Action.BUILD, Action.RUN, Action.LAUNCH_ALL, Action.SETUP_DEPS,
     )
     if needs_build:
-        _check_dockerfile(cfg)
-        _check_base_image(cfg)
+        _check_dockerfile(cfg, report)
+        _check_base_image(cfg, report)
 
-    _check_ssh_keys(cfg)
+    _check_ssh_keys(cfg, report)
 
     if action in (Action.LAUNCH_ALL, Action.STOP_ALL):
-        hosts = _check_hostfile(cfg)
+        hosts = _check_hostfile(cfg, report)
         if hosts:
-            _check_ssh_hosts(cfg, hosts)
+            _check_ssh_hosts(cfg, hosts, report)
             if action == Action.LAUNCH_ALL:
-                _check_rsync()
-                _check_docker_remote(cfg, hosts)
+                _check_rsync(report)
+                _check_docker_remote(cfg, hosts, report)
     elif action == Action.VERIFY:
-        _check_hostfile(cfg)
+        _check_hostfile(cfg, report)
 
     if cfg.post_setup_dir:
-        _check_post_setup(cfg)
+        _check_post_setup(cfg, report)
 
     log("")
     log("=== Dry run summary ===")
@@ -91,14 +105,14 @@ def run_preflight(cfg):
             n = len(parse_hostfile(cfg.hostfile))
             log("  Nodes     : {}".format(n))
     log("")
-    log("  Passed    : {}".format(_passed))
-    if _warned:
-        log("  Warnings  : {}".format(_warned))
-    if _failed:
-        log("  Failed    : {}".format(_failed))
+    log("  Passed    : {}".format(report.passed))
+    if report.warned:
+        log("  Warnings  : {}".format(report.warned))
+    if report.failed:
+        log("  Failed    : {}".format(report.failed))
     log("")
 
-    if _failed:
+    if report.failed:
         log("  Fix the issues above before running without --dry-run.")
         sys.exit(1)
     else:
@@ -110,180 +124,134 @@ def run_preflight(cfg):
 # Individual checks
 # ---------------------------------------------------------------------------
 
-def _check_docker_local():
-    # type: () -> None
+def _check_docker_local(report):
+    # type: (PreflightReport) -> None
     result = subprocess.run(
         ["docker", "info"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     if result.returncode == 0:
-        _ok("Docker daemon running locally")
+        report.ok("Docker daemon running locally")
     else:
-        _fail("Docker daemon not running locally")
+        report.fail("Docker daemon not running locally")
 
 
-def _check_rsync():
-    # type: () -> None
+def _check_rsync(report):
+    # type: (PreflightReport) -> None
     if shutil.which("rsync"):
-        _ok("rsync available (needed for file distribution)")
+        report.ok("rsync available (needed for file distribution)")
     else:
-        _fail("rsync not found (install: apt-get install rsync / yum install rsync)")
+        report.fail("rsync not found (install: apt-get install rsync / yum install rsync)")
 
 
-def _check_gpus(cfg):
-    # type: (Config) -> None
+def _check_gpus(cfg, report):
+    # type: (Config, PreflightReport) -> None
     count = int(cfg.gpus) if cfg.gpus else 0
     if count > 0:
-        _ok("GPUs: {} detected".format(count))
+        report.ok("GPUs: {} detected".format(count))
     else:
-        _warn("No GPUs detected (set GPUS env var if needed)")
+        report.warn("No GPUs detected (set GPUS env var if needed)")
 
 
-def _check_dockerfile(cfg):
-    # type: (Config) -> None
-    if os.path.isabs(cfg.dockerfile):
-        df_path = cfg.dockerfile
-    else:
-        df_path = os.path.join(cfg.script_dir, cfg.dockerfile)
+def _check_dockerfile(cfg, report):
+    # type: (Config, PreflightReport) -> None
+    df_path = resolve_dockerfile(cfg)
     if os.path.isfile(df_path):
-        _ok("Dockerfile: {}".format(cfg.dockerfile))
+        report.ok("Dockerfile: {}".format(cfg.dockerfile))
     else:
-        _fail("Dockerfile not found: {}".format(df_path))
+        report.fail("Dockerfile not found: {}".format(df_path))
 
 
-def _check_base_image(cfg):
-    # type: (Config) -> None
-    result = subprocess.run(
-        ["docker", "image", "inspect", cfg.rocm_image],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
-    if result.returncode == 0:
-        _ok("Base image '{}' available locally".format(cfg.rocm_image))
+def _check_base_image(cfg, report):
+    # type: (Config, PreflightReport) -> None
+    if cfg.runtime.image_exists(cfg.rocm_image):
+        report.ok("Base image '{}' available locally".format(cfg.rocm_image))
     else:
-        _warn(
+        report.warn(
             "Base image '{}' not found locally (will attempt pull)".format(
                 cfg.rocm_image
             )
         )
 
 
-def _check_ssh_keys(cfg):
-    # type: (Config) -> None
-    if cfg.ssh.key:
-        priv = cfg.ssh.priv_key
-        pub = cfg.ssh.pub_key
-        if priv and os.path.isfile(priv) and pub and os.path.isfile(pub):
-            _ok("SSH key pair: {}".format(cfg.ssh.key))
-        else:
-            _fail("SSH key not found: {} / {}".format(priv, pub))
-    elif cfg.ssh.keygen:
-        _ok("SSH keys: will auto-generate (--ssh)")
-    else:
+def _check_ssh_keys(cfg, report):
+    # type: (Config, PreflightReport) -> None
+    status, priv, pub = ssh_key_status(cfg)
+    if status == SSH_KEY_OK:
+        report.ok("SSH key pair: {}".format(cfg.ssh.key))
+    elif status == SSH_KEY_MISSING:
+        report.fail("SSH key not found: {} / {}".format(priv, pub))
+    elif status == SSH_KEY_KEYGEN:
+        report.ok("SSH keys: will auto-generate (--ssh)")
+    else:  # SSH_KEY_NONE
         if cfg.action in (Action.LAUNCH_ALL, Action.VERIFY):
-            _warn("No SSH keys configured (use --ssh or --ssh KEY_PATH)")
+            report.warn("No SSH keys configured (use --ssh or --ssh KEY_PATH)")
         else:
             log_verbose("SSH keys: not configured (optional for single-node)")
 
 
-def _check_hostfile(cfg):
-    # type: (Config) -> List[str]
-    if not os.path.isfile(cfg.hostfile):
-        _fail("Hostfile not found: {}".format(cfg.hostfile))
+def _check_hostfile(cfg, report):
+    # type: (Config, PreflightReport) -> List[str]
+    exists, hosts = hostfile_status(cfg)
+    if not exists:
+        report.fail("Hostfile not found: {}".format(cfg.hostfile))
         return []
-
-    hosts = parse_hostfile(cfg.hostfile)
     if hosts:
-        _ok("Hostfile: {} ({} nodes)".format(cfg.hostfile, len(hosts)))
+        report.ok("Hostfile: {} ({} nodes)".format(cfg.hostfile, len(hosts)))
         for h in hosts:
             log("           - {}".format(h))
     else:
-        _fail("Hostfile is empty: {}".format(cfg.hostfile))
+        report.fail("Hostfile is empty: {}".format(cfg.hostfile))
     return hosts
 
 
-def _check_ssh_hosts(cfg, hosts):
-    # type: (Config, List[str]) -> None
+def _check_ssh_hosts(cfg, hosts, report):
+    # type: (Config, List[str], PreflightReport) -> None
     """Check SSH reachability to each host (parallel via Popen)."""
     local_names = get_local_hostnames()
-
-    procs = {}  # type: dict
-    for host in hosts:
-        if host in local_names:
-            continue
-        procs[host] = subprocess.Popen(
-            [
-                "ssh",
-                "-p", str(cfg.host_ssh_port),
-                "-o", "StrictHostKeyChecking=no",
-                "-o", "UserKnownHostsFile=/dev/null",
-                "-o", "ConnectTimeout=5",
-                "-o", "BatchMode=yes",
-                "-o", "LogLevel=ERROR",
-                host, "hostname",
-            ],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
+    jobs = {
+        host: host_ssh_cmd(cfg, host, remote="hostname", connect_timeout=5)
+        for host in hosts if host not in local_names
+    }
+    results = run_parallel(jobs)
 
     for host in hosts:
         if host in local_names:
-            _ok("SSH: {} (local)".format(host))
-            continue
-        proc = procs[host]
-        proc.wait()
-        if proc.returncode == 0:
-            _ok("SSH: {} reachable".format(host))
+            report.ok("SSH: {} (local)".format(host))
+        elif results[host].ok:
+            report.ok("SSH: {} reachable".format(host))
         else:
-            _fail("SSH: {} unreachable".format(host))
+            report.fail("SSH: {} unreachable".format(host))
 
 
-def _check_docker_remote(cfg, hosts):
-    # type: (Config, List[str]) -> None
+def _check_docker_remote(cfg, hosts, report):
+    # type: (Config, List[str], PreflightReport) -> None
     """Check Docker daemon is running on each remote host (parallel via Popen)."""
     local_names = get_local_hostnames()
-
-    procs = {}  # type: dict
-    for host in hosts:
-        if host in local_names:
-            continue
-        procs[host] = subprocess.Popen(
-            [
-                "ssh",
-                "-p", str(cfg.host_ssh_port),
-                "-o", "StrictHostKeyChecking=no",
-                "-o", "UserKnownHostsFile=/dev/null",
-                "-o", "ConnectTimeout=5",
-                "-o", "BatchMode=yes",
-                "-o", "LogLevel=ERROR",
-                host, "docker", "info",
-            ],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    jobs = {
+        host: host_ssh_cmd(
+            cfg, host, remote=["docker", "info"], connect_timeout=5,
         )
+        for host in hosts if host not in local_names
+    }
+    results = run_parallel(jobs)
 
     for host in hosts:
         if host in local_names:
             continue
-        proc = procs[host]
-        proc.wait()
-        if proc.returncode == 0:
-            _ok("Docker: {} running".format(host))
+        if results[host].ok:
+            report.ok("Docker: {} running".format(host))
         else:
-            _fail("Docker: {} not reachable or daemon not running".format(host))
+            report.fail("Docker: {} not reachable or daemon not running".format(host))
 
 
-def _check_post_setup(cfg):
-    # type: (Config) -> None
+def _check_post_setup(cfg, report):
+    # type: (Config, PreflightReport) -> None
     d = cfg.post_setup_dir
-    if not os.path.isdir(d):
-        _fail("Post-setup directory not found: {}".format(d))
-        return
-    has_setup = os.path.isfile(os.path.join(d, "setup.sh"))
-    has_env = os.path.isfile(os.path.join(d, "env.sh"))
-    if has_setup or has_env:
-        files = []
-        if has_setup:
-            files.append("setup.sh")
-        if has_env:
-            files.append("env.sh")
-        _ok("Post-setup: {} ({})".format(d, ", ".join(files)))
-    else:
-        _fail("Post-setup dir has no setup.sh or env.sh: {}".format(d))
+    status, files = post_setup_status(cfg)
+    if status == POST_SETUP_MISSING:
+        report.fail("Post-setup directory not found: {}".format(d))
+    elif status == POST_SETUP_EMPTY:
+        report.fail("Post-setup dir has no setup.sh or env.sh: {}".format(d))
+    else:  # POST_SETUP_OK
+        report.ok("Post-setup: {} ({})".format(d, ", ".join(files)))

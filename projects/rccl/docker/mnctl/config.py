@@ -58,8 +58,21 @@ class SSHConfig(object):
 class Config(object):
     """All configuration for mnctl.
 
-    Merges MNCTL_* environment variables with defaults.  CLI flags are
-    applied afterwards in ``__main__.py``.
+    Merges ``MNCTL_*`` environment variables with defaults.  CLI flags
+    are applied afterwards in ``__main__.py``.
+
+    Naming convention
+    -----------------
+    Host-side settings consumed by mnctl are namespaced ``MNCTL_*`` to
+    avoid colliding with the user's environment.  When these settings
+    are forwarded into the container via ``docker run -e``, the prefix
+    is dropped because the container side is private to mnctl and
+    consumed by user-maintained shell scripts where short names are
+    more ergonomic.
+
+    Example: ``MNCTL_GPUS`` (host) becomes ``GPUS`` (container).
+
+    See :func:`docker_ops._container_env_pairs` for the full mapping.
     """
 
     def __init__(self):

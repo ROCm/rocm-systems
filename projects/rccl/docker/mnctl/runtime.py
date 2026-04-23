@@ -41,9 +41,9 @@ class ContainerRuntime(ABC):
     # Image management
     # ------------------------------------------------------------------
     @abstractmethod
-    def image_exists(self):
-        # type: () -> bool
-        """Return True if the configured image is available locally."""
+    def image_exists(self, tag=None):
+        # type: (Optional[str]) -> bool
+        """Return True if *tag* (or ``cfg.image_tag`` when None) exists locally."""
         pass
 
     @abstractmethod

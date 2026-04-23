@@ -126,6 +126,131 @@ def get_local_hostnames():
 
 
 # ---------------------------------------------------------------------------
+# SSH command construction (single source of truth for SSH options)
+# ---------------------------------------------------------------------------
+def ssh_opts(port, identity=None, connect_timeout=10, batch=True):
+    # type: (int, str, int, bool) -> List[str]
+    """Canonical SSH option list.
+
+    Does NOT include the ``ssh`` executable, the host, or a remote command.
+    Pass ``connect_timeout=None`` to omit the ``ConnectTimeout`` option.
+    """
+    opts = [
+        "-p", str(port),
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "LogLevel=ERROR",
+    ]
+    if batch:
+        opts += ["-o", "BatchMode=yes"]
+    if connect_timeout is not None:
+        opts += ["-o", "ConnectTimeout={}".format(connect_timeout)]
+    if identity:
+        opts += ["-i", identity]
+    return opts
+
+
+def ssh_cmd(port, host, remote=None, identity=None,
+            connect_timeout=10, batch=True, verbose=False):
+    # type: (int, str, object, str, int, bool, bool) -> List[str]
+    """Full ``ssh ...`` command list.
+
+    *remote* may be ``None``, a single string, or an iterable of args.
+    """
+    cmd = ["ssh"]
+    if verbose:
+        cmd.append("-v")
+    cmd += ssh_opts(
+        port, identity=identity,
+        connect_timeout=connect_timeout, batch=batch,
+    )
+    cmd.append(host)
+    if remote is not None:
+        if isinstance(remote, (list, tuple)):
+            cmd += list(remote)
+        else:
+            cmd.append(remote)
+    return cmd
+
+
+def host_ssh_cmd(cfg, host, remote=None, connect_timeout=10):
+    """Build an SSH command targeting a HOST node.
+
+    Uses ``cfg.host_ssh_port`` and the shared host key from
+    ``cfg.ssh.key_dir/id_rsa`` when it exists.
+    """
+    host_key = os.path.join(cfg.ssh.key_dir, "id_rsa")
+    identity = host_key if os.path.isfile(host_key) else None
+    return ssh_cmd(
+        cfg.host_ssh_port, host, remote=remote,
+        identity=identity, connect_timeout=connect_timeout,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Parallel subprocess fan-out
+# ---------------------------------------------------------------------------
+class ParallelResult(object):
+    """Result of one job from :func:`run_parallel`."""
+
+    __slots__ = ("returncode", "stdout", "stderr")
+
+    def __init__(self, returncode, stdout, stderr):
+        # type: (int, bytes, bytes) -> None
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+    @property
+    def ok(self):
+        # type: () -> bool
+        return self.returncode == 0
+
+    def stdout_text(self):
+        # type: () -> str
+        if not self.stdout:
+            return ""
+        return self.stdout.decode("utf-8", errors="replace")
+
+    def stderr_text(self):
+        # type: () -> str
+        if not self.stderr:
+            return ""
+        return self.stderr.decode("utf-8", errors="replace")
+
+
+def run_parallel(jobs, merge_stderr=False):
+    """Spawn a batch of subprocesses concurrently and wait for all of them.
+
+    Parameters
+    ----------
+    jobs : Mapping[Hashable, list[str]]
+        Mapping from arbitrary key (host, (host,user), etc.) to an argv
+        list.  Use ``["sh", "-c", "<shell-string>"]`` instead of
+        ``shell=True``.
+    merge_stderr : bool
+        If True, redirect stderr into stdout (one combined byte stream).
+        Each result's ``stderr`` will be ``None`` in that case.
+
+    Returns
+    -------
+    dict[key, ParallelResult]
+        One entry per input job, keyed by the original key.
+    """
+    stderr_arg = subprocess.STDOUT if merge_stderr else subprocess.PIPE
+    procs = {}
+    for key, cmd in jobs.items():
+        procs[key] = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=stderr_arg,
+        )
+    results = {}
+    for key, proc in procs.items():
+        out, err = proc.communicate()
+        results[key] = ParallelResult(proc.returncode, out, err)
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Timer context manager (verbose-mode only output)
 # ---------------------------------------------------------------------------
 class Timer(object):

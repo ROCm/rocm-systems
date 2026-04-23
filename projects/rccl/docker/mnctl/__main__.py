@@ -51,6 +51,19 @@ Environment Variables (override defaults without flags):
 
   GPU_TARGETS is also accepted as a fallback for MNCTL_GPU_TARGETS.
 
+Host vs container env-var naming:
+  Host-side mnctl settings are namespaced MNCTL_* to avoid collisions
+  with the user's environment.  When forwarded into the container
+  (via docker run -e), the prefix is dropped because the container
+  side is consumed by mnctl's own scripts (entrypoint, post-setup):
+
+      MNCTL_GPUS         -> GPUS
+      MNCTL_VERBOSE      -> VERBOSE
+      MNCTL_NIC_TYPE     -> NIC_TYPE
+      MNCTL_GPU_TARGETS  -> GPU_TARGETS
+
+  See docker_ops._container_env_pairs() for the authoritative mapping.
+
 Path expansion:
   All path options support ~ and $VAR / ${VAR} expansion.
 """,
