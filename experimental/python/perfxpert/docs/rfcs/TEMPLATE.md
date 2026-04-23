@@ -29,7 +29,7 @@ File paths, types, data flows.
 
 ### Backward compatibility
 
-Breaking? Deprecation plan?
+Breaking? Deprecation plan? Fallback/opt-in toggle (if any) and removal window?
 
 ## Alternatives considered
 

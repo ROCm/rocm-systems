@@ -18,7 +18,8 @@ pure-function layer between agents and data — no LLM calls, no I/O except
 
 Tool class: READ_ONLY (MCP-safe) or EXECUTION (in-process only).
 
-See docs/superpowers/specs/2026-04-17-multi-agent-perfxpert-design.md Appendix A.
+Tool classes are enumerated in the multi-agent design spec (local
+contributor doc, not tracked in the repo) — Appendix A.
 """
 
 from typing import Any, Dict

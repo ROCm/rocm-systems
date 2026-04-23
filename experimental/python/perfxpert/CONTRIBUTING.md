@@ -28,6 +28,10 @@ ruff check perfxpert/       # lint (optional — CI runs it anyway)
 | New MCP tool | `mcp_server/tools/<name>.py` | [docs/contributing/mcp_tools.md](docs/contributing/mcp_tools.md) |
 | New test fixture | `tests/fixtures/<name>.db` + `.md` | [docs/contributing/fixtures.md](docs/contributing/fixtures.md) |
 | New GPU arch | `knowledge/gpu_specs.yaml` + `vgpr_occupancy_tables.yaml` | [docs/contributing/gpu_arch.md](docs/contributing/gpu_arch.md) |
+| External-tool dependency (`require_tool` registration) | `perfxpert/tools/_tooldep.py` | [docs/contributing/external-tools.md](docs/contributing/external-tools.md) |
+
+The per-surface guides are indexed under
+[docs/contributing/README.md](docs/contributing/README.md).
 
 ## Governance
 
@@ -81,7 +85,8 @@ Every PR must stay green on Levels 0-4. Nightly runs Level 5.
 
 ## Code of conduct
 
-perfxpert inherits ROCm Systems' [Code of Conduct](../../../../CODE_OF_CONDUCT.md).
+perfxpert inherits ROCm Systems' Code of Conduct — see the top-level
+`rocm-systems` repository for the canonical text.
 
 ## Licensing
 

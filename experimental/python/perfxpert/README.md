@@ -10,8 +10,15 @@ pip install perfxpert
 # One-shot analysis (batch mode)
 perfxpert analyze -i trace.db --llm anthropic --format webview -o report.html
 
-# Interactive agentic TUI (AMD-themed opencode, replaces the old --interactive flag)
+# Interactive agentic TUI (AMD-themed opencode, replaces the old conversational mode)
 perfxpert-code
+
+# Multi-backend dispatch (claude + gemini + codex):
+perfxpert-code claude   # installs perfxpert MCP + gate into Claude Code, execs claude
+perfxpert-code gemini   # same flow for Gemini CLI
+perfxpert-code codex    # same flow for Codex CLI
+perfxpert-code claude --dry-run "analyze this trace"   # preview, write nothing
+perfxpert-code uninstall claude   # reverses install (refuses on marker drift)
 
 # Air-gap mode (no LLM; deterministic rule-based analysis only)
 perfxpert analyze -i trace.db --format markdown -o report.md
@@ -51,6 +58,7 @@ sub-command) requires **opencode** as a system dependency (bundling into the
 wheel is tracked as future work). Install opencode separately:
 
 ```bash
+# SKIP-SAMPLE — actual installer; scripts/test-samples.py must not execute this
 curl -fsSL https://opencode.ai/install | bash
 ```
 
@@ -72,8 +80,8 @@ an [RFC](docs/rfcs/README.md).
 The agentic runtime is the sole execution path; no feature flag
 toggles it. Setting any of the following has no effect:
 
-- `PERFXPERT_USE_AGENTS` — removed.
-- `PERFXPERT_LEGACY` — removed.
+- `PERFXPERT_USE_AGENTS` — removed in Phase 7.1.
+- `PERFXPERT_LEGACY` — removed in Phase 7.1.
 
 See [CHANGELOG.md](CHANGELOG.md) for the removal history.
 
@@ -94,11 +102,29 @@ See [CHANGELOG.md](CHANGELOG.md) for the removal history.
 
 ## Documentation
 
-- [Architecture](docs/architecture.md)
-- [Getting started](docs/guides/getting-started.md)
-- [Historical migration notes](docs/archive/migration-to-agentic.md)
-- [Contributing](CONTRIBUTING.md)
+- **Getting started**
+  - [Getting started guide](docs/guides/getting-started.md)
+  - [Agentic mode: air-gap vs LLM, provider ladder](docs/guides/agentic-mode.md)
+  - [Multi-backend launcher (`perfxpert-code claude|gemini|codex`)](docs/guides/backends.md)
+    — register perfxpert with your native Claude Code / Gemini CLI
+    TUI while keeping the perfxpert tool-priority gate.
+- **Architecture (v0.2.0+)**
+  - [Architecture overview](docs/architecture.md)
+  - [Architecture index](docs/architecture/README.md)
+    - [Agent hierarchy (Root / Analysis / Recommendation / specialists)](docs/architecture/agent-hierarchy.md)
+    - [Gate cascade (5 correctness gates as middleware)](docs/architecture/gate-cascade.md)
+    - [BackendAdapter protocol (multi-backend launcher)](docs/architecture/backend-adapter.md)
+- **Integration**
+  - [Integration index](docs/integration/README.md)
+    - [MCP server (`perfxpert-mcp`) — 34 READ_ONLY tools](docs/integration/mcp-server.md)
+- **Contributing**
+  - [CONTRIBUTING.md](CONTRIBUTING.md)
+  - [Contributing index](docs/contributing/README.md)
+    - [External-tool dependencies (`require_tool`)](docs/contributing/external-tools.md)
+- **Other**
+  - [Historical migration notes](docs/archive/migration-to-agentic.md)
+  - [Known issues and scanner scope limitations](docs/known-issues.md)
 
 ## Licensing
 
-MIT. opencode (system dependency, not bundled in this release) is also MIT.
+MIT. opencode is also MIT — bundled into the wheel via the build hook (`setup.py`) from the pinned upstream submodule.

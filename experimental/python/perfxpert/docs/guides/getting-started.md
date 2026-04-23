@@ -1,79 +1,267 @@
-# PerfXpert Getting Started Guide
+# PerfXpert — Getting Started
 
-A visual, step-by-step guide to using PerfXpert for AMD GPU performance analysis. Each section includes an animated demo showing exactly what to type and what to expect.
+This guide walks through
+install, the three entry points, the first analysis, and the top
+troubleshooting cases. For deeper dives follow the cross-links at the
+end of each section; nothing here duplicates reference material that
+lives elsewhere.
 
----
+## What is PerfXpert
 
-## Overview
+PerfXpert is an AI-augmented GPU profiling and optimization tool for
+AMD ROCm. It reads `rocprofv3` trace databases (`.db`), classifies
+bottlenecks against hardware SoL bounds, and produces targeted
+recommendations — either deterministically (air-gap) or with an LLM
+specialist agent. Supported GPUs: MI100 / MI200 / MI300 / MI350 and
+RDNA2 / RDNA3.
 
-PerfXpert reads ROCPD GPU trace databases from any AMD profiling & tracing tool such as `rocprofv3` and turns raw profiling data into prioritized, actionable recommendations. It works across five analysis tiers — from static source scanning (no GPU needed) through instruction-level stall analysis.
+## 1. Install
 
-The core workflow is: **Profile -> Analyze -> Optimize -> Verify**. PerfXpert's interactive mode automates this entire loop with AI-powered code editing.
+PerfXpert is a pure-Python package plus a bundled AMD-themed opencode
+binary. The install is two steps: pip-install the Python wheel, then
+build the bundled patched opencode (one-time, requires `bun`).
 
----
+### Step 1: pip install
 
-## 1. Installation
-
-Install PerfXpert with a single pip command. The `[all]` extra includes LLM support (Anthropic, OpenAI) and rich terminal output.
+> **Run this FIRST on stock Ubuntu / rocm/dev-ubuntu images**: those
+> images ship with pip 22.x and pre-PEP-621 setuptools, which fails the
+> perfxpert wheel build with `filename has 'perfxpert', but metadata has
+> 'unknown'`. The fix is a one-liner:
+>
+> ```bash
+> pip install -U pip setuptools wheel
+> ```
+>
+> The build requires `setuptools>=61` (declared in `pyproject.toml`'s
+> `[build-system] requires`). Recent pip (23+) honors that declaration
+> automatically; older pip does not.
 
 ```bash
-pip install "perfxpert[all]"
-
-# Or from source (development mode)
-cd experimental/python/perfxpert && pip install -e ".[all]"
-
-# Verify
-perfxpert --version
+# SKIP-SAMPLE — destructive pattern filtered by scripts/test-samples.py
+pip install -e "experimental/python/perfxpert[all]"
 ```
 
-![Installation Demo](assets/installation.gif)
+The `[all]` extra pulls in the optional LLM/provider integrations plus
+the MCP dependency, so the full interactive surface works out of the
+box. Omit it if you only want deterministic air-gap analysis.
 
-**Supported GPUs**: MI100 (gfx908), MI200 series (gfx90a), MI300 series (gfx942), MI350 series (gfx950), RDNA2 (gfx1030), RDNA3 (gfx1100).
+### Step 2: build the bundled patched opencode (one-time)
 
-**Dependencies**: Core analysis is pure Python (zero deps). LLM extras add `anthropic` and `openai` SDKs. `rich` adds colored terminal output.
-
----
-
-## 2. Quick Start: One-Shot Analysis
-
-The simplest workflow is two commands: collect a trace with `rocprofv3`, then analyze it.
+The interactive TUI (`perfxpert-code`) wraps upstream opencode with 17
+AMD patches: branding, the AMD red color palette, the 7-agent prompt
+preamble, and the STRICT-TOOL-DISCIPLINE stanza that forces
+`perfxpert_intent_classify` → `perfxpert_workflow_next_step` as the
+first two tool calls. Apply them with:
 
 ```bash
-# Step 1: Collect a system trace
-rocprofv3 --sys-trace --kernel-trace --memory-copy-trace --stats \
-  -d ./out -o results -- ./my_app
-
-# Step 2: Analyze
-perfxpert analyze -i ./out/results_results.db
+# SKIP-SAMPLE — requires the opencode submodule and bun toolchain
+cd experimental/python/perfxpert
+git submodule update --init --recursive
+bash scripts/apply-opencode-patches.sh
 ```
 
-The output shows a time breakdown (kernel / memcpy / overhead / idle), top kernels ranked by GPU time, and prioritized recommendations with specific actions.
+See `.patches/README.md` for the patch catalogue. Skip this step and
+`perfxpert-code` will still launch — it falls back to whatever
+`opencode` is on `PATH` — but you will NOT get the PerfXpert system
+prompt or the tool-priority gate.
 
-![Quick Start Demo](assets/quickstart-analysis.gif)
-
-### Output Formats
-
-Generate reports in four formats:
+## 2. Verify
 
 ```bash
-# Text (default) — for terminals and logs
+# SKIP-SAMPLE — requires perfxpert on PATH from the pip install above
+perfxpert doctor
+```
+
+Expected output ends with `ALL CLEAN` when everything is wired. The
+doctor checks:
+
+- `perfxpert` version + Python ≥ 3.10
+- openai-agents SDK
+- MCP server reachable (`perfxpert-mcp` boots + 34 tools registered)
+- task store (`~/.perfxpert` or `$PERFXPERT_TASK_ROOT`)
+- bundled opencode binary + bundled opencode config dir
+- LLM providers configured (counts `N/5` against
+  `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OLLAMA_HOST`,
+  `PRIVATE_LLM_ENDPOINT`, plus always-present `opencode`)
+
+If `opencode binary` reports missing, re-run the patch script
+(§1 step 2) or install upstream opencode:
+`curl -fsSL https://opencode.ai/install | bash`.
+
+## 3. Three entry points
+
+PerfXpert ships three command-line surfaces, all driving the same
+agent runtime.
+
+- **`perfxpert analyze -i trace.db`** — non-interactive CLI. Consumes
+  a rocprofv3 `.db`, emits a single report (text / JSON / markdown /
+  webview HTML). Deterministic with `--llm` omitted; LLM-augmented
+  when `--llm` is provided.
+- **`perfxpert-mcp`** — stdio MCP server that re-exposes the 34
+  READ-ONLY analysis tools over JSON-RPC. Meant to be spawned by an
+  MCP client (Claude Desktop, Claude Code, Codex CLI, Gemini CLI,
+  opencode). See `../integration/mcp-server.md`.
+- **`perfxpert-code`** — interactive TUI (the patched opencode
+  bundle). Conversational optimization loop with the Root → Analysis
+  → Recommendation → Specialist agent hierarchy and gate-cascade
+  correctness middleware.
+
+## 3.1 Choosing a backend
+
+`perfxpert-code` is multi-backend: the same AMD-branded bundled
+opencode is the default, but it can also wrap the user's native
+Claude Code, Gemini CLI, or Codex TUI while still enforcing
+the perfxpert tool-priority gate and registering the `perfxpert-mcp`
+server for free. Pick whichever matches your existing LLM workflow.
+
+- **Default (no subcommand)** — AMD-branded bundled opencode, the
+  recommended entry point. Ships with patched prompt + MCP
+  pre-wired, no extra install.
+- **`perfxpert-code claude`** — registers perfxpert as an MCP
+  server in the Claude Code project config, installs the native
+  `PreToolUse` gate hook, then execs the user's `claude` CLI.
+- **`perfxpert-code gemini`** — appends `perfxpert-mcp` to
+  `~/.gemini/settings.json` and list-appends a project-cache
+  prompt file to `context.fileName` (never touches user's
+  `GEMINI.md`), then execs `gemini`.
+- **`perfxpert-code codex`** — writes the perfxpert MCP stanza into
+  `~/.codex/config.toml` (TOML, not JSON) and execs `codex`. Gate
+  enforcement is prompt-layer-only because Codex's native
+  `PreToolUse` hook is Bash-only as of April 2026; the trust gate
+  runs before MCP registration and either prompts or honors
+  `PERFXPERT_AUTO_TRUST=1` (see §3.2 below).
+
+Short recipe per backend:
+
+```bash
+# SKIP-SAMPLE — requires the named backend binary on PATH
+perfxpert-code                              # default (bundled opencode)
+perfxpert-code claude                       # Claude Code (native TUI)
+perfxpert-code gemini                       # Gemini CLI
+perfxpert-code codex                        # Codex CLI
+perfxpert-code uninstall claude             # reverse the Claude install
+```
+
+See [backends.md](backends.md) for the full per-backend install /
+uninstall recipes, the gate-hook event-based lift semantics, the
+consent model (per-backend × cwd × file-set), and the env-var
+reference (`PERFXPERT_MCP_WARMUP_TIMEOUT_S`,
+`PERFXPERT_MCP_RETRY_BUDGET_S`, `PERFXPERT_SKIP_LIVE_CHECK`,
+`PERFXPERT_ASSUME_CONSENT`). The gate-probe coverage table in
+[backends.md §Gate-probe](backends.md) documents which small-model
+probe each backend uses to verify mechanical gate enforcement at
+`install()` time — Codex is not probed because its gate is
+prompt-layer-only.
+
+## 3.2 Codex trust gate
+
+Codex refuses to run agents in a project directory that isn't marked
+`trusted` in `~/.codex/config.toml`. `perfxpert-code codex` handles
+this as a separate step BEFORE MCP registration:
+
+- **Interactive sessions** — the adapter prompts "Trust <cwd> for
+  Codex? [y/N]" and writes `[projects."<abs-cwd>"].trust_level =
+  "trusted"` on confirmation.
+- **CI / non-interactive** — set `PERFXPERT_AUTO_TRUST=1` to
+  auto-trust the cwd without prompting. An always-on stderr warning
+  ("perfxpert-code codex: auto-trusted <cwd> because
+  PERFXPERT_AUTO_TRUST=1") is emitted even under `--quiet` — this is
+  the security-warning contract.
+- Without either path, the adapter raises `TrustRequired` and exits
+  non-zero. `ConfigClobber` is raised if `~/.codex/config.toml` is
+  git-tracked or fails to parse.
+
+## 4. First analysis (60 seconds)
+
+Profile a trivial HIP app, then analyze.
+
+```bash
+# SKIP-SAMPLE — requires ./my_app built against ROCm and rocprofv3 on PATH
+rocprofv3 --sys-trace --summary -d ./out -o results -- ./my_app
+perfxpert analyze -i ./out/results_results.db --format text
+```
+
+`rocprofv3` writes `./out/results_results.db` (the `_results` suffix
+is the rocprofv3 default); `perfxpert analyze` reads it, classifies
+the bottleneck (compute-bound / memory-bound / latency-bound /
+idle-bound), ranks hot kernels by Amdahl weight, and emits
+recommendations.
+
+Output formats:
+
+```bash
+# SKIP-SAMPLE — requires a real trace.db
+perfxpert analyze -i trace.db --format json -d ./out -o report
+perfxpert analyze -i trace.db --format markdown -d ./out -o report
+perfxpert analyze -i trace.db --format webview -d ./out -o report
+```
+
+The webview format produces a self-contained HTML file (AMD dark
+theme, SVG gauges, collapsible recommendation cards) suitable for
+sharing over email.
+
+## 5. Multi-GPU / MPI workflows
+
+**Correct pattern — MPI OUTSIDE, rocprofv3 INSIDE, per rank.** Each
+rank gets its own rocprofv3 instance and writes its own `.db` file:
+
+```bash
+# SKIP-SAMPLE — requires mpirun + ./app built against ROCm
+mpirun -n 8 rocprofv3 --sys-trace -d ./out -o results_%q{MPI_RANK} -- ./app
+perfxpert analyze -i ./out/merged_processes.db
+```
+
+**Wrong — do NOT emit this form.** `rocprofv3` attaches to `mpirun`,
+not to the ranks, so the `.db` is empty or contains only mpirun's
+no-GPU runtime:
+
+```bash
+# SKIP-SAMPLE — shown for contrast; DO NOT RUN
+rocprofv3 [flags] -- mpirun -n 8 ./app   # WRONG
+```
+
+Additional rules (enforced in `_bundled/opencode_config/AGENTS.md`):
+
+- Use `-o results_%q{MPI_RANK}` (or `%nid%` on Slurm) so ranks don't
+  race on the same file.
+- Do NOT use `--process-sync` with OpenMPI — it strips `LD_PRELOAD`
+  and breaks tracer injection.
+- Slurm / jsrun wrappers go OUTSIDE rocprofv3 too:
+  `srun rocprofv3 ... -- ./app`.
+
+The full canonical rule — including FETCH_SIZE / WRITE_SIZE PMC
+isolation — lives in `../../perfxpert/_bundled/opencode_config/AGENTS.md`.
+
+## 6. LLM modes
+
+Two modes, one code path. The agent hierarchy and gate cascade behave
+identically in both; the difference is whether an LLM rewrites the
+narrative and recommendation titles.
+
+### Air-gap (default, deterministic)
+
+```bash
+# SKIP-SAMPLE — requires a real trace.db
+PERFXPERT_AIRGAP=1 perfxpert analyze -i trace.db
+# or simply omit --llm — omission defaults to deterministic mode
 perfxpert analyze -i trace.db
-
-# JSON — for CI/CD pipelines
-perfxpert analyze -i trace.db --format json -d ./out -o analysis
-
-# Markdown — for pull requests and docs
-perfxpert analyze -i trace.db --format markdown -d ./out -o analysis
-
-# Webview — self-contained interactive HTML
-perfxpert analyze -i trace.db --format webview -d ./out -o analysis
 ```
 
-![Output Formats Demo](assets/output-formats.gif)
+Air-gap mode: no outbound calls, rule-based classification against
+the knowledge YAMLs. `primary_bottleneck` is still set.
+`recommendations[].name` populates only with LLM mode; air-gap
+returns bottleneck + narrative only (verbatim from the rule tables).
 
-The webview generates a self-contained HTML file with the AMD dark theme, SVG gauge charts, collapsible recommendation cards, and a light/dark mode toggle:
+### LLM-enabled
 
-![Webview Report](assets/webview-report.png)
+```bash
+# SKIP-SAMPLE — requires a real trace.db and an LLM credential
+export ANTHROPIC_API_KEY="sk-ant-..."
+perfxpert analyze -i trace.db --llm anthropic
+# or:
+export OPENAI_API_KEY="sk-..."
+perfxpert analyze -i trace.db --llm openai
+```
 
 ---
 
@@ -82,6 +270,7 @@ The webview generates a self-contained HTML file with the AMD dark theme, SVG ga
 Analyze your source code before profiling — no GPU or trace database needed.
 
 ```bash
+# SKIP-SAMPLE — requires a ./my_app source tree and/or trace.db
 # Scan source directory
 perfxpert analyze --source-dir ./my_app
 
@@ -99,36 +288,44 @@ PerfXpert scans `.hip`, `.cpp`, `.cu`, `.cl`, `.py`, `.h`, `.hpp` files and dete
 
 The output includes a profiling plan with the exact `rocprofv3` command to run, with counters pre-selected based on what was found in the source.
 
-![Source Scan Demo](assets/source-scan.gif)
-
 ---
 
-## 4. Interactive Workflow (The Star Feature)
+## 4. Agentic TUI Workflow (The Star Feature)
 
-The interactive mode automates the full optimization loop: profile, analyze, AI-edit code, recompile, re-profile, compare.
+The agentic TUI automates the full optimization loop: profile, analyze,
+AI-edit code, recompile, re-profile, compare. As of v0.2.0 this is the
+`perfxpert-code` command (AMD-themed bundled opencode TUI) — it wraps the
+same agent runtime the batch-mode `analyze` CLI uses.
 
 ```bash
-perfxpert analyze \
-  --source-dir ./my_app \
-  --llm claude-code \
-  --interactive "./my_app"
+# SKIP-SAMPLE — requires bundled opencode binary on PATH
+perfxpert-code
 ```
+
+Inside the TUI you describe your workload in natural language
+(e.g. "profile ./my_app and suggest optimizations"). The Root agent then
+drives the Analysis → Recommendation → Specialist hierarchy behind the
+scenes.
 
 ### What happens:
 
-1. **Phase 1b** — Workload detection: identifies your binary type (HIP, Python ML, MPI) and selects optimal profiling flags
-2. **Phase 2** — Shows the generated `rocprofv3` command for your approval
-3. **Phase 3** — Runs the profiler with real-time output streaming
-4. **Phase 4** — Analyzes the trace, shows findings with AI-refined recommendations
-5. **Phase 5** — Recommendations menu: address with AI, skip, or re-profile
-6. **Phase 6** — AI edits your source files using precise SEARCH/REPLACE blocks
-7. **Phase 7** — Re-profile with the optimized code and compare results
-
-![Interactive Workflow Demo](assets/interactive-workflow.gif)
+1. **Workload detection** — identifies your binary type (HIP, Python ML,
+   MPI) and selects optimal profiling flags
+2. **Profiling plan** — shows the generated `rocprofv3` command for your
+   approval
+3. **Profile run** — runs the profiler with real-time output streaming
+4. **Analysis** — analyzes the trace, shows findings with AI-refined
+   recommendations
+5. **Recommendations menu** — address with AI, skip, or re-profile
+6. **AI edit** — AI edits your source files using precise SEARCH/REPLACE
+   blocks (see Gate Cascade doc for correctness guarantees)
+7. **Re-profile** — re-profile with the optimized code and compare
 
 ### AI Code Editing
 
-When you select `[a] Address all with AI optimization`, the LLM generates targeted code changes as SEARCH/REPLACE blocks — not full-file rewrites. This prevents truncation on large files and makes the diff easy to review:
+When the agent applies an optimization, the LLM generates targeted code
+changes as SEARCH/REPLACE blocks — not full-file rewrites. This prevents
+truncation on large files and makes the diff easy to review:
 
 ```
 <<<<<<< SEARCH
@@ -142,7 +339,9 @@ When you select `[a] Address all with AI optimization`, the LLM generates target
 >>>>>>> REPLACE
 ```
 
-If the edit causes compilation errors, type `revert` to undo. The LLM analyzes the failure and proposes an alternative fix with full error context.
+If the edit causes compilation errors, the Correctness agent reverts the
+change automatically; see `docs/architecture/gate-cascade.md` for the full
+5-gate correctness/regression contract.
 
 ---
 
@@ -151,19 +350,23 @@ If the edit causes compilation errors, type `revert` to undo. The LLM analyzes t
 PerfXpert auto-detects MPI launchers and restructures the profiling command so each rank gets its own profiler instance.
 
 ```bash
+# SKIP-SAMPLE — requires a built MPI application + openmpi
+# Batch-mode analyze that profiles an MPI workload end-to-end
 perfxpert analyze \
-  --llm claude-code \
+  --llm anthropic \
   --source-dir ./src \
-  --interactive "mpirun -n 8 ./multi_gpu_demo"
+  --run "mpirun -n 8 ./multi_gpu_demo"
 ```
+
+Inside `perfxpert-code` you can describe the same workload in natural
+language ("profile mpirun -n 8 ./multi_gpu_demo") and the Analysis agent
+will drive the same detection logic.
 
 The tool:
 - Detects `mpirun`/`srun`/`jsrun` and wraps each rank: `mpirun -n 8 rocprofv3 <flags> -- ./binary`
 - Uses `%nid%` per-rank output naming to avoid SQLite collisions
 - Auto-merges all per-rank databases into a single `merged_processes.db`
 - Analyzes the unified trace across all GPUs
-
-![MPI Demo](assets/mpi-multi-gpu.gif)
 
 > **Note**: `--process-sync` (used for Python DDP/torchrun) is NOT used for MPI because OpenMPI strips LD_PRELOAD from child processes. PerfXpert handles this automatically.
 
@@ -174,11 +377,10 @@ The tool:
 Five LLM providers are supported. LLM is optional — all analysis runs locally without internet.
 
 ```bash
-# Anthropic Claude
+# SKIP-SAMPLE — requires a real trace.db and an LLM credential
 export ANTHROPIC_API_KEY="sk-ant-..."
-perfxpert analyze -i trace.db --llm anthropic
-
-# OpenAI
+perfxpert analyze -i trace.db --llm anthropic --llm-model claude-sonnet-4-5
+# or:
 export OPENAI_API_KEY="sk-..."
 perfxpert analyze -i trace.db --llm openai --llm-model gpt-4o
 
@@ -186,175 +388,122 @@ perfxpert analyze -i trace.db --llm openai --llm-model gpt-4o
 export PERFXPERT_LLM_PRIVATE_URL="https://llm.corp.internal/v1"
 export PERFXPERT_LLM_PRIVATE_MODEL="llama-3-70b"
 perfxpert analyze -i trace.db --llm private
-
-# Local Ollama (air-gapped, zero internet)
-perfxpert analyze -i trace.db --llm local
-
-# Claude Code (API key or stored CLI OAuth — no key needed)
-perfxpert analyze -i trace.db --llm claude-code
 ```
 
-![LLM Providers Demo](assets/llm-providers.gif)
+Model selection ladder (first hit wins, resolved at session boot):
 
-**Privacy**: When LLM is enabled, sensitive data is sanitized before transmission — kernel names, grid sizes, and file paths are redacted. Only aggregated metrics and bottleneck classifications are sent.
+1. `PERFXPERT_AGENTS_MODEL_<PROVIDER>` — per-provider pin, e.g.
+   `PERFXPERT_AGENTS_MODEL_OPENAI=gpt-4o-mini`
+2. `PERFXPERT_LLM_MODEL` — cross-provider override
+3. Built-in default (anthropic: `claude-sonnet-4-20250514`, openai:
+   `gpt-4o-mini`)
 
----
+### Fallback chain (recommended for interactive use)
 
-## 7. Intelligence Features
-
-PerfXpert goes beyond simple threshold rules with four intelligence features:
-
-### Counter-Aware Recommendations
-
-When hardware counters are in the trace, recommendations use actual GPU utilization instead of generic advice:
-
-```
-# With counters (GPU util 94%):
-[HIGH] GPU utilization is 94.3% — kernel is compute-bound.
-       Focus on algorithmic optimization: reduce transcendentals, use FMA.
-
-# Without counters:
-[HIGH] Profile this kernel with hardware counters to identify its bottleneck.
-```
-
-### Plateau Detection
-
-After 2+ iterations with <2% improvement, the tool stops repeating and suggests escalation:
-
-```
-Optimization plateau detected: <1.2% change over 3 iterations
-Consider deeper analysis: ATT (instruction stalls) or rocprof-compute (roofline)
-(2 previously-seen recommendations suppressed)
-```
-
-### Init-Overhead Awareness
-
-For short workloads where ROCm initialization dominates:
-
-```
-[INFO] Short workload (43ms) with 2.1% GPU compute — overhead is
-       ROCm runtime initialization. GPU code is already well-optimized.
-```
-
-### LLM-Refined Recommendations
-
-When an LLM is connected, rule-based recommendations are refined with full context — edit history, prior suggestions, and the AMD GPU reference guide:
-
-```
-AI-Refined Analysis (context-aware):
-  Async streams already applied in prior edit. Next step: use ATT
-  to identify which VALU instructions dominate the compute kernel.
-```
-
-![Intelligence Features Demo](assets/intelligence-features.gif)
-
----
-
-## 8. ATT Tier 3: Instruction-Level Analysis
-
-For the deepest analysis, collect an AMD Thread Trace to see per-instruction stall data:
+`PERFXPERT_LLM_FALLBACK_CHAIN` (new in cycle-2) cascades to the next
+provider when the primary raises `RateLimitError`. Survives most
+transient 429s without forcing a rerun:
 
 ```bash
-# Collect ATT trace
-rocprofv3 --att \
-  --att-library-path /opt/rocm/lib \
-  --att-target-cu 0 \
-  -d ./att_output -o trace -- ./my_app
-
-# Analyze (auto-detects stats_*.csv alongside the .db)
-perfxpert analyze -i ./att_output/trace*.db
+# SKIP-SAMPLE — requires live credentials for each provider in the chain
+export PERFXPERT_LLM_FALLBACK_CHAIN="openai,anthropic"
+perfxpert analyze -i trace.db --llm openai
 ```
 
-The output classifies each high-stall instruction into bottleneck categories: VMEM latency, LDS bank conflict, dependency chain, or branch divergence.
+`PERFXPERT_DISABLE_RATE_LIMIT_RETRY=1` short-circuits client-side
+retry so the fallback chain takes over on the first 429. See
+`../guides/agentic-mode.md` for the full provider-resolution contract
+and the recursion-guard rules.
 
-![ATT Analysis Demo](assets/att-analysis.gif)
+## 7. Interactive sessions via `perfxpert-code`
 
-In interactive mode, when plateau detection triggers, the `[t]` option builds the ATT collection command automatically.
-
----
-
-## 9. Python API
-
-The agentic runtime is available programmatically via `perfxpert.agents`:
-
-```python
-from pathlib import Path
-from perfxpert.agents import runtime, schemas
-
-session = runtime.build_session(airgap=True)  # or provider="openai"
-out = session.run_root(
-    schemas.RootInput(
-        user_query="Analyze this GPU performance trace.",
-        database_path=str(Path("trace.db")),
-        airgap=True,
-        session_id=session.session_id,
-    )
-)
-print(out.primary_bottleneck)
-print(out.narrative)
-for rec in out.recommendations:
-    print(f"[{rec.get('priority')}] {rec.get('title')}: {rec.get('description')}")
-```
-
-![Python API Demo](assets/python-api.gif)
-
----
-
-## 10. The Fence Document (LLM Reference Guide)
-
-The LLM reference guide controls AI behavior. It ships with the package and contains AMD GPU specs, performance models, and analysis guidelines. Edit it to customize the LLM:
+One-shot non-interactive:
 
 ```bash
-# Override with your own version
-export PERFXPERT_LLM_REFERENCE_GUIDE="/path/to/my-guide.md"
+# SKIP-SAMPLE — requires bundled opencode + an LLM credential
+perfxpert-code run -m anthropic/claude-haiku-4-5 "optimize ./app.cpp"
 ```
 
-Add company-specific guidelines:
-
-```markdown
-## Our Team's Standards
-<!-- perfxpert-context: always -->
-- We use MI300X exclusively — skip non-MI300X advice
-- Flag any kernel launching fewer than 64 wavefronts
-- Target: >80% GPU utilization on inference workloads
-```
-
-No code changes needed — the guide is reloaded on every analysis run.
-
-![Fence Document Demo](assets/fence-document.gif)
-
----
-
-## 11. Session Persistence
-
-Sessions auto-save to `~/.perfxpert/sessions/`. Resume any session with full context:
+Fully interactive (drop into the TUI):
 
 ```bash
-# Resume a prior session
-perfxpert analyze --source-dir ./src --interactive "./my_app" \
-  --resume-session ~/.perfxpert/sessions/workflow_2026-03-26_14-30-12___my_app.json
+# SKIP-SAMPLE — requires the bundled opencode binary on PATH
+perfxpert-code
 ```
 
-The checkpoint system tracks every code edit. Roll back to any prior state during a session with `[b] Roll back to a checkpoint`.
+### Tool-priority gate + lift semantics
 
-![Session Persistence Demo](assets/session-persistence.gif)
+The bundled opencode enforces a two-stage gate for every
+GPU-performance request:
 
+1. **Gate stage.** The LLM MUST call `perfxpert_intent_classify`
+   first, then `perfxpert_workflow_next_step`. Calls to `bash`,
+   `edit`, `write`, `read`, `glob`, `grep` BEFORE those two are
+   refused by the system-prompt discipline (patches 0010, 0012-0017;
+   applied to all 8 prompt families so Anthropic / GPT / Gemini /
+   Kimi / Trinity / Codex / Beast / default all get identical
+   framing).
+2. **Lift stage.** Once `perfxpert_workflow_next_step` returns a phase
+   (`profile` / `optimize` / `reprofile` / `analyze` / `build`), the
+   gate is LIFTED. The agent then MUST use `bash` to run the profiler
+   (rocprofv3 / rocprof-compute), `edit` / `write` to apply the patch,
+   and `bash` to rebuild. Refusing to execute is the wrong move — the
+   workflow asked for it.
 
----
+Session state is auto-saved. List / resume with `perfxpert-code
+session list` and `perfxpert-code session <id>` (pass-through to the
+underlying opencode `session` subcommand).
 
-## Quick Reference
+## 8. Connecting other MCP clients
 
-| Task | Command |
-|---|---|
-| Install | `pip install "perfxpert[all]"` |
-| Analyze trace | `perfxpert analyze -i trace.db` |
-| HTML report | `perfxpert analyze -i trace.db --format webview -d ./out -o report` |
-| Source scan | `perfxpert analyze --source-dir ./src` |
-| Interactive | `perfxpert analyze --source-dir ./src --llm claude-code --interactive ./my_app` |
-| MPI profiling | `perfxpert analyze --source-dir ./src --interactive "mpirun -n 4 ./my_app"` |
-| Resume session | `perfxpert analyze --source-dir ./src --interactive -- ./my_app --resume-session <path>` |
-| ATT analysis | `perfxpert analyze -i att_output/trace*.db --att-dir ./att_output` |
+Any MCP-compatible client can consume the 34 READ-ONLY tools exposed
+by `perfxpert-mcp`. Configuration snippets for Claude Desktop, Claude
+Code, Codex CLI, Gemini CLI, and generic stdio clients live in
+`../integration/mcp-server.md` under §"Client integration". The
+bundled opencode inside `perfxpert-code` wires `perfxpert-mcp`
+automatically — no client-side setup required.
 
----
+## 9. Troubleshooting
 
-*Generated for PerfXpert v0.1.0 — AMD ROCm AI-Powered GPU Trace Analysis*
+**`perfxpert-code` launches the unpatched upstream binary.**
+Check that `PERFXPERT_OPENCODE_PATH` is either unset or points at the
+bundled copy (usually under
+`experimental/python/perfxpert/perfxpert/_bundled/opencode`). If it's
+unset and you still get the upstream binary, re-run
+`bash experimental/python/perfxpert/scripts/apply-opencode-patches.sh`
+and rebuild the bundled opencode. The launcher warns on fallback.
+
+**LLM quota exhausted (429 / `insufficient_quota`).**
+Set `PERFXPERT_LLM_FALLBACK_CHAIN` to a comma-separated provider
+list, e.g. `export PERFXPERT_LLM_FALLBACK_CHAIN="openai,anthropic"`.
+Combine with `PERFXPERT_DISABLE_RATE_LIMIT_RETRY=1` to skip the
+client-side retry entirely and fall through on first 429.
+
+**PMC counter collection fails with a per-block limit error.**
+`FETCH_SIZE` and `WRITE_SIZE` each consume the full TCC budget — each
+MUST own its own `--pmc` pass, alone. Any other TCC-derived counter
+combined with either of those two will exceed the hardware limit.
+Consult `perfxpert.counter_list_by_block` / `counter_lookup_info`
+before emitting a counter set.
+
+**`opencode binary not found` on `perfxpert doctor`.**
+Either run the patch script (§1 step 2) or install upstream opencode
+(`curl -fsSL https://opencode.ai/install | bash`) and retry. The
+launcher searches `$PERFXPERT_OPENCODE_PATH` → bundled wheel →
+`~/.opencode/bin/opencode` → `~/.local/bin/opencode` → `PATH`.
+
+**`claude mcp add perfxpert --scope project -- perfxpert-mcp` not finding the binary.**
+The client's `PATH` is narrower than your login shell. Use the
+absolute path returned by `which perfxpert-mcp` when registering the
+server.
+
+## 10. Next steps
+
+- `../architecture/agent-hierarchy.md` — 7-agent tier map + fence
+  slices
+- `../architecture/gate-cascade.md` — 5-gate correctness/regression
+  middleware
+- `../integration/mcp-server.md` — full MCP tool list + client
+  integration
+- `../guides/agentic-mode.md` — air-gap vs LLM + provider ladder +
+  fallback chain
