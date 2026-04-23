@@ -1,3 +1,6 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
+
 // Copied from https://github.com/benrichard-amd/rocflop/tree/82f197e12314bab694fc70451a2b495b4f51bf90
 
 #include <iostream>

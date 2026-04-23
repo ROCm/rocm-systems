@@ -23,7 +23,7 @@ EXCLUDED_DIRS = (
     "docs/archive/",
 )
 
-EXCLUDED_FILES = ("__init__.py", "rocflop.cpp")
+EXCLUDED_FILES = ("__init__.py",)
 
 
 def _check_header(filepath, prefix):
