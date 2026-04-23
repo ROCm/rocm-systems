@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import test_utils
+import yaml
 from scipy.stats import zscore
 
 # Runtime config options
@@ -151,25 +152,18 @@ gpu_arch, soc = test_utils.gpu_soc()
 # Discover available set options for the current GPU arch
 AVAILABLE_SETS = []
 if gpu_arch:
-    import yaml
+    ROOT = os.path.dirname(os.path.dirname(__file__))
+    SRC = os.path.join(ROOT, "src")
+    if SRC not in sys.path:
+        sys.path.insert(0, SRC)
 
-    _root = Path(__file__).resolve().parent.parent
     _sets_file = (
-        _root
-        / "src"
+        Path(SRC)
         / "rocprof_compute_soc"
         / "profile_configs"
         / "sets"
         / f"{gpu_arch}_sets.yaml"
     )
-    if not _sets_file.exists():
-        _sets_file = (
-            _root
-            / "rocprof_compute_soc"
-            / "profile_configs"
-            / "sets"
-            / f"{gpu_arch}_sets.yaml"
-        )
     if _sets_file.exists():
         _data = yaml.safe_load(_sets_file.read_text())
         AVAILABLE_SETS = [
