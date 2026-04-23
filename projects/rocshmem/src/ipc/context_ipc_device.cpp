@@ -116,8 +116,8 @@ __device__ void IPCContext::getmem_wg(void *dest, const void *source,
   uint64_t L_offset = const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[my_pe];
   ipcImpl_.ipcCopy_wg(dest, ipcImpl_.ipc_bases[pe] + L_offset,
                       nelems, pe, /*blocking=*/true);
-  ipcImpl_.ipcFence<detail::atomic::memory_scope_agent,
-                    detail::atomic::memory_order_acquire>();
+  ipcImpl_.ipcFence<detail::atomic::memory_scope_workgroup,
+                    detail::atomic::memory_order_release>();
   __builtin_amdgcn_s_barrier();
 }
 
@@ -147,8 +147,8 @@ __device__ void IPCContext::getmem_wave(void *dest, const void *source,
   uint64_t L_offset = const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[my_pe];
   ipcImpl_.ipcCopy_wave(dest, ipcImpl_.ipc_bases[pe] + L_offset,
                         nelems, pe, /*blocking=*/true);
-  ipcImpl_.ipcFence<detail::atomic::memory_scope_agent,
-                    detail::atomic::memory_order_acquire>();
+  ipcImpl_.ipcFence<detail::atomic::memory_scope_wavefront,
+                    detail::atomic::memory_order_release>();
 }
 
 __device__ void IPCContext::putmem_nbi_wave(void *dest, const void *source,
