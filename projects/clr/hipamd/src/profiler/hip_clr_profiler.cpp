@@ -22,8 +22,8 @@
  *   No map, no TLS sentinel, no pending table.
  *
  * Chunk storage: g_records holds HipApiRecordExt arrays.
- *   Op-1 lives in rec.gpu; ops 2..N spill into a heap-allocated HipGpuActivityExt[]
- *   pointed to by rec.gpu.gpu_ops (graph launches only). Freed by FreeChunk via delete[].
+ *   Op-1 lives in rec.gpu; ops 2..N are a linked list via rec.gpu.next (graph launches only).
+ *   Each node is individually heap-allocated. Freed by FreeChunk walking the list.
  */
 
 #include "hip_clr_profiler.hpp"
@@ -42,8 +42,14 @@
 #include <fstream>
 #include <mutex>
 #include <thread>
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
+
+// Forward-declare CLR's comgr-based demangler (defined in hip_comgr_helper.cpp).
+namespace hip { namespace helpers {
+bool demangleName(const std::string& mangledName, std::string& demangledName);
+} }
 
 
 extern "C" void hipRegisterTracerCallback(int (*function)(activity_domain_t domain,
@@ -107,8 +113,15 @@ HipApiRecordExt* AllocChunk() {
 }
 
 void FreeChunk(HipApiRecordExt* chunk) {
-  for (size_t i = 0; i < kChunkSize; ++i)
-    delete[] chunk[i].gpu.gpu_ops;
+  for (size_t i = 0; i < kChunkSize; ++i) {
+    // Walk the linked list of spill nodes and delete each one.
+    const HipGpuActivityExt* node = chunk[i].gpu.next;
+    while (node) {
+      const HipGpuActivityExt* next = node->next;
+      delete node;
+      node = next;
+    }
+  }
   ::operator delete[](static_cast<void*>(chunk));
 }
 
@@ -180,8 +193,11 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
   // them all so the trace shows where barriers land on the GPU timeline.
 
   if (ar->op == OP_ID_DISPATCH && ar->kernel_name) {
+    // Cache the raw name pointer now; demangling happens lazily in WriteJsonTraceImpl
+    // (calling COMGR from within the GPU activity callback is unsafe — the callback
+    // may fire from a HIP runtime context where COMGR re-entrancy is not guaranteed).
     std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
-    g_kernel_names.emplace(ar->kernel_name, ar->kernel_name);
+    g_kernel_names.emplace(ar->kernel_name, std::string{});  // empty = not yet demangled
   }
 
   if (rec->gpu.gpu_op_count == 0) {
@@ -191,9 +207,9 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
     rec->gpu.end_ns    = ar->end_ns;
     rec->gpu.device_id = ar->device_id;
     rec->gpu.queue_id  = ar->queue_id;
-    if (ar->op == OP_ID_DISPATCH)
+    if (ar->op == OP_ID_DISPATCH) {
       rec->gpu.kernel_name = ar->kernel_name;
-    else if (ar->op == OP_ID_COPY) {
+    } else if (ar->op == OP_ID_COPY) {
       rec->gpu.bytes     = ar->bytes;
       rec->gpu.copy_kind = ToCopyKindExt(ar->kind);
     }
@@ -201,28 +217,30 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
     rec->gpu.gpu_op_count  = 1;
     rec->has_gpu_activity  = 1;
   } else {
-    // Subsequent op (graph launch): op-1 stays in rec->gpu; ops 2..N spill into gpu_ops.
-    // spill_count = number of entries already in gpu_ops (gpu_op_count - 1).
-    uint32_t spill_count = rec->gpu.gpu_op_count - 1;
-    HipGpuActivityExt* grown = new HipGpuActivityExt[spill_count + 1]{};
-    if (spill_count > 0)
-      std::memcpy(grown, rec->gpu.gpu_ops, spill_count * sizeof(HipGpuActivityExt));
-    delete[] const_cast<HipGpuActivityExt*>(rec->gpu.gpu_ops);
-
-    HipGpuActivityExt& entry = grown[spill_count];
-    entry.op        = ar->op;
-    entry.begin_ns  = ar->begin_ns;
-    entry.end_ns    = ar->end_ns;
-    entry.device_id = ar->device_id;
-    entry.queue_id  = ar->queue_id;
-    if (ar->op == OP_ID_DISPATCH)
-      entry.kernel_name = ar->kernel_name;
-    else if (ar->op == OP_ID_COPY) {
-      entry.bytes     = ar->bytes;
-      entry.copy_kind = ToCopyKindExt(ar->kind);
+    // Subsequent op (graph launch spill): allocate a new node and O(1)-append via _spill_tail.
+    HipGpuActivityExt* node = new HipGpuActivityExt{};
+    node->op        = ar->op;
+    node->begin_ns  = ar->begin_ns;
+    node->end_ns    = ar->end_ns;
+    node->device_id = ar->device_id;
+    node->queue_id  = ar->queue_id;
+    if (ar->op == OP_ID_DISPATCH) {
+      node->kernel_name = ar->kernel_name;
+    } else if (ar->op == OP_ID_COPY) {
+      node->bytes     = ar->bytes;
+      node->copy_kind = ToCopyKindExt(ar->kind);
     }
+    node->next = nullptr;
 
-    rec->gpu.gpu_ops = grown;
+    // _spill_tail caches the list tail so append is O(1).
+    HipGpuActivityExt* tail =
+      const_cast<HipGpuActivityExt*>(rec->_spill_tail);
+    if (tail)
+      tail->next = node;
+    else
+      rec->gpu.next = node;  // first spill node → head
+    rec->_spill_tail = node;
+
     rec->gpu.gpu_op_count++;
   }
 
@@ -266,6 +284,8 @@ void WriteJsonTraceImpl(const char* filepath) {
   // Track only the (device_id, gpu_tid) pairs that actually received events.
   // Key = device_id, Value = set of gpu tids (queue_id*2+sdma) with events.
   std::unordered_map<int, std::unordered_set<uint64_t>> device_gpu_tids;
+  // Map (device_id, gpu_tid) -> last seen hipStream_t for lane labeling.
+  std::map<std::pair<int,uint64_t>, hipStream_t> gpu_tid_stream;
   // Map raw hash thread ids to compact sequential ints (JS safe-integer limit)
   std::unordered_map<uint64_t, uint32_t> tid_map;
   uint32_t next_tid = 0;
@@ -300,22 +320,45 @@ void WriteJsonTraceImpl(const char* filepath) {
       trace << "\n{\"name\":\"" << rec.api_name
             << "\",\"ph\":\"X\",\"pid\":1024,\"tid\":" << ctid
             << ",\"ts\":" << s_time << ",\"dur\":" << dur_us;
-      if (rec.stream)
-        trace << ",\"args\":{\"stream\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(rec.stream) << std::dec << "\"}";
+      {
+        bool first_cpu_arg = true;
+        auto cpu_sep = [&]() {
+          if (first_cpu_arg) { trace << ",\"args\":{"; first_cpu_arg = false; }
+          else trace << ",";
+        };
+        if (rec.memory1) {
+          cpu_sep();
+          trace << "\"ptr\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(rec.memory1) << std::dec << "\"";
+        }
+        if (rec.memory2) {
+          cpu_sep();
+          trace << "\"src\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(rec.memory2) << std::dec << "\"";
+        }
+        if (rec.stream) {
+          cpu_sep();
+          trace << "\"stream\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(rec.stream) << std::dec << "\"";
+        }
+        if (!first_cpu_arg) trace << "}";
+      }
       trace << "}";
 
       // Emit one GPU op event: flow start (ph:s) on CPU side, GPU X event,
       // flow finish (ph:t) on GPU side.  The shared flow_id links the arrow.
+      // grid/block are non-zero only for single kernel launches (from HipApiRecordExt);
+      // graph launch spill nodes carry zeros (per-node dims are unavailable at the API level).
       auto emit_gpu_op = [&](uint32_t op, uint64_t begin_ns, uint64_t end_ns,
                               int device_id, uint64_t queue_id,
                               const char* kernel_name, size_t bytes,
-                              uint32_t copy_kind) {
+                              uint32_t copy_kind, hipStream_t stream,
+                              uint32_t gx, uint32_t gy, uint32_t gz,
+                              uint32_t bx, uint32_t by, uint32_t bz) {
         uint32_t op_idx  = op < 3 ? op : 3;
         int sdma = (op_idx == OP_ID_COPY) &&
                    hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(copy_kind)) ? 1 : 0;
         uint64_t gpu_dur = (end_ns > begin_ns)
                            ? std::max(uint64_t{1}, (end_ns - begin_ns) / 1000) : 1;
         uint64_t gpu_ts  = begin_ns / 1000;
+        uint64_t gpu_tid = queue_id * 2 + sdma;
 
         const char* gpu_name_cstr = (op_idx == OP_ID_COPY) ? CopyKindName(copy_kind)
                                                             : kGpuEvents[op_idx];
@@ -323,8 +366,19 @@ void WriteJsonTraceImpl(const char* filepath) {
         if (op_idx == OP_ID_DISPATCH && kernel_name) {
           std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
           auto it = g_kernel_names.find(kernel_name);
-          if (it != g_kernel_names.end()) gpu_name = it->second;
+          if (it != g_kernel_names.end()) {
+            // Demangle lazily on first use; empty string = not yet demangled.
+            if (it->second.empty()) {
+              std::string demangled;
+              it->second = (hip::helpers::demangleName(kernel_name, demangled))
+                           ? std::move(demangled) : kernel_name;
+            }
+            gpu_name = it->second;
+          }
         }
+
+        // Track stream→lane mapping for metadata labels.
+        if (stream) gpu_tid_stream[{device_id, gpu_tid}] = stream;
 
         // Only draw flow arrow when GPU timestamps are valid (begin_ns == 0
         // means ReportActivity never populated the record — no arrow to draw).
@@ -334,34 +388,55 @@ void WriteJsonTraceImpl(const char* filepath) {
           trace << ",\n{\"ph\":\"s\",\"id\":" << fid
                 << ",\"pid\":1024,\"tid\":" << ctid
                 << ",\"ts\":" << s_time << ",\"name\":\"dep\"}";
-        // GPU X event (always emitted when gpu_op_count > 0)
+        // GPU X event.
         trace << ",\n{\"name\":\"" << gpu_name
               << "\",\"ph\":\"X\",\"pid\":" << device_id
-              << ",\"tid\":" << (queue_id * 2 + sdma)
-              << ",\"ts\":" << gpu_ts << ",\"dur\":" << gpu_dur;
-        if (op_idx == OP_ID_COPY)
-          trace << ",\"args\":{\"copy_kind\":\"" << CopyKindName(copy_kind)
-                << "\",\"bytes\":" << bytes << "}";
-        trace << "}";
+              << ",\"tid\":" << gpu_tid
+              << ",\"ts\":" << gpu_ts << ",\"dur\":" << gpu_dur
+              << ",\"args\":{";
+        bool first_arg = true;
+        auto sep = [&]() { if (!first_arg) trace << ","; first_arg = false; };
+        sep();
+        trace << "\"queue_id\":" << queue_id;
+        if (op_idx == OP_ID_DISPATCH && gx) {
+          sep();
+          trace << "\"grid\":\"" << gx << "x" << gy << "x" << gz << "\""
+                << ",\"block\":\"" << bx << "x" << by << "x" << bz << "\"";
+        }
+        if (op_idx == OP_ID_COPY) {
+          sep();
+          trace << "\"copy_kind\":\"" << CopyKindName(copy_kind) << "\",\"bytes\":" << bytes;
+        }
+        if (stream) {
+          sep();
+          trace << "\"stream\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(stream) << std::dec << "\"";
+        }
+        trace << "}}";
         if (has_ts)
           trace << ",\n{\"ph\":\"t\",\"id\":" << fid
                 << ",\"pid\":" << device_id
-                << ",\"tid\":" << (queue_id * 2 + sdma)
+                << ",\"tid\":" << gpu_tid
                 << ",\"ts\":" << gpu_ts << ",\"name\":\"dep\"}";
 
-        device_gpu_tids[device_id].insert(queue_id * 2 + sdma);
+        device_gpu_tids[device_id].insert(gpu_tid);
       };
 
-      // Op-1 lives directly in rec.gpu; ops 2..N are in GpuOps(rec).
-      if (rec.gpu.gpu_op_count > 0)
+      // Op-1 lives directly in rec.gpu; ops 2..N are in the spill linked list.
+      // Dispatch dims come from the CPU record (captured by the wrapper at launch time).
+      if (rec.gpu.gpu_op_count > 0) {
         emit_gpu_op(rec.gpu.op, rec.gpu.begin_ns, rec.gpu.end_ns,
                     rec.gpu.device_id, rec.gpu.queue_id,
-                    rec.gpu.kernel_name, rec.gpu.bytes, rec.gpu.copy_kind);
-      for (uint32_t g = 0; g + 1 < rec.gpu.gpu_op_count && rec.gpu.gpu_ops; ++g)
-        emit_gpu_op(rec.gpu.gpu_ops[g].op, rec.gpu.gpu_ops[g].begin_ns, rec.gpu.gpu_ops[g].end_ns,
-                    rec.gpu.gpu_ops[g].device_id, rec.gpu.gpu_ops[g].queue_id,
-                    rec.gpu.gpu_ops[g].kernel_name, rec.gpu.gpu_ops[g].bytes,
-                    rec.gpu.gpu_ops[g].copy_kind);
+                    rec.gpu.kernel_name, rec.gpu.bytes, rec.gpu.copy_kind,
+                    rec.stream,
+                    rec.grid_x, rec.grid_y, rec.grid_z,
+                    rec.block_x, rec.block_y, rec.block_z);
+        for (const HipGpuActivityExt* node = rec.gpu.next; node; node = node->next)
+          emit_gpu_op(node->op, node->begin_ns, node->end_ns,
+                      node->device_id, node->queue_id,
+                      node->kernel_name, node->bytes, node->copy_kind,
+                      rec.stream,
+                      0, 0, 0, 0, 0, 0);  // graph spill: per-node dims unavailable
+      }
     }
   }
 
@@ -405,15 +480,26 @@ void WriteJsonTraceImpl(const char* filepath) {
 
     // Emit a thread_name only for tids that actually have events.
     // Even tid = Compute (queue_id*2), odd tid = SDMA (queue_id*2+1).
-    // queue_id==0 is the default/null HIP stream on the compute engine.
+    // Use the hipStream_t address if known; fall back to queue index label.
     for (uint64_t gpu_tid : active_tids) {
       bool is_sdma = (gpu_tid & 1) != 0;
       uint64_t q   = gpu_tid / 2;
       std::string lane_name;
-      if (!is_sdma && q == 0)
+      auto sit = gpu_tid_stream.find({dev_id, gpu_tid});
+      if (sit != gpu_tid_stream.end() && sit->second) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "0x%llx",
+                 static_cast<unsigned long long>(
+                   reinterpret_cast<uintptr_t>(sit->second)));
+        // SDMA lane shares the stream prefix so it sorts next to its compute lane.
+        lane_name = std::string("Stream ") + buf + (is_sdma ? " [DMA]" : "");
+      } else if (!is_sdma && q == 0) {
         lane_name = "Default Stream";
-      else
+      } else if (is_sdma && q == 0) {
+        lane_name = "Default Stream [DMA]";
+      } else {
         lane_name = std::string(is_sdma ? "SDMA " : "Compute ") + std::to_string(q);
+      }
       trace << ",\n{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":" << dev_id
             << ",\"tid\":" << gpu_tid
             << ",\"args\":{\"name\":\"" << lane_name << "\"}}";
@@ -489,7 +575,10 @@ HipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id) {
 // ============================================================
 // Internal API
 // ============================================================
-namespace hip { const HipDispatchTable* GetHipDispatchTable(); }
+namespace hip {
+  const HipDispatchTable*         GetHipDispatchTable();
+  const HipCompilerDispatchTable* GetHipCompilerDispatchTable();
+}
 
 // Shared helper — registers callback once and installs wrappers.
 static void EnsureCallbackAndWrappers() {
@@ -511,6 +600,8 @@ static void EnsureCallbackAndWrappers() {
     hipRegisterTracerCallback(HipActivityCallbackExt);
   }
   HipProfilerInstallWrappersExt(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()));
+  HipProfilerInstallCompilerWrappersExt(
+      const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable()));
 }
 
 void HipProfilerInitExt() {
@@ -549,6 +640,8 @@ uint64_t HipProfilerDisableExt() {
     // the profiler callback is still active.
     DrainAllDevices();
     HipProfilerRemoveWrappersExt(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()));
+    HipProfilerRemoveCompilerWrappersExt(
+        const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable()));
   }
   return g_rec_counter.load(std::memory_order_acquire);
 }

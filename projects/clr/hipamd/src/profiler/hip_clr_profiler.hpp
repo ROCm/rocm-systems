@@ -28,10 +28,14 @@ HipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id);
 
 // Declared in hip_clr_dispatch_wrappers.cpp; called by Enable/Disable/Init
 struct HipDispatchTable;
+struct HipCompilerDispatchTable;
 // Called once at init: captures g_next and pre-builds g_wrapper_tbl.
 void HipProfilerBuildWrapperTableExt(HipDispatchTable* tbl);
 void HipProfilerInstallWrappersExt(HipDispatchTable* tbl);
 void HipProfilerRemoveWrappersExt(HipDispatchTable* tbl);
+// Compiler dispatch table (___hipPushCallConfiguration / hipLaunchByPtr path).
+void HipProfilerInstallCompilerWrappersExt(HipCompilerDispatchTable* tbl);
+void HipProfilerRemoveCompilerWrappersExt(HipCompilerDispatchTable* tbl);
 
 // API name table — indexed by api_id, same order as UpdateDispatchTable
 extern const char* const kHipApiNamesExt[];
