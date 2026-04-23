@@ -150,6 +150,10 @@ void Backend::destroy_remaining_ctxs() {
 Backend::~Backend() {
   if (backend_comm != MPI_COMM_NULL)
     NET_CHECK(mpilib_ftable_.Comm_free(&backend_comm));
+
+  if (done_init) {
+    CHECK_HIP(hipHostFree(done_init));
+  }
 }
 
 void Backend::dump_stats() {
