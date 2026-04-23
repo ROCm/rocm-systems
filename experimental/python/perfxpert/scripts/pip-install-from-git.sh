@@ -31,10 +31,12 @@ Install the prerequisites first:
     apt install -y curl git unzip python3-venv python3-pip
     python3 -m venv .venv
   RHEL 9:
-    dnf install -y curl git unzip python3.11 python3.11-pip
+    command -v curl >/dev/null || dnf install -y curl
+    dnf install -y git unzip python3.11 python3.11-pip
     python3.11 -m venv .venv
   RHEL 10:
-    dnf install -y curl git unzip python3 python3-pip
+    command -v curl >/dev/null || dnf install -y curl
+    dnf install -y git unzip python3 python3-pip
     python3 -m venv .venv
   SLES 15:
     zypper install -y curl git unzip python311 python311-pip
@@ -87,10 +89,12 @@ Prerequisite package examples by distro:
     apt install -y curl git unzip python3-venv python3-pip
     python3 -m venv .venv
   RHEL 9:
-    dnf install -y curl git unzip python3.11 python3.11-pip
+    command -v curl >/dev/null || dnf install -y curl
+    dnf install -y git unzip python3.11 python3.11-pip
     python3.11 -m venv .venv
   RHEL 10:
-    dnf install -y curl git unzip python3 python3-pip
+    command -v curl >/dev/null || dnf install -y curl
+    dnf install -y git unzip python3 python3-pip
     python3 -m venv .venv
   SLES 15:
     zypper install -y curl git unzip python311 python311-pip
@@ -145,15 +149,28 @@ _run_with_privilege() {
 _install_os_prereqs_if_needed() {
   local -a missing
   missing=()
+  local need_curl need_git need_unzip need_python
+  need_curl=0
+  need_git=0
+  need_unzip=0
+  need_python=0
 
-  for tool in curl git unzip; do
-    if ! command -v "${tool}" >/dev/null 2>&1; then
-      missing+=("${tool}")
-    fi
-  done
+  if ! command -v curl >/dev/null 2>&1; then
+    missing+=("curl")
+    need_curl=1
+  fi
+  if ! command -v git >/dev/null 2>&1; then
+    missing+=("git")
+    need_git=1
+  fi
+  if ! command -v unzip >/dev/null 2>&1; then
+    missing+=("unzip")
+    need_unzip=1
+  fi
 
   if ! _supported_python_with_pip_available; then
     missing+=("python3.10+ with pip")
+    need_python=1
   fi
 
   if [ "${#missing[@]}" -eq 0 ]; then
@@ -164,11 +181,17 @@ _install_os_prereqs_if_needed() {
   echo "pip-install-from-git: attempting package-manager install" >&2
 
   if command -v apt-get >/dev/null 2>&1; then
+    local -a apt_packages
+    apt_packages=()
+    [ "${need_curl}" = "1" ] && apt_packages+=("curl")
+    [ "${need_git}" = "1" ] && apt_packages+=("git")
+    [ "${need_unzip}" = "1" ] && apt_packages+=("unzip")
+    [ "${need_python}" = "1" ] && apt_packages+=("python3-venv" "python3-pip")
     if ! _run_with_privilege apt-get update; then
       _die "failed to run apt-get update. Install prerequisites manually:
 $(_print_python_prereqs)"
     fi
-    if ! _run_with_privilege apt-get install -y curl git unzip python3-venv python3-pip; then
+    if ! _run_with_privilege apt-get install -y "${apt_packages[@]}"; then
       _die "failed to install prerequisites with apt-get. Install them manually:
 $(_print_python_prereqs)"
     fi
@@ -177,19 +200,26 @@ $(_print_python_prereqs)"
 
   if command -v dnf >/dev/null 2>&1; then
     local version_major
+    local -a dnf_packages
     version_major=""
+    dnf_packages=()
     if [ -r /etc/os-release ]; then
       # shellcheck disable=SC1091
       . /etc/os-release
       version_major="${VERSION_ID%%.*}"
     fi
+    [ "${need_curl}" = "1" ] && dnf_packages+=("curl")
+    [ "${need_git}" = "1" ] && dnf_packages+=("git")
+    [ "${need_unzip}" = "1" ] && dnf_packages+=("unzip")
     if [ "${version_major}" = "9" ]; then
-      if ! _run_with_privilege dnf install -y curl git unzip python3.11 python3.11-pip; then
+      [ "${need_python}" = "1" ] && dnf_packages+=("python3.11" "python3.11-pip")
+      if ! _run_with_privilege dnf install -y "${dnf_packages[@]}"; then
         _die "failed to install prerequisites with dnf. Install them manually:
 $(_print_python_prereqs)"
       fi
     else
-      if ! _run_with_privilege dnf install -y curl git unzip python3 python3-pip; then
+      [ "${need_python}" = "1" ] && dnf_packages+=("python3" "python3-pip")
+      if ! _run_with_privilege dnf install -y "${dnf_packages[@]}"; then
         _die "failed to install prerequisites with dnf. Install them manually:
 $(_print_python_prereqs)"
       fi
@@ -198,7 +228,13 @@ $(_print_python_prereqs)"
   fi
 
   if command -v zypper >/dev/null 2>&1; then
-    if ! _run_with_privilege zypper --non-interactive install -y curl git unzip python311 python311-pip; then
+    local -a zypper_packages
+    zypper_packages=()
+    [ "${need_curl}" = "1" ] && zypper_packages+=("curl")
+    [ "${need_git}" = "1" ] && zypper_packages+=("git")
+    [ "${need_unzip}" = "1" ] && zypper_packages+=("unzip")
+    [ "${need_python}" = "1" ] && zypper_packages+=("python311" "python311-pip")
+    if ! _run_with_privilege zypper --non-interactive install -y "${zypper_packages[@]}"; then
       _die "failed to install prerequisites with zypper. Install them manually:
 $(_print_python_prereqs)"
     fi

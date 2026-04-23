@@ -56,8 +56,9 @@ def test_install_wrapper_help_mentions_supported_prereqs() -> None:
     assert "pip build hook bootstraps bun" in result.stdout
     assert "package-manager install" in result.stdout
     assert "It never downloads" in result.stdout
-    assert "dnf install -y curl git unzip python3.11 python3.11-pip" in result.stdout
-    assert "dnf install -y curl git unzip python3 python3-pip" in result.stdout
+    assert "command -v curl >/dev/null || dnf install -y curl" in result.stdout
+    assert "dnf install -y git unzip python3.11 python3.11-pip" in result.stdout
+    assert "dnf install -y git unzip python3 python3-pip" in result.stdout
     assert "zypper install -y curl git unzip python311 python311-pip" in result.stdout
     assert "python3.11 -m venv .venv" in result.stdout
     assert 'REF=<SHA>; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"' in result.stdout
@@ -76,7 +77,8 @@ def test_install_wrapper_help_works_from_stdin() -> None:
     assert "pip build hook bootstraps bun" in result.stdout
     assert "package-manager install" in result.stdout
     assert "It never downloads" in result.stdout
-    assert "dnf install -y curl git unzip python3.11 python3.11-pip" in result.stdout
+    assert "command -v curl >/dev/null || dnf install -y curl" in result.stdout
+    assert "dnf install -y git unzip python3.11 python3.11-pip" in result.stdout
     assert "zypper install -y curl git unzip python311 python311-pip" in result.stdout
     assert 'REF=<SHA>; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"' in result.stdout
 
@@ -111,8 +113,9 @@ def test_getting_started_keeps_internal_install_detail() -> None:
     assert "never downloads a separate" in text
     assert "Python runtime" in text
     assert "pip bootstraps\nbun when the OS prerequisites are available" in text
-    assert "dnf install -y curl git unzip python3.11 python3.11-pip" in text
-    assert "dnf install -y curl git unzip python3 python3-pip" in text
+    assert "command -v curl >/dev/null || dnf install -y curl" in text
+    assert "dnf install -y git unzip python3.11 python3.11-pip" in text
+    assert "dnf install -y git unzip python3 python3-pip" in text
     assert "zypper install -y curl git unzip python311 python311-pip" in text
     assert "python3.11 -m venv .venv" in text
     assert 'REF=<SHA>; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"' in text
@@ -162,8 +165,9 @@ def test_install_wrapper_reports_missing_prereqs_when_package_manager_unavailabl
     assert "git" in result.stderr
     assert "unzip" in result.stderr
     assert "apt install -y curl git unzip python3-venv python3-pip" in result.stderr
-    assert "dnf install -y curl git unzip python3.11 python3.11-pip" in result.stderr
-    assert "dnf install -y curl git unzip python3 python3-pip" in result.stderr
+    assert "command -v curl >/dev/null || dnf install -y curl" in result.stderr
+    assert "dnf install -y git unzip python3.11 python3.11-pip" in result.stderr
+    assert "dnf install -y git unzip python3 python3-pip" in result.stderr
     assert "zypper install -y curl git unzip python311 python311-pip" in result.stderr
 
 
@@ -240,7 +244,88 @@ exit 0
     assert result.returncode == 0
     assert installed.read_text(encoding="utf-8").splitlines() == [
         "update",
-        "install -y curl git unzip python3-venv python3-pip",
+        "install -y curl unzip",
+    ]
+
+
+def test_install_wrapper_dnf_keeps_existing_curl_provider(tmp_path: Path) -> None:
+    """RHEL/UBI images can provide `curl` through curl-minimal.
+
+    The wrapper must not ask dnf to install full `curl` again when the command
+    is already present, because that conflicts with curl-minimal on UBI.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    bundled = tmp_path / "site-packages" / "perfxpert" / "_bundled" / "opencode"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_text("fake-opencode", encoding="utf-8")
+    bundled.chmod(0o755)
+    _write_executable(
+        bin_dir / "python3",
+        f"""#!/bin/bash
+if [ "$1" = "-m" ] && [ "$2" = "pip" ] && [ "$3" = "--version" ]; then
+  echo "pip 24.0"
+  exit 0
+fi
+if [ "$1" = "-m" ] && [ "$2" = "pip" ] && [ "$3" = "install" ]; then
+  exit 0
+fi
+if [ "$1" = "-c" ]; then
+  case "$2" in
+    *"sys.version_info"*)
+      exit 0
+      ;;
+    *'sys.prefix != getattr(sys, "base_prefix", sys.prefix)'*)
+      echo 1
+      exit 0
+      ;;
+    *'sysconfig.get_path("stdlib")'*)
+      echo "{tmp_path / 'missing-externally-managed'}"
+      exit 0
+      ;;
+    *'resources.files("perfxpert")'*)
+      echo "{bundled}"
+      exit 0
+      ;;
+  esac
+fi
+exit 99
+""",
+    )
+    _symlink_tool(bin_dir, "cat")
+    _symlink_tool(bin_dir, "chmod")
+    _write_executable(bin_dir / "curl", "#!/bin/sh\nexit 0\n")
+    _write_executable(
+        bin_dir / "sudo",
+        """#!/bin/bash
+"$@"
+""",
+    )
+    installed = tmp_path / "installed.txt"
+    _write_executable(
+        bin_dir / "dnf",
+        f"""#!/bin/bash
+echo "$*" >> "{installed}"
+if [ "$1" = "install" ]; then
+  printf '#!/bin/sh\\nexit 0\\n' > "{bin_dir}/git"
+  printf '#!/bin/sh\\nexit 0\\n' > "{bin_dir}/unzip"
+  chmod +x "{bin_dir}/git" "{bin_dir}/unzip"
+fi
+exit 0
+""",
+    )
+
+    result = subprocess.run(
+        ["/bin/bash", str(_INSTALL_WRAPPER), "develop"],
+        capture_output=True,
+        text=True,
+        env=_env_with_path(bin_dir),
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert installed.read_text(encoding="utf-8").splitlines() == [
+        "install -y git unzip",
     ]
 
 
@@ -312,8 +397,9 @@ exit 99
     assert "python3.10+ with pip" in result.stderr
     assert "no supported package manager found" in result.stderr
     assert "apt install -y curl git unzip python3-venv python3-pip" in result.stderr
-    assert "dnf install -y curl git unzip python3.11 python3.11-pip" in result.stderr
-    assert "dnf install -y curl git unzip python3 python3-pip" in result.stderr
+    assert "command -v curl >/dev/null || dnf install -y curl" in result.stderr
+    assert "dnf install -y git unzip python3.11 python3.11-pip" in result.stderr
+    assert "dnf install -y git unzip python3 python3-pip" in result.stderr
     assert "zypper install -y curl git unzip python311 python311-pip" in result.stderr
 
 
@@ -364,8 +450,9 @@ exit 99
     assert result.returncode == 2
     assert "the current Python is externally managed" in result.stderr
     assert "curl -fsSL" in result.stderr
-    assert "dnf install -y curl git unzip python3.11 python3.11-pip" in result.stderr
-    assert "dnf install -y curl git unzip python3 python3-pip" in result.stderr
+    assert "command -v curl >/dev/null || dnf install -y curl" in result.stderr
+    assert "dnf install -y git unzip python3.11 python3.11-pip" in result.stderr
+    assert "dnf install -y git unzip python3 python3-pip" in result.stderr
     assert "zypper install -y curl git unzip python311 python311-pip" in result.stderr
 
 

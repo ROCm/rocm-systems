@@ -76,14 +76,16 @@ python3 -m venv .venv
 
 ```bash
 # SKIP-SAMPLE — RHEL 9
-dnf install -y curl git unzip python3.11 python3.11-pip
+command -v curl >/dev/null || dnf install -y curl
+dnf install -y git unzip python3.11 python3.11-pip
 python3.11 -m venv .venv
 . .venv/bin/activate
 ```
 
 ```bash
 # SKIP-SAMPLE — RHEL 10
-dnf install -y curl git unzip python3 python3-pip
+command -v curl >/dev/null || dnf install -y curl
+dnf install -y git unzip python3 python3-pip
 python3 -m venv .venv
 . .venv/bin/activate
 ```

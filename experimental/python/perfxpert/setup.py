@@ -97,9 +97,11 @@ def _package_manager_prereq_hint() -> str:
         "  Ubuntu 22.04 / 24.04:\n"
         "    apt install -y curl git unzip python3-venv python3-pip\n"
         "  RHEL 9:\n"
-        "    dnf install -y curl git unzip python3.11 python3.11-pip\n"
+        "    command -v curl >/dev/null || dnf install -y curl\n"
+        "    dnf install -y git unzip python3.11 python3.11-pip\n"
         "  RHEL 10:\n"
-        "    dnf install -y curl git unzip python3 python3-pip\n"
+        "    command -v curl >/dev/null || dnf install -y curl\n"
+        "    dnf install -y git unzip python3 python3-pip\n"
         "  SLES 15:\n"
         "    zypper install -y curl git unzip python311 python311-pip\n"
     )
