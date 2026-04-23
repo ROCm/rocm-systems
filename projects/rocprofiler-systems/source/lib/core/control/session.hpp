@@ -13,31 +13,31 @@
 #include <unordered_set>
 #include <vector>
 
-namespace rocprofsys
+namespace rocprofsys::control
 {
-namespace rocprofiler_sdk
-{
-namespace control
-{
-
 using callback_t = std::function<void()>;
 
-class trace_control
+class session
 {
 public:
-    explicit trace_control(std::string_view trace_regions = {});
-    ~trace_control() = default;
+    explicit session(std::string_view trace_regions = {});
+    ~session() = default;
+
+    session(const session&)            = delete;
+    session& operator=(const session&) = delete;
+    session(session&&)                 = delete;
+    session& operator=(session&&)      = delete;
 
     void shutdown();
 
     void register_region_pause_resume_callbacks(callback_t resume_callback,
                                                 callback_t pause_callback);
 
-    bool region_filter_active() const
+    [[nodiscard]] bool region_filter_active() const noexcept
     {
         return m_region_filter_active.load(std::memory_order_relaxed);
     }
-    bool should_write_markers() const;
+    [[nodiscard]] bool should_write_markers() const;
 
     void force_initial_pause();
 
@@ -61,6 +61,4 @@ private:
 
     void trigger_callbacks(const std::vector<callback_t>& callbacks);
 };
-}  // namespace control
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::control

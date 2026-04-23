@@ -13,6 +13,7 @@
 #include "core/common_types.hpp"
 #include "core/config.hpp"
 #include "core/containers/stable_vector.hpp"
+#include "core/control/session.hpp"
 #include "core/demangler.hpp"
 #include "core/gpu.hpp"
 #include "core/output_file_registry.hpp"
@@ -30,7 +31,6 @@
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include "library/rocprofiler-sdk/kfd_events.hpp"
 #include "library/rocprofiler-sdk/rccl.hpp"
-#include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "rocprofiler-sdk.hpp"
@@ -2798,15 +2798,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     // Setup roctx client (must happen within tool_init for rocprofiler-sdk context
     // creation). Roctx client configures MARKER_CORE_API and MARKER_CONTROL_API
-    // on control_ctx. trace_control's pause/resume callbacks are routed through
-    // roctx_client (registered later in library.cpp).
+    // on control_ctx. The control session's pause/resume callbacks are routed
+    // through roctx_client (registered later in library.cpp).
     auto roctx_client = get_roctx_client();
     if(roctx_client)
     {
         roctx_client->configure_services(_data->get_control_context());
 
-        const auto filtering_active =
-            roctx_client->get_controller()->region_filter_active();
+        const auto filtering_active = roctx_client->get_session()->region_filter_active();
         if(!filtering_active)
         {
             start();
@@ -2901,12 +2900,12 @@ flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp)
 
 }  // namespace
 
-std::shared_ptr<control::trace_control>
-get_trace_controller()
+std::shared_ptr<control::session>
+get_session()
 {
     const auto roctx_client = get_roctx_client();
     if(!roctx_client) return nullptr;
-    return roctx_client->get_controller();
+    return roctx_client->get_session();
 }
 
 void
@@ -2924,10 +2923,9 @@ void
 shutdown()
 {
     auto roctx_client = get_roctx_client();
-    // Shutdown marker client (and trace_control) before rocprofiler-sdk finalization
     if(roctx_client)
     {
-        roctx_client->get_controller()->shutdown();
+        roctx_client->get_session()->shutdown();
     }
 
     // shutdown

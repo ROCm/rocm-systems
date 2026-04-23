@@ -20,6 +20,7 @@
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/constraint.hpp"
+#include "core/control/session.hpp"
 #include "core/cpu.hpp"
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
@@ -49,7 +50,6 @@
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk.hpp"
 #include "library/rocprofiler-sdk/roctx_client.hpp"
-#include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
@@ -669,8 +669,8 @@ rocprofsys_init_tooling_hidden(void)
             trace_cache::get_buffer_storage().start(getpid());
         }
 
-        auto trace_controller = rocprofiler_sdk::get_trace_controller();
-        if(trace_controller)
+        auto session = rocprofiler_sdk::get_session();
+        if(session)
         {
             auto pause_callback = [](void) {
                 LOG_DEBUG("Pause callback...");
@@ -700,10 +700,10 @@ rocprofsys_init_tooling_hidden(void)
                 process_sampler::resume();
                 invoke_external_resume_callbacks();
             };
-            trace_controller->register_region_pause_resume_callbacks(resume_callback,
-                                                                     pause_callback);
+            session->register_region_pauser_resume_callbacks(resume_callback,
+                                                             pause_callback);
 
-            trace_controller->force_initial_pause();
+            session->force_initial_pause();
         }
 
         state::process::set(

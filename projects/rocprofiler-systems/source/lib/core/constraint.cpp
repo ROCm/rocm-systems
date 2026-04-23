@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "constraint.hpp"
+#include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/units.hpp"
 #include "config.hpp"
