@@ -43,7 +43,7 @@ Configuration::fallback(bool enabled) noexcept
 unsigned int
 Configuration::statsLevel() const noexcept
 {
-    HIPFILE_STATIC unsigned int stats_level_env{Environment::stats_level().value_or(0)};
+    HIPFILE_STATIC unsigned int stats_level_env{Environment::stats_level().value_or(1)};
     return stats_level_env;
 }
 
