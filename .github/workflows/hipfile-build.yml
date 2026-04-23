@@ -324,7 +324,7 @@ jobs:
           docker cp \
             "${AIS_CONTAINER_NAME}:/ais/build/hipfile" \
             ${GITHUB_WORKSPACE}/hipfile-build-dir
-      - name: Upload runtime hipFile package as an artifact
+      - name: Upload hipFile build directory as an artifact
         if: ${{ inputs.upload_artifacts }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
