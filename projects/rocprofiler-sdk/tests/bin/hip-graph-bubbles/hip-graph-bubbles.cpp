@@ -101,7 +101,7 @@ parse_args(int argc, char** argv)
 {
     config cfg{};
 
-    if(argc > 5)
+    if(argc > 6)
     {
         print_usage(argv[0], cfg);
         exit(EXIT_FAILURE);
