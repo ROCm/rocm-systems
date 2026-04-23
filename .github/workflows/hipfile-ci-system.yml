@@ -62,8 +62,9 @@ jobs:
       - name: Set early AIS CI environment variables
         run: echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
       - name: Set AIS CI container name
+        # On non-pull_request triggering workflows, AIS_PR_NUMBER may be empty.
         run: |
-          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_INPUT_CMAKE_BUILD_TYPE}_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_ENV}"
+          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_INPUT_CMAKE_BUILD_TYPE}_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_ENV}"
       - name: Fetching hipFile repository...
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
