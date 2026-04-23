@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "core/control/session.hpp"
 #include "rocprof-sys/library/rocprofiler-sdk/roctx_client.hpp"
-#include "rocprof-sys/library/rocprofiler-sdk/trace_control.hpp"
 
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
@@ -104,7 +104,7 @@ TEST_F(roctx_client_test, constructor_creates_controller)
 
     const roctx_client_config config{ true, true, true, false, "TestRegion" };
     const roctx_client<mock_marker_policy> client(config);
-    EXPECT_NE(client.get_controller(), nullptr);
+    EXPECT_NE(client.get_session(), nullptr);
 }
 
 TEST_F(roctx_client_test, constructor_without_region_filter)
@@ -113,8 +113,8 @@ TEST_F(roctx_client_test, constructor_without_region_filter)
 
     const roctx_client_config              config{ true, true, true, false, "" };
     const roctx_client<mock_marker_policy> client(config);
-    EXPECT_NE(client.get_controller(), nullptr);
-    EXPECT_FALSE(client.get_controller()->region_filter_active());
+    EXPECT_NE(client.get_session(), nullptr);
+    EXPECT_FALSE(client.get_session()->region_filter_active());
 }
 
 TEST_F(roctx_client_test, constructor_with_region_filter)
@@ -123,7 +123,7 @@ TEST_F(roctx_client_test, constructor_with_region_filter)
 
     const roctx_client_config              config{ true, true, true, false, "Region 1" };
     const roctx_client<mock_marker_policy> client(config);
-    EXPECT_TRUE(client.get_controller()->region_filter_active());
+    EXPECT_TRUE(client.get_session()->region_filter_active());
 }
 
 TEST_F(roctx_client_test, should_write_no_filter)
@@ -132,7 +132,7 @@ TEST_F(roctx_client_test, should_write_no_filter)
 
     const roctx_client_config              config{ true, true, true, false, "" };
     const roctx_client<mock_marker_policy> client(config);
-    EXPECT_TRUE(client.get_controller()->should_write_markers());
+    EXPECT_TRUE(client.get_session()->should_write_markers());
 }
 
 TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
@@ -141,14 +141,14 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
 
     const roctx_client_config              config{ true, true, true, false, "Region 1" };
     const roctx_client<mock_marker_policy> client(config);
-    EXPECT_FALSE(client.get_controller()->should_write_markers());
+    EXPECT_FALSE(client.get_session()->should_write_markers());
 }
 
 // ============================================================================
 // Integration tests: events driven through the client's controller
 //
-// Each test creates a roctx_client, obtains its trace_control via
-// get_controller(), registers callback counters, and simulates events
+// Each test creates a roctx_client, obtains its control::session via
+// get_session(), registers callback counters, and simulates events
 // by calling the controller's public handle_* methods. Assertions verify
 // ctrl->should_write_markers() returns the correct value at each point
 // and that start/stop callbacks fire at the right times.
@@ -171,9 +171,9 @@ protected:
         const roctx_config_t config{ true, false, false, false, regions };
         auto                 client = std::make_unique<roctx_client_t>(config);
 
-        auto ctrl = client->get_controller();
-        ctrl->register_region_pause_resume_callbacks([this]() { start_count++; },
-                                                     [this]() { stop_count++; });
+        auto ctrl = client->get_session();
+        ctrl->register_region_pauser_resume_callbacks([this]() { start_count++; },
+                                                      [this]() { stop_count++; });
 
         return client;
     }
@@ -192,7 +192,7 @@ protected:
 TEST_F(roctx_client_control_test, pause_resume_no_filter)
 {
     auto client = make_client("");
-    auto ctrl   = client->get_controller();
+    auto ctrl   = client->get_session();
 
     EXPECT_FALSE(ctrl->region_filter_active());
     EXPECT_TRUE(ctrl->should_write_markers());
@@ -233,7 +233,7 @@ TEST_F(roctx_client_control_test, pause_resume_no_filter)
 TEST_F(roctx_client_control_test, selective_region_normal)
 {
     auto client = make_client("Region 1");
-    auto ctrl   = client->get_controller();
+    auto ctrl   = client->get_session();
 
     EXPECT_TRUE(ctrl->region_filter_active());
 
@@ -297,7 +297,7 @@ TEST_F(roctx_client_control_test, selective_region_normal)
 TEST_F(roctx_client_control_test, selective_region_pause_resume_inside)
 {
     auto client = make_client("Region 1");
-    auto ctrl   = client->get_controller();
+    auto ctrl   = client->get_session();
 
     // CodeZ: outside region
     EXPECT_FALSE(ctrl->should_write_markers());
@@ -342,7 +342,7 @@ TEST_F(roctx_client_control_test, selective_region_pause_resume_inside)
 TEST_F(roctx_client_control_test, selective_region_pause_outside_resume_inside)
 {
     auto client = make_client("Region 1");
-    auto ctrl   = client->get_controller();
+    auto ctrl   = client->get_session();
 
     // roctx_pause outside region: ignored (region filter active, no active ranges)
     ctrl->handle_pause(std::uint64_t{ 1 });
@@ -391,7 +391,7 @@ TEST_F(roctx_client_control_test, selective_region_pause_outside_resume_inside)
 TEST_F(roctx_client_control_test, selective_region_pause_then_region_ends)
 {
     auto client = make_client("Region 1");
-    auto ctrl   = client->get_controller();
+    auto ctrl   = client->get_session();
 
     // Push Region1
     ctrl->handle_range_start(1, "Region 1");
@@ -423,7 +423,7 @@ TEST_F(roctx_client_control_test, selective_region_pause_then_region_ends)
 TEST_F(roctx_client_control_test, double_pause_is_ignored)
 {
     auto client = make_client("");
-    auto ctrl   = client->get_controller();
+    auto ctrl   = client->get_session();
 
     const auto tid = std::uint64_t{ 1 };
     ctrl->handle_pause(tid);
@@ -440,7 +440,7 @@ TEST_F(roctx_client_control_test, double_pause_is_ignored)
 TEST_F(roctx_client_control_test, resume_without_pause_is_ignored)
 {
     auto client = make_client("");
-    auto ctrl   = client->get_controller();
+    auto ctrl   = client->get_session();
 
     // Resume without prior pause
     ctrl->handle_resume(std::uint64_t{ 1 });
@@ -451,7 +451,7 @@ TEST_F(roctx_client_control_test, resume_without_pause_is_ignored)
 TEST_F(roctx_client_control_test, nested_target_regions)
 {
     auto client = make_client("Region 1");
-    auto ctrl   = client->get_controller();
+    auto ctrl   = client->get_session();
 
     EXPECT_FALSE(ctrl->should_write_markers());
 
@@ -479,7 +479,7 @@ TEST_F(roctx_client_control_test, nested_target_regions)
 TEST_F(roctx_client_control_test, multiple_target_regions)
 {
     auto client = make_client("Region 1,Region 2");
-    auto ctrl   = client->get_controller();
+    auto ctrl   = client->get_session();
 
     EXPECT_TRUE(ctrl->region_filter_active());
     EXPECT_FALSE(ctrl->should_write_markers());
@@ -504,7 +504,7 @@ TEST_F(roctx_client_control_test, multiple_target_regions)
 TEST_F(roctx_client_control_test, shutdown_clears_state)
 {
     auto client = make_client("Region 1");
-    auto ctrl   = client->get_controller();
+    auto ctrl   = client->get_session();
 
     ctrl->handle_range_start(1, "Region 1");
     EXPECT_TRUE(ctrl->should_write_markers());
@@ -518,7 +518,7 @@ TEST_F(roctx_client_control_test, shutdown_clears_state)
 TEST_F(roctx_client_control_test, stop_unknown_range_is_noop)
 {
     auto client = make_client("Region 1");
-    auto ctrl   = client->get_controller();
+    auto ctrl   = client->get_session();
 
     ctrl->handle_range_stop(999);
     EXPECT_EQ(stop_count, 0);
@@ -528,7 +528,7 @@ TEST_F(roctx_client_control_test, stop_unknown_range_is_noop)
 TEST_F(roctx_client_control_test, start_with_null_message_is_ignored)
 {
     auto client = make_client("Region 1");
-    auto ctrl   = client->get_controller();
+    auto ctrl   = client->get_session();
 
     ctrl->handle_range_start(1, nullptr);
     EXPECT_EQ(start_count, 0);
