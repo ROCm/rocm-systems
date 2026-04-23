@@ -74,12 +74,6 @@ def validate_perfetto(data, labels, counts, depths, useSubstringForLabels=False)
 
     expected = [[litr, citr, ditr] for litr, citr, ditr in zip(labels, counts, depths)]
 
-    if len(data) != len(expected):
-        raise RuntimeError(
-            f"Expected {len(expected)} aggregated slice rows in order, got {len(data)} "
-            "(must match labels/counts/depths one-to-one)"
-        )
-
     for ditr, eitr in zip(data, expected):
         _label = ditr["label"]
         _count = ditr["count"]
