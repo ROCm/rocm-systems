@@ -319,8 +319,8 @@ void RocmSMI::Initialize(uint64_t flags) {
   ss << __PRETTY_FUNCTION__ << " Sort index based on BDF.";
   LOG_DEBUG(ss);
 
-  // Stable sort to keep the order if bdf is equal.
-  std::stable_sort(
+  // Sort index based on BDF (BDF values are unique per device).
+  std::sort(
       dv_to_id.begin(), dv_to_id.end(),
       [](const BDFDevicePair_t& p1, const BDFDevicePair_t& p2) { return p1.first < p2.first; });
   devices_.clear();
@@ -443,8 +443,8 @@ void RocmSMI::Initialize(uint64_t flags) {
     ss << __PRETTY_FUNCTION__ << " Sort index based on BDF.";
     LOG_DEBUG(ss);
 
-    // Stable sort to keep the order if bdf is equal.
-    std::stable_sort(
+    // Sort index based on BDF (BDF values are unique per device).
+    std::sort(
         dv_to_id.begin(), dv_to_id.end(),
         [](const BDFDevicePair_t& p1, const BDFDevicePair_t& p2) { return p1.first < p2.first; });
     nic_devices_.clear();
@@ -503,8 +503,8 @@ void RocmSMI::Initialize(uint64_t flags) {
     ss << __PRETTY_FUNCTION__ << " Sort index based on BDF.";
     LOG_DEBUG(ss);
 
-    // Stable sort to keep the order if bdf is equal.
-    std::stable_sort(
+    // Sort index based on BDF (BDF values are unique per device).
+    std::sort(
         dv_to_id.begin(), dv_to_id.end(),
         [](const BDFDevicePair_t& p1, const BDFDevicePair_t& p2) { return p1.first < p2.first; });
     switch_devices_.clear();
