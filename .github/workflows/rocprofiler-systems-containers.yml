@@ -78,6 +78,12 @@ jobs:
         exclude:
           - system: { distro: "debian", version: "12" }
             rocm-version: "6.3"
+          - system: { distro: "rhel", version: "10" }
+            rocm-version: "6.3"
+          - system: { distro: "rhel", version: "10" }
+            rocm-version: "6.4"
+          - system: { distro: "rhel", version: "10" }
+            rocm-version: "7.0"
 
     steps:
       - uses: actions/checkout@v6

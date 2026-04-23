@@ -8,6 +8,7 @@ distros:
   - { distro: "debian", version: "12" }
   - { distro: "rhel", version: "8.10" }
   - { distro: "rhel", version: "9" }
+  - { distro: "rhel", version: "10" }
 
 rocm-versions:
   - "6.3"

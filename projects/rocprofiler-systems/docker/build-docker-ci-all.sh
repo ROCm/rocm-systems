@@ -16,6 +16,7 @@ DISTROS=(
     "debian:12"
     "rhel:8.10"
     "rhel:9"
+    "rhel:10"
 )
 
 ROCM_VERSIONS=("6.3" "6.4" "7.0" "7.1" "7.2")
