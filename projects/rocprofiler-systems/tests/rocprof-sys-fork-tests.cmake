@@ -7,6 +7,7 @@
 #
 # -------------------------------------------------------------------------------------- #
 
+# Some change eto trigger CI
 rocprofiler_systems_add_test(
     NAME fork
     TARGET fork-example
