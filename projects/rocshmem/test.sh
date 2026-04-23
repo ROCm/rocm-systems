@@ -5,12 +5,17 @@ set -eux
 # export GPU_MAX_HW_QUEUES=32
 export HIP_VISIBLE_DEVICES=1,2,5,6,7
 
-LOG_DIR=./tests-results-skip0/logs-heatmap-store-16-fence
+LOG_DIR=./tests-results-skip0/logs-heatmap-waveput-narrow-fence
 mkdir -p $LOG_DIR
 
 # Test cases
+WGGET_TEST="24" 
+WGGET_NBI_TEST="25" 
+
 WGPUT_TEST="26" 
 WGPUT_NBI_TEST="27"
+
+WAVEPUT_TEST="30"
 WAVEPUT_NBI_TEST="31"
 
 TEST_CASE=$WGPUT_TEST
