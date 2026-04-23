@@ -82,6 +82,13 @@ function run_mpirun {
     fi
 }
 
+if [ -n $(rocminfo | grep gfx1201) ];
+then
+  echo "Unit tests disabled in gfx1201"
+  echo "See AIROCSHMEM-393"
+  exit
+fi
+
 # Processing modes
 case $mode in
     all)
