@@ -3,17 +3,13 @@
 
 #pragma once
 
-#include <memory>
-#include <utility>
+#include "library/pmc/device_providers/rocprofiler_sdk/drivers/driver.hpp"
 
 #include <gmock/gmock.h>
 
-#include <rocprofiler-sdk/counters.h>
-#include <rocprofiler-sdk/device_counting_service.h>
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include <cstddef>
+#include <memory>
+#include <utility>
 
 namespace rocprofsys::pmc::drivers::rocprofiler_sdk::testing
 {

@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "common/defines.h"
 #include "library/pmc/collectors/base/collector.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/gpu_perf_counter_traits.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
@@ -118,10 +119,14 @@ make_agent(uint64_t handle, size_t device_type_index, const std::string& name)
 
 struct counter_setup
 {
-    rocprofiler_counter_id_t                             id;
-    const char*                                          name;
-    rocprofiler_counter_record_dimension_instance_info_t dim_instance;
-    rocprofiler_counter_dimension_info_t                 dim_info;
+    rocprofiler_counter_id_t id;
+    const char*              name;
+#if ROCPROFSYS_ROCM_VERSION >= 70000
+    rocprofiler_counter_record_dimension_instance_info_t        dim_instance;
+    rocprofiler_counter_dimension_info_t                        dim_info;
+    const rocprofiler_counter_record_dimension_instance_info_t* dim_instance_ptr =
+        nullptr;
+#endif
 };
 
 static void
@@ -146,6 +151,7 @@ setup_provider_expectations(std::shared_ptr<MockDriver>& mock, uint64_t agent_ha
     // query_counter_info: called by filter_counters and resolve_counter_details
     for(auto& c : counters)
     {
+#if ROCPROFSYS_ROCM_VERSION >= 70000
         c.dim_info = { sizeof(rocprofiler_counter_dimension_info_t), "DIMENSION", 0 };
 
         c.dim_instance                  = {};
@@ -155,12 +161,16 @@ setup_provider_expectations(std::shared_ptr<MockDriver>& mock, uint64_t agent_ha
         c.dim_instance.dimensions_count = 0;
         c.dim_instance.dimensions       = nullptr;
 
+        c.dim_instance_ptr = &c.dim_instance;
+#endif
+
         EXPECT_CALL(
             *mock,
             query_counter_info(
                 ::testing::Field(&rocprofiler_counter_id_t::handle, c.id.handle), _, _))
             .WillRepeatedly([&c](rocprofiler_counter_id_t,
                                  rocprofiler_counter_info_version_id_t, void* info_out) {
+#if ROCPROFSYS_ROCM_VERSION >= 70000
                 auto* info        = static_cast<rocprofiler_counter_info_v1_t*>(info_out);
                 *info             = {};
                 info->id          = c.id;
@@ -173,10 +183,19 @@ setup_provider_expectations(std::shared_ptr<MockDriver>& mock, uint64_t agent_ha
                 info->dimensions_count = 0;
                 info->dimensions       = nullptr;
 
-                const rocprofiler_counter_record_dimension_instance_info_t* dim_ptr =
-                    &c.dim_instance;
                 info->dimensions_instances_count = 1;
-                info->dimensions_instances       = &dim_ptr;
+                info->dimensions_instances       = &c.dim_instance_ptr;
+#else
+                auto* info        = static_cast<rocprofiler_counter_info_v0_t*>(info_out);
+                *info             = {};
+                info->id          = c.id;
+                info->name        = c.name;
+                info->description = "";
+                info->block       = "";
+                info->expression  = "";
+                info->is_constant = 0;
+                info->is_derived  = 0;
+#endif
 
                 return ROCPROFILER_STATUS_SUCCESS;
             });
@@ -339,6 +358,7 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
         });
 
     // query_counter_info for counter 100 and 200
+#if ROCPROFSYS_ROCM_VERSION >= 70000
     for(auto& cs : counters0)
     {
         cs.dim_instance                  = {};
@@ -347,6 +367,7 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
         cs.dim_instance.counter_id       = cs.id.handle;
         cs.dim_instance.dimensions_count = 0;
         cs.dim_instance.dimensions       = nullptr;
+        cs.dim_instance_ptr              = &cs.dim_instance;
     }
     for(auto& cs : counters1)
     {
@@ -356,7 +377,9 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
         cs.dim_instance.counter_id       = cs.id.handle;
         cs.dim_instance.dimensions_count = 0;
         cs.dim_instance.dimensions       = nullptr;
+        cs.dim_instance_ptr              = &cs.dim_instance;
     }
+#endif
 
     EXPECT_CALL(*mock,
                 query_counter_info(
@@ -364,16 +387,25 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
         .WillRepeatedly([&counters0](rocprofiler_counter_id_t,
                                      rocprofiler_counter_info_version_id_t,
                                      void* info_out) {
-            auto* info          = static_cast<rocprofiler_counter_info_v1_t*>(info_out);
-            *info               = {};
-            info->id            = counters0[0].id;
-            info->name          = counters0[0].name;
-            info->description   = "";
-            info->block         = "";
-            info->expression    = "";
-            const auto* dim_ptr = &counters0[0].dim_instance;
+#if ROCPROFSYS_ROCM_VERSION >= 70000
+            auto* info        = static_cast<rocprofiler_counter_info_v1_t*>(info_out);
+            *info             = {};
+            info->id          = counters0[0].id;
+            info->name        = counters0[0].name;
+            info->description = "";
+            info->block       = "";
+            info->expression  = "";
             info->dimensions_instances_count = 1;
-            info->dimensions_instances       = &dim_ptr;
+            info->dimensions_instances       = &counters0[0].dim_instance_ptr;
+#else
+            auto* info        = static_cast<rocprofiler_counter_info_v0_t*>(info_out);
+            *info             = {};
+            info->id          = counters0[0].id;
+            info->name        = counters0[0].name;
+            info->description = "";
+            info->block       = "";
+            info->expression  = "";
+#endif
             return ROCPROFILER_STATUS_SUCCESS;
         });
 
@@ -383,16 +415,25 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
         .WillRepeatedly([&counters1](rocprofiler_counter_id_t,
                                      rocprofiler_counter_info_version_id_t,
                                      void* info_out) {
-            auto* info          = static_cast<rocprofiler_counter_info_v1_t*>(info_out);
-            *info               = {};
-            info->id            = counters1[0].id;
-            info->name          = counters1[0].name;
-            info->description   = "";
-            info->block         = "";
-            info->expression    = "";
-            const auto* dim_ptr = &counters1[0].dim_instance;
+#if ROCPROFSYS_ROCM_VERSION >= 70000
+            auto* info        = static_cast<rocprofiler_counter_info_v1_t*>(info_out);
+            *info             = {};
+            info->id          = counters1[0].id;
+            info->name        = counters1[0].name;
+            info->description = "";
+            info->block       = "";
+            info->expression  = "";
             info->dimensions_instances_count = 1;
-            info->dimensions_instances       = &dim_ptr;
+            info->dimensions_instances       = &counters1[0].dim_instance_ptr;
+#else
+            auto* info        = static_cast<rocprofiler_counter_info_v0_t*>(info_out);
+            *info             = {};
+            info->id          = counters1[0].id;
+            info->name        = counters1[0].name;
+            info->description = "";
+            info->block       = "";
+            info->expression  = "";
+#endif
             return ROCPROFILER_STATUS_SUCCESS;
         });
 

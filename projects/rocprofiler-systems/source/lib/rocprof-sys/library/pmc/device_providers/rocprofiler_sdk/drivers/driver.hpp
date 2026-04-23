@@ -3,11 +3,22 @@
 
 #pragma once
 
+#include "common/defines.h"
+
 #include <cstddef>
 #include <memory>
 
 #include <rocprofiler-sdk/context.h>
-#include <rocprofiler-sdk/counter_config.h>
+#if ROCPROFSYS_ROCM_VERSION >= 70000
+#    include <rocprofiler-sdk/counter_config.h>
+#else
+#    include <rocprofiler-sdk/profile_config.h>
+using rocprofiler_counter_config_id_t        = rocprofiler_profile_config_id_t;
+using rocprofiler_counter_record_t           = rocprofiler_record_counter_t;
+using rocprofiler_device_counting_agent_cb_t = rocprofiler_agent_set_profile_callback_t;
+using rocprofiler_device_counting_service_cb_t =
+    rocprofiler_device_counting_service_callback_t;
+#endif
 #include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/device_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -81,8 +92,13 @@ struct driver
         rocprofiler_agent_id_t agent_id, rocprofiler_counter_id_t* counters_list,
         size_t counters_count, rocprofiler_counter_config_id_t* config_id)
     {
+#if ROCPROFSYS_ROCM_VERSION >= 70000
         return rocprofiler_create_counter_config(agent_id, counters_list, counters_count,
                                                  config_id);
+#else
+        return rocprofiler_create_profile_config(agent_id, counters_list, counters_count,
+                                                 config_id);
+#endif
     }
 
     static rocprofiler_status_t configure_device_counting_service(

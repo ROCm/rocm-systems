@@ -353,7 +353,7 @@ config_settings(const std::shared_ptr<settings>& _config)
         "sampling). Comma-separated counter names or 'all'. Independent from "
         "ROCPROFSYS_ROCM_EVENTS which controls kernel dispatch counters. "
         "If empty, no PMC sampling is performed",
-        "", "rocm", "hardware_counters", "pmc");
+        "", "rocm", "hardware_counters", "pmc", "process_sampling");
 
     _skip_domains.emplace("kernel_dispatch");
     _skip_domains.emplace("page_migration");

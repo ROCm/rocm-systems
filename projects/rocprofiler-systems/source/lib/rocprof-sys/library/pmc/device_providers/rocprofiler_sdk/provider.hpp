@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/agent.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/device.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
@@ -170,9 +171,15 @@ private:
         result.reserve(supported.size());
         std::copy_if(supported.begin(), supported.end(), std::back_inserter(result),
                      [&](const rocprofiler_counter_id_t& counter_id) {
+#if ROCPROFSYS_ROCM_VERSION >= 70000
                          rocprofiler_counter_info_v1_t info{};
                          const auto status = m_driver_api->query_counter_info(
                              counter_id, ROCPROFILER_COUNTER_INFO_VERSION_1, &info);
+#else
+                         rocprofiler_counter_info_v0_t info{};
+                         const auto status = m_driver_api->query_counter_info(
+                             counter_id, ROCPROFILER_COUNTER_INFO_VERSION_0, &info);
+#endif
 
                          if(status != ROCPROFILER_STATUS_SUCCESS || info.name == nullptr)
                          {
@@ -195,6 +202,7 @@ private:
             return str != nullptr ? std::string{ str } : std::string{};
         };
 
+#if ROCPROFSYS_ROCM_VERSION >= 70000
         auto build_dims =
             [](const rocprofiler_counter_record_dimension_instance_info_t* dim_inst) {
                 auto dims = std::vector<dimension_position>{};
@@ -208,9 +216,11 @@ private:
                                });
                 return dims;
             };
+#endif
 
         for(const auto& cid : counter_ids)
         {
+#if ROCPROFSYS_ROCM_VERSION >= 70000
             rocprofiler_counter_info_v1_t cinfo{};
             const auto                    status = m_driver_api->query_counter_info(
                 cid, ROCPROFILER_COUNTER_INFO_VERSION_1, &cinfo);
@@ -236,6 +246,21 @@ private:
                                return make_meta(dim_inst->instance_id,
                                                 build_dims(dim_inst));
                            });
+#else
+            rocprofiler_counter_info_v0_t cinfo{};
+            const auto                    status = m_driver_api->query_counter_info(
+                cid, ROCPROFILER_COUNTER_INFO_VERSION_0, &cinfo);
+            if(status != ROCPROFILER_STATUS_SUCCESS || cinfo.name == nullptr) continue;
+
+            result.push_back(counter_metadata{ cid.handle,
+                                               std::string{ cinfo.name },
+                                               safe_str(cinfo.description),
+                                               safe_str(cinfo.block),
+                                               safe_str(cinfo.expression),
+                                               static_cast<bool>(cinfo.is_constant),
+                                               static_cast<bool>(cinfo.is_derived),
+                                               {} });
+#endif
         }
 
         return result;
