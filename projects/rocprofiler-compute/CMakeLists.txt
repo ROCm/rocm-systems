@@ -499,13 +499,13 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-# RDNA3.5 memory chart CLI (Rich) — no GPU required
+# Memory chart CLI renderers (gfx9 plotille + gfx11 Rich) — no GPU required
 add_test(
-    NAME test_mem_chart_gfx11
+    NAME test_mem_chart
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_mem_chart_gfx11.xml ${COV_OPTION}
-        tests/test_mem_chart_gfx11.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_mem_chart.xml ${COV_OPTION} tests/test_mem_chart.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -661,7 +661,7 @@ if(${ENABLE_COVERAGE})
         test_num_xcds_spec_class
         test_num_xcds_cli_output
         test_utils
-        test_mem_chart_gfx11
+        test_mem_chart
         test_roofline_calc_ai_analyze
         test_data_imputation
         test_autogen_config

@@ -741,7 +741,6 @@ def format_table_output(
         if gpu_arch and gpu_arch.startswith("gfx115"):
             content += (
                 mem_chart_gfx11.plot_mem_chart(
-                    "",
                     args.normal_unit,
                     mem_data,
                     chart_title=_gfx115_mem_chart_heading(None, args.normal_unit),
@@ -749,9 +748,7 @@ def format_table_output(
                 + "\n"
             )
         else:
-            content += (
-                mem_chart_gfx9.plot_mem_chart("", args.normal_unit, mem_data) + "\n"
-            )
+            content += mem_chart_gfx9.plot_mem_chart(args.normal_unit, mem_data) + "\n"
     else:
         content += (
             get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
@@ -963,7 +960,6 @@ def show_all(
             heading = _gfx115_mem_chart_heading(panel, args.normal_unit)
             panel_content += (
                 mem_chart_gfx11.plot_mem_chart(
-                    "",
                     args.normal_unit,
                     mem_chart_data,
                     chart_title=heading,
