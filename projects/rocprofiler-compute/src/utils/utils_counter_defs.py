@@ -8,8 +8,6 @@ imported by both the main runtime code and lightweight tooling such as
 ``tools/validate_sets_metric_ids.py``.
 """
 
-from __future__ import annotations
-
 import re
 
 # ---------------------------------------------------------------------------

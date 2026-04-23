@@ -15,8 +15,6 @@ Metric ID format X.Y.Z:
   Z = 0-indexed position of the metric within that table's ordered metric dict
 """
 
-from __future__ import annotations
-
 import sys
 from collections import defaultdict
 from pathlib import Path
