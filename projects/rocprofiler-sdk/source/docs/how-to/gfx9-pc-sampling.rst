@@ -42,7 +42,7 @@ The following table lists the stall reasons:
     - The sampled wave is waiting at a barrier for other waves in the workgroup to reach there.
 
   * - ARBITER_NOT_WIN
-    - The sampled wave isn't selected to issue instructions. This typically occurs when multiple waves compete to issue instructions of the same type (served by the same execution pipeline) at the same time. Only one wave wins the arbitration. For more details on wave arbitration, see `Scheduler documentation <https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/conceptual/pipeline-descriptions.html#scheduler>`_.
+    - The sampled wave isn't selected to issue instructions. This typically occurs when multiple waves compete to issue instructions of the same type (served by the same execution pipeline) simultaneously. Only one wave wins the arbitration. For more information about wave arbitration, see `Scheduler documentation <https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/conceptual/pipeline-descriptions.html#scheduler>`_.
 
   * - ARBITER_WIN_EX_STALL
     - The wave was ready to issue an instruction after being selected by the arbiter. However, the execution pipeline backpressured the wave, preventing it from issuing instructions because it could not accept more instructions.
