@@ -42,7 +42,7 @@ docs/
 │   ├── agentic-mode.md      ← how the agent brain works at runtime
 │   ├── python-api.md        ← `perfxpert.api.*` — 1:1 mirror of the agent MCP tools
 │   ├── backends.md          ← perfxpert-code dispatch matrix
-│   └── assets/{gifs,tapes}/ ← VHS demo recordings
+│   └── assets/gifs/         ← checked-in guide demo recordings
 ├── integration/
 │   ├── README.md
 │   └── mcp-server.md        ← the MCP wire surface (56 tools)

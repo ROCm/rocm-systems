@@ -12,6 +12,11 @@ PerfXpert's analysis can run in two modes:
 This guide explains how to select between them, what changes in the
 output, and how provider selection works.
 
+The same agent/session machinery powers `perfxpert analyze`,
+`perfxpert.api.*`, the 8 agent MCP tools exposed by `perfxpert-mcp`,
+and every `perfxpert-code` backend. The entry surface changes the
+shell/UI and config plumbing, not the analysis brain.
+
 Cross-links:
 - [Agent hierarchy](../architecture/agent-hierarchy.md) — who calls
   the LLM and who doesn't
@@ -111,7 +116,7 @@ Behavior differences vs air-gap:
 *The five primary providers come directly from the CLI's `--llm`
 registry: `anthropic`, `openai`, `ollama`, `private`, `opencode`.
 The CLI also accepts `claude-code` as a compatibility alias for the
-bundled opencode backend.*
+patched opencode backend used by `perfxpert-code`.*
 
 `PROVIDER_REGISTRY` is defined in `perfxpert/agents/runtime.py` (with a
 hard-coded fallback there; `build_session` imports the richer copy
@@ -181,9 +186,11 @@ Two CLI surfaces drive the same agent runtime:
   source directory, emits a single report (JSON / markdown / webview).
   Use `--llm <provider>` to pick the provider; omit `--llm` to run
   air-gap.
-- `perfxpert-code ...` — TUI (bundled AMD-themed opencode). Same
-  runtime under the hood; `perfxpert-code run -m <message>` is the
-  non-interactive equivalent for scripts.
+- `perfxpert-code ...` — interactive launcher. Plain `perfxpert-code`
+  uses the patched opencode path; `perfxpert-code claude|gemini|codex`
+  stages the same prompt/MCP surface into the user's native backend.
+  `perfxpert-code run -m <message>` is the non-interactive equivalent
+  when the patched opencode path is in use.
 
 Roughly:
 
@@ -194,10 +201,10 @@ Roughly:
 | Drive an optimization session conversationally | `perfxpert-code` |
 | Drive an optimization session non-interactively | `perfxpert-code run -m "optimize hot kernel"` |
 
-Under the hood, both CLIs call `build_session()` and then one of the
-tier-0/tier-1 `run_*` methods. The **only** difference is whether the
-output is rendered as a report (batch mode) or streamed into a TUI
-(opencode mode).
+Under the hood, the batch CLI, Python API, MCP wrappers, and
+`perfxpert-code` backends all funnel into `build_session()` and the
+same `run_*` methods. The differences are output rendering and whether
+an external TUI talks to those runners through MCP.
 
 ## When to use which
 

@@ -7,10 +7,11 @@ AI-powered AMD ROCm GPU trace analysis.
 ### Prerequisites
 
 - Python 3.10+
-- `bun` on PATH if you want the bundled AMD-branded `opencode` build
-  produced during `pip install`. The build hook does not auto-download
-  bun; if bun is missing, install still succeeds and only the bundled
-  launcher build is skipped. See
+- `bun` on PATH if you want the patched `opencode` build produced during
+  `pip install`. Packaged installs bundle that build; source/editable
+  checkouts can rebuild the same pinned fork locally. The build hook
+  does not auto-download bun; if bun is missing, install still succeeds
+  and only the patched launcher build is skipped. See
   [docs/guides/getting-started.md](docs/guides/getting-started.md)
   for the exact install contract and opt-out envs.
 - (Optional) `claude`, `codex`, or `gemini` CLI on PATH for multi-backend dispatch.
@@ -64,9 +65,9 @@ measurements.
 
 `[all]` pulls in the optional LLM providers (`anthropic`, `openai`,
 `litellm`) plus `rich` for pretty terminal output. That covers the
-hosted/local SDK-backed provider paths; the bundled `opencode` path is
-validated separately through the launcher/build flow. Pick a provider
-with `--llm <name>`.
+hosted/local SDK-backed provider paths; the default patched `opencode`
+path is validated separately through the launcher/build flow. Pick a
+provider with `--llm <name>`.
 
 ### Run
 
@@ -76,7 +77,7 @@ with `--llm <name>`.
 perfxpert analyze -i trace.db --llm anthropic --format webview -o report.html
 
 # SKIP-SAMPLE — launches interactive TUI
-# Interactive agentic TUI (AMD-branded bundled opencode)
+# Interactive agentic TUI (default patched opencode path)
 perfxpert-code
 
 # SKIP-SAMPLE — multi-backend dispatch (requires the native CLI installed)
@@ -131,16 +132,18 @@ perfxpert doctor
 ```
 
 Core analysis is self-contained — `pip install perfxpert` handles all
-profiling + recommendation features. `perfxpert-code` ships an
-AMD-branded opencode binary bundled directly into the wheel: the
-pip-install build hook compiles it from the pinned `sst/opencode`
-submodule + our patch series (`experimental/python/perfxpert/.patches/`)
-during install, provided `bun` is on PATH.
+profiling + recommendation features. `perfxpert-code` defaults to the
+patched opencode path: packaged installs use the bundled AMD-branded
+binary, while source/editable checkouts can rebuild the same pinned
+`sst/opencode` fork locally from
+`experimental/python/perfxpert/opencode` plus our patch series
+(`experimental/python/perfxpert/.patches/`) when `bun` is on PATH.
 
 If `bun` is missing, the install still succeeds (library + analyze + MCP
-paths all work); `perfxpert-code` itself won't launch until you install
-bun and rerun the install. As a last resort, set
-`PERFXPERT_OPENCODE_PATH` to point at a pre-built opencode binary.
+paths all work). Packaged installs then miss the bundled patched build,
+and source/editable checkouts cannot rebuild the repo-local patched
+binary until bun is available. As a last resort, set
+`PERFXPERT_OPENCODE_PATH` to point at a patched opencode binary.
 
 Advanced: for tightly-sandboxed CI where neither bun nor network access
 is available, set `PERFXPERT_SKIP_BUNDLED_BUILD=1` before
@@ -164,7 +167,7 @@ an [RFC](docs/rfcs/README.md).
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `PERFXPERT_OPENCODE_PATH` | system PATH | Override path to opencode binary; must point to an existing file or launcher raises immediately |
+| `PERFXPERT_OPENCODE_PATH` | system PATH | Override path to opencode binary; point this at a patched build if you need the full perfxpert gate behavior |
 
 The agentic runtime is the sole execution path; no feature flag
 toggles it. Setting any of the following has no effect:
@@ -223,4 +226,6 @@ See [CHANGELOG.md](CHANGELOG.md) for the removal history.
 
 ## Licensing
 
-MIT. opencode is also MIT — bundled into the wheel via the build hook (`setup.py`) from the pinned upstream submodule.
+MIT. opencode is also MIT — the packaged build bundles a patched binary
+from the pinned upstream submodule, and source/editable checkouts use
+that same fork via the local submodule build path.

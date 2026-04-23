@@ -1,32 +1,25 @@
 # PerfXpert — Known Issues
 
-## Tool gate is prompt-layer only — not a mechanical hook
+## Codex gate is prompt-layer only
 
-The `0020-perfxpert-tool-gate.patch` and the bracketed `[MUST BE CALLED FIRST
-FOR GPU-PERF QUERIES]` prefix in `mcp_server/server.py::_fn_to_tool_schema`
-are a **weaker-variant** solution to the cycle-4 B1 blocker (LLMs calling
-`bash`/`read` before `perfxpert_intent_classify`). The brief asked for a
-pre-turn tool-availability hook (only expose `perfxpert_*` for the first 2
-turns) OR a post-turn rejection hook (rewrite non-perfxpert `tool_calls`
-into a synthetic retry). Implementing either requires intercepting
-opencode's session message flow in `packages/opencode/src/session/processor.ts`
-and `prompt.ts`, whose `plugin.trigger(...)` hook points are currently
-fire-and-forget — a real blocking hook inside the opencode TypeScript
-runtime was outside the time budget for cycle-4.
+`perfxpert-code codex` stages the same prompt cache and MCP surface as
+the other backends, but its gate remains prompt-layer-only. As of April
+2026 Codex's native `PreToolUse` surface intercepts Bash only, not MCP /
+Write / other tool calls, so it cannot satisfy PerfXpert's "block every
+non-perfxpert tool until `intent_classify` returns" contract.
 
-**Known-limitation:** the current patch does not mechanically reject a
-non-perfxpert first tool call; an adversarial LLM can still call `bash`
-first. Live-scenario D (cycle-4 validation) showed the prompt+bracket
-combo moves the needle but does not guarantee 100% compliance.
+Current backend split:
 
-**Follow-up:** track a real pre-/post-turn gate at the opencode
-TypeScript layer. The cleanest attach point is
-`packages/opencode/src/session/prompt.ts` around the `plugin.trigger(
-"tool.execute.before", ...)` invocation (lines 414-419 and 455-460) —
-extending that hook to allow a plugin to return `{ block: true, retryWith:
-<message> }` would give us the rejection semantics the brief described.
-Proposed env var: `PERFXPERT_DISABLE_TOOL_GATE=1` (already documented in
-the prompt text for user-facing discoverability).
+- **Patched opencode path** — mechanical gate via fork patch 0020
+  (`{block, retryWith}` in `tool.execute.before`)
+- **Claude Code** — mechanical gate via native `PreToolUse`
+- **Gemini CLI** — mechanical gate via `allowedTools` restriction +
+  runtime lift
+- **Codex CLI** — prompt-layer rejection language in
+  `.perfxpert/AGENTS.md`
+
+If you need a hard pre-tool-call gate today, use the default patched
+opencode path, Claude Code, or Gemini CLI instead of Codex.
 
 ## LLM end-to-end smoke test may fail with 429 insufficient_quota
 
@@ -105,12 +98,12 @@ without being ported.
 
 ## Opencode fork / bundling
 
-- **`apply-opencode-patches.sh` is not yet wired into the wheel build.**
-  The patch apply step is manual: run
-  `bash experimental/python/perfxpert/scripts/apply-opencode-patches.sh`
-  before bundling the opencode binary. Automating this requires `bun`
-  available on the build host (for opencode's post-patch type-check);
-  that toolchain setup is deferred to the wheel-build PR.
+- **Patch application is wired into the current build/install path.**
+  The setup/build flow applies `.patches/*.patch` to the pinned
+  `opencode` submodule and builds the patched binary automatically when
+  prerequisites are present. `perfxpert-code install-patches` is the
+  rebuild helper for source/editable checkouts; packaged installs prefer
+  the bundled result.
 
 - **The opencode submodule (`.gitmodules` pin `v1.4.11`) is MIT.**
   All customizations are carried in `.patches/*.patch`. Do NOT commit
@@ -125,11 +118,11 @@ without being ported.
   `PERFXPERT_LLM_FALLBACK_CHAIN` to cascade across providers when
   rate-limited.
 
-- **Forced tool priority is LLM-dependent.**
-  Patch `0010-perfxpert-tool-priority.patch` and the MCP description
-  hint strongly bias the LLM toward `intent_classify` first, but a
-  determined model can still skip. Measurement + feedback is
-  tracked as future telemetry work.
+- **Upstream-opencode fallback weakens the opencode gate.**
+  If you force `PERFXPERT_OPENCODE_PATH` to an upstream `opencode`
+  binary, or fall through to one on `PATH`, the fork-only
+  `{block, retryWith}` behavior is unavailable. The launcher warns in
+  that mode and falls back to prompt guidance only.
 
 ## Docs-audit baseline
 

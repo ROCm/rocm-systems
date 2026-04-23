@@ -1,8 +1,10 @@
 # Multi-Backend Launcher (`perfxpert-code <backend>`)
 
-`perfxpert-code` is multi-backend. The default `perfxpert-code`
-invocation still launches the AMD-branded bundled opencode (unchanged).
-In addition, each supported backend has a
+`perfxpert-code` is multi-backend. Plain `perfxpert-code` launches the
+patched opencode path: packaged installs prefer the bundled
+AMD-branded binary, while source/editable checkouts prefer a locally
+built patched binary from the pinned `opencode` submodule. In
+addition, each supported backend has a
 subcommand that registers the `perfxpert-mcp` server in the backend's
 native config, stages an `AGENTS.md`-equivalent rendered prompt,
 installs a pre-tool-call gate hook, and then execs the backend's
@@ -42,15 +44,16 @@ write the correct MCP registration + gate hook + prompt cache for
 whichever backend the user chose, then exec the native binary — the
 perfxpert tool discipline travels with the install, not the TUI.
 
-The bundled opencode remains the recommended default: it ships
-pre-patched with the STRICT-TOOL-DISCIPLINE stanza, so no user-side
-install is required for the tool-priority gate to work.
+The patched opencode path remains the recommended default. In wheels it
+ships bundled; in source checkouts it can be rebuilt from the pinned
+submodule. That path carries the STRICT-TOOL-DISCIPLINE stanza and the
+fork-only opencode gate hook without any extra backend install.
 
 ## Backend comparison
 
 | Backend | Subcommand | LLM | Config location | Scope | Gate hook | MCP tool prefix |
 |---------|-----------|-----|-----------------|-------|-----------|-----------------|
-| **opencode** (default, bundled) | `perfxpert-code` | Any (via opencode provider) | `~/.cache/perfxpert/opencode/opencode.json` | Per-bundle | Patched system prompt + fork patches 0010, 0020 | `perfxpert_*` |
+| **opencode** (default patched path) | `perfxpert-code` | Any (via opencode provider) | `~/.cache/perfxpert/opencode/opencode.json` | Per-bundle / per-checkout | Patched system prompt + fork patches 0010, 0020 | `perfxpert_*` |
 | **Claude Code** | `perfxpert-code claude` | Anthropic Claude | `./.mcp.json` + `./CLAUDE.local.md` + `./.claude/settings.json` | Project | Native `PreToolUse` hook (event-based lift) | `mcp__perfxpert__*` |
 | **Gemini CLI** | `perfxpert-code gemini` | Google Gemini | `~/.gemini/settings.json` + `./.perfxpert/AGENTS.md` | User (MCP) + project (prompt) | `allowedTools` restriction (event-based lift) | `mcp_perfxpert_*` |
 | **Codex CLI** | `perfxpert-code codex` | OpenAI | `~/.codex/config.toml` (TOML: trust + MCP) + `./.perfxpert/AGENTS.md` | User (MCP + trust) + project (prompt) | Prompt-layer-only (Codex `PreToolUse` is Bash-only — see decision record) | `mcp_perfxpert_*` |
@@ -62,20 +65,22 @@ directory is silent. Changing the file set (e.g. adding
 
 ## Install recipes
 
-### Default: bundled opencode
+### Default: patched opencode path
 
 ![perfxpert-code](assets/gifs/14-perfxpert-code.gif)
 
-*`perfxpert-code` from the bundled AMD-branded launcher, with the
-interactive TUI and MCP wiring ready to go.*
+*`perfxpert-code` on the default patched path, with the interactive TUI
+and MCP wiring ready to go.*
 
-No subcommand, no extra install. The bundled opencode ships with AMD
-branding + the STRICT-TOOL-DISCIPLINE stanza + AMD red palette pre-applied;
-the launcher spawns the bundled binary with `perfxpert-mcp`
-already wired into its config.
+No subcommand, no extra backend install. In packaged installs the
+launcher uses the bundled AMD-branded patched binary. In source/editable
+checkouts it prefers a locally built patched binary from
+`experimental/python/perfxpert/opencode`. Only when neither patched
+copy exists does it fall back to an upstream `opencode` on disk, with a
+warning and without the fork-only gate behavior.
 
 ```bash
-# SKIP-SAMPLE — requires the bundled opencode binary on PATH
+# SKIP-SAMPLE — requires a patched opencode path (repo-local build or bundled wheel)
 perfxpert-code
 ```
 
@@ -86,9 +91,8 @@ prompt at `.perfxpert/AGENTS.md`, writes a pointer at
 `CLAUDE.local.md` (at the project root), and installs the native
 `PreToolUse` hook inside `.claude/settings.json`.
 
-*Claude Code support is implemented in-tree and covered by the backend
-adapter plus dispatcher tests. A refreshed launch GIF is still a
-separate docs asset task.*
+Claude Code support is implemented in-tree and covered by the backend
+adapter plus dispatcher tests.
 
 ```bash
 # SKIP-SAMPLE — requires claude CLI ≥ 2.1.59 on PATH
@@ -117,9 +121,8 @@ perfxpert under `mcpServers`. The adapter **never** touches the
 user's `GEMINI.md` — list-append in `context.fileName` is the
 supported extension point.
 
-*Gemini support is implemented in-tree and covered by the backend
-adapter plus dispatcher tests. A refreshed launch GIF is still a
-separate docs asset task.*
+Gemini support is implemented in-tree and covered by the backend
+adapter plus dispatcher tests.
 
 ```bash
 # SKIP-SAMPLE — requires gemini CLI ≥ 0.2.0 on PATH
@@ -135,9 +138,8 @@ trusted via the `[projects."<abs-cwd>"]` TOML table (required — Codex
 refuses to run agents in untrusted projects). Writes preserve
 comments + key ordering via lazy-imported `tomlkit`.
 
-*Codex support is implemented in-tree and covered by the backend
-adapter plus dispatcher tests. A refreshed launch GIF is still a
-separate docs asset task.*
+Codex support is implemented in-tree and covered by the backend
+adapter plus dispatcher tests.
 
 ```bash
 # SKIP-SAMPLE — requires codex CLI ≥ 0.7.0 on PATH
@@ -240,7 +242,7 @@ owned flags before any backend-native args:
 | `--dry-run` | Run `adapter.plan()`, print the actions that would run, skip every write, skip `spawn()`. No consent prompt fires. |
 | `--quiet` | Suppress the AMD banner and the per-step install progress log. Errors still go to stderr. |
 | `--force` | Bypass the recursion guard (refuse-if-already-inside-a-perfxpert-session) and the clobber guard. |
-| `--allow-agents-md-append` | Opt in to appending the rendered prompt into a tracked `CLAUDE.md` / `GEMINI.md` / `AGENTS.md`. Default is to write a separate cache file. |
+| `--allow-agents-md-append` | Opt in to appending the rendered prompt into a tracked prompt file when a backend supports that flow. Today this matters for Claude/Codex `AGENTS.md`-family files; Gemini always stages `.perfxpert/AGENTS.md` and never edits `GEMINI.md`. |
 
 Dispatcher flags are consumed **greedily from the front** of argv;
 the first non-dispatcher token ends the consume and the remainder is

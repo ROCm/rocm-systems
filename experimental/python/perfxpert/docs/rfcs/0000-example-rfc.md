@@ -60,7 +60,7 @@ n/a (additive)
 
 ## Prior art
 
-Vendor GPU thermal sensor usage in profiler reports.
+AMD SMI / ROCm SMI thermal telemetry and existing ROCm monitoring flows.
 
 ## Approval checklist
 

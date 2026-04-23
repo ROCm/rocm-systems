@@ -36,7 +36,8 @@ were removed during the agentic refactor, so nothing here is optional.
 
 ### Conversational mode on `perfxpert analyze`
 
-→ **Switch to `perfxpert-code`**, which is the AMD-themed bundled opencode TUI.
+→ **Switch to `perfxpert-code`**, which uses the default AMD-themed patched
+opencode path for the conversational TUI.
 Calls into the same agent runtime as batch mode, just wrapped in a conversational UI.
 
 ### Conversational mode with session resume

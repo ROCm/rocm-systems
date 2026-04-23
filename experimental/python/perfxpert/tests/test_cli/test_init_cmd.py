@@ -121,6 +121,17 @@ def test_init_returns_rc0_on_clean_run(tmp_path, monkeypatch) -> None:
     assert rc == 0
 
 
+def test_init_detects_ollama_via_new_local_url_env(monkeypatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("PERFXPERT_LLM_PRIVATE_URL", raising=False)
+    monkeypatch.delenv("PRIVATE_LLM_ENDPOINT", raising=False)
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.setenv("PERFXPERT_LLM_LOCAL_URL", "http://localhost:11434")
+
+    assert init_cmd._detect_configured_provider() == "ollama"
+
+
 def test_init_returns_rc1_on_unwritable_config_path(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(init_cmd, "_detect_gpu", lambda override=None: None)
 

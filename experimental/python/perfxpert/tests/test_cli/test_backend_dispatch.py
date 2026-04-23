@@ -412,6 +412,55 @@ def test_recursion_guard_env_set_before_spawn(
     assert captured_env.get(RECURSION_GUARD_ENV) == "claude"
 
 
+def test_successful_install_logs_launch_handoff(
+    capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import perfxpert.cli._backend.codex as codex_mod
+
+    def _fake_install(self, cwd, **kw):
+        from perfxpert.cli._backend.protocol import InstallReport
+
+        return InstallReport(backend=self.name)
+
+    def _fake_spawn(self, argv, env, cwd):
+        return 0
+
+    monkeypatch.setattr(codex_mod.CodexAdapter, "install", _fake_install)
+    monkeypatch.setattr(codex_mod.CodexAdapter, "spawn", _fake_spawn)
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+    monkeypatch.delenv(RECURSION_GUARD_ENV, raising=False)
+
+    rc = _backend_dispatch._exec_backend("codex", [])
+
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "MCP verified; launching codex" in err
+
+
+def test_quiet_successful_install_suppresses_launch_handoff(
+    capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import perfxpert.cli._backend.codex as codex_mod
+
+    def _fake_install(self, cwd, **kw):
+        from perfxpert.cli._backend.protocol import InstallReport
+
+        return InstallReport(backend=self.name)
+
+    def _fake_spawn(self, argv, env, cwd):
+        return 0
+
+    monkeypatch.setattr(codex_mod.CodexAdapter, "install", _fake_install)
+    monkeypatch.setattr(codex_mod.CodexAdapter, "spawn", _fake_spawn)
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+    monkeypatch.delenv(RECURSION_GUARD_ENV, raising=False)
+
+    rc = _backend_dispatch._exec_backend("codex", ["--quiet"])
+
+    assert rc == 0
+    assert "MCP verified; launching codex" not in capsys.readouterr().err
+
+
 def test_help_passthrough_does_not_install(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

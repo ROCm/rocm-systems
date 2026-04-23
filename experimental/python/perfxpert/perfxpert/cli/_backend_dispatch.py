@@ -170,6 +170,12 @@ def _run_adapter(adapter, remaining_argv: list[str]) -> int:
 
     env = dict(os.environ)
     env[RECURSION_GUARD_ENV] = adapter.name
+    if not flags.quiet:
+        sys.stderr.write(
+            f"perfxpert-code {adapter.name}: MCP verified; launching "
+            f"{adapter.binary_name} ...\n"
+        )
+        sys.stderr.flush()
     return adapter.spawn(flags.remaining, env, Path.cwd())
 
 

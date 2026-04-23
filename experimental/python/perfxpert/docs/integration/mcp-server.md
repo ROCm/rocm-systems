@@ -1,10 +1,10 @@
 # MCP Server (`perfxpert-mcp`)
 
-**If you use `perfxpert-code claude`, `perfxpert-code codex`, or
-`perfxpert-code gemini`, the MCP registration is done automatically
-— see [../guides/backends.md](../guides/backends.md). The manual
-integration snippets below remain for users running `claude`,
-`codex`, or `gemini` directly.**
+**If you use plain `perfxpert-code` or `perfxpert-code claude|codex|gemini`,
+the MCP registration is handled automatically — see
+[../guides/backends.md](../guides/backends.md). The manual integration
+snippets below remain for users running `claude`, `codex`, or `gemini`
+directly.**
 
 PerfXpert ships a stdio-transport MCP server (`perfxpert-mcp`) that
 re-exposes every `READ_ONLY` tool in `perfxpert.tools.*` to any
@@ -25,12 +25,13 @@ Cross-links:
 perfxpert-mcp
 ```
 
-The entry point is registered in `pyproject.toml` (`perfxpert-mcp`). It
-requires the optional `mcp` Python package:
+The entry point is registered in `pyproject.toml` (`perfxpert-mcp`).
+Current wheels/install-from-source builds already depend on the Python
+`mcp` package, so no separate extra is required:
 
 ```bash
 # SKIP-SAMPLE — pip install is in the destructive-skip list
-pip install "perfxpert[mcp]"
+pip install perfxpert
 ```
 
 Under `PERFXPERT_AIRGAP=1`, the server still serves cached READ_ONLY
@@ -518,7 +519,8 @@ Send `initialize` → `tools/list` → `tools/call` in that order. See the
 ## Launching via `perfxpert-code <backend>` (multi-backend dispatch)
 
 The `perfxpert-code` launcher supports three third-party agent
-backends in addition to the bundled opencode TUI. Each subcommand
+backends in addition to the default patched opencode path. Each
+subcommand
 installs perfxpert MCP + AGENTS.md + a server-side tool-priority
 gate hook, then execs the backend binary for an interactive
 session:
@@ -602,7 +604,7 @@ The launcher mitigates this in three layers:
 ### `perfxpert-code install-patches` (deprecated)
 
 The `install-patches` subcommand is kept as a backward-compat
-alias for the bundled opencode build step. It now prints a
+alias for the patched opencode build step. It now prints a
 yellow-stderr deprecation notice. Silence with
 `export PERFXPERT_SILENCE_DEPRECATION=1`.
 

@@ -184,7 +184,7 @@ _PROVIDER_ENV_ORDER = [
     ("anthropic", ("ANTHROPIC_API_KEY", "PERFXPERT_LLM_ANTHROPIC_KEY")),
     ("openai", ("OPENAI_API_KEY", "PERFXPERT_LLM_OPENAI_KEY")),
     ("private", ("PERFXPERT_LLM_PRIVATE_URL", "PRIVATE_LLM_ENDPOINT")),
-    ("ollama", ("OLLAMA_HOST",)),
+    ("ollama", ("PERFXPERT_LLM_LOCAL_URL", "OLLAMA_HOST")),
 ]
 
 

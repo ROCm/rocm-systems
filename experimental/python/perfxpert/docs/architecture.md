@@ -6,8 +6,11 @@ design spec (kept in the contributor's working copy)._
 ## High-level shape
 
 perfxpert is a **multi-agent system** for GPU performance analysis on AMD
-ROCm. At the top there's a batch CLI (`perfxpert analyze`) and an
-interactive wrapper (`perfxpert-code`). Both drive the same agent runtime.
+ROCm. The shipped entry surfaces are the batch CLI (`perfxpert analyze`),
+the interactive launcher (`perfxpert-code`), the stdio MCP server
+(`perfxpert-mcp`), and the in-process Python API (`perfxpert.api.*`).
+All four resolve into the same session/runtime layer in
+`perfxpert.agents.runtime`.
 
 ## Agents (spec §2)
 
@@ -27,7 +30,9 @@ See [architecture/agent-hierarchy.md](architecture/agent-hierarchy.md) for the t
 
 ## Tools (spec §3 + Appendix A)
 
-~45 deterministic Python functions split into two MCP-exposure classes:
+perfxpert ships dozens of deterministic Python tools. The current MCP
+surface exposes **56 READ_ONLY tools**; side-effecting tools remain
+in-process only. The split is:
 
 - **READ_ONLY** — safe for MCP (agent lookups, analysis, classification)
 - **EXECUTION** — in-process only (profile.run, compile.build, patch.apply)
@@ -74,12 +79,14 @@ user  →  perfxpert analyze -i trace.db
         → formatters → text / json / markdown / html
 ```
 
-### Interactive
+### Interactive / backend TUIs
 
 ```
-user  →  perfxpert-code  (bundled opencode)
-        → opencode session with AMD-themed config
-        → perfxpert MCP server exposes READ_ONLY tools
+user  →  perfxpert-code
+        → default patched opencode path
+          (repo-local build in source checkouts, bundled binary in wheels)
+          OR native claude / gemini / codex CLI
+        → perfxpert-mcp + staged prompt / gate config as needed
         → same agent runtime under the hood
 ```
 
@@ -97,6 +104,16 @@ output = session.run_root(RootInput(
 ))
 print(output.primary_bottleneck)
 ```
+
+### MCP + Python embedding
+
+External clients and in-process callers use the same underlying brain:
+
+- `perfxpert.api.agent_*` calls the same session runners directly.
+- `perfxpert-mcp` re-exposes the same READ_ONLY agent and classifier
+  tools over MCP.
+- `perfxpert-code` backends differ only in TUI / config / gate-plumbing,
+  not in analysis semantics.
 
 ## Test pyramid (spec §6)
 

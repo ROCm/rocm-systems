@@ -194,7 +194,7 @@ doctor checks:
 - openai-agents SDK
 - MCP server reachable (`perfxpert-mcp` boots + 56 tools registered — 8 agent-hierarchy + 47 classifier/knowledge + 1 `trace_diff.diff_runs`)
 - task store (`~/.perfxpert` or `$PERFXPERT_TASK_ROOT`)
-- bundled opencode binary + bundled opencode config dir
+- patched opencode binary resolution + bundled opencode config dir
 - LLM providers configured (counts `N/5` against
   `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
   `PERFXPERT_LLM_LOCAL_URL` or `OLLAMA_HOST`,
@@ -228,15 +228,17 @@ agent runtime.
 
 ## 3.1 Choosing a backend
 
-`perfxpert-code` is multi-backend: the same AMD-branded bundled
-opencode is the default, but it can also wrap the user's native
-Claude Code, Gemini CLI, or Codex CLI while still enforcing
-the perfxpert tool-priority gate and registering the `perfxpert-mcp`
-server for free. Pick whichever matches your existing LLM workflow.
+`perfxpert-code` is multi-backend: packaged installs default to the
+bundled AMD-branded patched opencode, while source/editable checkouts
+prefer a locally built patched binary from the pinned `opencode`
+submodule. It can also wrap the user's native Claude Code, Gemini CLI,
+or Codex CLI while still enforcing the perfxpert tool-priority gate and
+registering the `perfxpert-mcp` server for free. Pick whichever matches
+your existing LLM workflow.
 
-- **Default (no subcommand)** — AMD-branded bundled opencode, the
-  recommended entry point. Ships with patched prompt + MCP
-  pre-wired, no extra install.
+- **Default (no subcommand)** — patched opencode path, the recommended
+  entry point. Wheels ship the bundled binary; source checkouts can
+  rebuild the same patched fork locally. Prompt + MCP come pre-wired.
 - **`perfxpert-code claude`** — registers perfxpert as an MCP
   server in the Claude Code project config, installs the native
   `PreToolUse` gate hook, then execs the user's `claude` CLI.
@@ -255,7 +257,7 @@ Short recipe per backend:
 
 ```bash
 # SKIP-SAMPLE — requires the named backend binary on PATH
-perfxpert-code                              # default (bundled opencode)
+perfxpert-code                              # default (patched opencode path)
 perfxpert-code claude                       # Claude Code (native TUI)
 perfxpert-code gemini                       # Gemini CLI
 perfxpert-code codex                        # Codex CLI
@@ -359,11 +361,12 @@ Wizard complete. Your setup is ready.
 ```
 
 `--non-interactive` never prompts; it always overwrites the config if
-one exists, so it's safe in CI. Provider detection order:
-`ANTHROPIC_API_KEY` → `OPENAI_API_KEY` →
+one exists, so it's safe in CI. The current init-wizard provider probe
+order is: `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` →
 `PERFXPERT_LLM_PRIVATE_URL` (compat: `PRIVATE_LLM_ENDPOINT`) →
-`PERFXPERT_LLM_LOCAL_URL` (compat: `OLLAMA_HOST`) →
-bundled `opencode` (no key required).
+`OLLAMA_HOST` → patched `opencode` (no key required). The broader CLI
+surfaces (`analyze`, `doctor`) also accept the newer
+`PERFXPERT_LLM_LOCAL_URL` spelling for Ollama.
 
 ## 4. First analysis (60 seconds)
 
@@ -844,8 +847,9 @@ returns bottleneck + narrative only (verbatim from the rule tables).
 All five primary providers are selectable from the CLI with `--llm
 <name>`: `anthropic`, `openai`, `ollama`, `private`, `opencode`. The
 CLI also accepts `claude-code` as a compatibility alias for the
-bundled opencode backend. The same five primary providers are also
-reachable from Python via `perfxpert.api.agent_root(...,
+patched opencode backend used by `perfxpert-code`. The same five
+primary providers are also reachable from Python via
+`perfxpert.api.agent_root(...,
 provider=<name>)` — the CLI is a thin wrapper over the public Python
 API.
 
@@ -1046,16 +1050,17 @@ The output includes a profiling plan with the exact `rocprofv3` command to run, 
 
 The agentic TUI automates the full optimization loop: profile, analyze,
 AI-edit code, recompile, re-profile, compare. As of v0.2.0 this is the
-`perfxpert-code` command (AMD-themed bundled opencode TUI) — it wraps the
-same agent runtime the batch-mode `analyze` CLI uses.
+`perfxpert-code` command. By default it uses the patched opencode path
+(bundled in wheels; locally built first in source checkouts), and it
+wraps the same agent runtime the batch-mode `analyze` CLI uses.
 
 ![perfxpert-code](assets/gifs/14-perfxpert-code.gif)
 
-*`perfxpert-code` — the AMD-branded bundled opencode TUI with
-`perfxpert-mcp` pre-wired, waiting at the interactive startup screen.*
+*`perfxpert-code` on the default patched opencode path, with
+`perfxpert-mcp` pre-wired and the TUI ready at startup.*
 
 ```bash
-# SKIP-SAMPLE — requires bundled opencode binary on PATH
+# SKIP-SAMPLE — requires a patched opencode path (repo-local build or bundled wheel)
 perfxpert-code
 ```
 
@@ -1147,7 +1152,8 @@ from argparse's `choices=` list:
 All five primary LLM providers are selectable via `--llm <name>` on the
 CLI **and** via `provider=<name>` on `perfxpert.api.agent_root(...)` —
 the same registry backs both surfaces. `claude-code` is accepted on the
-CLI as a compatibility alias for the bundled opencode backend. LLM is
+CLI as a compatibility alias for the patched opencode backend used by
+`perfxpert-code`. LLM is
 optional; all analysis runs locally without internet when you omit
 `--llm` (or set `PERFXPERT_AIRGAP=1`).
 
@@ -1216,20 +1222,20 @@ and the recursion-guard rules.
 One-shot non-interactive:
 
 ```bash
-# SKIP-SAMPLE — requires bundled opencode + an LLM credential
+# SKIP-SAMPLE — requires the patched opencode path + an LLM credential
 perfxpert-code run -m anthropic/claude-haiku-4-5 "optimize ./app.cpp"
 ```
 
 Fully interactive (drop into the TUI):
 
 ```bash
-# SKIP-SAMPLE — requires the bundled opencode binary on PATH
+# SKIP-SAMPLE — requires a patched opencode path (repo-local build or bundled wheel)
 perfxpert-code
 ```
 
 ### Tool-priority gate + lift semantics
 
-The bundled opencode enforces a two-stage gate for every
+The patched opencode path enforces a two-stage gate for every
 GPU-performance request:
 
 1. **Gate stage.** The LLM MUST call `perfxpert_intent_classify`
@@ -1276,7 +1282,7 @@ by `perfxpert-mcp` (8 agent-hierarchy entry points + 47
 classifier/knowledge tools + 1 `trace_diff.diff_runs`). Configuration snippets for Claude Desktop,
 Claude Code, Codex CLI, Gemini CLI, and generic stdio clients live in
 `../integration/mcp-server.md` under §"Client integration". The
-bundled opencode inside `perfxpert-code` wires `perfxpert-mcp`
+default patched opencode path inside `perfxpert-code` wires `perfxpert-mcp`
 automatically — no client-side setup required.
 
 ![mcp server](assets/gifs/13-mcp-server.gif)
@@ -1288,12 +1294,14 @@ confirms the negotiated protocol version.*
 ## 14. Troubleshooting
 
 **`perfxpert-code` launches the unpatched upstream binary.**
-Check that `PERFXPERT_OPENCODE_PATH` is either unset or points at the
-bundled copy (usually under
-`experimental/python/perfxpert/perfxpert/_bundled/opencode`). If it's
-unset and you still get the upstream binary, re-run
-`bash experimental/python/perfxpert/scripts/apply-opencode-patches.sh`
-and rebuild the bundled opencode. The launcher warns on fallback.
+Check that `PERFXPERT_OPENCODE_PATH` is either unset or points at a
+patched binary. The launcher search order is: explicit env override →
+locally built patched submodule copy (source/editable checkouts) →
+bundled wheel copy → well-known upstream install locations / `PATH`.
+If you're in a source checkout, run `perfxpert-code install-patches` to
+rebuild the patched binary from the pinned submodule. If you're using a
+wheel build, reinstall with bun available so the bundled build can
+complete. The launcher prints a warning on unpatched fallback.
 
 **LLM quota exhausted (429 / `insufficient_quota`).**
 Set `PERFXPERT_LLM_FALLBACK_CHAIN` to a comma-separated provider
