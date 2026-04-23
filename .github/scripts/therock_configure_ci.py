@@ -154,6 +154,9 @@ def retrieve_projects(args):
     # single nightly job with THEROCK_ENABLE_ALL=ON and full projects_to_test list.
     # Run all builds and tests including RCCL.
     if args.get("is_nightly"):
+        # For nightly runs, always run RCCL CI (only relevant for Linux platform)
+        if args.get("platform") == "linux":
+            set_github_output({"run_linux_rccl_ci": "true"})
         nightly_config = project_map.get("nightly")
         if not nightly_config:
             logging.warning("No 'nightly' entry in project_map, nightly will have no jobs")
@@ -300,11 +303,7 @@ def retrieve_projects(args):
 
 def run(args):
     project_to_run = retrieve_projects(args)
-    outputs = {"projects": json.dumps(project_to_run)}
-    # For nightly runs, always run RCCL CI (only relevant for Linux platform)
-    if args.get("is_nightly") and args.get("platform") == "linux":
-        outputs["run_linux_rccl_ci"] = "true"
-    set_github_output(outputs)
+    set_github_output({"projects": json.dumps(project_to_run)})
 
 
 if __name__ == "__main__":
