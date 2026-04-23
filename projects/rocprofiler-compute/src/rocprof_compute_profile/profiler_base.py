@@ -364,10 +364,7 @@ class RocProfCompute_Base:
             # Use native counter collection tool
             # Use lib* glob pattern to handle CMAKE_INSTALL_LIBDIR variations
             # (lib, lib64, lib32, etc. depending on distribution)
-            script_path = Path(sys.argv[0]).resolve()
-            native_tool_base_path = (
-                script_path.parents[2] if len(script_path.parents) >= 3 else Path()
-            )
+            native_tool_base_path = Path(__file__).parents[3]
             native_tool_glob_pattern = (
                 "lib*/rocprofiler-compute/librocprofiler-compute-tool.so"
             )
