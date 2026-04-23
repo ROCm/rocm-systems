@@ -11,7 +11,6 @@
 #include "nccl_net.h"
 #include "comm.h"
 #include "checks.h"
-#include <atomic>
 
 #define NCCL_UNDEF_DEV_COUNT -1
 
@@ -26,29 +25,6 @@ ncclResult_t ncclCollNetSetVirtDevCount(int netPluginIndex, int nVirtDev);
 
 // Test whether the current GPU support GPU Direct RDMA.
 ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport);
-
-struct ncclIbQpTracker {
-  std::atomic<int> total{0};
-  std::atomic<int> active{0};
-  std::atomic<int> peak{0};
-
-  void trackCreate() {
-    total.fetch_add(1, std::memory_order_relaxed);
-    int cur = active.fetch_add(1, std::memory_order_relaxed) + 1;
-    int p = peak.load(std::memory_order_relaxed);
-    while (cur > p && !peak.compare_exchange_weak(p, cur, std::memory_order_relaxed));
-  }
-
-  void trackDestroy() {
-    active.fetch_sub(1, std::memory_order_relaxed);
-  }
-
-  void log(const char* tag, int nqps) {
-    INFO(NCCL_NET, "NET/IB: %s nqps=%d total_qps=%d active_qps=%d peak_qps=%d",
-      tag, nqps, total.load(std::memory_order_relaxed),
-      active.load(std::memory_order_relaxed), peak.load(std::memory_order_relaxed));
-  }
-};
 
 extern ncclNet_t ncclNetIb;
 extern ncclNet_t ncclNetSocket;

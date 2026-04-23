@@ -111,8 +111,6 @@ struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
 static std::mutex ncclIbMutex;
 static int ncclIbRelaxedOrderingEnabled = 0;
 
-static ncclIbQpTracker ncclIbQpCount;
-
 // With ncclNet_v11_t the NCCL core initializes the network plugin per-communicator
 // rather than once for all communicators. However, the internal plugin implementation
 // still assumes the plugin is initialized only once across all communicators. The ref
@@ -1469,7 +1467,6 @@ ncclResult_t ncclIbCreateQp(uint8_t ib_port, struct ncclIbNetCommDevBase* base, 
   qpAttr.port_num = ib_port;
   qpAttr.qp_access_flags = access_flags;
   NCCLCHECK(wrap_ibv_modify_qp(qp->qp, &qpAttr, IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS));
-  ncclIbQpCount.trackCreate();
   TRACE(NCCL_NET, "NET/IB : ncclIbCreateQp port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qpn=%u pkey=%u pd=%p",
     ib_port, base->ibDevN, ncclIbDevs[base->ibDevN].devName, ncclNIbDevs, ncclNMergedIbDevs, qp->qp->qp_num, qpAttr.pkey_index, base->pd);
   return ncclSuccess;
@@ -1800,7 +1797,6 @@ ib_connect:
   comm->base.ready = 1;
   stage->state = ncclIbCommStateConnected;
   stage->offset = 0;
-  ncclIbQpCount.log("ncclIbConnect complete", comm->base.nqps);
 
 ib_send_ready:
   NCCLCHECKGOTO(ncclSocketProgress(NCCL_SOCKET_SEND, &comm->base.sock, &comm->base.ready, sizeof(int), &stage->offset), ret, fail);
@@ -2196,7 +2192,6 @@ ib_recv_ready:
   if (stage->offset != sizeof(int)) return ncclSuccess;
 
   *recvComm = rComm;
-  ncclIbQpCount.log("ncclIbAccept complete", rComm->base.nqps);
 exit:
   /* reset lComm stage */
   if (stage->buffer) free(stage->buffer);
@@ -3068,13 +3063,8 @@ ncclResult_t ncclIbCloseSend(void* sendComm) {
   if (comm) {
     NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
-    for (int q = 0; q < comm->base.nqps; q++) {
-      if (comm->base.qps[q].qp != NULL) {
-        NCCLCHECK(wrap_ibv_destroy_qp(comm->base.qps[q].qp));
-        ncclIbQpCount.trackDestroy();
-      }
-    }
-    ncclIbQpCount.log("ncclIbCloseSend", comm->base.nqps);
+    for (int q = 0; q < comm->base.nqps; q++)
+      if (comm->base.qps[q].qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(comm->base.qps[q].qp));
 
     for (int i = 0; i < comm->base.vProps.ndevs; i++) {
       struct ncclIbSendCommDev* commDev = comm->devs + i;
@@ -3093,12 +3083,8 @@ ncclResult_t ncclIbCloseRecv(void* recvComm) {
   if (comm) {
     NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
-    for (int q = 0; q < comm->base.nqps; q++) {
-      if (comm->base.qps[q].qp != NULL) {
-        NCCLCHECK(wrap_ibv_destroy_qp(comm->base.qps[q].qp));
-        ncclIbQpCount.trackDestroy();
-      }
-    }
+    for (int q = 0; q < comm->base.nqps; q++)
+      if (comm->base.qps[q].qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(comm->base.qps[q].qp));
 
     for (int i = 0; i < comm->base.vProps.ndevs; i++) {
       struct ncclIbRecvCommDev* commDev = comm->devs + i;
@@ -3110,17 +3096,13 @@ ncclResult_t ncclIbCloseRecv(void* recvComm) {
           commDev->gpuFlush.gpuMr = nullptr;
           if(commDev->gpuFlush.dmabuf_fd > 0) { close(commDev->gpuFlush.dmabuf_fd);}
         }
-        if (commDev->gpuFlush.qp.qp != NULL) {
-          NCCLCHECK(wrap_ibv_destroy_qp(commDev->gpuFlush.qp.qp));
-          ncclIbQpCount.trackDestroy();
-        }
+        if (commDev->gpuFlush.qp.qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(commDev->gpuFlush.qp.qp));
         if (commDev->gpuFlush.hostMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.hostMr));
       }
       if (commDev->fifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->fifoMr));
       if (commDev->sizesFifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->sizesFifoMr));
       NCCLCHECK(ncclIbDestroyBase(&commDev->base));
     }
-    ncclIbQpCount.log("ncclIbCloseRecv", comm->base.nqps);
     free(comm);
   }
   return ncclSuccess;
