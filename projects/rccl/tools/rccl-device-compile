@@ -1,0 +1,755 @@
+#!/usr/bin/env python3
+"""RCCL device compilation driver.
+
+A compiler/linker driver for the RCCL assembly-extract device pipeline.
+Presents a standard compiler CLI to CMake's custom language machinery.
+
+Compile mode (--compile):
+    rccl-device-compile --compile --arch=gfx942 -DFOO -Ipath -o out.o in.cpp
+    1. Compiles .cpp to assembly via amdclang++
+    2. Extracts device function + resource JSON (inline)
+    3. Assembles extracted .s to .o via amdclang++
+    Side effect: writes out.resources.json alongside out.o
+
+Link mode (--link):
+    rccl-device-compile --link --arch=gfx942 --dispatcher=common.cu.cpp -o device.elf obj1.o obj2.o
+    1. Aggregates resource JSON files from all input objects
+    2. Compiles dispatcher source to assembly
+    3. Patches dispatcher with aggregated resources
+    4. Assembles patched dispatcher
+    5. Links all objects + dispatcher into device.elf via ld.lld
+
+Tool discovery:
+    amdclang++, ld.lld are found relative to --clang=<path> or by searching
+    PATH and the directory containing the system C++ compiler.
+    Uses --offload-device-only for device compilation.  HIP path flags
+    (--hip-path, --hip-device-lib-path) are forwarded from CMake when present.
+"""
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+
+# ---------------------------------------------------------------------------
+# Assembly extraction (from extract_device_function.py)
+# ---------------------------------------------------------------------------
+
+def _parse_metadata_resources(lines):
+    """Parse .amdgpu_metadata YAML to extract resource usage."""
+    metadata_start = None
+    metadata_end = None
+    for i, line in enumerate(lines):
+        if line.strip() == '.amdgpu_metadata':
+            metadata_start = i + 1
+        elif line.strip() == '.end_amdgpu_metadata':
+            metadata_end = i
+
+    if metadata_start is None or metadata_end is None:
+        return {}
+
+    yaml_text = ''.join(lines[metadata_start:metadata_end])
+    resources = {}
+    for key, pattern in [
+        ('vgpr_count', r'\.vgpr_count:\s+(\d+)'),
+        ('agpr_count', r'\.agpr_count:\s+(\d+)'),
+        ('sgpr_count', r'\.sgpr_count:\s+(\d+)'),
+        ('group_segment_fixed_size', r'\.group_segment_fixed_size:\s+(\d+)'),
+        ('private_segment_fixed_size', r'\.private_segment_fixed_size:\s+(\d+)'),
+        ('sgpr_spill_count', r'\.sgpr_spill_count:\s+(\d+)'),
+        ('vgpr_spill_count', r'\.vgpr_spill_count:\s+(\d+)'),
+    ]:
+        m = re.search(pattern, yaml_text)
+        if m:
+            resources[key] = int(m.group(1))
+    return resources
+
+
+def _find_devfunc_symbol(lines):
+    for line in lines:
+        m = re.match(r'\s+\.type\s+(.*ncclDevFunc[^,]+),\s*@function', line)
+        if m:
+            mangled = m.group(1)
+            dm = re.search(r'ncclDevFunc_\w+', mangled)
+            unmangled = dm.group(0) if dm else mangled
+            return mangled, unmangled
+    return None, None
+
+
+def _find_kernel_symbol(lines):
+    for line in lines:
+        m = re.match(r'\s+\.globl\s+(.*ncclDevKernel\S+)', line)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def _find_amdhsa_kernel_range(lines):
+    amdhsa_start = None
+    for i, line in enumerate(lines):
+        if line.strip().startswith('.amdhsa_kernel'):
+            start = i
+            for j in range(i - 1, max(i - 5, -1), -1):
+                s = lines[j].strip()
+                if s.startswith('.section') and '.rodata' in s:
+                    start = j
+                    break
+                if s.startswith('.p2align') or s == '':
+                    start = j
+                else:
+                    break
+            amdhsa_start = start
+        if line.strip() == '.end_amdhsa_kernel':
+            end = i + 1
+            if end < len(lines) and lines[end].strip() == '.text':
+                end += 1
+            return (amdhsa_start, end)
+    return None
+
+
+def _find_metadata_range(lines):
+    start = None
+    for i, line in enumerate(lines):
+        if line.strip() == '.amdgpu_metadata':
+            start = i
+        elif line.strip() == '.end_amdgpu_metadata':
+            if start is not None:
+                return (start, i + 1)
+    return None
+
+
+def extract_device_function(asm_lines):
+    """Extract device function from assembly lines.
+    Returns (extracted_asm_lines, resources_dict) or raises on error."""
+    mangled, unmangled = _find_devfunc_symbol(asm_lines)
+    if not mangled:
+        raise RuntimeError("No ncclDevFunc found in assembly")
+
+    kernel_sym = _find_kernel_symbol(asm_lines)
+    resources = _parse_metadata_resources(asm_lines)
+    resources['function_name'] = unmangled
+    resources['mangled_name'] = mangled
+
+    skip_ranges = []
+    amdhsa_range = _find_amdhsa_kernel_range(asm_lines)
+    if amdhsa_range:
+        skip_ranges.append(amdhsa_range)
+    metadata_range = _find_metadata_range(asm_lines)
+    if metadata_range:
+        skip_ranges.append(metadata_range)
+
+    def in_skip_range(idx):
+        return any(s <= idx < e for s, e in skip_ranges)
+
+    out_lines = []
+    globl_inserted = False
+    for i, line in enumerate(asm_lines):
+        if in_skip_range(i):
+            continue
+        stripped = line.strip()
+        if '__hip_cuid' in stripped:
+            continue
+        if kernel_sym and re.match(r'\s*\.globl\s+' + re.escape(kernel_sym), stripped):
+            continue
+        if not globl_inserted and mangled in line and '.type' in line and '@function' in line:
+            out_lines.append(f'\t.globl\t{mangled}\n')
+            globl_inserted = True
+        out_lines.append(line)
+
+    return out_lines, resources
+
+
+# ---------------------------------------------------------------------------
+# Resource aggregation (from aggregate_resources.py)
+# ---------------------------------------------------------------------------
+
+RESOURCE_KEYS = [
+    'vgpr_count', 'agpr_count', 'sgpr_count',
+    'private_segment_fixed_size', 'group_segment_fixed_size',
+]
+
+
+def _align_up(val, alignment):
+    return ((val + alignment - 1) // alignment) * alignment
+
+
+def _has_unified_vgpr_agpr(gpu_target):
+    return gpu_target in ('gfx90a', 'gfx942', 'gfx950')
+
+
+def aggregate_resources(resource_list, gpu_target):
+    """Aggregate a list of resource dicts into max values.
+    Returns the aggregated dict with derived fields."""
+    max_vals = {k: 0 for k in RESOURCE_KEYS}
+    max_regular_vgpr = 0
+
+    for res in resource_list:
+        for key in RESOURCE_KEYS:
+            max_vals[key] = max(max_vals[key], res.get(key, 0))
+        regular = res.get('vgpr_count', 0) - res.get('agpr_count', 0)
+        max_regular_vgpr = max(max_regular_vgpr, regular)
+
+    accum_offset = _align_up(max_regular_vgpr, 4)
+
+    if _has_unified_vgpr_agpr(gpu_target):
+        next_free_vgpr = max(max_vals['vgpr_count'],
+                             accum_offset + max_vals['agpr_count'])
+    else:
+        next_free_vgpr = max_vals['vgpr_count']
+
+    max_vals['accum_offset'] = accum_offset
+    max_vals['next_free_vgpr'] = next_free_vgpr
+
+    _MAX_NUMBERED_SGPR = {9: 102, 10: 106, 11: 106, 12: 106}
+    gen = _gfx_generation(gpu_target)
+    if gen not in _MAX_NUMBERED_SGPR:
+        raise RuntimeError(f"Unknown SGPR limit for generation gfx{gen}xx (target '{gpu_target}')")
+    max_vals['next_free_sgpr'] = min(max_vals['sgpr_count'], _MAX_NUMBERED_SGPR[gen])
+
+    return max_vals
+
+
+def _gfx_generation(gpu_target):
+    m = re.match(r'gfx(\d+)', gpu_target)
+    if not m:
+        raise RuntimeError(f"Cannot parse GPU target '{gpu_target}'")
+    gen = int(m.group(1))
+    if gen >= 100:
+        gen //= 100
+    elif gen >= 10:
+        gen //= 10
+    return gen
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher patching (from patch_dispatcher.py)
+# ---------------------------------------------------------------------------
+
+def _patch_abs_symbols(lines, max_res):
+    result = []
+    for line in lines:
+        m = re.match(r'(\s*\.set\s+\S+)\.(num_vgpr),\s*(.*)', line)
+        if m:
+            result.append(f'{m.group(1)}.num_vgpr, {max_res["next_free_vgpr"]}\n')
+            continue
+        m = re.match(r'(\s*\.set\s+\S+)\.(num_agpr),\s*(.*)', line)
+        if m:
+            result.append(f'{m.group(1)}.num_agpr, {max_res["agpr_count"]}\n')
+            continue
+        m = re.match(r'(\s*\.set\s+\S+)\.(numbered_sgpr),\s*(.*)', line)
+        if m:
+            result.append(f'{m.group(1)}.numbered_sgpr, {max_res["next_free_sgpr"]}\n')
+            continue
+        m = re.match(r'(\s*\.set\s+\S+)\.(num_named_barrier),\s*(.*)', line)
+        if m:
+            result.append(f'{m.group(1)}.num_named_barrier, 0\n')
+            continue
+        m = re.match(r'(\s*\.set\s+\S+)\.(private_seg_size),\s*(.*)', line)
+        if m:
+            result.append(f'{m.group(1)}.private_seg_size, {max_res["private_segment_fixed_size"]}\n')
+            continue
+        m = re.match(r'(\s*\.set\s+\S+)\.(uses_flat_scratch),\s*(.*)', line)
+        if m:
+            result.append(f'{m.group(1)}.uses_flat_scratch, 1\n')
+            continue
+        m = re.match(r'(\s*\.set\s+\S+)\.(has_dyn_sized_stack),\s*(.*)', line)
+        if m:
+            result.append(f'{m.group(1)}.has_dyn_sized_stack, 1\n')
+            continue
+        m = re.match(r'(\s*\.set\s+\S+)\.(has_recursion),\s*(.*)', line)
+        if m:
+            result.append(f'{m.group(1)}.has_recursion, 1\n')
+            continue
+        m = re.match(r'(\s*\.set\s+\S+)\.(has_indirect_call),\s*(.*)', line)
+        if m:
+            result.append(f'{m.group(1)}.has_indirect_call, 1\n')
+            continue
+        result.append(line)
+    return result
+
+
+def _patch_amdhsa_kernel_directives(lines, max_res):
+    result = []
+    in_kernel = False
+    for line in lines:
+        if re.match(r'\s*\.amdhsa_kernel\s+', line):
+            in_kernel = True
+            result.append(line)
+            continue
+        if in_kernel and re.match(r'\s*\.end_amdhsa_kernel', line):
+            in_kernel = False
+            result.append(line)
+            continue
+        if not in_kernel:
+            result.append(line)
+            continue
+
+        m = re.match(r'(\s*)(\.amdhsa_accum_offset)\s+(.*)', line)
+        if m:
+            result.append(f'{m.group(1)}.amdhsa_accum_offset {max_res["accum_offset"]}\n')
+            continue
+        m = re.match(r'(\s*)(\.amdhsa_next_free_vgpr)\s+(.*)', line)
+        if m:
+            result.append(f'{m.group(1)}.amdhsa_next_free_vgpr {max_res["next_free_vgpr"]}\n')
+            continue
+        m = re.match(r'(\s*)(\.amdhsa_next_free_sgpr)\s+(.*)', line)
+        if m:
+            result.append(f'{m.group(1)}.amdhsa_next_free_sgpr {max_res["next_free_sgpr"]}\n')
+            continue
+        m = re.match(r'(\s*)(\.amdhsa_private_segment_fixed_size)\s+(.*)', line)
+        if m:
+            result.append(f'{m.group(1)}.amdhsa_private_segment_fixed_size {max_res["private_segment_fixed_size"]}\n')
+            continue
+        m = re.match(r'(\s*)(\.amdhsa_uses_dynamic_stack)\s+(.*)', line)
+        if m:
+            result.append(f'{m.group(1)}.amdhsa_uses_dynamic_stack 1\n')
+            continue
+        m = re.match(r'(\s*)(\.amdhsa_enable_private_segment)\s+(.*)', line)
+        if m:
+            result.append(f'{m.group(1)}.amdhsa_enable_private_segment 1\n')
+            continue
+        result.append(line)
+    return result
+
+
+def _patch_gpr_maximums(lines, max_res):
+    result = []
+    for line in lines:
+        m = re.match(r'(\s*\.set\s+amdgpu\.max_num_vgpr,\s*)\d+', line)
+        if m:
+            result.append(f'{m.group(1)}{max_res["next_free_vgpr"]}\n')
+            continue
+        m = re.match(r'(\s*\.set\s+amdgpu\.max_num_agpr,\s*)\d+', line)
+        if m:
+            result.append(f'{m.group(1)}{max_res["agpr_count"]}\n')
+            continue
+        m = re.match(r'(\s*\.set\s+amdgpu\.max_num_sgpr,\s*)\d+', line)
+        if m:
+            result.append(f'{m.group(1)}{max_res["next_free_sgpr"]}\n')
+            continue
+        result.append(line)
+    return result
+
+
+def _patch_amdgpu_metadata(lines, max_res):
+    result = []
+    in_metadata = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped == '.amdgpu_metadata':
+            in_metadata = True
+            result.append(line)
+            continue
+        if stripped == '.end_amdgpu_metadata':
+            in_metadata = False
+            result.append(line)
+            continue
+        if not in_metadata:
+            result.append(line)
+            continue
+
+        m = re.match(r'(\s+\.vgpr_count:\s+)\d+', line)
+        if m:
+            result.append(f'{m.group(1)}{max_res["next_free_vgpr"]}\n')
+            continue
+        m = re.match(r'(\s+(?:-\s+)?\.agpr_count:\s+)\d+', line)
+        if m:
+            result.append(f'{m.group(1)}{max_res["agpr_count"]}\n')
+            continue
+        m = re.match(r'(\s+\.sgpr_count:\s+)\d+', line)
+        if m:
+            result.append(f'{m.group(1)}{max_res["sgpr_count"]}\n')
+            continue
+        m = re.match(r'(\s+\.private_segment_fixed_size:\s+)\d+', line)
+        if m:
+            result.append(f'{m.group(1)}{max_res["private_segment_fixed_size"]}\n')
+            continue
+        m = re.match(r'(\s+\.uses_dynamic_stack:\s+)(true|false)', line)
+        if m:
+            result.append(f'{m.group(1)}true\n')
+            continue
+        result.append(line)
+    return result
+
+
+def _normalize_file_directives(lines):
+    return [re.sub(r'(\s+\.file\s+\d+\s+"[^"]*"\s+"[^"]*")\s+md5\s+0x[0-9a-fA-F]+', r'\1', line)
+            for line in lines]
+
+
+def patch_dispatcher(asm_lines, max_res):
+    """Patch dispatcher assembly with aggregated resource values.
+    Returns patched lines."""
+    lines = _patch_abs_symbols(asm_lines, max_res)
+    lines = _patch_amdhsa_kernel_directives(lines, max_res)
+    lines = _patch_gpr_maximums(lines, max_res)
+    lines = _patch_amdgpu_metadata(lines, max_res)
+    lines = _normalize_file_directives(lines)
+    return lines
+
+
+# ---------------------------------------------------------------------------
+# Tool discovery
+# ---------------------------------------------------------------------------
+
+def find_tool(name, hints, required=True):
+    """Find an executable by name, searching hints first, then PATH."""
+    for d in hints:
+        if not d:
+            continue
+        path = os.path.join(d, name)
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    # Fall back to PATH
+    import shutil
+    path = shutil.which(name)
+    if path:
+        return path
+    if required:
+        raise FileNotFoundError(
+            f"Required tool '{name}' not found. Searched: {hints} and PATH")
+    return None
+
+
+
+def discover_tools(clang_path):
+    """Discover amdclang++ and ld.lld from the given compiler path."""
+    if clang_path:
+        clang = clang_path
+    else:
+        import shutil
+        clang = shutil.which('amdclang++') or shutil.which('clang++')
+        if not clang:
+            raise FileNotFoundError("Cannot find amdclang++ or clang++ on PATH")
+
+    compiler_dir = os.path.dirname(os.path.realpath(clang))
+    llvm_bin = os.path.join(compiler_dir, '..', 'lib', 'llvm', 'bin')
+    hints = [compiler_dir, llvm_bin]
+
+    lld = find_tool('ld.lld', hints)
+    return clang, lld
+
+
+# ---------------------------------------------------------------------------
+# Run subprocess with error handling
+# ---------------------------------------------------------------------------
+
+def run(cmd, description=""):
+    """Run a command, raising on failure with the full command for diagnosis."""
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError as e:
+        label = f" ({description})" if description else ""
+        print(f"ERROR{label}: command failed with exit code {e.returncode}:",
+              file=sys.stderr)
+        print(f"  {' '.join(cmd)}", file=sys.stderr)
+        sys.exit(e.returncode)
+    except FileNotFoundError:
+        print(f"ERROR: executable not found: {cmd[0]}", file=sys.stderr)
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# Compile mode: .cpp -> .o + .resources.json
+# ---------------------------------------------------------------------------
+
+
+def do_compile(args, forwarded_flags):
+    clang, _ = discover_tools(args.clang)
+    arch = args.arch
+    source = args.source
+    output = args.output
+    keep_temps = args.keep_temps
+
+    base = os.path.splitext(output)[0]
+    json_out = base + '.resources.json'
+
+    # Determine temp directory: alongside output if --keep-temps, else truly temp
+    if keep_temps:
+        asm_file = base + '.full.s'
+        ext_file = base + '.extracted.s'
+        cleanup = []
+    else:
+        tmpdir = tempfile.mkdtemp(prefix='rccl-dc-')
+        asm_file = os.path.join(tmpdir, 'full.s')
+        ext_file = os.path.join(tmpdir, 'extracted.s')
+        cleanup = [asm_file, ext_file, tmpdir]
+
+    try:
+        # Step 1: Compile to assembly
+        compile_cmd = [
+            clang,
+            '-x', 'hip',
+            '--offload-device-only',
+            f'--offload-arch={arch}',
+            '-gline-tables-only',
+            '-w',
+        ] + forwarded_flags + [
+            '-S', '-o', asm_file, source,
+        ]
+        run(compile_cmd, f"compile {os.path.basename(source)}")
+
+        # Step 2: Extract device function (inline)
+        with open(asm_file) as f:
+            asm_lines = f.readlines()
+
+        try:
+            extracted_lines, resources = extract_device_function(asm_lines)
+        except RuntimeError as e:
+            print(f"ERROR: extraction failed for {source}: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        extracted_lines = _normalize_file_directives(extracted_lines)
+
+        with open(ext_file, 'w') as f:
+            f.writelines(extracted_lines)
+
+        with open(json_out, 'w') as f:
+            json.dump(resources, f, indent=2)
+
+        # Step 3: Assemble to object
+        assemble_cmd = [
+            clang,
+            '-x', 'assembler',
+            '-target', 'amdgcn-amd-amdhsa',
+            f'-mcpu={arch}',
+            '-c', '-o', output, ext_file,
+        ]
+        run(assemble_cmd, f"assemble {os.path.basename(source)}")
+
+    finally:
+        if not keep_temps:
+            for f in cleanup:
+                try:
+                    if os.path.isfile(f):
+                        os.unlink(f)
+                    elif os.path.isdir(f):
+                        os.rmdir(f)
+                except OSError:
+                    pass
+
+
+# ---------------------------------------------------------------------------
+# Link mode: objects -> device.elf
+# ---------------------------------------------------------------------------
+
+def do_link(args, forwarded_flags):
+    clang, lld = discover_tools(args.clang)
+    arch = args.arch
+    objects = args.objects
+    output = args.output
+    dispatcher = args.dispatcher
+    keep_temps = args.keep_temps
+
+    if not dispatcher:
+        raise SystemExit("ERROR: --link requires --dispatcher=<source>")
+
+    # Collect resource JSONs from alongside each .o
+    resource_list = []
+    for obj in objects:
+        json_path = os.path.splitext(obj)[0] + '.resources.json'
+        if os.path.exists(json_path):
+            with open(json_path) as f:
+                resource_list.append(json.load(f))
+
+    if not resource_list:
+        raise SystemExit(f"ERROR: no .resources.json files found alongside input objects")
+
+    # Step 1: Aggregate resources
+    max_res = aggregate_resources(resource_list, arch)
+    print(f"[{arch}] Aggregated {len(resource_list)} resources: "
+          f"VGPR={max_res['vgpr_count']}, AGPR={max_res['agpr_count']}, "
+          f"SGPR={max_res['sgpr_count']}, "
+          f"scratch={max_res['private_segment_fixed_size']}")
+
+    output_dir = os.path.dirname(output) or '.'
+    if keep_temps:
+        disp_asm = os.path.join(output_dir, f'dispatcher_{arch}.s')
+        disp_patched = os.path.join(output_dir, f'dispatcher_{arch}_patched.s')
+        disp_obj = os.path.join(output_dir, f'dispatcher_{arch}.o')
+        cleanup = []
+    else:
+        tmpdir = tempfile.mkdtemp(prefix='rccl-dl-')
+        disp_asm = os.path.join(tmpdir, 'dispatcher.s')
+        disp_patched = os.path.join(tmpdir, 'dispatcher_patched.s')
+        disp_obj = os.path.join(tmpdir, 'dispatcher.o')
+        cleanup = [disp_asm, disp_patched, disp_obj, tmpdir]
+
+    try:
+        # Step 2: Compile dispatcher to assembly
+        disp_compile_cmd = [
+            clang,
+            '-x', 'hip',
+            '--offload-device-only',
+            f'--offload-arch={arch}',
+            '-g', '-w',
+        ] + forwarded_flags + [
+            '-S', '-o', disp_asm, dispatcher,
+        ]
+        run(disp_compile_cmd, f"compile dispatcher for {arch}")
+
+        # Step 3: Patch dispatcher with aggregated resources
+        with open(disp_asm) as f:
+            disp_lines = f.readlines()
+        patched_lines = patch_dispatcher(disp_lines, max_res)
+        with open(disp_patched, 'w') as f:
+            f.writelines(patched_lines)
+
+        # Step 4: Assemble patched dispatcher
+        disp_assemble_cmd = [
+            clang,
+            '-x', 'assembler',
+            '-target', 'amdgcn-amd-amdhsa',
+            f'-mcpu={arch}',
+            '-c', '-o', disp_obj, disp_patched,
+        ]
+        run(disp_assemble_cmd, f"assemble dispatcher for {arch}")
+
+        # Step 5: Link all objects + dispatcher into device.elf
+        # Use a response file for potentially long object lists
+        rsp_path = os.path.join(output_dir, f'link_{arch}.rsp')
+        with open(rsp_path, 'w') as f:
+            f.write(disp_obj + '\n')
+            for obj in objects:
+                f.write(obj + '\n')
+
+        link_cmd = [
+            lld, '-shared',
+            '-o', output,
+            f'@{rsp_path}',
+        ]
+        run(link_cmd, f"link device.elf for {arch}")
+
+        if not keep_temps:
+            try:
+                os.unlink(rsp_path)
+            except OSError:
+                pass
+
+    finally:
+        if not keep_temps:
+            for f in cleanup:
+                try:
+                    if os.path.isfile(f):
+                        os.unlink(f)
+                    elif os.path.isdir(f):
+                        os.rmdir(f)
+                except OSError:
+                    pass
+
+
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+
+def parse_compiler_flags(argv):
+    """Separate our flags from forwarded compiler flags (-D, -I, -isystem, -std, -O, etc.)"""
+    our_args = []
+    forwarded = []
+    sources = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        # Our flags
+        if arg in ('--compile', '--link', '--keep-temps', '--version'):
+            our_args.append(arg)
+        elif arg.startswith('--arch='):
+            our_args.append(arg)
+        elif arg == '--arch' and i + 1 < len(argv):
+            our_args.extend([arg, argv[i + 1]])
+            i += 1
+        elif arg.startswith('--clang='):
+            our_args.append(arg)
+        elif arg == '--clang' and i + 1 < len(argv):
+            our_args.extend([arg, argv[i + 1]])
+            i += 1
+        elif arg.startswith('--dispatcher='):
+            our_args.append(arg)
+        elif arg == '--dispatcher' and i + 1 < len(argv):
+            our_args.extend([arg, argv[i + 1]])
+            i += 1
+        elif arg == '-o' and i + 1 < len(argv):
+            our_args.extend(['-o', argv[i + 1]])
+            i += 1
+        # Forwarded compiler flags
+        elif arg.startswith('-D') or arg.startswith('-I') or arg.startswith('-isystem'):
+            forwarded.append(arg)
+        elif arg.startswith('-std=') or arg.startswith('-O') or arg == '-g':
+            forwarded.append(arg)
+        elif arg == '-D' and i + 1 < len(argv):
+            forwarded.extend(['-D', argv[i + 1]])
+            i += 1
+        elif arg == '-I' and i + 1 < len(argv):
+            forwarded.extend(['-I', argv[i + 1]])
+            i += 1
+        elif arg.startswith('-'):
+            forwarded.append(arg)
+        else:
+            # Positional: source file or object file
+            sources.append(arg)
+        i += 1
+    return our_args, forwarded, sources
+
+
+def expand_response_files(argv):
+    """Expand @file arguments: replace with one-per-line entries from file."""
+    expanded = []
+    for arg in argv:
+        if arg.startswith('@') and os.path.isfile(arg[1:]):
+            with open(arg[1:]) as f:
+                expanded.extend(line.strip() for line in f if line.strip())
+        else:
+            expanded.append(arg)
+    return expanded
+
+
+def main():
+    raw_args, forwarded_flags, positional = parse_compiler_flags(
+        expand_response_files(sys.argv[1:]))
+
+    parser = argparse.ArgumentParser(prog='rccl-device-compile', add_help=False)
+    parser.add_argument('--compile', action='store_true')
+    parser.add_argument('--link', action='store_true')
+    parser.add_argument('--arch', required=False)
+    parser.add_argument('--clang', default=None)
+    parser.add_argument('--dispatcher', default=None)
+    parser.add_argument('-o', '--output', required=False)
+    parser.add_argument('--keep-temps', action='store_true')
+    parser.add_argument('--version', action='store_true')
+
+    args = parser.parse_args(raw_args)
+
+    if args.version:
+        print("rccl-device-compile 1.0")
+        sys.exit(0)
+
+    if args.compile:
+        if not positional:
+            raise SystemExit("ERROR: --compile requires a source file")
+        if not args.arch:
+            raise SystemExit("ERROR: --compile requires --arch=<target>")
+        if not args.output:
+            raise SystemExit("ERROR: --compile requires -o <output>")
+        args.source = positional[0]
+        do_compile(args, forwarded_flags)
+
+    elif args.link:
+        if not positional:
+            raise SystemExit("ERROR: --link requires object files")
+        if not args.arch:
+            raise SystemExit("ERROR: --link requires --arch=<target>")
+        if not args.output:
+            raise SystemExit("ERROR: --link requires -o <output>")
+        args.objects = positional
+        do_link(args, forwarded_flags)
+
+    else:
+        raise SystemExit("ERROR: specify --compile or --link mode")
+
+
+if __name__ == '__main__':
+    main()
