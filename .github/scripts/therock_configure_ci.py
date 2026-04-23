@@ -163,7 +163,9 @@ def retrieve_projects(args):
     if args.get("is_nightly"):
         nightly_config = project_map.get("nightly")
         if not nightly_config:
-            logging.warning("No 'nightly' entry in project_map, nightly will have no jobs")
+            logging.warning(
+                "No 'nightly' entry in project_map, nightly will have no jobs"
+            )
             return []
         # Run full coverage on both Linux and Windows (no path-based skip).
         return [
