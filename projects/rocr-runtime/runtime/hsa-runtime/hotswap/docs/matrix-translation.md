@@ -871,6 +871,58 @@ pass.  The bug surfaces only under the joint regime:
   A and B operand vregs after the swap;
 - Non-uniform B input so the swap'd-vreg data matters.
 
+### 12.5 Prerequisite ABI fix — `amdgpu-lds-size` propagation (2026-04-22)
+
+Second prerequisite ABI bug surfaced during the matmul_fp16 multi-
+WMMA investigation, this time in the lifted kernel's static LDS
+allocation.
+
+**Symptom.**  A HIP kernel that declares `__shared__ uint8_t lds[N]`
+and cross-thread-shuffles through LDS (thread T writes its slot,
+then reads `((T ^ 16) & 31)`'s slot) had every cross-thread read
+return zero after lift to gfx942.  Same-thread reads of an own-slot
+write returned correct data (LLVM's forward-propagation elides the
+LDS round-trip when it proves the read sees the same value the
+write stored).  Static LDS was the trigger; dynamic LDS (via
+`extern __shared__ T arr[]` + `sharedMemBytes` launcher argument)
+behaved correctly.
+
+**Bisection.**  The `lds_probe` synthetic (`/tmp/wmma_lds_probe.hip`
+in-session) isolated to: "cross-thread static-LDS reads return 0,
+same-thread reads return correct data."  Inspecting the lifted
+HSACO's KD metadata revealed `.group_segment_fixed_size: 0` despite
+the source's `.group_segment_fixed_size: 4096`.
+
+**Root cause.**  `raiser.cpp` emits LDS operations via raw
+`inttoptr i64 to ptr addrspace(3)` arithmetic — no module-level
+`addrspace(3)` `GlobalVariable`s.  The AMDGPU backend's KD emitter
+derives `group_segment_fixed_size` from addrspace(3) GVs plus the
+`amdgpu-lds-size` per-function attribute (see
+`AMDGPUMachineFunctionInfo::AMDGPUMachineFunctionInfo` —
+`LDSSizeRange.first` is read from the attr).  With neither GVs
+nor the attr, the emitter defaults to 0 and every LDS access
+targets an unallocated segment; reads return zero on gfx942.
+
+**Fix.**  `raiser.cpp`'s Phase-4 kernel-setup mirrors the source's
+`.group_segment_fixed_size` into an `amdgpu-lds-size` function
+attribute with `"N,N"` (min=max, since we know the source's static
+size exactly).  Zero-size sources skip the attribute entirely
+so `group_segment_fixed_size` stays 0 and dynamic LDS (which
+flows through the launcher's `sharedMemBytes` on top of the
+static segment) keeps working.
+
+**Regression fence.**  `lit_tests/group_segment_fixed_size_attr/`
+pins the attribute's presence + value + the presence of at least
+one addrspace(3) load/store in the lifted IR (so the fixture
+doesn't pass vacuously if a future refactor elides the LDS
+entirely).
+
+**Relationship to matmul_fp16.**  `matmul_fp16` has
+`.group_segment_fixed_size: 0` and uses DYNAMIC LDS (512 / 2048
+bytes at launch per the Triton sidecar), so my fix does not
+affect its KD.  The matmul_fp16 multi-WMMA residual documented
+in §12.4 persists after this fix — it's a separate bug.
+
 ### 12.4.1 Additional session findings (2026-04-22)
 
 Session 2 ran several directed experiments; the residual is still

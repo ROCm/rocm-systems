@@ -507,6 +507,34 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
     // want to propagate the source kernel's waves-per-eu for parity.
   }
 
+  // Propagate static LDS allocation from the source kernel descriptor.
+  //
+  // The raiser's `ds_write_b128` / `ds_load_b128` / `ds_bpermute` emit
+  // pointer-arithmetic into `addrspace(3)` DIRECTLY (via `inttoptr i64
+  // to ptr addrspace(3)`), without declaring an LDS `GlobalVariable`.
+  // LLVM's AMDGPU backend derives `group_segment_fixed_size` from
+  // addrspace(3) GlobalVariables plus the `amdgpu-lds-size` function
+  // attribute (see `AMDGPUMachineFunctionInfo` — `LDSSizeRange.first`
+  // is read from the attr), so a raised kernel that only manipulates
+  // addrspace(3) via int-to-ptr conversion and never sets the attr
+  // gets `group_segment_fixed_size: 0` in the emitted HSACO.  The
+  // hardware then treats every LDS op as out-of-segment and returns
+  // zero / drops writes.  This silently miscompiled every lifted
+  // kernel with a non-trivial LDS round-trip, most visibly Triton's
+  // `matmul_fp16` (mode-5 B-only-varying input returned all zeros
+  // because the cross-thread LDS fragment shuffle read from an
+  // uninitialised segment; see matrix-translation.md §12.4 for the
+  // bisection).
+  //
+  // We mirror the source's `.group_segment_fixed_size` by setting the
+  // per-function `amdgpu-lds-size` attribute in the source-declared
+  // range.  The attribute takes "min,max" — we pass the same value
+  // for both since the source's static size is known exactly.
+  if (meta.groupSegmentFixedSize > 0) {
+    std::string sizeStr = std::to_string(meta.groupSegmentFixedSize);
+    F->addFnAttr("amdgpu-lds-size", sizeStr + "," + sizeStr);
+  }
+
   for (int i = 0; i < paramIdx; i++)
     F->getArg(i)->setName("arg" + std::to_string(i));
 

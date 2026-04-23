@@ -393,6 +393,15 @@ config.fixtures = {
     # along with the matmul_fp16_16x16 fix.
     "ttmp7_workgroup_id_yz_init":
         r"@LIT_FIXTURE_TTMP7_WORKGROUP_ID_YZ_INIT_CO@",
+    # group_segment_fixed_size_attr — regression fence for the
+    # `amdgpu-lds-size` function-attribute propagation in `raiser.cpp`.
+    # Without this attribute, every lifted kernel with static LDS gets
+    # `.group_segment_fixed_size: 0` in the emitted HSACO KD and every
+    # LDS access returns zero (the segment is never allocated).  Root-
+    # caused as part of the matmul_fp16 investigation; see
+    # matrix-translation.md §12.4 for the bisection.
+    "group_segment_fixed_size_attr":
+        r"@LIT_FIXTURE_GROUP_SEGMENT_FIXED_SIZE_ATTR_CO@",
     # s_set_pc_i64 (SOP1) — four sibling fixtures, one per analysis
     # outcome class. See setpc_analysis.cpp / handle_sop1.cpp for the
     # Pattern A (DirectA, br) / Pattern B (IndirectB, indirectbr) /
