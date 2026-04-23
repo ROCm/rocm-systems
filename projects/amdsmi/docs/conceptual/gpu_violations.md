@@ -249,9 +249,6 @@ amd-smi metric --violation
 # MI3x+: Monitor violations in real time
 amd-smi monitor --violation
 
-# MI3x+: Continuous monitoring (update every 2 seconds)
-watch -n 2 'amd-smi monitor --violation'
-
 # MI3x+: Monitor power, temp, GFX clock, and utilization violations every second
 # AMDSMI_GPU_METRICS_CACHE_MS=0 disables the 100ms cache so the driver controls updates
 AMDSMI_GPU_METRICS_CACHE_MS=0 amd-smi monitor -ptV --watch 1
