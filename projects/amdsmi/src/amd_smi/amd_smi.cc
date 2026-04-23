@@ -2800,7 +2800,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handl
      << "; info->vram_size (MB): " << std::dec << info->vram_size << "\n"
      << "; info->vram_vendor: " << std::dec << info->vram_vendor << "\n"
      << "; info->vram_bit_width: " << std::dec
-     << (info->vram_bit_width == std::numeric_limits<uint64_t>::max()
+     << (info->vram_bit_width == std::numeric_limits<uint32_t>::max()
              ? "N/A"
              : std::to_string(info->vram_bit_width))
      << "\n"

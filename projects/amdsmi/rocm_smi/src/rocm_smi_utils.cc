@@ -978,7 +978,11 @@ void logHexDump(const char* desc, const void* addr, const size_t len, size_t byt
   if (bytesPerLine < 4 || bytesPerLine > 64) bytesPerLine = 16;
 
   size_t i;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wvla-cxx-extension"
+  // Using known compiler extension variable length arrays
   unsigned char buff[bytesPerLine + 1];
+#pragma clang diagnostic pop
   const unsigned char* pc  // ptr to data (char, 1 byte sized data)
       = (const unsigned char*)addr;
 

@@ -1331,12 +1331,12 @@ uint32_t RocmSMI::DiscoverBRCMswitchDevices(void) {
     // each identified switch node is a primary node for
     // potential matching unique ids
     std::vector<char> buf(512);
-    ssize_t len;
+    size_t len;
 
     do {
       buf.resize(buf.size() + 100);
-      len = ::readlink(path.c_str(), &(buf[0]), buf.size());
-    } while (static_cast<ssize_t>(buf.size()) == len);
+      len = static_cast<size_t>(::readlink(path.c_str(), &(buf[0]), buf.size()));
+    } while (buf.size() == len);
 
     if (len > 0) {
       buf[len] = '\0';
@@ -1347,7 +1347,7 @@ uint32_t RocmSMI::DiscoverBRCMswitchDevices(void) {
 
       auto first = path.begin();
       constexpr auto MAX_BDF_LENGTH = std::size_t(12);
-      auto end = path.begin() + path.length() - MAX_BDF_LENGTH;
+      auto end = path.begin() + static_cast<long>(path.length()) - MAX_BDF_LENGTH;
       path.erase(first, end);
 
       std::string prefixAdd = kPathPciDevices;
