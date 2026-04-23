@@ -33,6 +33,37 @@ Append to `proven_optimizations.yaml`:
     description_md: "tests/fixtures/proven_optimizations/<id>.md"
 ```
 
+## Concrete example
+
+```yaml
+- id: hip_stream_overlap_async_h2d
+  bottleneck_type: memory_transfer
+  technique: "overlap H2D copies with compute via hipMemcpyAsync"
+  description: >
+    The baseline trace serialized host-to-device transfers and kernel launches
+    on the default stream. The optimized variant moved transfers onto a
+    dedicated stream, inserted the required synchronization once at the true
+    dependency boundary, and reduced API-visible idle time while preserving
+    wall-clock correctness.
+  measured_speedup_range: [1.12, 1.28]
+  source_citation: "amd-internal:perfxpert-phase10-async-overlap-example"
+  preconditions:
+    - {metric: "memcpy_percent", op: ">", threshold: 20}
+    - {metric: "overhead_percent", op: ">", threshold: 10}
+  failure_modes:
+    - "Async copies without pinned host memory can add overhead instead of hiding it"
+    - "Missing stream synchronization can create correctness bugs that the baseline trace did not have"
+    - "Tiny transfers may not amortize stream-management cost"
+  fixture_pair:
+    baseline_db:    "tests/fixtures/proven_optimizations/hip_stream_overlap_async_h2d.baseline.db"
+    optimized_db:   "tests/fixtures/proven_optimizations/hip_stream_overlap_async_h2d.optimized.db"
+    description_md: "tests/fixtures/proven_optimizations/hip_stream_overlap_async_h2d.md"
+```
+
+This example is intentionally small but realistic: it shows the level of
+specificity reviewers expect for technique naming, conservative speedup ranges,
+and failure modes.
+
 ## Fixture construction
 
 Use `tests/fixtures/proven_optimizations/_build_fixtures.py` as the

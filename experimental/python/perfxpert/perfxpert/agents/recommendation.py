@@ -4,7 +4,7 @@ Dispatches to one of the three Layer-2 specialists (compute / memory / latency)
 based on findings.primary_bottleneck; ranks + dedups outputs.
 
 Tool allowlist (3 of 5 used):
-  plateau.check, trace.fingerprint, profiling.fill_gap
+  plateau.check, trace_fingerprint.fingerprint, profiling.fill_gap
 
 Handoff whitelist: compute_specialist, memory_specialist, latency_specialist
 (Layer 2 only). Cannot handoff to Layer 1 peers (Analysis / Correctness).
@@ -90,7 +90,7 @@ def _plateau_check(history: List[Dict[str, Any]]) -> Dict[str, Any]:
 def build_recommendation_agent() -> Agent:
     tools = [
         ToolBinding(name="plateau.check", fn=_plateau_check),
-        ToolBinding(name="trace.fingerprint", fn=trace_fingerprint.fingerprint),
+        ToolBinding(name="trace_fingerprint.fingerprint", fn=trace_fingerprint.fingerprint),
         ToolBinding(name="profiling.fill_gap", fn=lambda **kw: {}),  # placeholder stub
     ]
     return Agent(

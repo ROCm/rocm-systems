@@ -1,7 +1,7 @@
 # perfxpert Architecture
 
-_Last refreshed: v0.2.0. Source of truth:
-`docs/superpowers/specs/2026-04-17-multi-agent-perfxpert-design.md`._
+_Last refreshed: v0.2.0. Source of truth: local multi-agent-perfxpert
+design spec (kept in the contributor's working copy)._
 
 ## High-level shape
 
@@ -22,6 +22,8 @@ Root (intent router)
 ```
 
 7 agents total. Each has ≤ 400 lines of fence + ≤ 5 tools + ≤ 10 input / ≤ 5 output fields. Narrow scope is CI-enforced.
+
+See [architecture/agent-hierarchy.md](architecture/agent-hierarchy.md) for the tier-by-tier map, fence-slice pattern, and source-tree locations, and [architecture/gate-cascade.md](architecture/gate-cascade.md) for the 5-gate correctness middleware that sits between the agents. The full architecture docs index lives at [architecture/README.md](architecture/README.md).
 
 ## Tools (spec §3 + Appendix A)
 
@@ -64,7 +66,8 @@ All five verified nightly via `.github/workflows/perfxpert-nightly.yml`.
 
 ```
 user  →  perfxpert analyze -i trace.db
-        → api.analyze_database()
+        → perfxpert.agents.runtime.build_session(...)
+        → session.run_root(RootInput(...))
         → agent runtime (Root → Analysis → bottleneck.classify …)
         → Recommendation hands off to specialist
         → Correctness runs 5 gates
@@ -83,8 +86,16 @@ user  →  perfxpert-code  (bundled opencode)
 ### Library API
 
 ```python
-from perfxpert import analyze_database
-result = analyze_database("trace.db", provider="anthropic")
+# Agentic library API — v0.2.0+
+from perfxpert.agents.runtime import build_session
+from perfxpert.agents.schemas import RootInput
+
+session = build_session(airgap=True)  # or provider='anthropic'
+output = session.run_root(RootInput(
+    user_query="Summarize the primary bottleneck.",
+    airgap=True,
+))
+print(output.primary_bottleneck)
 ```
 
 ## Test pyramid (spec §6)
@@ -111,18 +122,17 @@ Level 0 — Knowledge YAML (PR)         pytest tests/test_knowledge
 The following symbols were deleted during the agentic refactor and are
 no longer present:
 
-- `interactive.py`, `llm_conversation.py` — bespoke LLM-session state
-  machine, superseded by OpenAI Agents SDK sessions.
-- `perfxpert/ai_analysis/` module — superseded by `perfxpert/agents/`.
-- `PERFXPERT_LEGACY` env var — no longer recognized.
-- `PERFXPERT_USE_AGENTS` env var — no longer recognized.
+- `interactive.py`, `llm_conversation.py` — bespoke LLM-session state machine (removed in Phase 7.1), superseded by OpenAI Agents SDK sessions.
+- `perfxpert/ai_analysis/` module — removed in Phase 7.1 and superseded by `perfxpert/agents/`.
+- `PERFXPERT_LEGACY` env var — no longer recognized (removed in Phase 7.1).
+- `PERFXPERT_USE_AGENTS` env var — no longer recognized (removed in Phase 7.1).
 
 Consult the git history or [CHANGELOG.md](../CHANGELOG.md) for the
 old code.
 
 ## Pointers
 
-- Full spec: `docs/superpowers/specs/2026-04-17-multi-agent-perfxpert-design.md`
-- Phase plans: `docs/superpowers/plans/2026-04-17-perfxpert-phase*`
+- Full spec and phase plans: living documents in the contributor's
+  working copy (not tracked in the repo).
 - Contributor entry: `CONTRIBUTING.md`
 - RFCs: `docs/rfcs/`

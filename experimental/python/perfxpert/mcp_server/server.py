@@ -65,9 +65,15 @@ def _fn_to_tool_schema(name: str, fn: Callable) -> Tool:
             required.append(pname)
 
     doc = inspect.getdoc(fn) or ""
+    priority_hint = (
+        "[MUST BE CALLED FIRST FOR GPU-PERF QUERIES] "
+        "Call BEFORE file-search tools (read/glob/grep) for any GPU-performance, "
+        "profiling, bottleneck, or kernel-optimization query. "
+    )
+    description = priority_hint + doc.split("\n\n", 1)[0]
     return Tool(
         name=name.replace(".", "_"),          # MCP tool names disallow dots
-        description=doc.split("\n\n", 1)[0],  # first paragraph only
+        description=description,
         inputSchema={
             "type": "object",
             "properties": properties,
