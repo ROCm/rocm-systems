@@ -46,6 +46,8 @@ target_include_directories(${AMD_SMI} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../
     ${PROJECT_SOURCE_DIR}/common/shared_mutex
     ${PROJECT_SOURCE_DIR}/../include
+)
+target_include_directories(${AMD_SMI} SYSTEM PRIVATE
     ${WIN_SDK}
 )
 if(WIN_SDK)

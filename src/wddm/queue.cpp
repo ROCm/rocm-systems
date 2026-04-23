@@ -623,7 +623,7 @@ ComputeQueue::KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *pa
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   int major = device->Major();
-  int i = ib_size;
+  uint32_t i = ib_size;
 
   const amd_kernel_code_t* kernel_object =
     (const amd_kernel_code_t *)GetKernelObjAddr(packet->kernel_object);
@@ -731,7 +731,7 @@ ComputeQueue::KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *pa
 
   // Check if we exceeded the frame size
   if ((i - ib_size) > cmdbuf_aql_frame_size) {
-    pr_err("PM4 command buffer overflow in KernelDispatch: used %d bytes, limit %d bytes\n", i - ib_size, cmdbuf_aql_frame_size);
+    pr_err("PM4 command buffer overflow in KernelDispatch: used %lu bytes, limit %u bytes\n", i - ib_size, cmdbuf_aql_frame_size);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -785,7 +785,7 @@ ComputeQueue::BarrierGenericAqlToPm4(char *cpu, hsa_barrier_and_packet_t *packet
   }
 
   int major = device->Major();
-  int i = ib_size;
+  uint32_t i = ib_size;
 
   if (packet->completion_signal.handle != 0) {
     amd_signal_t *signal = (amd_signal_t *)packet->completion_signal.handle;
@@ -825,7 +825,7 @@ ComputeQueue::BarrierGenericAqlToPm4(char *cpu, hsa_barrier_and_packet_t *packet
 
   // Check if we exceeded the frame size
   if ((i - ib_size) > cmdbuf_aql_frame_size) {
-    pr_err("PM4 command buffer overflow in BarrierGeneric: used %d bytes, limit %d bytes\n", i - ib_size, cmdbuf_aql_frame_size);
+    pr_err("PM4 command buffer overflow in BarrierGeneric: used %lu bytes, limit %u bytes\n", i - ib_size, cmdbuf_aql_frame_size);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -851,7 +851,7 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char *cpu, amd_aql_pm4_ib *pac
     pr_debug("pm4_addr[%d]=%#x\n", i, pm4_addr[i]);
   }
 
-  int i = ib_size;
+  uint32_t i = ib_size;
 
   if (dxg_runtime->vendor_packet_process) {
     int major = device->Major();
@@ -901,7 +901,7 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char *cpu, amd_aql_pm4_ib *pac
 
   // Check if we exceeded the frame size
   if ((i - ib_size) > cmdbuf_aql_frame_size) {
-    pr_err("PM4 command buffer overflow in VendorSpecific: used %d bytes, limit %d bytes\n", i - ib_size, cmdbuf_aql_frame_size);
+    pr_err("PM4 command buffer overflow in VendorSpecific: used %lu bytes, limit %u bytes\n", i - ib_size, cmdbuf_aql_frame_size);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 

@@ -136,8 +136,9 @@ target_include_directories( ${ROCDXG_TARGET}
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE
-  ${WIN_SDK}
   ${CMAKE_CURRENT_SOURCE_DIR}/src )
+
+target_include_directories( ${ROCDXG_TARGET} SYSTEM PRIVATE ${WIN_SDK} )
 
 add_compile_definitions(LINUX __AMD64__ LITTLEENDIAN_CPU HSA_LARGE_MODEL)
 

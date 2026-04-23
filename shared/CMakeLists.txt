@@ -44,9 +44,9 @@ target_include_directories(dxg_shared
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
-    PRIVATE
-        ${WIN_SDK}
 )
+
+target_include_directories(dxg_shared SYSTEM PRIVATE ${WIN_SDK})
 
 target_compile_options(dxg_shared PRIVATE
     -fPIC

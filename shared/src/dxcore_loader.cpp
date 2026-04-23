@@ -13,9 +13,7 @@ namespace thunk {
 namespace dxcore {
 
 DxcoreLoader::DxcoreLoader()
-    : dxcore_handle_(nullptr)
-    , init_flag_()
-    , pfn_D3DKMTCreateAllocation2(nullptr)
+    : pfn_D3DKMTCreateAllocation2(nullptr)
     , pfn_D3DKMTDestroyAllocation2(nullptr)
     , pfn_D3DKMTMapGpuVirtualAddress(nullptr)
     , pfn_D3DKMTReserveGpuVirtualAddress(nullptr)
@@ -48,7 +46,9 @@ DxcoreLoader::DxcoreLoader()
     , pfn_D3DKMTDestroyHwQueue(nullptr)
     , pfn_D3DKMTSubmitCommandToHwQueue(nullptr)
     , pfn_D3DKMTEnumProcesses(nullptr)
-    , pfn_D3DKMTQueryVideoMemoryInfo(nullptr) {
+    , pfn_D3DKMTQueryVideoMemoryInfo(nullptr)
+    , dxcore_handle_(nullptr)
+    , init_flag_() {
 }
 
 DxcoreLoader::~DxcoreLoader() {
