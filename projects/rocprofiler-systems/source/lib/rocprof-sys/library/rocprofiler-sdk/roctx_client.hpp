@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "core/control/session.hpp"
 #include "library/rocprofiler-sdk/marker_writer.hpp"
-#include "library/rocprofiler-sdk/trace_control.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -44,10 +44,7 @@ public:
 
     void configure_services(rocprofiler_context_id_t ctx);
 
-    std::shared_ptr<control::trace_control> get_controller() const
-    {
-        return m_controller;
-    }
+    std::shared_ptr<control::session> get_session() const { return m_session; }
 
 private:
     struct marker_range_entry
@@ -60,10 +57,10 @@ private:
 
     using marker_range_stack_t = std::vector<marker_range_entry>;
 
-    rocprofiler_context_id_t                m_ctx{ 0 };
-    roctx_client_config                     m_config;
-    marker_writer<MarkerWriterPolicy>       m_writer;
-    std::shared_ptr<control::trace_control> m_controller{};
+    rocprofiler_context_id_t          m_ctx{ 0 };
+    roctx_client_config               m_config;
+    marker_writer<MarkerWriterPolicy> m_writer;
+    std::shared_ptr<control::session> m_session{};
 
     static thread_local marker_range_stack_t m_pushed_ranges;
     static thread_local marker_range_stack_t m_started_ranges;
@@ -102,8 +99,7 @@ roctx_client<MarkerWriterPolicy>::roctx_client(const roctx_client_config& roctx_
 : m_config{ roctx_cfg }
 , m_writer{ roctx_cfg.use_perfetto, roctx_cfg.use_timemory,
             roctx_cfg.perfetto_annotations }
-, m_controller{ std::make_shared<control::trace_control>(
-      roctx_cfg.selected_trace_regions) }
+, m_session{ std::make_shared<control::session>(roctx_cfg.selected_trace_regions) }
 {}
 
 }  // namespace rocprofiler_sdk
