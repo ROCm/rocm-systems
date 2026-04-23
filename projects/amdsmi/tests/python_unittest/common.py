@@ -446,6 +446,20 @@ class Common:
                 error_code_name = self.error_map[error_code]
         return (error_code, error_code_name)
 
+    def get_dict_key_from_value(self, _value, _dict):
+        if _value not in _dict.values():
+            return None
+        for key, value in _dict.items():
+            if value == _value:
+                return key
+        return None
+
+    def get_error_code_from_name(self, error_code_name):
+        error_code = self.get_dict_key_from_value(error_code_name, self.error_map)
+        if error_code == None:
+            error_code = -1
+        return error_code
+
     def check_ret(self, msg, exc, expected_code_name=None, printIt=True):
         # Returns True if the test FAILED (i.e. the result did not match expected).
         # Callers use the pattern: `if self.check_ret(...): raise_exception = e`
@@ -466,36 +480,45 @@ class Common:
 
         # Check for when there are multiple passing conditions
         if isinstance(expected_code_name, list):
-            for ec in expected_code_name:
-                if not self.check_ret(msg, exc, ec, False):  # check without printing
+            for ec_name in expected_code_name:
+                if not self.check_ret(msg, exc, ec_name, False):  # check without printing
                     # This expected code matched - print once and return success
                     if self.verbose > VERBOSITY_QUIET and printIt:
                         if msg:
                             print(f"{msg}\n", end="")
-                        print(f"\tTest PASSED with expected result {ec}", flush=True)
+                        ec_code = self.get_error_code_from_name(ec_name)
+                        print(f"\tTEST SUCCESS, AMDSMI API Returned {ec_code:>2s}, {ec_name}")
                     return False
 
             # No expected result matched - print failure (respects same guards as single-condition path)
             if self.verbose > VERBOSITY_QUIET and printIt:
                 if msg:
                     print(f"{msg}\n", end="")
-                print(
-                    f"\tTest FAILED with expected results {expected_code_name} but received {error_code_name}",
-                    flush=True,
+                status_msg = (
+                    f"\tTEST FAILURE, AMDSMI API Returned {error_code:>2s}, {error_code_name}\n"
                 )
+                for ec_name in expected_code_name:
+                    ec_code = self.get_error_code_from_name(ec_name)
+                    status_msg += (
+                        f"\t              AMDSMI API Expected {ec_code:>2s}, {expected_code_name}"
+                    )
             return True
 
         # Check for single passing condition
         status_msg = ""
         status_ret = False
         if any(error_code in value for value in self.not_supported_error_codes):
-            status_msg = f"\tAMDSMI API Returned {error_code_name}"
+            status_msg = f"\tAMDSMI API Returned {error_code:>2s}, {error_code_name}"
         elif error_code_name == expected_code_name:
-            status_msg = f"\tTest PASSED with expected result {expected_code_name}"
+            status_msg = f"\tTEST SUCCESS, AMDSMI API Returned expected {error_code:>2s}, {expected_code_name}"
         elif error_code_name != self.PASS and expected_code_name == self.ANY_FAIL:
-            status_msg = f"\tTest PASSED with expected result {expected_code_name} and received {error_code_name}"
+            status_msg = f"\tTEST SUCCESS, AMDSMI API Returned expected fail {error_code:>2s}, {expected_code_name}"
         else:
-            status_msg = f"\tTest FAILED with expected result {expected_code_name} but received {error_code_name}"
+            expected_error_code = self.get_error_code_from_name(expected_code_name)
+            status_msg = (
+                f"\tTEST FAILURE, AMDSMI API Returned {error_code:>2s}, {error_code_name}\n"
+            )
+            status_msg += f"\t              AMDSMI API Expected {expected_error_code:>2s}, {expected_code_name}"
             status_ret = True
         if self.verbose > VERBOSITY_QUIET and printIt:
             if msg:

@@ -127,6 +127,10 @@ declare -A TEST_NUMBERS=(
   ["flood_fadd"]="91"
   ["flood_waitadd"]="92"
   ["device_bitcode"]="93"
+  ["library_info"]="94"
+  ["teamctxsharedinfra"]="95"
+  ["quiet_on_stream"]="96"
+  ["sync_all_on_stream"]="97"
 )
 
 ExecTest() {
@@ -504,6 +508,8 @@ TestOnStream() {
   else echo "Skip:   putmem_signal_on_stream (AIROCSHMEM-217: RO sometimes abort)"; fi
 
   ExecTest  "barrier_all_on_stream"  2  1           1
+  ExecTest  "quiet_on_stream"        2  1           1
+  ExecTest  "sync_all_on_stream"     2  1           1
   ExecTest  "alltoallmem_on_stream"  2  1           64        1048576
   ExecTest  "broadcastmem_on_stream" 2  1           64        1048576
 }
@@ -513,6 +519,7 @@ TestOther() {
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
   ExecTest  "init"             2       1            1
+  ExecTest  "library_info"     2       1            1
   ExecTest  "hipmodule_init"   2       1            1
   ExecTest  "device_bitcode"   2       1            1
   ExecTest  "device_bitcode"   2       32           1024
@@ -555,6 +562,8 @@ TestOther() {
   ExecTest  "teamctxblockinfra"   5       1            1
   ExecTest  "teamctxoddeveninfra" 4       1            1
   ExecTest  "teamctxoddeveninfra" 5       1            1
+  ExecTest  "teamctxsharedinfra"  2       1            1
+  ExecTest  "teamctxsharedinfra"  5       1            1
   unset ROCSHMEM_MAX_NUM_CONTEXTS
 
   ExecTest  "shmemptr"         2       1            1         8

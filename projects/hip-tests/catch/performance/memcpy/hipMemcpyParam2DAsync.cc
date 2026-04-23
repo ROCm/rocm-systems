@@ -105,7 +105,6 @@ HIP_TEST_CASE(Performance_hipMemcpyParam2DAsync_DeviceToHost) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyParam2DAsync_HostToDevice) {
-  CHECK_IMAGE_SUPPORT
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(width, 32, hipMemcpyHostToDevice);
 }
@@ -148,7 +147,6 @@ HIP_TEST_CASE(Performance_hipMemcpyParam2DAsync_HostToHost) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyParam2DAsync_DeviceToDevice_DisablePeerAccess) {
-  CHECK_IMAGE_SUPPORT
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(width, 32, hipMemcpyDeviceToDevice);
 }
@@ -171,7 +169,6 @@ HIP_TEST_CASE(Performance_hipMemcpyParam2DAsync_DeviceToDevice_DisablePeerAccess
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyParam2DAsync_DeviceToDevice_EnablePeerAccess) {
-  CHECK_IMAGE_SUPPORT
   if (HipTest::getDeviceCount() < 2) {
     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
