@@ -90,7 +90,7 @@ get_queue_registry();
  * @return Strong QueueState reference if found, empty otherwise
  */
 queue_state_ptr_t
-lookup_queue_state(const hsa_queue_t* queue);
+lookup_queue_state(const hsa_queue_t* queue, bool create_if_missing = false);
 
 /**
  * @brief Look up QueueState by doorbell signal
@@ -99,7 +99,7 @@ lookup_queue_state(const hsa_queue_t* queue);
  * @return Strong QueueState reference if found and still alive, empty otherwise
  */
 queue_state_ptr_t
-lookup_queue_state_by_doorbell(hsa_signal_t signal);
+lookup_queue_state_by_doorbell(hsa_signal_t signal, bool create_if_missing = false);
 
 /**
  * @brief Atomically add to virtual write pointer
@@ -184,8 +184,8 @@ process_doorbell_impl(const queue_state_ptr_t& state,
  * @param wdid_addr Pointer to the queue's real write doorbell index
  * @param rdid_addr Pointer to the queue's real read doorbell index
  */
-void
-create_queue_state(const hsa_queue_t* queue);
+std::shared_ptr<QueueState>
+create_queue_state(const hsa_queue_t* queue, bool overwrite = false);
 
 /**
  * @brief Destroy and unregister queue state
@@ -199,6 +199,14 @@ void
 destroy_queue_state(const hsa_queue_t* queue);
 
 /**
+ * @brief Check if inline interception is currently installed and active
+ *
+ * @return True if inline interception is installed and active, false otherwise
+ */
+bool
+is_intercepting_inline();
+
+/**
  * @brief Install interposition wrappers into the HSA core API table
  *
  * Saves original function pointers and replaces them with wrappers that
@@ -208,10 +216,7 @@ destroy_queue_state(const hsa_queue_t* queue);
  * @param core_table The HSA core API table to intercept
  */
 void
-install_intercept(CoreApiTable& core_table);
-
-bool
-is_intercepting_inline();
+intercept_init(CoreApiTable* core_table, bool enabled);
 
 /**
  * @brief Disable inline queue interception and clear tracked state
@@ -221,10 +226,16 @@ is_intercepting_inline();
  * Intended for finalization to avoid teardown-order hazards in static objects.
  */
 void
-shutdown_intercept();
+intercept_fini();
 
+/**
+ * @brief Wait for all in-flight signal handlers to complete and clean up resources
+ *
+ * This should be called during shutdown to ensure that any pending doorbell
+ * processing is completed and that the signal pool is cleaned up.
+ */
 void
-sync();
+intercept_sync();
 }  // namespace queue_intercept
 }  // namespace hsa
 }  // namespace rocprofiler

@@ -566,7 +566,7 @@ void
 queue_controller_sync()
 {
     // sync the queue interceptor
-    if(queue_intercept::is_intercepting_inline()) queue_intercept::sync();
+    queue_intercept::intercept_sync();
 
     if(get_queue_controller())
         get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
@@ -581,7 +581,7 @@ queue_controller_fini()
     // finalize queue data (e.g. clean up signal pool)
     if(enable_queue_intercept()) queue_fini();
 
-    queue_intercept::shutdown_intercept();
+    queue_intercept::intercept_fini();
 }
 
 void
