@@ -7,6 +7,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:demangler-tests>
     $<TARGET_OBJECTS:logger-tests>
     $<TARGET_OBJECTS:lib-components-tests>
+    $<TARGET_OBJECTS:rocprofiler-sdk-components-unit-tests>
     $<$<TARGET_EXISTS:rccl-unit-tests>:$<TARGET_OBJECTS:rccl-unit-tests>>
     $<$<TARGET_EXISTS:bin-common-tests>:$<TARGET_OBJECTS:bin-common-tests>>
 )

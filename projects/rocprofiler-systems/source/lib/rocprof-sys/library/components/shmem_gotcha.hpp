@@ -18,14 +18,9 @@
 #include <string_view>
 #include <type_traits>
 
-namespace rocprofsys
-{
-namespace component
-{
-
 // Categories for SHMEM API filtering. Use these names in ROCPROFSYS_SHMEM_PERMIT_LIST
 // and ROCPROFSYS_SHMEM_REJECT_LIST (e.g. "init,sync,rma" or "atomics,memory").
-namespace shmem_categories
+namespace rocprofsys::component::shmem_categories
 {
 // Category name -> set of API names (symbols we bind).
 inline const std::map<std::string, std::set<std::string>>&
@@ -126,9 +121,9 @@ expand_tokens_to_apis(const std::set<std::string>& tokens)
     }
     return out;
 }
-}  // namespace shmem_categories
+}  // namespace rocprofsys::component::shmem_categories
 
-namespace traits
+namespace rocprofsys::component::traits
 {
 template <typename Policy, typename = void>
 struct has_comm_data : std::false_type
@@ -173,7 +168,10 @@ struct has_shmem_gotcha_t<Policy, std::void_t<typename Policy::shmem_gotcha_t>>
 : std::true_type
 {};
 
-}  // namespace traits
+}  // namespace rocprofsys::component::traits
+
+namespace rocprofsys::component
+{
 
 template <typename SHMEMPolicy>
 struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
@@ -584,6 +582,4 @@ shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
     SHMEMPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
 }
 
-}  // namespace component
-
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
