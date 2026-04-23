@@ -63,10 +63,10 @@ struct QueueState
 
     const hsa_queue_t* hsa_queue       = nullptr;  ///< HSA queue pointer for Queue* lookup
     hsa_signal_t       doorbell_signal = {0};      ///< The queue's doorbell signal
-    std::mutex         gate_lock;                  ///< Lock for packet submission gating
+    std::mutex         gate_lock       = {};       ///< Lock for packet submission gating
 };
 
-using queue_state_ptr_t      = std::shared_ptr<QueueState>;
+using queue_state_ptr_t = std::shared_ptr<QueueState>;
 
 /// Thread-safe map from HSA queue pointer to its QueueState
 using queue_registry_t =
@@ -80,19 +80,8 @@ using queue_registry_t =
  *
  * @return Reference to the queue registry
  */
-// queue_registry_t&
-// get_queue_registry();
-
-/**
- * @brief Get the global doorbell map singleton
- *
- * The doorbell map allows looking up QueueState by doorbell signal handle,
- * which is needed when intercepting signal store operations.
- *
- * @return Reference to the doorbell map
- */
-// doorbell_map_t&
-// get_doorbell_map();
+queue_registry_t&
+get_queue_registry();
 
 /**
  * @brief Look up QueueState by HSA queue pointer
@@ -100,8 +89,8 @@ using queue_registry_t =
  * @param queue The HSA queue to look up
  * @return Strong QueueState reference if found, empty otherwise
  */
-// queue_state_ptr_t
-// lookup_queue_state(const hsa_queue_t* queue);
+queue_state_ptr_t
+lookup_queue_state(const hsa_queue_t* queue);
 
 /**
  * @brief Look up QueueState by doorbell signal
@@ -109,30 +98,8 @@ using queue_registry_t =
  * @param signal The doorbell signal to look up
  * @return Strong QueueState reference if found and still alive, empty otherwise
  */
-// queue_state_ptr_t
-// lookup_queue_state_by_doorbell(hsa_signal_t signal);
-
-/**
- * @brief Register a doorbell signal for a queue
- *
- * This creates an association between the queue's doorbell signal and its
- * QueueState, enabling lookup by signal handle in intercepted signal stores.
- *
- * @param queue The HSA queue whose doorbell to register
- * @param doorbell The doorbell signal to register
- */
-void
-register_doorbell(const hsa_queue_t* queue, hsa_signal_t doorbell);
-
-/**
- * @brief Unregister a doorbell signal
- *
- * Removes the doorbell-to-QueueState mapping when a queue is destroyed.
- *
- * @param doorbell The doorbell signal to unregister
- */
-bool
-unregister_doorbell(hsa_signal_t doorbell);
+queue_state_ptr_t
+lookup_queue_state_by_doorbell(hsa_signal_t signal);
 
 /**
  * @brief Atomically add to virtual write pointer
