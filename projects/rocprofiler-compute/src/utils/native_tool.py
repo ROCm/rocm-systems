@@ -19,40 +19,22 @@ class NativeTool:
         lib_name,
     ])
 
-    def __init__(self, compute_script_path: Path, sdk_tool_path: Path) -> None:
+    def __init__(self, src_path: Path, sdk_tool_path: Path) -> None:
         assert sdk_tool_path.stem == "librocprofiler-sdk-tool"
-        assert compute_script_path.stem == "rocprof-compute"
         console_debug("Searching for native collector.")
-        console_debug(f"Compute script path: {compute_script_path}")
+        console_debug(f"Compute script path: {src_path}")
         console_debug(f"ROCm Profiler SDK Tool path: {sdk_tool_path}")
 
-        self.compute_script_path = compute_script_path
-        self.src_dir = self.__find_src_dir(compute_script_path)
+        self.src_path = src_path
         self.sdk_tool_path = sdk_tool_path
         pass
 
-    def __find_src_dir(self, compute_script_path: Path) -> Path | None:
-        if compute_script_path.parent.name == "src":
-            return compute_script_path.parent
-        else:
-            src_dir: Path = compute_script_path.parent / "src"
-            if src_dir.is_dir():
-                return src_dir
-        return None
-
     def get_collector_library_path(self) -> Path | None:
-        collector_path = None
-        if self.__is_run_from_rocm_installation_folder():
-            collector_path = self.__find_installed_collector()
-            if not collector_path:
-                raise RuntimeError("Failed to find installed native collector")
+        collector_path = self.__find_installed_collector()
         if not collector_path:
             collector_path = self.__build_collector()
         console_log(f"Using native collector: {collector_path}")
         return collector_path
-
-    def __is_run_from_rocm_installation_folder(self) -> bool:
-        return self.compute_script_path.parents[1] == self.sdk_tool_path.parents[2]
 
     def __find_installed_collector(self) -> Path | None:
         rocm_root_path = self.__get_installed_rocm_root_path()
@@ -73,16 +55,16 @@ class NativeTool:
         return Path(match) if match is not None else None
 
     def __build_collector(self) -> Path | None:
-        if not self.src_dir:
+        if not self.src_path:
             return None
-        self._generate_cmake_project(self.src_dir)
-        self._build_cmake_project(self.src_dir)
+        self._generate_cmake_project(self.src_path)
+        self._build_cmake_project(self.src_path)
         return self.__find_built_collector()
 
     def __find_built_collector(self) -> Path | None:
         pattern = self.lib_relative_path
-        console_log(f"Searching {self.src_dir} by {pattern} for native collector")
-        return self.__find_file_by_glob_pattern(self.src_dir, pattern)
+        console_log(f"Searching {self.src_path} by {pattern} for native collector")
+        return self.__find_file_by_glob_pattern(self.src_path, pattern)
 
     def _generate_cmake_project(self, src_path: Path) -> bool:
         build_command = (

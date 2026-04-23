@@ -352,9 +352,9 @@ class RocProfCompute_Base:
             and not args.attach_pid
             and not is_only_pc_sampling(args.filter_blocks)
         ):
-            rocprof_compute_script_path = Path(sys.argv[0]).resolve()
+            sources_path = Path(__file__).resolve().parents[1]
             native_tool = NativeTool(
-                Path(rocprof_compute_script_path), Path(args.rocprofiler_sdk_tool_path)
+                Path(sources_path), Path(args.rocprofiler_sdk_tool_path)
             )
             native_tool_path = native_tool.get_collector_library_path()
             native_tool_path_str = str(
