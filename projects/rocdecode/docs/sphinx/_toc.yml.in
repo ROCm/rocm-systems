@@ -2,19 +2,6 @@ defaults:
   numbered: False
 root: index
 subtrees:
-- entries:
-  - file: what-is-rocDecode.rst
-    title: What is rocDecode?
-
-- caption: Install
-  entries:
-  - file: install/rocDecode-prerequisites.rst
-    title: Prerequisites
-  - file: install/rocDecode-clone-project.rst
-    title: Cloning the project
-  - file: install/rocDecode-build-and-install.rst
-    title: Installing from source code
-
 - caption: Conceptual
   entries:
   - file: conceptual/video-decoding-pipeline.rst
@@ -29,6 +16,8 @@ subtrees:
 
 - caption: How to
   entries:
+  - file: how-to/rocDecode-build-and-install.rst
+    title: Build from source code
   - file: how-to/using-rocDecode-videodecode-sample.rst
     title: Understand the videodecode sample
   - file: how-to/using-rocDecode-rocdecdecoder.rst

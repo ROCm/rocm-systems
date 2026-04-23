@@ -2,23 +2,12 @@ defaults:
   numbered: False
 root: index
 subtrees:
-- entries:
-  - file: what-is-rocJPEG.rst
-    title: What is rocJPEG?
-
-- caption: Install
-  entries:
-  - file: install/rocjpeg-prerequisites.rst
-    title: Installation prerequisites
-  - file: install/rocjpeg-clone-repo.rst    
-    title: Cloning the project
-  - file: install/rocjpeg-build-and-install.rst
-    title: Building and installing from source code
-
 - caption: How to
   entries:
   - file: how-to/using-rocjpeg.rst
     title: Use rocJPEG
+  - file: how-to/rocjpeg-build-and-install.rst
+    title: Build from source code
   - file: how-to/rocjpeg-retrieve-image-info.rst
     title: Retrieve image information
   - file: how-to/rocjpeg-decoding-a-jpeg-stream.rst

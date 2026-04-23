@@ -3,12 +3,24 @@
   :keywords: install, building, rocDecode, AMD, ROCm, source code, developer
 
 ********************************************************************
-Building and installing rocDecode from source code
+Build rocDecode from source code
 ********************************************************************
 
-rocDecode is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. For TheRock installation details, refer to the `TheRock documentation <https://github.com/ROCm/TheRock#readme>`_.
+Only build rocDecode from source code if you're contributing to the rocDecode project or want to preview new features. 
 
-To build rocDecode standalone from source, :doc:`clone the rocDecode project <./rocDecode-clone-project>` and change to the project directory:
+Use sparse checkout to clone the rocDecode project:
+
+.. code::
+
+  git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+  cd rocm-systems
+  git sparse-checkout init --cone
+  git sparse-checkout set projects/rocdecode
+  git checkout develop
+
+The default develop branch is intended for users who want to preview new features or contribute to the rocDecode codebase.
+
+Change directory to ``projects/rocdecode``:
 
 .. code:: shell
 
@@ -25,7 +37,13 @@ Build and install rocDecode using the following commands:
 
 After installation, the rocDecode libraries will be copied to ``/opt/rocm/lib`` and the rocDecode header files will be copied to ``/opt/rocm/include/rocdecode``.
 
-To run the installed CTest-based verification:
+.. note::
+
+  FFmpeg development libraries must be installed to build and run samples:
+
+  ``sudo apt install libavcodec-dev libavformat-dev libavutil-dev``
+
+Build the CTest-based verification:
 
 .. code:: shell
 

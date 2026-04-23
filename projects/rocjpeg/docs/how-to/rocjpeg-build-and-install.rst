@@ -3,16 +3,27 @@
   :keywords: install, building, rocJPEG, AMD, ROCm, source code, developer
 
 ********************************************************************
-Building and installing rocJPEG from source code
+Build rocJPEG from source code
 ********************************************************************
 
-rocJPEG is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. For TheRock installation details, refer to the `TheRock documentation <https://github.com/ROCm/TheRock#readme>`_.
+Only build rocJPEG from its source code if you're contributing to the rocJPEG project or want to preview new features. 
 
-To build rocJPEG standalone from source, :doc:`clone the rocJPEG project <./rocjpeg-clone-repo>` and change to the project directory:
+.. code::
+
+  git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+  cd rocm-systems
+  git sparse-checkout init --cone
+  git sparse-checkout set projects/rocjpeg
+  git checkout develop
+
+The default develop branch is intended for users who want to preview new features or contribute to the rocJPEG codebase.
+
+Change directory to ``projects/rocjpeg``:
 
 .. code:: shell
 
   cd rocm-systems/projects/rocjpeg
+
 
 Build and install rocJPEG using the following commands:
 
@@ -25,7 +36,7 @@ Build and install rocJPEG using the following commands:
 
 After installation, the rocJPEG libraries will be copied to ``/opt/rocm/lib`` and the rocJPEG header files will be copied to ``/opt/rocm/include/rocjpeg``.
 
-To run the installed CTest-based verification:
+Build the CTest-based verification:
 
 .. code:: shell
 
@@ -34,3 +45,4 @@ To run the installed CTest-based verification:
   ctest -VV
 
 To test your build, run ``make test``. To run the test with the verbose option, run ``make test ARGS="-VV"``.
+
