@@ -286,7 +286,9 @@ class VirtualGPU : public device::VirtualDevice {
     void AddExternalSignal(ProfilingSignal* signal) { external_signals_.push_back(signal); }
 
     //! Get the last active signal on the queue
-    ProfilingSignal* GetLastSignal() const { return signal_list_[current_id_]; }
+    ProfilingSignal* GetLastSignal() const {
+      return (last_graph_signal_ != nullptr) ? last_graph_signal_ : signal_list_[current_id_];
+    }
 
     //! Clear external signals
     void ClearExternalSignals() { external_signals_.clear(); }
@@ -319,6 +321,7 @@ class VirtualGPU : public device::VirtualDevice {
     std::stack<ProfilingSignal*> signal_pool_;       //!< The pool of free signals without interrupt
     std::vector<ProfilingSignal*> signal_list_;      //!< The pool of all signals for processing
     size_t current_id_ = 0;                          //!< Last submitted signal
+    ProfilingSignal* last_graph_signal_ = nullptr;   //!< Last signal from graph pool (null when not in graph mode)
     bool sdma_profiling_ = false;                    //!< If TRUE, then SDMA profiling is enabled
     const VirtualGPU& gpu_;                          //!< VirtualGPU, associated with this tracker
     std::vector<ProfilingSignal*> external_signals_;  //!< External signals for a wait in this queue

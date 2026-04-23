@@ -63,13 +63,19 @@ Event::~Event() {
 
 // ================================================================================================
 AccumulateCommand::~AccumulateCommand() {
-  // Release all retained HW events per device
-  for (auto& device_events_pair : hw_events_) {
-    Device* dev = device_events_pair.first;
-    if (dev != nullptr) {
-      for (void* hw_event : device_events_pair.second) {
-        if (hw_event != nullptr) {
-          dev->ReleaseGlobalSignal(hw_event);
+  if (owned_graph_signal_pool_ != nullptr) {
+    // Graph pool owns all signals (SyncPlan HW events + ActiveSignal signals).
+    // Skip per-device HW event release — pool destructor handles everything.
+    delete owned_graph_signal_pool_;
+  } else {
+    // Non-graph path: release HW events per device as before
+    for (auto& device_events_pair : hw_events_) {
+      Device* dev = device_events_pair.first;
+      if (dev != nullptr) {
+        for (void* hw_event : device_events_pair.second) {
+          if (hw_event != nullptr) {
+            dev->ReleaseGlobalSignal(hw_event);
+          }
         }
       }
     }

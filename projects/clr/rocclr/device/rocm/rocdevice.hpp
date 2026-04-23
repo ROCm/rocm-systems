@@ -114,6 +114,46 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   }
 };
 
+//! Graph-owned signal pool for per-launch signal allocation.
+//! Avoids runtime signal pool stalls (WaitCurrent/WaitNext) during graph execution.
+//! Two sub-pools: GPU-only signals (fast) and interrupt-capable signals (for host callbacks).
+struct GraphSignalPool {
+  ProfilingSignal* Acquire() {
+    size_t idx = next_idx_.fetch_add(1, std::memory_order_relaxed);
+    if (idx < signals_.size()) {
+      return signals_[idx];
+    }
+    return GrowAndAcquire(idx);
+  }
+
+  ProfilingSignal* AcquireIrq(bool system_scope) {
+    size_t idx = irq_next_idx_.fetch_add(1, std::memory_order_relaxed);
+    if (idx < irq_signals_.size()) {
+      return irq_signals_[idx];
+    }
+    return GrowAndAcquireIrq(idx, system_scope);
+  }
+
+  bool Allocate(size_t count);
+  bool AllocateIrq(size_t count, bool system_scope);
+
+  size_t UsedCount() const { return next_idx_.load(std::memory_order_relaxed); }
+  size_t UsedIrqCount() const { return irq_next_idx_.load(std::memory_order_relaxed); }
+
+  ~GraphSignalPool();
+
+ private:
+  std::vector<ProfilingSignal*> signals_;       //!< GPU-only signals
+  std::atomic<size_t> next_idx_{0};             //!< Next GPU-only signal index
+  std::vector<ProfilingSignal*> irq_signals_;   //!< Interrupt-capable signals
+  std::atomic<size_t> irq_next_idx_{0};         //!< Next interrupt signal index
+  amd::Monitor lock_;                           //!< Protects growth of both vectors
+
+  static ProfilingSignal* AllocateOneSignal(bool interrupt, bool system_scope);
+  ProfilingSignal* GrowAndAcquire(size_t idx);
+  ProfilingSignal* GrowAndAcquireIrq(size_t idx, bool system_scope);
+};
+
 class Sampler : public device::Sampler {
  public:
   //! Constructor

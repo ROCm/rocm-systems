@@ -5,6 +5,7 @@
  */
 
 #include "hip_graph_internal.hpp"
+#include "device/rocm/rocdevice.hpp"
 
 #define CASE_STRING(X, C)                                                                          \
   case X:                                                                                          \
@@ -550,6 +551,25 @@ void GraphExec::BuildSyncPlan() {
 
     if (segment.segment_ids_edges.empty()) {
       sync_plan_.leaf_segment_ids.push_back(segment.id);
+    }
+  }
+
+  // Seed GPU-only signal count with known minimum (SyncPlan HW events)
+  // so even the first launch pre-allocates these instead of growing on demand.
+  graph_signal_count_ = sync_plan_.num_segments;
+
+  // Count interrupt signals needed based on graph topology (host nodes, etc.)
+  graph_irq_signal_count_ = 0;
+  for (const auto& segment : segments_) {
+    if (segment.child_graph_ptr != nullptr) continue;
+    auto segBatchIt = segmentBatches_.find(segment.id);
+    if (segBatchIt == segmentBatches_.end()) continue;
+    auto& segBatch = segBatchIt->second;
+    for (size_t i = 0; i < segment.nodes.size(); ++i) {
+      if (!segBatch.node_capture_status[i] &&
+          segment.nodes[i]->GetType() == hipGraphNodeTypeHost) {
+        graph_irq_signal_count_ += 2;
+      }
     }
   }
 }
@@ -1715,19 +1735,24 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
 
   auto* device = g_devices[launch_stream->DeviceId()]->devices()[0];
 
-  // Allocate HW events for all segments
-  std::vector<void*> segment_hw_events;
-  if (sync_plan_.num_segments > 0) {
-    if (!device->CreateHwEvents(sync_plan_.num_segments, segment_hw_events)) {
-      if (out_status != nullptr) {
-        *out_status = hipErrorOutOfMemory;
-      }
-      return nullptr;
-    }
+  // Create per-launch graph signal pool for intra-segment ActiveSignal() calls.
+  auto* launch_pool = new amd::roc::GraphSignalPool();
+  if (graph_signal_count_ > 0) {
+    launch_pool->Allocate(graph_signal_count_);
+  }
+  if (graph_irq_signal_count_ > 0) {
+    launch_pool->AllocateIrq(graph_irq_signal_count_, true);
   }
 
-  // Apply pre-computed patches -- writes HW events directly into flatPacketData
-  // via the flat_packet pointers resolved at instantiate time, so no rebuild needed.
+  // Allocate SyncPlan HW events from the graph pool (replaces CreateHwEvents).
+  // All signals — SyncPlan inter-segment HW events AND intra-segment ActiveSignal
+  // calls — come from one unified GraphSignalPool.
+  std::vector<void*> segment_hw_events(sync_plan_.num_segments, nullptr);
+  for (int i = 0; i < sync_plan_.num_segments; ++i) {
+    segment_hw_events[i] = launch_pool->Acquire();
+  }
+
+  // Apply pre-computed patches — writes HW events directly into flatPacketData
   if (!sync_plan_.patch_list.empty()) {
     device->ApplyHwEventPatches(sync_plan_.patch_list, segment_hw_events);
   }
@@ -1735,18 +1760,11 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
   // Track stream assignments across levels
   std::unordered_map<int, hip::Stream*> segment_to_stream;
 
-  // Single AccumulateCommand on launch_stream manages all HW event lifetimes
+  // Single AccumulateCommand on launch_stream manages graph pool lifetime
   // and serves as the dispatch anchor for all segments across all streams.
   auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
-
-  // Register HW events with graph_accumulate for lifetime tracking.
-  // addHwEvent does not retain — ownership transfers from CreateHwEvents
-  // to graph_accumulate. ~AccumulateCommand releases them after graph completion.
-  for (auto& hw_event : segment_hw_events) {
-    if (hw_event != nullptr) {
-      graph_accumulate->addHwEvent(hw_event, device);
-    }
-  }
+  graph_accumulate->SetGraphSignalPool(launch_pool);
+  graph_accumulate->SetOwnedGraphSignalPool(launch_pool);
 
   // Process segments level by level
   for (int level = 0; level <= max_dependency_level_; ++level) {
@@ -1759,13 +1777,13 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
     AssignStreamsToSegments(segments_at_level, launch_stream, streams, segment_to_stream);
 
     if (level == 0) {
-      // Synchronize internal streams with launch stream's last command if available
+      // Synchronize internal streams with launch stream's last command if available.
+      // These wait markers use runtime pool signals (no graph pool) for boundary sync.
       amd::Command* launch_last_cmd = launch_stream->getLastQueuedCommand(true);
       if (launch_last_cmd != nullptr) {
         amd::Command::EventWaitList launch_wait_list;
         launch_wait_list.push_back(launch_last_cmd);
 
-        // For each segment at level 0, if it's on a different stream, add a wait marker
         for (int segment_id : segments_at_level) {
           hip::Stream* seg_stream = segment_to_stream[segment_id];
           if (seg_stream != launch_stream) {
@@ -1780,7 +1798,7 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
       }
     }
 
-    // Dispatch each segment -- barriers are in the batch, signals are patched
+    // Dispatch each segment — barriers are in the batch, signals are patched
     for (int segment_id : segments_at_level) {
       const auto& segment = segments_[segment_id];
       hip::Stream* current_stream = segment_to_stream[segment_id];
@@ -1797,10 +1815,7 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
     }
   }
 
-  // Synchronize parallel streams back to the launch stream.
-  // Each leaf segment already has a completion HW event signal patched onto its
-  // last packet. Add those HW events as dependencies on graph_accumulate so
-  // the runtime emits barrier packets when it is enqueued on the launch stream.
+  // Synchronize parallel streams back to the launch stream via leaf HW events
   if (IsLeafNodeSyncRequired()) {
     for (int seg_id : sync_plan_.leaf_segment_ids) {
       auto it = segment_to_stream.find(seg_id);
@@ -1808,6 +1823,12 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
         graph_accumulate->addDepHwEvent(segment_hw_events[seg_id]);
       }
     }
+  }
+
+  // Cache GPU-only signal count for future launches (first launch or if count grew)
+  size_t used = launch_pool->UsedCount();
+  if (used > graph_signal_count_) {
+    graph_signal_count_ = used;
   }
 
   graph_accumulate->enqueue();
@@ -1925,8 +1946,6 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
   }
 
   for (size_t i = 0; i < segment.nodes.size(); ++i) {
-    auto& node = segment.nodes[i];
-
     if (segBatch && i < segBatch->node_capture_status.size() &&
         segBatch->node_capture_status[i]) {
       // Node was successfully captured - dispatch its batch
@@ -1945,32 +1964,32 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
         if (status != hipSuccess) return status;
       }
     } else {
-      // Node doesn't support capture - execute individually.
-      // Flat dispatch bypasses the Barriers() tracker (ActiveSignal is skipped).
-      // Enqueue Markers before and after the non-captured node to:
-      //   Before: resync the Barriers() tracker so releaseGpuMemoryFence/WaitCurrent
-      //           can track queue progress for the node's internal operations.
-      //   After:  ensure the node's commands (e.g. host node blocking callbacks) are
-      //           fully flushed to the HW queue before the next flat batch is
-      //           dispatched, which writes directly to the HW queue.
-      auto pre_marker = new amd::Marker(*stream, kMarkerDisableFlush, {});
-      if (pre_marker != nullptr) {
-        pre_marker->enqueue();
-        pre_marker->release();
+      // Non-captured nodes execute through the normal command pipeline.
+      // No pre/post markers needed: in direct dispatch mode the node's submit()
+      // writes directly to the HW queue, preserving in-order execution with
+      // surrounding flat-dispatched batches. Batch command-status tracking is
+      // deferred to the AccumulateCommand enqueued at the end of
+      // EnqueueSegmentedGraph. Engine transitions (e.g. SDMA) are handled by
+      // releaseGpuMemoryFence (hasPendingDispatch_) and WaitingSignal engine tracking.
+      for (; i < segment.nodes.size(); ++i) {
+        if (segBatch && i < segBatch->node_capture_status.size() &&
+            segBatch->node_capture_status[i]) {
+          break;
+        }
+        auto& uncaptured_node = segment.nodes[i];
+        if (DEBUG_HIP_GRAPH_DOT_PRINT) {
+          uncaptured_node->stream_id_ = stream->GetStreamId();
+          uncaptured_node->hw_queue_id_ = stream->getQueueID();
+        }
+        uncaptured_node->SetStream(stream);
+        status = uncaptured_node->CreateCommand(uncaptured_node->GetQueue());
+        if (status != hipSuccess) return status;
+        if (accumulate->graphSignalPool() != nullptr) {
+          uncaptured_node->SetGraphSignalPoolOnCommands(accumulate->graphSignalPool());
+        }
+        uncaptured_node->EnqueueCommands(stream);
       }
-      if (DEBUG_HIP_GRAPH_DOT_PRINT) {
-        node->stream_id_ = stream->GetStreamId();
-        node->hw_queue_id_ = stream->getQueueID();
-      }
-      node->SetStream(stream);
-      status = node->CreateCommand(node->GetQueue());
-      if (status != hipSuccess) return status;
-      node->EnqueueCommands(stream);
-      auto post_marker = new amd::Marker(*stream, kMarkerDisableFlush, {});
-      if (post_marker != nullptr) {
-        post_marker->enqueue();
-        post_marker->release();
-      }
+      --i;
     }
   }
 

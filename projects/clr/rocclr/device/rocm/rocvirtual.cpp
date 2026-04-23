@@ -567,6 +567,87 @@ bool VirtualGPU::HwQueueTracker::Create() {
 hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_val, Timestamp* ts,
                                                       bool attach_signal) {
   amd::Command* cmd = gpu_.command();
+
+  // Graph signal pool fast path: skip WaitCurrent/WaitNext, use graph-owned signals.
+  // No fallback to runtime pool — graph pool grows on demand.
+  if (cmd != nullptr && cmd->graphSignalPool() != nullptr) {
+    if (!attach_signal) {
+      if (cmd->HwEvent() != nullptr) {
+        reinterpret_cast<ProfilingSignal*>(cmd->HwEvent())->release();
+      }
+      cmd->SetHwEvent(nullptr);
+      return hsa_signal_t{0};
+    }
+
+    auto* pool = cmd->graphSignalPool();
+
+    bool enqueHandler = false;
+    if (ts != nullptr) {
+      enqueHandler =
+          (ts->command().Callback() != nullptr || ts->command().GetBatchHead() != nullptr) &&
+          !ts->command().CpuWaitRequested();
+    }
+    bool use_irq = enqueHandler || (IS_WINDOWS && gpu_.ForceIrq());
+    use_irq |= !gpu_.dev().ActiveWait();
+
+    ProfilingSignal* ps;
+    if (use_irq) {
+      const Settings& settings = gpu_.dev().settings();
+      ps = pool->AcquireIrq(settings.system_scope_signal_);
+    } else {
+      ps = pool->Acquire();
+    }
+
+    if (ps == nullptr) {
+      LogError("GraphSignalPool: failed to allocate signal");
+      return hsa_signal_t{0};
+    }
+
+    Hsa::signal_silent_store_relaxed(ps->signal_, init_val);
+    ps->flags_.done_ = false;
+    ps->engine_ = engine_;
+    ps->flags_.isPacketDispatch_ = false;
+    ps->ResetCachedTiming();
+
+    if (cmd->HwEvent() != nullptr) {
+      reinterpret_cast<ProfilingSignal*>(cmd->HwEvent())->release();
+    }
+    cmd->SetHwEvent(ps);
+    ps->retain();
+
+    if (ts != nullptr) {
+      ts->retain();
+      ps->ts_ = ts;
+      ts->AddProfilingSignal(ps);
+
+      if (enqueHandler) {
+        uint32_t handler_init = kInitSignalValueOne;
+        if (ts->command().Callback() != nullptr) {
+          bool blocking = ts->command().Callback()->blocking_;
+          ts->SetCallbackSignal(ps->signal_, blocking);
+          if (blocking) {
+            Hsa::signal_add_relaxed(ps->signal_, 1);
+            handler_init += 1;
+          }
+        }
+        gpu_.QueuedAsyncHandlers()++;
+        ts->gpu()->retain();
+        hsa_status_t result = Hsa::signal_async_handler(
+            ps->signal_, HSA_SIGNAL_CONDITION_LT, handler_init, &HsaAmdSignalHandler, ts);
+        if (HSA_STATUS_SUCCESS != result) {
+          gpu_.QueuedAsyncHandlers()--;
+          ts->gpu()->release();
+          LogError("hsa_amd_signal_async_handler() failed in graph pool path");
+        }
+      }
+    }
+    last_graph_signal_ = ps;
+    return ps->signal_;
+  }
+
+  // --- Normal runtime pool path ---
+  last_graph_signal_ = nullptr;
+
   // If no signal is needed, decrement the refcount and clear the hw_event of current command
   if (!attach_signal) {
     if (nullptr != cmd) {
@@ -740,15 +821,16 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
   if (explicit_wait) {
     bool skip_internal_signal = false;
 
+    ProfilingSignal* last_signal = GetLastSignal();
     for (uint32_t i = 0; i < external_signals_.size(); ++i) {
       // If external signal matches internal one, then skip it
-      if (external_signals_[i]->signal_.handle == signal_list_[current_id_]->signal_.handle) {
+      if (external_signals_[i]->signal_.handle == last_signal->signal_.handle) {
         skip_internal_signal = true;
       }
     }
     // Add the oldest signal into the tracking for a wait
     if (!skip_internal_signal) {
-      external_signals_.push_back(signal_list_[current_id_]);
+      external_signals_.push_back(last_signal);
     }
   }
 
@@ -801,12 +883,13 @@ bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
 
 // ================================================================================================
 bool VirtualGPU::HwQueueTracker::WaitCurrent() {
-  ProfilingSignal* signal = signal_list_[current_id_];
+  ProfilingSignal* signal = GetLastSignal();
   return CpuWaitForSignal(signal);
 }
 
 // ================================================================================================
 void VirtualGPU::HwQueueTracker::WaitNext() {
+  if (last_graph_signal_ != nullptr) return;
   size_t next = (current_id_ + 1) % signal_list_.size();
   ProfilingSignal* signal = signal_list_[next];
   // Only wait, there is no need to save timestamp for the next signal
@@ -816,6 +899,11 @@ void VirtualGPU::HwQueueTracker::WaitNext() {
 
 // ================================================================================================
 void VirtualGPU::HwQueueTracker::ResetCurrentSignal() {
+  if (last_graph_signal_ != nullptr) {
+    Hsa::signal_silent_store_relaxed(last_graph_signal_->signal_, 0);
+    last_graph_signal_ = nullptr;
+    return;
+  }
   // Reset the signal and return
   Hsa::signal_silent_store_relaxed(signal_list_[current_id_]->signal_, 0);
   // Fallback to the previous signal

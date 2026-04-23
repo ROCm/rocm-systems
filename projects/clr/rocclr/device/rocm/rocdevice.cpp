@@ -3587,6 +3587,75 @@ void Device::DestroyHwEvent(void* hw_event) const {
 }
 
 // ================================================================================================
+// GraphSignalPool implementation
+// ================================================================================================
+ProfilingSignal* GraphSignalPool::AllocateOneSignal(bool interrupt, bool system_scope) {
+  auto* ps = new ProfilingSignal();
+  hsa_status_t status;
+  if (interrupt && system_scope) {
+    status = Hsa::signal_create(1, 0, nullptr, &ps->signal_);
+  } else {
+    status = Hsa::signal_create(1, 0, nullptr, HSA_AMD_SIGNAL_AMD_GPU_ONLY, &ps->signal_);
+  }
+  if (status != HSA_STATUS_SUCCESS) {
+    delete ps;
+    return nullptr;
+  }
+  ps->flags_.interrupt_ = interrupt;
+  return ps;
+}
+
+bool GraphSignalPool::Allocate(size_t count) {
+  signals_.reserve(count);
+  for (size_t i = signals_.size(); i < count; ++i) {
+    auto* ps = AllocateOneSignal(false, false);
+    if (ps == nullptr) return false;
+    signals_.push_back(ps);
+  }
+  next_idx_.store(0);
+  irq_next_idx_.store(0);
+  return true;
+}
+
+bool GraphSignalPool::AllocateIrq(size_t count, bool system_scope) {
+  irq_signals_.reserve(count);
+  for (size_t i = irq_signals_.size(); i < count; ++i) {
+    auto* ps = AllocateOneSignal(true, system_scope);
+    if (ps == nullptr) return false;
+    irq_signals_.push_back(ps);
+  }
+  irq_next_idx_.store(0);
+  return true;
+}
+
+ProfilingSignal* GraphSignalPool::GrowAndAcquire(size_t idx) {
+  amd::ScopedLock sl(lock_);
+  if (idx < signals_.size()) return signals_[idx];
+  while (signals_.size() <= idx) {
+    auto* ps = AllocateOneSignal(false, false);
+    if (ps == nullptr) return nullptr;
+    signals_.push_back(ps);
+  }
+  return signals_[idx];
+}
+
+ProfilingSignal* GraphSignalPool::GrowAndAcquireIrq(size_t idx, bool system_scope) {
+  amd::ScopedLock sl(lock_);
+  if (idx < irq_signals_.size()) return irq_signals_[idx];
+  while (irq_signals_.size() <= idx) {
+    auto* ps = AllocateOneSignal(true, system_scope);
+    if (ps == nullptr) return nullptr;
+    irq_signals_.push_back(ps);
+  }
+  return irq_signals_[idx];
+}
+
+GraphSignalPool::~GraphSignalPool() {
+  for (auto* ps : signals_) { ps->release(); }
+  for (auto* ps : irq_signals_) { ps->release(); }
+}
+
+// ================================================================================================
 uint8_t* Device::CreateBarrierPacket() const {
   static constexpr uint16_t kBarrierNopHeader =
       (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
