@@ -49,7 +49,7 @@ public:
     using parent_type   = PTL::TaskManager;
     using task_type     = PTL::PackagedTask<void>;
 
-    TaskGroup();
+    TaskGroup(size_t pool_size = 1);
     ~TaskGroup() override;
 
     TaskGroup(const TaskGroup&)     = delete;
@@ -87,5 +87,9 @@ create_callback_thread();
 
 // returns the task group for the given callback thread identifier
 task_group_t* get_task_group(rocprofiler_callback_thread_t);
+
+// returns a task group with the given pool size
+std::unique_ptr<task_group_t>
+create_task_group(size_t pool_size = 1);
 }  // namespace internal_threading
 }  // namespace rocprofiler

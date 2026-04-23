@@ -33,6 +33,7 @@
 
 #include <pthread.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <stdexcept>
@@ -57,14 +58,14 @@ auto affinity_functor(intmax_t)
 }
 
 auto
-get_thread_pool_config()
+get_thread_pool_config(size_t pool_size = 1)
 {
     return thread_pool_config_t{.init         = true,
                                 .use_tbb      = false,
                                 .use_affinity = false,
                                 .verbose      = 0,
                                 .priority     = 0,
-                                .pool_size    = 1,
+                                .pool_size    = pool_size,
                                 .task_queue   = nullptr,
                                 .set_affinity = affinity_functor,
                                 .initializer  = []() {},
@@ -72,8 +73,8 @@ get_thread_pool_config()
 }
 }  // namespace
 
-TaskGroup::TaskGroup()
-: parent_type{new thread_pool_t{get_thread_pool_config()}, false}
+TaskGroup::TaskGroup(size_t pool_size)
+: parent_type{new thread_pool_t{get_thread_pool_config(pool_size)}, false}
 , m_pool{parent_type::thread_pool()}
 {}
 
@@ -304,6 +305,21 @@ get_task_group(rocprofiler_callback_thread_t cb_tid)
 {
     if(!get_task_groups() || get_task_groups()->empty()) return nullptr;
     return get_task_groups()->at(cb_tid.handle);
+}
+
+std::unique_ptr<task_group_t>
+create_task_group(size_t pool_size)
+{
+    // notify that rocprofiler library is about to create an inernal thread
+    notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
+
+    // construct the task group to use the newly created thread pool
+    auto _tg = std::make_unique<task_group_t>(pool_size);
+
+    // notify that rocprofiler library finished creating an internal thread
+    notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
+
+    return _tg;
 }
 }  // namespace internal_threading
 }  // namespace rocprofiler
