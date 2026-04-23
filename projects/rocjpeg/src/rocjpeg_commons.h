@@ -35,7 +35,9 @@ THE SOFTWARE.
 #include <time.h>
 #include <unistd.h>
 #include <stdint.h>
-#include <sys/syscall.h>
+#include <thread>
+#include <sstream>
+#include <iomanip>
 
 #define MSG(X) std::clog << X << std::endl;
 #define MSG_NO_NEWLINE(X) std::clog << X;
@@ -67,7 +69,8 @@ enum RocJpegLogLevel {
 
 #define GET_TIME_NS() ([]() -> uint64_t { struct timespec ts_; clock_gettime(CLOCK_MONOTONIC, &ts_); return static_cast<uint64_t>(ts_.tv_sec) * 1000000000LL + ts_.tv_nsec; }())
 #define FILENAME_ONLY (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
-#define MakeMsg(msg) ROCJPEG_STR(FILENAME_ONLY) + ":" + ROCJPEG_TOSTR(__LINE__) + ": " + ROCJPEG_TOSTR(GET_TIME_NS() / 1000ULL) + ROCJPEG_STR(" us: ") + ROCJPEG_STR("[pid:") + ROCJPEG_TOSTR(getpid()) + ROCJPEG_STR(" tid:") + ROCJPEG_TOSTR(syscall(SYS_gettid)) + ROCJPEG_STR("] ") + ROCJPEG_STR(__func__) + "(): " + msg
+#define GET_THREAD_ID() ([]() -> std::string { std::ostringstream oss; oss << "0x" << std::hex << std::setw(5) << std::setfill('0') << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); return oss.str(); }())
+#define MakeMsg(msg) ROCJPEG_STR(FILENAME_ONLY) + ":" + ROCJPEG_TOSTR(__LINE__) + ": " + ROCJPEG_TOSTR(GET_TIME_NS() / 1000ULL) + ROCJPEG_STR(" us: ") + ROCJPEG_STR("[pid:") + ROCJPEG_TOSTR(getpid()) + ROCJPEG_STR(" tid: ") + GET_THREAD_ID() + ROCJPEG_STR("] ") + ROCJPEG_STR(__func__) + "(): " + msg
 
 #define OutputMsg(msg) std::cout << msg << std::endl
 #define OutputErrMsg(msg) std::cerr << msg << std::endl
@@ -109,16 +112,16 @@ public:
         if (logger_.GetLogLevel() >= kRocJpegLogInfo) {
             start_time_ = GET_TIME_NS() / 1000ULL;
             OutputMsg("[" + ROCJPEG_TOSTR(kRocJpegLogInfo) + ", Info] " + ROCJPEG_STR(filename_) + ":" + ROCJPEG_TOSTR(line_) + ": " +
-                      ROCJPEG_TOSTR(start_time_) + ROCJPEG_STR(" us: ") + ROCJPEG_STR("[pid:") + ROCJPEG_TOSTR(getpid()) + ROCJPEG_STR(" tid:") +
-                      ROCJPEG_TOSTR(syscall(SYS_gettid)) + ROCJPEG_STR("] ") + ROCJPEG_STR(func_) + "(): entry ...");
+                      ROCJPEG_TOSTR(start_time_) + ROCJPEG_STR(" us: ") + ROCJPEG_STR("[pid:") + ROCJPEG_TOSTR(getpid()) + ROCJPEG_STR(" tid: ") +
+                      GET_THREAD_ID() + ROCJPEG_STR("] ") + ROCJPEG_STR(func_) + "(): entry ...");
         }
     }
     ~RocJpegFuncScopeLog() {
         if (logger_.GetLogLevel() >= kRocJpegLogInfo) {
             uint64_t end_time = GET_TIME_NS() / 1000ULL;
             OutputMsg("[" + ROCJPEG_TOSTR(kRocJpegLogInfo) + ", Info] " + ROCJPEG_STR(filename_) + ":" + ROCJPEG_TOSTR(line_) + ": " +
-                      ROCJPEG_TOSTR(end_time) + ROCJPEG_STR(" us: ") + ROCJPEG_STR("[pid:") + ROCJPEG_TOSTR(getpid()) + ROCJPEG_STR(" tid:") +
-                      ROCJPEG_TOSTR(syscall(SYS_gettid)) + ROCJPEG_STR("] ") + ROCJPEG_STR(func_) + "(): exit (" +
+                      ROCJPEG_TOSTR(end_time) + ROCJPEG_STR(" us: ") + ROCJPEG_STR("[pid:") + ROCJPEG_TOSTR(getpid()) + ROCJPEG_STR(" tid: ") +
+                      GET_THREAD_ID() + ROCJPEG_STR("] ") + ROCJPEG_STR(func_) + "(): exit (" +
                       ROCJPEG_TOSTR(end_time - start_time_) + " us) ...");
         }
     }
