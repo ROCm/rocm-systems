@@ -90,7 +90,7 @@ echo "===== COMMAND TO EXECUTE ====="
 echo "${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out}"
 echo ""
 echo "===== ENVIRONMENT VARIABLES ====="
-env | sort
+env | grep "^ROCPROF" | sort
 echo "===== END ENVIRONMENT ====="
 echo ""
 

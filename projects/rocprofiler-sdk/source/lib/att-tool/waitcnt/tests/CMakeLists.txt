@@ -15,7 +15,7 @@ target_link_libraries(
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-att-parser
             rocprofiler-sdk::rocprofiler-sdk-json
             rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-glog
+            rocprofiler-sdk::rocprofiler-sdk-abseil
             rocprofiler-sdk::rocprofiler-sdk-static-library
             GTest::gtest
             GTest::gtest_main)

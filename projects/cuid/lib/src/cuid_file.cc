@@ -25,6 +25,7 @@
 #include "src/cuid_gpu.h"
 #include "src/cuid_cpu.h"
 #include "src/cuid_nic.h"
+#include "src/cuid_npu.h"
 #include "src/cuid_platform.h"
 #include "src/hmac.h"
 #include "src/cuid_internal.h"
@@ -332,6 +333,7 @@ amdcuid_device_type_t CuidFile::string_to_device_type(const std::string& str) co
     if (str == "CPU") return AMDCUID_DEVICE_TYPE_CPU;
     if (str == "GPU") return AMDCUID_DEVICE_TYPE_GPU;
     if (str == "NIC") return AMDCUID_DEVICE_TYPE_NIC;
+    if (str == "NPU") return AMDCUID_DEVICE_TYPE_NPU;
     return AMDCUID_DEVICE_TYPE_NONE;
 }
 
@@ -522,6 +524,7 @@ amdcuid_status_t CuidFile::save() {
         AMDCUID_DEVICE_TYPE_GPU,
         AMDCUID_DEVICE_TYPE_CPU,
         AMDCUID_DEVICE_TYPE_NIC,
+        AMDCUID_DEVICE_TYPE_NPU,
         AMDCUID_DEVICE_TYPE_PLATFORM
     };
     
@@ -830,6 +833,19 @@ amdcuid_status_t CuidFileGenerator::generate_from_devices(
                     if (nic->get_mac_address(mac_address) == AMDCUID_STATUS_SUCCESS) {
                         entry.mac_address = mac_address;
                     }
+                    entry.bdf = info.bdf;
+                }
+                break;
+            }
+            case AMDCUID_DEVICE_TYPE_NPU: {
+                auto npu = std::dynamic_pointer_cast<CuidNpu>(device);
+                if (npu) {
+                    const auto& info = npu->get_info();
+                    entry.vendor_id = info.header.fields.npu.vendor_id;
+                    entry.device_id = info.header.fields.npu.device_id;
+                    entry.revision_id = info.header.fields.npu.revision_id;
+                    entry.pci_class = info.header.fields.npu.pci_class;
+                    entry.device_node = info.accel_node;
                     entry.bdf = info.bdf;
                 }
                 break;
