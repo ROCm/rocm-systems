@@ -51,12 +51,12 @@ TEST_F(DestroyPendingCommTest, Destroy_WithPendingAllReduce)
 
     void* send_buf = nullptr;
     void* recv_buf = nullptr;
-    HIPCHECK(hipMalloc(&send_buf, kBufferSize));
-    HIPCHECK(hipMalloc(&recv_buf, kBufferSize));
-    HIPCHECK(hipMemset(send_buf, 1, kBufferSize));
-    HIPCHECK(hipMemset(recv_buf, 0, kBufferSize));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&send_buf, kBufferSize));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&recv_buf, kBufferSize));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMemset(send_buf, 1, kBufferSize));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMemset(recv_buf, 0, kBufferSize));
 
-    RCCL_TEST_CHECK(ncclAllReduce(
+    RCCL_TEST_CHECK_GTEST_FAIL(ncclAllReduce(
         send_buf, recv_buf, kBufferElements, ncclFloat, ncclSum, comm, stream));
 
     // Destroy without syncing — this is the regression scenario from PR #1631.
@@ -68,8 +68,8 @@ TEST_F(DestroyPendingCommTest, Destroy_WithPendingAllReduce)
     // Stream may still have work; synchronize to let the GPU finish.
     (void)hipStreamSynchronize(stream);
 
-    HIPCHECK(hipFree(send_buf));
-    HIPCHECK(hipFree(recv_buf));
+    HIP_TEST_CHECK_GTEST_FAIL(hipFree(send_buf));
+    HIP_TEST_CHECK_GTEST_FAIL(hipFree(recv_buf));
 }
 
 // Launch an AllReduce, then immediately abort the communicator without
@@ -90,12 +90,12 @@ TEST_F(DestroyPendingCommTest, Abort_WithPendingAllReduce)
 
     void* send_buf = nullptr;
     void* recv_buf = nullptr;
-    HIPCHECK(hipMalloc(&send_buf, kBufferSize));
-    HIPCHECK(hipMalloc(&recv_buf, kBufferSize));
-    HIPCHECK(hipMemset(send_buf, 1, kBufferSize));
-    HIPCHECK(hipMemset(recv_buf, 0, kBufferSize));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&send_buf, kBufferSize));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&recv_buf, kBufferSize));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMemset(send_buf, 1, kBufferSize));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMemset(recv_buf, 0, kBufferSize));
 
-    RCCL_TEST_CHECK(ncclAllReduce(
+    RCCL_TEST_CHECK_GTEST_FAIL(ncclAllReduce(
         send_buf, recv_buf, kBufferElements, ncclFloat, ncclSum, comm, stream));
 
     // Abort without syncing — exercises the abort-flag path from PR #1631.
@@ -107,8 +107,8 @@ TEST_F(DestroyPendingCommTest, Abort_WithPendingAllReduce)
 
     (void)hipStreamSynchronize(stream);
 
-    HIPCHECK(hipFree(send_buf));
-    HIPCHECK(hipFree(recv_buf));
+    HIP_TEST_CHECK_GTEST_FAIL(hipFree(send_buf));
+    HIP_TEST_CHECK_GTEST_FAIL(hipFree(recv_buf));
 }
 
 #endif // MPI_TESTS_ENABLED
