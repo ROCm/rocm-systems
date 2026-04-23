@@ -12,7 +12,8 @@ set(ROCPROFILER_LIB_HSA_SOURCES
     queue_controller.cpp
     queue_intercept.cpp
     queue.cpp
-    scratch_memory.cpp)
+    scratch_memory.cpp
+    signal_pool.cpp)
 
 set(ROCPROFILER_LIB_HSA_HEADERS
     agent_cache.hpp
@@ -31,6 +32,7 @@ set(ROCPROFILER_LIB_HSA_HEADERS
     rocprofiler_packet.hpp
     scratch_memory.hpp
     signal.hpp
+    signal_pool.hpp
     utils.hpp)
 
 target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_HSA_SOURCES}
