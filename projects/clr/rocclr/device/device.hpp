@@ -1928,6 +1928,9 @@ class Device : public RuntimeObject {
                          void* svmPtr) const = 0;
   /**
    * @copydoc amd::Context::svmFree
+   *
+   * @return true if this device actually released the SVM allocation or removed it from its
+   *         MemObjMap tracking; false otherwise.
    */
   virtual bool svmFree(void* ptr) const = 0;
 
