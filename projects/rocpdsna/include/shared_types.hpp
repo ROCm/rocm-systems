@@ -18,6 +18,8 @@ using timestamp_ns_t = size_t;
 
 /***
  * @brief Memory address range representing a loaded code object region.
+ * @note Maps to table `rocpd_info_address_range` in schema v4.
+ * @note V4 ONLY -- In V3, this data is embedded in JSONB.
  */
 struct address_range_info_t
 {
@@ -29,6 +31,8 @@ struct address_range_info_t
 
 /***
  * @brief Program counter information representing a location in executable code.
+ * @note Maps to table `rocpd_info_pc` in schema v4.
+ * @note V4 ONLY -- In V3, this data is embedded in JSONB.
  */
 struct program_counter_info_t
 {
@@ -41,6 +45,10 @@ struct program_counter_info_t
 
 /***
  * @brief A single frame in a call stack.
+ * @note Maps to a single row in table `rocpd_call_stack` in schema v4.
+ *       References `rocpd_info_pc` (via program_counter) and
+ *       `rocpd_info_address_range` (via address_range).
+ * @note V4 ONLY -- In V3, serialized as part of rocpd_event.call_stack JSONB.
  */
 struct stack_frame_t
 {
@@ -54,12 +62,16 @@ struct stack_frame_t
  * @brief Complete call stack as an ordered collection of stack frames.
  * @note Front element (index 0) is the top of the stack (most recent call).
  * Back element is the bottom of the stack (e.g., main). Depth is implicit
- * from position in the deque. Maps to multiple rocpd_call_stack rows in schema v4.
+ * from position in the deque.
+ * @note Maps to multiple rows in table `rocpd_call_stack` in schema v4.
+ * @note V4 ONLY -- In V3, serialized as rocpd_event.call_stack JSONB column.
  */
 using call_stack_t = std::deque<stack_frame_t>;
 
 /***
  * @brief Source code context containing actual source lines and disassembly.
+ * @note Maps to table `rocpd_info_source_code` in schema v4.
+ * @note V4 ONLY -- In V3, this data is embedded in JSONB.
  */
 struct source_code_info_t
 {
@@ -74,20 +86,28 @@ struct source_code_info_t
 
 /***
  * @brief Line info entry linking source code context with program counter location.
+ * @note Maps to a single row in table `rocpd_line_info` in schema v4.
+ *       References `rocpd_info_source_code` (via source_code),
+ *       `rocpd_info_pc` (via program_counter), and
+ *       `rocpd_info_address_range` (via address_range).
+ * @note V4 ONLY -- In V3, serialized as part of rocpd_event.line_info JSONB.
  */
 struct line_info_entry_t
 {
     std::optional<source_code_info_t>     source_code;      ///< Source code context
     std::optional<program_counter_info_t> program_counter;  ///< Code location
     std::optional<address_range_info_t>
-        address_range;  ///< Code object for program_counter
+                     address_range;  ///< Code object for program_counter
+    std::string_view extdata = "{}";
 };
 
 /***
  * @brief Collection of line info entries for an event.
  * @note An event may have multiple source contexts (e.g., inlined functions,
  * multiple relevant source locations). Each entry provides source code and
- * location information. Maps to multiple rocpd_line_info rows in schema v4.
+ * location information.
+ * @note Maps to multiple rows in table `rocpd_line_info` in schema v4.
+ * @note V4 ONLY -- In V3, serialized as rocpd_event.line_info JSONB column.
  */
 using source_context_list_t = std::vector<line_info_entry_t>;
 

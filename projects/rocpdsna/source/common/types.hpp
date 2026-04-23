@@ -1,6 +1,3 @@
-// Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier: MIT
-
 #include <cstddef>
 #include <functional>
 #include <string>

@@ -97,6 +97,24 @@ get_key(const writer_types::track_info_t& e) noexcept
     return e;
 }
 
+[[nodiscard]] inline auto
+get_key(const writer_types::address_range_info_t& e) noexcept
+{
+    return e.id;
+}
+
+[[nodiscard]] inline auto
+get_key(const writer_types::source_code_info_t& e) noexcept
+{
+    return e.id;
+}
+
+[[nodiscard]] inline auto
+get_key(const writer_types::pc_info_t& e) noexcept
+{
+    return e.id;
+}
+
 // ============================================================================
 // to_string()
 // ============================================================================
@@ -197,6 +215,33 @@ to_string(const writer_types::track_info_t& e)
         to_error_string(e.process_id),
         to_error_string(e.thread_id),
         e.name.value_or("NULL"));
+}
+
+[[nodiscard]] inline std::string
+to_string(const writer_types::address_range_info_t& e)
+{
+    return fmt::format(
+        "[address_range_info] id: {}, base: {:#x}, low: {:#x}, high: {:#x}",
+        e.id,
+        e.address_base,
+        e.address_low,
+        e.address_high);
+}
+
+[[nodiscard]] inline std::string
+to_string(const writer_types::source_code_info_t& e)
+{
+    return fmt::format(
+        "[source_code_info] id: {}, file: {}", e.id, e.file.value_or("<none>"));
+}
+
+[[nodiscard]] inline std::string
+to_string(const writer_types::pc_info_t& e)
+{
+    return fmt::format("[pc_info] id: {}, function: {}, file: {}",
+                       e.id,
+                       e.function,
+                       e.file.value_or("<none>"));
 }
 
 // Handle optional types - must be after all specific overloads due to two-phase lookup

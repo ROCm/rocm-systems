@@ -4,10 +4,10 @@
 #pragma once
 
 #include "writers/info_registration_writer.hpp"
-#include "writers/schema_v3/common_insert_operations.hpp"
+#include "writers/schema_v4/common_insert_operations.hpp"
 #include "writers/writer_context.hpp"
 
-#include "data_storage/schema_v3/insert_statements.hpp"
+#include "data_storage/schema_v4/insert_statements.hpp"
 #include "data_storage/schema_version.hpp"
 
 #include "common/string_conversions.hpp"
@@ -22,7 +22,7 @@
 namespace rocpdsna
 {
 
-namespace
+namespace detail_v4
 {
 
 template <typename Utility, typename Entity>
@@ -37,20 +37,20 @@ is_already_registered(Utility& utility, const Entity& entity)
     return false;
 }
 
-}  // namespace
+}  // namespace detail_v4
 
 template <>
-class info_registration_writer<data_storage::schema_v3_tag>
+class info_registration_writer<data_storage::schema_v4_tag>
 : public info_registration_writer_interface<
-      info_registration_writer<data_storage::schema_v3_tag>>
+      info_registration_writer<data_storage::schema_v4_tag>>
 {
 public:
     explicit info_registration_writer(
         std::shared_ptr<writer_context> ctx,
         std::shared_ptr<
-            data_storage::schema_v3::insert_statements<data_storage::sqlite_backend>>
+            data_storage::schema_v4::insert_statements<data_storage::sqlite_backend>>
                                                                                stmts,
-        std::shared_ptr<common_insert_operations<data_storage::schema_v3_tag>> common_ops)
+        std::shared_ptr<common_insert_operations<data_storage::schema_v4_tag>> common_ops)
     : m_ctx(std::move(ctx))
     , m_stmts(std::move(stmts))
     , m_common_ops(std::move(common_ops))
@@ -59,11 +59,12 @@ public:
     void register_node_info_impl(const writer_types::node_info_t& node_info)
     {
         auto& node_info_utility = m_ctx->registry->node_info();
-        if(is_already_registered(node_info_utility, node_info)) return;
+        if(detail_v4::is_already_registered(node_info_utility, node_info)) return;
 
         m_stmts->node_info_statement()(node_info.node_id,
                                        node_info.hash,
                                        node_info.machine_id,
+                                       node_info.name,
                                        node_info.system_name,
                                        node_info.hostname,
                                        node_info.release,
@@ -78,7 +79,7 @@ public:
     void register_process_info_impl(const writer_types::process_info_t& process_info)
     {
         auto& process_info_utility = m_ctx->registry->process_info();
-        if(is_already_registered(process_info_utility, process_info)) return;
+        if(detail_v4::is_already_registered(process_info_utility, process_info)) return;
 
         m_ctx->validator->require_node(process_info.node_id);
 
@@ -89,6 +90,7 @@ public:
                                           process_info.node_id,      // nid
                                           process_info.ppid,         // ppid
                                           process_info.pid,          // pid
+                                          process_info.name,         // name  v4
                                           process_info.init,         // init
                                           process_info.fini,         // fini
                                           process_info.start,        // start
@@ -104,7 +106,7 @@ public:
     void register_agent_info_impl(const writer_types::agent_info_t& agent_info)
     {
         auto& agent_info_utility = m_ctx->registry->agent_info();
-        if(is_already_registered(agent_info_utility, agent_info)) return;
+        if(detail_v4::is_already_registered(agent_info_utility, agent_info)) return;
 
         m_ctx->validator->require_node(agent_info.node_id)
             .require_process(agent_info.process_id);
@@ -125,20 +127,21 @@ public:
         const auto primary_key =
             m_ctx->key_providers->agent_info().get_primary_key_value();
 
-        m_stmts->agent_info_statement()(primary_key,                      // id
-                                        agent_info.node_id,               // nid
-                                        process_pk,                       // pid
-                                        agent_info.unique_id.agent_type,  // type
-                                        agent_info.absolute_index,  // absolute_index
-                                        agent_info.logical_index,   // logical_index
-                                        agent_info.unique_id.type_index,  // type_index
-                                        agent_info.uuid,                  // uuid
-                                        agent_info.name,                  // name
-                                        agent_info.model_name,            // model_name
-                                        agent_info.vendor_name,           // vendor_name
-                                        agent_info.product_name,          // product_name
-                                        agent_info.user_name,  // user_name ← v3 only
-                                        agent_info.extdata);   // extdata
+        m_stmts->agent_info_statement()(
+            primary_key,                      // id
+            agent_info.node_id,               // nid
+            process_pk,                       // pid
+            agent_info.unique_id.agent_type,  // type
+            agent_info.absolute_index,        // absolute_index
+            agent_info.logical_index,         // logical_index
+            agent_info.unique_id.type_index,  // type_index
+            agent_info.uuid,                  // uuid
+            agent_info.name,                  // name
+            agent_info.generic_name,          // generic_name ← v4 only
+            agent_info.model_name,            // model_name
+            agent_info.vendor_name,           // vendor_name
+            agent_info.product_name,          // product_name
+            agent_info.extdata);              // extdata
 
         agent_info_utility.emplace_entity(agent_info.unique_id, primary_key);
         LOG_TRACE("Registered agent info: {}", rocpdsna::to_string(agent_info));
@@ -147,16 +150,27 @@ public:
     void register_pmc_info_impl(const writer_types::pmc_info_t& pmc_info)
     {
         auto& pmc_info_utility = m_ctx->registry->pmc_info();
-        if(is_already_registered(pmc_info_utility, pmc_info)) return;
+        if(detail_v4::is_already_registered(pmc_info_utility, pmc_info)) return;
 
         m_ctx->validator->require_node(pmc_info.node_id)
-            .require_process(pmc_info.process_id)
-            .require_agent(*pmc_info.unique_id.agent_id);
+            .require_process(pmc_info.process_id);
+
+        // Only require agent if agent_id is provided (it's optional in the schema)
+        if(pmc_info.unique_id.agent_id.has_value())
+        {
+            m_ctx->validator->require_agent(*pmc_info.unique_id.agent_id);
+        }
 
         const auto process_pk =
             m_ctx->validator->resolve_process_key(pmc_info.process_id);
-        const auto agent_pk =
-            m_ctx->validator->resolve_agent_key(*pmc_info.unique_id.agent_id);
+
+        // Resolve agent_pk only if agent_id has a value, otherwise use nullopt
+        std::optional<primary_key_t> agent_pk = std::nullopt;
+        if(pmc_info.unique_id.agent_id.has_value())
+        {
+            agent_pk = m_ctx->validator->resolve_agent_key(*pmc_info.unique_id.agent_id);
+        }
+
         const auto primary_key = m_ctx->key_providers->pmc_info().get_primary_key_value();
 
         m_stmts->pmc_info_statement()(primary_key,                // id
@@ -168,6 +182,7 @@ public:
                                       pmc_info.instance_id,       // instance_id
                                       pmc_info.unique_id.name,    // name
                                       pmc_info.symbol,            // symbol
+                                      pmc_info.qualifier,         // qualifier ← V4 ONLY
                                       pmc_info.description,       // description
                                       pmc_info.long_description,  // long_description
                                       pmc_info.component,         // component
@@ -177,7 +192,7 @@ public:
                                       pmc_info.expression,        // expression
                                       pmc_info.is_constant,       // is_constant
                                       pmc_info.is_derived,        // is_derived
-                                      pmc_info.extdata);          // extdata);
+                                      pmc_info.extdata);          // extdata
 
         pmc_info_utility.emplace_entity(pmc_info.unique_id, primary_key);
         LOG_TRACE("Registered pmc info: {}", rocpdsna::to_string(pmc_info));
@@ -186,7 +201,7 @@ public:
     void register_thread_info_impl(const writer_types::thread_info_t& thread_info)
     {
         auto& thread_info_utility = m_ctx->registry->thread_info();
-        if(is_already_registered(thread_info_utility, thread_info)) return;
+        if(detail_v4::is_already_registered(thread_info_utility, thread_info)) return;
 
         m_ctx->validator->require_node(thread_info.node_id)
             .require_process(thread_info.process_id);
@@ -213,7 +228,7 @@ public:
     void register_stream_info_impl(const writer_types::stream_info_t& stream_info)
     {
         auto& stream_info_utility = m_ctx->registry->stream_info();
-        if(is_already_registered(stream_info_utility, stream_info)) return;
+        if(detail_v4::is_already_registered(stream_info_utility, stream_info)) return;
 
         m_ctx->validator->require_node(stream_info.node_id)
             .require_process(stream_info.process_id);
@@ -236,7 +251,7 @@ public:
     void register_queue_info_impl(const writer_types::queue_info_t& queue_info)
     {
         auto& queue_info_utility = m_ctx->registry->queue_info();
-        if(is_already_registered(queue_info_utility, queue_info)) return;
+        if(detail_v4::is_already_registered(queue_info_utility, queue_info)) return;
 
         m_ctx->validator->require_node(queue_info.node_id)
             .require_process(queue_info.process_id);
@@ -246,11 +261,11 @@ public:
         const auto primary_key =
             m_ctx->key_providers->queue_info().get_primary_key_value();
 
-        m_stmts->queue_info_statement()(primary_key,          // id
-                                        queue_info.node_id,   // nid
-                                        process_pk,           // pid (resolved FK)
-                                        queue_info.name,      // name
-                                        queue_info.extdata);  // extdata
+        m_stmts->queue_info_statement()(primary_key,
+                                        queue_info.node_id,
+                                        process_pk,
+                                        queue_info.name,
+                                        queue_info.extdata);
 
         queue_info_utility.emplace_entity(queue_info.queue_id, primary_key);
         LOG_TRACE("Registered queue info: {}", rocpdsna::to_string(queue_info));
@@ -260,7 +275,8 @@ public:
         const writer_types::code_object_info_t& code_object_info)
     {
         auto& code_object_info_utility = m_ctx->registry->code_object_info();
-        if(is_already_registered(code_object_info_utility, code_object_info)) return;
+        if(detail_v4::is_already_registered(code_object_info_utility, code_object_info))
+            return;
 
         m_ctx->validator->require_node(code_object_info.node_id)
             .require_process(code_object_info.process_id)
@@ -291,7 +307,9 @@ public:
         const writer_types::kernel_symbol_info_t& kernel_symbol_info)
     {
         auto& kernel_symbol_info_utility = m_ctx->registry->kernel_symbol_info();
-        if(is_already_registered(kernel_symbol_info_utility, kernel_symbol_info)) return;
+        if(detail_v4::is_already_registered(kernel_symbol_info_utility,
+                                            kernel_symbol_info))
+            return;
 
         m_ctx->validator->require_node(kernel_symbol_info.node_id)
             .require_process(kernel_symbol_info.process_id)
@@ -325,11 +343,14 @@ public:
     void register_track_info_impl(const writer_types::track_info_t& track)
     {
         auto& track_info_utility = m_ctx->registry->track_info();
-        if(is_already_registered(track_info_utility, track)) return;
+        if(detail_v4::is_already_registered(track_info_utility, track)) return;
 
         m_ctx->validator->require_node(track.node_id)
             .validate_optional_process(track.process_id)
-            .validate_optional_thread(track.thread_id);
+            .validate_optional_thread(track.thread_id)
+            .validate_optional_agent(track.agent_id)
+            .validate_optional_queue(track.queue_id)
+            .validate_optional_stream(track.stream_id);
 
         if(track.name.has_value() &&
            !m_ctx->registry->string_info().is_entry_registered(track.name.value()))
@@ -341,66 +362,178 @@ public:
             m_ctx->validator->resolve_optional_process_key(track.process_id);
         const auto thread_pk =
             m_ctx->validator->resolve_optional_thread_key(track.thread_id);
+        const auto agent_pk =
+            m_ctx->validator->resolve_optional_agent_key(track.agent_id);
+        const auto queue_pk =
+            m_ctx->validator->resolve_optional_queue_key(track.queue_id);
+        const auto stream_pk =
+            m_ctx->validator->resolve_optional_stream_key(track.stream_id);
         const auto string_pk = m_ctx->validator->resolve_optional_string_key(
             track.name.has_value() ? std::make_optional<std::string>(track.name.value())
                                    : std::nullopt);
         const auto primary_key =
             m_ctx->key_providers->track_info().get_primary_key_value();
 
-        m_stmts->track_info_statement()(
-            primary_key, track.node_id, process_pk, thread_pk, string_pk, track.extdata);
+        std::optional<primary_key_t> ppid_fk = std::nullopt;
+        if(track.ppid.has_value())
+        {
+            ppid_fk = static_cast<primary_key_t>(track.ppid.value());
+        }
+
+        m_stmts->track_info_statement()(primary_key,
+                                        track.node_id,
+                                        ppid_fk,
+                                        process_pk,
+                                        thread_pk,
+                                        agent_pk,
+                                        queue_pk,
+                                        stream_pk,
+                                        string_pk,
+                                        track.extdata);
 
         track_info_utility.emplace_entity(track, primary_key);
         LOG_TRACE("Registered track info: {}", rocpdsna::to_string(track));
     }
 
-    // =========================================================================
-    // v4+ stub implementations (no-op in v3 - data embedded in JSONB columns)
-    // =========================================================================
-
     /**
-     * @brief Category info stub for v3
-     * @note In v3, categories are stored as strings via register_string()
-     *       The category name is embedded in event extdata if needed.
+     * @brief Register category info (v4+ table)
+     * @note Uses m_common_ops->get_or_insert_category which handles caching
      */
     void register_category_info_impl(const writer_types::category_info_t& category_info)
     {
-        // In v3, we just register the category name as a string
-        m_common_ops->register_string(category_info.name);
-        LOG_TRACE("v3: Category '{}' registered as string (no separate table)",
+        m_common_ops->ensure_category_registered(category_info.name,
+                                                 category_info.extdata);
+        LOG_TRACE("Registered category info: id={}, name={}",
+                  category_info.id,
                   category_info.name);
     }
 
     /**
-     * @brief Address range info stub for v3
-     * @note In v3, address ranges are embedded in call_stack/line_info JSONB
+     * @brief Register address range info (v4+ table)
      */
     void register_address_range_info_impl(
-        const writer_types::address_range_info_t& /* addr_range */)
+        const writer_types::address_range_info_t& addr_range)
     {
-        // No-op in v3: address range info is embedded in JSONB columns
-        LOG_TRACE("v3: Address range info ignored (embedded in JSONB)");
+        auto& addr_range_utility = m_ctx->registry->address_range_info();
+        if(detail_v4::is_already_registered(addr_range_utility, addr_range)) return;
+
+        m_ctx->validator->require_node(addr_range.node_id);
+        m_ctx->validator->require_process(addr_range.process_id);
+
+        const auto process_pk =
+            m_ctx->validator->resolve_process_key(addr_range.process_id);
+        const auto primary_key =
+            m_ctx->key_providers->address_range_info().get_primary_key_value();
+
+        m_stmts->address_range_info_statement()(primary_key,
+                                                addr_range.node_id,
+                                                process_pk,
+                                                addr_range.address_base,
+                                                addr_range.address_low,
+                                                addr_range.address_high,
+                                                addr_range.extdata);
+
+        addr_range_utility.emplace_entity(addr_range.id, primary_key);
+        LOG_TRACE(
+            "Registered address range info: id={}, base={:#x}, low={:#x}, high={:#x}",
+            addr_range.id,
+            addr_range.address_base,
+            addr_range.address_low,
+            addr_range.address_high);
     }
 
     /**
-     * @brief Source code info stub for v3
-     * @note In v3, source code is embedded in line_info JSONB column
+     * @brief Register source code info (v4+ table)
      */
     void register_source_code_info_impl(
-        const writer_types::source_code_info_t& /* source_code */)
+        const writer_types::source_code_info_t& source_code)
     {
-        // No-op in v3: source code info is embedded in JSONB columns
-        LOG_TRACE("v3: Source code info ignored (embedded in JSONB)");
+        auto& source_code_utility = m_ctx->registry->source_code_info();
+        if(detail_v4::is_already_registered(source_code_utility, source_code)) return;
+
+        m_ctx->validator->require_node(source_code.node_id);
+        m_ctx->validator->require_process(source_code.process_id);
+
+        const auto process_pk =
+            m_ctx->validator->resolve_process_key(source_code.process_id);
+
+        std::optional<primary_key_t> address_pk = std::nullopt;
+        if(source_code.address_id.has_value())
+        {
+            const auto addr_id = source_code.address_id.value();
+            if(!m_ctx->registry->address_range_info().is_entry_registered(addr_id))
+            {
+                throw std::invalid_argument(
+                    fmt::format("source_code_info references address_range_id {} "
+                                "which has not been registered. "
+                                "Call register_address_range_info() first.",
+                                addr_id));
+            }
+            address_pk =
+                m_ctx->registry->address_range_info().get_primary_key_value_for_entity(
+                    addr_id);
+        }
+
+        const auto primary_key =
+            m_ctx->key_providers->source_code_info().get_primary_key_value();
+
+        m_stmts->source_code_info_statement()(primary_key,
+                                              source_code.node_id,
+                                              process_pk,
+                                              address_pk,
+                                              source_code.file,
+                                              source_code.line_number,
+                                              source_code.lines,
+                                              source_code.instructions,
+                                              source_code.extdata);
+
+        source_code_utility.emplace_entity(source_code.id, primary_key);
+        LOG_TRACE("Registered source code info: {}", rocpdsna::to_string(source_code));
     }
 
     /**
-     * @brief PC info stub for v3
-     * @note In v3, PC info is embedded in call_stack/line_info JSONB
+     * @brief Register program counter info (v4+ table)
      */
-    void register_pc_info_impl(const writer_types::pc_info_t& /* pc_info */)
+    void register_pc_info_impl(const writer_types::pc_info_t& pc_info)
     {
-        // No-op in v3: PC info is embedded in JSONB columns
-        LOG_TRACE("v3: PC info ignored (embedded in JSONB)");
+        auto& pc_info_utility = m_ctx->registry->pc_info();
+        if(detail_v4::is_already_registered(pc_info_utility, pc_info)) return;
+
+        m_ctx->validator->require_node(pc_info.node_id);
+        m_ctx->validator->require_process(pc_info.process_id);
+
+        const auto process_pk = m_ctx->validator->resolve_process_key(pc_info.process_id);
+
+        std::optional<primary_key_t> address_pk = std::nullopt;
+        if(pc_info.address_id.has_value())
+        {
+            const auto addr_id = pc_info.address_id.value();
+            if(!m_ctx->registry->address_range_info().is_entry_registered(addr_id))
+            {
+                throw std::invalid_argument(
+                    fmt::format("pc_info references address_range_id {} "
+                                "which has not been registered. "
+                                "Call register_address_range_info() first.",
+                                addr_id));
+            }
+            address_pk =
+                m_ctx->registry->address_range_info().get_primary_key_value_for_entity(
+                    addr_id);
+        }
+
+        const auto primary_key = m_ctx->key_providers->pc_info().get_primary_key_value();
+
+        m_stmts->pc_info_statement()(primary_key,
+                                     pc_info.node_id,
+                                     process_pk,
+                                     pc_info.function,
+                                     address_pk,
+                                     pc_info.file,
+                                     pc_info.line,
+                                     pc_info.extdata);
+
+        pc_info_utility.emplace_entity(pc_info.id, primary_key);
+        LOG_TRACE("Registered pc info: {}", rocpdsna::to_string(pc_info));
     }
 
     void register_string_impl(std::string_view str)
@@ -411,9 +544,9 @@ public:
 private:
     std::shared_ptr<writer_context> m_ctx;
     std::shared_ptr<
-        data_storage::schema_v3::insert_statements<data_storage::sqlite_backend>>
+        data_storage::schema_v4::insert_statements<data_storage::sqlite_backend>>
                                                                            m_stmts;
-    std::shared_ptr<common_insert_operations<data_storage::schema_v3_tag>> m_common_ops;
+    std::shared_ptr<common_insert_operations<data_storage::schema_v4_tag>> m_common_ops;
 };
 
 }  // namespace rocpdsna

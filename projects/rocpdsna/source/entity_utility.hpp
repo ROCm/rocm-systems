@@ -38,14 +38,19 @@ public:
     }
 
     template <typename Entity>
-    [[nodiscard]] PrimaryKey get_primary_key_value_for_entity(
-        const Entity& entity) const noexcept
+    [[nodiscard]] PrimaryKey get_primary_key_value_for_entity(const Entity& entity) const
     {
         const std::lock_guard<std::mutex> lock(m_mutex);
         if constexpr(common::traits::is_unordered_map_v<EntityContainerType>)
         {
             const typename EntityContainerType::key_type key{ entity };
-            return m_entity_container.at(key);
+            auto it = m_entity_container.find(key);
+            if(it == m_entity_container.end())
+            {
+                throw std::runtime_error(
+                    "Primary key not found: entity was never registered");
+            }
+            return it->second;
         }
         else
         {
@@ -96,10 +101,16 @@ public:
     }
 
     [[nodiscard]] PrimaryKey get_primary_key_value_for_entity(
-        const std::string& key) const noexcept
+        const std::string& key) const
     {
         const std::lock_guard<std::mutex> lock(m_mutex);
-        return m_entity_container.at(key);
+        auto                              it = m_entity_container.find(key);
+        if(it == m_entity_container.end())
+        {
+            throw std::runtime_error(
+                fmt::format("Primary key not found for key: {}", key));
+        }
+        return it->second;
     }
 
     [[nodiscard]] PrimaryKey get_primary_key_value_for_entity(std::string_view key) const

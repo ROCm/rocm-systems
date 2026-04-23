@@ -35,10 +35,11 @@ writer_impl_core<Policy>::writer_impl_core(std::shared_ptr<writer_context> ctx)
       std::make_unique<typename Policy::pmc_event_writer_t>(m_ctx, m_stmts, m_common_ops))
 {}
 
-template class writer_impl_core<active_policy_t>;
+template class writer_impl_core<writer_policy_v3>;
+template class writer_impl_core<writer_policy_v4>;
 
 std::shared_ptr<writer_context>
-writer_t::impl::create_writer_context(storage_t& storage)
+writer_t::impl::create_writer_context(storage_t& storage, version_t version)
 {
     auto ctx = std::make_shared<writer_context>();
     ctx->backend =
@@ -58,14 +59,28 @@ writer_t::impl::create_writer_context(storage_t& storage)
     }
 
     ctx->validator = std::make_shared<insert_validator>(ctx->registry);
-    ctx->backend->initialize_schema();
+    ctx->backend->initialize_schema(version);
 
     return ctx;
 }
 
+writer_variant_t
+writer_t::impl::create_core(storage_t& storage, version_t version)
+{
+    auto ctx = create_writer_context(storage, version);
+
+    if(version == rocpdsna::version_t{ 4, 0, 0 })
+    {
+        return writer_impl_core<writer_policy_v4>(std::move(ctx));
+    }
+
+    return writer_impl_core<writer_policy_v3>(std::move(ctx));
+}
+
 writer_t::impl::impl(std::unique_ptr<rocpdsna::storage_t> storage)
-: writer_impl_core<active_policy_t>(create_writer_context(*storage))
-, m_storage(std::move(storage))
+: m_storage(std::move(storage))
+, m_version(m_storage->get_storage_version())
+, m_core(create_core(*m_storage, m_version))
 {}
 
 }  // namespace rocpdsna
