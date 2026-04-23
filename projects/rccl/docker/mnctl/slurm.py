@@ -15,15 +15,39 @@ from .utils import log, log_verbose, warn
 
 def detect_slurm(cfg):
     # type: (Config) -> None
-    """Auto-detect SLURM allocation; mutates *cfg* in-place."""
-    if os.path.isfile(cfg.hostfile):
+    """Auto-detect SLURM allocation; mutates *cfg* in-place.
+
+    Behavior:
+      * User-provided hostfile (``--hostfile`` / ``MNCTL_HOSTFILE``) is
+        always honored as-is, even when SLURM env vars are set.
+      * Otherwise, if ``SLURM_NODELIST`` is set, regenerate the default
+        hostfile from the live allocation (overwriting any stale file
+        from a previous run/allocation).
+      * If no SLURM vars and no existing hostfile, do nothing -- the
+        validator will surface a clear error.
+    """
+    if cfg.hostfile_explicit:
+        # User passed --hostfile explicitly; trust it verbatim.
+        log_verbose(
+            "User-provided hostfile {}; skipping SLURM auto-detect".format(
+                cfg.hostfile
+            )
+        )
         return
 
     nodelist = os.environ.get("SLURM_NODELIST") or os.environ.get(
         "SLURM_JOB_NODELIST", ""
     )
     if not nodelist:
+        # No SLURM allocation; fall back to whatever hostfile exists.
         return
+
+    if os.path.isfile(cfg.hostfile):
+        log_verbose(
+            "SLURM_NODELIST is set; regenerating default hostfile {}".format(
+                cfg.hostfile
+            )
+        )
 
     if not shutil.which("scontrol"):
         warn(

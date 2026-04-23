@@ -94,9 +94,12 @@ class Config(object):
         self.builds_dir = os.environ.get(
             "MNCTL_BUILDS_DIR", os.path.join(home, ".docker-builds")
         )
-        self.hostfile = os.environ.get(
-            "MNCTL_HOSTFILE", os.path.join(home, ".mpi_hostfile")
-        )
+        _env_hostfile = os.environ.get("MNCTL_HOSTFILE", "")
+        self.hostfile = _env_hostfile or os.path.join(home, ".mnctl_hostfile")
+        # True when the hostfile path came from the user (CLI or env), not
+        # the built-in default. Lets SLURM auto-detection regenerate the
+        # default file safely without clobbering a user-provided one.
+        self.hostfile_explicit = bool(_env_hostfile)
         self.post_setup_dir = os.environ.get("MNCTL_POST_SETUP_DIR", "")
         self.host_ssh_port = int(os.environ.get("MNCTL_HOST_SSH_PORT", "22"))
         self.verbose = bool(os.environ.get("MNCTL_VERBOSE", ""))

@@ -117,7 +117,7 @@ Path expansion:
     # --- Visible options ---
     parser.add_argument(
         "--hostfile",
-        help="MPI hostfile (default: MNCTL_HOSTFILE env or ~/.mpi_hostfile)",
+        help="MPI hostfile (default: MNCTL_HOSTFILE env or ~/.mnctl_hostfile)",
     )
     parser.add_argument(
         "--ssh", nargs="?", const="auto", default=None,
@@ -168,11 +168,13 @@ Path expansion:
         "--shared-fs", dest="shared_fs",
         choices=["auto", "yes", "no"],
         help=(
-            "Shared-filesystem coordination for --setup-deps "
-            "(default: MNCTL_SHARED_FS env or 'auto'). "
-            "When the shared dir is on NFS/GPFS/Lustre, only the leader "
-            "node builds; followers wait for a completion marker. "
-            "Use 'no' to force per-node builds even on a shared FS."
+            "Shared-filesystem mode (default: MNCTL_SHARED_FS env or 'auto'). "
+            "Affects two things: (1) --setup-deps coordination -- only the "
+            "leader node builds on shared storage, followers wait for a "
+            "completion marker; (2) --launch-all file distribution -- items "
+            "already on a shared FS skip rsync. "
+            "'yes' forces shared behavior (skip rsync, leader-elect builds); "
+            "'no' forces per-node behavior (always rsync, always rebuild)."
         ),
     )
     parser.add_argument(
@@ -224,6 +226,7 @@ def _apply_cli_args(cfg, args):
 
     if args.hostfile is not None:
         cfg.hostfile = args.hostfile
+        cfg.hostfile_explicit = True
     if args.volumes:
         cfg.extra_volumes = list(args.volumes)
     if args.post_setup_dir is not None:

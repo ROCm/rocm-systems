@@ -16,6 +16,7 @@ import time
 from typing import Dict, List, Tuple
 
 from .config import Config
+from .shared_fs import resolve_shared_fs
 from .ssh import install_ssh_keys
 from .utils import (
     log, log_verbose, parse_hostfile, get_local_hostnames, Timer,
@@ -88,6 +89,24 @@ def _ssh_base_cmd(cfg, host):
 
 
 # ---------------------------------------------------------------------------
+# Shared-filesystem detection for path distribution
+# ---------------------------------------------------------------------------
+def _is_path_shared(path, override):
+    # type: (str, str) -> bool
+    """Return True if *path* lives on a shared filesystem visible to all nodes.
+
+    ``override`` mirrors :data:`Config.shared_fs` (``"auto"`` / ``"yes"`` /
+    ``"no"``).  An explicit ``"yes"`` short-circuits to True without probing
+    the filesystem; ``"no"`` short-circuits to False so the caller always
+    distributes.  In ``"auto"`` mode the *directory* containing the path is
+    inspected (so that not-yet-existing destination files still resolve to
+    their parent dir).
+    """
+    probe = path if os.path.isdir(path) else os.path.dirname(path) or path
+    return resolve_shared_fs(probe, override)
+
+
+# ---------------------------------------------------------------------------
 # SSH key bootstrap for remote hosts
 # ---------------------------------------------------------------------------
 def _push_pubkey_to_remotes(cfg, remote_hosts, pub_key_path):
@@ -152,15 +171,15 @@ def _distribute_files(cfg, remote_hosts):
 
     Uses rsync over the host SSH port.  All items are small so this
     completes quickly even for many nodes.
+
+    On a shared filesystem (NFS / GPFS / Lustre / ...) the items are
+    already visible to every node, so distribution is a no-op.  Each
+    item is probed independently so a mixed setup (e.g. shared $HOME
+    but local /tmp) still copies only what is needed.  Override the
+    auto-detection with ``--shared-fs {auto,yes,no}``.
     """
     if not remote_hosts:
         return
-
-    if shutil.which("rsync") is None:
-        log("")
-        log("ERROR: rsync is required for multi-node deployment")
-        log("  Install it:  apt-get install rsync  /  yum install rsync")
-        sys.exit(1)
 
     log("=== Distributing files to {} remote node(s) ===".format(
         len(remote_hosts),
@@ -171,17 +190,15 @@ def _distribute_files(cfg, remote_hosts):
 
     # Bootstrap: install our public key into each remote host's
     # ~/.ssh/authorized_keys so subsequent SSH/rsync operations work.
-    if os.path.isfile(pub_key):
+    # Skipped when ~/.ssh is itself on a shared FS (key already visible).
+    home_ssh = os.path.join(os.path.expanduser("~"), ".ssh")
+    if not os.path.isfile(pub_key):
+        log_verbose("No public key at {}; skipping key bootstrap".format(pub_key))
+    elif _is_path_shared(home_ssh, cfg.shared_fs):
+        log("  Skipping SSH key bootstrap ({} is on a shared filesystem)"
+            .format(home_ssh))
+    else:
         _push_pubkey_to_remotes(cfg, remote_hosts, pub_key)
-
-    # rsync --rsh expects a single string; build it from our canonical
-    # SSH options. ConnectTimeout is omitted to match the original behavior.
-    rsh_parts = ["ssh"] + ssh_opts(
-        cfg.host_ssh_port,
-        identity=host_key if os.path.isfile(host_key) else None,
-        connect_timeout=None,
-    )
-    rsh = " ".join(rsh_parts)
 
     # (local_path, is_dir, label)
     items = [
@@ -192,6 +209,41 @@ def _distribute_files(cfg, remote_hosts):
         items.append((cfg.hostfile, False, "hostfile"))
     if cfg.post_setup_dir and os.path.isdir(cfg.post_setup_dir):
         items.append((cfg.post_setup_dir, True, "post-setup"))
+
+    # Filter out items already on a shared filesystem (visible to all nodes).
+    items_to_copy = []
+    for local_path, is_dir, label in items:
+        if _is_path_shared(local_path, cfg.shared_fs):
+            log("  Skipping {} ({} is on a shared filesystem)".format(
+                label, local_path,
+            ))
+        else:
+            items_to_copy.append((local_path, is_dir, label))
+
+    if not items_to_copy:
+        log("  All paths are on a shared filesystem; no rsync needed")
+        log("")
+        return
+
+    if shutil.which("rsync") is None:
+        log("")
+        log("ERROR: rsync is required for multi-node deployment")
+        log("  Install it:  apt-get install rsync  /  yum install rsync")
+        log("  Or place the items below on a shared filesystem:")
+        for _p, _d, label in items_to_copy:
+            log("    - {}".format(label))
+        sys.exit(1)
+
+    # rsync --rsh expects a single string; build it from our canonical
+    # SSH options. ConnectTimeout is omitted to match the original behavior.
+    rsh_parts = ["ssh"] + ssh_opts(
+        cfg.host_ssh_port,
+        identity=host_key if os.path.isfile(host_key) else None,
+        connect_timeout=None,
+    )
+    rsh = " ".join(rsh_parts)
+
+    items = items_to_copy
 
     # Phase 1: create parent directories on remote hosts (parallel)
     remote_dirs = set()  # type: set
