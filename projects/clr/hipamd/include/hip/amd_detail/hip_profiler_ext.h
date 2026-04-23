@@ -168,13 +168,29 @@ typedef struct {
       uint32_t block_z;  /**< Block Z */
     };
     struct {
-      void* memory1;     /**< Opaque pointer-sized view of grid_x/y/z (first 8 bytes) */
-      void* memory2;     /**< Opaque pointer-sized view of grid_z/block_x (bytes 8–15) */
+      void*    memory1;  /**< Dst/allocated ptr for memory ops (bytes 0–7, overlaps grid_x/y) */
+      void*    memory2;  /**< Src ptr for copies (bytes 8–15, overlaps grid_z/block_x) */
+      uint64_t size;     /**< Bytes for allocs/copies/sets (bytes 16–23, overlaps block_y/z) */
     };
   };
+  /* Kernel argument blob — valid when api_name refers to a kernel launch and
+   * kernel_args != NULL.  The blob is a flat byte buffer containing one record
+   * per user-visible kernel argument (hidden/implicit arguments excluded),
+   * laid out in parameter index order.  Each record has the form:
+   *
+   *   uint32_t  value_size;        // byte size of the argument value
+   *   uint8_t   value[value_size]; // raw little-endian argument bytes
+   *
+   * kernel_args_size is the total byte length of the blob.
+   *
+   * Lifetime: the buffer is owned by the profiler and is valid for the
+   * lifetime of the process (freed when the profiler shuts down).
+   * Callers must not free or modify it. */
+  const uint8_t*    kernel_args;       /**< Packed arg blob, or NULL */
+  uint32_t          kernel_args_size;  /**< Byte length of kernel_args blob */
   /* Remaining padding to complete the 128-byte CPU half.
    * Reserved — must be treated as zero by callers. */
-  uint8_t           _pad1[48];
+  uint8_t           _pad1[36];
   /* GPU activity — second 128-byte half (valid when has_gpu_activity != 0) */
   HipGpuActivityExt gpu;
 } HipApiRecordExt;

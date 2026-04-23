@@ -40,3 +40,12 @@ void HipProfilerRemoveCompilerWrappersExt(HipCompilerDispatchTable* tbl);
 // API name table — indexed by api_id, same order as UpdateDispatchTable
 extern const char* const kHipApiNamesExt[];
 extern const size_t      kHipApiNamesCountExt;
+
+// Capture kernel arguments from a void** args array.
+// Walks the kernel signature (user params only), packs each arg as
+// {uint32_t size; uint8_t data[size];} into a heap-allocated blob,
+// and stores kernel_args / kernel_args_size on the record.
+// func may be a hipFunction_t (module path) or a host function pointer
+// (hipLaunchKernel path — pass as_hip_func=false); in the latter case
+// hipGetFuncBySymbol is called via the dispatch table to resolve it.
+void HipCaptureKernelArgsExt(HipApiRecordExt* rec, hipFunction_t func, void** args);

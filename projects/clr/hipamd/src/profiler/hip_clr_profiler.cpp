@@ -30,6 +30,7 @@
 #include "hip/amd_detail/hip_api_trace.hpp"
 #include "platform/activity.hpp"
 #include "../hip_internal.hpp"
+#include "../hip_global.hpp"
 
 #include "rocclr/os/os.hpp"
 #include "utils/flags.hpp"
@@ -121,6 +122,8 @@ void FreeChunk(HipApiRecordExt* chunk) {
       delete node;
       node = next;
     }
+    // Free kernel arg blobs.
+    delete[] chunk[i].kernel_args;
   }
   ::operator delete[](static_cast<void*>(chunk));
 }
@@ -292,6 +295,65 @@ void WriteJsonTraceImpl(const char* filepath) {
   uint64_t flow_id  = 0;  // unique id for each CPU→GPU flow arrow pair
   bool first = true;
 
+  // ── Memory lifetime map ───────────────────────────────────────────────────
+  // Built in a first pass over all records before emission.
+  // pid 2048 "GPU Memory" — one tid per allocation (low 20 bits of ptr).
+  static constexpr int kMemPid = 2048;
+  struct AllocInfo {
+    uint64_t start_ns;   // hipMalloc call start
+    uint64_t end_ns;     // hipFree call start; 0 = still live at trace end
+    uint64_t size;       // bytes
+    uint64_t mem_fid;    // flow id for the "alloc→lifetime" arrow (filled later)
+  };
+  // Key = device pointer (uint64_t cast of void*)
+  std::unordered_map<uint64_t, AllocInfo> alloc_map;
+  // Helpers: identify alloc/free/copy API names by prefix.
+  auto is_alloc = [](const char* n) {
+    return (strncmp(n, "hipMalloc", 9) == 0);
+  };
+  auto is_free  = [](const char* n) {
+    return (strncmp(n, "hipFree", 7) == 0);
+  };
+  // First pass: populate alloc_map.
+  for (size_t c = 0; c < g_records.size(); ++c) {
+    HipApiRecordExt* chunk = g_records[c];
+    size_t base  = c * kChunkSize;
+    size_t valid = (total > base) ? std::min(total - base, kChunkSize) : 0;
+    for (size_t i = 0; i < valid; ++i) {
+      const HipApiRecordExt& rec = chunk[i];
+      if (!rec.api_name) continue;
+      uint64_t ptr = reinterpret_cast<uintptr_t>(rec.memory1);
+      if (is_alloc(rec.api_name) && ptr) {
+        alloc_map[ptr] = AllocInfo{rec.start_ns, 0, rec.size, 0};
+      } else if (is_free(rec.api_name) && ptr) {
+        auto it = alloc_map.find(ptr);
+        if (it != alloc_map.end() && it->second.end_ns == 0)
+          it->second.end_ns = rec.start_ns;
+      }
+    }
+  }
+  // Close any allocations still live at trace end (hipFree never called).
+  uint64_t trace_end_ns = 0;
+  for (auto& kv : alloc_map)
+    if (kv.second.end_ns > trace_end_ns) trace_end_ns = kv.second.end_ns;
+  // Also check all record end times for a proper upper bound.
+  for (size_t c = 0; c < g_records.size(); ++c) {
+    HipApiRecordExt* chunk = g_records[c];
+    size_t base  = c * kChunkSize;
+    size_t valid = (total > base) ? std::min(total - base, kChunkSize) : 0;
+    for (size_t i = 0; i < valid; ++i)
+      if (chunk[i].end_ns > trace_end_ns) trace_end_ns = chunk[i].end_ns;
+  }
+  for (auto& kv : alloc_map)
+    if (kv.second.end_ns == 0) kv.second.end_ns = trace_end_ns;
+
+  // Assign a stable tid to each allocation: low 20 bits of ptr shifted right
+  // by alignment (device allocs are typically 4KB-aligned, so bits 12+).
+  // Collisions are harmless — they just share a lane.
+  auto alloc_tid = [](uint64_t ptr) -> uint64_t {
+    return (ptr >> 12) & 0xFFFFF;
+  };
+
   auto compact_tid = [&](uint64_t raw) -> uint32_t {
     auto it = tid_map.find(raw);
     if (it != tid_map.end()) return it->second;
@@ -326,17 +388,54 @@ void WriteJsonTraceImpl(const char* filepath) {
           if (first_cpu_arg) { trace << ",\"args\":{"; first_cpu_arg = false; }
           else trace << ",";
         };
-        if (rec.memory1) {
-          cpu_sep();
-          trace << "\"ptr\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(rec.memory1) << std::dec << "\"";
-        }
-        if (rec.memory2) {
-          cpu_sep();
-          trace << "\"src\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(rec.memory2) << std::dec << "\"";
+        // memory1/memory2/size share the union with grid/block dims; only emit them
+        // when kernel_args is absent (i.e. this is a memory op, not a kernel launch).
+        if (!rec.kernel_args) {
+          if (rec.memory1) {
+            cpu_sep();
+            trace << "\"ptr\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(rec.memory1) << std::dec << "\"";
+          }
+          if (rec.memory2) {
+            cpu_sep();
+            trace << "\"src\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(rec.memory2) << std::dec << "\"";
+          }
+          if (rec.size) {
+            cpu_sep();
+            trace << "\"size\":" << rec.size;
+          }
         }
         if (rec.stream) {
           cpu_sep();
           trace << "\"stream\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(rec.stream) << std::dec << "\"";
+        }
+        if (rec.kernel_args && rec.kernel_args_size > 0) {
+          cpu_sep();
+          trace << "\"kernel_args\":{";
+          const uint8_t* p = rec.kernel_args;
+          const uint8_t* end = p + rec.kernel_args_size;
+          int karg_idx = 0;
+          while (p + sizeof(uint32_t) <= end) {
+            uint32_t sz;
+            std::memcpy(&sz, p, sizeof(uint32_t));
+            p += sizeof(uint32_t);
+            if (p + sz > end) break;
+            if (karg_idx > 0) trace << ",";
+            trace << "\"" << karg_idx++ << "\":";
+            if (sz == 8) {
+              uint64_t v; std::memcpy(&v, p, 8);
+              trace << "\"0x" << std::hex << v << std::dec << "\"";
+            } else if (sz == 4) {
+              uint32_t v; std::memcpy(&v, p, 4);
+              trace << v;
+            } else {
+              trace << "\"0x" << std::hex;
+              for (uint32_t b = 0; b < sz; ++b)
+                trace << static_cast<unsigned>(p[b]);
+              trace << std::dec << "\"";
+            }
+            p += sz;
+          }
+          trace << "}";
         }
         if (!first_cpu_arg) trace << "}";
       }
@@ -351,7 +450,8 @@ void WriteJsonTraceImpl(const char* filepath) {
                               const char* kernel_name, size_t bytes,
                               uint32_t copy_kind, hipStream_t stream,
                               uint32_t gx, uint32_t gy, uint32_t gz,
-                              uint32_t bx, uint32_t by, uint32_t bz) {
+                              uint32_t bx, uint32_t by, uint32_t bz,
+                              const uint8_t* kargs, uint32_t kargs_size) {
         uint32_t op_idx  = op < 3 ? op : 3;
         int sdma = (op_idx == OP_ID_COPY) &&
                    hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(copy_kind)) ? 1 : 0;
@@ -411,12 +511,72 @@ void WriteJsonTraceImpl(const char* filepath) {
           sep();
           trace << "\"stream\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(stream) << std::dec << "\"";
         }
+        // Kernel args on GPU dispatch event (positional, same format as CPU record).
+        if (op_idx == OP_ID_DISPATCH && kargs && kargs_size > 0) {
+          const uint8_t* p   = kargs;
+          const uint8_t* end = p + kargs_size;
+          int kidx = 0;
+          while (p + sizeof(uint32_t) <= end) {
+            uint32_t sz; std::memcpy(&sz, p, sizeof(uint32_t)); p += sizeof(uint32_t);
+            if (p + sz > end) break;
+            sep();
+            trace << "\"" << kidx++ << "\":";
+            if (sz == 8) {
+              uint64_t v; std::memcpy(&v, p, 8);
+              trace << "\"0x" << std::hex << v << std::dec << "\"";
+            } else if (sz == 4) {
+              uint32_t v; std::memcpy(&v, p, 4);
+              trace << v;
+            } else {
+              trace << "\"0x" << std::hex;
+              for (uint32_t b = 0; b < sz; ++b) trace << static_cast<unsigned>(p[b]);
+              trace << std::dec << "\"";
+            }
+            p += sz;
+          }
+        }
         trace << "}}";
         if (has_ts)
           trace << ",\n{\"ph\":\"t\",\"id\":" << fid
                 << ",\"pid\":" << device_id
                 << ",\"tid\":" << gpu_tid
                 << ",\"ts\":" << gpu_ts << ",\"name\":\"dep\"}";
+
+        // ── GPU→memory flow arrows ────────────────────────────────────────
+        // Emit arrows from this GPU event to the lifetime slice of each
+        // allocation it references.  Dispatch: scan kargs for 8-byte ptrs.
+        // Copy: use rec.memory1 (dst) and rec.memory2 (src).
+        if (has_ts) {
+          uint64_t seen[18]; int nseen = 0;
+          auto try_mem_arrow = [&](uint64_t ptr) {
+            if (!ptr) return;
+            for (int si = 0; si < nseen; ++si) if (seen[si] == ptr) return;
+            auto it = alloc_map.find(ptr);
+            if (it == alloc_map.end()) return;
+            seen[nseen++] = ptr;
+            uint64_t afid    = flow_id++;
+            uint64_t mem_tid = alloc_tid(ptr);
+            trace << ",\n{\"ph\":\"s\",\"id\":" << afid
+                  << ",\"pid\":" << device_id << ",\"tid\":" << gpu_tid
+                  << ",\"ts\":" << gpu_ts << ",\"name\":\"mem\",\"cat\":\"mem\"}";
+            trace << ",\n{\"ph\":\"f\",\"bp\":\"e\",\"id\":" << afid
+                  << ",\"pid\":" << kMemPid << ",\"tid\":" << mem_tid
+                  << ",\"ts\":" << gpu_ts << ",\"name\":\"mem\",\"cat\":\"mem\"}";
+          };
+          if (op_idx == OP_ID_DISPATCH && kargs && kargs_size > 0) {
+            const uint8_t* p   = kargs;
+            const uint8_t* end = p + kargs_size;
+            while (p + sizeof(uint32_t) <= end) {
+              uint32_t sz; std::memcpy(&sz, p, sizeof(uint32_t)); p += sizeof(uint32_t);
+              if (p + sz > end) break;
+              if (sz == 8) { uint64_t v; std::memcpy(&v, p, 8); try_mem_arrow(v); }
+              p += sz;
+            }
+          } else if (op_idx == OP_ID_COPY) {
+            try_mem_arrow(reinterpret_cast<uintptr_t>(rec.memory1));
+            try_mem_arrow(reinterpret_cast<uintptr_t>(rec.memory2));
+          }
+        }
 
         device_gpu_tids[device_id].insert(gpu_tid);
       };
@@ -429,15 +589,63 @@ void WriteJsonTraceImpl(const char* filepath) {
                     rec.gpu.kernel_name, rec.gpu.bytes, rec.gpu.copy_kind,
                     rec.stream,
                     rec.grid_x, rec.grid_y, rec.grid_z,
-                    rec.block_x, rec.block_y, rec.block_z);
+                    rec.block_x, rec.block_y, rec.block_z,
+                    rec.kernel_args, rec.kernel_args_size);
         for (const HipGpuActivityExt* node = rec.gpu.next; node; node = node->next)
           emit_gpu_op(node->op, node->begin_ns, node->end_ns,
                       node->device_id, node->queue_id,
                       node->kernel_name, node->bytes, node->copy_kind,
                       rec.stream,
-                      0, 0, 0, 0, 0, 0);  // graph spill: per-node dims unavailable
+                      0, 0, 0, 0, 0, 0,   // graph spill: per-node dims unavailable
+                      nullptr, 0);         // graph spill: no per-node kernel args
       }
     }
+  }
+
+  // ── Memory lifetime slices (pid 2048 "GPU Memory") ───────────────────────
+  // One ph:"X" slice per allocation spanning malloc→free, on a per-ptr tid lane.
+  for (auto& kv : alloc_map) {
+    uint64_t ptr   = kv.first;
+    const AllocInfo& ai = kv.second;
+    uint64_t mem_tid = alloc_tid(ptr);
+    uint64_t ts_us   = ai.start_ns / 1000;
+    uint64_t end_us  = ai.end_ns   / 1000;
+    uint64_t dur_us  = (end_us > ts_us) ? (end_us - ts_us) : 1;
+    char ptrbuf[32];
+    snprintf(ptrbuf, sizeof(ptrbuf), "0x%llx",
+             static_cast<unsigned long long>(ptr));
+    char sizebuf[32];
+    if (ai.size >= 1024 * 1024)
+      snprintf(sizebuf, sizeof(sizebuf), "%.1f MB", ai.size / (1024.0 * 1024.0));
+    else if (ai.size >= 1024)
+      snprintf(sizebuf, sizeof(sizebuf), "%.1f KB", ai.size / 1024.0);
+    else
+      snprintf(sizebuf, sizeof(sizebuf), "%llu B",
+               static_cast<unsigned long long>(ai.size));
+    trace << ",\n{\"name\":\"" << ptrbuf << " (" << sizebuf << ")"
+          << "\",\"ph\":\"X\""
+          << ",\"pid\":" << kMemPid << ",\"tid\":" << mem_tid
+          << ",\"ts\":" << ts_us << ",\"dur\":" << dur_us
+          << ",\"args\":{\"ptr\":\"" << ptrbuf << "\",\"size\":" << ai.size << "}}";
+    trace << ",\n{\"name\":\"thread_name\",\"ph\":\"M\""
+          << ",\"pid\":" << kMemPid << ",\"tid\":" << mem_tid
+          << ",\"args\":{\"name\":\"" << ptrbuf << " (" << sizebuf << ")\"}}";
+  }
+  if (!alloc_map.empty()) {
+    uint64_t total_bytes = 0;
+    for (auto& kv : alloc_map) total_bytes += kv.second.size;
+    char total_sizebuf[32];
+    if (total_bytes >= 1024 * 1024)
+      snprintf(total_sizebuf, sizeof(total_sizebuf), "%.1f MB", total_bytes / (1024.0 * 1024.0));
+    else if (total_bytes >= 1024)
+      snprintf(total_sizebuf, sizeof(total_sizebuf), "%.1f KB", total_bytes / 1024.0);
+    else
+      snprintf(total_sizebuf, sizeof(total_sizebuf), "%llu B",
+               static_cast<unsigned long long>(total_bytes));
+    trace << ",\n{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":" << kMemPid
+          << ",\"args\":{\"name\":\"GPU Memory (" << total_sizebuf << " total)\"}}";
+    trace << ",\n{\"name\":\"process_sort_index\",\"ph\":\"M\",\"pid\":" << kMemPid
+          << ",\"args\":{\"sort_index\":999}}";
   }
 
   // Emit CPU thread name metadata using the same compact tid mapping
@@ -537,6 +745,44 @@ struct HipClrProfilerFinalizer {
 } g_finalizer;
 
 }  // anonymous namespace
+
+// ============================================================
+// Kernel argument capture
+// ============================================================
+void HipCaptureKernelArgsExt(HipApiRecordExt* rec, hipFunction_t func, void** args) {
+  if (!rec || !func || !args) return;
+
+  amd::Kernel* kernel = hip::asKernel(func);
+  if (!kernel) return;
+
+  const amd::KernelSignature& sig = kernel->signature();
+  uint32_t nparams = sig.numParameters();   // user-visible params only (hidden excluded)
+  if (nparams == 0) return;
+
+  // Blob layout per param (positional order, 0..N-1):
+  //   uint32_t value_size      — byte size of argument value
+  //   uint8_t  value[value_size] — raw little-endian bytes
+  size_t total = 0;
+  for (uint32_t i = 0; i < nparams; ++i)
+    total += sizeof(uint32_t) + sig.at(i).size_;
+
+  uint8_t* blob = new uint8_t[total];
+  uint8_t* p = blob;
+  for (uint32_t i = 0; i < nparams; ++i) {
+    const amd::KernelParameterDescriptor& desc = sig.at(i);
+    uint32_t val_size = static_cast<uint32_t>(desc.size_);
+    std::memcpy(p, &val_size, sizeof(uint32_t));
+    p += sizeof(uint32_t);
+    if (args[i])
+      std::memcpy(p, args[i], val_size);
+    else
+      std::memset(p, 0, val_size);
+    p += val_size;
+  }
+
+  rec->kernel_args      = blob;
+  rec->kernel_args_size = static_cast<uint32_t>(total);
+}
 
 // ============================================================
 // Called from each *Layer wrapper — mirrors reference GetActiveRecord().

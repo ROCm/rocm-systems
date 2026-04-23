@@ -781,6 +781,11 @@ static hipError_t hipExtLaunchKernelLayer(const void* function_address, dim3 num
   _rec->stream = stream;
   _rec->grid_x = numBlocks.x; _rec->grid_y = numBlocks.y; _rec->grid_z = numBlocks.z;
   _rec->block_x = dimBlocks.x; _rec->block_y = dimBlocks.y; _rec->block_z = dimBlocks.z;
+  if (args) {
+    hipFunction_t hfunc = nullptr;
+    if (g_next.hipGetFuncBySymbol_fn(&hfunc, function_address) == hipSuccess)
+      HipCaptureKernelArgsExt(_rec, hfunc, args);
+  }
   auto _r = g_next.hipExtLaunchKernel_fn(function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream, startEvent, stopEvent, flags);
   _rec->end_ns = NowNs();
   return _r;
@@ -1953,6 +1958,11 @@ static hipError_t hipLaunchCooperativeKernelLayer(const void* f, dim3 gridDim, d
   _rec->stream = stream;
   _rec->grid_x = gridDim.x;  _rec->grid_y = gridDim.y;  _rec->grid_z = gridDim.z;
   _rec->block_x = blockDimX.x; _rec->block_y = blockDimX.y; _rec->block_z = blockDimX.z;
+  if (kernelParams) {
+    hipFunction_t hfunc = nullptr;
+    if (g_next.hipGetFuncBySymbol_fn(&hfunc, f) == hipSuccess)
+      HipCaptureKernelArgsExt(_rec, hfunc, kernelParams);
+  }
   auto _r = g_next.hipLaunchCooperativeKernel_fn(f, gridDim, blockDimX, kernelParams, sharedMemBytes, stream);
   _rec->end_ns = NowNs();
   return _r;
@@ -1984,6 +1994,11 @@ static hipError_t hipLaunchKernelLayer(const void* function_address, dim3 numBlo
   _rec->stream = stream;
   _rec->grid_x = numBlocks.x; _rec->grid_y = numBlocks.y; _rec->grid_z = numBlocks.z;
   _rec->block_x = dimBlocks.x; _rec->block_y = dimBlocks.y; _rec->block_z = dimBlocks.z;
+  if (args) {
+    hipFunction_t hfunc = nullptr;
+    if (g_next.hipGetFuncBySymbol_fn(&hfunc, function_address) == hipSuccess)
+      HipCaptureKernelArgsExt(_rec, hfunc, args);
+  }
   auto _r = g_next.hipLaunchKernel_fn(function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream);
   _rec->end_ns = NowNs();
   return _r;
@@ -1992,6 +2007,7 @@ static hipError_t hipLaunchKernelLayer(const void* function_address, dim3 numBlo
 // api_id = 218
 static hipError_t hipMallocLayer(void** ptr, size_t size) {
   auto* _rec = HipGetActiveRecordExt(218u);
+  _rec->size = size;
   auto _r = g_next.hipMalloc_fn(ptr, size);
   if (ptr) _rec->memory1 = *ptr;
   _rec->end_ns = NowNs();
@@ -2028,6 +2044,7 @@ static hipError_t hipMallocArrayLayer(hipArray_t* array, const hipChannelFormatD
 static hipError_t hipMallocAsyncLayer(void** dev_ptr, size_t size, hipStream_t stream) {
   auto* _rec = HipGetActiveRecordExt(222u);
   _rec->stream = stream;
+  _rec->size = size;
   auto _r = g_next.hipMallocAsync_fn(dev_ptr, size, stream);
   if (dev_ptr) _rec->memory1 = *dev_ptr;
   _rec->end_ns = NowNs();
@@ -2039,6 +2056,7 @@ static hipError_t hipMallocFromPoolAsyncLayer(void** dev_ptr, size_t size, hipMe
                                                hipStream_t stream) {
   auto* _rec = HipGetActiveRecordExt(223u);
   _rec->stream = stream;
+  _rec->size = size;
   auto _r = g_next.hipMallocFromPoolAsync_fn(dev_ptr, size, mem_pool, stream);
   if (dev_ptr) _rec->memory1 = *dev_ptr;
   _rec->end_ns = NowNs();
@@ -2048,6 +2066,7 @@ static hipError_t hipMallocFromPoolAsyncLayer(void** dev_ptr, size_t size, hipMe
 // api_id = 224
 static hipError_t hipMallocHostLayer(void** ptr, size_t size) {
   auto* _rec = HipGetActiveRecordExt(224u);
+  _rec->size = size;
   auto _r = g_next.hipMallocHost_fn(ptr, size);
   if (ptr) _rec->memory1 = *ptr;
   _rec->end_ns = NowNs();
@@ -2057,6 +2076,7 @@ static hipError_t hipMallocHostLayer(void** ptr, size_t size) {
 // api_id = 225
 static hipError_t hipMallocManagedLayer(void** dev_ptr, size_t size, unsigned int flags) {
   auto* _rec = HipGetActiveRecordExt(225u);
+  _rec->size = size;
   auto _r = g_next.hipMallocManaged_fn(dev_ptr, size, flags);
   if (dev_ptr) _rec->memory1 = *dev_ptr;
   _rec->end_ns = NowNs();
@@ -2428,6 +2448,7 @@ static hipError_t hipMemcpyLayer(void* dst, const void* src, size_t sizeBytes, h
   auto* _rec = HipGetActiveRecordExt(265u);
   _rec->memory1 = dst;
   _rec->memory2 = const_cast<void*>(src);
+  _rec->size = sizeBytes;
   auto _r = g_next.hipMemcpy_fn(dst, src, sizeBytes, kind);
   _rec->end_ns = NowNs();
   return _r;
@@ -2439,6 +2460,7 @@ static hipError_t hipMemcpy2DLayer(void* dst, size_t dpitch, const void* src, si
   auto* _rec = HipGetActiveRecordExt(266u);
   _rec->memory1 = dst;
   _rec->memory2 = const_cast<void*>(src);
+  _rec->size = width * height;
   auto _r = g_next.hipMemcpy2D_fn(dst, dpitch, src, spitch, width, height, kind);
   _rec->end_ns = NowNs();
   return _r;
@@ -2452,6 +2474,7 @@ static hipError_t hipMemcpy2DAsyncLayer(void* dst, size_t dpitch, const void* sr
   _rec->stream = stream;
   _rec->memory1 = dst;
   _rec->memory2 = const_cast<void*>(src);
+  _rec->size = width * height;
   auto _r = g_next.hipMemcpy2DAsync_fn(dst, dpitch, src, spitch, width, height, kind, stream);
   _rec->end_ns = NowNs();
   return _r;
@@ -2525,6 +2548,7 @@ static hipError_t hipMemcpyAsyncLayer(void* dst, const void* src, size_t sizeByt
   _rec->stream = stream;
   _rec->memory1 = dst;
   _rec->memory2 = const_cast<void*>(src);
+  _rec->size = sizeBytes;
   auto _r = g_next.hipMemcpyAsync_fn(dst, src, sizeBytes, kind, stream);
   _rec->end_ns = NowNs();
   return _r;
@@ -2544,6 +2568,7 @@ static hipError_t hipMemcpyDtoDLayer(hipDeviceptr_t dst, hipDeviceptr_t src, siz
   auto* _rec = HipGetActiveRecordExt(276u);
   _rec->memory1 = reinterpret_cast<void*>(dst);
   _rec->memory2 = reinterpret_cast<void*>(src);
+  _rec->size = sizeBytes;
   auto _r = g_next.hipMemcpyDtoD_fn(dst, src, sizeBytes);
   _rec->end_ns = NowNs();
   return _r;
@@ -2556,6 +2581,7 @@ static hipError_t hipMemcpyDtoDAsyncLayer(hipDeviceptr_t dst, hipDeviceptr_t src
   _rec->stream = stream;
   _rec->memory1 = reinterpret_cast<void*>(dst);
   _rec->memory2 = reinterpret_cast<void*>(src);
+  _rec->size = sizeBytes;
   auto _r = g_next.hipMemcpyDtoDAsync_fn(dst, src, sizeBytes, stream);
   _rec->end_ns = NowNs();
   return _r;
@@ -2566,6 +2592,7 @@ static hipError_t hipMemcpyDtoHLayer(void* dst, hipDeviceptr_t src, size_t sizeB
   auto* _rec = HipGetActiveRecordExt(278u);
   _rec->memory1 = dst;
   _rec->memory2 = reinterpret_cast<void*>(src);
+  _rec->size = sizeBytes;
   auto _r = g_next.hipMemcpyDtoH_fn(dst, src, sizeBytes);
   _rec->end_ns = NowNs();
   return _r;
@@ -2578,6 +2605,7 @@ static hipError_t hipMemcpyDtoHAsyncLayer(void* dst, hipDeviceptr_t src, size_t 
   _rec->stream = stream;
   _rec->memory1 = dst;
   _rec->memory2 = reinterpret_cast<void*>(src);
+  _rec->size = sizeBytes;
   auto _r = g_next.hipMemcpyDtoHAsync_fn(dst, src, sizeBytes, stream);
   _rec->end_ns = NowNs();
   return _r;
@@ -2626,6 +2654,7 @@ static hipError_t hipMemcpyHtoDLayer(hipDeviceptr_t dst, const void* src, size_t
   auto* _rec = HipGetActiveRecordExt(284u);
   _rec->memory1 = reinterpret_cast<void*>(dst);
   _rec->memory2 = const_cast<void*>(src);
+  _rec->size = sizeBytes;
   auto _r = g_next.hipMemcpyHtoD_fn(dst, src, sizeBytes);
   _rec->end_ns = NowNs();
   return _r;
@@ -2638,6 +2667,7 @@ static hipError_t hipMemcpyHtoDAsyncLayer(hipDeviceptr_t dst, const void* src, s
   _rec->stream = stream;
   _rec->memory1 = reinterpret_cast<void*>(dst);
   _rec->memory2 = const_cast<void*>(src);
+  _rec->size = sizeBytes;
   auto _r = g_next.hipMemcpyHtoDAsync_fn(dst, src, sizeBytes, stream);
   _rec->end_ns = NowNs();
   return _r;
@@ -2666,6 +2696,7 @@ static hipError_t hipMemcpyPeerLayer(void* dst, int dstDeviceId, const void* src
   auto* _rec = HipGetActiveRecordExt(288u);
   _rec->memory1 = dst;
   _rec->memory2 = const_cast<void*>(src);
+  _rec->size = sizeBytes;
   auto _r = g_next.hipMemcpyPeer_fn(dst, dstDeviceId, src, srcDeviceId, sizeBytes);
   _rec->end_ns = NowNs();
   return _r;
@@ -2678,6 +2709,7 @@ static hipError_t hipMemcpyPeerAsyncLayer(void* dst, int dstDeviceId, const void
   _rec->stream = stream;
   _rec->memory1 = dst;
   _rec->memory2 = const_cast<void*>(src);
+  _rec->size = sizeBytes;
   auto _r = g_next.hipMemcpyPeerAsync_fn(dst, dstDeviceId, src, srcDevice, sizeBytes, stream);
   _rec->end_ns = NowNs();
   return _r;
@@ -2719,6 +2751,7 @@ static hipError_t hipMemcpyWithStreamLayer(void* dst, const void* src, size_t si
   _rec->stream = stream;
   _rec->memory1 = dst;
   _rec->memory2 = const_cast<void*>(src);
+  _rec->size = sizeBytes;
   auto _r = g_next.hipMemcpyWithStream_fn(dst, src, sizeBytes, kind, stream);
   _rec->end_ns = NowNs();
   return _r;
@@ -2728,6 +2761,7 @@ static hipError_t hipMemcpyWithStreamLayer(void* dst, const void* src, size_t si
 static hipError_t hipMemsetLayer(void* dst, int value, size_t sizeBytes) {
   auto* _rec = HipGetActiveRecordExt(294u);
   _rec->memory1 = dst;
+  _rec->size = sizeBytes;
   auto _r = g_next.hipMemset_fn(dst, value, sizeBytes);
   _rec->end_ns = NowNs();
   return _r;
@@ -2738,6 +2772,7 @@ static hipError_t hipMemset2DLayer(void* dst, size_t pitch, int value, size_t wi
                                     size_t height) {
   auto* _rec = HipGetActiveRecordExt(295u);
   _rec->memory1 = dst;
+  _rec->size = width * height;
   auto _r = g_next.hipMemset2D_fn(dst, pitch, value, width, height);
   _rec->end_ns = NowNs();
   return _r;
@@ -2749,6 +2784,7 @@ static hipError_t hipMemset2DAsyncLayer(void* dst, size_t pitch, int value, size
   auto* _rec = HipGetActiveRecordExt(296u);
   _rec->stream = stream;
   _rec->memory1 = dst;
+  _rec->size = width * height;
   auto _r = g_next.hipMemset2DAsync_fn(dst, pitch, value, width, height, stream);
   _rec->end_ns = NowNs();
   return _r;
@@ -2777,6 +2813,7 @@ static hipError_t hipMemsetAsyncLayer(void* dst, int value, size_t sizeBytes, hi
   auto* _rec = HipGetActiveRecordExt(299u);
   _rec->stream = stream;
   _rec->memory1 = dst;
+  _rec->size = sizeBytes;
   auto _r = g_next.hipMemsetAsync_fn(dst, value, sizeBytes, stream);
   _rec->end_ns = NowNs();
   return _r;
@@ -2786,6 +2823,7 @@ static hipError_t hipMemsetAsyncLayer(void* dst, int value, size_t sizeBytes, hi
 static hipError_t hipMemsetD16Layer(hipDeviceptr_t dest, unsigned short value, size_t count) {
   auto* _rec = HipGetActiveRecordExt(300u);
   _rec->memory1 = reinterpret_cast<void*>(dest);
+  _rec->size = count * 2;
   auto _r = g_next.hipMemsetD16_fn(dest, value, count);
   _rec->end_ns = NowNs();
   return _r;
@@ -2797,6 +2835,7 @@ static hipError_t hipMemsetD16AsyncLayer(hipDeviceptr_t dest, unsigned short val
   auto* _rec = HipGetActiveRecordExt(301u);
   _rec->stream = stream;
   _rec->memory1 = reinterpret_cast<void*>(dest);
+  _rec->size = count * 2;
   auto _r = g_next.hipMemsetD16Async_fn(dest, value, count, stream);
   _rec->end_ns = NowNs();
   return _r;
@@ -2806,6 +2845,7 @@ static hipError_t hipMemsetD16AsyncLayer(hipDeviceptr_t dest, unsigned short val
 static hipError_t hipMemsetD32Layer(hipDeviceptr_t dest, int value, size_t count) {
   auto* _rec = HipGetActiveRecordExt(302u);
   _rec->memory1 = reinterpret_cast<void*>(dest);
+  _rec->size = count * 4;
   auto _r = g_next.hipMemsetD32_fn(dest, value, count);
   _rec->end_ns = NowNs();
   return _r;
@@ -2817,6 +2857,7 @@ static hipError_t hipMemsetD32AsyncLayer(hipDeviceptr_t dst, int value, size_t c
   auto* _rec = HipGetActiveRecordExt(303u);
   _rec->stream = stream;
   _rec->memory1 = reinterpret_cast<void*>(dst);
+  _rec->size = count * 4;
   auto _r = g_next.hipMemsetD32Async_fn(dst, value, count, stream);
   _rec->end_ns = NowNs();
   return _r;
@@ -2826,6 +2867,7 @@ static hipError_t hipMemsetD32AsyncLayer(hipDeviceptr_t dst, int value, size_t c
 static hipError_t hipMemsetD8Layer(hipDeviceptr_t dest, unsigned char value, size_t count) {
   auto* _rec = HipGetActiveRecordExt(304u);
   _rec->memory1 = reinterpret_cast<void*>(dest);
+  _rec->size = count;
   auto _r = g_next.hipMemsetD8_fn(dest, value, count);
   _rec->end_ns = NowNs();
   return _r;
@@ -2837,6 +2879,7 @@ static hipError_t hipMemsetD8AsyncLayer(hipDeviceptr_t dest, unsigned char value
   auto* _rec = HipGetActiveRecordExt(305u);
   _rec->stream = stream;
   _rec->memory1 = reinterpret_cast<void*>(dest);
+  _rec->size = count;
   auto _r = g_next.hipMemsetD8Async_fn(dest, value, count, stream);
   _rec->end_ns = NowNs();
   return _r;
@@ -2945,6 +2988,8 @@ static hipError_t hipModuleLaunchKernelLayer(hipFunction_t f, unsigned int gridD
   _rec->stream = stream;
   _rec->grid_x = gridDimX; _rec->grid_y = gridDimY; _rec->grid_z = gridDimZ;
   _rec->block_x = blockDimX; _rec->block_y = blockDimY; _rec->block_z = blockDimZ;
+  if (kernelParams)
+    HipCaptureKernelArgsExt(_rec, f, kernelParams);
   auto _r = g_next.hipModuleLaunchKernel_fn(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, stream, kernelParams, extra);
   _rec->end_ns = NowNs();
   return _r;
