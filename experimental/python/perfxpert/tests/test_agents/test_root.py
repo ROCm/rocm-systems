@@ -147,3 +147,177 @@ def test_root_writes_bottleneck_narrative(fake_provider):
     )
     assert len(result.narrative) > 0
     assert result.primary_bottleneck == "memory_transfer"
+
+
+# -- Finding #24: Root lambda stubs for tasks.* never validated ---------------
+
+def test_root_lambdas_for_tasks_never_invoked_during_routing(monkeypatch, fake_provider):
+    """Root's tasks.* are stubbed as lambdas returning None. Ensure run_root
+    doesn't actually invoke them in normal routing paths (Finding #24).
+
+    If it does, the lambda stubs are hiding real behavior — switch to real
+    tasks.* wrappers from the tasks module.
+    """
+    from perfxpert.agents.framework import dispatch_tool as real_dispatch_tool
+
+    invocations = []
+
+    def recording_dispatch(ag, tool_name, args):
+        invocations.append(tool_name)
+        return real_dispatch_tool(ag, tool_name, args)
+
+    monkeypatch.setattr(
+        "perfxpert.agents.framework.dispatch_tool",
+        recording_dispatch,
+    )
+
+    fake_provider.return_value = FakeProviderResponse(
+        text="routed",
+        structured_output={
+            "narrative": "Routed.",
+            "recommendations": [],
+            "primary_bottleneck": "mixed",
+            "warnings": [],
+            "metadata": {},
+        },
+    )
+    result = root_module.run_root(
+        schemas.RootInput(user_query="why slow?", database_path="x.db"),
+        provider="anthropic",
+    )
+    assert isinstance(result, schemas.RootOutput)
+
+    tasks_invocations = [n for n in invocations if n.startswith("tasks.")]
+    # Root should NOT invoke tasks.* tools during a simple routing turn.
+    # If this assertion fails, the lambda stubs are hiding real behavior.
+    assert not tasks_invocations, (
+        f"Root invoked tasks.* tools during routing: {tasks_invocations}. "
+        "Switch the lambda stubs to real tasks.* wrappers from perfxpert.tools.tasks."
+    )
+
+
+def test_root_tasks_bindings_are_real():
+    """Root must wire real tasks.* wrappers — no lambda stubs may remain.
+
+    Regression guard for Finding #24.
+    """
+    import inspect
+
+    from perfxpert.tools import tasks as tasks_mod
+
+    agent = root_module.build_root_agent()
+    tasks_tools = [tb for tb in agent.tools if tb.name.startswith("tasks.")]
+
+    assert len(tasks_tools) >= 1, (
+        "Root should declare at least one tasks.* tool per fence spec"
+    )
+
+    expected = {
+        "tasks.next": tasks_mod.next_task,
+        "tasks.create": tasks_mod.create,
+        "tasks.update": tasks_mod.update,
+        "tasks.close": tasks_mod.close,
+    }
+
+    lambda_stubs = []
+    for tb in tasks_tools:
+        try:
+            src = inspect.getsource(tb.fn).strip()
+        except (OSError, TypeError):
+            src = ""
+        if "lambda" in src and ("None" in src or ": None" in src):
+            lambda_stubs.append(tb.name)
+        if tb.name in expected:
+            assert tb.fn is expected[tb.name], (
+                f"{tb.name} should be wired to perfxpert.tools.tasks.{expected[tb.name].__name__}"
+            )
+
+    assert not lambda_stubs, (
+        f"Root still uses lambda stub(s) for: {lambda_stubs}. "
+        "Real perfxpert.tools.tasks wrappers must be used instead."
+    )
+
+
+# -- Fence allowlist helper -----------------------------------------------
+
+def _extract_fence_tool_names(fence_text):
+    """Parse Tool allowlist section from a fence markdown file.
+
+    Returns set of tool names. Stops at next ## heading or EOF.
+    """
+    in_section = False
+    tools = set()
+    for line in fence_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## ") and "Tool allowlist" in stripped:
+            in_section = True
+            continue
+        if in_section:
+            if stripped.startswith("## "):
+                break
+            if stripped.startswith("- "):
+                tool_name = stripped[2:].strip()
+                if tool_name:
+                    tools.add(tool_name)
+    return tools
+
+
+# -- Fence / allowlist alignment (design N29) ----------------------------
+
+def test_root_fence_tools_match_allowlist():
+    """Fence-declared tools must be subset of agent actual allowlist (N29)."""
+    from pathlib import Path
+    agent = root_module.build_root_agent()
+    allowed = {t.name for t in agent.tools}
+    fence_path = Path(root_module.__file__).parent / "fence" / "root.md"
+    fence_text = fence_path.read_text()
+    fence_tools = _extract_fence_tool_names(fence_text)
+    violations = fence_tools - allowed
+    assert not violations, (
+        f"Root fence lists tools not in agent allowlist: {violations}"
+    )
+
+
+# -- Fence / allowlist alignment for ALL agents (design N29 full audit) --
+
+def _agent_fence_allowlist_cases():
+    from pathlib import Path
+    from perfxpert.agents import (
+        analysis as analysis_mod,
+        recommendation as rec_mod,
+        correctness as cor_mod,
+        compute_specialist as cs_mod,
+        memory_specialist as ms_mod,
+        latency_specialist as ls_mod,
+    )
+    return [
+        ("Root", root_module.build_root_agent,
+         Path(root_module.__file__).parent / "fence" / "root.md"),
+        ("Analysis", analysis_mod.build_analysis_agent,
+         Path(analysis_mod.__file__).parent / "fence" / "analysis.md"),
+        ("Recommendation", rec_mod.build_recommendation_agent,
+         Path(rec_mod.__file__).parent / "fence" / "recommendation.md"),
+        ("Correctness", cor_mod.build_correctness_agent,
+         Path(cor_mod.__file__).parent / "fence" / "correctness.md"),
+        ("ComputeSpecialist", cs_mod.build_compute_specialist,
+         Path(cs_mod.__file__).parent / "fence" / "compute_specialist.md"),
+        ("MemorySpecialist", ms_mod.build_memory_specialist,
+         Path(ms_mod.__file__).parent / "fence" / "memory_specialist.md"),
+        ("LatencySpecialist", ls_mod.build_latency_specialist,
+         Path(ls_mod.__file__).parent / "fence" / "latency_specialist.md"),
+    ]
+
+
+@pytest.mark.parametrize("agent_name,builder,fence_path", _agent_fence_allowlist_cases())
+def test_all_agents_fence_tools_subset_of_allowlist(agent_name, builder, fence_path):
+    """Every fence-listed tool must appear in code allowlist (design N29)."""
+    if not fence_path.exists():
+        pytest.skip(f"No fence file for {agent_name}: {fence_path}")
+    agent = builder()
+    allowed = {t.name for t in agent.tools}
+    fence_text = fence_path.read_text()
+    fence_tools = _extract_fence_tool_names(fence_text)
+    violations = fence_tools - allowed
+    assert not violations, (
+        f"{agent_name}: fence lists tools NOT in allowlist: {violations}"
+    )

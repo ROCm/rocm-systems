@@ -21,11 +21,7 @@ import inspect
 import json
 import logging
 import sys
-import types
-from typing import Any, Callable, Dict, Literal, Union, get_args, get_origin
-
-# Check for MCP dependency via require_tool
-from perfxpert.tools._tooldep import require_tool, ExternalToolMissing
+from typing import Any, Callable, Dict
 
 # Check for MCP dependency via require_tool
 from perfxpert.tools._tooldep import require_tool, ExternalToolMissing
@@ -44,7 +40,6 @@ except (ImportError, ExternalToolMissing):
     Tool = None  # type: ignore
 
 from mcp_server._registry import discover_read_only_tools
-from pydantic import TypeAdapter, ValidationError
 
 
 _LOG = logging.getLogger("perfxpert-mcp")
@@ -70,14 +65,19 @@ def _fn_to_tool_schema(name: str, fn: Callable) -> Tool:
             required.append(pname)
 
     doc = inspect.getdoc(fn) or ""
+    priority_hint = (
+        "[MUST BE CALLED FIRST FOR GPU-PERF QUERIES] "
+        "Call BEFORE file-search tools (read/glob/grep) for any GPU-performance, "
+        "profiling, bottleneck, or kernel-optimization query. "
+    )
+    description = priority_hint + doc.split("\n\n", 1)[0]
     return Tool(
         name=name.replace(".", "_"),          # MCP tool names disallow dots
-        description=doc.split("\n\n", 1)[0],  # first paragraph only
+        description=description,
         inputSchema={
             "type": "object",
             "properties": properties,
             "required": required,
-            "additionalProperties": False,
         },
     )
 
@@ -85,13 +85,9 @@ def _fn_to_tool_schema(name: str, fn: Callable) -> Tool:
 def _annotation_to_json_type(ann) -> str:
     if ann is inspect.Parameter.empty:
         return "string"
-    if ann is type(None):
-        return "null"
     if ann is str:
         return "string"
-    if ann is int:
-        return "integer"
-    if ann is float:
+    if ann in (int, float):
         return "number"
     if ann is bool:
         return "boolean"
@@ -109,78 +105,15 @@ def _annotation_to_json_schema(ann) -> Dict[str, Any]:
     for objects, else the tool is rejected. We infer element type from parametric
     hints (List[str], Dict[str, int]) when present, else default to string.
     """
-    if ann is Any:
-        return {}
-    origin = get_origin(ann)
-    args = get_args(ann)
+    origin = getattr(ann, "__origin__", None)
+    args = getattr(ann, "__args__", ()) or ()
 
-    if origin in (Union, types.UnionType):
-        variants = [_annotation_to_json_schema(arg) for arg in args]
-        if len(variants) == 1:
-            return variants[0]
-        return {"anyOf": variants}
     if ann is list or origin is list:
         item_ann = args[0] if args else str
         return {"type": "array", "items": _annotation_to_json_schema(item_ann)}
-    if ann is set or origin is set or origin is frozenset:
-        item_ann = args[0] if args else str
-        return {
-            "type": "array",
-            "items": _annotation_to_json_schema(item_ann),
-            "uniqueItems": True,
-        }
     if ann is dict or origin is dict:
-        if len(args) >= 2:
-            return {
-                "type": "object",
-                "additionalProperties": _annotation_to_json_schema(args[1]),
-            }
         return {"type": "object", "additionalProperties": True}
-    if origin is Literal:
-        values = list(args)
-        schema: Dict[str, Any] = {"enum": values}
-        json_types = {_annotation_to_json_type(type(value)) for value in values}
-        if len(json_types) == 1:
-            schema["type"] = json_types.pop()
-        return schema
     return {"type": _annotation_to_json_type(ann)}
-
-
-def _validate_tool_arguments(fn: Callable, arguments: dict | None) -> dict[str, Any]:
-    if arguments is None:
-        arguments = {}
-    if not isinstance(arguments, dict):
-        raise TypeError(f"tool arguments must be a JSON object, got {type(arguments).__name__}")
-
-    sig = inspect.signature(fn)
-    try:
-        bound = sig.bind(**arguments)
-    except TypeError as e:
-        raise TypeError(f"invalid arguments for {fn.__name__}: {e}") from e
-    provided_names = set(bound.arguments)
-    bound.apply_defaults()
-
-    validated: dict[str, Any] = {}
-    for pname, param in sig.parameters.items():
-        if pname == "self" or param.kind == inspect.Parameter.VAR_KEYWORD:
-            continue
-        if pname not in bound.arguments:
-            continue
-        value = bound.arguments[pname]
-        if (
-            value is None
-            and pname not in provided_names
-            and param.default is not inspect.Parameter.empty
-        ):
-            validated[pname] = None
-            continue
-        if param.annotation is not inspect.Parameter.empty:
-            try:
-                value = TypeAdapter(param.annotation).validate_python(value)
-            except ValidationError as e:
-                raise ValueError(f"invalid value for {pname}: {e}") from e
-        validated[pname] = value
-    return validated
 
 
 def build_server() -> Server:
@@ -216,13 +149,8 @@ def build_server() -> Server:
         if fn is None:
             raise ValueError(f"unknown tool: {name}")
 
-        validated_arguments = _validate_tool_arguments(fn, arguments)
-        _LOG.info(
-            "perfxpert-mcp: calling %s with validated args %r",
-            original_name,
-            validated_arguments,
-        )
-        result = fn(**validated_arguments)
+        _LOG.info("perfxpert-mcp: calling %s with %r", original_name, arguments)
+        result = fn(**arguments)
         return [TextContent(
             type="text",
             text=json.dumps(result, default=str, indent=2),

@@ -51,8 +51,11 @@ def test_bf16_variant():
 
 
 def test_unknown_kernel_type_raises():
+    # gpu_specs.yaml now exposes peak_fp16_tflops on every arch (Phase
+    # 10 Live-Roofline extension) so "fp16" is no longer an unknown
+    # kernel_type. Use a token that will stay unknown forever.
     with pytest.raises(ValueError):
-        sol.sanity_check(achieved_flops_per_sec=1e12, kernel_type="fp16", gfx_id="gfx942")
+        sol.sanity_check(achieved_flops_per_sec=1e12, kernel_type="fp42", gfx_id="gfx942")
 
 
 # -- classify_utilization --------------------------------------------------

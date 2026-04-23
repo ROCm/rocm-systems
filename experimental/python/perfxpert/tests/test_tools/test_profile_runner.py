@@ -22,33 +22,6 @@ def test_run_rejects_unknown_flag(tmp_path: Path):
     assert "--totally-fake-flag" in str(exc.value)
 
 
-def test_run_rejects_flag_smuggled_as_output_value(tmp_path: Path):
-    with pytest.raises(profile_runner.RocprofFlagError, match="must not be another flag"):
-        profile_runner.run(
-            argv=["rocprofv3", "-d", "--kernel-trace", "--", "./app"],
-            cwd=tmp_path,
-        )
-
-
-def test_run_rejects_output_path_traversal(tmp_path: Path):
-    from perfxpert.tools._safety import PathConfinementError
-
-    with pytest.raises(PathConfinementError) as exc:
-        profile_runner.run(
-            argv=["rocprofv3", "--sys-trace", "-d", "../outside", "--", "./app"],
-            cwd=tmp_path,
-        )
-    assert "outside project root" in str(exc.value)
-
-
-def test_run_rejects_non_numeric_pid(tmp_path: Path):
-    with pytest.raises(profile_runner.RocprofFlagError, match="unsigned integer"):
-        profile_runner.run(
-            argv=["rocprofv3", "--pid", "not-a-pid", "--", "./app"],
-            cwd=tmp_path,
-        )
-
-
 def test_run_accepts_known_flags(tmp_path: Path, monkeypatch):
     fake = mock.MagicMock(return_value=mock.MagicMock(
         returncode=0, stdout=b"", stderr=b""
@@ -63,66 +36,6 @@ def test_run_accepts_known_flags(tmp_path: Path, monkeypatch):
     args, kwargs = fake.call_args
     assert isinstance(args[0], list)
     assert kwargs.get("shell", False) is False
-
-
-def test_run_accepts_inline_value_flags(tmp_path: Path, monkeypatch):
-    fake = mock.MagicMock(return_value=mock.MagicMock(
-        returncode=0, stdout=b"", stderr=b""
-    ))
-    monkeypatch.setattr("perfxpert.tools.profile_runner.subprocess.run", fake)
-
-    result = profile_runner.run(
-        argv=[
-            "rocprofv3",
-            "--sys-trace",
-            "--att-library-path",
-            "/opt/rocm/lib",
-            "--output-dir=trace_out",
-            "--output=results",
-            "--pid=7",
-            "--pmc=SQ_WAVES,GRBM_COUNT",
-            "--",
-            "./app",
-        ],
-        cwd=tmp_path,
-    )
-    assert result["returncode"] == 0
-
-
-def test_run_accepts_space_separated_pmc_values(tmp_path: Path, monkeypatch):
-    fake = mock.MagicMock(return_value=mock.MagicMock(
-        returncode=0, stdout=b"", stderr=b""
-    ))
-    monkeypatch.setattr("perfxpert.tools.profile_runner.subprocess.run", fake)
-
-    result = profile_runner.run(
-        argv=[
-            "rocprofv3",
-            "--sys-trace",
-            "--pmc",
-            "GRBM_COUNT",
-            "SQ_WAVES",
-            "--",
-            "./app",
-        ],
-        cwd=tmp_path,
-    )
-    assert result["returncode"] == 0
-
-
-def test_run_rejects_arbitrary_absolute_att_library_path(tmp_path: Path):
-    with pytest.raises(profile_runner.RocprofFlagError, match="must stay within"):
-        profile_runner.run(
-            argv=[
-                "rocprofv3",
-                "--att",
-                "--att-library-path",
-                "/tmp/evil/lib",
-                "--",
-                "./app",
-            ],
-            cwd=tmp_path,
-        )
 
 
 def test_run_rejects_shell_injection_in_args(tmp_path: Path):

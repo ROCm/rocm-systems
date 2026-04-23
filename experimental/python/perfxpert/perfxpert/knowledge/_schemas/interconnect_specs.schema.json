@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "description": "Per-arch / NIC interconnect spec map keyed by gfx_id (e.g., 'gfx942') or NIC codename (e.g., 'connectx7'). Source of truth for interconnect.lookup_peaks().",
+  "patternProperties": {
+    "^(gfx[0-9a-f]+|connectx[0-9]+)$": {"$ref": "#/properties/entry"}
+  },
+  "additionalProperties": false,
+  "properties": {
+    "entry": {
+      "type": "object",
+      "required": [
+        "name",
+        "xgmi_peak_gbps",
+        "xgmi_links",
+        "xgmi_per_link_gbps",
+        "pcie_tier",
+        "pcie_peak_gbps",
+        "achievable_gbps",
+        "source_url",
+        "measured_with"
+      ],
+      "properties": {
+        "name": {"type": "string"},
+        "xgmi_peak_gbps": {"type": "number", "minimum": 0, "description": "Aggregate bidirectional XGMI bandwidth (0 for NICs or GPUs without XGMI)."},
+        "xgmi_links": {"type": "integer", "minimum": 0},
+        "xgmi_per_link_gbps": {"type": "number", "minimum": 0},
+        "pcie_tier": {"type": "string", "description": "Human-readable PCIe generation/width label, e.g. 'PCIe Gen5 x16'."},
+        "pcie_peak_gbps": {"type": "number", "minimum": 0},
+        "achievable_gbps": {"type": "number", "minimum": 0, "description": "Typical RCCL AllReduce busBW observed in practice."},
+        "source_url": {"type": "string", "format": "uri"},
+        "measured_with": {"type": "string"}
+      }
+    }
+  }
+}

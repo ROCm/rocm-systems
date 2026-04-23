@@ -39,18 +39,18 @@ Covers:
 
 import json
 import sys
+from unittest import mock
+
 import pytest
 
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-# Check if rocprof-trace-decoder is available (required for ATT tests)
-try:
-    import rocprof_trace_decoder  # noqa
-    HAS_ROCPROF_TRACE_DECODER = True
-except ImportError:
-    HAS_ROCPROF_TRACE_DECODER = False
+from perfxpert.tools._tooldep import ExternalToolMissing, check_tool_available
+
+
+HAS_ROCPROF_TRACE_DECODER = check_tool_available("rocprof-trace-decoder")[0]
 
 
 def _empty_breakdown(**overrides):
@@ -128,7 +128,6 @@ def test_analyze_module_has_all():
         "analyze_memory_copies",
         "generate_recommendations",
         "format_analysis_output",
-        "analyze_performance",
         "add_args",
         "execute",
         "main",
@@ -827,6 +826,30 @@ def test_format_json_time_breakdown_values():
     assert eb["api_overhead_pct"] == 5.0
 
 
+def test_format_json_multidb_runtime_split():
+    """JSON output keeps wall-clock runtime separate from normalized runtime."""
+    from perfxpert.analyze import _format_as_json
+
+    td = {
+        "total_runtime": 80,
+        "normalized_runtime": 160,
+        "total_kernel_time": 60,
+        "total_memcpy_time": 0,
+        "kernel_percent": 37.5,
+        "memcpy_percent": 0.0,
+        "overhead_percent": 25.0,
+    }
+    doc = json.loads(_format_as_json(td, [], {}, []))
+    eb = doc["execution_breakdown"]
+    assert eb["total_runtime_ns"] == 80
+    assert eb["normalized_runtime_ns"] == 160
+    assert eb["kernel_time_ns"] == 60
+    assert eb["kernel_time_pct"] == 37.5
+    assert eb["api_overhead_ns"] == 40
+    assert eb["idle_time_ns"] == 60
+    assert eb["idle_time_pct"] == 37.5
+
+
 def test_format_json_idle_time_calculation():
     """Idle time = total − kernel − memcpy − api_overhead, clamped to 0."""
     from perfxpert.analyze import _format_as_json
@@ -862,6 +885,46 @@ def test_format_json_idle_time_clamped_to_zero():
     }
     doc = json.loads(_format_as_json(td, [], {}, []))
     assert doc["execution_breakdown"]["idle_time_ns"] >= 0
+
+
+def test_format_output_text_shows_normalized_runtime_for_multidb():
+    from perfxpert.analyze import format_analysis_output
+
+    td = {
+        "total_runtime": 80_000_000,
+        "normalized_runtime": 160_000_000,
+        "total_kernel_time": 60_000_000,
+        "total_memcpy_time": 20_000_000,
+        "kernel_percent": 37.5,
+        "memcpy_percent": 12.5,
+        "overhead_percent": 50.0,
+    }
+
+    out = format_analysis_output(td, [], {}, [], output_format="text")
+    assert "Total Runtime:" in out
+    assert "Normalized Runtime:" in out
+    assert "% normalized" in out
+
+
+def test_format_output_markdown_shows_normalized_runtime_for_multidb():
+    from perfxpert.analyze import format_analysis_output
+
+    td = {
+        "total_runtime": 80_000_000,
+        "normalized_runtime": 160_000_000,
+        "total_kernel_time": 60_000_000,
+        "total_memcpy_time": 20_000_000,
+        "kernel_percent": 37.5,
+        "memcpy_percent": 12.5,
+        "overhead_percent": 50.0,
+    }
+
+    out = format_analysis_output(td, [], {}, [], output_format="markdown")
+    assert "Wall-clock total runtime: 80.00 ms" in out
+    assert "Normalized runtime for percentage math:" in out
+    assert "| Kernel Execution |" in out
+    assert "% normalized" in out
+    assert "| **Normalized Total** | **160.00** | **100% normalized** |" in out
 
 
 def test_format_json_hotspot_field_mapping():
@@ -1264,6 +1327,26 @@ def test_att_missing_directory():
     assert result["has_att_data"] is False
     assert "not found" in result["reason"].lower()
     assert result["kernels"] == []
+
+
+def test_att_missing_decoder_returns_graceful_no_data(monkeypatch):
+    """analyze_thread_trace returns a deterministic no-data result when decoder is missing."""
+    import tempfile
+
+    from perfxpert.analyze import analyze_thread_trace
+
+    monkeypatch.setattr(
+        "perfxpert.tools._tooldep.require_tool",
+        mock.Mock(side_effect=ExternalToolMissing("rocprof-trace-decoder", "install decoder")),
+    )
+
+    with tempfile.TemporaryDirectory() as att_dir:
+        result = analyze_thread_trace(att_dir)
+
+    assert result["has_att_data"] is False
+    assert result["kernels"] == []
+    assert "rocprof-trace-decoder" in result["reason"]
+    assert "skipped" in result["reason"].lower()
 
 
 @pytest.mark.skipif(not HAS_ROCPROF_TRACE_DECODER, reason="rocprof-trace-decoder not installed")
@@ -1711,44 +1794,6 @@ def test_init_overhead_not_emitted_when_low_occupancy_rec_exists():
     # Verify the Tier 2 rec DID fire
     occ_recs = [r for r in recs if r["category"] == "Low Occupancy"]
     assert len(occ_recs) == 1
-
-
-# ---------------------------------------------------------------------------
-# Editor validation in _apply_code_change_interactive
-# ---------------------------------------------------------------------------
-
-
-def test_editor_not_found_skips_subprocess():
-    """When shutil.which returns None for $EDITOR, subprocess.run must NOT be called."""
-    from unittest.mock import patch, MagicMock
-    from perfxpert.analyze import _apply_code_change_interactive
-
-    rec = {
-        "category": "Kernel Hotspot",
-        "issue": "Kernel is slow",
-        "suggestion": "Optimize it",
-        "actions": ["Do something"],
-        "estimated_impact": "20%",
-    }
-    colors = {"C": "", "G": "", "Y": "", "R": "", "DIM": "", "N": ""}
-
-    with (
-        patch("shutil.which", return_value=None) as mock_which,
-        patch("subprocess.run") as mock_run,
-        patch("os.environ.get", side_effect=lambda k, d="": "fake-editor" if k == "EDITOR" else d),
-        patch("builtins.input", return_value="y"),
-        patch("glob.glob", return_value=["/tmp/src/app.hip"]),
-        patch("os.path.isfile", return_value=True),
-    ):
-        _apply_code_change_interactive(
-            rec=rec,
-            source_dir="/tmp/src",
-            llm_provider=None,
-            llm_api_key=None,
-            llm_model=None,
-            colors=colors,
-        )
-    mock_run.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

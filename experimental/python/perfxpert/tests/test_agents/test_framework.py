@@ -11,8 +11,8 @@ from perfxpert.agents.framework import (
     run_agent,
 )
 
-
 # -- AgentSpec / Agent construction ----------------------------------------
+
 
 def test_agent_construction_enforces_tool_cap():
     """Spec §2: ≤ 5 tools per agent."""
@@ -71,6 +71,7 @@ def test_agent_construction_accepts_400_line_fence(tmp_path):
 
 # -- Handoff whitelist -----------------------------------------------------
 
+
 def test_handoff_rejects_layer2_to_layer2():
     """Spec §2 rule: no Layer-2 → Layer-2 handoffs."""
     with pytest.raises(AgentConstructionError, match="layer"):
@@ -89,32 +90,37 @@ def test_handoff_allows_root_to_layer1():
 
 def test_handoff_allows_layer1_to_layer2_from_recommendation():
     h = Handoff(
-        source_layer=1, target_layer=2,
-        source_name="recommendation", target_name="compute_specialist",
+        source_layer=1,
+        target_layer=2,
+        source_name="recommendation",
+        target_name="compute_specialist",
     )
     assert h.source_name == "recommendation"
 
 
 def test_handoff_rejects_upward():
     with pytest.raises(AgentConstructionError, match="downward"):
-        Handoff(source_layer=2, target_layer=1,
-                source_name="compute_specialist", target_name="recommendation")
+        Handoff(source_layer=2, target_layer=1, source_name="compute_specialist", target_name="recommendation")
 
 
 def test_handoff_rejects_skip_root_to_layer2():
     with pytest.raises(AgentConstructionError, match="skip"):
-        Handoff(source_layer=0, target_layer=2,
-                source_name="root", target_name="compute_specialist")
+        Handoff(source_layer=0, target_layer=2, source_name="root", target_name="compute_specialist")
 
 
 # -- Tool dispatch guard ---------------------------------------------------
+
 
 def test_tool_dispatch_blocks_out_of_allowlist(fake_provider):
     """Agent cannot call a tool not in its allowlist."""
     allowed = ToolBinding(name="analysis.time_breakdown", fn=lambda db: {})
     agent = Agent(
-        name="Test", layer=1, fence_path=None,
-        input_schema=dict, output_schema=dict, tools=[allowed],
+        name="Test",
+        layer=1,
+        fence_path=None,
+        input_schema=dict,
+        output_schema=dict,
+        tools=[allowed],
     )
     # Simulate SDK producing a tool call the agent isn't allowed to make
     with pytest.raises(framework.ToolAllowlistViolation):
@@ -123,6 +129,7 @@ def test_tool_dispatch_blocks_out_of_allowlist(fake_provider):
 
 # -- Airgap fallback -------------------------------------------------------
 
+
 def test_run_agent_airgap_uses_template(monkeypatch, tmp_path):
     """With PERFXPERT_AIRGAP=1, no SDK call is made; templates drive output."""
     monkeypatch.setenv("PERFXPERT_AIRGAP", "1")
@@ -130,8 +137,12 @@ def test_run_agent_airgap_uses_template(monkeypatch, tmp_path):
     fence = tmp_path / "x.md"
     fence.write_text("short fence")
     agent = Agent(
-        name="T", layer=1, fence_path=str(fence),
-        input_schema=dict, output_schema=dict, tools=[],
+        name="T",
+        layer=1,
+        fence_path=str(fence),
+        input_schema=dict,
+        output_schema=dict,
+        tools=[],
     )
 
     # If run_agent tried to call the SDK we'd get an AttributeError; with
@@ -143,13 +154,18 @@ def test_run_agent_airgap_uses_template(monkeypatch, tmp_path):
 
 # -- Provider selection pass-through --------------------------------------
 
+
 def test_run_agent_passes_provider_to_sdk(fake_provider):
     from perfxpert.agents.framework import FakeProviderResponse  # type: ignore
 
     fence = None
     agent = Agent(
-        name="P", layer=1, fence_path=fence,
-        input_schema=dict, output_schema=dict, tools=[],
+        name="P",
+        layer=1,
+        fence_path=fence,
+        input_schema=dict,
+        output_schema=dict,
+        tools=[],
     )
     fake_provider.return_value = FakeProviderResponse(text="ok", structured_output={"x": 1})
 
@@ -158,3 +174,195 @@ def test_run_agent_passes_provider_to_sdk(fake_provider):
     # Assert the facade forwarded "anthropic" to the SDK call
     called_args = fake_provider.call_args
     assert "anthropic" in str(called_args)
+
+
+# -- Finding #12: Agent layer validation and frozen enforcement ------------
+
+
+def test_agent_rejects_invalid_layer():
+    """Agent with layer=3 must raise AgentConstructionError."""
+    from perfxpert.agents.framework import AgentConstructionError
+
+    with pytest.raises(AgentConstructionError, match="layer=3"):
+        Agent(
+            name="Bad",
+            layer=3,
+            fence_path=None,
+            input_schema=dict,
+            output_schema=dict,
+        )
+
+
+def test_agent_rejects_negative_layer():
+    """Agent with layer=-1 must raise AgentConstructionError."""
+    from perfxpert.agents.framework import AgentConstructionError
+
+    with pytest.raises(AgentConstructionError, match="layer=-1"):
+        Agent(
+            name="Bad",
+            layer=-1,
+            fence_path=None,
+            input_schema=dict,
+            output_schema=dict,
+        )
+
+
+def test_agent_accepts_all_valid_layers():
+    """Layers 0, 1, 2 must all construct without error."""
+    for layer in (0, 1, 2):
+        agent = Agent(
+            name=f"Layer{layer}",
+            layer=layer,
+            fence_path=None,
+            input_schema=dict,
+            output_schema=dict,
+        )
+        assert agent.layer == layer
+
+
+def test_agent_is_frozen():
+    """Agent must be frozen — attribute assignment must raise FrozenInstanceError."""
+    import dataclasses
+
+    agent = Agent(
+        name="Frozen",
+        layer=1,
+        fence_path=None,
+        input_schema=dict,
+        output_schema=dict,
+    )
+    with pytest.raises((dataclasses.FrozenInstanceError, AttributeError)):
+        agent.name = "mutated"
+
+
+# -- _sdk_invoke live-path wiring (B1) -------------------------------------
+
+
+def test_sdk_invoke_is_not_unconditionally_stub():
+    """Regression for review blocker B1: _sdk_invoke must not raise
+    NotImplementedError for the live path. Tests that monkeypatch
+    _sdk_invoke are unaffected (they replace the symbol)."""
+    import inspect
+    from perfxpert.agents import framework
+
+    src = inspect.getsource(framework._sdk_invoke)
+    assert "NotImplementedError" not in src, (
+        "Live SDK path must not raise NotImplementedError — this gates "
+        "tests/test_integration/test_llm_end_to_end.py from ever running."
+    )
+
+
+def test_sdk_invoke_wires_openai_agents_sdk(monkeypatch):
+    """Build an Agent with a tool whose name contains a dot; assert the
+    wiring calls the SDK Runner.run_sync with a sanitized tool name and
+    the selected model, then coerces the result into FakeProviderResponse.
+    """
+    from perfxpert.agents import framework
+
+    # Stub the SDK Agent, Runner, function_tool so we don't hit the network.
+    captured = {}
+
+    class _FakeSdkAgent:
+        def __init__(self, *, name, instructions, tools, model):
+            captured["agent_name"] = name
+            captured["instructions"] = instructions
+            captured["tools"] = list(tools)
+            captured["model"] = model
+
+    class _FakeRunResult:
+        def __init__(self):
+            self.final_output = {"narrative": "hello", "recommendations": []}
+            self.new_items = []
+
+    class _FakeRunner:
+        @staticmethod
+        def run_sync(*, starting_agent, input, max_turns, run_config):
+            captured["input"] = input
+            captured["max_turns"] = max_turns
+            return _FakeRunResult()
+
+    def _fake_function_tool(fn, *, name_override, strict_mode):
+        return {"name": name_override, "fn": fn}
+
+    monkeypatch.setattr(framework, "_SDK_AVAILABLE", True)
+    monkeypatch.setattr(framework, "SdkAgent", _FakeSdkAgent)
+    monkeypatch.setattr(framework, "SdkRunner", _FakeRunner)
+    monkeypatch.setattr(framework, "SdkRunConfig", lambda: object())
+    monkeypatch.setattr(framework, "sdk_function_tool", _fake_function_tool)
+
+    from perfxpert.agents.framework import Agent, ToolBinding, _sdk_invoke, FakeProviderResponse
+
+    def _noop(**kwargs):
+        return None
+
+    agent = Agent(
+        name="T",
+        layer=1,
+        fence_path=None,
+        input_schema=dict,
+        output_schema=dict,
+        tools=[ToolBinding(name="intent.classify", fn=_noop)],
+    )
+
+    resp = _sdk_invoke(agent, {"user_query": "?"}, provider="openai")
+
+    assert isinstance(resp, FakeProviderResponse)
+    assert resp.structured_output == {"narrative": "hello", "recommendations": []}
+    # The SDK receives a sanitized tool name (dots → underscores)
+    assert captured["tools"] == [{"name": "intent_classify", "fn": _noop}]
+    # Default max_turns=10 when PERFXPERT_AGENTS_MAX_TURNS unset
+    assert captured["max_turns"] == 10
+    # Model resolved from _DEFAULT_MODELS["openai"]
+    assert captured["model"] == "gpt-4o-mini"
+
+
+def test_sdk_invoke_raises_runtime_error_when_sdk_missing(monkeypatch):
+    """When openai-agents is not installed, _sdk_invoke must raise RuntimeError
+    with an actionable message — NOT NotImplementedError."""
+    from perfxpert.agents import framework
+
+    monkeypatch.setattr(framework, "_SDK_AVAILABLE", False)
+    monkeypatch.setattr(framework, "SdkAgent", None)
+    monkeypatch.setattr(framework, "SdkRunner", None)
+    monkeypatch.setattr(framework, "SdkRunConfig", None)
+
+    from perfxpert.agents.framework import Agent, _sdk_invoke
+
+    agent = Agent(
+        name="T", layer=1, fence_path=None, input_schema=dict, output_schema=dict, tools=[]
+    )
+    with pytest.raises(RuntimeError, match="openai-agents"):
+        _sdk_invoke(agent, "x", provider="openai")
+
+
+def test_sdk_invoke_preserves_provider_taxonomy(monkeypatch):
+    """ProviderError subclasses from the live SDK path must not be flattened."""
+    from perfxpert.agents import framework
+    from perfxpert.providers._exceptions import AuthError
+
+    class _FakeSdkAgent:
+        def __init__(self, **_kwargs):
+            pass
+
+    class _FakeRunner:
+        @staticmethod
+        def run_sync(**_kwargs):
+            raise AuthError("openai", "bad key")
+
+    monkeypatch.setattr(framework, "_SDK_AVAILABLE", True)
+    monkeypatch.setattr(framework, "SdkAgent", _FakeSdkAgent)
+    monkeypatch.setattr(framework, "SdkRunner", _FakeRunner)
+    monkeypatch.setattr(framework, "SdkRunConfig", lambda: object())
+    monkeypatch.setattr(framework, "sdk_function_tool", lambda fn, **kwargs: {"fn": fn, **kwargs})
+
+    agent = Agent(
+        name="T",
+        layer=1,
+        fence_path=None,
+        input_schema=dict,
+        output_schema=dict,
+        tools=[],
+    )
+
+    with pytest.raises(AuthError):
+        framework._sdk_invoke(agent, {"user_query": "?"}, provider="openai")

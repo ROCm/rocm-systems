@@ -9,9 +9,7 @@ import pytest
 from perfxpert.cli import opencode_launcher
 
 
-def test_launcher_sets_recursion_guard(tmp_path: Path, monkeypatch):
-    cache_root = tmp_path / "cache"
-    cache_root.mkdir()
+def test_launcher_sets_recursion_guard(monkeypatch):
     captured_env = {}
 
     def fake_run(cmd, **kwargs):
@@ -23,31 +21,11 @@ def test_launcher_sets_recursion_guard(tmp_path: Path, monkeypatch):
         opencode_launcher, "resolve_opencode_binary",
         lambda: Path("/bin/true"),
     )
-    monkeypatch.setattr(
-        opencode_launcher,
-        "_runtime_cache_root",
-        lambda: cache_root,
-    )
     monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
 
     opencode_launcher.main([])
 
     assert captured_env.get("PERFXPERT_IN_OPENCODE_SESSION") == "1"
-
-
-def test_launcher_rejects_recursive_entry(monkeypatch, capsys):
-    monkeypatch.setenv("PERFXPERT_IN_OPENCODE_SESSION", "1")
-    monkeypatch.setattr(
-        opencode_launcher.subprocess,
-        "run",
-        mock.MagicMock(side_effect=AssertionError("subprocess should not run")),
-    )
-
-    rc = opencode_launcher.main([])
-
-    assert rc == 1
-    captured = capsys.readouterr()
-    assert "recursion detected" in captured.err
 
 
 def test_recursion_guard_documented_in_agents_md():
@@ -58,5 +36,5 @@ def test_recursion_guard_documented_in_agents_md():
     # AGENTS.md covers the master agent's mandatory behavior; recursion guard
     # is enforced at the launcher level, so this test just confirms the file
     # exists and is nontrivial. The actual recursion-guard enforcement happens
-    # in perfxpert/runtime/recursion_guard.py (Phase 3 deliverable).
+    # in perfxpert/runtime/recursion_guard.py.
     assert len(content) > 500

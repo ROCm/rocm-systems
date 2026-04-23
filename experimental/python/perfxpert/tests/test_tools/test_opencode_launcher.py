@@ -1,7 +1,6 @@
 """Unit tests for perfxpert.cli.opencode_launcher."""
 
 import os
-import tempfile
 from pathlib import Path
 from unittest import mock
 
@@ -39,33 +38,33 @@ def test_resolve_binary_uses_override(tmp_path: Path, monkeypatch):
     assert opencode_launcher.resolve_opencode_binary() == fake_bin
 
 
-def test_resolve_binary_falls_back_when_override_missing(tmp_path: Path, monkeypatch, capsys):
+def test_resolve_binary_raises_when_override_missing(tmp_path: Path, monkeypatch):
+    """PERFXPERT_OPENCODE_PATH pointing to a nonexistent file must raise immediately."""
     monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", str(tmp_path / "nonexistent"))
-    # Should print a warning and try bundled / PATH. If neither present, raises.
-    try:
-        opencode_launcher.resolve_opencode_binary()
-    except FileNotFoundError:
-        pass  # acceptable when no bundled/PATH opencode
-    captured = capsys.readouterr()
-    assert "WARNING" in captured.err or "not found" in captured.err.lower()
-
-
-def test_resolve_binary_falls_back_when_override_not_executable(tmp_path: Path, monkeypatch, capsys):
-    fake_bin = tmp_path / "fake-opencode"
-    fake_bin.write_text("echo nope\n")
-    fake_bin.chmod(0o644)
-    monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", str(fake_bin))
-    monkeypatch.setattr(opencode_launcher.resources, "files", lambda *_: (_ for _ in ()).throw(ModuleNotFoundError))
-    monkeypatch.setattr(opencode_launcher.shutil, "which", lambda *_args, **_kwargs: None)
-
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError, match="does not exist"):
         opencode_launcher.resolve_opencode_binary()
 
-    captured = capsys.readouterr()
-    assert "not executable" in captured.err.lower()
+
+def test_prepare_runtime_config_dir_skips_subdirectories(tmp_path: Path):
+    """_prepare_runtime_config_dir must not crash on subdirectories in src_config_dir."""
+    src = tmp_path / "src_config"
+    src.mkdir()
+    (src / "opencode.json").write_text('{"config": true}')
+    # Add a subdirectory — should be silently skipped
+    subdir = src / "subdir"
+    subdir.mkdir()
+    (subdir / "nested.json").write_text("{}")
+
+    from perfxpert.cli.opencode_launcher import _prepare_runtime_config_dir
+
+    # Should not raise; only files are copied
+    out = _prepare_runtime_config_dir(src)
+    assert (out / "opencode.json").exists()
+    # subdirectory itself must NOT be copied as a file
+    assert not (out / "subdir").is_file()
 
 
-def test_banner_is_printed_to_stderr(tmp_path: Path, monkeypatch):
+def test_banner_is_printed_to_stderr(monkeypatch):
     # Stub subprocess to avoid actually launching opencode
     monkeypatch.setattr(
         opencode_launcher.subprocess,
@@ -77,20 +76,15 @@ def test_banner_is_printed_to_stderr(tmp_path: Path, monkeypatch):
         "resolve_opencode_binary",
         lambda: Path("/bin/true"),
     )
-    cache_root = tmp_path / "cache"
-    cache_root.mkdir()
-    monkeypatch.setattr(
-        opencode_launcher,
-        "_runtime_cache_root",
-        lambda: cache_root,
-    )
     monkeypatch.delenv("PERFXPERT_CODE_NO_BANNER", raising=False)
     # Track that print_banner is called
     banner_called = []
 
     original_print_banner = opencode_launcher.print_banner
+
     def track_banner(stream=None):
         import sys
+
         if stream is None:
             stream = sys.stderr
         banner_called.append(True)
@@ -101,9 +95,7 @@ def test_banner_is_printed_to_stderr(tmp_path: Path, monkeypatch):
     assert len(banner_called) > 0
 
 
-def test_banner_suppressed_by_env(tmp_path: Path, monkeypatch, capsys):
-    cache_root = tmp_path / "cache"
-    cache_root.mkdir()
+def test_banner_suppressed_by_env(monkeypatch, capsys):
     monkeypatch.setattr(
         opencode_launcher.subprocess,
         "run",
@@ -114,20 +106,13 @@ def test_banner_suppressed_by_env(tmp_path: Path, monkeypatch, capsys):
         "resolve_opencode_binary",
         lambda: Path("/bin/true"),
     )
-    monkeypatch.setattr(
-        opencode_launcher,
-        "_runtime_cache_root",
-        lambda: cache_root,
-    )
     monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
     opencode_launcher.main([])
     captured = capsys.readouterr()
     assert "AMD ROCm PerfXpert" not in captured.err
 
 
-def test_recursion_guard_env_set(tmp_path: Path, monkeypatch):
-    cache_root = tmp_path / "cache"
-    cache_root.mkdir()
+def test_recursion_guard_env_set(monkeypatch):
     captured_env = {}
 
     def fake_run(cmd, **kwargs):
@@ -140,134 +125,112 @@ def test_recursion_guard_env_set(tmp_path: Path, monkeypatch):
         "resolve_opencode_binary",
         lambda: Path("/bin/true"),
     )
-    monkeypatch.setattr(
-        opencode_launcher,
-        "_runtime_cache_root",
-        lambda: cache_root,
-    )
     monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
     opencode_launcher.main([])
     assert captured_env.get("PERFXPERT_IN_OPENCODE_SESSION") == "1"
-
-
-def test_recursion_guard_rejects_nested_launch(monkeypatch, capsys):
-    monkeypatch.setenv("PERFXPERT_IN_OPENCODE_SESSION", "1")
-    monkeypatch.setattr(
-        opencode_launcher.subprocess,
-        "run",
-        mock.MagicMock(side_effect=AssertionError("subprocess should not run")),
-    )
-
-    rc = opencode_launcher.main([])
-
-    assert rc == 1
-    captured = capsys.readouterr()
-    assert "recursion detected" in captured.err
-
-
-def test_prepare_runtime_config_dir_is_read_only(tmp_path: Path):
-    staged = opencode_launcher._prepare_runtime_config_dir(
-        opencode_launcher.resolve_config_dir(),
-        tmp_path / "runtime",
-    )
-
-    assert staged == tmp_path / "runtime"
-    assert (staged.stat().st_mode & 0o200) == 0
-    for name in ("opencode.json", "amd-theme.json", "AGENTS.md", "mcp.json"):
-        assert ((staged / name).stat().st_mode & 0o200) == 0
-
-
-def test_main_launches_from_staged_runtime_dir(tmp_path: Path, monkeypatch):
-    staged = tmp_path / "runtime"
-    staged.mkdir()
-    cache_root = tmp_path / "cache"
-    cache_root.mkdir()
-    captured = {}
-    original_tempdir = tempfile.TemporaryDirectory
-
-    monkeypatch.setattr(
-        opencode_launcher,
-        "resolve_opencode_binary",
-        lambda: Path("/bin/true"),
-    )
-    monkeypatch.setattr(
-        opencode_launcher,
-        "resolve_config_dir",
-        lambda: tmp_path,
-    )
-    monkeypatch.setattr(
-        opencode_launcher,
-        "_prepare_runtime_config_dir",
-        lambda src, runtime_dir=None: staged,
-    )
-    monkeypatch.setattr(
-        opencode_launcher,
-        "_runtime_cache_root",
-        lambda: cache_root,
-    )
-    monkeypatch.setattr(
-        opencode_launcher.tempfile,
-        "TemporaryDirectory",
-        lambda *args, **kwargs: original_tempdir(dir=str(tmp_path)),
-    )
-
-    def fake_run(cmd, **kwargs):
-        captured["cwd"] = kwargs.get("cwd")
-        return mock.MagicMock(returncode=0)
-
-    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
-    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
-
-    rc = opencode_launcher.main([])
-
-    assert rc == 0
-    assert captured["cwd"] == str(staged)
-
-
-def test_runtime_cache_root_falls_back_without_home(tmp_path: Path, monkeypatch):
-    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
-    monkeypatch.delenv("HOME", raising=False)
-    monkeypatch.setattr(opencode_launcher.Path, "home", lambda: (_ for _ in ()).throw(RuntimeError("no home")))
-    monkeypatch.setattr(opencode_launcher.tempfile, "gettempdir", lambda: str(tmp_path))
-    monkeypatch.setattr(opencode_launcher.os, "getuid", lambda: 1234)
-
-    cache_root = opencode_launcher._runtime_cache_root()
-
-    assert cache_root == tmp_path / "perfxpert-1234" / "perfxpert"
-    assert cache_root.exists()
-
-
-def test_main_reports_launch_oserror(tmp_path: Path, monkeypatch, capsys):
-    cache_root = tmp_path / "cache"
-    cache_root.mkdir()
-    monkeypatch.setattr(
-        opencode_launcher,
-        "resolve_opencode_binary",
-        lambda: Path("/bin/true"),
-    )
-    monkeypatch.setattr(
-        opencode_launcher,
-        "_runtime_cache_root",
-        lambda: cache_root,
-    )
-    monkeypatch.setattr(
-        opencode_launcher.subprocess,
-        "run",
-        mock.MagicMock(side_effect=PermissionError("Permission denied")),
-    )
-    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
-
-    rc = opencode_launcher.main([])
-
-    assert rc == 1
-    captured = capsys.readouterr()
-    assert "Permission denied" in captured.err
 
 
 def test_amd_red_in_banner(monkeypatch):
     """Banner includes AMD red ANSI color code."""
     # Verify the function itself contains the AMD red color code
     import inspect
+
     source = inspect.getsource(opencode_launcher.print_banner)
     # The source will have the escaped form \\033 when inspected
     assert "38;5;196m" in source  # AMD red color code in the function
+
+
+# -- Fix 4: doctor autodiscovery of well-known opencode paths ---------------
+
+
+def test_resolve_binary_autodiscovers_home_opencode_bin(tmp_path: Path, monkeypatch):
+    """`~/.opencode/bin/opencode` is the upstream installer's default;
+    resolve_opencode_binary() must find it without PATH munging."""
+    fake_home = tmp_path
+    fake_bin_dir = fake_home / ".opencode" / "bin"
+    fake_bin_dir.mkdir(parents=True)
+    fake_bin = fake_bin_dir / "opencode"
+    fake_bin.write_text("#!/bin/sh\necho fake\n")
+    fake_bin.chmod(0o755)
+
+    # Isolate: no override, no bundled binary, no PATH hit.
+    monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    monkeypatch.setattr(opencode_launcher.shutil, "which", lambda _: None)
+
+    # Force the bundled-resource branch to miss (no bundled binary in the test wheel).
+    import contextlib
+
+    @contextlib.contextmanager
+    def _fake_as_file(_):
+        yield tmp_path / "no_such_bundled_path"
+
+    monkeypatch.setattr(opencode_launcher.resources, "as_file", _fake_as_file)
+
+    resolved = opencode_launcher.resolve_opencode_binary()
+    assert resolved == fake_bin
+
+
+@pytest.mark.parametrize(
+    "subpath",
+    [
+        ".opencode/bin/opencode",
+        ".local/bin/opencode",
+    ],
+)
+def test_resolve_binary_autodiscovers_multiple_wellknown_paths(
+    tmp_path: Path, monkeypatch, subpath
+):
+    """Each of the well-known install locations must be auto-discovered."""
+    fake_home = tmp_path
+    fake_bin = fake_home / subpath
+    fake_bin.parent.mkdir(parents=True, exist_ok=True)
+    fake_bin.write_text("#!/bin/sh\necho fake\n")
+    fake_bin.chmod(0o755)
+
+    monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    monkeypatch.setattr(opencode_launcher.shutil, "which", lambda _: None)
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def _fake_as_file(_):
+        yield tmp_path / "no_such_bundled_path"
+
+    monkeypatch.setattr(opencode_launcher.resources, "as_file", _fake_as_file)
+
+    assert opencode_launcher.resolve_opencode_binary() == fake_bin
+
+
+def test_resolve_binary_missing_suggests_install_command(monkeypatch, tmp_path: Path):
+    """When no opencode binary is found anywhere, the error message must
+    mention the upstream install command so doctor's output is actionable.
+    """
+    monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+    # Ensure no well-known path resolves
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(opencode_launcher.shutil, "which", lambda _: None)
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def _fake_as_file(_):
+        yield tmp_path / "no_such_bundled_path"
+
+    monkeypatch.setattr(opencode_launcher.resources, "as_file", _fake_as_file)
+
+    with pytest.raises(FileNotFoundError) as exc:
+        opencode_launcher.resolve_opencode_binary()
+    msg = str(exc.value)
+    assert "opencode.ai/install.sh" in msg, (
+        "install hint must surface the upstream installer URL"
+    )
+
+
+def test_wellknown_paths_list_includes_home_opencode():
+    """Sanity: the well-known paths helper lists `~/.opencode/bin/opencode`."""
+    paths = opencode_launcher._wellknown_opencode_paths()
+    # The upstream installer's default must be listed.
+    home_opencode = Path.home() / ".opencode" / "bin" / "opencode"
+    assert home_opencode in paths

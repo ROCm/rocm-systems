@@ -71,12 +71,58 @@ def _run_compile_gate(patch_file: str, flags: List[str]) -> Dict[str, Any]:
     return compile_tool.build(patch_file, flags)
 
 
-def _run_sol_gate(claimed_speedup: float, gfx_id: str) -> Dict[str, Any]:
-    """Delegate to tools.sol.sanity_check."""
+def _run_sol_gate(
+    claimed_speedup: float,
+    gfx_id: str,
+    achieved_flops_per_sec: Optional[float] = None,
+    kernel_type: str = "fp64",
+) -> Dict[str, Any]:
+    """Delegate to tools.sol.sanity_check.
+
+    Two-tier check:
+    1. Hard cap: reject any claimed_speedup > SOL_MAX_REASONABLE_SPEEDUP (50×).
+       This is architecture-independent and catches gross reward-hacking even when
+       absolute FLOPS are unavailable.
+    2. Absolute-FLOPS check (when achieved_flops_per_sec is provided): delegate to
+       sol.sanity_check which compares against per-architecture hardware peak.
+
+    Returns dict with "ok" key: True = plausible, False = reject.
+    """
     from perfxpert.tools import sol
-    r = sol.sanity_check(claimed_speedup=claimed_speedup, gfx_id=gfx_id)
-    r["ok"] = r.get("verdict") == "sane"
-    return r
+
+    # Tier 1: hard cap on speedup ratio (architecture-independent fast path)
+    if claimed_speedup > SOL_MAX_REASONABLE_SPEEDUP:
+        return {
+            "ok": False,
+            "plausible": False,
+            "peak_ratio": claimed_speedup,
+            "reason": (
+                f"Claimed speedup {claimed_speedup}× exceeds maximum plausible ratio "
+                f"{SOL_MAX_REASONABLE_SPEEDUP}× — likely sandbox exploit"
+            ),
+            "sol_peak": None,
+        }
+
+    # Tier 2: absolute FLOPS check when caller supplies measured throughput
+    if achieved_flops_per_sec is not None:
+        r = sol.sanity_check(
+            achieved_flops_per_sec=achieved_flops_per_sec,
+            kernel_type=kernel_type,
+            gfx_id=gfx_id,
+        )
+        # sol.sanity_check returns {"plausible": bool, "reason": str, "sol_peak": float}
+        r["ok"] = r["plausible"]
+        r["peak_ratio"] = claimed_speedup
+        return r
+
+    # No absolute FLOPS available; tier-1 passed, so accept
+    return {
+        "ok": True,
+        "plausible": True,
+        "peak_ratio": claimed_speedup,
+        "reason": f"Claimed speedup {claimed_speedup}× is within {SOL_MAX_REASONABLE_SPEEDUP}× cap",
+        "sol_peak": None,
+    }
 
 
 def _run_bitwise_gate(baseline_db: str, candidate_db: str) -> Dict[str, Any]:
@@ -106,6 +152,8 @@ def evaluate(
     claimed_speedup: float,
     compile_flags: Optional[List[str]] = None,
     candidate_binary: Optional[str] = None,
+    achieved_flops_per_sec: Optional[float] = None,
+    kernel_type: str = "fp64",
 ) -> GateVerdict:
     """Run the 5-gate cascade and return a structured verdict.
 
@@ -127,7 +175,11 @@ def evaluate(
         )
 
     # Gate 2: SOL sanity (anti-Sakana)
-    r = _run_sol_gate(claimed_speedup, gfx_id)
+    r = _run_sol_gate(
+        claimed_speedup, gfx_id,
+        achieved_flops_per_sec=achieved_flops_per_sec,
+        kernel_type=kernel_type,
+    )
     if not r.get("ok", False):
         return GateVerdict(
             status="reject", failing_gate="sol",
@@ -147,19 +199,33 @@ def evaluate(
         )
 
     # Gate 4: Regression (with hot-kernel + weighted-geomean)
+    #
+    # regression.compare_runs returns:
+    #   "per_kernel_deltas" (not "hot_kernels") — list of
+    #       {"kernel": str, "delta_pct": float, "was_hot": bool}
+    # where delta_pct is a FRACTION (e.g. 0.15 = 15%), NOT a percentage.
+    # HOT_KERNEL_INDIVIDUAL_THRESHOLD_PCT (10.0) is expressed as percent, so
+    # we must divide by 100 before comparing.
+    # Similarly, total_delta_pct and weighted_geomean_delta_pct from
+    # regression.compare_runs are fractions; REGRESSION_NOISE_THRESHOLD_PCT
+    # (3.0) and TAIL_GEOMEAN_THRESHOLD_PCT (5.0) are percent — divide by 100.
     r = _run_regression_gate(baseline_db, candidate_db)
-    total_delta = r.get("total_delta_pct", 0.0)
-    tail_delta = r.get("weighted_geomean_delta_pct", 0.0)
-    hot_failures = [k for k in r.get("hot_kernels", [])
-                    if k.get("delta_pct", 0.0) > HOT_KERNEL_INDIVIDUAL_THRESHOLD_PCT]
-    if (total_delta > REGRESSION_NOISE_THRESHOLD_PCT
-            or tail_delta > TAIL_GEOMEAN_THRESHOLD_PCT
+    total_delta = r.get("total_delta_pct", 0.0)          # fraction, e.g. 0.15
+    tail_delta = r.get("weighted_geomean_delta_pct", 0.0)  # fraction
+    # Only flag kernels that are hot AND regressed beyond the threshold
+    hot_failures = [
+        k for k in r.get("per_kernel_deltas", [])
+        if k.get("was_hot", False)
+        and k.get("delta_pct", 0.0) > HOT_KERNEL_INDIVIDUAL_THRESHOLD_PCT / 100.0
+    ]
+    if (total_delta > REGRESSION_NOISE_THRESHOLD_PCT / 100.0
+            or tail_delta > TAIL_GEOMEAN_THRESHOLD_PCT / 100.0
             or hot_failures):
         detail_parts = []
-        if total_delta > REGRESSION_NOISE_THRESHOLD_PCT:
-            detail_parts.append(f"total +{total_delta:.1f}%")
-        if tail_delta > TAIL_GEOMEAN_THRESHOLD_PCT:
-            detail_parts.append(f"weighted-geomean +{tail_delta:.1f}% (tail)")
+        if total_delta > REGRESSION_NOISE_THRESHOLD_PCT / 100.0:
+            detail_parts.append(f"total +{total_delta * 100:.1f}%")
+        if tail_delta > TAIL_GEOMEAN_THRESHOLD_PCT / 100.0:
+            detail_parts.append(f"weighted-geomean +{tail_delta * 100:.1f}% (tail)")
         if hot_failures:
             detail_parts.append(f"{len(hot_failures)} hot kernel(s) regressed >10%")
         return GateVerdict(
@@ -168,25 +234,35 @@ def evaluate(
             metrics={"regression": r},
             rejected_patch_sha=patch_sha,
             delta_pct=total_delta,
-            per_kernel_deltas=r.get("hot_kernels", []),
+            per_kernel_deltas=r.get("per_kernel_deltas", []),
         )
 
-    # Gate 5: Test anchors
-    if candidate_binary is not None:
+    # Gate 5: Test anchors (optional — only runs when candidate_binary is provided)
+    gate5_ran = candidate_binary is not None
+    if gate5_ran:
         r = _run_anchors_gate(candidate_binary)
         if not r.get("ok", False):
             return GateVerdict(
                 status="reject", failing_gate="anchors",
                 detail=f"anchor tests failed: {r.get('failed', [])}",
-                metrics={"anchors": r},
+                metrics={"anchors": r, "gates_run": 5},
                 rejected_patch_sha=patch_sha,
             )
 
-    # All gates passed
+    # Build accurate pass verdict — distinguish between 4-gate and 5-gate runs
+    gates_run = 5 if gate5_ran else 4
+    if gate5_ran:
+        detail = "all 5 gates passed"
+    else:
+        detail = (
+            "4 gates passed; Gate 5 (anchors) skipped"
+            " — no candidate_binary provided"
+        )
+
     return GateVerdict(
         status="pass", failing_gate=None,
-        detail="all 5 gates passed",
-        metrics={"claimed_speedup": claimed_speedup},
+        detail=detail,
+        metrics={"claimed_speedup": claimed_speedup, "gates_run": gates_run},
         delta_pct=total_delta,
     )
 
@@ -245,9 +321,9 @@ class GateInput:
 def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> GateVerdict:
     """Run the gate cascade with synthetic test inputs.
 
-    Used exclusively by red-team attack tests (Phase 5) to inject malicious
-    data at each gate boundary. Mocks the execution tools to test gate logic
-    in isolation.
+    Used exclusively by red-team attack tests to inject malicious data at
+    each gate boundary. Mocks the execution tools to test gate logic in
+    isolation.
 
     Args:
         gate_input: GateInput dataclass with test vectors
