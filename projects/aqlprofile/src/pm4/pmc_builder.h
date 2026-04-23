@@ -66,25 +66,37 @@ class PrecExecBuilder {
  public:
   PrecExecBuilder(Builder& _builder, CmdBuffer* cmd_buffer, uint32_t target_xcc, bool is_mi300)
       : cmd_buffer_(cmd_buffer), builder{_builder}, is_mi300_(is_mi300), target_xcc_(target_xcc) {
-    if (is_mi300_) {
-      // PRED_EXEC aplies to MI300 only
-      pos_ = cmd_buffer->DwSize();
-      builder.BuildPredExecPacket(cmd_buffer, target_xcc_, 0);
-      initial_buff_size_ = cmd_buffer->DwSize();
-    }
+    if (is_mi300_) Init();
   }
 
   ~PrecExecBuilder() {
-    if (is_mi300_) {
-      // PRED_EXEC aplies to MI300 only
-      CmdBuffer pred_exec;
-      // update first PRED_EXEC packet to its correct value
-      builder.BuildPredExecPacket(&pred_exec, target_xcc_,
-                                  cmd_buffer_->DwSize() - initial_buff_size_);
-      const uint32_t* data = (const uint32_t*)pred_exec.Data();
+    if (is_mi300_) Fini();
+  }
 
-      for (size_t i = 0; i < pred_exec.DwSize(); ++i) cmd_buffer_->Assign(pos_ + i, data[i]);
-    }
+ private:
+  void Init() {
+    auto pred_exec_flush = [](void* userdata) {
+      auto this_ = reinterpret_cast<PrecExecBuilder*>(userdata);
+      this_->Fini();
+      this_->Init();
+    };
+
+    pos_ = cmd_buffer_->DwSize();
+    builder.BuildPredExecPacket(cmd_buffer_, target_xcc_, 0);
+    initial_buff_size_ = cmd_buffer_->DwSize();
+
+    cmd_buffer_->RegisterPredExecFlush(pred_exec_flush, initial_buff_size_ + pred_exec_max_size,
+                                       this);
+  }
+
+  void Fini() {
+    CmdBuffer pred_exec;
+    // update PRED_EXEC packet to its correct value
+    builder.BuildPredExecPacket(&pred_exec, target_xcc_,
+                                cmd_buffer_->DwSize() - initial_buff_size_);
+    const uint32_t* data = (const uint32_t*)pred_exec.Data();
+    for (size_t i = 0; i < pred_exec.DwSize(); ++i) cmd_buffer_->Assign(pos_ + i, data[i]);
+    cmd_buffer_->RegisterPredExecFlush();
   }
 
  private:
@@ -94,6 +106,7 @@ class PrecExecBuilder {
   uint32_t target_xcc_{0};
   int pos_{0};
   int initial_buff_size_{0};
+  const int pred_exec_max_size{0x3FFF};
 };
 
 // PMC PM4 commands builder virtual interface
