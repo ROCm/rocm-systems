@@ -1274,8 +1274,10 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     int cpuVendor;
     int localRanks;
     int nc;
+    int romeTopoModelIdx;
     bool pivotA2AEnabled;
     bool ll128Enabled;
+    char hostname[128];
   };
 
   int nChannelsOrig;
@@ -1634,6 +1636,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   allGather3Data[rank].cpuArch = comm->cpuArch;
   allGather3Data[rank].cpuVendor = comm->cpuVendor;
+  allGather3Data[rank].romeTopoModelIdx = comm->topo->romeTopoModelIdx;
+  (void) getHostName(allGather3Data[rank].hostname, sizeof(allGather3Data[rank].hostname), '\0');
 
   comm->nChannels = std::min(treeGraph->nChannels, ringGraph->nChannels);
 
@@ -1644,6 +1648,53 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(ncclTopoPreset(comm, graphs, &allGather3Data[rank].topoRanks), ret, fail);
 
   NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, allGather3Data, sizeof(*allGather3Data)), ret, fail);
+
+  {
+    // Plurality vote for romeTopoModelIdx. Tie on vote count: prefer the value that
+    // first appears on the lowest MPI rank (outer index c is that first rank).
+    int refIdx = allGather3Data[0].romeTopoModelIdx;
+    int refVotes = -1;
+    int refFirstRank = nranks;
+    for (int c = 0; c < nranks; c++) {
+      int cand = allGather3Data[c].romeTopoModelIdx;
+      bool seenEarlier = false;
+      for (int d = 0; d < c; d++) {
+        if (allGather3Data[d].romeTopoModelIdx == cand) { seenEarlier = true; break; }
+      }
+      if (seenEarlier) continue;
+      int cnt = 0;
+      for (int r = 0; r < nranks; r++) {
+        if (allGather3Data[r].romeTopoModelIdx == cand) cnt++;
+      }
+      if (cnt > refVotes || (cnt == refVotes && c < refFirstRank)) {
+        refVotes = cnt;
+        refIdx = cand;
+        refFirstRank = c;
+      }
+    }
+    int nDisagree = 0;
+    for (int r = 0; r < nranks; r++) {
+      if (allGather3Data[r].romeTopoModelIdx != refIdx) nDisagree++;
+    }
+    if (nDisagree > 0) {
+      WARN("RCCL FATAL: mismatched Rome preset topology model index across ranks; all ranks must agree for precomputed graphs (voted refIdx %d from %d of %d ranks).", refIdx, refVotes, nranks);
+      for (int r = 0; r < nranks; r++) {
+        if (allGather3Data[r].romeTopoModelIdx == refIdx) continue;
+        bool lowestMismatchOnHost = true;
+        for (int r2 = 0; r2 < r; r2++) {
+          if (allGather3Data[r2].romeTopoModelIdx == refIdx) continue;
+          if (comm->peerInfo[r2].hostHash == comm->peerInfo[r].hostHash) {
+            lowestMismatchOnHost = false;
+            break;
+          }
+        }
+        if (!lowestMismatchOnHost) continue;
+        WARN("  rank %d host %s romeTopoModelIdx=%d", r, allGather3Data[r].hostname, allGather3Data[r].romeTopoModelIdx);
+      }
+      ret = ncclInvalidUsage;
+      goto fail;
+    }
+  }
 
   // Determine nNodes, firstRanks, ...
   NCCLCHECKGOTO(ncclCalloc(&nodesFirstRank, nranks), ret, fail);
