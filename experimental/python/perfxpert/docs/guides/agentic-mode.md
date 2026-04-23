@@ -40,7 +40,7 @@ Behavior:
   is skipped entirely.
 - `RootOutput.recommendations` is currently empty in the root air-gap
   path. Deterministic mode still classifies the bottleneck and returns
-  the terse template narrative, but it does not populate structured
+  the terse template narrative, but it does not yet populate structured
   recommendation dicts until an LLM-backed path is used.
 - `primary_bottleneck` is still set (classifier runs deterministically
   against the knowledge YAMLs).
@@ -56,6 +56,11 @@ Use air-gap mode for:
   bottleneck classification
 
 ## LLM-enabled mode
+
+![progress spinner](assets/gifs/10-progress-spinner.gif)
+
+*Live agent-phase progress UI captured under `PERFXPERT_AIRGAP=1` for
+deterministic rendering of the analysis flow.*
 
 Pick a provider explicitly:
 
@@ -101,6 +106,12 @@ Behavior differences vs air-gap:
 
 ## Provider ladder
 
+![all providers](assets/gifs/15-all-providers.gif)
+
+*The five supported provider choices come directly from the CLI's
+`--llm` registry: `anthropic`, `openai`, `ollama`, `private`,
+`opencode`.*
+
 `PROVIDER_REGISTRY` is defined in `perfxpert/agents/runtime.py` (with a
 hard-coded fallback there; `build_session` imports the richer copy
 from `perfxpert.providers` when the optional provider package is
@@ -133,11 +144,20 @@ export PERFXPERT_LLM_FALLBACK_CHAIN="anthropic,openai,private"
 perfxpert analyze -i trace.db --llm anthropic
 ```
 
-When set, `build_session(provider="anthropic", ...)` wraps the primary
-provider in a `FallbackProvider` that cascades down the chain on typed
-error classes (`RateLimitError`, `AuthError`, `TimeoutError`). The
-`recursion_guard` still applies to each candidate — `opencode` cannot
-be chosen from inside an already-running opencode session.
+When set, `build_session(provider="anthropic", ...)` keeps the
+configured provider selection but still surfaces typed provider errors
+from `perfxpert/providers/_exceptions.py`. The concrete exception
+surface in this tree is:
+
+| Exception | Meaning |
+|-----------|---------|
+| `RateLimitError` | HTTP 429 / short-term throttle |
+| `TimeoutError` | Per-call timeout budget exceeded |
+| `AuthError` | Bad API key / missing credential |
+| `ProviderError` | Generic provider failure when no narrower typed subclass applies |
+
+The `recursion_guard` still applies to each candidate — `opencode`
+cannot be chosen from inside an already-running opencode session.
 
 Unset or empty: no fallback. A typed error surfaces to the caller
 unchanged.

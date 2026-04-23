@@ -43,8 +43,8 @@ whichever backend the user chose, then exec the native binary — the
 perfxpert tool discipline travels with the install, not the TUI.
 
 The bundled opencode remains the recommended default: it ships
-pre-patched (the 17 AMD patches + STRICT-TOOL-DISCIPLINE stanza), so
-no user-side install is required for the tool-priority gate to work.
+pre-patched with the STRICT-TOOL-DISCIPLINE stanza, so no user-side
+install is required for the tool-priority gate to work.
 
 ## Backend comparison
 
@@ -64,6 +64,11 @@ directory is silent. Changing the file set (e.g. adding
 
 ### Default: bundled opencode
 
+![perfxpert-code](assets/gifs/14-perfxpert-code.gif)
+
+*`perfxpert-code` from the bundled AMD-branded launcher, with the
+interactive TUI and MCP wiring ready to go.*
+
 No subcommand, no extra install. The bundled opencode ships with AMD
 branding + the STRICT-TOOL-DISCIPLINE stanza + AMD red palette pre-applied;
 the launcher spawns the bundled binary with `perfxpert-mcp`
@@ -80,6 +85,8 @@ Registers perfxpert in the project `.mcp.json`, stages the rendered
 prompt at `.perfxpert/AGENTS.md`, writes a pointer at
 `CLAUDE.local.md` (at the project root), and installs the native
 `PreToolUse` hook inside `.claude/settings.json`.
+
+*Animated Claude Code launch capture coming soon.*
 
 ```bash
 # SKIP-SAMPLE — requires claude CLI ≥ 2.1.59 on PATH
@@ -108,6 +115,8 @@ perfxpert under `mcpServers`. The adapter **never** touches the
 user's `GEMINI.md` — list-append in `context.fileName` is the
 supported extension point.
 
+*Animated Gemini launch capture coming soon.*
+
 ```bash
 # SKIP-SAMPLE — requires gemini CLI ≥ 0.2.0 on PATH
 perfxpert-code gemini
@@ -122,12 +131,14 @@ trusted via the `[projects."<abs-cwd>"]` TOML table (required — Codex
 refuses to run agents in untrusted projects). Writes preserve
 comments + key ordering via lazy-imported `tomlkit`.
 
+*Animated Codex CLI launch capture coming soon.*
+
 ```bash
 # SKIP-SAMPLE — requires codex CLI ≥ 0.7.0 on PATH
 perfxpert-code codex
 
 # Equivalent explicit form (showing the MCP registration step Codex does natively):
-codex mcp add perfxpert perfxpert-mcp
+codex mcp add perfxpert -- perfxpert-mcp
 ```
 
 #### Trust gate
