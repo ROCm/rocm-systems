@@ -8,6 +8,131 @@ Append-only. Newest on top.
 
 ---
 
+## 2026-04-23 — global_atomic SADDR form silently miscompiled (sum_bitmatrix_rows_u32)
+
+`sum_bitmatrix_rows_u32` and its `_nw4` sibling crashed every launch
+with `HIP error 700 (illegal memory access)` despite `raise_cli`
+reporting `OK 178/178` — a textbook "lift succeeds, device explodes"
+shape that the recipe-level native-vs-salmon comparison caught but
+the single-primitive canaries did not.  Root-caused to a SADDR-form
+blind spot in the `GLOBAL_ATOMIC_*` handler in `handle_flat.cpp`.
+
+**The instruction:**
+
+    global_atomic_add_u32 v1, v0, s[4:5] scale_offset scope:SCOPE_DEV
+
+This is the gfx12+ SADDR form — vaddr(VGPR32) + vdata(VGPR32) +
+saddr(SGPR64), semantically identical to `global_store` SADDR:
+uniform SGPR64 base + per-lane VGPR32 offset, optionally scaled
+by element size.  Triton's `tl.atomic_add(Out + offs_n, ...)`
+codegen for gfx1250 lands exactly here.
+
+**What salmon emitted BEFORE the fix:**
+
+    global_atomic_add v[2:3], v0, off offset:2064 sc1
+
+Two compounding bugs, both inherited from a pre-gfx12 operand-shape
+assumption in the atomic block:
+
+  1. `ParsedReg addrReg = op.srcReg(0); Value *addr = readReg64(addrReg);`
+     hard-coded the plain-form shape.  On SADDR, `srcReg(0)` is the
+     VGPR32 vaddr offset (`v1`), not a 64-bit address; reading it as
+     a VGPR pair pulled in `v2` as the high half and produced a
+     garbage pointer rooted in whatever lived adjacent to `v1`.
+
+  2. The imm-scan loop "first non-zero immediate wins" was meant to
+     pick up the signed offset field.  On gfx12+ the CPol operand
+     (packed scale_offset flag + scope bits) lives as an additional
+     immediate AFTER the offset field, and for `scale_offset
+     scope:SCOPE_DEV` carries the value 0x810 = 2064.  With the real
+     offset being 0, the loop happily mistook CPol for offset and
+     GEP'd the atomic address 2064 bytes past the Out-pointer base.
+
+  3. Same loop's "last reg-valued src = data" heuristic then picked
+     the SGPR saddr (s[4:5] = Out pointer) as the data to add,
+     because after (1)(2) it was still scanning past the true vdata.
+     Net device-visible atomic:
+       `atomic_add(&B[~garbage+2064], &Out /* pointer */)`
+
+**The fix:**
+
+Delegate to `decodeGlobalStoreAddr` — atomics share the store's
+operand shape ((vaddr, vdata, [saddr], [imms])) and the helper
+already handles both plain and SADDR discrimination, uses
+`firstImmOffset` (FIRST imm regardless of value, not first
+NON-ZERO), and returns the vdata register via `fa.stData`.  The
+CMPSWAP branch still increments `baseIdx` on `fa.stData` to reach
+the newVal half of the cmp/new pair.
+
+Element size for `scale_offset` is 4 for every atomic in the
+`[GLOBAL_ATOMIC_ADD, GLOBAL_ATOMIC_PK_ADD_F16]` range — the 64-bit
+`_X2` variants are outside this range, so a single `elemBytes=4`
+covers ADD/SUB/AND/OR/XOR/MIN/MAX/SWAP/ADD_F32/PK_ADD_{BF16,F16}/
+CMPSWAP uniformly.
+
+**After the fix:**
+
+    v_mul_i32_i24_e32 v2, 4, v1                 ; scaled vaddr lo
+    v_mul_hi_i32_i24_e32 v3, 4, v1              ; scaled vaddr hi
+    v_lshl_add_u64 v[0:1], s[12:13], 0, v[2:3]  ; s[12:13]=Out + v1*4
+    global_atomic_add v[0:1], v10, off sc1      ; *(Out+v1*4) += v10
+
+Structurally identical to Triton's gfx942-native compile (modulo
+register allocation) — no spurious offset, vdata is the real
+popcount sum.
+
+**Corpus impact:**
+
+    sum_bitmatrix_rows_u32       4 EXIT=2 →  4 match
+    sum_bitmatrix_rows_u32_nw4   4 EXIT=2 →  4 match
+    corpus total                 64/104  → 72/104
+
+No regressions elsewhere — `canary_tl_sort_fp32_deterministic`
+(which exercises the permlane16-xor3-partner rewrite we just
+landed) still matches, all Gfx1250Gpu cross-lane + atomic GTests
+pass, and the `c3_atomic_cas` lit fixture's CMPSWAP path goes
+through the same code path via `fa.stData + baseIdx+1` so the
+cmp/new pair contract is preserved.
+
+**Generalization — the bug class.**
+
+"Handler assumes operand shape that varies by subtarget" is a
+recurring salmon bug class.  The same root cause (hard-coded
+plain-form shape, later patched up for gfx12+ SADDR) bit
+`rcp_sqrt_kernel` in `GLOBAL_LOAD` before this — see the
+`Gfx1250Gpu.RcpSqrt` GTest and handle_flat.cpp:653-665 comment.
+The prescribed pattern is: **when a gfx12+ form has SGPR-base +
+VGPR-offset addressing, EXTRACT the shape decode into a helper
+(`decodeGlobal{Load,Store}Addr`) and have every consumer — load,
+store, atomic, prefetch — route through it**.  The atomic handler
+is now the third caller of `decodeGlobalStoreAddr`; the dword and
+sub-dword global loads are wired to `decodeGlobalLoadAddr`.  Any
+new FLAT-class handler (flat_atomic on gfx12+, the pending
+`tensor_load_to_lds` family) should follow this pattern.
+
+**Investigation technique.**
+
+  * Start from the device-reported failure shape (HIP 700 = VM page
+    fault → bad address, not bad data) to narrow "where" vs "what".
+  * Produce all three disassemblies side-by-side:
+      source gfx1250 (what Triton emitted)
+      native gfx942 (what Triton's native compile does — the
+                     algorithm's ground truth)
+      salmon gfx942 (what we produced)
+    Diff the critical memory op.
+  * When CPol imms leak into offset lookups (the 2064 red herring),
+    instrument the handler to dump `op.srcIdx(k)` / `di.getImm(idx)`
+    for each operand — a few lines of `llvm::errs()` behind an
+    env-gated debug print is faster than reading LLVM's encoding
+    specs.
+
+See `Gfx1250Gpu.SumBitmatrixRowsU32` GTest (to be added) for the
+direct regression pin, and the `sum_bitmatrix_rows_u32{,_nw4}`
+compare_correctness recipes for the composition-level pin that
+caught the bug in the first place.
+
+---
+
 ## 2026-04-22 — Triton gfx1250 cross-16 bitonic-merge xor3-partner rewrite (TRANSITIONAL)
 
 `canary_tl_sort_fp32_deterministic` now matches (was `WRONG 16384/16384`).

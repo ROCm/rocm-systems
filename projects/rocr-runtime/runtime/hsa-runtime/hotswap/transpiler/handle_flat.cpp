@@ -876,24 +876,68 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
   if (sop >= SemOp::GLOBAL_ATOMIC_ADD && sop <= SemOp::GLOBAL_ATOMIC_PK_ADD_F16) {
     assert(((di.tsFlags & SIInstrFlags::IsAtomicRet) != 0) == (di.numDefs > 0) &&
            "global atomic: IsAtomicRet disagrees with numDefs");
-    ParsedReg addrReg = op.srcReg(0);
-    Value *addr = ctx.regs.readReg64(ctx.B, addrReg);
-    if (addr->getType() != ctx.ptrGlobalTy) addr = ctx.B.CreateIntToPtr(addr, ctx.ptrGlobalTy);
-    int64_t memOffset = 0;
-    unsigned dataIdx = 1;
-    for (unsigned k = 1; k < op.nSrcs(); k++) {
-      if (di.isImm(op.srcIdx(k)) && di.getImm(op.srcIdx(k)) != 0)
-        memOffset = di.getImm(op.srcIdx(k));
-      else if (di.isReg(op.srcIdx(k)))
-        dataIdx = k;
-    }
-    if (memOffset != 0) addr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, addr, ctx.B.getInt64(memOffset));
-    Value *data = ctx.regs.readReg32(ctx.B, op.srcReg(dataIdx));
+    // Delegate addressing to `decodeGlobalStoreAddr`.  Global atomics
+    // share the store's operand shape — (vaddr, vdata, [saddr], [imms]) —
+    // and we reuse the exact same decoder to get both shape variants
+    // handled consistently:
+    //
+    //   (plain)  vaddr:VGPR64, vdata:VGPR*, [imms]
+    //   (SADDR)  vaddr:VGPR32, vdata:VGPR*, saddr:SGPR64,
+    //            [scale_offset] [offset:imm]
+    //
+    // Before this switch, the handler hard-coded the plain shape
+    // (`readReg64(srcReg(0))`) AND used a heuristic "first non-zero imm
+    // wins" scan to pick up the signed offset.  Two bugs compounded on
+    // `_sum_bitmatrix_rows`'s
+    //   global_atomic_add_u32 v1, v0, s[4:5] scale_offset scope:SCOPE_DEV
+    // — the SADDR form:
+    //
+    //   (1) `op.srcReg(0)` is VGPR32 `v1` (the vaddr offset), not a
+    //       pointer; reading it as a VGPR64 pair pulled in v2 as the
+    //       high half and produced garbage.
+    //   (2) After the saddr SGPR, the CPol operand carries the
+    //       `scale_offset` bit + scope bits packed into a non-zero
+    //       immediate (0x810 = 2064 for `scale_offset scope:SCOPE_DEV`);
+    //       "first non-zero imm wins" mistook that for the signed
+    //       offset field and added a 2064-byte GEP before the atomic,
+    //       far past the 32-element `Out` buffer.
+    //   (3) The same loop's "last reg-valued src = data" heuristic
+    //       then selected the SGPR saddr (s[4:5] = Out pointer) as the
+    //       data to atomic-add, instead of the VGPR vdata (v0 = the
+    //       popcount sum).
+    //
+    // Net device-visible symptom: `HIP error 700 (illegal memory
+    // access)` on every launch of `sum_bitmatrix_rows_u32` (and the
+    // `_nw4` variant) — the atomic fired at the wrong address with
+    // the wrong value.  `decodeGlobalStoreAddr` handles the shape
+    // discriminator and uses `firstImmOffset` (FIRST imm, regardless
+    // of value) for the offset field, so CPol no longer leaks into
+    // the offset lookup.  See `hotswap/docs/learnings.md` entry
+    // "2026-04-23 — global_atomic SADDR form silently miscompiled"
+    // for the full investigation and the regression gate
+    // (`Gfx1250Gpu.SumBitmatrixRowsU32`).
+    //
+    // Element size for `scale_offset`: every atomic in the SemOp range
+    // [GLOBAL_ATOMIC_ADD, GLOBAL_ATOMIC_PK_ADD_F16] operates on a
+    // 32-bit memory slot (the 64-bit `_X2` variants are outside this
+    // range), so elemBytes=4 is correct for all of
+    //   ADD/SUB/AND/OR/XOR/MIN/MAX/SWAP/ADD_F32/PK_ADD_{BF16,F16}/CMPSWAP
+    // When `hasScaleOffset` is false the multiply is elided by the
+    // decoder.
+    FlatAddr fa = decodeGlobalStoreAddr(ctx, di, op, /*elemBytes=*/4,
+                                         "GLOBAL_ATOMIC");
+    Value *addr = fa.ptr;
+    // `stData` points to the base of the vdata VGPR range (32-bit for
+    // the scalar atomics; CMPSWAP treats it as a 2-vgpr pair
+    // cmp/new — see the CMPSWAP branch below).
+    Value *data = ctx.regs.readReg32(ctx.B, fa.stData);
 
     if (sop == SemOp::GLOBAL_ATOMIC_CMPSWAP) {
+      // CMPSWAP's vdata is declared as VReg_64 in the .td (a 2-vgpr
+      // pair (cmpVal, newVal) in that order).  `fa.stData` is the
+      // base of that pair; increment baseIdx to reach newVal.
       Value *cmpVal = data;
-      ParsedReg srcPair = op.srcReg(dataIdx);
-      ParsedReg newReg = srcPair; newReg.baseIdx += 1; newReg.width = 1;
+      ParsedReg newReg = fa.stData; newReg.baseIdx += 1; newReg.width = 1;
       Value *newVal = ctx.regs.readReg32(ctx.B, newReg);
       ctx.emitUnderExec([&] {
         auto *cas = ctx.B.CreateAtomicCmpXchg(
