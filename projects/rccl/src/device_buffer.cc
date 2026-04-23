@@ -13,15 +13,28 @@
 #include <cuda_runtime.h>
 #include <cstdlib>
 #include <utility>
+#include <iostream>
 
 namespace meta::comms {
 
+// Helper macro for catching HIP errors
+#define HIP_CALL(cmd)                                                                   \
+    do {                                                                                \
+        hipError_t error = (cmd);                                                       \
+        if (error != hipSuccess)                                                        \
+        {                                                                               \
+            std::cerr << "Encountered HIP error (" << hipGetErrorString(error)          \
+                      << ") at line " << __LINE__ << " in file " << __FILE__ << "\n";   \
+        }                                                                               \
+    } while (0)
+
 DeviceBuffer::DeviceBuffer(std::size_t size) : size_(size) {
-  cudaError_t err = cudaMalloc(&ptr_, size);
-  if (err != cudaSuccess) {
-    ERROR("DeviceBuffer: cudaMalloc failed (%s)", cudaGetErrorString(err));
-    //std::abort();
-  }
+  
+#if defined(HIP_UNCACHED_MEMORY)  
+  HIP_CALL(hipExtMallocWithFlags((void**)&ptr_, size, hipDeviceMallocUncached));
+#else
+  HIP_CALL(hipExtMallocWithFlags((void**)&ptr_, size, hipDeviceMallocFinegrained));
+#endif
 }
 
 DeviceBuffer::~DeviceBuffer() {

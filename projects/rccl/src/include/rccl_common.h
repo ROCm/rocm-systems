@@ -131,6 +131,7 @@ RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 RCCL_PARAM_DECLARE(HierarchicalAllGather);
 // DDA threashold
 RCCL_PARAM_DECLARE(DdaThreshold);
+RCCL_PARAM_DECLARE(DdaEnable);
 
 #define HIERARCHICAL_AG_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB
 int getFirmwareVersion();

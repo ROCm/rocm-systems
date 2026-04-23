@@ -109,6 +109,7 @@ static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, si
 }
 
 RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 0);
+RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
 
 static bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
   if (comm->nNodes < 8) return false;
@@ -384,7 +385,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   size_t ddaThreshold =  rcclParamDdaThreshold();
 
-  if ((count * ncclTypeSize(datatype) <= ddaThreshold) && ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op) && ncclGroupDepth == 0) {
+  if (rcclParamDdaEnable() && (count * ncclTypeSize(datatype) <= ddaThreshold) && ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op) && ncclGroupDepth == 0) {
     NCCLCHECK(ncclAllReduceDdaIpc(
         sendbuff,
         recvbuff,

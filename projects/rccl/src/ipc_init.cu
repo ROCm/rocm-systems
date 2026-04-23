@@ -18,6 +18,17 @@ using nccl_dda_ipc_detail::DdaIpcBarrierState;
 using nccl_dda_ipc_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_ipc_detail::kDdaNranks;
 
+
+#define HIP_CALL(cmd)                                                                   \
+    do {                                                                                \
+        hipError_t error = (cmd);                                                       \
+        if (error != hipSuccess)                                                        \
+        {                                                                               \
+            std::cerr << "Encountered HIP error (" << hipGetErrorString(error)          \
+                      << ") at line " << __LINE__ << " in file " << __FILE__ << "\n";   \
+        }                                                                               \
+    } while (0)
+
 ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   if (comm == nullptr) {
     return ncclSuccess;
@@ -33,14 +44,11 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   }
 
   void* scratch = nullptr;
-  cudaError_t ce = cudaMalloc(&scratch, bytes);
-  if (ce != cudaSuccess) {
-    WARN(
-        "ncclDdaIpcCommInit: cudaMalloc(%zu) failed (%s)",
-        bytes,
-        cudaGetErrorString(ce));
-    return ncclSuccess;
-  }
+#if defined(HIP_UNCACHED_MEMORY)
+  HIP_CALL(hipExtMallocWithFlags((void**)&scratch, bytes, hipDeviceMallocUncached));
+#else
+  HIP_CALL(hipExtMallocWithFlags((void**)&scratch, bytes, hipDeviceMallocFinegrained));
+#endif
 
   auto* handler = new (std::nothrow) ncclIpcMemHandler(
       comm->bootstrap, comm->rank, comm->nRanks);
@@ -66,7 +74,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   }
 
   void* peerDev = nullptr;
-  ce = cudaMalloc(&peerDev, kDdaNranks * sizeof(void*));
+  cudaError_t ce = cudaMalloc(&peerDev, kDdaNranks * sizeof(void*));
   if (ce != cudaSuccess) {
     delete handler;
     CUDACHECKIGNORE(cudaFree(scratch));
