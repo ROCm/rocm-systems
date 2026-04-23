@@ -352,6 +352,70 @@ protected:
 
         return done ? ncclSuccess : ncclInternalError;
     }
+
+    // Helper: create a merged device from N physical NICs.
+    // Returns merged device index, or -1 if not enough devices / merge failed.
+    // physDevs: indices of physical (non-merged) devices
+    // props: device properties (indexed by device index)
+    // nNicsToMerge: how many NICs to merge (e.g., 2, 3, 4)
+    // rank: MPI rank of this process
+    int CreateMergedDevice(int nNicsToMerge, int rank, int offset = 0)
+    {
+        if (nNicsToMerge <= 0 || nNicsToMerge > NCCL_NET_MAX_DEVS_PER_NIC) {
+            fprintf(stderr,
+                    "Rank %d requested invalid merge size %d (valid range: 1..%d)\n",
+                    rank, nNicsToMerge, NCCL_NET_MAX_DEVS_PER_NIC);
+            return -1;
+        }
+
+        int outMergedDev = -1;
+
+        int ndev = 0;
+        RCCL_TEST_CHECK(GetDeviceCount(&ndev));
+        if (ndev <= 0) return -1;
+
+        std::vector<ncclNetProperties_t> props(ndev);
+        std::vector<int> physDevs;
+        for (int i = 0; i < ndev; i++) {
+            memset(&props[i], 0, sizeof(ncclNetProperties_t));
+            RCCL_TEST_CHECK(GetDeviceProperties(i, &props[i]));
+            if (!props[i].name || !strchr(props[i].name, '+'))
+                physDevs.push_back(i);
+        }
+
+        if (physDevs.size() < offset + 1) {
+            return -1;
+        }
+
+        int targetSpeed = props[physDevs[offset]].speed;
+        std::vector<int> compat;
+        for (int d : physDevs)
+            if (props[d].speed == targetSpeed) compat.push_back(d);
+
+        if ((int)compat.size() < nNicsToMerge * 2) {
+            return CreateMergedDevice(nNicsToMerge, rank, offset + 1);
+        }
+
+        int baseOffset = (rank % 2) ? nNicsToMerge : 0;
+        int finalOffset = baseOffset + offset;
+
+        if (finalOffset + nNicsToMerge > (int)compat.size()) return -1;
+
+        ncclNetVDeviceProps_t vProps;
+        memset(&vProps, 0, sizeof(vProps));
+        vProps.ndevs = nNicsToMerge;
+        for (int i = 0; i < nNicsToMerge; i++)
+            vProps.devs[i] = compat[finalOffset + i];
+
+        if (MakeVirtualDevice(&outMergedDev, &vProps) != ncclSuccess || outMergedDev < 0) {
+            fprintf(stderr,
+                    "Rank %d failed to create %d-NIC merged device at offset %d, retrying with offset %d\n",
+                    rank, nNicsToMerge, offset, offset + 1);
+            return CreateMergedDevice(nNicsToMerge, rank, offset + 1);
+        }
+
+        return outMergedDev;
+    }
 };
 
 // Initialization Tests
@@ -464,6 +528,462 @@ TEST_F(NetIbMPITest, ListenAndConnect) {
         EXPECT_NE(pair.listenComm, nullptr) << "Listen comm should exist";
     } else {
         EXPECT_NE(pair.sendComm, nullptr) << "Send comm should be established";
+    }
+}
+
+TEST_F(NetIbMPITest, ListenCloseListen) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int mergedDev = CreateMergedDevice(4, rank);
+    if (mergedDev == -1) {
+        GTEST_SKIP() << "Failed to create merged device";
+    }
+
+    for (int iter = 0; iter < 3; iter++) {
+        // Iteration 3: abandoned listen-close
+        if (iter == 2) {
+            if (rank == 0) {
+                void* abandonedListen = nullptr;
+                ncclNetHandle_t abandonedHandle;
+                ASSERT_EQ(CreateListenComm(mergedDev, &abandonedHandle, &abandonedListen),
+                          ncclSuccess)
+                    << "Iter 3: abandoned listen failed";
+                ASSERT_NE(abandonedListen, nullptr);
+                ASSERT_EQ(CloseListenComm(abandonedListen), ncclSuccess)
+                    << "Iter 3: close abandoned listen failed";
+            }
+        }
+
+        ConnectionPair pair;
+        ncclNetHandle_t handle;
+
+        if (rank == 0) {
+            ASSERT_EQ(CreateListenComm(mergedDev, &handle, &pair.listenComm), ncclSuccess)
+                << "Listen failed iter " << iter;
+            ASSERT_NE(pair.listenComm, nullptr);
+        }
+
+        if (rank == 0) {
+            MPI_Send(&handle, sizeof(handle), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
+        } else {
+            MPI_Recv(&handle, sizeof(handle), MPI_BYTE, peerRank, 0,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+
+        if (rank == 0) {
+            while (!pair.recvComm) AcceptConnection(pair.listenComm, &pair.recvComm);
+        } else {
+            while (!pair.sendComm) ConnectToRemote(mergedDev, &handle, &pair.sendComm);
+        }
+
+        // Close: data comms first, then listen
+        if (rank == 0) {
+            ASSERT_EQ(CloseRecvComm(pair.recvComm), ncclSuccess)
+                << "CloseRecvComm failed iter " << iter;
+        } else {
+            ASSERT_EQ(CloseSendComm(pair.sendComm), ncclSuccess)
+                << "CloseSendComm failed iter " << iter;
+        }
+
+        if (rank == 0) {
+            ASSERT_EQ(CloseListenComm(pair.listenComm), ncclSuccess)
+                << "CloseListenComm failed iter " << iter;
+        }
+    }
+}
+
+TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+    ASSERT_GT(ndev, 0);
+
+    std::vector<ncclNetProperties_t> props(ndev);
+    std::vector<int> physDevs;
+    for (int i = 0; i < ndev; i++) {
+        memset(&props[i], 0, sizeof(ncclNetProperties_t));
+        ASSERT_EQ(GetDeviceProperties(i, &props[i]), ncclSuccess);
+        if (!props[i].name || !strchr(props[i].name, '+'))
+            physDevs.push_back(i);
+    }
+
+    if (physDevs.empty()) {
+        GTEST_SKIP() << "Failed to find network devices";
+    }
+
+    int targetSpeed = props[physDevs[0]].speed;
+    std::vector<int> compat;
+    for (int d : physDevs)
+        if (props[d].speed == targetSpeed) compat.push_back(d);
+
+    int mergedDevA = CreateMergedDevice(2, rank);
+    int mergedDevB = CreateMergedDevice(3, rank, 2);
+    if (mergedDevA == -1 || mergedDevB == -1) {
+        GTEST_SKIP() << "Failed to create merged device";
+    }
+
+    // Physical device = first NIC from merged A's group
+    int physDev = compat[0];
+
+    static constexpr size_t kTransferSize = 4096;
+    static constexpr int kNumListens = 4;
+
+    // 4 listens: 2 on merged A, 1 on merged B, 1 on physical NIC (member of merged A)
+    struct ListenInfo {
+        int dev;
+        const char* label;
+    };
+    ListenInfo listens[kNumListens] = {
+        {mergedDevA, "MergedA-1"},
+        {mergedDevA, "MergedA-2"},
+        {mergedDevB, "MergedB"},
+        {physDev,    "PhysDev"},
+    };
+
+    void* listenComms[kNumListens] = {};
+    void* recvComms[kNumListens] = {};
+    void* sendComms[kNumListens] = {};
+    ncclNetHandle_t handles[kNumListens] = {};
+
+    // === Phase 1: Rank 0 creates ALL 4 listens simultaneously ===
+    if (rank == 0) {
+        for (int i = 0; i < kNumListens; i++) {
+            ASSERT_EQ(CreateListenComm(listens[i].dev, &handles[i], &listenComms[i]),
+                      ncclSuccess)
+                << "CreateListenComm failed for " << listens[i].label;
+            ASSERT_NE(listenComms[i], nullptr)
+                << "listenComm NULL for " << listens[i].label;
+        }
+
+        // Verify all handles are pairwise unique
+        for (int i = 0; i < kNumListens; i++) {
+            for (int j = i + 1; j < kNumListens; j++) {
+                bool eq = (memcmp(&handles[i], &handles[j], sizeof(ncclNetHandle_t)) == 0);
+                EXPECT_FALSE(eq)
+                    << "Handles identical for " << listens[i].label
+                    << " and " << listens[j].label;
+            }
+        }
+
+        // Send all handles to rank 1
+        for (int i = 0; i < kNumListens; i++) {
+            MPI_Send(&handles[i], sizeof(ncclNetHandle_t), MPI_BYTE,
+                     peerRank, 60 + i, MPI_COMM_WORLD);
+        }
+    } else {
+        for (int i = 0; i < kNumListens; i++) {
+            MPI_Recv(&handles[i], sizeof(ncclNetHandle_t), MPI_BYTE,
+                     peerRank, 60 + i, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+    }
+
+    // === Phase 2: ALL connect + accept ===
+    if (rank == 0) {
+        for (int i = 0; i < kNumListens; i++)
+            while (!recvComms[i])
+                AcceptConnection(listenComms[i], &recvComms[i]);
+    } else {
+        for (int i = 0; i < kNumListens; i++)
+            while (!sendComms[i])
+                ConnectToRemote(listens[i].dev, &handles[i], &sendComms[i]);
+    }
+
+    // === Phase 3: Transfer on ALL 4 connections ===
+    for (int c = 0; c < kNumListens; c++) {
+        void* comm = (rank == 0) ? recvComms[c] : sendComms[c];
+        int seed = 2000 + c * 1000;
+        int tag = 200 + c;
+
+        void* buf = malloc(kTransferSize);
+        ASSERT_NE(buf, nullptr);
+        auto bufGuard = RCCLTestGuards::makeHostBufferAutoGuard(buf);
+        void* mhandle = nullptr;
+        ASSERT_EQ(RegisterMemory(comm, buf, kTransferSize, NCCL_PTR_HOST, &mhandle),
+                  ncclSuccess);
+
+        if (rank == 1) {
+            FillHostBuffer(buf, kTransferSize, seed);
+        } else {
+            memset(buf, 0xDE, kTransferSize);
+        }
+
+        void* req = nullptr;
+        if (rank == 0) {
+            void* rb[1] = {buf}; size_t rs[1] = {kTransferSize};
+            int rt[1] = {tag}; void* rh[1] = {mhandle};
+            ASSERT_EQ(PostRecv(recvComms[c], 1, rb, rs, rt, rh, &req), ncclSuccess);
+            ASSERT_NE(req, nullptr);
+        }
+
+        if (rank == 1) {
+            void* sendReq = nullptr;
+            PostSendWithRetry(sendComms[c], buf, kTransferSize, tag, mhandle, &sendReq);
+        }
+
+        if (rank == 0) {
+            int csz[1] = {0};
+            ASSERT_EQ(WaitForCompletion(req, csz, kLargeTransferTimeoutMs), ncclSuccess)
+                << listens[c].label << " recv timed out";
+            EXPECT_EQ(csz[0], (int)kTransferSize)
+                << listens[c].label << " size mismatch";
+
+            size_t errIdx = 0;
+            uint8_t errExp = 0, errGot = 0;
+            bool ok = RCCLTestHelpers::verifyHostBufferData<uint8_t>(buf, kTransferSize,
+                [seed](size_t j) { return static_cast<uint8_t>((seed + j) % kBytePatternModulo); },
+                0, 0.0, &errIdx, &errExp, &errGot);
+            EXPECT_TRUE(ok) << listens[c].label << " data mismatch at byte " << errIdx
+                            << ": expected " << (int)errExp << " got " << (int)errGot;
+        }
+
+        ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+    }
+
+    // === Phase 4: Close ALL ===
+    if (rank == 0) {
+        for (int i = 0; i < kNumListens; i++)
+            ASSERT_EQ(CloseRecvComm(recvComms[i]), ncclSuccess)
+                << "CloseRecvComm failed for " << listens[i].label;
+    } else {
+        for (int i = 0; i < kNumListens; i++)
+            ASSERT_EQ(CloseSendComm(sendComms[i]), ncclSuccess)
+                << "CloseSendComm failed for " << listens[i].label;
+    }
+
+    if (rank == 0) {
+        for (int i = 0; i < kNumListens; i++)
+            ASSERT_EQ(CloseListenComm(listenComms[i]), ncclSuccess)
+                << "CloseListenComm failed for " << listens[i].label;
+    }
+}
+
+TEST_F(NetIbMPITest, MultipleSequentialConnections) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+    ASSERT_GT(ndev, 0);
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    // Open and close multiple connections sequentially to test resource cleanup
+    const int kNumIterations = 5;
+    for (int iter = 0; iter < kNumIterations; iter++) {
+        ConnectionPair pair;
+        ASSERT_EQ(SetupConnection(0, pair, rank, peerRank), ncclSuccess)
+            << "Failed to setup connection on iteration " << iter;
+
+        NetConnectionGuard connGuard(net_);
+        if (rank == 0) {
+            connGuard.setRecvComm(pair.recvComm);
+            connGuard.setListenComm(pair.listenComm);
+            EXPECT_NE(pair.recvComm, nullptr);
+        } else {
+            connGuard.setSendComm(pair.sendComm);
+            EXPECT_NE(pair.sendComm, nullptr);
+        }
+        // connGuard destructor closes connection
+    }
+
+    if (MPIEnvironment::world_rank == 0) {
+        TEST_INFO("Successfully completed %d sequential connection cycles", kNumIterations);
+    }
+}
+
+TEST_F(NetIbMPITest, RapidConnectDisconnect) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+    ASSERT_GT(ndev, 0);
+
+    std::vector<ncclNetProperties_t> props(ndev);
+    std::vector<int> physDevs;
+    for (int i = 0; i < ndev; i++) {
+        memset(&props[i], 0, sizeof(ncclNetProperties_t));
+        ASSERT_EQ(GetDeviceProperties(i, &props[i]), ncclSuccess);
+        if (!props[i].name || !strchr(props[i].name, '+'))
+            physDevs.push_back(i);
+    }
+    ASSERT_FALSE(physDevs.empty()) << "No physical devices found";
+
+    int mergedDev = CreateMergedDevice(3, rank);
+    if (mergedDev == -1) {
+        GTEST_SKIP() << "Failed to create merged device";
+    }
+
+
+    static constexpr int kIterations = 100;
+
+    struct RdmaResourceCounts {
+        int qp = -1;
+        int cq = -1;
+        int mr = -1;
+        int pd = -1;
+    };
+
+    auto execCommand = [](const char* cmd) -> std::string {
+        std::array<char, 256> buf{};
+        std::string out;
+
+        FILE* pipe = popen(cmd, "r");
+        if (!pipe) return out;
+
+        while (fgets(buf.data(), buf.size(), pipe) != nullptr)
+            out += buf.data();
+
+        pclose(pipe);
+        return out;
+    };
+
+    auto countNonEmptyLines = [](const std::string& text) -> int {
+        std::istringstream iss(text);
+        std::string line;
+        int count = 0;
+        while (std::getline(iss, line)) {
+            if (!line.empty()) count++;
+        }
+        return count;
+    };
+
+    auto readRdmaResourceCounts = [&]() -> RdmaResourceCounts {
+        RdmaResourceCounts counts;
+
+        std::string probe =
+            execCommand("sh -c 'rdma resource show qp >/dev/null 2>&1 && "
+                        "rdma resource show cq >/dev/null 2>&1 && "
+                        "rdma resource show mr >/dev/null 2>&1 && "
+                        "rdma resource show pd >/dev/null 2>&1 && echo OK'");
+        if (probe.find("OK") == std::string::npos) return counts;
+
+        std::string qpOut = execCommand("rdma resource show qp 2>/dev/null");
+        std::string cqOut = execCommand("rdma resource show cq 2>/dev/null");
+        std::string mrOut = execCommand("rdma resource show mr 2>/dev/null");
+        std::string pdOut = execCommand("rdma resource show pd 2>/dev/null");
+
+        if (qpOut.empty() || cqOut.empty() || mrOut.empty() || pdOut.empty()) return counts;
+
+        counts.qp = countNonEmptyLines(qpOut);
+        counts.cq = countNonEmptyLines(cqOut);
+        counts.mr = countNonEmptyLines(mrOut);
+        counts.pd = countNonEmptyLines(pdOut);
+
+        return counts;
+    };
+
+    auto countsAvailable = [](const RdmaResourceCounts& c) -> bool {
+        return c.qp >= 0 && c.cq >= 0 && c.mr >= 0 && c.pd >= 0;
+    };
+
+    RdmaResourceCounts before = readRdmaResourceCounts();
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    for (int iter = 0; iter < kIterations; iter++) {
+        void* listenComm = nullptr;
+        void* recvComm = nullptr;
+        void* sendComm = nullptr;
+        ncclNetHandle_t handle;
+        memset(&handle, 0, sizeof(handle));
+
+        if (rank == 0) {
+            ASSERT_EQ(CreateListenComm(mergedDev, &handle, &listenComm), ncclSuccess)
+                << "CreateListenComm failed at iteration " << iter;
+            ASSERT_NE(listenComm, nullptr)
+                << "listenComm is NULL at iteration " << iter;
+
+            MPI_Send(&handle, sizeof(ncclNetHandle_t), MPI_BYTE,
+                     peerRank, 7000 + iter, MPI_COMM_WORLD);
+        } else {
+            MPI_Recv(&handle, sizeof(ncclNetHandle_t), MPI_BYTE,
+                     peerRank, 7000 + iter, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        if (rank == 0) {
+            int attempts = 0;
+            while (!recvComm && attempts < kMaxRetryAttempts) {
+                ASSERT_EQ(AcceptConnection(listenComm, &recvComm), ncclSuccess)
+                    << "AcceptConnection failed at iteration " << iter;
+                if (!recvComm) usleep(kPollIntervalUs);
+                attempts++;
+            }
+            ASSERT_NE(recvComm, nullptr)
+                << "AcceptConnection did not complete at iteration " << iter;
+        } else {
+            int attempts = 0;
+            while (!sendComm && attempts < kMaxRetryAttempts) {
+                ASSERT_EQ(ConnectToRemote(mergedDev, &handle, &sendComm), ncclSuccess)
+                    << "ConnectToRemote failed at iteration " << iter;
+                if (!sendComm) usleep(kPollIntervalUs);
+                attempts++;
+            }
+            ASSERT_NE(sendComm, nullptr)
+                << "ConnectToRemote did not complete at iteration " << iter;
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        if (rank == 0) {
+            ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess)
+                << "CloseRecvComm failed at iteration " << iter;
+            ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess)
+                << "CloseListenComm failed at iteration " << iter;
+        } else {
+            ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess)
+                << "CloseSendComm failed at iteration " << iter;
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    RdmaResourceCounts after = readRdmaResourceCounts();
+
+    if (countsAvailable(before) && countsAvailable(after)) {
+        EXPECT_EQ(after.qp, before.qp)
+            << "QP leak detected on rank " << rank
+            << ": before=" << before.qp << " after=" << after.qp;
+        EXPECT_EQ(after.cq, before.cq)
+            << "CQ leak detected on rank " << rank
+            << ": before=" << before.cq << " after=" << after.cq;
+        EXPECT_EQ(after.mr, before.mr)
+            << "MR leak detected on rank " << rank
+            << ": before=" << before.mr << " after=" << after.mr;
+        EXPECT_EQ(after.pd, before.pd)
+            << "PD leak detected on rank " << rank
+            << ": before=" << before.pd << " after=" << after.pd;
+    } else {
+        GTEST_SKIP() << "RDMA resource counters unavailable; rapid connect/disconnect "
+                     << "behavior was tested, but QP/CQ/MR/PD leak check was skipped";
     }
 }
 
@@ -867,6 +1387,621 @@ TEST_F(NetIbMPITest, SendRecvZeroSize) {
     }
 }
 
+// =============================================================================
+// Test: SendRecvDifferentMemoryTypes
+//
+// Creates a 2-NIC merged virtual device per rank (CreateMergedDevice(2, rank)).
+// Rank 0 (receiver) and Rank 1 (sender) each use their own merged device.
+// Tests all four memory type combinations: host→host, host→GPU, GPU→host, GPU→GPU.
+//
+// This exercises:
+//   - Asymmetric merged device usage (different vNIC per rank)
+//   - Multi-QP data path with 2 QPs per rank
+//   - GDR path selection based on pointer type
+//   - Memory registration across multiple Protection Domains
+//   - Flush semantics for GPU memory receives
+// =============================================================================
+TEST_F(NetIbMPITest, SendRecvDifferentMemoryTypes) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int mergedDev = CreateMergedDevice(2, rank);
+    if (mergedDev == -1) {
+        GTEST_SKIP() << "Failed to create merged device";
+    }
+
+    ncclNetProperties_t mProps;
+    memset(&mProps, 0, sizeof(mProps));
+    ASSERT_EQ(GetDeviceProperties(mergedDev, &mProps), ncclSuccess);
+
+    // Check GDR support across both ranks
+    int localGdr = (mProps.ptrSupport & NCCL_PTR_CUDA) ? 1 : 0;
+    int globalGdr = 0;
+    MPI_Allreduce(&localGdr, &globalGdr, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+    bool gdr = (globalGdr == 1);
+
+    struct Combo {
+        int send;
+        int recv;
+        const char* desc;
+    };
+    Combo combos[] = {
+        {NCCL_PTR_HOST, NCCL_PTR_HOST, "Host->Host"},
+        {NCCL_PTR_HOST, NCCL_PTR_CUDA, "Host->GPU"},
+        {NCCL_PTR_CUDA, NCCL_PTR_HOST, "GPU->Host"},
+        {NCCL_PTR_CUDA, NCCL_PTR_CUDA, "GPU->GPU"},
+    };
+
+    for (auto& c : combos) {
+        bool needGpu = (c.send == NCCL_PTR_CUDA || c.recv == NCCL_PTR_CUDA);
+        if (needGpu && !gdr) {
+            if (rank == 0) fprintf(stderr, "  [SKIP] %s (no GDR)\n", c.desc);
+            continue;
+        }
+
+        int memType = (rank == 0) ? c.recv : c.send;
+
+        ConnectionPair pair;
+        ASSERT_EQ(SetupConnection(mergedDev, pair, rank, peerRank), ncclSuccess);
+
+        NetConnectionGuard conn(net_);
+        if (rank == 0) {
+            conn.setRecvComm(pair.recvComm);
+            conn.setListenComm(pair.listenComm);
+        } else {
+            conn.setSendComm(pair.sendComm);
+        }
+
+        const size_t sz = kSmallBufferSize;
+        void* buf = nullptr;
+        RCCLTestGuards::DeviceBufferAutoGuard deviceBufGuard;
+        RCCLTestGuards::HostBufferAutoGuard hostBufGuard;
+        if (memType == NCCL_PTR_CUDA) {
+            HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&buf, sz));
+            deviceBufGuard.set(buf);
+        } else {
+            buf = malloc(sz);
+            ASSERT_NE(buf, nullptr);
+            hostBufGuard.set(buf);
+        }
+
+        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        void* mh = nullptr;
+        ASSERT_EQ(RegisterMemory(comm, buf, sz, memType, &mh), ncclSuccess);
+        NetMHandleGuard mhG(mh, NetMHandleDeleter(net_, comm));
+
+        uint8_t seed = static_cast<uint8_t>(c.send * 10 + c.recv * 3 + 42);
+        int tag = 700 + c.send * 2 + c.recv;
+
+        if (rank == 1) {
+            if (memType == NCCL_PTR_CUDA) {
+                ASSERT_EQ(InitializeBuffer(buf, sz, seed), hipSuccess);
+            } else {
+                FillHostBuffer(buf, sz, seed);
+            }
+        } else {
+            if (memType == NCCL_PTR_CUDA) {
+                HIP_TEST_CHECK_GTEST_FAIL(hipMemset(buf, 0, sz));
+            } else {
+                memset(buf, 0, sz);
+            }
+        }
+
+        void* req = nullptr;
+        if (rank == 0) {
+            void* b[1] = {buf};
+            size_t s[1] = {sz};
+            int t[1] = {tag};
+            void* h[1] = {mh};
+            ASSERT_EQ(PostRecv(pair.recvComm, 1, b, s, t, h, &req), ncclSuccess);
+            ASSERT_NE(req, nullptr);
+        } else {
+            PostSendWithRetry(pair.sendComm, buf, sz, tag, mh, &req);
+        }
+
+        int csz[1] = {0};
+        ASSERT_EQ(WaitForCompletion(req, csz), ncclSuccess);
+
+        if (rank == 0) {
+            EXPECT_EQ(csz[0], static_cast<int>(sz));
+
+            if (memType == NCCL_PTR_CUDA) {
+                void* fb[1] = {buf};
+                int fs[1] = {static_cast<int>(sz)};
+                void* fh[1] = {mh};
+                void* fr = nullptr;
+                if (FlushRecv(pair.recvComm, 1, fb, fs, fh, &fr) == ncclSuccess && fr) {
+                    ASSERT_EQ(WaitForCompletion(fr, nullptr), ncclSuccess);
+                }
+            }
+
+            if (memType == NCCL_PTR_CUDA) {
+                EXPECT_TRUE(VerifyBuffer(buf, sz, seed)) << "Data mismatch for " << c.desc;
+            } else {
+                EXPECT_TRUE(VerifyHostBuffer(buf, sz, seed)) << "Data mismatch for " << c.desc;
+            }
+        }
+    }
+}    
+
+TEST_F(NetIbMPITest, SendRecvMultipleSizesFusion) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly kExactTwoProcesses processes";
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int mergedDev = CreateMergedDevice(3, rank);
+    if (mergedDev == -1) {
+        GTEST_SKIP() << "Failed to create merged device";
+    }
+
+    // Build test size list
+    long pageSize = sysconf(_SC_PAGESIZE);
+    if (pageSize <= 0) pageSize = 4096;
+
+    std::vector<size_t> testSizes = {
+        // Tiny — size < nqps (3 QPs → some get 0-byte chunks)
+        1,
+        // Non-power-of-two — uneven 3-way splits
+        3, 7, 1023, 4097, 65537,
+        // Page boundary
+        (size_t)pageSize,
+        // Powers of two: 2 bytes to 64 MB
+        2, 4, 8, 16, 32, 64, 128, 256, 512, 1024,
+        2048, 4096, 8192, 16384, 32768, 65536,
+        128 * 1024, 256 * 1024, 512 * 1024,
+        1024 * 1024,
+        2 * 1024 * 1024,
+        4 * 1024 * 1024,
+        8 * 1024 * 1024,
+        16 * 1024 * 1024,
+        32 * 1024 * 1024,
+        64 * 1024 * 1024,
+    };
+
+    // Sort and deduplicate (pageSize might duplicate 4096)
+    std::sort(testSizes.begin(), testSizes.end());
+    testSizes.erase(std::unique(testSizes.begin(), testSizes.end()), testSizes.end());
+
+    size_t maxSize = testSizes.back();
+
+    // Allocate max-size buffer once, register once
+    void* buffer = malloc(maxSize);
+    ASSERT_NE(buffer, nullptr);
+    auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+    // Setup connection through merged device
+    ConnectionPair pair;
+    ncclNetHandle_t handle;
+    if (rank == 0) {
+        ASSERT_EQ(CreateListenComm(mergedDev, &handle, &pair.listenComm), ncclSuccess);
+        MPI_Send(&handle, sizeof(handle), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
+        while (!pair.recvComm) AcceptConnection(pair.listenComm, &pair.recvComm);
+    } else {
+        MPI_Recv(&handle, sizeof(handle), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        while (!pair.sendComm) ConnectToRemote(mergedDev, &handle, &pair.sendComm);
+    }
+
+    NetConnectionGuard conn(net_);
+    if (rank == 0) { conn.setRecvComm(pair.recvComm); conn.setListenComm(pair.listenComm); }
+    else conn.setSendComm(pair.sendComm);
+
+    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buffer, maxSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+    NetMHandleGuard mhGuard(mhandle, NetMHandleDeleter(net_, comm));
+
+    for (size_t idx = 0; idx < testSizes.size(); idx++) {
+        size_t sz = testSizes[idx];
+        int tag = 800 + (int)idx;
+        int seed = 9000 + (int)idx;
+
+        if (rank == 1) {
+            FillHostBuffer(buffer, sz, seed);
+        } else {
+            memset(buffer, 0xDE, sz);
+        }
+
+        // Transfer
+        void* req = nullptr;
+        if (rank == 0) {
+            void* b[1] = {buffer}; size_t s[1] = {sz}; int t[1] = {tag}; void* h[1] = {mhandle};
+            ASSERT_EQ(PostRecv(pair.recvComm, 1, b, s, t, h, &req), ncclSuccess);
+            ASSERT_NE(req, nullptr) << "Recv request NULL for size " << sz;
+        } else {
+            PostSendWithRetry(pair.sendComm, buffer, sz, tag, mhandle, &req);
+        }
+
+        int csz[1] = {0};
+        int timeout = (sz > 1024 * 1024) ? kLargeTransferTimeoutMs : kDefaultTimeoutMs;
+        ASSERT_EQ(WaitForCompletion(req, csz, timeout), ncclSuccess)
+            << "Transfer timeout for size " << sz;
+
+        // Verify on receiver
+        if (rank == 0) {
+            bool sizeOk = (csz[0] == (int)sz);
+            bool dataOk = false;
+            size_t errIdx = 0;
+            uint8_t errExp = 0, errGot = 0;
+
+            if (sizeOk) {
+                dataOk = RCCLTestHelpers::verifyHostBufferData<uint8_t>(buffer, sz,
+                    [seed](size_t i) { return static_cast<uint8_t>((seed + i) % kBytePatternModulo); },
+                    0, 0.0, &errIdx, &errExp, &errGot);
+            }
+
+            bool ok = sizeOk && dataOk;
+            if (!ok) {
+                if (!sizeOk) {
+                    fprintf(stderr, "  [FAIL] size=%10zu  size mismatch: got %d\n", sz, csz[0]);
+                } else {
+                    fprintf(stderr, "  [FAIL] size=%10zu  data error at byte %zu: "
+                            "expected %u, got %u\n", sz, errIdx, errExp, errGot);
+                }
+            }
+            fflush(stderr);
+
+            EXPECT_TRUE(ok) << "Failed for size " << sz;
+        }
+    }
+}
+
+TEST_F(NetIbMPITest, MultidirectionalTransfer) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int mergedSendDev = CreateMergedDevice(4, rank);
+    if (mergedSendDev == -1) {
+        GTEST_SKIP() << "Failed to create merged device";
+    }
+    int mergedRecvDev = mergedSendDev;
+
+    // Setup bidirectional connections
+    void* sendCommFwd = nullptr, *recvCommFwd = nullptr, *listenCommFwd = nullptr;
+    void* sendCommBwd = nullptr, *recvCommBwd = nullptr, *listenCommBwd = nullptr;
+
+    // Forward: Rank 1 listens, Rank 0 connects
+    {
+        ncclNetHandle_t h;
+        if (rank == 1) {
+            ASSERT_EQ(CreateListenComm(mergedRecvDev, &h, &listenCommFwd), ncclSuccess);
+            MPI_Send(&h, sizeof(h), MPI_BYTE, peerRank, 80, MPI_COMM_WORLD);
+            while (!recvCommFwd) AcceptConnection(listenCommFwd, &recvCommFwd);
+        } else {
+            MPI_Recv(&h, sizeof(h), MPI_BYTE, peerRank, 80, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            while (!sendCommFwd) ConnectToRemote(mergedSendDev, &h, &sendCommFwd);
+        }
+    }
+
+    // Backward: Rank 0 listens, Rank 1 connects
+    {
+        ncclNetHandle_t h;
+        if (rank == 0) {
+            ASSERT_EQ(CreateListenComm(mergedRecvDev, &h, &listenCommBwd), ncclSuccess);
+            MPI_Send(&h, sizeof(h), MPI_BYTE, peerRank, 81, MPI_COMM_WORLD);
+            while (!recvCommBwd) AcceptConnection(listenCommBwd, &recvCommBwd);
+        } else {
+            MPI_Recv(&h, sizeof(h), MPI_BYTE, peerRank, 81, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            while (!sendCommBwd) ConnectToRemote(mergedSendDev, &h, &sendCommBwd);
+        }
+    }
+
+    void* mySendComm = (rank == 0) ? sendCommFwd : sendCommBwd;
+    void* myRecvComm = (rank == 0) ? recvCommBwd : recvCommFwd;
+
+    // Patterns
+    struct Pattern {
+        const char* name;
+        size_t sendSize, recvSize;
+        int sendSeed, recvSeed;
+        int tag;
+    };
+
+    // to be extended for running multirank
+    std::vector<Pattern> patterns = {
+        {"Allgather (4KB)", 4096, 4096,
+         (rank == 0) ? 1000 : 2000, (rank == 0) ? 2000 : 1000, 300},
+        {"Alltoall (8KB)", 8192, 8192,
+         (rank == 0) ? 3000 : 4000, (rank == 0) ? 4000 : 3000, 301},
+        {"Hypercube (4KB/16KB)", (size_t)((rank == 0) ? 4096 : 16384),
+         (size_t)((rank == 0) ? 16384 : 4096),
+         (rank == 0) ? 5000 : 6000, (rank == 0) ? 6000 : 5000, 302},
+    };
+
+    for (size_t pi = 0; pi < patterns.size(); pi++) {
+        const Pattern& pat = patterns[pi];
+
+        void* sendBuf = malloc(pat.sendSize);
+        ASSERT_NE(sendBuf, nullptr);
+        auto sendBufGuard = RCCLTestGuards::makeHostBufferAutoGuard(sendBuf);
+        void* sendMr = nullptr;
+        ASSERT_EQ(RegisterMemory(mySendComm, sendBuf, pat.sendSize,
+                                 NCCL_PTR_HOST, &sendMr), ncclSuccess);
+
+        void* recvBuf = malloc(pat.recvSize);
+        ASSERT_NE(recvBuf, nullptr);
+        auto recvBufGuard = RCCLTestGuards::makeHostBufferAutoGuard(recvBuf);
+        void* recvMr = nullptr;
+        ASSERT_EQ(RegisterMemory(myRecvComm, recvBuf, pat.recvSize,
+                                 NCCL_PTR_HOST, &recvMr), ncclSuccess);
+
+        FillHostBuffer(sendBuf, pat.sendSize, pat.sendSeed);
+        memset(recvBuf, 0xDE, pat.recvSize);
+
+        // BOTH ranks post recv
+        void* recvReq = nullptr;
+        {
+            void* rb[1] = {recvBuf}; size_t rs[1] = {pat.recvSize};
+            int rt[1] = {pat.tag}; void* rh[1] = {recvMr};
+            ASSERT_EQ(PostRecv(myRecvComm, 1, rb, rs, rt, rh, &recvReq), ncclSuccess);
+            ASSERT_NE(recvReq, nullptr);
+        }
+
+        // BOTH ranks post send with retry
+        {
+            void* sendReq = nullptr;
+            PostSendWithRetry(mySendComm, sendBuf, pat.sendSize, pat.tag, sendMr, &sendReq);
+        }
+
+        // Wait for recv
+        {
+            int csz[1] = {0};
+            ASSERT_EQ(WaitForCompletion(recvReq, csz, kLargeTransferTimeoutMs), ncclSuccess)
+                << pat.name << " recv timed out on rank " << rank;
+            EXPECT_EQ(csz[0], (int)pat.recvSize)
+                << pat.name << " size mismatch on rank " << rank;
+        }
+
+        // Verify
+        {
+            size_t errIdx = 0;
+            uint8_t errExp = 0, errGot = 0;
+            bool ok = RCCLTestHelpers::verifyHostBufferData<uint8_t>(recvBuf, pat.recvSize,
+                [&pat](size_t j) { return static_cast<uint8_t>((pat.recvSeed + j) % kBytePatternModulo); },
+                0, 0.0, &errIdx, &errExp, &errGot);
+            EXPECT_TRUE(ok) << pat.name << " rank " << rank
+                            << " data mismatch at byte " << errIdx
+                            << ": expected " << (int)errExp << " got " << (int)errGot;
+        }
+
+        ASSERT_EQ(DeregisterMemory(mySendComm, sendMr), ncclSuccess);
+        ASSERT_EQ(DeregisterMemory(myRecvComm, recvMr), ncclSuccess);
+    }
+
+    // Close
+    if (rank == 0) {
+        ASSERT_EQ(CloseSendComm(sendCommFwd), ncclSuccess);
+        ASSERT_EQ(CloseRecvComm(recvCommBwd), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenCommBwd), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseRecvComm(recvCommFwd), ncclSuccess);
+        ASSERT_EQ(CloseSendComm(sendCommBwd), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenCommFwd), ncclSuccess);
+    }
+}
+
+TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    // --- Init and discover devices ---
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int mergedDev = CreateMergedDevice(2, rank);
+    if (mergedDev == -1) {
+        GTEST_SKIP() << "Failed to create merged device";
+    }
+
+    // --- Parameters ---
+    static constexpr int kNumOutstanding = 8;
+    static constexpr int kTagBase = 900;
+    static constexpr int kSendDelayUs = 50000;  // 50ms delay before sender posts
+
+    // --- Setup connection ---
+    ConnectionPair pair;
+    ncclNetHandle_t handle;
+    if (rank == 0) {
+        ASSERT_EQ(CreateListenComm(mergedDev, &handle, &pair.listenComm), ncclSuccess);
+        MPI_Send(&handle, sizeof(handle), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
+        while (!pair.recvComm) AcceptConnection(pair.listenComm, &pair.recvComm);
+    } else {
+        MPI_Recv(&handle, sizeof(handle), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        while (!pair.sendComm) ConnectToRemote(mergedDev, &handle, &pair.sendComm);
+    }
+
+    NetConnectionGuard conn(net_);
+    if (rank == 0) { conn.setRecvComm(pair.recvComm); conn.setListenComm(pair.listenComm); }
+    else conn.setSendComm(pair.sendComm);
+
+    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+
+    // --- Allocate per-operation buffers and register MRs ---
+    std::vector<RCCLTestGuards::HostBufferAutoGuard> bufGuards;
+    std::vector<void*> bufs(kNumOutstanding, nullptr);
+    std::vector<void*> mrs(kNumOutstanding, nullptr);
+    for (int i = 0; i < kNumOutstanding; i++) {
+        bufs[i] = malloc(kLargeBufferSize);
+        ASSERT_NE(bufs[i], nullptr);
+        bufGuards.push_back(RCCLTestGuards::makeHostBufferAutoGuard(bufs[i]));
+        ASSERT_EQ(RegisterMemory(comm, bufs[i], kLargeBufferSize, NCCL_PTR_HOST, &mrs[i]),
+                  ncclSuccess);
+    }
+
+    // --- GPU resources for async work on sender ---
+    RCCLTestGuards::DeviceBufferAutoGuard gpuAGuard;
+    RCCLTestGuards::DeviceBufferAutoGuard gpuBGuard;
+    RCCLTestGuards::HipStreamAutoGuard gpuStreamGuard;
+    void* gpuA = nullptr;
+    void* gpuB = nullptr;
+    hipStream_t gpuStream = nullptr;
+    if (rank == 1) {
+        HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&gpuA, kLargeBufferSize));
+        gpuAGuard.set(gpuA);
+        HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&gpuB, kLargeBufferSize));
+        gpuBGuard.set(gpuB);
+        HIP_TEST_CHECK_GTEST_FAIL(hipStreamCreate(&gpuStream));
+        gpuStreamGuard.set(gpuStream);
+        HIP_TEST_CHECK_GTEST_FAIL(hipMemset(gpuA, 0xAA, kLargeBufferSize));
+        HIP_TEST_CHECK_GTEST_FAIL(hipMemset(gpuB, 0x00, kLargeBufferSize));
+    }
+
+    // =========================================================================
+    // Timeline:
+    //
+    //   Receiver (rank 0):
+    //     Phase 1: PostRecv 0..7 (all recvs posted immediately)
+    //     (idle — waiting for data)
+    //     Phase 3: WaitForCompletion 0..7, verify data
+    //
+    //   Sender (rank 1):
+    //     (idle)
+    //     Phase 2: sleep 50ms, then fill bufs + PostSend 0..7,
+    //              then IMMEDIATELY overwrite all bufs with 0xFF + launch GPU work
+    //     Phase 3: verify GPU work
+    //
+    // What we're testing:
+    //   After PostSend, sender overwrites the send buffers with garbage (0xFF).
+    //   If RDMA has already read the original data before the overwrite,
+    //   receiver sees correct data. If RDMA reads after overwrite → corruption.
+    // =========================================================================
+
+    std::vector<void*> recvReqs(kNumOutstanding, nullptr);
+
+    // ===================== Phase 1: Receiver posts ALL recvs =====================
+    if (rank == 0) {
+        for (int i = 0; i < kNumOutstanding; i++) {
+            memset(bufs[i], 0xDE, kLargeBufferSize);  // Poison
+            void* rb[1] = {bufs[i]};
+            size_t rs[1] = {kLargeBufferSize};
+            int rt[1] = {kTagBase + i};
+            void* rh[1] = {mrs[i]};
+            ASSERT_EQ(PostRecv(pair.recvComm, 1, rb, rs, rt, rh, &recvReqs[i]),
+                      ncclSuccess);
+            ASSERT_NE(recvReqs[i], nullptr) << "Recv request NULL for op " << i;
+        }
+    }
+
+    // ===================== Phase 2: Sender sleeps, sends, then corrupts =====================
+    if (rank == 1) {
+        // Deliberate delay
+        usleep(kSendDelayUs);
+
+        // Fill each buffer with a unique pattern and post send
+        for (int i = 0; i < kNumOutstanding; i++) {
+            int seed = kTagBase + i;
+            FillHostBuffer(bufs[i], kLargeBufferSize, seed);
+
+            void* sendReq = nullptr;
+            ASSERT_EQ(PostSend(pair.sendComm, bufs[i], kLargeBufferSize,
+                               kTagBase + i, mrs[i], &sendReq), ncclSuccess)
+                << "PostSend failed for op " << i;
+            // Don't care about sendReq — we verify via recv completions
+        }
+
+        // IMMEDIATELY overwrite all send buffers with garbage.
+        // This is the critical test: if RDMA hasn't finished reading the
+        // buffer yet, receiver will see 0xFF instead of the pattern.
+        for (int i = 0; i < kNumOutstanding; i++) {
+            memset(bufs[i], 0xFF, kLargeBufferSize);
+        }
+
+        // Also launch async GPU work — overlaps with RDMA completion
+        for (int i = 0; i < 10; i++) {
+            HIP_TEST_CHECK_GTEST_FAIL(
+                hipMemcpyAsync(gpuB, gpuA, kLargeBufferSize,
+                               hipMemcpyDeviceToDevice, gpuStream));
+            HIP_TEST_CHECK_GTEST_FAIL(
+                hipMemsetAsync(gpuA, 0xBB + i, kLargeBufferSize, gpuStream));
+        }
+    }
+
+    // ===================== Phase 3: Verify =====================
+
+    // Receiver: wait for all recv completions and verify data
+    if (rank == 0) {
+        for (int i = 0; i < kNumOutstanding; i++) {
+            int csz[1] = {0};
+            ASSERT_EQ(WaitForCompletion(recvReqs[i], csz, kLargeTransferTimeoutMs),
+                      ncclSuccess)
+                << "Recv " << i << " timed out";
+            EXPECT_EQ(csz[0], (int)kLargeBufferSize) << "Size mismatch recv op " << i;
+        }
+
+        // Verify data integrity — should be ORIGINAL pattern, not 0xFF
+        int ok = 0;
+        for (int i = 0; i < kNumOutstanding; i++) {
+            int seed = kTagBase + i;
+            size_t errIdx = 0;
+            uint8_t errExp = 0, errGot = 0;
+            bool good = RCCLTestHelpers::verifyHostBufferData<uint8_t>(bufs[i], kLargeBufferSize,
+                [seed](size_t j) { return static_cast<uint8_t>((seed + j) % kBytePatternModulo); },
+                0, 0.0, &errIdx, &errExp, &errGot);
+
+            if (good) {
+                ok++;
+            } else {
+                bool sawFF = (errGot == 0xFF);
+                fprintf(stderr, "  [FAIL] op %d byte %zu: expected %u got %u%s\n",
+                        i, errIdx, errExp, errGot,
+                        sawFF ? " (0xFF = sender overwrote before RDMA read!)" : "");
+            }
+        }
+        EXPECT_EQ(ok, kNumOutstanding);
+    }
+
+    // Sender: verify GPU work
+    if (rank == 1) {
+        hipError_t syncErr = hipStreamSynchronize(gpuStream);
+        EXPECT_EQ(syncErr, hipSuccess) << "hipStreamSynchronize failed: "
+                                       << hipGetErrorString(syncErr);
+
+        std::vector<uint8_t> h(kLargeBufferSize);
+
+        // After 10 iterations: gpuA = 0xC4, gpuB = 0xC3
+        {
+            hipError_t err = hipMemcpy(h.data(), gpuA, kLargeBufferSize, hipMemcpyDeviceToHost);
+            EXPECT_EQ(err, hipSuccess) << "hipMemcpy gpuA failed: " << hipGetErrorString(err);
+            bool aOk = std::all_of(h.begin(), h.end(),
+                                   [](uint8_t v){ return v == 0xC4; });
+            EXPECT_TRUE(aOk);
+        }
+        {
+            hipError_t err = hipMemcpy(h.data(), gpuB, kLargeBufferSize, hipMemcpyDeviceToHost);
+            EXPECT_EQ(err, hipSuccess) << "hipMemcpy gpuB failed: " << hipGetErrorString(err);
+            bool bOk = std::all_of(h.begin(), h.end(),
+                                   [](uint8_t v){ return v == 0xC3; });
+            EXPECT_TRUE(bOk);
+        }
+    }
+
+    // ===================== Cleanup =====================
+    // MR deregistration must happen before bufGuards free the underlying memory.
+    for (int i = 0; i < kNumOutstanding; i++) {
+        if (mrs[i]) DeregisterMemory(comm, mrs[i]);
+    }
+    // bufGuards, gpuAGuard, gpuBGuard, gpuStreamGuard clean up automatically.
+}
+
 // Flush Tests
 
 TEST_F(NetIbMPITest, FlushAfterRecv) {
@@ -1013,6 +2148,201 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceInvalidProps) {
     ncclResult_t result = MakeVirtualDevice(&vdev, &vProps);
     EXPECT_EQ(result, ncclInvalidUsage) << "Should fail with zero devices";
 
+}
+
+// =============================================================================
+// Test: MergeMultipleDevices
+//
+// Tests makeVDevice() with increasing numbers of physical devices:
+//   - 3 devices: should succeed (within NCCL_NET_MAX_DEVS_PER_NIC = 4 limit)
+//   - 4 devices: should succeed (at the limit)
+//   - 5 devices: should fail (exceeds the limit)
+//
+// makeVDevice() is additive — each successful call appends a new merged device
+// to the device list. Physical devices remain visible (hiding is done by the
+// topology layer's XML manipulation, not by makeVDevice).
+//
+// =============================================================================
+TEST_F(NetIbMPITest, MergeMultipleDevices) {
+    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
+        << "Test requirements not met";
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+    ASSERT_GT(ndev, 0);
+
+    // --- Collect all device properties and identify physical (non-merged) devices ---
+    std::vector<ncclNetProperties_t> allProps(ndev);
+    std::vector<int> physicalDevices;
+
+    for (int i = 0; i < ndev; i++) {
+        memset(&allProps[i], 0, sizeof(ncclNetProperties_t));
+        ASSERT_EQ(GetDeviceProperties(i, &allProps[i]), ncclSuccess);
+
+        bool isMerged = (allProps[i].name && strchr(allProps[i].name, '+') != nullptr);
+        if (!isMerged) {
+            physicalDevices.push_back(i);
+        }
+    }
+
+    if (physicalDevices.size() < 5) {
+        GTEST_SKIP() << "Need at least 5 physical (non-merged) IB devices, found "
+                     << physicalDevices.size();
+    }
+
+    // --- Find 5 physical devices with matching speed ---
+    int targetSpeed = allProps[physicalDevices[0]].speed;
+    std::vector<int> selected;
+
+    for (size_t i = 0; i < physicalDevices.size() && selected.size() < 5; i++) {
+        int devIdx = physicalDevices[i];
+        if (allProps[devIdx].speed == targetSpeed) {
+            selected.push_back(devIdx);
+        }
+    }
+
+    if (selected.size() < 5) {
+        GTEST_SKIP() << "Could not find 5 physical devices with matching speed. "
+                     << "Found " << selected.size() << " devices at speed " << targetSpeed;
+    }
+
+    // =========================================================================
+    // Sub-test 1: Merge 3 devices (should succeed, under limit of 4)
+    // =========================================================================
+    {
+        int ndevBefore = 0;
+        ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
+
+        ncclNetVDeviceProps_t vProps;
+        memset(&vProps, 0, sizeof(vProps));
+        vProps.ndevs = 3;
+        vProps.devs[0] = selected[0];
+        vProps.devs[1] = selected[1];
+        vProps.devs[2] = selected[2];
+
+        int vdev = -1;
+        ncclResult_t result = MakeVirtualDevice(&vdev, &vProps);
+
+        EXPECT_EQ(result, ncclSuccess)
+            << "Merging 3 devices should succeed (within limit of 4)";
+
+        if (result == ncclSuccess) {
+            EXPECT_GE(vdev, 0) << "Virtual device index should be non-negative";
+
+            // Device count should increase by 1
+            int ndevAfter = 0;
+            ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
+            EXPECT_EQ(ndevAfter, ndevBefore + 1)
+                << "makeVDevice should add exactly one device";
+
+            // Verify the new merged device properties
+            ncclNetProperties_t vdevProps;
+            memset(&vdevProps, 0, sizeof(vdevProps));
+            ASSERT_EQ(GetDeviceProperties(vdev, &vdevProps), ncclSuccess);
+
+            // Name should contain two '+' separators (3 devices)
+            ASSERT_NE(vdevProps.name, nullptr);
+            std::string mergedName(vdevProps.name);
+            int plusCount = 0;
+            for (char c : mergedName) {
+                if (c == '+') plusCount++;
+            }
+            EXPECT_EQ(plusCount, 2)
+                << "3-device merge should have 2 '+' separators, got " << plusCount
+                << " in name '" << mergedName << "'";
+
+            // Speed should be sum of 3 constituents
+            int expectedSpeed = allProps[selected[0]].speed +
+                                allProps[selected[1]].speed +
+                                allProps[selected[2]].speed;
+            EXPECT_EQ(vdevProps.speed, expectedSpeed)
+                << "Merged speed should be " << expectedSpeed << ", got " << vdevProps.speed;
+        }
+    }
+
+    // =========================================================================
+    // Sub-test 2: Merge 4 devices (should succeed, at the limit)
+    // =========================================================================
+    {
+        int ndevBefore = 0;
+        ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
+
+        ncclNetVDeviceProps_t vProps;
+        memset(&vProps, 0, sizeof(vProps));
+        vProps.ndevs = 4;
+        vProps.devs[0] = selected[0];
+        vProps.devs[1] = selected[1];
+        vProps.devs[2] = selected[2];
+        vProps.devs[3] = selected[3];
+
+        int vdev = -1;
+        ncclResult_t result = MakeVirtualDevice(&vdev, &vProps);
+
+        EXPECT_EQ(result, ncclSuccess)
+            << "Merging 4 devices should succeed (at the limit of NCCL_NET_MAX_DEVS_PER_NIC)";
+
+        if (result == ncclSuccess) {
+            EXPECT_GE(vdev, 0);
+
+            int ndevAfter = 0;
+            ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
+            EXPECT_EQ(ndevAfter, ndevBefore + 1);
+
+            ncclNetProperties_t vdevProps;
+            memset(&vdevProps, 0, sizeof(vdevProps));
+            ASSERT_EQ(GetDeviceProperties(vdev, &vdevProps), ncclSuccess);
+
+            // Name should contain three '+' separators (4 devices)
+            ASSERT_NE(vdevProps.name, nullptr);
+            std::string mergedName(vdevProps.name);
+            int plusCount = 0;
+            for (char c : mergedName) {
+                if (c == '+') plusCount++;
+            }
+            EXPECT_EQ(plusCount, 3)
+                << "4-device merge should have 3 '+' separators, got " << plusCount
+                << " in name '" << mergedName << "'";
+
+            // Speed should be sum of 4 constituents
+            int expectedSpeed = allProps[selected[0]].speed +
+                                allProps[selected[1]].speed +
+                                allProps[selected[2]].speed +
+                                allProps[selected[3]].speed;
+            EXPECT_EQ(vdevProps.speed, expectedSpeed)
+                << "Merged speed should be " << expectedSpeed << ", got " << vdevProps.speed;
+        }
+    }
+
+    // =========================================================================
+    // Sub-test 3: Merge 5 devices (should FAIL, exceeds limit of 4)
+    // =========================================================================
+    {
+        int ndevBefore = 0;
+        ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
+
+        ncclNetVDeviceProps_t vProps;
+        memset(&vProps, 0, sizeof(vProps));
+        vProps.ndevs = 5;
+        vProps.devs[0] = selected[0];
+        vProps.devs[1] = selected[1];
+        vProps.devs[2] = selected[2];
+        vProps.devs[3] = selected[3];
+
+        int vdev = -1;
+        ncclResult_t result = MakeVirtualDevice(&vdev, &vProps);
+
+        EXPECT_NE(result, ncclSuccess)
+            << "Merging 5 devices should fail (exceeds NCCL_NET_MAX_DEVS_PER_NIC = 4)";
+
+        // Device count should NOT have changed
+        int ndevAfter = 0;
+        ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
+        EXPECT_EQ(ndevAfter, ndevBefore)
+            << "Failed merge should not add any devices";
+    }
 }
 
 // Stress and Edge Case Tests

@@ -1,0 +1,14 @@
+{
+  "attack_id": "llm_unavailable_airgap_parity",
+  "status": "defeated",
+  "details": {
+    "llm_on": {
+      "status": "pass",
+      "gate": null
+    },
+    "llm_off": {
+      "status": "pass",
+      "gate": null
+    }
+  }
+}

@@ -18,6 +18,17 @@ public:
     MStatsServer() : co{this}
     {
     }
-    MOCK_METHOD(Stats *, getStats, (), (override));
+    MOCK_METHOD(Stats *, getStats, (), (noexcept, override));
+};
+
+class MStatsCollection : public StatsCollection {
+    ContextOverride<StatsCollection> co;
+
+public:
+    MStatsCollection() : co{this}
+    {
+    }
+    MOCK_METHOD(void, addIo, (IoType ioType, StatsBackend backend, uint64_t bytes, uint64_t timeUs),
+                (const, noexcept, override));
 };
 }
