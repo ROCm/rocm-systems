@@ -221,10 +221,10 @@ class NullDevice : public amd::Device {
   }
 
   //! Just returns nullptr for the dummy device
-  void svmFree(void* ptr  //!< svm pointer needed to be freed
+  bool svmFree(void* ptr  //!< svm pointer needed to be freed
   ) const override {
     ShouldNotReachHere();
-    return;
+    return false;
   }
 
   void* virtualAlloc(void* req_addr, size_t size, size_t alignment) override {
@@ -452,7 +452,7 @@ class Device : public NullDevice {
   virtual void* svmAlloc(amd::Context& context, size_t size, size_t alignment,
                          cl_svm_mem_flags flags = CL_MEM_READ_WRITE, void* svmPtr = nullptr) const override;
 
-  virtual void svmFree(void* ptr) const override;
+  virtual bool svmFree(void* ptr) const override;
 
   virtual bool SetSvmAttributes(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
                                 bool use_cpu = false, int numa_id = kDefaultNumaNode) const override;

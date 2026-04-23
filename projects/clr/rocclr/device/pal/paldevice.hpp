@@ -128,7 +128,7 @@ class NullDevice : public amd::Device {
                          cl_svm_mem_flags flags, void* svmPtr) const {
     return NULL;
   }
-  virtual void svmFree(void* ptr) const { return; }
+  virtual bool svmFree(void* ptr) const { return false; }
   virtual void* virtualAlloc(void* addr, size_t size, size_t alignment) { return nullptr; };
   virtual bool virtualFree(void* addr) { return true; }
 
@@ -559,7 +559,7 @@ class Device : public NullDevice {
   void hostFree(void* ptr, size_t size) const;
 
   //! SVM free
-  virtual void svmFree(void* ptr) const;
+  virtual bool svmFree(void* ptr) const;
 
   //! Virtual address space allocation(reservation)
   virtual void* virtualAlloc(void* addr, size_t size, size_t alignment);

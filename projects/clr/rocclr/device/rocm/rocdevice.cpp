@@ -2884,12 +2884,14 @@ bool Device::SvmAllocInit(void* memory, size_t size) const {
 }
 
 // ================================================================================================
-void Device::svmFree(void* ptr) const {
+bool Device::svmFree(void* ptr) const {
   amd::Memory* svmMem = amd::MemObjMap::FindMemObj(ptr);
   if (nullptr != svmMem) {
     amd::MemObjMap::RemoveMemObj(svmMem->getSvmPtr());
     svmMem->release();
+    return true;
   }
+  return false;
 }
 
 // ================================================================================================

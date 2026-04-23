@@ -1929,7 +1929,7 @@ class Device : public RuntimeObject {
   /**
    * @copydoc amd::Context::svmFree
    */
-  virtual void svmFree(void* ptr) const = 0;
+  virtual bool svmFree(void* ptr) const = 0;
 
   /**
    * Validatates Virtual Address range between parent and sub-buffer.

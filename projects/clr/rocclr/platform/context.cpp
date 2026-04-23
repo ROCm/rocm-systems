@@ -351,9 +351,10 @@ void* Context::svmAlloc(size_t size, size_t alignment, cl_svm_mem_flags flags,
 void Context::svmFree(void* ptr) const {
   amd::ScopedLock lock(&ctxLock_);
   for (const auto& dev : svmAllocDevice_) {
-    dev->svmFree(ptr);
+    if (dev->svmFree(ptr)) {
+      break;
+    }
   }
-  return;
 }
 
 bool Context::containsDevice(const Device* device) const {

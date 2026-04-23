@@ -2424,16 +2424,18 @@ void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_
   return svmPtr;
 }
 
-void Device::svmFree(void* ptr) const {
+bool Device::svmFree(void* ptr) const {
   if (freeCPUMem_) {
     amd::Os::alignedFree(ptr);
-  } else {
-    amd::Memory* svmMem = amd::MemObjMap::FindMemObj(ptr);
-    if (nullptr != svmMem) {
-      amd::MemObjMap::RemoveMemObj(ptr);
-      svmMem->release();
-    }
+    return true;
   }
+  amd::Memory* svmMem = amd::MemObjMap::FindMemObj(ptr);
+  if (nullptr != svmMem) {
+    amd::MemObjMap::RemoveMemObj(ptr);
+    svmMem->release();
+    return true;
+  }
+  return false;
 }
 
 // ================================================================================================
