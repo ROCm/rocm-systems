@@ -185,19 +185,19 @@ TEST_F(HipFileConfiguration, OverrideDisabledFallbackBackend)
 TEST_F(HipFileConfiguration, StatsLevelEnvironmentVariableIsNotSet)
 {
     expect_configuration_statslevel(nullptr);
-    ASSERT_EQ(0, Configuration().statsLevel());
+    ASSERT_EQ(1, Configuration().statsLevel());
 }
 
 TEST_F(HipFileConfiguration, StatsLevelEnvironmentVariableIsInvalid)
 {
     expect_configuration_statslevel("not-a-number");
-    ASSERT_EQ(0, Configuration().statsLevel());
+    ASSERT_EQ(1, Configuration().statsLevel());
 }
 
 TEST_F(HipFileConfiguration, StatsLevelEnvironmentVariableIsSet)
 {
-    expect_configuration_statslevel("1");
-    ASSERT_EQ(1, Configuration().statsLevel());
+    expect_configuration_statslevel("2");
+    ASSERT_EQ(2, Configuration().statsLevel());
 }
 
 TEST_F(HipFileConfiguration, UnsupportedFilesystemsDisabledIfEnvironmentVariableIsNotSet)
