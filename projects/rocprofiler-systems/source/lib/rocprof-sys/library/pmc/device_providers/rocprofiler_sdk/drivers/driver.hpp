@@ -4,11 +4,18 @@
 #pragma once
 
 #include "common/defines.h"
+#include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 
 #include <cstddef>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include <rocprofiler-sdk/context.h>
+#include <rocprofiler-sdk/counters.h>
+#include <rocprofiler-sdk/device_counting_service.h>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 #if ROCPROFSYS_ROCM_VERSION >= 70000
 #    include <rocprofiler-sdk/counter_config.h>
 #else
@@ -19,30 +26,24 @@ using rocprofiler_device_counting_agent_cb_t = rocprofiler_agent_set_profile_cal
 using rocprofiler_device_counting_service_cb_t =
     rocprofiler_device_counting_service_callback_t;
 #endif
-#include <rocprofiler-sdk/counters.h>
-#include <rocprofiler-sdk/device_counting_service.h>
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/rocprofiler.h>
 
 namespace rocprofsys::pmc::drivers::rocprofiler_sdk
 {
 
-/**
- * @brief Thin wrapper around rocprofiler-sdk C APIs used by the PMC subsystem.
- *
- * Wraps both runtime APIs (sampling, context start/stop) and setup APIs
- * (counter enumeration, profile config, device counting configuration).
- * The provider calls setup APIs during construction (within tool_init),
- * and the device calls runtime APIs during sampling.
- */
+using collectors::gpu_perf_counter::counter_metadata;
+using collectors::gpu_perf_counter::dimension_position;
+
 struct driver
 {
+    using counter_config_id_t          = rocprofiler_counter_config_id_t;
+    using counter_record_t             = rocprofiler_counter_record_t;
+    using device_counting_agent_cb_t   = rocprofiler_device_counting_agent_cb_t;
+    using device_counting_service_cb_t = rocprofiler_device_counting_service_cb_t;
+
     static rocprofiler_status_t create_context(rocprofiler_context_id_t* context)
     {
         return rocprofiler_create_context(context);
     }
-
-    // --- Context lifecycle ---
 
     static rocprofiler_status_t start_context(rocprofiler_context_id_t context)
     {
@@ -53,8 +54,6 @@ struct driver
     {
         return rocprofiler_stop_context(context);
     }
-
-    // --- Runtime (hot path) ---
 
     static rocprofiler_status_t sample_device_counting_service(
         rocprofiler_context_id_t context, rocprofiler_user_data_t user_data,
@@ -71,14 +70,55 @@ struct driver
         return rocprofiler_query_record_counter_id(record_id, counter_id);
     }
 
-    static rocprofiler_status_t query_counter_info(
-        rocprofiler_counter_id_t counter, rocprofiler_counter_info_version_id_t version,
-        void* info)
+    static std::vector<counter_metadata> query_counter_details(
+        rocprofiler_counter_id_t counter_id)
     {
-        return rocprofiler_query_counter_info(counter, version, info);
-    }
+        auto safe_str = [](const char* str) {
+            return str != nullptr ? std::string{ str } : std::string{};
+        };
 
-    // --- Setup (called by provider during construction) ---
+#if ROCPROFSYS_ROCM_VERSION >= 70000
+        rocprofiler_counter_info_v1_t info{};
+        auto                          status = rocprofiler_query_counter_info(
+            counter_id, ROCPROFILER_COUNTER_INFO_VERSION_1, &info);
+        if(status != ROCPROFILER_STATUS_SUCCESS || info.name == nullptr) return {};
+
+        auto result = std::vector<counter_metadata>{};
+        result.reserve(info.dimensions_instances_count);
+
+        for(uint64_t i = 0; i < info.dimensions_instances_count; ++i)
+        {
+            const auto* dim_inst = info.dimensions_instances[i];
+            auto        dims     = std::vector<dimension_position>{};
+            dims.reserve(dim_inst->dimensions_count);
+            for(uint64_t d = 0; d < dim_inst->dimensions_count; ++d)
+            {
+                dims.push_back({ std::string{ dim_inst->dimensions[d]->dimension_name },
+                                 dim_inst->dimensions[d]->index });
+            }
+            result.push_back(counter_metadata{
+                dim_inst->instance_id, std::string{ info.name },
+                safe_str(info.description), safe_str(info.block),
+                safe_str(info.expression), static_cast<bool>(info.is_constant),
+                static_cast<bool>(info.is_derived), std::move(dims) });
+        }
+        return result;
+#else
+        rocprofiler_counter_info_v0_t info{};
+        auto                          status = rocprofiler_query_counter_info(
+            counter_id, ROCPROFILER_COUNTER_INFO_VERSION_0, &info);
+        if(status != ROCPROFILER_STATUS_SUCCESS || info.name == nullptr) return {};
+
+        return { counter_metadata{ counter_id.handle,
+                                   std::string{ info.name },
+                                   safe_str(info.description),
+                                   safe_str(info.block),
+                                   safe_str(info.expression),
+                                   static_cast<bool>(info.is_constant),
+                                   static_cast<bool>(info.is_derived),
+                                   {} } };
+#endif
+    }
 
     static rocprofiler_status_t iterate_agent_supported_counters(
         rocprofiler_agent_id_t agent_id, rocprofiler_available_counters_cb_t callback,
@@ -111,9 +151,6 @@ struct driver
     }
 };
 
-/**
- * @brief Factory for creating driver instances.
- */
 struct driver_factory
 {
     using driver_t = driver;

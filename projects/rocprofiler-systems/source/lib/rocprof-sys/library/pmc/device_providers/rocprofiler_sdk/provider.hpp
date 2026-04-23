@@ -3,15 +3,12 @@
 
 #pragma once
 
-#include "common/defines.h"
 #include "core/agent.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/device.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 
-#include <rocprofiler-sdk/counters.h>
-#include <rocprofiler-sdk/device_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -20,6 +17,7 @@
 #include <iterator>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -92,7 +90,7 @@ private:
                 continue;
             }
 
-            auto profile = rocprofiler_counter_config_id_t{};
+            auto profile = typename driver_t::counter_config_id_t{};
             auto status  = m_driver_api->create_counter_config(
                 agent_id, filtered_ids.data(), filtered_ids.size(), &profile);
             if(status != ROCPROFILER_STATUS_SUCCESS)
@@ -116,11 +114,11 @@ private:
             status = m_driver_api->configure_device_counting_service(
                 counter_context, rocprofiler_buffer_id_t{ 0 }, agent_id,
                 [](rocprofiler_context_id_t ctx, rocprofiler_agent_id_t agent_cb,
-                   rocprofiler_device_counting_agent_cb_t set_config, void* user_data) {
-                    auto* configs = static_cast<
-                        std::unordered_map<uint64_t, rocprofiler_counter_config_id_t>*>(
-                        user_data);
-                    auto iter = configs->find(agent_cb.handle);
+                   typename driver_t::device_counting_agent_cb_t set_config,
+                   void*                                         user_data) {
+                    auto* configs = static_cast<std::unordered_map<
+                        uint64_t, typename driver_t::counter_config_id_t>*>(user_data);
+                    auto  iter    = configs->find(agent_cb.handle);
                     if(iter != configs->end()) set_config(ctx, iter->second);
                 },
                 &m_profile_configs);
@@ -169,26 +167,13 @@ private:
     {
         auto result = std::vector<rocprofiler_counter_id_t>{};
         result.reserve(supported.size());
-        std::copy_if(supported.begin(), supported.end(), std::back_inserter(result),
-                     [&](const rocprofiler_counter_id_t& counter_id) {
-#if ROCPROFSYS_ROCM_VERSION >= 70000
-                         rocprofiler_counter_info_v1_t info{};
-                         const auto status = m_driver_api->query_counter_info(
-                             counter_id, ROCPROFILER_COUNTER_INFO_VERSION_1, &info);
-#else
-                         rocprofiler_counter_info_v0_t info{};
-                         const auto status = m_driver_api->query_counter_info(
-                             counter_id, ROCPROFILER_COUNTER_INFO_VERSION_0, &info);
-#endif
-
-                         if(status != ROCPROFILER_STATUS_SUCCESS || info.name == nullptr)
-                         {
-                             return false;
-                         }
-
-                         return enabled.is_counter_enabled(
-                             { std::string{ info.name }, device_index });
-                     });
+        std::copy_if(
+            supported.begin(), supported.end(), std::back_inserter(result),
+            [&](const rocprofiler_counter_id_t& counter_id) {
+                const auto details = m_driver_api->query_counter_details(counter_id);
+                if(details.empty()) return false;
+                return enabled.is_counter_enabled({ details.front().name, device_index });
+            });
         return result;
     }
 
@@ -198,69 +183,11 @@ private:
         auto result = std::vector<counter_metadata>{};
         result.reserve(counter_ids.size());
 
-        auto safe_str = [](const char* str) {
-            return str != nullptr ? std::string{ str } : std::string{};
-        };
-
-#if ROCPROFSYS_ROCM_VERSION >= 70000
-        auto build_dims =
-            [](const rocprofiler_counter_record_dimension_instance_info_t* dim_inst) {
-                auto dims = std::vector<dimension_position>{};
-                dims.reserve(dim_inst->dimensions_count);
-                std::transform(dim_inst->dimensions,
-                               dim_inst->dimensions + dim_inst->dimensions_count,
-                               std::back_inserter(dims), [](const auto* dim) {
-                                   return dimension_position{
-                                       std::string{ dim->dimension_name }, dim->index
-                                   };
-                               });
-                return dims;
-            };
-#endif
-
         for(const auto& cid : counter_ids)
         {
-#if ROCPROFSYS_ROCM_VERSION >= 70000
-            rocprofiler_counter_info_v1_t cinfo{};
-            const auto                    status = m_driver_api->query_counter_info(
-                cid, ROCPROFILER_COUNTER_INFO_VERSION_1, &cinfo);
-            if(status != ROCPROFILER_STATUS_SUCCESS || cinfo.name == nullptr) continue;
-
-            const auto base_name   = std::string{ cinfo.name };
-            const auto description = safe_str(cinfo.description);
-            const auto block       = safe_str(cinfo.block);
-            const auto expression  = safe_str(cinfo.expression);
-            const auto is_constant = static_cast<bool>(cinfo.is_constant);
-            const auto is_derived  = static_cast<bool>(cinfo.is_derived);
-
-            auto make_meta = [&](counter_id_t                    counter_id,
-                                 std::vector<dimension_position> dims) {
-                return counter_metadata{ counter_id, base_name,      description,
-                                         block,      expression,     is_constant,
-                                         is_derived, std::move(dims) };
-            };
-
-            std::transform(cinfo.dimensions_instances,
-                           cinfo.dimensions_instances + cinfo.dimensions_instances_count,
-                           std::back_inserter(result), [&](const auto* dim_inst) {
-                               return make_meta(dim_inst->instance_id,
-                                                build_dims(dim_inst));
-                           });
-#else
-            rocprofiler_counter_info_v0_t cinfo{};
-            const auto                    status = m_driver_api->query_counter_info(
-                cid, ROCPROFILER_COUNTER_INFO_VERSION_0, &cinfo);
-            if(status != ROCPROFILER_STATUS_SUCCESS || cinfo.name == nullptr) continue;
-
-            result.push_back(counter_metadata{ cid.handle,
-                                               std::string{ cinfo.name },
-                                               safe_str(cinfo.description),
-                                               safe_str(cinfo.block),
-                                               safe_str(cinfo.expression),
-                                               static_cast<bool>(cinfo.is_constant),
-                                               static_cast<bool>(cinfo.is_derived),
-                                               {} });
-#endif
+            auto details = m_driver_api->query_counter_details(cid);
+            result.insert(result.end(), std::make_move_iterator(details.begin()),
+                          std::make_move_iterator(details.end()));
         }
 
         return result;
@@ -271,7 +198,8 @@ private:
     // Must outlive the context: the SDK callback set via
     // configure_device_counting_service fires during start_context(), reading from this
     // map via the user_data pointer.
-    std::unordered_map<uint64_t, rocprofiler_counter_config_id_t> m_profile_configs;
+    std::unordered_map<uint64_t, typename driver_t::counter_config_id_t>
+        m_profile_configs;
 };
 
 }  // namespace rocprofsys::pmc::device_providers::rocprofiler_sdk

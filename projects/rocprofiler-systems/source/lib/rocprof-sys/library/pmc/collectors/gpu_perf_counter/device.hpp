@@ -27,9 +27,9 @@ class device
 {
 public:
     device(std::shared_ptr<Driver> driver, rocprofiler_context_id_t context,
-           std::shared_ptr<rocprofsys::agent> agent,
-           rocprofiler_counter_config_id_t    profile_config,
-           std::vector<counter_metadata>      counter_meta)
+           std::shared_ptr<rocprofsys::agent>   agent,
+           typename Driver::counter_config_id_t profile_config,
+           std::vector<counter_metadata>        counter_meta)
     : m_driver_api{ std::move(driver) }
     , m_context{ context }
     , m_agent{ std::move(agent) }
@@ -117,12 +117,12 @@ public:
     }
 
 private:
-    std::shared_ptr<Driver>                   m_driver_api;
-    rocprofiler_context_id_t                  m_context;
-    std::shared_ptr<rocprofsys::agent>        m_agent;
-    rocprofiler_counter_config_id_t           m_profile_config;
-    std::vector<counter_metadata>             m_counter_meta;
-    std::vector<rocprofiler_counter_record_t> m_record_buffer;
+    std::shared_ptr<Driver>                        m_driver_api;
+    rocprofiler_context_id_t                       m_context;
+    std::shared_ptr<rocprofsys::agent>             m_agent;
+    typename Driver::counter_config_id_t           m_profile_config;
+    std::vector<counter_metadata>                  m_counter_meta;
+    std::vector<typename Driver::counter_record_t> m_record_buffer;
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter

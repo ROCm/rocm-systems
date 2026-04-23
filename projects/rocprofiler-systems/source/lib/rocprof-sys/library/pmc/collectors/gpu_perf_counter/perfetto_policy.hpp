@@ -94,8 +94,10 @@ struct perfetto_policy
         const auto& thread_info = thread_info::get(0, InternalTID);
         if(!thread_info) return;
 
-        for(const auto& [device_index, data] : detail::get_perfetto_data())
+        for(const auto& entry : detail::get_perfetto_data())
         {
+            const auto  device_index = entry.first;
+            const auto& data         = entry.second;
             if(!data.samples) continue;
 
             LOG_DEBUG("Post-processing {} samples for device {}", data.samples->size(),

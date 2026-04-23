@@ -10,19 +10,19 @@
 #include <cstddef>
 #include <memory>
 #include <utility>
+#include <vector>
 
 namespace rocprofsys::pmc::drivers::rocprofiler_sdk::testing
 {
 
-/**
- * @brief Mock implementation of rocprofiler-sdk driver for unit testing.
- *
- * Mirrors the real driver interface exactly — only the methods that the
- * PMC device and provider actually call.
- */
 class mock_driver
 {
 public:
+    using counter_config_id_t          = rocprofiler_counter_config_id_t;
+    using counter_record_t             = rocprofiler_counter_record_t;
+    using device_counting_agent_cb_t   = rocprofiler_device_counting_agent_cb_t;
+    using device_counting_service_cb_t = rocprofiler_device_counting_service_cb_t;
+
     MOCK_METHOD(rocprofiler_status_t, create_context,
                 (rocprofiler_context_id_t * context));
 
@@ -39,9 +39,8 @@ public:
                 (rocprofiler_counter_instance_id_t record_id,
                  rocprofiler_counter_id_t*         counter_id));
 
-    MOCK_METHOD(rocprofiler_status_t, query_counter_info,
-                (rocprofiler_counter_id_t              counter,
-                 rocprofiler_counter_info_version_id_t version, void* info));
+    MOCK_METHOD((std::vector<collectors::gpu_perf_counter::counter_metadata>),
+                query_counter_details, (rocprofiler_counter_id_t counter_id));
 
     MOCK_METHOD(rocprofiler_status_t, iterate_agent_supported_counters,
                 (rocprofiler_agent_id_t              agent_id,
@@ -57,14 +56,6 @@ public:
                  rocprofiler_device_counting_service_cb_t callback, void* user_data));
 };
 
-/**
- * @brief Factory for creating mock driver instances in tests.
- *
- * Supports two modes:
- * - Default: creates a new mock_driver each time (for device-level unit tests)
- * - Injectable: set a shared mock via set_mock() before constructing a provider,
- *   so the test can set expectations on the same instance the provider uses.
- */
 struct mock_driver_factory
 {
     using driver_t = mock_driver;
