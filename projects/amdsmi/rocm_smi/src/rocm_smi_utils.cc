@@ -1402,7 +1402,7 @@ void system_wait(int milli_seconds) {
     LOG_DEBUG(ss);
   }
 
-  usleep(waitTime);
+  usleep(static_cast<unsigned int>(waitTime));
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   if (is_logger_enabled) {
