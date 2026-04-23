@@ -98,6 +98,23 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   for (uint32_t lane = 0; lane < cu->wf_size(); ++lane)
     cu->write_vgpr(vbase, lane, workitem_base + lane);
 
+  // Flat memory apertures: upper 32 bits of the 48-bit aperture addresses.
+  // Used by SRC_SHARED_BASE (enc 235), SRC_SHARED_LIMIT (236),
+  // SRC_PRIVATE_BASE (237), SRC_PRIVATE_LIMIT (238).
+  //
+  // Values from MAKE_LDS_APP_BASE_V9 / MAKE_SCRATCH_APP_BASE_V9 in the
+  // Linux KFD driver (kfd_flat_memory.c):
+  //   https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/amd/amdkfd/kfd_flat_memory.c
+  //
+  // GFX9+ uses bits [63:48] of the virtual address to identify the memory
+  // space: 0x0001 = LDS, 0x0002 = scratch, anything else = global.
+  // Aperture size is implicitly 4GB (lower 32 bits = offset).
+  wf->set_apertures(
+      static_cast<uint32_t>(0x1000000000000ULL >> 32),  // shared_base  (MAKE_LDS_APP_BASE_V9)
+      static_cast<uint32_t>(0x10000FFFFFFFFULL >> 32),  // shared_limit
+      static_cast<uint32_t>(0x2000000000000ULL >> 32),  // private_base (MAKE_SCRATCH_APP_BASE_V9)
+      static_cast<uint32_t>(0x20000FFFFFFFFULL >> 32)); // private_limit
+
   // Scratch (private segment) setup.
   // Each wavefront gets a unique slice of scratch memory. The per-lane
   // private size is private_segment_fixed_size; the per-wave region is

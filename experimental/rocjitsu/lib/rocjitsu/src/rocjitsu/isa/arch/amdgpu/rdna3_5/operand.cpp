@@ -530,6 +530,14 @@ uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {
     return 0xC0800000u; // -4.0f
   if (ev == 248)
     return 0x3E22F983u; // 1/(2*pi)
+  if (ev == 235)
+    return wf.shared_base(); // SRC_SHARED_BASE
+  if (ev == 236)
+    return wf.shared_limit(); // SRC_SHARED_LIMIT
+  if (ev == 237)
+    return wf.private_base(); // SRC_PRIVATE_BASE
+  if (ev == 238)
+    return wf.private_limit(); // SRC_PRIVATE_LIMIT
   if (ev == 251)
     return wf.vcc() == 0 ? 1u : 0u; // VCCZ
   if (ev == 252)

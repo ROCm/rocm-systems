@@ -144,6 +144,18 @@ public:
   /// @param val Scratch base byte address (set at dispatch by CP).
   void set_scratch_base(uint64_t val) { scratch_base_ = val; }
 
+  /// @brief Flat memory aperture registers (SRC_SHARED_BASE etc., enc 235-238).
+  /// @details These hold the upper 32 bits of the 48-bit aperture addresses.
+  ///          Used by flat instructions to distinguish LDS vs private vs global.
+  uint32_t shared_base() const { return shared_base_; }
+  uint32_t shared_limit() const { return shared_limit_; }
+  uint32_t private_base() const { return private_base_; }
+  uint32_t private_limit() const { return private_limit_; }
+  void set_apertures(uint32_t sb, uint32_t sl, uint32_t pb, uint32_t pl) {
+    shared_base_ = sb; shared_limit_ = sl;
+    private_base_ = pb; private_limit_ = pl;
+  }
+
   /// @brief Return the wait counters for outstanding memory operations.
   /// @returns Reference to the wait counters.
   WaitCounters &wait_counters() { return wait_counters_; }
@@ -348,6 +360,10 @@ private:
   uint64_t vcc_ = 0;                ///< Vector condition code (per-lane comparison result).
   uint32_t m0_ = 0;                 ///< M0 special register (misc addressing).
   uint64_t scratch_base_ = 0;       ///< Per-wavefront scratch (private segment) base address.
+  uint32_t shared_base_ = 0;        ///< Upper 32 bits of shared (LDS) aperture base.
+  uint32_t shared_limit_ = 0;       ///< Upper 32 bits of shared (LDS) aperture limit.
+  uint32_t private_base_ = 0;       ///< Upper 32 bits of private (scratch) aperture base.
+  uint32_t private_limit_ = 0;      ///< Upper 32 bits of private (scratch) aperture limit.
   WfState state_ = WfState::HALTED; ///< Current execution state.
   WaitCounters wait_counters_;      ///< Outstanding memory operation counters.
 
