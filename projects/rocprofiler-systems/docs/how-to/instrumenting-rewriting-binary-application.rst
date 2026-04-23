@@ -111,12 +111,14 @@ view the help menu.
                                                             --min-address-range (count: 1, dtype: int)
                                                             --min-instructions-loop (count: 1, dtype: int)
                                                             --min-address-range-loop (count: 1, dtype: int)
+                                                            --max-library-functions (count: 1, dtype: int)
                                                             --coverage (max: 1, dtype: bool)
                                                             --dynamic-callsites (max: 1, dtype: boolean)
                                                             --traps (max: 1, dtype: boolean)
                                                             --loop-traps (max: 1, dtype: boolean)
                                                             --allow-overlapping (max: 1, dtype: bool)
-                                                            --parse-all-modules (max: 1, dtype: bool)
+                                                            --exclude-all-internal-lib-paths (max: 1, dtype: boolean)
+                                                            --exe-only (max: 1, dtype: boolean)
                                                             --batch-size (count: 1, dtype: int)
                                                             --dyninst-rt (min: 1, dtype: filepath)
                                                             --dyninst-options (count: unlimited)
@@ -137,13 +139,13 @@ view the help menu.
       --simulate                     Exit after outputting diagnostic {available,instrumented,excluded,overlapping} module
                                     function lists, e.g. available.txt (max: 1, dtype: boolean)
       --dump-info                    Write diagnostic module function reports (available, instrumented, excluded, coverage,
-                                    overlapping) to files in the output directory. Includes per-function heuristic constraint
-                                    results in JSON/XML formats (max: 0)
+                                    overlapping) to {print-dir}/instrumentation/. Includes per-function heuristic constraint
+                                    results in {print-format} formats (max: 0)
       --print-format [ json | txt | xml ]
-                                    Output file format(s) for --dump-info diagnostic reports, e.g. {print-dir}/available.txt
-                                    (min: 1, dtype: string)
-      --print-dir                    Output directory for diagnostic {available,instrumented,excluded,overlapping} module
-                                    function lists, e.g. {print-dir}/available.txt (count: 1, dtype: string)
+                                    Output file format(s) for --dump-info diagnostic reports, e.g.
+                                    {print-dir}/instrumentation/available.txt (min: 1, dtype: string)
+      --print-dir                    Output directory for --dump-info diagnostic reports. Files are written to
+                                    {print-dir}/instrumentation/ (count: 1, dtype: string)
       --print-available [ functions | functions+ | modules | pair | pair+ ]
                                     Print the available entities for instrumentation (functions, modules, or module-function
                                     pair) to stdout after applying regular expressions (count: 1)
@@ -221,7 +223,6 @@ view the help menu.
                                     instrumented. (count: unlimited)
       --internal-library-remove [ ld-linux-x86-64.so.2
                                  libBrokenLocale.so.1
-                                 libLLVM.so
                                  libamd_comgr.so
                                  libamd_smi.so
                                  libanl.so.1
@@ -229,7 +230,6 @@ view the help menu.
                                  libbz2.so
                                  libc.so.6
                                  libcaliper.so
-                                 libclang-cpp.so
                                  libcommon.so
                                  libdl.so.2
                                  libdw.so
@@ -318,6 +318,11 @@ view the help menu.
                                     exclude it from instrumentation (count: 1, dtype: int)
       --min-address-range-loop       If the address range of a function containing a loop is less than this value, exclude it
                                     from instrumentation (count: 1, dtype: int)
+      --max-library-functions        Skip shared libraries whose procedure count exceeds this threshold. Useful for keeping
+                                    instrumentation overhead manageable. The target executable is never gated by this. This
+                                    check is bypassed by module include/restrict regexes (--module-include/-MI,
+                                    --module-restrict/-MR) and function include/restrict regexes (--function-include/-I,
+                                    --function-restrict/-R). 0 = disabled. (count: 1, dtype: int)
       --coverage [ basic_block | function | none ]
                                     Enable recording the code coverage. If instrumenting in coverage mode ('-M converage'),
                                     this simply specifies the granularity. If instrumenting in trace or sampling mode, this
@@ -337,11 +342,14 @@ view the help menu.
       --allow-overlapping            Allow dyninst to instrument either multiple functions which overlap (share part of same
                                     function body) or single functions with multiple entry points. For more info, see Section
                                     2 of the DyninstAPI documentation. (max: 1, dtype: bool)
-      --parse-all-modules            By default, rocprof-sys simply requests Dyninst to provide all the procedures in the
-                                    application image. If this option is enabled, rocprof-sys will iterate over all the
-                                    modules and extract the functions. Theoretically, it should be the same but the data is
-                                    slightly different, possibly due to weak binding scopes. In general, enabling option will
-                                    probably have no visible effect (max: 1, dtype: bool)
+      --exclude-all-internal-lib-paths
+                                    By default, each internal library is excluded only at the path linked at startup. When
+                                    enabled, every on-disk path matching an internal library's filename is excluded. Useful
+                                    when the application dlopen()s a different copy at runtime. Trade-off: slower startup and
+                                    a larger filter set. (max: 1, dtype: boolean)
+      --exe-only                     Shorthand for excluding every shared library from instrumentation, leaving only the main
+                                    executable. Only takes effect during runtime instrumentation; ignored in binary-rewrite
+                                    mode. (max: 1, dtype: boolean)
 
       [DYNINST OPTIONS]
 
@@ -483,6 +491,12 @@ Selective instrumentation
 
 The default behavior of ``rocprof-sys-instrument`` does not instrument every symbol in the binary.
 The default rules are:
+
+* Skip instrumenting large shared libraries
+
+  * Processing a large amount of functions for instrumentation is expensive in time.
+    By default, to reduce this cost, libraries with more than 10000 functions are excluded.
+    This limit can be modified with the ``--max-library-functions`` option. Setting it to ``0`` disables the limit.
 
 * Skip instrumenting dynamic call-sites (such as function pointers)
 

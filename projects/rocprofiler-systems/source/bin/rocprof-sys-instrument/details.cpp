@@ -775,6 +775,40 @@ rocprofsys_get_origin(const char* _name, std::vector<int>&& _open_modes)
 
 //======================================================================================//
 //
+//  Get the estimated number of procedures in an object via Dyninst SymtabAPI.
+//  This is orders of magnitude quicker than querying the respective
+//  getProcedures()->size() However, we lose some accuracy.
+//
+//  We do not assume that process_module has been called.
+//
+//  E.g: With libomptarget.so, SymtabAPI reports ~49750 procedures, whilst
+//       BPatch_module::getProcedures()->size() reports ~49990.
+//
+//  Due to this, the returned value should be considered a lower bound.
+//
+
+size_t
+get_object_procedure_count_lb(object_t* _object)
+{
+    if(!_object) return 0;
+
+    SymTab::Symtab* _st = SymTab::convert(_object);
+    if(!_st)
+    {
+        verbprintf(1,
+                   "Warning! Failed to convert object %s to SymtabAPI for "
+                   "procedure count... assuming 0\n",
+                   _object->name().c_str());
+        return 0;
+    }
+
+    std::vector<symtab_func_t*> _fns;
+    _st->getAllFunctions(_fns);  // API does not return object
+    return _fns.size();
+}
+
+//======================================================================================//
+//
 //  Error callback routine.
 //
 void
@@ -855,8 +889,123 @@ using ::timemory::join::join;
 
 //======================================================================================//
 //
+//  Filters app_objects (internal constraints are applied in module level filtering)
+//
+
+std::vector<object_t*>
+filter_objects(std::vector<object_t*>* app_objects)
+{
+    if(!app_objects || app_objects->empty()) return {};
+
+    auto _wc = tim::component::wall_clock{};
+    auto _pr = tim::component::peak_rss{};
+    _wc.start();
+    _pr.start();
+
+    auto   _result         = std::vector<object_t*>{};
+    size_t _excluded_count = 0;
+
+    for(auto* obj : *app_objects)
+    {
+        if(!obj) continue;
+
+        // Exclude every shared library when --exe-only is requested.
+        if(exe_only && obj->isSharedLib())
+        {
+            verbprintf(2, "[filter] skipping shared lib '%s' (--exe-only)\n",
+                       obj->name().c_str());
+            continue;
+        }
+
+        // If function include/restrict filtering is active, keep the object so
+        // the later function-level filtering can make the decision
+        if(!func_include.empty() || !func_restrict.empty())
+        {
+            _result.emplace_back(obj);
+            continue;
+        }
+
+        bool _is_excluded     = false;
+        bool _included_module = false;
+
+        // -MI/-MR: if any module within this object matches a
+        // module-include or module-restrict regex, keep the object so the later
+        // module-level filtering can make the final per-module decision.
+        if(!file_include.empty() || !file_restrict.empty())
+        {
+            auto _mods = std::vector<module_t*>{};
+            obj->modules(_mods);  // Inexpensive
+            for(auto* mod : _mods)
+            {
+                if(!mod) continue;
+                auto _module_name = std::string{ get_name(mod) };
+                if(!file_include.empty() &&
+                   std::any_of(file_include.begin(), file_include.end(),
+                               [&](const auto& re) {
+                                   return std::regex_search(_module_name, re);
+                               }))
+                {
+                    _included_module = true;
+                    verbprintf(2,
+                               "[filter] forcing object '%s' "
+                               "(module-include-regex matched '%s')\n",
+                               obj->name().c_str(), _module_name.c_str());
+                    break;
+                }
+
+                if(!file_restrict.empty() &&
+                   std::any_of(file_restrict.begin(), file_restrict.end(),
+                               [&](const auto& re) {
+                                   return std::regex_search(_module_name, re);
+                               }))
+                {
+                    _included_module = true;
+                    verbprintf(2,
+                               "[filter] forcing object '%s' "
+                               "(module-restrict-regex matched '%s')\n",
+                               obj->name().c_str(), _module_name.c_str());
+                    break;
+                }
+            }
+        }
+
+        // --max-library-functions: shared libs only; main executable is never gated
+        if(!_included_module && max_library_functions > 0 && obj->isSharedLib())
+        {
+            auto _proc_count = get_object_procedure_count_lb(obj);
+            if(_proc_count > max_library_functions)
+            {
+                _is_excluded = true;
+                verbprintf(0,
+                           "[filter] skipping shared lib '%s' "
+                           "(%zu functions > --max-library-functions=%zu)\n",
+                           obj->name().c_str(), _proc_count, max_library_functions);
+            }
+        }
+
+        if(_is_excluded)
+        {
+            ++_excluded_count;
+            continue;
+        }
+
+        _result.emplace_back(obj);
+    }
+
+    _wc.stop();
+    _pr.stop();
+    verbprintf(0,
+               "Filtered objects: %zu of %zu included (%zu excluded) "
+               "(%.3f %s, %.3f %s)\n",
+               _result.size(), app_objects->size(), _excluded_count, _wc.get(),
+               _wc.display_unit().c_str(), _pr.get(), _pr.display_unit().c_str());
+
+    return _result;
+}
+
+//======================================================================================//
+//
 //  Filters app_modules by removing internal and user-excluded modules.
-//  Returns a new vector containing only the modules eligible for instrumentation.
 //
 
 std::vector<module_t*>
@@ -911,7 +1060,14 @@ filter_modules(std::vector<module_t*>* app_modules)
 
         if(_is_excluded)
         {
-            verbprintf(3, "Skipping internal module: '%s'\n", _module_name.c_str());
+            // Do not filter it out if internal function regex is active
+            if(!func_internal_include.empty())
+            {
+                _result.emplace_back(mod);
+                continue;
+            }
+            verbprintf(3, "[filter] Skipping internal module: '%s'\n",
+                       _module_name.c_str());
             ++_excluded_count;
             continue;
         }
@@ -922,7 +1078,7 @@ filter_modules(std::vector<module_t*>* app_modules)
             if(std::regex_search(_module_name, re))
             {
                 _is_excluded = true;
-                verbprintf(2, "[filter_modules] skipping module-exclude-regex: '%s'\n",
+                verbprintf(2, "[filter] skipping module-exclude-regex: '%s'\n",
                            _module_name.c_str());
                 break;
             }
@@ -943,7 +1099,7 @@ filter_modules(std::vector<module_t*>* app_modules)
             if(!_matched)
             {
                 _is_excluded = true;
-                verbprintf(2, "[filter_modules] skipping module-restrict-regex: '%s'\n",
+                verbprintf(2, "[filter] skipping module-restrict-regex: '%s'\n",
                            _module_name.c_str());
             }
         }
@@ -956,7 +1112,7 @@ filter_modules(std::vector<module_t*>* app_modules)
                 if(std::regex_search(_module_name, re))
                 {
                     _is_excluded = false;
-                    verbprintf(2, "[filter_modules] forcing module-include-regex: '%s'\n",
+                    verbprintf(2, "[filter] forcing module-include-regex: '%s'\n",
                                _module_name.c_str());
                     break;
                 }
@@ -985,38 +1141,63 @@ filter_modules(std::vector<module_t*>* app_modules)
 
 //======================================================================================//
 //
-//  Fetches procedures from the given modules. Assumes modules have already been
-//  filtered by filter_modules(). Falls back to app_image->getProcedures() if
-//  no modules are provided.
+//  Fetches procedures/modules from the given modules/objects. Assumes modules have
+//  already been filtered by the respective filter functions
 //
 
-std::vector<procedure_t*>*
-get_procedures(image_t* app_image, std::vector<module_t*>* app_modules,
-               bool include_uninstrumentable)
+std::vector<module_t*>*
+get_modules(std::vector<object_t*>* app_objects)
 {
+    if(!app_objects || app_objects->empty()) return nullptr;
+
     auto _wc = tim::component::wall_clock{};
     auto _pr = tim::component::peak_rss{};
     _wc.start();
     _pr.start();
 
-    // This is the original dyninst implementation. No filtering is applied
+    auto* modlist = new std::vector<module_t*>{};
+
+    // BPatch_object exposes modules() as an out-param API, not a getter
+    auto _scratch = std::vector<module_t*>{};
+    for(auto* obj : *app_objects)
+    {
+        if(!obj) continue;
+        _scratch.clear();
+        obj->modules(_scratch);
+        if(!_scratch.empty())
+            modlist->insert(modlist->end(), _scratch.begin(), _scratch.end());
+    }
+
+    _pr.stop();
+    _wc.stop();
+    verbprintf(1,
+               "Fetched modules from %zu objects: "
+               "%zu modules found (%.3f %s, %.3f %s)\n",
+               app_objects->size(), modlist->size(), _wc.get(),
+               _wc.display_unit().c_str(), _pr.get(), _pr.display_unit().c_str());
+
+    if(modlist->empty())
+    {
+        delete modlist;
+        return nullptr;
+    }
+
+    return modlist;
+}
+
+std::vector<procedure_t*>*
+get_procedures(std::vector<module_t*>* app_modules, bool include_uninstrumentable)
+{
     if(!app_modules || app_modules->empty())
     {
-        verbprintf(2, "No modules found, falling back to "
-                      "app_image->getProcedures()...\n");
-        auto* _procs = app_image->getProcedures(include_uninstrumentable);
-
-        _pr.stop();
-        _wc.stop();
-
-        verbprintf(0,
-                   "Fetching procedures from image (no modules): "
-                   "%zu procedures found (%.3f %s, %.3f %s)\n",
-                   _procs ? _procs->size() : 0, _wc.get(), _wc.display_unit().c_str(),
-                   _pr.get(), _pr.display_unit().c_str());
-
-        return _procs;
+        verbprintf(0, "No modules found\n");
+        return nullptr;
     }
+
+    auto _wc = tim::component::wall_clock{};
+    auto _pr = tim::component::peak_rss{};
+    _wc.start();
+    _pr.start();
 
     auto* proclist = new std::vector<procedure_t*>{};
 
@@ -1030,7 +1211,7 @@ get_procedures(image_t* app_image, std::vector<module_t*>* app_modules,
 
     _pr.stop();
     _wc.stop();
-    verbprintf(0,
+    verbprintf(1,
                "Fetched procedures from %zu modules: "
                "%zu procedures found (%.3f %s, %.3f %s)\n",
                app_modules->size(), proclist->size(), _wc.get(),
@@ -1052,6 +1233,8 @@ get_procedures(image_t* app_image, std::vector<module_t*>* app_modules,
 void
 process_modules(const std::vector<module_t*>& _app_modules)
 {
+    // SymtabAPI indexing for the filtered application modules into
+    // symtab_data (signature, linkage, visibility, mangled-name -> symbol)
     parse_internal_libs_data();
 
     auto _erase_nullptrs = [](auto& _vec) {
