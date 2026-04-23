@@ -2,18 +2,16 @@
 # SPDX-License-Identifier:  MIT
 
 """
-Unit tests for mem_chart_gfx11.py - RDNA3.5 Memory Architecture Visualization
+Unit tests for memory-chart renderers.
 
-Tests cover:
-1. Bandwidth formatting functions (Bytes/s to human-readable)
-2. Value formatting utilities
-3. Metric extraction and display
-4. Memory chart generation
+Covers:
+- mem_chart_gfx11.py - RDNA3.5 (Rich-based) memory architecture visualization
+- mem_chart_gfx9.py  - CDNA (plotille-based) memory architecture visualization
 """
 
 import re
 
-from utils import mem_chart_gfx11
+from utils import mem_chart_gfx9, mem_chart_gfx11
 
 ANSI_ESCAPE = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
 
@@ -23,7 +21,7 @@ def strip_ansi(text: str) -> str:
 
 
 # =============================================================================
-# Tests for format_bw_human_readable function
+# Tests for format_bw_human_readable function (gfx11)
 # =============================================================================
 
 
@@ -130,7 +128,7 @@ class TestFormatBwHumanReadable:
 
 
 # =============================================================================
-# Tests for format_value function
+# Tests for format_value function (gfx11)
 # =============================================================================
 
 
@@ -172,7 +170,7 @@ class TestFormatValue:
 
 
 # =============================================================================
-# Tests for format_sci function
+# Tests for format_sci function (gfx11)
 # =============================================================================
 
 
@@ -212,7 +210,7 @@ class TestFormatSci:
 
 
 # =============================================================================
-# Tests for bar function
+# Tests for bar function (gfx11)
 # =============================================================================
 
 
@@ -259,7 +257,7 @@ class TestBar:
 
 
 # =============================================================================
-# Tests for metric_line function
+# Tests for metric_line function (gfx11)
 # =============================================================================
 
 
@@ -281,7 +279,7 @@ class TestMetricLine:
 
 
 # =============================================================================
-# Tests for get_sample_metrics function
+# Tests for get_sample_metrics function (gfx11)
 # =============================================================================
 
 
@@ -333,17 +331,17 @@ class TestGetSampleMetrics:
 
 
 # =============================================================================
-# Tests for plot_mem_chart function
+# Tests for plot_mem_chart function (gfx11)
 # =============================================================================
 
 
-class TestPlotMemChart:
-    """Tests for plot_mem_chart - main chart generation."""
+class TestPlotMemChartGfx11:
+    """Tests for gfx11 plot_mem_chart - main chart generation."""
 
     def test_returns_string(self):
         """Test that plot_mem_chart returns a string."""
         metrics = mem_chart_gfx11.get_sample_metrics()
-        result = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_kernel", metrics)
+        result = mem_chart_gfx11.plot_mem_chart("per_kernel", metrics)
         clean = strip_ansi(result)
 
         assert isinstance(result, str)
@@ -356,7 +354,6 @@ class TestPlotMemChart:
         """Explicit chart_title appears in output."""
         metrics = mem_chart_gfx11.get_sample_metrics()
         result = mem_chart_gfx11.plot_mem_chart(
-            "gfx1151",
             "per_kernel",
             metrics,
             chart_title="3. Memory Chart (Normalization: per_kernel)",
@@ -366,7 +363,7 @@ class TestPlotMemChart:
     def test_contains_architecture_elements(self):
         """Test that output contains RDNA3.5 architecture elements."""
         metrics = mem_chart_gfx11.get_sample_metrics()
-        result = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_kernel", metrics)
+        result = mem_chart_gfx11.plot_mem_chart("per_kernel", metrics)
 
         # Check for key components
         assert "TCP" in result or "L0" in result  # L0 cache
@@ -380,7 +377,7 @@ class TestPlotMemChart:
     def test_contains_bandwidth_values(self):
         """Test that output contains formatted bandwidth values."""
         metrics = mem_chart_gfx11.get_sample_metrics()
-        result = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_kernel", metrics)
+        result = mem_chart_gfx11.plot_mem_chart("per_kernel", metrics)
 
         # Should contain GB/s units since sample data uses GB/s range
         assert "GB/s" in result
@@ -396,7 +393,7 @@ class TestPlotMemChart:
 
     def test_empty_metrics(self):
         """Test with empty metrics dictionary."""
-        result = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_kernel", {})
+        result = mem_chart_gfx11.plot_mem_chart("per_kernel", {})
 
         # Should still produce output (with N/A values)
         assert isinstance(result, str)
@@ -409,9 +406,7 @@ class TestPlotMemChart:
             "GL1C Utilization": 65.0,
             # Missing many other metrics
         }
-        result = mem_chart_gfx11.plot_mem_chart(
-            "gfx1151", "per_kernel", partial_metrics
-        )
+        result = mem_chart_gfx11.plot_mem_chart("per_kernel", partial_metrics)
 
         assert isinstance(result, str)
         assert len(result) > 0
@@ -422,9 +417,7 @@ class TestPlotMemChart:
             "DRAM Read Bandwidth": 10e12,  # 10 TB/s
             "DRAM Write Bandwidth": 5e12,  # 5 TB/s
         }
-        result = mem_chart_gfx11.plot_mem_chart(
-            "gfx1151", "per_kernel", extreme_metrics
-        )
+        result = mem_chart_gfx11.plot_mem_chart("per_kernel", extreme_metrics)
 
         assert "TB/s" in result
 
@@ -434,13 +427,13 @@ class TestPlotMemChart:
             "DRAM Read Bandwidth": 0,
             "DRAM Write Bandwidth": 0,
         }
-        result = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_kernel", zero_metrics)
+        result = mem_chart_gfx11.plot_mem_chart("per_kernel", zero_metrics)
 
         assert "B/s" in result  # Zero formats as "0.0 B/s"
 
 
 # =============================================================================
-# Tests for DEFAULT_SAMPLE_METRICS constant
+# Tests for DEFAULT_SAMPLE_METRICS constant (gfx11)
 # =============================================================================
 
 
@@ -489,12 +482,12 @@ class TestDefaultSampleMetrics:
 
 
 # =============================================================================
-# Integration Tests
+# Integration Tests (gfx11)
 # =============================================================================
 
 
-class TestIntegration:
-    """Integration tests for complete workflows."""
+class TestIntegrationGfx11:
+    """Integration tests for complete gfx11 workflows."""
 
     def test_full_workflow_with_sample_data(self):
         """Test complete workflow with sample data."""
@@ -502,7 +495,7 @@ class TestIntegration:
         metrics = mem_chart_gfx11.get_sample_metrics()
 
         # Generate chart
-        chart = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_dispatch", metrics)
+        chart = mem_chart_gfx11.plot_mem_chart("per_dispatch", metrics)
 
         # Verify chart contains expected elements
         assert isinstance(chart, str)
@@ -522,7 +515,7 @@ class TestIntegration:
             "DRAM Write Bandwidth": 100e9,  # 100 GB/s
         }
 
-        chart = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_kernel", metrics)
+        chart = mem_chart_gfx11.plot_mem_chart("per_kernel", metrics)
 
         # All values should show in GB/s since they're in that range
         assert chart.count("GB/s") >= 6
@@ -536,8 +529,99 @@ class TestIntegration:
             "TCP-GL1 Read Bandwidth": 50e3,  # 50 KB/s
         }
 
-        chart = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_kernel", metrics)
+        chart = mem_chart_gfx11.plot_mem_chart("per_kernel", metrics)
 
         # Should contain multiple unit types
         assert "TB/s" in chart
         assert "GB/s" in chart
+
+
+# =============================================================================
+# Tests for plot_mem_chart function (gfx9)
+# =============================================================================
+
+
+GFX9_SAMPLE_METRICS = {
+    "Wavefront Occupancy": 1,
+    "Wave Life": 2,
+    "SALU": 3,
+    "SMEM": 4,
+    "VALU": 5,
+    "Matrix Ops": 6,
+    "VMEM": 7,
+    "LDS": 8,
+    "GWS": 9,
+    "BR": 10,
+    "Active CUs": 11,
+    "Num CUs": 12,
+    "VGPR": 13,
+    "SGPR": 14,
+    "LDS Allocation": 15,
+    "Scratch Allocation": 16,
+    "Wavefronts": 17,
+    "Workgroups": 18,
+    "LDS Req": 19,
+    "LDS Util": 20,
+    "LDS Latency": 21,
+    "VL1 Rd": 22,
+    "VL1 Wr": 23,
+    "VL1 Atomic": 24,
+    "VL1 Hit": 25,
+    "VL1 Lat": 26,
+    "VL1 Coalesce": 27,
+    "VL1 Stall": 28,
+    "sL1D Rd": 29,
+    "sL1D Hit": 30,
+    "sL1D Lat": 31,
+    "IL1 Fetch": 32,
+    "IL1 Hit": 33,
+    "IL1 Lat": 34,
+    "VL1_L2 Rd": 36,
+    "VL1_L2 Wr": 37,
+    "VL1_L2 Atomic": 38,
+    "sL1D_L2 Rd": 39,
+    "sL1D_L2 Wr": 40,
+    "sL1D_L2 Atomic": 41,
+    "IL1_L2 Rd": 42,
+    "L2 Hit": 43,
+    "L2 Rd": 44,
+    "L2 Wr": 45,
+    "L2 Atomic": 46,
+    "L2 Rd Lat": 47,
+    "L2 Wr Lat": 48,
+    "Fabric_L2 Rd": 49,
+    "Fabric_L2 Wr": 50,
+    "Fabric_L2 Atomic": 51,
+    "Fabric Rd Lat": 52,
+    "Fabric Wr Lat": 53,
+    "Fabric Atomic Lat": 54,
+    "HBM Rd": 55,
+    "HBM Wr": 56,
+}
+
+
+class TestPlotMemChartGfx9:
+    """Tests for gfx9 plot_mem_chart - CDNA memory chart generation."""
+
+    def test_returns_non_empty_string(self):
+        """Full sample metrics produce a non-empty chart string."""
+        result = mem_chart_gfx9.plot_mem_chart("per_kernel", dict(GFX9_SAMPLE_METRICS))
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_empty_metrics(self):
+        """Empty metric dict still produces a non-empty chart (N/A placeholders)."""
+        result = mem_chart_gfx9.plot_mem_chart("per_kernel", {})
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_partial_metrics(self):
+        """Partial metric dict still produces a non-empty chart."""
+        partial = {
+            "Wavefront Occupancy": 4,
+            "L2 Hit": 75,
+            "HBM Rd": 100,
+        }
+        result = mem_chart_gfx9.plot_mem_chart("per_kernel", partial)
+        assert isinstance(result, str)
+        assert len(result) > 0
