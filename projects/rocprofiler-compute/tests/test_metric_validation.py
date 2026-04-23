@@ -1,15 +1,15 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import common
 import pandas as pd
 import pytest
-import test_utils
 
 config = {}
 config["memcopy"] = ["tests/memcopy"]
 config["cleanup"] = True
 
-_, soc = test_utils.gpu_soc()
+_, soc = common.gpu_soc()
 
 # workload -> gfx -> metric definition
 VALIDATE_METRICS = {
@@ -72,10 +72,8 @@ def test_validate_metrics(
             )
             continue
 
-        profile_workload_dir = test_utils.get_output_dir(param_id=f"{workload}_profile")
-        analysis_workload_dir = test_utils.get_output_dir(
-            param_id=f"{workload}_analysis"
-        )
+        profile_workload_dir = common.get_output_dir(param_id=f"{workload}_profile")
+        analysis_workload_dir = common.get_output_dir(param_id=f"{workload}_analysis")
         try:
             # Ensure non zero length of profile df
             options = VALIDATE_METRICS[workload].get("profile_options", [])
@@ -87,7 +85,7 @@ def test_validate_metrics(
                 roof=VALIDATE_METRICS[workload].get("roof", False),
                 app_name=workload,
             )
-            _ = test_utils.check_csv_files(
+            _ = common.check_csv_files(
                 profile_workload_dir, num_devices=1, num_kernels=1
             )
 
@@ -122,5 +120,5 @@ def test_validate_metrics(
                     f"diffs={diffs} (tolerance: 5%)"
                 )
         finally:
-            test_utils.clean_output_dir(config["cleanup"], analysis_workload_dir)
-            test_utils.clean_output_dir(config["cleanup"], profile_workload_dir)
+            common.clean_output_dir(config["cleanup"], analysis_workload_dir)
+            common.clean_output_dir(config["cleanup"], profile_workload_dir)
