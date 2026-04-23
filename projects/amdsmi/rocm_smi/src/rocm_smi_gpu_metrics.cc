@@ -2719,6 +2719,20 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
     metrics_public_init.common_header.format_revision = header.m_format_revision;
     metrics_public_init.common_header.content_revision = header.m_content_revision;
   };
+  // Keep APU-specific power fields in raw mW; convert and clamp only the generic legacy field.
+  auto convert_apu_power_mw_to_public_w = [&ss](auto power_mw) {
+    using PublicPowerT = decltype(metrics_public_init.average_socket_power);
+    const auto rounded_watts = (static_cast<uint32_t>(power_mw) + 500U) / 1000U;
+    constexpr auto max_power = std::numeric_limits<PublicPowerT>::max();
+    if (rounded_watts > max_power) {
+      ss << __PRETTY_FUNCTION__ << " | WARNING: Socket power value " << rounded_watts
+         << " W exceeds uint16_t max, clamping to " << max_power << " W";
+      LOG_WARN(ss);
+      ss.str("");
+      ss.clear();
+    }
+    return static_cast<PublicPowerT>(std::min<uint32_t>(rounded_watts, max_power));
+  };
 
   if (get_gpu_metrics_version_used() == AMDGpuMetricVersionFlags_t::kApuMetricV24) {
     const auto& metrics = m_apu_metrics_v24_tbl;
@@ -2787,7 +2801,8 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
 
     metrics_public_init.average_gfx_activity = metrics.m_average_gfx_activity;
     metrics_public_init.average_mm_activity = metrics.m_average_mm_activity;
-    metrics_public_init.average_socket_power = metrics.m_average_socket_power;
+    metrics_public_init.average_socket_power =
+        convert_apu_power_mw_to_public_w(metrics.m_average_socket_power);
     metrics_public_init.system_clock_counter = metrics.m_system_clock_counter;
     metrics_public_init.average_gfxclk_frequency = metrics.m_average_gfxclk_frequency;
     metrics_public_init.average_socclk_frequency = metrics.m_average_socclk_frequency;
@@ -2864,20 +2879,8 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
     apu.time_filter_alphavalue = metrics.m_time_filter_alphavalue;
 
     metrics_public_init.average_gfx_activity = metrics.m_average_gfx_activity;
-    // Clamp socket power from uint32_t to uint16_t range with warning if truncation occurs
-    constexpr auto max_power =
-        std::numeric_limits<decltype(metrics_public_init.average_socket_power)>::max();
-    if (metrics.m_average_socket_power > max_power) {
-      ss << __PRETTY_FUNCTION__ << " | WARNING: Socket power value "
-         << metrics.m_average_socket_power << " mW exceeds uint16_t max, clamping to " << max_power
-         << " mW";
-      LOG_WARN(ss);
-      ss.str("");  // Clear stringstream
-      ss.clear();
-    }
     metrics_public_init.average_socket_power =
-        static_cast<decltype(metrics_public_init.average_socket_power)>(
-            std::min<uint32_t>(metrics.m_average_socket_power, max_power));
+        convert_apu_power_mw_to_public_w(metrics.m_average_socket_power);
     metrics_public_init.system_clock_counter = metrics.m_system_clock_counter;
     metrics_public_init.average_gfxclk_frequency = metrics.m_average_gfxclk_frequency;
     metrics_public_init.average_socclk_frequency = metrics.m_average_socclk_frequency;

@@ -2276,12 +2276,12 @@ struct_amdsmi_gpu_metrics_t._fields_ = [
     ('PADDING_5', ctypes.c_ubyte * 4),
     ('vram_max_bandwidth', ctypes.c_uint64),
     ('xgmi_link_status', ctypes.c_uint16 * 8),
-    ('apu_metrics', ctypes.POINTER(struct_amdsmi_apu_metrics_t)),
     ('temperature_hbm_stacks', ctypes.c_uint16 * 12),
     ('temperature_mid', ctypes.c_uint16 * 2),
     ('temperature_aid', ctypes.c_uint16 * 2),
     ('current_uclk_aid', ctypes.c_uint16 * 2),
     ('current_socclks_mid', ctypes.c_uint16 * 2),
+    ('apu_metrics', ctypes.POINTER(struct_amdsmi_apu_metrics_t)),
 ]
 
 amdsmi_gpu_metrics_t = struct_amdsmi_gpu_metrics_t
