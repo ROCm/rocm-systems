@@ -18,9 +18,8 @@ Examples:
     ...     airgap=True,
     ... )
 
-Every callable honors ``PERFXPERT_AIRGAP=1`` plus the full provider
-/ fallback-chain ladder (``PERFXPERT_LLM_FALLBACK_CHAIN``) because the
-agent tools defer to :func:`perfxpert.agents.runtime.build_session`.
+Every callable honors ``PERFXPERT_AIRGAP=1`` plus the shared provider
+selection semantics from :func:`perfxpert.agents.runtime.build_session`.
 """
 
 from perfxpert.tools.agents.analysis import agent_analysis

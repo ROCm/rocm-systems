@@ -9,8 +9,8 @@ concrete ``action`` (``accept`` / ``revert`` / ``reject_and_log``).
 Call this tool after the backend has run a gate-cascade probe (e.g.
 compile + sol check) and needs a structured decision on the patch.
 
-Tool class: READ_ONLY. Honors ``PERFXPERT_AIRGAP=1`` + the full
-provider / fallback-chain ladder via ``agents.runtime.build_session``.
+Tool class: READ_ONLY. Honors ``PERFXPERT_AIRGAP=1`` + the shared
+provider-selection semantics from ``agents.runtime.build_session``.
 """
 
 from __future__ import annotations

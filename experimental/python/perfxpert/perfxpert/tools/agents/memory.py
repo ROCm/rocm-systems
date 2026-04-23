@@ -9,8 +9,8 @@ Call this tool directly when the backend already knows the kernel is
 memory-bound and wants technique recommendations without running the
 full Root → Analysis → Recommendation chain.
 
-Tool class: READ_ONLY. Honors ``PERFXPERT_AIRGAP=1`` + the full
-provider / fallback-chain ladder via ``agents.runtime.build_session``.
+Tool class: READ_ONLY. Honors ``PERFXPERT_AIRGAP=1`` + the shared
+provider-selection semantics from ``agents.runtime.build_session``.
 """
 
 from __future__ import annotations

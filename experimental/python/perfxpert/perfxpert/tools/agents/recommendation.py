@@ -8,8 +8,8 @@ bottleneck and returns the specialist's techniques plus a plateau flag.
 Call this tool when the backend already has an analysis verdict and
 wants the next-step technique list without re-running Analysis.
 
-Tool class: READ_ONLY. Honors ``PERFXPERT_AIRGAP=1`` + the full
-provider / fallback-chain ladder via ``agents.runtime.build_session``.
+Tool class: READ_ONLY. Honors ``PERFXPERT_AIRGAP=1`` + the shared
+provider-selection semantics from ``agents.runtime.build_session``.
 """
 
 from __future__ import annotations

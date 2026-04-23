@@ -9,16 +9,29 @@ Responsibilities:
 - Honor PERFXPERT_AIRGAP env var
 - Generate session_id if missing
 - Expose run_root / run_correctness / run_analysis / run_recommendation
+  plus the restored specialist session methods used by the public agent
+  wrappers.
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
 import uuid
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable, Iterator, Optional
 
-from perfxpert.agents import analysis, correctness, recommendation, root, schemas
+from perfxpert.agents import (
+    analysis,
+    compute_specialist,
+    correctness,
+    diff_specialist,
+    latency_specialist,
+    memory_specialist,
+    recommendation,
+    root,
+    schemas,
+)
 from perfxpert.runtime import ensure_not_recursive
 
 
@@ -39,26 +52,68 @@ except ImportError:
 DEFAULT_PROVIDER = "anthropic"
 
 
+_PROVIDER_CANONICAL_ENV = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "private": "PERFXPERT_LLM_PRIVATE_API_KEY",
+    "ollama": "PERFXPERT_LLM_OLLAMA_KEY",
+    "opencode": "PERFXPERT_LLM_OPENCODE_KEY",
+}
+
+
+@contextlib.contextmanager
+def _override_provider_env(
+    provider: Optional[str], api_key: Optional[str]
+) -> Iterator[None]:
+    """Temporarily inject ``api_key`` into the provider's canonical env var."""
+    if not provider or not api_key:
+        yield
+        return
+    env_name = _PROVIDER_CANONICAL_ENV.get(provider)
+    if not env_name:
+        yield
+        return
+
+    sentinel = object()
+    previous = os.environ.get(env_name, sentinel)
+    os.environ[env_name] = api_key
+    try:
+        yield
+    finally:
+        if previous is sentinel:
+            os.environ.pop(env_name, None)
+        else:
+            os.environ[env_name] = previous  # type: ignore[assignment]
+
+
 @dataclass(frozen=True)
 class AnalysisSession:
     """Handle returned by build_session() — expose run_* wrappers."""
+
     session_id: str
     provider: Optional[str]
     airgap: bool
+    api_key: Optional[str] = None
+
+    def _provider_name(self) -> str:
+        return self.provider or DEFAULT_PROVIDER
+
+    def _run_live(self, fn: Callable[[str], object]) -> object:
+        provider = self._provider_name()
+        with _override_provider_env(provider, self.api_key):
+            return fn(provider)
 
     def run_root(
         self,
         payload: schemas.RootInput,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> schemas.RootOutput:
-        # ``progress_callback`` is accepted for compatibility with the
-        # newer agent-tool wrappers restored during PR cleanup. This
-        # rebased runtime does not stream progress yet, so the callback
-        # is intentionally unused here.
         del progress_callback
         if self.airgap:
             return root.run_root(payload, airgap=True)
-        return root.run_root(payload, provider=self.provider or DEFAULT_PROVIDER)
+        return self._run_live(
+            lambda prov: root.run_root(payload, provider=prov)
+        )  # type: ignore[return-value]
 
     def run_analysis(
         self,
@@ -68,7 +123,9 @@ class AnalysisSession:
         del progress_callback
         if self.airgap:
             return analysis.run_analysis(payload, airgap=True)
-        return analysis.run_analysis(payload, provider=self.provider or DEFAULT_PROVIDER)
+        return self._run_live(
+            lambda prov: analysis.run_analysis(payload, provider=prov)
+        )  # type: ignore[return-value]
 
     def run_recommendation(
         self,
@@ -78,9 +135,9 @@ class AnalysisSession:
         del progress_callback
         if self.airgap:
             return recommendation.run_recommendation(payload, airgap=True)
-        return recommendation.run_recommendation(
-            payload, provider=self.provider or DEFAULT_PROVIDER
-        )
+        return self._run_live(
+            lambda prov: recommendation.run_recommendation(payload, provider=prov)
+        )  # type: ignore[return-value]
 
     def run_correctness(
         self,
@@ -90,9 +147,63 @@ class AnalysisSession:
         del progress_callback
         if self.airgap:
             return correctness.run_correctness(payload, airgap=True)
-        return correctness.run_correctness(
-            payload, provider=self.provider or DEFAULT_PROVIDER
-        )
+        return self._run_live(
+            lambda prov: correctness.run_correctness(payload, provider=prov)
+        )  # type: ignore[return-value]
+
+    def run_compute_specialist(
+        self,
+        payload: schemas.ComputeSpecialistInput,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> schemas.ComputeSpecialistOutput:
+        del progress_callback
+        if self.airgap:
+            return compute_specialist.run_compute_specialist(payload, airgap=True)
+        return self._run_live(
+            lambda prov: compute_specialist.run_compute_specialist(
+                payload, provider=prov
+            )
+        )  # type: ignore[return-value]
+
+    def run_memory_specialist(
+        self,
+        payload: schemas.MemorySpecialistInput,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> schemas.MemorySpecialistOutput:
+        del progress_callback
+        if self.airgap:
+            return memory_specialist.run_memory_specialist(payload, airgap=True)
+        return self._run_live(
+            lambda prov: memory_specialist.run_memory_specialist(
+                payload, provider=prov
+            )
+        )  # type: ignore[return-value]
+
+    def run_latency_specialist(
+        self,
+        payload: schemas.LatencySpecialistInput,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> schemas.LatencySpecialistOutput:
+        del progress_callback
+        if self.airgap:
+            return latency_specialist.run_latency_specialist(payload, airgap=True)
+        return self._run_live(
+            lambda prov: latency_specialist.run_latency_specialist(
+                payload, provider=prov
+            )
+        )  # type: ignore[return-value]
+
+    def run_diff_specialist(
+        self,
+        payload: schemas.DiffSpecialistInput,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> schemas.DiffSpecialistOutput:
+        del progress_callback
+        if self.airgap:
+            return diff_specialist.run_diff_specialist(payload, airgap=True)
+        return self._run_live(
+            lambda prov: diff_specialist.run_diff_specialist(payload, provider=prov)
+        )  # type: ignore[return-value]
 
 
 def _airgap_from_env() -> bool:
@@ -114,17 +225,16 @@ def build_session(
                   Ignored when airgap=True.
         session_id: Explicit id for the task store; uuid4() if None.
         airgap: If True (or PERFXPERT_AIRGAP=1), skip LLM entirely.
-        progress_callback: Accepted for API compatibility with newer
-                           stacked-PR wrappers. Unused in this runtime.
-        api_key: Accepted for API compatibility with newer stacked-PR
-                 wrappers. Unused in this runtime.
+        progress_callback: Accepted for compatibility with the public agent
+                           wrappers. This runtime does not stream progress.
+        api_key: Optional explicit API key forwarded via the provider's
+                 canonical env var for the duration of each live call.
 
     Raises:
         ValueError: unknown provider.
         RecursionGuardViolation: provider='opencode' inside an opencode session.
     """
     del progress_callback
-    del api_key
     is_airgap = airgap if airgap is not None else _airgap_from_env()
 
     if not is_airgap:
@@ -140,6 +250,7 @@ def build_session(
         session_id=session_id or str(uuid.uuid4()),
         provider=prov,
         airgap=is_airgap,
+        api_key=None if is_airgap else api_key,
     )
 
 

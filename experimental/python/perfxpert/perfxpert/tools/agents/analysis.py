@@ -8,8 +8,8 @@ confidence, hot kernels, and counter-availability flag.
 Call this tool when the backend wants ONLY the bottleneck verdict —
 without the surrounding Root narrative or recommendation list.
 
-Tool class: READ_ONLY. Honors ``PERFXPERT_AIRGAP=1`` + the full
-provider / fallback-chain ladder via ``agents.runtime.build_session``.
+Tool class: READ_ONLY. Honors ``PERFXPERT_AIRGAP=1`` + the shared
+provider-selection semantics from ``agents.runtime.build_session``.
 """
 
 from __future__ import annotations

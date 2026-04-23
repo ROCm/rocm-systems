@@ -10,8 +10,8 @@ Call this tool directly when the backend already knows the bottleneck
 is launch-overhead / latency (e.g. many short kernels or high
 ``api_overhead_pct``) and wants techniques without the full chain.
 
-Tool class: READ_ONLY. Honors ``PERFXPERT_AIRGAP=1`` + the full
-provider / fallback-chain ladder via ``agents.runtime.build_session``.
+Tool class: READ_ONLY. Honors ``PERFXPERT_AIRGAP=1`` + the shared
+provider-selection semantics from ``agents.runtime.build_session``.
 """
 
 from __future__ import annotations

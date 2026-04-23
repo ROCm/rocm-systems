@@ -70,21 +70,30 @@ def _resolve_verdict_threshold() -> float:
     return 5.0
 
 
-def _classify_verdict(wall_delta_pct: float, threshold_pct: float) -> str:
-    """Bucket ``wall_delta_pct`` into regressed / improved / neutral.
+def _classify_verdict(
+    wall_delta_pct: float,
+    threshold_pct: float,
+    regressions: List[Dict[str, Any]],
+    improvements: List[Dict[str, Any]],
+) -> str:
+    """Bucket the diff into regressed / improved / neutral.
 
-    * ``wall_delta_pct > +threshold`` → ``regressed``
-    * ``wall_delta_pct < -threshold`` → ``improved``
-    * within |threshold|               → ``neutral``
+    Per-kernel regressions win over a neutral wall-time delta so callers
+    do not silently miss a real hot-kernel slowdown when aggregate wall
+    time is damped by unrelated improvements.
     """
     try:
         pct = float(wall_delta_pct)
     except (TypeError, ValueError):
         pct = 0.0
     thr = abs(float(threshold_pct))
+    if regressions:
+        return "regressed"
     if pct > thr:
         return "regressed"
     if pct < -thr:
+        return "improved"
+    if improvements:
         return "improved"
     return "neutral"
 
@@ -203,13 +212,13 @@ def diff_runs(
         key=lambda n: baseline_map.get(n, 0),
         reverse=True,
     )
-    per_kernel: List[Dict[str, Any]] = []
-    for name in union[: max(int(top_kernels), 0)]:
+    all_kernel_deltas: List[Dict[str, Any]] = []
+    for name in union:
         b = baseline_map.get(name, 0)
         a = new_map.get(name, 0)
         delta_ns = a - b
         delta_pct = _safe_pct(delta_ns, b) if b > 0 else (0.0 if a == 0 else 100.0)
-        per_kernel.append(
+        all_kernel_deltas.append(
             {
                 "name": name,
                 "baseline_ns": int(b),
@@ -220,17 +229,19 @@ def diff_runs(
                 "was_hot": name in hot_set,
             }
         )
+    per_kernel = all_kernel_deltas[: max(int(top_kernels), 0)]
 
     # Primary regressions / improvements — thresholds mirror Gate-4 noise
-    # tolerance (3%). Sorted by magnitude so the UI surfaces the biggest
-    # offenders first.
+    # tolerance (3%). These are derived from the full kernel union, not
+    # the display-limited ``per_kernel`` slice, so callers cannot lose
+    # true regressions merely by asking for a short top-K table.
     regressions = sorted(
-        (k for k in per_kernel if k["delta_pct"] > 3.0),
+        (k for k in all_kernel_deltas if k["delta_pct"] > 3.0),
         key=lambda k: k["delta_pct"],
         reverse=True,
     )
     improvements = sorted(
-        (k for k in per_kernel if k["delta_pct"] < -3.0),
+        (k for k in all_kernel_deltas if k["delta_pct"] < -3.0),
         key=lambda k: k["delta_pct"],
     )
 
@@ -241,7 +252,12 @@ def diff_runs(
     # ``PERFXPERT_CI_REGRESSION_THRESHOLD`` (default 5.0) to match
     # ``perfxpert ci``.
     _verdict_threshold = _resolve_verdict_threshold()
-    _verdict = _classify_verdict(wall_delta_pct, _verdict_threshold)
+    _verdict = _classify_verdict(
+        wall_delta_pct,
+        _verdict_threshold,
+        regressions,
+        improvements,
+    )
 
     result: Dict[str, Any] = {
         "schema_version": _SCHEMA_VERSION,

@@ -10,8 +10,8 @@ run against baseline.db" or "what got slower since yesterday's
 trace?" — the backend LLM picks this tool based on the
 ``AGENTS.md`` inventory rather than running ``analyze`` twice.
 
-Tool class: READ_ONLY. Honors ``PERFXPERT_AIRGAP=1`` + the full
-provider / fallback-chain ladder via ``agents.runtime.build_session``.
+Tool class: READ_ONLY. Honors ``PERFXPERT_AIRGAP=1`` + the shared
+provider-selection semantics from ``agents.runtime.build_session``.
 """
 
 from __future__ import annotations

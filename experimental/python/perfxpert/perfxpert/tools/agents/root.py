@@ -9,12 +9,12 @@ recommendations + warnings + metadata.
 This wrapper is the ONLY thing every backend (opencode / claude /
 codex / gemini) needs to reach the full agent brain: `agent_root`
 builds an :class:`AnalysisSession` and dispatches `run_root` through
-the same airgap + provider + fallback-chain semantics as the
-in-process `perfxpert analyze` path.
+the same airgap + provider-selection semantics as the in-process
+`perfxpert analyze` path.
 
 Tool class: READ_ONLY — pure aggregator over already-READ_ONLY tools.
-Honors ``PERFXPERT_AIRGAP=1`` plus the full provider / fallback-chain
-ladder because it defers to ``agents.runtime.build_session``.
+Honors ``PERFXPERT_AIRGAP=1`` plus the shared provider-selection
+semantics from ``agents.runtime.build_session``.
 """
 
 from __future__ import annotations
