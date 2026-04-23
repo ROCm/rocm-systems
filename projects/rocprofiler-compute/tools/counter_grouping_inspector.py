@@ -149,7 +149,10 @@ def iter_yaml_metrics(
 
 
 def _rocprof_supported_superset(counters: set[str]) -> set[str]:
-    """Return a fake rocprofiler avail set so ``perfmon_coalesce`` skips unsupported warnings."""
+    """
+    Return a fake rocprofiler avail set so ``perfmon_coalesce``skips \
+        unsupported warnings.
+    """
     out = set(counters)
     for ctr in counters:
         if is_tcc_channel_counter(ctr):
@@ -164,7 +167,10 @@ def run_soc_detect_and_coalesce(
     perfmon_config: dict[str, int],
     workload_root: Path,
 ) -> tuple[set[str], list[CounterFile]]:
-    """Run SoC counter detection and perfmon coalesce; write YAML under ``workload_root/perfmon/``."""
+    """
+    Run SoC counter detection and perfmon coalesce;
+    write YAML under ``workload_root/perfmon/``.
+    """
     mspec = MagicMock()
     mspec.rocminfo_lines = None
     mspec.num_xcd = 1
@@ -181,6 +187,7 @@ def run_soc_detect_and_coalesce(
         spatial_multiplexing=None,
         no_roof=True,
         device=0,
+        output_directory=str(workload_root.resolve()),
     )
 
     with patch("rocprof_compute_soc.soc_base.console_debug"):
@@ -608,7 +615,10 @@ Examples:
 
     config_arch = config_dir / arch
     if not config_arch.is_dir():
-        print(f"Error: Architecture config directory not found: {config_arch}", file=sys.stderr)
+        print(
+            f"Error: Architecture config directory not found: {config_arch}",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     with tempfile.TemporaryDirectory(prefix="rocprof_counter_inspector_") as tmpdir:
