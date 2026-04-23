@@ -1243,25 +1243,44 @@ rocprofiler_set_api_table(const char* name,
         // install inline queue intercept AFTER update_table so our wrappers
         // sit outermost in core_ and chain through the tracing functors
         {
-            auto inline_intercept =
-                rocprofiler::common::get_env("ROCPROFILER_INLINE_INTERCEPT", true);
-            ROCP_INFO << "[queue-intercept] ROCPROFILER_INLINE_INTERCEPT="
-                      << (inline_intercept ? "true" : "false");
-            if(inline_intercept)
+            auto noninline_intercept_contexts = rocprofiler::context::get_registered_contexts(
+                [](const rocprofiler::context::context* ctx) {
+                    return (ctx->dispatch_counter_collection != nullptr ||
+                            ctx->dispatch_thread_trace != nullptr || ctx->pc_sampler != nullptr);
+                });
+
+            ROCP_INFO << fmt::format(
+                "[queue-intercept] counter/ATT/PC-sampling contexts found: {}. The presence of any "
+                "of these contexts will prevent inline intercept (for the time being).",
+                noninline_intercept_contexts.size());
+
+            // if noninline_intercept_contexts is empty, default to inline intercept.
+            // if noninline_intercept_contexts is not empty, default to non-inline intercept.
+            auto enable_inline_intercept = rocprofiler::common::get_env(
+                "ROCPROFILER_INLINE_INTERCEPT", noninline_intercept_contexts.empty());
+
+            // if ROCPROFILER_INLINE_INTERCEPT is explicitly set to true, but there are contexts
+            // that require non-inline intercept, print a warning and fall back to non-inline
+            // intercept
+            if(enable_inline_intercept && !noninline_intercept_contexts.empty())
             {
-                auto counter_att_contexts = rocprofiler::context::get_registered_contexts(
-                    [](const rocprofiler::context::context* ctx) {
-                        return (ctx->dispatch_counter_collection != nullptr ||
-                                ctx->dispatch_thread_trace != nullptr);
-                    });
-                ROCP_INFO << "[queue-intercept] counter/ATT contexts found: "
-                          << counter_att_contexts.size();
-                if(counter_att_contexts.empty())
-                    rocprofiler::hsa::queue_intercept::install_intercept(*hsa_api_table->core_);
-                else
-                    ROCP_INFO << "[queue-intercept] skipping inline intercept — "
-                                 "counter/ATT contexts present";
+                ROCP_WARNING << fmt::format(
+                    "ROCPROFILER_INLINE_INTERCEPT was explicitly set to true, but {} contexts were "
+                    "found that require non-inline intercept. Falling back to non-inline "
+                    "intercept...",
+                    noninline_intercept_contexts.size());
+                enable_inline_intercept = false;
             }
+
+            // report the final decision on inline vs non-inline intercept
+            ROCP_INFO << "[queue-intercept] ROCPROFILER_INLINE_INTERCEPT="
+                      << (enable_inline_intercept ? "true" : "false");
+
+            // (eventually) we will want to always install the intercepts so that dynamic enablement
+            // of inline intercept can occur when conditions allow.
+            if(enable_inline_intercept)
+                rocprofiler::hsa::queue_intercept::intercept_init(hsa_api_table->core_,
+                                                                  enable_inline_intercept);
         }
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
