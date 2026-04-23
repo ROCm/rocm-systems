@@ -125,7 +125,8 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
     }
   }
   CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
-  CUCHECKIGNORE(cuMemUnmap(flatAddr, devr->lsaSize*devr->bigSize));
+  // Returns error: invalid argument. Already unmapped by symMemoryDropRef
+  // CUCHECKIGNORE(cuMemUnmap(flatAddr, devr->lsaSize*devr->bigSize));
   CUCHECKIGNORE(cuMemAddressFree(flatAddr, devr->lsaSize*devr->bigSize));
   ncclShadowPoolDestruct(&devr->shadows);
   ncclSpaceDestruct(&devr->bigSpace);
