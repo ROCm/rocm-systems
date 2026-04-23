@@ -984,6 +984,64 @@ static void doTestPermlane16SwapWave32() {
          "`topk_forward_bf16` for context.";
 }
 
+// Triton-state xor3 probe — validates v3 post-xor3 under v3=v4=v2 init.
+static void doTestBitonicXor3TritonState() {
+  printf("--- bitonic_xor3_triton_state_kernel ---\n");
+  std::string path = std::string(GFX1250_DATA_DIR) +
+                     "/bitonic_xor3_triton_state_gfx1250.hsaco";
+  auto data = transpiler::readFile(path);
+  ASSERT_FALSE(data.empty()) << "Cannot read " << path;
+  auto result = transpiler::runPipeline(
+      data, "gfx1250", "gfx942", "bitonic_xor3_triton_state_kernel");
+  ASSERT_TRUE(result.success);
+  constexpr int N = 32;
+  auto meta = transpiler::extractKernelMeta(
+      data, "bitonic_xor3_triton_state_kernel");
+  std::vector<int> hV3(N, -1), hV4(N, -1);
+  int *dV3, *dV4;
+  HIP_ASSERT(hipMalloc(&dV3, N * sizeof(int)));
+  HIP_ASSERT(hipMalloc(&dV4, N * sizeof(int)));
+  HIP_ASSERT(hipMemset(dV3, 0xff, N * sizeof(int)));
+  HIP_ASSERT(hipMemset(dV4, 0xff, N * sizeof(int)));
+  hipModule_t mod;
+  HIP_ASSERT(hipModuleLoadData(&mod, result.hsaco.data()));
+  hipFunction_t func;
+  HIP_ASSERT(hipModuleGetFunction(&func, mod,
+                                   "bitonic_xor3_triton_state_kernel"));
+  std::vector<uint8_t> argBuf(meta.kernargSegmentSize, 0);
+  memcpy(argBuf.data() + 0, &dV3, 8);
+  memcpy(argBuf.data() + 8, &dV4, 8);
+  size_t argSz = argBuf.size();
+  void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, argBuf.data(),
+                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSz,
+                    HIP_LAUNCH_PARAM_END};
+  HIP_ASSERT(hipModuleLaunchKernel(func, 1, 1, 1, N, 1, 1,
+                                   meta.groupSegmentFixedSize, nullptr,
+                                   nullptr, config));
+  HIP_ASSERT(hipDeviceSynchronize());
+  HIP_ASSERT(hipMemcpy(hV3.data(), dV3, N * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipMemcpy(hV4.data(), dV4, N * sizeof(int), hipMemcpyDeviceToHost));
+  (void)hipFree(dV3);
+  (void)hipFree(dV4);
+  (void)hipModuleUnload(mod);
+
+  printf("  Triton state (v3_in=v4_in=v2=L) per-lane after "
+         "swap+xor3:\n");
+  printf("  %3s  %5s  %5s  %-20s\n",
+         "L", "v3", "v4", "interpretation");
+  int distinct_self = 0, distinct_partner = 0, distinct_other = 0;
+  for (int L = 0; L < N; L++) {
+    const char *interp = "???";
+    if (hV3[L] == L) { interp = "= self"; distinct_self++; }
+    else if (hV3[L] == (L ^ 16)) { interp = "= partner"; distinct_partner++; }
+    else { interp = "= OTHER"; distinct_other++; }
+    printf("  %3d  %5d  %5d  %s\n", L, hV3[L], hV4[L], interp);
+  }
+  printf("  Summary: %d self / %d partner / %d other\n",
+         distinct_self, distinct_partner, distinct_other);
+  SUCCEED();
+}
+
 // ----- P4.wave32+WaveNative: v_permlane16_swap_b32 under the
 //       WaveNativeProjection path (max_flat >= target wavefront) -----
 //
@@ -1403,6 +1461,7 @@ TEST_F(Gfx1250Gpu, Permlane16Swap) { doTestPermlane16Swap(); } // P4 explicit
 TEST_F(Gfx1250Gpu, Permlane16SwapWave32) { doTestPermlane16SwapWave32(); } // P4 wave32 source
 TEST_F(Gfx1250Gpu, Permlane16SwapWave32WaveNative) { doTestPermlane16SwapWave32WaveNative(); } // P4 WaveNative
 TEST_F(Gfx1250Gpu, BitonicCross16Probe) { doTestBitonicCross16Probe(); } // diagnostic — prints trace
+TEST_F(Gfx1250Gpu, BitonicXor3TritonState) { doTestBitonicXor3TritonState(); } // probe Triton's v3=v4=v2 init
 TEST_F(Gfx1250Gpu, DppQuadPerm)    { doTestDppQuadPerm(); }    // P5 explicit
 TEST_F(Gfx1250Gpu, DsSwizzle)      { doTestDsSwizzle(); }      // P6 explicit
 
