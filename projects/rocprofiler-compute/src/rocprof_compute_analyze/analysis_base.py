@@ -105,8 +105,13 @@ def detect_missing_counters(
                 f"Insufficient number of kernel calls for kernels: "
                 f"{', '.join(kernels_with_missing_counters)} "
                 f"to collect all counters using iteration multiplexing. "
-                f"Please use kernel filtering and exclude the above kernels "
-                f"or turn off iteration multiplexing."
+                f"These kernels do not have enough dispatches to fill all "
+                f"{num_files} counter sets. Use kernel filtering (-k) to "
+                f"profile only the kernels of interest, e.g.: "
+                f"rocprof-compute profile -k <your_kernel> "
+                f"--iteration-multiplexing -- <app>. "
+                f"Alternatively, remove --iteration-multiplexing to use "
+                f"application replay instead."
             ),
         )
 
