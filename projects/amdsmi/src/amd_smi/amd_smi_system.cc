@@ -148,7 +148,7 @@ amdsmi_status_t AMDSmiSystem::get_cpu_model_name(uint32_t socket_id, std::string
       if (info.find("model name") != std::string::npos) {
         *model_name = info.substr(info.find(':') + 2);
         if (current_socket_id != -1) {
-          socket_model_map[current_socket_id] = *model_name;
+          socket_model_map[static_cast<uint32_t>(current_socket_id)] = *model_name;
         }
       }
     }
