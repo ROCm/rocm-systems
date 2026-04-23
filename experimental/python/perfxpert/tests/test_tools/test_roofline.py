@@ -7,14 +7,14 @@ from perfxpert.tools._class import ToolClass
 
 
 def test_compute_bound_when_ai_above_ridge():
-    # MI300X ridge = 15.4 FLOPS/Byte; ai=30 → compute-bound
-    r = roofline.classify(flops=1e12, bytes=3e10, gfx_id="gfx942")
+    # MI300X default ridge uses FP32 vector peak: 30.8 FLOPS/Byte.
+    r = roofline.classify(flops=3.6e12, bytes=1e11, gfx_id="gfx942")
     assert r["regime"] == "compute"
     assert r["arithmetic_intensity"] > 30
 
 
 def test_memory_bound_when_ai_below_ridge():
-    # AI=2 → well below MI300X ridge 15.4 → memory-bound
+    # AI=2 → well below MI300X ridge 30.8 → memory-bound
     r = roofline.classify(flops=1e12, bytes=5e11, gfx_id="gfx942")
     assert r["regime"] == "memory"
     assert r["arithmetic_intensity"] < 5
@@ -22,10 +22,9 @@ def test_memory_bound_when_ai_below_ridge():
 
 def test_at_ridge_point_balanced():
     # AI close to ridge point → both/balanced
-    specs = {"gfx942": {"ridge_point": 15.4}}
-    r = roofline.classify(flops=1.54e12, bytes=1e11, gfx_id="gfx942")
-    # AI = 15.4 → regime should be "balanced" or "compute" (tie-break toward compute)
-    assert r["arithmetic_intensity"] == pytest.approx(15.4, rel=0.01)
+    r = roofline.classify(flops=3.08e12, bytes=1e11, gfx_id="gfx942")
+    # AI = 30.8 → regime should be "balanced" or "compute" (tie-break toward compute)
+    assert r["arithmetic_intensity"] == pytest.approx(30.8, rel=0.01)
     assert r["regime"] in ("compute", "balanced")
 
 

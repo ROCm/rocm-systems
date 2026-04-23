@@ -25,9 +25,13 @@ gfx908:
   memory_bandwidth_tbs: 1.2
   cu_count: 120
   lds_kb: 64
+  lds_per_cu_kb: 64
   wave_size: 64
   max_vgprs_per_thread: 256
-  ridge_point: 19.2  # TFLOPS / TB/s
+  vgprs_per_simd: 512
+  simds_per_cu: 4
+  max_waves_per_simd: 8
+  ridge_point: 19.2  # FP32 vector peak / TB/s
   mfma_flops_per_inst:
     fp32: 128
     fp16: 4096
@@ -47,8 +51,12 @@ gfx90a:
   memory_bandwidth_tbs: 3.2
   cu_count: 220
   lds_kb: 64
+  lds_per_cu_kb: 64
   wave_size: 64
   max_vgprs_per_thread: 256
+  vgprs_per_simd: 512
+  simds_per_cu: 4
+  max_waves_per_simd: 8
   ridge_point: 15.0
   mfma_flops_per_inst:
     fp32: 128
@@ -69,9 +77,13 @@ gfx942:
   memory_bandwidth_tbs: 5.3
   cu_count: 304
   lds_kb: 64
+  lds_per_cu_kb: 64
   wave_size: 64
   max_vgprs_per_thread: 256
-  ridge_point: 15.4
+  vgprs_per_simd: 512
+  simds_per_cu: 4
+  max_waves_per_simd: 10
+  ridge_point: 30.8  # FP32 vector peak / TB/s; FP64 ridge is 15.4
   mfma_flops_per_inst:
     fp32: 128
     fp16: 4096
@@ -91,8 +103,12 @@ gfx950:
   memory_bandwidth_tbs: 8.0
   cu_count: 256
   lds_kb: 160               # DOUBLED vs CDNA3
+  lds_per_cu_kb: 160
   wave_size: 64
   max_vgprs_per_thread: 256
+  vgprs_per_simd: 512
+  simds_per_cu: 4
+  max_waves_per_simd: 10
   ridge_point: 20.1
   mfma_flops_per_inst:
     fp32: 128
@@ -113,8 +129,12 @@ gfx1030:
   memory_bandwidth_tbs: 0.512
   cu_count: 80
   lds_kb: 64
-  wave_size: 64
-  max_vgprs_per_thread: 1024
+  lds_per_cu_kb: 64
+  wave_size: 32
+  max_vgprs_per_thread: 256
+  vgprs_per_simd: 1024
+  simds_per_cu: 2
+  max_waves_per_simd: 16
   ridge_point: 44.9
   mfma_flops_per_inst:
     fp32: 128
@@ -135,8 +155,12 @@ gfx1100:
   memory_bandwidth_tbs: 0.960
   cu_count: 96
   lds_kb: 128
+  lds_per_cu_kb: 64
   wave_size: 32
-  max_vgprs_per_thread: 1536
+  max_vgprs_per_thread: 256
+  vgprs_per_simd: 1536
+  simds_per_cu: 2
+  max_waves_per_simd: 16
   ridge_point: 63.5
   mfma_flops_per_inst:
     fp32: 128

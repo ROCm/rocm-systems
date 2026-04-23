@@ -1,5 +1,8 @@
 """Isolation tests for Analysis agent (Layer 1)."""
 
+import sys
+import types
+
 import pytest
 from unittest.mock import MagicMock
 
@@ -196,3 +199,93 @@ def test_analysis_propagates_counter_availability(fake_provider, monkeypatch):
         provider="anthropic",
     )
     assert result.counter_data_available is False
+
+
+def test_extract_hw_metrics_uses_detected_arch_specs(monkeypatch):
+    class _Cursor:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def fetchone(self):
+            if isinstance(self._rows, list):
+                return self._rows[0] if self._rows else None
+            return self._rows
+
+        def fetchall(self):
+            if isinstance(self._rows, list):
+                return self._rows
+            return [self._rows]
+
+    def _fake_execute_statement(_conn, query):
+        if "COUNT(*) FROM pmc_events" in query:
+            return _Cursor((1,))
+        if "GROUP BY counter_name" in query:
+            return _Cursor(
+                [
+                    ("GRBM_GUI_ACTIVE", 100.0, 100.0),
+                    ("GRBM_COUNT", 100.0, 100.0),
+                    ("FETCH_SIZE", 600.0, 600.0),
+                    ("WRITE_SIZE", 400.0, 400.0),
+                    ("SQ_INSTS_VALU_MFMA", 35.0, 35.0),
+                ]
+            )
+        if "MAX(end) - MIN(start) FROM kernels" in query:
+            return _Cursor((1000,))
+        if "FROM rocpd_info_agent" in query:
+            return _Cursor(("gfx950",))
+        raise AssertionError(f"unexpected query: {query}")
+
+    fake_connection = types.SimpleNamespace(
+        PerfxpertConnection=lambda db: object(),
+        execute_statement=_fake_execute_statement,
+    )
+    monkeypatch.setitem(sys.modules, "perfxpert.connection", fake_connection)
+
+    metrics = analysis_module._extract_hw_metrics("fake.db")
+
+    assert metrics["arithmetic_intensity_above_ridge"] == 0
+    assert metrics["arithmetic_intensity_below_ridge"] == 1
+    assert metrics["hbm_bw_utilization"] == pytest.approx(0.000125, rel=0.01)
+
+
+def test_extract_hw_metrics_leaves_arch_sensitive_fields_unknown_when_gpu_missing(monkeypatch):
+    class _Cursor:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def fetchone(self):
+            if isinstance(self._rows, list):
+                return self._rows[0] if self._rows else None
+            return self._rows
+
+        def fetchall(self):
+            if isinstance(self._rows, list):
+                return self._rows
+            return [self._rows]
+
+    def _fake_execute_statement(_conn, query):
+        if "COUNT(*) FROM pmc_events" in query:
+            return _Cursor((1,))
+        if "GROUP BY counter_name" in query:
+            return _Cursor(
+                [
+                    ("FETCH_SIZE", 600.0, 600.0),
+                    ("WRITE_SIZE", 400.0, 400.0),
+                    ("SQ_INSTS_VALU_MFMA", 35.0, 35.0),
+                ]
+            )
+        if "FROM rocpd_info_agent" in query:
+            return _Cursor((None,))
+        raise AssertionError(f"unexpected query: {query}")
+
+    fake_connection = types.SimpleNamespace(
+        PerfxpertConnection=lambda db: object(),
+        execute_statement=_fake_execute_statement,
+    )
+    monkeypatch.setitem(sys.modules, "perfxpert.connection", fake_connection)
+
+    metrics = analysis_module._extract_hw_metrics("fake.db")
+
+    assert metrics["hbm_bw_utilization"] is None
+    assert metrics["arithmetic_intensity_above_ridge"] is None
+    assert metrics["arithmetic_intensity_below_ridge"] is None

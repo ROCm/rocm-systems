@@ -31,6 +31,7 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from ..connection import PerfxpertConnection as RocpdImportData, execute_statement
+from ..tools import arch as arch_tools
 
 
 def compute_time_breakdown(connection: RocpdImportData) -> Dict[str, Any]:
@@ -422,15 +423,11 @@ def detect_warmup_issues(
 # ---------------------------------------------------------------------------
 # Architecture specs for occupancy calculation (ROCM-21553 I1)
 # ---------------------------------------------------------------------------
+#
+# Keep one source of truth: ``knowledge/gpu_specs.yaml`` carries both the
+# user-facing peak specs and the occupancy-only caps consumed here.
 
-_ARCH_SPECS: Dict[str, Dict[str, Any]] = {
-    "gfx908": {"max_waves_per_simd": 8, "vgprs_per_simd": 512, "lds_per_cu_kb": 64, "wavefront_size": 64, "simds_per_cu": 4},
-    "gfx90a": {"max_waves_per_simd": 8, "vgprs_per_simd": 512, "lds_per_cu_kb": 64, "wavefront_size": 64, "simds_per_cu": 4},
-    "gfx942": {"max_waves_per_simd": 10, "vgprs_per_simd": 512, "lds_per_cu_kb": 64, "wavefront_size": 64, "simds_per_cu": 4},
-    "gfx950": {"max_waves_per_simd": 10, "vgprs_per_simd": 512, "lds_per_cu_kb": 160, "wavefront_size": 64, "simds_per_cu": 4},
-    "gfx1030": {"max_waves_per_simd": 16, "vgprs_per_simd": 1024, "lds_per_cu_kb": 64, "wavefront_size": 32, "simds_per_cu": 2},
-    "gfx1100": {"max_waves_per_simd": 16, "vgprs_per_simd": 1536, "lds_per_cu_kb": 64, "wavefront_size": 32, "simds_per_cu": 2},
-}
+_ARCH_SPECS: Dict[str, Dict[str, Any]] = arch_tools.occupancy_specs_table()
 
 
 def analyze_kernel_resources(

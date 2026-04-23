@@ -27,7 +27,10 @@ from perfxpert.tools._class import ToolClass, tool_class
 # perfxpert.tools.* and collects public READ_ONLY callables) does not
 # re-register this as `roofline.lookup_peaks`. Canonical name is
 # `arch.lookup_peaks`; this module re-uses it internally only.
-from perfxpert.tools.arch import lookup_peaks as _lookup_peaks
+from perfxpert.tools.arch import (
+    lookup_peaks as _lookup_peaks,
+    lookup_ridge_point as _lookup_ridge_point,
+)
 
 
 _BALANCED_TOLERANCE = 0.05  # +/-5% around ridge = "balanced"
@@ -56,13 +59,12 @@ def classify(flops: float, bytes: float, gfx_id: str) -> Dict[str, Any]:
 
     Example:
         >>> classify(flops=1e12, bytes=1e11, gfx_id="gfx942")
-        {"arithmetic_intensity": 10.0, "ridge_point": 15.4, "regime": "memory", ...}
+        {"arithmetic_intensity": 10.0, "ridge_point": 30.8, "regime": "memory", ...}
     """
     if bytes == 0:
         raise ValueError("bytes must be > 0 — divide-by-zero in arithmetic intensity")
 
-    specs = _lookup_peaks(gfx_id)
-    ridge = specs["ridge_point"]
+    ridge = _lookup_ridge_point(gfx_id, dtype="fp32")
     ai = flops / bytes
 
     if abs(ai - ridge) / ridge <= _BALANCED_TOLERANCE:
@@ -350,7 +352,7 @@ def plot_points(
     hbm_bps = float(specs.get("memory_bandwidth_tbs") or 0.0) * 1e12
 
     dom_peak = arch_peaks.get(dominant_dtype) or arch_peaks["fp32"]
-    ridge_ai = (dom_peak / hbm_bps) if hbm_bps > 0 else float(specs.get("ridge_point") or 0.0)
+    ridge_ai = _lookup_ridge_point(gfx_id, dtype=dominant_dtype)
 
     return {
         "schema_version": "0.3.x",

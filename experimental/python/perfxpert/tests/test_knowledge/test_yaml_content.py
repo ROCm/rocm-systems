@@ -15,6 +15,15 @@ def test_every_arch_in_vgpr_occupancy_has_gpu_specs_entry():
         )
 
 
+def test_gpu_specs_runtime_caps_cover_all_vgpr_table_archs():
+    specs = load_yaml("gpu_specs")
+    vgpr = load_yaml("vgpr_occupancy_tables")
+    for gfx in vgpr:
+        entry = specs[gfx]
+        for key in ("vgprs_per_simd", "simds_per_cu", "max_waves_per_simd", "lds_per_cu_kb"):
+            assert key in entry, f"gpu_specs missing {key!r} for {gfx!r}"
+
+
 def test_counter_catalog_blocks_appear_in_pmc_limits():
     """Every block referenced in counter_catalog should have a per-block limit."""
     catalog = load_yaml("counter_catalog")

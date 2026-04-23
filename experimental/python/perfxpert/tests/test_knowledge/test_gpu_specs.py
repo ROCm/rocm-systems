@@ -50,6 +50,25 @@ def test_cdna4_has_160kb_lds():
     assert mi350["lds_kb"] == 160, f"CDNA4 LDS expected 160 KB/CU, got {mi350['lds_kb']}"
 
 
+def test_default_ridge_matches_fp32_peak_over_bandwidth():
+    specs = load_yaml("gpu_specs")
+    for gfx_id, spec in specs.items():
+        expected = round(spec["peak_fp32_tflops"] / spec["memory_bandwidth_tbs"], 1)
+        assert spec["ridge_point"] == pytest.approx(expected, rel=0.01), (
+            f"{gfx_id} ridge_point drifted from fp32/bandwidth ratio: "
+            f"stored={spec['ridge_point']} expected={expected}"
+        )
+
+
+def test_runtime_occupancy_caps_exist_for_every_arch():
+    specs = load_yaml("gpu_specs")
+    for gfx_id, spec in specs.items():
+        assert spec["lds_per_cu_kb"] > 0, gfx_id
+        assert spec["vgprs_per_simd"] >= spec["max_vgprs_per_thread"], gfx_id
+        assert spec["simds_per_cu"] >= 1, gfx_id
+        assert spec["max_waves_per_simd"] >= 1, gfx_id
+
+
 def test_schema_rejects_invalid_arch_id_pattern():
     """Schema's patternProperties should reject non-gfx identifiers."""
     schema = json.loads(SCHEMA_PATH.read_text())

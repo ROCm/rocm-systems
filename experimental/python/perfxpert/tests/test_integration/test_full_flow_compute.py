@@ -37,7 +37,7 @@ def test_analysis_classifies_compute_bound_fixture(compute_bound_db):
 
     The fixture was captured with hardware counters: SQ_WAVES, SQ_INSTS_VALU,
     GRBM_GUI_ACTIVE, GRBM_COUNT, FETCH_SIZE, WRITE_SIZE.
-    AI >> ridge (3696 FLOPS/B vs ridge 15.4), GPU util = 100%.
+    AI >> ridge (3696 FLOPS/B vs ridge 30.8), GPU util = 100%.
     Classifier must return compute (confidence >= 0.5).
     """
     session = build_session(airgap=True)

@@ -16,6 +16,7 @@ Tool allowlist (exactly 5 per spec §2 cap):
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -24,6 +25,7 @@ from perfxpert.agents import schemas
 
 _log = logging.getLogger(__name__)
 from perfxpert.agents.framework import Agent, ToolBinding, run_agent
+from perfxpert.tools import arch as arch_tools
 from perfxpert.tools import bottleneck, counters, roofline
 
 # trace_analysis — delegates to perfxpert.analyze helper functions
@@ -156,6 +158,13 @@ def _extract_hw_metrics(db: str) -> Dict[str, Any]:
         """
         rows = execute_statement(conn, counter_query).fetchall()
         counters = {r[0]: {"avg": r[1], "total": r[2]} for r in rows}
+        gfx_id = _detect_gfx_id_from_connection(conn, execute_statement)
+        arch_specs = None
+        if gfx_id:
+            try:
+                arch_specs = arch_tools.lookup_peaks(gfx_id)
+            except KeyError:
+                arch_specs = None
 
         hw: Dict[str, Any] = {}
 
@@ -206,9 +215,14 @@ def _extract_hw_metrics(db: str) -> Dict[str, Any]:
         hw["occupancy_pct"] = None
 
         # --- hbm_bw_utilization: (FETCH_SIZE + WRITE_SIZE) / (peak_BW * duration)
-        # MI300X peak HBM BW ~ 5.2 TB/s (3.2 TB/s practical sustained)
-        _MI300X_PEAK_BW_BYTES_PER_NS = 5.2e12 / 1e9  # bytes/ns
-        if "FETCH_SIZE" in counters and "WRITE_SIZE" in counters:
+        # Arch-sensitive. If the DB does not identify a supported GPU, leave the
+        # metric unknown instead of silently assuming MI300X.
+        peak_bw_bytes_per_ns = None
+        if arch_specs:
+            peak_bw_tbs = float(arch_specs.get("memory_bandwidth_tbs") or 0.0)
+            if peak_bw_tbs > 0:
+                peak_bw_bytes_per_ns = peak_bw_tbs * 1e12 / 1e9
+        if "FETCH_SIZE" in counters and "WRITE_SIZE" in counters and peak_bw_bytes_per_ns:
             fetch = counters["FETCH_SIZE"]["total"]
             write = counters["WRITE_SIZE"]["total"]
             # Get total trace duration from kernels table
@@ -218,7 +232,7 @@ def _extract_hw_metrics(db: str) -> Dict[str, Any]:
                 ).fetchone()
                 trace_dur_ns = dur_row[0] if dur_row and dur_row[0] else 1
                 total_bytes = (fetch or 0) + (write or 0)
-                peak_bytes = _MI300X_PEAK_BW_BYTES_PER_NS * trace_dur_ns
+                peak_bytes = peak_bw_bytes_per_ns * trace_dur_ns
                 hw["hbm_bw_utilization"] = min(1.0, total_bytes / peak_bytes) if peak_bytes > 0 else None
             except Exception:
                 hw["hbm_bw_utilization"] = None
@@ -226,22 +240,27 @@ def _extract_hw_metrics(db: str) -> Dict[str, Any]:
             hw["hbm_bw_utilization"] = None
 
         # --- arithmetic_intensity_above_ridge / arithmetic_intensity_below_ridge
-        # MI300X ridge point ≈ 15.4 FLOPS/Byte (gfx942)
-        _RIDGE = 15.4
-        if "FETCH_SIZE" in counters and "WRITE_SIZE" in counters and (
+        ridge_point = None
+        if gfx_id:
+            try:
+                ridge_point = arch_tools.lookup_ridge_point(gfx_id, dtype="fp32")
+            except KeyError:
+                ridge_point = None
+        if ridge_point and "FETCH_SIZE" in counters and "WRITE_SIZE" in counters and (
             "SQ_INSTS_VALU" in counters or "SQ_INSTS_VALU_MFMA" in counters
         ):
             fetch_t = counters["FETCH_SIZE"]["total"] or 0
             write_t = counters["WRITE_SIZE"]["total"] or 0
             total_bytes_ai = fetch_t + write_t
-            # Rough FLOPs: SQ_INSTS_VALU * 64 (wavefront_size) * 2 (FMA) + MFMA ops
+            # Rough FLOPs: SQ_INSTS_VALU * wave_size * 2 (FMA) + MFMA ops
+            wave_size = int((arch_specs or {}).get("wave_size") or 64)
             valu_t = counters.get("SQ_INSTS_VALU", {}).get("total", 0) or 0
             mfma_t = counters.get("SQ_INSTS_VALU_MFMA", {}).get("total", 0) or 0
-            total_flops = valu_t * 64 * 2 + mfma_t * 512  # MFMA f32_32x32x8 = 512 FP ops
+            total_flops = valu_t * wave_size * 2 + mfma_t * 512  # MFMA legacy counter uses a coarse fp32-equivalent weight.
             if total_bytes_ai > 0:
                 ai = total_flops / total_bytes_ai
-                hw["arithmetic_intensity_above_ridge"] = 1 if ai > _RIDGE else 0
-                hw["arithmetic_intensity_below_ridge"] = 1 if ai <= _RIDGE else 0
+                hw["arithmetic_intensity_above_ridge"] = 1 if ai > ridge_point else 0
+                hw["arithmetic_intensity_below_ridge"] = 1 if ai <= ridge_point else 0
             else:
                 hw["arithmetic_intensity_above_ridge"] = None
                 hw["arithmetic_intensity_below_ridge"] = None
@@ -261,6 +280,31 @@ def _extract_hw_metrics(db: str) -> Dict[str, Any]:
         # Non-DB exceptions (e.g. import errors, attribute errors) are programmer
         # bugs — let them propagate so they are not silently swallowed.
         raise
+
+
+def _detect_gfx_id_from_connection(conn: Any, execute_statement: Any) -> Optional[str]:
+    try:
+        row = execute_statement(
+            conn,
+            "SELECT name FROM rocpd_info_agent WHERE type='GPU' LIMIT 1",
+        ).fetchone()
+    except Exception:
+        return None
+
+    name = row[0] if row and row[0] else None
+    if not name:
+        return None
+
+    match = re.search(r"gfx[0-9a-f]+", str(name))
+    if not match:
+        return None
+
+    gfx_id = match.group(0)
+    try:
+        arch_tools.lookup_peaks(gfx_id)
+    except KeyError:
+        return None
+    return gfx_id
 
 
 def _extract_dispatch_metrics(db: str, hotspots: list) -> Dict[str, Any]:
