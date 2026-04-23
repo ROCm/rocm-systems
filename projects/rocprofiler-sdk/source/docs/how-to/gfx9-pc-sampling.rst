@@ -45,7 +45,7 @@ The following table lists the stall reasons:
     - The sampled wave isn't selected to issue instructions. This typically occurs when multiple waves compete to issue instructions of the same type (served by the same execution pipeline) at the same time. Only one wave wins the arbitration. For more details on wave arbitration, see `Scheduler documentation <https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/conceptual/pipeline-descriptions.html#scheduler>`_.
 
   * - ARBITER_WIN_EX_STALL
-    - The wave was ready to issue an instruction after being selected by the arbiter to issue instructions. However, the execution pipeline backpressured the wave and prevented it from issuing instructions for reasons such as not being able to accept more instructions.
+    - The wave was ready to issue an instruction after being selected by the arbiter. However, the execution pipeline backpressured the wave, preventing it from issuing instructions because it could not accept more instructions.
 
   * - OTHER
     - Other reasons for stalling a wave such as recoverable page-fault (``XNACK``).
