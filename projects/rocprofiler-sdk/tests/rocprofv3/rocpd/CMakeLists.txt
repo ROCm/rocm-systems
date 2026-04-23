@@ -370,14 +370,16 @@ rocprofiler_add_integration_validate_test(
          validate.py::test_summary_region_category_hip
          validate.py::test_summary_region_category_multiple
          validate.py::test_summary_region_category_none
-         --summary-kernel-dir
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-kernel
-         --summary-hip-dir
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-hip
-         --summary-multiple-dir
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-multiple
-         --summary-none-dir
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-none
+         --summary-kernel-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-kernel/out_kernels_summary.csv
+         --summary-hip-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-hip/out_hip_summary.csv
+         --summary-multiple-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-multiple/out_hip_summary.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-multiple/out_kernels_summary.csv
+         --summary-none-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-none/out_kernels_summary.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-none/out_memory_allocations_summary.csv
     TIMEOUT 60
     LABELS "integration-tests;rocpd;region-category"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-region-category)

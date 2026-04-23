@@ -91,29 +91,26 @@ def test_event_id_annotations(pftrace_reader):
 
 
 def _validate_summary_region_category_filtering(
-    summary_dir, expected_categories=None, allow_none=False
+    csv_files, expected_categories=None, allow_none=False
 ):
     """
     Test that summary output contains ONLY the expected categories.
 
     Args:
-        summary_dir: Path to directory containing summary CSV files
+        csv_files: List of CSV file paths to validate
         expected_categories: List of category names that should be present (e.g., ['kernel', 'hip'])
         allow_none: If True, allows no region summaries (for --region-categories NONE test)
     """
     import os
-    import glob
 
-    if not os.path.exists(summary_dir):
-        raise FileNotFoundError(f"Summary directory not found: {summary_dir}")
+    if not csv_files:
+        raise ValueError("No CSV files provided for validation")
 
-    # Get all CSV files
-    csv_files = glob.glob(os.path.join(summary_dir, "*.csv"))
     basenames = [os.path.basename(f) for f in csv_files]
 
-    assert len(basenames) > 0, f"No summary files found in {summary_dir}"
+    assert len(basenames) > 0, "No summary files provided for validation"
 
-    print(f"\nFound {len(basenames)} summary files in {summary_dir}:")
+    print(f"\nValidating {len(basenames)} summary files:")
     for name in sorted(basenames):
         print(f"  - {name}")
 
@@ -149,34 +146,34 @@ def _validate_summary_region_category_filtering(
             )
 
 
-def test_summary_region_category_kernel(summary_kernel_dir):
+def test_summary_region_category_kernel(summary_kernel_csv_files):
     """Test that --region-categories KERNEL only produces kernel summaries."""
     _validate_summary_region_category_filtering(
-        summary_kernel_dir,
+        summary_kernel_csv_files,
         expected_categories=["kernel"],
     )
 
 
-def test_summary_region_category_hip(summary_hip_dir):
+def test_summary_region_category_hip(summary_hip_csv_files):
     """Test that --region-categories HIP only produces HIP summaries."""
     _validate_summary_region_category_filtering(
-        summary_hip_dir,
+        summary_hip_csv_files,
         expected_categories=["hip"],
     )
 
 
-def test_summary_region_category_multiple(summary_multiple_dir):
+def test_summary_region_category_multiple(summary_multiple_csv_files):
     """Test that --region-categories HIP KERNEL produces those summaries."""
     _validate_summary_region_category_filtering(
-        summary_multiple_dir,
+        summary_multiple_csv_files,
         expected_categories=["hip", "kernel"],
     )
 
 
-def test_summary_region_category_none(summary_none_dir):
+def test_summary_region_category_none(summary_none_csv_files):
     """Test that --region-categories NONE includes views but no regions."""
     _validate_summary_region_category_filtering(
-        summary_none_dir,
+        summary_none_csv_files,
         expected_categories=["kernel", "memory"],
         allow_none=True,
     )
