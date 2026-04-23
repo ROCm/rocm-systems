@@ -254,10 +254,10 @@ def test_csv_has_summary_and_hotspots_and_honours_has_profiling(
 
 ### 7. Getting-started screenshot (optional)
 
-If the format warrants a visual, regenerate the sanity fixture under
-`docs/guides/assets/gifs/04-analyze-<fmt>.gif` using the VHS tape
-pattern already in `docs/guides/assets/tapes/`. Skip this step for
-machine-only formats (csv, ndjson).
+If the format warrants a visual, update the checked-in sanity fixture
+under `docs/guides/assets/gifs/04-analyze-<fmt>.gif` to match the
+guide GIF style. Skip this step for machine-only formats (csv,
+ndjson).
 
 ## Contract checklist
 
