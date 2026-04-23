@@ -54,11 +54,11 @@ check_hip_error(void);
 
 // ======================================================
 __global__ void
-kernel1(const int c)
+kernel1(const int c, const size_t iter_num)
 {
     int a = 0;
 #pragma nounroll
-    for(int i = 0; i < ITER_NUM; i++)
+    for(size_t i = 0; i < iter_num; i++)
     {
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
@@ -164,11 +164,11 @@ kernel1(const int c)
 }
 
 __global__ void
-kernel2(const int c)
+kernel2(const int c, const size_t iter_num)
 {
     int a = 0;
 #pragma nounroll
-    for(int i = 0; i < ITER_NUM; i++)
+    for(size_t i = 0; i < iter_num; i++)
     {
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
@@ -274,14 +274,14 @@ kernel2(const int c)
 }
 
 __global__ void
-kernel3(const float c)
+kernel3(const float c, const size_t iter_num)
 {
     double a        = threadIdx.x;
     float  i        = 0;
     float  d        = threadIdx.x;
     float  e        = 0;
     int    tid_even = threadIdx.x % 2;
-    for(int j = 0; j < ITER_NUM; j++)
+    for(size_t j = 0; j < iter_num; j++)
     {
         if(tid_even == 0)
         {
@@ -495,35 +495,35 @@ kernel3(const float c)
 // ======================================================
 
 void
-run_kernel()
+run_kernel(size_t iter_num)
 {
     int wave_size = 0;
     HIP_API_CALL(hipDeviceGetAttribute(&wave_size, hipDeviceAttributeWarpSize, 0));
 
-    // Get device properties to retrieve GFXIP version
     uint32_t num_blocks = BLOCK_SIZE;
-
     for(int i = 1; i <= wave_size; i++)
     {
         if(i % 2 == 1)
-            kernel1<<<num_blocks, i>>>(i);
+            kernel1<<<num_blocks, i>>>(i, iter_num);
         else
-            kernel2<<<num_blocks, i>>>(i);
+            kernel2<<<num_blocks, i>>>(i, iter_num);
 
         check_hip_error();
         HIP_API_CALL(hipDeviceSynchronize());
     }
 
     float arg = 0;
-    kernel3<<<num_blocks, 4 * wave_size>>>(arg);
+    kernel3<<<num_blocks, 4 * wave_size>>>(arg, iter_num);
     check_hip_error();
     HIP_API_CALL(hipDeviceSynchronize());
 }
 
 int
-main()
+main(int argc, char* argv[])
 {
-    run_kernel();
+    size_t iter_num = ITER_NUM;
+    if(argc > 1) iter_num = std::stoull(argv[1]);
+    run_kernel(iter_num);
     return 0;
 }
 
