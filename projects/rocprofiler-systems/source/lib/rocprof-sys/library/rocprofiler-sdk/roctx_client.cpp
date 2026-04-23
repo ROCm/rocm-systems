@@ -109,7 +109,7 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_enter(
 {
     auto* data =
         static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
-    const bool write_enabled = m_session->should_write_markers();
+    const bool write_enabled = m_session->is_active();
 
     switch(record.operation)
     {
@@ -205,7 +205,7 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
         }
         case ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA:
         {
-            if(m_session->should_write_markers())
+            if(m_session->is_active())
             {
                 m_writer.write_end(data->args.roctxMarkA.message, begin_ts, ts, args_str,
                                    record);
@@ -223,7 +223,7 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
 
             m_session->handle_range_start(range_id, name);
 
-            const bool write_enabled = m_session->should_write_markers();
+            const bool write_enabled = m_session->is_active();
             m_started_ranges.push_back(
                 { tim::get_hash_id(name), begin_ts, write_enabled });
             if(write_enabled)
@@ -234,7 +234,7 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
         }
         default:
         {
-            if(m_session->should_write_markers())
+            if(m_session->is_active())
             {
                 const auto& name =
                     trace_cache::get_metadata_registry().get_callback_tracing_info().at(
