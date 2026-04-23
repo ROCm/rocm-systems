@@ -1161,7 +1161,6 @@ class CodeGenerator:
             L.append(f'  uint64_t exec = wf.exec();')
             L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
             L.append(f'  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);')
-            L.append(f'  // Pre-read all data0 values from every lane.')
             L.append(f'  uint32_t src_data[64];')
             L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i)')
             L.append(f'    src_data[i] = cu.read_vgpr(vb + inst_.data0, i);')
@@ -1223,14 +1222,12 @@ class CodeGenerator:
             L.append(f'    if (!(exec & (1ULL << lane))) continue;')
             L.append(f'    uint32_t src_lane;')
             L.append(f'    if (offset & 0x8000) {{')
-            L.append(f'      // QDMode: swizzle within 4-lane quads.')
             L.append(f'      uint32_t and_mask = offset & 0x1F;')
             L.append(f'      uint32_t or_mask = (offset >> 5) & 0x1F;')
             L.append(f'      uint32_t xor_mask = (offset >> 10) & 0x1F;')
             L.append(f'      src_lane = ((lane & and_mask) | or_mask) ^ xor_mask;')
             L.append(f'      src_lane = (lane & ~0x3) | (src_lane & 0x3);  // stay in quad')
             L.append(f'    }} else {{')
-            L.append(f'      // BitMode: full-wave swizzle.')
             L.append(f'      uint32_t and_mask = offset & 0x1F;')
             L.append(f'      uint32_t or_mask = (offset >> 5) & 0x1F;')
             L.append(f'      uint32_t xor_mask = (offset >> 10) & 0x1F;')
@@ -3788,7 +3785,6 @@ class CodeGenerator:
                 L.append(f'    }}')
                 L.append(f'    int32_t acc0 = static_cast<int32_t>({s2}.read_lane(wf, lane));')
                 L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(acc0 + dot));')
-                L.append(f'    // Additional result registers would require cross-lane data')
             else:
                 # FP8/BF8 variants: input_type is e.g. "BF8_BF8", "BF8_FP8", etc.
                 _FP8_CONV = {'BF8': 'util::bf8_e5m2_to_f32', 'FP8': 'util::fp8_e4m3_to_f32'}
