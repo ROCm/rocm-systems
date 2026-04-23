@@ -25,7 +25,7 @@ void dumpLine(int* values, int nranks, const char* prefix) {
   INFO(NCCL_INIT, "%s", line);
 }
 
-ncclResult_t ncclBuildRings_old(int nrings, int* rings, int rank, int nranks, int* prev, int* next) {
+ncclResult_t ncclBuildRings(int nrings, int* rings, int rank, int nranks, int* prev, int* next) {
   for (int r=0; r<nrings; r++) {
     char prefix[40];
     /*sprintf(prefix, "[%d] Channel %d Prev : ", rank, r);
@@ -63,8 +63,8 @@ ncclResult_t ncclBuildRings_old(int nrings, int* rings, int rank, int nranks, in
 }
 
 /**
- * ncclBuildRings: Linearizes linked-list neighbor pointers into a rank array.
- * * This function converts 'next' and 'prev' adjacency arrays into a flat list 
+ * rcclBuildRings: Functionally same as ncclBuildRings, Linearizes linked-list neighbor pointers into a rank array.
+ * This function converts 'next' and 'prev' adjacency arrays into a flat list 
  * of ranks (a ring) for each communication channel.
  *
  * PRE-CONDITIONS & ASSUMPTIONS:
@@ -75,16 +75,16 @@ ncclResult_t ncclBuildRings_old(int nrings, int* rings, int rank, int nranks, in
  * - 'prev' and 'next' must be (nrings * nranks) in size.
  * 3. Identity: 'rank' must be the global rank of the local process, and 
  * 0 <= rank < nranks.
- * 4. Path Discovery: It assumes the caller has already performed a search 
- * (e.g., BFS or Dijkstra) to populate 'next' and 'prev' such that they 
- * form a Hamiltonian cycle (a path visiting every node exactly once).
+ * 4. Path Discovery: It assumes the caller has already performed topology search 
+ * to populate 'next' and 'prev' such that they form a Hamiltonian cycle.
  *
- * VALIDATION LOGIC:
+ * DESCRIPTION:
  * - Loop-back: Ensures the ring returns to the starting rank after exactly 'nranks' steps.
  * - Full Coverage: Ensures no rank is skipped or duplicated (O(N) check).
  * - Bi-directional: Verifies that 'prev' and 'next' are perfect mirrors.
+ * - O( nRings * nRanks ) Algorithmic complexity 
  */
-ncclResult_t ncclBuildRings(int nrings, int* rings, int rank, int nranks, int* prev, int* next) {
+ncclResult_t rcclBuildRings(int nrings, int* rings, int rank, int nranks, int* prev, int* next) {
   // Use a bitmask/flag array for O(N) validation instead of O(N^2)
   std::vector<char> found(nranks, 0);
 
