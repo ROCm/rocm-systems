@@ -961,7 +961,7 @@ typedef enum {
 typedef struct {
   struct pcie_static_ {
     uint16_t max_pcie_width;              //!< maximum number of PCIe lanes
-    uint32_t max_pcie_speed;              //!< maximum PCIe speed in GT/s
+    uint32_t max_pcie_speed;              //!< maximum PCIe speed in MT/s (e.g. 16000 for PCIe Gen4)
     uint32_t pcie_interface_version;      //!< PCIe interface version
     amdsmi_card_form_factor_t slot_type;  //!< card form factor
     uint32_t max_pcie_interface_version;  //!< maximum PCIe link generation

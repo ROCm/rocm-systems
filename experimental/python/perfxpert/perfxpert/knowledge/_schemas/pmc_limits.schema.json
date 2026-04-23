@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["per_block_limits"],
+  "properties": {
+    "per_block_limits": {
+      "type": "object",
+      "description": "Maximum raw hardware counters per block per rocprofv3 pass",
+      "patternProperties": {
+        "^[A-Z][A-Z0-9_]*$": {
+          "type": "object",
+          "required": ["limit"],
+          "properties": {
+            "limit": {"type": "integer", "minimum": 1},
+            "gfx942_limit": {"type": "integer", "minimum": 1},
+            "note": {"type": "string"}
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -286,6 +286,7 @@ endif()
 # Add the example directory
 if(AIS_INSTALL_EXAMPLES)
     add_subdirectory(examples/aiscp)
+    add_subdirectory(examples/api)
 endif()
 
 # Add tools directory
