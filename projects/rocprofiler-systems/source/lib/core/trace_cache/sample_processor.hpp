@@ -38,7 +38,7 @@ struct processor_t
         static_cast<T*>(this)->handle(sample);
     }
 
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     void handle(const memory_allocate_sample& sample)
     {
         static_cast<T*>(this)->handle(sample);
@@ -85,7 +85,7 @@ struct processor_view_t
     using kernel_dispatch_fn_t = void (*)(void*, const kernel_dispatch_sample&) noexcept;
     using scratch_memory_fn_t  = void (*)(void*, const scratch_memory_sample&) noexcept;
     using memory_copy_fn_t     = void (*)(void*, const memory_copy_sample&) noexcept;
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     using memory_allocate_fn_t = void (*)(void*, const memory_allocate_sample&) noexcept;
 #endif
     using region_fn_t           = void (*)(void*, const region_sample&) noexcept;
@@ -97,7 +97,7 @@ struct processor_view_t
     using gpu_perf_counter_sample_fn_t =
         void (*)(void*, const gpu_perf_counter_sample&) noexcept;
     using backtrace_region_fn_t       = void (*)(void*,
-                                                 const backtrace_region_sample&) noexcept;
+                                           const backtrace_region_sample&) noexcept;
     using kfd_sample_fn_t             = void (*)(void*, const kfd_sample&) noexcept;
     using prepare_for_processing_fn_t = void (*)(void*) noexcept;
     using finalize_processing_fn_t    = void (*)(void*) noexcept;
@@ -107,7 +107,7 @@ struct processor_view_t
         kernel_dispatch_fn_t handle_kernel_dispatch;
         scratch_memory_fn_t  handle_scratch_memory;
         memory_copy_fn_t     handle_memory_copy;
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
         memory_allocate_fn_t handle_memory_allocate;
 #endif
         region_fn_t                  handle_region;
@@ -152,7 +152,7 @@ struct processor_view_t
         m_vtable->handle_memory_copy(m_object, sample);
     }
 
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     ROCPROFSYS_INLINE void handle(const memory_allocate_sample& sample) const noexcept
     {
         m_vtable->handle_memory_allocate(m_object, sample);
@@ -227,7 +227,7 @@ private:
             +[](void* obj, const memory_copy_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
             +[](void* obj, const memory_allocate_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
@@ -247,10 +247,10 @@ private:
             +[](void* obj, const ainic_pmc_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
-            +[](void* obj, const gpu_perf_counter_sample& sample) noexcept {
+            +[](void* obj, const cpu_pmc_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
-            +[](void* obj, const cpu_pmc_sample& sample) noexcept {
+            +[](void* obj, const gpu_perf_counter_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
             +[](void* obj, const backtrace_region_sample& sample) noexcept {
