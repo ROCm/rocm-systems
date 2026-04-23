@@ -8,7 +8,19 @@ add_subdirectory(common)
 add_subdirectory(base)
 add_subdirectory(gpu)
 add_subdirectory(cpu)
-add_subdirectory(gpu_perf_counter)
+
+# GPU perf counter collector requires ROCm >= 6.4 (device counting service API change)
+if(
+    (ROCPROFSYS_ROCM_VERSION_MAJOR GREATER 6)
+    OR (
+        ROCPROFSYS_ROCM_VERSION_MAJOR EQUAL 6
+         AND ROCPROFSYS_ROCM_VERSION_MINOR GREATER_EQUAL 4
+    )
+)
+    add_subdirectory(gpu_perf_counter)
+else()
+    set(pmc_gpu_perf_counter_sources "")
+endif()
 
 # Conditionally compile NIC collector based on AINIC support
 # ROCPROFSYS_BUILD_AINIC is set in cmake/Packages.cmake based on:

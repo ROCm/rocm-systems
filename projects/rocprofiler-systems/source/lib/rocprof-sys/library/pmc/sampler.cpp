@@ -6,10 +6,12 @@
 #include "library/pmc/collectors/gpu/cache_policy.hpp"
 #include "library/pmc/collectors/gpu/collector.hpp"
 #include "library/pmc/collectors/gpu/perfetto_policy.hpp"
-#include "library/pmc/collectors/gpu_perf_counter/collector.hpp"
 #include "library/pmc/device_providers/amd_smi/provider.hpp"
 #include <cstdint>
-#include "library/pmc/device_providers/rocprofiler_sdk/provider.hpp"
+#if ROCPROFSYS_ROCM_VERSION >= 60400
+#    include "library/pmc/collectors/gpu_perf_counter/collector.hpp"
+#    include "library/pmc/device_providers/rocprofiler_sdk/provider.hpp"
+#endif
 
 #if defined(ROCPROFSYS_BUILD_AINIC)
 #    include "library/pmc/collectors/nic/cache_policy.hpp"
@@ -27,7 +29,9 @@
 #include "core/components/fwd.hpp"
 #include "core/state.hpp"
 #include "library/pmc/device_providers/amd_smi/drivers/driver.hpp"
-#include "library/pmc/device_providers/rocprofiler_sdk/drivers/driver.hpp"
+#if ROCPROFSYS_ROCM_VERSION >= 60400
+#    include "library/pmc/device_providers/rocprofiler_sdk/drivers/driver.hpp"
+#endif
 #include "library/runtime.hpp"
 
 #include "library/pmc/sampler.hpp"
@@ -100,10 +104,12 @@ using provider_factory_t =
 using provider_t      = provider_factory_t::provider_t;
 using gpu_collector_t = collectors::gpu::collector<provider_t, gpu_production_config>;
 
+#if ROCPROFSYS_ROCM_VERSION >= 60400
 using gpu_perf_counter_provider_t =
     device_providers::rocprofiler_sdk::provider<drivers::rocprofiler_sdk::driver_factory>;
 using gpu_perf_counter_collector_t =
     collectors::gpu_perf_counter::collector<gpu_perf_counter_provider_t>;
+#endif
 
 #if defined(ROCPROFSYS_BUILD_AINIC)
 using nic_collector_t = collectors::nic::collector<provider_t, nic_production_config>;
@@ -116,9 +122,11 @@ using cpu_collector_t = collectors::cpu::collector<cpu_provider_t, cpu_productio
 
 std::shared_ptr<provider_t> g_device_provider;
 
-std::unique_ptr<gpu_collector_t>              g_gpu_collector;
+std::unique_ptr<gpu_collector_t> g_gpu_collector;
+#if ROCPROFSYS_ROCM_VERSION >= 60400
 std::shared_ptr<gpu_perf_counter_provider_t>  g_gpu_perf_counter_provider;
 std::unique_ptr<gpu_perf_counter_collector_t> g_gpu_perf_counter_collector;
+#endif
 #if defined(ROCPROFSYS_BUILD_AINIC)
 std::unique_ptr<nic_collector_t> g_nic_collector;
 #endif
@@ -263,8 +271,10 @@ post_process()
         slice.post_process();
     }
     g_collector_slices.clear();
+#if ROCPROFSYS_ROCM_VERSION >= 60400
     g_gpu_perf_counter_collector.reset();
     g_gpu_perf_counter_provider.reset();
+#endif
     g_device_provider.reset();
     g_cpu_provider.reset();
 }
@@ -298,8 +308,10 @@ postfork_child_cleanup()
         slice.shutdown();
     }
     g_collector_slices.clear();
+#if ROCPROFSYS_ROCM_VERSION >= 60400
     g_gpu_perf_counter_collector.reset();
     g_gpu_perf_counter_provider.reset();
+#endif
     g_gpu_collector.reset();
 #if defined(ROCPROFSYS_BUILD_AINIC)
     g_nic_collector.reset();
@@ -319,6 +331,7 @@ postfork_parent_reinit()
     g_reinit_pending.store(true);
 }
 
+#if ROCPROFSYS_ROCM_VERSION >= 60400
 void
 prefork_lock_sampler()
 {
@@ -376,4 +389,5 @@ register_gpu_perf_counter_source(const std::vector<std::shared_ptr<agent>>& agen
         LOG_ERROR("Failed to register SDK PMC source: {}", runtime_exception.what());
     }
 }
+#endif
 }  // namespace rocprofsys::pmc

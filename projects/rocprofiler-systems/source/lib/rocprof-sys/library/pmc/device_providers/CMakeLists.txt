@@ -4,7 +4,18 @@
 # PMC Device Providers
 add_subdirectory(amd_smi)
 add_subdirectory(procfs)
-add_subdirectory(rocprofiler_sdk)
+
+if(
+    (ROCPROFSYS_ROCM_VERSION_MAJOR GREATER 6)
+    OR (
+        ROCPROFSYS_ROCM_VERSION_MAJOR EQUAL 6
+         AND ROCPROFSYS_ROCM_VERSION_MINOR GREATER_EQUAL 4
+    )
+)
+    add_subdirectory(rocprofiler_sdk)
+else()
+    set(pmc_gpu_perf_counter_provider_sources "")
+endif()
 
 # Collect all device provider sources
 set(pmc_device_provider_sources
