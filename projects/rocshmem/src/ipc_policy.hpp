@@ -222,6 +222,7 @@ class IpcSdmaImpl : public IpcOnImpl {
                           bool blocking = false) {
     if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
       auto* handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
+      assert(nullptr != handle /* Assuming sdma is available to all pes uniformely */);
       if (blocking) handle->quietAll();
       return;
     }
@@ -234,6 +235,7 @@ class IpcSdmaImpl : public IpcOnImpl {
       anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_block()) {
         handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
+        assert(nullptr != handle /* Assuming sdma is available to all pes uniformely */);
         if (blocking) handle->quietAll();
       }
       return;
@@ -247,6 +249,7 @@ class IpcSdmaImpl : public IpcOnImpl {
       anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_wave()) {
         handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
+        assert(nullptr != handle /* Assuming sdma is available to all pes uniformely */);
         if (blocking) handle->quietAll();
       }
       return;
