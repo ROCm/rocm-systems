@@ -271,6 +271,10 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "multi_gpu(num): mark test as using requiring atleast num amount of GPUs",
     )
+    config.addinivalue_line(
+        "markers",
+        "rockoff: prevents the test from being run on TheRock",
+    )
 
     # See pytest_collection_modifyitems
     generic_functional_markers = [
