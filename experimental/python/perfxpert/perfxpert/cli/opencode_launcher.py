@@ -1,17 +1,23 @@
 """opencode_launcher — `perfxpert-code` entry point.
 
-Launches opencode (from PERFXPERT_OPENCODE_PATH / locally built patched
-repo checkout / bundled wheel / well-known paths / system PATH in that
-order) with the AMD-themed config directory.
+Launches opencode with the bundled AMD-themed config. Runtime binary resolution
+prefers, in order: `PERFXPERT_OPENCODE_PATH`, a locally built patched repo
+checkout under `experimental/python/perfxpert/opencode`, the packaged
+`perfxpert/_bundled/opencode` resource when it exists, then upstream well-known
+install paths and finally `PATH`.
 
-In source/editable checkouts, `perfxpert-code install-patches` can build the
-patched binary from the pinned `opencode` submodule. In packaged installs, the
-launcher prefers the bundled binary when present and falls back to an upstream
-`opencode` install only when no patched copy is available.
+Bundling the patched binary is best-effort, not guaranteed. `setup.py` tries to
+run `scripts/build-bundled-opencode.sh` during wheel/editable installs when the
+repo-pinned submodule and `bun` are available, but it warns and skips the build
+instead of downloading tooling or cloning mutable upstream source. The
+deprecated `perfxpert-code install-patches` alias is the editable/source escape
+hatch for rebuilding `_bundled/opencode` from that pinned submodule.
 
-PERFXPERT_OPENCODE_PATH, if set, must point to an existing executable file;
-the launcher raises FileNotFoundError immediately rather than silently
-falling back to bundled/PATH lookup.
+If no patched copy is available at runtime, the launcher falls through to an
+upstream `opencode` install and emits a warning that the perfxpert gate/rebrand
+patches are inactive. `PERFXPERT_OPENCODE_PATH`, if set, must point to an
+existing executable file; otherwise the launcher raises `FileNotFoundError`
+instead of silently continuing to bundled/PATH lookup.
 """
 
 from __future__ import annotations
