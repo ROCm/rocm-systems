@@ -74,6 +74,7 @@ def get_thread_limit() -> int:
         get_thread_limit() + 24,
         get_thread_limit(),
     ],
+    ids=["below", "above", "at"],
 )
 @pytest.mark.class_name("thread-limit")
 class TestThreadLimit(RocprofsysTest):
