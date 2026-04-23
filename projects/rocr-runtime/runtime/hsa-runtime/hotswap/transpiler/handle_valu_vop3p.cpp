@@ -602,19 +602,13 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
         hr.failure = RaiseFailure::unsupportedShape(
             di, "VOP3P",
             "v_wmma_*_16x16x{32,64}_* cross-target (WMMA → MFMA) "
-            "under ModuloReplicationProjection — the staged "
-            "strict.wwm-scoped lowering passes minimal-repro "
-            "tests (isolated WMMA, K-loop chain) but has an "
-            "unexplained residual divergence vs native gfx1250 on "
-            "Triton's `matmul_fp16_16x16` at M>=32 (under "
-            "investigation; not yet pinned to a specific root "
-            "cause).  Refusing loudly rather than shipping a "
-            "subtle wrong-numerics kernel.  Compile the source "
+            "under ModuloReplicationProjection.  The staged "
+            "`strict.wwm`-scoped lowering has an open multi-WMMA "
+            "residual (see matrix-translation.md §12.4); until "
+            "that is pinned, refusing loudly rather than shipping "
+            "wrong numerics.  Workaround: compile the source "
             "kernel with `__launch_bounds__(targetWaveSize)` or "
-            "larger to get a `max_flat_workgroup_size >= "
-            "targetWaveSize` HSACO that takes the WaveNative "
-            "projection path (verified correct end-to-end via "
-            "`Gfx1250Gpu.Matmul*` gtests).");
+            "larger to take the verified WaveNative path.");
         return hr;
       }
       result_val = emitWMMAtoMFMA(ctx, a, b, c, wmmaInputType);

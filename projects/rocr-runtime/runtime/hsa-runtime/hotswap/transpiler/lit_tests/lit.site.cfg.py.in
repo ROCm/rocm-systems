@@ -383,6 +383,16 @@ config.fixtures = {
     # in that fixture's `.ll` for the full flip protocol.
     "wmma_phantom_lane_f16_chain":
         r"@LIT_FIXTURE_WMMA_PHANTOM_LANE_F16_CHAIN_CO@",
+    # ttmp7_workgroup_id_yz_init — regression fence for the
+    # `ttmp7 = (workgroup_id_z << 16) | (workgroup_id_y & 0xFFFF)`
+    # raiser-entry init on gfx12+.  Matches the AMDGPU backend's
+    # `AMDGPULegalizerInfo::loadInputValue` preload layout for 2D/3D
+    # grid kernels; without it every Triton-style `s_and_b32 sN,
+    # ttmp7, 0xffff` read of `workgroup_id_y` returns 0 and the
+    # kernel silently writes only its Y=0 workgroup column.  Pinned
+    # along with the matmul_fp16_16x16 fix.
+    "ttmp7_workgroup_id_yz_init":
+        r"@LIT_FIXTURE_TTMP7_WORKGROUP_ID_YZ_INIT_CO@",
     # s_set_pc_i64 (SOP1) — four sibling fixtures, one per analysis
     # outcome class. See setpc_analysis.cpp / handle_sop1.cpp for the
     # Pattern A (DirectA, br) / Pattern B (IndirectB, indirectbr) /

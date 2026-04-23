@@ -658,8 +658,19 @@ T5 in parallel. T3, then T4.
 ## 12. Staging state — ModuloReplicationProjection-aware lowering (2026-04-22)
 
 > **Status:** infrastructure landed, lowering staged-but-gated-off.
-> End-to-end enable blocked on `matmul_fp16_16x16` residual
-> investigation (commit `b532077af4`).
+> Independent of the WMMA lowering, a prerequisite ABI bug in the
+> raiser-entry `ttmp7` init was identified and fixed (2026-04-22;
+> see §12.3 for the full bisection).  With that fix plus the MODREP
+> refusal gate lifted in-session, `matmul_fp16_16x16` passes
+> `compare_correctness` 5/5 end-to-end across all shapes
+> (verified in-session; the test path is gated behind the WMMA
+> refusal on `main`, so a fresh checkout does not exercise it
+> without manually flipping the gate — see §12.2 gate-flip
+> protocol).  `matmul_fp16` (the larger BLOCK=32 sibling with four
+> parallel WMMAs sharing A / B operand vregs through
+> `v_permlane16_swap_b32`) still exhibits a residual mode-5 /
+> random-input divergence under the same enable — this is the
+> remaining blocker to flipping the refusal gate (§12.4).
 
 The WMMA → MFMA lowering in `wmma_lowering.cpp` now supports TWO
 projections:
@@ -727,6 +738,176 @@ is ready to enable:
    (`if (numSrcWaves != 2) report_fatal_error(...)`) once the
    `numSrcWaves == 1` branch is live. Keep the `numSrcWaves ∉ {1,
    2}` guard — that's a contract check for new projection classes.
+
+### 12.3 Prerequisite ABI fix — `ttmp7` init for `workgroup_id_y/z` (2026-04-22)
+
+The AMDGPU backend's entry-function ABI for gfx12+ preloads
+`workgroup_id_y` and `workgroup_id_z` into a packed `ttmp7` by
+`SIMachineFunctionInfo`'s argument-descriptor table (see LLVM's
+`AMDGPULegalizerInfo::loadInputValue`):
+
+```cpp
+WorkGroupIDY = ArgDescriptor::createRegister(TTMP7, 0xFFFFu);
+WorkGroupIDZ = ArgDescriptor::createRegister(TTMP7, 0xFFFF0000u);
+```
+
+i.e. `ttmp7[15:0] = workgroup_id_y`, `ttmp7[31:16] = workgroup_id_z`.
+Triton-generated gfx1250 kernels read the Y component via the
+canonical idiom:
+
+```
+s_and_b32 sDST, ttmp7, 0xffff       ; wg_id_y
+```
+
+`raiser.cpp`'s Phase-4 entry init previously initialised `ttmp9`
+(`workgroup_id_x`) and `ttmp8[29:25]` (`wave_id_in_workgroup`)
+for the canonical Tensile / rocBLAS BFE pattern, but left `ttmp7`
+uninitialised.  Under MODREP the uninitialised SGPR read as
+whatever the alloca's initial pattern yielded — effectively
+always zero — so every 2D-grid kernel's `workgroup_id_y` collapsed
+onto the Y=0 column.
+
+Bisection trace (against `matmul_fp16_16x16` M=32, all-ones ×
+all-ones; expected output every cell = K = 32; host harness
+`/tmp/matmul_test.cpp` in-session):
+
+| Column range | Observed | Diagnosis |
+|---|---|---|
+| cols 0..15 | 32.0 (correct) | WG(\*, pid_n=0) writes |
+| cols 16..31 | `0xCDCD` (poison) | WG(\*, pid_n=1) never writes — all WGs see `pid_n = 0` |
+
+The pattern is unambiguous: the kernel body was running every
+workgroup to completion but every WG wrote to its `pid_n=0`
+destination region, so the Y=1 column of workgroups landed atop
+the Y=0 column and the Y=1 output region retained the host's
+pre-launch `0xCD` memset poison.
+
+The fix (in `raiser.cpp`'s `if (AMDGPU::isGFX12Plus(...))` block):
+
+```cpp
+// ttmp7 = (workgroup_id_z << 16) | (workgroup_id_y & 0xFFFF)
+Value *wgIdY = B.CreateCall(fnWorkgroupIdY, {}, "ttmp7_wg_id_y");
+Value *wgIdZ = B.CreateCall(fnWorkgroupIdZ, {}, "ttmp7_wg_id_z");
+Value *wgIdYLo = B.CreateAnd(wgIdY, B.getInt32(0xFFFF), "wg_id_y_lo16");
+Value *wgIdZHi = B.CreateShl(wgIdZ, B.getInt32(16), "wg_id_z_hi16");
+Value *ttmp7Val = B.CreateOr(wgIdYLo, wgIdZHi, "ttmp7_val");
+B.CreateStore(ttmp7Val, regs.ttmp[7]);
+```
+
+Masking Y to 16 bits before the OR is safe on no-Z kernels (the
+backend's mask there is `~0u`; the consumer's `s_and ttmp7,
+0xffff` discards the upper bits regardless) and is the principled
+all-cases shape for 2D/3D grid kernels alike.
+
+**Regression fence:** `lit_tests/ttmp7_workgroup_id_yz_init/`
+pins the `@llvm.amdgcn.workgroup.id.{y,z}` + `shl ..., 16`
+IR shape at kernel entry.  A backwards-stride to pre-fix behaviour
+would drop at least one of those three anchors.
+
+### 12.4 Remaining `matmul_fp16` divergence — multi-WMMA + `v_permlane16_swap_b32`
+
+With §12.3's fix applied and the refusal gate lifted locally,
+`matmul_fp16_16x16` passes `compare_correctness` 5/5.  The sibling
+`matmul_fp16` (BLOCK=32, four parallel WMMAs per WG, epilogue
+without LDS round-trip) still diverges for non-uniform inputs.
+
+Host-harness bisection with deterministic `mode ∈ {0, 3..6}` input
+generators narrows the residual (harness not checked in — rebuilding
+for a future investigation is the right step, not re-reading the
+prior session's `/tmp` file):
+
+| Mode | A layout | B layout | Expected | Observed | Verdict |
+|---|---|---|---|---|---|
+| 0 | all 1s | all 1s | C[i,j] = K = 32 | C[i,j] = 32 | ✓ match |
+| 6 | A[i,k]=i/16 | all 1s | C[i,j] = 2i | C[i,j] = 2i | ✓ match |
+| 5 | all 1s | B[k,j]=j/16 | C[i,j] = 2j | C[i,j] = 2(j±8 mod 16) | ✗ mismatch (cols 0..15: got=ref+16; cols 16..31: got=ref-16) |
+
+The A-only-varying and all-uniform cases being bitwise correct
+while the B-only-varying case is systematically off by the
+sub-tile width strongly suggests the bug is specific to B's
+data-flow path rather than the (A↔B-symmetric) redistribute
+math, MFMA intrinsic choice, or collect mapping.  This is a
+bisection hypothesis, not a formal proof — a data-dependent
+redistribute bug that happens to thread the wrong SSA value as
+the B fragment while A's SSA is correct would show the same
+asymmetry.  Getting to a formal localisation needs either a
+minimal synthetic repro kernel that isolates the B-path (in
+progress; `quad_wmma_kernel` sketched in-session but didn't
+cleanly reproduce the ±16 pattern) or an MIR-level dump after
+`si-wqm` / regalloc to observe the B-operand vreg threading.
+
+Two confounded differentiators between the working
+`matmul_fp16_16x16` and the failing `matmul_fp16`:
+
+  1. **`v_permlane16_swap_b32` presence.**  `matmul_fp16` emits
+     8 of these (one per A-fragment dword pair); `matmul_fp16_16x16`
+     emits zero.
+  2. **Multi-WMMA per WG.**  `matmul_fp16` has 4 parallel WMMAs
+     per workgroup (a 2×2 output sub-tile grid);
+     `matmul_fp16_16x16` has 1.
+
+With only one sample on each side I can't separate these
+empirically.  The candidate root causes below apply under either.
+
+The swap sequence emitted by Triton for `matmul_fp16`:
+
+```
+v_permlane16_swap_b32_e32 v186, v194   ; A fragment pair 0
+v_permlane16_swap_b32_e32 v187, v195
+...
+v_permlane16_swap_b32_e32 v193, v201   ; A fragment pair 7
+```
+
+Each swap exchanges a register PAIR between lanes 0..15 and 16..31,
+setting up the two-row-tile A fragment distribution.  The lift
+decomposes each `v_permlane16_swap_b32 vdst, src0` into a pair of
+EXEC-ungated `ds_bpermute` reads using `lane_id XOR 16` as the
+partner selector — semantics are correct per the AMDGPU ISA spec,
+and individual `v_permlane16_swap_b32` lit fixtures (`c2_permlane_swap`)
+pass.  The bug surfaces only under the joint regime:
+
+- MODREP phantom-lane projection (source-active lanes 0..31 only);
+- Four PARALLEL WMMAs (not chained via accumulator PHIs) sharing
+  A and B operand vregs after the swap;
+- Non-uniform B input so the swap'd-vreg data matters.
+
+Candidate root causes to investigate next (ordered by suspicion,
+all unverified — these are TODOs, not localisations):
+
+1. **`strict.wwm` region collapse across multiple parallel MFMAs.**
+   Each of the 4 source WMMAs lowers to a pair of chained MFMAs
+   (K=32 → 2× K=16) wrapped in `@llvm.amdgcn.strict.wwm`.  The
+   backend's `SIWholeQuadMode` pass may merge the 8 MFMA regions
+   into a single large WWM scope; `SIPreAllocateWWMRegs`'s
+   dedicated-physreg-per-WWM-vreg requirement may then produce a
+   spill/reload pattern that crosses the swap's partner-lane read
+   boundary.  Verify via MIR dump after `si-wqm` + `si-pre-
+   allocate-wwm-regs` on the lifted IR.
+2. **Redistribute-step CSE across WMMAs sharing operands.**  The
+   B fragment for WMMA(0,0) and WMMA(1,0) derives from the same
+   source vreg pair `b[170:177]`.  The LLVM mid-level CSE may
+   collapse the redistribute's per-WMMA `ds.bpermute` calls into
+   a single SSA value reused across both WMMAs.  If one WMMA's
+   redistribute path happens to land before the swap and another
+   after, the shared SSA values encode the wrong B fragment for
+   one of them.  Verify via `-print-after-all` on the IR's mid-
+   level pipeline, specifically GVN / CSE passes.
+3. **Scoped-WWM alternative lowering.**  The file header comment
+   in `wmma_lowering.cpp` (lines 152-173) documents an earlier
+   design that was abandoned because `SIPreAllocateWWMRegs`
+   exhausted the 256-VGPR pool on 128×128 f16 matmuls.  The
+   abandoned design wrapped MFMA outputs in `strict.wwm`; the
+   current code re-introduces `strict.wwm` via `wrapAsWWMValue`
+   for MODREP.  A genuinely scoped `s_or_saveexec_b64 sN, -1`
+   → MFMA → `s_mov_b64 exec, sN` sequence emitted directly by
+   the raiser (no `strict.wwm` markers, no WWM-region allocator
+   dependency) would sidestep both issues.
+
+Until one of these is pinned, the K=32/K=64 refusal gate stays
+in place — the principled outcome for `matmul_fp16` remains
+EXIT=2 (refuse), and the gate's diagnostic in
+`handle_valu_vop3p.cpp` now surfaces the `matmul_fp16_16x16` WIN
+and the `matmul_fp16` OPEN items explicitly.
 
 ## 13. Relationship to other axes
 

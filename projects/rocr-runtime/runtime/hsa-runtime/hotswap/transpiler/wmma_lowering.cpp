@@ -569,13 +569,10 @@ Value *emitWMMAtoMFMA(RaiseContext &ctx, Value *a, Value *b, Value *c,
   // residual that the gate is specifically guarding against.
   if (numSrcWaves != 2)
     report_fatal_error(
-        "reached emitWMMAtoMFMA under a projection that returns "
-        "numSourceWavesPerTarget() != 2 — the MODREP arm of this "
-        "lowering is staged-but-gated-off via the refusal in "
-        "`handle_valu_vop3p.cpp`.  If you flipped that gate, also "
-        "vet compare_correctness's matmul_fp16_16x16 end-to-end "
-        "output before removing this guard (see the K=32/K=64 arm's "
-        "block comment in `handle_valu_vop3p.cpp` for the handoff).");
+        "emitWMMAtoMFMA: numSourceWavesPerTarget() != 2; the "
+        "MODREP arm is staged-but-gated-off — see "
+        "matrix-translation.md §12 and the refusal in "
+        "`handle_valu_vop3p.cpp`.");
 
   Value *result0[8];
   runGroupPass(B, M, ctx, /*groupBase=*/0, laneId, aDwords, bDwords, cDwords,
