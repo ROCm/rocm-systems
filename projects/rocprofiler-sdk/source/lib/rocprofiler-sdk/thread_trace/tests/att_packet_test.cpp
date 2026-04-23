@@ -34,8 +34,8 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
-#include <glog/logging.h>
 #include <gtest/gtest.h>
+#include "lib/common/logging.hpp"
 
 #include <algorithm>
 #include <cstdint>

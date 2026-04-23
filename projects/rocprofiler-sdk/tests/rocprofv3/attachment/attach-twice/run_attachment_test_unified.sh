@@ -86,6 +86,14 @@ fi
 # First attachment
 echo "First attachment: Attaching profiler to PID $APP_PID for 5 seconds (${OUTPUT_FORMAT} format)..."
 
+# Output the command and environment for debugging
+echo "===== COMMAND TO EXECUTE ====="
+echo "${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out}"
+echo ""
+echo "===== ENVIRONMENT VARIABLES ====="
+env | grep "^ROCPROF" | sort
+echo "===== END ENVIRONMENT ====="
+echo ""
 
 # Run first rocprofv3 with --attach option
 echo "About to launch first rocprofv3 process..."
@@ -134,6 +142,10 @@ fi
 # Second attachment
 echo "Second attachment: Attaching profiler to PID $APP_PID for 5 seconds (${OUTPUT_FORMAT} format)..."
 
+# Output the command for debugging
+echo "===== COMMAND TO EXECUTE ====="
+echo "${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out}"
+echo ""
 
 # Run second rocprofv3 with --attach option
 echo "About to launch second rocprofv3 process..."

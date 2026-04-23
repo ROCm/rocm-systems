@@ -82,14 +82,14 @@ typedef struct {
 
 #define CHECK_ALLOWED_RANGE(str, val, min, max) { \
     if (val < min || val > max) { \
-        ErrorLog(g_rocdec_logger, STR(str) + " value not in valid range: " + TOSTR(val) + ", allowed (min,max): " + TOSTR(min) + "," + TOSTR(max));\
+        ErrorLog(g_rocdec_logger, ROCDEC_STR(str) + " value not in valid range: " + ROCDEC_TOSTR(val) + ", allowed (min,max): " + ROCDEC_TOSTR(min) + "," + ROCDEC_TOSTR(max));\
         return PARSER_OUT_OF_RANGE; \
     } \
 }
 
 #define CHECK_ALLOWED_MAX(str, val, max) { \
     if (val > max) { \
-        ErrorLog(g_rocdec_logger, STR(str) +  " value greater than maximum allowed value: " + TOSTR(val) + ", max: " + TOSTR(max)); \
+        ErrorLog(g_rocdec_logger, ROCDEC_STR(str) +  " value greater than maximum allowed value: " + ROCDEC_TOSTR(val) + ", max: " + ROCDEC_TOSTR(max)); \
         return PARSER_OUT_OF_RANGE; \
     } \
 }

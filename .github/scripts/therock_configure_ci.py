@@ -219,10 +219,21 @@ def retrieve_projects(args):
             )
             subtrees = list(subtree_to_project_map.keys())
 
+    # Holds the python-specific cmake options passed to TheRock build.
+    common_python_options = []
+
     # Linux CI skip logic: exclude Windows-only subtrees so they don't
     # produce Linux projects. If nothing remains, Linux CI is skipped.
     if args.get("platform") == "linux":
         subtrees = [s for s in subtrees if s not in windows_only_subtrees]
+
+        # Common Python executable options for all builds.
+        # Replaces TheRock's manylinux build behavior.
+        # See build_tools/github_actions/manylinux_config.py in TheRock.
+        common_python_options = [
+            "-DTHEROCK_SHARED_PYTHON_EXECUTABLES=/opt/python-shared/cp310-cp310/bin/python3;/opt/python-shared/cp311-cp311/bin/python3;/opt/python-shared/cp312-cp312/bin/python3;/opt/python-shared/cp313-cp313/bin/python3;/opt/python-shared/cp314-cp314/bin/python3",
+            "-DTHEROCK_DIST_PYTHON_EXECUTABLES=/opt/python/cp310-cp310/bin/python;/opt/python/cp311-cp311/bin/python;/opt/python/cp312-cp312/bin/python;/opt/python/cp313-cp313/bin/python",
+        ]
 
     # Windows CI skip logic: skip if neither the modified file paths nor the
     # explicitly selected subtrees require Windows CI.
@@ -272,6 +283,8 @@ def retrieve_projects(args):
         final_flags_list = sorted(merged_flags)
     # Always append -DTHEROCK_ENABLE_CORE=ON as a default at the end
     final_flags_list.append("-DTHEROCK_ENABLE_CORE=ON")
+    # Always append the Python options.
+    final_flags_list += common_python_options
     # Removing duplicates
     final_flags_list = list(set(final_flags_list))
     final_flags = " ".join(final_flags_list)
