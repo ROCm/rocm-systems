@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 if(NOT ROCPROFSYS_GFX_TARGETS)
     rocprofiler_systems_message(WARNING "No GPU targets detected/set. Disabling OpenMP target example...")
@@ -124,12 +124,12 @@ foreach(tgt openmp-target-lib openmp-target)
 endforeach()
 
 rocprofiler_systems_custom_compilation(
-    TARGET   openmp-target-lib
+    TARGET openmp-target-lib
     COMPILER ${OMP_TARGET_COMPILER}
 )
 
 rocprofiler_systems_custom_compilation(TARGET openmp-target
-                                       COMPILER ${OMP_TARGET_COMPILER}
+    COMPILER ${OMP_TARGET_COMPILER}
 )
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)

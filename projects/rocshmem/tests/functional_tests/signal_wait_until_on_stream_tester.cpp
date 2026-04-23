@@ -183,7 +183,7 @@ void SignalWaitUntilOnStreamTester::verifyResults([[maybe_unused]] size_t size) 
 
   // Verify signal values
   // All PEs except PE 0 should have received the final signal value
-  uint64_t expected_signal = args.skip + args.loop;
+  uint64_t expected_signal = args.skip + num_loops;
 
   for (int stream_id = 0; stream_id < num_streams; stream_id++) {
     // PE 0 doesn't receive signals (it initiates), so skip verification

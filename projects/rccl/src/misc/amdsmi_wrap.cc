@@ -45,7 +45,6 @@ static int is_wsl2 = -1;
 
 RCCL_PARAM(UseAmdSmiLib, "USE_AMD_SMI_LIB", 0); // Opt-in environment variable for enabling using amd_smi_lib instead of internal code
 
-
 #include <dlfcn.h>
 #define RCCL_AMDSMI_FN(name, rettype, arglist) rettype(*pfn_##name)arglist = nullptr;
 

@@ -31,7 +31,13 @@
 #if defined(NDEBUG)
 
 #define dbgapi_assert(expr) ((void)0)
-#define dbgapi_assert_not_reached(message) __builtin_trap ()
+
+#if defined(_MSC_VER)
+# define dbgapi_assert_not_reached(message) \
+  do { __debugbreak (); abort (); } while (0)
+#else
+# define dbgapi_assert_not_reached(message) __builtin_trap ()
+#endif /* defined (_MSC_VER) */
 
 #else /* !defined (NDEBUG) */
 

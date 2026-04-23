@@ -154,7 +154,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMalloc3DArray_MaxTexture, int, uint4, short, usho
   const unsigned int flag = GENERATE(hipArrayDefault, hipArraySurfaceLoadStore);
 #endif
   if (flag == hipArraySurfaceLoadStore) {
-    HipTest::HIP_SKIP_TEST("EXSWCPHIPT-58");
+    HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-58.");
     return;
   }
   CAPTURE(flag);
@@ -426,7 +426,7 @@ HIP_TEST_CASE(Unit_hipMalloc3DArray_Negative_NumericLimit) {
 HIP_TEMPLATE_TEST_CASE(Unit_hipMalloc3DArray_Negative_Non2DTextureGather, char, uchar2, short4,
                    float2, float4) {
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST("Texture Gather arrays not supported using AMD backend");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureGatherUnsupportedAmd);
   return;
 #endif
   hipArray_t array;

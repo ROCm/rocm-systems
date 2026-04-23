@@ -15,7 +15,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 from textual.widgets import Static
 
-from utils.mem_chart import plot_mem_chart
+from utils.mem_chart_gfx9 import plot_mem_chart as plot_mem_chart_gfx9
+from utils.mem_chart_gfx11 import plot_mem_chart as plot_mem_chart_gfx11
 
 # Constants
 MIN_PLOT_WIDTH = 20
@@ -300,6 +301,7 @@ class MemoryChart(Static):
         super().__init__("", classes="mem-chart", **kwargs)
         self.df = df
 
+    def on_mount(self) -> None:
         try:
             if self.df is None or self.df.empty:
                 self.update("No chart data generated")
@@ -311,11 +313,19 @@ class MemoryChart(Static):
 
             metric_dict = dict(zip(self.df["Metric"], self.df["Value"]))
 
+            # Route to arch-specific chart renderer
+            mspec = getattr(self.app, "mspec", None)
+            gpu_arch = mspec.gpu_arch if mspec else ""
+            if gpu_arch.startswith("gfx115"):
+                plot_func = plot_mem_chart_gfx11
+            else:
+                plot_func = plot_mem_chart_gfx9
+
             original_stdout = sys.stdout
             try:
                 with StringIO() as string_buffer:
                     sys.stdout = string_buffer
-                    result = plot_mem_chart("", "per_kernel", metric_dict)
+                    result = plot_func("", "per_kernel", metric_dict)
                     stdout_output = string_buffer.getvalue()
             finally:
                 sys.stdout = original_stdout

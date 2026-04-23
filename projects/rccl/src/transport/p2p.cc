@@ -873,7 +873,14 @@ ncclResult_t ret = ncclSuccess;
 
         if (baseAddr == NULL) {
           CUCHECKGOTO(cuMemGetAddressRange((CUdeviceptr*)&baseAddr, &baseSize, (CUdeviceptr)userbuff), ret, fail);
+#if HIP_VERSION >= 71260540
           CUCHECKGOTO(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, (CUdeviceptr)baseAddr), ret, fail);
+#else
+          // Legacy CUDA IPC support
+          if (ncclParamLegacyCudaRegister()) {
+            legacyIpcCap = 1;
+          }
+#endif
         }
         if (comm->gproxyConn[peerRank].initialized == false)
           NCCLCHECKGOTO(ncclProxyConnect(comm, TRANSPORT_P2P, 1, peerRank, &comm->gproxyConn[peerRank]), ret, fail);

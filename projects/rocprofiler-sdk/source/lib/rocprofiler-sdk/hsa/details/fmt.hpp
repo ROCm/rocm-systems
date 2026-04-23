@@ -271,7 +271,7 @@ struct formatter<hsa_amd_memory_copy_op_t>
         }
 
         auto       type            = static_cast<hsa_amd_memory_copy_op_type_t>(op.type);
-        const bool is_linear_multi = (type == HSA_AMD_MEMORY_COPY_OP_LINEAR && op.num_dsts > 0);
+        const bool is_linear_multi = (type == HSA_AMD_MEMORY_COPY_OP_LINEAR && op.num_entries > 0);
         if(is_linear_multi && op.reserved0 != 0)
         {
             reserved += fmt::format(", reserved0={}", op.reserved0);
@@ -282,12 +282,12 @@ struct formatter<hsa_amd_memory_copy_op_t>
             case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
                 return fmt::format_to(
                     ctx.out(),
-                    "[MEMORY_COPY_OP type={}, version={}, num_dsts={}, traffic_class={}, "
+                    "[MEMORY_COPY_OP type={}, version={}, num_entries={}, traffic_class={}, "
                     "completion_signal={}, src={}, src_agent={}, dst_list={}, "
                     "dst_agent_list={}, size={}{}{}{}]",
                     type,
                     op.version,
-                    op.num_dsts,
+                    op.num_entries,
                     op.traffic_class,
                     op.completion_signal.handle,
                     fmt::ptr(op.src),
@@ -302,12 +302,12 @@ struct formatter<hsa_amd_memory_copy_op_t>
             case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
                 return fmt::format_to(
                     ctx.out(),
-                    "[MEMORY_COPY_OP type={}, version={}, num_dsts={}, traffic_class={}, "
+                    "[MEMORY_COPY_OP type={}, version={}, num_entries={}, traffic_class={}, "
                     "completion_signal={}, src={}, src_agent={}, dst={}, dst_agent={}, "
                     "src_size={}, dst_size={}{}{}{}]",
                     type,
                     op.version,
-                    op.num_dsts,
+                    op.num_entries,
                     op.traffic_class,
                     op.completion_signal.handle,
                     fmt::ptr(op.src),
@@ -325,12 +325,12 @@ struct formatter<hsa_amd_memory_copy_op_t>
                 {
                     return fmt::format_to(
                         ctx.out(),
-                        "[MEMORY_COPY_OP type={}, version={}, num_dsts={}, traffic_class={}, "
+                        "[MEMORY_COPY_OP type={}, version={}, num_entries={}, traffic_class={}, "
                         "completion_signal={}, src_list={}, src_agent={}, dst_list={}, "
                         "dst_agent_list={}, size_list={}{}{}{}]",
                         type,
                         op.version,
-                        op.num_dsts,
+                        op.num_entries,
                         op.traffic_class,
                         op.completion_signal.handle,
                         fmt::ptr(op.src_list),
@@ -344,12 +344,12 @@ struct formatter<hsa_amd_memory_copy_op_t>
                 }
                 return fmt::format_to(
                     ctx.out(),
-                    "[MEMORY_COPY_OP type={}, version={}, num_dsts={}, traffic_class={}, "
+                    "[MEMORY_COPY_OP type={}, version={}, num_entries={}, traffic_class={}, "
                     "completion_signal={}, src={}, src_agent={}, dst={}, dst_agent={}, "
                     "size={}, unused_size={}{}{}{}]",
                     type,
                     op.version,
-                    op.num_dsts,
+                    op.num_entries,
                     op.traffic_class,
                     op.completion_signal.handle,
                     fmt::ptr(op.src),
@@ -366,12 +366,12 @@ struct formatter<hsa_amd_memory_copy_op_t>
             case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
                 return fmt::format_to(
                     ctx.out(),
-                    "[MEMORY_COPY_OP type={}, version={}, num_dsts={}, traffic_class={}, "
+                    "[MEMORY_COPY_OP type={}, version={}, num_entries={}, traffic_class={}, "
                     "completion_signal={}, src={}, src_agent={}, dst={}, dst_agent={}, "
                     "size={}, unused_size={}{}{}{}]",
                     type,
                     op.version,
-                    op.num_dsts,
+                    op.num_entries,
                     op.traffic_class,
                     op.completion_signal.handle,
                     fmt::ptr(op.src),

@@ -66,7 +66,8 @@ HIP_TEST_CASE(Unit_Device__hip_check_VGPRs) {
                                 hipDeviceAttributeMaxAvailableVgprsPerThread, device));
   if (maxAvailableVgprsPerThread > 1024) {
     // The test should work on all current devices as of writing.
-    HipTest::HIP_SKIP_TEST("maxAvailableVgprsPerThread > 1024 isn't supported in this test!");
+    HipTest::HIP_SKIP_TEST(
+        "maxAvailableVgprsPerThread > 1024 is not supported in this test.");
   }
   HIP_CHECK(hipFuncGetAttributes(&attr, reinterpret_cast<void*>(test1024)));
   std::cout << "Info: running on device #" << device << " " << props.name << ": arch = "

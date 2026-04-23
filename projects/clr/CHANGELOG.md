@@ -26,6 +26,9 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipDeviceAttributeExpertSchedMode` has been added to hipDeviceAttribute_t to indicate whether expert scheduling mode is supported on AMD GPUs.
     - `hipDeviceAttributeDmaBufSupported` is now supported, enabling buffer sharing.
 
+### Removed
+* roc-obj* tools and Perl dependency.
+
 ### Resolved issues
 
 * An error that occurred during HIP graph stream capture in thread‑local capture mode has been fixed. The HIP runtime now updates its validation logic to ensure that captures running in other threads on different streams no longer invalidate or block the thread‑local capture in the current thread.
@@ -99,6 +102,7 @@ This approach reduces dispatch overhead and improves GPU utilization by overlapp
     - `hipOccupancyAvailableDynamicSMemPerBlock` returns dynamic shared memory available per block when launching numBlocks blocks on CU.
     - `hipMemSetMemPool`        Sets the current memory pool for a memory location and allocation type
     - `hipMemGetMemPool`        Gets the current memory pool for a memory location and of a particular allocation type
+    - `hipMemPrefetchBatchAsync` Prefetches a batch of memory ranges to the specified locations
 * New HIP flags
     - `hipMemLocationTypeHost`, enables handling virtual memory management in host memory location, in addition to device memory.
     - Support for flags in `hipGetProcAddress`, enables searching for the per-thread version symbols.
@@ -108,12 +112,12 @@ This approach reduces dispatch overhead and improves GPU utilization by overlapp
 
 ### Resolved issues
 
-* Corrected the calculation of the value of maximum shared memory per multiprocessor, in HIP device properties. 
+* Corrected the calculation of the value of maximum shared memory per multiprocessor, in HIP device properties.
 
 ### Optimized
 
 * Graph node scaling:
-HIP runtime implements optimized doorbell ring mechanism for certain topologies of graph execution. It enables efficient batching of graph nodes. This enhancement provides better alignment with CUDA Graph optimizations. 
+HIP runtime implements optimized doorbell ring mechanism for certain topologies of graph execution. It enables efficient batching of graph nodes. This enhancement provides better alignment with CUDA Graph optimizations.
 HIP also adds a new performance test for HIP graphs with programmable topologies to measure graph performance across different structures. The test evaluates graph instantiation time, first launch time, repeat launch times, and end-to-end execution for various graph topologies. The test implements comprehensive timing measurements including CPU overhead and device execution time.
 * Back memory set (`memset`) optimization:
 HIP runtime now implements a back memory set (memset) optimization to improve how `memset` nodes are processed during graph execution. This enhancement specifically handles varying number of AQL (Architected Queue Language) packets for `memset` graph node due to graph node set params for AQL batch submission approach.

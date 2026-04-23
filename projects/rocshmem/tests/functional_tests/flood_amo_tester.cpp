@@ -56,7 +56,7 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
   int t_id {get_flat_block_id()};
   int wf_id {t_id / wf_size};
 
-  auto tgt_offset {(wg_id + 1) % num_wg}; //for npes=1: avoid writting and reading from same wg
+  auto tgt_offset {(wg_id + 1) % num_wg}; //for npes=1: avoid writing and reading from same wg
 
   for (int i = 0; i < loop + skip; i++) {
     if (i == skip) {
@@ -229,7 +229,7 @@ void FloodAmoTester::verifyResults([[maybe_unused]] size_t size) {
 
   if (*verification_error) {
     std::cerr << "Data validation error (found by device kernel)" << std::endl;
-    uint64_t expected = static_cast<uint64_t>(args.loop + args.skip) * num_pes * (args.wg_size * (args.wg_size+1)) / 2;
+    uint64_t expected = static_cast<uint64_t>(num_loops + args.skip) * num_pes * (args.wg_size * (args.wg_size+1)) / 2;
     for(unsigned int wg = 0; wg < static_cast<unsigned int>(args.num_wgs); wg++) {
       if (expected != s_buf[wg]) {
         std::cerr << "Data validation error for wg " << wg << std::endl;

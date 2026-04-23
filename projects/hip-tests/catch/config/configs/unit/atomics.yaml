@@ -337,7 +337,7 @@ atomics:
     disabled: [amd_linux]
   Unit_atomicAdd_system_Positive_Host_And_GPU:
     <<: *level_2
-    tags: [deviceLib, system, multigpu]
+    tags: [deviceLib, system]
   Unit_atomicAdd_system_Positive_Host_And_Peer_GPUs:
     <<: *level_2
     tags: [deviceLib, system, multigpu]
@@ -370,7 +370,7 @@ atomics:
     tags: [deviceLib, system, multigpu]
   Unit_atomicSub_system_Positive_Host_And_GPU:
     <<: *level_2
-    tags: [deviceLib, system, multigpu]
+    tags: [deviceLib, system]
   Unit_atomicSub_system_Positive_Host_And_Peer_GPUs:
     <<: *level_2
     tags: [deviceLib, system, multigpu]
@@ -388,7 +388,7 @@ atomics:
     tags: [deviceLib, system, multigpu]
   Unit_atomicCAS_system_Positive_Host_And_GPU:
     <<: *level_2
-    tags: [deviceLib, system, multigpu]
+    tags: [deviceLib, system]
   Unit_atomicCAS_system_Positive_Host_And_Peer_GPUs:
     <<: *level_2
     tags: [deviceLib, system, multigpu]
@@ -427,7 +427,7 @@ atomics:
     disabled: [amd_wsl]
   Unit_atomicExch_system_Positive_Host_And_GPU:
     <<: *level_2
-    tags: [deviceLib, system, multigpu]
+    tags: [deviceLib, system]
     # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
     disabled: [amd_wsl, nvidia_linux]
   Unit_atomicExch_system_Positive_Host_And_Peer_GPUs:

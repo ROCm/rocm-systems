@@ -59,7 +59,7 @@ template <typename T>
 AMOStandardTester<T>::AMOStandardTester(TesterArguments args) : Tester(args) {
   n_out   = (args.addr_mode == AddrMode::PerBlock) ? args.num_wgs : 1;
   n_in    = args.num_wgs * args.wg_size;
-  n_loops = args.loop + args.skip;
+  n_loops = std::max(args.loop, args.loop_large) + args.skip;
 
   // One return per *thread* per loop
   CHECK_HIP(hipMalloc((void **)&ret_val, max_msg_size * n_in * n_loops));
@@ -79,21 +79,24 @@ AMOStandardTester<T>::~AMOStandardTester() {
 
 template <typename T>
 void AMOStandardTester<T>::resetBuffers([[maybe_unused]] size_t size) {
+  n_loops = num_loops + args.skip;
   memset(ret_val, 0, max_msg_size * n_in  * n_loops);
   memset(dest,    0, max_msg_size * n_out * n_loops);
 }
 
 template <typename T>
-void AMOStandardTester<T>::launchKernel(dim3 gridsize, dim3 blocksize, [[maybe_unused]] int loop,
+void AMOStandardTester<T>::launchKernel(dim3 gridsize, dim3 blocksize, int loop,
                                         [[maybe_unused]] size_t size) {
   size_t shared_bytes = 0;
 
+  n_loops = loop + args.skip;
+
   hipLaunchKernelGGL(AMOStandardTest, gridsize, blocksize, shared_bytes, stream,
-                     args.loop, args.skip, start_time, end_time, dest, ret_val,
+                     loop, args.skip, start_time, end_time, dest, ret_val,
                      args.addr_mode, _type, _shmem_context);
 
-  num_msgs       = n_loops   * gridsize.x * blocksize.x;
-  num_timed_msgs = args.loop * gridsize.x * blocksize.x;
+  num_msgs       = n_loops * gridsize.x * blocksize.x;
+  num_timed_msgs = loop    * gridsize.x * blocksize.x;
 }
 
 

@@ -178,7 +178,7 @@ HIP_TEST_CASE(Unit_hipStreamGetDevice_SetDiffDevice) {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   for (int i = 0; i < device_count; ++i) {

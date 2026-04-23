@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # ------------------------------------------------------------------------------#
 #
 # rocprofiler-systems object library
@@ -26,6 +29,13 @@ add_subdirectory(library)
 target_link_libraries(
     rocprofiler-systems-object-library
     PRIVATE rocprofiler-systems::rocprofiler-systems-interface-library
+)
+
+# Preserve frame pointers so that libunwind can reliably unwind through
+# this code when the causal profiling sampling signal fires.
+target_compile_options(
+    rocprofiler-systems-object-library
+    PRIVATE $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fno-omit-frame-pointer>
 )
 
 # ------------------------------------------------------------------------------#
