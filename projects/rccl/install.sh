@@ -84,7 +84,7 @@ function display_help()
     echo "       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes"
     echo "       --generate-sym-kernels  Generate symmetric memory kernels"
     echo "       --device-linker         Build with assembly-extract device linker (default)"
-    echo "       --no-device-linker     Disable device linker, use standard -fgpu-rdc"
+    echo "       --no-device-linker      Disable device linker, use standard -fgpu-rdc"
     echo "    -q|--quiet-warnings        Suppress majority of compiler warnings (not recommended)"
     echo "       --rocshmem              Build with rocSHMEM support"
     echo "       --cmake-options         Pass additional CMake options (e.g. --cmake-options \"-DFOO=BAR -DBAZ=ON\")"
