@@ -672,36 +672,28 @@ rocprofsys_init_tooling_hidden(void)
         auto session = rocprofiler_sdk::get_session();
         if(session)
         {
-            auto pause_callback = [](void) {
-                LOG_DEBUG("Pause callback...");
-                rocprofiler_sdk::pause();
-                sampling::pause();
-                component::mpi_gotcha::pause();
-                component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::pause();
-                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause();
-                component::vaapi_gotcha::pause();
-                ::rocprofsys::pthread_gotcha::pause();
-                component::numa_gotcha::pause();
-                rocprofsys::kokkosp::pause();
-                process_sampler::pause();
-                invoke_external_pause_callbacks();
-            };
-            auto resume_callback = [](void) {
-                LOG_DEBUG("Resume callback...");
-                rocprofiler_sdk::resume();
-                sampling::resume();
-                component::mpi_gotcha::resume();
-                component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::resume();
-                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume();
-                component::vaapi_gotcha::resume();
-                ::rocprofsys::pthread_gotcha::resume();
-                component::numa_gotcha::resume();
-                rocprofsys::kokkosp::resume();
-                process_sampler::resume();
-                invoke_external_resume_callbacks();
-            };
-            session->register_region_pauser_resume_callbacks(resume_callback,
-                                                             pause_callback);
+            using shmem_t = component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>;
+
+            session->subscribe(
+                { &rocprofiler_sdk::pause, &rocprofiler_sdk::resume, "rocm" });
+            session->subscribe({ &sampling::pause, &sampling::resume, "sampling" });
+            session->subscribe(
+                { &component::mpi_gotcha::pause, &component::mpi_gotcha::resume, "mpi" });
+            session->subscribe(
+                { &component::ucx_gotcha::pause, &component::ucx_gotcha::resume, "ucx" });
+            session->subscribe({ &shmem_t::pause, &shmem_t::resume, "shmem" });
+            session->subscribe({ &component::vaapi_gotcha::pause,
+                                 &component::vaapi_gotcha::resume, "vaapi" });
+            session->subscribe({ &::rocprofsys::pthread_gotcha::pause,
+                                 &::rocprofsys::pthread_gotcha::resume, "pthread" });
+            session->subscribe({ &component::numa_gotcha::pause,
+                                 &component::numa_gotcha::resume, "numa" });
+            session->subscribe(
+                { &rocprofsys::kokkosp::pause, &rocprofsys::kokkosp::resume, "kokkos" });
+            session->subscribe(
+                { &process_sampler::pause, &process_sampler::resume, "process_sampler" });
+            session->subscribe({ &invoke_external_pause_callbacks,
+                                 &invoke_external_resume_callbacks, "external" });
 
             session->force_initial_pause();
         }

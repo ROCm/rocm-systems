@@ -5,6 +5,9 @@
 
 #include "common/delimit.hpp"
 
+#include "logger/debug.hpp"
+#include <spdlog/fmt/ranges.h>
+
 #include <atomic>
 #include <cstdint>
 #include <mutex>
@@ -12,9 +15,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#include "logger/debug.hpp"
-#include <spdlog/fmt/ranges.h>
 
 namespace rocprofsys::control
 {
@@ -26,15 +26,20 @@ session::session(std::string_view trace_regions)
     m_trace_regions.insert(delimited.begin(), delimited.end());
     m_region_filter_active.store(!m_trace_regions.empty(), std::memory_order_relaxed);
 
-    LOG_INFO("Trace controller: region filter active for regions: [{}]",
-             fmt::join(m_trace_regions, ", "));
+    if(region_filter_active())
+    {
+        recompute_active();
+        LOG_INFO("Trace controller: region filter active for regions: [{}]",
+                 fmt::join(m_trace_regions, ", "));
+    }
 }
 
 void
 session::force_initial_pause()
 {
     if(!region_filter_active()) return;
-    trigger_callbacks(m_pause_callbacks);
+    recompute_active();
+    notify_pause();
 }
 
 void
@@ -53,7 +58,8 @@ session::handle_range_start(std::uint64_t range_id, const char* message)
 
     if(was_empty && !m_user_paused.load(std::memory_order_relaxed))
     {
-        trigger_callbacks(m_resume_callbacks);
+        recompute_active();
+        notify_resume();
     }
 }
 
@@ -83,10 +89,12 @@ session::handle_range_stop(std::uint64_t range_id)
             LOG_WARNING(
                 "Target region ended while paused. Subsequent resume will be ignored.");
             m_user_paused.store(false, std::memory_order_relaxed);
+            recompute_active();
         }
         else
         {
-            trigger_callbacks(m_pause_callbacks);
+            recompute_active();
+            notify_pause();
         }
     }
 }
@@ -111,8 +119,9 @@ session::handle_pause(std::uint64_t tid)
     }
 
     m_user_paused.store(true, std::memory_order_relaxed);
+    recompute_active();
     LOG_INFO("Pausing tracing session (thread {})...", tid);
-    trigger_callbacks(m_pause_callbacks);
+    notify_pause();
 }
 
 void
@@ -135,17 +144,17 @@ session::handle_resume(std::uint64_t tid)
     }
 
     m_user_paused.store(false, std::memory_order_relaxed);
+    recompute_active();
     LOG_INFO("Resuming tracing session (thread {})...", tid);
-    trigger_callbacks(m_resume_callbacks);
+    notify_resume();
 }
 
 void
 session::shutdown()
 {
     {
-        const std::scoped_lock lk{ m_callback_mutex };
-        m_resume_callbacks.clear();
-        m_pause_callbacks.clear();
+        const std::scoped_lock lk{ m_subscribers_mutex };
+        m_subscribers.clear();
     }
 
     {
@@ -157,40 +166,46 @@ session::shutdown()
     }
 
     m_user_paused.store(false, std::memory_order_relaxed);
+    recompute_active();
 }
 
 void
-session::register_region_pauser_resume_callbacks(callback_t resume_callback,
-                                                 callback_t pause_callback)
+session::subscribe(subscriber sub)
 {
-    const std::scoped_lock lk{ m_callback_mutex };
-    m_resume_callbacks.push_back(std::move(resume_callback));
-    m_pause_callbacks.push_back(std::move(pause_callback));
+    const std::scoped_lock lk{ m_subscribers_mutex };
+    m_subscribers.push_back(std::move(sub));
 }
 
-bool
-session::should_write_markers() const
+// Mirrors the original should_write_markers() formula:
+//   no filter            -> always active
+//   filter && paused     -> inactive
+//   filter && !paused    -> active iff at least one target region is open
+void
+session::recompute_active()
 {
-    if(m_user_paused.load(std::memory_order_relaxed))
-    {
-        return false;
-    }
-
-    if(!region_filter_active())
-    {
-        return true;
-    }
-
-    return m_active_region_count.load(std::memory_order_relaxed) > 0;
+    const bool filter   = m_region_filter_active.load(std::memory_order_relaxed);
+    const bool paused   = m_user_paused.load(std::memory_order_relaxed);
+    const auto in_range = m_active_region_count.load(std::memory_order_relaxed) > 0;
+    m_active.store(!filter || (!paused && in_range), std::memory_order_relaxed);
 }
 
 void
-session::trigger_callbacks(const std::vector<callback_t>& callbacks)
+session::notify_pause()
 {
-    const std::scoped_lock lk{ m_callback_mutex };
-    for(const auto& cb : callbacks)
+    const std::scoped_lock lk{ m_subscribers_mutex };
+    for(const auto& sub : m_subscribers)
     {
-        if(cb) cb();
+        if(sub.on_pause) sub.on_pause();
+    }
+}
+
+void
+session::notify_resume()
+{
+    const std::scoped_lock lk{ m_subscribers_mutex };
+    for(const auto& sub : m_subscribers)
+    {
+        if(sub.on_resume) sub.on_resume();
     }
 }
 }  // namespace rocprofsys::control
