@@ -129,6 +129,18 @@ __host__ void ROHostContext::barrier_all_on_stream(hipStream_t stream) {
   host_interface->barrier_all_on_stream(stream);
 }
 
+__host__ void ROHostContext::quiet_on_stream(hipStream_t stream) {
+  LOG_TRACE("RO backend: quiet_on_stream");
+
+  host_interface->quiet_on_stream(stream);
+}
+
+__host__ void ROHostContext::sync_all_on_stream(hipStream_t stream) {
+  LOG_TRACE("ro_net_host_sync_all_on_stream");
+
+  host_interface->sync_all_on_stream(stream);
+}
+
 __host__ void ROHostContext::alltoallmem_on_stream(rocshmem_team_t team,
                                                     void *dest,
                                                     const void *source,
@@ -158,6 +170,7 @@ __host__ void ROHostContext::getmem_on_stream(void *dest, const void *source,
 __host__ void ROHostContext::putmem_on_stream(void *dest, const void *source,
                                               size_t nelems, int pe,
                                               hipStream_t stream) {
+  LOG_TRACE("RO backend: putmem_on_stream (pe=%d, size=%zu)", pe, nelems);
 
   host_interface->putmem_on_stream(dest, source, nelems, pe, stream);
 }

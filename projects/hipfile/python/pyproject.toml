@@ -4,10 +4,22 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "hipfile"
-version = "0.2.0"
-description = "Low-level Python bindings for hipFile (direct-to-GPU IO)"
+version = "0.2.0.dev0"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+]
+description = "Python bindings for hipFile — direct-to-GPU file IO via AMD Infinity Storage (AIS)"
+keywords = ["hipfile", "rocm", "amd", "hip", "AIS"]
+license = { text = "MIT" }
+maintainers = [
+    { name = "AMD hipFile Team", email = "hipfile-maintainer@amd.com" },
+    { name="Riley Dixon", email="riley.dixon@amd.com" }
+]
+readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+
+[project.urls]
+Homepage = "https://github.com/ROCm/rocm-systems/tree/develop/projects/hipfile"
 
 [tool.scikit-build]
 cmake.build-type = "Release"

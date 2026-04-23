@@ -169,14 +169,10 @@ bool NullDevice::init() {
         (isa->xnack() == amd::Isa::Feature::Any)) {
       continue;
     }
-    bool isOnline = false;
+
     // Check if the particular device is online
-    for (size_t i = 0; i < devices.size(); i++) {
-      if (&(devices[i]->isa()) == isa) {
-        isOnline = true;
-        break;
-      }
-    }
+    bool isOnline = std::any_of(devices.begin(), devices.end(),
+                                [isa](Device* device) { return &(device->isa()) == isa; });
     if (isOnline) {
       continue;
     }
@@ -294,7 +290,7 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
                                ? palProp.gfxipProperties.shaderCore.numAvailableCus / 2
                                : palProp.gfxipProperties.shaderCore.numAvailableCus;
   info_.maxPhysicalComputeUnits_ = info_.maxComputeUnits_;
-  info_.numberOfShaderEngines = palProp.gfxipProperties.shaderCore.numShaderEngines;
+  info_.numberOfShaderEngines_ = palProp.gfxipProperties.shaderCore.numShaderEngines;
 
   // SI parts are scalar.  Also, reads don't need to be 128-bits to get peak rates.
   // For example, float4 is not faster than float as long as all threads fetch the same
@@ -612,6 +608,8 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
 #endif  // _WIN64
   }
   info_.virtualMemoryManagement_ = true;
+  info_.gpuDirectRdmaWithHipVmmSupported_ =
+      info_.virtualMemoryManagement_ && info_.dmabufSupported_;
   info_.virtualMemAllocGranularityMinimum_ =
       static_cast<size_t>(palProp.gpuMemoryProperties.virtualMemAllocGranularity);
   info_.virtualMemAllocGranularityRecommended_ =
@@ -970,8 +968,7 @@ bool Device::create(Pal::IDevice* device) {
   computeEnginesId_.resize(std::min(numComputeEngines(), settings().numComputeRings_));
 
   amd::Context::Info info = {0};
-  std::vector<amd::Device*> devices;
-  devices.push_back(this);
+  std::vector<amd::Device*> devices{this};
 
   // Create a dummy context
   context_ = new amd::Context(devices, info);
@@ -2709,8 +2706,7 @@ bool Device::createBlitProgram() {
   // note: It's not critical for runtime functionality to fail trap handler initialization
   auto asm_program = new amd::Program(*context_, TrapHandlerAsm.c_str(), amd::Program::Assembly);
   if (asm_program != nullptr) {
-    std::vector<amd::Device*> devices;
-    devices.push_back(this);
+    std::vector<amd::Device*> devices{this};
     std::string opt = "-cl-internal-kernel ";
     if (auto retval =
             asm_program->build(devices, opt.c_str(), nullptr, nullptr, false) != CL_SUCCESS) {

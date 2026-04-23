@@ -968,3 +968,32 @@ If ROCm Systems Profiler fails to detect or instrument your program's main funct
 .. code-block:: shell
 
    rocprof-sys-instrument --main-function '<function-symbol-name>' -o ./foo.inst -- ./foo
+
+Failed to transform trace error
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+During instrumentation, it is possible for Dyninst to fail to process certain sequences of instructions in a function.
+When this occurs, an error message is always logged to the console that reads:
+
+.. code-block:: shell
+
+   Failed to transform trace <N> in function '<func>' in module '<module>' in object '<object>' at address <address>
+
+If instrumentation then fails, it may be possible to fix the issue by excluding ``<func>`` from instrumentation.
+
+.. code-block:: shell
+
+   rocprof-sys-instrument --function-exclude '<func>' -- ./foo
+
+.. note::
+
+   Even with ``--function-exclude``, this error may still appear for ``<func>``. While
+   it may not be fatal, Dyninst must relocate all functions that share basic blocks
+   (overlapping functions) together. If an instrumented function shares code with
+   ``<func>``, Dyninst will pull ``<func>`` into the relocation set regardless of the
+   exclude list.
+
+   To resolve this, exclude the overlapping neighbors as well, or use
+   ``--module-exclude '<module>'`` or ``--module-exclude '<object>'`` to exclude the
+   entire module or object containing the problematic function. Be aware that doing so
+   will exclude other functions that reside in the same module or object.

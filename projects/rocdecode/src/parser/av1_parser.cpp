@@ -62,6 +62,7 @@ rocDecStatus Av1VideoParser::UnInitialize() {
 rocDecStatus Av1VideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
     FunctionEntryLog(g_rocdec_logger);
     if (p_data->payload && p_data->payload_size) {
+        DebugLog(g_rocdec_logger, ROCDEC_STR("Parsing picture ") + ROCDEC_TOSTR(pic_count_) + ROCDEC_STR(" with payload size ") + ROCDEC_TOSTR(p_data->payload_size) + ROCDEC_STR(" bytes ..."));
         curr_pts_ = p_data->pts;
         if (ParsePictureData(p_data->payload, p_data->payload_size) != PARSER_OK) {
             ErrorLog(g_rocdec_logger, "Error occurred in picture data parsing.");
@@ -204,7 +205,7 @@ ParserResult Av1VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                 return ret;
             }
             if ((ret = SendPicForDecode()) != PARSER_OK) {
-                ErrorLog(g_rocdec_logger, STR("Failed to decode!"));
+                ErrorLog(g_rocdec_logger, ROCDEC_STR("Failed to decode!"));
                 FunctionExitLog(g_rocdec_logger);
                 return ret;
             }
@@ -501,9 +502,9 @@ ParserResult Av1VideoParser::SendPicForDecode() {
     }
     dec_pic_params_.slice_params.av1 = tile_param_list_.data();
 
-#if DBGINFO
-    PrintVaapiParams();
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintVaapiParams();
+    }
 
     if (pfn_decode_picture_cb_(parser_params_.user_data, &dec_pic_params_) == 0) {
         ErrorLog(g_rocdec_logger, "Decode error occurred.");
@@ -604,9 +605,9 @@ ParserResult Av1VideoParser::DecodeFrameWrapup() {
         // For show_existing_frame = 0 case, post processing filtering is done in HW
         UpdateRefFrames();
     }
-#if DBGINFO
-    PrintDpb();
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintDpb();
+    }
 
     // Output decoded pictures from DPB if any are ready
     if (pfn_display_picture_cb_ && num_output_pics_ > 0) {
@@ -839,7 +840,7 @@ ParserResult Av1VideoParser::ParseSequenceHeaderObu(uint8_t *p_stream, size_t si
             if (i > 0) {
                 for (int j = 0; j < i - 1; j++) {
                     if (p_seq_header->operating_point_idc[i] == p_seq_header->operating_point_idc[j]) {
-                        ErrorLog(g_rocdec_logger, "operating_point_idc[" + TOSTR(i) + "] is equal to operating_point_idc[" + TOSTR(j) + "]");
+                        ErrorLog(g_rocdec_logger, "operating_point_idc[" + ROCDEC_TOSTR(i) + "] is equal to operating_point_idc[" + ROCDEC_TOSTR(j) + "]");
                         return PARSER_WRONG_STATE;
                     }
                 }
@@ -1365,12 +1366,12 @@ ParserResult Av1VideoParser::ParseTileGroupObu(uint8_t *p_stream, size_t size) {
         uint32_t tile_bits = p_frame_header->tile_info.tile_cols_log2 + p_frame_header->tile_info.tile_rows_log2;
         p_tile_group->tg_start = Parser::ReadBits(p_stream, offset, tile_bits);
         if (p_tile_group->tg_start != p_tile_group->num_tiles_parsed) {
-            ErrorLog(g_rocdec_logger, "It is a requirement of bitstream conformance that the value of tg_start (" + TOSTR(p_tile_group->tg_start) + ") is equal to the value of TileNum (" + TOSTR(p_tile_group->num_tiles_parsed) + ") at the point that tile_group_obu is invoked.");
+            ErrorLog(g_rocdec_logger, "It is a requirement of bitstream conformance that the value of tg_start (" + ROCDEC_TOSTR(p_tile_group->tg_start) + ") is equal to the value of TileNum (" + ROCDEC_TOSTR(p_tile_group->num_tiles_parsed) + ") at the point that tile_group_obu is invoked.");
             return PARSER_WRONG_STATE;
         }
         p_tile_group->tg_end = Parser::ReadBits(p_stream, offset, tile_bits);
         if (p_tile_group->tg_end < p_tile_group->tg_start) {
-            ErrorLog(g_rocdec_logger, "It is a requirement of bitstream conformance that the value of tg_end (" + TOSTR(p_tile_group->tg_end) + ") is greater than or equal to tg_start (" + TOSTR(p_tile_group->tg_start) + ").");
+            ErrorLog(g_rocdec_logger, "It is a requirement of bitstream conformance that the value of tg_end (" + ROCDEC_TOSTR(p_tile_group->tg_end) + ") is greater than or equal to tg_start (" + ROCDEC_TOSTR(p_tile_group->tg_start) + ").");
             return PARSER_WRONG_STATE;
         }
     }
@@ -2479,7 +2480,7 @@ ParserResult Av1VideoParser::FilmGrainParams(const uint8_t *p_stream, size_t &of
     for (i = 0; i < p_frame_header->film_grain_params.num_y_points; i++) {
         p_frame_header->film_grain_params.point_y_value[i] = Parser::ReadBits(p_stream, offset, 8);
         if (i > 0 && p_frame_header->film_grain_params.point_y_value[i] <= p_frame_header->film_grain_params.point_y_value[i - 1]) {
-            ErrorLog(g_rocdec_logger, "point_y_value["+ TOSTR(i) + "] (" + TOSTR(p_frame_header->film_grain_params.point_y_value[i]) + ") should be greater than point_y_value[" + TOSTR(i - 1) + "] (" + TOSTR(p_frame_header->film_grain_params.point_y_value[i - 1]) + ")");
+            ErrorLog(g_rocdec_logger, "point_y_value["+ ROCDEC_TOSTR(i) + "] (" + ROCDEC_TOSTR(p_frame_header->film_grain_params.point_y_value[i]) + ") should be greater than point_y_value[" + ROCDEC_TOSTR(i - 1) + "] (" + ROCDEC_TOSTR(p_frame_header->film_grain_params.point_y_value[i - 1]) + ")");
             return PARSER_INVALID_ARG;
         }
         p_frame_header->film_grain_params.point_y_scaling[i] = Parser::ReadBits(p_stream, offset, 8);
@@ -2500,7 +2501,7 @@ ParserResult Av1VideoParser::FilmGrainParams(const uint8_t *p_stream, size_t &of
         for (i = 0; i < p_frame_header->film_grain_params.num_cb_points; i++) {
             p_frame_header->film_grain_params.point_cb_value[i] = Parser::ReadBits(p_stream, offset, 8);
             if (i > 0 && p_frame_header->film_grain_params.point_cb_value[i] <= p_frame_header->film_grain_params.point_cb_value[i - 1]) {
-                ErrorLog(g_rocdec_logger, "point_cb_value["+ TOSTR(i) + "] (" + TOSTR(p_frame_header->film_grain_params.point_cb_value[i]) + ") should be greater than point_cb_value[" + TOSTR(i - 1) + "] (" + TOSTR(p_frame_header->film_grain_params.point_cb_value[i - 1]) + ")");
+                ErrorLog(g_rocdec_logger, "point_cb_value["+ ROCDEC_TOSTR(i) + "] (" + ROCDEC_TOSTR(p_frame_header->film_grain_params.point_cb_value[i]) + ") should be greater than point_cb_value[" + ROCDEC_TOSTR(i - 1) + "] (" + ROCDEC_TOSTR(p_frame_header->film_grain_params.point_cb_value[i - 1]) + ")");
                 return PARSER_INVALID_ARG;
             }
             p_frame_header->film_grain_params.point_cb_scaling[i] = Parser::ReadBits(p_stream, offset, 8);
@@ -2521,7 +2522,7 @@ ParserResult Av1VideoParser::FilmGrainParams(const uint8_t *p_stream, size_t &of
         {
             p_frame_header->film_grain_params.point_cr_value[i] = Parser::ReadBits(p_stream, offset, 8);
             if (i > 0 && p_frame_header->film_grain_params.point_cr_value[i] <= p_frame_header->film_grain_params.point_cr_value[i - 1]) {
-                ErrorLog(g_rocdec_logger, "point_cr_value["+ TOSTR(i) + "] (" + TOSTR(p_frame_header->film_grain_params.point_cr_value[i]) + ") should be greater than point_cr_value[" + TOSTR(i - 1) + "] (" + TOSTR(p_frame_header->film_grain_params.point_cr_value[i - 1]) + ")");
+                ErrorLog(g_rocdec_logger, "point_cr_value["+ ROCDEC_TOSTR(i) + "] (" + ROCDEC_TOSTR(p_frame_header->film_grain_params.point_cr_value[i]) + ") should be greater than point_cr_value[" + ROCDEC_TOSTR(i - 1) + "] (" + ROCDEC_TOSTR(p_frame_header->film_grain_params.point_cr_value[i - 1]) + ")");
                 return PARSER_INVALID_ARG;
             }
             p_frame_header->film_grain_params.point_cr_scaling[i] = Parser::ReadBits(p_stream, offset, 8);
@@ -2573,7 +2574,6 @@ ParserResult Av1VideoParser::FilmGrainParams(const uint8_t *p_stream, size_t &of
     return PARSER_OK;
 }
 
-#if DBGINFO
 void Av1VideoParser::PrintVaapiParams() {
     int i, j;
     MSG("=======================");
@@ -2853,4 +2853,3 @@ void Av1VideoParser::PrintDpb() {
         MSG("");
     }
 }
-#endif // DBGINFO

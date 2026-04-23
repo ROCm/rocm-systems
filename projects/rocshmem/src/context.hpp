@@ -399,6 +399,10 @@ class Context {
 
   __host__ void barrier_all_on_stream(hipStream_t stream);
 
+  __host__ void quiet_on_stream(hipStream_t stream);
+
+  __host__ void sync_all_on_stream(hipStream_t stream);
+
   __host__ void alltoallmem_on_stream(rocshmem_team_t team, void *dest,
                                       const void *source, size_t size,
                                       hipStream_t stream);
@@ -526,6 +530,13 @@ class Context {
    * communication through shared memory.
    */
   IpcImpl ipcImpl_{};
+
+  /**
+   * @brief Used to broadcast signal across wg.
+   *        Note: There are potentional issues where multiple wgs share the ctx (AIROCSHMEM-368)
+   */
+
+  uint64_t wg_signal_scratch = 0;
 };
 
 }  // namespace rocshmem

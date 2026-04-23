@@ -133,7 +133,25 @@ endif()
 
 if(BUILD_SHARED_LIBS)
   if(WIN32)
-    target_sources(amdhip64 PRIVATE amdhip.def)
+    set(AMDHIP_DEF_OUTPUT "${PROJECT_BINARY_DIR}/amdhip.def")
+
+    # ROCCLR_ENABLE_HSA is known at configure time; use configure_file to
+    # conditionally include the HSA export block instead of invoking the C
+    # preprocessor at build time (cl.exe does not support GCC-style -E -P -o).
+    if(ROCCLR_ENABLE_HSA)
+      set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_LIST_DIR}/hsa_exports.def")
+      file(READ "${CMAKE_CURRENT_LIST_DIR}/hsa_exports.def" HSA_EXPORTS)
+    else()
+      set(HSA_EXPORTS "")
+    endif()
+
+    configure_file("${CMAKE_CURRENT_LIST_DIR}/amdhip.def.in" "${AMDHIP_DEF_OUTPUT}" @ONLY)
+
+    # For MSVC, pass the .def file directly to the linker with /DEF: flag
+    string(REPLACE "/" "\\" AMDHIP_DEF_OUTPUT_NATIVE "${AMDHIP_DEF_OUTPUT}")
+    target_link_options(amdhip64 PRIVATE "/DEF:${AMDHIP_DEF_OUTPUT_NATIVE}")
+    set_target_properties(amdhip64 PROPERTIES LINK_DEPENDS "${AMDHIP_DEF_OUTPUT}")
   else()
     target_link_libraries(amdhip64 PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_LIST_DIR}/hip_hcc.map.in")
     set_target_properties(amdhip64 PROPERTIES LINK_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/hip_hcc.map.in")

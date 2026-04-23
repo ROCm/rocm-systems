@@ -199,4 +199,19 @@ Hip::hipInit() const
     (void)throwOnHipError<Hip::RuntimeError>(::hipInit(0));
 }
 
+int
+Hip::hipGetDevice() const
+{
+    int device_id;
+    (void)throwOnHipError<Hip::RuntimeError>(::hipGetDevice(&device_id));
+    return device_id;
+}
+
+int
+Hip::hipGetDeviceCount() const
+{
+    int device_count;
+    (void)throwOnHipError<Hip::RuntimeError>(::hipGetDeviceCount(&device_count));
+    return device_count;
+}
 }

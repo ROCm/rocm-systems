@@ -61,7 +61,8 @@ void GDABackend::mlx5_create_qps(int sq_length) {
   // mlx5 provider can support up to 28B of inline data in a WQE
   inline_threshold = sizeof(gda_mlx5_wqe_inline_data::data);
   for (size_t i = 0; i < mlx5_qps.size(); i++) {
-    int err = mlx5dv.create_qp(mlx5_qps[i], context, pd_orig, sq_length);
+    NicDevice &nic = nic_for_qp(i);
+    int err = mlx5dv.create_qp(mlx5_qps[i], nic.context, nic.pd_orig, sq_length);
     CHECK_ZERO(err, "mlx5dv::create_qp");
   }
 }
@@ -110,8 +111,11 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
                                        reinterpret_cast<gda_mlx5_doorbell*>(gpu_db_ptr),
                                        static_cast<uint16_t>(qp.sq_depth)};
 
-  gpu_qp->rkey = htobe32(heap_rkey[conn_num % num_pes]);
-  gpu_qp->lkey = htobe32(heap_mr->lkey);
+  int pe = conn_num % num_pes;
+  int nic_idx = nic_idx_for_qp(conn_num);
+  NicDevice &nic = nic_for_qp(conn_num);
+  gpu_qp->rkey = htobe32(heap_rkey[pe * num_nics_ + nic_idx]);
+  gpu_qp->lkey = htobe32(nic.heap_mr->lkey);
   gpu_qp->qp_num = qp.qpn;
   gpu_qp->inline_threshold = inline_threshold;
 }
