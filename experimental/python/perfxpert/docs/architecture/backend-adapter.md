@@ -82,8 +82,8 @@ mid-install, there is no partial MCP registration to clean up.
 |---------|------------------------|--------------|-------------------|---------------|
 | opencode (bundled) | `~/.cache/perfxpert/opencode/opencode.json` | Patched system prompt (AMD fork patches 0010+0020) | Fork patches 0010, 0012-0017 + STRICT-TOOL-DISCIPLINE stanza | N/A — state carried in opencode session |
 | Claude Code | `<cwd>/.mcp.json` (project scope) | `<cwd>/.perfxpert/AGENTS.md` + `<cwd>/CLAUDE.local.md` pointer | Native `PreToolUse` hook in `<cwd>/.claude/settings.json` | `<cwd>/.claude/.perfxpert-gate-state.<session_id>.json` |
-| Gemini CLI | `~/.gemini/settings.json` (user scope) | `<cwd>/.perfxpert/AGENTS.md` referenced via `context.fileName` list-append | `allowedTools` restriction in `~/.gemini/settings.json` | In-settings (session-ephemeral via `allowedTools`) |
-| Codex CLI | `~/.codex/config.toml` (user scope — `[mcp_servers.perfxpert]` table) | `<cwd>/.perfxpert/AGENTS.md` (no pointer; Codex loads project-local `AGENTS.md` natively) | **Prompt-layer-only** — rejection-language stanza in the staged `AGENTS.md`. `CodexGateHook.install()` always raises `GateHookUnsupported` because Codex's native `PreToolUse` intercepts Bash only (not MCP/Write/etc.) as of April 2026 | N/A (no persistent server-side session state; stanza re-emitted every session) |
+| Gemini CLI | `<cwd>/.gemini/settings.json` (project scope) | `<cwd>/.perfxpert/AGENTS.md` referenced via `context.fileName` list-append | Native `BeforeTool` + `AfterTool` command hooks in `<cwd>/.gemini/settings.json` | `<cwd>/.gemini/runtime/perfxpert-gate-<session_id>.json` |
+| Codex CLI | `<cwd>/.codex/config.toml` when the project is trusted; otherwise fallback user-scope `~/.codex/config.toml`. Trust itself always lives in `~/.codex/config.toml` under `[projects."<abs-cwd>"]` | `<cwd>/AGENTS.override.md` (perfxpert-managed compatibility override; if `<cwd>/AGENTS.md` exists the adapter shadow-copies it into the override and appends a perfxpert-managed block) | **Prompt-layer-only** — rejection-language stanza in the perfxpert-managed override file. `CodexGateHook.install()` always raises `GateHookUnsupported` because Codex's native `PreToolUse` intercepts Bash only (not MCP/Write/etc.) as of April 2026 | N/A (no persistent server-side session state; stanza re-emitted every session) |
 
 A NEW session (different `session_id`) always starts with the gate
 engaged — even in the same cwd. The sidecar file is keyed on
@@ -96,18 +96,17 @@ module per backend. Every gate-hook installer satisfies three rules:
 
 1. **Event-based lift.** The gate lifts once
    `perfxpert_intent_classify` has returned in the current session.
-   The lift signal is a sidecar state file (Claude) or an
-   `allowedTools` mutation driven by a companion `PostToolUse` path
-   (Gemini). Static deny-lists alone are insufficient — they cannot
-   lift mid-session.
+   The lift signal is a sidecar state file written by a native
+   post-tool hook (Claude and Gemini). Static deny-lists alone are
+   insufficient — they cannot lift mid-session.
 
-2. **Raise `GateHookUnsupported` before MCP.** If the gate cannot be
-   installed cleanly (pre-existing conflicting hook, invalid JSON,
-   surface not available on this backend version, etc.), the
+2. **Raise `GateHookUnsupported` before MCP on mechanical-hook
+   backends.** If the gate cannot be installed cleanly on a backend
+   that promises a native hook (today: Claude and Gemini), the
    installer MUST raise `GateHookUnsupported` BEFORE any MCP or
-   prompt-cache write. The adapter's `verify_mcp_live()` then reports
-   `gate_hook_installed=False` as a documented-known-limit rather
-   than a failure.
+   prompt-cache write. Codex is the explicit exception: it does not
+   satisfy the mechanical hook contract and instead relies on
+   prompt-layer guidance only.
 
 3. **Reject non-perfxpert tool calls until lift.** Until
    `perfxpert_intent_classify` has been invoked in the current
@@ -130,18 +129,20 @@ currently intercepts Bash only (not MCP/Write/WebSearch/etc.) and
 therefore cannot satisfy rule-3. The adapter catches the exception
 before MCP registration runs (I-N1), records
 `gate_hook_installed=False`, and leans on the rejection-language
-stanza inside the staged `.perfxpert/AGENTS.md` for enforcement.
+stanza inside the discovered `AGENTS.override.md` for enforcement.
 Full rationale + the Codex re-visit checklist are captured in the
 local Codex hook-surface decision record.
 
 Two Codex-specific state-handling conventions worth naming here:
 
-- **TOML, not JSON.** Codex's user-scope config is
-  `~/.codex/config.toml`. `CodexAdapter` reads it with stdlib
-  `tomllib` on the hot path; writes go through a **lazy-imported**
-  `tomlkit` (comment/key-order preserving). The `tomlkit` import
-  lives inside the write branch only — the read path never pays
-  the cost.
+- **TOML, not JSON.** Codex trust state always lives in
+  `~/.codex/config.toml`, while MCP registration lands in
+  `<cwd>/.codex/config.toml` for trusted projects and falls back to
+  `~/.codex/config.toml` only when project scope is unavailable.
+  `CodexAdapter` reads TOML with stdlib `tomllib` on the hot path;
+  writes go through a **lazy-imported** `tomlkit`
+  (comment/key-order preserving). The `tomlkit` import lives inside
+  the write branch only — the read path never pays the cost.
 - **Trust gate before MCP.** Codex refuses to run agents in a
   project directory that isn't marked
   `[projects."<abs-cwd>"].trust_level = "trusted"`. The adapter's

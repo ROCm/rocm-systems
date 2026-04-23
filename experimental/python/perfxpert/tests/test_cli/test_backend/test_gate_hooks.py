@@ -8,7 +8,7 @@ Covers per-backend:
   GateHookUnsupported when surface unavailable; marker substring
   for uninstall recognition; install-before-MCP invariant (I-N1)
   exercised via `evaluate_gate_state`.
-* gemini: allowedTools restriction, event-based lift, uninstall
+* gemini: native BeforeTool/AfterTool hooks, event-based lift, uninstall
   clears perfxpert entries.
 
 Also asserts the **event-based** rule: a `bash` on turn 2 after
@@ -316,25 +316,50 @@ def test_gemini_evaluate_perfxpert_prefix_always_allowed() -> None:
     assert out["allowed"] is True
 
 
-def test_gemini_gate_install_writes_settings_and_runtime(tmp_path: Path) -> None:
-    result = gemini_hook.GeminiGateHook().install(tmp_path / "proj", home=tmp_path)
+def test_gemini_gate_install_writes_settings_and_scripts(tmp_path: Path) -> None:
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    result = gemini_hook.GeminiGateHook().install(proj)
+    assert result.settings_path.is_file()
+    assert result.hook_script.is_file()
+    assert result.post_script.is_file()
     data = json.loads(result.settings_path.read_text())
-    assert "mcp_perfxpert_*" in data["allowedTools"]
-    runtime = json.loads(result.runtime_config_path.read_text())
-    assert runtime["sentinel"] == GATE_STATE_LIFTED_SENTINEL
+    hooks = data["hooks"]
+    assert "BeforeTool" in hooks and "AfterTool" in hooks
+    assert "perfxpert-gate" in json.dumps(hooks)
 
 
-def test_gemini_gate_install_preserves_existing_allowed_tools(
+def test_gemini_gate_install_preserves_existing_beforetool_hooks(
     tmp_path: Path,
 ) -> None:
-    settings = tmp_path / ".gemini" / "settings.json"
-    settings.parent.mkdir()
-    settings.write_text(json.dumps({"allowedTools": ["user_existing_tool"]}))
-    gemini_hook.GeminiGateHook().install(tmp_path / "proj", home=tmp_path)
+    proj = tmp_path / "proj"
+    (proj / ".gemini").mkdir(parents=True)
+    settings = proj / ".gemini" / "settings.json"
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "BeforeTool": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "/user/other.sh",
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+    )
+    gemini_hook.GeminiGateHook().install(proj)
     data = json.loads(settings.read_text())
-    allowed = data["allowedTools"]
-    assert "mcp_perfxpert_*" in allowed
-    assert "user_existing_tool" in allowed
+    commands = [
+        entry["hooks"][0]["command"] for entry in data["hooks"]["BeforeTool"]
+    ]
+    assert "/user/other.sh" in commands
+    assert any("perfxpert-gate" in command for command in commands)
 
 
 def test_gemini_gate_install_raises_when_env_disabled(
@@ -342,15 +367,87 @@ def test_gemini_gate_install_raises_when_env_disabled(
 ) -> None:
     monkeypatch.setenv(GATE_HOOK_DISABLED_ENV, "0")
     with pytest.raises(GateHookUnsupported):
-        gemini_hook.GeminiGateHook().install(tmp_path / "proj", home=tmp_path)
+        gemini_hook.GeminiGateHook().install(tmp_path / "proj")
+
+
+@pytest.mark.parametrize(
+    "existing",
+    [
+        "not valid json {{",
+        "[]",
+        json.dumps({"hooks": []}),
+    ],
+    ids=["invalid-json", "top-level-list", "hooks-not-object"],
+)
+def test_gemini_gate_install_rolls_back_scripts_on_invalid_settings(
+    tmp_path: Path, existing: str
+) -> None:
+    proj = tmp_path / "proj"
+    settings = proj / ".gemini" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(existing)
+
+    with pytest.raises(GateHookUnsupported):
+        gemini_hook.GeminiGateHook().install(proj)
+
+    assert not (proj / ".gemini" / "hooks" / "perfxpert-gate.sh").exists()
+    assert not (proj / ".gemini" / "hooks" / "perfxpert-gate-post.sh").exists()
 
 
 def test_gemini_gate_uninstall_removes_perfxpert_entries(tmp_path: Path) -> None:
+    proj = tmp_path / "proj"
+    proj.mkdir()
     h = gemini_hook.GeminiGateHook()
-    h.install(tmp_path / "proj", home=tmp_path)
-    h.uninstall(home=tmp_path)
-    data = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
-    assert "mcp_perfxpert_*" not in data.get("allowedTools", [])
+    h.install(proj)
+    assert h.uninstall(proj) is True
+    data = json.loads((proj / ".gemini" / "settings.json").read_text())
+    assert "hooks" not in data or "perfxpert-gate" not in json.dumps(data["hooks"])
+
+
+def test_gemini_gate_valid_session_id_lifts_gate(tmp_path: Path) -> None:
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    gemini_hook.GeminiGateHook().install(proj)
+
+    session_id = "safe.sid-123"
+    post_result = _run_shell_hook(
+        proj / ".gemini" / "hooks" / "perfxpert-gate-post.sh",
+        {
+            "tool_name": "mcp_perfxpert_intent_classify",
+            "session_id": session_id,
+        },
+    )
+    assert post_result.returncode == 0
+    state_file = proj / ".gemini" / "runtime" / f"perfxpert-gate-{session_id}.json"
+    assert state_file.is_file()
+    assert GATE_STATE_LIFTED_SENTINEL in state_file.read_text()
+
+    pre_result = _run_shell_hook(
+        proj / ".gemini" / "hooks" / "perfxpert-gate.sh",
+        {
+            "tool_name": "Bash",
+            "session_id": session_id,
+        },
+    )
+    assert pre_result.returncode == 0
+    payload = json.loads(pre_result.stdout)
+    assert payload["decision"] == "allow"
+
+
+def test_gemini_gate_posttool_ignores_invalid_session_id(tmp_path: Path) -> None:
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    gemini_hook.GeminiGateHook().install(proj)
+
+    result = _run_shell_hook(
+        proj / ".gemini" / "hooks" / "perfxpert-gate-post.sh",
+        {
+            "tool_name": "mcp_perfxpert_intent_classify",
+            "session_id": "../../escape",
+        },
+    )
+    assert result.returncode == 0
+    assert list((proj / ".gemini" / "runtime").glob("perfxpert-gate-*.json")) == []
 
 
 # ---------------------------------------------------------------------------

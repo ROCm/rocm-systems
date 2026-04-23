@@ -2,7 +2,7 @@
 
 ## Codex gate is prompt-layer only
 
-`perfxpert-code codex` stages the same prompt cache and MCP surface as
+`perfxpert-code codex` stages the same MCP surface as
 the other backends, but its gate remains prompt-layer-only. As of April
 2026 Codex's native `PreToolUse` surface intercepts Bash only, not MCP /
 Write / other tool calls, so it cannot satisfy PerfXpert's "block every
@@ -13,10 +13,10 @@ Current backend split:
 - **Patched opencode path** — mechanical gate via fork patch 0020
   (`{block, retryWith}` in `tool.execute.before`)
 - **Claude Code** — mechanical gate via native `PreToolUse`
-- **Gemini CLI** — mechanical gate via `allowedTools` restriction +
-  runtime lift
-- **Codex CLI** — prompt-layer rejection language in
-  `.perfxpert/AGENTS.md`
+- **Gemini CLI** — mechanical gate via project-local `BeforeTool` /
+  `AfterTool` hooks + runtime lift
+- **Codex CLI** — prompt-layer rejection language in the
+  perfxpert-managed `AGENTS.override.md` compatibility override
 
 If you need a hard pre-tool-call gate today, use the default patched
 opencode path, Claude Code, or Gemini CLI instead of Codex.

@@ -422,8 +422,10 @@ tools become available in any subsequent `claude` session under the
 
 ### Codex CLI (OpenAI)
 
-Edit `~/.codex/config.toml` and append an `[mcp_servers.perfxpert]`
-table:
+For a trusted project, add `[mcp_servers.perfxpert]` to
+`<cwd>/.codex/config.toml`. If project scope is unavailable, the
+fallback location is `~/.codex/config.toml`. Trust itself still lives
+in `~/.codex/config.toml` under `[projects."<abs-cwd>"]`.
 
 ```toml
 # SKIP-SAMPLE — client config, not executable
@@ -438,8 +440,9 @@ shows the exposed tools.
 
 ### Gemini CLI (Google)
 
-Gemini CLI reads MCP configuration from `~/.gemini/settings.json`.
-Add the server under `mcpServers`:
+`perfxpert-code gemini` installs MCP wiring into the **project-local**
+`.gemini/settings.json` so hooks and prompt state stay scoped to the
+current checkout. Add the server under `mcpServers`:
 
 ```json
 // SKIP-SAMPLE — client config, not executable
@@ -455,9 +458,16 @@ Add the server under `mcpServers`:
 }
 ```
 
-Verify with `gemini mcp list` (Gemini CLI ≥ 0.2). Any tool named
+Verify with `gemini mcp list` (Gemini CLI ≥ 0.2). For project-local
+installs this probe is advisory: PerfXpert treats
+`.gemini/settings.json` as the source of truth and does not fail setup
+just because `gemini mcp list` omits the project MCP. Any tool named
 `perfxpert_*` is exposed; unprefixed names are reserved for built-in
 Gemini capabilities.
+
+Older perfxpert releases may have left user-global entries in
+`~/.gemini/settings.json`; current installs treat that file as a legacy
+migration target, not the live install location.
 
 ### opencode (bundled with `perfxpert-code`)
 
@@ -521,15 +531,15 @@ Send `initialize` → `tools/list` → `tools/call` in that order. See the
 The `perfxpert-code` launcher supports three third-party agent
 backends in addition to the default patched opencode path. Each
 subcommand
-installs perfxpert MCP + AGENTS.md + a server-side tool-priority
-gate hook, then execs the backend binary for an interactive
+installs perfxpert MCP + AGENTS.md plus the backend's gate layer,
+then execs the backend binary for an interactive
 session:
 
 | Subcommand | Backend | Config file written | Tool-name wire format |
 |---|---|---|---|
 | `perfxpert-code claude`  | Claude Code | `.mcp.json` + `CLAUDE.local.md` + `.claude/settings.json` | `mcp__perfxpert__<tool>` |
-| `perfxpert-code gemini`  | Gemini CLI  | `~/.gemini/settings.json` (list-append, never touches `GEMINI.md`) | `mcp_perfxpert_<tool>` |
-| `perfxpert-code codex`   | Codex CLI   | `~/.codex/config.toml` (trust gate + MCP) + `.perfxpert/AGENTS.md` | `mcp_perfxpert_<tool>` |
+| `perfxpert-code gemini`  | Gemini CLI  | `.gemini/settings.json` (project-local list-append, never touches `GEMINI.md`) | `mcp_perfxpert_<tool>` |
+| `perfxpert-code codex`   | Codex CLI   | `~/.codex/config.toml` (trust) + `<cwd>/.codex/config.toml` when trusted or fallback `~/.codex/config.toml` for MCP + `AGENTS.override.md` | `mcp_perfxpert_<tool>` |
 
 All three subcommands accept the same dispatcher-owned flags:
 
@@ -561,7 +571,7 @@ git — the security impact of "yes" changed).
 
 ### Tool-priority gate (event-based)
 
-Each backend receives a server-side hook that rejects any
+Each backend receives a gate layer that rejects any
 non-`perfxpert_*` tool call UNTIL
 `perfxpert_intent_classify` has returned in the current session.
 There is no turn counter — a legitimate `bash` on turn 2 AFTER
@@ -574,14 +584,15 @@ Surfaces per backend:
   `.claude/settings.json` with `permissionDecision: deny` +
   `permissionDecisionReason`. The decision record lives locally in
   the contributor's working copy.
-- **Gemini** — `allowedTools: ["mcp_perfxpert_*"]` in
-  `~/.gemini/settings.json` + runtime sidecar at
-  `~/.gemini/runtime/perfxpert-gate-<session_id>.json`.
-- **Codex** — prompt-layer-only (rejection-language stanza in
-  `.perfxpert/AGENTS.md`). Codex's native `PreToolUse` hook currently
-  intercepts Bash only, not MCP / Write / other tools, so it cannot
-  satisfy the event-based gate contract. Rationale is captured in the
-  local Codex hook-surface decision record.
+- **Gemini** — native `BeforeTool` / `AfterTool` hook entries in
+  `.gemini/settings.json` + runtime sidecar at
+  `.gemini/runtime/perfxpert-gate-<session_id>.json`.
+- **Codex** — prompt-layer-only (rejection-language stanza in the
+  perfxpert-managed `AGENTS.override.md` compatibility file). Codex's
+  native `PreToolUse` hook currently intercepts Bash only, not MCP /
+  Write / other tools, so it cannot satisfy the event-based gate
+  contract. Rationale is captured in the local Codex hook-surface
+  decision record.
 - **opencode** — `{block, retryWith}` from patched
   `tool.execute.before` plugin (fork-only — patch 0020).
 

@@ -55,8 +55,8 @@ fork-only opencode gate hook without any extra backend install.
 |---------|-----------|-----|-----------------|-------|-----------|-----------------|
 | **opencode** (default patched path) | `perfxpert-code` | Any (via opencode provider) | `~/.cache/perfxpert/opencode/opencode.json` | Per-bundle / per-checkout | Patched system prompt + fork patches 0010, 0020 | `perfxpert_*` |
 | **Claude Code** | `perfxpert-code claude` | Anthropic Claude | `./.mcp.json` + `./CLAUDE.local.md` + `./.claude/settings.json` | Project | Native `PreToolUse` hook (event-based lift) | `mcp__perfxpert__*` |
-| **Gemini CLI** | `perfxpert-code gemini` | Google Gemini | `~/.gemini/settings.json` + `./.perfxpert/AGENTS.md` | User (MCP) + project (prompt) | `allowedTools` restriction (event-based lift) | `mcp_perfxpert_*` |
-| **Codex CLI** | `perfxpert-code codex` | OpenAI | `~/.codex/config.toml` (TOML: trust + MCP) + `./.perfxpert/AGENTS.md` | User (MCP + trust) + project (prompt) | Prompt-layer-only (Codex `PreToolUse` is Bash-only — see decision record) | `mcp_perfxpert_*` |
+| **Gemini CLI** | `perfxpert-code gemini` | Google Gemini | `./.gemini/settings.json` + `./.perfxpert/AGENTS.md` | Project | Native `BeforeTool` / `AfterTool` hooks (event-based lift) | `mcp_perfxpert_*` |
+| **Codex CLI** | `perfxpert-code codex` | OpenAI | `~/.codex/config.toml` (trust) + `./.codex/config.toml` when trusted or fallback `~/.codex/config.toml` for MCP + `./AGENTS.override.md` | Trust in user config; MCP project-local when trusted | Prompt-layer-only (Codex `PreToolUse` is Bash-only — see decision record) | `mcp_perfxpert_*` |
 
 Consent is requested once per **(backend, cwd-hash, file-set-hash)**
 tuple and persisted — re-running the same subcommand in the same
@@ -115,11 +115,12 @@ perfxpert-code claude --allow-agents-md-append
 
 ### Gemini CLI (`perfxpert-code gemini`)
 
-List-appends the staged prompt cache to `context.fileName` in
-`~/.gemini/settings.json` (preserving any user entries) and registers
-perfxpert under `mcpServers`. The adapter **never** touches the
-user's `GEMINI.md` — list-append in `context.fileName` is the
-supported extension point.
+List-appends the staged prompt cache to `context.fileName` in the
+project-local `.gemini/settings.json` (preserving any project entries),
+registers perfxpert under `mcpServers`, and installs native
+`BeforeTool` / `AfterTool` Gemini hooks in the same project settings.
+The adapter **never** touches the user's `GEMINI.md` — list-append in
+`context.fileName` is the supported extension point.
 
 Gemini support is implemented in-tree and covered by the backend
 adapter plus dispatcher tests.
@@ -131,12 +132,15 @@ perfxpert-code gemini
 
 ### Codex CLI (`perfxpert-code codex`)
 
-Registers perfxpert in `~/.codex/config.toml` under the
-`[mcp_servers.perfxpert]` table, stages the rendered prompt at
-`<cwd>/.perfxpert/AGENTS.md`, and marks the current project as
-trusted via the `[projects."<abs-cwd>"]` TOML table (required — Codex
-refuses to run agents in untrusted projects). Writes preserve
-comments + key ordering via lazy-imported `tomlkit`.
+Marks the current project as trusted via the
+`[projects."<abs-cwd>"]` table in `~/.codex/config.toml` (required —
+Codex refuses to run agents in untrusted projects), registers
+perfxpert under `[mcp_servers.perfxpert]` in `<cwd>/.codex/config.toml`
+for trusted projects or falls back to `~/.codex/config.toml` when
+project scope is unavailable, and writes a perfxpert-managed
+`<cwd>/AGENTS.override.md` compatibility override so Codex actually
+loads the rendered prompt. Writes preserve comments + key ordering via
+lazy-imported `tomlkit`.
 
 Codex support is implemented in-tree and covered by the backend
 adapter plus dispatcher tests.
@@ -173,7 +177,7 @@ previous run, the warning never fires.
 
 #### Prompt-layer-only gate (why Codex differs)
 
-Unlike Claude (`PreToolUse`) and Gemini (`allowedTools`), the Codex
+Unlike Claude (`PreToolUse`) and Gemini (`BeforeTool` / `AfterTool`), the Codex
 adapter does **not** install a server-side pre-tool-call gate hook.
 Codex's native `PreToolUse` hook exists (behind `[features]
 codex_hooks = true`) but currently intercepts Bash only — it cannot
@@ -183,8 +187,13 @@ intercept every non-`perfxpert_*` tool call until
 contract. Installing one anyway would give false confidence.
 
 Instead, the Codex install relies on the rejection-language stanza
-embedded in the staged `.perfxpert/AGENTS.md` (prompt-layer
-enforcement). Smaller models may bypass advisory language; if
+embedded in a perfxpert-managed `AGENTS.override.md`
+(prompt-layer enforcement). When the repo already has a root
+`AGENTS.md`, the adapter shadow-copies that file into the override and
+appends a perfxpert-managed block so Codex sees both the repo guidance
+and the perfxpert gate. `AGENTS.override.md` is a compatibility file
+owned by the adapter, not a native Codex-only source of truth.
+Smaller models may bypass advisory language; if
 mechanical enforcement matters for your workflow, use
 `perfxpert-code claude` or the bundled `opencode` default (both
 have server-side mechanical gates). The full rationale + re-visit
@@ -217,7 +226,7 @@ perfxpert-code uninstall claude
 # SKIP-SAMPLE — reverses a Gemini install
 perfxpert-code uninstall gemini
 
-# SKIP-SAMPLE — reverses a Codex install (drops MCP table + trust entry + staged AGENTS.md)
+# SKIP-SAMPLE — reverses a Codex install (drops MCP table + trust entry + staged AGENTS.override.md)
 perfxpert-code uninstall codex
 
 # SKIP-SAMPLE — non-interactive: consent the uninstall in advance
@@ -225,8 +234,9 @@ perfxpert-code uninstall --yes claude
 ```
 
 On a successful uninstall, all of the following are reverted: MCP
-registration entry, `.perfxpert/AGENTS.md` cache, any pointer file
-the adapter wrote, and the gate-hook settings block. Files the user
+registration entry, any discovered prompt file or managed prompt
+block the adapter wrote, any pointer file the adapter wrote, and the
+gate-hook settings block. Files the user
 created (e.g. a pre-existing `CLAUDE.local.md`) are preserved. For
 Codex specifically, the `[projects."<cwd>"]` trust entry that the
 install added is also removed; any other `[projects.*]` entries are
@@ -281,12 +291,12 @@ Check, in order:
 
 1. Run `perfxpert-code <backend> --dry-run` and confirm the
    "Install PreToolUse gate hook" (Claude) or
-   "Write allowedTools gate restriction" (Gemini) action is listed.
+   "Install Gemini BeforeTool/AfterTool gate hooks" action is listed.
    If missing, the adapter refused to install the hook — look for
    a `GateHookUnsupported` warning in the install log.
 2. Confirm the gate hook file is present:
    `cat .claude/settings.json | jq '.hooks.PreToolUse'` (Claude)
-   or `cat ~/.gemini/settings.json | jq '.allowedTools'` (Gemini).
+   or `cat .gemini/settings.json | jq '.hooks.BeforeTool'` (Gemini).
 3. Start a fresh session. The lift is event-based: after
    `perfxpert_intent_classify` returns once, the gate lifts for the
    remainder of THAT session. A brand-new session (new `session_id`)
@@ -406,7 +416,7 @@ the specific models used are:
 |----------|---------------------------------|-------|
 | opencode | opencode-default                | patched `{block, retryWith}` gate (bundled patch 0020). |
 | claude   | `claude-haiku-4-5`              | native `PreToolUse` hook. R-new-4 scope: verified on haiku-4-5; other small models require independent re-verification at acceptance time. |
-| gemini   | `gemini-2.5-flash`              | `allowedTools` restriction + runtime-state file for event-based lift. |
+| gemini   | `gemini-2.5-flash`              | Native `BeforeTool` / `AfterTool` hooks + runtime-state file for event-based lift. |
 | codex    | *not probed*                    | Gate is prompt-layer-only (Codex `PreToolUse` is Bash-only). `install()` emits a warning-level log (`codex gate hook unsupported on this backend`) and records `gate_hook_installed=False`; `verify_mcp_live` still runs its connectivity checks (e.g. `codex mcp list`) but skips the gate-probe canary. Rationale is captured in the local Codex hook-surface decision record. |
 
 If you re-verify against a different small model for a non-Codex

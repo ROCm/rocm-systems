@@ -13,7 +13,7 @@ Covers:
   NEVER import tomlkit at module-load time (supersedes cycle-2 I7;
   commit 3547736829 made tomlkit a required dep but the import is
   still deferred to keep the primary path import-cost-free).
-* Never touches tracked `AGENTS.md`.
+* Never mutates tracked `AGENTS.md`; uses a discovered `AGENTS.override.md`.
 * `spawn()` uses `os.execvpe`, not `subprocess.run`.
 * `uninstall()` removes only our managed `[mcp_servers.perfxpert]`
   block; refuses on marker drift (different `command` value).
@@ -42,6 +42,7 @@ from perfxpert.cli._backend.protocol import (
     InstallReport,
     LiveCheckReport,
     Plan,
+    PartialInstall,
     TrustRequired,
     UninstallReport,
 )
@@ -271,10 +272,10 @@ def test_plan_lists_targets(
     plan = CodexAdapter().plan(project_cwd)
     assert isinstance(plan, Plan)
     assert plan.backend == "codex"
-    # config.toml + AGENTS.md cache.
+    # config.toml + Codex-discovered prompt file.
     target_names = {p.name for p in plan.targets}
     assert "config.toml" in target_names
-    assert "AGENTS.md" in target_names
+    assert "AGENTS.override.md" in target_names
     joined = "\n".join(plan.actions).lower()
     assert "mcp_servers" in joined
     assert "trust" in joined
@@ -316,7 +317,7 @@ def test_install_raises_trust_required_when_non_interactive_untrusted(
     # var. The trust-gate should then raise because neither consent-
     # env nor auto-trust is set.
     config_toml = project_cwd / ".codex" / "config.toml"
-    agents = project_cwd / ".perfxpert" / "AGENTS.md"
+    agents = project_cwd / "AGENTS.override.md"
     grant_consent(
         "codex",
         project_cwd,
@@ -398,6 +399,44 @@ def test_install_falls_back_to_user_scope_on_still_untrusted(
     assert not project_cfg.exists() or project_cfg.read_text().strip() == ""
 
 
+def test_install_reprompts_consent_after_scope_falls_back_to_user(
+    project_cwd: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_home: Path,
+) -> None:
+    prompts: list[list[str]] = []
+    answers = iter([True, False])
+
+    class _FakeStdin:
+        def isatty(self) -> bool:
+            return True
+
+        def readline(self) -> str:
+            return "n\n"
+
+    monkeypatch.setattr(sys, "stdin", _FakeStdin())
+    monkeypatch.delenv("PERFXPERT_ASSUME_CONSENT", raising=False)
+    def _fake_prompt(*args, **kwargs):
+        plan_lines = kwargs.get("plan_lines")
+        if plan_lines is None and len(args) >= 3:
+            plan_lines = args[2]
+        prompts.append(list(plan_lines))
+        return next(answers)
+
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex.prompt_consent_interactive",
+        _fake_prompt,
+    )
+
+    with pytest.raises(ConsentDenied):
+        CodexAdapter().install(project_cwd, scope="project")
+
+    assert len(prompts) == 2
+    assert str(project_cwd / ".codex" / "config.toml") in prompts[0][0]
+    assert str(isolated_home / ".codex" / "config.toml") in prompts[1][0]
+    assert not (project_cwd / "AGENTS.override.md").exists()
+
+
 # ---------------------------------------------------------------------------
 # Lazy tomlkit import (cycle-2 I7).
 # ---------------------------------------------------------------------------
@@ -472,7 +511,7 @@ def test_structured_edit_fallback_uses_tomlkit(
 
 
 # ---------------------------------------------------------------------------
-# Never touches tracked AGENTS.md.
+# Never mutates tracked AGENTS.md.
 # ---------------------------------------------------------------------------
 
 
@@ -482,8 +521,8 @@ def test_install_never_touches_tracked_agents_md(
     isolated_home: Path,
 ) -> None:
     """I3: even if the user has a committed AGENTS.md, install must
-    stage the prompt into `.perfxpert/AGENTS.md` — the committed
-    file must be byte-identical afterwards."""
+    leave the committed file byte-identical and write a discovered
+    `AGENTS.override.md` that shadows it safely for Codex."""
     tracked = project_cwd / "AGENTS.md"
     tracked.write_text("USER CONTENT — do not touch\n")
     subprocess.run(
@@ -504,9 +543,102 @@ def test_install_never_touches_tracked_agents_md(
 
     # Tracked AGENTS.md unchanged.
     assert tracked.read_text() == "USER CONTENT — do not touch\n"
-    # Cache file staged under .perfxpert/.
-    cache = project_cwd / ".perfxpert" / "AGENTS.md"
-    assert cache.is_file()
+    # Codex-discovered override staged at project root.
+    override = project_cwd / "AGENTS.override.md"
+    assert override.is_file()
+    override_text = override.read_text()
+    assert "USER CONTENT — do not touch" in override_text
+    assert "<!-- BEGIN perfxpert-managed v1 cache=" in override_text
+
+
+def test_install_refreshes_generated_shadow_copy_on_rerun(
+    project_cwd: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_home: Path,
+) -> None:
+    tracked = project_cwd / "AGENTS.md"
+    tracked.write_text("BASE v1\n")
+
+    _mark_trusted(isolated_home, project_cwd)
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex.subprocess.run",
+        _fake_codex_subprocess(),
+    )
+
+    adapter = CodexAdapter()
+    adapter.install(project_cwd, scope="project")
+    tracked.write_text("BASE v2\n")
+    adapter.install(project_cwd, scope="project")
+
+    override = project_cwd / "AGENTS.override.md"
+    text = override.read_text()
+    assert "BASE v2" in text
+    assert "BASE v1" not in text
+
+
+def test_install_refuses_recreating_tracked_deleted_override_without_flag(
+    project_cwd: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_home: Path,
+) -> None:
+    override = project_cwd / "AGENTS.override.md"
+    override.write_text("tracked override\n")
+    subprocess.run(
+        ["git", "add", "AGENTS.override.md"],
+        cwd=str(project_cwd),
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "track override"],
+        cwd=str(project_cwd),
+        check=True,
+    )
+    override.unlink()
+
+    _mark_trusted(isolated_home, project_cwd)
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex.subprocess.run",
+        _fake_codex_subprocess(),
+    )
+
+    with pytest.raises(ConfigClobber, match="tracked in git"):
+        CodexAdapter().install(project_cwd, scope="project")
+
+
+def test_install_allows_recreating_tracked_deleted_override_with_flag(
+    project_cwd: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_home: Path,
+) -> None:
+    override = project_cwd / "AGENTS.override.md"
+    override.write_text("tracked override\n")
+    subprocess.run(
+        ["git", "add", "AGENTS.override.md"],
+        cwd=str(project_cwd),
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "track override"],
+        cwd=str(project_cwd),
+        check=True,
+    )
+    override.unlink()
+
+    _mark_trusted(isolated_home, project_cwd)
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex.subprocess.run",
+        _fake_codex_subprocess(),
+    )
+
+    CodexAdapter().install(
+        project_cwd,
+        scope="project",
+        allow_agents_md_append=True,
+    )
+    assert override.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -744,6 +876,23 @@ def test_install_rejects_oversized_prompt(
         CodexAdapter().install(project_cwd, scope="project")
 
 
+def test_install_rejects_oversized_shadow_copy_prompt(
+    project_cwd: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_home: Path,
+) -> None:
+    _mark_trusted(isolated_home, project_cwd)
+    (project_cwd / "AGENTS.md").write_text("A" * (33 * 1024))
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex.subprocess.run",
+        _fake_codex_subprocess(),
+    )
+
+    with pytest.raises(PartialInstall, match="32 KiB"):
+        CodexAdapter().install(project_cwd, scope="project")
+
+
 # ---------------------------------------------------------------------------
 # Sanity: plan / install preserve duration_s + report shape.
 # ---------------------------------------------------------------------------
@@ -764,9 +913,10 @@ def test_install_report_shape(
     assert isinstance(r, InstallReport)
     assert r.backend == "codex"
     assert r.duration_s >= 0.0
-    # MCP config path present.
+    # MCP config path + discovered prompt file present.
     names = {p.name for p in r.paths_written}
     assert "config.toml" in names
+    assert "AGENTS.override.md" in names
 
 
 # ---------------------------------------------------------------------------
@@ -898,6 +1048,7 @@ def test_install_consent_denied_leaves_codex_home_untouched(
     # Project-scope .codex/ also must not be created.
     assert not (project_cwd / ".codex").exists()
     assert not (project_cwd / ".perfxpert").exists()
+    assert not (project_cwd / "AGENTS.override.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -998,3 +1149,142 @@ def test_uninstall_on_malformed_project_config_records_drift_without_traceback(
     joined = "\n".join(report.actions)
     assert "not valid TOML" in joined
     assert "refused to edit" in joined
+
+
+def test_install_appends_managed_block_to_existing_override(
+    project_cwd: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_home: Path,
+) -> None:
+    """Existing project override stays intact; perfxpert appends only its block."""
+    _mark_trusted(isolated_home, project_cwd)
+    override = project_cwd / "AGENTS.override.md"
+    override.write_text("EXISTING OVERRIDE\n")
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex.subprocess.run",
+        _fake_codex_subprocess(),
+    )
+
+    CodexAdapter().install(project_cwd, scope="project")
+
+    text = override.read_text()
+    assert "EXISTING OVERRIDE" in text
+    assert "<!-- BEGIN perfxpert-managed v1 cache=" in text
+
+
+def test_uninstall_removes_only_perfxpert_block_from_existing_override(
+    project_cwd: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_home: Path,
+) -> None:
+    """Uninstall preserves unrelated AGENTS.override.md content."""
+    _mark_trusted(isolated_home, project_cwd)
+    override = project_cwd / "AGENTS.override.md"
+    override.write_text("EXISTING OVERRIDE\n")
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex.subprocess.run",
+        _fake_codex_subprocess(),
+    )
+    CodexAdapter().install(project_cwd, scope="project")
+
+    report = CodexAdapter().uninstall(project_cwd, scope="project")
+
+    assert isinstance(report, UninstallReport)
+    assert override.is_file()
+    text = override.read_text()
+    assert text == "EXISTING OVERRIDE\n"
+
+
+def test_uninstall_removes_generated_override_and_legacy_cache(
+    project_cwd: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_home: Path,
+) -> None:
+    """Generated AGENTS.override.md is removed entirely on uninstall.
+
+    Legacy hidden caches from older installs are removed too.
+    """
+    _mark_trusted(isolated_home, project_cwd)
+    tracked = project_cwd / "AGENTS.md"
+    tracked.write_text("ROOT AGENTS\n")
+    legacy = project_cwd / ".perfxpert" / "AGENTS.md"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text("legacy prompt cache\n")
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex.subprocess.run",
+        _fake_codex_subprocess(),
+    )
+    CodexAdapter().install(project_cwd, scope="project")
+
+    report = CodexAdapter().uninstall(project_cwd, scope="project")
+
+    assert isinstance(report, UninstallReport)
+    assert not (project_cwd / "AGENTS.override.md").exists()
+    assert not legacy.exists()
+    assert tracked.read_text() == "ROOT AGENTS\n"
+
+
+def test_uninstall_preserves_user_edited_generated_override(
+    project_cwd: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_home: Path,
+) -> None:
+    _mark_trusted(isolated_home, project_cwd)
+    tracked = project_cwd / "AGENTS.md"
+    tracked.write_text("ROOT AGENTS\n")
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex.subprocess.run",
+        _fake_codex_subprocess(),
+    )
+    adapter = CodexAdapter()
+    adapter.install(project_cwd, scope="project")
+
+    override = project_cwd / "AGENTS.override.md"
+    override.write_text(override.read_text().replace("ROOT AGENTS", "ROOT AGENTS\nUSER EDIT"))
+
+    report = adapter.uninstall(project_cwd, scope="project")
+
+    assert isinstance(report, UninstallReport)
+    assert override.exists()
+    text = override.read_text()
+    assert "USER EDIT" in text
+    assert "<!-- BEGIN perfxpert-managed v1 cache=" not in text
+
+
+def test_uninstall_removes_project_trust_entry(
+    project_cwd: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_home: Path,
+) -> None:
+    _mark_trusted(isolated_home, project_cwd)
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex.subprocess.run",
+        _fake_codex_subprocess(),
+    )
+
+    adapter = CodexAdapter()
+    adapter.install(project_cwd, scope="project")
+    adapter.uninstall(project_cwd, scope="project")
+
+    cfg = isolated_home / ".codex" / "config.toml"
+    assert str(project_cwd.resolve()) not in cfg.read_text()
+
+
+def test_split_managed_prompt_block_ignores_shadow_copy_end_marker_text() -> None:
+    adapter = CodexAdapter()
+    managed = adapter._make_managed_prompt_block("PROMPT")
+    text = adapter._make_shadow_copy_prompt(
+        "before\n<!-- END perfxpert-managed v1 -->\nafter\n",
+        managed,
+    )
+
+    before, after = adapter._split_managed_prompt_block(text)
+
+    assert "<!-- END perfxpert-managed v1 -->" in before
+    assert "PROMPT" not in before
+    assert after.strip() == ""

@@ -204,8 +204,10 @@ user-visible release is this v0.2.0 block.
 ### Added
 - **`perfxpert-code codex` subcommand** — full Codex CLI adapter.
   Registers perfxpert under `[mcp_servers.perfxpert]` in
-  `~/.codex/config.toml` (writes via lazy-imported `tomlkit`,
-  comment-preserving), stages `.perfxpert/AGENTS.md`, and handles
+  `<cwd>/.codex/config.toml` for trusted projects (falling back to
+  `~/.codex/config.toml` when project scope is unavailable), stages
+  the perfxpert-managed compatibility file `AGENTS.override.md`
+  (shadow-copies root `AGENTS.md` when present), and handles
   Codex's `[projects."<cwd>"].trust_level = "trusted"` requirement
   (interactive prompt, or `PERFXPERT_AUTO_TRUST=1` for CI with an
   always-on stderr warning bypassing `--quiet`). Gate enforcement is
@@ -213,7 +215,7 @@ user-visible release is this v0.2.0 block.
   intercepts Bash only as of April 2026 (rationale in the local Codex
   hook-surface decision record).
   `perfxpert-code uninstall codex` reverses the install (MCP table +
-  trust entry + staged `AGENTS.md`), with `ConfigClobber` /
+  trust entry + staged `AGENTS.override.md`), with `ConfigClobber` /
   `skipped_due_to_drift` protection against git-tracked or malformed
   TOML.
 
@@ -232,10 +234,11 @@ user-visible release is this v0.2.0 block.
   fifth-backend work doesn't need Protocol churn. See
   `docs/architecture/backend-adapter.md`.
 - **Per-backend gate hook with event-based lift.** Native
-  `PreToolUse` for Claude Code, `allowedTools` restriction for
-  Gemini. Lift fires once `perfxpert_intent_classify` returns in the
-  current session; non-perfxpert tool calls before that are rejected
-  with a retry-hint message.
+  `PreToolUse` for Claude Code, native `BeforeTool` / `AfterTool`
+  hooks for Gemini CLI. Lift fires once
+  `perfxpert_intent_classify` returns in the current session;
+  non-perfxpert tool calls before that are rejected with a
+  retry-hint message.
 - **MCP warmup + retry (env-configurable).**
   `PERFXPERT_MCP_WARMUP_TIMEOUT_S` (default 10s),
   `PERFXPERT_MCP_RETRY_BUDGET_S` (default 30s),

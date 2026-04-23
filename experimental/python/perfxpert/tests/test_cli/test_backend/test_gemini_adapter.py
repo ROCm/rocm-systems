@@ -1,22 +1,10 @@
-"""Tests for `perfxpert.cli._backend.gemini.GeminiAdapter` (Task 5).
-
-Covers:
-
-* Tool-name template is single-underscore (B1).
-* Never touches GEMINI.md (I3).
-* context.fileName list-merge preserves existing entries.
-* New entry appended when absent.
-* Existing mcpServers preserved.
-* Installs are idempotent.
-* verify_mcp_live returns healthy when settings.json contains our entry.
-* uninstall list-removes entry.
-* spawn uses execvpe.
-"""
+"""Tests for `perfxpert.cli._backend.gemini.GeminiAdapter` (Task 5)."""
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -25,6 +13,7 @@ from perfxpert.cli._backend.gemini import GeminiAdapter
 from perfxpert.cli._backend.protocol import (
     BackendAdapter,
     ConfigClobber,
+    GateHookUnsupported,
     InstallReport,
     Plan,
     UninstallReport,
@@ -47,6 +36,10 @@ def project_cwd(isolated_home: Path) -> Path:
     return cwd
 
 
+def _project_settings(project_cwd: Path) -> Path:
+    return project_cwd / ".gemini" / "settings.json"
+
+
 def test_adapter_conforms_to_protocol() -> None:
     assert isinstance(GeminiAdapter(), BackendAdapter)
 
@@ -59,27 +52,18 @@ def test_spawn_strategy_is_execvpe() -> None:
     assert GeminiAdapter.spawn_strategy == "execvpe"
 
 
-# ---------------------------------------------------------------------------
-# plan.
-# ---------------------------------------------------------------------------
-
-
-def test_plan_lists_settings_and_agents(project_cwd: Path, isolated_home: Path) -> None:
+def test_plan_lists_project_settings_and_agents(project_cwd: Path) -> None:
     plan = GeminiAdapter().plan(project_cwd)
     assert isinstance(plan, Plan)
-    target_names = {p.name for p in plan.targets}
-    assert "settings.json" in target_names
-    assert "AGENTS.md" in target_names
-    # Plan text mentions settings.json path + preserve-existing.
+    assert _project_settings(project_cwd) in plan.targets
+    assert project_cwd / ".perfxpert" / "AGENTS.md" in plan.targets
     joined = "\n".join(plan.actions)
-    assert "settings.json" in joined
-    assert "preserve" in joined.lower() or "context.fileName" in joined
+    assert ".gemini/settings.json" in joined
+    assert "context.fileName" in joined
+    assert "BeforeTool/AfterTool" in joined
 
 
-def test_plan_never_mentions_gemini_md(
-    project_cwd: Path, isolated_home: Path
-) -> None:
-    """I3: the whole point — GEMINI.md never appears in the plan."""
+def test_plan_never_mentions_gemini_md(project_cwd: Path) -> None:
     plan = GeminiAdapter().plan(project_cwd)
     for action in plan.actions:
         assert "GEMINI.md" not in action
@@ -87,27 +71,22 @@ def test_plan_never_mentions_gemini_md(
         assert "GEMINI.md" not in str(target)
 
 
-# ---------------------------------------------------------------------------
-# install — settings.json merging.
-# ---------------------------------------------------------------------------
-
-
-def test_install_writes_mcp_servers_perfxpert(
-    project_cwd: Path, isolated_home: Path
-) -> None:
-    adapter = GeminiAdapter()
-    adapter.install(project_cwd)
-    settings = isolated_home / ".gemini" / "settings.json"
-    data = json.loads(settings.read_text())
+def test_install_writes_project_mcp_servers_perfxpert(project_cwd: Path) -> None:
+    GeminiAdapter().install(project_cwd)
+    data = json.loads(_project_settings(project_cwd).read_text())
     assert data["mcpServers"]["perfxpert"]["command"] == "perfxpert-mcp"
 
 
-def test_install_list_appends_context_filename(
+def test_install_does_not_write_user_global_settings_when_not_needed(
     project_cwd: Path, isolated_home: Path
 ) -> None:
-    """practical §3.3: list-append preserves existing entries + adds ours."""
-    settings = isolated_home / ".gemini" / "settings.json"
-    settings.parent.mkdir()
+    GeminiAdapter().install(project_cwd)
+    assert not (isolated_home / ".gemini" / "settings.json").exists()
+
+
+def test_install_list_appends_context_filename(project_cwd: Path) -> None:
+    settings = _project_settings(project_cwd)
+    settings.parent.mkdir(parents=True)
     settings.write_text(
         json.dumps(
             {
@@ -117,35 +96,29 @@ def test_install_list_appends_context_filename(
             }
         )
     )
-    adapter = GeminiAdapter()
-    adapter.install(project_cwd)
+    GeminiAdapter().install(project_cwd)
     data = json.loads(settings.read_text())
     files = data["context"]["fileName"]
-    # Existing entries preserved in order.
     assert files[0] == "~/.gemini/my-context.md"
     assert files[1] == "/abs/file.md"
-    # Our AGENTS.md appended.
-    assert any(".perfxpert/AGENTS.md" in str(f) for f in files)
+    assert any(".perfxpert/AGENTS.md" in str(entry) for entry in files)
 
 
 def test_install_does_not_duplicate_context_filename_on_rerun(
-    project_cwd: Path, isolated_home: Path
+    project_cwd: Path,
 ) -> None:
     adapter = GeminiAdapter()
     adapter.install(project_cwd)
-    adapter.install(project_cwd)  # idempotent.
-    settings = isolated_home / ".gemini" / "settings.json"
-    data = json.loads(settings.read_text())
+    adapter.install(project_cwd)
+    data = json.loads(_project_settings(project_cwd).read_text())
     files = data["context"]["fileName"]
-    perfxpert_entries = [f for f in files if ".perfxpert/AGENTS.md" in str(f)]
+    perfxpert_entries = [entry for entry in files if ".perfxpert/AGENTS.md" in str(entry)]
     assert len(perfxpert_entries) == 1
 
 
-def test_install_preserves_existing_mcp_servers(
-    project_cwd: Path, isolated_home: Path
-) -> None:
-    settings = isolated_home / ".gemini" / "settings.json"
-    settings.parent.mkdir()
+def test_install_preserves_existing_mcp_servers(project_cwd: Path) -> None:
+    settings = _project_settings(project_cwd)
+    settings.parent.mkdir(parents=True)
     settings.write_text(
         json.dumps({"mcpServers": {"other": {"command": "other-bin", "args": []}}})
     )
@@ -155,11 +128,34 @@ def test_install_preserves_existing_mcp_servers(
     assert data["mcpServers"]["perfxpert"]["command"] == "perfxpert-mcp"
 
 
-def test_install_refuses_clobber(
-    project_cwd: Path, isolated_home: Path
-) -> None:
-    settings = isolated_home / ".gemini" / "settings.json"
-    settings.parent.mkdir()
+def test_install_preserves_existing_perfxpert_subkeys(project_cwd: Path) -> None:
+    settings = _project_settings(project_cwd)
+    settings.parent.mkdir(parents=True)
+    settings.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "perfxpert": {
+                        "command": "perfxpert-mcp",
+                        "args": [],
+                        "env": {"KEEP": "1"},
+                        "timeout": 1234,
+                    }
+                }
+            }
+        )
+    )
+    GeminiAdapter().install(project_cwd)
+    data = json.loads(settings.read_text())
+    entry = data["mcpServers"]["perfxpert"]
+    assert entry["env"] == {"KEEP": "1"}
+    assert entry["timeout"] == 1234
+    assert entry["command"] == "perfxpert-mcp"
+
+
+def test_install_refuses_clobber(project_cwd: Path) -> None:
+    settings = _project_settings(project_cwd)
+    settings.parent.mkdir(parents=True)
     settings.write_text(
         json.dumps(
             {
@@ -173,9 +169,7 @@ def test_install_refuses_clobber(
         GeminiAdapter().install(project_cwd)
 
 
-def test_install_idempotent(
-    project_cwd: Path, isolated_home: Path
-) -> None:
+def test_install_idempotent(project_cwd: Path) -> None:
     adapter = GeminiAdapter()
     r1 = adapter.install(project_cwd)
     r2 = adapter.install(project_cwd)
@@ -183,71 +177,271 @@ def test_install_idempotent(
     assert isinstance(r2, InstallReport)
 
 
-# ---------------------------------------------------------------------------
-# I3: never touches GEMINI.md.
-# ---------------------------------------------------------------------------
+def test_install_fails_closed_when_gate_hook_disabled(
+    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PERFXPERT_GATE_HOOK", "0")
+
+    with pytest.raises(GateHookUnsupported):
+        GeminiAdapter().install(project_cwd)
+
+    assert not _project_settings(project_cwd).exists()
+    assert not (project_cwd / ".perfxpert" / "AGENTS.md").exists()
 
 
-def test_install_never_touches_gemini_md(
+def test_install_fails_closed_when_hook_settings_shape_is_invalid(
+    project_cwd: Path,
+) -> None:
+    settings = _project_settings(project_cwd)
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"hooks": []}))
+
+    with pytest.raises(GateHookUnsupported):
+        GeminiAdapter().install(project_cwd)
+
+    data = json.loads(settings.read_text())
+    assert "mcpServers" not in data
+    assert "context" not in data
+    assert not (project_cwd / ".perfxpert" / "AGENTS.md").exists()
+
+
+def test_install_migrates_legacy_user_settings(project_cwd: Path, isolated_home: Path) -> None:
+    legacy = isolated_home / ".gemini" / "settings.json"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "perfxpert": {"command": "perfxpert-mcp", "args": []}
+                },
+                "context": {
+                    "fileName": [str(project_cwd / ".perfxpert" / "AGENTS.md")]
+                },
+                "allowedTools": ["mcp_perfxpert_*"],
+                "tools": {"allowed": ["mcp_perfxpert_*"]},
+            }
+        )
+    )
+    GeminiAdapter().install(project_cwd)
+    data = json.loads(legacy.read_text())
+    assert "perfxpert" not in data.get("mcpServers", {})
+    assert "allowedTools" not in data
+    assert "tools" not in data
+    assert str(project_cwd / ".perfxpert" / "AGENTS.md") not in json.dumps(data)
+
+
+def test_install_cleans_legacy_user_settings_without_touching_auth_fields(
     project_cwd: Path, isolated_home: Path
 ) -> None:
-    """I3: GEMINI.md must not be created, even if user has one.
+    legacy = isolated_home / ".gemini" / "settings.json"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "perfxpert": {
+                        "command": "perfxpert-mcp",
+                        "args": [],
+                        "timeout": 30000,
+                    }
+                },
+                "context": {
+                    "fileName": [str(project_cwd / ".perfxpert" / "AGENTS.md")]
+                },
+                "tools": {"allowed": ["mcp_perfxpert_*"]},
+                "security": {"auth": {"selectedType": "oauth-personal"}},
+                "theme": "ansi",
+            }
+        )
+    )
 
-    We seed a GEMINI.md and assert byte-identical state after install.
-    """
+    GeminiAdapter().install(project_cwd)
+    data = json.loads(legacy.read_text())
+
+    assert "perfxpert" not in data.get("mcpServers", {})
+    assert data["security"]["auth"]["selectedType"] == "oauth-personal"
+    assert data["theme"] == "ansi"
+
+
+def test_install_migrates_legacy_nested_tools_allowed_for_this_project(
+    project_cwd: Path, isolated_home: Path
+) -> None:
+    legacy = isolated_home / ".gemini" / "settings.json"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "perfxpert": {"command": "perfxpert-mcp", "args": []}
+                },
+                "context": {
+                    "fileName": [str(project_cwd / ".perfxpert" / "AGENTS.md")]
+                },
+                "tools": {"allowed": ["mcp_perfxpert_*"]},
+            }
+        )
+    )
+
+    GeminiAdapter().install(project_cwd)
+    data = json.loads(legacy.read_text())
+
+    assert "perfxpert" not in data.get("mcpServers", {})
+    assert "tools" not in data
+
+
+def test_install_does_not_touch_other_projects_legacy_user_state(
+    project_cwd: Path, isolated_home: Path
+) -> None:
+    legacy = isolated_home / ".gemini" / "settings.json"
+    other_agents = isolated_home / "other" / ".perfxpert" / "AGENTS.md"
+    other_agents.parent.mkdir(parents=True)
+    other_agents.write_text("other project cache\n")
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "perfxpert": {"command": "perfxpert-mcp", "args": []}
+                },
+                "context": {"fileName": [str(other_agents)]},
+                "allowedTools": ["mcp_perfxpert_*"],
+                "tools": {"allowed": ["mcp_perfxpert_*"]},
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    before = legacy.read_text()
+
+    GeminiAdapter().install(project_cwd)
+
+    assert legacy.read_text() == before
+
+
+def test_install_does_not_touch_manual_global_perfxpert_entry_without_legacy_markers(
+    project_cwd: Path, isolated_home: Path
+) -> None:
+    legacy = isolated_home / ".gemini" / "settings.json"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "perfxpert": {
+                        "command": "perfxpert-mcp",
+                        "args": [],
+                        "timeout": 30000,
+                    }
+                },
+                "security": {"auth": {"selectedType": "oauth-personal"}},
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    before = legacy.read_text()
+
+    GeminiAdapter().install(project_cwd)
+
+    assert legacy.read_text() == before
+
+
+def test_install_never_touches_gemini_md(project_cwd: Path) -> None:
     gemini_md = project_cwd / "GEMINI.md"
-    gemini_md.write_text("user's own content — do NOT edit\n")
+    gemini_md.write_text("user's own content\n")
     snapshot = gemini_md.read_bytes()
     GeminiAdapter().install(project_cwd)
     assert gemini_md.read_bytes() == snapshot
 
 
-# ---------------------------------------------------------------------------
-# verify_mcp_live.
-# ---------------------------------------------------------------------------
-
-
 def test_verify_mcp_live_healthy_after_install(
-    project_cwd: Path, isolated_home: Path
+    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     GeminiAdapter().install(project_cwd)
-    # Remove the SKIP env so verify actually runs.
     os.environ.pop("PERFXPERT_SKIP_LIVE_CHECK", None)
+
+    def _fake_run(*_args, **_kwargs):
+        return subprocess.CompletedProcess(
+            args=["gemini", "mcp", "list"],
+            returncode=0,
+            stdout="Configured MCP servers:\n✓ perfxpert: perfxpert-mcp (stdio) - Connected\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr("subprocess.run", _fake_run)
     report = GeminiAdapter().verify_mcp_live(project_cwd)
     assert report.mcp_healthy is True
-    assert report.gate_hook_installed is True  # gate hook installed by install()
+    assert report.mcp_listed is True
+    assert report.gate_hook_installed is True
 
 
-def test_verify_mcp_live_unhealthy_when_entry_missing(
-    project_cwd: Path, isolated_home: Path
+def test_verify_mcp_live_treats_missing_list_entry_as_advisory(
+    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    settings = isolated_home / ".gemini" / "settings.json"
-    settings.parent.mkdir()
-    settings.write_text(json.dumps({"mcpServers": {"other": {"command": "o"}}}))
+    GeminiAdapter().install(project_cwd)
+
+    def _fake_run(*_args, **_kwargs):
+        return subprocess.CompletedProcess(
+            args=["gemini", "mcp", "list"],
+            returncode=0,
+            stdout="Configured MCP servers:\n✓ other: other-mcp (stdio) - Connected\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr("subprocess.run", _fake_run)
+    report = GeminiAdapter().verify_mcp_live(project_cwd)
+    assert report.mcp_healthy is True
+    assert report.mcp_listed is False
+    assert "advisory" in (report.error or "").lower()
+
+
+def test_install_succeeds_when_mcp_list_probe_is_advisory(
+    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _fake_run(*_args, **_kwargs):
+        return subprocess.CompletedProcess(
+            args=["gemini", "mcp", "list"],
+            returncode=0,
+            stdout="Configured MCP servers:\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr("subprocess.run", _fake_run)
+
+    report = GeminiAdapter().install(project_cwd)
+
+    assert isinstance(report, InstallReport)
+
+
+def test_verify_mcp_live_rejects_malformed_perfxpert_entry(project_cwd: Path) -> None:
+    settings = _project_settings(project_cwd)
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"mcpServers": {"perfxpert": "junk"}}))
     report = GeminiAdapter().verify_mcp_live(project_cwd)
     assert report.mcp_healthy is False
-    assert "missing" in (report.error or "").lower()
+    assert "malformed" in (report.error or "").lower()
 
 
-def test_verify_mcp_live_returns_error_when_settings_absent(
-    project_cwd: Path, isolated_home: Path
-) -> None:
+def test_verify_mcp_live_rejects_wrong_command_entry(project_cwd: Path) -> None:
+    settings = _project_settings(project_cwd)
+    settings.parent.mkdir(parents=True)
+    settings.write_text(
+        json.dumps({"mcpServers": {"perfxpert": {"command": "wrong-bin"}}})
+    )
+    report = GeminiAdapter().verify_mcp_live(project_cwd)
+    assert report.mcp_healthy is False
+    assert "malformed" in (report.error or "").lower()
+
+
+def test_verify_mcp_live_returns_error_when_settings_absent(project_cwd: Path) -> None:
     report = GeminiAdapter().verify_mcp_live(project_cwd)
     assert report.mcp_healthy is False
     assert "not present" in (report.error or "")
 
 
-# ---------------------------------------------------------------------------
-# uninstall.
-# ---------------------------------------------------------------------------
-
-
-def test_uninstall_removes_mcp_entry_and_context_filename(
-    project_cwd: Path, isolated_home: Path
-) -> None:
-    # Seed existing entries we want preserved.
-    settings = isolated_home / ".gemini" / "settings.json"
-    settings.parent.mkdir()
+def test_uninstall_removes_mcp_entry_and_context_filename(project_cwd: Path) -> None:
+    settings = _project_settings(project_cwd)
+    settings.parent.mkdir(parents=True)
     settings.write_text(
         json.dumps(
             {
@@ -261,32 +455,49 @@ def test_uninstall_removes_mcp_entry_and_context_filename(
     adapter.uninstall(project_cwd)
 
     data = json.loads(settings.read_text())
-    # Other entries preserved.
     assert data["mcpServers"]["other"]["command"] == "other-bin"
-    # perfxpert entries removed.
     assert "perfxpert" not in data["mcpServers"]
     assert "/user/other.md" in data["context"]["fileName"]
-    assert not any(".perfxpert/AGENTS.md" in str(f) for f in data["context"]["fileName"])
+    assert not any(".perfxpert/AGENTS.md" in str(entry) for entry in data["context"]["fileName"])
 
 
-def test_uninstall_returns_report(
-    project_cwd: Path, isolated_home: Path
-) -> None:
+def test_uninstall_migrates_legacy_user_settings(project_cwd: Path, isolated_home: Path) -> None:
+    legacy = isolated_home / ".gemini" / "settings.json"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "perfxpert": {"command": "perfxpert-mcp", "args": []}
+                },
+                "context": {
+                    "fileName": [str(project_cwd / ".perfxpert" / "AGENTS.md")]
+                },
+                "allowedTools": ["mcp_perfxpert_*"],
+                "tools": {"allowed": ["mcp_perfxpert_*"]},
+            }
+        )
+    )
+    adapter = GeminiAdapter()
+    adapter.install(project_cwd)
+    adapter.uninstall(project_cwd)
+    data = json.loads(legacy.read_text())
+    assert "perfxpert" not in data.get("mcpServers", {})
+    assert "allowedTools" not in data
+    assert "tools" not in data
+
+
+def test_uninstall_returns_report(project_cwd: Path) -> None:
     adapter = GeminiAdapter()
     adapter.install(project_cwd)
     report = adapter.uninstall(project_cwd)
     assert isinstance(report, UninstallReport)
 
 
-# ---------------------------------------------------------------------------
-# spawn.
-# ---------------------------------------------------------------------------
-
-
 def test_spawn_uses_execvpe(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    called: dict = {}
+    called: dict[str, object] = {}
 
     def _fake_execvpe(name, argv, env):
         called["name"] = name

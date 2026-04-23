@@ -26,8 +26,14 @@ cycle-2 I7, superseded by commit 3547736829 which made tomlkit a
 required runtime dep — imported inside the fallback branch ONLY;
 the primary code path must never pay the import cost).
 
-Prompt staging writes to `<scope_dir>/.perfxpert/AGENTS.md`, NEVER to
-a tracked `AGENTS.md` unless `--allow-agents-md-append` is given.
+Prompt staging writes a **perfxpert-managed compatibility file**
+`<cwd>/AGENTS.override.md`. If the repo already has an `AGENTS.md`,
+we shadow-copy its contents into `AGENTS.override.md` and append a
+perfxpert-managed block so Codex still sees the repo guidance plus the
+perfxpert gate. Existing `AGENTS.override.md` files receive an appended
+managed block; git-tracked overrides require
+`--allow-agents-md-append`. Legacy `.perfxpert/AGENTS.md` installs are
+cleaned up on uninstall.
 
 Gate hook (Task 4.6 Codex-portion): the gate hook module is
 imported from `perfxpert.cli._gate_hooks.codex` and invoked BEFORE
@@ -42,8 +48,10 @@ report (I-N1 documented-known-limit).
 from __future__ import annotations
 
 import enum
+import hashlib
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -147,8 +155,9 @@ class CodexAdapter:
     tool_name_template: str = "mcp_perfxpert_{tool}"
     spawn_strategy: Literal["execvpe", "subprocess"] = "execvpe"
 
-    _PERFXPERT_DIR = ".perfxpert"
-    _AGENTS_FILE = "AGENTS.md"
+    _PERFXPERT_DIR = ".perfxpert"  # legacy cleanup only
+    _PROJECT_GUIDE_FILE = "AGENTS.override.md"
+    _BASE_AGENTS_FILE = "AGENTS.md"
     _CODEX_CFG_REL = ".codex/config.toml"
 
     # ------------------------------------------------------------------
@@ -254,12 +263,16 @@ class CodexAdapter:
         cwd: Path,
         scope: Literal["project", "user"] = "project",
     ) -> tuple[Path, Path]:
-        """Return (config_toml_path, agents_cache_path)."""
+        """Return (config_toml_path, codex_discovered_prompt_path)."""
         cwd = Path(cwd).expanduser().resolve()
         config_dir = self._scope_config_dir(cwd, scope)
         config_toml = config_dir / "config.toml"
-        agents_cache = cwd / self._PERFXPERT_DIR / self._AGENTS_FILE
-        return config_toml, agents_cache
+        project_guide = cwd / self._PROJECT_GUIDE_FILE
+        return config_toml, project_guide
+
+    def _legacy_agents_cache_path(self, cwd: Path) -> Path:
+        """Old hidden prompt cache path kept for uninstall cleanup only."""
+        return Path(cwd).expanduser().resolve() / self._PERFXPERT_DIR / self._BASE_AGENTS_FILE
 
     def plan(
         self,
@@ -272,7 +285,7 @@ class CodexAdapter:
         actions = [
             f"Check project trust in {self._user_codex_config_path()} for {cwd_resolved}",
             f"Register [mcp_servers.perfxpert] in {config_toml} (scope={scope})",
-            f"Stage rendered prompt at {agents_cache.relative_to(cwd_resolved)}",
+            f"Write Codex-discovered prompt at {agents_cache.relative_to(cwd_resolved)}",
             "Install PreToolUse gate hook (prompt-layer-only on Codex — see decision record)",
             "Warm perfxpert-mcp",
             "Verify perfxpert MCP is live (codex mcp list)",
@@ -297,19 +310,42 @@ class CodexAdapter:
     ) -> InstallReport:
         start = time.monotonic()
         cwd = Path(cwd).expanduser().resolve()
-        config_toml, agents_cache = self._target_paths(cwd, scope)
+        config_toml, agents_file = self._target_paths(cwd, scope)
 
         # ---- Consent -------------------------------------------------
         fset = file_set_hash(
             (
                 (config_toml, config_toml.exists(), False),
-                (agents_cache, agents_cache.exists(), False),
+                (agents_file, agents_file.exists(), False),
             )
         )
         if not has_consent(self.name, cwd, fset):
             plan_lines = [
                 f"Register [mcp_servers.perfxpert] in {config_toml}",
-                f"Stage rendered prompt at {agents_cache}",
+                f"Write Codex-discovered prompt at {agents_file}",
+            ]
+            if not prompt_consent_interactive(self.name, cwd, plan_lines):
+                raise ConsentDenied(
+                    f"user declined perfxpert install for codex in {cwd}. "
+                    f"Re-run with {CONSENT_ASSUME_ENV}=1 to bypass the "
+                    "prompt (non-interactive)."
+                )
+
+        # ---- Step 0/5: Trust gate -----------------------------------
+        self._log_step(quiet, "[0/5] Checking project trust ...")
+        scope = self._resolve_trust_and_scope(cwd, scope, quiet=quiet)
+        # Re-resolve target paths in case scope changed.
+        config_toml, agents_file = self._target_paths(cwd, scope)
+        effective_fset = file_set_hash(
+            (
+                (config_toml, config_toml.exists(), False),
+                (agents_file, agents_file.exists(), False),
+            )
+        )
+        if effective_fset != fset and not has_consent(self.name, cwd, effective_fset):
+            plan_lines = [
+                f"Register [mcp_servers.perfxpert] in {config_toml}",
+                f"Write perfxpert-managed Codex override at {agents_file}",
             ]
             if not prompt_consent_interactive(self.name, cwd, plan_lines):
                 raise ConsentDenied(
@@ -329,12 +365,6 @@ class CodexAdapter:
 
         actions: list[str] = []
         written: list[Path] = []
-
-        # ---- Step 0/5: Trust gate -----------------------------------
-        self._log_step(quiet, "[0/5] Checking project trust ...")
-        scope = self._resolve_trust_and_scope(cwd, scope, quiet=quiet)
-        # Re-resolve target paths in case scope changed.
-        config_toml, agents_cache = self._target_paths(cwd, scope)
         actions.append(f"resolved install scope={scope}")
 
         # ---- Step 1/5: Install gate hook (BEFORE MCP) --------------
@@ -357,45 +387,25 @@ class CodexAdapter:
             _LOG.warning("codex gate hook install failed: %s", exc)
             actions.append(f"gate hook install failed: {exc}")
 
-        # ---- Step 2/5: Register MCP ---------------------------------
+        # ---- Step 2/5: Stage prompt ---------------------------------
+        self._log_step(quiet, "[2/5] Staging rendered prompt ...")
+        rendered = self._render_prompt_for_codex()
+        staged_prompt = self._stage_codex_prompt_file(
+            cwd,
+            rendered,
+            allow_agents_md_append=allow_agents_md_append,
+        )
+        actions.append(f"wrote Codex-discovered prompt at {staged_prompt.name}")
+        written.append(staged_prompt)
+
+        # ---- Step 3/5: Register MCP ---------------------------------
         self._log_step(
             quiet,
-            f"[2/5] Registering perfxpert MCP in {config_toml.name} (scope={scope}) ...",
+            f"[3/5] Registering perfxpert MCP in {config_toml.name} (scope={scope}) ...",
         )
         self._register_mcp(cwd, config_toml, scope)
         actions.append("registered perfxpert MCP")
         written.append(config_toml)
-
-        # ---- Step 3/5: Stage prompt ---------------------------------
-        self._log_step(quiet, "[3/5] Staging rendered prompt ...")
-        rendered = self._render_prompt_for_codex()
-        # Pre-check: 32 KiB cap on AGENTS.md so we don't silently
-        # produce a monster file (practical §3.4).
-        if len(rendered.encode("utf-8")) > 32 * 1024:
-            raise PartialInstall(
-                f"rendered codex prompt exceeds 32 KiB cap "
-                f"({len(rendered.encode('utf-8'))} bytes). Shrink the "
-                "source AGENTS.md or raise the cap explicitly."
-            )
-        # Respect --allow-agents-md-append: if the user's AGENTS.md is
-        # tracked AND the flag is NOT set, we refuse to touch it. Our
-        # cache path is always under .perfxpert/, so we never edit
-        # AGENTS.md directly unless the user explicitly opted in.
-        tracked_agents_md = cwd / self._AGENTS_FILE
-        if (
-            tracked_agents_md.exists()
-            and pa.is_git_tracked(Path(self._AGENTS_FILE), cwd)
-            and not allow_agents_md_append
-        ):
-            # Stage to .perfxpert/AGENTS.md only; never touch the
-            # tracked file. This is the default safe path.
-            _LOG.debug(
-                "tracked AGENTS.md at %s; using .perfxpert/ staging path",
-                tracked_agents_md,
-            )
-        pa.stage_cache_file(agents_cache, agents_cache, rendered)
-        actions.append("staged AGENTS.md cache")
-        written.append(agents_cache)
 
         # ---- Step 4/5: Warmup ---------------------------------------
         self._log_step(quiet, "[4/5] Warming perfxpert-mcp ...")
@@ -432,7 +442,7 @@ class CodexAdapter:
                     f"{live.error or 'unknown reason'}"
                 )
 
-        grant_consent(self.name, cwd, fset)
+        grant_consent(self.name, cwd, effective_fset)
         _ = gate_installed  # quiets type-checker on unused when no telem.
         return InstallReport(
             backend=self.name,
@@ -856,7 +866,8 @@ class CodexAdapter:
         scope: Literal["project", "user"] = "project",
     ) -> UninstallReport:
         cwd = Path(cwd).expanduser().resolve()
-        config_toml, agents_cache = self._target_paths(cwd, scope)
+        config_toml, agents_file = self._target_paths(cwd, scope)
+        legacy_agents_cache = self._legacy_agents_cache_path(cwd)
         actions: list[str] = []
         removed: list[Path] = []
         drifted: list[Path] = []
@@ -892,14 +903,29 @@ class CodexAdapter:
                 actions.append(f"refused to edit {config_toml}: {cexc}")
                 drifted.append(config_toml)
 
-        # Remove cache file.
-        if agents_cache.exists():
+        # Remove project prompt file / managed block.
+        try:
+            prompt_action, removed_path = self._remove_codex_prompt_file(
+                cwd, agents_file
+            )
+            if prompt_action:
+                actions.append(prompt_action)
+            if removed_path is not None:
+                removed.append(removed_path)
+        except ConfigClobber as exc:
+            actions.append(f"refused to edit {agents_file}: {exc}")
+            drifted.append(agents_file)
+
+        # Remove legacy hidden cache file from older installs.
+        if legacy_agents_cache.exists():
             try:
-                agents_cache.unlink()
-                removed.append(agents_cache)
-                actions.append(f"removed {agents_cache}")
+                legacy_agents_cache.unlink()
+                removed.append(legacy_agents_cache)
+                actions.append(f"removed legacy cache {legacy_agents_cache}")
             except OSError as exc:
-                actions.append(f"failed to remove {agents_cache}: {exc}")
+                actions.append(
+                    f"failed to remove legacy cache {legacy_agents_cache}: {exc}"
+                )
 
         # Remove .perfxpert/ if empty.
         perfxpert_dir = cwd / self._PERFXPERT_DIR
@@ -917,6 +943,14 @@ class CodexAdapter:
             actions.append("gate hook uninstall: complete")
         except Exception as exc:
             actions.append(f"gate hook uninstall failed: {exc}")
+
+        if scope == "project":
+            try:
+                if self._remove_project_trust_entry(cwd):
+                    actions.append("removed project trust entry from ~/.codex/config.toml")
+            except ConfigClobber as cexc:
+                actions.append(f"refused to edit {self._user_codex_config_path()}: {cexc}")
+                drifted.append(self._user_codex_config_path())
 
         revoke_consent(self.name, cwd)
         actions.append("revoked consent")
@@ -1008,6 +1042,39 @@ class CodexAdapter:
                 "perfxpert-code."
             )
 
+    def _remove_project_trust_entry(self, cwd: Path) -> bool:
+        cfg = self._user_codex_config_path()
+        if not cfg.is_file():
+            return False
+        self._refuse_if_git_tracked(cfg)
+
+        tomlkit_mod = _lazy_import_tomlkit("removing codex project trust")
+        try:
+            doc = tomlkit_mod.parse(cfg.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise ConfigClobber(
+                f"{cfg} is not valid TOML: {exc}. "
+                "Fix the syntax error or delete the file before "
+                "re-running perfxpert-code uninstall."
+            ) from exc
+
+        projects = doc.get("projects")
+        if not isinstance(projects, dict):
+            return False
+        resolved = str(Path(cwd).expanduser().resolve())
+        entry = projects.get(resolved)
+        if not isinstance(entry, dict):
+            return False
+
+        if "trust_level" in entry:
+            del entry["trust_level"]
+        if len(entry) == 0:
+            del projects[resolved]
+        if len(projects) == 0:
+            del doc["projects"]
+        pa.atomic_write(cfg, tomlkit_mod.dumps(doc))
+        return True
+
     def _render_prompt_for_codex(self) -> str:
         bundled_source = _find_bundled_agents_md()
         if bundled_source is None:
@@ -1029,6 +1096,166 @@ class CodexAdapter:
             known_tools=_KNOWN_TOOLS,
             reject_language=True,
         )
+
+    def _stage_codex_prompt_file(
+        self,
+        cwd: Path,
+        rendered: str,
+        *,
+        allow_agents_md_append: bool,
+    ) -> Path:
+        """Write the Codex-discovered project instructions file.
+
+        Codex discovers `AGENTS.override.md` in the current directory,
+        not hidden files under `.perfxpert/`. To preserve existing repo
+        guidance we shadow-copy root `AGENTS.md` when creating a fresh
+        override file, and otherwise append or replace only our managed
+        block inside the existing override.
+        """
+        prompt_file = cwd / self._PROJECT_GUIDE_FILE
+        base_agents = cwd / self._BASE_AGENTS_FILE
+        managed_block = self._make_managed_prompt_block(rendered)
+
+        prompt_is_tracked = pa.is_git_tracked(Path(prompt_file.name), cwd)
+        if prompt_is_tracked and not allow_agents_md_append:
+            raise ConfigClobber(
+                f"{prompt_file} is tracked in git. Pass "
+                "--allow-agents-md-append to append a "
+                "perfxpert-managed block to it."
+            )
+
+        if prompt_file.exists():
+            existing = prompt_file.read_text(encoding="utf-8")
+            remaining = existing
+            parsed = self._split_managed_prompt_block(existing)
+            if parsed is not None:
+                remaining = self._join_prompt_segments(*parsed)
+            shadow = self._parse_shadow_copy(remaining)
+            if shadow is not None and base_agents.exists():
+                recorded_sha, body = shadow
+                if _sha8(body.rstrip("\n")) == recorded_sha:
+                    base_text = base_agents.read_text(encoding="utf-8")
+                    refreshed = self._make_shadow_copy_prompt(base_text, managed_block)
+                    self._validate_prompt_size(refreshed)
+                    pa.atomic_write(prompt_file, refreshed)
+                    return prompt_file
+            updated = self._upsert_managed_prompt_block(existing, managed_block)
+            self._validate_prompt_size(updated)
+            pa.atomic_write(prompt_file, updated)
+            return prompt_file
+
+        if base_agents.exists():
+            base_text = base_agents.read_text(encoding="utf-8")
+            shadow_copy = self._make_shadow_copy_prompt(base_text, managed_block)
+            self._validate_prompt_size(shadow_copy)
+            pa.atomic_write(prompt_file, shadow_copy)
+            return prompt_file
+
+        self._validate_prompt_size(managed_block)
+        pa.atomic_write(prompt_file, managed_block)
+        return prompt_file
+
+    def _validate_prompt_size(self, content: str) -> None:
+        size = len(content.encode("utf-8"))
+        if size > 32 * 1024:
+            raise PartialInstall(
+                f"rendered codex prompt exceeds 32 KiB cap ({size} bytes). "
+                "Shrink the source AGENTS.md or raise the cap explicitly."
+            )
+
+    def _make_managed_prompt_block(self, rendered: str) -> str:
+        begin, end = pa.emit_marker_block(rendered)
+        body = rendered.rstrip("\n")
+        return f"{begin}\n{body}\n{end}\n"
+
+    def _make_shadow_copy_prompt(
+        self, base_text: str, managed_block: str
+    ) -> str:
+        base_body = base_text.rstrip("\n")
+        header = (
+            "<!-- perfxpert-managed codex shadow-copy "
+            f"source=AGENTS.md base_sha={_sha8(base_body)} -->"
+        )
+        if base_body:
+            return f"{header}\n{base_body}\n\n{managed_block}"
+        return managed_block
+
+    def _upsert_managed_prompt_block(
+        self, existing: str, managed_block: str
+    ) -> str:
+        parsed = self._split_managed_prompt_block(existing)
+        if parsed is None:
+            trimmed = existing.rstrip("\n")
+            if not trimmed:
+                return managed_block
+            return f"{trimmed}\n\n{managed_block}"
+
+        before, after = parsed
+        parts = [segment.rstrip("\n") for segment in (before, after) if segment.strip()]
+        if parts:
+            return "\n\n".join([*parts, managed_block.rstrip("\n")]) + "\n"
+        return managed_block
+
+    def _remove_codex_prompt_file(
+        self, cwd: Path, prompt_file: Path
+    ) -> tuple[str | None, Path | None]:
+        """Remove only the perfxpert-managed prompt block from Codex instructions."""
+        if not prompt_file.exists():
+            return None, None
+
+        text = prompt_file.read_text(encoding="utf-8")
+        parsed = self._split_managed_prompt_block(text)
+        if parsed is None:
+            return None, None
+
+        before, after = parsed
+        remaining = self._join_prompt_segments(before, after)
+        shadow = self._parse_shadow_copy(remaining)
+        if shadow is not None:
+            recorded_sha, body = shadow
+            if _sha8(body.rstrip("\n")) == recorded_sha:
+                prompt_file.unlink()
+                return f"removed {prompt_file}", prompt_file
+            remaining = body
+
+        if remaining.strip():
+            pa.atomic_write(prompt_file, remaining.rstrip("\n") + "\n")
+            return f"removed perfxpert block from {prompt_file}", None
+
+        prompt_file.unlink()
+        return f"removed {prompt_file}", prompt_file
+
+    def _split_managed_prompt_block(
+        self, text: str
+    ) -> tuple[str, str] | None:
+        """Return the text before and after our managed prompt block."""
+        start = text.find("<!-- BEGIN perfxpert-managed v1 cache=")
+        end = text.find(pa.END_MARKER_FMT, start if start != -1 else 0)
+        if start == -1 and end == -1:
+            return None
+        if start == -1 or end == -1:
+            raise ConfigClobber(
+                "managed perfxpert prompt markers are malformed. "
+                "Remove the broken block from AGENTS.override.md "
+                "manually, then re-run perfxpert-code."
+            )
+        end += len(pa.END_MARKER_FMT)
+        before = text[:start]
+        after = text[end:]
+        return before, after
+
+    def _join_prompt_segments(self, before: str, after: str) -> str:
+        parts = [segment.strip("\n") for segment in (before, after) if segment.strip()]
+        if not parts:
+            return ""
+        return "\n\n".join(parts)
+
+    def _parse_shadow_copy(self, text: str) -> tuple[str, str] | None:
+        match = _SHADOW_COPY_RE.match(text)
+        if match is None:
+            return None
+        body = text[match.end() :].lstrip("\n")
+        return match.group("sha"), body
 
 
 # ---------------------------------------------------------------------------
@@ -1068,6 +1295,16 @@ def _find_bundled_agents_md() -> Path | None:
         if c.is_file():
             return c
     return None
+
+
+def _sha8(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
+
+
+_SHADOW_COPY_RE = re.compile(
+    r"^<!-- perfxpert-managed codex shadow-copy "
+    r"source=AGENTS\.md base_sha=(?P<sha>[0-9a-f]{8}) -->\n?"
+)
 
 
 def _lazy_import_tomlkit(reason: str):

@@ -242,12 +242,16 @@ your existing LLM workflow.
 - **`perfxpert-code claude`** — registers perfxpert as an MCP
   server in the Claude Code project config, installs the native
   `PreToolUse` gate hook, then execs the user's `claude` CLI.
-- **`perfxpert-code gemini`** — appends `perfxpert-mcp` to
-  `~/.gemini/settings.json` and list-appends a project-cache
-  prompt file to `context.fileName` (never touches user's
-  `GEMINI.md`), then execs `gemini`.
+- **`perfxpert-code gemini`** — writes `perfxpert-mcp` into the
+  project-local `.gemini/settings.json`, list-appends a
+  project-cache prompt file to `context.fileName`, installs
+  native Gemini `BeforeTool` / `AfterTool` hooks, and never
+  touches the user's `GEMINI.md`, then execs `gemini`.
 - **`perfxpert-code codex`** — writes the perfxpert MCP stanza into
-  `~/.codex/config.toml` (TOML, not JSON) and execs `codex`. Gate
+  `<cwd>/.codex/config.toml` when the project is trusted (otherwise
+  falls back to `~/.codex/config.toml`), writes a project-root
+  `AGENTS.override.md` compatibility override so Codex actually loads
+  the perfxpert prompt, and execs `codex`. Gate
   enforcement is prompt-layer-only because Codex's native
   `PreToolUse` hook is Bash-only as of April 2026; the trust gate
   runs before MCP registration and either prompts or honors
