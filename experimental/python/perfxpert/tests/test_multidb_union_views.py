@@ -20,31 +20,37 @@ import sqlite3
 
 
 def _create_test_db(path, kernel_name, kernel_duration):
-    """Create a minimal DB with kernels/memory_copies/regions tables.
-
-    Production rocpd DBs expose these as VIEWs; for the purpose of this
-    regression test using base tables is equivalent because
-    ``sqlite_master.type`` can be either ``'table'`` or ``'view'`` and the
-    union logic handles both.
-    """
+    """Create a minimal DB with real analysis VIEWs over backing tables."""
     conn = sqlite3.connect(str(path))
     conn.execute(
-        "CREATE TABLE kernels (name TEXT, start INTEGER, end INTEGER, "
+        "CREATE TABLE kernels_data (name TEXT, start INTEGER, end INTEGER, "
         "duration INTEGER)"
     )
     conn.execute(
-        "INSERT INTO kernels VALUES (?, 100, ?, ?)",
+        "INSERT INTO kernels_data VALUES (?, 100, ?, ?)",
         (kernel_name, 100 + kernel_duration, kernel_duration),
     )
     conn.execute(
-        "CREATE TABLE memory_copies "
+        "CREATE VIEW kernels AS "
+        "SELECT name, start, end, duration FROM kernels_data"
+    )
+    conn.execute(
+        "CREATE TABLE memory_copies_data "
         "(name TEXT, start INTEGER, end INTEGER, duration INTEGER, "
         "size INTEGER)"
     )
     conn.execute(
-        "CREATE TABLE regions "
+        "CREATE VIEW memory_copies AS "
+        "SELECT name, start, end, duration, size FROM memory_copies_data"
+    )
+    conn.execute(
+        "CREATE TABLE regions_data "
         "(name TEXT, category TEXT, start INTEGER, end INTEGER, "
         "duration INTEGER)"
+    )
+    conn.execute(
+        "CREATE VIEW regions AS "
+        "SELECT name, category, start, end, duration FROM regions_data"
     )
     conn.execute(
         "CREATE TABLE pmc_events "
@@ -86,9 +92,9 @@ class TestMultiFileUnionViews:
 
         for path, name in [(db0, "copy0"), (db1, "copy1")]:
             conn = sqlite3.connect(str(path))
-            conn.execute("DELETE FROM kernels")
+            conn.execute("DELETE FROM kernels_data")
             conn.execute(
-                "INSERT INTO memory_copies VALUES (?, 100, 180, 80, 1024)",
+                "INSERT INTO memory_copies_data VALUES (?, 100, 180, 80, 1024)",
                 (name,),
             )
             conn.commit()
@@ -114,9 +120,9 @@ class TestMultiFileUnionViews:
         _create_test_db(db1, "kernel_B", 0)
 
         conn = sqlite3.connect(str(db1))
-        conn.execute("DELETE FROM kernels")
+        conn.execute("DELETE FROM kernels_data")
         conn.execute(
-            "INSERT INTO memory_copies VALUES ('copy_B', 100, 120, 20, 1024)"
+            "INSERT INTO memory_copies_data VALUES ('copy_B', 100, 120, 20, 1024)"
         )
         conn.commit()
         conn.close()
@@ -142,7 +148,7 @@ class TestMultiFileUnionViews:
 
         conn = sqlite3.connect(str(db0))
         conn.execute(
-            "INSERT INTO memory_copies VALUES ('copy_A', 300, 340, 40, 1024)"
+            "INSERT INTO memory_copies_data VALUES ('copy_A', 300, 340, 40, 1024)"
         )
         conn.commit()
         conn.close()
@@ -162,6 +168,14 @@ class TestMultiFileUnionViews:
         db1 = tmp_path / "shard1.db"
         _create_test_db(db0, "kernel_A", 1000)
         _create_test_db(db1, "kernel_B", 2000)
+
+        for path in (db0, db1):
+            conn = sqlite3.connect(str(path))
+            obj_type = conn.execute(
+                "SELECT type FROM sqlite_master WHERE name='kernels'"
+            ).fetchone()[0]
+            conn.close()
+            assert obj_type == "view"
 
         from perfxpert.connection import (
             PerfxpertConnection,
@@ -185,7 +199,7 @@ class TestMultiFileUnionViews:
         for path, mc_name in [(db0, "h2d_0"), (db1, "h2d_1")]:
             c = sqlite3.connect(str(path))
             c.execute(
-                "INSERT INTO memory_copies VALUES (?, 0, 100, 100, 1024)",
+                "INSERT INTO memory_copies_data VALUES (?, 0, 100, 100, 1024)",
                 (mc_name,),
             )
             c.commit()
@@ -210,7 +224,7 @@ class TestMultiFileUnionViews:
         for path, rname in [(db0, "region_0"), (db1, "region_1")]:
             c = sqlite3.connect(str(path))
             c.execute(
-                "INSERT INTO regions VALUES (?, 'api', 0, 100, 100)",
+                "INSERT INTO regions_data VALUES (?, 'api', 0, 100, 100)",
                 (rname,),
             )
             c.commit()
@@ -226,7 +240,7 @@ class TestMultiFileUnionViews:
         assert len(rows) == 2
 
     def test_single_db_still_works(self, tmp_path):
-        """Single-DB path must not regress — no views are created there."""
+        """Single-DB path must not regress — only the multi-DB union path is special."""
         db0 = tmp_path / "single.db"
         _create_test_db(db0, "kernel_only", 500)
 
