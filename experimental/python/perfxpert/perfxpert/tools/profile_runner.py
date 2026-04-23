@@ -10,6 +10,7 @@ Extends the existing `_filter_rec_commands` pattern from analyze.py.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Set
@@ -23,30 +24,58 @@ _ROCPROFV3_TIMEOUT_SEC = 600
 
 # Authoritative rocprofv3 flag allowlist. Extend via knowledge yaml in a
 # future task — hard-coded here so a hostile YAML can't widen it.
-_ROCPROFV3_FLAGS: Set[str] = {
-    # trace modes
-    "--sys-trace", "--hip-trace", "--kernel-trace", "--memory-copy-trace",
-    "--hsa-trace", "--stats",
-    # ATT
-    "--att", "--att-library-path", "--att-target-cu", "--att-simd-select",
-    "--att-buffer-size", "--att-activity",
-    # PC sampling
-    "--pc-sampling",
-    # counters
-    "--pmc",
-    # output
-    "-d", "--output-dir", "-o", "--output",
-    # process controls
-    "--process-sync", "--pid",
-    # listing / info
-    "--list-avail", "--list-counters", "--help",
-    # discovery separator
-    "--",
+_ROCPROFV3_NO_VALUE_FLAGS: Set[str] = {
+    "--sys-trace",
+    "--hip-trace",
+    "--kernel-trace",
+    "--memory-copy-trace",
+    "--hsa-trace",
+    "--stats",
+    "--att",
+    "--process-sync",
+    "--list-avail",
+    "--list-counters",
+    "--help",
 }
+
+_ROCPROFV3_VALUE_FLAGS: Set[str] = {
+    "--att-library-path",
+    "--att-target-cu",
+    "--att-simd-select",
+    "--att-buffer-size",
+    "--att-activity",
+    "--pc-sampling",
+    "--pmc",
+    "-d",
+    "--output-dir",
+    "-o",
+    "--output",
+    "--pid",
+}
+
+_ROCPROFV3_PATH_VALUE_FLAGS: Set[str] = {
+    "--att-library-path",
+    "-d",
+    "--output-dir",
+    "-o",
+    "--output",
+}
+
+_ROCPROFV3_FLAGS: Set[str] = _ROCPROFV3_NO_VALUE_FLAGS | _ROCPROFV3_VALUE_FLAGS | {"--"}
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 
 
 class RocprofFlagError(Exception):
     """Raised when argv contains a rocprofv3 flag not in the allowlist."""
+
+
+def _validate_path_value(flag: str, value: str) -> None:
+    """Reject rocprofv3 path values that cannot be project-confined later."""
+    normalized = value.replace("\\", "/")
+    if not value or value.startswith(("~", "/", "\\")) or _WINDOWS_DRIVE_RE.match(value):
+        raise RocprofFlagError(f"unsafe path value for {flag}: {value!r}")
+    if ".." in normalized.split("/"):
+        raise RocprofFlagError(f"unsafe path value for {flag}: {value!r}")
 
 
 def _validate_argv(argv: List[str]) -> None:
@@ -75,7 +104,24 @@ def _validate_argv(argv: List[str]) -> None:
                 raise RocprofFlagError(
                     f"rocprofv3 flag not in allowlist: {tok!r}"
                 )
-        # value-takers: skip one more token if no `=`
+            has_inline_value = "=" in tok
+            if key in _ROCPROFV3_NO_VALUE_FLAGS:
+                if has_inline_value:
+                    raise RocprofFlagError(f"rocprofv3 flag does not take a value: {tok!r}")
+            else:
+                if has_inline_value:
+                    value = tok.split("=", 1)[1]
+                else:
+                    if i + 1 >= len(rocprof_tokens):
+                        raise RocprofFlagError(f"rocprofv3 flag requires a value: {tok!r}")
+                    value = rocprof_tokens[i + 1]
+                    if value.startswith("-"):
+                        raise RocprofFlagError(f"rocprofv3 flag requires a value: {tok!r}")
+                    i += 1
+                if key in _ROCPROFV3_PATH_VALUE_FLAGS:
+                    _validate_path_value(key, value)
+        else:
+            raise RocprofFlagError(f"unexpected rocprofv3 value without flag: {tok!r}")
         i += 1
 
     # Sanitize every token (including target app path + args)
@@ -103,10 +149,9 @@ def run(
         ShellMetacharError on metachar-bearing token.
         subprocess.TimeoutExpired on timeout.
     """
-    # Check external dependencies
+    _validate_argv(argv)
     require_tool("rocprofv3")
 
-    _validate_argv(argv)
     proc = subprocess.run(
         argv,
         shell=False,
