@@ -1298,6 +1298,17 @@ struct amdgpu_xcp_metrics_t {
  * Use ::rsmi_gpu_metrics_t.common_header to identify which metric table
  * variant populated the fields.
  *
+ * **Sentinel Values:**
+ * Fields not applicable to the current version are initialized to the maximum value
+ * of their respective type: 0xFFFF for uint16_t fields, 0xFFFFFFFF for uint32_t fields,
+ * and UINT64_MAX for uint64_t fields. For example, on v3.0 hardware, v2.4-only fields
+ * like `average_mm_activity` and `temperature_l3` will contain 0xFFFF. Similarly,
+ * array elements beyond the version-specific count (e.g., elements 8-15 of
+ * `temperature_core` on v2.4) will contain 0xFFFF. However, uint32_t elements such as
+ * 'throttle_status' will contain 0xFFFFFFFF and UINT64_MAX for uint64_t elements such
+ * as 'indep_throttle_status'. Callers should check the version and treat maximum values
+ * as invalid/not applicable.
+ *
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
@@ -1617,14 +1628,6 @@ typedef struct {
   /* XGMI link status(up/down) */
   uint16_t xgmi_link_status[RSMI_MAX_NUM_XGMI_LINKS];
 
-  /*
-   * APU metrics auxiliary data.
-   *
-   * This pointer is non-null only when the queried device reports APU-specific
-   * metrics. The pointed-to storage is owned by the library and may
-   * be invalidated by the next metrics query made on the same thread.
-   */
-  rsmi_apu_metrics_t* apu_metrics;
   /**
    * v1.9 additions
    */
@@ -1634,6 +1637,15 @@ typedef struct {
 
   uint16_t current_uclk_aid[RSMI_MAX_NUM_CLKS_PER_AID];     //!< In MHz
   uint16_t current_socclks_mid[RSMI_MAX_NUM_CLKS_PER_MID];  //!< In MHz
+
+  /*
+   * APU metrics auxiliary data.
+   *
+   * This pointer is non-null only when the queried device reports APU-specific
+   * metrics. The pointed-to storage is owned by the library and may
+   * be invalidated by the next metrics query made on the same thread.
+   */
+  rsmi_apu_metrics_t* apu_metrics;
 
   /// \endcond
 } rsmi_gpu_metrics_t;
