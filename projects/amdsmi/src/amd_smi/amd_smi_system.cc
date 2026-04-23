@@ -452,8 +452,10 @@ std::tuple<uint64_t, amdsmi_bdf_t> bdf_to_int(const std::string& bdf) {
     bdf_info.bus_number = std::stoul(matches[2], nullptr, 16) & 0xff;
     bdf_info.device_number = std::stoul(matches[3], nullptr, 16) & 0x1f;
     bdf_info.function_number = std::stoul(matches[4], nullptr, 16) & 0x7;
-    return {(bdf_info.domain_number << 16) | (bdf_info.bus_number << 8) |
-                (bdf_info.device_number << 3) | (bdf_info.function_number << 0),
+    return {(static_cast<uint64_t>(bdf_info.domain_number) << 16) |
+                (static_cast<uint64_t>(bdf_info.bus_number) << 8) |
+                (static_cast<uint64_t>(bdf_info.device_number) << 3) |
+                (static_cast<uint64_t>(bdf_info.function_number) << 0),
             bdf_info};
   }
   return {0, bdf_info};
