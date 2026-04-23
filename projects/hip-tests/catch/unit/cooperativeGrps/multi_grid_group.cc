@@ -618,11 +618,15 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Positive_Sync) {
     unsigned int max_in_this_loop = 0;
     for (unsigned int j = 0; j < loops; j++) {
       max_in_this_loop += multi_grid.grids_[i].block_count_;
-      unsigned int k = 0;
-      for (k = 0; k < multi_grid.grids_[i].block_count_ - 1; k++) {
-        REQUIRE(uint_arr[i].ptr()[j * multi_grid.grids_[i].block_count_ + k] < max_in_this_loop);
+      unsigned int base = j * multi_grid.grids_[i].block_count_;
+      std::unordered_set<unsigned int> seen;
+      for (unsigned int k = 0; k < multi_grid.grids_[i].block_count_; k++) {
+        unsigned int val = uint_arr[i].ptr()[j * multi_grid.grids_[i].block_count_ + k];
+        REQUIRE(val >= base);
+        REQUIRE(val < max_in_this_loop);
+        REQUIRE(seen.insert(val).second);  // No duplicates
       }
-      REQUIRE(uint_arr[i].ptr()[j * multi_grid.grids_[i].block_count_ + k] == max_in_this_loop - 1);
+      REQUIRE(seen.size() == multi_grid.grids_[i].block_count_);  // All blocks executed
     }
   }
 
