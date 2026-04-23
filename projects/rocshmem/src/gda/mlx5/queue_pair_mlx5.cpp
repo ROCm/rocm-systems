@@ -260,6 +260,8 @@ __device__ void QueuePair::mlx5_quiet_single() {
 // can be called with all active lanes using any number of different QPs, don't assume anything
 __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, uintptr_t raddr,
                                              uint8_t opcode, const ActiveWFInfo& wf_info) {
+  /* since the leader needs to write the first 8 bytes of the LAST WQE to the
+   * doorbell register, it's easier if the LAST thread is the leader */
   if (wf_info.is_pe_group_last) {
     // get SQ lock
     acquire_lock(&mlx5_sq.lock);
@@ -334,6 +336,8 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
                                                  uintptr_t raddr, uint8_t opcode,
                                                  int64_t atomic_data, int64_t atomic_cmp,
                                                  bool fetching, const ActiveWFInfo& wf_info) {
+  /* since the leader needs to write the first 8 bytes of the LAST WQE to the
+   * doorbell register, it's easier if the LAST thread is the leader */
   if (wf_info.is_pe_group_last) {
     // get SQ lock
     acquire_lock(&mlx5_sq.lock);
