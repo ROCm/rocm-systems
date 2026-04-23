@@ -114,6 +114,38 @@ def test_analysis_airgap_uses_deterministic_classifier(monkeypatch):
     assert result.primary_bottleneck in ("compute", "mixed")
 
 
+def test_analysis_airgap_prefers_runtime_overhead_when_it_dominates(monkeypatch):
+    monkeypatch.setenv("PERFXPERT_AIRGAP", "1")
+    monkeypatch.setattr(
+        analysis_module,
+        "_collect_deterministic_metrics",
+        lambda db, top_n=10, min_duration=0.0: {
+            "time_breakdown": {
+                "kernel_pct": 8.9,
+                "memcpy_pct": 4.5,
+                "api_pct": 86.6,
+                "idle_pct": 0.0,
+            },
+            "hot_kernels": [],
+            "metrics_for_classifier": {
+                "memcpy_pct": 0.045,
+                "api_overhead_pct": 0.866,
+                "valu_util_pct": 1.0,
+                "arithmetic_intensity_above_ridge": 1,
+                "gpu_util_pct": 1.0,
+            },
+            "counter_data_available": True,
+        },
+    )
+
+    result = analysis_module.run_analysis(
+        schemas.AnalysisInput(database_path="fake.db"),
+        airgap=True,
+    )
+
+    assert result.primary_bottleneck == "latency"
+
+
 def test_analysis_airgap_rejects_unknown_rule_bottleneck(monkeypatch):
     monkeypatch.setenv("PERFXPERT_AIRGAP", "1")
     monkeypatch.setattr(

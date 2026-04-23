@@ -168,6 +168,32 @@ def test_root_routing_is_deterministic_in_airgap(monkeypatch):
     assert result1.metadata.get("routed_to") == result2.metadata.get("routed_to")
 
 
+def test_root_airgap_uses_analysis_bottleneck_for_db_queries(monkeypatch):
+    """Airgap Root should preserve deterministic Analysis classification."""
+    analysis_output = schemas.AnalysisOutput(
+        primary_bottleneck="latency",
+        confidence=0.75,
+        time_breakdown={"api_pct": 86.6},
+        hot_kernels=[],
+        counter_data_available=True,
+    )
+
+    monkeypatch.setattr(
+        "perfxpert.agents.analysis.run_analysis",
+        lambda *args, **kwargs: analysis_output,
+    )
+
+    result = root_module.run_root(
+        schemas.RootInput(
+            user_query="analyze this trace",
+            database_path="x.db",
+        ),
+        airgap=True,
+    )
+
+    assert result.primary_bottleneck == "latency"
+
+
 # -- Narrative assembly ---------------------------------------------------
 
 def test_root_writes_bottleneck_narrative(fake_provider):

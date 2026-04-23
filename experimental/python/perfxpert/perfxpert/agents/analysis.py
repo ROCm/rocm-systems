@@ -508,6 +508,40 @@ def _promote_sparse_compute_verdict(
     return rule_verdict
 
 
+def _override_runtime_dominant_verdict(
+    facts: Dict[str, Any],
+    rule_verdict: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Prefer the whole-workload bottleneck when runtime overhead dominates.
+
+    Counter-derived compute signatures describe the hot kernel. They should not
+    override the end-to-end classification when runtime/API overhead is the vast
+    majority of wall-clock time. In that situation the user-visible bottleneck
+    is launch/runtime latency, not kernel throughput.
+    """
+    metrics = facts.get("metrics_for_classifier", {})
+    time_breakdown = facts.get("time_breakdown", {})
+    api_pct = float(metrics.get("api_overhead_pct") or 0.0)
+    memcpy_pct = float(metrics.get("memcpy_pct") or 0.0)
+    kernel_pct = float(time_breakdown.get("kernel_pct", 0.0) or 0.0) / 100.0
+
+    if api_pct > 0.50 and api_pct > kernel_pct and api_pct > memcpy_pct:
+        return {
+            "type": "latency",
+            "confidence": max(float(rule_verdict.get("confidence", 0.0)), 0.75),
+            "reasoning": (
+                "Runtime/API overhead dominates end-to-end time, so the workload "
+                "is latency-bound even if the hottest kernel itself is compute-efficient."
+            ),
+            "all_scores": {
+                **(rule_verdict.get("all_scores") or {}),
+                "runtime_overhead_dominance": 0.75,
+            },
+        }
+
+    return rule_verdict
+
+
 def run_analysis(
     payload: schemas.AnalysisInput,
     *,
@@ -550,6 +584,7 @@ def run_analysis(
     else:
         rule_verdict = bottleneck.classify_from_metrics(facts["metrics_for_classifier"])
         rule_verdict = _promote_sparse_compute_verdict(facts, rule_verdict)
+        rule_verdict = _override_runtime_dominant_verdict(facts, rule_verdict)
 
     # Step 3: LLM refinement (optional).
     agent = build_analysis_agent()

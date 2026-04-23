@@ -100,6 +100,40 @@ _INTENT_TO_HANDOFF = {
 }
 
 
+def _airgap_primary_bottleneck(
+    payload: schemas.RootInput,
+    *,
+    routed_to: str,
+) -> tuple[str, list[str]]:
+    """Best-effort deterministic bottleneck for Root airgap mode.
+
+    The Root airgap template does not invoke any Layer-1 agents, but the
+    batch ``perfxpert analyze`` path still expects Root to thread through the
+    deterministic Analysis verdict when a profiling DB is present. Without
+    this, airgap JSON/webview drift to ``mixed`` even when Analysis already
+    classifies the run as latency/compute/memory bound.
+    """
+    if routed_to not in {"analysis", "recommendation"} or not payload.database_path:
+        return "mixed", []
+
+    from perfxpert.agents import analysis as analysis_module
+
+    opts = dict(payload.analysis_options or {})
+    try:
+        result = analysis_module.run_analysis(
+            schemas.AnalysisInput(
+                database_path=payload.database_path,
+                top_kernels=int(opts.get("top_kernels") or 10),
+                att_dir=opts.get("att_dir"),
+                min_duration=float(opts.get("min_duration") or 0.0),
+            ),
+            airgap=True,
+        )
+        return result.primary_bottleneck, []
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        return "mixed", [f"airgap analysis fallback failed: {exc}"]
+
+
 def run_root(
     payload: schemas.RootInput,
     *,
@@ -119,11 +153,15 @@ def run_root(
     )
 
     if raw.get("_mode") == "airgap":
+        primary_bottleneck, extra_warnings = _airgap_primary_bottleneck(
+            payload,
+            routed_to=routed_to,
+        )
         return schemas.RootOutput(
             narrative=raw.get("narrative", ""),
             recommendations=[],
-            primary_bottleneck="mixed",
-            warnings=["airgap mode; deterministic template used"],
+            primary_bottleneck=primary_bottleneck,
+            warnings=["airgap mode; deterministic template used", *extra_warnings],
             metadata={"routed_to": routed_to, "intent": verdict.intent},
         )
 
