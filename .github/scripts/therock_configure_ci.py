@@ -152,6 +152,7 @@ def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
 def retrieve_projects(args):
     # Nightly (schedule): use same test coverage as TheRock submodule bump PRs —
     # single nightly job with THEROCK_ENABLE_ALL=ON and full projects_to_test list.
+    # Run all builds and tests including RCCL.
     if args.get("is_nightly"):
         nightly_config = project_map.get("nightly")
         if not nightly_config:
@@ -299,16 +300,25 @@ def retrieve_projects(args):
 
 def run(args):
     project_to_run = retrieve_projects(args)
-    set_github_output({"projects": json.dumps(project_to_run)})
+    outputs = {"projects": json.dumps(project_to_run)}
+    # For nightly runs, always run RCCL CI (only relevant for Linux platform)
+    if args.get("is_nightly") and args.get("platform") == "linux":
+        outputs["run_linux_rccl_ci"] = "true"
+    set_github_output(outputs)
 
 
 if __name__ == "__main__":
     args = {}
     github_event_name = os.getenv("GITHUB_EVENT_NAME")
+    github_workflow = os.getenv("GITHUB_WORKFLOW", "")
     args["is_pull_request"] = github_event_name == "pull_request"
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
-    args["is_nightly"] = github_event_name == "schedule"
+    # Nightly: either scheduled run or manual dispatch of the nightly workflow
+    args["is_nightly"] = github_event_name == "schedule" or (
+        github_event_name == "workflow_dispatch"
+        and github_workflow == "TheRock CI Nightly"
+    )
 
     input_subtrees = os.getenv("SUBTREES", "")
     args["input_subtrees"] = input_subtrees
