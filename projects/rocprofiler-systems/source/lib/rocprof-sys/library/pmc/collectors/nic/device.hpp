@@ -173,7 +173,7 @@ private:
         LOG_DEBUG("NIC device [{}] ({}) initialized with {} RDMA port(s)", m_index,
                   m_device_name, m_rdma_port_count);
 
-        return true
+        return true;
     }
 
     std::shared_ptr<Driver> m_driver;
