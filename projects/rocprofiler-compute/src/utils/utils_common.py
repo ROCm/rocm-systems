@@ -477,7 +477,6 @@ def capture_subprocess_output(
     # sanitized_env directly handles both the None and dict cases.
     process = subprocess.Popen(
         subprocess_args,
-        bufsize=1,
         stdin=subprocess.PIPE,
         stdout=pty_child_fd,
         stderr=pty_child_fd,
