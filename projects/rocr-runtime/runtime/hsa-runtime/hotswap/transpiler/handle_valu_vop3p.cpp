@@ -604,13 +604,13 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
             "v_wmma_*_16x16x{32,64}_* cross-target (WMMA → MFMA) "
             "under ModuloReplicationProjection.  The staged "
             "`strict.wwm`-scoped lowering has an open multi-WMMA "
-            "residual on Triton's `matmul_fp16` (BLOCK=32) — mode-5 "
-            "B-only-varying input still produces wrong numerics "
-            "after the ttmp7 and amdgpu-lds-size fixes, root cause "
-            "TBD (see matrix-translation.md §12.4); refusing loudly "
-            "until that's pinned.  Workaround: compile the source "
-            "kernel with `__launch_bounds__(targetWaveSize)` or "
-            "larger to take the verified WaveNative path.");
+            "residual on Triton's `matmul_fp16` (BLOCK=32, dynamic "
+            "LDS) — mode-5 B-only-varying input still produces "
+            "wrong numerics after the ttmp7 and amdgpu-lds-size "
+            "fixes (see matrix-translation.md §12.4); refusing "
+            "loudly until that's pinned.  Workaround: compile the "
+            "source kernel with `__launch_bounds__(targetWaveSize)` "
+            "or larger to take the verified WaveNative path.");
         return hr;
       }
       result_val = emitWMMAtoMFMA(ctx, a, b, c, wmmaInputType);
