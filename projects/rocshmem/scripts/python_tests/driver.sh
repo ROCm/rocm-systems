@@ -104,9 +104,10 @@ ExecPythonTest() {
   local TEST_LOG_NAME="python_${TEST_NAME}_n${NUM_RANKS}"
   echo "Test:   $TEST_LOG_NAME"
   echo "# ${cmd[*]}" > "$LOG_DIR/$TEST_LOG_NAME.log"
-  "${cmd[@]}" >> "$LOG_DIR/$TEST_LOG_NAME.log" 2>&1
 
-  if [ $? -ne 0 ]; then
+  # Use `if` so `set -e` does not terminate the script on mpirun failure,
+  # otherwise the log is never cat'd and the real error stays hidden in CI.
+  if ! "${cmd[@]}" >> "$LOG_DIR/$TEST_LOG_NAME.log" 2>&1; then
     echo "FAILED: $TEST_LOG_NAME"
     cat "$LOG_DIR/$TEST_LOG_NAME.log"
     DRIVER_RETURN_STATUS=1
@@ -147,6 +148,32 @@ fi
 echo "Python tests: type=$TEST, GPUs=$NUM_GPUS"
 echo ""
 
+# ---------------------------------------------------------------------------
+# TEMP: remove before merge
+# One-shot MPI / UCX / rocshmem4py linkage diagnostics so that any future CI
+# failure shows the runtime environment without needing a re-run.
+# ---------------------------------------------------------------------------
+echo "=== TEMP MPI/UCX diagnostics (remove before merge) ==="
+{
+  echo "--- mpirun ---"
+  command -v mpirun && mpirun --version 2>&1 | head -3
+  echo "--- _rocshmem4py.so ldd (mpi/ucx) ---"
+  _rocshmem4py_so=$(python3 -c 'import _rocshmem4py; print(_rocshmem4py.__file__)' 2>/dev/null) || true
+  if [ -n "$_rocshmem4py_so" ]; then
+    echo "$_rocshmem4py_so"
+    ldd "$_rocshmem4py_so" 2>&1 | grep -E 'mpi|ucx' || true
+  else
+    echo "(could not locate _rocshmem4py extension)"
+  fi
+  echo "--- mpi4py library version ---"
+  python3 -c 'import mpi4py.MPI as M; print(M.Get_library_version())' 2>&1 | head -3 || true
+  echo "--- ompi_info pml/osc components ---"
+  ompi_info --param pml all --level 9 2>/dev/null | grep -E 'MCA pml:' | head -5 || true
+  ompi_info --param osc all --level 9 2>/dev/null | grep -E 'MCA osc:' | head -5 || true
+} 2>&1
+echo "=== end diagnostics ==="
+echo ""
+
 case $TEST in
   "all")
     TestAll
@@ -164,10 +191,9 @@ case $TEST in
     ;;
 esac
 
-EXIT_STATUS=$(($DRIVER_RETURN_STATUS || $?))
-if [ $EXIT_STATUS -eq 0 ]; then
+if [ "$DRIVER_RETURN_STATUS" -eq 0 ]; then
   echo "PYTHON TESTS PASSED"
 else
-  echo "PYTHON TESTS FAILED: $FAILED_LIST"
+  echo "PYTHON TESTS FAILED:$FAILED_LIST"
 fi
-exit $EXIT_STATUS
+exit $DRIVER_RETURN_STATUS
