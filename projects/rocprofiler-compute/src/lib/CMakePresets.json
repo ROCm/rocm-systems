@@ -8,7 +8,10 @@
       "generator": "Unix Makefiles",
       "binaryDir": "${sourceDir}/_build/out/build/${presetName}",
       "installDir": "${sourceDir}/_build/out/install/${presetName}",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_TESTS": "ON"
+      },
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
