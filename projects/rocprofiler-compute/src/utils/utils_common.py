@@ -4,10 +4,12 @@
 import argparse
 import csv
 import ctypes
+import errno
 import glob
 import io
 import locale
 import os
+import pty
 import re
 import select
 import shutil
@@ -458,9 +460,6 @@ def capture_subprocess_output(
     profileMode: bool = False,
     enable_logging: bool = True,
 ) -> tuple[bool, str]:
-    # Start subprocess
-    # bufsize = 1 means output is line buffered
-    # universal_newlines = True is required for line buffering
     sanitized_env = (
         None
         if new_env is None
@@ -470,26 +469,25 @@ def capture_subprocess_output(
         }
     )
 
-    process = (
-        subprocess.Popen(
-            subprocess_args,
-            bufsize=1,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True,
-        )
-        if sanitized_env == None
-        else subprocess.Popen(
-            subprocess_args,
-            bufsize=1,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True,
-            env=sanitized_env,
-        )
+    # PTY (not a pipe) so the child sees a terminal and line-buffers its
+    # output. Prevents partial lines from one writer getting glued onto
+    # complete lines from another writer sharing the same fd.
+    pty_parent_fd, pty_child_fd = pty.openpty()
+    # env=None is Popen's default (inherit parent env), so passing
+    # sanitized_env directly handles both the None and dict cases.
+    process = subprocess.Popen(
+        subprocess_args,
+        bufsize=1,
+        stdin=subprocess.PIPE,
+        stdout=pty_child_fd,
+        stderr=pty_child_fd,
+        universal_newlines=True,
+        env=sanitized_env,
     )
+    os.close(pty_child_fd)
+    # buffering=1 for line-buffered reads, errors="replace" so bad bytes
+    # don't crash the read loop.
+    process_stdout = os.fdopen(pty_parent_fd, "r", buffering=1, errors="replace")
 
     # Create buffer for captured process output
     buf = io.StringIO()
@@ -531,24 +529,25 @@ def capture_subprocess_output(
     input_thread = threading.Thread(target=forward_input, daemon=True)
     input_thread.start()
 
-    # Read until the pipe closes, not until the child exits. Otherwise lines
-    # still buffered in the pipe at exit time are dropped.
-    if process.stdout is not None:
-        while True:
-            try:
-                line = process.stdout.readline()
-            except UnicodeDecodeError:
-                continue
-            if not line:
+    # Read until the child closes its end. On Linux, reading a closed PTY
+    # parent end raises OSError(EIO) instead of returning an empty string,
+    # so that's how we detect end-of-stream here.
+    while True:
+        try:
+            line = process_stdout.readline()
+        except OSError as e:
+            if e.errno == errno.EIO:
                 break
-            buf.write(line)
-            if not enable_logging:
-                continue
-            if profileMode:
-                console_log(get_rocprof_cmd(), line.strip(), indent_level=1)
-            else:
-                console_log(line.strip())
+            raise
+        buf.write(line)
+        if not enable_logging:
+            continue
+        if profileMode:
+            console_log(get_rocprof_cmd(), line.strip(), indent_level=1)
+        else:
+            console_log(line.strip())
 
+    process_stdout.close()
     input_thread.join(timeout=1)
 
     # Get process return code
