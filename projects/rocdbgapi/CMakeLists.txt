@@ -62,7 +62,7 @@
 
 cmake_minimum_required(VERSION 3.8)
 
-project(amd-dbgapi VERSION 0.79.0)
+project(amd-dbgapi VERSION 0.80.0)
 
 include(CheckIncludeFile)
 include(CheckIncludeFiles)
@@ -117,6 +117,15 @@ else()
   if(uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
     add_compile_definitions(NDEBUG)
   endif()
+endif()
+
+# Define this before amd-dbgapi.h is generated.  amd-dbgapi.h.in uses
+# this to define the right export/import decorators in amd-dbgapi.h
+# for clients to use.
+if(NOT BUILD_SHARED_LIBS)
+  set(AMD_DBGAPI_STATIC_LIB "1")
+else()
+  set(AMD_DBGAPI_STATIC_LIB "0")
 endif()
 
 configure_file(

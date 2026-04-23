@@ -101,8 +101,6 @@ class RocVideoESParser {
 
         bool ivf_file_header_read_; // indicator if IVF file header has been checked
 
-        RocDecLogger logger_;
-
         /*! \brief Function to retrieve the bitstream of a picture for AVC/HEVC
          * \param [out] p_pic_data Pointer to the picture data
          * \param [out] pic_size Size of the picture in bytes

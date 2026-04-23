@@ -318,17 +318,12 @@ class TestMergeSqliteDbs:
         assert out == dest
         assert dest.exists()
 
-    def test_merge_two_dbs_combines_rows(self, two_dbs, tmp_dir):
+    def test_merge_two_dbs_raises_on_pk_collision(self, two_dbs, tmp_dir):
         p1, p2 = two_dbs
         dest = tmp_dir / "merged.db"
-        out = merge_sqlite_dbs([p1, p2], output_path=dest)
-        assert out.exists()
-        conn = sqlite3.connect(str(out))
-        row = conn.execute("SELECT COUNT(*) FROM pmc_events").fetchone()
-        conn.close()
-        # p1 has SQ_WAVES (id=1), p2 has GRBM_COUNT (id=1) — INSERT OR IGNORE merges by id
-        # At minimum p1's data is present (base copy); p2's row has same id=1 so may be ignored
-        assert row[0] >= 1
+        # Both shards have id=1 — collision must be detected and raised
+        with pytest.raises(ValueError, match="collision"):
+            merge_sqlite_dbs([p1, p2], output_path=dest)
 
     def test_merge_returns_path_object(self, single_db):
         out = merge_sqlite_dbs([single_db])

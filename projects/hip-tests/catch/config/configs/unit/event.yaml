@@ -49,7 +49,7 @@ event:
     tags: [synchronization]
   Unit_hipEventRecord_Negative:
     <<: *level_2
-    tags: [multigpu, synchronization]
+    tags: [synchronization]
   Unit_hipEventIpc:
     <<: *level_2
     # (amd_wsl) Below tests fail in stress test on 24/07/23
@@ -122,7 +122,7 @@ event:
     tags: [synchronization]
   Unit_hipEventMGpuMThreads_1:
     <<: *level_2
-    tags: [multigpu, synchronization]
+    tags: [synchronization]
   Unit_hipEventMGpuMThreads_2:
     <<: *level_2
     tags: [multigpu]
@@ -131,7 +131,7 @@ event:
     tags: [multigpu]
   Unit_hipEventQuery_DifferentDevice:
     <<: *level_2
-    tags: [multigpu, synchronization]
+    tags: [synchronization]
   Unit_hipEventIpc_shm_cleanup:
     <<: *level_2
     tags: [ipc]

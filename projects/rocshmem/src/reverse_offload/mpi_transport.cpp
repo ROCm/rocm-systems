@@ -22,6 +22,7 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
+#include "log.hpp"
 #include "mpi_transport.hpp"
 #include <algorithm>
 #include <functional>
@@ -38,13 +39,11 @@
 
 namespace rocshmem {
 
-#define NET_CHECK(cmd)                                       \
-  {                                                          \
-    if (cmd != MPI_SUCCESS) {                                \
-      fprintf(stderr, "Unrecoverable error: MPI Failure\n"); \
-      abort() ;                                              \
-    }                                                        \
-  }
+#define NET_CHECK(cmd) do {                                \
+  if (cmd != MPI_SUCCESS) {                                \
+    LOG_ERROR_ABORT("Unrecoverable error: MPI Failure");   \
+  }                                                        \
+} while(0)
 
 MPITransport::MPITransport(MPI_Comm comm, Queue* q)
   : Transport{}, queue{q} {
@@ -93,7 +92,7 @@ void MPITransport::submitRequestsToMPI() {
       putMem(next_element.dst, next_element.src, next_element.ol1.size,
              next_element.PE, next_element.ro_net_win_id, queue_idx,
              next_element.status, true);
-      DPRINTF("Submitted PUT dst %p src %p size %lu pe %d win_id %d\n",
+      LOG_TRACE("proxy::mpi Submitted PUT dst %p src %p size %lu pe %d win_id %d",
               next_element.dst, next_element.src, next_element.ol1.size,
               next_element.PE, next_element.ro_net_win_id);
       break;
@@ -108,7 +107,7 @@ void MPITransport::submitRequestsToMPI() {
       putMem(next_element.dst, source_buffer, next_element.ol1.size,
              next_element.PE, next_element.ro_net_win_id, queue_idx,
              next_element.status, true, true);
-      DPRINTF("Submitted P dst %p value %p pe %d\n", next_element.dst,
+      LOG_TRACE("proxy::mpi Submitted P dst %p value %p pe %d", next_element.dst,
               next_element.src, next_element.PE);
       break;
     }
@@ -116,14 +115,14 @@ void MPITransport::submitRequestsToMPI() {
       getMem(next_element.dst, next_element.src, next_element.ol1.size,
              next_element.PE, next_element.ro_net_win_id, queue_idx,
              next_element.status, true);
-      DPRINTF("Submitted GET dst %p src %p size %lu pe %d\n", next_element.dst,
+      LOG_TRACE("proxy::mpi Submitted GET dst %p src %p size %lu pe %d", next_element.dst,
               next_element.src, next_element.ol1.size, next_element.PE);
       break;
     case RO_NET_PUT_NBI:
       putMem(next_element.dst, next_element.src, next_element.ol1.size,
              next_element.PE, next_element.ro_net_win_id, queue_idx,
              next_element.status, false);
-      DPRINTF("Submitted PUT NBI dst %p src %p size %lu pe %d\n",
+      LOG_TRACE("proxy::mpi Submitted PUT NBI dst %p src %p size %lu pe %d",
               next_element.dst, next_element.src, next_element.ol1.size,
               next_element.PE);
       break;
@@ -131,7 +130,7 @@ void MPITransport::submitRequestsToMPI() {
       getMem(next_element.dst, next_element.src, next_element.ol1.size,
              next_element.PE, next_element.ro_net_win_id, queue_idx,
              next_element.status, false);
-      DPRINTF("Submitted GET NBI dst %p src %p size %lu pe %d\n",
+      LOG_TRACE("proxy::mpi Submitted GET NBI dst %p src %p size %lu pe %d",
               next_element.dst, next_element.src, next_element.ol1.size,
               next_element.PE);
       break;
@@ -142,7 +141,7 @@ void MPITransport::submitRequestsToMPI() {
              next_element.status, true,
              static_cast<ROCSHMEM_OP>(next_element.op),
              static_cast<ro_net_types>(next_element.datatype));
-      DPRINTF("Submitted AMO dst %p src %p Val %llu pe %d\n", next_element.dst,
+      LOG_TRACE("proxy::mpi Submitted AMO dst %p src %p Val %llu pe %d", next_element.dst,
               next_element.src, next_element.ol1.atomic_value, next_element.PE);
       break;
     case RO_NET_AMO_FCAS:
@@ -152,7 +151,7 @@ void MPITransport::submitRequestsToMPI() {
               next_element.status, true,
               const_cast<void **>(&next_element.ol2.pWrk),
               static_cast<ro_net_types>(next_element.datatype));
-      DPRINTF("Submitted F_CSWAP dst %p src %p Val %llu pe %d cond %ld\n",
+      LOG_TRACE("proxy::mpi Submitted F_CSWAP dst %p src %p Val %llu pe %d cond %ld",
               next_element.dst, next_element.src, next_element.ol1.atomic_value,
               next_element.PE,
               reinterpret_cast<int64_t>(next_element.ol2.pWrk));
@@ -164,7 +163,7 @@ void MPITransport::submitRequestsToMPI() {
                      static_cast<ROCSHMEM_OP>(next_element.op),
                      static_cast<ro_net_types>(next_element.datatype),
                      next_element.status, true);
-      DPRINTF("Submitted FLOAT_SUM_TEAM_REDUCE dst %p src %p size %lu team %zd\n",
+      LOG_TRACE("proxy::mpi Submitted FLOAT_SUM_TEAM_REDUCE dst %p src %p size %lu team %zd",
               next_element.dst, next_element.src, next_element.ol1.size,
               (intptr_t)next_element.team_comm);
       break;
@@ -174,9 +173,9 @@ void MPITransport::submitRequestsToMPI() {
                      (MPI_Comm)next_element.team_comm, next_element.PE_root,
                      static_cast<ro_net_types>(next_element.datatype),
                      next_element.status, true);
-      DPRINTF(
-          "Submitted TEAM_BROADCAST dst %p src %p size %lu "
-          "team %zd, PE_root %d \n",
+      LOG_TRACE(
+          "proxy::mpi Submitted TEAM_BROADCAST dst %p src %p size %lu "
+          "team %zd, PE_root %d",
           next_element.dst, next_element.src, next_element.ol1.size,
           (intptr_t)next_element.team_comm, next_element.PE_root);
       break;
@@ -186,7 +185,7 @@ void MPITransport::submitRequestsToMPI() {
                next_element.ol2.pWrk,
                static_cast<ro_net_types>(next_element.datatype),
                next_element.status, true);
-      DPRINTF("Submitted ALLTOALL  dst %p src %p size %lu team %zd\n",
+      LOG_TRACE("proxy::mpi Submitted ALLTOALL  dst %p src %p size %lu team %zd",
               next_element.dst, next_element.src, next_element.ol1.size,
               (intptr_t)next_element.team_comm);
       break;
@@ -196,7 +195,7 @@ void MPITransport::submitRequestsToMPI() {
                next_element.ol2.pWrk,
                static_cast<ro_net_types>(next_element.datatype),
                next_element.status, true);
-      DPRINTF("Submitted FCOLLECT  dst %p src %p size %lu team %zd\n",
+      LOG_TRACE("proxy::mpi Submitted FCOLLECT  dst %p src %p size %lu team %zd",
               next_element.dst, next_element.src, next_element.ol1.size,
               (intptr_t)next_element.team_comm);
       break;
@@ -204,26 +203,25 @@ void MPITransport::submitRequestsToMPI() {
       barrier(queue_idx, next_element.status, true,
               next_element.team_comm == ((intptr_t) NULL) ? ro_net_comm_world : (MPI_Comm)next_element.team_comm,
               true);
-      DPRINTF("Submitted Barrier_all\n");
+      LOG_TRACE("proxy::mpi Submitted Barrier_all");
       break;
     case RO_NET_SYNC:
       barrier(queue_idx, next_element.status, true,
               next_element.team_comm == ((intptr_t) NULL) ? ro_net_comm_world : (MPI_Comm)next_element.team_comm,
               false);
-      DPRINTF("Submitted Sync\n");
+      LOG_TRACE("proxy::mpi Submitted Sync");
       break;
     case RO_NET_FENCE:
     case RO_NET_QUIET:
       quiet(queue_idx, next_element.status);
-      DPRINTF("Submitted FENCE/QUIET\n");
+      LOG_TRACE("proxy::mpi Submitted FENCE/QUIET");
       break;
     case RO_NET_FINALIZE:
       quiet(queue_idx, next_element.status);
-      DPRINTF("Submitted Finalize\n");
+      LOG_TRACE("proxy::mpi Submitted Finalize");
       break;
     default:
-      fprintf(stderr, "Invalid GPU Packet received, exiting....\n");
-      abort();
+      LOG_ERROR_ABORT("Invalid GPU Packet received");
       break;
   }
 }
@@ -253,9 +251,10 @@ rocshmem_team_t get_external_team(ROTeam *team) {
 }
 
 void MPITransport::createNewTeam(ROBackend *backend, [[maybe_unused]] Team *parent_team,
-                                   TeamInfo *team_info_wrt_parent,
-                                   TeamInfo *team_info_wrt_world, int num_pes,
-                                   int my_pe_in_new_team, MPI_Comm team_comm,
+                                   const TeamInfo& team_info_wrt_parent,
+                                   const TeamInfo& team_info_wrt_world,
+                                   int num_pes, int my_pe_in_new_team,
+                                   MPI_Comm team_comm,
                                    rocshmem_team_t *new_team) {
   ROTeam *new_team_obj{nullptr};
 
@@ -306,8 +305,7 @@ MPI_Op MPITransport::get_mpi_op(ROCSHMEM_OP op) {
     case ROCSHMEM_REPLACE:
       return MPI_REPLACE;
     default:
-      fprintf(stderr, "Unknown rocSHMEM op MPI conversion %d\n", op);
-      abort();
+      LOG_ERROR_ABORT("proxy::mpi\tUnknown rocSHMEM op MPI conversion %d", op);
   }
 }
 
@@ -336,8 +334,7 @@ static MPI_Datatype convertType(ro_net_types type) {
     case RO_NET_UNSIGNED_CHAR:
       return MPI_UNSIGNED_CHAR;
     default:
-      fprintf(stderr, "Unknown rocSHMEM type MPI conversion %d\n", type);
-      abort();
+      LOG_ERROR_ABORT("proxy::mpi\tUnknown rocSHMEM type MPI conversion %d", type);
   }
 }
 
@@ -428,8 +425,7 @@ void MPITransport::alltoall(void *dst, void *src, int size, int win_id,
   NET_CHECK(mpilib_ftable_.Type_size(mpi_type, &type_size));
 
   if (dst == src) {
-    fprintf(stderr, "IN_PLACE option not support for alltoall in the RO rocSHMEM conduit\n");
-    abort();
+    LOG_ERROR_EXIT("IN_PLACE option not supported for alltoall in the RO rocSHMEM conduit");
   }
 
   std::vector<MPI_Request> pe_req(pe_size);
@@ -477,8 +473,7 @@ void MPITransport::fcollect(void *dst, void *src, int size, int win_id,
   NET_CHECK(mpilib_ftable_.Type_size(mpi_type, &type_size));
 
   if (dst == src) {
-    fprintf(stderr, "IN_PLACE option not support for fcollect in the RO rocSHMEM conduit\n");
-    abort();
+    LOG_ERROR_EXIT("IN_PLACE option not supported for fcollect in the RO rocSHMEM conduit");
   }
 
   std::vector<MPI_Request> pe_req(pe_size);
@@ -596,7 +591,7 @@ void MPITransport::progress() {
     usleep(envvar::ro::progress_delay);
     NET_CHECK(mpilib_ftable_.Iprobe(MPI_ANY_SOURCE, tag, ro_net_comm_world, &flag, &status));
   } else {
-    DPRINTF("Testing all outstanding requests (%zu)\n", requests.size());
+    LOG_TRACE("proxy::mpi Testing all outstanding requests (%zu)", requests.size());
 
     int incount = (requests.size() < testsome_indices.size())
                       ? requests.size()
@@ -614,9 +609,9 @@ void MPITransport::progress() {
 
       if (contextId != -1) {
         outstanding[contextId]--;
-        DPRINTF(
-            "Finished op for contextId %d at status addr %p "
-            "(%d requests outstanding)\n",
+        LOG_TRACE(
+            "proxy::mpi Finished op for contextId %d at status addr %p "
+            "(%d requests outstanding)",
             contextId, status, outstanding[contextId]);
       }
 
@@ -635,7 +630,7 @@ void MPITransport::progress() {
       // all outstanding requests are complete.
       if (!outstanding[contextId] && !waiting_quiet[contextId].empty()) {
         for (const auto status : waiting_quiet[contextId]) {
-          DPRINTF("Finished Quiet for contextId %d at status addr %p\n", contextId,
+          LOG_TRACE("proxy::mpi Finished Quiet for contextId %d at status addr %p", contextId,
                   status);
           queue->notify(status);
         }
@@ -657,7 +652,7 @@ void MPITransport::progress() {
 
 void MPITransport::quiet(int contextId, volatile char *status) {
   if (!outstanding[contextId]) {
-    DPRINTF("Finished Quiet immediately for contextId %d at status addr %p\n",
+    LOG_TRACE("proxy::mpi Finished Quiet immediately for contextId %d at status addr %p",
             contextId, status);
     queue->notify(status);
   } else {

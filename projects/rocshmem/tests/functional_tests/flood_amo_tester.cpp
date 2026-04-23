@@ -56,7 +56,7 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
   int t_id {get_flat_block_id()};
   int wf_id {t_id / wf_size};
 
-  auto tgt_offset {(wg_id + 1) % num_wg}; //for npes=1: avoid writting and reading from same wg
+  auto tgt_offset {(wg_id + 1) % num_wg}; //for npes=1: avoid writing and reading from same wg
 
   for (int i = 0; i < loop + skip; i++) {
     if (i == skip) {
