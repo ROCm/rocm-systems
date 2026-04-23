@@ -285,6 +285,7 @@ class RocprofsysConfig:
                 else ""
             ),
             "ROCPROFSYS_CONFIG_FILE": "",
+            "LD_LIBRARY_PATH": self.get_library_path(),
         }
 
     def get_base_causal_environment(self) -> dict[str, str]:

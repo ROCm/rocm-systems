@@ -176,8 +176,8 @@ source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
 Install the Python test dependencies (requires Python 3.8+):
 
 ```shell
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
