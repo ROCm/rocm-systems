@@ -130,6 +130,23 @@ class Config(object):
             or os.environ.get("GPU_TARGETS", "")
         )
 
+        # Shared-filesystem coordination for --setup-deps.
+        #   "auto" (default): detect via `stat -f -c %T` on shared_dir
+        #   "yes" / "no":     force-enable or force-disable coordination
+        # When enabled, only the first node to claim the lock builds;
+        # the others poll the completion marker.  See shared_fs.py.
+        self.shared_fs = os.environ.get("MNCTL_SHARED_FS", "auto")
+
+        # Stale-lock TTL: a deps lock older than this is auto-stolen.
+        self.deps_lock_ttl_sec = float(
+            os.environ.get("MNCTL_DEPS_LOCK_TTL_SEC", "3600")
+        )
+
+        # Follower poll timeout: give up waiting after this many seconds.
+        self.deps_wait_timeout_sec = float(
+            os.environ.get("MNCTL_DEPS_WAIT_TIMEOUT_SEC", "3600")
+        )
+
         # Resolved from the Dockerfile's ARG CONTAINER_USER (set by __main__)
         self.container_user = "ubuntu"
 

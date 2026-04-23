@@ -47,9 +47,19 @@ Environment Variables (override defaults without flags):
   MNCTL_SSH_PORT, MNCTL_SHM_SIZE, MNCTL_SHARED_DIR,
   MNCTL_BUILDS_DIR, MNCTL_SSH_KEY_DIR, MNCTL_SSH_KEY,
   MNCTL_HOSTFILE, MNCTL_HOST_SSH_PORT, MNCTL_POST_SETUP_DIR,
-  MNCTL_DOCKERFILE, MNCTL_NIC_TYPE, MNCTL_GPU_TARGETS, MNCTL_VERBOSE
+  MNCTL_DOCKERFILE, MNCTL_NIC_TYPE, MNCTL_GPU_TARGETS, MNCTL_VERBOSE,
+  MNCTL_SHARED_FS, MNCTL_DEPS_LOCK_TTL_SEC, MNCTL_DEPS_WAIT_TIMEOUT_SEC
 
   GPU_TARGETS is also accepted as a fallback for MNCTL_GPU_TARGETS.
+
+Shared-FS coordination for --setup-deps:
+  When MNCTL_SHARED_DIR is on a network filesystem (NFS, GPFS, Lustre,
+  CephFS, GlusterFS, ...), only one node ("leader") performs the
+  UCX/OpenMPI build; the other nodes ("followers") wait for a
+  completion marker.  On a local filesystem every node builds
+  independently -- there is always a working install regardless of
+  storage type.  Override detection with --shared-fs {auto,yes,no} or
+  MNCTL_SHARED_FS.  See mnctl/shared_fs.py for the lock primitives.
 
 Host vs container env-var naming:
   Host-side mnctl settings are namespaced MNCTL_* to avoid collisions
@@ -155,6 +165,17 @@ Path expansion:
         help="Container runtime (default: docker)",
     )
     parser.add_argument(
+        "--shared-fs", dest="shared_fs",
+        choices=["auto", "yes", "no"],
+        help=(
+            "Shared-filesystem coordination for --setup-deps "
+            "(default: MNCTL_SHARED_FS env or 'auto'). "
+            "When the shared dir is on NFS/GPFS/Lustre, only the leader "
+            "node builds; followers wait for a completion marker. "
+            "Use 'no' to force per-node builds even on a shared FS."
+        ),
+    )
+    parser.add_argument(
         "--dry-run", action="store_true",
         help="Validate configuration and check prerequisites without executing",
     )
@@ -215,6 +236,8 @@ def _apply_cli_args(cfg, args):
         cfg.gpu_targets = args.gpu_targets
     if args.runtime_name is not None:
         cfg.runtime_name = args.runtime_name
+    if args.shared_fs is not None:
+        cfg.shared_fs = args.shared_fs
     if args.dry_run:
         cfg.dry_run = True
     if args.rebuild:
@@ -300,6 +323,7 @@ def _dump_config(cfg):
     log_verbose("nic_type={}".format(cfg.nic_type))
     log_verbose("gpu_targets={}".format(cfg.gpu_targets or "(dockerfile default)"))
     log_verbose("runtime={}".format(cfg.runtime_name))
+    log_verbose("shared_fs={}".format(cfg.shared_fs))
     log_verbose("extra_volumes={}".format(cfg.extra_volumes))
     import platform
     log_verbose("Host kernel: {}".format(platform.release()))

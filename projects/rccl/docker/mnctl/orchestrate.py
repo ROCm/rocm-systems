@@ -308,6 +308,9 @@ def _build_forward_args(cfg, action="--run",
         args += ["--nic-type", cfg.nic_type]
     if cfg.gpu_targets:
         args += ["--gpu-targets", cfg.gpu_targets]
+    # Forward shared-fs override so all nodes agree on coordination mode.
+    if cfg.shared_fs and cfg.shared_fs != "auto":
+        args += ["--shared-fs", cfg.shared_fs]
     # --runtime before positional to avoid nargs='?' ambiguity with --ssh
     args += ["--runtime", cfg.runtime_name]
     args.append(cfg.rocm_image)
