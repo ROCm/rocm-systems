@@ -6,6 +6,7 @@
 #pragma once
 
 #include "hipfile-warnings.h"
+#include "stats.h"
 
 #include <stdexcept>
 #ifdef AIS_TESTING
@@ -18,6 +19,10 @@ template <typename T> struct ContextOverride;
 
 template <typename T> struct ContextDefaultImpl {
     using type = T;
+};
+
+template <> struct ContextDefaultImpl<IStatsServer> {
+    using type = StatsServer;
 };
 
 template <typename T> struct Context {

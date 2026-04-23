@@ -201,11 +201,17 @@ private:
     Stats         *m_stats;
 };
 
-class StatsServer {
+class IStatsServer {
+public:
+    virtual Stats *getStats() noexcept = 0;
+    virtual ~IStatsServer()            = default;
+};
+
+class StatsServer : public IStatsServer {
 public:
     StatsServer();
-    virtual ~StatsServer();
-    virtual Stats *getStats() noexcept
+    virtual ~StatsServer() override;
+    virtual Stats *getStats() noexcept override
     {
         return m_stats.getStats();
     }

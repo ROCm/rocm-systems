@@ -16,7 +16,7 @@ HipFileInit::HipFileInit()
 {
     Context<Hip>::get();
     Context<Sys>::get();
-    Context<StatsServer>::get();
+    Context<IStatsServer>::get();
     Context<DriverState>::get();
 }
 
