@@ -375,43 +375,47 @@ def perform_attach_detach(new_env: dict[str, str], options: dict[str, Any]) -> N
         except Exception as e:
             console_error(f"Error loading {libname}: {e}")
 
-        # Set argument and return types for attach/detach functions
+        # Set argument and return types for live attach functions
         try:
-            # old attach/detach API
-            c_lib.attach.argtypes = [ctypes.c_uint]
+            # new live attach API
+            c_lib.rocattach_attach.restype = ctypes.c_int
+            c_lib.rocattach_attach.argtypes = [ctypes.c_int]
+            c_lib.rocattach_detach.restype = ctypes.c_int
+            c_lib.rocattach_detach.argtypes = [ctypes.c_int]
         except Exception as e:
             console_debug(
-                "Error setting old attach/detach API argument "
-                f"types: {e}, trying new API"
+                "Error setting new live attach API argument "
+                f"types: {e}, trying legacy live attach API"
             )
             try:
-                # new attach/detach API
-                c_lib.rocattach_attach.restype = ctypes.c_int
-                c_lib.rocattach_attach.argtypes = [ctypes.c_int]
-                c_lib.rocattach_detach.restype = ctypes.c_int
-                c_lib.rocattach_detach.argtypes = [ctypes.c_int]
+                # old live attach API
+                c_lib.attach.restype = ctypes.c_int
+                c_lib.attach.argtypes = [ctypes.c_uint]
+                c_lib.detach.restype = ctypes.c_int
+                c_lib.detach.argtypes = [ctypes.c_uint]
             except Exception as e:
-                console_error(
-                    f"Error setting attach/detach function argument types: {e}"
-                )
+                console_error(f"Error setting live attach function argument types: {e}")
 
         pid = options["ROCPROF_ATTACH_PID"]
         if pid is None:
-            console_error("Mode of attach/detach must have setup for process ID")
+            console_error("Live attach mode requires a process ID (ROCPROF_ATTACH_PID)")
 
         try:
-            # old attach/detach API
-            c_lib.attach(int(pid))
+            # new live attach API
+            attach_status = c_lib.rocattach_attach(int(pid))
+            if attach_status != 0:
+                console_error(
+                    f"Error attaching to process {pid}, "
+                    f"rocattach_attach returned {attach_status}"
+                )
         except Exception as e:
-            console_debug(f"Error attaching with old API: {e}, trying new API")
+            console_debug(
+                "Error attaching with latest live attach "
+                f"API: {e}, trying legacy live attach API"
+            )
             try:
-                # new attach/detach API
-                attach_status = c_lib.rocattach_attach(int(pid))
-                if attach_status != 0:
-                    console_error(
-                        f"Error attaching to process {pid}, "
-                        f"rocattach_attach returned {attach_status}"
-                    )
+                # old live attach API
+                c_lib.attach(int(pid))
             except Exception as e:
                 console_error(f"Error attaching to process {pid}: {e}")
 
@@ -430,18 +434,21 @@ def perform_attach_detach(new_env: dict[str, str], options: dict[str, Any]) -> N
             time.sleep(int(duration) / 1000)
 
         try:
-            # old attach/detach API
-            c_lib.detach(int(pid))
+            # new live attach API
+            detach_status = c_lib.rocattach_detach(int(pid))
+            if detach_status != 0:
+                console_error(
+                    f"Error detaching from process {pid}, "
+                    f"rocattach_detach returned {detach_status}"
+                )
         except Exception as e:
-            console_debug(f"Error detaching with old API: {e}, trying new API")
+            console_debug(
+                f"Error detaching with latest live attach API: {e}, "
+                "trying detach with legacy live attach API"
+            )
             try:
-                # new attach/detach API
-                detach_status = c_lib.rocattach_detach(int(pid))
-                if detach_status != 0:
-                    console_error(
-                        f"Error detaching from process {pid}, "
-                        f"rocattach_detach returned {detach_status}"
-                    )
+                # old live attach API
+                c_lib.detach(int(pid))
             except Exception as e:
                 console_error(f"Error detaching from process {pid}: {e}")
 
