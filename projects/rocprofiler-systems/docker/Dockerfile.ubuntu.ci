@@ -23,11 +23,11 @@ ENV CMAKE_PREFIX_PATH="/usr/local"
 
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
-    apt-get install -y autoconf autotools-dev bash-completion bison build-essential \
+    apt-get install -y autoconf autotools-dev bash-completion build-essential \
         bzip2 chrpath cmake curl environment-modules flex gettext git-core gnupg2 \
         gzip iproute2 libgmock-dev libgtest-dev libiberty-dev libpapi-dev libpfm4-dev \
         libsqlite3-dev libtool locales lsb-release m4 ninja-build nlohmann-json3-dev \
-        python3-pip software-properties-common texinfo unzip wget vim zip zlib1g-dev \
+        python3-pip software-properties-common unzip wget vim zip zlib1g-dev \
         libucx-dev ucx-utils && \
     apt-get autoclean
 

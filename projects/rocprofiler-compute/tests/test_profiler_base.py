@@ -2,10 +2,14 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
+import test_utils
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
+from rocprof_compute_profile.profiler_rocprofiler_sdk import rocprofiler_sdk_profiler
 from utils.utils_exceptions import (
     ExecutableNotFoundError,
     NoScriptInCommandError,
@@ -19,7 +23,7 @@ def _make_sanitize_args(remaining, torch_trace=False):
         filter_blocks=[],
         set_selected=None,
         roof_only=False,
-        path="/tmp/test_workload",
+        output_directory="/tmp/test_workload",
         no_native_tool=False,
         iteration_multiplexing=None,
         attach_pid=None,
@@ -222,3 +226,58 @@ def test_sanitize_no_torch_trace(tmp_path, remaining, expected_exception, setup)
             profiler.sanitize()
     else:
         profiler.sanitize()
+
+
+# ---------------------------------------------------------------------------
+# get_profiler_options(): live-attach library resolution with fallback
+# ---------------------------------------------------------------------------
+def test_attach_library_resolution_with_fallback():
+    """Unit test: attach branch picks new lib first, falls back to old, errors if
+    neither exists. resolve_rocm_library_path is mocked so the actual library
+    locations are controlled by the test, independent of the configured tool path."""
+    output_dir = Path(test_utils.get_output_dir())
+    output_dir.mkdir(parents=True, exist_ok=True)
+    args = argparse.Namespace(
+        remaining="-- /bin/true",
+        rocprofiler_sdk_tool_path="/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
+        format_rocprof_output="csv",
+        output_directory=str(output_dir),
+        iteration_multiplexing=None,
+        attach_pid=12345,
+        attach_duration_msec=None,
+        kokkos_trace=False,
+        kernel=None,
+        dispatch=None,
+        torch_trace=False,
+    )
+    profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
+    resolve_target = (
+        "rocprof_compute_profile.profiler_rocprofiler_sdk.resolve_rocm_library_path"
+    )
+    new_lib = output_dir / "librocprofiler-sdk-rocattach.so"
+    old_lib = output_dir / "librocprofv3-attach.so"
+
+    # Case 1: new library present -> selected, fallback lookup never happens.
+    new_lib.write_text("")
+    with patch(
+        resolve_target, side_effect=[str(new_lib), str(old_lib)]
+    ) as mock_resolve:
+        options = profiler.get_profiler_options()
+    assert options["ROCPROF_ATTACH_LIBRARY"] == str(new_lib)
+    assert mock_resolve.call_count == 1
+
+    # Case 2: only old library present -> falls back to it.
+    new_lib.unlink()
+    old_lib.write_text("")
+    with patch(
+        resolve_target, side_effect=[str(new_lib), str(old_lib)]
+    ) as mock_resolve:
+        options = profiler.get_profiler_options()
+    assert options["ROCPROF_ATTACH_LIBRARY"] == str(old_lib)
+    assert mock_resolve.call_count == 2
+
+    # Case 3: neither library present -> console_error exits the process.
+    old_lib.unlink()
+    with patch(resolve_target, side_effect=[str(new_lib), str(old_lib)]):
+        with pytest.raises(SystemExit):
+            profiler.get_profiler_options()
