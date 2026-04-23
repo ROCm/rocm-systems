@@ -43,7 +43,7 @@ target_sources(thread-trace-producer-consumer-test
 target_link_libraries(
     thread-trace-producer-consumer-test
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-static-library
-            rocprofiler-sdk::rocprofiler-sdk-glog
+            rocprofiler-sdk::rocprofiler-sdk-abseil
             rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
             rocprofiler-sdk::rocprofiler-sdk-hip
             rocprofiler-sdk::rocprofiler-sdk-common-library

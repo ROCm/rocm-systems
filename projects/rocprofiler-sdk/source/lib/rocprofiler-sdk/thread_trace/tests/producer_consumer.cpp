@@ -35,7 +35,6 @@
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/threading.hpp"
 
-#include <glog/logging.h>
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <unordered_set>

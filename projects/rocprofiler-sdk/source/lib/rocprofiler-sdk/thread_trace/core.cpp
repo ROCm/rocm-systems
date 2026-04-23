@@ -77,12 +77,18 @@ common::Synchronized<std::optional<int64_t>> client;
 hsa_status_t
 thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callback_data)
 {
-    auto& cb_data = *CHECK_NOTNULL(static_cast<cbdata_t*>(callback_data));
+    auto& cb_data = *static_cast<cbdata_t*>(callback_data);
 
-    cb_data.cb_fn(cb_data.agent, shader, buffer, size, *cb_data.userdata);
+    cb_data.cb_fn(cb_data.agent,
+                  shader,
+                  buffer,
+                  size,
+                  ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END,
+                  *cb_data.userdata);
+    // The iterator guarantees the last chunk is tagged with END; here we just
+    // ferry the data to the user callback.
     return HSA_STATUS_SUCCESS;
 }
-}  // namespace
 
 bool
 thread_trace_parameter_pack::are_params_valid() const
@@ -175,22 +181,6 @@ ThreadTracerAgent::get_start_packet()
 {
     auto lock = std::unique_lock{trace_resources_mut};
     return get_control(true);
-}
-
-hsa_status_t
-thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callback_data)
-{
-    auto& cb_data = *static_cast<cbdata_t*>(callback_data);
-
-    cb_data.cb_fn(cb_data.agent,
-                  shader,
-                  buffer,
-                  size,
-                  ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END,
-                  *cb_data.userdata);
-    // The iterator guarantees the last chunk is tagged with END; here we just
-    // ferry the data to the user callback.
-    return HSA_STATUS_SUCCESS;
 }
 
 void
