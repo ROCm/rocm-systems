@@ -485,7 +485,10 @@ enum hip_api_id_t {
   HIP_API_ID_hipMemPrefetchBatchAsync = 460,
   HIP_API_ID_hipOccupancyMaxActiveClusters = 461,
   HIP_API_ID_hipOccupancyMaxPotentialClusterSize = 462,
-  HIP_API_ID_LAST = 462,
+  HIP_API_ID_hipExtGraphExecDumpCreate = 463,
+  HIP_API_ID_hipExtGraphExecDumpGet = 464,
+  HIP_API_ID_hipExtGraphExecDumpDestroy = 465,
+  HIP_API_ID_LAST = 465,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -611,6 +614,9 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipExtEnableLogging: return "hipExtEnableLogging";
     case HIP_API_ID_hipExtGetLastError: return "hipExtGetLastError";
     case HIP_API_ID_hipExtGetLinkTypeAndHopCount: return "hipExtGetLinkTypeAndHopCount";
+    case HIP_API_ID_hipExtGraphExecDumpCreate: return "hipExtGraphExecDumpCreate";
+    case HIP_API_ID_hipExtGraphExecDumpDestroy: return "hipExtGraphExecDumpDestroy";
+    case HIP_API_ID_hipExtGraphExecDumpGet: return "hipExtGraphExecDumpGet";
     case HIP_API_ID_hipExtLaunchKernel: return "hipExtLaunchKernel";
     case HIP_API_ID_hipExtLaunchMultiKernelMultiDevice: return "hipExtLaunchMultiKernelMultiDevice";
     case HIP_API_ID_hipExtMallocWithFlags: return "hipExtMallocWithFlags";
@@ -1067,6 +1073,9 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipExtEnableLogging", name) == 0) return HIP_API_ID_hipExtEnableLogging;
   if (strcmp("hipExtGetLastError", name) == 0) return HIP_API_ID_hipExtGetLastError;
   if (strcmp("hipExtGetLinkTypeAndHopCount", name) == 0) return HIP_API_ID_hipExtGetLinkTypeAndHopCount;
+  if (strcmp("hipExtGraphExecDumpCreate", name) == 0) return HIP_API_ID_hipExtGraphExecDumpCreate;
+  if (strcmp("hipExtGraphExecDumpDestroy", name) == 0) return HIP_API_ID_hipExtGraphExecDumpDestroy;
+  if (strcmp("hipExtGraphExecDumpGet", name) == 0) return HIP_API_ID_hipExtGraphExecDumpGet;
   if (strcmp("hipExtLaunchKernel", name) == 0) return HIP_API_ID_hipExtLaunchKernel;
   if (strcmp("hipExtLaunchMultiKernelMultiDevice", name) == 0) return HIP_API_ID_hipExtLaunchMultiKernelMultiDevice;
   if (strcmp("hipExtMallocWithFlags", name) == 0) return HIP_API_ID_hipExtMallocWithFlags;
@@ -1850,6 +1859,22 @@ typedef struct hip_api_data_s {
       unsigned int* hopcount;
       unsigned int hopcount__val;
     } hipExtGetLinkTypeAndHopCount;
+    struct {
+      hipGraphExec_t graphExec;
+      unsigned int flags;
+      hipExtGraphExecDump_t* dumpOut;
+      hipExtGraphExecDump_t dumpOut__val;
+    } hipExtGraphExecDumpCreate;
+    struct {
+      hipExtGraphExecDump_t dump;
+    } hipExtGraphExecDumpDestroy;
+    struct {
+      hipExtGraphExecDump_t dump;
+      hipExtGraphExecDumpQuery_t query;
+      size_t index;
+      hipExtGraphExecDumpResult_t* result;
+      hipExtGraphExecDumpResult_t result__val;
+    } hipExtGraphExecDumpGet;
     struct {
       const void* function_address;
       dim3 numBlocks;
@@ -4611,6 +4636,23 @@ typedef struct hip_api_data_s {
   cb_data.args.hipExtGetLinkTypeAndHopCount.linktype = (unsigned int*)linktype; \
   cb_data.args.hipExtGetLinkTypeAndHopCount.hopcount = (unsigned int*)hopcount; \
 };
+// hipExtGraphExecDumpCreate[('hipGraphExec_t', 'graphExec'), ('unsigned int', 'flags'), ('hipExtGraphExecDump_t*', 'dumpOut')]
+#define INIT_hipExtGraphExecDumpCreate_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipExtGraphExecDumpCreate.graphExec = (hipGraphExec_t)graphExec; \
+  cb_data.args.hipExtGraphExecDumpCreate.flags = (unsigned int)flags; \
+  cb_data.args.hipExtGraphExecDumpCreate.dumpOut = (hipExtGraphExecDump_t*)dumpOut; \
+};
+// hipExtGraphExecDumpDestroy[('hipExtGraphExecDump_t', 'dump')]
+#define INIT_hipExtGraphExecDumpDestroy_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipExtGraphExecDumpDestroy.dump = (hipExtGraphExecDump_t)dump; \
+};
+// hipExtGraphExecDumpGet[('hipExtGraphExecDump_t', 'dump'), ('hipExtGraphExecDumpQuery_t', 'query'), ('size_t', 'index'), ('hipExtGraphExecDumpResult_t*', 'result')]
+#define INIT_hipExtGraphExecDumpGet_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipExtGraphExecDumpGet.dump = (hipExtGraphExecDump_t)dump; \
+  cb_data.args.hipExtGraphExecDumpGet.query = (hipExtGraphExecDumpQuery_t)query; \
+  cb_data.args.hipExtGraphExecDumpGet.index = (size_t)index; \
+  cb_data.args.hipExtGraphExecDumpGet.result = (hipExtGraphExecDumpResult_t*)result; \
+};
 // hipExtLaunchKernel[('const void*', 'function_address'), ('dim3', 'numBlocks'), ('dim3', 'dimBlocks'), ('void**', 'args'), ('size_t', 'sharedMemBytes'), ('hipStream_t', 'stream'), ('hipEvent_t', 'startEvent'), ('hipEvent_t', 'stopEvent'), ('int', 'flags')]
 #define INIT_hipExtLaunchKernel_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipExtLaunchKernel.function_address = (const void*)hostFunction; \
@@ -7322,6 +7364,17 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipExtGetLinkTypeAndHopCount.linktype) data->args.hipExtGetLinkTypeAndHopCount.linktype__val = *(data->args.hipExtGetLinkTypeAndHopCount.linktype);
       if (data->args.hipExtGetLinkTypeAndHopCount.hopcount) data->args.hipExtGetLinkTypeAndHopCount.hopcount__val = *(data->args.hipExtGetLinkTypeAndHopCount.hopcount);
       break;
+// hipExtGraphExecDumpCreate[('hipGraphExec_t', 'graphExec'), ('unsigned int', 'flags'), ('hipExtGraphExecDump_t*', 'dumpOut')]
+    case HIP_API_ID_hipExtGraphExecDumpCreate:
+      if (data->args.hipExtGraphExecDumpCreate.dumpOut) data->args.hipExtGraphExecDumpCreate.dumpOut__val = *(data->args.hipExtGraphExecDumpCreate.dumpOut);
+      break;
+// hipExtGraphExecDumpDestroy[('hipExtGraphExecDump_t', 'dump')]
+    case HIP_API_ID_hipExtGraphExecDumpDestroy:
+      break;
+// hipExtGraphExecDumpGet[('hipExtGraphExecDump_t', 'dump'), ('hipExtGraphExecDumpQuery_t', 'query'), ('size_t', 'index'), ('hipExtGraphExecDumpResult_t*', 'result')]
+    case HIP_API_ID_hipExtGraphExecDumpGet:
+      if (data->args.hipExtGraphExecDumpGet.result) data->args.hipExtGraphExecDumpGet.result__val = *(data->args.hipExtGraphExecDumpGet.result);
+      break;
 // hipExtLaunchKernel[('const void*', 'function_address'), ('dim3', 'numBlocks'), ('dim3', 'dimBlocks'), ('void**', 'args'), ('size_t', 'sharedMemBytes'), ('hipStream_t', 'stream'), ('hipEvent_t', 'startEvent'), ('hipEvent_t', 'stopEvent'), ('int', 'flags')]
     case HIP_API_ID_hipExtLaunchKernel:
       if (data->args.hipExtLaunchKernel.args) data->args.hipExtLaunchKernel.args__val = *(data->args.hipExtLaunchKernel.args);
@@ -9377,6 +9430,28 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << ", linktype="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtGetLinkTypeAndHopCount.linktype__val); }
       if (data->args.hipExtGetLinkTypeAndHopCount.hopcount == NULL) oss << ", hopcount=NULL";
       else { oss << ", hopcount="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtGetLinkTypeAndHopCount.hopcount__val); }
+      oss << ")";
+    break;
+    case HIP_API_ID_hipExtGraphExecDumpCreate:
+      oss << "hipExtGraphExecDumpCreate(";
+      oss << "graphExec="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtGraphExecDumpCreate.graphExec);
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtGraphExecDumpCreate.flags);
+      if (data->args.hipExtGraphExecDumpCreate.dumpOut == NULL) oss << ", dumpOut=NULL";
+      else { oss << ", dumpOut="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtGraphExecDumpCreate.dumpOut__val); }
+      oss << ")";
+    break;
+    case HIP_API_ID_hipExtGraphExecDumpDestroy:
+      oss << "hipExtGraphExecDumpDestroy(";
+      oss << "dump="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtGraphExecDumpDestroy.dump);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipExtGraphExecDumpGet:
+      oss << "hipExtGraphExecDumpGet(";
+      oss << "dump="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtGraphExecDumpGet.dump);
+      oss << ", query="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtGraphExecDumpGet.query);
+      oss << ", index="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtGraphExecDumpGet.index);
+      if (data->args.hipExtGraphExecDumpGet.result == NULL) oss << ", result=NULL";
+      else { oss << ", result="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExtGraphExecDumpGet.result__val); }
       oss << ")";
     break;
     case HIP_API_ID_hipExtLaunchKernel:

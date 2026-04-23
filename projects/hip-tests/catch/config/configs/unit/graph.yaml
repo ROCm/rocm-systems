@@ -1661,3 +1661,18 @@ graph:
   Unit_hipEventSynchronize_ThreadLocalCapture_DefaultMode_CapturedEvent: *level_2
   Unit_hipEventQuery_SameThread_GlobalCapture: *level_2
   Unit_hipEventQuery_SameThread_RelaxedCapture: *level_2
+  Unit_hipExtGraphExecDump_Negative:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipExtGraphExecDump_ScalarArgs:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipExtGraphExecDump_ArrayArg:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipExtGraphExecDump_MultiNodeDeps:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipExtGraphExecDump_FlagsControl:
+    <<: *level_2
+    tags: [exec]

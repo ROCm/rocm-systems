@@ -9227,6 +9227,120 @@ hipError_t hipGraphReleaseUserObject(hipGraph_t graph, hipUserObject_t object,
 hipError_t hipGraphDebugDotPrint(hipGraph_t graph, const char* path, unsigned int flags);
 
 /**
+ * @brief Flags for hipExtGraphExecDump content control.
+ */
+typedef enum hipExtGraphExecDumpFlags {
+    hipExtGraphExecDumpFlagsNone        = 0x0,  ///< Dump node types and IDs only
+    hipExtGraphExecDumpFlagsCodeObjects = 0x1,  ///< Include code object ELF binaries
+    hipExtGraphExecDumpFlagsKernelArgs  = 0x2,  ///< Include kernel argument values
+    hipExtGraphExecDumpFlagsDeps        = 0x4,  ///< Include node dependency edges
+    hipExtGraphExecDumpFlagsDispatch    = 0x8,  ///< Include dispatch dimensions
+    hipExtGraphExecDumpFlagsAll         = 0xF   ///< Include everything
+} hipExtGraphExecDumpFlags;
+
+/**
+ * @brief Opaque handle to an in-memory graph exec dump.
+ *
+ * Created by hipExtGraphExecDumpCreate(), queried via hipExtGraphExecDumpGet(),
+ * and freed by hipExtGraphExecDumpDestroy().
+ */
+typedef struct hipExtGraphExecDump_st* hipExtGraphExecDump_t;
+
+/**
+ * @brief Query selector for hipExtGraphExecDumpGet().
+ */
+typedef enum hipExtGraphExecDumpQuery_e {
+    hipExtGraphExecDumpQueryJson            = 0,  ///< JSON metadata string (result.json)
+    hipExtGraphExecDumpQueryCodeObjectCount = 1,  ///< Number of unique code objects (result.count)
+    hipExtGraphExecDumpQueryCodeObject      = 2,  ///< ELF binary by index (result.codeObject)
+} hipExtGraphExecDumpQuery_t;
+
+/**
+ * @brief Result union for hipExtGraphExecDumpGet().
+ *
+ * The active field depends on the query passed to hipExtGraphExecDumpGet().
+ * All pointers are owned by the dump handle and remain valid until
+ * hipExtGraphExecDumpDestroy() is called.
+ */
+typedef struct hipExtGraphExecDumpResult_st {
+    union {
+        /** hipExtGraphExecDumpQueryJson: null-terminated JSON string and byte length. */
+        struct {
+          const char* ptr; ///< pointer to JSON string
+          size_t len;      ///< byte length of JSON string
+        } json;
+        /** hipExtGraphExecDumpQueryCodeObjectCount: number of unique ELF binaries. */
+        size_t count;
+        /** hipExtGraphExecDumpQueryCodeObject: one ELF binary, located by index. */
+        struct {
+            const char* hash;  ///< 16-char hex content hash (e.g. "3c1cad708846a399")
+            const void* data;  ///< pointer to ELF bytes
+            size_t      size;  ///< byte length of ELF
+        } codeObject;
+    };
+} hipExtGraphExecDumpResult_t;
+
+/**
+ * @brief Build an in-memory dump of a graph execution object.
+ *
+ * Captures graph structure, kernel arguments, dispatch dimensions, and code object
+ * binaries into an opaque handle. No file I/O is performed; the caller is responsible
+ * for persisting the data. The handle must be freed with hipExtGraphExecDumpDestroy().
+ *
+ * @param [in]  graphExec  The graph execution object to dump.
+ * @param [in]  flags      Bitmask of hipExtGraphExecDumpFlags controlling what to capture.
+ * @param [out] dumpOut    Output handle for the in-memory dump.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorOutOfMemory
+ */
+hipError_t hipExtGraphExecDumpCreate(hipGraphExec_t graphExec, unsigned int flags,
+                                     hipExtGraphExecDump_t* dumpOut);
+
+/**
+ * @brief Query data from an in-memory graph exec dump.
+ *
+ * The @p query enum selects what to retrieve; @p index is only used for
+ * @ref hipExtGraphExecDumpQueryCodeObject (zero-based, must be < count) and is
+ * ignored for all other queries.
+ *
+ * Example usage:
+ * @code
+ *   hipExtGraphExecDumpResult_t r;
+ *   // JSON
+ *   hipExtGraphExecDumpGet(dump, hipExtGraphExecDumpQueryJson, 0, &r);
+ *   fwrite(r.json.ptr, 1, r.json.len, f);
+ *   // ELF count + iteration
+ *   hipExtGraphExecDumpGet(dump, hipExtGraphExecDumpQueryCodeObjectCount, 0, &r);
+ *   for (size_t i = 0; i < r.count; i++) {
+ *     hipExtGraphExecDumpGet(dump, hipExtGraphExecDumpQueryCodeObject, i, &r);
+ *     fwrite(r.codeObject.data, 1, r.codeObject.size, f);
+ *   }
+ * @endcode
+ *
+ * @param [in]  dump    Handle returned by hipExtGraphExecDumpCreate().
+ * @param [in]  query   What to retrieve (see hipExtGraphExecDumpQuery_t).
+ * @param [in]  index   Code object index for hipGraphExecDumpQueryCodeObject; 0 otherwise.
+ * @param [out] result  Output union; the relevant field is populated on success.
+ *                      When iterating code objects, copy result.count to a local variable
+ *                      before the loop — each CodeObject call overwrites the entire union.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ */
+hipError_t hipExtGraphExecDumpGet(hipExtGraphExecDump_t dump,
+                                   hipExtGraphExecDumpQuery_t query,
+                                   size_t index,
+                                   hipExtGraphExecDumpResult_t* result);
+
+/**
+ * @brief Free an in-memory graph exec dump and all associated data.
+ *
+ * @param [in] dump  Handle returned by hipExtGraphExecDumpCreate().
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ */
+hipError_t hipExtGraphExecDumpDestroy(hipExtGraphExecDump_t dump);
+
+/**
  * @brief Copies attributes from source node to destination node.
  *
  * Copies attributes from source node to destination node.
@@ -9533,7 +9647,7 @@ hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void*
  * @param [in] prop - properties of the allocation.
  * @param [in] flags - currently unused, must be zero.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
- * 
+ *
  * This API creates a memory allocation on the target device specified through the prop structure.
  * The prop allocation type must be specified as either #hipMemAllocationTypePinned or
  * #hipMemAllocationTypeUncached.

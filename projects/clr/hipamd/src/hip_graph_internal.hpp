@@ -998,6 +998,9 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   // Capture GPU Packets from graph commands
   hipError_t CaptureAQLPackets();
   hipError_t UpdateAQLPacket(hip::GraphNode* node);
+  // Build an in-memory dump of this graph exec (no file I/O).
+  // Caller must eventually pass the result to hipExtGraphExecDumpDestroy.
+  hipExtGraphExecDump_t BuildDump(unsigned int flags) const;
   // Handle packetBatches_ updates when nodes are enabled/disabled
   hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled);
   // Kenrel arg manger is for the entire graph.

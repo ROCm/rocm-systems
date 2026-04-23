@@ -440,6 +440,9 @@ hipGraphReleaseUserObject
 hipLaunchHostFunc
 hipLaunchHostFunc_spt
 hipGraphDebugDotPrint
+hipExtGraphExecDumpCreate
+hipExtGraphExecDumpGet
+hipExtGraphExecDumpDestroy
 hipGraphKernelNodeCopyAttributes
 hipGraphNodeGetEnabled
 hipGraphNodeSetEnabled

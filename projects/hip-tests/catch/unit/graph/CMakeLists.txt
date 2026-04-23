@@ -152,6 +152,8 @@ if(HIP_PLATFORM MATCHES "amd")
     hipDrvGraphAddMemsetNode.cc
     # hipDrvGraphAddMemcpyNode not mapped to Nvidia
     hipDrvGraphAddMemcpyNode.cc
+    # hipExtGraphExecDump is AMD extension only
+    hipExtGraphExecDump.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
   add_custom_target(add_Kernel.code COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST}
