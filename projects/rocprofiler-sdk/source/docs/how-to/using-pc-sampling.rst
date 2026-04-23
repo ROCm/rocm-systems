@@ -8,7 +8,7 @@
 Using PC sampling
 ==================
 
-PC (Program Counter) sampling service for GPU profiling is a profiling technique to periodically sample the program counter during GPU kernel execution. PC sampling helps in understanding code execution patterns and identifying hotspot(s).
+PC (Program Counter) sampling is a GPU profiling technique that periodically samples the program counter during GPU kernel execution. PC sampling helps in understanding code execution patterns and identifying hotspots.
 
 Here are the benefits of using PC sampling:
 
