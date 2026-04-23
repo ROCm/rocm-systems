@@ -850,6 +850,272 @@ static void doTestPermlane16Swap() {
                    "XOR-16 partner pattern)";
 }
 
+// ----- P4.wave32: v_permlane16_swap_b32 under wave32 → wave64 cross-widen -----
+//
+// Spec: same handler as the wave64-source sibling above, but pinned
+// against the CROSS-WIDENING direction (wave32 source → wave64
+// target).  The wave64-source test (`doTestPermlane16Swap`) verifies
+// same-wave (wave64 → wave64) correctness of
+// `emitPermLaneSwapEmulation`'s `ds_bpermute(lane_id ^ 16, src)`
+// emission.  It does NOT exercise the wave-projection path that
+// Triton's `tl.sort(dim=1, descending=True)` takes at
+// (BLOCK_M=32, BLOCK_N=32).  Empirically the deterministic sort
+// canary `canary_tl_sort_fp32_deterministic` shows that path
+// producing two SORTED HALVES (no cross-16 merge) under salmon,
+// but the root cause is not yet pinned — it could be the
+// emulation itself being wrong under wave32 projection, OR it
+// could be the compare-and-cndmask dance around the swap in
+// Triton's bitonic sort.
+//
+// This test is the isolation point: run a wave32 source kernel
+// whose ONLY non-trivial cross-lane op is `v_permlane16_swap_b32`,
+// verify the per-lane output pattern on gfx942 hardware after
+// salmon's cross-widening lift.
+//
+// * PASS: emulation is correct under wave32 → wave64 projection;
+//   the tl.sort bug lives in the compare-and-cndmask surround
+//   (next narrowing step: the `v_cmp → v_cndmask` producer whose
+//   VOP3 encoding `.long 0xd41b0002` objdump's gfx12-generic
+//   decoder does not recognise).
+// * FAIL: emulation is broken under cross-widening; the XOR-16
+//   partner mapping or the EXEC-mask gating is mis-emitted.
+//   Would localise the fix to `emitPermLaneSwapEmulation` in
+//   `handle_valu_cross_lane.cpp`.
+//
+// Wave32 source + WaveNativeProjection:
+//   Source wave32 has 32 lanes (threads 0..31 of the block).
+//   `__launch_bounds__(32)` sets the kernel's
+//   `max_flat_workgroup_size = 32`.  WaveNativeProjection maps
+//   two source waves into one target wave, but this kernel only
+//   dispatches ONE source wave worth of threads (blockDim=32);
+//   target lanes 32..63 are phantom.  We read only 32 output
+//   entries from the device buffer.
+//
+// Per-lane setup: vdst_in[L] = L,  src0_in[L] = 1000 + L (for
+// L in [0, 32)).  Expected: new_vdst[L] = 1000 + (L XOR 16),
+// new_src0_out[L] = (L XOR 16).
+static void doTestPermlane16SwapWave32() {
+  printf("--- permlane16_swap_wave32_kernel (wave32→wave64) ---\n");
+  std::string path = std::string(GFX1250_DATA_DIR) +
+                     "/permlane16_swap_wave32_gfx1250.hsaco";
+  auto data = transpiler::readFile(path);
+  ASSERT_FALSE(data.empty()) << "Cannot read " << path;
+
+  auto result = transpiler::runPipeline(data, "gfx1250", "gfx942",
+                                         "permlane16_swap_wave32_kernel");
+  ASSERT_TRUE(result.success)
+      << "Pipeline failed for permlane16_swap_wave32";
+  printf("  Pipeline: raised %d/%d insts, HSACO=%zu bytes\n",
+         result.liftedCount, result.totalCount, result.hsaco.size());
+
+  // Source block size is 32 (wave32).  Launch the lifted gfx942
+  // kernel with block size 32 as well; on wave64 hardware this
+  // leaves lanes 32..63 as phantoms.
+  constexpr int N = 32;
+  auto meta =
+      transpiler::extractKernelMeta(data, "permlane16_swap_wave32_kernel");
+
+  // Pre-flight: the .hip declares __launch_bounds__(32).  If
+  // someone edits the .hip without rebuilding the .hsaco, the
+  // binary's max_flat and the test's N would drift apart —
+  // surface that loudly.
+  ASSERT_EQ(meta.maxFlatWorkgroupSize, (uint32_t)N)
+      << "Binary's max_flat_workgroup_size ("
+      << meta.maxFlatWorkgroupSize
+      << ") != expected wave32 source N (" << N
+      << ").  The .hip's __launch_bounds__ and the test's N have "
+         "drifted.";
+
+  std::vector<int> hVdst(N, -1), hSrc0(N, -1);
+
+  int *dVdst, *dSrc0;
+  HIP_ASSERT(hipMalloc(&dVdst, N * sizeof(int)));
+  HIP_ASSERT(hipMalloc(&dSrc0, N * sizeof(int)));
+  HIP_ASSERT(hipMemset(dVdst, 0xff, N * sizeof(int)));
+  HIP_ASSERT(hipMemset(dSrc0, 0xff, N * sizeof(int)));
+
+  hipModule_t mod;
+  HIP_ASSERT(hipModuleLoadData(&mod, result.hsaco.data()));
+  hipFunction_t func;
+  HIP_ASSERT(hipModuleGetFunction(&func, mod,
+                                   "permlane16_swap_wave32_kernel"));
+
+  std::vector<uint8_t> argBuf(meta.kernargSegmentSize, 0);
+  memcpy(argBuf.data() + 0, &dVdst, 8);
+  memcpy(argBuf.data() + 8, &dSrc0, 8);
+  size_t argSz = argBuf.size();
+  void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, argBuf.data(),
+                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSz,
+                    HIP_LAUNCH_PARAM_END};
+  HIP_ASSERT(hipModuleLaunchKernel(func, /*grid*/ 1, 1, 1,
+                                   /*block*/ N, 1, 1,
+                                   meta.groupSegmentFixedSize, nullptr,
+                                   nullptr, config));
+  HIP_ASSERT(hipDeviceSynchronize());
+  HIP_ASSERT(hipMemcpy(hVdst.data(), dVdst, N * sizeof(int),
+                       hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipMemcpy(hSrc0.data(), dSrc0, N * sizeof(int),
+                       hipMemcpyDeviceToHost));
+
+  int errors = 0;
+  for (int L = 0; L < N; L++) {
+    int partner = L ^ 16;
+    int expVdst = 1000 + partner;
+    int expSrc0 = partner;
+    if (hVdst[L] != expVdst || hSrc0[L] != expSrc0) {
+      if (errors < 4)
+        fprintf(stderr,
+                "  lane %2d: vdst got=%d exp=%d, src0 got=%d exp=%d\n",
+                L, hVdst[L], expVdst, hSrc0[L], expSrc0);
+      errors++;
+    }
+  }
+
+  (void)hipFree(dVdst);
+  (void)hipFree(dSrc0);
+  (void)hipModuleUnload(mod);
+  printf("  Result: %d errors over %d lanes\n", errors, N);
+  EXPECT_EQ(errors, 0)
+      << errors
+      << " lane mismatches in permlane16_swap under wave32 → wave64 "
+         "(expected XOR-16 partner pattern).  If this fires, the root "
+         "of the tl.sort cross-16 merge bug is the emulation itself "
+         "— see the 2026-04-22 learnings.md entry on "
+         "`topk_forward_bf16` for context.";
+}
+
+// ----- P4.wave32+WaveNative: v_permlane16_swap_b32 under the
+//       WaveNativeProjection path (max_flat >= target wavefront) -----
+//
+// The wave32 sibling above (`doTestPermlane16SwapWave32`) passes,
+// but it engages `ModuloReplicationProjection` because
+// `__launch_bounds__(32)` triggers `raiser.cpp`'s phantom-lane
+// fallback.  That is NOT the projection path Triton's
+// `tl.sort(dim=1, descending=True)` at
+// (BLOCK_M=32, BLOCK_N=32, num_warps=4) takes — the Triton
+// dispatch hits max_flat_workgroup_size=128, so
+// `WaveNativeProjection` engages (source wave 0 → target lanes
+// 0..31, source wave 1 → target lanes 32..63; see the `numSource
+// WavesPerTarget() == 2` entry in `wave_projection.hpp`).
+//
+// This test isolates `emitPermLaneSwapEmulation` under
+// `WaveNativeProjection` by dispatching a wave32 source kernel
+// at blockDim=128 (4 source waves → 2 target wave64s).  Expected
+// per-lane output pattern: the swap stays within each source
+// wave32's 32-lane range, the "L XOR 16" partner preserves the
+// wave_base (L & ~0x1F).
+//
+// Result interpretation:
+//
+// * PASS: `emitPermLaneSwapEmulation` is correct under both
+//   ModRep and WaveNative projections.  The Triton `tl.sort`
+//   cross-16 merge failure therefore LIVES IN THE COMPOSITION —
+//   specifically the `v_cmp → v_cndmask` dance that surrounds
+//   the swap (gfx1250 encodes the compare via a new VOP3 shape
+//   `.long 0xd41b0002` which objdump's gfx12-generic decoder
+//   doesn't recognise; that producer's lift is the next narrowing
+//   step).
+//
+// * FAIL: `emitPermLaneSwapEmulation` breaks under
+//   WaveNativeProjection (but not ModRep).  The fix belongs in
+//   the emulation helper, most likely in how it interacts with
+//   `init_whole_wave` / `saved_exec` vs WaveNative's all-lanes-
+//   active convention.
+static void doTestPermlane16SwapWave32WaveNative() {
+  printf("--- permlane16_swap_wave32_wn_kernel (WaveNative) ---\n");
+  std::string path = std::string(GFX1250_DATA_DIR) +
+                     "/permlane16_swap_wave32_wn_gfx1250.hsaco";
+  auto data = transpiler::readFile(path);
+  ASSERT_FALSE(data.empty()) << "Cannot read " << path;
+
+  auto result =
+      transpiler::runPipeline(data, "gfx1250", "gfx942",
+                               "permlane16_swap_wave32_wn_kernel");
+  ASSERT_TRUE(result.success)
+      << "Pipeline failed for permlane16_swap_wave32_wn";
+  printf("  Pipeline: raised %d/%d insts, HSACO=%zu bytes\n",
+         result.liftedCount, result.totalCount, result.hsaco.size());
+
+  // Source block size is 128 (4 wave32s).  Launch the lifted
+  // gfx942 kernel at the same shape; WaveNative maps 2 source
+  // waves into each target wave64, so 2 target waves cover the
+  // 128-thread block.
+  constexpr int N = 128;
+  auto meta = transpiler::extractKernelMeta(
+      data, "permlane16_swap_wave32_wn_kernel");
+
+  ASSERT_EQ(meta.maxFlatWorkgroupSize, (uint32_t)N)
+      << "Binary's max_flat_workgroup_size ("
+      << meta.maxFlatWorkgroupSize
+      << ") != expected wave32+WaveNative N (" << N
+      << ").  The .hip's __launch_bounds__ and the test's N have "
+         "drifted.";
+
+  std::vector<int> hVdst(N, -1), hSrc0(N, -1);
+
+  int *dVdst, *dSrc0;
+  HIP_ASSERT(hipMalloc(&dVdst, N * sizeof(int)));
+  HIP_ASSERT(hipMalloc(&dSrc0, N * sizeof(int)));
+  HIP_ASSERT(hipMemset(dVdst, 0xff, N * sizeof(int)));
+  HIP_ASSERT(hipMemset(dSrc0, 0xff, N * sizeof(int)));
+
+  hipModule_t mod;
+  HIP_ASSERT(hipModuleLoadData(&mod, result.hsaco.data()));
+  hipFunction_t func;
+  HIP_ASSERT(hipModuleGetFunction(&func, mod,
+                                   "permlane16_swap_wave32_wn_kernel"));
+
+  std::vector<uint8_t> argBuf(meta.kernargSegmentSize, 0);
+  memcpy(argBuf.data() + 0, &dVdst, 8);
+  memcpy(argBuf.data() + 8, &dSrc0, 8);
+  size_t argSz = argBuf.size();
+  void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, argBuf.data(),
+                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSz,
+                    HIP_LAUNCH_PARAM_END};
+  HIP_ASSERT(hipModuleLaunchKernel(func, /*grid*/ 1, 1, 1,
+                                   /*block*/ N, 1, 1,
+                                   meta.groupSegmentFixedSize, nullptr,
+                                   nullptr, config));
+  HIP_ASSERT(hipDeviceSynchronize());
+  HIP_ASSERT(hipMemcpy(hVdst.data(), dVdst, N * sizeof(int),
+                       hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipMemcpy(hSrc0.data(), dSrc0, N * sizeof(int),
+                       hipMemcpyDeviceToHost));
+
+  // Expected pattern:
+  //   wave_base    = L & ~0x1F                 // 0, 32, 64, 96
+  //   within_wave  = L & 0x1F                  // 0..31
+  //   within_part  = within_wave XOR 16
+  //   partner      = wave_base | within_part
+  int errors = 0;
+  for (int L = 0; L < N; L++) {
+    int partner = (L & ~0x1F) | ((L & 0x1F) ^ 16);
+    int expVdst = 1000 + partner;
+    int expSrc0 = partner;
+    if (hVdst[L] != expVdst || hSrc0[L] != expSrc0) {
+      if (errors < 6)
+        fprintf(stderr,
+                "  lane %3d: vdst got=%d exp=%d, src0 got=%d exp=%d\n",
+                L, hVdst[L], expVdst, hSrc0[L], expSrc0);
+      errors++;
+    }
+  }
+
+  (void)hipFree(dVdst);
+  (void)hipFree(dSrc0);
+  (void)hipModuleUnload(mod);
+  printf("  Result: %d errors over %d lanes\n", errors, N);
+  EXPECT_EQ(errors, 0)
+      << errors
+      << " lane mismatches in permlane16_swap under WaveNative "
+         "projection.  If this fires, the tl.sort cross-16 merge "
+         "bug roots in `emitPermLaneSwapEmulation` at "
+         "handle_valu_cross_lane.cpp; if it passes, the root is "
+         "in the compare-and-cndmask dance around the swap — see "
+         "the 2026-04-22 learnings.md entry on "
+         "`topk_forward_bf16` for context.";
+}
+
 // ----- P5: DPP modifier → llvm.amdgcn.update.dpp lift -----
 //
 // Spec: raise_context.cpp::emitUpdateDpp + the OpResolver
@@ -1016,6 +1282,8 @@ class Gfx1250Gpu : public GpuTest {};
 // hotswap/docs/wave-size-translation.md §5.3 + Triton corpus).
 TEST_F(Gfx1250Gpu, Softmax)        { doTestSoftmax(); }        // P2 (permlanex16) implicit
 TEST_F(Gfx1250Gpu, Permlane16Swap) { doTestPermlane16Swap(); } // P4 explicit
+TEST_F(Gfx1250Gpu, Permlane16SwapWave32) { doTestPermlane16SwapWave32(); } // P4 wave32 source
+TEST_F(Gfx1250Gpu, Permlane16SwapWave32WaveNative) { doTestPermlane16SwapWave32WaveNative(); } // P4 WaveNative
 TEST_F(Gfx1250Gpu, DppQuadPerm)    { doTestDppQuadPerm(); }    // P5 explicit
 TEST_F(Gfx1250Gpu, DsSwizzle)      { doTestDsSwizzle(); }      // P6 explicit
 

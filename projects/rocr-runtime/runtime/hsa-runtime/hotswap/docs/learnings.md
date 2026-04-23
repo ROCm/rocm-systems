@@ -108,19 +108,93 @@ they all graduate:
   its input is lane-identifiable so a regression would reveal
   the exact shuffle-network shape that broke
 
-**Next steps** (not yet done):
+**Progress update (same-day).**  Step 1 DONE — two wave32-source
+GTests now exist alongside the pre-existing wave64-source one:
 
-1. Author a wave32-SOURCE HIP canary of `v_permlane16_swap_b32`
-   — directly mirrors `Gfx1250Gpu.Permlane16Swap` but with
-   `__launch_bounds__(32)`.  If this passes, the
-   `emitPermLaneSwapEmulation` is not the bug and the issue is
-   in the compare/cndmask shape around it.
-2. Trace the exact `v_cmp → v_cndmask` sequence in the raised
-   IR for a single bitonic compare-and-swap stage, confirming
-   the VCC-source value under wave32→wave64 lift.
-3. Cross-reference with the WaveNative projection's handling
-   of wave-sized compare ops (ballot.i32 → ballot.i64
-   widening, `V_CMP_*_e64` SGPR destination width, etc.).
+| test                                     | source    | projection      | verdict |
+|------------------------------------------|-----------|------------------|---------|
+| `Gfx1250Gpu.Permlane16Swap`              | wave64    | SameWave         | PASS    |
+| `Gfx1250Gpu.Permlane16SwapWave32`        | wave32    | ModuloRep        | PASS    |
+| `Gfx1250Gpu.Permlane16SwapWave32WaveNative` | wave32 | WaveNative       | PASS    |
+
+(The middle test trips the phantom-lane regime because
+`__launch_bounds__(32) < 64`, so `raiser.cpp` forces ModRep.  The
+third test dispatches at `__launch_bounds__(128)` — same shape
+as Triton `tl.sort`'s 4 × 32-lane source waves — so
+`WaveNativeProjection` engages, exactly the path the broken
+`tl.sort` takes.)
+
+**Conclusion: `emitPermLaneSwapEmulation` is correct under all
+three projection regimes, including WaveNative.**  The
+`ds_bpermute(lane_id ^ 16, src)` cross-wired emission faithfully
+implements the ISA-defined `new_vdst[L] = src0_in[L XOR 16],
+new_src0_out[L] = vdst_in[L XOR 16]` semantics.  Lifted kernels
+swap correctly per-lane on gfx942 hardware.
+
+So the `tl.sort` cross-16 merge failure roots in the
+**composition** around the swap, not in the primitive itself.
+The Triton bitonic-merge step emits this 4-instruction dance
+around `v_permlane16_swap`:
+
+```
+v3 = v2                                    ; copy self into v3
+v4 = v2                                    ; copy self into v4
+v_permlane16_swap_b32 v3, v4               ; v3 = v4 = partner_v2
+v_xor3_b32 v3, v3, v4, v2                  ; v3 = self_v2
+                                           ; (v3 ^ v4 ^ v2 =
+                                           ;  partner ^ partner ^ self)
+v_and_b32 v4, 8, v0                        ; v4 is CLOBBERED (next stage)
+.long 0xd41b0002                           ; v_cmp (salmon raises to
+                                           ;  fcmp ule v2, v3 = self <= self)
+v_cndmask_b32_e32 v1, v2, v3, vcc_lo       ; v1 = vcc ? v3 : v2
+```
+
+After the XOR3, both `v2` and `v3` hold `self_v2`, so salmon
+raises the compare as `fcmp ule self_v2, self_v2` — an
+identity compare that is always `true`, making the cndmask
+collapse to "always pick v3" (= self), which IS a no-op from
+the source-wave's perspective.
+
+But the NATIVE gfx1250 hardware runs the SAME instruction
+sequence and produces a CORRECT sort.  That means either:
+
+(a) My read of `v_xor3` is wrong — the XOR3 actually yields
+    `partner_v2`, not `self_v2`.  Possible if `v_permlane16_swap`
+    has different post-swap VGPR semantics than I've inferred
+    (the `Gfx1250Gpu.Permlane16Swap` test verifies the
+    cross-wired post-swap state, so this is unlikely).
+
+(b) My read of the compare operands is wrong — `0xd41b0002`
+    may compare `v2 vs v4`-before-clobber rather than
+    `v2 vs v3`-after-XOR3.  Salmon's IR shows `fcmp ule v2, v3`
+    but the gfx1250 ISA encoding for opcode 27 / `0xd41b` in
+    this new VOP3-single-dword family may be what's actually
+    different — upstream llvm-mc cannot decode this opcode, but
+    salmon's newer decoder can.
+
+(c) Something more subtle — e.g. the compare opcode has
+    implicit operand usage (v2 vs "prior v3 before XOR3"?),
+    or it's not an `fcmp ule` at all but a gfx1250-new
+    variant that has different semantics than the `NGT`
+    mapping salmon applied.
+
+Committed the two wave32 GTests as regression guards
+regardless; the PASSING state of both pins the positive
+correctness invariant for `emitPermLaneSwapEmulation` under
+both ModRep and WaveNative.  Any future regression in the
+emulation (e.g. forgetting to cross-wire the two
+`ds_bpermute` calls) trips here before reaching a Triton
+user.
+
+**Next investigation step (not yet done).**  Author a
+hand-authored wave32 HIP canary that INLINE-ASM-emits the
+exact 4-instruction dance above with known-distinct values
+for `v2`, `v3`, `v4`, dumps intermediate VGPRs to a buffer,
+and runs both on native gfx1250 AND through salmon on gfx942.
+Diffing the per-lane VGPR trace at each step will pin whether
+the bug is in the XOR3 folding, the compare operand selection,
+or the cndmask — without needing to decode the new VOP3
+encoding by hand.
 
 ---
 
