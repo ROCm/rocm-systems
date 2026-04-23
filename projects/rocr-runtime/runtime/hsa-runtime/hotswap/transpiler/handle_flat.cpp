@@ -802,25 +802,76 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
     // IsAtomicRet <=> (numDefs > 0) to decide result writeback below.
     assert(((di.tsFlags & SIInstrFlags::IsAtomicRet) != 0) == (di.numDefs > 0) &&
            "flat atomic: IsAtomicRet disagrees with numDefs");
-    ParsedReg addrReg = op.srcReg(0);
-    Value *addr = ctx.regs.readReg64(ctx.B, addrReg);
-    Type *ptrFlatTy = PointerType::get(ctx.C, 0);
-    if (addr->getType() != ptrFlatTy) addr = ctx.B.CreateIntToPtr(addr, ptrFlatTy);
-    int64_t memOffset = 0;
-    unsigned dataIdx = 1;
-    for (unsigned k = 1; k < op.nSrcs(); k++) {
-      if (di.isImm(op.srcIdx(k)) && di.getImm(op.srcIdx(k)) != 0)
-        memOffset = di.getImm(op.srcIdx(k));
-      else if (di.isReg(op.srcIdx(k)))
-        dataIdx = k;
+    // Two operand-shape variants, mirroring the FLAT_LOAD/STORE case
+    // split and the GLOBAL_ATOMIC block below:
+    //
+    //   (plain)  vaddr:VGPR64, vdata:VGPR*, [imms] → addrspace(0)
+    //              gfx9/10/11 `flat_atomic_add v[A:B], vData, off[,offset]`:
+    //              VGPR64 holds a full per-lane flat address that may
+    //              legitimately reach LDS/private/global; preserve
+    //              addrspace(0) so the backend re-emits `flat_atomic_*`
+    //              on targets where plain-flat is still valid.
+    //
+    //   (SADDR)  vaddr:VGPR32, vdata:VGPR*, saddr:SGPR64,
+    //            [scale_offset] [offset:imm] → addrspace(1)
+    //              gfx12+ `flat_atomic_* vAddr, vData, s[A:B]
+    //              [scale_offset]`: scale-offset + signed-imm
+    //              arithmetic can only reach globally-allocated memory
+    //              (same semantic-narrowing as FLAT_LOAD/STORE SADDR),
+    //              so delegate to `decodeGlobalStoreAddr` which casts
+    //              to `ctx.ptrGlobalTy` (addrspace(1)) and lets the
+    //              backend re-emit `global_atomic_*` with matching
+    //              scale-offset arithmetic.
+    //
+    // Before this split, the handler hard-coded the plain shape and
+    // used a "first non-zero imm wins" scan that misidentified the
+    // CPol operand (packed scale_offset + scope bits) as the signed
+    // offset field.  The bug is DORMANT today — no recipe in the
+    // compare_correctness Triton corpus emits gfx12+ `flat_atomic_*`
+    // (Triton's gfx1250 codegen prefers `global_atomic_*` whenever it
+    // knows the buffer lives in global) — but it's the identical
+    // class that bit GLOBAL_ATOMIC (see that block's comment for the
+    // `sum_bitmatrix_rows_u32` failure and the
+    // `Gfx1250Gpu.SumBitmatrixRowsU32` regression gate).  Fixed here
+    // for symmetry to close the "handler assumes operand shape that
+    // varies by subtarget" bug class across FLAT_LOAD / FLAT_STORE /
+    // FLAT_ATOMIC / GLOBAL_LOAD / GLOBAL_STORE / GLOBAL_ATOMIC — all
+    // six now route SADDR through the shared decoder.
+    Value *addr = nullptr;
+    ParsedReg stData;
+    const bool isSaddr = op.nSrcs() >= 3 && op.isSrcReg(0) &&
+                         op.isSrcReg(1) && op.isSrcReg(2) &&
+                         op.srcReg(0).kind == ParsedReg::VGPR &&
+                         op.srcReg(1).kind == ParsedReg::VGPR &&
+                         op.srcReg(2).kind == ParsedReg::SGPR;
+    if (isSaddr) {
+      FlatAddr fa = decodeGlobalStoreAddr(ctx, di, op, /*elemBytes=*/4,
+                                           "FLAT_ATOMIC (SADDR)");
+      addr = fa.ptr;
+      stData = fa.stData;
+    } else {
+      ParsedReg addrReg = op.srcReg(0);
+      addr = ctx.regs.readReg64(ctx.B, addrReg);
+      Type *ptrFlatTy = PointerType::get(ctx.C, 0);
+      if (addr->getType() != ptrFlatTy) addr = ctx.B.CreateIntToPtr(addr, ptrFlatTy);
+      int64_t memOffset = 0;
+      unsigned dataIdx = 1;
+      for (unsigned k = 1; k < op.nSrcs(); k++) {
+        if (di.isImm(op.srcIdx(k)) && di.getImm(op.srcIdx(k)) != 0)
+          memOffset = di.getImm(op.srcIdx(k));
+        else if (di.isReg(op.srcIdx(k)))
+          dataIdx = k;
+      }
+      if (memOffset != 0) addr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, addr, ctx.B.getInt64(memOffset));
+      stData = op.srcReg(dataIdx);
     }
-    if (memOffset != 0) addr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, addr, ctx.B.getInt64(memOffset));
-    Value *data = ctx.regs.readReg32(ctx.B, op.srcReg(dataIdx));
+    Value *data = ctx.regs.readReg32(ctx.B, stData);
 
     if (sop == SemOp::FLAT_ATOMIC_CMPSWAP) {
-      Value *cmpVal = ctx.regs.readReg32(ctx.B, op.srcReg(dataIdx));
-      ParsedReg srcPair = op.srcReg(dataIdx);
-      ParsedReg newReg = srcPair; newReg.baseIdx += 1; newReg.width = 1;
+      // CMPSWAP's vdata is a 2-vgpr pair (cmp, new); read low half as
+      // cmpVal and the adjacent baseIdx+1 as newVal.
+      Value *cmpVal = data;
+      ParsedReg newReg = stData; newReg.baseIdx += 1; newReg.width = 1;
       Value *newVal = ctx.regs.readReg32(ctx.B, newReg);
       ctx.emitUnderExec([&] {
         auto *cas = ctx.B.CreateAtomicCmpXchg(

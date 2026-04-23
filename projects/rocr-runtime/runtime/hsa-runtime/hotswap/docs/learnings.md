@@ -104,11 +104,16 @@ plain-form shape, later patched up for gfx12+ SADDR) bit
 The prescribed pattern is: **when a gfx12+ form has SGPR-base +
 VGPR-offset addressing, EXTRACT the shape decode into a helper
 (`decodeGlobal{Load,Store}Addr`) and have every consumer — load,
-store, atomic, prefetch — route through it**.  The atomic handler
-is now the third caller of `decodeGlobalStoreAddr`; the dword and
-sub-dword global loads are wired to `decodeGlobalLoadAddr`.  Any
-new FLAT-class handler (flat_atomic on gfx12+, the pending
-`tensor_load_to_lds` family) should follow this pattern.
+store, atomic, prefetch — route through it**.  All six FLAT/GLOBAL
+memory-class handlers (load, store, atomic × flat, global) now
+route SADDR through the shared decoder.  The FLAT_ATOMIC fix was
+applied in the same commit even though no recipe in the compare_
+correctness Triton corpus currently triggers it (Triton's gfx1250
+codegen prefers `global_atomic_*` when the buffer is known global)
+— the identical bug was still latent and would bite the first
+kernel that landed on `flat_atomic_*` with SADDR.  Any new
+FLAT-class handler (the pending `tensor_load_to_lds` family, flat
+prefetch) should follow the same pattern.
 
 **Investigation technique.**
 
@@ -126,10 +131,21 @@ new FLAT-class handler (flat_atomic on gfx12+, the pending
     env-gated debug print is faster than reading LLVM's encoding
     specs.
 
-See `Gfx1250Gpu.SumBitmatrixRowsU32` GTest (to be added) for the
-direct regression pin, and the `sum_bitmatrix_rows_u32{,_nw4}`
-compare_correctness recipes for the composition-level pin that
-caught the bug in the first place.
+The `sum_bitmatrix_rows_u32{,_nw4}` compare_correctness recipes
+are the regression pin — they're the only artefacts in-tree that
+exercise a Triton-emitted `global_atomic_*` SADDR + `scale_offset`
+shape end-to-end on a real GPU, and both verdicts flip from
+`EXIT=2 (HIP 700)` to `match` under the fix.  A narrower gtest-
+scope regression (on the line of `Gfx1250Gpu.RcpSqrt` for the
+load-side SADDR sibling) would need a hand-authored HIP kernel
+that forces hipcc to emit `global_atomic_add_u32 vAddr, vData,
+s[A:B] scale_offset`, which hipcc does not reliably produce from
+`__builtin_amdgcn_atomic_add` — the codegen picks the addressing
+form based on alias/escape analysis of the pointer and does not
+expose a builtin/intrinsic that pins the SADDR form.  The
+recipe-level gate is therefore the right layer; adding a
+semantically-duplicate gtest on top would give the illusion of
+broader coverage without actually exercising a different path.
 
 ---
 
