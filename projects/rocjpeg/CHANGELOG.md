@@ -1,6 +1,6 @@
 # rocJPEG changelog
 
-Documentation for rocJPEG is available at
+Current documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
 ## (Unreleased) rocJPEG 1.5.0
