@@ -25,6 +25,12 @@ from utils.utils_common import normalize_filter_to_str_list
 # from dask import dataframe as dd
 
 
+def find_latest_glob(directory: Path, pattern: str) -> Optional[Path]:
+    """Return the most recently modified file matching pattern, or None."""
+    matches = sorted(directory.glob(pattern), key=lambda p: p.stat().st_mtime)
+    return matches[-1] if matches else None
+
+
 def load_sys_info(f: str) -> pd.DataFrame:
     """
     Load sys running info from csv file to a df.
@@ -252,8 +258,8 @@ def process_pc_sampling_kernel_trace(
     available.  Reads ``ps_file_kernel_trace.csv`` (and optionally
     ``ps_file_agent_info.csv`` for GPU ID mapping)
     """
-    trace_path = Path(workload_path) / "ps_file_kernel_trace.csv"
-    if not trace_path.exists():
+    trace_path = find_latest_glob(Path(workload_path), "ps_file_*_kernel_trace.csv")
+    if trace_path is None or not trace_path.exists():
         console_warning(
             f"Kernel trace not found at {trace_path}. Cannot build dispatch data."
         )
@@ -270,9 +276,11 @@ def process_pc_sampling_kernel_trace(
     trace_df = pd.read_csv(trace_path)
 
     # Map agent IDs to GPU IDs
-    agent_to_gpu = build_agent_to_gpu_map(
-        Path(workload_path) / "ps_file_agent_info.csv"
+    agent_info_path = (
+        find_latest_glob(Path(workload_path), "ps_file_*_agent_info.csv")
+        or Path(workload_path) / "ps_file_agent_info.csv"
     )
+    agent_to_gpu = build_agent_to_gpu_map(agent_info_path)
     trace_df["GPU_ID"] = trace_df["Agent_Id"].map(agent_to_gpu).fillna(0).astype(int)
 
     trace_df = trace_df[
