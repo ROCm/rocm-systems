@@ -78,9 +78,6 @@ matrix:
   # RHEL 10
   - os-distro: "rhel"
     os-version: "10"
-    rocm-version: "7.0"
-  - os-distro: "rhel"
-    os-version: "10"
     rocm-version: "7.1"
   - os-distro: "rhel"
     os-version: "10"
