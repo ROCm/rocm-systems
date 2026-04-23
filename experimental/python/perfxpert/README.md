@@ -16,23 +16,44 @@ AI-powered AMD ROCm GPU trace analysis.
 ### Prerequisites
 
 - Python 3.10+
+- `curl`, `git`, `python3-venv`, and `python3-pip` for the GitHub install
+  path. On Ubuntu 24+ and other externally managed Python environments,
+  create and activate a virtual environment before running pip.
+  For the RHEL 9/10 and SLES package-manager variants, see the detailed
+  install guide; RHEL 9 and SLES use versioned Python package names.
 - `bun` on PATH if you want the patched `opencode` build produced during
   `pip install`. Packaged installs bundle that build; source/editable
   checkouts can rebuild the same pinned fork locally. The build hook
   does not auto-download bun; if bun is missing, install still succeeds
-  and only the patched launcher build is skipped. See
+  and only the patched launcher build is skipped. `perfxpert analyze`,
+  `perfxpert-mcp`, and the Python API still work; `perfxpert-code`
+  needs either `perfxpert-code install-patches` once bun is available,
+  or an existing `opencode` binary on PATH / `PERFXPERT_OPENCODE_PATH`.
+  Install bun with `curl -fsSL https://bun.sh/install | bash` when you
+  need to enable the interactive TUI later.
+  See
   [docs/guides/getting-started.md](docs/guides/getting-started.md)
   for the exact install contract and opt-out envs.
 - (Optional) `claude`, `codex`, or `gemini` CLI on PATH for multi-backend dispatch.
 
 ### Install
 
-> **First-time tip (stock Ubuntu / `rocm/dev-ubuntu-22.04` images):** the
-> default pip (22.x) misreads perfxpert's PEP-621 metadata and aborts the
-> wheel build. Upgrade pip once before installing:
+> **Ubuntu 24 / clean-container setup:** use a virtual environment for
+> GitHub installs, and install the OS-level prerequisites first:
 >
 > ```bash
-> pip install -U pip setuptools wheel
+> # SKIP-SAMPLE — host package install + virtual environment creation
+> apt install -y curl git python3-venv python3-pip
+> python3 -m venv .venv
+> . .venv/bin/activate
+> ```
+>
+> If the venv's pip/setuptools are too old and metadata preparation fails,
+> upgrade them inside the venv and retry:
+>
+> ```bash
+> # SKIP-SAMPLE — only needed for older venv toolchains
+> python -m pip install -U pip setuptools wheel
 > ```
 
 ```bash
@@ -45,38 +66,36 @@ monorepo on GitHub, use the wrapper script (~5 sec instead of
 ~5 min — details below):
 
 ```bash
-# SKIP-SAMPLE — first clone the repo (no recursive submodules), then run
-git clone --depth 1 --no-recurse-submodules https://github.com/ROCm/rocm-systems.git
-bash rocm-systems/experimental/python/perfxpert/scripts/pip-install-from-git.sh
-# Pass a ref / pip flags as positional args:
-#   scripts/pip-install-from-git.sh v0.2.0
-#   scripts/pip-install-from-git.sh <SHA> --user
+# SKIP-SAMPLE — latest develop branch, no local clone needed
+REF=develop; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
+# Pin a tag / SHA or pass pip flags after the ref:
+# REF=v0.2.0; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
+# REF=<SHA>; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
+# REF=<SHA>; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}" --user
+# REF=develop; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}" --extras ''
 ```
 
-Or invoke pip directly with the submodule-scope env vars set
-(equivalent to the wrapper, just verbose):
+The README keeps the supported customer-facing install flow on the
+wrapper. The internal getting-started guide documents the verbose
+direct-pip equivalent and the submodule-scope rationale in detail.
 
-```bash
-# SKIP-SAMPLE — pip directly, scoped submodule init
-GIT_CONFIG_COUNT=1 \
-GIT_CONFIG_KEY_0=submodule.active \
-GIT_CONFIG_VALUE_0=experimental/python/perfxpert/opencode \
-  pip install "perfxpert[all] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/perfxpert"
-```
-
-The plain `pip install "perfxpert @ git+…"` one-liner still works but
-triggers pip's full recursive submodule init over the ~34 unrelated
-submodules declared at the rocm-systems repo root — 3-6 min of wasted
-network on stock `rocm/dev-ubuntu-22.04`. The wrapper script scopes
-the init down to just the opencode submodule perfxpert's build hook
-actually needs; see `docs/guides/getting-started.md` §1.2 for the
-measurements.
+Both GitHub install paths require `git` on PATH because pip shells out
+to `git clone`. The supported Ubuntu 24+ path is a virtual environment;
+the wrapper exits early on externally managed system Python and points
+users at `python3 -m venv`. It prefers the active `python`, then
+`python3`, and only falls back to another already-installed
+`python3.10+` binary on PATH when the distro default is too old; it
+never downloads a separate Python runtime.
 
 `[all]` pulls in the optional LLM providers (`anthropic`, `openai`,
 `litellm`) plus `rich` for pretty terminal output. That covers the
 hosted/local SDK-backed provider paths; the default patched `opencode`
-path is validated separately through the launcher/build flow. Pick a
-provider with `--llm <name>`.
+path is validated separately through the launcher/build flow. If bun is
+absent during install, `perfxpert analyze`, `perfxpert-mcp`, and the
+Python API still install cleanly, but `perfxpert-code` will ask you to
+install bun with `curl -fsSL https://bun.sh/install | bash`, then run
+`perfxpert-code install-patches`, or point `PERFXPERT_OPENCODE_PATH` at
+an existing binary. Pick a provider with `--llm <name>`.
 
 ### Run
 
@@ -156,14 +175,10 @@ binary until bun is available. As a last resort, set
 
 Advanced: for tightly-sandboxed CI where neither bun nor network access
 is available, set `PERFXPERT_SKIP_BUNDLED_BUILD=1` before
-`pip install` to suppress the build attempt entirely:
-
-```bash
-# SKIP-SAMPLE — actual installer; scripts/test-samples.py must not execute this
-curl -fsSL https://opencode.ai/install | bash
-```
-
-Or point `PERFXPERT_OPENCODE_PATH` at an existing opencode binary.
+`pip install` to suppress the build attempt entirely. When bun becomes
+available again, run `perfxpert-code install-patches` to build the
+repo-pinned patched binary, or point `PERFXPERT_OPENCODE_PATH` at an
+existing patched opencode binary.
 
 ## Contributing
 
