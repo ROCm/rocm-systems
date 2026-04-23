@@ -17,7 +17,7 @@ Here are the benefits of using PC sampling:
 - Analyze code coverage
 - Find heavily executed code paths
 
-To try out the PC sampling feature, you can use the command-line tool ``rocprofv3`` or the ROCprofiler-SDK library on ``ROCm 6.4`` or later.
+To try out the PC sampling feature, you can use the ``rocprofv3`` command-line tool or the ROCprofiler-SDK library on ROCm 6.4 and later.
 
 Supported GPUs
 ===============
