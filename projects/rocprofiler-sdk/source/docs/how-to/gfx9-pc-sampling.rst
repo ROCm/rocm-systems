@@ -181,7 +181,7 @@ To identify pipeline oversubscription, look for samples where a wave is stalled 
 Pipeline backpressuring
 ------------------------
 
-Sometimes the execution pipeline backpressures a wave from issuing an instruction, even when the wave was chosen by the arbiter. This is indicated by ``arbiter_state_stall_PIPE`` == 1 .
+Sometimes, the execution pipeline backpressures a wave from issuing an instruction, even when the arbiter has chosen that wave. This is indicated by ``arbiter_state_stall_PIPE`` == 1 .
 A backpressured wave will be stalled due to ARBITER_WIN_EX_STALL.
 
 Pipeline backpressuring can occur due to the following conditions:
