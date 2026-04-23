@@ -13,6 +13,10 @@ on:
       ci_image:
         required: true
         type: string
+      cmake_build_type:
+        description: "CMake build type (e.g. Release or Debug)"
+        required: true
+        type: string
       platform:
         required: true
         type: string
@@ -85,11 +89,13 @@ jobs:
         run: |
           docker exec \
             -e "_AIS_INPUT_CXX_COMPILER=${AIS_INPUT_CXX_COMPILER}" \
+            -e "_AIS_INPUT_CMAKE_BUILD_TYPE=${{ inputs.cmake_build_type }}" \
             -t \
             -w /ais/build/hipfile \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
               cmake \
+                -DCMAKE_BUILD_TYPE="${_AIS_INPUT_CMAKE_BUILD_TYPE}" \
                 -DCMAKE_CXX_COMPILER="${_AIS_INPUT_CXX_COMPILER}" \
                 -DCMAKE_CXX_FLAGS="-Werror" \
                 -DCMAKE_HIP_PLATFORM=nvidia \

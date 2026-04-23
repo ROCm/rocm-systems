@@ -5,6 +5,7 @@ env:
   AIS_GHA_CMD_FILES_DOCKER_DIR: /root/github
   AIS_INPUT_BUILD_ID: ${{ inputs.build_id }}
   AIS_INPUT_CI_IMAGE: ${{ inputs.ci_image }}
+  AIS_INPUT_CMAKE_BUILD_TYPE: ${{ inputs.cmake_build_type }}
   AIS_INPUT_CXX_COMPILER: ${{ inputs.cxx_compiler }}
   AIS_INPUT_JOB_DESIGNATOR: ${{ inputs.job_designator }}
   AIS_INPUT_PLATFORM: ${{ inputs.platform }}
@@ -18,8 +19,8 @@ env:
     }}
   AIS_PKG_TYPE: ${{ inputs.platform == 'ubuntu' && 'DEB' || 'RPM' }}
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
-  # Code coverage report only vetted to work for amdclang++ on Ubuntu
-  AIS_USE_CODE_COVERAGE: ${{ inputs.cxx_compiler == 'amdclang++' && inputs.platform == 'ubuntu' }}
+  # Code coverage report only vetted to work for amdclang++ on Ubuntu in Debug builds
+  AIS_USE_CODE_COVERAGE: ${{ inputs.cxx_compiler == 'amdclang++' && inputs.platform == 'ubuntu' && inputs.cmake_build_type == 'Debug' }}
   AIS_HIP_ARCHITECTURES: gfx950;gfx1201;gfx1200;gfx1101;gfx1100;gfx1030;gfx942;gfx90a;gfx908
 
 on:
@@ -31,6 +32,10 @@ on:
         required: false
         type: number
       ci_image:
+        required: true
+        type: string
+      cmake_build_type:
+        description: "CMake build type (e.g. Release or Debug)"
         required: true
         type: string
       cxx_compiler:
@@ -140,6 +145,7 @@ jobs:
         run: |
           docker exec \
             -e "_AIS_INPUT_CXX_COMPILER=${AIS_INPUT_CXX_COMPILER}" \
+            -e "_AIS_INPUT_CMAKE_BUILD_TYPE=${AIS_INPUT_CMAKE_BUILD_TYPE}" \
             -e "BUILD_ID=${AIS_INPUT_BUILD_ID}" \
             -e "JOB_DESIGNATOR=${AIS_INPUT_JOB_DESIGNATOR}" \
             -t \
@@ -149,7 +155,7 @@ jobs:
               export CPACK_DEBIAN_PACKAGE_RELEASE="${JOB_DESIGNATOR}${SLES_BUILD_ID_PREFIX}${BUILD_ID}~$(source /etc/os-release && echo ${VERSION_ID})"
               export CPACK_RPM_PACKAGE_RELEASE="${JOB_DESIGNATOR}${SLES_BUILD_ID_PREFIX}${BUILD_ID}"
               cmake \
-                -DCMAKE_BUILD_TYPE=Debug \
+                -DCMAKE_BUILD_TYPE="${_AIS_INPUT_CMAKE_BUILD_TYPE}" \
                 -DCMAKE_CXX_COMPILER="${_AIS_INPUT_CXX_COMPILER}" \
                 -DCMAKE_CXX_FLAGS="-Werror" \
                 -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
@@ -322,7 +328,7 @@ jobs:
         if: ${{ inputs.upload_artifacts }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: hipfile-build-dir-${{ inputs.platform }}
+          name: hipfile-build-dir-${{ inputs.platform }}-${{ inputs.cmake_build_type }}
           path: ${{ github.workspace }}/hipfile-build-dir
           if-no-files-found: error
           retention-days: 1

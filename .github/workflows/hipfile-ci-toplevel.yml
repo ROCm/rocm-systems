@@ -36,7 +36,11 @@ jobs:
           - ubuntu
         rocm_versions:
           - 7.2.2
+        cmake_build_type:
+          - Release
+          - Debug
     uses: ./.github/workflows/hipfile-ci.yml
     with:
+      cmake_build_type: ${{ matrix.cmake_build_type }}
       platform: ${{ matrix.supported_platforms }}
       rocm_version: ${{ matrix.rocm_versions }}
