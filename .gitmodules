@@ -64,6 +64,9 @@
 [submodule "projects/rocprofiler-sdk/external/gotcha"]
 	path = projects/rocprofiler-sdk/external/gotcha
 	url = https://github.com/ROCm/GOTCHA
+[submodule "projects/rocprofiler-sdk/external/abseil-cpp"]
+	path = projects/rocprofiler-sdk/external/abseil-cpp
+	url = https://github.com/abseil/abseil-cpp.git
 [submodule "projects/rocprofiler-systems/external/timemory"]
 	path = projects/rocprofiler-systems/external/timemory
 	url = https://github.com/ROCm/timemory.git
