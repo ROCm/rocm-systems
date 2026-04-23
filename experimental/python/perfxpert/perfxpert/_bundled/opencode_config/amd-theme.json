@@ -1,0 +1,18 @@
+{
+  "name": "AMD PerfXpert",
+  "description": "AMD red/black theme for ROCm PerfXpert",
+  "palette": {
+    "primary": "#ED1C24",
+    "secondary": "#000000",
+    "accent": "#FFFFFF",
+    "success": "#00A651",
+    "warning": "#FFC00C",
+    "error": "#C62828",
+    "background": "#0A0A0A",
+    "foreground": "#E8E8E8",
+    "dim": "#888888",
+    "muted": "#333333"
+  },
+  "prompt_prefix": "ROCm PerfXpert › ",
+  "banner": true
+}

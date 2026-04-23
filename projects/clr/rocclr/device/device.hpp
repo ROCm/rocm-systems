@@ -1278,6 +1278,21 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   //! Return the physical device for this virtual device.
   const amd::Device& device() const { return device_(); }
   virtual uint64_t getQueueID() = 0;
+
+  //! Snapshot the current HW queue as preferred for future re-acquisition (used by graph launch)
+  virtual void SetPreferredQueue() {}
+  //! Acquire a HW queue using the preferred hint, then clear the hint
+  virtual void AcquireQueueWithPreference() {}
+
+  //! Pin the current HW queue so ReleaseHwQueue() becomes a no-op (used by graph internal streams)
+  virtual void PinQueue() {}
+  //! Unpin the HW queue, allowing ReleaseHwQueue() to release it again
+  virtual void UnpinQueue() {}
+  //! Release current HW queue and acquire a new one, avoiding queues with IDs in the excluded set
+  virtual bool ReacquireQueueExcluding(const std::unordered_set<uint64_t>& excluded_ids) {
+    return false;
+  }
+
   virtual void submitReadMemory(amd::ReadMemoryCommand& cmd) = 0;
   virtual void submitWriteMemory(amd::WriteMemoryCommand& cmd) = 0;
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
@@ -2066,10 +2081,13 @@ class Device : public RuntimeObject {
   virtual void DestroyHwEvent(void* hw_event) const {}
 
   struct HwEventPatch {
+    static constexpr int kCompletionSignal = -1;
+    static constexpr int kExtDispatchDepSignal = -2;
+
     uint8_t* packet;      // original dispatchPackets pointer (for UpdateAQLPacket matching)
     uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
     int hw_event_index;
-    int dep_slot;  // -1 = completion_signal, 0-4 = dep_signal[slot]
+    int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
   };
 
   virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
@@ -2202,13 +2220,13 @@ class Device : public RuntimeObject {
   //! Adds the queue to the set of active command queues
   void addToActiveQueues(amd::CommandQueue* commandQueue) {
     amd::ScopedLock lock(activeQueuesLock_);
-    activeQueues.insert(commandQueue);
+    activeQueues[commandQueue] = true;
   }
 
   //! Removes the queue from the set of active command queues
   void removeFromActiveQueues(amd::CommandQueue* commandQueue) {
     amd::ScopedLock lock(activeQueuesLock_);
-    activeQueues.erase(commandQueue);
+    activeQueues[commandQueue] = false;
   }
 
   // Notifies device about context destroy
@@ -2320,7 +2338,7 @@ class Device : public RuntimeObject {
   device::Memory* initial_heap_buffer_;                 //!< Initial heap buffer
   uint64_t initial_heap_size_{HIP_INITIAL_DM_SIZE};     //!< Initial device heap size
   amd::Monitor activeQueuesLock_{};                     //!< Guards access to the activeQueues set
-  std::unordered_set<amd::CommandQueue*> activeQueues;  //!< The set of active queues
+  std::unordered_map<amd::CommandQueue*, bool> activeQueues;  //!< The set of active queues
   uint8_t group_mem_carveout_hint_; //!< LDS carveout
  private:
   const Isa* isa_;  //!< Device isa
