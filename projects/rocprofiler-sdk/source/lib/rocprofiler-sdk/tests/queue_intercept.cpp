@@ -23,6 +23,9 @@
 #include "lib/rocprofiler-sdk/hsa/queue_intercept.hpp"
 
 #include <gtest/gtest.h>
+
+#include <hsa/amd_hsa_queue.h>
+#include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 
 #include <chrono>
@@ -59,8 +62,8 @@ TEST(QueueIntercept, RegistryInsertAndLookup)
 {
     // Create a dummy queue pointer for testing
     // We're just using a dummy address; we never dereference it
-    hsa_queue_t        dummy_queue;
-    const hsa_queue_t* queue_ptr = &dummy_queue;
+    auto               dummy_queue = hsa_queue_t{};
+    const hsa_queue_t* queue_ptr   = &dummy_queue;
 
     // Create a QueueState and insert it into the registry
     auto state       = std::make_shared<QueueState>();
@@ -89,8 +92,8 @@ TEST(QueueIntercept, RegistryInsertAndLookup)
 TEST(QueueIntercept, DoorbellMapInsertAndLookup)
 {
     // Create a dummy queue for testing
-    hsa_queue_t        dummy_queue;
-    const hsa_queue_t* queue_ptr = &dummy_queue;
+    auto               dummy_queue = hsa_queue_t{};
+    const hsa_queue_t* queue_ptr   = &dummy_queue;
 
     // Create and register a QueueState
     auto state            = std::make_shared<QueueState>();
@@ -100,10 +103,10 @@ TEST(QueueIntercept, DoorbellMapInsertAndLookup)
     get_queue_registry().wlock([&](auto& registry) { registry[queue_ptr] = state; });
 
     // Create a doorbell signal and register it
-    hsa_signal_t doorbell;
-    doorbell.handle = 0x12345678;
-
-    register_doorbell(queue_ptr, doorbell);
+    auto amd_doorbell = amd_signal_t{};
+    amd_doorbell.queue_ptr =
+        const_cast<amd_queue_v2_t*>(reinterpret_cast<const amd_queue_v2_t*>(queue_ptr));
+    auto doorbell = hsa_signal_t{.handle = reinterpret_cast<uint64_t>(&amd_doorbell)};
 
     // Look up by doorbell
     auto found_state = lookup_queue_state_by_doorbell(doorbell);
@@ -111,15 +114,12 @@ TEST(QueueIntercept, DoorbellMapInsertAndLookup)
     EXPECT_EQ(found_state.get(), state_ptr);
     EXPECT_EQ(found_state->ring_size, 2048U);
 
-    // Unregister doorbell
-    unregister_doorbell(doorbell);
+    // Clean up queue registry
+    destroy_queue_state(queue_ptr);
 
     // Verify removal
     auto after_removal = lookup_queue_state_by_doorbell(doorbell);
     EXPECT_EQ(after_removal, nullptr);
-
-    // Clean up queue registry
-    get_queue_registry().wlock([&](auto& registry) { registry.erase(queue_ptr); });
 }
 
 TEST(QueueIntercept, AddWriteIndexAdvancesVirtualWptr)
@@ -266,32 +266,46 @@ TEST(QueueIntercept, DoorbellNoNewPackets)
 
 TEST(QueueIntercept, CreateAndDestroyQueueState)
 {
-    alignas(64) char ring_mem[64 * 256];
-    hsa_queue_t      fake_queue{};
-    fake_queue.base_address    = reinterpret_cast<void*>(ring_mem);
-    fake_queue.size            = 256;
-    fake_queue.doorbell_signal = {.handle = 9999};
+    // char ring_mem[64 * 256];
+    constexpr auto   ring_size = 64UL * 256UL;
+    alignas(64) auto ring_mem  = std::array<std::byte, ring_size>{};
+    ring_mem.fill(std::byte{0});
 
-    uint64_t fake_wdid = 0;
-    uint64_t fake_rdid = 0;
+    amd_queue_v2_t amd_fake_queue{};
+    hsa_queue_t&   hsa_fake_queue    = amd_fake_queue.hsa_queue;
+    hsa_fake_queue.base_address      = reinterpret_cast<void*>(ring_mem.data());
+    hsa_fake_queue.size              = 256;
+    hsa_fake_queue.doorbell_signal   = {.handle = 9999};
+    amd_fake_queue.write_dispatch_id = 0;
+    amd_fake_queue.read_dispatch_id  = 0;
 
-    create_queue_state(&fake_queue, &fake_wdid, &fake_rdid);
+    // make sure that the hsa_queue field is at offset 0, so that we can safely reinterpret_cast
+    // from hsa_queue_t* to amd_queue_v2_t*
+    ASSERT_EQ(offsetof(amd_queue_v2_t, hsa_queue), 0u);
 
-    auto state = lookup_queue_state(&fake_queue);
+    auto* fake_queue = reinterpret_cast<hsa_queue_t*>(&amd_fake_queue);
+
+    create_queue_state(fake_queue);
+
+    auto state = lookup_queue_state(fake_queue);
     ASSERT_NE(state, nullptr);
-    EXPECT_EQ(state->ring_buf, reinterpret_cast<void*>(ring_mem));
+    EXPECT_EQ(state->ring_buf, reinterpret_cast<void*>(ring_mem.data()));
     EXPECT_EQ(state->ring_size, 256u);
     EXPECT_EQ(state->ring_mask, 255u);
-    EXPECT_EQ(state->real_wdid, &fake_wdid);
-    EXPECT_EQ(state->real_rdid, &fake_rdid);
+    EXPECT_EQ(*state->real_wdid, amd_fake_queue.write_dispatch_id);
+    EXPECT_EQ(*state->real_rdid, amd_fake_queue.read_dispatch_id);
     EXPECT_EQ(state->doorbell_signal.handle, 9999u);
 
-    auto by_doorbell = lookup_queue_state_by_doorbell({.handle = 9999});
+    auto amd_doorbell      = amd_signal_t{};
+    amd_doorbell.queue_ptr = &amd_fake_queue;
+    auto doorbell          = hsa_signal_t{.handle = reinterpret_cast<uint64_t>(&amd_doorbell)};
+
+    auto by_doorbell = lookup_queue_state_by_doorbell(doorbell);
     EXPECT_EQ(by_doorbell.get(), state.get());
 
-    destroy_queue_state(&fake_queue);
-    EXPECT_EQ(lookup_queue_state(&fake_queue), nullptr);
-    EXPECT_EQ(lookup_queue_state_by_doorbell({.handle = 9999}), nullptr);
+    destroy_queue_state(fake_queue);
+    EXPECT_EQ(lookup_queue_state(fake_queue), nullptr);
+    EXPECT_EQ(lookup_queue_state_by_doorbell(doorbell), nullptr);
 }
 
 TEST(QueueIntercept, DoorbellBackpressureWaitsWhenRingFullK0)
@@ -334,7 +348,6 @@ TEST(QueueIntercept, DoorbellBackpressureWaitsWhenRingFullK0)
     EXPECT_LE(state->next_submit_pos - real_rdid, state->ring_size);
     EXPECT_EQ(get_pkt(ring, 4, 3)->kernel_object, static_cast<uint64_t>(0xABCD));
 }
-
 }  // namespace
 }  // namespace queue_intercept
 }  // namespace hsa
