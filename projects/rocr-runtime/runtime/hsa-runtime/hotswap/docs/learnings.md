@@ -8,6 +8,97 @@ Append-only. Newest on top.
 
 ---
 
+## 2026-04-22 — Failed experiment: inject `ds_bpermute(lane ^ 16)` on V_CMP_NGT_F32_e64_gfx12 src1
+
+After the xor3-triton-state probe (`Gfx1250Gpu.BitonicXor3TritonState`)
+definitively confirmed v3 post-xor3 = self_v2 for every lane, the
+remaining hypothesis was that `.long 0xd41b0002` (which LLVM's
+gfx12 tables decode as `V_CMP_NGT_F32_e64`, opcode 42725) might be
+a gfx1250-compact encoding that reuses this opcode slot with a
+fused compare-with-permlane16-partner semantic.
+
+**Experiment.**  Patched `handle_valu_vcmp.cpp` under an env gate
+`SALMON_EXPERIMENTAL_V_CMP_NGT_F32_PARTNER=1` to inject
+`ds_bpermute(lane ^ 16, src1)` before the fcmp, making the compare
+functionally `fcmp ngt self, permlane16(self)` on gfx1250 — the
+shape the bitonic cross-16 merge would want if the opcode really
+had implicit partner-read semantics.
+
+**Result: experiment FAILED.**  On
+`canary_tl_sort_fp32_deterministic`:
+
+  * Baseline (no patch): row 0 = `[15,14,…,0, 31,30,…,16]` —
+    two sorted halves, distance-16 merge missing.  WRONG
+    16384/16384, max\|err\|=16.
+  * With patch:          row 0 = `[15,15,…,15, 31,31,…,31]` —
+    MAX-broadcast within each 16-lane half.  WRONG 16384/16384,
+    max\|err\|=31.
+
+The patch made it worse: it broadcast the half-max to every lane
+in the half.  That's because the patch applies to EVERY
+`V_CMP_NGT_F32_e64_gfx12` call — and those fire at distances
+16, 8, 4, 2, 1 in the outer-stage-4 sequence.  At distances
+8/4/2/1 the preceding DPP moves have already placed partner into
+v3; forcing a further permlane16 read produces a compare against
+a lane 16 positions away instead of the correct local-distance
+partner.  The signature (max-broadcast within halves) indicates
+every compare in the outer-stage-4 chain collapsed to
+"self vs max-within-16" under the injected partner-read.
+
+**Negative finding.** The opcode is NOT a simple fused
+compare-with-permlane16-partner.  The correct semantic —
+whatever it is — must adapt to the lane distance the surrounding
+DPP / permlane moves set up, or it uses a different mechanism
+than an implicit cross-lane read on its source operand.
+
+**Next candidate hypotheses** (not yet tested):
+
+  1. The compare's real src1 reads v4 (which at the `.long
+     0xd41b0002` site still holds partner_v2 from the swap's
+     second output — the `v_and_b32 v4, 8, v0` write that comes
+     between xor3 and the compare may not have committed yet due
+     to the `s_delay_alu instid0(VALU_DEP_2)` hint's scheduling
+     model).  For distance-8/4/2/1, v4 at the compare site is
+     lane_id & 8 / 4 / 2 / 1 — irrelevant.  Hmm, that doesn't
+     match either, since the distance-8 v_and is ALSO between
+     xor3-equivalent moves and the compare.
+  2. The compare implements a `compare_and_swap_within_16_by_
+     lane_parity` — a single-instruction compare-and-swap that
+     uses lane_id-derived direction implicitly.  The fact that
+     the SAME opcode works at all 5 distances within the outer
+     stage suggests a distance-agnostic semantic, possibly
+     using the preceding DPP setup's output (v3) combined with
+     an implicit per-lane control.
+  3. The compare participates in a VOPD / dual-issue shape not
+     yet in LLVM's decode tables for gfx1250, where the
+     subsequent `v_cndmask_b32_e32 v1, v2, v3, vcc_lo` is
+     actually the SECOND half of a single 8-byte fused
+     compare-and-conditional-move.
+
+Hypothesis 3 feels most plausible but unverifiable without gfx1250
+ISA documentation.  Hypothesis 1 can be ruled out by the observation
+that v4 IS clobbered by `v_and` before the compare fires in the
+instruction stream, and salmon faithfully serializes that in the
+lifted IR.  Hypothesis 2 would require a gfx1250 ISA spec to
+confirm.
+
+Deferring further investigation until we have:
+  - AMD's gfx1250 ISA reference for the `.long 0xd41b000X`
+    encoding, OR
+  - A newer LLVM tree where the decode tables match gfx1250
+    silicon (then cross-check against salmon's current decode).
+
+The full diagnostic probe suite committed across
+79e1edc2f1 / 65b5fde536 / a9bcc14d03 / af64431eec stays as
+regression guards.  When the fix lands, all of
+`canary_tl_sort_fp32_deterministic`,
+`canary_tl_sort_fp32`, `canary_tl_topk_{bf16,bf16_nw1,fp32}`,
+`topk_forward_bisect_m2_strict`, and `topk_forward_bf16`
+graduate to match; the wave32 permlane16_swap and bitonic
+probes stay passing as they do today.
+
+---
+
 ## 2026-04-22 — `topk_forward_bf16` root-caused to `tl.sort` / `tl.topk` cross-16 bitonic merge under wave32→wave64 projection (OPEN)
 
 **Context.** Continuation of the principled-tolerance thread.  The
