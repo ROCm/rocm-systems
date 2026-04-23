@@ -13,7 +13,8 @@ function(rocprofiler_tests_configure_python_package_sources RELATIVE_DEST)
     foreach(_FILE ${ARGN})
         configure_file(
             ${CMAKE_CURRENT_SOURCE_DIR}/${_FILE}
-            ${ROCPROFILER_TESTS_PYTHON_SITE_PACKAGES_DIR}/${RELATIVE_DEST}/${_FILE} COPYONLY)
+            ${ROCPROFILER_TESTS_PYTHON_SITE_PACKAGES_DIR}/${RELATIVE_DEST}/${_FILE}
+            COPYONLY)
     endforeach()
 endfunction()
 
