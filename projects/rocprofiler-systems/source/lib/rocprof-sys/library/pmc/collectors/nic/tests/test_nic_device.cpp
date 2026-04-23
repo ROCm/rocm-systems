@@ -33,9 +33,9 @@ class NicDeviceTest : public ::testing::Test
 {
 protected:
     std::shared_ptr<MockDriver> mock_driver;
-    amdsmi_processor_handle     test_handle;
-    processor_type_t            test_processor_type;
-    size_t                      test_index;
+    amdsmi_processor_handle     test_handle{};
+    processor_type_t            test_processor_type{};
+    size_t                      test_index{};
 
     void SetUp() override
     {
@@ -43,6 +43,12 @@ protected:
         test_handle         = reinterpret_cast<amdsmi_processor_handle>(0x5678);
         test_processor_type = AMDSMI_PROCESSOR_TYPE_AMD_NIC;
         test_index          = 0;
+    }
+
+    void TearDown() override
+    {
+        ::testing::Mock::VerifyAndClearExpectations(mock_driver.get());
+        mock_driver.reset();
     }
 
     /**

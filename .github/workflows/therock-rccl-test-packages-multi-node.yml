@@ -21,6 +21,10 @@ on:
         type: string
       artifact_run_id:
         type: string
+        
+concurrency:
+  group: ${{ inputs.amdgpu_families == 'gfx94X-dcgpu' && 'gfx94x-multinode-exclusive' || github.run_id }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -39,15 +43,37 @@ jobs:
     env:
       VENV_DIR: ${{ github.workspace }}/.venv
       ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id }}"
-      OUTPUT_ARTIFACTS_DIR: /apps/cvs_tests/dist_new/dist/rocm
       THEROCK_BIN_DIR: "./build/bin"
-      AWS_SHARED_CREDENTIALS_FILE: /apps/cvs_tests/awsconfig/credentials.ini
     steps:
       - name: Checkout Repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
           ref: 702d15844f84a3a8401a24185bd4131008f0e640 # 2026-04-16 commit
+
+      # Centralized arch-specific configuration
+      - name: Set arch-specific paths
+        run: |
+          case "${{ inputs.amdgpu_families }}" in
+            gfx950-dcgpu)
+              echo "OUTPUT_ARTIFACTS_DIR=/apps/cvs_tests/dist_new/dist/rocm" >> $GITHUB_ENV
+              echo "AWS_SHARED_CREDENTIALS_FILE=/apps/cvs_tests/awsconfig/credentials.ini" >> $GITHUB_ENV
+              echo "REPORT_PATH=/apps/cvs_tests/test_reports" >> $GITHUB_ENV
+              echo "LOG_DEST=/logs/gfx950-dcgpu" >> $GITHUB_ENV
+              ;;
+
+            gfx94X-dcgpu)
+              echo "OUTPUT_ARTIFACTS_DIR=/home/arravikum/dist_new/dist/rocm" >> $GITHUB_ENV
+              echo "AWS_SHARED_CREDENTIALS_FILE=/home/arravikum/awsconfig/credentials.ini" >> $GITHUB_ENV
+              echo "REPORT_PATH=/home/arravikum/cvs_8nic/cvs/test_reports" >> $GITHUB_ENV
+              echo "LOG_DEST=/logs/gfx94X-dcgpu" >> $GITHUB_ENV
+              ;;
+
+            *)
+              echo "Unsupported arch: ${{ inputs.amdgpu_families }}"
+              exit 1
+              ;;
+          esac
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
@@ -69,6 +95,16 @@ jobs:
           chmod +x /apps/cvs_tests/ci-entrypoint.sh
           /apps/cvs_tests/ci-entrypoint.sh
 
+      - name: Test gfx94X
+        if: ${{ inputs.amdgpu_families == 'gfx94X-dcgpu' }}
+        run: |
+          source /home/arravikum/TheRock/.venv/bin/activate
+          cd /home/arravikum/cvs_8nic/cvs/cvs
+          pytest -vvv -s ./tests/rccl/rccl_heatmap_cvs.py   --cluster_file ./input/cluster_file/cluster.json \
+            --config_file ./input/config_file/rccl/rccl_config.json   --log-file=/tmp/rccl_log.log \
+            --html=/home/arravikum/cvs_8nic/cvs/test_reports/ci_test_report.html   --capture=tee-sys \
+            --self-contained-html
+
       - name: Configure AWS Credentials for non-forked repos
         if: ${{ always() && !github.event.pull_request.head.repo.fork }}
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
@@ -84,6 +120,6 @@ jobs:
           python3 build_tools/github_actions/upload_test_report_script.py \
             --run-id "${{ github.run_id }}" \
             --amdgpu-family "${{ inputs.amdgpu_families }}" \
-            --report-path "/apps/cvs_tests/test_reports" \
-            --log-destination "/logs/gfx950-dcgpu" \
+            --report-path "${REPORT_PATH}" \
+            --log-destination "${LOG_DEST}" \
             --index-file-name "index_rccl_test_report.html"

@@ -1,0 +1,57 @@
+# thermal_specs — per-arch thermal envelope + throttle thresholds used by
+# `gpu_runtime_monitor.analyze_thermal` when the caller supplies gfx_id.
+#
+# Junction temperature (TjMax) governs whether the driver dynamically
+# clock-gates. Exceeding `tj_throttle_margin_c` below TjMax is a strong
+# signal that perf is thermally bounded.
+#
+# Phase-10 Feature B.
+
+version: 1
+
+architectures:
+  - gfx_id: gfx942
+    name: "MI300X (CDNA3)"
+    tjmax_c: 110
+    tj_throttle_margin_c: 5
+    tdp_w: 750
+    tdp_headroom_pct: 0.95   # >= 95% TDP = power-throttle suspect
+    hbm_tjmax_c: 95
+
+  - gfx_id: gfx940
+    name: "MI300A (CDNA3 APU)"
+    tjmax_c: 110
+    tj_throttle_margin_c: 5
+    tdp_w: 550
+    tdp_headroom_pct: 0.95
+    hbm_tjmax_c: 95
+
+  - gfx_id: gfx90a
+    name: "MI250X/MI250 (CDNA2)"
+    tjmax_c: 105
+    tj_throttle_margin_c: 5
+    tdp_w: 560
+    tdp_headroom_pct: 0.95
+    hbm_tjmax_c: 95
+
+  - gfx_id: gfx908
+    name: "MI100 (CDNA1)"
+    tjmax_c: 95
+    tj_throttle_margin_c: 5
+    tdp_w: 300
+    tdp_headroom_pct: 0.95
+    hbm_tjmax_c: 85
+
+verdict_buckets:
+  healthy:
+    description: "Thermal headroom > 10 C below TjMax, power < 85% TDP."
+  hot:
+    description: "Within 10 C of TjMax but no sustained throttle yet."
+  throttling:
+    description: "Junction temp within throttle_margin OR power >= TDP headroom."
+
+notes: |
+  Sourced from AMD data sheets / ROCm public documentation. Values are
+  *defaults* — real-world board partners may ship with more aggressive
+  thermal caps. Override via parse_amd_smi_json sample + analyze_thermal
+  tjmax_c argument when you know the exact sku.
