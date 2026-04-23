@@ -24,6 +24,7 @@
 
 #include "lib/common/synchronized.hpp"
 
+#include <hsa/amd_hsa_queue.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 
@@ -66,14 +67,10 @@ struct QueueState
 };
 
 using queue_state_ptr_t      = std::shared_ptr<QueueState>;
-using queue_state_weak_ptr_t = std::weak_ptr<QueueState>;
 
 /// Thread-safe map from HSA queue pointer to its QueueState
 using queue_registry_t =
     common::Synchronized<std::unordered_map<const hsa_queue_t*, queue_state_ptr_t>>;
-
-/// Thread-safe map from doorbell signal handle to weak QueueState reference
-using doorbell_map_t = common::Synchronized<std::unordered_map<uint64_t, queue_state_weak_ptr_t>>;
 
 /**
  * @brief Get the global queue registry singleton
@@ -83,8 +80,8 @@ using doorbell_map_t = common::Synchronized<std::unordered_map<uint64_t, queue_s
  *
  * @return Reference to the queue registry
  */
-queue_registry_t&
-get_queue_registry();
+// queue_registry_t&
+// get_queue_registry();
 
 /**
  * @brief Get the global doorbell map singleton
@@ -94,8 +91,8 @@ get_queue_registry();
  *
  * @return Reference to the doorbell map
  */
-doorbell_map_t&
-get_doorbell_map();
+// doorbell_map_t&
+// get_doorbell_map();
 
 /**
  * @brief Look up QueueState by HSA queue pointer
@@ -103,8 +100,8 @@ get_doorbell_map();
  * @param queue The HSA queue to look up
  * @return Strong QueueState reference if found, empty otherwise
  */
-queue_state_ptr_t
-lookup_queue_state(const hsa_queue_t* queue);
+// queue_state_ptr_t
+// lookup_queue_state(const hsa_queue_t* queue);
 
 /**
  * @brief Look up QueueState by doorbell signal
@@ -112,8 +109,8 @@ lookup_queue_state(const hsa_queue_t* queue);
  * @param signal The doorbell signal to look up
  * @return Strong QueueState reference if found and still alive, empty otherwise
  */
-queue_state_ptr_t
-lookup_queue_state_by_doorbell(hsa_signal_t signal);
+// queue_state_ptr_t
+// lookup_queue_state_by_doorbell(hsa_signal_t signal);
 
 /**
  * @brief Register a doorbell signal for a queue
@@ -221,9 +218,7 @@ process_doorbell_impl(const queue_state_ptr_t& state,
  * @param rdid_addr Pointer to the queue's real read doorbell index
  */
 void
-create_queue_state(const hsa_queue_t* queue,
-                   volatile uint64_t* wdid_addr,
-                   volatile uint64_t* rdid_addr);
+create_queue_state(const hsa_queue_t* queue);
 
 /**
  * @brief Destroy and unregister queue state
@@ -261,6 +256,8 @@ is_intercepting_inline();
 void
 shutdown_intercept();
 
+void
+sync();
 }  // namespace queue_intercept
 }  // namespace hsa
 }  // namespace rocprofiler

@@ -21,10 +21,26 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/queue_intercept.hpp"
+#include "lib/common/container/pool.hpp"
+#include "lib/common/container/pool_object.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/code_object/code_object.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/internal_threading.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/tracing/tracing.hpp"
+
+#include <rocprofiler-sdk/cxx/operators.hpp>
+
+#include <fmt/format.h>
+#include <hsa/amd_hsa_queue.h>
+#include <hsa/amd_hsa_signal.h>
+#include <hsa/hsa.h>
 
 #include <cstring>
 #include <thread>
@@ -36,6 +52,41 @@ namespace hsa
 {
 namespace queue_intercept
 {
+signal_t&
+construct_hsa_signal(signal_t&          signal,
+                     hsa_signal_value_t initial_value = 0,
+                     uint32_t           num_consumers = 0,
+                     const hsa_agent_t* consumers     = nullptr,
+                     uint64_t           attributes    = 0)
+{
+    auto status = HSA_STATUS_SUCCESS;
+    if(!get_amd_ext_table() || !get_amd_ext_table()->hsa_amd_signal_create_fn)
+        status = HSA_STATUS_ERROR;
+    else
+        status = get_amd_ext_table()->hsa_amd_signal_create_fn(
+            initial_value, num_consumers, consumers, attributes, &signal.value);
+
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS)
+        << fmt::format("Error: hsa_amd_signal_create failed with error code {} :: {}",
+                       static_cast<int>(status),
+                       hsa::get_hsa_status_string(status));
+
+    return signal;
+}
+
+auto*
+get_signal_pool()
+{
+    constexpr size_t default_signal_pool_size = (1 << 12);  // 4096 signals per pool batch
+
+    static auto*& pool = common::static_object<common::container::pool<signal_t>>::construct(
+        std::piecewise_construct, default_signal_pool_size, [](signal_t& signal) {
+            if(registration::get_fini_status() == 0) construct_hsa_signal(signal);
+        });
+
+    return pool;
+}
+
 queue_registry_t&
 get_queue_registry()
 {
@@ -43,57 +94,25 @@ get_queue_registry()
     return *_v;
 }
 
-doorbell_map_t&
-get_doorbell_map()
-{
-    static auto*& _v = common::static_object<doorbell_map_t>::construct();
-    return *_v;
-}
-
 queue_state_ptr_t
 lookup_queue_state(const hsa_queue_t* queue)
 {
-    queue_state_ptr_t result = {};
-    get_queue_registry().rlock([&](const auto& registry) {
-        auto it = registry.find(queue);
-        if(it != registry.end())
-        {
-            result = it->second;
-        }
+    return get_queue_registry().rlock([&](const auto& registry) -> queue_state_ptr_t {
+        if(auto it = registry.find(queue); it != registry.end()) return it->second;
+        return queue_state_ptr_t{};
     });
-    return result;
 }
 
 queue_state_ptr_t
 lookup_queue_state_by_doorbell(hsa_signal_t signal)
 {
-    queue_state_ptr_t result = {};
-    get_doorbell_map().rlock([&](const auto& doorbell_map) {
-        auto it = doorbell_map.find(signal.handle);
-        if(it != doorbell_map.end())
-        {
-            result = it->second.lock();
-        }
-    });
-    return result;
-}
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    const auto* _amd_signal = reinterpret_cast<amd_signal_t*>(signal.handle);
 
-void
-register_doorbell(const hsa_queue_t* queue, hsa_signal_t doorbell)
-{
-    auto state = lookup_queue_state(queue);
-    if(!state) return;
+    if(_amd_signal && _amd_signal->queue_ptr)
+        return lookup_queue_state(reinterpret_cast<const hsa_queue_t*>(_amd_signal->queue_ptr));
 
-    get_doorbell_map().wlock([&](auto& doorbell_map) { doorbell_map[doorbell.handle] = state; });
-}
-
-bool
-unregister_doorbell(hsa_signal_t doorbell)
-{
-    bool erased = false;
-    get_doorbell_map().wlock(
-        [&](auto& doorbell_map) { erased = (doorbell_map.erase(doorbell.handle) > 0); });
-    return erased;
+    return queue_state_ptr_t{};
 }
 
 uint64_t
@@ -176,6 +195,396 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
         tls_submit_pos++;
     }
 }
+
+internal_threading::task_group_t*
+get_async_signal_handler()
+{
+    static auto _v = internal_threading::create_task_group(4);
+    return _v.get();
+}
+
+bool
+context_filter(const context::context* ctx)
+{
+    return (ctx->is_tracing_one_of(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                   ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH));
+}
+
+template <typename Integral>
+Integral
+bit_extract(Integral x, int first, int last)
+{
+    static_assert(std::is_integral<Integral>::value, "Integral type required");
+
+    auto&& bit_mask = [](int _first, int _last) {
+        ROCP_FATAL_IF(!(_last >= _first)) << fmt::format(
+            "[queue::bit_extract::bit_mask] -> invalid argument. last (={}) is not >= first (={})",
+            _last,
+            _first);
+
+        size_t num_bits = _last - _first + 1;
+        return ((num_bits >= sizeof(Integral) * 8) ? ~Integral{0}
+                                                   /* num_bits exceed the size of Integral */
+                                                   : ((Integral{1} << num_bits) - 1))
+               << _first;
+    };
+
+    return (x >> first) & bit_mask(0, last - first);
+}
+
+void
+async_signal_handler(hsa_signal_t                            completion_signal,
+                     hsa_signal_value_t                      starting_value,
+                     std::shared_ptr<queue_info_session_t>&& session)
+{
+    constexpr auto timeout_hint =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::microseconds{10});
+
+    auto signal_value = starting_value;
+    auto niterations  = uint64_t{0};
+    while(true)
+    {
+        signal_value = get_core_table()->hsa_signal_wait_relaxed_fn(completion_signal,
+                                                                    HSA_SIGNAL_CONDITION_LT,
+                                                                    starting_value,
+                                                                    timeout_hint.count(),
+                                                                    HSA_WAIT_STATE_ACTIVE);
+
+        if(signal_value < starting_value || registration::get_fini_status() != 0) break;
+        ++niterations;
+    }
+    // auto signal_value = get_core_table()->hsa_signal_load_relaxed_fn(completion_signal);
+
+    ROCP_INFO << fmt::format("Async signal handler invoked for signal {{.handle={} / {:3}}} with "
+                             "value {} (original value={}, iterations={})",
+                             completion_signal.handle,
+                             completion_signal.handle % 1000,
+                             signal_value,
+                             starting_value,
+                             niterations);
+
+    for(auto& packet : session->packet_data)
+    {
+        auto dispatch_time = kernel_dispatch::get_dispatch_time(*session, packet);
+        kernel_dispatch::dispatch_complete(*session, packet, dispatch_time);
+
+        // if the completion signal was from the pool, we just release it back to the pool for
+        // reuse.
+        if(packet.pooled_signal)
+        {
+            Queue::release_signal(packet.pooled_signal);
+        }
+        else
+        {
+            // if the signal was not from the pool, we need to decrement the signal value to clean
+            // up the signal for the application
+            get_core_table()->hsa_signal_add_relaxed_fn(packet.completion_signal, -1);
+        }
+
+        // we need to decrement this reference count at the end of the functions
+        auto* _corr_id = session->correlation_id;
+        if(_corr_id)
+        {
+            ROCP_FATAL_IF(_corr_id->get_ref_count() == 0)
+                << "reference counter for correlation id " << _corr_id->internal << " from thread "
+                << _corr_id->thread_idx << " has no reference count";
+            _corr_id->sub_kern_count();
+            _corr_id->sub_ref_count();
+        }
+    }
+
+    session->queue.async_complete();
+}
+
+void
+write_interceptor(Queue*                                queue,
+                  const void*                           packets,
+                  uint64_t                              pkt_count,
+                  hsa_amd_queue_intercept_packet_writer writer)
+{
+    using callback_record_t = packet_data_t::callback_record_t;
+    using packet_vector_t   = common::container::small_vector<rocprofiler_packet, 512>;
+
+    if(registration::get_fini_status() > 0)
+    {
+        writer(packets, pkt_count);
+        return;
+    }
+
+    ROCP_INFO << fmt::format("write_interceptor called with pkt_count={}", pkt_count);
+
+    auto _contexts = context::get_active_contexts(context_filter);
+
+    // We have no packets or no one who needs to be notified, do nothing.
+    if(pkt_count == 0 || _contexts.empty())
+    {
+        writer(packets, pkt_count);
+        return;
+    }
+
+    // unique sequence id for the dispatch
+    static auto sequence_counter = std::atomic<rocprofiler_dispatch_id_t>{0};
+
+    const auto* packets_arr          = static_cast<const rocprofiler_packet*>(packets);
+    auto        num_dispatch_packets = size_t{0};
+    for(size_t i = 0; i < pkt_count; ++i)
+    {
+        const auto& original_packet = packets_arr[i].kernel_dispatch;
+        auto        packet_type     = bit_extract(original_packet.header,
+                                       HSA_PACKET_HEADER_TYPE,
+                                       HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+        if(packet_type == HSA_PACKET_TYPE_KERNEL_DISPATCH)
+        {
+            ++num_dispatch_packets;
+        }
+    }
+
+    if(num_dispatch_packets == 0)
+    {
+        writer(packets, pkt_count);
+        return;
+    }
+
+    auto tracing_data_v = tracing::tracing_data{};
+    tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                               ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                               tracing_data_v);
+
+    // all packets should have the same correlation id so we can just look at the first one to
+    // get the correlation id for the entire batch of packets
+    auto*                    corr_id      = context::get_latest_correlation_id();
+    context::correlation_id* _corr_id_pop = nullptr;
+
+    // Allocate a correlation id if we have at least one dispatch packet and we don't have a
+    // correlation id already. There will not be a correlation id if there is no API tracing but
+    // it was requested by tools to always provide one.
+    if(!corr_id)
+    {
+        constexpr auto ref_count = 1;
+        corr_id                  = context::correlation_tracing_service::construct(ref_count);
+        _corr_id_pop             = corr_id;
+    }
+
+    // During finalization, correlation tracing service will not construct a correlation id so
+    // just write packet through without tracing
+    if(!corr_id)
+    {
+        writer(packets, pkt_count);
+        return;
+    }
+
+    // if we constructed a correlation id, this decrements the reference count after the
+    // underlying function returns
+    auto _corr_id_dtor = common::scope_destructor{[_corr_id_pop]() {
+        if(_corr_id_pop)
+        {
+            context::pop_latest_correlation_id(_corr_id_pop);
+            _corr_id_pop->sub_ref_count();
+        }
+    }};
+
+    using packet_writer_fn_t = std::function<void(packet_vector_t &&)>;
+
+    auto process_packet_batch = [&queue, &corr_id, tracing_data_v](
+                                    const rocprofiler_packet* _packets,
+                                    uint64_t                  _num_packets,
+                                    const packet_writer_fn_t& _writer) {
+        static constexpr auto null_signal = hsa_signal_t{.handle = 0};
+
+        auto transformed_packets = packet_vector_t{};
+
+        auto thr_id           = (corr_id) ? corr_id->thread_idx : common::get_tid();
+        auto internal_corr_id = (corr_id) ? corr_id->internal : 0;
+        auto ancestor_corr_id = (corr_id) ? corr_id->ancestor : 0;
+
+        using packet_data_array_t = queue_info_session_t::packet_data_array_t;
+
+        auto _info_session = queue_info_session_t{.queue          = *queue,
+                                                  .tid            = thr_id,
+                                                  .enqueue_ts     = common::timestamp_ns(),
+                                                  .correlation_id = corr_id,
+                                                  .packet_data    = packet_data_array_t{}};
+
+        // mark the queue as having at least one packet which will be assigned a callback to
+        // AsyncSignalHandler. This is used to determine whether we need to wait for the signal
+        // handler to complete during finalization.
+        queue->async_started();
+
+        // Searching accross all the packets given during this write
+        for(size_t i = 0; i < _num_packets; ++i)
+        {
+            const auto& original_packet = _packets[i].kernel_dispatch;
+            auto        packet_type =
+                bit_extract(original_packet.header,
+                            HSA_PACKET_HEADER_TYPE,
+                            HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+            if(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+            {
+                transformed_packets.emplace_back(_packets[i]);
+                continue;
+            }
+
+            // increase the reference count to denote that this correlation id is being used in a
+            // kernel
+            corr_id->add_ref_count();
+            corr_id->add_kern_count();
+
+            auto _packet_data = packet_data_t{};
+
+            // make a copy of the tracing data
+            _packet_data.tracing_data = tracing_data_v;
+
+            tracing::populate_external_correlation_ids(
+                _packet_data.tracing_data.external_correlation_ids,
+                thr_id,
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
+                ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
+                internal_corr_id);
+
+            const uint64_t kernel_id = code_object::get_kernel_id(original_packet.kernel_object);
+            const auto     original_completion_signal = original_packet.completion_signal;
+            const auto     existing_completion_signal = (original_completion_signal != null_signal);
+
+            // Copy kernel pkt, copy is to allow for signal to be modified
+            _packet_data.kernel_packet = _packets[i];
+            // create a reference for short hand access
+            auto& kernel_packet     = _packet_data.kernel_packet;
+            auto& completion_signal = _packet_data.kernel_packet.kernel_dispatch.completion_signal;
+
+            auto create_signal = [](auto* signal) -> common::container::pool_object<signal_t>* {
+                if(auto* pool = get_signal_pool(); pool && signal->handle == 0)
+                {
+                    auto& _signal = pool->acquire(construct_hsa_signal, 0, 0, nullptr, 0);
+                    ROCP_FATAL_IF(!_signal.in_use())
+                        << "Acquired signal from pool that is not in use";
+                    ROCP_FATAL_IF(_signal.get().value == null_signal)
+                        << "Acquired signal from pool that has invalid handle";
+                    *CHECK_NOTNULL(signal) = _signal.get().value;
+                    return &_signal;
+                }
+                return nullptr;
+            };
+
+            // create our own signal that we can get a callback on. if there is an original
+            // completion signal we will create a barrier packet, assign the original completion
+            // signal that that barrier packet, and add it right after the kernel packet
+            if(!existing_completion_signal)
+                _packet_data.pooled_signal = create_signal(&completion_signal);
+
+            // increment the signal value
+            get_core_table()->hsa_signal_add_scacq_screl_fn(completion_signal, 1);
+
+            // set the completion signal to the kernel packet
+            _packet_data.completion_signal = completion_signal;
+
+            // computes the "size" based on the offset of reserved_padding field
+            constexpr auto kernel_dispatch_info_rt_size =
+                common::compute_runtime_sizeof<rocprofiler_kernel_dispatch_info_t>();
+
+            static_assert(kernel_dispatch_info_rt_size < sizeof(rocprofiler_kernel_dispatch_info_t),
+                          "failed to compute size field based on offset of reserved_padding field");
+
+            auto dispatch_id             = ++sequence_counter;
+            _packet_data.callback_record = callback_record_t{
+                sizeof(callback_record_t),
+                rocprofiler_timestamp_t{0},
+                rocprofiler_timestamp_t{0},
+                rocprofiler_kernel_dispatch_info_t{
+                    .size                 = kernel_dispatch_info_rt_size,
+                    .agent_id             = queue->get_agent().get_rocp_agent()->id,
+                    .queue_id             = queue->get_id(),
+                    .kernel_id            = kernel_id,
+                    .dispatch_id          = dispatch_id,
+                    .private_segment_size = kernel_packet.kernel_dispatch.private_segment_size,
+                    .group_segment_size   = kernel_packet.kernel_dispatch.group_segment_size,
+                    .workgroup_size =
+                        rocprofiler_dim3_t{kernel_packet.kernel_dispatch.workgroup_size_x,
+                                           kernel_packet.kernel_dispatch.workgroup_size_y,
+                                           kernel_packet.kernel_dispatch.workgroup_size_z},
+                    .grid_size = rocprofiler_dim3_t{kernel_packet.kernel_dispatch.grid_size_x,
+                                                    kernel_packet.kernel_dispatch.grid_size_y,
+                                                    kernel_packet.kernel_dispatch.grid_size_z},
+                    .reserved_padding = {0}}};
+
+            {
+                auto tracer_data = _packet_data.callback_record;
+                tracing::execute_phase_enter_callbacks(
+                    _packet_data.tracing_data.callback_contexts,
+                    thr_id,
+                    internal_corr_id,
+                    _packet_data.tracing_data.external_correlation_ids,
+                    ancestor_corr_id,
+                    ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                    ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
+                    tracer_data);
+            }
+
+            // map all the external correlation ids (after enqueue enter phase) for all the contexts
+            // captured by the info session
+            tracing::update_external_correlation_ids(
+                _packet_data.tracing_data.external_correlation_ids,
+                thr_id,
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
+
+            // Stores the instrumentation pkt (i.e. AQL packets for counter collection)
+            // along with an ID of the client we got the packet from (this will be returned via
+            // completed_cb_t)
+
+            // emplace the kernel packet
+            transformed_packets.emplace_back(kernel_packet);
+
+            ROCP_FATAL_IF(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+                << "get_kernel_id below might need to be updated";
+
+            {
+                auto tracer_data = _packet_data.callback_record;
+                tracing::execute_phase_exit_callbacks(
+                    _packet_data.tracing_data.callback_contexts,
+                    _packet_data.tracing_data.external_correlation_ids,
+                    ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                    ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
+                    tracer_data);
+            }
+
+            _info_session.packet_data.emplace_back(std::move(_packet_data));
+        }
+
+        if(!_info_session.packet_data.empty())
+        {
+            auto last_completion_signal = _info_session.packet_data.back().completion_signal;
+
+            ROCP_FATAL_IF(last_completion_signal == null_signal)
+                << "invalid completion signal in the last packet of the batch";
+
+            auto current_signal_value =
+                get_core_table()->hsa_signal_load_scacquire_fn(last_completion_signal);
+
+            ROCP_INFO << fmt::format(
+                "  Enqueued batch with completion signal {{.handle={} / {:3}}} with value {}",
+                last_completion_signal.handle,
+                last_completion_signal.handle % 1000,
+                current_signal_value);
+
+            auto _shared_info_session =
+                std::make_shared<queue_info_session_t>(std::move(_info_session));
+            get_async_signal_handler()->exec(
+                [_signal_v          = last_completion_signal,
+                 _expected_signal_v = current_signal_value,
+                 _session_v         = std::move(_shared_info_session)]() mutable {
+                    async_signal_handler(_signal_v, _expected_signal_v, std::move(_session_v));
+                });
+        }
+
+        _writer(std::move(transformed_packets));
+    };
+
+    ROCP_TRACE_IF(pkt_count > 1) << fmt::format(
+        "[{}] Batching packets. Number of packets = {}", __FUNCTION__, pkt_count);
+
+    process_packet_batch(packets_arr, pkt_count, [&writer](packet_vector_t&& _packets) {
+        writer(_packets.data(), _packets.size());
+    });
+}
 }  // namespace
 
 void
@@ -221,7 +630,9 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 
     if(queue)
     {
-        queue->invoke_write_interceptor(source_snapshot.data(), pkt_count, ring_buffer_writer);
+        // queue->invoke_write_interceptor(source_snapshot.data(), pkt_count, ring_buffer_writer);
+        write_interceptor(
+            const_cast<Queue*>(queue), source_snapshot.data(), pkt_count, ring_buffer_writer);
     }
     else
     {
@@ -258,45 +669,36 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 }
 
 void
-create_queue_state(const hsa_queue_t* queue,
-                   volatile uint64_t* wdid_addr,
-                   volatile uint64_t* rdid_addr)
+create_queue_state(const hsa_queue_t* queue)
 {
-    auto     state         = std::make_shared<QueueState>();
-    uint64_t current_wdid  = __atomic_load_n(wdid_addr, __ATOMIC_ACQUIRE);
-    state->ring_buf        = queue->base_address;
-    state->ring_size       = queue->size;
-    state->ring_mask       = queue->size - 1;
-    state->real_wdid       = wdid_addr;
-    state->real_rdid       = rdid_addr;
-    state->hsa_queue       = queue;
-    state->doorbell_signal = queue->doorbell_signal;
+    auto*              amd_queue = reinterpret_cast<amd_queue_t*>(const_cast<hsa_queue_t*>(queue));
+    auto               state     = std::make_shared<QueueState>();
+    volatile uint64_t* wdid_addr = &amd_queue->write_dispatch_id;
+    volatile uint64_t* rdid_addr = &amd_queue->read_dispatch_id;
+    uint64_t           current_wdid = __atomic_load_n(wdid_addr, __ATOMIC_ACQUIRE);
+    state->ring_buf                 = queue->base_address;
+    state->ring_size                = queue->size;
+    state->ring_mask                = queue->size - 1;
+    state->real_wdid                = wdid_addr;
+    state->real_rdid                = rdid_addr;
+    state->hsa_queue                = queue;
+    state->doorbell_signal          = queue->doorbell_signal;
     state->virtual_wptr.store(current_wdid, std::memory_order_relaxed);
     state->next_scan_pos   = current_wdid;
     state->next_submit_pos = current_wdid;
 
     get_queue_registry().wlock([&](auto& map) { map[queue] = state; });
-    get_doorbell_map().wlock([&](auto& map) { map[queue->doorbell_signal.handle] = state; });
 }
 
 void
 destroy_queue_state(const hsa_queue_t* queue)
 {
-    hsa_signal_t      doorbell = {0};
-    queue_state_ptr_t doomed   = {};
-    get_queue_registry().wlock([&](auto& map) {
-        auto it = map.find(queue);
-        if(it == map.end())
-        {
-            return;
-        }
-        doomed = it->second;
-        if(doomed) doorbell = doomed->doorbell_signal;
-        map.erase(it);
-    });
-
-    if(!doomed) return;
-    if(doorbell.handle != 0) unregister_doorbell(doorbell);
+    get_queue_registry().wlock(
+        [&](auto& map, const auto* _queue_v) {
+            auto itr = map.find(_queue_v);
+            if(itr != map.end()) map.erase(itr);
+        },
+        queue);
 }
 
 namespace
@@ -510,7 +912,6 @@ wrap_signal_store_screlease(hsa_signal_t sig, hsa_signal_value_t val)
     }
     s_next_table.hsa_signal_store_screlease_fn(sig, val);
 }
-
 }  // namespace
 
 bool
@@ -522,10 +923,26 @@ is_intercepting_inline()
 void
 shutdown_intercept()
 {
+    sync();
+
     s_intercept_installed.store(false, std::memory_order_release);
 
     get_queue_registry().wlock([](auto& map) { map.clear(); });
-    get_doorbell_map().wlock([](auto& map) { map.clear(); });
+}
+
+void
+sync()
+{
+    if(auto* tg = get_async_signal_handler())
+    {
+        tg->join();
+    }
+
+    if(auto* pool = get_signal_pool(); pool != nullptr)
+    {
+        ROCP_WARNING << pool->get_usage_report();
+        pool->clear([](auto& signal) { Queue::destroy_signal(&signal); });
+    }
 }
 
 void
@@ -558,7 +975,6 @@ install_intercept(CoreApiTable& core_table)
 
     s_intercept_installed.store(true, std::memory_order_release);
 }
-
 }  // namespace queue_intercept
 }  // namespace hsa
 }  // namespace rocprofiler

@@ -251,8 +251,7 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
     });
 
     // Register queue state for SDK-level write pointer interception
-    auto* amd_q = reinterpret_cast<amd_queue_t*>(id);
-    queue_intercept::create_queue_state(id, &amd_q->write_dispatch_id, &amd_q->read_dispatch_id);
+    queue_intercept::create_queue_state(id);
 }
 
 void
@@ -566,6 +565,9 @@ queue_controller_init(HsaApiTable* table)
 void
 queue_controller_sync()
 {
+    // sync the queue interceptor
+    if(queue_intercept::is_intercepting_inline()) queue_intercept::sync();
+
     if(get_queue_controller())
         get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
 }
@@ -573,8 +575,8 @@ queue_controller_sync()
 void
 queue_controller_fini()
 {
-    if(get_queue_controller())
-        get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
+    // synchronize first
+    queue_controller_sync();
 
     // finalize queue data (e.g. clean up signal pool)
     if(enable_queue_intercept()) queue_fini();
