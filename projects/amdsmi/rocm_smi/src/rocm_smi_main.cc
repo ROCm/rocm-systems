@@ -1341,12 +1341,12 @@ uint32_t RocmSMI::DiscoverBRCMswitchDevices(void) {
     // each identified switch node is a primary node for
     // potential matching unique ids
     std::vector<char> buf(512);
-    ssize_t len;
+    size_t len;
 
     do {
       buf.resize(buf.size() + 100);
-      len = ::readlink(path.c_str(), &(buf[0]), buf.size());
-    } while (static_cast<ssize_t>(buf.size()) == len);
+      len = static_cast<size_t>(::readlink(path.c_str(), &(buf[0]), buf.size()));
+    } while (buf.size() == len);
 
     if (len > 0) {
       buf[static_cast<size_t>(len)] = '\0';
