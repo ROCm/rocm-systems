@@ -60,7 +60,7 @@ n/a (additive)
 
 ## Prior art
 
-NVIDIA nvidia-smi thermal sensor usage in nsys reports.
+Vendor GPU thermal sensor usage in profiler reports.
 
 ## Approval checklist
 
