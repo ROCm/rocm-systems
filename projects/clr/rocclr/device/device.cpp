@@ -346,44 +346,6 @@ std::map<MemObjMap::IpcMemHandle, amd::Memory*> MemObjMap::IpcHandleMemObjMap_ R
 
 thread_local int MemObjMap::svmFreeMapBatchDepth_ = 0;
 
-amd::Memory* MemObjMap::findMemObjUnlocked(const void* k, size_t* offset, Device* dev) {
-  uintptr_t key = reinterpret_cast<uintptr_t>(k);
-  auto it = MemObjMap_.upper_bound(key);
-  if (it == MemObjMap_.begin()) {
-    return nullptr;
-  }
-
-  --it;
-  amd::Memory* mem = it->second;
-  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM) ? sizeof(mem->getUserData().hsa_handle)
-                                                             : mem->getSize();
-  if (key < it->first || key >= (it->first + mem_size)) {
-    return nullptr;
-  }
-  if (offset != nullptr) {
-    *offset = key - it->first;
-  }
-  if (dev != nullptr && mem->getDeviceMemory(*dev, false) == nullptr) {
-    return nullptr;
-  }
-  return mem;
-}
-
-amd::Memory* MemObjMap::findVirtualMemObjUnlocked(const void* k) {
-  uintptr_t key = reinterpret_cast<uintptr_t>(k);
-  auto it = VirtualMemObjMap_.upper_bound(key);
-  if (it == VirtualMemObjMap_.begin()) {
-    return nullptr;
-  }
-
-  --it;
-  amd::Memory* mem = it->second;
-  if (key >= it->first && key < (it->first + mem->getSize())) {
-    return mem;
-  }
-  return nullptr;
-}
-
 void MemObjMap::AddMemObj(const void* k, amd::Memory* v) {
   runWithUniqueAllocLock([&] {
     auto rval = MemObjMap_.insert({reinterpret_cast<uintptr_t>(k), v});
@@ -402,7 +364,32 @@ void MemObjMap::RemoveMemObj(const void* k) {
 }
 
 amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
-  return runWithSharedAllocLock([&] { return findMemObjUnlocked(k, offset, dev); });
+  return runWithSharedAllocLock([&]() -> amd::Memory* {
+    uintptr_t key = reinterpret_cast<uintptr_t>(k);
+
+    // First search the global map
+    auto it = MemObjMap_.upper_bound(key);
+    if (it != MemObjMap_.begin()) {
+      --it;
+      amd::Memory* mem = it->second;
+      size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+                            ? sizeof(mem->getUserData().hsa_handle)
+                            : mem->getSize();
+      if (key >= it->first && key < (it->first + mem_size)) {
+        if (offset != nullptr) {
+          *offset = key - it->first;
+        }
+        return mem;
+      }
+    }
+
+    // Search per-device va maps on Windows (due to overlapping ranges)
+    if (IS_WINDOWS && dev != nullptr) {
+      return dev->FindDevMemObj(k, offset);
+    }
+
+    return nullptr;
+  });
 }
 
 void MemObjMap::UpdateAccess(amd::Device* peerDev) {
@@ -451,13 +438,14 @@ void MemObjMap::Purge(amd::Device* dev) {
 }
 
 void MemObjMap::AddVirtualMemObj(const void* k, amd::Memory* v) {
-  std::unique_lock lock(AllocatedLock_);
-  auto rval = VirtualMemObjMap_.insert({reinterpret_cast<uintptr_t>(k), v});
-  if (!rval.second) {
-    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-            "Virtual Memobj map already has an entry for ptr: 0x%x",
-            reinterpret_cast<uintptr_t>(k));
-  }
+  runWithUniqueAllocLock([&] {
+    auto rval = VirtualMemObjMap_.insert({reinterpret_cast<uintptr_t>(k), v});
+    if (!rval.second) {
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+              "Virtual Memobj map already has an entry for ptr: 0x%x",
+              reinterpret_cast<uintptr_t>(k));
+    }
+  });
 }
 
 void MemObjMap::RemoveVirtualMemObj(const void* k) {
@@ -469,16 +457,32 @@ void MemObjMap::RemoveVirtualMemObj(const void* k) {
 }
 
 amd::Memory* MemObjMap::FindVirtualMemObj(const void* k) {
-  return runWithSharedAllocLock([&] { return findVirtualMemObjUnlocked(k); });
+  return runWithSharedAllocLock([&]() -> amd::Memory* {
+    uintptr_t key = reinterpret_cast<uintptr_t>(k);
+    auto it = VirtualMemObjMap_.upper_bound(key);
+    if (it == VirtualMemObjMap_.begin()) {
+      return nullptr;
+    }
+
+    --it;
+    amd::Memory* mem = it->second;
+    if (key >= it->first && key < (it->first + mem->getSize())) {
+      // the k is in the range
+      return mem;
+    } else {
+      return nullptr;
+    }
+  });
 }
 
 void MemObjMap::AddIpcHandleMemObj(const IpcMemHandle& k, amd::Memory* v) {
-  std::unique_lock lock(AllocatedLock_);
-  auto rval = IpcHandleMemObjMap_.insert({k, v});
-  if (!rval.second) {
-    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-        "Error adding entry for Memobj 0x%x in IpcHandle map. The handle already exists.", v);
-  }
+  runWithUniqueAllocLock([&] {
+    auto rval = IpcHandleMemObjMap_.insert({k, v});
+    if (!rval.second) {
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+          "Error adding entry for Memobj 0x%x in IpcHandle map. The handle already exists.", v);
+    }
+  });
 }
 
 void MemObjMap::RemoveIpcHandleMemObj(amd::Memory* v) {
@@ -493,14 +497,14 @@ void MemObjMap::RemoveIpcHandleMemObj(amd::Memory* v) {
 }
 
 amd::Memory* MemObjMap::FindIpcHandleMemObj(const IpcMemHandle& k) {
-  std::shared_lock lock(AllocatedLock_);
+  return runWithSharedAllocLock([&]() -> amd::Memory* {
+    auto it = IpcHandleMemObjMap_.find(k);
+    if (it == IpcHandleMemObjMap_.cend()) {
+      return nullptr;
+    }
 
-  auto it = IpcHandleMemObjMap_.find(k);
-  if (it == IpcHandleMemObjMap_.cend()) {
-    return nullptr;
-  }
-
-  return it->second;
+    return it->second;
+  });
 }
 
 //==================================================================================================
@@ -1054,8 +1058,6 @@ char* Device::getExtensionString() {
 bool Device::IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* mem_offset) const {
   amd::Memory* amd_mem_obj = amd::MemObjMap::FindMemObj(dev_ptr);
   if (amd_mem_obj == nullptr) {
-    LogPrintfError("[DEVICE][IpcCreate] PID: %d, TID: %lu, Ptr: %p - FAILED FindMemObj ",
-      getpid(), (unsigned long)pthread_self(), dev_ptr);
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
              "Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
     return false;
@@ -1211,19 +1213,21 @@ void Device::ClearHostcallMemories() { hostcall_allocated_memories_.clear(); }
 
 // ================================================================================================
 void Device::AddDevMemObj(const void* k, amd::Memory* memObj) {
-  std::unique_lock lock(MemObjMap::AllocatedLock_);
-  auto rval = devMemObjMap_.insert({reinterpret_cast<uintptr_t>(k), memObj});
-  if (!rval.second) {
-    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-            "Device memobj map already has an entry for VA: 0x%llx",
-            reinterpret_cast<uintptr_t>(k));
-  }
+  MemObjMap::runWithUniqueAllocLock([&] {
+    auto rval = devMemObjMap_.insert({reinterpret_cast<uintptr_t>(k), memObj});
+    if (!rval.second) {
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+              "Device memobj map already has an entry for VA: 0x%llx",
+              reinterpret_cast<uintptr_t>(k));
+    }
+  });
 }
 
 // ================================================================================================
 void Device::RemoveDevMemObj(const void* k) {
-  std::unique_lock lock(MemObjMap::AllocatedLock_);
-  devMemObjMap_.erase(reinterpret_cast<uintptr_t>(k));
+  MemObjMap::runWithUniqueAllocLock([&] {
+    devMemObjMap_.erase(reinterpret_cast<uintptr_t>(k));
+  });
 }
 
 // ================================================================================================
