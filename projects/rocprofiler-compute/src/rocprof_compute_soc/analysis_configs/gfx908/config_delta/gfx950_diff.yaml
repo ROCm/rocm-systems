@@ -1077,7 +1077,7 @@ Modification:
   metric_table:
     id: 301
     metrics:
-    - MFMA:
+    - Matrix Ops:
         value: ROUND(SUM(SQ_INSTS_MFMA) / SUM($denom), 0)
     - Wavefronts:
         value: ROUND(AVG(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE), 0)
@@ -1206,8 +1206,8 @@ Modification:
         unit: Gbps
     - Remote Write and Atomic Traffic:
         avg: SUM(100 * NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum)) / SUM(TCC_EA0_WRREQ_sum)
-        min: MIN((100 * NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum / TCC_EA0_WRREQ_sum))
-        max: MAX((100 * NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum / TCC_EA0_WRREQ_sum))
+        min: MIN(100 * NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum) / TCC_EA0_WRREQ_sum)
+        max: MAX(100 * NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum) / TCC_EA0_WRREQ_sum)
 - Panel Config:
     id: 1700
   metric_table:
