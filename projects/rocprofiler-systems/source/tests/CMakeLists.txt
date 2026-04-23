@@ -18,7 +18,6 @@ list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-nic-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-cpu-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:procfs-driver-tests>)
 
-
 add_executable(rocprof-sys-unit-tests ${UNIT_TEST_OBJECTS})
 
 target_link_libraries(
