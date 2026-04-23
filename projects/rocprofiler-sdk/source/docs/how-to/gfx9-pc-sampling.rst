@@ -101,7 +101,7 @@ Arbiter state
 
 The arbiter state (``arbiter_state_*`` or ``arb_state_*``) describes the arbiter activity during the sampled cycle. These variables can be used to analyze each pipeline activity and the overall CU utilization.
 
-- ``arbiter_state_issue_PIPE``: Indicates whether the arbiter picked any instruction from the ready instructions of all active waves, implying that the waves weren't blocked from issuing an instruction for execution on the given execution pipeline due to reasons such as NO_INSTRUCTION_AVAILABLE, ALU_DEPENDENCY, WAITCNT, INTERNAL_INSTRUCTION, or BARRIER_WAIT. Note that, PIPE is the execution pipeline responsible for servicing the instruction type of the sampled wave.
+- ``arbiter_state_issue_PIPE``: Indicates whether the arbiter picked any instruction from the ready instructions of all active waves, implying that the waves weren't blocked from issuing an instruction for execution on the given execution pipeline due to reasons such as NO_INSTRUCTION_AVAILABLE, ALU_DEPENDENCY, WAITCNT, INTERNAL_INSTRUCTION, or BARRIER_WAIT. Note that PIPE is the execution pipeline responsible for servicing the instruction type of the sampled wave.
 
 - ``arbiter_state_stall_PIPE``: Indicates whether a given execution pipeline backpressured an issued instruction, implying that the pipeline couldn't accept the instruction and the arbiter will try issuing it again in a later cycle.
 
