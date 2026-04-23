@@ -2217,7 +2217,6 @@ testResult_t run() {
   finalizeFooter();
 
 #ifdef MPI_SUPPORT
-  MPI_Barrier(mpi_comm);   // Synchronize all ranks
   MPI_Comm_free(&mpi_comm);
   MPI_Finalize();
 #endif
