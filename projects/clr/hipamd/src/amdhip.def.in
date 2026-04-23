@@ -535,3 +535,4 @@ hipKernelSetAttribute
 hipKernelGetFunction
 hipOccupancyMaxPotentialClusterSize
 hipOccupancyMaxActiveClusters
+@HSA_EXPORTS@

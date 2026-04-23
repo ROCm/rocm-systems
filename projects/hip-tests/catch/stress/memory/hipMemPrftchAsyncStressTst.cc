@@ -87,6 +87,9 @@ HIP_TEST_CASE(Stress_hipMemPrefetchAsyncOneToAll) {
           INFO("Did not find expected value!");
           REQUIRE(false);
         }
+        for (int m = 0; m < NumElms; ++m) {
+          Hmm1[m] = InitVal;
+        }
         // Prefetching memory from j to i
         HIP_CHECK(hipMemPrefetchAsync(Hmm1, MemSz, i, strm));
         HIP_CHECK(hipStreamSynchronize(strm));
@@ -102,6 +105,9 @@ HIP_TEST_CASE(Stress_hipMemPrefetchAsyncOneToAll) {
           ReleaseResource(Hmm1, &strm);
           INFO("Did not find expected value!");
           REQUIRE(false);
+        }
+        for (int m = 0; m < NumElms; ++m) {
+          Hmm1[m] = InitVal;
         }
 
         HIP_CHECK(hipStreamDestroy(strm));

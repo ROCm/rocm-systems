@@ -10,6 +10,7 @@ on:
     paths:
       - '.github/workflows/rocprofiler-systems-ghcr.yml'
       - 'projects/rocprofiler-systems/docker/**'
+      - 'projects/rocprofiler-systems/requirements.txt'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -23,6 +24,7 @@ on:
     paths:
       - '.github/workflows/rocprofiler-systems-ghcr.yml'
       - 'projects/rocprofiler-systems/docker/**'
+      - 'projects/rocprofiler-systems/requirements.txt'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -73,7 +75,7 @@ jobs:
           submodules: recursive
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -123,8 +125,9 @@ jobs:
       - name: Build CI GFX Container (Does not Push on PR)
         id: docker_build
         continue-on-error: true
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
+          context: projects/rocprofiler-systems
           file: projects/rocprofiler-systems/docker/${{ steps.setup_vars_gfx.outputs.docker_file }}
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
@@ -144,8 +147,9 @@ jobs:
       # Retry a copy of docker_build if Docker build failed due to intermittent failure
       - name: Build CI GFX Container Retry (Does not Push on PR)
         if: steps.docker_build.outcome != 'success'
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
+          context: projects/rocprofiler-systems
           file: projects/rocprofiler-systems/docker/${{ steps.setup_vars_gfx.outputs.docker_file }}
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
