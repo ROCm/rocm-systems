@@ -30,7 +30,7 @@ The following table lists the stall reasons:
     - The wave is stalled waiting for instructions. For example, at the branch target, I$ miss, and others.
 
   * - ALU_DEPENDENCY
-    - The sampled wave's instruction couldn't be issued due to an internal hardware dependency, such as inter-pipeline dependencies or data hazards. For more information, see 4.4 Data dependency resolution in `CDNA3 instruction set architecture <https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-mi300-cdna3-instruction-set-architecture.pdf>`_ or `CDNA4 instruction set architecture <https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf>`_.
+    - The sampled wave's instruction couldn't be issued due to an internal hardware dependency, such as an inter-pipeline dependency or a data hazard. For more information, see 4.4 Data dependency resolution in `CDNA3 instruction set architecture <https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-mi300-cdna3-instruction-set-architecture.pdf>`_ or `CDNA4 instruction set architecture <https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf>`_.
 
   * - WAITCNT
     - The sampled wave is waiting due to memory dependency (``waitcnt``).
