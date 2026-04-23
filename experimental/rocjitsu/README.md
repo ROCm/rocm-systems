@@ -1,5 +1,7 @@
 # rocjitsu: ROCm&trade; Just-in-Time Suite
 
+[![rocjitsu CI](https://github.com/ROCm/rocm-systems/actions/workflows/rocjitsu-ci.yml/badge.svg)](https://github.com/ROCm/rocm-systems/actions/workflows/rocjitsu-ci.yml)
+
 rocjitsu is a set of simulation, virtualization, and instrumentation tools for ROCm&trade; AMD GPU
 applications.
 
