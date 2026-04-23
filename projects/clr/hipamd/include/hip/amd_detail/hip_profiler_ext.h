@@ -113,12 +113,36 @@ typedef struct HipGpuActivityExt {
     const char* kernel_name;    /**< Kernel name        (op==HIP_OP_DISPATCH_EXT, may be NULL) */
   };
   /* Originally _pad1[96].  First 16 bytes repurposed for multi-op linked list;
-   * remaining 80 bytes stay reserved and must be treated as zero. */
+   * next 40 bytes repurposed for op-specific payload (dispatch dims/args or copy src/dst);
+   * remaining 40 bytes stay reserved and must be treated as zero by external callers. */
   uint32_t                   gpu_op_count; /**< Total GPU ops (0=none, 1=in gpu field, >1=graph) */
   uint32_t                   _reserved_u32;/**< Reserved — must be zero */
   const struct HipGpuActivityExt* next;    /**< Next spill node (ops 2..N); NULL at tail or when
                                                  gpu_op_count <= 1.  rec->gpu.next is the head. */
-  uint8_t     _pad1[80];                   /**< Remaining reserved padding — must be zero */
+  /* Op-specific payload — 40 bytes, two arms sharing the same storage. */
+  union {
+    struct { /* op==HIP_OP_DISPATCH_EXT: grid/block dims and kernel arg blob.
+              * Dims are valid when launched from a single hipLaunchKernel or a graph node
+              * captured at hipGraphInstantiate time; zero for barriers/copies. */
+      uint32_t    grid_x;          /**< Grid X (number of blocks) */
+      uint32_t    grid_y;          /**< Grid Y */
+      uint32_t    grid_z;          /**< Grid Z */
+      uint32_t    block_x;         /**< Block X (threads per block) */
+      uint32_t    block_y;         /**< Block Y */
+      uint32_t    block_z;         /**< Block Z */
+      const uint8_t* kernel_args;  /**< Packed arg blob, or NULL.  Owned by the profiler. */
+      uint32_t    kernel_args_size;/**< Byte length of kernel_args blob */
+      uint32_t    _reserved_dispatch; /**< Reserved — must be zero */
+    };
+    struct { /* op==HIP_OP_COPY_EXT: source and destination addresses.
+              * Populated for both direct copies and graph copy nodes captured at
+              * hipGraphInstantiate time.  NULL when address is unavailable. */
+      const void* src;             /**< Source address (host or device) */
+      const void* dst;             /**< Destination address (host or device) */
+      uint8_t     _reserved_copy[24]; /**< Reserved — must be zero */
+    };
+  };
+  uint8_t     _pad1[40];           /**< Remaining reserved padding — must be zero */
 } HipGpuActivityExt;
 #ifdef __cplusplus
 static_assert(sizeof(HipGpuActivityExt) == 128, "HipGpuActivityExt must be 128 bytes");
@@ -134,8 +158,13 @@ static_assert(sizeof(HipGpuActivityExt) == 128, "HipGpuActivityExt must be 128 b
  * first GPU operation.  gpu.gpu_op_count gives the total count; for graph launches
  * with more than one op, gpu.next is the head of the spill linked list (ops 2..N).
  *
- * Fixed size: 256 bytes (48-byte CPU header + 8-byte _spill_tail + 24-byte dims +
+ * Fixed size: 256 bytes (48-byte CPU header + 8-byte _spill_tail + 24-byte memory ptrs +
  *             48-byte pad + 128-byte HipGpuActivityExt).
+ *
+ * Dispatch grid/block dims and kernel argument blobs are stored in the HipGpuActivityExt
+ * dispatch union arm (grid_x/y/z, block_x/y/z, kernel_args, kernel_args_size).
+ * Copy source/destination addresses are stored in the copy union arm (src, dst).
+ * Both are available per-GPU-op for direct launches and graph nodes.
  */
 typedef struct {
   /* CPU call info — first 128-byte half */
@@ -155,42 +184,17 @@ typedef struct {
    * runtime to achieve O(1) append without scanning to the end of the list.
    * Callers must treat this field as opaque and must not read or write it. */
   const struct HipGpuActivityExt* _spill_tail; /**< Internal — do not use */
-  /* Kernel dispatch dimensions — valid when has_gpu_activity != 0 and the
-   * API is a single kernel launch.  Zero for memory copies, barriers, and
-   * graph launches (per-node dims are not available at the API call level). */
-  union {
-    struct {
-      uint32_t grid_x;   /**< Grid X (number of blocks) */
-      uint32_t grid_y;   /**< Grid Y */
-      uint32_t grid_z;   /**< Grid Z */
-      uint32_t block_x;  /**< Block X (threads per block) */
-      uint32_t block_y;  /**< Block Y */
-      uint32_t block_z;  /**< Block Z */
-    };
-    struct {
-      void*    memory1;  /**< Dst/allocated ptr for memory ops (bytes 0–7, overlaps grid_x/y) */
-      void*    memory2;  /**< Src ptr for copies (bytes 8–15, overlaps grid_z/block_x) */
-      uint64_t size;     /**< Bytes for allocs/copies/sets (bytes 16–23, overlaps block_y/z) */
-    };
-  };
-  /* Kernel argument blob — valid when api_name refers to a kernel launch and
-   * kernel_args != NULL.  The blob is a flat byte buffer containing one record
-   * per user-visible kernel argument (hidden/implicit arguments excluded),
-   * laid out in parameter index order.  Each record has the form:
-   *
-   *   uint32_t  value_size;        // byte size of the argument value
-   *   uint8_t   value[value_size]; // raw little-endian argument bytes
-   *
-   * kernel_args_size is the total byte length of the blob.
-   *
-   * Lifetime: the buffer is owned by the profiler and is valid for the
-   * lifetime of the process (freed when the profiler shuts down).
-   * Callers must not free or modify it. */
-  const uint8_t*    kernel_args;       /**< Packed arg blob, or NULL */
-  uint32_t          kernel_args_size;  /**< Byte length of kernel_args blob */
+  /* Memory operation pointers and size.
+   * memory1: destination/allocated pointer (hipMalloc, hipMemcpy dst, hipGraphLaunch exec handle).
+   * memory2: source pointer for copies.
+   * size:    byte count for allocations, copies, and memsets.
+   * Zero for kernel launches and other non-memory APIs. */
+  void*    memory1;  /**< Dst/allocated ptr for memory ops, or graphExec for hipGraphLaunch */
+  void*    memory2;  /**< Src ptr for copies */
+  uint64_t size;     /**< Bytes for allocs/copies/sets */
   /* Remaining padding to complete the 128-byte CPU half.
    * Reserved — must be treated as zero by callers. */
-  uint8_t           _pad1[36];
+  uint8_t           _pad1[48];
   /* GPU activity — second 128-byte half (valid when has_gpu_activity != 0) */
   HipGpuActivityExt gpu;
 } HipApiRecordExt;

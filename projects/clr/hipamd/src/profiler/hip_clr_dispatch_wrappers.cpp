@@ -16,8 +16,10 @@
 #include "hip/amd_detail/hip_api_trace.hpp"
 #include "hip_clr_profiler.hpp"
 #include "rocclr/os/os.hpp"
+#include "../hip_global.hpp"
 
 #include <atomic>
+#include <vector>
 
 static inline uint64_t NowNs() { return amd::Os::timeNanos(); }
 
@@ -779,12 +781,12 @@ static hipError_t hipExtLaunchKernelLayer(const void* function_address, dim3 num
                                            hipEvent_t stopEvent, int flags) {
   auto* _rec = HipGetActiveRecordExt(85u);
   _rec->stream = stream;
-  _rec->grid_x = numBlocks.x; _rec->grid_y = numBlocks.y; _rec->grid_z = numBlocks.z;
-  _rec->block_x = dimBlocks.x; _rec->block_y = dimBlocks.y; _rec->block_z = dimBlocks.z;
+  _rec->gpu.grid_x = numBlocks.x; _rec->gpu.grid_y = numBlocks.y; _rec->gpu.grid_z = numBlocks.z;
+  _rec->gpu.block_x = dimBlocks.x; _rec->gpu.block_y = dimBlocks.y; _rec->gpu.block_z = dimBlocks.z;
   if (args) {
     hipFunction_t hfunc = nullptr;
     if (g_next.hipGetFuncBySymbol_fn(&hfunc, function_address) == hipSuccess)
-      HipCaptureKernelArgsExt(_rec, hfunc, args);
+      HipCaptureKernelArgsExt(&_rec->gpu, hfunc, args);
   }
   auto _r = g_next.hipExtLaunchKernel_fn(function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream, startEvent, stopEvent, flags);
   _rec->end_ns = NowNs();
@@ -1316,6 +1318,7 @@ static hipError_t hipGraphExecChildGraphNodeSetParamsLayer(hipGraphExec_t hGraph
 // api_id = 144
 static hipError_t hipGraphExecDestroyLayer(hipGraphExec_t graphExec) {
   auto* _rec = HipGetActiveRecordExt(144u);
+  HipEraseGraphExecNodesExt(graphExec);
   auto _r = g_next.hipGraphExecDestroy_fn(graphExec);
   _rec->end_ns = NowNs();
   return _r;
@@ -1468,6 +1471,72 @@ static hipError_t hipGraphHostNodeSetParamsLayer(hipGraphNode_t node,
   return _r;
 }
 
+// Map hipMemcpyKind + array/rect flags to HipCopyKindExt.
+static HipCopyKindExt GraphMemcpyKindToExt(hipMemcpyKind kind,
+                                            bool src_is_array, bool dst_is_array,
+                                            bool is_rect) {
+  switch (kind) {
+    case hipMemcpyHostToDevice:
+      return dst_is_array ? HIP_COPY_KIND_H2D_IMAGE_EXT
+           : is_rect      ? HIP_COPY_KIND_H2D_RECT_EXT
+                          : HIP_COPY_KIND_H2D_EXT;
+    case hipMemcpyDeviceToHost:
+      return src_is_array ? HIP_COPY_KIND_D2H_IMAGE_EXT
+           : is_rect      ? HIP_COPY_KIND_D2H_RECT_EXT
+                          : HIP_COPY_KIND_D2H_EXT;
+    case hipMemcpyDeviceToDevice:
+      if (src_is_array && dst_is_array) return HIP_COPY_KIND_D2D_IMAGE_EXT;
+      if (dst_is_array) return HIP_COPY_KIND_BUFFER_TO_IMAGE_EXT;
+      if (src_is_array) return HIP_COPY_KIND_IMAGE_TO_BUFFER_EXT;
+      return is_rect ? HIP_COPY_KIND_D2D_RECT_EXT : HIP_COPY_KIND_D2D_EXT;
+    default:
+      return HIP_COPY_KIND_UNKNOWN_EXT;
+  }
+}
+
+// Capture kernel and memcpy node info from a graph, store per graphExec.
+// Called after a successful hipGraphInstantiate* — pGraphExec is already set.
+static void CaptureGraphExecNodes(hipGraphExec_t exec, hipGraph_t graph) {
+  if (!exec || !graph) return;
+  size_t numNodes = 0;
+  g_next.hipGraphGetNodes_fn(graph, nullptr, &numNodes);
+  if (numNodes == 0) return;
+  std::vector<hipGraphNode_t> gnodes(numNodes);
+  g_next.hipGraphGetNodes_fn(graph, gnodes.data(), &numNodes);
+  std::vector<HipGraphNodeInfoExt> infos;
+  for (auto gnode : gnodes) {
+    hipGraphNodeType type = hipGraphNodeTypeCount;
+    if (g_next.hipGraphNodeGetType_fn(gnode, &type) != hipSuccess) continue;
+    if (type == hipGraphNodeTypeKernel) {
+      hipKernelNodeParams kp{};
+      if (g_next.hipGraphKernelNodeGetParams_fn(gnode, &kp) != hipSuccess) continue;
+      if (!kp.func) continue;
+      hipFunction_t hfunc = nullptr;
+      if (g_next.hipGetFuncBySymbol_fn(&hfunc, kp.func) != hipSuccess || !hfunc) continue;
+      HipGraphNodeInfoExt info;
+      info.op      = HIP_OP_DISPATCH_EXT;
+      info.grid_x  = kp.gridDim.x;  info.grid_y  = kp.gridDim.y;  info.grid_z  = kp.gridDim.z;
+      info.block_x = kp.blockDim.x; info.block_y = kp.blockDim.y; info.block_z = kp.blockDim.z;
+      HipCaptureGraphNodeArgsExt(&info, hfunc, kp.kernelParams);
+      if (!info.kernel_name.empty()) infos.push_back(std::move(info));
+    } else if (type == hipGraphNodeTypeMemcpy) {
+      hipMemcpy3DParms mp{};
+      if (g_next.hipGraphMemcpyNodeGetParams_fn(gnode, &mp) != hipSuccess) continue;
+      bool src_arr = (mp.srcArray != nullptr);
+      bool dst_arr = (mp.dstArray != nullptr);
+      bool is_rect = (mp.extent.height > 1 || mp.extent.depth > 1);
+      HipGraphNodeInfoExt info;
+      info.op        = HIP_OP_COPY_EXT;
+      info.src       = src_arr ? nullptr : mp.srcPtr.ptr;
+      info.dst       = dst_arr ? nullptr : mp.dstPtr.ptr;
+      info.bytes     = mp.extent.width * mp.extent.height * mp.extent.depth;
+      info.copy_kind = GraphMemcpyKindToExt(mp.kind, src_arr, dst_arr, is_rect);
+      infos.push_back(std::move(info));
+    }
+  }
+  if (!infos.empty()) HipStoreGraphExecNodesExt(exec, std::move(infos));
+}
+
 // api_id = 160
 static hipError_t hipGraphInstantiateLayer(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                             hipGraphNode_t* pErrorNode, char* pLogBuffer,
@@ -1475,6 +1544,8 @@ static hipError_t hipGraphInstantiateLayer(hipGraphExec_t* pGraphExec, hipGraph_
   auto* _rec = HipGetActiveRecordExt(160u);
   auto _r = g_next.hipGraphInstantiate_fn(pGraphExec, graph, pErrorNode, pLogBuffer, bufferSize);
   _rec->end_ns = NowNs();
+  if (_r == hipSuccess && pGraphExec && *pGraphExec)
+    CaptureGraphExecNodes(*pGraphExec, graph);
   return _r;
 }
 
@@ -1484,6 +1555,8 @@ static hipError_t hipGraphInstantiateWithFlagsLayer(hipGraphExec_t* pGraphExec, 
   auto* _rec = HipGetActiveRecordExt(161u);
   auto _r = g_next.hipGraphInstantiateWithFlags_fn(pGraphExec, graph, flags);
   _rec->end_ns = NowNs();
+  if (_r == hipSuccess && pGraphExec && *pGraphExec)
+    CaptureGraphExecNodes(*pGraphExec, graph);
   return _r;
 }
 
@@ -1493,6 +1566,8 @@ static hipError_t hipGraphInstantiateWithParamsLayer(hipGraphExec_t* pGraphExec,
   auto* _rec = HipGetActiveRecordExt(162u);
   auto _r = g_next.hipGraphInstantiateWithParams_fn(pGraphExec, graph, instantiateParams);
   _rec->end_ns = NowNs();
+  if (_r == hipSuccess && pGraphExec && *pGraphExec)
+    CaptureGraphExecNodes(*pGraphExec, graph);
   return _r;
 }
 
@@ -1545,7 +1620,8 @@ static hipError_t hipGraphKernelNodeSetParamsLayer(hipGraphNode_t node,
 // api_id = 168
 static hipError_t hipGraphLaunchLayer(hipGraphExec_t graphExec, hipStream_t stream) {
   auto* _rec = HipGetActiveRecordExt(168u);
-  _rec->stream = stream;
+  _rec->stream   = stream;
+  _rec->memory1  = reinterpret_cast<void*>(graphExec);  // stash exec for callback lookup
   auto _r = g_next.hipGraphLaunch_fn(graphExec, stream);
   _rec->end_ns = NowNs();
   return _r;
@@ -1943,8 +2019,8 @@ static const char* hipKernelNameRefByPtrLayer(const void* hostFunction, hipStrea
 static hipError_t hipLaunchByPtrLayer(const void* func) {
   auto* _rec = HipGetActiveRecordExt(213u);
   // Grid/block were stashed by __hipPushCallConfigurationLayer (<<<>>> lowering).
-  _rec->grid_x = g_pushed_grid.x;  _rec->grid_y = g_pushed_grid.y;  _rec->grid_z = g_pushed_grid.z;
-  _rec->block_x = g_pushed_block.x; _rec->block_y = g_pushed_block.y; _rec->block_z = g_pushed_block.z;
+  _rec->gpu.grid_x = g_pushed_grid.x;  _rec->gpu.grid_y = g_pushed_grid.y;  _rec->gpu.grid_z = g_pushed_grid.z;
+  _rec->gpu.block_x = g_pushed_block.x; _rec->gpu.block_y = g_pushed_block.y; _rec->gpu.block_z = g_pushed_block.z;
   auto _r = g_next.hipLaunchByPtr_fn(func);
   _rec->end_ns = NowNs();
   return _r;
@@ -1956,12 +2032,12 @@ static hipError_t hipLaunchCooperativeKernelLayer(const void* f, dim3 gridDim, d
                                                    hipStream_t stream) {
   auto* _rec = HipGetActiveRecordExt(214u);
   _rec->stream = stream;
-  _rec->grid_x = gridDim.x;  _rec->grid_y = gridDim.y;  _rec->grid_z = gridDim.z;
-  _rec->block_x = blockDimX.x; _rec->block_y = blockDimX.y; _rec->block_z = blockDimX.z;
+  _rec->gpu.grid_x = gridDim.x;  _rec->gpu.grid_y = gridDim.y;  _rec->gpu.grid_z = gridDim.z;
+  _rec->gpu.block_x = blockDimX.x; _rec->gpu.block_y = blockDimX.y; _rec->gpu.block_z = blockDimX.z;
   if (kernelParams) {
     hipFunction_t hfunc = nullptr;
     if (g_next.hipGetFuncBySymbol_fn(&hfunc, f) == hipSuccess)
-      HipCaptureKernelArgsExt(_rec, hfunc, kernelParams);
+      HipCaptureKernelArgsExt(&_rec->gpu, hfunc, kernelParams);
   }
   auto _r = g_next.hipLaunchCooperativeKernel_fn(f, gridDim, blockDimX, kernelParams, sharedMemBytes, stream);
   _rec->end_ns = NowNs();
@@ -1992,12 +2068,12 @@ static hipError_t hipLaunchKernelLayer(const void* function_address, dim3 numBlo
                                         hipStream_t stream) {
   auto* _rec = HipGetActiveRecordExt(217u);
   _rec->stream = stream;
-  _rec->grid_x = numBlocks.x; _rec->grid_y = numBlocks.y; _rec->grid_z = numBlocks.z;
-  _rec->block_x = dimBlocks.x; _rec->block_y = dimBlocks.y; _rec->block_z = dimBlocks.z;
+  _rec->gpu.grid_x = numBlocks.x; _rec->gpu.grid_y = numBlocks.y; _rec->gpu.grid_z = numBlocks.z;
+  _rec->gpu.block_x = dimBlocks.x; _rec->gpu.block_y = dimBlocks.y; _rec->gpu.block_z = dimBlocks.z;
   if (args) {
     hipFunction_t hfunc = nullptr;
     if (g_next.hipGetFuncBySymbol_fn(&hfunc, function_address) == hipSuccess)
-      HipCaptureKernelArgsExt(_rec, hfunc, args);
+      HipCaptureKernelArgsExt(&_rec->gpu, hfunc, args);
   }
   auto _r = g_next.hipLaunchKernel_fn(function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream);
   _rec->end_ns = NowNs();
@@ -2962,8 +3038,8 @@ static hipError_t hipModuleLaunchCooperativeKernelLayer(hipFunction_t f, unsigne
     unsigned int sharedMemBytes, hipStream_t stream, void** kernelParams) {
   auto* _rec = HipGetActiveRecordExt(314u);
   _rec->stream = stream;
-  _rec->grid_x = gridDimX; _rec->grid_y = gridDimY; _rec->grid_z = gridDimZ;
-  _rec->block_x = blockDimX; _rec->block_y = blockDimY; _rec->block_z = blockDimZ;
+  _rec->gpu.grid_x = gridDimX; _rec->gpu.grid_y = gridDimY; _rec->gpu.grid_z = gridDimZ;
+  _rec->gpu.block_x = blockDimX; _rec->gpu.block_y = blockDimY; _rec->gpu.block_z = blockDimZ;
   auto _r = g_next.hipModuleLaunchCooperativeKernel_fn(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, stream, kernelParams);
   _rec->end_ns = NowNs();
   return _r;
@@ -2986,10 +3062,10 @@ static hipError_t hipModuleLaunchKernelLayer(hipFunction_t f, unsigned int gridD
                                               void** extra) {
   auto* _rec = HipGetActiveRecordExt(316u);
   _rec->stream = stream;
-  _rec->grid_x = gridDimX; _rec->grid_y = gridDimY; _rec->grid_z = gridDimZ;
-  _rec->block_x = blockDimX; _rec->block_y = blockDimY; _rec->block_z = blockDimZ;
+  _rec->gpu.grid_x = gridDimX; _rec->gpu.grid_y = gridDimY; _rec->gpu.grid_z = gridDimZ;
+  _rec->gpu.block_x = blockDimX; _rec->gpu.block_y = blockDimY; _rec->gpu.block_z = blockDimZ;
   if (kernelParams)
-    HipCaptureKernelArgsExt(_rec, f, kernelParams);
+    HipCaptureKernelArgsExt(&_rec->gpu, f, kernelParams);
   auto _r = g_next.hipModuleLaunchKernel_fn(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, stream, kernelParams, extra);
   _rec->end_ns = NowNs();
   return _r;
@@ -4131,7 +4207,8 @@ static hipError_t hipLaunchKernel_sptLayer(const void* function_address, dim3 nu
 // api_id = 439
 static hipError_t hipGraphLaunch_sptLayer(hipGraphExec_t graphExec, hipStream_t stream) {
   auto* _rec = HipGetActiveRecordExt(439u);
-  _rec->stream = stream;
+  _rec->stream  = stream;
+  _rec->memory1 = reinterpret_cast<void*>(graphExec);
   auto _r = g_next.hipGraphLaunch_spt_fn(graphExec, stream);
   _rec->end_ns = NowNs();
   return _r;
@@ -4512,8 +4589,8 @@ static hipError_t hipLaunchKernelExCLayer(const hipLaunchConfig_t* config, const
   auto* _rec = HipGetActiveRecordExt(479u);
   if (config) {
     _rec->stream = config->stream;
-    _rec->grid_x = config->gridDim.x; _rec->grid_y = config->gridDim.y; _rec->grid_z = config->gridDim.z;
-    _rec->block_x = config->blockDim.x; _rec->block_y = config->blockDim.y; _rec->block_z = config->blockDim.z;
+    _rec->gpu.grid_x = config->gridDim.x; _rec->gpu.grid_y = config->gridDim.y; _rec->gpu.grid_z = config->gridDim.z;
+    _rec->gpu.block_x = config->blockDim.x; _rec->gpu.block_y = config->blockDim.y; _rec->gpu.block_z = config->blockDim.z;
   }
   auto _r = g_next.hipLaunchKernelExC_fn(config, fPtr, args);
   _rec->end_ns = NowNs();
@@ -4526,8 +4603,8 @@ static hipError_t hipDrvLaunchKernelExLayer(const HIP_LAUNCH_CONFIG* config, hip
   auto* _rec = HipGetActiveRecordExt(480u);
   if (config) {
     _rec->stream = config->hStream;
-    _rec->grid_x = config->gridDimX; _rec->grid_y = config->gridDimY; _rec->grid_z = config->gridDimZ;
-    _rec->block_x = config->blockDimX; _rec->block_y = config->blockDimY; _rec->block_z = config->blockDimZ;
+    _rec->gpu.grid_x = config->gridDimX; _rec->gpu.grid_y = config->gridDimY; _rec->gpu.grid_z = config->gridDimZ;
+    _rec->gpu.block_x = config->blockDimX; _rec->gpu.block_y = config->blockDimY; _rec->gpu.block_z = config->blockDimZ;
   }
   auto _r = g_next.hipDrvLaunchKernelEx_fn(config, f, params, extra);
   _rec->end_ns = NowNs();
