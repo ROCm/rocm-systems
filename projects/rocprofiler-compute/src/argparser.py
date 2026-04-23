@@ -521,7 +521,7 @@ Examples:
         default=False,
         action="store_true",
         help=(
-            "\t\t\t(DEPRECATED) Retain the large raw rocpd database in workload directory.\n"
+            "\t\t\t(DEPRECATED) Retain the large raw rocpd database in workload directory.\n"  # noqa: E501
             "\t\t\tThis option requires --format-rocprof-output rocpd.\n"
             "\t\t\t --retain-rocpd-output is deprecated. .db files will be retained by default in a future release."  # noqa: E501
         ),
