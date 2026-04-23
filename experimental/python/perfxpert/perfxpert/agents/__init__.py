@@ -1,4 +1,4 @@
-"""Agent hierarchy — 8 agents on a deterministic tool floor (spec §2)."""
+"""PerfXpert agent package exports for the root, tier-1, and tier-2 roles."""
 
 from perfxpert.agents.runtime import AnalysisSession, build_session, DEFAULT_PROVIDER
 from perfxpert.agents.schemas import (
@@ -13,6 +13,7 @@ from perfxpert.agents.analysis import run_analysis, build_analysis_agent
 from perfxpert.agents.recommendation import run_recommendation, build_recommendation_agent
 from perfxpert.agents.correctness import run_correctness, build_correctness_agent
 from perfxpert.agents.compute_specialist import run_compute_specialist, build_compute_specialist
+from perfxpert.agents.diff_specialist import run_diff_specialist, build_diff_specialist
 from perfxpert.agents.memory_specialist import run_memory_specialist, build_memory_specialist
 from perfxpert.agents.latency_specialist import run_latency_specialist, build_latency_specialist
 
@@ -32,6 +33,7 @@ __all__ = [
     "run_recommendation", "build_recommendation_agent",
     "run_correctness", "build_correctness_agent",
     "run_compute_specialist", "build_compute_specialist",
+    "run_diff_specialist", "build_diff_specialist",
     "run_memory_specialist", "build_memory_specialist",
     "run_latency_specialist", "build_latency_specialist",
 ]
