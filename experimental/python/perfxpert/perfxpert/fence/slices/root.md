@@ -19,10 +19,17 @@ yourself.
 ## Tool allowlist (max 5)
 
 - intent.classify
-- tasks.next
-- tasks.create
-- tasks.update
-- tasks.close
+
+Root's job is routing, not tool invocation. It classifies intent then
+hands off; it does NOT invoke other MCP tools directly — delegation
+goes through `run_analysis` / `run_recommendation` / `run_correctness`
+session methods. The four remaining slots are intentionally unused.
+
+The task backbone (`tasks.next` / `tasks.create` / `tasks.update` /
+`tasks.close`) is an **internal capability** accessed via the LLM
+framework (`perfxpert.tools.tasks`), not an MCP READ_ONLY tool — it
+mutates local `.perfxpert/` state and is deliberately not exposed on
+the MCP surface.
 
 ## Handoff schema
 

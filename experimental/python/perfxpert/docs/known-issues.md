@@ -105,14 +105,14 @@ without being ported.
 
 ## Opencode fork / bundling
 
-- **Bundled-opencode build is gated on a local toolchain, not installer downloads.**
-  `setup.py` will run `build-bundled-opencode.sh`, but only when the
-  repo-pinned opencode submodule is available and `bun` is already on
-  PATH. The installer deliberately refuses to auto-download `bun` or
-  clone opencode from the network; when prerequisites are missing it
-  warns and skips the bundled binary.
+- **`apply-opencode-patches.sh` is not yet wired into the wheel build.**
+  The patch apply step is manual: run
+  `bash experimental/python/perfxpert/scripts/apply-opencode-patches.sh`
+  before bundling the opencode binary. Automating this requires `bun`
+  available on the build host (for opencode's post-patch type-check);
+  that toolchain setup is deferred to the wheel-build PR.
 
-- **The opencode submodule (gitlink-pinned to commit `a35b8a95...`) is MIT.**
+- **The opencode submodule (`.gitmodules` pin `v1.4.11`) is MIT.**
   All customizations are carried in `.patches/*.patch`. Do NOT commit
   mutations inside the submodule; the submodule's committed state must
   stay pristine so that `git submodule update` can fetch upstream
@@ -130,3 +130,72 @@ without being ported.
   hint strongly bias the LLM toward `intent_classify` first, but a
   determined model can still skip. Measurement + feedback is
   tracked as future telemetry work.
+
+## Docs-audit baseline
+
+Tracks docs-audit gaps that cannot be mechanically fixed by the
+scanners but are known and tolerated for now. Each entry has a
+one-line rationale + optional follow-up tracking id.
+
+### Zero-violation baseline
+
+None. All three scanners (`scripts/lint.sh`, `scripts/link-checker.py`,
+`scripts/test-samples.py`) report zero violations live, enforced by
+`tests/test_docs_tooling/test_ship_readiness.py` — which runs each
+scanner in `--strict` mode and asserts `rc == 0`. Green test = zero
+violations today; no frozen JSON snapshot is kept in the repo.
+
+### Scanner scope limitations
+
+Documented here so users reading "zero violations" know what is and
+isn't covered.
+
+#### `scripts/link-checker.py`
+- **External URLs not validated.** Any `http://` or `https://` link is
+  skipped (`is_external_url`). Dead external links will not flag.
+- **Anchor fragments not validated.** `#section-id` is stripped before
+  the file-existence check. A link pointing at a missing anchor inside
+  a real file passes.
+- **`--strict` is output-format only.** It suppresses the
+  human-readable preamble and only emits CSV rows; it does NOT enable
+  stricter checks. The set of validated link classes is identical in
+  both modes.
+
+Workaround: rely on Markdown preview in your IDE / GitHub for anchor
+correctness; external URL health is covered nightly by a separate
+link-health workflow (not part of the zero-violation baseline).
+
+#### `scripts/lint.sh` — banned-string scanner
+The banned-string scan excludes these paths (`lint.sh:50-54`) so that
+historical context or pre-existing test fixtures don't cause false
+positives:
+
+- `**/.git/**` — git internals
+- `**/.pytest_cache/**` — test runner cache
+- `**/perfxpert/ai_analysis/**` — legacy module removed during the
+  agentic refactor; banned terms inside historical fixtures are not live.
+
+The scanner also ignores individual hits whose line contains the
+historical-anchor phrase "removed in Phase 7.1"; this lets us keep a
+searchable record of removed flags, env vars, and classes (e.g. in
+`CHANGELOG.md`) without re-introducing live guidance.
+
+Consequence: banned strings inside the excluded paths (or on lines
+carrying the historical anchor) will NOT trip the scanner. If you're
+adding a new fixture directory that should be ignored for legitimate
+reasons, add it here with a one-line comment.
+
+### Out-of-scope follow-ups
+
+- `tests/test_docs_tooling/test_secret_scanner.py` — three tests fail
+  locally because they cd into a fresh `tempfile.TemporaryDirectory()`
+  without symlinking `tools/_secret_scanner.py` first. Pre-existing
+  bug (commit c2c419ff9e).
+  - **Reproducer:** `pytest tests/test_docs_tooling/test_secret_scanner.py -q`
+  - **Owner / tracking:** queued in a follow-up sweep; no
+    issue number assigned yet. Fix is a one-line tmpdir setup (copy
+    or symlink `tools/_secret_scanner.py` into the tmpdir before the
+    subprocess call).
+  - **Workaround for affected devs:** skip the three `test_secret_scanner_*`
+    tests with `-k 'not secret_scanner'` while the fix is queued;
+    they don't gate any other scanner.

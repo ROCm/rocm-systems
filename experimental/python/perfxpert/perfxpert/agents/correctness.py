@@ -5,7 +5,7 @@ gates directly — spec §5.0). Narrates the verdict to Root, proposes
 alternatives on regressions, creates follow-up tasks on rejects.
 
 Tool allowlist (3 of 5 used — intentionally NO execution tools):
-  tasks.query_by_kernel, tasks.create, trace.fingerprint
+  tasks.query_by_kernel, tasks.create, trace_fingerprint.fingerprint
 
 Handoff whitelist: [] (Layer-1 returns to Root).
 
@@ -45,7 +45,7 @@ def build_correctness_agent() -> Agent:
     tools = [
         ToolBinding(name="tasks.query_by_kernel", fn=_tasks_query_by_kernel),
         ToolBinding(name="tasks.create", fn=_tasks_create),
-        ToolBinding(name="trace.fingerprint", fn=trace_fingerprint.fingerprint),
+        ToolBinding(name="trace_fingerprint.fingerprint", fn=trace_fingerprint.fingerprint),
     ]
     return Agent(
         name="Correctness",

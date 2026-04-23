@@ -26,6 +26,7 @@ narrowly-scoped problem. Agents route via typed handoffs and run within the
 ### Agent skeleton
 
 ```python
+# SKIP-SAMPLE — template: <name>/<Name> placeholders, pedagogical scaffolding
 """<name> — <one-sentence purpose>."""
 
 from typing import Any, Dict
@@ -35,7 +36,7 @@ from perfxpert.agents.schemas import HandoffSchema
 from perfxpert.tools import tool1, tool2
 
 
-class <Name>Handoff(HandoffSchema):
+class NameHandoff(HandoffSchema):
     """Handoff schema: what this agent outputs."""
     result: str
     confidence: float
@@ -45,18 +46,26 @@ AGENT_SPEC = AgentSpec(
     name="<name>",
     fence_path="perfxpert/agents/fence/<name>.md",
     tools=[tool1, tool2],
-    handoff_schema=<Name>Handoff,
+    handoff_schema=NameHandoff,
     description="<purpose>"
 )
 
 
-async def run(context: Dict[str, Any]) -> <Name>Handoff:
+async def run(context: Dict[str, Any]) -> NameHandoff:
     """Main entry point for this agent."""
     # Call tools, process results
-    return <Name>Handoff(result=..., confidence=...)
+    return NameHandoff(result=..., confidence=...)
 ```
 
 ### Fence skeleton
+
+Use `perfxpert/agents/fence/diff_specialist.md` as the canonical
+template — it has the definitive section layout (Purpose, Tools you
+can use, Instructions, Output contract, plus any agent-specific
+sub-sections). The Root (`root.md`) and Recommendation
+(`recommendation.md`) fences have been aligned to the same
+diff_specialist template during the final doc pass, so new agents
+should mirror that structure to stay consistent.
 
 ```markdown
 # <Name> Agent
@@ -70,6 +79,9 @@ async def run(context: Dict[str, Any]) -> <Name>Handoff:
 
 ## Instructions
 <Narrative instructions for the LLM on how to solve the problem using the tools.>
+
+## Output contract
+<Fields the agent MUST populate, matching the handoff schema.>
 ```
 
 ## Schema constraints (CI-enforced)

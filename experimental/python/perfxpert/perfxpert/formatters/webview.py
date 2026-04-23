@@ -33,7 +33,23 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from ._att_flamegraph import _slug as _rec_slug
+from ._att_flamegraph import render_att_flamegraph
+from ._roofline_svg import render_roofline_svg
+from ._source_correlation import correlate_hotspots_with_source
 from .json_fmt import _build_summary, _format_as_json, _tier0_to_dict
+
+
+def _rec_anchor_id(rec: Dict[str, Any], idx: int) -> str:
+    """Stable ``id="rec-<slug>"`` anchor for a rec card.
+
+    Prefers the rec's ``target`` (typically the kernel basename) so the
+    ATT flame-graph can jump straight to the matching recommendation.
+    Falls back to a slug of ``issue`` then to ``rec-<idx>`` so every card
+    always carries an anchor for testability.
+    """
+    key = rec.get("target") or rec.get("issue") or f"idx_{idx}"
+    return f"rec-{_rec_slug(str(key))}"
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
@@ -56,6 +72,9 @@ def _format_as_webview(
     kernel_categories=None,
     short_kernels=None,
     att_analysis: Optional[Dict[str, Any]] = None,
+    detected_kernels: Optional[List[Dict[str, Any]]] = None,
+    communication: Optional[Dict[str, Any]] = None,
+    roofline: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Generate a self-contained interactive HTML report.
@@ -184,6 +203,25 @@ def _format_as_webview(
             if impact
             else ""
         )
+        # Phase 10 — Change-Impact Prediction. Only rendered when the
+        # specialist (or the analyze.py final-pass) attached
+        # predicted_impact_range on the rec.
+        predicted_html = ""
+        _pred_range = rec.get("predicted_impact_range")
+        if _pred_range and len(_pred_range) == 2:
+            _plo, _phi = _pred_range
+            _pconf = rec.get("predicted_confidence")
+            if _pconf is None:
+                _pconf = rec.get("confidence")
+            _pconf_txt = (
+                f" (confidence {int(float(_pconf) * 100)}%)"
+                if _pconf is not None
+                else ""
+            )
+            predicted_html = (
+                f'<p class="r-predicted"><strong>Predicted:</strong> '
+                f'{float(_plo):.2f}-{float(_phi):.2f}&#215;{_h(_pconf_txt)}</p>'
+            )
         cmds_parts = []
         for ci, cmd in enumerate(rec.get("commands", [])):
             fc = cmd.get("full_command", "")
@@ -206,8 +244,9 @@ def _format_as_webview(
         suggest = rec.get("suggestion", "")
         conf = rec.get("confidence")
         conf_html = f'<span class="r-conf" style="margin-left:8px;opacity:0.7;font-size:0.85em">Confidence: {int(conf * 100)}%</span>' if conf is not None else ""
+        r_anchor = _rec_anchor_id(rec, ri)
         recs_parts.append(
-            f'<div class="r-card" style="border-left-color:{fg}" data-p="{_h(p)}">'
+            f'<div class="r-card" id="{r_anchor}" style="border-left-color:{fg}" data-p="{_h(p)}">'
             f'<div class="r-hdr" onclick="toggleR(this)">'
             f'<span class="r-priority-icon">{picon}</span>'
             f'<span class="r-badge" style="background:{fg};color:#fff">{_h(p)}</span>'
@@ -218,7 +257,7 @@ def _format_as_webview(
             f'<div class="r-body">'
             f'<p class="r-issue"><strong>Issue:</strong> {_h(issue_txt)}</p>'
             f'<p class="r-suggest"><strong>What to do:</strong> {_h(suggest)}</p>'
-            f"{actions_html}{impact_html}{cmds_html}"
+            f"{actions_html}{impact_html}{predicted_html}{cmds_html}"
             f"</div></div>"
         )
     recs_html = (
@@ -227,16 +266,142 @@ def _format_as_webview(
     )
 
     # -- hotspots table --
+    # Cross-reference each hotspot with Tier-0 detected_kernels so each row
+    # can optionally expand to show the source definition + launch site
+    # (VTune / NSight-style source correlation).
+    _have_source_scan = detected_kernels is not None
+    _annotated_hotspots = correlate_hotspots_with_source(
+        hotspots or [], detected_kernels if _have_source_scan else None
+    )
+    _LAUNCH_BADGE = {
+        "GLOBAL_KERNEL_DEF": ("__global__", "var(--blue)"),
+        "HIP_KERNEL_LAUNCH": ("HIP_KERNEL_LAUNCH", "var(--orange)"),
+        "TRIPLE_ANGLE_LAUNCH": ("&lt;&lt;&lt; &gt;&gt;&gt;", "var(--purple)"),
+    }
+
+    def _render_source_panel(
+        idx: int, locs: List[Dict[str, Any]], pct: float = 0.0
+    ) -> str:
+        """Inner cell body for the expandable Source-location panel.
+
+        ``pct`` is the owning hotspot's ``percent_of_total`` — used to
+        drive the VTune / NSight-style severity coloring (red/orange/
+        yellow/blue) even when ``locs`` is empty (matching panels still
+        get framed so the user sees an at-a-glance cue that a hot row
+        lacks a source reference).
+        """
+        # Classify once — shared by the panel frame AND the per-row items.
+        from ._source_correlation import _classify_severity
+
+        sev_id, sev_label, sev_color = _classify_severity(pct)
+        border_style = f"border-left:3px solid {sev_color}"
+
+        if not _have_source_scan:
+            return (
+                f'<div class="h-src-panel h-src-empty" '
+                f'data-severity="{sev_id}" '
+                f'style="{border_style}">'
+                "<em>No source scan available.</em> "
+                "Pass <code>--source-dir &lt;path&gt;</code> to analyze so PerfXpert can "
+                "correlate each hotspot with its definition + launch site."
+                "</div>"
+            )
+        if not locs:
+            return (
+                f'<div class="h-src-panel h-src-empty" '
+                f'data-severity="{sev_id}" '
+                f'style="{border_style}">'
+                "<em>No matching source location detected.</em> "
+                "The scanned <code>--source-dir</code> did not contain a symbol matching "
+                "this kernel's basename."
+                "</div>"
+            )
+        rows = []
+        sev_badge = (
+            f'<span class="h-src-sev-badge" '
+            f'style="background:{sev_color};color:#fff;'
+            f'padding:2px 6px;border-radius:3px;'
+            f'font-size:0.75em;font-weight:600;margin-right:6px">'
+            f"{sev_label}</span>"
+        )
+        for j, lo in enumerate(locs):
+            cite_id = f"h-src-cite-{idx}-{j}"
+            kind = lo.get("kind", "definition")
+            kind_label = "Definition" if kind == "definition" else "Launch site"
+            lt = lo.get("launch_type", "GLOBAL_KERNEL_DEF")
+            badge_text, badge_color = _LAUNCH_BADGE.get(
+                lt, (lt.replace("_", " "), "var(--teal)")
+            )
+            file_ = _h(lo.get("file", "?"))
+            line = int(lo.get("line", 0))
+            cite = f"{file_}:{line}"
+            rows.append(
+                f'<div class="h-src-item">'
+                f"{sev_badge if j == 0 else ''}"
+                f'<span class="h-src-kind">{_h(kind_label)}:</span> '
+                f'<span class="cmd-row" id="{cite_id}">'
+                f"<code>{cite}</code>"
+                f'<button class="cp-btn" onclick="cpCmd(\'{cite_id}\')">Copy</button>'
+                f"</span>"
+                f'<span class="h-src-badge" style="background:{badge_color}">{badge_text}</span>'
+                f"</div>"
+            )
+        return (
+            f'<div class="h-src-panel" '
+            f'data-severity="{sev_id}" '
+            f'style="{border_style}">'
+            + "".join(rows)
+            + "</div>"
+        )
+
     hotspot_rows = []
-    for i, k in enumerate(hotspots or []):
+    for i, k in enumerate(_annotated_hotspots):
         pct = float(k.get("percent_of_total", 0))
         bar = min(100.0, pct)
         name = k.get("name", "unknown")
         hot = ' class="hot-row"' if pct >= 20 else ""
+        locs = k.get("source_locations") or []
+        # Chevron always rendered so users know a source panel can be
+        # expanded; when no --source-dir was supplied the panel explains
+        # how to enable the correlation.
+        has_match = bool(locs)
+        chevron_title = (
+            "Show source location"
+            if has_match
+            else "No matching source location (pass --source-dir)"
+        )
+        toggle_btn = (
+            f'<button class="h-src-toggle" type="button" '
+            f'onclick="toggleHSrc(this)" '
+            f'aria-expanded="false" '
+            f'title="{chevron_title}">'
+            f'<span class="h-src-chev">&#9662;</span>'
+            f"</button>"
+        )
+        # Severity class on the expandable source panel row mirrors the
+        # ``_classify_severity`` buckets used by the source-panel frame and
+        # the recommendation cards. Spec three-reviewer consolidation
+        # (2026-04): the ``h-src-*`` prefix is already a stable convention
+        # (``h-src-toggle``, ``h-src-row``, ``h-src-item``, ``h-src-badge``,
+        # ``h-src-kind``, ``h-src-panel``); adding ``h-src-critical``,
+        # ``h-src-hot``, ``h-src-warm``, ``h-src-cool`` keeps the naming
+        # consistent and makes the severity tier queryable from CSS.
+        from ._source_correlation import _classify_severity as _cls_sev
+        _sev_id_for_row, _, _ = _cls_sev(pct)
+        _H_SRC_SEV_CLASS = {
+            "HIGH": "h-src-critical",
+            "MEDIUM": "h-src-hot",
+            "LOW": "h-src-warm",
+            "INFO": "h-src-cool",
+        }
+        _h_src_sev_cls = _H_SRC_SEV_CLASS.get(_sev_id_for_row, "h-src-cool")
         hotspot_rows.append(
-            f"<tr{hot}>"
+            f"<tr{hot} data-h-src-row>"
             f"<td>{i + 1}</td>"
-            f'<td class="kname" title="{_h(name)}"><code>{_h(name)}</code></td>'
+            f'<td class="kname" title="{_h(name)}">'
+            f"{toggle_btn}"
+            f'<code>{_h(name)}</code>'
+            f"</td>"
             f'<td data-v="{k.get("calls", 0)}">{int(k.get("calls", 0)):,}</td>'
             f'<td data-v="{k.get("total_duration", 0)}">{_fmt_ns(k.get("total_duration", 0))}</td>'
             f'<td data-v="{k.get("avg_duration", 0)}">{_fmt_ns(k.get("avg_duration", 0))}</td>'
@@ -245,6 +410,15 @@ def _format_as_webview(
             f'<div class="pbar"><div class="pfill" style="width:{bar:.1f}%"></div>'
             f"<span>{pct:.1f}%</span></div>"
             f"</td></tr>"
+        )
+        # Hidden sibling row with the source-location panel (colored
+        # by severity so the expanded panel carries the same red/orange/
+        # yellow/blue cue as the surrounding recommendation cards).
+        hotspot_rows.append(
+            f'<tr class="h-src-row {_h_src_sev_cls}" hidden>'
+            f'<td colspan="7">'
+            + _render_source_panel(i, locs, pct)
+            + "</td></tr>"
         )
     hotspots_html = ""
     if hotspot_rows:
@@ -258,7 +432,7 @@ def _format_as_webview(
             '<table class="dtable sortable" id="hs-tbl">'
             "<thead><tr>"
             "<th data-tip='Rank by total execution time \u2014 1 is the hottest kernel.'>#</th>"
-            "<th data-tip='Demangled GPU kernel function name dispatched to the GPU. Rows highlighted in red consume &gt;20% of total runtime.'>Kernel Name</th>"
+            "<th data-tip='Demangled GPU kernel function name dispatched to the GPU. Click the &#9662; arrow to expand a VTune-style source-location panel showing the definition + launch site (requires --source-dir). Rows highlighted in red consume &gt;20% of total runtime.'>Kernel Name</th>"
             "<th data-tip='Number of times this kernel was dispatched. Very high call counts with low avg time suggest kernel launch overhead dominates useful work.'>Calls &#8645;</th>"
             "<th data-tip='Sum of all dispatch durations for this kernel \u2014 the primary metric for identifying hotspots. Longer total time = bigger optimization target.'>Total Time &#8645;</th>"
             "<th data-tip='Mean duration per single dispatch. Values below 10 &micro;s suggest kernel launch overhead may dominate the actual computation.'>Avg Time &#8645;</th>"
@@ -653,6 +827,7 @@ def _format_as_webview(
         "%%HW_INNER%%": hw_inner,
         "%%RECS_BADGE%%": _recs_badge_html,
         "%%RECS_HTML%%": recs_html,
+        "%%ROOFLINE_SECTION%%": render_roofline_svg(roofline),
         "%%JSON_EMBEDDED%%": json_embedded,
     }
 
@@ -788,6 +963,22 @@ def _format_as_webview(
             "</table></div>"
         )
 
+        # Inline-SVG flame graph — rendered below the per-kernel stall
+        # table as an alternative visualisation. Pure-Python helper, no
+        # external JS/CSS libs; empty string when no ATT data.
+        att_flame_svg = render_att_flamegraph(att_analysis)
+        att_flame_block = (
+            (
+                '\n<div class="att-flame-wrap" style="margin-top:1.1rem">'
+                '\n<h3 style="margin:0 0 .4rem 0;font-size:1rem">'
+                "Stall flame graph</h3>"
+                f"\n{att_flame_svg}"
+                "\n</div>"
+            )
+            if att_flame_svg
+            else ""
+        )
+
         att_section = (
             '\n<section class="scard">'
             '\n<div class="shdr">'
@@ -798,11 +989,15 @@ def _format_as_webview(
             '\n<div class="sbody">'
             f"\n{att_kpi}"
             f"\n{att_table}"
+            "\n%%ATT_FLAMEGRAPH_SECTION%%"
             '\n<p class="dim" style="margin-top:1rem;font-size:.82rem">'
             "Sub-rows show the top 5 stalling instructions per kernel (indented). "
             "Weighted stall = stall_cycles &times; hitcount &mdash; the primary ranking metric."
             "</p>"
             "\n</div>\n</section>"
+        )
+        att_section = att_section.replace(
+            "%%ATT_FLAMEGRAPH_SECTION%%", att_flame_block
         )
         html = html.replace("<!-- ATT_SECTION_PLACEHOLDER -->", att_section)
     else:
@@ -844,11 +1039,164 @@ def _format_as_webview(
     else:
         html = html.replace("<!-- CAT_SECTION_PLACEHOLDER -->", "")
 
+    # --- Communication (RCCL / NIC) section - Phase 10 ---
+    if communication and communication.get("collectives"):
+        comm = communication
+        c_summary = comm.get("summary", {}) or {}
+        c_ops = comm.get("collectives") or []
+        c_count = c_summary.get("op_count", len(c_ops))
+        c_dominant = c_summary.get("dominant_op") or "n/a"
+        c_overlap = float(c_summary.get("overlap_pct", 0.0) or 0.0)
+        c_peak = c_summary.get("peak_bw_gbps")
+        c_avg_bw = float(c_summary.get("avg_bw_gbps", 0.0) or 0.0)
+        c_peak_s = f"{c_peak:.0f} GB/s" if c_peak else "n/a"
+        c_ranks = int(c_summary.get("ranks", 0) or 0)
+        c_incomplete = bool(c_summary.get("capture_incomplete", False))
+
+        overview_html = (
+            '<div class="comm-overview" style="display:flex;flex-wrap:wrap;'
+            'gap:.75rem;margin-bottom:1rem;font-size:.92rem">'
+            f'<span class="hpill"><span class="hpill-label">Ops:</span>'
+            f'<span class="hpill-value">{c_count}</span></span>'
+            f'<span class="hpill"><span class="hpill-label">Dominant:</span>'
+            f'<span class="hpill-value">{_h(c_dominant)}</span></span>'
+            f'<span class="hpill"><span class="hpill-label">Avg busBW:</span>'
+            f'<span class="hpill-value">{c_avg_bw:.2f} GB/s</span></span>'
+            f'<span class="hpill"><span class="hpill-label">Peak:</span>'
+            f'<span class="hpill-value">{_h(c_peak_s)}</span></span>'
+            f'<span class="hpill"><span class="hpill-label">Ranks:</span>'
+            f'<span class="hpill-value">{c_ranks}</span></span>'
+            "</div>"
+        )
+
+        def _fmt_bytes_comm(b: int) -> str:
+            if b <= 0:
+                return "\u2014"
+            if b >= 1_073_741_824:
+                return f"{b / 1_073_741_824:.2f} GB"
+            if b >= 1_048_576:
+                return f"{b / 1_048_576:.1f} MB"
+            if b >= 1_024:
+                return f"{b / 1_024:.1f} KB"
+            return f"{b} B"
+
+        comm_rows = []
+        for c in c_ops:
+            op = str(c.get("op_type", "?"))
+            mb = int(c.get("msg_bytes", 0) or 0)
+            dur_ns = int(c.get("duration_ns", 0) or 0)
+            bw = float(c.get("effective_bw_gbps", 0.0) or 0.0)
+            peak_v = c.get("peak_bw_gbps")
+            eff = float(c.get("efficiency_pct", 0.0) or 0.0)
+            ov = float(c.get("overlap_ratio", 0.0) or 0.0)
+            regime = str(c.get("regime", "") or "")
+            algo = str(c.get("algo_hint", "") or "")
+            eff_label = str(c.get("efficiency_label", "") or "")
+            if eff >= 70:
+                eff_color = "#44dd66"
+            elif eff >= 40:
+                eff_color = "#ff8800"
+            else:
+                eff_color = "#e84040"
+            bar_w = min(100.0, eff)
+            peak_s = f"{peak_v:.0f} GB/s" if peak_v else "\u2014"
+            comm_rows.append(
+                f"<tr>"
+                f'<td><code>{_h(op)}</code></td>'
+                f"<td>{_fmt_bytes_comm(mb)}</td>"
+                f"<td>{_fmt_ns(dur_ns)}</td>"
+                f"<td>"
+                f'<div class="btrack" style="width:120px;height:10px;'
+                f'background:#1a1a2e;border-radius:4px;overflow:hidden;'
+                f'display:inline-block;vertical-align:middle">'
+                f'<div class="bfill" style="width:{bar_w:.1f}%;height:100%;'
+                f'background:{eff_color};border-radius:4px"></div>'
+                f"</div>"
+                f' <span style="color:{eff_color};margin-left:.5rem">'
+                f"{bw:.2f} GB/s</span>"
+                f"</td>"
+                f"<td>{_h(peak_s)}</td>"
+                f'<td style="color:{eff_color};font-weight:600">'
+                f'{eff:.1f}% <span class="dim" style="font-size:.82rem">'
+                f"({_h(eff_label)})</span></td>"
+                f"<td>{ov:.1f}%</td>"
+                f'<td class="dim" style="font-size:.85rem">{_h(regime)} / '
+                f"{_h(algo)}</td>"
+                f"</tr>"
+            )
+        comm_table = (
+            '<div class="tbl-wrap">'
+            '<table class="dtable">'
+            "<thead><tr>"
+            "<th data-tip='RCCL collective operation (AllReduce, AllGather, ReduceScatter, ...).'>Op</th>"
+            "<th data-tip='Message size per rank in bytes (count * dtype_bytes).'>Bytes</th>"
+            "<th data-tip='Wall-clock duration of this collective on the kernel side.'>Duration</th>"
+            "<th data-tip='Effective bus bandwidth = msg_bytes * factor / duration. Factor is 2(N-1)/N for AllReduce, (N-1)/N for AllGather/ReduceScatter/AllToAll, 1 for Broadcast/Reduce.'>Bus BW (vs peak)</th>"
+            "<th data-tip='Achievable XGMI busBW for this architecture (from interconnect_specs.yaml).'>Peak</th>"
+            "<th data-tip='efficiency_pct = busBW / peak. Classification: &lt;40% poor, 40-70% fair, &gt;70% good.'>Eff%</th>"
+            "<th data-tip='Fraction of this collective overlapping with non-RCCL kernel activity. Higher is better.'>Overlap%</th>"
+            "<th data-tip='Regime classification (latency/bandwidth-bound) plus algorithm hint (Ring/Tree/Pairwise).'>Regime / Algo</th>"
+            "</tr></thead>"
+            "<tbody>" + "".join(comm_rows) + "</tbody>"
+            "</table></div>"
+        )
+
+        ov_color = "#44dd66" if c_overlap >= 50 else (
+            "#ff8800" if c_overlap >= 20 else "#e84040"
+        )
+        overlap_donut = (
+            '<div class="gauge-wrap" style="margin-top:1rem">'
+            f'{_svg_gauge(c_overlap, ov_color, "Comm/Compute Overlap", f"{c_overlap:.0f}%")}'
+            f'<p class="g-hint {"ok" if c_overlap >= 50 else "warn"}" '
+            f'style="text-align:center;margin-top:.25rem">'
+            f'{"&#10003; Good overlap" if c_overlap >= 50 else "&#9888; Low overlap"}'
+            "</p>"
+            "</div>"
+        )
+
+        incomplete_note = (
+            '<p class="dim" style="margin-top:.75rem;font-size:.82rem">'
+            "&#9888; Capture incomplete \u2014 fell back to kernel-name regex "
+            "(no <code>category='RCCL'</code> spans in DB; install "
+            "<code>rocprofv3 &ge; 6.2</code> for full RCCL arg capture)."
+            "</p>"
+        ) if c_incomplete else ""
+
+        comm_section = (
+            '\n<section class="scard">'
+            '\n<div class="shdr">'
+            '\n<span class="shdr-icon">&#128225;</span>'
+            "\n<h2>Communication</h2>"
+            '\n<span class="shdr-badge sbadge-info">RCCL / XGMI</span>'
+            "\n</div>"
+            '\n<div class="sbody">'
+            f"\n{overview_html}"
+            f"\n{comm_table}"
+            f"\n{overlap_donut}"
+            f"\n{incomplete_note}"
+            "\n</div>\n</section>"
+        )
+        html = html.replace("<!-- COMM_SECTION_PLACEHOLDER -->", comm_section)
+    else:
+        html = html.replace("<!-- COMM_SECTION_PLACEHOLDER -->", "")
+
     return html
 
 
-def _format_tier0_webview(tier0_result: Any) -> str:
-    """Generate a self-contained AMD-themed HTML Tier 0 report (identical design system as Tier 1/2)."""
+def _format_tier0_webview(
+    tier0_result: Any,
+    has_profiling: bool = False,
+    hotspots: Optional[List[Dict[str, Any]]] = None,
+) -> str:
+    """Generate a self-contained AMD-themed HTML Tier 0 report (identical design system as Tier 1/2).
+
+    When ``hotspots`` is provided (combined-mode: -i + --source-dir), each
+    row in the Detected GPU Kernels table that matches a Tier-1 hotspot
+    (by canonicalized kernel name) is colored by the hotspot's
+    ``percent_of_total`` bucket via ``h-src-critical`` / ``h-src-hot`` /
+    ``h-src-warm`` / ``h-src-cool`` CSS classes on the ``<tr>``. Source-only
+    callers (``hotspots=None``) render the table without severity coloring.
+    """
     import html as _html
     import json as _json
 
@@ -880,7 +1228,13 @@ def _format_tier0_webview(tier0_result: Any) -> str:
     src_display = src_dir[-45:] if len(src_dir) > 45 else src_dir
 
     # -- Counts --
-    recs = tier0_result.recommendations or []
+    # Bug 3: render the code-level patterns list here, NOT the
+    # profiling-plan actions. The plan has its own block below.
+    recs = (
+        getattr(tier0_result, "code_patterns", None)
+        or tier0_result.recommendations
+        or []
+    )
     n_high = sum(1 for r in recs if r.get("priority") == "HIGH")
     n_medium = sum(1 for r in recs if r.get("priority") == "MEDIUM")
     n_low = sum(1 for r in recs if r.get("priority") == "LOW")
@@ -928,6 +1282,25 @@ def _format_tier0_webview(tier0_result: Any) -> str:
             if impact
             else ""
         )
+        # Phase 10 — Change-Impact Prediction. Only rendered when the
+        # specialist (or the analyze.py final-pass) attached
+        # predicted_impact_range on the rec.
+        predicted_html = ""
+        _pred_range = rec.get("predicted_impact_range")
+        if _pred_range and len(_pred_range) == 2:
+            _plo, _phi = _pred_range
+            _pconf = rec.get("predicted_confidence")
+            if _pconf is None:
+                _pconf = rec.get("confidence")
+            _pconf_txt = (
+                f" (confidence {int(float(_pconf) * 100)}%)"
+                if _pconf is not None
+                else ""
+            )
+            predicted_html = (
+                f'<p class="r-predicted"><strong>Predicted:</strong> '
+                f'{float(_plo):.2f}-{float(_phi):.2f}&#215;{_h(_pconf_txt)}</p>'
+            )
         cmds_parts = []
         for ci, cmd in enumerate(rec.get("commands", [])):
             fc = cmd.get("full_command", "")
@@ -950,8 +1323,9 @@ def _format_tier0_webview(tier0_result: Any) -> str:
         suggest = rec.get("suggestion", "")
         conf = rec.get("confidence")
         conf_html = f'<span class="r-conf" style="margin-left:8px;opacity:0.7;font-size:0.85em">Confidence: {int(conf * 100)}%</span>' if conf is not None else ""
+        r_anchor = _rec_anchor_id(rec, ri)
         recs_parts.append(
-            f'<div class="r-card" style="border-left-color:{fg}" data-p="{_h(p)}">'
+            f'<div class="r-card" id="{r_anchor}" style="border-left-color:{fg}" data-p="{_h(p)}">'
             f'<div class="r-hdr" onclick="toggleR(this)">'
             f'<span class="r-priority-icon">{picon}</span>'
             f'<span class="r-badge" style="background:{fg};color:#fff">{_h(p)}</span>'
@@ -962,7 +1336,7 @@ def _format_tier0_webview(tier0_result: Any) -> str:
             f'<div class="r-body">'
             f'<p class="r-issue"><strong>Issue:</strong> {_h(issue_txt)}</p>'
             f'<p class="r-suggest"><strong>What to do:</strong> {_h(suggest)}</p>'
-            f"{actions_html}{impact_html}{cmds_html}"
+            f"{actions_html}{impact_html}{predicted_html}{cmds_html}"
             f"</div></div>"
         )
     recs_html = (
@@ -971,19 +1345,84 @@ def _format_tier0_webview(tier0_result: Any) -> str:
     )
 
     # -- Kernels table --
+    # Build a hotspot lookup so each detected source kernel can be colored
+    # by its Tier-1 % Total bucket. Key: canonicalized name (namespace/
+    # template/argument peeled + lowercased). Source-only callers pass
+    # ``hotspots=None`` → lookup stays empty → no severity coloring.
+    from ._source_correlation import (
+        _classify_severity as _cls_sev_t0,
+        _demangle_basename as _demangle_t0,
+    )
+    _hotspot_pct_by_key: Dict[str, float] = {}
+    if hotspots:
+        for _hs in hotspots:
+            _hname = _hs.get("name") or ""
+            _hkey = _demangle_t0(_hname)
+            if not _hkey:
+                continue
+            try:
+                _hp = float(_hs.get("percent_of_total", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                _hp = 0.0
+            # Keep the highest percent on duplicate keys (defensive —
+            # hotspots list normally de-dups upstream).
+            if _hkey not in _hotspot_pct_by_key or _hp > _hotspot_pct_by_key[_hkey]:
+                _hotspot_pct_by_key[_hkey] = _hp
+
+    _T0_SEV_CLASS = {
+        "HIGH": "h-src-critical",
+        "MEDIUM": "h-src-hot",
+        "LOW": "h-src-warm",
+        "INFO": "h-src-cool",
+    }
+    _show_runtime_col = bool(_hotspot_pct_by_key)
+
     kernel_rows = []
     for i, k in enumerate(tier0_result.detected_kernels[:50]):
         fname = _h(k.get("file", "").split("/")[-1])
+        # Match this source kernel against the Tier-1 hotspot lookup.
+        _k_key = _demangle_t0(k.get("name") or "")
+        _row_cls = ""
+        _rt_cell = '<td class="tier0-sev-pct dim">&mdash;</td>' if _show_runtime_col else ""
+        if _k_key and _k_key in _hotspot_pct_by_key:
+            _k_pct = _hotspot_pct_by_key[_k_key]
+            _k_sev_id, _, _ = _cls_sev_t0(_k_pct)
+            _row_cls = _T0_SEV_CLASS.get(_k_sev_id, "")
+            if _show_runtime_col:
+                _rt_cell = (
+                    f'<td class="tier0-sev-pct" data-v="{_k_pct}">{_k_pct:.1f}%</td>'
+                )
+        _cls_attr = f' class="{_row_cls}"' if _row_cls else ""
         kernel_rows.append(
-            f"<tr>"
+            f"<tr{_cls_attr}>"
             f"<td>{i + 1}</td>"
             f'<td class="kname" title="{_h(k.get("name", ""))}"><code>{_h(k.get("name", ""))}</code></td>'
             f'<td>{_h(k.get("launch_type", ""))}</td>'
             f"<td>{fname}</td>"
             f'<td data-v="{k.get("line", 0)}">{_h(str(k.get("line", "")))}</td>'
+            f"{_rt_cell}"
             f"</tr>"
         )
     if kernel_rows:
+        _rt_th = (
+            "<th data-tip='Runtime share from the matched Tier-1 hotspot. "
+            "Row color: red >=20%, orange 5-20%, yellow 1-5%, blue <1%, "
+            "no border = not in top hotspots.'>Runtime % &#8645;</th>"
+            if _show_runtime_col
+            else ""
+        )
+        _legend_html = (
+            '<p class="dim tier0-sev-legend" style="margin:.5rem 0 0;font-size:.78rem;">'
+            "Row color indicates runtime share from Tier-1 hotspot match &mdash; "
+            '<span style="color:#e84040;font-weight:600;">red: &ge;20%</span>, '
+            '<span style="color:#f08432;font-weight:600;">orange: 5-20%</span>, '
+            '<span style="color:#caa828;font-weight:600;">yellow: 1-5%</span>, '
+            '<span style="color:#4d8ef2;font-weight:600;">blue: &lt;1%</span>, '
+            "no border: not in top hotspots."
+            "</p>"
+            if _show_runtime_col
+            else ""
+        )
         kernels_section = (
             '<section class="scard">'
             '<div class="shdr">'
@@ -992,16 +1431,17 @@ def _format_tier0_webview(tier0_result: Any) -> str:
             f'<span class="shdr-badge sbadge-info">{tier0_result.kernel_count} found</span>'
             "</div>"
             '<div class="sbody"><div class="tbl-wrap">'
-            '<table class="dtable sortable">'
+            '<table class="dtable sortable tier0-kernels-table">'
             "<thead><tr>"
             "<th data-tip='Rank by order found in source.'>#</th>"
             "<th data-tip='GPU kernel function name detected in source code. For HIP/CUDA: __global__ functions.'>Kernel Name</th>"
             "<th data-tip='How the kernel is launched: __global__ for HIP/CUDA, kernel for OpenCL.'>Launch Type</th>"
             "<th data-tip='Source file where the kernel is defined (basename only).'>File</th>"
             "<th data-tip='Line number of the kernel definition in the source file.'>Line &#8645;</th>"
+            f"{_rt_th}"
             "</tr></thead>"
             "<tbody>" + "".join(kernel_rows) + "</tbody>"
-            "</table></div></div></section>"
+            "</table></div>" + _legend_html + "</div></section>"
         )
     else:
         kernels_section = (
@@ -1074,7 +1514,7 @@ def _format_tier0_webview(tier0_result: Any) -> str:
         for c in tier0_result.suggested_counters
     )
     counters_section = ""
-    if tier0_result.suggested_counters:
+    if tier0_result.suggested_counters and not has_profiling:
         collect_cmd = (
             "rocprofv3 --sys-trace --pmc "
             + " ".join(tier0_result.suggested_counters)
@@ -1098,24 +1538,61 @@ def _format_tier0_webview(tier0_result: Any) -> str:
             "</div></section>"
         )
 
-    # -- Start Here --
+    # -- Profiling Plan --
+    # Bug 3: dedicated section containing the instrumentation advice (first
+    # command + description) so it never leaks into the main code-patterns
+    # list. `<h3>Profiling Plan</h3>` is the anchor the CLI test suite
+    # searches for to confirm separation from the main recs table.
+    profiling_plan = getattr(tier0_result, "profiling_plan", None) or {}
+    suggested_cmd = (
+        (profiling_plan.get("suggested_first_command") if isinstance(profiling_plan, dict) else None)
+        or tier0_result.suggested_first_command
+    )
     start_here_section = ""
-    if tier0_result.suggested_first_command:
-        fc = tier0_result.suggested_first_command
+    if (suggested_cmd or profiling_plan) and not has_profiling:
+        desc = (
+            profiling_plan.get("description")
+            if isinstance(profiling_plan, dict)
+            else None
+        ) or "Run this command to collect profiling data for Tier 1/2 analysis:"
+        cmd_block = ""
+        if suggested_cmd:
+            cmd_block = (
+                f'<div class="cmd-row" id="cmd-start">'
+                f"<code>{_h(suggested_cmd)}</code>"
+                f'<button class="cp-btn" onclick="cpCmd(\'cmd-start\')">Copy</button>'
+                "</div>"
+            )
+        actions_list = (
+            profiling_plan.get("actions")
+            if isinstance(profiling_plan, dict)
+            else None
+        ) or []
+        extra_actions = [a for a in actions_list if a and a != suggested_cmd]
+        extras_html = ""
+        if extra_actions:
+            extras_html = (
+                '<p style="margin-top:1rem;margin-bottom:.5rem;color:var(--sub);font-size:.9rem">'
+                "Additional actions:</p>"
+            )
+            for idx, act in enumerate(extra_actions):
+                extras_html += (
+                    f'<div class="cmd-row" id="cmd-plan-{idx}">'
+                    f"<code>{_h(act)}</code>"
+                    f'<button class="cp-btn" onclick="cpCmd(\'cmd-plan-{idx}\')">Copy</button>'
+                    "</div>"
+                )
         start_here_section = (
-            '<section class="scard">'
+            '<section class="scard" id="tier0-profiling-plan">'
             '<div class="shdr">'
             '<span class="shdr-icon">&#9654;</span>'
-            "<h2>Start Here</h2>"
-            '<span class="shdr-badge sbadge-info">Recommended First Step</span>'
+            "<h3>Profiling Plan</h3>"
+            '<span class="shdr-badge sbadge-info">Instrumentation Advice</span>'
             "</div>"
             '<div class="sbody">'
-            '<p style="margin-bottom:.85rem;color:var(--sub);font-size:.9rem">'
-            "Run this command to collect profiling data for Tier 1/2 analysis:</p>"
-            f'<div class="cmd-row" id="cmd-start">'
-            f"<code>{_h(fc)}</code>"
-            f'<button class="cp-btn" onclick="cpCmd(\'cmd-start\')">Copy</button>'
-            "</div>"
+            f'<p style="margin-bottom:.85rem;color:var(--sub);font-size:.9rem">{_h(desc)}</p>'
+            f"{cmd_block}"
+            f"{extras_html}"
             "</div></section>"
         )
 
@@ -1186,3 +1663,253 @@ def _format_tier0_webview(tier0_result: Any) -> str:
         html = html.replace(placeholder, value)
 
     return html
+
+
+# ---------------------------------------------------------------------------
+# Trace-diff webview (Confluence row #7 — ``perfxpert diff`` + ``perfxpert ci``)
+#
+# This is a standalone self-contained HTML page. It reuses the same palette
+# as ``webview.html`` (one palette across the product) but does NOT depend
+# on the template file: the diff view has its own overview-card + delta-bar
+# + sortable-table layout that doesn't map cleanly onto the main analyze
+# template's placeholders.
+# ---------------------------------------------------------------------------
+
+
+def _format_diff_webview(
+    diff_result: Dict[str, Any],
+    *,
+    title: Optional[str] = None,
+) -> str:
+    """Render a ``trace_diff`` result as a self-contained HTML page.
+
+    Uses the standard ``.scard / .shdr / .sbody`` + ``.dtable sortable`` CSS
+    conventions from the main webview so the two formats feel coherent.
+
+    Sections (top to bottom):
+      1. Overview card — wall-delta %, regression count, improvement count.
+      2. Delta-bar card — one stacked bar per kernel (red = regression,
+         green = improvement, width = ``|delta_pct|``).
+      3. Kernel-by-kernel speedup table — sortable; click a header to sort.
+      4. Narrative card — deterministic / LLM summary.
+
+    The ``has_profiling`` gate invariant is structurally satisfied: a diff
+    report implies two databases were supplied, so there is always
+    profiling data behind both sides.
+    """
+    import html as _html
+
+    def _h(v: Any) -> str:
+        return _html.escape(str(v), quote=True)
+
+    baseline_db = diff_result.get("baseline_db", "?")
+    new_db = diff_result.get("new_db", "?")
+    wall_ns = int(diff_result.get("wall_delta_ns", 0))
+    wall_pct = float(diff_result.get("wall_delta_pct", 0.0))
+    per_kernel = diff_result.get("per_kernel", []) or []
+    regressions = diff_result.get("primary_regressions", []) or []
+    improvements = diff_result.get("primary_improvements", []) or []
+    narrative = diff_result.get("narrative", "") or ""
+
+    page_title = title or f"PerfXpert diff — {_h(baseline_db)} vs {_h(new_db)}"
+
+    # Color the wall-delta pill.
+    if wall_pct > 5.0:
+        wall_color = "#e84040"  # CRITICAL red
+        wall_verdict = "REGRESSED"
+    elif wall_pct > 0.5:
+        wall_color = "#f08432"  # HOT orange
+        wall_verdict = "Slightly slower"
+    elif wall_pct < -5.0:
+        wall_color = "#3acc66"  # green
+        wall_verdict = "IMPROVED"
+    elif wall_pct < -0.5:
+        wall_color = "#caa828"  # WARM yellow
+        wall_verdict = "Slightly faster"
+    else:
+        wall_color = "#4d8ef2"  # INFO blue
+        wall_verdict = "Within noise"
+
+    # Overview KPIs.
+    overview_html = (
+        '<section class="scard">'
+        '<div class="shdr">'
+        '<span class="shdr-icon">&#128202;</span>'
+        "<h2>Overview</h2>"
+        "</div>"
+        '<div class="sbody">'
+        f'<div class="kpi-grid">'
+        f'<div class="kpi"><div class="kpi-label">Wall-time delta</div>'
+        f'<div class="kpi-value" style="color:{wall_color}">{wall_pct:+.2f}%</div>'
+        f'<div class="kpi-sub">{_h(wall_verdict)} ({wall_ns:+,} ns)</div>'
+        f"</div>"
+        f'<div class="kpi"><div class="kpi-label">Regressions (&gt; +3%)</div>'
+        f'<div class="kpi-value" style="color:#e84040">{len(regressions)}</div>'
+        f'<div class="kpi-sub">kernels slower in new</div>'
+        f"</div>"
+        f'<div class="kpi"><div class="kpi-label">Improvements (&lt; -3%)</div>'
+        f'<div class="kpi-value" style="color:#3acc66">{len(improvements)}</div>'
+        f'<div class="kpi-sub">kernels faster in new</div>'
+        f"</div>"
+        f"</div>"
+        "</div></section>"
+    )
+
+    # Delta-bar card — red for regressions, green for improvements.
+    # Width is proportional to |delta_pct| capped at 100%.
+    bars = []
+    for k in per_kernel:
+        dp = float(k.get("delta_pct", 0.0))
+        name = _h(k.get("name", "?"))
+        if dp > 0:
+            color = "#e84040"
+            direction = "regression"
+        elif dp < 0:
+            color = "#3acc66"
+            direction = "improvement"
+        else:
+            color = "#4d8ef2"
+            direction = "unchanged"
+        width = min(100.0, abs(dp))
+        bars.append(
+            f'<div class="dbar-row">'
+            f'<span class="dbar-name"><code>{name}</code></span>'
+            f'<span class="dbar-val" style="color:{color}">{dp:+.1f}%</span>'
+            f'<div class="dbar-track">'
+            f'<div class="dbar-fill" '
+            f'style="width:{width:.1f}%;background:{color}" '
+            f'data-direction="{direction}"></div>'
+            f"</div></div>"
+        )
+    bars_html = (
+        '<section class="scard">'
+        '<div class="shdr">'
+        '<span class="shdr-icon">&#128200;</span>'
+        "<h2>Per-kernel delta</h2>"
+        "</div>"
+        '<div class="sbody">'
+        + ("".join(bars) or '<p class="dim">No kernels in common.</p>')
+        + "</div></section>"
+    )
+
+    # Sortable speedup table.
+    rows = []
+    for k in per_kernel:
+        dp = float(k.get("delta_pct", 0.0))
+        color = "#e84040" if dp > 3 else ("#3acc66" if dp < -3 else "#a8aace")
+        rows.append(
+            "<tr>"
+            f'<td><code>{_h(k.get("name", "?"))}</code></td>'
+            f'<td data-v="{int(k.get("baseline_ns", 0))}">{int(k.get("baseline_ns", 0)):,}</td>'
+            f'<td data-v="{int(k.get("new_ns", 0))}">{int(k.get("new_ns", 0)):,}</td>'
+            f'<td data-v="{int(k.get("delta_ns", 0))}">{int(k.get("delta_ns", 0)):+,}</td>'
+            f'<td data-v="{dp}" style="color:{color}">{dp:+.2f}%</td>'
+            f'<td>{"yes" if k.get("was_hot") else "no"}</td>'
+            "</tr>"
+        )
+    table_html = (
+        '<section class="scard">'
+        '<div class="shdr">'
+        '<span class="shdr-icon">&#128202;</span>'
+        "<h2>Kernel speedup table</h2>"
+        "</div>"
+        '<div class="sbody"><div class="tbl-wrap">'
+        '<table class="dtable sortable">'
+        "<thead><tr>"
+        "<th>Kernel</th><th>Baseline (ns)</th><th>New (ns)</th>"
+        "<th>&Delta; (ns)</th><th>&Delta; %</th><th>Hot?</th>"
+        "</tr></thead>"
+        "<tbody>" + "".join(rows) + "</tbody>"
+        "</table></div></div></section>"
+    )
+
+    # Narrative card — whatever the caller supplied (LLM or airgap).
+    narrative_html = (
+        '<section class="scard">'
+        '<div class="shdr">'
+        '<span class="shdr-icon">&#128221;</span>'
+        "<h2>Summary</h2>"
+        "</div>"
+        '<div class="sbody">'
+        f'<pre style="white-space:pre-wrap;line-height:1.6;'
+        f'color:var(--sub);font-size:.9rem">{_h(narrative)}</pre>'
+        "</div></section>"
+    )
+
+    css = (
+        "<style>"
+        ":root{--bg:#0d0d14;--bg2:#14141f;--bg3:#1c1c2c;--text:#e0e3f2;"
+        "--sub:#a8aace;--dim:#6868a0;--bdr:#2c2c48;--amd:#e01a22;"
+        "--r:10px;--font:-apple-system,'Segoe UI',system-ui,sans-serif;"
+        "--mono:'JetBrains Mono',ui-monospace,monospace;}"
+        "*{box-sizing:border-box;margin:0;padding:0}"
+        "body{font-family:var(--font);background:var(--bg);color:var(--text);"
+        "line-height:1.6;font-size:15px;padding:1.5rem}"
+        ".scard{background:var(--bg2);border:1px solid var(--bdr);"
+        "border-radius:var(--r);margin-bottom:1.25rem;overflow:hidden}"
+        ".shdr{background:var(--bg3);padding:.85rem 1.1rem;"
+        "border-bottom:1px solid var(--bdr);display:flex;align-items:center;gap:.5rem}"
+        ".shdr h2{font-size:1.1rem;font-weight:600}"
+        ".sbody{padding:1.1rem}"
+        ".kpi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}"
+        ".kpi{background:var(--bg3);padding:1rem;border-radius:var(--r);"
+        "border:1px solid var(--bdr)}"
+        ".kpi-label{color:var(--dim);font-size:.8rem;text-transform:uppercase}"
+        ".kpi-value{font-size:2rem;font-weight:700;margin:.25rem 0}"
+        ".kpi-sub{color:var(--sub);font-size:.85rem}"
+        ".dbar-row{display:grid;grid-template-columns:minmax(200px,2fr) 80px 1fr;"
+        "gap:.75rem;align-items:center;padding:.35rem 0;border-bottom:1px dashed var(--bdr)}"
+        ".dbar-name code{color:var(--text);background:var(--bg3);"
+        "padding:2px 6px;border-radius:3px}"
+        ".dbar-val{font-weight:600;text-align:right}"
+        ".dbar-track{background:var(--bg3);height:8px;border-radius:4px;overflow:hidden}"
+        ".dbar-fill{height:100%;transition:width .35s}"
+        ".tbl-wrap{overflow-x:auto}"
+        ".dtable{width:100%;border-collapse:collapse;font-size:.88rem}"
+        ".dtable th{background:var(--bg3);color:var(--sub);text-align:left;"
+        "padding:.55rem .7rem;border-bottom:1px solid var(--bdr);cursor:pointer}"
+        ".dtable td{padding:.5rem .7rem;border-bottom:1px solid var(--bdr)}"
+        ".dim{color:var(--dim);font-style:italic}"
+        ".hdr{background:linear-gradient(135deg,#080810,#120e1c);"
+        "border-bottom:3px solid var(--amd);padding:.85rem 1.25rem;"
+        "margin:-1.5rem -1.5rem 1.25rem;color:#fff}"
+        ".hdr h1{font-size:1.4rem;font-weight:700}"
+        ".hdr .hdr-sub{color:var(--sub);font-size:.8rem;margin-top:.2rem}"
+        "</style>"
+    )
+
+    js = (
+        "<script>"
+        "document.querySelectorAll('.dtable.sortable th').forEach((th,i)=>{"
+        "th.addEventListener('click',()=>{"
+        "const tb=th.closest('table').querySelector('tbody');"
+        "const rows=[...tb.querySelectorAll('tr')];"
+        "const asc=th.getAttribute('data-order')!=='asc';"
+        "rows.sort((a,b)=>{"
+        "const av=a.cells[i].getAttribute('data-v')||a.cells[i].innerText;"
+        "const bv=b.cells[i].getAttribute('data-v')||b.cells[i].innerText;"
+        "const an=parseFloat(av),bn=parseFloat(bv);"
+        "if(!isNaN(an)&&!isNaN(bn))return asc?an-bn:bn-an;"
+        "return asc?av.localeCompare(bv):bv.localeCompare(av);});"
+        "rows.forEach(r=>tb.appendChild(r));"
+        "th.setAttribute('data-order',asc?'asc':'desc');});});"
+        "</script>"
+    )
+
+    return (
+        "<!DOCTYPE html>"
+        '<html lang="en" data-theme="dark"><head>'
+        '<meta charset="UTF-8">'
+        f"<title>{page_title}</title>"
+        f"{css}"
+        "</head><body>"
+        '<div class="hdr"><h1>PerfXpert &mdash; Trace diff</h1>'
+        f'<div class="hdr-sub">baseline: <code>{_h(baseline_db)}</code> '
+        f'&rarr; new: <code>{_h(new_db)}</code></div></div>'
+        f"{overview_html}{bars_html}{table_html}{narrative_html}"
+        f"{js}"
+        "</body></html>"
+    )
+
+
+__all__ = [*(globals().get("__all__", []) or []), "_format_diff_webview"]

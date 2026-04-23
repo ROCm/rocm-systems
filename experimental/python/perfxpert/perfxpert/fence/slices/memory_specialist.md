@@ -15,9 +15,14 @@ kernel fusion.
 
 ## Tool allowlist (max 5)
 
-- memory_techniques.catalog
 - arch.lookup_peaks
 - bottleneck.lookup_signatures
+
+Memory-technique catalogs live in YAML
+(`knowledge/optimization_techniques.yaml`,
+`knowledge/memory_patterns.yaml`). These are **YAML lookups**, not
+MCP tools — the agent loads them via the knowledge loader. Three
+allowlist slots are intentionally unused.
 
 ## Output schema (≤5 fields)
 

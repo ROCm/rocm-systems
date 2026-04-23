@@ -16,11 +16,17 @@ and GPU metadata.
 
 ## Tool allowlist (max 5)
 
-- analysis.time_breakdown
-- analysis.hotspots
 - bottleneck.classify_from_metrics
 - roofline.classify
 - counters.validate_for_gpu
+
+The Analysis agent receives the time-breakdown + hot-kernel data from
+its upstream payload (populated by the `_TraceAnalysisAdapter` before
+the agent runs); the agent does NOT query them via MCP tools — they
+are part of `AnalysisInput`. `analysis.time_breakdown` /
+`analysis.hotspots` are internal adapter shims, not READ_ONLY MCP
+tools, and are therefore absent from this allowlist. Two remaining
+slots are intentionally unused.
 
 ## Output schema (≤5 fields)
 
