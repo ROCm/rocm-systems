@@ -2108,7 +2108,7 @@ int main() {
 
         // Accumulated counters — names match CLI output
         std::cout << "\t-- Accumulated --\n";
-        std::cout << "\tACCUMULATION_COUNTER:        " << u64_str(violation_status.acc_counter)
+        std::cout << "\tACCUMULATION_COUNTER:       " << u64_str(violation_status.acc_counter)
                   << "\n";
         std::cout << "\tPROCHOT_ACCUMULATED:        " << u64_str(violation_status.acc_prochot_thrm)
                   << "\n";

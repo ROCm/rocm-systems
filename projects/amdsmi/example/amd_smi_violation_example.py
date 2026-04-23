@@ -34,6 +34,13 @@ MI3x+ (MI300X and newer) is required for full violation data.
 import amdsmi
 
 
+def _active_str(value) -> str:
+    """Convert active flag value to ACTIVE/NOT ACTIVE/N/A, matching CLI and C++ output."""
+    if value == "N/A":
+        return "N/A"
+    return "ACTIVE" if value else "NOT ACTIVE"
+
+
 def main() -> None:
     amdsmi.amdsmi_init()
     try:
@@ -57,12 +64,12 @@ def main() -> None:
                     m = amdsmi.amdsmi_get_gpu_metrics_info(processor)
                     # throttle_status: same field the CLI uses for amd-smi metric --power
                     ts = m.get("throttle_status", "N/A")
-                    if ts is True:
-                        print("  throttle_status: THROTTLED")
-                    elif ts is False:
-                        print("  throttle_status: UNTHROTTLED")
-                    else:
+                    if ts == "N/A":
                         print("  throttle_status: N/A")
+                    elif ts:
+                        print("  throttle_status: THROTTLED")
+                    else:
+                        print("  throttle_status: UNTHROTTLED")
                 except amdsmi.AmdSmiException as metrics_exc:
                     print(f"  amdsmi_get_gpu_metrics_info also failed: {metrics_exc}")
                 continue
@@ -89,12 +96,12 @@ def main() -> None:
             print(f"  per_hbm_thrm (%):     {v['per_hbm_thrm']}")
 
             # -- Active flags --
-            print("\n  -- Active flags (True=active, False=not active, N/A=unsupported) --")
-            print(f"  active_prochot_thrm: {v['active_prochot_thrm']}")
-            print(f"  active_ppt_pwr:      {v['active_ppt_pwr']}")
-            print(f"  active_socket_thrm:  {v['active_socket_thrm']}")
-            print(f"  active_vr_thrm:      {v['active_vr_thrm']}")
-            print(f"  active_hbm_thrm:     {v['active_hbm_thrm']}")
+            print("\n  -- Active flags (ACTIVE / NOT ACTIVE / N/A=unsupported) --")
+            print(f"  active_prochot_thrm: {_active_str(v['active_prochot_thrm'])}")
+            print(f"  active_ppt_pwr:      {_active_str(v['active_ppt_pwr'])}")
+            print(f"  active_socket_thrm:  {_active_str(v['active_socket_thrm'])}")
+            print(f"  active_vr_thrm:      {_active_str(v['active_vr_thrm'])}")
+            print(f"  active_hbm_thrm:     {_active_str(v['active_hbm_thrm'])}")
 
             # -- GPU metrics v1.8 per-XCP/XCC 2D arrays --
             # Each field is a list-of-lists indexed [xcp][xcc].
@@ -127,7 +134,12 @@ def main() -> None:
                     # Only print XCC rows that have at least one non-N/A value
                     if all(val == "N/A" for val in row):
                         continue
-                    print(f"    XCP[{xcp_idx}]: {row}")
+                    # Translate active flag rows to ACTIVE/NOT ACTIVE to match CLI/C++ output
+                    if field.startswith("active_"):
+                        display_row = [_active_str(val) for val in row]
+                    else:
+                        display_row = row
+                    print(f"    XCP[{xcp_idx}]: {display_row}")
 
             if not any_xcp_printed:
                 print("\n  -- GPU metrics v1.8 per-XCP/XCC: all N/A (pre-v1.8 driver) --")
