@@ -34,7 +34,7 @@ jobs:
           abi-compliance-checker --version
 
       - name: Checkout current code (new version)
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -83,7 +83,7 @@ jobs:
 
       - name: Upload Major ABI Report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: major-abi-report
           path: abi_report.html
@@ -117,7 +117,7 @@ jobs:
           abi-compliance-checker --version
 
       - name: Checkout current code (new version)
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -166,7 +166,7 @@ jobs:
 
       - name: Upload Minor ABI Report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: minor-abi-report
           path: abi_report.html

@@ -53,7 +53,7 @@ jobs:
       rocm_versions: ${{ steps.generate_matrix_ci.outputs.rocm_versions }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: projects/rocprofiler-systems/docker
 
@@ -86,7 +86,7 @@ jobs:
             rocm-version: "7.0"
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: projects/rocprofiler-systems/docker
           submodules: recursive
@@ -149,7 +149,7 @@ jobs:
       matrix_data: ${{ steps.generate_matrix_release.outputs.matrix_data }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: projects/rocprofiler-systems
 
@@ -170,7 +170,7 @@ jobs:
         include: ${{ fromJSON(needs.prepare_matrix_release.outputs.matrix_data) }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: projects/rocprofiler-systems
 
