@@ -197,6 +197,18 @@ jobs:
             -L "rocm" \
             -LE "rccl|runtime|ompvv"
 
+      - name: Test fork-runtime-instrument
+        id: run_fork_runtime
+        timeout-minutes: 30
+        working-directory: projects/rocprofiler-systems
+        run: |
+          set -e
+          PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
+          LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
+          ctest --test-dir build \
+            --output-on-failure \
+            -R "^fork-runtime-instrument(-cleanup)?$"
+
       - name: Check for Leftover Buffered Files
         timeout-minutes: 5
         working-directory: projects/rocprofiler-systems/
@@ -211,7 +223,7 @@ jobs:
           fi
 
       - name: Output Logs
-        if: failure() && steps.run_ci.outcome == 'failure'
+        if: failure() && (steps.run_ci.outcome == 'failure' || steps.run_fork_runtime.outcome == 'failure')
         working-directory: projects/rocprofiler-systems
         run: |
           echo "❌ Run Failed: Now outputting LastTest.log files for detailed logs..."
