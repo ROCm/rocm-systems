@@ -960,10 +960,12 @@ ncclResult_t connectRailOptimizedTrees(struct ncclComm* comm, int* treeToParent,
   return ncclSuccess;
 }
 
-
-// Check if search actually filled all requested channels
-// This is temporary. It is expected that these structures are filled by 
-// individual ranks followed by bootstrap allgather. Just for debugging.
+/**
+ * Check if search actually filled all requested channels
+ * It is expected that these structures are filled by individual ranks followed by bootstrap allgather.
+ * gfx1151 having 1-GPU/node communicating via ethernet is special case
+ * But call to this function is a safety net for all architectures, and is idempotent.
+ */ 
 static ncclResult_t repairMissingChannels(struct ncclTopoRanks** allTopoRanks, int nranks, int nChannels) {
   for (int r = 0; r < nranks; r++) {
     for (int c = 1; c < nChannels; c++) {
@@ -1024,8 +1026,8 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   NCCLCHECKGOTO(ncclCalloc(&treeToChild0, nNodes*MAXCHANNELS), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&treeToChild1, nNodes*MAXCHANNELS), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&nvlsHeads, nNodes*MAXCHANNELS), ret, fail);
-
-  repairMissingChannels(allTopoRanks,nranks,nChannels);
+  
+  NCCLCHECK(repairMissingChannels(allTopoRanks,nranks,nChannels));
   // Alternate rings to avoid crossing rails.
   // CrossNic values could be not the same on all nodes as it depends on the number of net devs and the NVLink bandwidth.
   // Therefore, it's only done if the rank obtained a solution with crossNic=2.
