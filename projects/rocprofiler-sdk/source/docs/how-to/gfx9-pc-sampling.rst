@@ -107,7 +107,7 @@ The arbiter state (``arbiter_state_*`` or ``arb_state_*``) describes the arbiter
 
 The following table lists the conditions based on the ``arbiter_state_*`` values to determine the arbiter activity during the sampled cycle:
 
-.. list-table:: Diagnosing arbiter acitivity
+.. list-table:: Diagnosing arbiter activity
   :header-rows: 1
 
   * - Condition
