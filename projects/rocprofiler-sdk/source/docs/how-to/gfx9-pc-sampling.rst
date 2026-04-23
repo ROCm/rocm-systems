@@ -167,7 +167,7 @@ Arbiter states can also be used to estimate the number of IPC, which is specific
 .. note::
 
     Under specific circumstances, the GPU can co-issue two VALU instructions in the same clock cycle.
-    When this occurs, the PC sampling data records ``dual_issue_valu`` = 1 in the sample. This has implications for IPC estimation; a sample with ``arbiter_state_issue_valu`` == 1 AND ``arbiter_state_stall_valu`` == 0 AND ``dual_issue_valu`` == 1 represents two VALU instructions issued in that cycle. To obtain an accurate IPC estimate, VALU contributions from such samples should be counted as two instead of one. For more details, see `Why does VALU utilization exceed the theoretical peak? <https://github.com/ROCm/rocm-systems/blob/7bd3b0f4870adcec97fabaf7442566345da105e7/projects/rocprofiler-compute/docs/reference/faq.rst#why-does-valu-utilization-exceed-the-theoretical-peak>`_.
+    When this occurs, the PC sampling data records ``dual_issue_valu`` = 1 in the sample. This has implications for IPC estimation; a sample with ``arbiter_state_issue_valu`` == 1 AND ``arbiter_state_stall_valu`` == 0 AND ``dual_issue_valu`` == 1 represents two VALU instructions issued in that cycle. To obtain an accurate IPC estimate, VALU contributions from such samples should be counted as two instead of one. For more information, see `Why does VALU utilization exceed the theoretical peak? <https://github.com/ROCm/rocm-systems/blob/7bd3b0f4870adcec97fabaf7442566345da105e7/projects/rocprofiler-compute/docs/reference/faq.rst#why-does-valu-utilization-exceed-the-theoretical-peak>`_.
 
 .. _pipeline_oversubscribe:
 
