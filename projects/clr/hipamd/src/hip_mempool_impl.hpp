@@ -82,6 +82,7 @@ struct MemoryTimestamp {
 
   std::unordered_set<hip::Stream*> safe_streams_;  //!< Safe streams for memory reuse
   hip::Event* event_ = nullptr;  //!< Last known HIP event, associated with the memory object
+  uint32_t refcount_ = 0;  //!< VA-mapping refcount: >0 means skip unmap/erase (graph caching)
 };
 
 class Heap : public amd::EmbeddedObject {
@@ -155,6 +156,25 @@ class Heap : public amd::EmbeddedObject {
   /// Checks if memory belongs to this heap
   bool IsActiveMemory(amd::Memory* memory) const {
     return (allocations_.find({memory->getSize(), memory}) != allocations_.end());
+  }
+
+  /// Increments refcount for the given memory allocation
+  bool IncrementRefCount(amd::Memory* memory) {
+    if (auto it = allocations_.find({memory->getSize(), memory}); it != allocations_.end()) {
+      it->second.refcount_++;
+      return true;
+    }
+    return false;
+  }
+
+  /// Decrements refcount for the given memory allocation
+  bool DecrementRefCount(amd::Memory* memory) {
+    if (auto it = allocations_.find({memory->getSize(), memory}); it != allocations_.end()) {
+      assert(it->second.refcount_ > 0);
+      it->second.refcount_--;
+      return true;
+    }
+    return false;
   }
 
   /// Enabled VM heap for memory, instead of direct allocations
@@ -312,6 +332,18 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
   bool InternalDependencies() const { return (state_.internal_dependencies_) ? true : false; }
   bool GraphInUse() const { return (state_.graph_in_use_) ? true : false; }
   void SetGraphInUse() { state_.graph_in_use_ = true; }
+
+  /// Increments refcount for the given memory in either busy or free heap
+  bool IncrementRefCount(amd::Memory* memory) {
+    std::scoped_lock lock(lock_pool_ops_);
+    return busy_heap_.IncrementRefCount(memory) || free_heap_.IncrementRefCount(memory);
+  }
+
+  /// Decrements refcount for the given memory in either busy or free heap
+  bool DecrementRefCount(amd::Memory* memory) {
+    std::scoped_lock lock(lock_pool_ops_);
+    return busy_heap_.DecrementRefCount(memory) || free_heap_.DecrementRefCount(memory);
+  }
 
  private:
   MemoryPool() = delete;

@@ -48,6 +48,7 @@ amd::Memory* Heap::FindMemory(size_t size, Stream* stream, bool opportunistic, v
       total_size_ -= memory->getSize();
       // Preserve event, since the logic could skip GPU wait on reuse
       ts->event_ = it->second.event_;
+      ts->refcount_ = it->second.refcount_;
       // Remove found allocation from the map
       it = allocations_.erase(it);
       break;
@@ -77,6 +78,9 @@ bool Heap::RemoveMemory(amd::Memory* memory, MemoryTimestamp* ts) {
 
 // ================================================================================================
 Heap::SortedMap::iterator Heap::EraseAllocation(Heap::SortedMap::iterator& it) {
+  if (it->second.refcount_ > 0) {
+    return ++it;
+  }
   auto memory = it->first.second;
   const device::Memory* dev_mem = memory->getDeviceMemory(*device_->devices()[0]);
   void* dev_mem_vaddr = reinterpret_cast<void*>(dev_mem->virtualAddress());
@@ -103,6 +107,10 @@ bool Heap::ReleaseAllMemory(size_t min_bytes_to_hold, bool safe_release) {
     if (total_size_ <= min_bytes_to_hold) {
       return true;
     }
+    if (it->second.refcount_ > 0) {
+      ++it;
+      continue;
+    }
     // Safe release forces unconditional wait for memory
     if (safe_release) {
       it->second.Wait();
@@ -127,6 +135,10 @@ bool Heap::ReleaseAllMemory() {
     // @note: Managed memory controls the threshold on its own
     if (!use_vm_heap_ && (total_size_ <= release_threshold_)) {
       return true;
+    }
+    if (it->second.refcount_ > 0) {
+      ++it;
+      continue;
     }
     if (it->second.IsSafeRelease()) {
       it = EraseAllocation(it);
@@ -269,7 +281,7 @@ bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
     }
     ClPrint(amd::LOG_INFO, amd::LOG_MEM_POOL, "Pool FreeMem: %p, %p", memory->getSvmPtr(), memory);
 
-    if (memory->getUserData().vaddr_mem_obj != nullptr) {
+    if (ts.refcount_ == 0 && memory->getUserData().vaddr_mem_obj != nullptr) {
       auto va_mem = memory->getUserData().vaddr_mem_obj;
       if (stream == nullptr) {
         stream = g_devices[memory->getUserData().deviceId]->NullStream();

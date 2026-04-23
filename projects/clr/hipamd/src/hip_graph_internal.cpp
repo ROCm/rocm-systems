@@ -2240,8 +2240,15 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
 
   if (flags_ & hipGraphInstantiateFlagAutoFreeOnLaunch) {
     if (firstNode != nullptr) {
-      firstNode->GetParentGraph()->FreeAllMemory(launch_stream);
-      firstNode->GetParentGraph()->memalloc_nodes_ = 0;
+      auto* parentGraph = firstNode->GetParentGraph();
+      auto* pool = parentGraph->Device()->GetGraphMemoryPool();
+      for (auto* node : topoOrder_) {
+        if (node->GetType() == hipGraphNodeTypeMemAlloc) {
+          static_cast<GraphMemAllocNode*>(node)->ReleaseCachedMapping(pool);
+        }
+      }
+      parentGraph->FreeAllMemory(launch_stream);
+      parentGraph->memalloc_nodes_ = 0;
       if (!AMD_DIRECT_DISPATCH) {
         // The MemoryPool::FreeAllMemory queues a memory unmap command that for !AMD_DIRECT_DISPATCH
         // runs asynchonously. Make sure that freeAllMemory is complete before creating new commands

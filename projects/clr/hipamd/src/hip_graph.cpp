@@ -2936,7 +2936,27 @@ hipError_t hipDeviceGraphMemTrim(int device) {
   if ((static_cast<size_t>(device) >= g_devices.size()) || device < 0) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
-  g_devices[device]->GetGraphMemoryPool()->TrimTo(0);
+  auto* pool = g_devices[device]->GetGraphMemoryPool();
+
+  // Phase 1: Release all idle graph-cached VA mappings and decrement refcounts.
+  {
+    std::scoped_lock lock(hip::GraphExec::graphExecSetLock_);
+    for (auto* ge : hip::GraphExec::graphExecSet_) {
+      if (ge->Device() != g_devices[device] ||
+          ge->GetMemAllocNodeCount() > 0) {
+        continue;
+      }
+      for (auto* node : ge->GetNodes()) {
+        if (node->GetType() != hipGraphNodeTypeMemAlloc) continue;
+        auto* alloc_node = static_cast<hip::GraphMemAllocNode*>(node);
+        alloc_node->ReleaseCachedMapping(pool);
+      }
+    }
+  }
+
+  // Phase 2: All previously-refcounted entries now have refcount==0.
+  pool->TrimTo(0);
+
   HIP_RETURN(hipSuccess);
 }
 
