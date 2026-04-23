@@ -205,7 +205,7 @@ def test_install_fails_closed_when_hook_settings_shape_is_invalid(
     assert not (project_cwd / ".perfxpert" / "AGENTS.md").exists()
 
 
-def test_install_migrates_legacy_user_settings(project_cwd: Path, isolated_home: Path) -> None:
+def test_install_does_not_touch_legacy_user_settings(project_cwd: Path, isolated_home: Path) -> None:
     legacy = isolated_home / ".gemini" / "settings.json"
     legacy.parent.mkdir(parents=True)
     legacy.write_text(
@@ -220,17 +220,16 @@ def test_install_migrates_legacy_user_settings(project_cwd: Path, isolated_home:
                 "allowedTools": ["mcp_perfxpert_*"],
                 "tools": {"allowed": ["mcp_perfxpert_*"]},
             }
-        )
+        ),
+        encoding="utf-8",
     )
+    before = legacy.read_text()
+
     GeminiAdapter().install(project_cwd)
-    data = json.loads(legacy.read_text())
-    assert "perfxpert" not in data.get("mcpServers", {})
-    assert "allowedTools" not in data
-    assert "tools" not in data
-    assert str(project_cwd / ".perfxpert" / "AGENTS.md") not in json.dumps(data)
+    assert legacy.read_text() == before
 
 
-def test_install_cleans_legacy_user_settings_without_touching_auth_fields(
+def test_install_does_not_touch_legacy_user_settings_with_auth_fields(
     project_cwd: Path, isolated_home: Path
 ) -> None:
     legacy = isolated_home / ".gemini" / "settings.json"
@@ -254,16 +253,13 @@ def test_install_cleans_legacy_user_settings_without_touching_auth_fields(
             }
         )
     )
+    before = legacy.read_text()
 
     GeminiAdapter().install(project_cwd)
-    data = json.loads(legacy.read_text())
-
-    assert "perfxpert" not in data.get("mcpServers", {})
-    assert data["security"]["auth"]["selectedType"] == "oauth-personal"
-    assert data["theme"] == "ansi"
+    assert legacy.read_text() == before
 
 
-def test_install_migrates_legacy_nested_tools_allowed_for_this_project(
+def test_install_does_not_touch_legacy_nested_tools_allowed_for_this_project(
     project_cwd: Path, isolated_home: Path
 ) -> None:
     legacy = isolated_home / ".gemini" / "settings.json"
@@ -281,12 +277,10 @@ def test_install_migrates_legacy_nested_tools_allowed_for_this_project(
             }
         )
     )
+    before = legacy.read_text()
 
     GeminiAdapter().install(project_cwd)
-    data = json.loads(legacy.read_text())
-
-    assert "perfxpert" not in data.get("mcpServers", {})
-    assert "tools" not in data
+    assert legacy.read_text() == before
 
 
 def test_install_does_not_touch_other_projects_legacy_user_state(
@@ -461,7 +455,7 @@ def test_uninstall_removes_mcp_entry_and_context_filename(project_cwd: Path) -> 
     assert not any(".perfxpert/AGENTS.md" in str(entry) for entry in data["context"]["fileName"])
 
 
-def test_uninstall_migrates_legacy_user_settings(project_cwd: Path, isolated_home: Path) -> None:
+def test_uninstall_does_not_touch_legacy_user_settings(project_cwd: Path, isolated_home: Path) -> None:
     legacy = isolated_home / ".gemini" / "settings.json"
     legacy.parent.mkdir(parents=True)
     legacy.write_text(
@@ -478,13 +472,11 @@ def test_uninstall_migrates_legacy_user_settings(project_cwd: Path, isolated_hom
             }
         )
     )
+    before = legacy.read_text()
     adapter = GeminiAdapter()
     adapter.install(project_cwd)
     adapter.uninstall(project_cwd)
-    data = json.loads(legacy.read_text())
-    assert "perfxpert" not in data.get("mcpServers", {})
-    assert "allowedTools" not in data
-    assert "tools" not in data
+    assert legacy.read_text() == before
 
 
 def test_uninstall_returns_report(project_cwd: Path) -> None:

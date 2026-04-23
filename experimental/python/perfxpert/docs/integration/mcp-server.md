@@ -462,12 +462,11 @@ Verify with `gemini mcp list` (Gemini CLI ≥ 0.2). For project-local
 installs this probe is advisory: PerfXpert treats
 `.gemini/settings.json` as the source of truth and does not fail setup
 just because `gemini mcp list` omits the project MCP. Any tool named
-`perfxpert_*` is exposed; unprefixed names are reserved for built-in
+`mcp_perfxpert_*` is exposed; unprefixed names are reserved for built-in
 Gemini capabilities.
 
 Older perfxpert releases may have left user-global entries in
-`~/.gemini/settings.json`; current installs treat that file as a legacy
-migration target, not the live install location.
+`~/.gemini/settings.json`; current installs do not mutate that file.
 
 ### opencode (bundled with `perfxpert-code`)
 
@@ -572,7 +571,7 @@ git — the security impact of "yes" changed).
 ### Tool-priority gate (event-based)
 
 Each backend receives a gate layer that rejects any
-non-`perfxpert_*` tool call UNTIL
+non-PerfXpert-prefixed tool call UNTIL
 `perfxpert_intent_classify` has returned in the current session.
 There is no turn counter — a legitimate `bash` on turn 2 AFTER
 `intent_classify` on turn 1 passes through. Gate escape hatch:

@@ -165,7 +165,7 @@ def test_uninstall_gemini_removes_perfxpert_entries(
     from perfxpert.cli._backend.gemini import GeminiAdapter
 
     GeminiAdapter().install(project_cwd)
-    settings = isolated_home / ".gemini" / "settings.json"
+    settings = project_cwd / ".gemini" / "settings.json"
     data = json.loads(settings.read_text())
     assert "perfxpert" in data["mcpServers"]
 

@@ -98,15 +98,6 @@ class GeminiAdapter:
         cwd = Path(cwd).expanduser().resolve()
         return cwd / self._SETTINGS_REL
 
-    def _user_settings_path(self, home: Path | None = None) -> Path:
-        """Legacy migration target only.
-
-        Live Gemini installs are project-local under ``<cwd>/.gemini``. We
-        still inspect the user-global file so we can clean up stale
-        perfxpert-managed entries left behind by older releases.
-        """
-        return (home or Path.home()) / self._SETTINGS_REL
-
     def plan(
         self,
         cwd: Path,
@@ -144,25 +135,12 @@ class GeminiAdapter:
         cwd = Path(cwd).expanduser().resolve()
         settings = self._settings_path(cwd)
         agents = cwd / self._PERFXPERT_DIR / self._AGENTS_FILE
-        legacy_settings = self._user_settings_path()
-        legacy_cleanup_needed = self._has_legacy_user_state(legacy_settings, agents)
 
         # Consent.
         fset = file_set_hash(
-            tuple(
-                entry
-                for entry in (
-                    (settings, settings.exists(), False),
-                    (agents, agents.exists(), False),
-                    (
-                        legacy_settings,
-                        legacy_settings.exists(),
-                        False,
-                    )
-                    if legacy_cleanup_needed
-                    else None,
-                )
-                if entry is not None
+            (
+                (settings, settings.exists(), False),
+                (agents, agents.exists(), False),
             )
         )
         if not has_consent(self.name, cwd, fset):
@@ -172,10 +150,6 @@ class GeminiAdapter:
                 "List-append cache path to context.fileName (never touches GEMINI.md)",
                 "Install Gemini BeforeTool/AfterTool gate hooks",
             ]
-            if legacy_cleanup_needed:
-                plan_lines.append(
-                    f"Migrate legacy perfxpert Gemini user-scope entries from {legacy_settings}"
-                )
             if not prompt_consent_interactive(self.name, cwd, plan_lines):
                 raise ConsentDenied(
                     f"user declined perfxpert install for gemini in {cwd}. "
@@ -253,19 +227,8 @@ class GeminiAdapter:
                     "leave the backend partially installed"
                 )
 
-        # Step 5/5: Migrate legacy user-scope state for this project.
-        if legacy_cleanup_needed:
-            self._log_step(
-                quiet,
-                "[5/5] Migrating legacy perfxpert Gemini entries from ~/.gemini/settings.json ...",
-            )
-            if self._cleanup_legacy_user_state(legacy_settings, agents):
-                actions.append("migrated legacy ~/.gemini/settings.json entries")
-                written.append(legacy_settings)
-            else:
-                actions.append("legacy ~/.gemini/settings.json migration skipped")
-        else:
-            self._log_step(quiet, "[5/5] No legacy ~/.gemini/settings.json migration needed")
+        # Step 5/5: Done. Gemini installs are project-local only.
+        self._log_step(quiet, "[5/5] Project-local Gemini install complete")
 
         grant_consent(self.name, cwd, fset)
         return InstallReport(
@@ -437,10 +400,6 @@ class GeminiAdapter:
         revoke_consent(self.name, cwd)
         actions.append("revoked consent")
 
-        legacy_settings = self._user_settings_path()
-        if self._cleanup_legacy_user_state(legacy_settings, agents):
-            actions.append("migrated legacy ~/.gemini/settings.json entries for this project")
-
         return UninstallReport(
             backend=self.name,
             actions=tuple(actions),
@@ -568,115 +527,6 @@ class GeminiAdapter:
             if "perfxpert" in line:
                 return line.strip()
         raise RuntimeError("perfxpert not listed by gemini mcp list")
-
-    def _has_legacy_user_state(self, settings: Path, agents: Path) -> bool:
-        if not settings.is_file():
-            return False
-        try:
-            data = json.loads(settings.read_text())
-        except (OSError, json.JSONDecodeError):
-            return False
-        if not isinstance(data, dict):
-            return False
-
-        has_agents_entry = self._has_legacy_agents_entry(data, agents)
-
-        # Legacy Gemini gate shapes from older perfxpert releases. Current
-        # installs use native hooks instead of allowed-tool config.
-        top_allowed = data.get("allowedTools")
-        has_top_allowed = isinstance(top_allowed, list) and "mcp_perfxpert_*" in top_allowed
-
-        tools = data.get("tools")
-        tools_allowed = tools.get("allowed") if isinstance(tools, dict) else None
-        has_tools_allowed = isinstance(tools_allowed, list) and "mcp_perfxpert_*" in tools_allowed
-
-        # Only migrate user-global state when it is explicitly tied to this
-        # checkout via the staged AGENTS.md path. Otherwise we risk clobbering
-        # another repo's older user-scope install.
-        if not has_agents_entry:
-            return False
-
-        servers = data.get("mcpServers")
-        if not isinstance(servers, dict):
-            return has_top_allowed or has_tools_allowed or has_agents_entry
-        entry = servers.get("perfxpert")
-        return (
-            has_top_allowed
-            or has_tools_allowed
-            or (
-                isinstance(entry, dict)
-                and entry.get("command") == "perfxpert-mcp"
-            )
-        )
-
-    def _cleanup_legacy_user_state(self, settings: Path, agents: Path) -> bool:
-        if not settings.is_file():
-            return False
-        try:
-            data = json.loads(settings.read_text())
-        except (OSError, json.JSONDecodeError):
-            return False
-        if not isinstance(data, dict):
-            return False
-        if not self._has_legacy_agents_entry(data, agents):
-            return False
-
-        changed = False
-        context = data.get("context")
-        if isinstance(context, dict):
-            filenames = context.get("fileName")
-            if isinstance(filenames, list):
-                filtered = [entry for entry in filenames if entry != str(agents)]
-                if filtered != filenames:
-                    changed = True
-                    if filtered:
-                        context["fileName"] = filtered
-                    else:
-                        context.pop("fileName", None)
-            if not context:
-                data.pop("context", None)
-
-        # Legacy Gemini gate shapes from older perfxpert releases. Current
-        # installs use native hooks instead of allowed-tool config.
-        top_allowed = data.get("allowedTools")
-        if isinstance(top_allowed, list) and "mcp_perfxpert_*" in top_allowed:
-            filtered = [entry for entry in top_allowed if entry != "mcp_perfxpert_*"]
-            changed = True
-            if filtered:
-                data["allowedTools"] = filtered
-            else:
-                data.pop("allowedTools", None)
-
-        tools = data.get("tools")
-        if isinstance(tools, dict):
-            allowed = tools.get("allowed")
-            if isinstance(allowed, list) and "mcp_perfxpert_*" in allowed:
-                filtered = [entry for entry in allowed if entry != "mcp_perfxpert_*"]
-                changed = True
-                if filtered:
-                    tools["allowed"] = filtered
-                else:
-                    tools.pop("allowed", None)
-            if not tools:
-                data.pop("tools", None)
-
-        servers = data.get("mcpServers")
-        if isinstance(servers, dict):
-            entry = servers.get("perfxpert")
-            if isinstance(entry, dict) and entry.get("command") == "perfxpert-mcp":
-                servers.pop("perfxpert")
-                changed = True
-                if not servers:
-                    data.pop("mcpServers", None)
-
-        if changed:
-            pa.atomic_write(settings, json.dumps(data, indent=2) + "\n")
-        return changed
-
-    def _has_legacy_agents_entry(self, data: dict, agents: Path) -> bool:
-        context = data.get("context")
-        filenames = context.get("fileName") if isinstance(context, dict) else None
-        return isinstance(filenames, list) and str(agents) in filenames
 
 
 # ---------------------------------------------------------------------------

@@ -182,7 +182,7 @@ adapter does **not** install a server-side pre-tool-call gate hook.
 Codex's native `PreToolUse` hook exists (behind `[features]
 codex_hooks = true`) but currently intercepts Bash only — it cannot
 block MCP, Write, or other tool calls. The perfxpert gate must
-intercept every non-`perfxpert_*` tool call until
+intercept every non-PerfXpert-prefixed tool call until
 `intent_classify` returns, so a Bash-only hook cannot satisfy the
 contract. Installing one anyway would give false confidence.
 
