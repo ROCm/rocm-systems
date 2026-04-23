@@ -139,15 +139,16 @@ If the user insists on the plain one-liner without the wrapper, pip
 still works — they just pay the 3-6 min submodule-init penalty once.
 The `setup.py` build hook notices if the opencode submodule is still
 empty after pip's checkout (i.e. the user scoped submodule init out
-manually without including opencode) and falls back to a direct
-shallow clone of `sst/opencode` at the pinned tag — so the install
-always completes regardless of how the user configured git.
+manually without including opencode), but it does **not** clone from
+the network during install. Instead it warns clearly and skips only the
+bundled `opencode` build; library + analyze + MCP paths still install
+successfully.
 
 Opt-outs:
 
-- `PERFXPERT_SKIP_OPENCODE_FETCH=1` — don't attempt the fallback
-  clone; air-gap CI that intentionally skips the bundled opencode
-  build should set this AND `PERFXPERT_SKIP_BUNDLED_BUILD=1`.
+- `PERFXPERT_SKIP_OPENCODE_FETCH=1` — don't attempt the scoped
+  submodule init; air-gap CI that intentionally skips the bundled
+  opencode build should set this AND `PERFXPERT_SKIP_BUNDLED_BUILD=1`.
 
 ### What the build hook does
 
@@ -195,8 +196,10 @@ doctor checks:
 - task store (`~/.perfxpert` or `$PERFXPERT_TASK_ROOT`)
 - bundled opencode binary + bundled opencode config dir
 - LLM providers configured (counts `N/5` against
-  `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OLLAMA_HOST`,
-  `PRIVATE_LLM_ENDPOINT`, plus always-present `opencode`)
+  `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `PERFXPERT_LLM_LOCAL_URL` or `OLLAMA_HOST`,
+  `PERFXPERT_LLM_PRIVATE_URL` or `PRIVATE_LLM_ENDPOINT`,
+  plus always-present `opencode`)
 
 If `opencode binary` reports missing, re-run the patch script
 (§1 step 2) or install upstream opencode:
@@ -358,8 +361,9 @@ Wizard complete. Your setup is ready.
 `--non-interactive` never prompts; it always overwrites the config if
 one exists, so it's safe in CI. Provider detection order:
 `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` →
-`PERFXPERT_LLM_PRIVATE_URL` → `OLLAMA_HOST` → bundled `opencode`
-(no key required).
+`PERFXPERT_LLM_PRIVATE_URL` (compat: `PRIVATE_LLM_ENDPOINT`) →
+`PERFXPERT_LLM_LOCAL_URL` (compat: `OLLAMA_HOST`) →
+bundled `opencode` (no key required).
 
 ## 4. First analysis (60 seconds)
 
@@ -1151,7 +1155,7 @@ optional; all analysis runs locally without internet when you omit
 |---------|----------|---------|
 | `anthropic` | `ANTHROPIC_API_KEY` | Claude API (production default) |
 | `openai` | `OPENAI_API_KEY` | OpenAI hosted API |
-| `ollama` | `OLLAMA_HOST` (default `http://localhost:11434`) | Local Ollama daemon — fully offline once the model is pulled |
+| `ollama` | `PERFXPERT_LLM_LOCAL_URL` (compat: `OLLAMA_HOST`, default `http://localhost:11434`) | Local Ollama daemon — fully offline once the model is pulled |
 | `private` | `PERFXPERT_LLM_PRIVATE_URL`, `PERFXPERT_LLM_PRIVATE_MODEL`, optional `PERFXPERT_LLM_PRIVATE_API_KEY`, optional `PERFXPERT_LLM_PRIVATE_HEADERS` (JSON), optional `PERFXPERT_LLM_PRIVATE_VERIFY_SSL=false` | Any OpenAI-compatible endpoint (enterprise / self-hosted) |
 | `opencode` | none required (bundled) | Bundled opencode CLI — subprocess wrapper |
 
@@ -1175,7 +1179,7 @@ export PERFXPERT_LLM_PRIVATE_VERIFY_SSL=false
 perfxpert analyze -i trace.db --llm private
 
 # Local Ollama (no network after model pull)
-export OLLAMA_HOST="http://localhost:11434"
+export PERFXPERT_LLM_LOCAL_URL="http://localhost:11434"
 perfxpert analyze -i trace.db --llm ollama --llm-model llama3:70b
 
 # Bundled opencode (no credential — used internally by perfxpert-code)

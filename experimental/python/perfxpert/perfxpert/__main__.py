@@ -386,15 +386,15 @@ def _check_llm_providers() -> tuple[list[str], list[str]]:
     import perfxpert.providers.opencode_provider  # noqa: F401
 
     providers = {
-        "anthropic": "ANTHROPIC_API_KEY",
-        "openai": "OPENAI_API_KEY",
-        "ollama": "OLLAMA_HOST",
-        "private": "PRIVATE_LLM_ENDPOINT",
-        "opencode": None,  # always available (bundled)
+        "anthropic": ("ANTHROPIC_API_KEY",),
+        "openai": ("OPENAI_API_KEY",),
+        "ollama": ("PERFXPERT_LLM_LOCAL_URL", "OLLAMA_HOST"),
+        "private": ("PERFXPERT_LLM_PRIVATE_URL", "PRIVATE_LLM_ENDPOINT"),
+        "opencode": (),  # always available (bundled)
     }
 
-    for name, env_var in providers.items():
-        if name == "opencode" or (env_var and os.getenv(env_var)):
+    for name, env_vars in providers.items():
+        if name == "opencode" or any(os.getenv(env_var) for env_var in env_vars):
             configured.append(name)
         else:
             unconfigured.append(name)

@@ -4,9 +4,10 @@ Launches opencode (from PERFXPERT_OPENCODE_PATH / locally built patched
 repo checkout / bundled wheel / well-known paths / system PATH in that
 order) with the AMD-themed config directory.
 
-opencode is a system dependency — it is NOT bundled inside the perfxpert wheel
-in this release (bundling is tracked as future work). Users must install it
-separately: ``curl -fsSL https://opencode.ai/install | bash``.
+In source/editable checkouts, `perfxpert-code install-patches` can build the
+patched binary from the pinned `opencode` submodule. In packaged installs, the
+launcher prefers the bundled binary when present and falls back to an upstream
+`opencode` install only when no patched copy is available.
 
 PERFXPERT_OPENCODE_PATH, if set, must point to an existing executable file;
 the launcher raises FileNotFoundError immediately rather than silently
