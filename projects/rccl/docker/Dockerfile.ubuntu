@@ -72,31 +72,40 @@ RUN wget https://github.com/Kitware/CMake/releases/download/v3.28.0/cmake-3.28.0
 ## Set ROCm path
 ENV ROCM_PATH=/opt/rocm
 
+## UCX / OpenMPI versions
+# Kept in sync with docker/versions.env (the single source of truth used
+# by mnctl and setup_multinode.sh).  Override at build time with
+# `docker build --build-arg UCX_VERSION=... --build-arg OMPI_VERSION=...`.
+ARG UCX_VERSION=1.16.0
+ARG OMPI_VERSION=4.1.6
+
 ## Install UCX
 ENV UCX_INSTALL_PREFIX=/opt/ucx
-RUN wget https://github.com/openucx/ucx/releases/download/v1.16.0/ucx-1.16.0.tar.gz \
+RUN wget https://github.com/openucx/ucx/releases/download/v${UCX_VERSION}/ucx-${UCX_VERSION}.tar.gz \
     && mkdir -p ucx \
-    && tar -zxf ucx-1.16.0.tar.gz -C ucx --strip-components=1 \
+    && tar -zxf ucx-${UCX_VERSION}.tar.gz -C ucx --strip-components=1 \
     && cd ucx \
     && mkdir build \
     && cd build \
     && ../configure --prefix=${UCX_INSTALL_PREFIX} --with-rocm=${ROCM_PATH} \
     && make -j16 install \
     && cd ../.. \
-    && rm -rf ucx ucx-1.16.0.tar.gz
+    && rm -rf ucx ucx-${UCX_VERSION}.tar.gz
 
 ## Install OpenMPI
+# OpenMPI release URLs are grouped by major.minor series (e.g. v4.1/...).
 ENV MPI_INSTALL_PREFIX=/opt/ompi
-RUN wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.gz \
+RUN OMPI_SERIES="${OMPI_VERSION%.*}" \
+    && wget https://download.open-mpi.org/release/open-mpi/v${OMPI_SERIES}/openmpi-${OMPI_VERSION}.tar.gz \
     && mkdir -p ompi4 \
-    && tar -zxf openmpi-4.1.6.tar.gz -C ompi4 --strip-components=1 \
+    && tar -zxf openmpi-${OMPI_VERSION}.tar.gz -C ompi4 --strip-components=1 \
     && cd ompi4 \
     && mkdir build \
     && cd build \
     && ../configure --prefix=${MPI_INSTALL_PREFIX} --with-ucx=${UCX_INSTALL_PREFIX} --disable-oshmem --disable-mpi-fortran --enable-orterun-prefix-by-default \
     && make -j16 install \
     && cd ../.. \
-    && rm -rf ompi4 openmpi-4.1.6.tar.gz
+    && rm -rf ompi4 openmpi-${OMPI_VERSION}.tar.gz
 
 
 ## building RCCL

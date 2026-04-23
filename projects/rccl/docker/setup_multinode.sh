@@ -68,6 +68,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Single source of truth for UCX / OpenMPI versions.  See versions.env.
+# shellcheck source=versions.env disable=SC1091
+. "${SCRIPT_DIR}/versions.env"
+OMPI_SERIES="${OMPI_VERSION%.*}"
+
 # ============================================================================
 # Defaults
 # ============================================================================
@@ -582,14 +587,14 @@ setup_shared_deps() {
     fi
 
     timer_start
-    echo "  Building UCX 1.16.0 (log: ${ucx_log})..."
+    echo "  Building UCX ${UCX_VERSION} (log: ${ucx_log})..."
     if ! docker run --rm \
         -v "${SHARED_DIR}:/opt/shared" \
         "${IMAGE_TAG}" \
         bash -c "set -e \
             && cd /tmp \
-            && wget -q https://github.com/openucx/ucx/releases/download/v1.16.0/ucx-1.16.0.tar.gz \
-            && mkdir -p ucx && tar -zxf ucx-1.16.0.tar.gz -C ucx --strip-components=1 \
+            && wget -q https://github.com/openucx/ucx/releases/download/v${UCX_VERSION}/ucx-${UCX_VERSION}.tar.gz \
+            && mkdir -p ucx && tar -zxf ucx-${UCX_VERSION}.tar.gz -C ucx --strip-components=1 \
             && cd ucx && mkdir build && cd build \
             && ../configure --prefix=/opt/shared/ucx --with-rocm=/opt/rocm \
                --with-verbs --with-rdmacm --enable-mt \
@@ -605,14 +610,14 @@ setup_shared_deps() {
     echo "  [OK] UCX installed"
 
     timer_start
-    echo "  Building OpenMPI 4.1.6 (log: ${ompi_log})..."
+    echo "  Building OpenMPI ${OMPI_VERSION} (log: ${ompi_log})..."
     if ! docker run --rm \
         -v "${SHARED_DIR}:/opt/shared" \
         "${IMAGE_TAG}" \
         bash -c "set -e \
             && cd /tmp \
-            && wget -q https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.gz \
-            && mkdir -p ompi4 && tar -zxf openmpi-4.1.6.tar.gz -C ompi4 --strip-components=1 \
+            && wget -q https://download.open-mpi.org/release/open-mpi/v${OMPI_SERIES}/openmpi-${OMPI_VERSION}.tar.gz \
+            && mkdir -p ompi4 && tar -zxf openmpi-${OMPI_VERSION}.tar.gz -C ompi4 --strip-components=1 \
             && cd ompi4 && mkdir build && cd build \
             && ../configure --prefix=/opt/shared/ompi --with-ucx=/opt/shared/ucx \
                --disable-oshmem --disable-mpi-fortran --disable-mpi-cxx \

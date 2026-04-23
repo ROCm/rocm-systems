@@ -9,15 +9,20 @@ import os
 
 from .config import Config
 from .utils import log, log_verbose, Timer
+from .versions import (
+    UCX_VERSION, OMPI_VERSION,
+    UCX_TARBALL_URL, OMPI_TARBALL_URL,
+)
 
 
 # UCX and OpenMPI build scripts executed inside the container.
+# Version strings and tarball URLs come from versions.env via versions.py
+# so there is exactly ONE place to bump a version.
 _UCX_SCRIPT = (
     "set -e "
     "&& cd /tmp "
-    "&& wget -q https://github.com/openucx/ucx/releases/download/"
-    "v1.16.0/ucx-1.16.0.tar.gz "
-    "&& mkdir -p ucx && tar -zxf ucx-1.16.0.tar.gz "
+    "&& wget -q {url} "
+    "&& mkdir -p ucx && tar -zxf ucx-{ver}.tar.gz "
     "-C ucx --strip-components=1 "
     "&& cd ucx && mkdir build && cd build "
     "&& ../configure --prefix=/opt/shared/ucx --with-rocm=/opt/rocm "
@@ -25,14 +30,13 @@ _UCX_SCRIPT = (
     "   --disable-examples --silent "
     "&& make -j$(nproc) install "
     "&& echo '>>> UCX installed successfully'"
-)
+).format(url=UCX_TARBALL_URL, ver=UCX_VERSION)
 
 _OMPI_SCRIPT = (
     "set -e "
     "&& cd /tmp "
-    "&& wget -q https://download.open-mpi.org/release/open-mpi/"
-    "v4.1/openmpi-4.1.6.tar.gz "
-    "&& mkdir -p ompi4 && tar -zxf openmpi-4.1.6.tar.gz "
+    "&& wget -q {url} "
+    "&& mkdir -p ompi4 && tar -zxf openmpi-{ver}.tar.gz "
     "-C ompi4 --strip-components=1 "
     "&& cd ompi4 && mkdir build && cd build "
     "&& ../configure --prefix=/opt/shared/ompi "
@@ -41,7 +45,7 @@ _OMPI_SCRIPT = (
     "   --enable-orterun-prefix-by-default --silent "
     "&& make -j$(nproc) install "
     "&& echo '>>> OpenMPI installed successfully'"
-)
+).format(url=OMPI_TARBALL_URL, ver=OMPI_VERSION)
 
 
 def setup_shared_deps(cfg):
@@ -79,10 +83,10 @@ def setup_shared_deps(cfg):
         cfg.runtime.build_image()
 
     _build_component(
-        cfg, "UCX 1.16.0", _UCX_SCRIPT, ucx_log,
+        cfg, "UCX {}".format(UCX_VERSION), _UCX_SCRIPT, ucx_log,
     )
     _build_component(
-        cfg, "OpenMPI 4.1.6", _OMPI_SCRIPT, ompi_log,
+        cfg, "OpenMPI {}".format(OMPI_VERSION), _OMPI_SCRIPT, ompi_log,
     )
 
     log("")
