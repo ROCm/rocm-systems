@@ -19,16 +19,11 @@ class NativeToolFinder:
         lib_name,
     ])
 
-    def __init__(self, src_path: Path, sdk_tool_path: Path) -> None:
-        assert sdk_tool_path.stem == "librocprofiler-sdk-tool", (
-            f"Incorrect sdk_tool_path: {sdk_tool_path}"
-        )
+    def __init__(self, root_path: Path) -> None:
         console_debug("Searching for native collector.")
-        console_debug(f"Source directory: {src_path}")
-        console_debug(f"ROCm Profiler SDK Tool path: {sdk_tool_path}")
+        console_debug(f"ROCm Compute root directory: {root_path}")
 
-        self.src_path = src_path
-        self.sdk_tool_path = sdk_tool_path
+        self.root_path = root_path
         pass
 
     def get_collector_library_path(self) -> Path:
@@ -49,9 +44,7 @@ class NativeToolFinder:
 
     def __get_installed_rocm_root_path(self) -> Path:
         native_tool_base_path = (
-            self.sdk_tool_path.parents[2]
-            if len(self.sdk_tool_path.parents) > 2
-            else Path()
+            self.root_path.parents[1] if len(self.root_path.parents) > 1 else Path()
         )
         return native_tool_base_path
 
@@ -60,14 +53,14 @@ class NativeToolFinder:
         return Path(match) if match is not None else None
 
     def __build_collector(self) -> Path | None:
-        self._generate_cmake(self.src_path)
-        self._build_cmake(self.src_path)
+        self._generate_cmake(self.root_path)
+        self._build_cmake(self.root_path)
         return self.__find_built_collector()
 
     def __find_built_collector(self) -> Path | None:
         pattern = self.lib_relative_path
-        console_log(f"Searching {self.src_path} by {pattern} for native collector")
-        return self.__find_file_by_glob_pattern(self.src_path, pattern)
+        console_log(f"Searching {self.root_path} by {pattern} for native collector")
+        return self.__find_file_by_glob_pattern(self.root_path, pattern)
 
     def _generate_cmake(self, src_path: Path) -> None:
         build_command = (

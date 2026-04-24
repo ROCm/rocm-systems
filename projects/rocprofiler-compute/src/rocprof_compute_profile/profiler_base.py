@@ -479,15 +479,13 @@ class RocProfCompute_Base:
         )
 
     def __get_native_tool_path(self, args: argparse.Namespace) -> str | None:
-        sources_path = Path(__file__).resolve().parents[1]
         try:
             if (
                 self.__is_native_tool_requested(args)  # noqa: E501
                 and self.__is_native_tool_supported(args)
             ):
-                native_tool_finder = NativeToolFinder(
-                    Path(sources_path), Path(args.rocprofiler_sdk_tool_path)
-                )
+                compute_root_path = Path(__file__).resolve().parents[1]
+                native_tool_finder = NativeToolFinder(compute_root_path)
                 return str(native_tool_finder.get_collector_library_path())
             return None
         except Exception:
