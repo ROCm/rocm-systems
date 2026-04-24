@@ -1,0 +1,115 @@
+# AMD GPU interconnect (XGMI / Infinity Fabric / PCIe) and NIC specs per arch.
+# Source of truth for interconnect.lookup_peaks(). Consumed by RCCL / NIC
+# communication analysis (tools/rccl_analysis.py + Latency Specialist).
+#
+# Fields
+# ------
+#   xgmi_peak_gbps    : aggregate bidirectional XGMI bandwidth per GPU (GB/s)
+#   xgmi_links        : number of XGMI links wired per GPU
+#   xgmi_per_link_gbps: per-link bidirectional peak (GB/s)
+#   pcie_tier         : PCIe generation / width (human-readable label)
+#   pcie_peak_gbps    : PCIe aggregate peak (GB/s)
+#   achievable_gbps   : typical RCCL AllReduce busBW observed in practice
+#   source_url        : vendor / reference source for the published number
+#   measured_with     : short description of the measurement context
+#
+# Notes
+# -----
+# - achievable_gbps is conservative — RCCL AllReduce typically hits 60-85% of
+#   the wire peak on well-tuned rings. It is the number the Latency Specialist
+#   compares against when flagging "efficiency poor / fair / good".
+# - Inter-node (NIC) entries live alongside the GPU entries with the vendor
+#   codename as the key (e.g. "connectx7"). They are selected explicitly by
+#   callers that know the trace crosses nodes; there is no auto-detection.
+# - See docs/contributing/schemas.md for the "communication" key shape.
+
+gfx908:
+  name: "MI100"
+  xgmi_peak_gbps: 276.0         # 3 links x 92 GB/s bidirectional
+  xgmi_links: 3
+  xgmi_per_link_gbps: 92.0
+  pcie_tier: "PCIe Gen4 x16"
+  pcie_peak_gbps: 32.0
+  achievable_gbps: 180.0
+  source_url: "https://www.amd.com/en/products/server-accelerators/instinct-mi100"
+  measured_with: "vendor datasheet (CDNA1)"
+
+gfx90a:
+  name: "MI250X"
+  xgmi_peak_gbps: 400.0         # 8 links x ~50 GB/s bidirectional (aggregate)
+  xgmi_links: 8
+  xgmi_per_link_gbps: 50.0
+  pcie_tier: "PCIe Gen4 x16"
+  pcie_peak_gbps: 32.0
+  achievable_gbps: 200.0
+  source_url: "https://www.amd.com/en/products/server-accelerators/instinct-mi250x"
+  measured_with: "vendor datasheet (CDNA2) + RCCL AllReduce"
+
+gfx942:
+  name: "MI300X"
+  xgmi_peak_gbps: 448.0         # 7 links x ~64 GB/s bidirectional
+  xgmi_links: 7
+  xgmi_per_link_gbps: 64.0
+  pcie_tier: "PCIe Gen5 x16"
+  pcie_peak_gbps: 64.0
+  achievable_gbps: 340.0
+  source_url: "https://www.amd.com/en/products/accelerators/instinct/mi300/mi300x.html"
+  measured_with: "vendor datasheet (CDNA3) + RCCL AllReduce, 8-GPU ring"
+
+gfx950:
+  name: "MI350X"
+  xgmi_peak_gbps: 896.0         # doubled vs CDNA3 (CDNA4 projection)
+  xgmi_links: 7
+  xgmi_per_link_gbps: 128.0
+  pcie_tier: "PCIe Gen5 x16"
+  pcie_peak_gbps: 64.0
+  achievable_gbps: 650.0
+  source_url: "https://www.amd.com/en/products/accelerators/instinct/mi350.html"
+  measured_with: "vendor datasheet (CDNA4)"
+
+gfx1030:
+  name: "RX 6900 XT"
+  xgmi_peak_gbps: 0.0           # consumer RDNA2 has no XGMI
+  xgmi_links: 0
+  xgmi_per_link_gbps: 0.0
+  pcie_tier: "PCIe Gen4 x16"
+  pcie_peak_gbps: 32.0
+  achievable_gbps: 24.0
+  source_url: "https://www.amd.com/en/products/graphics/amd-radeon-rx-6900-xt"
+  measured_with: "vendor datasheet (RDNA2)"
+
+gfx1100:
+  name: "RX 7900 XTX"
+  xgmi_peak_gbps: 0.0           # consumer RDNA3 has no XGMI
+  xgmi_links: 0
+  xgmi_per_link_gbps: 0.0
+  pcie_tier: "PCIe Gen4 x16"
+  pcie_peak_gbps: 32.0
+  achievable_gbps: 24.0
+  source_url: "https://www.amd.com/en/products/graphics/amd-radeon-rx-7900xtx"
+  measured_with: "vendor datasheet (RDNA3)"
+
+# -- Inter-node NIC entries -----------------------------------------------
+# Selected explicitly via interconnect.lookup_peaks("connectx7") etc.
+
+connectx7:
+  name: "NVIDIA ConnectX-7 400G"
+  xgmi_peak_gbps: 0.0
+  xgmi_links: 0
+  xgmi_per_link_gbps: 0.0
+  pcie_tier: "PCIe Gen5 x16"
+  pcie_peak_gbps: 64.0
+  achievable_gbps: 50.0          # GDR RDMA, 400 Gb/s = 50 GB/s one-way
+  source_url: "https://www.nvidia.com/en-us/networking/ethernet/connectx-7/"
+  measured_with: "ConnectX-7 400G, GDR-enabled RoCE"
+
+connectx6:
+  name: "NVIDIA ConnectX-6 200G"
+  xgmi_peak_gbps: 0.0
+  xgmi_links: 0
+  xgmi_per_link_gbps: 0.0
+  pcie_tier: "PCIe Gen4 x16"
+  pcie_peak_gbps: 32.0
+  achievable_gbps: 25.0          # 200 Gb/s = 25 GB/s one-way
+  source_url: "https://www.nvidia.com/en-us/networking/ethernet/connectx-6/"
+  measured_with: "ConnectX-6 200G, GDR-enabled RoCE"

@@ -33,14 +33,6 @@ namespace rocprofsys
 namespace rocprofiler_sdk
 {
 
-template <typename MarkerWriterPolicy>
-thread_local typename roctx_client<MarkerWriterPolicy>::marker_range_stack_t
-    roctx_client<MarkerWriterPolicy>::m_pushed_ranges{};
-
-template <typename MarkerWriterPolicy>
-thread_local typename roctx_client<MarkerWriterPolicy>::marker_range_stack_t
-    roctx_client<MarkerWriterPolicy>::m_started_ranges{};
-
 namespace
 {
 
@@ -87,15 +79,6 @@ collect_args(rocprofiler_callback_tracing_record_t record)
 }
 
 }  // namespace
-
-template <typename MarkerWriterPolicy>
-roctx_client<MarkerWriterPolicy>::roctx_client(const roctx_client_config& roctx_cfg)
-: m_config{ roctx_cfg }
-, m_writer{ roctx_cfg.use_perfetto, roctx_cfg.use_timemory,
-            roctx_cfg.perfetto_annotations }
-, m_controller{ std::make_shared<control::trace_control>(
-      roctx_cfg.selected_trace_regions) }
-{}
 
 template <typename MarkerWriterPolicy>
 void

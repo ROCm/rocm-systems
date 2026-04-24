@@ -307,14 +307,16 @@ to_string (os_queue_snapshot_entry_t snapshot)
     "{ .queue_id=%d, .state=%s, .gpu_id=%d, .queue_type=%s, "
     ".exception_status=%s, .ring_base_address=%s, .ring_size=%" PRId64 ", "
     ".write_pointer_address=%s, .read_pointer_address=%s, "
-    ".ctx_save_restore_address=%s, .ctx_save_restore_area_size=%" PRId64 " }",
+    ".ctx_save_restore_address=%s, .ctx_save_restore_area_size=%" PRId64
+    ", .compute_tmpring_size=%s }",
     snapshot.queue_id, to_cstring (snapshot.state), snapshot.gpu_id,
     to_cstring (snapshot.queue_type), to_cstring (snapshot.exception_status),
     to_cstring (snapshot.ring_base_address), snapshot.ring_size,
     to_cstring (snapshot.write_pointer_address),
     to_cstring (snapshot.read_pointer_address),
     to_cstring (snapshot.ctx_save_restore_address),
-    snapshot.ctx_save_restore_area_size);
+    snapshot.ctx_save_restore_area_size,
+    to_cstring (snapshot.compute_tmpring_size));
 }
 
 template <>

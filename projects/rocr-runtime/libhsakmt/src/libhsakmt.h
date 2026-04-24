@@ -94,6 +94,8 @@ extern int hsakmt_page_shift;
 #define ALIGN_UP(x,align) (((uint64_t)(x) + (align) - 1) & ~(uint64_t)((align)-1))
 #define ALIGN_UP_32(x,align) (((uint32_t)(x) + (align) - 1) & ~(uint32_t)((align)-1))
 #define PAGE_ALIGN_UP(x) ALIGN_UP(x,PAGE_SIZE)
+#define IS_ALIGNED(x, alignment) (((uint64_t)(x) & ((alignment) - 1)) == 0)
+#define IS_PAGE_ALIGNED(x) (IS_ALIGNED(x, PAGE_SIZE))
 #define BITMASK(n) ((n) ? (UINT64_MAX >> (sizeof(UINT64_MAX) * CHAR_BIT - (n))) : 0)
 #define ARRAY_LEN(array) (sizeof(array) / sizeof(array[0]))
 
@@ -174,6 +176,7 @@ enum full_gfx_versions {
 	GFX_VERSION_GFX1151		= 0x0B0501,
 	GFX_VERSION_GFX1200		= 0x0C0000,
 	GFX_VERSION_GFX1201		= 0x0C0001,
+	GFX_VERSION_GFX1250		= 0x0C0500
 };
 
 struct hsa_gfxip_table {
@@ -260,5 +263,5 @@ bool hsakmt_is_forked_child(void);
 
 /* Calculate VGPR and SGPR register file size per CU */
 uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv);
-#define SGPR_SIZE_PER_CU 0x4000
+uint32_t hsakmt_get_sgpr_size_per_cu(uint32_t gfxv);
 #endif

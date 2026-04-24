@@ -204,6 +204,17 @@ typedef enum {
 #define AMDSMI_MAX_PROFILE_COUNT 16          //!< Maximum profiles supported
 
 /**
+ * @brief Introduced in gpu metrics v1.9+
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+#define AMDSMI_MAX_NUM_HBM_STACKS 12   //!< Maximum number of HBM stacks supported
+#define AMDSMI_MAX_NUM_AID 2           //!< Maximum number of AID supported
+#define AMDSMI_MAX_NUM_MID 2           //!< Maximum number of MID supported
+#define AMDSMI_MAX_NUM_CLKS_PER_AID 2  //!< Maximum number of clocks per AID supported
+#define AMDSMI_MAX_NUM_CLKS_PER_MID 2  //!< Maximum number of clocks per MID supported
+
+/**
  * @brief String format
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
@@ -950,7 +961,7 @@ typedef enum {
 typedef struct {
   struct pcie_static_ {
     uint16_t max_pcie_width;              //!< maximum number of PCIe lanes
-    uint32_t max_pcie_speed;              //!< maximum PCIe speed in GT/s
+    uint32_t max_pcie_speed;              //!< maximum PCIe speed in MT/s (e.g. 16000 for PCIe Gen4)
     uint32_t pcie_interface_version;      //!< PCIe interface version
     amdsmi_card_form_factor_t slot_type;  //!< card form factor
     uint32_t max_pcie_interface_version;  //!< maximum PCIe link generation
@@ -2032,6 +2043,11 @@ typedef struct {
   uint64_t gfx_below_host_limit_thm_acc[AMDSMI_MAX_NUM_XCC];
   uint64_t gfx_low_utilization_acc[AMDSMI_MAX_NUM_XCC];
   uint64_t gfx_below_host_limit_total_acc[AMDSMI_MAX_NUM_XCC];
+
+  /**
+   * @brief v1.9 additions
+   */
+  uint16_t temperature_xcd[AMDSMI_MAX_NUM_XCC];
 } amdsmi_gpu_xcp_metrics_t;
 
 /**
@@ -2231,6 +2247,17 @@ typedef struct {
   uint64_t vram_max_bandwidth;  //!< VRAM max bandwidth at max memory clock (GB/s)
 
   uint16_t xgmi_link_status[AMDSMI_MAX_NUM_XGMI_LINKS];  //!< XGMI link status(up/down)
+
+  /**
+   * @brief v1.9 additions
+   */
+  uint16_t
+      temperature_hbm_stacks[AMDSMI_MAX_NUM_HBM_STACKS];  //!< temperature of the HBM stacks in C
+  uint16_t temperature_mid[AMDSMI_MAX_NUM_MID];           //!< temperature of the MID in C
+  uint16_t temperature_aid[AMDSMI_MAX_NUM_AID];           //!< temperature of the AID in C
+
+  uint16_t current_uclk_aid[AMDSMI_MAX_NUM_CLKS_PER_AID];     //!< In MHz
+  uint16_t current_socclks_mid[AMDSMI_MAX_NUM_CLKS_PER_MID];  //!< In MHz
 } amdsmi_gpu_metrics_t;
 
 /**
@@ -3681,14 +3708,14 @@ amdsmi_status_t amdsmi_get_supported_power_cap(amdsmi_processor_handle processor
  *
  *  @platform{cpu_bm}
  *
- *  @param[in]      processor_handle Cpu socket which to query
+ *  @param[in]   processor_handle Cpu socket which to query
  *
- *  @param[in,out]    ppower - Input buffer to return socket power
+ *  @param[out]  ppower - Input buffer to return socket power
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_handle,
-                                            double* ppower);
+                                            uint32_t* ppower);
 
 /**
  *  @brief Get the socket power cap.
@@ -3697,14 +3724,14 @@ amdsmi_status_t amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_ha
  *
  *  @platform{cpu_bm}
  *
- *  @param[in]      processor_handle Cpu socket which to query
+ *  @param[in]   processor_handle Cpu socket which to query
  *
- *  @param[in,out]    pcap - Input buffer to return power cap.
+ *  @param[out]  pcap - Input buffer to return power cap.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processor_handle,
-                                                double* pcap);
+                                                uint32_t* pcap);
 
 /**
  *  @brief Get the maximum power cap value for a given socket.
@@ -3713,14 +3740,14 @@ amdsmi_status_t amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processo
  *
  *  @platform{cpu_bm}
  *
- *  @param[in]      processor_handle Cpu socket which to query
+ *  @param[in]   processor_handle Cpu socket which to query
  *
- *  @param[in,out]    pmax - Input buffer to return maximum power limit value
+ *  @param[out]  pmax - Input buffer to return maximum power limit value
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_cpu_socket_power_cap_max(amdsmi_processor_handle processor_handle,
-                                                    double* pmax);
+                                                    uint32_t* pmax);
 
 /**
  *  @brief Get the SVI based power telemetry for all rails.
@@ -3797,7 +3824,7 @@ amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
  */
 amdsmi_status_t amdsmi_get_cpu_pwr_efficiency_mode(amdsmi_processor_handle processor_handle,
                                                    uint32_t* power_efficiency_mode,
-                                                   uint32_t* utilization, double* ppt_limit);
+                                                   uint32_t* utilization, uint32_t* ppt_limit);
 
 /**
  *  @brief Read CCD (Core Complex Die) power consumption
@@ -3808,14 +3835,14 @@ amdsmi_status_t amdsmi_get_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
  *
  *  @platform{cpu_bm}
  *
- *  @param[in]  processor_handle Cpu core which to query
+ *  @param[in]   processor_handle Cpu core which to query
  *  @param[out]  power - Input buffer to store power consumption in watts
  *
  *   @return ::amdsmi_status_t
  *           ::AMDSMI_STATUS_SUCCESS on successful register read, non-zero on failure
  */
 amdsmi_status_t amdsmi_get_cpu_core_ccd_power(amdsmi_processor_handle processor_handle,
-                                              double* power);
+                                              uint32_t* power);
 
 /** @} End tagEsmiPowerControl */
 
@@ -7798,13 +7825,13 @@ amdsmi_status_t amdsmi_set_cpu_sdps_limit(amdsmi_processor_handle processor_hand
  *
  *  @platform{cpu_bm}
  *
- *  @param[in]  processor_handle Processor handle for which to query the limit
+ *  @param[in]   processor_handle Processor handle for which to query the limit
  *  @param[out]  sdps_limit - Input buffer to receive the current SDPS limit value in watts
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_cpu_sdps_limit(amdsmi_processor_handle processor_handle,
-                                          double* sdps_limit);
+                                          uint32_t* sdps_limit);
 
 /** @} End tagEsmiPerfControl */
 

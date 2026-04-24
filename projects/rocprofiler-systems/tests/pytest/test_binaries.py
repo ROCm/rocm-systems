@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 """
 Tests rocprof-sys binaries
@@ -44,7 +44,7 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_PERFETTO_FILL_POLICY": "tracing.fill_policy",
     "ROCPROFSYS_PERFETTO_BACKEND": "tracing.backend",
     "ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS": "tracing.flush_period_ms",
-    "ROCPROFSYS_TRACE_REGION": "tracing.region",
+    "ROCPROFSYS_SELECTED_REGIONS": "tracing.region",
     # --- Profiling ---
     "ROCPROFSYS_PROFILE": "profiling.enabled",
     "ROCPROFSYS_FLAT_PROFILE": "profiling.flat_profile",
@@ -66,6 +66,7 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_PROCESS_SAMPLING_FREQ": "domains.gpu.process_sampling_freq",
     "ROCPROFSYS_PROCESS_SAMPLING_DURATION": "domains.gpu.process_sampling_duration",
     "ROCPROFSYS_CPU_FREQ_ENABLED": "domains.cpu.cpu_freq_enabled",
+    "ROCPROFSYS_CPU_METRICS": "domains.cpu.metrics",
     # --- Domains: ROCm ---
     "ROCPROFSYS_ROCM_DOMAINS": "domains.rocm.api_domains",
     "ROCPROFSYS_ROCM_GROUP_BY_QUEUE": "domains.rocm.group_by_queue",
@@ -198,6 +199,7 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
 
         test_args = [
             "--simulate",
+            "--dump-info",
             "--print-format",
             "json",
             "txt",

@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -112,9 +93,15 @@ perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
     }
     auto        _index     = _track_data.size();
     auto&       _name      = _name_data.emplace_back(std::make_unique<std::string>(_v));
-    const char* _unit_name = (_units && strlen(_units) > 0) ? _units : nullptr;
+    const char* _name_cstr = _name->c_str();
+    const char* _unit_name = nullptr;
+    if(_units && strlen(_units) > 0)
+    {
+        auto& _unit_str = _name_data.emplace_back(std::make_unique<std::string>(_units));
+        _unit_name      = _unit_str->c_str();
+    }
     _track_data.emplace_back(
-        ::perfetto::CounterTrack{ ::perfetto::DynamicString{ _name->c_str() } }
+        ::perfetto::CounterTrack{ ::perfetto::DynamicString{ _name_cstr } }
             .set_unit_name(_unit_name)
             .set_category(_category)
             .set_unit_multiplier(_mult)

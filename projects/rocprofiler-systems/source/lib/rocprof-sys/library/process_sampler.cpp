@@ -1,28 +1,8 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/process_sampler.hpp"
 #include "core/config.hpp"
-#include "library/cpu_freq.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/runtime.hpp"
 
@@ -151,17 +131,6 @@ sampler::setup()
         _pmc->config       = []() { pmc::config(); };
         _pmc->sample       = []() { pmc::sample(); };
         _pmc->pause        = []() { pmc::pause(); };
-    }
-
-    if(get_cpu_freq_enabled())
-    {
-        auto& _cpu_freq         = instances.emplace_back(std::make_unique<instance>());
-        _cpu_freq->setup        = []() { cpu_freq::setup(); };
-        _cpu_freq->shutdown     = []() { cpu_freq::shutdown(); };
-        _cpu_freq->post_process = []() { cpu_freq::post_process(); };
-        _cpu_freq->config       = []() { cpu_freq::config(); };
-        _cpu_freq->sample       = []() { cpu_freq::sample(); };
-        _cpu_freq->pause        = []() { cpu_freq::pause(); };
     }
 
     for(auto& itr : instances)

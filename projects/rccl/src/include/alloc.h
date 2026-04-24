@@ -309,7 +309,7 @@ static_assert(sizeof(struct allocationTracker) == 64, "allocationTracker must be
 #define MAX_ALLOC_TRACK_NGPU 128
 extern struct allocationTracker allocTracker[];
 
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
 
 #include "rocmwrap.h"
 
@@ -393,7 +393,11 @@ static inline ncclResult_t ncclCuMemAlloc(void **ptr, CUmemGenericAllocationHand
   bool mapped = false;
   CUDACHECK(cudaGetDevice(&cudaDev));
   CUCHECK(cuDeviceGet(&currentDev, cudaDev));
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+  prop.type = hipMemAllocationTypeUncached;
+#else
   prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+#endif
   prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   prop.requestedHandleTypes = type;
   prop.location.id = currentDev;
@@ -498,21 +502,21 @@ static inline ncclResult_t ncclCuMemFree(void *ptr) {
 extern int ncclCuMemEnable();
 
 static inline ncclResult_t ncclCuMemAlloc(void **ptr, void *handlep, int type, size_t size) {
-  WARN("CUMEM requires ROCM_VERSION >= 7.12.0");
+  WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }
 static inline ncclResult_t ncclCuMemFree(void *ptr) {
-  WARN("CUMEM requires ROCM_VERSION >= 7.12.0");
+  WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }
 
 static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocationHandle *handleIn, size_t size) {
-  WARN("CUMEM requires ROCM_VERSION >= 7.12.0");
+  WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }
 
 static inline ncclResult_t ncclCuMemFreeAddr(void *ptr) {
-  WARN("CUMEM requires ROCM_VERSION >= 7.12.0");
+  WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }
 #endif
@@ -523,8 +527,13 @@ ncclResult_t ncclCudaMallocDebug(const char *filefunc, int line, T** ptr, size_t
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   *ptr = nullptr;
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  if (nelem > 0) 
-    CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem*ncclSizeOfT<T>(), flags), result, finish);
+  if (nelem > 0) {
+    if (ncclCuMemEnable()) {
+      NCCLCHECKGOTO(ncclCuMemAlloc((void **)ptr, NULL, ncclCuMemHandleType, nelem*ncclSizeOfT<T>()), result, finish);
+    } else {
+      CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem*ncclSizeOfT<T>(), flags), result, finish);
+    }
+  }
 finish:
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (*ptr == nullptr && nelem > 0) WARN("Failed to CUDA malloc %ld bytes", nelem*ncclSizeOfT<T>());

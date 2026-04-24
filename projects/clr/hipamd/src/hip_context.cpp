@@ -109,7 +109,7 @@ hip::Stream* getStream(hipStream_t stream, bool wait) {
 
 // ================================================================================================
 hip::Stream* getNullStream(amd::Context& ctx, bool wait) {
-  for (auto& it : g_devices) {
+  for (const auto& it : g_devices) {
     if (it->asContext() == &ctx) {
       return it->NullStream(wait);
     }

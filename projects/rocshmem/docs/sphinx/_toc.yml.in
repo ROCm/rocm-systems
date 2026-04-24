@@ -20,6 +20,16 @@ subtrees:
   - file: docker.rst
     title: Deploy with Docker
 
+- caption: Library constants
+  entries:
+  - file: library_constants.rst
+    title: Library constants
+
+- caption: Environment variables
+  entries:
+  - file: env_variables.rst
+    title: Environment variables
+
 - caption: API reference
   entries:
   - file: api/init.rst
@@ -30,8 +40,6 @@ subtrees:
     title: Team management routines
   - file: api/ctx.rst
     title: Context management routines
-  - file: api/env_variables.rst
-    title: Environment variables
   - file: api/rma.rst
     title: Remote memory access routines
   - file: api/amo.rst

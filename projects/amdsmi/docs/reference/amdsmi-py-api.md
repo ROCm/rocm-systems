@@ -1237,8 +1237,8 @@ Output: Dictionary with 2 fields `pcie_static` and `pcie_metric`
 
 Fields | Description
 ---|---
-`pcie_static` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`max_pcie_width`</td><td>Maximum number of pcie lanes available</td></tr><tr><td>`max_pcie_speed`</td><td>Maximum capable pcie speed in GT/s</td></tr><tr><td>`pcie_interface_version`</td><td>PCIe generation ie. 3,4,5...</td></tr><tr><td>`slot_type`</td><td>The type of form factor of the slot: OAM, PCIE, CEM, or Unknown</td></tr></tbody></table>
-`pcie_metric` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`pcie_width`</td><td>Current number of pcie lanes available</td></tr><tr><td>`pcie_speed`</td><td>Current pcie speed capable in GT/s</td></tr><tr><td>`pcie_bandwidth`</td><td>Current instantaneous bandwidth usage in Mb/s</td></tr><tr><td>`pcie_replay_count`</td><td>Total number of PCIe replays (NAKs)</td></tr><tr><td>`pcie_l0_to_recovery_count`</td><td>PCIE L0 to recovery state transition accumulated count</td></tr><tr><td>`pcie_replay_roll_over_count`</td><td>PCIe Replay accumulated count</td></tr><tr><td>`pcie_nak_sent_count`</td><td>PCIe NAK sent accumulated count</td></tr><tr><td>`pcie_nak_received_count`</td><td>PCIe NAK received accumulated count</td></tr></tbody></table>
+`pcie_static` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`max_pcie_width`</td><td>Maximum number of pcie lanes available</td></tr><tr><td>`max_pcie_speed`</td><td>Maximum capable pcie speed in MT/s</td></tr><tr><td>`pcie_interface_version`</td><td>PCIe generation ie. 3,4,5...</td></tr><tr><td>`slot_type`</td><td>The type of form factor of the slot: OAM, PCIE, CEM, or Unknown</td></tr></tbody></table>
+`pcie_metric` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`pcie_width`</td><td>Current number of pcie lanes available</td></tr><tr><td>`pcie_speed`</td><td>Current pcie speed in MT/s</td></tr><tr><td>`pcie_bandwidth`</td><td>Current instantaneous bandwidth usage in Mb/s</td></tr><tr><td>`pcie_replay_count`</td><td>Total number of PCIe replays (NAKs)</td></tr><tr><td>`pcie_l0_to_recovery_count`</td><td>PCIE L0 to recovery state transition accumulated count</td></tr><tr><td>`pcie_replay_roll_over_count`</td><td>PCIe Replay accumulated count</td></tr><tr><td>`pcie_nak_sent_count`</td><td>PCIe NAK sent accumulated count</td></tr><tr><td>`pcie_nak_received_count`</td><td>PCIe NAK received accumulated count</td></tr></tbody></table>
 
 Exceptions that can be thrown by `amdsmi_get_pcie_info` function:
 
@@ -1590,7 +1590,7 @@ except AmdSmiException as e:
     print(e)
 ```
 
-Refer to [amd_smi_cper_example.py](https://github.com/ROCm/amdsmi/blob/amd-mainline/example/amd_smi_cper_example.py) for a complete example.
+Refer to [amd_smi_cper_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_cper_example.py) for a complete example.
 
 ### amdsmi_get_afids_from_cper
 
@@ -1648,7 +1648,7 @@ except AmdSmiException as e:
     print(e)
 ```
 
-Refer to [amd_smi_afid_example.py](https://github.com/ROCm/amdsmi/blob/amd-mainline/example/amd_smi_afid_example.py) for a complete example.
+Refer to [amd_smi_afid_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_afid_example.py) for a complete example.
 
 ### amdsmi_get_gpu_ras_feature_info
 
@@ -4255,7 +4255,7 @@ Example:
 
 ```python
 try:
-    status_str = amdsmi_status_code_to_string(ctypes.c_uint32(0))
+    status_str = amdsmi_status_code_to_string(int(0))
     print(status_str)
 except AmdSmiException as e:
     print(e)
@@ -6126,7 +6126,7 @@ Input parameters:
 Output: Dictionary containing the power efficiency mode information:
 - `power_efficiency_mode` (int): Mode value
 - `utilization` (int): Utilization point for balanced core modes (0-100)(%), if applicable
-- `ppt_limit` (float): PPT Limit value in Watts if applicable
+- `ppt_limit` (int): PPT Limit value in Watts if applicable
 
 Exceptions that can be thrown by `amdsmi_set_cpu_pwr_efficiency_mode` function:
 
@@ -6225,7 +6225,7 @@ try:
                 # Only show utilization and ppt_limit for modes 4 and 5
                 if power_efficiency_mode in [4, 5]:
                     print(f"    	UTIL: {utilization}%")
-                    print(f"    	PPT_LIMIT: {ppt_limit:.3f} Watts")
+                    print(f"    	PPT_LIMIT: {ppt_limit} Watts")
                     print()
                 else:
                     # For modes 0-3, utilization and ppt_limit are not displayed
@@ -7813,7 +7813,7 @@ try:
         power = amdsmi_get_cpu_core_ccd_power(core0)
         print("CPU: 0")
         print("    CCD_POWER:")
-        print(f"        VALUE: {power:.3f} Watts")
+        print(f"        VALUE: {power} Watts")
 except AmdSmiException as e:
     print(e)
 ```
@@ -8431,7 +8431,7 @@ Description: Get the SDPS limit for a CPU socket. This function retrieves the cu
 Input parameters:
 - `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
 
-Output: Double representing the SDPS limit value in Watts
+Output: int representing the SDPS limit value in Watts
 
 Exceptions that can be thrown by `amdsmi_get_cpu_sdps_limit` function:
 

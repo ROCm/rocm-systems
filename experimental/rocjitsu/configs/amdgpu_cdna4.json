@@ -2,7 +2,36 @@
   "max_ticks": 100000,
   "num_threads": 1,
   "exec_mode": "functional",
-  "vm": { "arch": "cdna4" },
+  "vm": {
+    "arch": "cdna4",
+    "gpu": {
+      "device": {
+        "gpu_id": 38144,
+        "gfx_target_version": 90500,
+        "vendor_id": 4098,
+        "device_id": 5892,
+        "family_id": 160,
+        "unique_id": 5929628898254127105,
+        "marketing_name": "AMD Instinct MI350X",
+        "simd_count": 1024,
+        "max_waves_per_simd": 10,
+        "num_shader_engines": 4,
+        "num_shader_arrays_per_engine": 2,
+        "num_cu_per_sh": 4,
+        "simd_per_cu": 4,
+        "wave_front_size": 64,
+        "local_mem_size": 309237645312,
+        "lds_size_kb": 128,
+        "mem_width": 8192,
+        "mem_clk_max": 1600,
+        "l2_size_kb": 6144,
+        "num_sdma_engines": 5,
+        "num_sdma_xgmi_engines": 12,
+        "num_cp_queues": 128,
+        "max_engine_clk_fcompute": 2700
+      }
+    }
+  },
   "topology": {
     "root": {
       "name": "soc", "type": "soc",
@@ -22,9 +51,9 @@
               "children": [{
                 "name": "cu[0:8]", "type": "compute_unit",
                 "config": [
-                  { "key": "num_wf_slots", "value": "10" },
+                  { "key": "num_wf_slots", "value": "40" },
                   { "key": "sgprs_per_wf", "value": "104" },
-                  { "key": "vgprs_per_wf", "value": "256" },
+                  { "key": "vgprs_per_wf", "value": "512" },
                   { "key": "lds_size_kb", "value": "160" }
                 ]
               }]

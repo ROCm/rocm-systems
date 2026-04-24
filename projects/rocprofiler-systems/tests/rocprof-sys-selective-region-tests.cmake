@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 find_package(ROCmVersion)
 
@@ -115,7 +115,7 @@ rocprofiler_systems_add_test(
     TARGET selective_region
     GPU ON
     LABELS "selective_regions;roctx"
-    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region1"
+    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_SELECTED_REGIONS=Region1"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -150,7 +150,7 @@ rocprofiler_systems_add_test(
     GPU ON
     LABELS "selective_regions;roctx"
     ENVIRONMENT
-    "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region2,Region3"
+    "${_selective_region_environment};ROCPROFSYS_SELECTED_REGIONS=Region2,Region3"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -221,7 +221,7 @@ rocprofiler_systems_add_test(
     TARGET selective_region_pause_1
     GPU ON
     LABELS "selective_regions;roctx"
-    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region1"
+    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_SELECTED_REGIONS=Region1"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -292,7 +292,7 @@ rocprofiler_systems_add_test(
     TARGET selective_region_pause_2
     GPU ON
     LABELS "selective_regions;roctx"
-    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region1"
+    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_SELECTED_REGIONS=Region1"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -363,7 +363,7 @@ rocprofiler_systems_add_test(
     TARGET selective_region_pause_3
     GPU ON
     LABELS "selective_regions;roctx"
-    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region1"
+    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_SELECTED_REGIONS=Region1"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -389,7 +389,7 @@ rocprofiler_systems_add_validation_test(
 # =========================================================================
 # ConditionB-only tests: no marker_api in ROCM_DOMAINS
 # =========================================================================
-# When marker_api is NOT in ROCM_DOMAINS but ROCPROFSYS_TRACE_REGION is set
+# When marker_api is NOT in ROCM_DOMAINS but ROCPROFSYS_SELECTED_REGIONS is set
 # (ConditionB only), region filtering still works but pause/resume is IGNORED.
 # When neither marker_api nor TRACE_REGION is set, pause/resume is also IGNORED.
 
@@ -447,7 +447,7 @@ rocprofiler_systems_add_test(
     TARGET selective_region
     GPU ON
     LABELS "selective_regions;roctx"
-    ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_TRACE_REGION=Region1"
+    ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_SELECTED_REGIONS=Region1"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -482,7 +482,7 @@ rocprofiler_systems_add_test(
     TARGET selective_region_pause_1
     GPU ON
     LABELS "selective_regions;roctx"
-    ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_TRACE_REGION=Region1"
+    ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_SELECTED_REGIONS=Region1"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -517,7 +517,7 @@ rocprofiler_systems_add_test(
     TARGET selective_region_pause_2
     GPU ON
     LABELS "selective_regions;roctx"
-    ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_TRACE_REGION=Region1"
+    ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_SELECTED_REGIONS=Region1"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -552,7 +552,7 @@ rocprofiler_systems_add_test(
     TARGET selective_region_pause_3
     GPU ON
     LABELS "selective_regions;roctx"
-    ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_TRACE_REGION=Region1"
+    ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_SELECTED_REGIONS=Region1"
 )
 
 rocprofiler_systems_add_validation_test(
