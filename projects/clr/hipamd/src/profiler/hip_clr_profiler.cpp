@@ -199,11 +199,13 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
   // them all so the trace shows where barriers land on the GPU timeline.
 
   if (ar->op == OP_ID_DISPATCH && ar->kernel_name) {
-    // Cache the raw name pointer now; demangling happens lazily in WriteJsonTraceImpl
-    // (calling COMGR from within the GPU activity callback is unsafe — the callback
-    // may fire from a HIP runtime context where COMGR re-entrancy is not guaranteed).
+    // Eagerly copy the mangled name string now — ar->kernel_name is a pointer into
+    // the HIP runtime kernel object which may be freed before WriteJsonTraceImpl runs
+    // at process exit.  Demangling still happens lazily at write time, but only using
+    // the owned copy in g_kernel_names::second (never gop.kernel_name directly).
+    // Calling COMGR from within the GPU activity callback is unsafe (re-entrancy risk).
     std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
-    g_kernel_names.emplace(ar->kernel_name, std::string{});  // empty = not yet demangled
+    g_kernel_names.emplace(ar->kernel_name, std::string{ar->kernel_name});
   }
 
   // Helper: populate dims and kernel args for a dispatch GPU op.
@@ -505,11 +507,12 @@ void WriteJsonTraceImpl(const char* filepath) {
           std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
           auto it = g_kernel_names.find(gop.kernel_name);
           if (it != g_kernel_names.end()) {
-            // Demangle lazily on first use; empty string = not yet demangled.
-            if (it->second.empty()) {
+            // it->second holds the eagerly-copied mangled name; demangle lazily on first use.
+            // Never use gop.kernel_name at write time — it may be dangling.
+            if (it->second.size() > 0 && it->second[0] == '_') {
               std::string demangled;
-              it->second = (hip::helpers::demangleName(gop.kernel_name, demangled))
-                           ? std::move(demangled) : gop.kernel_name;
+              if (hip::helpers::demangleName(it->second, demangled))
+                it->second = std::move(demangled);
             }
             gpu_name = it->second;
           }
@@ -765,13 +768,505 @@ static void DrainAllDevices() {
   }
 }
 
+// ============================================================
+// Minimal protobuf encoder (no external dependency)
+// ============================================================
+struct ProtoMsg {
+  std::string buf;
+
+  void varint(uint64_t v) {
+    while (v >= 0x80) { buf += static_cast<char>((v & 0x7f) | 0x80); v >>= 7; }
+    buf += static_cast<char>(v);
+  }
+  void tag(uint32_t field, uint32_t wtype) { varint((uint64_t(field) << 3) | wtype); }
+  void u64(uint32_t field, uint64_t v)  { tag(field, 0); varint(v); }
+  void u32(uint32_t field, uint32_t v)  { tag(field, 0); varint(v); }
+  void str(uint32_t field, const std::string& s) {
+    tag(field, 2); varint(s.size()); buf += s;
+  }
+  void str(uint32_t field, const char* s) {
+    if (!s) return;
+    tag(field, 2); size_t n = strlen(s); varint(n); buf.append(s, n);
+  }
+  void msg(uint32_t field, const ProtoMsg& m) {
+    tag(field, 2); varint(m.buf.size()); buf += m.buf;
+  }
+  // packed repeated uint64 (wire type 2, content = concatenated varints)
+  void packed_u64(uint32_t field, const std::vector<uint64_t>& vals) {
+    if (vals.empty()) return;
+    ProtoMsg inner;
+    for (uint64_t v : vals) inner.varint(v);
+    tag(field, 2); varint(inner.buf.size()); buf += inner.buf;
+  }
+};
+
+// ── Perfetto proto field numbers (verified against perfetto/trace protos) ────
+// TracePacket (trace_packet.proto)
+static constexpr uint32_t kPkt_timestamp      = 8;   // uint64
+static constexpr uint32_t kPkt_track_event    = 11;  // TrackEvent
+static constexpr uint32_t kPkt_seq_id         = 10;  // trusted_packet_sequence_id
+static constexpr uint32_t kPkt_seq_flags      = 13;  // sequence_flags
+static constexpr uint32_t kPkt_track_desc     = 60;  // TrackDescriptor
+// kPkt_clock_snapshot (6) and kPkt_ts_clock_id (58) intentionally omitted —
+// we rely on Perfetto's default trace clock (no conversion needed).
+
+// sequence_flags values
+static constexpr uint32_t kSeqFlag_Cleared = 1;  // SEQ_INCREMENTAL_STATE_CLEARED
+
+// TrackDescriptor (track_descriptor.proto)
+static constexpr uint32_t kDesc_uuid    = 1;
+static constexpr uint32_t kDesc_name    = 2;
+static constexpr uint32_t kDesc_process = 3;
+static constexpr uint32_t kDesc_thread  = 4;
+static constexpr uint32_t kDesc_parent  = 5;
+
+// ProcessDescriptor (process_descriptor.proto)
+static constexpr uint32_t kProc_pid  = 1;
+static constexpr uint32_t kProc_name = 6;
+
+// ThreadDescriptor (thread_descriptor.proto)
+static constexpr uint32_t kThrd_pid  = 1;
+static constexpr uint32_t kThrd_tid  = 2;
+static constexpr uint32_t kThrd_name = 5;
+
+// TrackEvent (track_event.proto)
+static constexpr uint32_t kEvt_type       = 9;
+static constexpr uint32_t kEvt_track_uuid = 11;
+static constexpr uint32_t kEvt_name       = 23;  // string name (direct)
+static constexpr uint32_t kEvt_categories = 22;  // repeated string
+static constexpr uint32_t kEvt_dbg_ann          = 4;   // repeated DebugAnnotation
+static constexpr uint32_t kEvt_flow_ids          = 47;  // repeated uint64 (packed) — flow starts here (new field; 36 is old/deprecated)
+static constexpr uint32_t kEvt_term_flow_ids     = 48;  // repeated uint64 (packed) — flow ends here  (new field; 42 is old/deprecated)
+static constexpr uint32_t kEvt_TYPE_BEGIN = 1;
+static constexpr uint32_t kEvt_TYPE_END   = 2;
+
+// DebugAnnotation (debug_annotation.proto)
+static constexpr uint32_t kAnn_name    = 10;  // string name (direct)
+static constexpr uint32_t kAnn_uint    = 4;   // uint64 uint_value
+static constexpr uint32_t kAnn_str_val = 7;   // string string_value
+
+// ClockSnapshot — not used; we emit no clock_snapshot and no timestamp_clock_id.
+// Perfetto treats timestamps without a clock ID as nanoseconds on the default trace
+// clock (displayed as-is).  Emitting CLOCK_MONOTONIC (id=3) with a snapshot taken
+// at atexit time causes Perfetto to reject events whose timestamps predate the snapshot.
+
+// UUID helpers: keep out of collision with each other
+static uint64_t CpuProcessUuid()                        { return 0x1000ULL; }
+static uint64_t CpuThreadUuid(uint32_t tid)             { return 0x1000ULL << 20 | tid; }
+static uint64_t GpuProcessUuid(int dev)                 { return 0x2000ULL | uint64_t(dev); }
+static uint64_t GpuThreadUuid(int dev, uint64_t q_tid)  { return (0x2000ULL | uint64_t(dev)) << 20 | q_tid; }
+static uint64_t MemProcessUuid()                        { return 0x3000ULL; }
+static uint64_t MemThreadUuid(uint64_t tid)             { return 0x3000ULL << 20 | (tid & 0xFFFFF); }
+
+static void AppendPacket(std::string& out, const ProtoMsg& pkt) {
+  // Each TracePacket is field 1 (length-delimited) of the Trace message.
+  ProtoMsg wrapper;
+  wrapper.msg(1, pkt);
+  out += wrapper.buf;
+}
+
+// All track events share a single sequence (cleared by the ClockSnapshot packet).
+static constexpr uint32_t kGlobalSeq = 1;
+
+static void EmitTrackDesc(std::string& out, uint64_t uuid, uint64_t parent,
+                           const std::string& name,
+                           int pid = -1, int tid = -1, bool is_process = false) {
+  ProtoMsg desc;
+  desc.u64(kDesc_uuid, uuid);
+  if (parent) desc.u64(kDesc_parent, parent);
+  desc.str(kDesc_name, name);
+  if (is_process && pid >= 0) {
+    ProtoMsg proc;
+    proc.u32(kProc_pid, uint32_t(pid));
+    proc.str(kProc_name, name);
+    desc.msg(kDesc_process, proc);
+  } else if (!is_process && pid >= 0) {
+    ProtoMsg thrd;
+    thrd.u32(kThrd_pid, uint32_t(pid));
+    if (tid >= 0) thrd.u32(kThrd_tid, uint32_t(tid));
+    thrd.str(kThrd_name, name);
+    desc.msg(kDesc_thread, thrd);
+  }
+
+  ProtoMsg pkt;
+  pkt.msg(kPkt_track_desc, desc);
+  pkt.u32(kPkt_seq_id, kGlobalSeq);
+  pkt.u32(kPkt_seq_flags, kSeqFlag_Cleared);
+  AppendPacket(out, pkt);
+}
+
+static void EmitSlice(std::string& out, uint64_t uuid, uint32_t /*seq_id*/,
+                       uint64_t ts_ns, uint64_t dur_ns,
+                       const std::string& name, const std::string& cat,
+                       const std::vector<std::pair<std::string,std::string>>& anns,
+                       const std::vector<uint64_t>& out_flows = {},
+                       const std::vector<uint64_t>& in_flows  = {}) {
+  // BEGIN — flow_ids (field 47) start here, terminating_flow_ids (field 48) end here
+  {
+    ProtoMsg evt;
+    evt.u32(kEvt_type, kEvt_TYPE_BEGIN);
+    evt.u64(kEvt_track_uuid, uuid);
+    evt.str(kEvt_name, name);
+    if (!cat.empty()) evt.str(kEvt_categories, cat);
+    for (const auto& a : anns) {
+      ProtoMsg ann;
+      ann.str(kAnn_name, a.first);
+      ann.str(kAnn_str_val, a.second);
+      evt.msg(kEvt_dbg_ann, ann);
+    }
+    evt.packed_u64(kEvt_flow_ids,      out_flows);
+    evt.packed_u64(kEvt_term_flow_ids, in_flows);
+    ProtoMsg pkt;
+    pkt.u64(kPkt_timestamp, ts_ns);
+    pkt.msg(kPkt_track_event, evt);
+    pkt.u32(kPkt_seq_id, kGlobalSeq);
+    pkt.u32(kPkt_seq_flags, kSeqFlag_Cleared);
+    AppendPacket(out, pkt);
+  }
+  // END
+  {
+    ProtoMsg evt;
+    evt.u32(kEvt_type, kEvt_TYPE_END);
+    evt.u64(kEvt_track_uuid, uuid);
+    ProtoMsg pkt;
+    pkt.u64(kPkt_timestamp, ts_ns + dur_ns);
+    pkt.msg(kPkt_track_event, evt);
+    pkt.u32(kPkt_seq_id, kGlobalSeq);
+    pkt.u32(kPkt_seq_flags, kSeqFlag_Cleared);
+    AppendPacket(out, pkt);
+  }
+}
+
+void WriteProtoTraceImpl(const char* filepath) {
+  std::string out;
+
+  size_t total = g_rec_counter.load(std::memory_order_acquire);
+
+  // ── Pass 1: build all maps needed before any emission ────────────────────
+  std::unordered_map<uint64_t, uint32_t> tid_map;
+  uint32_t next_tid = 0;
+  auto compact_tid = [&](uint64_t raw) -> uint32_t {
+    auto [it, ins] = tid_map.emplace(raw, next_tid);
+    if (ins) ++next_tid;
+    return it->second;
+  };
+  std::unordered_map<int, std::unordered_set<uint64_t>> device_gpu_tids;
+  std::map<std::pair<int,uint64_t>, hipStream_t> gpu_tid_stream;
+
+  struct AllocInfoP { uint64_t start_ns, end_ns, size; };
+  std::unordered_map<uint64_t, AllocInfoP> alloc_map;
+  auto is_alloc = [](const char* n){ return n && strncmp(n,"hipMalloc",9)==0; };
+  auto is_free  = [](const char* n){ return n && strncmp(n,"hipFree",  7)==0; };
+
+  uint64_t t_end = 0;
+  for (size_t c = 0; c < g_records.size(); ++c) {
+    HipApiRecordExt* chunk = g_records[c];
+    size_t base  = c * kChunkSize;
+    size_t valid = (total > base) ? std::min(total - base, kChunkSize) : 0;
+    for (size_t i = 0; i < valid; ++i) {
+      const HipApiRecordExt& rec = chunk[i];
+      t_end = std::max(t_end, rec.end_ns);
+      compact_tid(rec.thread_id);
+      if (rec.api_name) {
+        uint64_t ptr = reinterpret_cast<uintptr_t>(rec.memory1);
+        if      (is_alloc(rec.api_name) && ptr) alloc_map[ptr] = {rec.start_ns, 0, rec.size};
+        else if (is_free (rec.api_name) && ptr) {
+          auto it = alloc_map.find(ptr);
+          if (it != alloc_map.end() && it->second.end_ns == 0) it->second.end_ns = rec.start_ns;
+        }
+      }
+      if (rec.gpu.gpu_op_count == 0) continue;
+      auto scan = [&](const HipGpuActivityExt& gop) {
+        int sdma = (gop.op==OP_ID_COPY) && hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(gop.copy_kind)) ? 1 : 0;
+        uint64_t gtid = gop.queue_id * 2 + sdma;
+        device_gpu_tids[static_cast<int>(gop.device_id)].insert(gtid);
+        if (rec.stream) gpu_tid_stream[{static_cast<int>(gop.device_id), gtid}] = rec.stream;
+      };
+      scan(rec.gpu);
+      for (const HipGpuActivityExt* n = rec.gpu.next; n; n = n->next) scan(*n);
+    }
+  }
+  for (auto& kv : alloc_map) if (kv.second.end_ns == 0) kv.second.end_ns = t_end;
+
+  // ── Pass 2: pre-assign GPU→memory flow IDs ───────────────────────────────
+  // For each GPU op that references a known allocation, assign a flow_id now.
+  // Stored as: alloc_in_flows[ptr] = [fid, fid, ...] (terminating at that alloc slice)
+  //            gpu_op_out_flows[(chunk,slot,op_ordinal)] = [fid, ...]
+  uint64_t flow_id = 1;
+  // key = (chunk_idx<<32)|slot_in_chunk, value = outgoing flow ids from CPU slice (cpu→gpu)
+  std::unordered_map<uint64_t, uint64_t> cpu_gpu_flow;  // record slot → cpu→gpu fid
+  // per-alloc incoming flows
+  std::unordered_map<uint64_t, std::vector<uint64_t>> alloc_in_flows;
+  // per-(record_slot, op_ordinal) outgoing flows (gpu→mem)
+  // key = record_slot * 1000 + op_ordinal (ordinal capped at 999)
+  std::unordered_map<uint64_t, std::vector<uint64_t>> gpu_out_flows;
+
+  for (size_t c = 0; c < g_records.size(); ++c) {
+    HipApiRecordExt* chunk = g_records[c];
+    size_t base  = c * kChunkSize;
+    size_t valid = (total > base) ? std::min(total - base, kChunkSize) : 0;
+    for (size_t i = 0; i < valid; ++i) {
+      const HipApiRecordExt& rec = chunk[i];
+      if (!rec.api_name || rec.gpu.gpu_op_count == 0) continue;
+      uint64_t slot = base + i;
+
+      // CPU→GPU flow (first op only, only when GPU timestamps valid)
+      if (rec.gpu.begin_ns > 0) {
+        uint64_t fid = flow_id++;
+        cpu_gpu_flow[slot] = fid;
+      }
+
+      // GPU→memory flows
+      uint32_t op_ord = 0;
+      auto assign_mem_flows = [&](const HipGpuActivityExt& gop) {
+        uint64_t key = slot * 1000 + op_ord++;
+        uint64_t seen[18]; int nseen = 0;
+        auto try_ptr = [&](uint64_t ptr) {
+          if (!ptr) return;
+          for (int s = 0; s < nseen; ++s) if (seen[s]==ptr) return;
+          if (alloc_map.find(ptr) == alloc_map.end()) return;
+          seen[nseen++] = ptr;
+          uint64_t fid = flow_id++;
+          gpu_out_flows[key].push_back(fid);
+          alloc_in_flows[ptr].push_back(fid);
+        };
+        if (gop.op == OP_ID_DISPATCH && gop.kernel_args && gop.kernel_args_size > 0) {
+          const uint8_t* p = gop.kernel_args, *end = p + gop.kernel_args_size;
+          while (p + sizeof(uint32_t) <= end) {
+            uint32_t sz; std::memcpy(&sz, p, sizeof(uint32_t)); p += sizeof(uint32_t);
+            if (p + sz > end) break;
+            if (sz == 8) { uint64_t v; std::memcpy(&v, p, 8); try_ptr(v); }
+            p += sz;
+          }
+        } else if (gop.op == OP_ID_COPY) {
+          try_ptr(reinterpret_cast<uintptr_t>(gop.dst));
+          try_ptr(reinterpret_cast<uintptr_t>(gop.src));
+        }
+      };
+      assign_mem_flows(rec.gpu);
+      for (const HipGpuActivityExt* n = rec.gpu.next; n; n = n->next) assign_mem_flows(*n);
+    }
+  }
+
+  // ── Emit ALL track descriptors before any events ──────────────────────────
+  auto get_gfxip = [&](int idx) -> std::string {
+    if (idx < 0 || idx >= static_cast<int>(hip::g_devices.size())) return "";
+    auto* hdev = hip::g_devices[idx];
+    if (!hdev || hdev->devices().empty()) return "";
+    const char* tgt = hdev->devices()[0]->isa().targetId();
+    return (tgt && tgt[0]) ? std::string(tgt) : "";
+  };
+
+  EmitTrackDesc(out, CpuProcessUuid(), 0, "CPU HIP", 1024, -1, true);
+  for (auto& kv : tid_map) {
+    EmitTrackDesc(out, CpuThreadUuid(kv.second), CpuProcessUuid(),
+                  "HIP Thread " + std::to_string(kv.second), 1024, int(kv.second), false);
+  }
+  for (auto& kv : device_gpu_tids) {
+    int dev_id = kv.first;
+    std::string label = get_gfxip(dev_id);
+    if (label.empty()) label = get_gfxip(dev_id - 1);
+    if (label.empty()) label = "GPU " + std::to_string(dev_id);
+    EmitTrackDesc(out, GpuProcessUuid(dev_id), 0, label, dev_id, -1, true);
+    for (uint64_t gtid : kv.second) {
+      bool is_sdma = (gtid & 1) != 0;
+      std::string lane;
+      auto sit = gpu_tid_stream.find({dev_id, gtid});
+      if (sit != gpu_tid_stream.end() && sit->second) {
+        char buf[32]; snprintf(buf, sizeof(buf), "0x%llx",
+          static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(sit->second)));
+        lane = std::string("Stream ") + buf + (is_sdma ? " [DMA]" : "");
+      } else {
+        lane = std::string(is_sdma ? "SDMA " : "Compute ") + std::to_string(gtid / 2);
+      }
+      EmitTrackDesc(out, GpuThreadUuid(dev_id, gtid), GpuProcessUuid(dev_id),
+                    lane, dev_id, int(gtid), false);
+    }
+  }
+  if (!alloc_map.empty()) {
+    uint64_t total_bytes = 0;
+    for (auto& kv : alloc_map) total_bytes += kv.second.size;
+    char lbl[64];
+    if (total_bytes >= 1024*1024)
+      snprintf(lbl, sizeof(lbl), "GPU Memory (%.1f MB total)", total_bytes/(1024.0*1024.0));
+    else
+      snprintf(lbl, sizeof(lbl), "GPU Memory (%llu B total)",
+               static_cast<unsigned long long>(total_bytes));
+    EmitTrackDesc(out, MemProcessUuid(), 0, lbl, 2048, -1, true);
+    for (auto& kv : alloc_map) {
+      uint64_t ptr = kv.first;
+      uint64_t mem_tid = (ptr >> 12) & 0xFFFFF;
+      char ptrbuf[32], sizebuf[32];
+      snprintf(ptrbuf, sizeof(ptrbuf), "0x%llx", static_cast<unsigned long long>(ptr));
+      const AllocInfoP& ai = kv.second;
+      if (ai.size >= 1024*1024)      snprintf(sizebuf,sizeof(sizebuf),"%.1f MB",ai.size/(1024.0*1024.0));
+      else if (ai.size >= 1024)      snprintf(sizebuf,sizeof(sizebuf),"%.1f KB",ai.size/1024.0);
+      else                           snprintf(sizebuf,sizeof(sizebuf),"%llu B",(unsigned long long)ai.size);
+      EmitTrackDesc(out, MemThreadUuid(mem_tid), MemProcessUuid(),
+                    std::string(ptrbuf)+" ("+sizebuf+")", 2048, int(mem_tid), false);
+    }
+  }
+
+  // ── Pass 3: emit events with embedded flow_ids on BEGIN ───────────────────
+  for (size_t c = 0; c < g_records.size(); ++c) {
+    HipApiRecordExt* chunk = g_records[c];
+    size_t base  = c * kChunkSize;
+    size_t valid = (total > base) ? std::min(total - base, kChunkSize) : 0;
+    for (size_t i = 0; i < valid; ++i) {
+      const HipApiRecordExt& rec = chunk[i];
+      if (!rec.api_name) continue;
+      uint64_t slot     = base + i;
+      uint32_t ctid     = compact_tid(rec.thread_id);
+      uint64_t cpu_uuid = CpuThreadUuid(ctid);
+      uint64_t ts_ns    = rec.start_ns;
+      uint64_t dur_ns   = (rec.end_ns > rec.start_ns) ? (rec.end_ns - rec.start_ns) : 1000;
+
+      // CPU→GPU outgoing flow on CPU BEGIN
+      std::vector<uint64_t> cpu_out;
+      auto cfit = cpu_gpu_flow.find(slot);
+      if (cfit != cpu_gpu_flow.end()) cpu_out.push_back(cfit->second);
+
+      std::vector<std::pair<std::string,std::string>> cpu_anns;
+      if (rec.stream) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "0x%llx",
+                 static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(rec.stream)));
+        cpu_anns.push_back({"stream", buf});
+      }
+      EmitSlice(out, cpu_uuid, 0, ts_ns, dur_ns, rec.api_name, "hip", cpu_anns, cpu_out, {});
+
+      // GPU op slices
+      bool first_op = true;
+      uint32_t op_ord = 0;
+      auto emit_gpu = [&](const HipGpuActivityExt& gop) {
+        if (gop.begin_ns == 0) { ++op_ord; return; }
+        int sdma = (gop.op==OP_ID_COPY) && hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(gop.copy_kind)) ? 1 : 0;
+        uint64_t gtid     = gop.queue_id * 2 + sdma;
+        uint64_t gpu_uuid = GpuThreadUuid(static_cast<int>(gop.device_id), gtid);
+        uint64_t g_ts     = gop.begin_ns;
+        uint64_t g_dur    = (gop.end_ns > gop.begin_ns) ? (gop.end_ns - gop.begin_ns) : 1000;
+
+        std::string gpu_name;
+        if (gop.op == OP_ID_DISPATCH && gop.kernel_name) {
+          std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
+          auto it = g_kernel_names.find(gop.kernel_name);
+          if (it != g_kernel_names.end()) {
+            // it->second holds the eagerly-copied mangled name; demangle lazily on first use.
+            // Never use gop.kernel_name at write time — it may be dangling.
+            if (it->second.size() > 0 && it->second[0] == '_') {
+              std::string d;
+              if (hip::helpers::demangleName(it->second, d))
+                it->second = std::move(d);
+            }
+            gpu_name = it->second;
+          }
+          // If not found in map, kernel_name is dangling — leave gpu_name empty (shown as dispatch op type).
+        } else if (gop.op == OP_ID_COPY) {
+          gpu_name = CopyKindName(gop.copy_kind);
+        } else { gpu_name = "Barrier"; }
+
+        std::vector<std::pair<std::string,std::string>> anns;
+        if (gop.op == OP_ID_DISPATCH && gop.grid_x) {
+          char buf[64];
+          snprintf(buf, sizeof(buf), "%ux%ux%u", gop.grid_x, gop.grid_y, gop.grid_z); anns.push_back({"grid", buf});
+          snprintf(buf, sizeof(buf), "%ux%ux%u", gop.block_x, gop.block_y, gop.block_z); anns.push_back({"block", buf});
+        }
+        if (gop.op == OP_ID_COPY && gop.bytes) {
+          anns.push_back({"copy_kind", CopyKindName(gop.copy_kind)});
+          anns.push_back({"bytes", std::to_string(gop.bytes)});
+          if (gop.dst) {
+            char buf[32]; snprintf(buf, sizeof(buf), "0x%llx",
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(gop.dst)));
+            anns.push_back({"dst", buf});
+          }
+          if (gop.src) {
+            char buf[32]; snprintf(buf, sizeof(buf), "0x%llx",
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(gop.src)));
+            anns.push_back({"src", buf});
+          }
+        }
+        // Kernel args — same positional format as JSON writer
+        if (gop.op == OP_ID_DISPATCH && gop.kernel_args && gop.kernel_args_size > 0) {
+          const uint8_t* p   = gop.kernel_args;
+          const uint8_t* end = p + gop.kernel_args_size;
+          int kidx = 0;
+          while (p + sizeof(uint32_t) <= end) {
+            uint32_t sz; std::memcpy(&sz, p, sizeof(uint32_t)); p += sizeof(uint32_t);
+            if (p + sz > end) break;
+            char vbuf[32];
+            if (sz == 8) {
+              uint64_t v; std::memcpy(&v, p, 8);
+              snprintf(vbuf, sizeof(vbuf), "0x%llx", static_cast<unsigned long long>(v));
+            } else if (sz == 4) {
+              uint32_t v; std::memcpy(&v, p, 4);
+              snprintf(vbuf, sizeof(vbuf), "%u", v);
+            } else {
+              snprintf(vbuf, sizeof(vbuf), "(sz=%u)", sz);
+            }
+            anns.push_back({std::to_string(kidx++), vbuf});
+            p += sz;
+          }
+        }
+
+        // CPU→GPU incoming on first op
+        std::vector<uint64_t> in_flows;
+        if (first_op && cfit != cpu_gpu_flow.end()) in_flows.push_back(cfit->second);
+        first_op = false;
+
+        // GPU→memory outgoing
+        std::vector<uint64_t> out_flows;
+        auto ofit = gpu_out_flows.find(slot * 1000 + op_ord);
+        if (ofit != gpu_out_flows.end()) out_flows = ofit->second;
+        ++op_ord;
+
+        EmitSlice(out, gpu_uuid, 0, g_ts, g_dur, gpu_name, "gpu", anns, out_flows, in_flows);
+      };
+
+      if (rec.gpu.gpu_op_count > 0) {
+        emit_gpu(rec.gpu);
+        for (const HipGpuActivityExt* n = rec.gpu.next; n; n = n->next) emit_gpu(*n);
+      }
+    }
+  }
+
+  // ── Memory lifetime slices with terminating flows ─────────────────────────
+  for (auto& kv : alloc_map) {
+    uint64_t ptr = kv.first;
+    const AllocInfoP& ai = kv.second;
+    uint64_t mem_tid  = (ptr >> 12) & 0xFFFFF;
+    uint64_t mem_uuid = MemThreadUuid(mem_tid);
+    uint64_t dur_ns   = (ai.end_ns > ai.start_ns) ? (ai.end_ns - ai.start_ns) : 1000;
+    char ptrbuf[32], sizebuf[32];
+    snprintf(ptrbuf, sizeof(ptrbuf), "0x%llx", static_cast<unsigned long long>(ptr));
+    if (ai.size >= 1024*1024)      snprintf(sizebuf,sizeof(sizebuf),"%.1f MB",ai.size/(1024.0*1024.0));
+    else if (ai.size >= 1024)      snprintf(sizebuf,sizeof(sizebuf),"%.1f KB",ai.size/1024.0);
+    else                           snprintf(sizebuf,sizeof(sizebuf),"%llu B",(unsigned long long)ai.size);
+    std::string alloc_name = std::string(ptrbuf) + " (" + sizebuf + ")";
+    std::vector<std::pair<std::string,std::string>> anns;
+    anns.push_back({"ptr", ptrbuf}); anns.push_back({"size", std::to_string(ai.size)});
+    std::vector<uint64_t> in_flows;
+    auto afit = alloc_in_flows.find(ptr);
+    if (afit != alloc_in_flows.end()) in_flows = afit->second;
+    EmitSlice(out, mem_uuid, 0, ai.start_ns, dur_ns, alloc_name, "memory", anns, {}, in_flows);
+  }
+
+  std::ofstream f(filepath, std::ios::binary);
+  if (f.is_open()) f.write(out.data(), out.size());
+}
+
 // atexit handler — registered only when GPU_CLR_PROFILE_OUTPUT is set.
 // Runs before static destructors so HIP devices are still alive for DrainAllDevices().
 static void ProfilerAtExit() {
   // DrainAllDevices can crash on Windows KFD if streams are already partially
   // torn down when the atexit handler fires. GPU work has already completed by
   // the time the process exits normally, so skip the sync here.
-  WriteJsonTraceImpl(g_env_output_path.c_str());
+  const char* path = g_env_output_path.c_str();
+  // Detect extension: use binary Perfetto format for .pftrace, JSON otherwise.
+  const char* ext = strrchr(path, '.');
+  if (ext && strcmp(ext, ".pftrace") == 0)
+    WriteProtoTraceImpl(path);
+  else
+    WriteJsonTraceImpl(path);
 }
 
 struct HipClrProfilerFinalizer {
