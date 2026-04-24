@@ -118,6 +118,7 @@ flowchart TD
   classDef entry fill:#e8f3ff,stroke:#1664ad,color:#0f2f4a,stroke-width:1px
   classDef runtime fill:#fff4d8,stroke:#a66a00,color:#4a3100,stroke-width:1px
   classDef agent fill:#eaf8ef,stroke:#227343,color:#143b26,stroke-width:1px
+  classDef brain fill:#fff8c7,stroke:#9a6b00,color:#3d2b00,stroke-width:2px
   classDef guard fill:#ffe9e4,stroke:#b94a36,color:#5c2016,stroke-width:1px
   classDef data fill:#f4edff,stroke:#7250b5,color:#34205c,stroke-width:1px
 
@@ -128,8 +129,11 @@ flowchart TD
     api["perfxpert.api<br/>Python embedding"]
   end
 
-  runtime["Shared agent runtime/session<br/>same analysis brain for every shell"]
-  hierarchy["8-agent hierarchy<br/>Root → Analysis / Recommendation / Correctness<br/>Compute / Memory / Latency / Diff specialists"]
+  subgraph brainSection["🧠 Shared PerfXpert brain"]
+    runtime["Shared agent runtime/session<br/>same analysis brain for every shell"]
+    hierarchy["8-agent hierarchy<br/>Root → Analysis / Recommendation / Correctness<br/>Compute / Memory / Latency / Diff specialists"]
+  end
+
   knowledge["Deterministic tools + validated knowledge YAMLs<br/>classifiers, counters, hardware facts, trace diff"]
   gates["Correctness middleware<br/>gate_cascade + intent router"]
   readonly["56 READ_ONLY MCP tools<br/>8 agent tools + 47 classifier/knowledge tools + 1 diff tool"]
@@ -145,8 +149,7 @@ flowchart TD
   knowledge --> gates
 
   class analyze,code,mcp,api entry
-  class runtime runtime
-  class hierarchy agent
+  class runtime,hierarchy brain
   class gates guard
   class knowledge,readonly data
 ```

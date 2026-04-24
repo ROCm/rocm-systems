@@ -38,25 +38,39 @@ Cross-links:
 
 ## Three tiers
 
-```
-                     ┌───────────────┐
-                     │     Root      │   Tier 0 — intent classify
-                     └───────┬───────┘
-                             │
-            ┌────────────────┼────────────────┐
-            ▼                ▼                ▼
-    ┌──────────────┐ ┌───────────────┐ ┌──────────────────┐
-    │   Analysis   │ │  Correctness  │ │  Recommendation  │   Tier 1
-    └───────┬──────┘ └───────────────┘ └────────┬─────────┘
-            │                                    │
-            └───────────────┬────────────────────┘
-                            ▼
-              ┌─────────┬────┴────┬────────────┐
-              ▼         ▼         ▼            ▼
-       ┌──────────┐ ┌────────┐ ┌────────┐ ┌────────┐
-       │ Compute  │ │ Memory │ │Latency │ │  Diff  │  Tier 2
-       │ special. │ │ spec.  │ │ spec.  │ │ spec.  │
-       └──────────┘ └────────┘ └────────┘ └────────┘
+```mermaid
+flowchart TD
+  classDef root fill:#e8f3ff,stroke:#1664ad,color:#0f2f4a,stroke-width:1px
+  classDef tier1 fill:#fff4d8,stroke:#a66a00,color:#4a3100,stroke-width:1px
+  classDef tier2 fill:#eaf8ef,stroke:#227343,color:#143b26,stroke-width:1px
+  classDef brain fill:#fff8c7,stroke:#9a6b00,color:#3d2b00,stroke-width:2px
+
+  subgraph brainSection["🧠 PerfXpert agent brain"]
+    root["Root<br/>Tier 0: intent classify"]
+    analysis["Analysis<br/>Tier 1: read traces + artifacts"]
+    correctness["Correctness<br/>Tier 1: verdicts and gate summaries"]
+    recommendation["Recommendation<br/>Tier 1: optimization strategy"]
+  end
+
+  compute["Compute specialist<br/>Tier 2"]
+  memory["Memory specialist<br/>Tier 2"]
+  latency["Latency specialist<br/>Tier 2"]
+  diff["Diff specialist<br/>Tier 2"]
+
+  root --> analysis
+  root --> correctness
+  root --> recommendation
+  analysis --> compute
+  analysis --> memory
+  analysis --> latency
+  analysis --> diff
+  recommendation --> compute
+  recommendation --> memory
+  recommendation --> latency
+  recommendation --> diff
+
+  class root,analysis,correctness,recommendation brain
+  class compute,memory,latency,diff tier2
 ```
 
 - **Tier 0 (Root)** — classifies the user's natural-language query
