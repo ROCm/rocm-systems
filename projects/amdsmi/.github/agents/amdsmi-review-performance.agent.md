@@ -30,7 +30,7 @@ Key areas to watch: core C library hot paths (`src/amd_smi/`), Python ctypes ove
 ## CI Evidence (when available)
 
 If the orchestrator provides CI run data, use it to:
-- Compare **step timings** between PR run and baseline `main` run
+- Compare **step timings** between PR run and baseline `develop` run
 - Flag steps that took significantly longer (>20% regression)
 - Identify **cache misses** or changed cache behavior
 - Correlate timing anomalies with code changes in the diff

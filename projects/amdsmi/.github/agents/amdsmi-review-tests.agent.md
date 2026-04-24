@@ -47,7 +47,7 @@ Project structure and test directories are stored in repo memories.
 If the orchestrator provides CI run data, use it to:
 - Identify **test failures** in the PR's CI run — these are ❌ BLOCKING
 - Spot **flaky tests** (passed on retry, or failed inconsistently)
-- Compare test step results against a baseline `main` run
+- Compare test step results against a baseline `develop` run
 - Note any **new test steps** added or **existing steps removed**
 - Flag tests that passed but took significantly longer than baseline (>2x)
 

@@ -1,1 +1,0 @@
-../../.github/instructions/build-and-packaging.instructions.md

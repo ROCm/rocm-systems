@@ -8,7 +8,7 @@ Core C++ library (`libamd_smi.so`) with Python bindings, CLI, Go shim, and Rust 
 ## Critical Rules
 
 1. **Never edit `py-interface/amdsmi_wrapper.py` manually** — it's auto-generated. Regenerate with `tools/update_wrapper.sh` or `cmake -DBUILD_WRAPPER=ON`.
-2. **PRs target `amd-staging`** branch (not `main`).
+2. **PRs target `develop`** branch (not `main`).
 3. **Pre-commit must pass** before review: `pip install pre-commit && pre-commit install`
 4. **Version** is defined in `include/amd_smi/amdsmi.h` (`AMDSMI_LIB_VERSION_MAJOR/MINOR/RELEASE`). CMake extracts it from there.
 5. **Excluded from formatting/linting**: `docs/`, `build/`, `esmi_ib_library/`, `third_party/`, `*.md`, `*.rst`
@@ -107,8 +107,4 @@ Project structure, API cascade path, build/packaging paths, test directories, an
 
 ### Instructions (`.github/instructions/` + `.claude/rules/`)
 On-demand reference files loaded only when relevant. Source of truth is `.github/instructions/`; `.claude/rules/` symlinks to the same files for Claude Code compatibility:
-- **api-cascade** — API propagation path and per-layer verification checklist
-- **project-layout** — Source directory map by language/component
-- **test-directories** — Test suites, paths, runners, prerequisites
-- **build-and-packaging** — CMake options, RPM/DEB/pip packaging paths, versioning
-- **tools-and-generators** — Generator pipeline, wrapper regeneration rules
+- **project-layout** — Project layout, API propagation path, per-layer verification checklist, tools/generators, test suites, and build/packaging

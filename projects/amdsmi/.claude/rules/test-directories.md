@@ -1,1 +1,0 @@
-../../.github/instructions/test-directories.instructions.md
