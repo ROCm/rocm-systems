@@ -141,6 +141,13 @@ def test_parse_headers_valid_json_dict():
     assert result == {"X-Tenant": "amd", "X-Version": "1"}
 
 
+def test_parse_headers_valid_python_literal_dict():
+    from perfxpert.providers.private_provider import _parse_headers
+
+    result = _parse_headers("{'X-Tenant': 'amd', 'X-Version': '1'}")
+    assert result == {"X-Tenant": "amd", "X-Version": "1"}
+
+
 def test_parse_headers_invalid_json_raises_value_error():
     from perfxpert.providers.private_provider import _parse_headers
 

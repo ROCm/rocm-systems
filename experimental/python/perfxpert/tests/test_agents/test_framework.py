@@ -1,5 +1,8 @@
 """Tests for perfxpert.agents.framework — the SDK facade."""
 
+import inspect
+from functools import partial
+
 import pytest
 
 from perfxpert.agents import framework
@@ -360,6 +363,30 @@ def test_sdk_invoke_wires_openai_agents_sdk(monkeypatch):
     assert captured["run_config"] == {"kwargs": {}}
 
 
+def test_translate_tools_accepts_partial_callables(monkeypatch):
+    from perfxpert.agents import framework
+    from perfxpert.agents.framework import ToolBinding, _translate_tools
+
+    captured = {}
+
+    def _fake_function_tool(fn, *, name_override, strict_mode):
+        captured["callable_name"] = fn.__name__
+        return {"name": name_override, "fn": fn}
+
+    def _create_at(root, title):
+        return f"{root}:{title}"
+
+    monkeypatch.setattr(framework, "sdk_function_tool", _fake_function_tool)
+
+    tool = ToolBinding(name="tasks.create", fn=partial(_create_at, "demo-app"))
+    wrapped = _translate_tools([tool])
+
+    assert captured["callable_name"] == "tasks_create"
+    assert wrapped[0]["name"] == "tasks_create"
+    assert wrapped[0]["fn"]("check") == "demo-app:check"
+    assert str(inspect.signature(wrapped[0]["fn"])) == "(title)"
+
+
 def test_sdk_invoke_raises_runtime_error_when_sdk_missing(monkeypatch):
     """When openai-agents is not installed, _sdk_invoke must raise RuntimeError
     with an actionable message — NOT NotImplementedError."""
@@ -492,6 +519,10 @@ def test_sdk_invoke_private_provider_uses_custom_openai_base_url(monkeypatch):
 
     monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_URL", "https://llm.example/v1")
     monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_API_KEY", "sk-private")
+    monkeypatch.setenv(
+        "PERFXPERT_LLM_PRIVATE_HEADERS",
+        "{'Ocp-Apim-Subscription-Key': 'sub-key', 'user': 'test-user', 'api-version': 'preview'}",
+    )
     monkeypatch.setattr(framework, "_SDK_AVAILABLE", True)
     monkeypatch.setattr(framework, "SdkAgent", _FakeSdkAgent)
     monkeypatch.setattr(framework, "SdkRunner", _FakeRunner)
@@ -511,6 +542,11 @@ def test_sdk_invoke_private_provider_uses_custom_openai_base_url(monkeypatch):
 
     assert captured["model"] == "private/gpt-4o-mini"
     assert "model_provider" in captured["run_config"]["kwargs"]
+    model_provider = captured["run_config"]["kwargs"]["model_provider"]
+    private_provider = model_provider.provider_map.get_provider("private")
+    assert private_provider._client.default_headers["Ocp-Apim-Subscription-Key"] == "sub-key"
+    assert private_provider._client.default_headers["user"] == "test-user"
+    assert private_provider._client.default_headers["api-version"] == "preview"
 
 
 def test_sdk_invoke_maps_rate_limit_like_runtime_errors(monkeypatch):

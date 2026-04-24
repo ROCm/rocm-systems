@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import inspect
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
@@ -230,15 +231,26 @@ def _build_sdk_run_config(provider: str) -> Any:
             provider_map.add_provider(provider, LitellmProvider())
         elif provider == "private":
             from agents.models.openai_provider import OpenAIProvider  # type: ignore[import-not-found]
+            from openai import AsyncOpenAI  # type: ignore[import-not-found]
+            import httpx
+
+            from perfxpert.providers.private_provider import _parse_headers, _verify_ssl_from_env
 
             base_url = (os.environ.get("PERFXPERT_LLM_PRIVATE_URL") or "").rstrip("/")
             if not base_url:
                 raise AuthError("private", "no endpoint configured (set PERFXPERT_LLM_PRIVATE_URL)")
+            api_key = os.environ.get("PERFXPERT_LLM_PRIVATE_API_KEY") or "dummy"
+            headers = _parse_headers(os.environ.get("PERFXPERT_LLM_PRIVATE_HEADERS", ""))
+            openai_client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                default_headers=headers,
+                http_client=httpx.AsyncClient(verify=_verify_ssl_from_env()),
+            )
             provider_map.add_provider(
                 "private",
                 OpenAIProvider(
-                    api_key=os.environ.get("PERFXPERT_LLM_PRIVATE_API_KEY") or "dummy",
-                    base_url=base_url,
+                    openai_client=openai_client,
                     use_responses=False,
                 ),
             )
@@ -343,6 +355,37 @@ def _sanitize_tool_name(name: str) -> str:
     return name.replace(".", "_")
 
 
+def _prepare_tool_callable_for_sdk(fn: Callable[..., Any], tool_name: str) -> Callable[..., Any]:
+    """Ensure SDK introspection has basic callable metadata.
+
+    ``functools.partial`` preserves the effective signature, but it does not
+    expose ``__name__`` and is not accepted as a plain function by the Agents
+    SDK. For those callables, create a real wrapper function and copy the
+    effective signature so the generated tool schema still matches the bound
+    callable.
+    """
+    safe_name = _sanitize_tool_name(tool_name)
+    if inspect.isfunction(fn) or inspect.ismethod(fn):
+        if not getattr(fn, "__name__", None):
+            try:
+                setattr(fn, "__name__", safe_name)
+                setattr(fn, "__qualname__", safe_name)
+            except Exception:  # pragma: no cover - unusual callable object
+                pass
+        return fn
+
+    def _sdk_tool_wrapper(*args: Any, **kwargs: Any) -> Any:
+        return fn(*args, **kwargs)
+
+    _sdk_tool_wrapper.__name__ = safe_name
+    _sdk_tool_wrapper.__qualname__ = safe_name
+    try:
+        _sdk_tool_wrapper.__signature__ = inspect.signature(fn)  # type: ignore[attr-defined]
+    except (TypeError, ValueError):  # pragma: no cover - best effort
+        pass
+    return _sdk_tool_wrapper
+
+
 def _translate_tools(tools: List[ToolBinding]) -> List[Any]:
     """Wrap our ToolBinding list in openai-agents function_tool decorators.
 
@@ -356,9 +399,10 @@ def _translate_tools(tools: List[ToolBinding]) -> List[Any]:
     wrapped: List[Any] = []
     for tb in tools:
         try:
+            sdk_callable = _prepare_tool_callable_for_sdk(tb.fn, tb.name)
             wrapped.append(
                 sdk_function_tool(
-                    tb.fn,
+                    sdk_callable,
                     name_override=_sanitize_tool_name(tb.name),
                     # The SDK's introspection can be picky about third-party
                     # callables; relax strict mode so we don't 400 on schema
