@@ -212,6 +212,14 @@ struct CodeObjectInfo {
   std::string uri = {};
 };
 
+struct KernelSymbolInfo {
+  uint64_t symbol_handle = 0;
+  uint64_t executable_handle = 0;
+  uint64_t agent_handle = 0;
+  uint64_t kernel_object = 0;
+  std::string name = {};
+};
+
 struct DispatchSignalTracker {
   hsa_signal_t signal = {};
   hsa_agent_t agent = {};
@@ -398,6 +406,15 @@ using hsa_amd_profiling_convert_tick_to_system_domain_fn_t =
     hsa_status_t (*)(hsa_agent_t, uint64_t, uint64_t*);
 using hsa_executable_freeze_fn_t = hsa_status_t (*)(hsa_executable_t, const char*);
 using hsa_executable_destroy_fn_t = hsa_status_t (*)(hsa_executable_t);
+using hsa_executable_get_symbol_by_name_fn_t =
+    hsa_status_t (*)(hsa_executable_t, const char*, const hsa_agent_t*,
+                     hsa_executable_symbol_t*);
+using hsa_executable_symbol_get_info_fn_t =
+    hsa_status_t (*)(hsa_executable_symbol_t, hsa_executable_symbol_info_t, void*);
+using hsa_executable_iterate_symbols_fn_t =
+    hsa_status_t (*)(hsa_executable_t,
+                     hsa_status_t (*)(hsa_executable_t, hsa_executable_symbol_t, void*),
+                     void*);
 using hsa_loader_iterate_loaded_code_objects_fn_t =
     hsa_status_t (*)(hsa_executable_t,
                      hsa_status_t (*)(hsa_executable_t, hsa_loaded_code_object_t, void*), void*);
@@ -438,6 +455,9 @@ struct RealApi {
       amd_profiling_convert_tick_to_system_domain = nullptr;
   hsa_executable_freeze_fn_t executable_freeze = nullptr;
   hsa_executable_destroy_fn_t executable_destroy = nullptr;
+  hsa_executable_get_symbol_by_name_fn_t executable_get_symbol_by_name = nullptr;
+  hsa_executable_symbol_get_info_fn_t executable_symbol_get_info = nullptr;
+  hsa_executable_iterate_symbols_fn_t executable_iterate_symbols = nullptr;
   hsa_loader_iterate_loaded_code_objects_fn_t loader_iterate_loaded_code_objects = nullptr;
   hsa_loader_loaded_code_object_get_info_fn_t loader_loaded_code_object_get_info = nullptr;
 };
@@ -517,6 +537,15 @@ RealApi& real_api() {
         reinterpret_cast<hsa_executable_freeze_fn_t>(resolve("hsa_executable_freeze"));
     api.executable_destroy =
         reinterpret_cast<hsa_executable_destroy_fn_t>(resolve("hsa_executable_destroy"));
+    api.executable_get_symbol_by_name =
+        reinterpret_cast<hsa_executable_get_symbol_by_name_fn_t>(
+            resolve("hsa_executable_get_symbol_by_name"));
+    api.executable_symbol_get_info =
+        reinterpret_cast<hsa_executable_symbol_get_info_fn_t>(
+            resolve("hsa_executable_symbol_get_info"));
+    api.executable_iterate_symbols =
+        reinterpret_cast<hsa_executable_iterate_symbols_fn_t>(
+            resolve("hsa_executable_iterate_symbols"));
     api.loader_iterate_loaded_code_objects =
         reinterpret_cast<hsa_loader_iterate_loaded_code_objects_fn_t>(
             resolve("hsa_ven_amd_loader_executable_iterate_loaded_code_objects"));
@@ -546,6 +575,7 @@ class Monitor {
     }
 
     debug_log("begin_shutdown this=%p\n", static_cast<void*>(this));
+    drain_queue_publication();
     stop_.store(true, std::memory_order_release);
     if(publisher_.joinable()) publisher_.join();
     if(completion_poller_.joinable()) completion_poller_.join();
@@ -742,13 +772,57 @@ class Monitor {
     return true;
   }
 
+  void note_symbol_by_name(hsa_executable_t executable, const char* symbol_name,
+                           const hsa_agent_t* agent, hsa_executable_symbol_t symbol) {
+    if(!enabled_ || symbol_name == nullptr || *symbol_name == '\0' || symbol.handle == 0) {
+      return;
+    }
+
+    KernelSymbolInfo info{};
+    info.symbol_handle = symbol.handle;
+    info.executable_handle = executable.handle;
+    info.agent_handle = (agent != nullptr) ? agent->handle : 0;
+    info.name = symbol_name;
+
+    auto& api = real_api();
+    if(api.executable_symbol_get_info != nullptr) {
+      uint64_t kernel_object = 0;
+      if(api.executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
+                                        &kernel_object) == HSA_STATUS_SUCCESS) {
+        info.kernel_object = kernel_object;
+      }
+    }
+
+    record_kernel_symbol(info);
+  }
+
+  void note_symbol_kernel_object(hsa_executable_symbol_t symbol, uint64_t kernel_object) {
+    if(!enabled_ || symbol.handle == 0 || kernel_object == 0) return;
+
+    KernelSymbolInfo info{};
+    {
+      std::lock_guard<std::mutex> lk{symbol_mutex_};
+      const auto itr = symbols_by_handle_.find(symbol.handle);
+      if(itr != symbols_by_handle_.end()) info = itr->second;
+    }
+
+    info.symbol_handle = symbol.handle;
+    info.kernel_object = kernel_object;
+    if(info.name.empty()) info.name = query_symbol_name(symbol);
+    record_kernel_symbol(info);
+  }
+
   void note_executable_frozen(hsa_executable_t executable) {
     if(!enabled_) return;
 
     auto infos = collect_code_objects(executable);
+    auto symbols = collect_kernel_symbols(executable);
     {
       std::lock_guard<std::mutex> lk{registry_mutex_};
       executable_code_objects_[executable.handle] = infos;
+    }
+    for(const auto& symbol : symbols) {
+      record_kernel_symbol(symbol);
     }
 
     for(const auto& info : infos) {
@@ -775,7 +849,7 @@ class Monitor {
   }
 
   void wait_for_all_queues_idle() {
-    if(!enabled_ || shutting_down_.load(std::memory_order_acquire)) return;
+    if(!enabled_) return;
 
     auto& api = real_api();
     const uint64_t timeout_ns = parse_u64_env("AQLMONITOR_EXEC_DESTROY_SYNC_TIMEOUT_NS", 5000000000ull);
@@ -814,9 +888,53 @@ class Monitor {
     }
   }
 
+  bool queues_fully_published() {
+    for(const auto& queue : snapshot_queues()) {
+      const uint64_t hinted = queue->shadow_doorbell_wptr.load(std::memory_order_acquire);
+      const uint64_t published = queue->published_wptr.load(std::memory_order_acquire);
+      if(hinted > published) return false;
+    }
+    return true;
+  }
+
+  void drain_queue_publication() {
+    const uint64_t timeout_ns =
+        parse_u64_env("AQLMONITOR_FINAL_DRAIN_TIMEOUT_NS", 5000000000ull);
+    const uint64_t start_ns = monotonic_nsec();
+
+    while(true) {
+      bool progress = false;
+      for(const auto& queue : snapshot_queues()) {
+        progress = publish_queue(*queue) || progress;
+      }
+
+      if(queues_fully_published()) {
+        wait_for_all_queues_idle();
+        return;
+      }
+
+      if(monotonic_nsec() - start_ns >= timeout_ns) {
+        debug_log("final queue drain timeout after %llu ns\n",
+                  static_cast<unsigned long long>(timeout_ns));
+        trace_.add_dropped_packets();
+        return;
+      }
+
+      if(progress) continue;
+
+      timespec ts{};
+      ts.tv_nsec = 1000000;
+      nanosleep(&ts, nullptr);
+    }
+  }
+
  private:
   struct CodeObjectCollection {
     std::vector<CodeObjectInfo> infos = {};
+  };
+
+  struct KernelSymbolCollection {
+    std::vector<KernelSymbolInfo> infos = {};
   };
 
   Monitor() {
@@ -1112,6 +1230,107 @@ class Monitor {
     return injected_signal;
   }
 
+  static std::string query_symbol_name(hsa_executable_symbol_t symbol) {
+    auto& api = real_api();
+    if(api.executable_symbol_get_info == nullptr || symbol.handle == 0) return {};
+
+    uint32_t name_length = 0;
+    if(api.executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH,
+                                      &name_length) != HSA_STATUS_SUCCESS ||
+       name_length == 0) {
+      return {};
+    }
+
+    std::vector<char> name(name_length + 1, '\0');
+    if(api.executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME,
+                                      name.data()) != HSA_STATUS_SUCCESS) {
+      return {};
+    }
+    name[name_length] = '\0';
+    return name.data();
+  }
+
+  void record_kernel_symbol(const KernelSymbolInfo& info) {
+    if(info.symbol_handle == 0 && info.kernel_object == 0) return;
+
+    std::lock_guard<std::mutex> lk{symbol_mutex_};
+    if(info.symbol_handle != 0) {
+      auto& slot = symbols_by_handle_[info.symbol_handle];
+      if(info.executable_handle != 0) slot.executable_handle = info.executable_handle;
+      if(info.agent_handle != 0) slot.agent_handle = info.agent_handle;
+      if(info.kernel_object != 0) slot.kernel_object = info.kernel_object;
+      if(!info.name.empty()) slot.name = info.name;
+      slot.symbol_handle = info.symbol_handle;
+
+      if(slot.kernel_object != 0 && !slot.name.empty()) {
+        kernel_names_by_object_[slot.kernel_object] = slot.name;
+      }
+      return;
+    }
+
+    if(info.kernel_object != 0 && !info.name.empty()) {
+      kernel_names_by_object_[info.kernel_object] = info.name;
+    }
+  }
+
+  std::string kernel_name_for(uint64_t kernel_object) {
+    if(kernel_object == 0) return {};
+    std::lock_guard<std::mutex> lk{symbol_mutex_};
+    const auto itr = kernel_names_by_object_.find(kernel_object);
+    return (itr != kernel_names_by_object_.end()) ? itr->second : std::string{};
+  }
+
+  static hsa_status_t collect_executable_symbol(hsa_executable_t executable,
+                                                hsa_executable_symbol_t symbol, void* data) {
+    auto* collection = static_cast<KernelSymbolCollection*>(data);
+    auto& api = real_api();
+    if(api.executable_symbol_get_info == nullptr || collection == nullptr) {
+      return HSA_STATUS_SUCCESS;
+    }
+
+    hsa_symbol_kind_t kind{};
+    if(api.executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &kind) !=
+           HSA_STATUS_SUCCESS ||
+       kind != HSA_SYMBOL_KIND_KERNEL) {
+      return HSA_STATUS_SUCCESS;
+    }
+
+    uint64_t kernel_object = 0;
+    if(api.executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
+                                      &kernel_object) != HSA_STATUS_SUCCESS ||
+       kernel_object == 0) {
+      return HSA_STATUS_SUCCESS;
+    }
+
+    KernelSymbolInfo info{};
+    info.symbol_handle = symbol.handle;
+    info.executable_handle = executable.handle;
+    info.kernel_object = kernel_object;
+    info.name = query_symbol_name(symbol);
+
+    hsa_agent_t agent{};
+    if(api.executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_AGENT, &agent) ==
+       HSA_STATUS_SUCCESS) {
+      info.agent_handle = agent.handle;
+    }
+
+    collection->infos.emplace_back(std::move(info));
+    return HSA_STATUS_SUCCESS;
+  }
+
+  std::vector<KernelSymbolInfo> collect_kernel_symbols(hsa_executable_t executable) {
+    auto& api = real_api();
+    if(api.executable_iterate_symbols == nullptr || api.executable_symbol_get_info == nullptr) {
+      return {};
+    }
+
+    KernelSymbolCollection collection = {};
+    const auto status = api.executable_iterate_symbols(
+        executable, &Monitor::collect_executable_symbol, &collection);
+    return (status == HSA_STATUS_SUCCESS) ? std::move(collection.infos)
+                                          : std::vector<KernelSymbolInfo>{};
+  }
+
   static hsa_status_t collect_loaded_code_object(hsa_executable_t executable,
                                                  hsa_loaded_code_object_t loaded_code_object,
                                                  void* data) {
@@ -1255,6 +1474,11 @@ class Monitor {
         rec.kernel_object = packet->kernel_object;
         rec.completion_signal = packet->completion_signal.handle;
         rec.agent_handle = queue.agent.handle;
+        const auto kernel_name = kernel_name_for(rec.kernel_object);
+        if(!kernel_name.empty()) {
+          std::snprintf(rec.kernel_name, sizeof(rec.kernel_name), "%s", kernel_name.c_str());
+          rec.flags |= AQLMON_FLAG_KERNEL_NAME_VALID;
+        }
         if(injected_signal) rec.flags |= AQLMON_FLAG_INJECTED_SIGNAL;
       }
 
@@ -1292,9 +1516,14 @@ class Monitor {
 
   void completion_loop() {
     const uint64_t idle_ns = parse_u64_env("AQLMONITOR_COMPLETION_IDLE_NS", 50000);
+    const uint64_t final_timeout_ns =
+        parse_u64_env("AQLMONITOR_FINAL_DRAIN_TIMEOUT_NS", 5000000000ull);
     std::unordered_map<uint64_t, std::deque<DispatchSignalTracker>> pending = {};
+    uint64_t stop_start_ns = 0;
 
-    while(!stop_.load(std::memory_order_acquire)) {
+    while(true) {
+      const bool stop_requested = stop_.load(std::memory_order_acquire);
+      if(stop_requested && stop_start_ns == 0) stop_start_ns = monotonic_nsec();
       bool progress = false;
 
       if(completion_tracks_ != nullptr) {
@@ -1336,6 +1565,17 @@ class Monitor {
         } else {
           ++itr;
         }
+      }
+
+      if(stop_requested && pending.empty()) break;
+      if(stop_requested && stop_start_ns != 0 &&
+         monotonic_nsec() - stop_start_ns >= final_timeout_ns) {
+        uint64_t remaining = 0;
+        for(const auto& itr : pending) remaining += itr.second.size();
+        trace_.add_dropped_packets(remaining);
+        debug_log("completion final drain timeout pending=%llu\n",
+                  static_cast<unsigned long long>(remaining));
+        break;
       }
 
       if(progress) continue;
@@ -1380,11 +1620,14 @@ class Monitor {
   std::mutex signal_mutex_ = {};
   std::mutex destroyed_signal_mutex_ = {};
   std::mutex injected_signal_mutex_ = {};
+  std::mutex symbol_mutex_ = {};
   std::unordered_map<uint64_t, std::shared_ptr<QueueState>> queues_ = {};
   std::unordered_map<uint64_t, std::shared_ptr<QueueState>> doorbells_ = {};
   std::unordered_map<uint64_t, std::deque<DispatchSignalTracker>> signal_dispatches_ = {};
   std::unordered_map<uint64_t, WrappedAsyncHandlerState> wrapped_handlers_ = {};
   std::unordered_map<uint64_t, std::vector<CodeObjectInfo>> executable_code_objects_ = {};
+  std::unordered_map<uint64_t, KernelSymbolInfo> symbols_by_handle_ = {};
+  std::unordered_map<uint64_t, std::string> kernel_names_by_object_ = {};
   std::vector<uint64_t> destroyed_signals_ = {};
   std::vector<hsa_signal_t> free_injected_signals_ = {};
   std::unique_ptr<CompletionTrackQueue> completion_tracks_ = {};
@@ -1435,6 +1678,7 @@ AQLMON_EXPORT hsa_status_t hsa_queue_create(
 
 AQLMON_EXPORT hsa_status_t hsa_shut_down() {
   debug_log("hsa_shut_down enter\n");
+  finalize_monitor_atexit();
   const auto status = real_api().shut_down();
   debug_log("hsa_shut_down exit status=%d\n", static_cast<int>(status));
   return status;
@@ -1661,6 +1905,29 @@ AQLMON_EXPORT hsa_status_t hsa_amd_profiling_set_profiler_enabled(hsa_queue_t* q
   auto status = real_api().amd_profiling_set_profiler_enabled(queue, enable);
   if(status == HSA_STATUS_SUCCESS && !monitor_finalizing()) {
     Monitor::instance().note_queue_profiling_setting(queue, enable != 0);
+  }
+  return status;
+}
+
+AQLMON_EXPORT hsa_status_t hsa_executable_get_symbol_by_name(
+    hsa_executable_t executable, const char* symbol_name, const hsa_agent_t* agent,
+    hsa_executable_symbol_t* symbol) {
+  auto status =
+      real_api().executable_get_symbol_by_name(executable, symbol_name, agent, symbol);
+  if(status == HSA_STATUS_SUCCESS && symbol != nullptr && !monitor_finalizing()) {
+    Monitor::instance().note_symbol_by_name(executable, symbol_name, agent, *symbol);
+  }
+  return status;
+}
+
+AQLMON_EXPORT hsa_status_t hsa_executable_symbol_get_info(
+    hsa_executable_symbol_t executable_symbol, hsa_executable_symbol_info_t attribute,
+    void* value) {
+  auto status = real_api().executable_symbol_get_info(executable_symbol, attribute, value);
+  if(status == HSA_STATUS_SUCCESS && value != nullptr && !monitor_finalizing() &&
+     attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT) {
+    Monitor::instance().note_symbol_kernel_object(
+        executable_symbol, *static_cast<const uint64_t*>(value));
   }
   return status;
 }

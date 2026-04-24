@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <strings.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -23,6 +24,25 @@
 #include <vector>
 
 namespace {
+
+bool strict_mode_enabled() {
+  const char* value = std::getenv("AQLMON_TRACE_STRICT");
+  if(value == nullptr || *value == '\0') return false;
+  return std::strcmp(value, "0") != 0 && strcasecmp(value, "false") != 0 &&
+         strcasecmp(value, "off") != 0 && strcasecmp(value, "no") != 0;
+}
+
+bool completion_required() {
+  const char* value = std::getenv("AQLMON_TRACE_REQUIRE_COMPLETION");
+  if(value == nullptr || *value == '\0') return false;
+  return std::strcmp(value, "0") != 0 && strcasecmp(value, "false") != 0 &&
+         strcasecmp(value, "off") != 0 && strcasecmp(value, "no") != 0;
+}
+
+int fail_strict(const char* message) {
+  std::fprintf(stderr, "strict trace validation failed: %s\n", message);
+  return 2;
+}
 
 struct DispatchKey {
   uint32_t pid = 0;
@@ -81,6 +101,7 @@ struct PacketInfo {
   uint64_t code_object_handle = 0;
   uint64_t executable_handle = 0;
   uint64_t agent_handle = 0;
+  uint64_t publish_ns = 0;
   std::string kernel_name = {};
   std::string code_object_uri = {};
 };
@@ -92,6 +113,7 @@ struct TraceEvent {
   uint64_t signal_value = 0;
   bool injected_signal = false;
   bool has_timestamps = false;
+  bool completion_observed = false;
 };
 
 constexpr uint16_t kKernelDispatchPacketType = 2;  // HSA_PACKET_TYPE_KERNEL_DISPATCH
@@ -222,13 +244,17 @@ void write_trace_event(std::ofstream& output, const TraceEvent& event, int lane,
          << "\"completion_signal\":\"" << hex_u64(event.packet.completion_signal) << "\","
          << "\"signal_value\":" << event.signal_value << ","
          << "\"packet_header\":\"" << hex_u64(event.packet.packet_header) << "\","
-         << "\"injected_signal\":" << (event.injected_signal ? "true" : "false");
+         << "\"injected_signal\":" << (event.injected_signal ? "true" : "false") << ","
+         << "\"completion_observed\":" << (event.completion_observed ? "true" : "false");
 
   if(event.packet.code_object_handle != 0) {
     output << ",\"code_object_handle\":\"" << hex_u64(event.packet.code_object_handle) << "\"";
   }
   if(event.packet.executable_handle != 0) {
     output << ",\"executable_handle\":\"" << hex_u64(event.packet.executable_handle) << "\"";
+  }
+  if(!event.packet.kernel_name.empty()) {
+    output << ",\"kernel_name\":\"" << json_escape(event.packet.kernel_name) << "\"";
   }
   if(!event.packet.code_object_uri.empty()) {
     output << ",\"code_object_uri\":\"" << json_escape(event.packet.code_object_uri) << "\"";
@@ -281,16 +307,43 @@ int main(int argc, char** argv) {
   auto* records = reinterpret_cast<const aqlmon_record_t*>(
       static_cast<const unsigned char*>(mapping) + sizeof(aqlmon_shm_header_t));
 
+  const bool strict = strict_mode_enabled();
+  const bool require_completion = completion_required();
   const uint64_t write_seq = header->write_seq;
+  if(strict && header->dropped_records != 0) {
+    munmap(mapping, static_cast<size_t>(st.st_size));
+    close(fd);
+    return fail_strict("shared-memory header reports dropped records");
+  }
+  if(strict && header->dropped_packets != 0) {
+    munmap(mapping, static_cast<size_t>(st.st_size));
+    close(fd);
+    return fail_strict("shared-memory header reports dropped packets");
+  }
+  if(strict && write_seq > header->capacity) {
+    munmap(mapping, static_cast<size_t>(st.st_size));
+    close(fd);
+    return fail_strict("shared-memory ring wrapped before export");
+  }
+
   const uint64_t begin = (write_seq > header->capacity) ? (write_seq - header->capacity) : 0;
 
   std::unordered_map<uint64_t, CodeObjectRange> live_code_objects = {};
   std::unordered_map<DispatchKey, PacketInfo, DispatchKeyHash> packets = {};
   std::vector<TraceEvent> events = {};
+  uint64_t kernel_packets = 0;
+  uint64_t kernel_completions = 0;
 
   for(uint64_t seq = begin; seq < write_seq; ++seq) {
     const auto& rec = records[seq % header->capacity];
-    if(rec.seq != (seq + 1)) continue;
+    if(rec.seq != (seq + 1)) {
+      if(strict) {
+        munmap(mapping, static_cast<size_t>(st.st_size));
+        close(fd);
+        return fail_strict("missing expected record sequence");
+      }
+      continue;
+    }
 
     switch(rec.kind) {
       case AQLMON_RECORD_CODE_OBJECT_LIVE: {
@@ -309,6 +362,7 @@ int main(int argc, char** argv) {
         break;
       case AQLMON_RECORD_PACKET:
         if(rec.packet_type == kKernelDispatchPacketType) {
+          ++kernel_packets;
           PacketInfo packet{};
           packet.pid = rec.pid;
           packet.host_tid = rec.tid;
@@ -323,6 +377,7 @@ int main(int argc, char** argv) {
           packet.code_object_handle = rec.code_object_handle;
           packet.executable_handle = rec.executable_handle;
           packet.agent_handle = rec.agent_handle;
+          packet.publish_ns = rec.monotonic_ns;
           packet.kernel_name = rec.kernel_name;
           packet.code_object_uri = rec.code_object_uri;
 
@@ -344,7 +399,13 @@ int main(int argc, char** argv) {
         const auto packet_itr = packets.find(key);
         if(packet_itr != packets.end()) {
           event.packet = packet_itr->second;
+          packets.erase(packet_itr);
         } else {
+          if(strict) {
+            munmap(mapping, static_cast<size_t>(st.st_size));
+            close(fd);
+            return fail_strict("completion record has no matching packet record");
+          }
           event.packet.pid = rec.pid;
           event.packet.host_tid = rec.tid;
           event.packet.queue_id = rec.queue_id;
@@ -361,13 +422,46 @@ int main(int argc, char** argv) {
         event.signal_value = rec.signal_value;
         event.injected_signal = (rec.flags & AQLMON_FLAG_INJECTED_SIGNAL) != 0;
         event.has_timestamps = (rec.flags & AQLMON_FLAG_SIGNAL_TIMESTAMPS_VALID) != 0;
+        event.completion_observed = event.has_timestamps;
+        if(strict && require_completion && !event.has_timestamps) {
+          munmap(mapping, static_cast<size_t>(st.st_size));
+          close(fd);
+          return fail_strict("completion record is missing dispatch timestamps");
+        }
         if(event.has_timestamps && event.end_ns >= event.start_ns) {
           events.emplace_back(std::move(event));
+          ++kernel_completions;
+        } else if(strict && require_completion) {
+          munmap(mapping, static_cast<size_t>(st.st_size));
+          close(fd);
+          return fail_strict("completion record has invalid dispatch timestamps");
         }
         break;
       }
       default: break;
     }
+  }
+
+  if(strict && require_completion && !packets.empty()) {
+    munmap(mapping, static_cast<size_t>(st.st_size));
+    close(fd);
+    return fail_strict("one or more packet records have no matching completion record");
+  }
+  if(strict && require_completion && kernel_packets != kernel_completions) {
+    munmap(mapping, static_cast<size_t>(st.st_size));
+    close(fd);
+    return fail_strict("kernel packet/completion count mismatch");
+  }
+
+  const uint64_t unmatched_packets = packets.size();
+  for(auto& itr : packets) {
+    TraceEvent event{};
+    event.packet = std::move(itr.second);
+    event.start_ns = event.packet.publish_ns;
+    event.end_ns = event.packet.publish_ns;
+    event.has_timestamps = false;
+    event.completion_observed = false;
+    events.emplace_back(std::move(event));
   }
 
   std::sort(events.begin(), events.end(), [](const TraceEvent& lhs, const TraceEvent& rhs) {
@@ -403,7 +497,10 @@ int main(int argc, char** argv) {
   output << "\n  ]\n}\n";
   output.close();
 
-  std::printf("wrote %zu correlated kernel dispatch events to %s\n", events.size(), output_path);
+  std::printf("wrote %zu kernel dispatch events to %s (packets=%llu completions=%llu unmatched=%llu)\n",
+              events.size(), output_path, static_cast<unsigned long long>(kernel_packets),
+              static_cast<unsigned long long>(kernel_completions),
+              static_cast<unsigned long long>(unmatched_packets));
 
   munmap(mapping, static_cast<size_t>(st.st_size));
   close(fd);

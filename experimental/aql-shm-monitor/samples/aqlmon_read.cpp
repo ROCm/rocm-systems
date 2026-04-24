@@ -28,7 +28,7 @@ const char* record_kind_name(uint16_t kind) {
 void print_packet_record(const aqlmon_record_t& rec) {
   std::printf(
       "[%llu] %-16s type=%u pid=%u tid=%u qid=%llu dispatch_id=%llu idx=%llu wptr=%llu rptr=%llu "
-      "kernel_object=0x%llx completion=0x%llx\n",
+      "kernel_object=0x%llx completion=0x%llx kernel=%s\n",
       static_cast<unsigned long long>(rec.seq), record_kind_name(rec.kind), rec.packet_type,
       rec.pid, rec.tid, static_cast<unsigned long long>(rec.queue_id),
       static_cast<unsigned long long>(rec.dispatch_id),
@@ -36,7 +36,8 @@ void print_packet_record(const aqlmon_record_t& rec) {
       static_cast<unsigned long long>(rec.observed_wptr),
       static_cast<unsigned long long>(rec.observed_rptr),
       static_cast<unsigned long long>(rec.kernel_object),
-      static_cast<unsigned long long>(rec.completion_signal));
+      static_cast<unsigned long long>(rec.completion_signal),
+      (rec.kernel_name[0] != '\0') ? rec.kernel_name : "-");
 }
 
 void print_completion_record(const aqlmon_record_t& rec) {
