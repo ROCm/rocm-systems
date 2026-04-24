@@ -3,31 +3,24 @@
 
 #pragma once
 
-#include "core/common.hpp"
-#include "core/config.hpp"
-#include "core/defines.hpp"
-#include "core/timemory.hpp"
-#include "library/components/category_region.hpp"
-#include "library/components/comm_data.hpp"
-
-#include <timemory/components/base.hpp>
-#include <timemory/components/gotcha/backends.hpp>
+#include <timemory/components/base/declaration.hpp>
 #include <timemory/utility/types.hpp>
+
+#include "common/delimit.hpp"
+#include "common/environment.hpp"
 
 #include <cstddef>
 #include <cstdlib>
 #include <map>
+#include <mutex>
 #include <set>
 #include <string>
-
-namespace rocprofsys
-{
-namespace component
-{
+#include <string_view>
+#include <type_traits>
 
 // Categories for SHMEM API filtering. Use these names in ROCPROFSYS_SHMEM_PERMIT_LIST
 // and ROCPROFSYS_SHMEM_REJECT_LIST (e.g. "init,sync,rma" or "atomics,memory").
-namespace shmem_categories
+namespace rocprofsys::component::shmem_categories
 {
 // Category name -> set of API names (symbols we bind).
 inline const std::map<std::string, std::set<std::string>>&
@@ -128,9 +121,9 @@ expand_tokens_to_apis(const std::set<std::string>& tokens)
     }
     return out;
 }
-}  // namespace shmem_categories
+}  // namespace rocprofsys::component::shmem_categories
 
-namespace traits
+namespace rocprofsys::component::traits
 {
 template <typename Policy, typename = void>
 struct has_comm_data : std::false_type
@@ -175,7 +168,10 @@ struct has_shmem_gotcha_t<Policy, std::void_t<typename Policy::shmem_gotcha_t>>
 : std::true_type
 {};
 
-}  // namespace traits
+}  // namespace rocprofsys::component::traits
+
+namespace rocprofsys::component
+{
 
 template <typename SHMEMPolicy>
 struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
@@ -189,7 +185,12 @@ struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
 
     static constexpr size_t gotcha_capacity = 120;
 
-    ROCPROFSYS_DEFAULT_OBJECT(shmem_gotcha<SHMEMPolicy>)
+    shmem_gotcha<SHMEMPolicy>()                                                = default;
+    shmem_gotcha<SHMEMPolicy>(const shmem_gotcha<SHMEMPolicy>&)                = default;
+    shmem_gotcha<SHMEMPolicy>& operator=(const shmem_gotcha<SHMEMPolicy>&)     = default;
+    shmem_gotcha<SHMEMPolicy>(shmem_gotcha<SHMEMPolicy>&&) noexcept            = default;
+    shmem_gotcha<SHMEMPolicy>& operator=(shmem_gotcha<SHMEMPolicy>&&) noexcept = default;
+    ~shmem_gotcha<SHMEMPolicy>() noexcept                                      = default;
 
     static std::string label() { return "shmem_gotcha"; }
 
@@ -203,8 +204,8 @@ struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
     static void resume();
 
     template <typename... Args>
-    static void audit(const typename SHMEMPolicy::gotcha_data& _data, audit::incoming,
-                      Args...)
+    static void audit(const typename SHMEMPolicy::gotcha_data& _data,
+                      tim::audit::incoming, Args...)
     {
         SHMEMPolicy::category_region::start(std::string_view{ _data.tool_id });
     }
@@ -212,10 +213,13 @@ struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
     // Outgoing audit overloads must match the return types of wrapped APIs (like UCX).
     // Missing overloads cause the bundle's audit call to be a no-op for that component,
     // so the region is never stopped and the call may not appear correctly in traces.
-    static void audit(const typename SHMEMPolicy::gotcha_data&, audit::outgoing);
-    static void audit(const typename SHMEMPolicy::gotcha_data&, audit::outgoing, void*);
-    static void audit(const typename SHMEMPolicy::gotcha_data&, audit::outgoing, int);
-    static void audit(const typename SHMEMPolicy::gotcha_data&, audit::outgoing, long);
+    static void audit(const typename SHMEMPolicy::gotcha_data&, tim::audit::outgoing);
+    static void audit(const typename SHMEMPolicy::gotcha_data&, tim::audit::outgoing,
+                      void*);
+    static void audit(const typename SHMEMPolicy::gotcha_data&, tim::audit::outgoing,
+                      int);
+    static void audit(const typename SHMEMPolicy::gotcha_data&, tim::audit::outgoing,
+                      long);
 
 private:
     static std::mutex s_mutex;
@@ -227,7 +231,7 @@ template <typename SHMEMPolicy>
 auto&
 get_shmem_gotcha()
 {
-    static auto _v = tim::lightweight_tuple<typename SHMEMPolicy::shmem_gotcha_t>{};
+    static auto _v = typename SHMEMPolicy::gotcha_bundle_t{};
     return _v;
 }
 }  // namespace detail
@@ -467,8 +471,8 @@ shmem_gotcha<SHMEMPolicy>::configure()
     shmem_gotcha_t::get_reject_list() = []() {
         std::set<std::string> tokens;
         auto                  reject_list =
-            tim::get_env<std::string>(TIMEMORY_SETTINGS_PREFIX "SHMEM_REJECT_LIST", "");
-        for(const auto& itr : tim::delimit(reject_list))
+            rocprofsys::common::get_env<std::string>("ROCPROFSYS_SHMEM_REJECT_LIST", "");
+        for(const auto& itr : rocprofsys::common::delimit(reject_list))
             tokens.insert(itr);
         return shmem_categories::expand_tokens_to_apis(tokens);
     };
@@ -479,9 +483,9 @@ shmem_gotcha<SHMEMPolicy>::configure()
     // Set to "all" to permit every bound API; or list categories/APIs to trace.
     shmem_gotcha_t::get_permit_list() = []() {
         auto permit_list =
-            tim::get_env<std::string>(TIMEMORY_SETTINGS_PREFIX "SHMEM_PERMIT_LIST", "");
+            rocprofsys::common::get_env<std::string>("ROCPROFSYS_SHMEM_PERMIT_LIST", "");
         std::set<std::string> tokens;
-        for(const auto& itr : tim::delimit(permit_list))
+        for(const auto& itr : rocprofsys::common::delimit(permit_list))
             tokens.insert(itr);
         if(tokens.empty()) return shmem_categories::get_default_permit();
         if(tokens.count("all"))
@@ -549,7 +553,7 @@ shmem_gotcha<SHMEMPolicy>::resume()
 template <typename SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
-                                 audit::outgoing)
+                                 tim::audit::outgoing)
 {
     SHMEMPolicy::category_region::stop(std::string_view{ _data.tool_id });
 }
@@ -557,7 +561,7 @@ shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
 template <typename SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
-                                 audit::outgoing, void* ret)
+                                 tim::audit::outgoing, void* ret)
 {
     SHMEMPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
 }
@@ -565,7 +569,7 @@ shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
 template <typename SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
-                                 audit::outgoing, int ret)
+                                 tim::audit::outgoing, int ret)
 {
     SHMEMPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
 }
@@ -573,24 +577,9 @@ shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
 template <typename SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
-                                 audit::outgoing, long ret)
+                                 tim::audit::outgoing, long ret)
 {
     SHMEMPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
 }
 
-}  // namespace component
-
-struct DefaultSHMEMPolicy
-{
-    using comm_data       = component::comm_data;
-    using gotcha_data     = tim::component::gotcha_data;
-    using category_region = component::category_region<category::shmem>;
-
-    using component_t = component::shmem_gotcha<DefaultSHMEMPolicy>;
-
-    using shmem_bundle_t = tim::component_bundle<category::shmem, component_t, comm_data>;
-    using shmem_gotcha_t = tim::component::gotcha<component_t::gotcha_capacity,
-                                                  shmem_bundle_t, category::shmem>;
-};
-
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
