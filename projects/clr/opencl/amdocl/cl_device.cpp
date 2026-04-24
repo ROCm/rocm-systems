@@ -350,7 +350,10 @@ RUNTIME_ENTRY(cl_int, clGetDeviceInfo,
       CASE(CL_DEVICE_OPENCL_C_VERSION, oclcVersion_);
       CASE(CL_DEVICE_EXTENSIONS, extensions_);
       CASE(CL_DEVICE_MAX_ATOMIC_COUNTERS_EXT, maxAtomicCounters_);
-      CASE(CL_DEVICE_TOPOLOGY_AMD, deviceTopology_);
+      case CL_DEVICE_TOPOLOGY_AMD: {
+        cl_device_topology_amd topology = amd::cl::to_cl(as_amd(device)->info().deviceTopology_);
+        return amd::clGetInfo(topology, param_value_size, param_value, param_value_size_ret);
+      }
       CASE(CL_DEVICE_MAX_SEMAPHORE_SIZE_AMD, maxSemaphoreSize_);
       CASE(CL_DEVICE_BOARD_NAME_AMD, boardName_);
       CASE(CL_DEVICE_SPIR_VERSIONS, spirVersions_);

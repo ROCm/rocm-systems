@@ -293,4 +293,19 @@ static_assert(static_cast<uint32_t>(amd::AddressingMode::Clamp)          == CL_A
 static_assert(static_cast<uint32_t>(amd::AddressingMode::Repeat)         == CL_ADDRESS_REPEAT);
 static_assert(static_cast<uint32_t>(amd::AddressingMode::MirroredRepeat) == CL_ADDRESS_MIRRORED_REPEAT);
 
+// DeviceTopology is a flat internal struct; cl_device_topology_amd is a 24-byte union.
+// They must NOT be copied as raw bytes — use to_cl(amd::DeviceTopology) below.
+static_assert(sizeof(amd::DeviceTopology) != sizeof(cl_device_topology_amd),
+              "amd::DeviceTopology size matches cl_device_topology_amd — "
+              "review if direct byte-copy is now safe and remove this assert");
+
+inline cl_device_topology_amd to_cl(const amd::DeviceTopology& t) {
+  cl_device_topology_amd result{};
+  result.pcie.type     = t.type;
+  result.pcie.bus      = static_cast<cl_char>(t.bus);
+  result.pcie.device   = static_cast<cl_char>(t.device);
+  result.pcie.function = static_cast<cl_char>(t.function);
+  return result;
+}
+
 }  // namespace amd::cl
