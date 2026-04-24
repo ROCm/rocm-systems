@@ -676,6 +676,27 @@ void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize) {
   comm->p2pNetChunkSize = p2pNetChunkSize;
   rcclP2pNetChunkSize = p2pNetChunkSize;
 }
+void rcclSetP2pAlltoAllChunkSize(struct ncclComm* comm, int& rcclP2pAlltoAllChunkSize) {
+  if (comm->p2pAlltoAllNetChunkSize != RCCL_VALUE_UNSET) {
+    rcclP2pAlltoAllChunkSize = comm->p2pAlltoAllNetChunkSize;
+    return;
+  }
+
+  // Auto-tune only on AINIC/gfx950, and only when the user has not pinned the global P2P
+  // net chunk size via NCCL_P2P_NET_CHUNKSIZE (which then takes precedence).
+  const char *inputStr = getenv("NCCL_P2P_NET_CHUNKSIZE");
+  const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+  if (!archGfx950 || !rcclUseAinic() || inputStr) {
+    rcclP2pAlltoAllChunkSize = comm->p2pAlltoAllNetChunkSize = RCCL_VALUE_INVALID;
+    return;
+  }
+
+  comm->p2pAlltoAllNetChunkSize = (1 << 17);
+  rcclP2pAlltoAllChunkSize = comm->p2pAlltoAllNetChunkSize;
+  INFO(NCCL_INIT, "RCCL AllToAll P2P net chunk size set to %d for AINIC/gfx950",
+       comm->p2pAlltoAllNetChunkSize);
+}
+
 #ifdef ENABLE_WARP_SPEED
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels) {
   static int userChannelControlInput = RCCL_VALUE_UNSET;

@@ -133,6 +133,7 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseAlltoAllGda(struct ncclComm* comm);
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize);
+void rcclSetP2pAlltoAllChunkSize(struct ncclComm* comm, int& rcclP2pAlltoAllChunkSize);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);
 ncclResult_t commSetUnrollFactor(struct ncclComm* comm);
 ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm);
