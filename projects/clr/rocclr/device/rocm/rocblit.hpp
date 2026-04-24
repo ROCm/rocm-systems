@@ -646,7 +646,7 @@ inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index, si
   uint64_t uint64_value = 0;
 
   if (desc.type_ == amd::KernelArgValueType::Pointer && (desc.addressQualifier_ != amd::KernelArgAddressQualifier::Local)) {
-    if ((value == NULL) || (static_cast<const cl_mem*>(value) == NULL)) {
+    if (value == NULL) {
       LP64_SWITCH(uint32_value, uint64_value) = 0;
       reinterpret_cast<Memory**>(kernel->parameters().values() +
                                  kernel->parameters().memoryObjOffset())[desc.info_.arrayIndex_] =
