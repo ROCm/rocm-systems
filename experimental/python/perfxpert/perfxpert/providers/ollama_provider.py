@@ -21,10 +21,16 @@ _DEFAULT_TIMEOUT = 120.0
 
 
 def _resolve_url(explicit: Optional[str]) -> str:
-    if explicit:
-        return explicit.rstrip("/")
-    env = os.environ.get("PERFXPERT_LLM_LOCAL_URL")
-    return (env or _DEFAULT_URL).rstrip("/")
+    value = (
+        explicit
+        or os.environ.get("PERFXPERT_LLM_LOCAL_URL")
+        or os.environ.get("OLLAMA_HOST")
+        or _DEFAULT_URL
+    )
+    value = value.rstrip("/")
+    if "://" not in value:
+        value = f"http://{value}"
+    return value
 
 
 class OllamaProvider(Provider):
@@ -82,7 +88,7 @@ class OllamaProvider(Provider):
 register(
     "ollama",
     OllamaProvider,
-    "Local ollama daemon (default http://localhost:11434; override with PERFXPERT_LLM_LOCAL_URL)",
+    "Local ollama daemon (default http://localhost:11434; override with PERFXPERT_LLM_LOCAL_URL or OLLAMA_HOST)",
 )
 
 

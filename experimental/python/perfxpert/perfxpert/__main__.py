@@ -394,7 +394,13 @@ def _check_llm_providers() -> tuple[list[str], list[str]]:
     }
 
     for name, env_vars in providers.items():
-        if name == "opencode" or any(os.getenv(env_var) for env_var in env_vars):
+        if name == "private":
+            endpoint = any(os.getenv(env_var) for env_var in env_vars)
+            if endpoint and os.getenv("PERFXPERT_LLM_PRIVATE_API_KEY"):
+                configured.append(name)
+            else:
+                unconfigured.append(name)
+        elif name == "opencode" or any(os.getenv(env_var) for env_var in env_vars):
             configured.append(name)
         else:
             unconfigured.append(name)

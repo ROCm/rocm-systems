@@ -3,36 +3,27 @@
 Requires:
 - perfxpert-code installed (entry point)
 - perfxpert-mcp installed (entry point)
-- bundled opencode binary OR PERFXPERT_OPENCODE_PATH set
+- bundled patched opencode binary available
 - Any LLM provider configured, OR --no-llm / air-gap mode
 
 Skips gracefully if the opencode binary isn't available.
 """
 
 import os
-import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 
 
 @pytest.fixture
 def opencode_available():
-    # Check bundled OR PATH
-    if os.environ.get("PERFXPERT_OPENCODE_PATH"):
-        if Path(os.environ["PERFXPERT_OPENCODE_PATH"]).is_file():
-            return True
-    if shutil.which("opencode"):
-        return True
     try:
-        from importlib import resources
-        with resources.as_file(resources.files("perfxpert") / "_bundled" / "opencode") as p:
-            if p.is_file():
-                return True
+        from perfxpert.cli.opencode_launcher import resolve_opencode_binary
+
+        resolve_opencode_binary()
+        return True
     except Exception:
-        pass
-    return False
+        return False
 
 
 def test_perfxpert_code_launches_if_opencode_available(opencode_available):
