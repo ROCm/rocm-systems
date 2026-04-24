@@ -1343,7 +1343,7 @@ struct bit_or {
  * separate WGP processor. Sizing, cluster size is in workgroups, workgroups size is in threads.
  */
 class cluster_group {
-  friend __device__ cluster_group this_cluster();
+  friend __CG_QUALIFIER__ cluster_group this_cluster();
 
   // Default constructor, hidden
   __CG_QUALIFIER__ cluster_group() {}
@@ -1413,7 +1413,7 @@ class cluster_group {
  *
  * \return cluster_group
  */
-__device__ cluster_group this_cluster() {
+__CG_QUALIFIER__ cluster_group this_cluster() {
   cluster_group cg;
   return cg;
 }
