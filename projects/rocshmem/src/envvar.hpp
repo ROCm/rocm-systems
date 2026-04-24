@@ -392,6 +392,7 @@ namespace envvar {
       const std::string name;
       const std::string doc;
       const value_type default_value;
+    public:
       value_type value;
       bool value_set;
     };

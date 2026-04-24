@@ -75,6 +75,7 @@ function run_mpirun {
 case $mode in
     all)
         test_with_two_pes="IPCImplSimpleCoarseTestFixture/*:IPCImplSimpleFineTestFixture/*:IPCImplTiledFineTestFixture/*:DegenerateTiledFine.*"
+        test_with_two_pes+=":SdmaSimpleCoarse/*:SdmaSimpleFine/*:SdmaTiledFine/*"
         run_mpirun 4 "-$test_with_two_pes"
         #run_mpirun 2 "$test_with_two_pes"
         ;;
