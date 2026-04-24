@@ -25,6 +25,7 @@ from utils.logger import (
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import (
     MachineSpecs,
+    canonical_config_arch,
     generate_machine_specs,
 )
 from utils.utils_common import (
@@ -403,7 +404,10 @@ class RocProfCompute:
     ) -> dict[str, str]:
         """Load panel configs for arch and build metric_list.
         Returns the metric_list dictionary."""
-        panel_configs = load_panel_configs([str(Path(self.__args.config_dir) / arch)])
+        config_arch = canonical_config_arch(arch) or arch
+        panel_configs = load_panel_configs([
+            str(Path(self.__args.config_dir) / config_arch)
+        ])
         return build_metric_list(panel_configs, sys_info)
 
     @demarcate

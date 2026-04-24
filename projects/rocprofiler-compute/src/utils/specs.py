@@ -48,6 +48,15 @@ def canonical_gpu_arch(gpu_arch: Optional[str]) -> Optional[str]:
     return gpu_arch
 
 
+def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
+    """Map GPU architectures to the shared analysis-config directory name."""
+    if gpu_arch is None:
+        return None
+    if gpu_arch.startswith("gfx115"):
+        return "gfx115x"
+    return canonical_gpu_arch(gpu_arch)
+
+
 VERSION_LOC: list[str] = [
     "version",
     "version-dev",

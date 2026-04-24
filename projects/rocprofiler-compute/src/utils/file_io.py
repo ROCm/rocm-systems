@@ -440,8 +440,12 @@ def is_single_panel_config(
     Check the root configs dir structure to decide using one config set for all
     archs, or one for each arch.
     """
+    from utils.specs import canonical_config_arch
+
     # If not single config, verify all supported archs have defined configs
-    arch_names = list(supported_archs.keys())
+    arch_names = {
+        canonical_config_arch(arch) or arch for arch in supported_archs.keys()
+    }
     root_path = Path(root_dir)
     arch_count = sum(1 for arch in arch_names if (root_path / arch).exists())
 

@@ -23,6 +23,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.specs import canonical_config_arch
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     is_workload_empty,
@@ -165,8 +166,11 @@ class OmniAnalyze_Base:
         if list_stats:
             ac.panel_configs = TOP_STATS_BUILD_IN_CONFIG
         else:
+            config_arch = canonical_config_arch(arch) or arch
             arch_panel_config = [
-                config_dir if single_panel_config else str(f"{config_dir}/{arch}")
+                config_dir
+                if single_panel_config
+                else str(Path(config_dir) / config_arch)
             ]
             # Use restructured perf metrics in TUI analyze mode
             if self.get_args().tui and arch in ["gfx942", "gfx950"]:

@@ -4,14 +4,20 @@
 import re
 import subprocess
 import tempfile
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 try:
-    from src.utils.specs import generate_machine_specs
+    from src.rocprof_compute_soc.soc_base import OmniSoC_Base
+    from src.utils.specs import canonical_config_arch, generate_machine_specs
+    from src.utils.file_io import is_single_panel_config
 except Exception:
-    from utils.specs import generate_machine_specs
+    from rocprof_compute_soc.soc_base import OmniSoC_Base
+    from utils.file_io import is_single_panel_config
+    from utils.specs import canonical_config_arch, generate_machine_specs
 
 # NOTE: Only testing gfx942 for now.
 GFX942_CHIP_IDS_TO_NUM_XCDS = {
@@ -216,6 +222,70 @@ def test_get_gpu_series_dict_uninitialized():
 
     with patch.object(MIGPUSpecs, "_gpu_series_dict", {}):
         assert MIGPUSpecs.get_gpu_series_dict() == {}
+
+
+@pytest.mark.misc
+def test_canonical_config_arch_maps_gfx115_variants_to_shared_dir():
+    assert canonical_config_arch("gfx1151") == "gfx115x"
+    assert canonical_config_arch("gfx1152") == "gfx115x"
+    assert canonical_config_arch("gfx942") == "gfx942"
+
+
+@pytest.mark.misc
+def test_is_single_panel_config_accepts_shared_gfx115x_dir(tmp_path):
+    (tmp_path / "gfx115x").mkdir()
+
+    supported_archs = {
+        "gfx1151": "strix_halo",
+        "gfx1152": "strix_halo",
+    }
+
+    assert is_single_panel_config(str(tmp_path), supported_archs) is False
+
+
+@pytest.mark.misc
+def test_detect_counters_uses_shared_gfx115x_panel_configs():
+    class DummySoc(OmniSoC_Base):
+        def profiling_setup(self):
+            return None
+
+        def post_profiling(self):
+            return None
+
+    config_dir = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "rocprof_compute_soc"
+        / "analysis_configs"
+    )
+    assert not (config_dir / "gfx1152").exists()
+    assert (config_dir / "gfx115x").exists()
+
+    args = SimpleNamespace(
+        config_dir=str(config_dir),
+        filter_blocks=[],
+        set_selected=None,
+        roof_only=False,
+        membw_analysis=False,
+    )
+    soc = DummySoc(args, SimpleNamespace(num_xcd=1, l2_banks=1))
+    soc.set_arch("gfx1152")
+
+    captured = {}
+
+    def capture(text):
+        captured["length"] = len(text)
+        captured["has_top_stats"] = "Top Stats" in text
+        return set()
+
+    soc.parse_counters = capture
+
+    counters, filter_blocks = soc.detect_counters()
+
+    assert counters == set()
+    assert filter_blocks == []
+    assert captured["length"] > 0
+    assert captured["has_top_stats"] is True
 
 
 @pytest.mark.misc

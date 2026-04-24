@@ -25,7 +25,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.specs import MachineSpecs
+from utils.specs import MachineSpecs, canonical_config_arch
 from utils.utils_common import (
     BUILD_IN_VARS,
     METRIC_ID_RE,
@@ -452,7 +452,8 @@ class OmniSoC_Base:
         args = self.get_args()
 
         # File id dict
-        config_root_dir = f"{args.config_dir}/{self.__arch}"
+        config_arch = canonical_config_arch(self.__arch) or self.__arch
+        config_root_dir = f"{args.config_dir}/{config_arch}"
         config_filename_dict = {
             filename.name.split("_")[0]: str(filename)
             for filename in Path(config_root_dir).glob("*.yaml")
@@ -608,7 +609,7 @@ class OmniSoC_Base:
         arch = self.__arch
         if not arch:
             return
-        config_root = Path(args.config_dir) / arch
+        config_root = Path(args.config_dir) / (canonical_config_arch(arch) or arch)
         if not config_root.is_dir():
             return
         exclude: set[str] = set()
