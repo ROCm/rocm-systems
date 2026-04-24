@@ -108,6 +108,16 @@ public:
 
     using pooled_signal_t = common::container::pool_object<signal_t>;
 
+    enum class Mode : uint8_t
+    {
+        // Use hsa_amd_queue_intercept_create_fn; engages WriteInterceptor
+        // for packet rewriting + signal allocation. PR 5219 default.
+        full_intercept,
+        // Use hsa_queue_create_fn; application's queue is a real HSA queue,
+        // no packet rewriting, no signal allocation. Phase 1 fast path.
+        tracing_only,
+    };
+
     // Function prototype used to notify consumers that a kernel has been enqueued.
     // Pair first: An AQL packet can be returned that will be injected into the queue.
     // Pair second: Boolean flag indicating the dispatch needs to be serialized.
@@ -132,7 +142,8 @@ public:
           uint32_t           group_segment_size,
           CoreApiTable       core_api,
           AmdExtTable        ext_api,
-          hsa_queue_t**      queue);
+          hsa_queue_t**      queue,
+          Mode               mode = Mode::full_intercept);
 
     // Used when creating a Queue from a previously created intercept queue.
     Queue(const AgentCache&       agent,
@@ -179,6 +190,7 @@ public:
     const AmdExtTable&  ext_api() const { return _ext_api; }
     queue_state         get_state() const;
     void                set_state(queue_state state);
+    Mode                mode() const { return _mode; }
 
     void invoke_write_interceptor(const void*                           packets,
                                   uint64_t                              pkt_count,
@@ -200,6 +212,7 @@ private:
     queue_state                          _state           = queue_state::normal;
     std::mutex                           _lock_queue      = {};
     hsa_signal_t                         _active_kernels  = {.handle = 0};
+    Mode                                 _mode            = Mode::full_intercept;
 };
 
 inline rocprofiler_queue_id_t

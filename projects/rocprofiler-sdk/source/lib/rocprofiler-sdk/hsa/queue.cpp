@@ -724,65 +724,98 @@ Queue::Queue(const AgentCache&  agent,
              uint32_t      group_segment_size,
              CoreApiTable  core_api,
              AmdExtTable   ext_api,
-             hsa_queue_t** queue)
+             hsa_queue_t** queue,
+             Mode          mode)
 : _core_api(core_api)
 , _ext_api(ext_api)
 , _agent(agent)
+, _mode(mode)
 {
-    ROCP_HSA_TABLE_CALL(FATAL,
-                        _ext_api.hsa_amd_queue_intercept_create_fn(_agent.get_hsa_agent(),
-                                                                   size,
-                                                                   type,
-                                                                   callback,
-                                                                   data,
-                                                                   private_segment_size,
-                                                                   group_segment_size,
-                                                                   &_intercept_queue))
-        << "Could not create intercept queue";
-
-    ROCP_HSA_TABLE_CALL(FATAL,
-                        _ext_api.hsa_amd_profiling_set_profiler_enabled_fn(_intercept_queue, true))
-        << "Could not setup intercept profiler";
-
-    if(!context::get_registered_contexts([](const context::context* ctx) {
-            return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
-                    ctx->dispatch_thread_trace || ctx->device_thread_trace);
-        }).empty())
+    if(mode == Mode::tracing_only)
     {
-        CHECK(_agent.cpu_pool().handle != 0);
-        CHECK(_agent.get_hsa_agent().handle != 0);
+        // Phase 1 tracing-only mode: create a real HSA queue. No
+        // intercept queue, no profiler-active setup, no per-dispatch
+        // signal allocation. The doorbell wrapper installed in
+        // queue_intercept handles correlation capture; the firmware
+        // ring drainer reads timestamps directly from the host-visible
+        // ring buffer.
+        ROCP_HSA_TABLE_CALL(FATAL,
+                            _core_api.hsa_queue_create_fn(_agent.get_hsa_agent(),
+                                                          size,
+                                                          type,
+                                                          callback,
+                                                          data,
+                                                          private_segment_size,
+                                                          group_segment_size,
+                                                          &_intercept_queue))
+            << "Could not create HSA queue (tracing-only)";
 
-        // Set state of the queue to allow profiling
-        aql::set_profiler_active_on_queue(
-            _agent.cpu_pool(), _agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
-                hsa_signal_t completion;
-                create_signal(0, &completion, false);
-                pkt.ext_amd_aql_pm4.completion_signal = completion;
-                counters::submitPacket(_intercept_queue, &pkt);
-                constexpr auto timeout_hint =
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
-                hsa_signal_value_t val;
-                for(int i = 0; i < 3; i++)
-                {
-                    val = core_api.hsa_signal_wait_scacquire_fn(completion,
-                                                                HSA_SIGNAL_CONDITION_EQ,
-                                                                0,
-                                                                timeout_hint.count(),
-                                                                HSA_WAIT_STATE_ACTIVE);
-                    if(val == 0)
-                    {
-                        core_api.hsa_signal_destroy_fn(completion);
-                        return;
-                    }
-                }
-                ROCP_FATAL << "Could not set agent to be profiled - Signal Value: " << val;
-            });
+        ROCP_HSA_TABLE_CALL(
+            FATAL, _ext_api.hsa_amd_profiling_set_profiler_enabled_fn(_intercept_queue, true))
+            << "Could not enable profiler on HSA queue (tracing-only)";
+
+        // Skip the counter/ATT profiler-active block. Counter/ATT contexts
+        // cannot reach this path because they force needs_packet_rewriting_intercept()
+        // == true, which selects Mode::full_intercept.
     }
+    else  // Mode::full_intercept (existing PR 5219 behavior)
+    {
+        ROCP_HSA_TABLE_CALL(FATAL,
+                            _ext_api.hsa_amd_queue_intercept_create_fn(_agent.get_hsa_agent(),
+                                                                       size,
+                                                                       type,
+                                                                       callback,
+                                                                       data,
+                                                                       private_segment_size,
+                                                                       group_segment_size,
+                                                                       &_intercept_queue))
+            << "Could not create intercept queue";
 
-    ROCP_HSA_TABLE_CALL(
-        FATAL,
-        _ext_api.hsa_amd_queue_intercept_register_fn(_intercept_queue, WriteInterceptor, this))
-        << "Could not register interceptor";
+        ROCP_HSA_TABLE_CALL(
+            FATAL, _ext_api.hsa_amd_profiling_set_profiler_enabled_fn(_intercept_queue, true))
+            << "Could not setup intercept profiler";
+
+        if(!context::get_registered_contexts([](const context::context* ctx) {
+                return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
+                        ctx->dispatch_thread_trace || ctx->device_thread_trace);
+            }).empty())
+        {
+            CHECK(_agent.cpu_pool().handle != 0);
+            CHECK(_agent.get_hsa_agent().handle != 0);
+
+            // Set state of the queue to allow profiling
+            aql::set_profiler_active_on_queue(
+                _agent.cpu_pool(), _agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
+                    hsa_signal_t completion;
+                    create_signal(0, &completion, false);
+                    pkt.ext_amd_aql_pm4.completion_signal = completion;
+                    counters::submitPacket(_intercept_queue, &pkt);
+                    constexpr auto timeout_hint =
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::seconds{1});
+                    hsa_signal_value_t val;
+                    for(int i = 0; i < 3; i++)
+                    {
+                        val = core_api.hsa_signal_wait_scacquire_fn(completion,
+                                                                    HSA_SIGNAL_CONDITION_EQ,
+                                                                    0,
+                                                                    timeout_hint.count(),
+                                                                    HSA_WAIT_STATE_ACTIVE);
+                        if(val == 0)
+                        {
+                            core_api.hsa_signal_destroy_fn(completion);
+                            return;
+                        }
+                    }
+                    ROCP_FATAL << "Could not set agent to be profiled - Signal Value: " << val;
+                });
+        }
+
+        ROCP_HSA_TABLE_CALL(
+            FATAL,
+            _ext_api.hsa_amd_queue_intercept_register_fn(_intercept_queue, WriteInterceptor, this))
+            << "Could not register interceptor";
+    }
 
     create_signal(0, &ready_signal, false);
     create_signal(0, &block_signal, false);

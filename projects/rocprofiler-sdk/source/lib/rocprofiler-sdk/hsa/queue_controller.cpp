@@ -82,8 +82,13 @@ create_queue(hsa_agent_t        agent,
             }
             else
             {
+                const auto mode = needs_packet_rewriting_intercept() ? Queue::Mode::full_intercept
+                                                                     : Queue::Mode::tracing_only;
                 ROCP_INFO << "[queue-intercept] creating queue via LEGACY path for agent "
-                          << agent.handle;
+                          << agent.handle << " (mode="
+                          << (mode == Queue::Mode::full_intercept ? "full_intercept"
+                                                                  : "tracing_only")
+                          << ")";
                 new_queue = std::make_unique<Queue>(agent_info,
                                                     size,
                                                     type,
@@ -93,7 +98,8 @@ create_queue(hsa_agent_t        agent,
                                                     group_segment_size,
                                                     controller->get_core_table(),
                                                     controller->get_ext_table(),
-                                                    queue);
+                                                    queue,
+                                                    mode);
             }
 
             controller->serializer(new_queue.get()).wlock([&](auto& serializer) {
