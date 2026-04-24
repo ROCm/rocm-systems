@@ -38,7 +38,6 @@
 
 #include <hip/hip_runtime.h>
 #include <type_traits>
-#include <utility>
 
 namespace rocshmem {
 
@@ -115,7 +114,7 @@ __device__ T GDAContext::internal_amo_fetch_op(void *dst, T value, int pe, uint3
   do {
     ActiveWFInfo loop_wf_info{pe};
     prior_val = fetch_val;
-    T desired = std::forward<Op>(op)(prior_val, value);
+    T desired = op(prior_val, value);
     fetch_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, desired, prior_val, loop_wf_info);
   } while (fetch_val != prior_val);
   return fetch_val;
