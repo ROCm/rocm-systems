@@ -543,10 +543,11 @@ add_test(
 # -----------------------------------
 
 add_test(
-    NAME test_metrics
+    NAME test_metric_utils
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_metrics.xml ${COV_OPTION} tests/test_metrics.py
+        --junitxml=tests/test_metric_utils.xml ${COV_OPTION}
+        tests/test_metric_utils.py
         ${WORKING_DIR_OPTION}
 )
 
@@ -667,7 +668,7 @@ if(${ENABLE_COVERAGE})
         test_pc_sampling
         test_analyze_commands
         test_analyze_workloads
-        test_metrics
+        test_metric_utils
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
