@@ -7,7 +7,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Added
 
 * New HIP APIs
-    - `cooperative_groups::reduce()` allows calling reduce operators on `thread_block_tile`s and `coalesced_threads`. The implementation is based on the `__reduce_*_sync` operations, so the macro `HIP_ENABLE_EXTRA_WARP_SYNC_TYPES` may be needed to unlock some optimizations.
+    - `cooperative_groups::reduce()` allows calling reduce operators on `thread_block_tile` and `coalesced_threads`. The implementation is based on the `__reduce_*_sync` operations, so the macro `HIP_ENABLE_EXTRA_WARP_SYNC_TYPES` may be needed to unlock some optimizations.
 
 ### Changed
 
