@@ -56,11 +56,7 @@ rocprofiler_systems_add_test(
     NAME unified-memory-basic-output
     TARGET unified-memory
     GPU ON
-    REWRITE_RUN_ARGS
-        -e
-        ROCPROFSYS_USE_ROCPD=ON
-        ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON
-        --
+    REWRITE_ARGS -e -v 2
     ENVIRONMENT "${_unified_memory_environment}"
     LABELS "unified-memory" "e2e"
     TIMEOUT 300

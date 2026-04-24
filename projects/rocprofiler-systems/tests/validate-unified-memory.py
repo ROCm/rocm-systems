@@ -3,11 +3,21 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
+from typing import Optional
+
+# BSD sysexits.h codes — portable across platforms (os.EX_* is POSIX-only)
+EXIT_OK = 0
+EXIT_USAGE = 64
+EXIT_DATAERR = 65
+EXIT_NOINPUT = 66
 
 
 def print_help():
@@ -20,25 +30,19 @@ def print_help():
         It checks for required fields, proper structure, and expected content.
 
     USAGE:
-        {os.path.basename(__file__)} --output-dir <path> [OPTIONS]
+        {os.path.basename(__file__)} --txt-file <path> --json-file <path>
+        {os.path.basename(__file__)} --output-dir <dir>
 
-    REQUIRED ARGUMENTS:
-        --output-dir PATH           Directory containing unified_memory.txt and unified_memory.json
+    ARGUMENT MODES (mutually exclusive):
+        --txt-file PATH --json-file PATH    Explicit file paths
+        --output-dir DIR                    Single-level lookup of unified_memory*.{{txt,json}}
 
     OPTIONAL ARGUMENTS:
-        --txt-file PATH             Explicit path to unified_memory.txt (overrides --output-dir)
-        --json-file PATH            Explicit path to unified_memory.json (overrides --output-dir)
-        -h, --help                  Show this help message and exit
+        -h, --help                          Show this help message and exit
 
     EXAMPLES:
-        # Validate outputs in current directory
-        {os.path.basename(__file__)} --output-dir .
-
-        # Validate outputs in specific directory
-        {os.path.basename(__file__)} --output-dir rocprof-sys-output
-
-        # Validate specific files
         {os.path.basename(__file__)} --txt-file unified_memory.txt --json-file unified_memory.json
+        {os.path.basename(__file__)} --output-dir rocprof-sys-tests-output/unified-memory
 
     VALIDATION CHECKS:
         - Text output format and required headers
@@ -48,12 +52,13 @@ def print_help():
 
     EXIT CODES:
         0  - All validations passed successfully
-        1  - File not found or general error
+        64 - Usage error (EX_USAGE)
         65 - Validation failures detected (EX_DATAERR)
+        66 - Required input file not found (EX_NOINPUT)
     """)
 
 
-def validate_text_output(filepath):
+def validate_text_output(filepath: Path) -> bool:
     """
     Validates the text output file for unified memory profiling.
     Checks for required headers and migration direction data.
@@ -72,38 +77,38 @@ def validate_text_output(filepath):
 
     content = filepath.read_text()
 
-    required_headers = [
-        "Unified Memory profiling result",
-        "Device",
-        "Count",
-        "Avg Size",
-        "Total Size",
-        "Bandwidth",
-        "Total Page Faults",
-    ]
-
-    missing = []
-    for header in required_headers:
-        if header not in content:
-            missing.append(header)
-
+    base_headers = ["Unified Memory profiling result", "Total Page Faults"]
+    missing = [h for h in base_headers if h not in content]
     if missing:
         print(f"Error: Missing required headers in text output: {missing}")
         return False
 
-    migration_directions = ["Host To Device", "Device To Host", "Device To Device"]
+    has_device_block = 'Device "' in content
 
-    has_migration = any(direction in content for direction in migration_directions)
+    if has_device_block:
+        migration_headers = ["Count", "Avg Size", "Total Size", "Bandwidth"]
+        missing = [h for h in migration_headers if h not in content]
+        if missing:
+            print(f"Error: Missing migration headers in text output: {missing}")
+            return False
 
-    if not has_migration:
-        print("Error: No migration statistics found in text output")
-        return False
+        migration_directions = ["Host To Device", "Device To Host", "Device To Device"]
+        if not any(direction in content for direction in migration_directions):
+            print("Error: Device block present but no migration statistics found")
+            return False
+    else:
+        match = re.search(r"Total Page Faults:\s*(\d+)", content)
+        if not match or int(match.group(1)) == 0:
+            print(
+                "Error: No migrations and no page faults captured; report should be empty"
+            )
+            return False
 
     print("Text output validation passed")
     return True
 
 
-def validate_json_output(filepath):
+def validate_json_output(filepath: Path) -> bool:
     """
     Validates the JSON output file for unified memory profiling.
     Checks for proper structure, required fields, and device information.
@@ -211,99 +216,93 @@ def validate_json_output(filepath):
     return True
 
 
-def find_output_files(base_dir):
+def resolve_from_dir(output_dir: Path) -> tuple[Optional[Path], Optional[Path]]:
     """
-    Locates unified_memory.txt and unified_memory.json in the output directory.
-    Searches recursively to handle timestamped subdirectories.
-
-    Args:
-        base_dir: Base directory to search for output files
-
-    Returns:
-        tuple: (txt_file_path, json_file_path) or (None, None) if not found
+    Resolve unified_memory*.txt and unified_memory*.json in output_dir.
+    Single-level lookup only (no recursion). Used for tests where the PID-suffixed
+    filename is unknown at configure time.
     """
-    base_path = Path(base_dir)
+    txt_matches = sorted(output_dir.glob("unified_memory*.txt"))
+    json_matches = sorted(output_dir.glob("unified_memory*.json"))
 
-    txt_file = None
-    json_file = None
+    txt_file = txt_matches[0] if txt_matches else None
+    json_file = json_matches[0] if json_matches else None
 
-    # First try direct match, then recursive search
-    txt_patterns = ["unified_memory.txt", "**/unified_memory.txt"]
-    json_patterns = ["unified_memory.json", "**/unified_memory.json"]
-
-    for pattern in txt_patterns:
-        matches = list(base_path.glob(pattern))
-        if matches:
-            # If multiple matches, prefer the most recent (last modified)
-            txt_file = max(matches, key=lambda p: p.stat().st_mtime)
-            break
-
-    for pattern in json_patterns:
-        matches = list(base_path.glob(pattern))
-        if matches:
-            # If multiple matches, prefer the most recent (last modified)
-            json_file = max(matches, key=lambda p: p.stat().st_mtime)
-            break
+    if len(txt_matches) > 1:
+        print(
+            f"Warning: multiple unified_memory*.txt files in {output_dir}; using {txt_file}"
+        )
+    if len(json_matches) > 1:
+        print(
+            f"Warning: multiple unified_memory*.json files in {output_dir}; using {json_file}"
+        )
 
     return txt_file, json_file
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(add_help=False)
+    # Handle help manually so that --help doesn't fail on missing required args
+    if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
+        print_help()
+        sys.exit(EXIT_OK)
 
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        help="Directory containing unified_memory.txt and unified_memory.json",
-        default=None,
-    )
+    parser = argparse.ArgumentParser(add_help=False)
 
     parser.add_argument(
         "--txt-file",
         type=Path,
-        help="Explicit path to unified_memory.txt (overrides --output-dir)",
+        help="Explicit path to unified_memory.txt (use with --json-file)",
     )
 
     parser.add_argument(
         "--json-file",
         type=Path,
-        help="Explicit path to unified_memory.json (overrides --output-dir)",
+        help="Explicit path to unified_memory.json (use with --txt-file)",
     )
 
     parser.add_argument(
-        "-h", "--help", action="store_true", help="Show this help message and exit"
+        "--output-dir",
+        type=Path,
+        help="Directory containing unified_memory*.{txt,json} (single-level lookup)",
     )
 
     args = parser.parse_args()
 
-    if args.help:
-        print_help()
-        sys.exit(os.EX_OK)
+    explicit_mode = args.txt_file is not None and args.json_file is not None
+    dir_mode = args.output_dir is not None
 
-    if args.txt_file and args.json_file:
-        txt_file = args.txt_file
-        json_file = args.json_file
-    elif args.output_dir:
-        txt_file, json_file = find_output_files(args.output_dir)
-    else:
+    # Require exactly one mode: bool equality is true when both are set or neither is set
+    if explicit_mode == dir_mode:
         print(
-            "Error: Either --output-dir or both --txt-file and --json-file must be provided"
+            "Error: provide either (--txt-file AND --json-file) OR --output-dir, not both"
         )
         print_help()
-        sys.exit(os.EX_USAGE)
+        sys.exit(EXIT_USAGE)
 
-    if not txt_file:
-        print("Error: Could not find unified_memory.txt")
-        sys.exit(1)
+    if dir_mode:
+        if not args.output_dir.is_dir():
+            print(
+                f"Error: --output-dir does not exist or is not a directory: {args.output_dir}"
+            )
+            sys.exit(EXIT_NOINPUT)
+        txt_file, json_file = resolve_from_dir(args.output_dir)
+        if txt_file is None:
+            print(f"Error: no unified_memory*.txt found in {args.output_dir}")
+            sys.exit(EXIT_NOINPUT)
+        if json_file is None:
+            print(f"Error: no unified_memory*.json found in {args.output_dir}")
+            sys.exit(EXIT_NOINPUT)
+    else:
+        txt_file = args.txt_file
+        json_file = args.json_file
+        if not txt_file.exists():
+            print(f"Error: Could not find {txt_file}")
+            sys.exit(EXIT_NOINPUT)
+        if not json_file.exists():
+            print(f"Error: Could not find {json_file}")
+            sys.exit(EXIT_NOINPUT)
 
-    if not json_file:
-        print("Error: Could not find unified_memory.json")
-        sys.exit(1)
-
-    print(
-        f"Validating unified memory output. Output directory: {args.output_dir or 'N/A'}"
-    )
-    print(f"Found unified memory outputs:")
+    print("Validating unified memory outputs:")
     print(f"  Text:  {txt_file}")
     print(f"  JSON:  {json_file}")
     print()
@@ -316,8 +315,8 @@ if __name__ == "__main__":
     if txt_valid and json_valid:
         print("All validation checks passed")
         print(f"{txt_file} and {json_file} validated")
-        sys.exit(os.EX_OK)
+        sys.exit(EXIT_OK)
     else:
         print("Some validation checks failed")
-        print(f"Failure validating unified memory outputs")
-        sys.exit(os.EX_DATAERR)
+        print("Failure validating unified memory outputs")
+        sys.exit(EXIT_DATAERR)

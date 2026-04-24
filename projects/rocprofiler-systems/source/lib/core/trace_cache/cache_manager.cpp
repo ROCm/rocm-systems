@@ -449,7 +449,7 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _type_proc
         processor_storage.unified_memory_processor =
             std::make_shared<unified_memory_processor_t>(
                 _processor_config->_metadata_registry, _processor_config->_agent_manager,
-                _processor_config->_pid, output_dir);
+                _processor_config->_pid, output_dir, _output_registry);
         _type_processing->add_handler(*processor_storage.unified_memory_processor);
         LOG_DEBUG("Unified memory processor enabled for PID {} with output: {}",
                   _processor_config->_pid, output_dir);

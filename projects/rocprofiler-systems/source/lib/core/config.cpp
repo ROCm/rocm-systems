@@ -2525,6 +2525,24 @@ get_database_absolute_path(std::string_view database_name, std::string_view suff
 }
 
 std::string
+get_output_absolute_path(std::string_view basename, std::string_view extension,
+                         std::string_view tag, std::string_view dir)
+{
+    const auto* pwd = getenv("PWD");
+
+    auto cfg = settings::compose_filename_config{ settings::use_output_suffix(), tag,
+                                                  false, std::string{ dir } };
+
+    auto result = settings::compose_output_filename(std::string{ basename },
+                                                    std::string{ extension }, cfg);
+
+    if(!result.empty() && result.at(0) != '/')
+        return settings::format(fmt::format("{}/{}", pwd, result),
+                                get_config()->get_tag());
+    return result;
+}
+
+std::string
 get_perfetto_output_filename_with_suffix(std::string_view suffix)
 {
     static auto _v   = get_config()->find("ROCPROFSYS_PERFETTO_FILE");

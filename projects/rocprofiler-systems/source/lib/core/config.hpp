@@ -386,6 +386,10 @@ std::string
 get_database_absolute_path(std::string_view database_name, std::string_view tag);
 
 std::string
+get_output_absolute_path(std::string_view basename, std::string_view extension,
+                         std::string_view tag, std::string_view dir);
+
+std::string
 get_perfetto_output_filename_with_suffix(std::string_view suffix = "");
 
 bool&

@@ -645,6 +645,8 @@ get_buffered_domains()
     // Automatically enable KFD domains when unified memory profiling is enabled
     if(config::get_use_unified_memory_profiling())
     {
+        LOG_INFO("ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON: implicitly enabling "
+                 "KFD page_fault and page_migrate buffered tracing domains");
         _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT);
         _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE);
     }

@@ -23,6 +23,7 @@
 #pragma once
 
 #include "core/agent_manager.hpp"
+#include "core/output_file_registry.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 #include "core/trace_cache/sample_type.hpp"
@@ -123,7 +124,8 @@ class unified_memory_processor_t : public processor_t<unified_memory_processor_t
 public:
     unified_memory_processor_t(const std::shared_ptr<metadata_registry>& metadata,
                                const std::shared_ptr<agent_manager>& agent_mgr, int pid,
-                               const std::string& output_dir);
+                               const std::string&    output_dir,
+                               output_file_registry& output_registry);
 
     void prepare_for_processing();
     void finalize_processing();
@@ -184,6 +186,7 @@ private:
     std::shared_ptr<agent_manager>     m_agent_manager;
     int                                m_pid;
     std::string                        m_output_dir;
+    output_file_registry&              m_output_registry;
 
     // Performance optimization: cache node_id to agent_type mapping
     std::unordered_map<uint32_t, agent_type>  m_node_type_cache;

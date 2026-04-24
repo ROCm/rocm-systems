@@ -87,8 +87,13 @@ private:
     bool                                        m_use_annotations{ false };
 
     std::unordered_map<size_t, pmc_track_info> m_pmc_track_map;
-    std::map<uint32_t, int64_t>                m_unified_memory_fault_counts;
-    output_file_registry&                      m_output_registry;
+    // Each perfetto_processor_t instance is owned by a single consumer thread
+    // for its entire lifetime (see process_buffered_storage in cache_manager.cpp).
+    // No synchronization is required for instance-local state below.
+    // Note: m_output_registry is shared across threads; it must be internally
+    // thread-safe.
+    std::map<uint32_t, int64_t> m_unified_memory_fault_counts;
+    output_file_registry&       m_output_registry;
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

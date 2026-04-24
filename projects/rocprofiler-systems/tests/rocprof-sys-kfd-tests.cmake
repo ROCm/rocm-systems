@@ -28,7 +28,7 @@ if(NOT _XNACK_SUPPORTED)
     return()
 endif()
 
-# ROCprofiker-SDK version < 1.2.1 does not handle KFD_IOCTL_SVM_LOCATION_UNDEFINED
+# ROCProfiler-SDK version <= 1.2.1 does not handle KFD_IOCTL_SVM_LOCATION_UNDEFINED
 # node IDs (0xFFFFFFFF), causing a fatal crash in the SDK's KFD parsing thread.
 if(rocprofiler-sdk_VERSION VERSION_LESS "1.2.2")
     rocprofiler_systems_message(

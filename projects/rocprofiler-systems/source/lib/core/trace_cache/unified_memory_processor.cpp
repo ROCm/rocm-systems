@@ -62,6 +62,14 @@ format_size(uint64_t bytes) noexcept
 }
 
 std::string
+generate_unified_memory_output_path(int pid, const std::string& output_dir,
+                                    std::string_view ext)
+{
+    return rocprofsys::get_output_absolute_path("unified_memory", ext,
+                                                std::to_string(pid), output_dir);
+}
+
+std::string
 format_time(uint64_t nanoseconds) noexcept
 {
     std::ostringstream oss;
@@ -84,12 +92,13 @@ format_time(uint64_t nanoseconds) noexcept
 unified_memory_processor_t::unified_memory_processor_t(
     const std::shared_ptr<metadata_registry>& metadata,
     const std::shared_ptr<agent_manager>& agent_mgr, int pid,
-    const std::string& output_dir)
+    const std::string& output_dir, output_file_registry& output_registry)
 : processor_t<unified_memory_processor_t>()
 , m_metadata(metadata)
 , m_agent_manager(agent_mgr)
 , m_pid(pid)
 , m_output_dir(output_dir)
+, m_output_registry(output_registry)
 {
     const char* xnack    = std::getenv("HSA_XNACK");
     m_data.xnack_enabled = (xnack && std::strcmp(xnack, "1") == 0);
@@ -125,25 +134,26 @@ unified_memory_processor_t::finalize_processing()
 {
     LOG_DEBUG("Finalizing unified memory processor");
 
-    bool has_data = false;
+    bool has_migrations = false;
     for(const auto& [device_id, summary] : m_data.devices)
     {
         if(summary.host_to_device.count > 0 || summary.device_to_host.count > 0 ||
            summary.device_to_device.count > 0)
         {
-            has_data = true;
+            has_migrations = true;
             break;
         }
     }
 
-    if(!has_data)
+    if(!has_migrations && m_data.total_page_faults == 0)
     {
-        LOG_INFO(
-            "No unified memory migration events captured. Skipping output generation.");
+        LOG_INFO("No unified memory events captured (no migrations, no page faults). "
+                 "Skipping output generation.");
         return;
     }
 
-    std::string   txt_path = fmt::format("{}/unified_memory.txt", m_output_dir);
+    std::string txt_path =
+        generate_unified_memory_output_path(m_pid, m_output_dir, "txt");
     std::ofstream txt_file(txt_path);
     if(!txt_file.is_open())
     {
@@ -153,10 +163,12 @@ unified_memory_processor_t::finalize_processing()
     {
         write_text_output(txt_file);
         txt_file.close();
+        m_output_registry.register_file(txt_path, output_format::text);
         LOG_INFO("Unified memory text report written to: {}", txt_path);
     }
 
-    std::string   json_path = fmt::format("{}/unified_memory.json", m_output_dir);
+    std::string json_path =
+        generate_unified_memory_output_path(m_pid, m_output_dir, "json");
     std::ofstream json_file(json_path);
     if(!json_file.is_open())
     {
@@ -166,6 +178,7 @@ unified_memory_processor_t::finalize_processing()
     {
         write_json_output(json_file);
         json_file.close();
+        m_output_registry.register_file(json_path, output_format::json);
         LOG_INFO("Unified memory JSON report written to: {}", json_path);
     }
 
@@ -193,11 +206,17 @@ unified_memory_processor_t::handle(const kfd_sample& sample)
             device_migration_summary summary;
             summary.device_id = device_id;
 
-            auto cpu_agent = m_agent_manager->get_agent_by_type_index(
-                device_id, static_cast<agent_type>(sample.device_type));
-            std::string cpu_name = cpu_agent.name.empty()
-                                       ? fmt::format("CPU {}", device_id)
-                                       : cpu_agent.name;
+            std::string cpu_name = fmt::format("CPU {}", device_id);
+            try
+            {
+                const auto& cpu_agent = m_agent_manager->get_agent_by_type_index(
+                    device_id, static_cast<agent_type>(sample.device_type));
+                if(!cpu_agent.name.empty()) cpu_name = cpu_agent.name;
+            } catch(const std::out_of_range& e)
+            {
+                LOG_DEBUG("Could not resolve CPU agent for device_id={}: {}", device_id,
+                          e.what());
+            }
 
             std::string gpu_name = extract_gpu_name(src_label, dst_label);
 
@@ -445,12 +464,10 @@ unified_memory_processor_t::write_json_output(std::ostream& out)
         device["device_name"] = summary.device_name;
 
         auto create_migration_json = [](const migration_stats& stats) -> nlohmann::json {
-            if(stats.count == 0) return nullptr;
-
             nlohmann::json obj;
             obj["count"]            = stats.count;
             obj["avg_size_bytes"]   = stats.avg_size_bytes();
-            obj["min_size_bytes"]   = stats.min_size_bytes;
+            obj["min_size_bytes"]   = (stats.count == 0) ? 0 : stats.min_size_bytes;
             obj["max_size_bytes"]   = stats.max_size_bytes;
             obj["total_size_bytes"] = stats.total_size_bytes;
             obj["total_time_ns"]    = stats.total_time_ns;
@@ -459,12 +476,9 @@ unified_memory_processor_t::write_json_output(std::ostream& out)
         };
 
         nlohmann::json migrations;
-        if(auto htd = create_migration_json(summary.host_to_device); !htd.is_null())
-            migrations["host_to_device"] = htd;
-        if(auto dth = create_migration_json(summary.device_to_host); !dth.is_null())
-            migrations["device_to_host"] = dth;
-        if(auto dtd = create_migration_json(summary.device_to_device); !dtd.is_null())
-            migrations["device_to_device"] = dtd;
+        migrations["host_to_device"]   = create_migration_json(summary.host_to_device);
+        migrations["device_to_host"]   = create_migration_json(summary.device_to_host);
+        migrations["device_to_device"] = create_migration_json(summary.device_to_device);
 
         device["migrations"] = migrations;
 
