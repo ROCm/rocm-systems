@@ -2,7 +2,7 @@
 name: rdc-review-profiler
 description: "Profiler integration review subagent. Deep-dives the rdc_rocp module: RDC_FI_PROF_* field map, rocprofiler-sdk API usage, counter sampling, greedy packing, architecture support gaps, SIMD_UTILIZATION handling, field transformation math. Use when: profiler review, rdc_rocp changes, RDC_FI_PROF_* field additions, counter sampling."
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, search/usages
-model: "Claude Sonnet 4.6"
+model: claude-opus-4-6
 user-invocable: false
 ---
 

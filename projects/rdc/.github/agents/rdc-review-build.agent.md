@@ -2,7 +2,7 @@
 name: rdc-review-build
 description: "Build system review subagent. Checks CMake, gRPC linkage, packaging, install targets. Use when: build review, CMake check, packaging, gRPC dependencies."
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, execute/runInTerminal
-model: "Claude Sonnet 4.6"
+model: claude-sonnet-4-6
 user-invocable: false
 ---
 

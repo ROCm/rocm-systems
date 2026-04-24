@@ -2,7 +2,7 @@
 name: rdc-review-architecture
 description: "Architecture review subagent. Checks handler interface cascade, embedded/standalone symmetry, proto/impl sync, design patterns for RDC. Use when: architecture review, design check, API cascade, handler symmetry."
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, search/usages
-model: "Claude Sonnet 4.6"
+model: claude-opus-4-6
 user-invocable: false
 ---
 

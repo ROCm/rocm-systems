@@ -2,7 +2,7 @@
 name: rdc-review-security
 description: "Security review subagent. Checks vulnerabilities, TLS/mTLS config, input validation, unsafe patterns, secrets. Use when: security review, vulnerability check."
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory
-model: "Claude Sonnet 4.6"
+model: claude-opus-4-6
 user-invocable: false
 ---
 

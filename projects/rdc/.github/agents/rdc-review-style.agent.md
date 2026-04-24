@@ -2,7 +2,7 @@
 name: rdc-review-style
 description: "Style review subagent. Checks formatting, naming conventions, pre-commit compliance for RDC. Use when: style review, formatting check, naming conventions."
 tools: execute/runInTerminal, read/readFile, search/textSearch, search/fileSearch, search/listDirectory
-model: "Claude Sonnet 4.6"
+model: claude-sonnet-4-6
 user-invocable: false
 ---
 

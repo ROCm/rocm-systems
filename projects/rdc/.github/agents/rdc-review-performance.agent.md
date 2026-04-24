@@ -2,7 +2,7 @@
 name: rdc-review-performance
 description: "Performance review subagent. Checks efficiency, polling overhead, cache usage, gRPC latency, resource cleanup. Use when: performance review, optimization check."
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory
-model: "Claude Sonnet 4.6"
+model: claude-opus-4-6
 user-invocable: false
 ---
 

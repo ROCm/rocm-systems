@@ -2,7 +2,7 @@
 name: rdc-review-docs
 description: "Documentation review subagent. Checks docs, comments, help text, proto comments, docstrings. Use when: documentation review, docs check, help text."
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory
-model: "Claude Sonnet 4.6"
+model: claude-sonnet-4-6
 user-invocable: false
 ---
 
