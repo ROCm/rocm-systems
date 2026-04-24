@@ -204,4 +204,77 @@ intercept-and-wrap path with all its limitations.
 | KFD implementation | not yet started — gated on KFD-team review of the plan |
 | Firmware port to non-MI350 | not yet started — **requires firmware-team engagement** |
 
+## Medium-term, in parallel: replacing the HIP/HSA → rocprofiler-sdk callback path
+
+Today, HIP and HSA call back into rocprofiler-sdk via function pointers
+populated through `rocprofiler-register`. The runtimes know about
+rocprofiler-sdk (via the shared API table contract), and rocprofiler-sdk
+receives data **synchronously on the producer's thread**. This couples
+the runtimes to a specific consumer and forces always-on producer-side
+overhead.
+
+The medium-term goal is to move HIP/HSA to a **generic emit-and-subscribe
+transport**: HIP/HSA emit typed events to a tracing channel without
+naming a consumer, and rocprofiler-sdk (or any other tool) subscribes
+out-of-process. Steady-state cost when nobody is subscribed should be
+~one branch per event.
+
+**Hard constraints** (same as the firmware-ring side of this work):
+1. **No `LD_PRELOAD`** — must support attaching to a process that did
+   not pre-arrange tracing.
+2. **No runtime binary modification** — no text-segment patching, JIT
+   code rewriting, or in-place instruction overwrite when a consumer
+   attaches.
+
+These eliminate uprobes, eBPF uprobes, and (under the strict reading)
+USDT — all of which arm probes by having the kernel write `INT3` (0xCC)
+into the producer's text segment when a consumer attaches.
+
+**Surviving techniques** (from `TRACING_DELIVERY_RESEARCH.md`):
+
+| Technique | Verdict |
+|---|---|
+| **LTTng-UST** | Primary recommendation today |
+| **Linux `user_events`** (kernel 6.4+) | Better long-term fit; held back by distro reach (RHEL 9 / Ubuntu 22.04 LTS lack the kernel) |
+| io_uring channels | Borderline — late-attach discovery is unsolved on shipping kernels |
+
+**Recommended architecture:** abstract HIP/HSA's emit interface so
+**LTTng-UST is the today-backend** and **`user_events` is a drop-in
+swap** when distro reach allows (RHEL 10 / Ubuntu 24.04+ era). The
+hot-path call site stays the same; the backend is a per-event function
+pointer set at init.
+
+**Why this is parallel-able with the firmware-ring work:** the two
+designs touch entirely different layers. The firmware-ring path is
+about kernel-dispatch *timestamps*; the LTTng-UST path is about
+*API tracing event delivery*. Neither blocks the other. The
+firmware-ring side can ship while the LTTng-UST side is still in
+prototype, and vice versa.
+
+**Additional expertise needed for this medium-term track:**
+
+| Area | Why |
+|---|---|
+| HIP / HSA runtime maintainers | Defining and inserting the typed tracepoint set; build-time `liblttng-ust` dependency |
+| LTTng / CTF tooling expertise | Schema design, version evolution, multi-tool subscriber semantics, live-consumption performance |
+| Distro / packaging | Verify `liblttng-ust-dev` availability across RHEL 9/10, Ubuntu 22.04/24.04, SLES 15, and AMD's container baselines |
+| rocprofiler-sdk consumer side | New code path to subscribe to LTTng (via `liblttng-ctl` + `babeltrace2` or LTTng-live TCP), join with the existing in-process callback model |
+
+**Open questions before committing** (full list in
+`TRACING_DELIVERY_RESEARCH.md` §"Open Questions"):
+
+1. Real-world LTTng-UST overhead on the HIP dispatch hot path (the
+   path already has 1248 ns burned by `pool::acquire`; ~100 ns for a
+   tracepoint should fit, but verify on the actual workload).
+2. Multi-tool subscriber semantics — many tools each running their own
+   LTTng session vs single rocprofiler-sdk consumer that re-fans-out.
+3. Whether to renegotiate the "no binary modification" constraint
+   specifically for **USDT**, which patches a deliberately-reserved
+   NOP slot (not random executable code). Strict reading rules USDT
+   out; relaxed reading reopens it as a strong candidate. Worth a
+   conversation.
+
+Full research, comparison matrix, and per-technique deep-dives:
+`TRACING_DELIVERY_RESEARCH.md`.
+
 

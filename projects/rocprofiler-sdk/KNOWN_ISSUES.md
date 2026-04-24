@@ -18,6 +18,10 @@ relevant `file:line` site.
 >   moves dispatch-log setup from `UPDATE_QUEUE` into the existing
 >   profiler ioctl, plus a self-describing JSON descriptor so the SDK
 >   no longer hardcodes record format.
+> - `TRACING_DELIVERY_RESEARCH.md` — research on replacing the
+>   HIP/HSA → rocprofiler-sdk callback delivery with a generic
+>   emit-and-subscribe transport (LTTng-UST primary,
+>   `user_events` future). Medium-term parallel track.
 
 ## Scope
 
