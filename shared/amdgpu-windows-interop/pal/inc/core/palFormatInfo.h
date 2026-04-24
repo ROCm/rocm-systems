@@ -108,7 +108,7 @@ static constexpr uint32 CompressedEtcBlockDim = 4;
 extern const FormatInfo FormatInfoTable[static_cast<size_t>(ChNumFormat::Count)];
 
 /// Convert a floating-point representation of a color value in RGBA order to the appropriate bit representation for
-/// each channel based on the specified format. Swizzling is enabled by default to maintain backwards compatability.
+/// each channel based on the specified format. Swizzling is enabled by default to maintain backwards compatibility.
 /// There will be no swizzling functionality going forwards.
 extern void ConvertColor(
     SwizzledFormat format,
@@ -124,7 +124,7 @@ extern void ConvertYuvColor(
     uint32*        pColorOut);
 
 /// Packs a clear color value in RGBA order to a single element of the provided format and stores it in the
-/// memory provided. Swizzling is enabled by default to maintain backwards compatability. There will be
+/// memory provided. Swizzling is enabled by default to maintain backwards compatibility. There will be
 /// no swizzling functionality going forwards.
 extern void PackRawClearColor(
     SwizzledFormat format,

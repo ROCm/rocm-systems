@@ -10,7 +10,7 @@
 #include <memory>
 
 using namespace rocprofsys::pmc::collectors::cpu;
-using MockDriver      = rocprofsys::pmc::drivers::procfs::testing::mock_driver;
+using MockDriver      = rocprofsys::pmc::drivers::procfs::testing::strict_mock_driver;
 using cpu_jiffies     = rocprofsys::pmc::drivers::procfs::cpu_jiffies;
 using rusage_snapshot = rocprofsys::pmc::drivers::procfs::rusage_snapshot;
 
@@ -77,6 +77,10 @@ protected:
 
 TEST_F(cpu_device_test, all_metrics_supported_when_procfs_readable)
 {
+    EXPECT_CALL(*mock_driver, read_proc_stat()).Times(1);        // init probe
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(1);  // init probe
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(1);           // init probe
+
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
 
     EXPECT_TRUE(dev.is_supported());
@@ -97,6 +101,10 @@ TEST_F(cpu_device_test, no_load_when_proc_stat_empty)
     ON_CALL(*mock_driver, read_proc_stat())
         .WillByDefault(Return(std::map<size_t, cpu_jiffies>{}));
 
+    EXPECT_CALL(*mock_driver, read_proc_stat()).Times(1);        // init probe
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(1);  // init probe
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(1);           // init probe
+
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
 
     EXPECT_TRUE(dev.is_supported());
@@ -109,6 +117,10 @@ TEST_F(cpu_device_test, no_frequency_when_cpuinfo_empty)
     ON_CALL(*mock_driver, read_cpu_frequencies())
         .WillByDefault(Return(std::map<size_t, float>{}));
 
+    EXPECT_CALL(*mock_driver, read_proc_stat()).Times(1);        // init probe
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(1);  // init probe
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(1);           // init probe
+
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
 
     EXPECT_TRUE(dev.is_supported());
@@ -118,6 +130,10 @@ TEST_F(cpu_device_test, no_frequency_when_cpuinfo_empty)
 
 TEST_F(cpu_device_test, device_interface_methods)
 {
+    EXPECT_CALL(*mock_driver, read_proc_stat()).Times(1);        // init probe
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(1);  // init probe
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(1);           // init probe
+
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
 
     EXPECT_EQ(dev.get_index(), 0u);
@@ -132,6 +148,10 @@ TEST_F(cpu_device_test, frequencies_collected)
     ON_CALL(*mock_driver, read_cpu_frequencies())
         .WillByDefault(Return(make_freqs(3500.0f)));
 
+    EXPECT_CALL(*mock_driver, read_proc_stat()).Times(2);        // init + 1 sample
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(2);  // init + 1 sample
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(2);           // init + 1 sample
+
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
     auto               result = dev.get_cpu_metrics(all_enabled);
 
@@ -143,6 +163,10 @@ TEST_F(cpu_device_test, frequencies_collected)
 
 TEST_F(cpu_device_test, frequencies_filtered_by_monitored_set)
 {
+    EXPECT_CALL(*mock_driver, read_proc_stat()).Times(2);        // init + 1 sample
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(2);  // init + 1 sample
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(2);           // init + 1 sample
+
     std::set<size_t>   subset = { 1, 3 };
     device<MockDriver> dev(mock_driver, 0, subset);
     auto               result = dev.get_cpu_metrics(all_enabled);
@@ -160,6 +184,10 @@ TEST_F(cpu_device_test, frequencies_filtered_by_monitored_set)
 
 TEST_F(cpu_device_test, first_sample_returns_zero_load)
 {
+    EXPECT_CALL(*mock_driver, read_proc_stat()).Times(2);        // init + 1 sample
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(2);  // init + 1 sample
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(2);           // init + 1 sample
+
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
     auto               result = dev.get_cpu_metrics(all_enabled);
 
@@ -181,6 +209,8 @@ TEST_F(cpu_device_test, load_calculation_with_increasing_jiffies)
         .WillOnce(Return(baseline))  // init probe
         .WillOnce(Return(baseline))  // first sample (baseline stored)
         .WillOnce(Return(after));    // second sample (delta computed)
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(3);  // init + 2 samples
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(3);           // init + 2 samples
 
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
     (void) dev.get_cpu_metrics(all_enabled);  // baseline
@@ -202,6 +232,8 @@ TEST_F(cpu_device_test, full_load_calculation)
         .WillOnce(Return(baseline))
         .WillOnce(Return(baseline))
         .WillOnce(Return(after));
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(3);  // init + 2 samples
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(3);           // init + 2 samples
 
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
     (void) dev.get_cpu_metrics(all_enabled);
@@ -223,6 +255,8 @@ TEST_F(cpu_device_test, zero_load_when_idle)
         .WillOnce(Return(baseline))
         .WillOnce(Return(baseline))
         .WillOnce(Return(after));
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(3);  // init + 2 samples
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(3);           // init + 2 samples
 
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
     (void) dev.get_cpu_metrics(all_enabled);
@@ -238,6 +272,10 @@ TEST_F(cpu_device_test, process_metrics_collected)
 {
     auto snap = make_rusage();
     ON_CALL(*mock_driver, read_rusage()).WillByDefault(Return(snap));
+
+    EXPECT_CALL(*mock_driver, read_proc_stat()).Times(2);        // init + 1 sample
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(2);  // init + 1 sample
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(2);           // init + 1 sample
 
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
     auto               result = dev.get_cpu_metrics(all_enabled);
@@ -257,12 +295,20 @@ TEST_F(cpu_device_test, zero_peak_rss_marks_unsupported)
     snap.peak_rss = 0;
     ON_CALL(*mock_driver, read_rusage()).WillByDefault(Return(snap));
 
+    EXPECT_CALL(*mock_driver, read_proc_stat()).Times(1);        // init probe
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(1);  // init probe
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(1);           // init probe
+
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
     EXPECT_EQ(dev.get_supported_metrics().bits.peak_rss, 0u);
 }
 
 TEST_F(cpu_device_test, empty_monitored_set_produces_no_per_cpu_data)
 {
+    EXPECT_CALL(*mock_driver, read_proc_stat()).Times(2);        // init + 1 sample
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(2);  // init + 1 sample
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(2);           // init + 1 sample
+
     std::set<size_t>   empty_set;
     device<MockDriver> dev(mock_driver, 0, empty_set);
     auto               result = dev.get_cpu_metrics(all_enabled);
@@ -273,6 +319,10 @@ TEST_F(cpu_device_test, empty_monitored_set_produces_no_per_cpu_data)
 
 TEST_F(cpu_device_test, single_cpu_monitored)
 {
+    EXPECT_CALL(*mock_driver, read_proc_stat()).Times(2);        // init + 1 sample
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(2);  // init + 1 sample
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(2);           // init + 1 sample
+
     std::set<size_t>   single = { 2 };
     device<MockDriver> dev(mock_driver, 0, single);
     auto               result = dev.get_cpu_metrics(all_enabled);
@@ -287,6 +337,10 @@ TEST_F(cpu_device_test, single_cpu_monitored)
 
 TEST_F(cpu_device_test, nonexistent_cpu_id_has_zero_metrics)
 {
+    EXPECT_CALL(*mock_driver, read_proc_stat()).Times(2);        // init + 1 sample
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(2);  // init + 1 sample
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(2);           // init + 1 sample
+
     std::set<size_t>   nonexistent = { 99 };
     device<MockDriver> dev(mock_driver, 0, nonexistent);
     auto               result = dev.get_cpu_metrics(all_enabled);
@@ -309,10 +363,12 @@ TEST_F(cpu_device_test, multiple_samples_accumulate_correctly)
         make_jiffies(700, 2300);  // total=3000, delta=1000, active_delta=500 -> 50%
 
     EXPECT_CALL(*mock_driver, read_proc_stat())
-        .WillOnce(Return(jiffies1))   // init probe
-        .WillOnce(Return(jiffies1))   // sample 1 (baseline)
-        .WillOnce(Return(jiffies2))   // sample 2
-        .WillOnce(Return(jiffies3));  // sample 3
+        .WillOnce(Return(jiffies1))                              // init probe
+        .WillOnce(Return(jiffies1))                              // sample 1 (baseline)
+        .WillOnce(Return(jiffies2))                              // sample 2
+        .WillOnce(Return(jiffies3));                             // sample 3
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(4);  // init + 3 samples
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(4);           // init + 3 samples
 
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
 
@@ -347,6 +403,9 @@ TEST_F(cpu_device_test, all_metrics_combined_in_single_sample)
     auto snap = make_rusage(100 * 1024 * 1024, 500 * 1024 * 1024);
     ON_CALL(*mock_driver, read_rusage()).WillByDefault(Return(snap));
 
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(3);  // init + 2 samples
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(3);           // init + 2 samples
+
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
     (void) dev.get_cpu_metrics(all_enabled);  // baseline
 
@@ -370,6 +429,8 @@ TEST_F(cpu_device_test, only_frequency_enabled_skips_load_and_process)
 
     ON_CALL(*mock_driver, read_cpu_frequencies())
         .WillByDefault(Return(make_freqs(2400.0f)));
+
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(2);  // init + 1 sample
 
     // read_proc_stat should NOT be called when load is disabled
     EXPECT_CALL(*mock_driver, read_proc_stat())
