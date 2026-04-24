@@ -188,7 +188,7 @@ class TestExpression:
             keywords=[],
         )
         result = transformer.visit_Call(supported_call)
-        assert result.func.id == "to_min", "Expected 'to_min', got: {result.func.id}"
+        assert result.func.id == "to_min", f"Expected 'to_min', got: {result.func.id}"
 
     def test_gen_counter_list_with_none_returns_empty(self):
         """gen_counter_list returns (False, []) when given None."""
