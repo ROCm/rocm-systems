@@ -223,7 +223,7 @@ __device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr,
 }
 
 __device__ void QueuePair::quiet([[maybe_unused]] ActiveWFInfo &wf_info) {
-  if(wf_info.is_pe_group_leader) {
+  if(wf_info.is_pe_group_first) {
       switch (gda_provider_) {
     #if defined(GDA_IONIC)
       case GDAProvider::IONIC:

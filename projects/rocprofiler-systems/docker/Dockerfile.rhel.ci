@@ -24,7 +24,7 @@ RUN yum groupinstall -y "Development Tools" && \
     yum install -y epel-release && crb enable && \
     yum install -y --allowerasing chrpath cmake curl dpkg-devel gmock-devel gtest-devel \
         iproute json-devel ninja-build numactl-devel openmpi-devel papi-devel \
-        python3-devel python3-pip sqlite-devel texinfo wget which vim zlib-devel ucx-devel && \
+        python3-devel python3-pip sqlite-devel wget which vim zlib-devel ucx-devel && \
     yum clean all && \
     python3 -m pip install --upgrade pip && \
     python3 -m pip install 'cmake==3.25' perfetto
@@ -64,6 +64,23 @@ RUN if [ -n "$GPU_TYPE" ] && [ -n "$GPU_TARBALL" ]; then \
         python3 -m pip install -U awscli; \
         aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${VERSION}-${GPU_TYPE}.tar.gz --no-sign-request; \
         mv rocm-${VERSION}-${GPU_TYPE}.tar.gz /opt/rocm-${VERSION}-${GPU_TYPE}.tar.gz; \
+    fi
+
+ARG ROCM_VERSION=""
+RUN if [ -n "${ROCM_VERSION}" ]; then \
+        OS_VERSION_MAJOR=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"' | cut -d. -f1) && \
+        printf '%s\n' '[rocm]' \
+            "name=ROCm ${ROCM_VERSION} repository" \
+            "baseurl=https://repo.radeon.com/rocm/el${OS_VERSION_MAJOR}/${ROCM_VERSION}/main" \
+            'enabled=1' 'priority=50' 'gpgcheck=1' \
+            'gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key' > /etc/yum.repos.d/rocm.repo && \
+        if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi && \
+        dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir && \
+        dnf install -y rocm-dev && \
+        if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then \
+            dnf install -y libavcodec-free-devel libavformat-free-devel; \
+        fi && \
+        dnf clean all; \
     fi
 
 WORKDIR /home
