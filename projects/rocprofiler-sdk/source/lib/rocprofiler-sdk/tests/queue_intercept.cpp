@@ -53,6 +53,13 @@ TEST(QueueIntercept, QueueStateDefaultInit)
     EXPECT_EQ(state.next_submit_pos, 0UL);
     EXPECT_EQ(state.hsa_queue, nullptr);
     EXPECT_EQ(state.doorbell_signal.handle, 0UL);
+
+    // Phase 1 — new side-table fields.
+    EXPECT_EQ(state.mode, QueueState::Mode::full_intercept);
+    EXPECT_EQ(state.corr_ring_mask, 0U);
+    EXPECT_EQ(state.last_observed_wdid.load(), 0UL);
+    EXPECT_TRUE(state.corr_slots.empty());
+    EXPECT_FALSE(state.overwrite_warning_logged.load());
 }
 
 TEST(QueueIntercept, RegistryInsertAndLookup)

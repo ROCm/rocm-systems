@@ -23,6 +23,10 @@
 #pragma once
 
 #include "lib/common/synchronized.hpp"
+#include "lib/rocprofiler-sdk/context/correlation_id.hpp"
+#include "lib/rocprofiler-sdk/tracing/fwd.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
@@ -32,6 +36,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -39,6 +44,32 @@ namespace hsa
 {
 namespace queue_intercept
 {
+// Per-dispatch correlation snapshot captured at doorbell-store time
+// in mode_tracing_only. Read by the firmware-ring drainer when the
+// dispatch's END timestamp arrives.
+//
+// Slot lifecycle invariants are documented in
+// PHASE1_TRACING_ONLY_INTERCEPT_DESIGN.md §3.5. Briefly:
+//   - gen != 0           -> slot is occupied (not yet consumed/cleared)
+//   - captured_wdid      -> identifies WHICH dispatch occupies this slot
+//                           (drainer compares low 32 bits to the firmware
+//                           record's dispatch_idx as alias guard)
+//   - slot_publish_mu    -> serializes all field access (capture,
+//                           consume, cleanup)
+struct CorrEntry
+{
+    context::correlation_id*               corr_id    = nullptr;
+    rocprofiler_thread_id_t                tid        = 0;
+    uint64_t                               enqueue_ts = 0;
+    tracing::external_correlation_id_map_t external_corr_ids;
+    uint64_t                               seq        = 0;
+    // Full 64-bit dispatch index (NOT modulo'd). Drainer compares
+    // (captured_wdid & 0xFFFFFFFFu) == record.dispatch_idx.
+    uint64_t                               captured_wdid = 0;
+    // 0 == empty/consumed; non-zero == occupied. Release-store on publish.
+    std::atomic<uint64_t>                  gen{0};
+};
+
 /**
  * @brief Per-queue state for SDK-level write pointer virtualization
  *
@@ -63,6 +94,28 @@ struct QueueState
     const hsa_queue_t* hsa_queue       = nullptr;  ///< HSA queue pointer for Queue* lookup
     hsa_signal_t       doorbell_signal = {0};      ///< The queue's doorbell signal
     std::mutex         gate_lock;                  ///< Lock for packet submission gating
+
+    // ---- mode_tracing_only fields (PHASE1_TRACING_ONLY_INTERCEPT_DESIGN.md §3.2) ----
+    //
+    // Two values are stored: legacy_passthrough is a process-wide install-
+    // time decision, not a per-QueueState flag (no QueueState exists for
+    // those queues).
+    enum class Mode : uint8_t { tracing_only, full_intercept };
+    Mode                       mode              = Mode::full_intercept;
+
+    // Side-table for correlation capture in mode_tracing_only. Sized to
+    // queue->size at create_queue_state time. Unused (size 0) in
+    // mode_full_intercept.
+    std::vector<CorrEntry>     corr_slots;
+    uint32_t                   corr_ring_mask    = 0;
+    std::atomic<uint64_t>      last_observed_wdid{0};
+
+    // Serializes ALL access to corr_slots fields (capture, consume,
+    // cleanup). See §3.5 Invariant 3.
+    std::mutex                 slot_publish_mu;
+
+    // One-shot guard for the throttled overwrite warning (§4 capture path).
+    std::atomic<bool>          overwrite_warning_logged{false};
 };
 
 using queue_state_ptr_t      = std::shared_ptr<QueueState>;
