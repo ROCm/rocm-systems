@@ -89,7 +89,7 @@ struct queue_ring_state_t
     uint32_t           record_size{};
     hsa_agent_t        agent{};
     uint64_t           dispatch_count{0};
-    // TODO(KNOWN_ISSUES.md item 5): last_processed_record_count is a
+    // TODO(ai/KNOWN_ISSUES.md item 5): last_processed_record_count is a
     // monotonic per-buffer counter that grows without bound and is reset
     // only at shutdown. Acceptable for short-lived processes; not for
     // long-running ones.
@@ -102,7 +102,7 @@ std::atomic<bool>                                g_drainer_stop{true};
 std::thread                                      g_drainer_thread;
 std::atomic<rocprofiler_dispatch_id_t>           g_next_dispatch_id{1};
 
-// TODO(KNOWN_ISSUES.md item 5): g_emitted_dispatch_idx is an unbounded
+// TODO(ai/KNOWN_ISSUES.md item 5): g_emitted_dispatch_idx is an unbounded
 // unordered_set that is never pruned during normal operation. After
 // 2^32 dispatches the dispatch_idx wraps and dedup will become
 // incorrect. Bound this in a follow-up by per-queue ring of recently
@@ -162,7 +162,7 @@ emit_kernel_dispatch_tracing(hsa_agent_t                hag,
     if(!rocp_agent) return;
 
     auto kid = rocprofiler::code_object::get_kernel_id(kernel_object);
-    // TODO(KNOWN_ISSUES.md item 7): on a late attach, the code object
+    // TODO(ai/KNOWN_ISSUES.md item 7): on a late attach, the code object
     // load callback may not have run for this kernel yet. We currently
     // surface the raw kernel_object handle in place of a kernel_id so
     // tools can still attribute timing. A real fix is to either (a) pre-
@@ -179,7 +179,7 @@ emit_kernel_dispatch_tracing(hsa_agent_t                hag,
     dispatch_info.queue_id  = rocprofiler_queue_id_t{queue->id};
     dispatch_info.kernel_id = rocprofiler_kernel_id_t{kid};
     dispatch_info.dispatch_id = dispatch_id;
-    // TODO(KNOWN_ISSUES.md item 8): workgroup_size, grid_size, and
+    // TODO(ai/KNOWN_ISSUES.md item 8): workgroup_size, grid_size, and
     // segment sizes are zeroed because we do not yet read them off the
     // AQL packet at lookup time. lookup_kernel_object() reads
     // queue->base_address[dispatch_idx % size]; reading the same
@@ -195,7 +195,7 @@ emit_kernel_dispatch_tracing(hsa_agent_t                hag,
     tracer_data.end_timestamp   = end_ns;
     tracer_data.dispatch_info   = dispatch_info;
 
-    // TODO(KNOWN_ISSUES.md item 9): thread_id is the drainer thread's
+    // TODO(ai/KNOWN_ISSUES.md item 9): thread_id is the drainer thread's
     // tid, not the launching thread's. The interception path captures
     // the launching tid at enqueue time. Without queue interception we
     // do not know the launching tid here.
@@ -246,7 +246,7 @@ process_dispatch_record(queue_ring_state_t* st,
 {
     constexpr uint32_t init_ref = 2;
     auto* cid = context::correlation_tracing_service::construct(init_ref);
-    // TODO(KNOWN_ISSUES.md item 1): during finalization the correlation
+    // TODO(ai/KNOWN_ISSUES.md item 1): during finalization the correlation
     // service may already be shut down and return null. We hand back a
     // zero-initialized fallback so the dispatch record still flows out.
     // This means the record's correlation IDs will be all zero and
@@ -287,7 +287,7 @@ register_or_refresh_queue(hsa_queue_t* queue, void* /*data*/)
        dt != HSA_DEVICE_TYPE_GPU)
         return HSA_STATUS_SUCCESS;
 
-    // TODO(KNOWN_ISSUES.md item 6): we call
+    // TODO(ai/KNOWN_ISSUES.md item 6): we call
     // hsa_amd_profiling_set_profiler_enabled(true) on every discovered
     // GPU queue. This is an externally observable side effect and we
     // never disable it. Move to first-discovery-only and tear down on
@@ -369,7 +369,7 @@ drain_all()
 
         queue_ring_state_t* lookup_qs = (aql_qs ? aql_qs : &qs);
 
-        // TODO(KNOWN_ISSUES.md item 2): pair START with END using a
+        // TODO(ai/KNOWN_ISSUES.md item 2): pair START with END using a
         // smallest-positive-gap heuristic. This produces correct
         // pairings only when concurrent dispatches are well-separated
         // in time. For overlapping kernels on different XCCs the
@@ -432,7 +432,7 @@ discover_queues()
 void
 drainer_loop()
 {
-    // TODO(KNOWN_ISSUES.md item 4): hard-coded 1ms cadence; no adaptive
+    // TODO(ai/KNOWN_ISSUES.md item 4): hard-coded 1ms cadence; no adaptive
     // backoff. On idle processes this is 1000 wakeups/sec.
     while(!g_drainer_stop.load(std::memory_order_acquire))
     {
@@ -476,7 +476,7 @@ stop_firmware_dispatch_ring_drainer()
 {
     if(!g_drainer_thread.joinable()) return;
 
-    // TODO(KNOWN_ISSUES.md item 3): the 10ms grace sleep gives the
+    // TODO(ai/KNOWN_ISSUES.md item 3): the 10ms grace sleep gives the
     // drainer a few extra cycles to pick up records emitted by recent
     // dispatches. This is a substitute for a proper flush handshake
     // with the firmware. Replace with a real fence in a follow-up.

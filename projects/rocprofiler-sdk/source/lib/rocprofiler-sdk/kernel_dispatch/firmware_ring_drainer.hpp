@@ -38,7 +38,7 @@
 //   - At least one registered context requests kernel-dispatch tracing
 //     and is not also a PC-sampling context.
 //
-// See projects/rocprofiler-sdk/KNOWN_ISSUES.md for the list of deferred
+// See projects/rocprofiler-sdk/ai/KNOWN_ISSUES.md for the list of deferred
 // issues affecting this path.
 
 namespace rocprofiler
