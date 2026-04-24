@@ -796,6 +796,15 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
     props.EngineId.ui32.Major = device->Major();
     props.EngineId.ui32.Minor = device->Minor();
     props.EngineId.ui32.Stepping = device->Stepping();
+
+    // Workaround for device 0x1586: When GPU_ENABLE_PAL=0, the driver incorrectly reports
+    // stepping=0 (gfx1150) instead of stepping=1 (gfx1151). Device 0x1586 is always gfx1151.
+    if (props.DeviceId == 0x1586 &&
+        props.EngineId.ui32.Major == 11 &&
+        props.EngineId.ui32.Minor == 5 &&
+        props.EngineId.ui32.Stepping == 0) {
+      props.EngineId.ui32.Stepping = 1;  // Force gfx1151 for device 0x1586
+    }
   }
 
   snprintf(reinterpret_cast<char*>(props.AMDName), sizeof(props.AMDName) - 1, "GFX%06x",
