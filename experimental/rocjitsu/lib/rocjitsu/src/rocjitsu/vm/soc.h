@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_VM_SOC_H_
 #define ROCJITSU_VM_SOC_H_
 
+#include "rocjitsu/vm/execution_plugin.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/iod.h"
@@ -123,6 +124,9 @@ public:
   /// @returns Const pointer to the GPU memory.
   const amdgpu::GpuMemory *memory() const { return memory_; }
 
+  /// @brief Set the execution plugin group and distribute to CPs/CUs.
+  void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
+
 private:
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
@@ -130,6 +134,7 @@ private:
   std::vector<amdgpu::Iod *> iods_;
   amdgpu::GpuMemory *memory_ = nullptr;
   std::unique_ptr<amdgpu::HbmController> hbm_standalone_; ///< Used when num_iods == 0.
+  std::shared_ptr<ExecutionPluginGroup> plugin_group_;
 };
 
 } // namespace rocjitsu

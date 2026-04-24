@@ -1,0 +1,35 @@
+# Memory hierarchy thresholds for bottleneck analysis.
+# Ref: llm-reference-guide.md lines 1278-1318.
+
+levels:
+  - name: VGPR
+    description: "Vector general-purpose registers"
+    ideal_utilization_pct: 0.60
+    warn_below: 0.30
+
+  - name: LDS
+    description: "Local data share (shared memory)"
+    ideal_utilization_pct: 0.50
+    bank_conflict_warn_pct: 0.10
+
+  - name: L1
+    description: "L1 cache (per-CU)"
+    ideal_hit_rate: 0.80
+    warn_below: 0.50
+
+  - name: L2
+    description: "L2 cache (shared)"
+    ideal_hit_rate: 0.70
+    warn_below: 0.40
+
+  - name: HBM
+    description: "High-bandwidth memory (main GPU memory)"
+    ideal_bw_utilization: 0.50
+    warn_above: 0.90   # hot HBM = bandwidth-bound
+
+cache_hit_rate_thresholds:
+  l1_good: 0.80
+  l1_warn: 0.50
+  l1_critical: 0.30
+  l2_good: 0.70
+  l2_warn: 0.40

@@ -1299,6 +1299,88 @@ def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.roofline_1
+def test_bench_only_basic(binary_handler_profile_rocprof_compute):
+    """
+    Test that --bench-only generates roofline.csv standalone (no application
+    profiling and no performance counter collection).
+    """
+    skip_unsupported_roofline_soc()
+
+    options = ["--device", "0", "--bench-only"]
+    workload_dir = test_utils.get_output_dir()
+
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=True
+    )
+
+    assert returncode == 0
+    roofline_csv = Path(workload_dir) / "roofline.csv"
+    assert roofline_csv.exists(), f"Expected {roofline_csv} to be created"
+    # Bench-only must not produce profiling artifacts (no perfmon/, no pmc_perf_*.csv)
+    assert not (Path(workload_dir) / "perfmon").exists()
+    assert not list(Path(workload_dir).glob("pmc_perf_*.csv"))
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.roofline_1
+@pytest.mark.parametrize(
+    "conflicting_options",
+    [
+        pytest.param(["--set", "compute_thruput_util"], id="set"),
+        pytest.param(["--block", "2"], id="block"),
+        pytest.param(["--roof-only"], id="roof_only"),
+    ],
+)
+def test_bench_only_mutual_exclusion(
+    binary_handler_profile_rocprof_compute, conflicting_options
+):
+    """
+    --bench-only must be rejected when paired with --set, --block, or --roof-only.
+    These options are profiling-oriented and meaningless for a standalone benchmark.
+    """
+    skip_unsupported_roofline_soc()
+
+    options = ["--device", "0", "--bench-only"] + conflicting_options
+    workload_dir = test_utils.get_output_dir()
+
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
+
+    assert returncode == 1, (
+        f"Expected --bench-only with {conflicting_options} to fail, "
+        f"but command exited with {returncode}"
+    )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.roofline_1
+def test_bench_only_no_roof_mutual_exclusion(binary_handler_profile_rocprof_compute):
+    """
+    --bench-only must be rejected when combined with --no-roof, since the option
+    explicitly disables the roofline microbenchmark we are trying to run.
+    """
+    skip_unsupported_roofline_soc()
+
+    options = ["--device", "0", "--bench-only"]
+    workload_dir = test_utils.get_output_dir()
+
+    # roof=False makes the fixture inject --no-roof automatically
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=False
+    )
+
+    assert returncode == 1, (
+        "Expected --bench-only combined with --no-roof to fail, "
+        f"but command exited with {returncode}"
+    )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
 @pytest.mark.roofline_2
 def test_roofline_plot_points_data_generation():
     """
