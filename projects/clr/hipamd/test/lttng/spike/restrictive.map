@@ -1,0 +1,37 @@
+/*
+ * Restrictive linker version script for the LTTng-UST provider .so spike.
+ *
+ * Mirrors the HSA-runtime "hsacore.so.def" pattern:
+ *   - default visibility is hidden (via -fvisibility=hidden + local: *)
+ *   - only the explicit globals listed below are exported in dynsym
+ *
+ * The wildcards below are what Phase 4 must copy into hsacore.so.def to
+ * keep liblttng-ust's per-application registration working from inside
+ * libhsa-runtime64.so. They were derived empirically by enumerating which
+ * symbols liblttng-ust touches via the .so's own dynsym at constructor
+ * time (the provider object's static-init pulls in __tracepoint_provider_*
+ * and per-event __tracepoint__<provider>_<event> markers, plus the URCU
+ * registration callback table).
+ *
+ * VERIFIED Phase 0 working pattern (capture for Phase 4):
+ *   __tracepoint_*           - per-event tracepoint markers
+ *                              (e.g. __tracepoint__rocm_spike___hello)
+ *   __tracepoint_provider_*  - per-provider registration object
+ *                              (e.g. __tracepoint_provider_rocm_spike)
+ *   __lttng_*                - liblttng-ust internal hooks the provider
+ *                              registers against the URCU registry
+ *   __ust_*                  - older naming convention used by some
+ *                              liblttng-ust 2.x releases; safe to keep
+ *
+ * Do NOT delete or narrow these wildcards without re-running the
+ * `lttng list --userspace` registration check from Phase 0 Step 8.
+ */
+{
+    global:
+        __tracepoint_*;
+        __tracepoint_provider_*;
+        __lttng_*;
+        __ust_*;
+    local:
+        *;
+};
