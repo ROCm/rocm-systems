@@ -23,6 +23,7 @@ import tempfile
 import shutil
 import platform
 from subprocess import run, PIPE
+from pathlib import Path
 from ctypeslib.clang2py import main as clangToPy
 
 HEADER = """# Copyright (C) Advanced Micro Devices. All rights reserved.
@@ -182,54 +183,134 @@ def main():
         library_path = os.path.join(os.path.dirname(__file__), library)
         line_to_replace = "_libraries['{}'] = ctypes.CDLL('{}')".format(library_name, library_path)
         new_line = f"""from pathlib import Path
-# {library_name} can be located in several different places.
-# Look for it with below priority:
-# 0. Relative to amdsmi_wrapper.py in TheRock:
-#    `amdsmi_wrapper.py` is located in
-#    `_rocm_sdk_core/share/amd_smi/amdsmi`, libraries are in
-#    `_rocm_sdk_core/lib`.
-# 1. ROCM_HOME/ROCM_PATH environment variables
-#    - ROCM_HOME/lib
-#    - ROCM_PATH/lib (usually set to /opt/rocm/)
-# 2. Decided by the linker
-#    - LD_LIBRARY_PATH env var
-#    - defined path in /etc/ld.so.conf.d/
-# 3. Relative to amdsmi_wrapper.py
-#    - parent directory
-#    - current directory
-def find_smi_library():
-    err = OSError("Could not load {library_name}")
-    possible_locations = []
-    # 0.
-    libamd_smi_path = Path(__file__).resolve().parent.parent.parent.parent / "lib/libamd_smi.so.26"
-    possible_locations.append(libamd_smi_path)
-    # 1.
-    rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
-    if rocm_path:
-        possible_locations.append(os.path.join(rocm_path, "lib/{library_name}"))
-    # 2.
-    possible_locations.append("{library_name}")
-    # 3.
-    libamd_smi_parent_dir = Path(__file__).resolve().parent / "{library_name}"
-    libamd_smi_cwd = Path.cwd() / "{library_name}"
-    possible_locations.append(libamd_smi_parent_dir)
-    possible_locations.append(libamd_smi_cwd)
 
-    for location in possible_locations:
+# ---------------------------------------------------------------------------
+# Dynamic library loading
+# ---------------------------------------------------------------------------
+# Two installation contexts exist, each shipping its own .so:
+#
+#   1. Linux system package (RPM / DEB)
+#      wrapper:  /opt/rocm/share/amd_smi/amdsmi/amdsmi_wrapper.py
+#      library:  /opt/rocm/lib/{library_name}
+#      Note: /opt/rocm may be a symlink (e.g. /opt/rocm -> /opt/rocm-X.Y.Z).
+#            Path.resolve() handles this transparently.
+#
+#   2. Python pip package (wheel)
+#      wrapper:  <site-packages>/amdsmi/amdsmi_wrapper.py
+#      library:  <site-packages>/amdsmi/libamd_smi_python.so
+#      The exact site-packages location varies per distro / venv / conda.
+#
+# Detection strategy (based on the absolute *resolved* path of THIS file):
+#   - If libamd_smi_python.so exists next to this wrapper -> pip context
+#   - Otherwise -> system-package context (derive ROCm root from path or env)
+#
+# Regardless of which .so is loaded, it is stored under the key
+#   _libraries['{library_name}']
+# so every downstream ctypes binding in this wrapper works unchanged.
+# ---------------------------------------------------------------------------
+
+_libraries = {{}}
+
+
+def _detect_install_context():
+    \"\"\"Classify the current install as ``"pip"`` or ``"system"``.
+
+    Returns
+    -------
+    tuple[str, Path]
+        ``("pip",    module_dir)``  - *module_dir* contains the wrapper **and**
+        ``libamd_smi_python.so``.
+        ``("system", rocm_root)``   - *rocm_root* is the resolved ROCm prefix
+        (e.g. ``/opt/rocm``).
+
+    All paths are fully resolved so symlinks like
+    ``/opt/rocm -> /opt/rocm-X.Y.Z`` are handled automatically.
+    \"\"\"
+    wrapper_path = Path(__file__).resolve()
+    module_dir = wrapper_path.parent # .../amdsmi/
+
+    # pip context
+    # The wheel ships libamd_smi_python.so right next to the wrapper.
+    if (module_dir / "libamd_smi_python.so").exists():
+        return "pip", module_dir
+
+    #  system-package context
+    # Expected layout:
+    #   <rocm_root>/share/amd_smi/amdsmi/amdsmi_wrapper.py
+    #   module_dir  = <rocm_root>/share/amd_smi/amdsmi
+    #   rocm_root   = module_dir / ../../..          (3 dirs up)
+    potential_rocm_root = module_dir.parent.parent.parent
+    if (potential_rocm_root / "lib").is_dir():
+        return "system", potential_rocm_root
+
+    # Fallback to ROCM_HOME / ROCM_PATH environment variables
+    for env_var in ("ROCM_HOME", "ROCM_PATH"):
+        env_val = os.getenv(env_var)
+        if env_val:
+            p = Path(env_val).resolve()
+            if (p / "lib").is_dir():
+                return "system", p
+
+    # Last resort - default ROCm location.
+    return "system", Path("/opt/rocm").resolve()
+
+
+def _build_candidate_paths():
+    \"\"\"Return an ordered list of .so paths to try, best-match first.\"\"\"
+    context, base = _detect_install_context()
+    candidates = []
+
+    if context == "pip":
+        # .so lives alongside the wrapper inside the wheel / site-packages
+        candidates.append(base / "libamd_smi_python.so")
+    else:
+        # System package - .so lives under <rocm_root>/lib/
+        candidates.append(base / "lib" / "{library_name}")
+
+    # Fallbacks
+    for env_var in ("ROCM_HOME", "ROCM_PATH"):
+        env_val = os.getenv(env_var)
+        if env_val:
+            candidates.append(Path(env_val) / "lib" / "{library_name}")
+
+    # Let the dynamic linker try LD_LIBRARY_PATH / ld.so.conf.d
+    candidates.append("{library_name}")
+
+    return candidates
+
+
+def _load_library():
+    \"\"\"Load the AMD SMI shared library for the detected install context.
+
+    Returns
+    -------
+    tuple[ctypes.CDLL, str]
+        The loaded library handle and the path that was successfully loaded.
+
+    Raises
+    ------
+    OSError
+        If none of the candidate paths could be loaded.
+    \"\"\"
+    candidates = _build_candidate_paths()
+    last_err = None
+    mode = getattr(ctypes, "RTLD_LOCAL", 0)
+
+    for candidate in candidates:
         try:
-            lib = ctypes.CDLL(location)
-            return lib, location
-        except OSError as e:
-            err = e
-            continue
-    raise err
+            lib = ctypes.CDLL(str(candidate), mode=mode)
+            return lib, str(candidate)
+        except OSError as exc:
+            last_err = exc
 
-try:
-    _libraries['{library_name}'], location = find_smi_library()
-    #print(f"found smi lib in [", location, "]")
-except OSError as e:
-    print(e)
-    print("Unable to find {library_name} library try installing amd-smi-lib from your package manager")
+    raise last_err or OSError(
+        "Could not load AMD SMI library.  Searched:\\n"
+        + "\\n".join(f"  - {{c}}" for c in candidates)
+    )
+
+
+# The dict key stays '{library_name}' regardless of the actual .so loaded
+_libraries['{library_name}'], _loaded_lib_path = _load_library()
 
 #Add support for amdsmi_free_name_value_pairs
 amdsmi_free_name_value_pairs = _libraries['libamd_smi.so'].amdsmi_free_name_value_pairs
