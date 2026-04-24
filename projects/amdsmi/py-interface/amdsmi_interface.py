@@ -2881,6 +2881,7 @@ def amdsmi_get_gpu_enumeration_info(processor_handle: processor_handle_t) -> Dic
         "hsa_id": _validate_if_max_uint(enumeration_info.hsa_id, MaxUIntegerTypes.UINT32_T),
         "hip_id": _validate_if_max_uint(enumeration_info.hip_id, MaxUIntegerTypes.UINT32_T),
         "hip_uuid": enumeration_info.hip_uuid.decode("utf-8"),
+        "oam_id": _validate_if_max_uint(enumeration_info.oam_id, MaxUIntegerTypes.UINT32_T),
     }
 
     return enumeration_info

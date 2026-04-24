@@ -13,157 +13,159 @@ AI-powered AMD ROCm GPU trace analysis.
 
 ## Quickstart
 
-### Prerequisites
-
-- Python 3.10+
-- `bun` on PATH if you want the patched `opencode` build produced during
-  `pip install`. Packaged installs bundle that build; source/editable
-  checkouts can rebuild the same pinned fork locally. The build hook
-  does not auto-download bun; if bun is missing, install still succeeds
-  and only the patched launcher build is skipped. See
-  [docs/guides/getting-started.md](docs/guides/getting-started.md)
-  for the exact install contract and opt-out envs.
-- (Optional) `claude`, `codex`, or `gemini` CLI on PATH for multi-backend dispatch.
-
 ### Install
 
-> **First-time tip (stock Ubuntu / `rocm/dev-ubuntu-22.04` images):** the
-> default pip (22.x) misreads perfxpert's PEP-621 metadata and aborts the
-> wheel build. Upgrade pip once before installing:
->
-> ```bash
-> pip install -U pip setuptools wheel
-> ```
-
 ```bash
-# SKIP-SAMPLE — install from PyPI (when published)
-pip install "perfxpert[all]"
+# SKIP-SAMPLE — package install + venv setup are host-specific
+# Ubuntu 22/24 example. Use the package-manager equivalent on RHEL/SLES.
+apt install -y curl git unzip python3-venv python3-pip
+python3 -m venv .venv
+. .venv/bin/activate
+
+# Latest development build from ROCm/rocm-systems.
+REF=develop; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
 ```
 
-To install the latest development build direct from the rocm-systems
-monorepo on GitHub, use the wrapper script (~5 sec instead of
-~5 min — details below):
+Pin a tag or commit by changing `REF`:
 
 ```bash
-# SKIP-SAMPLE — first clone the repo (no recursive submodules), then run
-git clone --depth 1 --no-recurse-submodules https://github.com/ROCm/rocm-systems.git
-bash rocm-systems/experimental/python/perfxpert/scripts/pip-install-from-git.sh
-# Pass a ref / pip flags as positional args:
-#   scripts/pip-install-from-git.sh v0.2.0
-#   scripts/pip-install-from-git.sh <SHA> --user
+# SKIP-SAMPLE — replace <SHA> with a real tag or commit
+REF=<SHA>; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
 ```
 
-Or invoke pip directly with the submodule-scope env vars set
-(equivalent to the wrapper, just verbose):
+The wrapper installs from GitHub, scopes submodule init to the pinned
+PerfXpert `opencode` submodule, and bootstraps bun when needed. It
+builds the patched bundled `perfxpert-code` binary and verifies it before exiting.
+No separate `opencode` install is needed for the default `perfxpert-code`
+TUI. See [docs/guides/getting-started.md](docs/guides/getting-started.md)
+for the Ubuntu/RHEL/SLES package matrix, direct-pip equivalent, editable
+installs, and troubleshooting.
+
+### LLM Providers
+
+| Provider | Source | Typical use |
+|----------|--------|-------------|
+| `anthropic` | Claude API | Production default; requires `ANTHROPIC_API_KEY` |
+| `openai` | OpenAI API | Alternative hosted; requires `OPENAI_API_KEY` |
+| `ollama` | Local Ollama | Fully local; requires a running `ollama serve` |
+| `private` | Any OpenAI-compatible endpoint | Internal deployments; requires `PERFXPERT_LLM_PRIVATE_URL` + `PERFXPERT_LLM_PRIVATE_MODEL`; CLI preflight also needs `PERFXPERT_LLM_PRIVATE_API_KEY` or `--llm-api-key` |
+| `opencode` | Bundled opencode CLI | Used by `perfxpert-code`; not callable from inside opencode itself (recursion-guarded) |
+
+Private endpoint example:
 
 ```bash
-# SKIP-SAMPLE — pip directly, scoped submodule init
-GIT_CONFIG_COUNT=1 \
-GIT_CONFIG_KEY_0=submodule.active \
-GIT_CONFIG_VALUE_0=experimental/python/perfxpert/opencode \
-  pip install "perfxpert[all] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/perfxpert"
+# SKIP-SAMPLE — requires a real trace.db and reachable private endpoint
+export PERFXPERT_LLM_PRIVATE_URL="https://llm-api.iexample.com/OpenAI"
+export PERFXPERT_LLM_PRIVATE_MODEL="gpt-5.3-codex"
+export PERFXPERT_LLM_PRIVATE_API_KEY="..."
+export PERFXPERT_LLM_PRIVATE_HEADERS='{"Ocp-Apim-Subscription-Key":".......","user":".....","api-version":"preview"}'
+perfxpert analyze -i trace.db --llm private
 ```
 
-The plain `pip install "perfxpert @ git+…"` one-liner still works but
-triggers pip's full recursive submodule init over the ~34 unrelated
-submodules declared at the rocm-systems repo root — 3-6 min of wasted
-network on stock `rocm/dev-ubuntu-22.04`. The wrapper script scopes
-the init down to just the opencode submodule perfxpert's build hook
-actually needs; see `docs/guides/getting-started.md` §1.2 for the
-measurements.
+### Analyze
 
-`[all]` pulls in the optional LLM providers (`anthropic`, `openai`,
-`litellm`) plus `rich` for pretty terminal output. That covers the
-hosted/local SDK-backed provider paths; the default patched `opencode`
-path is validated separately through the launcher/build flow. Pick a
-provider with `--llm <name>`.
+`--format` accepts `text` (default), `json`, `markdown`, and `webview`
+(AMD-themed HTML). `text` prints to stdout unless `-o/-d` is supplied;
+all other formats write a report file by default, even when `-o` and `-d`
+are omitted.
 
-### Run
+LLM-backed analysis uses Chat Completions-style requests. Choose a provider
+model or private endpoint model that supports the Chat Completions API;
+Responses-only, embeddings-only, or non-chat models will fail.
 
 ```bash
-# SKIP-SAMPLE — requires an existing rocprofv3 trace DB
-# One-shot analysis (batch mode)
+# SKIP-SAMPLE — requires a real trace.db and provider credentials
+export ANTHROPIC_API_KEY="sk-ant-..."
 perfxpert analyze -i trace.db --llm anthropic --format webview -o report.html
 
-# SKIP-SAMPLE — launches interactive TUI
-# Interactive agentic TUI (default patched opencode path)
+export OPENAI_API_KEY="sk-..."
+perfxpert analyze -i trace.db --llm openai --llm-model gpt-4o-mini --format markdown -o report.md
+
+# Air-gap mode: no LLM calls, deterministic local analysis only.
+PERFXPERT_AIRGAP=1 perfxpert analyze -i trace.db --format markdown -o report.md
+```
+
+### Interactive TUI
+
+```bash
+# SKIP-SAMPLE — launches interactive CLIs and may write backend config
+# Default first-class TUI: bundled patched opencode built during install.
 perfxpert-code
 
-# SKIP-SAMPLE — multi-backend dispatch (requires the native CLI installed)
-# Claude / Codex / Gemini native CLIs with perfxpert MCP wired in:
-perfxpert-code claude   # installs perfxpert MCP + gate into Claude Code, execs claude
-perfxpert-code codex    # same for Codex CLI (trust-gate workflow)
-perfxpert-code gemini   # same for Gemini CLI
-perfxpert-code claude --dry-run "analyze this trace"   # preview, write nothing
-perfxpert-code uninstall claude   # reverses install (refuses on marker drift)
+# Use native shells with PerfXpert MCP and context installed for that backend.
+perfxpert-code claude
+perfxpert-code codex
+perfxpert-code gemini
 
-# SKIP-SAMPLE — requires an existing rocprofv3 trace DB
-# Air-gap mode (no LLM; deterministic rule-based analysis only)
-PERFXPERT_AIRGAP=1 perfxpert analyze -i trace.db --format markdown -o report.md
+# Explicit upstream-opencode escape hatch. The default TUI does not need this.
+PERFXPERT_OPENCODE_PATH="$(command -v opencode)" perfxpert-code opencode
+```
 
-# SKIP-SAMPLE — requires two rocprofv3 trace DBs (baseline + candidate)
-# Diff two runs (schema-0.3.1 trace_diff block — per-kernel deltas + verdict)
+Preview or uninstall a backend integration:
+
+```bash
+# SKIP-SAMPLE — preview/uninstall commands mutate or inspect backend setup
+perfxpert-code claude --dry-run "analyze this trace"
+perfxpert-code uninstall claude
+```
+
+### Other Commands
+
+```bash
+# SKIP-SAMPLE — requires real trace DB paths
 perfxpert diff baseline.db candidate.db --format markdown
-
-# SKIP-SAMPLE — CI wrapper; rc=1 on regression, rc=0 otherwise
-# Regression gate for CI pipelines (wraps `diff` + fails the build if slower)
-perfxpert ci baseline.db candidate.db --threshold 3.0
-
-# Health check
 perfxpert doctor
 ```
 
 ## Architecture (v0.2.0+)
 
-```
-┌────────────────────────────────────────────────────────────┐
-│  User shell                                                 │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │ perfxpert   │  │ perfxpert-   │  │ Library API       │  │
-│  │ analyze     │  │ code (TUI)   │  │ (Python)          │  │
-│  └──────┬──────┘  └──────┬───────┘  └────────┬──────────┘  │
-│         │                │                    │             │
-│         └────────────────┴────────────────────┘             │
-│                          │                                   │
-│                          ▼                                   │
-│             OpenAI Agents SDK hierarchy                      │
-│   (Root → Analysis → Recommendation → Specialists)           │
-│   — all 8 agents callable via MCP + perfxpert.api            │
-│                          │                                   │
-│                          ▼                                   │
-│    Deterministic middleware (gate_cascade, intent router)    │
-│                          │                                   │
-│                          ▼                                   │
-│  56 READ_ONLY MCP tools (8 agent + 47 classifier + 1 diff)   │
-│            + ~22 knowledge YAMLs                             │
-│                                                              │
-└────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+  classDef entry fill:#e8f3ff,stroke:#1664ad,color:#0f2f4a,stroke-width:1px
+  classDef runtime fill:#fff4d8,stroke:#a66a00,color:#4a3100,stroke-width:1px
+  classDef agent fill:#eaf8ef,stroke:#227343,color:#143b26,stroke-width:1px
+  classDef brain fill:#fff8c7,stroke:#9a6b00,color:#3d2b00,stroke-width:2px
+  classDef guard fill:#ffe9e4,stroke:#b94a36,color:#5c2016,stroke-width:1px
+  classDef data fill:#f4edff,stroke:#7250b5,color:#34205c,stroke-width:1px
 
-Core analysis is self-contained — `pip install perfxpert` handles all
-profiling + recommendation features. `perfxpert-code` defaults to the
-patched opencode path: packaged installs use the bundled AMD-branded
-binary, while source/editable checkouts can rebuild the same pinned
-`sst/opencode` fork locally from
-`experimental/python/perfxpert/opencode` plus our patch series
-(`experimental/python/perfxpert/.patches/`) when `bun` is on PATH.
+  subgraph entry["Entry surfaces"]
+    analyze["perfxpert analyze<br/>batch reports"]
+    code["perfxpert-code<br/>bundled patched TUI"]
+    mcp["perfxpert-mcp<br/>external MCP clients"]
+    api["perfxpert.api<br/>Python embedding"]
+  end
 
-If `bun` is missing, the install still succeeds (library + analyze + MCP
-paths all work). Packaged installs then miss the bundled patched build,
-and source/editable checkouts cannot rebuild the repo-local patched
-binary until bun is available. As a last resort, set
-`PERFXPERT_OPENCODE_PATH` to point at a patched opencode binary.
+  subgraph brainSection["🧠 Shared PerfXpert brain"]
+    runtime["Shared agent runtime/session<br/>same analysis brain for every shell"]
+    hierarchy["8-agent hierarchy<br/>Root → Analysis / Recommendation / Correctness<br/>Compute / Memory / Latency / Diff specialists"]
+  end
 
-Advanced: for tightly-sandboxed CI where neither bun nor network access
-is available, set `PERFXPERT_SKIP_BUNDLED_BUILD=1` before
-`pip install` to suppress the build attempt entirely:
+  knowledge["Deterministic tools + validated knowledge YAMLs<br/>classifiers, counters, hardware facts, trace diff"]
+  gates["Correctness middleware<br/>gate_cascade + intent router"]
+  readonly["56 READ_ONLY MCP tools<br/>8 agent tools + 47 classifier/knowledge tools + 1 diff tool"]
 
-```bash
-# SKIP-SAMPLE — actual installer; scripts/test-samples.py must not execute this
-curl -fsSL https://opencode.ai/install | bash
+  analyze --> runtime
+  code --> runtime
+  api --> runtime
+  mcp --> readonly
+  readonly --> runtime
+  runtime --> hierarchy
+  hierarchy --> knowledge
+  hierarchy --> gates
+  knowledge --> gates
+
+  class analyze,code,mcp,api entry
+  class runtime,hierarchy brain
+  class gates guard
+  class knowledge,readonly data
 ```
 
-Or point `PERFXPERT_OPENCODE_PATH` at an existing opencode binary.
+The GitHub wrapper is the supported install path today. It installs
+PerfXpert and builds the default `perfxpert-code` TUI from the pinned
+`experimental/python/perfxpert/opencode` submodule plus the local patch
+series. If build prerequisites are missing, install fails with
+package-manager guidance instead of falling back to an arbitrary opencode
+binary.
 
 ## Contributing
 
@@ -176,15 +178,7 @@ an [RFC](docs/rfcs/README.md).
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `PERFXPERT_OPENCODE_PATH` | system PATH | Override path to opencode binary; point this at a patched build if you need the full perfxpert gate behavior |
-
-The agentic runtime is the sole execution path; no feature flag
-toggles it. Setting any of the following has no effect:
-
-- `PERFXPERT_USE_AGENTS` — removed in Phase 7.1.
-- `PERFXPERT_LEGACY` — removed in Phase 7.1.
-
-See [CHANGELOG.md](CHANGELOG.md) for the removal history.
+| `PERFXPERT_OPENCODE_PATH` | unset | Explicit upstream-opencode escape hatch used only by `perfxpert-code opencode ...`; the default TUI ignores it |
 
 ## Supported GPUs
 
@@ -196,10 +190,6 @@ See [CHANGELOG.md](CHANGELOG.md) for the removal history.
 | gfx950 | MI350X/MI355X | CDNA4 |
 | gfx1030 | RX 6900 XT | RDNA2 |
 | gfx1100 | RX 7900 XTX | RDNA3 |
-
-## Output formats
-
-`--format` accepts: `text` (default), `json`, `markdown`, `webview` (AMD-themed HTML).
 
 ## Documentation
 
