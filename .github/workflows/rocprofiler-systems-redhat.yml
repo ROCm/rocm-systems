@@ -59,6 +59,7 @@ jobs:
         os-release: [ '8.10', '9' ]
         rocm-version: [ '6.3', '6.4', '7.0', '7.1', '7.2' ]
         build-type: ['Release']
+        build-dyninst: ['ON']
 
     steps:
     - uses: actions/checkout@v6
@@ -133,11 +134,10 @@ jobs:
           -DROCPROFSYS_USE_MPI=OFF
           -DROCPROFSYS_USE_OMPT=OFF
           -DROCPROFSYS_USE_PYTHON=ON
-          -DROCPROFSYS_BUILD_DYNINST=ON
-          -DROCPROFSYS_BUILD_BOOST=ON
-          -DROCPROFSYS_BUILD_TBB=ON
-          -DROCPROFSYS_BUILD_ELFUTILS=ON
-          -DROCPROFSYS_BUILD_LIBIBERTY=ON
+          -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }}
           -DROCPROFSYS_USE_MPI_HEADERS=ON
           -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON
           -DROCPROFSYS_MAX_THREADS=64

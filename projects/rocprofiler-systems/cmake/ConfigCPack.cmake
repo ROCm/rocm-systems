@@ -167,22 +167,20 @@ if(ROCPROFSYS_USE_PAPI AND NOT ROCPROFSYS_BUILD_PAPI)
     list(APPEND _DEBIAN_PACKAGE_DEPENDS libpapi-dev libpfm4)
 endif()
 if(NOT ROCPROFSYS_BUILD_DYNINST)
-    if(NOT ROCPROFSYS_BUILD_BOOST)
-        foreach(
-            _BOOST_COMPONENT
-            atomic
-            system
-            thread
-            date-time
-            filesystem
-            timer
+    foreach(
+        _BOOST_COMPONENT
+        atomic
+        system
+        thread
+        date-time
+        filesystem
+        timer
+    )
+        list(
+            APPEND _DEBIAN_PACKAGE_DEPENDS
+            "libboost-${_BOOST_COMPONENT}-dev (>= 1.67.0)"
         )
-            list(
-                APPEND _DEBIAN_PACKAGE_DEPENDS
-                "libboost-${_BOOST_COMPONENT}-dev (>= 1.67.0)"
-            )
-        endforeach()
-    endif()
+    endforeach()
     if(NOT ROCPROFSYS_BUILD_TBB)
         list(APPEND _DEBIAN_PACKAGE_DEPENDS "libtbb-dev (>= 2018.6)")
     endif()

@@ -161,7 +161,6 @@ jobs:
           -DROCPROFSYS_USE_PYTHON=${{ matrix.python }} \
           -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }} \
           -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }} \
-          -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }} \
@@ -342,7 +341,6 @@ jobs:
           -DROCPROFSYS_USE_PYTHON=ON \
           -DROCPROFSYS_USE_MPI_HEADERS=OFF \
           -DROCPROFSYS_BUILD_DYNINST=ON \
-          -DROCPROFSYS_BUILD_BOOST=OFF \
           -DROCPROFSYS_BUILD_TBB=OFF \
           -DROCPROFSYS_BUILD_ELFUTILS=OFF \
           -DROCPROFSYS_BUILD_LIBIBERTY=OFF \
@@ -473,7 +471,6 @@ jobs:
           -DROCPROFSYS_BUILD_CI=OFF \
           -DROCPROFSYS_BUILD_TESTING=ON \
           -DROCPROFSYS_BUILD_DYNINST=ON \
-          -DROCPROFSYS_BUILD_BOOST=ON \
           -DROCPROFSYS_BUILD_TBB=ON \
           -DROCPROFSYS_BUILD_ELFUTILS=ON \
           -DROCPROFSYS_BUILD_LIBIBERTY=ON \
