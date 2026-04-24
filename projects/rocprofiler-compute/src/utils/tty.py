@@ -20,6 +20,7 @@ from utils.logger import console_error, console_log, console_warning
 from utils.utils_analysis import (
     NS_TO_MS,
     CallTreeNode,
+    build_operator_summary,
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
@@ -339,16 +340,42 @@ def list_torch_operators(
     print("Grouped by source location, sorted by total GPU kernel duration.")
     print(f"{'=' * 80}")
     show_call_tree(call_trees)
+    show_operator_summary(build_operator_summary(call_trees))
     print(f"\n{'=' * 80}")
 
 
-def format_stats(launches: int, duration_ms: float) -> str:
-    """Format launch count and duration as an inline parenthesized string."""
+def format_duration(duration_ms: float) -> str:
+    """Format a duration in ms, switching to us below 0.01 ms for readability."""
     if duration_ms < 0.01:
-        formatted_duration = f"{duration_ms * 1000:.2f} us"
-    else:
-        formatted_duration = f"{duration_ms:.2f} ms"
-    return f"(kernel_launches: {launches}, total_duration: {formatted_duration})"
+        return f"{duration_ms * 1000:.2f} us"
+    return f"{duration_ms:.2f} ms"
+
+
+def format_stats(launches: int, duration_ms: float) -> str:
+    """Format kernel-leaf stats as an inline parenthesized string."""
+    return f"(dispatches: {launches}, total: {format_duration(duration_ms)})"
+
+
+def format_node_stats(node: CallTreeNode, include_calls: bool = True) -> str:
+    """Format operator-node stats (calls, dispatches, total, dispatch_mean/min/max).
+
+    ``dispatch_mean``/``dispatch_min``/``dispatch_max`` are per-GPU-kernel-dispatch
+    duration stats (one dispatch = one trace row = one kernel invocation).
+    ``include_calls=False`` is used for location-root lines, which are file:line
+    buckets rather than invocation frames and therefore have no meaningful
+    per-frame call count.
+    """
+    parts: list[str] = []
+    if include_calls:
+        parts.append(f"calls: {node.call_count}")
+    parts.append(f"dispatches: {node.kernel_launches}")
+    parts.append(f"total: {format_duration(node.total_duration_ms)}")
+    parts.append(
+        f"dispatch_mean: {format_duration(node.mean_dispatch_ns * NS_TO_MS)}"
+    )
+    parts.append(f"dispatch_min: {format_duration(node.min_dispatch_ns * NS_TO_MS)}")
+    parts.append(f"dispatch_max: {format_duration(node.max_dispatch_ns * NS_TO_MS)}")
+    return "(" + ", ".join(parts) + ")"
 
 
 def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
@@ -436,7 +463,7 @@ def show_call_tree(call_trees: dict[str, CallTreeNode]) -> None:
     for i, (location, root) in enumerate(sorted_locations):
         if i > 0:
             print(f"\n{'- ' * 40}")
-        stats = format_stats(root.kernel_launches, root.total_duration_ms)
+        stats = format_node_stats(root, include_calls=False)
         print(f"\n{location} {stats}")
         for child in sorted(
             root.children.values(),
@@ -444,6 +471,57 @@ def show_call_tree(call_trees: dict[str, CallTreeNode]) -> None:
             reverse=True,
         ):
             print_operator_node(child)
+
+
+OPERATOR_NAME_WRAP_WIDTH = 48
+
+
+def show_operator_summary(summary_df: pd.DataFrame) -> None:
+    """Print a flat per-operator summary table alongside the call tree.
+
+    Visually matches the rest of the analyze CLI: ``fancy_grid`` bordered
+    table via ``tabulate``. The ``Operator`` column is wrapped at
+    ``OPERATOR_NAME_WRAP_WIDTH`` so deep call-stack paths do not blow out
+    the right margin. Per-column ``floatfmt`` keeps ``ms`` columns at 4
+    decimals and ``us``/percentage columns at 2. ``NaN`` values render as
+    ``"N/A"``.
+    """
+    if summary_df is None or summary_df.empty:
+        print("\nOperator summary: (no operators with recorded calls)")
+        return
+
+    display_columns = [
+        "Operator",
+        "Calls",
+        "Dispatches",
+        "Total_GPU_ms",
+        "Pct_Total_GPU",
+        "Mean_Per_Call_ms",
+        "Mean_Per_Dispatch_us",
+        "Min_Dispatch_us",
+        "Max_Dispatch_us",
+    ]
+    display_df = summary_df[display_columns].copy()
+    display_df["Operator"] = display_df["Operator"].astype(str).apply(
+        lambda s: textwrap.fill(s, width=OPERATOR_NAME_WRAP_WIDTH)
+    )
+
+    # Per-column float format; "" for string and integer columns (tabulate
+    # picks a sensible default for those).
+    floatfmt = ("", "", "", ".4f", ".2f", ".4f", ".2f", ".2f", ".2f")
+    colalign = ("left",) + ("right",) * (len(display_columns) - 1)
+
+    print("\nOperator summary (sorted by Total_GPU_ms):")
+    print(
+        tabulate(
+            display_df.values,
+            headers=display_columns,
+            tablefmt="fancy_grid",
+            floatfmt=floatfmt,
+            colalign=colalign,
+            missingval="N/A",
+        )
+    )
 
 
 def print_operator_node(
@@ -458,10 +536,13 @@ def print_operator_node(
     node_prefix = f"{indent}{branch_char}"
 
     if is_branching:
-        stats = format_stats(node.kernel_launches, node.total_duration_ms)
-        print_wrapped_tree_line(node_prefix, f"{node.name} {stats}")
+        print_wrapped_tree_line(node_prefix, f"{node.name} {format_node_stats(node)}")
     else:
-        print_wrapped_tree_line(node_prefix, node.name)
+        if len(node.invocation_ids) > 0:
+            suffix = f" (calls: {node.call_count})"
+        else:
+            suffix = ""
+        print_wrapped_tree_line(node_prefix, f"{node.name}{suffix}")
 
     # Build new parent_pipes for children
     if is_last:

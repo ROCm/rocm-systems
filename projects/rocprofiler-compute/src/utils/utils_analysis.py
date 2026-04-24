@@ -60,10 +60,17 @@ def format_bw_human_readable(
 
 @dataclass
 class KernelStats:
-    """Aggregated kernel launch stats for one kernel name."""
+    """Aggregated kernel launch stats for one kernel name.
+
+    ``min_duration_ns`` starts at ``math.inf`` and is only lowered by dispatches
+    with a positive duration; callers must treat ``math.isinf(min_duration_ns)``
+    as "no meaningful minimum recorded".
+    """
 
     launches: int = 0
     total_duration_ns: float = 0.0
+    min_duration_ns: float = math.inf
+    max_duration_ns: float = 0.0
     kernel_id: Optional[int] = None
 
 
@@ -71,9 +78,19 @@ class KernelStats:
 class CallTreeNode:
     """A node in the operator call tree.
 
-    Children are ordered operator sub-calls; kernels maps each kernel name to
-    a ``KernelStats`` record. ``kernel_launches``
-    and ``total_duration_ms`` are inclusive (rolled up from all descendants).
+    Fields split by semantics:
+
+    Local to this frame (not rolled up from descendants):
+      - ``invocation_ids``: distinct ``Context_Id`` prefixes at this frame's
+        depth, one per time the frame was invoked.
+      - ``call_count``: equals ``len(invocation_ids)``. Materialized by
+        ``rollup_node_stats`` so display code can read an int directly.
+
+    Inclusive (rolled up over this node plus all descendants):
+      - ``kernel_launches``: kernel dispatches in the subtree.
+      - ``total_duration_ms``: cumulative GPU time in the subtree.
+      - ``min_dispatch_ns`` / ``max_dispatch_ns`` / ``mean_dispatch_ns``:
+        per-kernel-dispatch duration extremes and mean over the subtree.
     """
 
     name: str
@@ -81,6 +98,25 @@ class CallTreeNode:
     kernels: dict[str, KernelStats] = field(default_factory=dict)
     kernel_launches: int = 0
     total_duration_ms: float = 0.0
+    invocation_ids: set[str] = field(default_factory=set)
+    call_count: int = 0
+    min_dispatch_ns: float = 0.0
+    max_dispatch_ns: float = 0.0
+    mean_dispatch_ns: float = 0.0
+
+
+@dataclass
+class NodeRollup:
+    """Inclusive subtree aggregate returned by ``rollup_node_stats``.
+
+    Used only internally for bottom-up recursion; node fields are the
+    canonical read surface.
+    """
+
+    launches: int
+    total_duration_ns: float
+    min_dispatch_ns: float
+    max_dispatch_ns: float
 
 
 def simplify_kernel_name(full_kernel_name: str) -> str:
@@ -123,19 +159,56 @@ def parse_top_level_location(context_id: object) -> str:
     return location if ":" in location else "unknown:0"
 
 
-def rollup_node_stats(node: CallTreeNode) -> tuple[int, float]:
-    """Bottom-up rollup: set kernel_launches and total_duration_ms inclusive."""
-    launches = sum(stats.launches for stats in node.kernels.values())
-    duration_ns = sum(stats.total_duration_ns for stats in node.kernels.values())
+def rollup_node_stats(node: CallTreeNode) -> NodeRollup:
+    """Bottom-up rollup over this node and all descendants.
+
+    Sets inclusive fields on ``node``: ``kernel_launches``, ``total_duration_ms``,
+    ``min_dispatch_ns``, ``max_dispatch_ns``, ``mean_dispatch_ns``. Also
+    materializes ``call_count = len(node.invocation_ids)`` (local, but set here
+    so display code can read an int).
+
+    Returns a ``NodeRollup`` carrying the subtree aggregates used by the caller's
+    recursion. Kernels with no positive-duration dispatches (``min`` still
+    ``math.inf``) are skipped for min/max so they never leak a bogus zero
+    upward. The ``NodeRollup`` preserves the ``math.inf`` sentinel on
+    ``min_dispatch_ns`` when the subtree had no positive-duration dispatches,
+    so parents can skip the contribution via ``math.isinf`` in their own guard.
+    The node's displayed ``min_dispatch_ns`` is coerced to ``0.0`` for that
+    case, keeping the sentinel internal to the recursion.
+    """
+    launches = 0
+    total_duration_ns = 0.0
+    min_dispatch_ns = math.inf
+    max_dispatch_ns = 0.0
+
+    for stats in node.kernels.values():
+        launches += stats.launches
+        total_duration_ns += stats.total_duration_ns
+        if stats.launches > 0 and not math.isinf(stats.min_duration_ns):
+            min_dispatch_ns = min(min_dispatch_ns, stats.min_duration_ns)
+            max_dispatch_ns = max(max_dispatch_ns, stats.max_duration_ns)
 
     for child in node.children.values():
-        child_launches, child_duration_ns = rollup_node_stats(child)
-        launches += child_launches
-        duration_ns += child_duration_ns
+        child_rollup = rollup_node_stats(child)
+        launches += child_rollup.launches
+        total_duration_ns += child_rollup.total_duration_ns
+        if child_rollup.launches > 0 and not math.isinf(child_rollup.min_dispatch_ns):
+            min_dispatch_ns = min(min_dispatch_ns, child_rollup.min_dispatch_ns)
+            max_dispatch_ns = max(max_dispatch_ns, child_rollup.max_dispatch_ns)
 
     node.kernel_launches = launches
-    node.total_duration_ms = duration_ns * NS_TO_MS
-    return launches, duration_ns
+    node.total_duration_ms = total_duration_ns * NS_TO_MS
+    node.call_count = len(node.invocation_ids)
+    node.min_dispatch_ns = 0.0 if math.isinf(min_dispatch_ns) else min_dispatch_ns
+    node.max_dispatch_ns = max_dispatch_ns
+    node.mean_dispatch_ns = (total_duration_ns / launches) if launches > 0 else 0.0
+
+    return NodeRollup(
+        launches=launches,
+        total_duration_ns=total_duration_ns,
+        min_dispatch_ns=min_dispatch_ns,
+        max_dispatch_ns=max_dispatch_ns,
+    )
 
 
 def build_call_trees(
@@ -190,11 +263,20 @@ def build_call_trees(
             call_trees[location] = CallTreeNode(name=location)
         location_root = call_trees[location]
 
+        op_segments = op_path.split("/")
+        ctx_segments = (
+            str(context_id).split("/")
+            if has_context_id and context_id is not None and pd.notna(context_id)
+            else []
+        )
+
         current_node = location_root
-        for path_segment in op_path.split("/"):
+        for i, path_segment in enumerate(op_segments):
             if path_segment not in current_node.children:
                 current_node.children[path_segment] = CallTreeNode(name=path_segment)
             current_node = current_node.children[path_segment]
+            if i < len(ctx_segments):
+                current_node.invocation_ids.add("/".join(ctx_segments[: i + 1]))
 
         if kernel_name not in current_node.kernels:
             kernel_id = None
@@ -202,8 +284,12 @@ def build_call_trees(
             if pd.notna(kernel_id_value):
                 kernel_id = int(kernel_id_value)
             current_node.kernels[kernel_name] = KernelStats(kernel_id=kernel_id)
-        current_node.kernels[kernel_name].launches += 1
-        current_node.kernels[kernel_name].total_duration_ns += duration_ns
+        kstats = current_node.kernels[kernel_name]
+        kstats.launches += 1
+        kstats.total_duration_ns += duration_ns
+        if duration_ns > 0:
+            kstats.min_duration_ns = min(kstats.min_duration_ns, duration_ns)
+            kstats.max_duration_ns = max(kstats.max_duration_ns, duration_ns)
 
     for location_root in call_trees.values():
         rollup_node_stats(location_root)
@@ -236,6 +322,98 @@ def build_call_trees_with_kernel_ids(
         consolidated_with_ids["Kernel_Name"].str.strip().map(kernel_name_to_id)
     )
     return build_call_trees(consolidated_with_ids)
+
+
+OPERATOR_SUMMARY_COLUMNS: list[str] = [
+    "Operator",
+    "Location",
+    "Calls",
+    "Dispatches",
+    "Dispatches_Per_Call",
+    "Total_GPU_ms",
+    "Pct_Total_GPU",
+    "Mean_Per_Call_ms",
+    "Mean_Per_Dispatch_us",
+    "Min_Dispatch_us",
+    "Max_Dispatch_us",
+]
+
+
+def build_operator_summary(
+    call_trees: dict[str, CallTreeNode],
+) -> pd.DataFrame:
+    """Flatten per-location call trees into one row per invoked operator frame.
+
+    Column contract:
+
+    - ``Operator``: full ``"/"``-joined operator path.
+    - ``Location``: outermost Python ``file:line`` (the call tree's location-root
+      key). Operators nested under the same outer frame share this value.
+    - ``Calls``: distinct invocations of this specific frame
+      (``len(node.invocation_ids)``).
+    - ``Dispatches``: GPU kernel dispatches in this frame's subtree
+      (``node.kernel_launches``; one dispatch = one kernel invocation).
+    - ``Dispatches_Per_Call``: ``Dispatches / Calls`` (``NaN`` if ``Calls == 0``).
+    - ``Total_GPU_ms``: cumulative GPU time in the subtree
+      (``node.total_duration_ms``).
+    - ``Pct_Total_GPU``: share of total GPU time across all location roots
+      (``sum(root.total_duration_ms)``), counted once per dispatch regardless
+      of nesting depth. Because each row carries an *inclusive* subtree total,
+      percentages legitimately sum to more than 100% when operators are
+      nested; each row's value is the correct share for that frame's subtree.
+      ``0.0`` when the grand total is ``0``.
+    - ``Mean_Per_Call_ms``: ``Total_GPU_ms / Calls`` (``NaN`` if ``Calls == 0``).
+    - ``Mean_Per_Dispatch_us``, ``Min_Dispatch_us``, ``Max_Dispatch_us``:
+      per-kernel-dispatch stats from the subtree, converted from ns to us.
+
+    Row filter: location roots are skipped; a descendant node emits a row iff
+    ``kernel_launches > 0`` AND ``len(invocation_ids) > 0``.
+
+    Sort order: ``(Total_GPU_ms desc, Operator asc, Location asc)``.
+
+    Empty input returns a DataFrame with the full schema and zero rows.
+    """
+    rows: list[dict[str, Any]] = []
+
+    def walk(node: CallTreeNode, location: str, path_parts: list[str]) -> None:
+        for child_name, child in node.children.items():
+            full_path = path_parts + [child_name]
+            if child.kernel_launches > 0 and len(child.invocation_ids) > 0:
+                calls = len(child.invocation_ids)
+                dispatches = child.kernel_launches
+                total_gpu_ms = child.total_duration_ms
+                rows.append({
+                    "Operator": "/".join(full_path),
+                    "Location": location,
+                    "Calls": calls,
+                    "Dispatches": dispatches,
+                    "Dispatches_Per_Call": dispatches / calls,
+                    "Total_GPU_ms": total_gpu_ms,
+                    "Pct_Total_GPU": 0.0,  # filled in after grand total is known
+                    "Mean_Per_Call_ms": total_gpu_ms / calls,
+                    "Mean_Per_Dispatch_us": child.mean_dispatch_ns / 1000.0,
+                    "Min_Dispatch_us": child.min_dispatch_ns / 1000.0,
+                    "Max_Dispatch_us": child.max_dispatch_ns / 1000.0,
+                })
+            walk(child, location, full_path)
+
+    for location, root in call_trees.items():
+        walk(root, location, [])
+
+    if not rows:
+        return pd.DataFrame(columns=OPERATOR_SUMMARY_COLUMNS)
+
+    grand_total_ms = sum(root.total_duration_ms for root in call_trees.values())
+    if grand_total_ms > 0:
+        for r in rows:
+            r["Pct_Total_GPU"] = 100.0 * r["Total_GPU_ms"] / grand_total_ms
+
+    df = pd.DataFrame(rows, columns=OPERATOR_SUMMARY_COLUMNS)
+    return df.sort_values(
+        by=["Total_GPU_ms", "Operator", "Location"],
+        ascending=[False, True, True],
+        ignore_index=True,
+    )
 
 
 @demarcate
