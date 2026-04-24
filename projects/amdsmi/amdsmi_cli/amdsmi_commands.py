@@ -7665,13 +7665,17 @@ class AMDSMICommands:
                 else:
                     boost_limit = int(boost_limit)
 
-                if boost_limit < args.core_boost_limit[0][0]: 
-                    static_dict["set_core_boost_limit"]["Warning_MSG"]=(f"Max allowed boostlimit is {boost_limit} MHz")
+                if boost_limit < args.core_boost_limit[0][0]:
+                    static_dict["set_core_boost_limit"]["Warning_MSG"] = (
+                        f"Max allowed boostlimit is {boost_limit} MHz"
+                    )
                     self.logger.store_cpu_output(args.cpu, "values", static_dict)
                     self.logger.print_output()
                     return
                 elif boost_limit > args.core_boost_limit[0][0]:
-                    static_dict["set_core_boost_limit"]["Warning_MSG"]=(f"Min allowed boostlimit is {boost_limit} MHz")
+                    static_dict["set_core_boost_limit"]["Warning_MSG"] = (
+                        f"Min allowed boostlimit is {boost_limit} MHz"
+                    )
                     self.logger.store_cpu_output(args.cpu, "values", static_dict)
                     self.logger.print_output()
                     return
@@ -7936,7 +7940,9 @@ class AMDSMICommands:
                 amdsmi_interface.amdsmi_set_cpu_socket_power_cap(args.cpu, args.cpu_pwr_limit[0][0])
                 if args.cpu_pwr_limit[0][0] > max_power:
                     args.cpu_pwr_limit[0][0] = max_power
-                    static_dict["set_pwr_limit"]["Warning_MSG"]=(f"maximum allowed power limit is {max_power}")
+                    static_dict["set_pwr_limit"]["Warning_MSG"] = (
+                        f"maximum allowed power limit is {max_power}"
+                    )
                     self.logger.store_cpu_output(args.cpu, "values", static_dict)
                     self.logger.print_output()
                 static_dict["set_pwr_limit"]["Response"] = (
@@ -7952,9 +7958,15 @@ class AMDSMICommands:
 
         if args.cpu_xgmi_link_width:
             static_dict["set_xgmi_link_width"] = {}
-            if (args.cpu_xgmi_link_width[0][0] < 0 or args.cpu_xgmi_link_width[0][0] > 1 or
-                args.cpu_xgmi_link_width[0][1] < 0 or args.cpu_xgmi_link_width[0][1] > 1):
-                static_dict["set_xgmi_link_width"]["Warning_MSG"]=(f"minimum and maximum width values should be in range 0 to 1")
+            if (
+                args.cpu_xgmi_link_width[0][0] < 0
+                or args.cpu_xgmi_link_width[0][0] > 1
+                or args.cpu_xgmi_link_width[0][1] < 0
+                or args.cpu_xgmi_link_width[0][1] > 1
+            ):
+                static_dict["set_xgmi_link_width"]["Warning_MSG"] = (
+                    f"minimum and maximum width values should be in range 0 to 1"
+                )
                 self.logger.store_cpu_output(args.cpu, "values", static_dict)
                 self.logger.print_output()
                 return
@@ -7975,10 +7987,17 @@ class AMDSMICommands:
 
         if args.cpu_lclk_dpm_level:
             static_dict["set_lclk_dpm_level"] = {}
-            if (args.cpu_lclk_dpm_level[0][0] < 0 or args.cpu_lclk_dpm_level[0][0] > 3 or
-                args.cpu_lclk_dpm_level[0][1] < 0 or args.cpu_lclk_dpm_level[0][1] > 3 or
-                args.cpu_lclk_dpm_level[0][2] < 0 or args.cpu_lclk_dpm_level[0][2] > 3):
-                static_dict["set_lclk_dpm_level"]["Warning_MSG"]=(f"Die index, MIN_DPM, MAX_DPM should be in range 0 to 3")
+            if (
+                args.cpu_lclk_dpm_level[0][0] < 0
+                or args.cpu_lclk_dpm_level[0][0] > 3
+                or args.cpu_lclk_dpm_level[0][1] < 0
+                or args.cpu_lclk_dpm_level[0][1] > 3
+                or args.cpu_lclk_dpm_level[0][2] < 0
+                or args.cpu_lclk_dpm_level[0][2] > 3
+            ):
+                static_dict["set_lclk_dpm_level"]["Warning_MSG"] = (
+                    f"Die index, MIN_DPM, MAX_DPM should be in range 0 to 3"
+                )
                 self.logger.store_cpu_output(args.cpu, "values", static_dict)
                 self.logger.print_output()
                 return
@@ -8004,7 +8023,9 @@ class AMDSMICommands:
             static_dict["pwr_eff_mode"] = {}
 
             if args.cpu_pwr_eff_mode[0][0] < 0 or args.cpu_pwr_eff_mode[0][0] > 5:
-                static_dict["pwr_eff_mode"]["Warning_MSG"]=(f"Mode values should be in range 0 to 5")
+                static_dict["pwr_eff_mode"]["Warning_MSG"] = (
+                    f"Mode values should be in range 0 to 5"
+                )
                 self.logger.store_cpu_output(args.cpu, "values", static_dict)
                 self.logger.print_output()
                 return
@@ -8052,9 +8073,15 @@ class AMDSMICommands:
 
         if args.cpu_gmi3_link_width:
             static_dict["set_gmi3_link_width"] = {}
-            if (args.cpu_gmi3_link_width[0][0] < 0 or args.cpu_gmi3_link_width[0][0] > 2 or
-                args.cpu_gmi3_link_width[0][1] < 0 or args.cpu_gmi3_link_width[0][1] > 2):
-                static_dict["set_gmi3_link_width"]["Warning_MSG"]=(f"cpu_gmi3_link_width MIN_LW & MAX_LW values should be in range 0 to 2")
+            if (
+                args.cpu_gmi3_link_width[0][0] < 0
+                or args.cpu_gmi3_link_width[0][0] > 2
+                or args.cpu_gmi3_link_width[0][1] < 0
+                or args.cpu_gmi3_link_width[0][1] > 2
+            ):
+                static_dict["set_gmi3_link_width"]["Warning_MSG"] = (
+                    f"cpu_gmi3_link_width MIN_LW & MAX_LW values should be in range 0 to 2"
+                )
                 self.logger.store_cpu_output(args.cpu, "values", static_dict)
                 self.logger.print_output()
                 return
@@ -8118,8 +8145,10 @@ class AMDSMICommands:
 
         if args.cpu_disable_apb:
             static_dict["apbdisable"] = {}
-            if (args.cpu_disable_apb[0][0] < 0 or args.cpu_disable_apb[0][0] > 3):
-                static_dict["apbdisable"]["Warning_MSG"]=(f"cpu_disable_apb  value should be in range 0 to 3")
+            if args.cpu_disable_apb[0][0] < 0 or args.cpu_disable_apb[0][0] > 3:
+                static_dict["apbdisable"]["Warning_MSG"] = (
+                    f"cpu_disable_apb  value should be in range 0 to 3"
+                )
                 self.logger.store_cpu_output(args.cpu, "values", static_dict)
                 self.logger.print_output()
                 return
