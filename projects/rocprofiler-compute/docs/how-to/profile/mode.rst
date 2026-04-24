@@ -720,7 +720,7 @@ b) Otherwise, profile mode runs microbenchmarks and collects roofline performanc
 
 .. note::
 
-  ``--roof-only`` cannot be used with ``--block`` or ``--set`` options.
+  ``--roof-only`` cannot be used with ``--block``, ``--set``, or ``--bench-only`` options.
 
 Profile mode generates ``roofline.csv`` containing microbenchmark data. To generate
 roofline HTML plots, use ``rocprof-compute analyze`` on the profiling output directory
@@ -798,6 +798,50 @@ successfully.
    -rw-r--r-- 1 auser agroup   399 Mar 21 23:49 timestamps.csv
 
 To generate roofline HTML plots from this data, see :doc:`../analyze/mode`.
+
+
+Benchmark only
+--------------
+
+If you only want to run the roofline microbenchmark without profiling an application
+or collecting any performance counters, use the ``--bench-only`` option. No
+application run is required.
+
+This is useful for:
+
+* Re-generating ``roofline.csv`` in an existing workload directory without re-profiling.
+* Running the microbenchmark on a system where only HIP is available (no rocprofiler-sdk needed).
+
+.. note::
+
+  ``--bench-only`` cannot be used with ``--block``, ``--set``, ``--roof-only``, or ``--no-roof`` options.
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name my_bench --bench-only
+   ...
+   INFO [roofline] Running roofline microbenchmark on device 0
+   GPU Device 0 (gfx942) with 304 CUs: Profiling...
+   ...
+   GPU Benchmarking completed
+   INFO [roofline] Roofline data saved to workloads/my_bench/MI300X_A1/roofline.csv
+     Run 'rocprof-compute analyze -p workloads/my_bench/MI300X_A1' for charts
+
+To target a specific GPU device, use ``--device``:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name my_bench --bench-only --device 2
+
+To regenerate benchmark data in an existing profiled workload directory, use
+``--output-directory`` to point at the workload path directly:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --bench-only --output-directory workloads/vcopy/MI300X_A1
+   ...
+   INFO [roofline] Roofline data saved to workloads/vcopy/MI300X_A1/roofline.csv
+     Run 'rocprof-compute analyze -p workloads/vcopy/MI300X_A1' for charts
 
 .. _torch-operator-mapping:
 
