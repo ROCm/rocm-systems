@@ -48,16 +48,11 @@ class TestNativeToolFinder:
             ).get_collector_library_path()
         assert lib_path == sources_path / NativeToolFinder.lib_relative_path
 
-    def test_when_run_from_source_dir_and_generation_fails__returns_none(
+    def test_when_run_from_source_dir_and_generation_fails__returns_throws(
         self, installed_sdk_tool_path: Path, sources_path: Path
     ):
         lib_path = None
-        with (
-            patch.object(
-                NativeToolFinder, "_generate_cmake_project", return_value=False
-            ),
-            patch.object(NativeToolFinder, "_build_cmake_project", return_value=False),
-        ):
+        with pytest.raises(RuntimeError):
             lib_path = NativeToolFinder(
                 sources_path, installed_sdk_tool_path
             ).get_collector_library_path()

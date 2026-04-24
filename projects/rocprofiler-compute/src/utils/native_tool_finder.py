@@ -3,7 +3,7 @@
 import shlex
 from pathlib import Path
 
-from utils.logger import console_debug, console_error, console_log
+from utils.logger import console_debug, console_log
 from utils.utils_common import capture_subprocess_output
 
 
@@ -20,7 +20,9 @@ class NativeToolFinder:
     ])
 
     def __init__(self, src_path: Path, sdk_tool_path: Path) -> None:
-        assert sdk_tool_path.stem == "librocprofiler-sdk-tool"
+        assert sdk_tool_path.stem == "librocprofiler-sdk-tool", (
+            f"Incorrect sdk_tool_path: {sdk_tool_path}"
+        )
         console_debug("Searching for native collector.")
         console_debug(f"Compute script path: {src_path}")
         console_debug(f"ROCm Profiler SDK Tool path: {sdk_tool_path}")
@@ -66,16 +68,16 @@ class NativeToolFinder:
         console_log(f"Searching {self.src_path} by {pattern} for native collector")
         return self.__find_file_by_glob_pattern(self.src_path, pattern)
 
-    def _generate_cmake_project(self, src_path: Path) -> bool:
+    def _generate_cmake_project(self, src_path: Path) -> None:
         build_command = (
             "cmake "
             + f"-S {src_path}/{self.sources_dir_name} "
             + f"-B {src_path}/{self.sources_dir_name}/{self.sources_build_subdir_name}"
         )
         console_debug(f"Building native tool using command: {build_command}")
-        return self.__execute_command(build_command)
+        self.__execute_command(build_command)
 
-    def _build_cmake_project(self, src_path: Path) -> bool:
+    def _build_cmake_project(self, src_path: Path) -> None:
         generate_command = (
             "cmake --build "
             + f"{src_path}/{self.sources_dir_name}/{self.sources_build_subdir_name}"
@@ -84,12 +86,11 @@ class NativeToolFinder:
         console_debug(
             f"Generating native tool project using command: {generate_command}"
         )
-        return self.__execute_command(generate_command)
+        self.__execute_command(generate_command)
 
-    def __execute_command(self, command: str) -> bool:
+    def __execute_command(self, command: str) -> None:
         success, output = capture_subprocess_output(shlex.split(command))
         console_debug(f"Build output: {output}")
         if not success:
-            console_error("Failed to execute command: {command}")
-            return False
-        return True
+            msg = f"Failed to execute command: {command}"
+            raise RuntimeError(msg)
