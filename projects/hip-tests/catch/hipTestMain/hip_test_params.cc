@@ -33,8 +33,11 @@ void TestParameterStore::initialize() {
         levelBlockSizes[levelName] = params.block_sizes;
         levelIterations[levelName] = params.iterations;
         levelWarmups[levelName] = params.warmups;
-        levelMaxMemory[levelName] = params.max_memory;
-        
+        levelCgIterations[levelName] = params.cg_iterations;
+        levelMathAccuracyIterations[levelName] = params.math_accuracy_iterations;
+        levelMathAccuracyMaxMemoryPercentage[levelName] = params.math_accuracy_max_memory_percentage;
+        levelMathMaxMemory[levelName] = params.math_max_memory;
+        levelMathReductionFactor[levelName] = params.math_reduction_factor;
         LogPrintf("[TestParameterStore] %s: %zu memory sizes, %zu block sizes, %d iterations\n",
                   levelName.c_str(), params.memory_sizes.size(), 
                   params.block_sizes.size(), params.iterations);
@@ -117,11 +120,39 @@ int TestParameterStore::getWarmupsForCurrentLevel() const {
     return defaultWarmups;
 }
 
-size_t TestParameterStore::getMaxMemoryForCurrentLevel() const {
-    if (!currentTestLevel.empty() && levelMaxMemory.count(currentTestLevel)) {
-        return levelMaxMemory.at(currentTestLevel);
+int TestParameterStore::getCgIterationsForCurrentLevel() const {
+    if (!currentTestLevel.empty() && levelCgIterations.count(currentTestLevel)) {
+        return levelCgIterations.at(currentTestLevel);
     }
-    return defaultMaxMemory;
+    return defaultCgIterations;
+}
+
+uint64_t TestParameterStore::getMathAccuracyIterationsForCurrentLevel() const {
+    if (!currentTestLevel.empty() && levelMathAccuracyIterations.count(currentTestLevel)) {
+        return levelMathAccuracyIterations.at(currentTestLevel);
+    }
+    return defaultMathAccuracyIterations;
+}
+
+int TestParameterStore::getMathAccuracyMaxMemoryPercentageForCurrentLevel() const {
+    if (!currentTestLevel.empty() && levelMathAccuracyMaxMemoryPercentage.count(currentTestLevel)) {
+        return levelMathAccuracyMaxMemoryPercentage.at(currentTestLevel);
+    }
+    return defaultMathAccuracyMaxMemoryPercentage;
+}
+
+size_t TestParameterStore::getMathMaxMemoryForCurrentLevel() const {
+    if (!currentTestLevel.empty() && levelMathMaxMemory.count(currentTestLevel)) {
+        return levelMathMaxMemory.at(currentTestLevel);
+    }
+    return defaultMathMaxMemory;
+}
+
+double TestParameterStore::getMathReductionFactorForCurrentLevel() const {
+    if (!currentTestLevel.empty() && levelMathReductionFactor.count(currentTestLevel)) {
+        return levelMathReductionFactor.at(currentTestLevel);
+    }
+    return defaultMathReductionFactor;
 }
 
 void TestParameterStore::clear() {
@@ -130,5 +161,9 @@ void TestParameterStore::clear() {
     levelBlockSizes.clear();
     levelIterations.clear();
     levelWarmups.clear();
-    levelMaxMemory.clear();
+    levelCgIterations.clear();
+    levelMathAccuracyIterations.clear();
+    levelMathAccuracyMaxMemoryPercentage.clear();
+    levelMathMaxMemory.clear();
+    levelMathReductionFactor.clear();
 }
