@@ -13,89 +13,40 @@ AI-powered AMD ROCm GPU trace analysis.
 
 ## Quickstart
 
-### Prerequisites
-
-- Python 3.10+
-- `curl`, `git`, `unzip`, `python3-venv`, and `python3-pip` for the GitHub install
-  path. On Ubuntu 24+ and other externally managed Python environments,
-  create and activate a virtual environment before running pip.
-  For the RHEL 9/10 and SLES package-manager variants, see the detailed
-  install guide; RHEL 9 and SLES use versioned Python package names.
-- No separate `opencode` install is needed when using the GitHub wrapper below.
-  The wrapper bootstraps the required build tool and verifies that the patched
-  bundled `perfxpert-code` binary was built from the pinned PerfXpert submodule.
-  See [docs/guides/getting-started.md](docs/guides/getting-started.md) for
-  source/editable install details, the Ubuntu / RHEL / SLES package setup
-  matrix, and opt-out envs.
-- (Optional) `claude`, `codex`, or `gemini` CLI on PATH for multi-backend dispatch.
-
 ### Install
 
-> **Ubuntu 24 / clean-container setup:** use a virtual environment for
-> GitHub installs, and install the OS-level prerequisites first:
->
-> ```bash
-> # SKIP-SAMPLE — host package install + virtual environment creation
-> apt install -y curl git unzip python3-venv python3-pip
-> python3 -m venv .venv
-> . .venv/bin/activate
-> ```
->
-> If the venv's pip/setuptools are too old and metadata preparation fails,
-> upgrade them inside the venv and retry:
->
-> ```bash
-> # SKIP-SAMPLE — only needed for older venv toolchains
-> python -m pip install -U pip setuptools wheel
-> ```
+```bash
+# SKIP-SAMPLE — package install + venv setup are host-specific
+# Ubuntu 22/24 example. Use the package-manager equivalent on RHEL/SLES.
+apt install -y curl git unzip python3-venv python3-pip
+python3 -m venv .venv
+. .venv/bin/activate
+
+# Latest development build from ROCm/rocm-systems.
+REF=develop; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
+```
+
+Pin a tag or commit by changing `REF`:
 
 ```bash
-# SKIP-SAMPLE — install from PyPI (when published)
+# SKIP-SAMPLE — replace <SHA> with a real tag or commit
+REF=<SHA>; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
+```
+
+The wrapper installs from GitHub, scopes submodule init to the pinned
+PerfXpert `opencode` submodule, and bootstraps bun when needed. It
+builds the patched bundled `perfxpert-code` binary and verifies it before exiting.
+No separate `opencode` install is needed for the default `perfxpert-code`
+TUI. See [docs/guides/getting-started.md](docs/guides/getting-started.md)
+for the Ubuntu/RHEL/SLES package matrix, direct-pip equivalent, editable
+installs, and troubleshooting.
+
+PyPI install, when published:
+
+```bash
+# SKIP-SAMPLE — install from PyPI after publication
 pip install "perfxpert[all]"
 ```
-
-To install the latest development build direct from the rocm-systems
-monorepo on GitHub, use the wrapper script. It scopes submodule init to
-the pinned PerfXpert `opencode` submodule, builds the patched bundled
-binary, and verifies `perfxpert-code` before exiting:
-
-```bash
-# SKIP-SAMPLE — latest develop branch, no local clone needed
-REF=develop; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
-# Pin a tag / SHA or pass pip flags after the ref:
-# REF=v0.2.0; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
-# REF=<SHA>; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
-# REF=<SHA>; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}" --user
-# REF=develop; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}" --extras ''
-```
-
-The README keeps the supported customer-facing install flow on the
-wrapper. The internal getting-started guide documents the verbose
-direct-pip equivalent and the submodule-scope rationale in detail.
-
-Both GitHub install paths require `git` on PATH because pip shells out
-to `git clone`. The supported Ubuntu 24+ path is a virtual environment;
-the wrapper exits early on externally managed system Python and points
-users at `python3 -m venv`. It prefers the active `python`, then
-`python3`, and only falls back to another already-installed
-`python3.10+` binary on PATH when the distro default is too old; it
-never downloads a separate Python runtime. During the pip build, `setup.py`
-bootstraps bun when needed so the bundled patched opencode binary is built
-from the pinned perfxpert submodule and `perfxpert-code` is ready end to
-end.
-
-The GitHub wrapper path has been validated in clean containers for
-Ubuntu 22.04, Ubuntu 24.04, UBI/RHEL 9, UBI/RHEL 10, and SLES 15.6.
-On UBI/RHEL, keep the distro's existing `curl` provider if present
-(`curl-minimal` satisfies the requirement); do not force-replace it
-with the full `curl` package.
-
-`[all]` pulls in the optional LLM providers (`anthropic`, `openai`,
-`litellm`) plus `rich` for pretty terminal output. That covers the
-hosted/local SDK-backed provider paths; the default patched `opencode`
-path is validated separately through the launcher/build flow. The GitHub
-wrapper verifies that the bundled patched `perfxpert-code` build completes
-during install. Pick a provider with `--llm <name>`.
 
 ### LLM Providers
 
@@ -113,49 +64,54 @@ Private endpoint example:
 # SKIP-SAMPLE — requires a real trace.db and reachable private endpoint
 export PERFXPERT_LLM_PRIVATE_URL="https://llm-api.iexample.com/OpenAI"
 export PERFXPERT_LLM_PRIVATE_MODEL="gpt-5.3-codex"
-# Required by CLI preflight; use a real key or a gateway-accepted placeholder
-# if authentication is entirely header-based.
 export PERFXPERT_LLM_PRIVATE_API_KEY="..."
-export PERFXPERT_LLM_PRIVATE_HEADERS='{
-  "Ocp-Apim-Subscription-Key": ".......",
-  "user": ".....",
-  "api-version": "preview"
-}'
+export PERFXPERT_LLM_PRIVATE_HEADERS='{"Ocp-Apim-Subscription-Key":".......","user":".....","api-version":"preview"}'
 perfxpert analyze -i trace.db --llm private
 ```
 
-### Run
+### Analyze
 
 ```bash
-# SKIP-SAMPLE — requires an existing rocprofv3 trace DB
-# One-shot analysis (batch mode)
+# SKIP-SAMPLE — requires a real trace.db and provider credentials
+export ANTHROPIC_API_KEY="sk-ant-..."
 perfxpert analyze -i trace.db --llm anthropic --format webview -o report.html
 
-# SKIP-SAMPLE — launches interactive TUI
-# Interactive agentic TUI (default patched opencode path)
+export OPENAI_API_KEY="sk-..."
+perfxpert analyze -i trace.db --llm openai --llm-model gpt-4o-mini --format markdown -o report.md
+
+PERFXPERT_AIRGAP=1 perfxpert analyze -i trace.db --format markdown -o report.md
+```
+
+### Interactive TUI
+
+```bash
+# SKIP-SAMPLE — launches interactive CLIs and may write backend config
+# Default first-class TUI: bundled patched opencode built during install.
 perfxpert-code
 
-# SKIP-SAMPLE — multi-backend dispatch (requires the native CLI installed)
-# Claude / Codex / Gemini native CLIs with perfxpert MCP wired in:
-perfxpert-code claude   # installs perfxpert MCP + gate into Claude Code, execs claude
-perfxpert-code codex    # same for Codex CLI (trust-gate workflow)
-perfxpert-code gemini   # same for Gemini CLI
-perfxpert-code claude --dry-run "analyze this trace"   # preview, write nothing
-perfxpert-code uninstall claude   # reverses install (refuses on marker drift)
+# Use native shells with PerfXpert MCP and context installed for that backend.
+perfxpert-code claude
+perfxpert-code codex
+perfxpert-code gemini
 
-# SKIP-SAMPLE — requires an existing rocprofv3 trace DB
-# Air-gap mode (no LLM; deterministic rule-based analysis only)
-PERFXPERT_AIRGAP=1 perfxpert analyze -i trace.db --format markdown -o report.md
+# Explicit upstream-opencode escape hatch. The default TUI does not need this.
+PERFXPERT_OPENCODE_PATH="$(command -v opencode)" perfxpert-code opencode
+```
 
-# SKIP-SAMPLE — requires two rocprofv3 trace DBs (baseline + candidate)
-# Diff two runs (schema-0.3.1 trace_diff block — per-kernel deltas + verdict)
+Preview or uninstall a backend integration:
+
+```bash
+# SKIP-SAMPLE — preview/uninstall commands mutate or inspect backend setup
+perfxpert-code claude --dry-run "analyze this trace"
+perfxpert-code uninstall claude
+```
+
+### Other Commands
+
+```bash
+# SKIP-SAMPLE — requires real trace DB paths
 perfxpert diff baseline.db candidate.db --format markdown
-
-# SKIP-SAMPLE — CI wrapper; rc=1 on regression, rc=0 otherwise
-# Regression gate for CI pipelines (wraps `diff` + fails the build if slower)
 perfxpert ci baseline.db candidate.db --threshold 3.0
-
-# Health check
 perfxpert doctor
 ```
 

@@ -91,21 +91,11 @@ def test_readme_keeps_customer_install_flow_curl_only() -> None:
     assert "python3 -m venv .venv" in text
     assert "python3-venv" in text
     assert "python3-pip" in text
-    assert "never downloads a separate" in text
-    assert "Python runtime" in text
-    assert "`setup.py`\nbootstraps bun when needed" in text
+    assert "bootstraps bun when needed" in text
     assert "No separate `opencode` install is needed" in text
-    assert "bundled `perfxpert-code` binary was built" in text
+    assert "patched bundled `perfxpert-code` binary" in text
     assert "builds the patched bundled" in text
-    for distro in (
-        "Ubuntu 22.04",
-        "Ubuntu 24.04",
-        "UBI/RHEL 9",
-        "UBI/RHEL 10",
-        "SLES 15.6",
-    ):
-        assert distro in text
-    assert "curl-minimal" in text
+    assert "Ubuntu/RHEL/SLES package matrix" in text
     assert "| `private` | Any OpenAI-compatible endpoint |" in text
     assert "PERFXPERT_LLM_PRIVATE_URL" in text
     assert "PERFXPERT_LLM_PRIVATE_MODEL" in text
@@ -118,6 +108,18 @@ def test_readme_keeps_customer_install_flow_curl_only() -> None:
     assert "git clone --depth 1 --no-recurse-submodules" not in text
     assert "wget -qO-" not in text
     assert "curl -fsSL https://bun.sh/install | bash" not in text
+
+
+def test_readme_keeps_copy_paste_command_shapes() -> None:
+    text = _README.read_text(encoding="utf-8")
+    assert "perfxpert analyze -i trace.db --llm anthropic --format webview -o report.html" in text
+    assert "perfxpert analyze -i trace.db --llm openai --llm-model gpt-4o-mini" in text
+    assert "PERFXPERT_AIRGAP=1 perfxpert analyze -i trace.db" in text
+    assert "\nperfxpert-code\n" in text
+    assert "perfxpert-code claude" in text
+    assert "perfxpert-code codex" in text
+    assert "perfxpert-code gemini" in text
+    assert 'PERFXPERT_OPENCODE_PATH="$(command -v opencode)" perfxpert-code opencode' in text
 
 
 def test_getting_started_keeps_internal_install_detail() -> None:
@@ -166,8 +168,8 @@ def test_install_docs_explain_perfxpert_code_follow_up() -> None:
     readme = _README.read_text(encoding="utf-8")
     guide = _GETTING_STARTED.read_text(encoding="utf-8")
 
-    assert "`setup.py`\nbootstraps bun when needed" in readme
-    assert "bundled patched `perfxpert-code` build completes" in readme
+    assert "bootstraps bun when needed" in readme
+    assert "verifies it before exiting" in readme
     assert "curl -fsSL https://bun.sh/install | bash" not in readme
     assert "Direct\npip/editable paths use the same `setup.py` build hook" in guide
     assert "pip exits with distro-specific package-manager guidance" in guide
