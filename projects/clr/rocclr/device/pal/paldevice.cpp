@@ -460,7 +460,7 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   info_.preferredPlatformAtomicAlignment_ = 0;
   info_.preferredGlobalAtomicAlignment_ = 0;
   info_.preferredLocalAtomicAlignment_ = 0;
-  info_.queueProperties_ = CL_QUEUE_PROFILING_ENABLE;
+  info_.queueProperties_ = amd::QueueProperties::Profiling;
 
   info_.platform_ = reinterpret_cast<intptr_t>(AMD_PLATFORM);
 
@@ -532,7 +532,7 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
     info_.maxPipeArgs_ = 16;
 
     info_.queueOnDeviceProperties_ =
-        CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE;
+        amd::QueueProperties::OutOfOrderExec | amd::QueueProperties::Profiling;
     info_.queueOnDevicePreferredSize_ = 256 * Ki;
     info_.queueOnDeviceMaxSize_ = 8 * Mi;
     info_.maxOnDeviceQueues_ = 1;
