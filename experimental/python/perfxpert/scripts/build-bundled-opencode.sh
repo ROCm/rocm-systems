@@ -55,9 +55,6 @@ Install bun (one line, no root required):
 
 Then re-run:
     perfxpert-code install-patches
-
-Or point perfxpert at an already-built opencode binary:
-    export PERFXPERT_OPENCODE_PATH=/path/to/opencode
 EOF
   exit 2
 fi
@@ -100,8 +97,8 @@ else
 fi
 
 cd "${SUBMODULE}/packages/opencode"
-echo "build-bundled-opencode: compiling opencode (bun run build --single)"
-bun run build --single
+echo "build-bundled-opencode: compiling opencode (bun run build --single --skip-install)"
+bun run build --single --skip-install
 
 file_size_bytes() {
   local path="$1"

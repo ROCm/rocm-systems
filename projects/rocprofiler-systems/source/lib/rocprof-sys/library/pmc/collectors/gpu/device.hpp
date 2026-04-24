@@ -4,6 +4,7 @@
 #pragma once
 
 #include "core/amd_smi.hpp"
+#include "core/sdma_feature.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "logger/debug.hpp"
 
