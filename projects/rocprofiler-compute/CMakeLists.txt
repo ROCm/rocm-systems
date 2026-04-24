@@ -413,10 +413,10 @@ add_test(
 )
 
 add_test(
-    NAME test_native_tool
+    NAME test_native_tool_finder
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_native_tool.xml ${COV_OPTION} tests/test_native_tool.py
+        --junitxml=tests/test_native_tool_finder.xml ${COV_OPTION} tests/test_native_tool_finder.py
         ${WORKING_DIR_OPTION}
 )
 
