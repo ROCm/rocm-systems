@@ -95,11 +95,11 @@ fi
 case $mode in
     all)
         test_with_two_pes="IPCImplSimpleCoarseTestFixture/*:IPCImplSimpleFineTestFixture/*:IPCImplTiledFineTestFixture/*:DegenerateTiledFine.*"
+        test_with_two_pes+=":SdmaSimpleCoarse/*:SdmaSimpleFine/*:SdmaTiledFine/*"
         if [ $NUM_GPUS -ge 4 ]
         then
           run_mpirun 4 "-$test_with_two_pes"
         fi
-        #run_mpirun 2 "$test_with_two_pes"
         ;;
     custom)
         # Check if ranks is a positive integer
