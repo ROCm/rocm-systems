@@ -11,7 +11,6 @@ add_executable(
     mocks.h
     mocks.cpp
     main.cpp
-    test_sdk_callbacks.h
 )
 
 target_link_libraries(
@@ -20,3 +19,12 @@ target_link_libraries(
 )
 
 add_test(NAME ${target} COMMAND ${target})
+
+if(INSTALL_TESTS)
+    install(
+        TARGETS ${target}
+        RUNTIME
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
+            COMPONENT tests
+    )
+endif()
