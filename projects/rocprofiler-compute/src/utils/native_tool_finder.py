@@ -31,10 +31,12 @@ class NativeToolFinder:
         self.sdk_tool_path = sdk_tool_path
         pass
 
-    def get_collector_library_path(self) -> Path | None:
+    def get_collector_library_path(self) -> Path:
         collector_path = self.__find_installed_collector()
         if not collector_path:
             collector_path = self.__build_collector()
+        if not collector_path:
+            raise RuntimeError("Failed to find or build collector")
         console_log(f"Using native collector: {collector_path}")
         return collector_path
 
@@ -58,10 +60,8 @@ class NativeToolFinder:
         return Path(match) if match is not None else None
 
     def __build_collector(self) -> Path | None:
-        if not self.src_path:
-            return None
-        self._generate_cmake_project(self.src_path)
-        self._build_cmake_project(self.src_path)
+        self._generate_cmake(self.src_path)
+        self._build_cmake(self.src_path)
         return self.__find_built_collector()
 
     def __find_built_collector(self) -> Path | None:
@@ -69,24 +69,22 @@ class NativeToolFinder:
         console_log(f"Searching {self.src_path} by {pattern} for native collector")
         return self.__find_file_by_glob_pattern(self.src_path, pattern)
 
-    def _generate_cmake_project(self, src_path: Path) -> None:
+    def _generate_cmake(self, src_path: Path) -> None:
         build_command = (
             "cmake "
             + f"-S {src_path}/{self.sources_dir_name} "
             + f"-B {src_path}/{self.sources_dir_name}/{self.sources_build_subdir_name}"
         )
-        console_debug(f"Building native tool using command: {build_command}")
+        console_log(f"Building native tool using command: {build_command}")
         self.__execute_command(build_command)
 
-    def _build_cmake_project(self, src_path: Path) -> None:
+    def _build_cmake(self, src_path: Path) -> None:
         generate_command = (
             "cmake --build "
             + f"{src_path}/{self.sources_dir_name}/{self.sources_build_subdir_name}"
             + "--parallel"
         )
-        console_debug(
-            f"Generating native tool project using command: {generate_command}"
-        )
+        console_log(f"Generating native tool project using command: {generate_command}")
         self.__execute_command(generate_command)
 
     def __execute_command(self, command: str) -> None:

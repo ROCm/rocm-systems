@@ -11,10 +11,17 @@ from utils.native_tool_finder import NativeToolFinder
 
 class TestNativeToolFinder:
     def test_when_incorrect_opt_path_provided__asserts(self, sources_path: Path):
-        lib_path = None
         with pytest.raises(AssertionError):
-            lib_path = NativeToolFinder(sources_path, Path("incorrect_path"))
-        assert lib_path is None
+            NativeToolFinder(sources_path, Path("incorrect_path"))
+
+    def test_when_no_installed_collector_and_no_src_dir__throws(
+        self,
+        installed_sdk_tool_path: Path,
+    ) -> None:
+        with pytest.raises(RuntimeError):
+            NativeToolFinder(
+                Path("incorrect_src"), installed_sdk_tool_path
+            ).get_collector_library_path()
 
     def test_when_run_from_opt__finds_prebuilt_native_collector(
         self,
@@ -34,12 +41,10 @@ class TestNativeToolFinder:
             self.__create_file(sources_path, Path(NativeToolFinder.lib_relative_path))
 
         with (
-            patch.object(
-                NativeToolFinder, "_generate_cmake_project", return_value=True
-            ),
+            patch.object(NativeToolFinder, "_generate_cmake", return_value=None),
             patch.object(
                 NativeToolFinder,
-                "_build_cmake_project",
+                "_build_cmake",
                 side_effect=mock_build_collector,
             ),
         ):
@@ -48,7 +53,19 @@ class TestNativeToolFinder:
             ).get_collector_library_path()
         assert lib_path == sources_path / NativeToolFinder.lib_relative_path
 
-    def test_when_run_from_source_dir_and_generation_fails__returns_throws(
+    def test_when_run_from_source_dir_and_collector_not_found_after_build__throws(
+        self, sources_path, installed_sdk_tool_path: Path
+    ):
+        with (
+            patch.object(NativeToolFinder, "_generate_cmake", return_value=None),
+            patch.object(NativeToolFinder, "_build_cmake", return_value=None),
+        ):
+            with pytest.raises(RuntimeError):
+                NativeToolFinder(
+                    sources_path, installed_sdk_tool_path
+                ).get_collector_library_path()
+
+    def test_when_run_from_source_dir_and_generation_fails__throws(
         self, installed_sdk_tool_path: Path, sources_path: Path
     ):
         lib_path = None
