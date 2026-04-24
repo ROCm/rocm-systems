@@ -546,8 +546,7 @@ add_test(
     NAME test_metric_utils
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_metric_utils.xml ${COV_OPTION}
-        tests/test_metric_utils.py
+        --junitxml=tests/test_metric_utils.xml ${COV_OPTION} tests/test_metric_utils.py
         ${WORKING_DIR_OPTION}
 )
 

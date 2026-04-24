@@ -487,7 +487,8 @@ class TestMetricEvaluator:
         result = evaluator.eval_expression(eval_str)
         assert isinstance(result, float)
         assert abs(result - 60.0) < 1e-9, (
-            f"SUM(100*[800,600,400]) / SUM([1000,1000,1000]) should be 60.0, got {result}"
+            "SUM(100*[800,600,400]) / SUM([1000,1000,1000]) should be 60.0, "
+            f"got {result}"
         )
 
     def test_eval_expression_returns_na_for_all_nan_numerator(self):
