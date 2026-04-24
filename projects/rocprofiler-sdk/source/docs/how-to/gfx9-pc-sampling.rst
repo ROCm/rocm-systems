@@ -4,14 +4,14 @@
 
 .. _gfx9-pc-sampling:
 
-****************************************************
-Analyzing PC sampling data on CDNA 3/4 architecture
-****************************************************
+****************************************************************
+Analyzing PC sampling data on CDNA3 and CDNA4 GPU architectures
+****************************************************************
 
-PC sampling periodically samples waves running on a compute unit (CU) and reports whether the sampled wave issued an instruction in the sampled cycle. If the wave couldn't proceed to issue an instruction, a stall reason is recorded.
+Program Counter (PC) sampling periodically samples waves running on a compute unit (CU) and reports whether the sampled wave issued an instruction in the sampled cycle. If the wave couldn't proceed to issue an instruction, a stall reason is recorded.
 In addition to the wave's state, PC sampling captures the state of the sampled SIMD's arbiter (also referred to as the `scheduler <https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/conceptual/pipeline-descriptions.html#scheduler>`_). The term arbiter is used in accordance with the PC sampling data fields. The arbiter state indicates whether any wavefront on the SIMD was issued to a given pipeline during the given cycle, and if so, whether that instruction began execution.
 
-PC sampling on the CDNA3 (AMD Instinct MI350 Series) and CDNA4 (AMD Instinct MI300 Series) architectures primarily focuses on the frontend of shader execution, examining which waves are running and what prevents them from issuing instructions. It provides a limited view of the backend (execution pipelines), examining whether they are stalled and back-pressuring the front-end, but not the underlying cause of the stall. For the list of pipelines available on the CDNA 3/4 architecture, see :ref:`execution-pipelines`.
+PC sampling on the CDNA3 (AMD Instinct MI300 Series) and CDNA4 (AMD Instinct MI350 Series) architectures primarily focuses on the frontend of shader execution, examining which waves are running and what prevents them from issuing instructions. It provides a limited view of the backend (execution pipelines), examining whether they are stalled and back-pressuring the front-end, but not the underlying cause of the stall. For the list of pipelines available on the CDNA3 and CDNA4 architecture, see :ref:`execution-pipelines`.
 
 Stall reasons
 ==============
@@ -30,7 +30,7 @@ The following table lists the stall reasons:
     - The wave is stalled waiting for instructions. For example, at the branch target, I$ miss, and others.
 
   * - ALU_DEPENDENCY
-    - The sampled wave's instruction couldn't be issued due to an internal hardware dependency, such as an inter-pipeline dependency or a data hazard. For more information, see 4.4 Data dependency resolution in `CDNA3 instruction set architecture <https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-mi300-cdna3-instruction-set-architecture.pdf>`_ or `CDNA4 instruction set architecture <https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf>`_.
+    - The sampled wave's instruction couldn't be issued due to an internal hardware dependency, such as an inter-pipeline dependency or a data hazard. For more information, see 4.4 Data dependency resolution in `AMD Instinct MI300 (CDNA3) instruction set architecture <https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-mi300-cdna3-instruction-set-architecture.pdf>`_ or `CDNA4 instruction set architecture <https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf>`_.
 
   * - WAITCNT
     - The sampled wave is waiting due to memory dependency (``waitcnt``).

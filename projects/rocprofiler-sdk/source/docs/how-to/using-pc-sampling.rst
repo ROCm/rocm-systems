@@ -17,10 +17,10 @@ Here are the benefits of using PC sampling:
 - Analyze code coverage
 - Find heavily executed code paths
 
-To try out the PC sampling feature, you can use the ``rocprofv3`` command-line tool or the ROCprofiler-SDK library on ROCm 6.4 and later.
+To try out the PC sampling feature, you can use the ``rocprofv3`` command-line tool or the ROCprofiler-SDK library on ROCm 6.4 or later.
 
 Supported AMD Instinct GPUs
-===============
+============================
 
 The following table lists the AMD Instinct™ GPUs supporting PC sampling and shows whether they support stochastic PC sampling and host-trap PC sampling:
 
@@ -28,39 +28,48 @@ The following table lists the AMD Instinct™ GPUs supporting PC sampling and sh
   :header-rows: 1
 
   * - AMD Instinct GPU
+    - Architecture
     - Stochastic PC sampling
     - Host-trap PC sampling
 
-  * - MI210
-    - ❌
-    - ✅
-
-  * - MI250
-    - ❌
-    - ✅
-
-  * - MI250X
-    - ❌
-    - ✅
-
-  * - MI300A
-    - ✅
-    - ✅
-
-  * - MI300X
-    - ✅
-    - ✅
-
-  * - MI325X
+  * - MI355X
+    - CDNA4
     - ✅
     - ✅
 
   * - MI350X
+    - CDNA4
     - ✅
     - ✅
 
-  * - MI355X
+  * - MI325X
+    - CDNA3
     - ✅
+    - ✅
+
+  * - MI300X
+    - CDNA3
+    - ✅
+    - ✅
+
+  * - MI300A
+    - CDNA3
+    - ✅
+    - ✅
+
+  * - MI250X
+    - CDNA2
+    - ❌
+    - ✅
+
+  * - MI250
+    - CDNA2
+    - ❌
+    - ✅
+
+  * - MI210
+    - CDNA2
+    - ❌
     - ✅
 
 PC sampling availability and configuration
