@@ -25,7 +25,8 @@ AI-powered AMD ROCm GPU trace analysis.
   The wrapper bootstraps the required build tool and verifies that the patched
   bundled `perfxpert-code` binary was built from the pinned PerfXpert submodule.
   See [docs/guides/getting-started.md](docs/guides/getting-started.md) for
-  source/editable install details and opt-out envs.
+  source/editable install details, the Ubuntu / RHEL / SLES package setup
+  matrix, and opt-out envs.
 - (Optional) `claude`, `codex`, or `gemini` CLI on PATH for multi-backend dispatch.
 
 ### Install
@@ -83,12 +84,45 @@ bootstraps bun when needed so the bundled patched opencode binary is built
 from the pinned perfxpert submodule and `perfxpert-code` is ready end to
 end.
 
+The GitHub wrapper path has been validated in clean containers for
+Ubuntu 22.04, Ubuntu 24.04, UBI/RHEL 9, UBI/RHEL 10, and SLES 15.6.
+On UBI/RHEL, keep the distro's existing `curl` provider if present
+(`curl-minimal` satisfies the requirement); do not force-replace it
+with the full `curl` package.
+
 `[all]` pulls in the optional LLM providers (`anthropic`, `openai`,
 `litellm`) plus `rich` for pretty terminal output. That covers the
 hosted/local SDK-backed provider paths; the default patched `opencode`
 path is validated separately through the launcher/build flow. The GitHub
 wrapper verifies that the bundled patched `perfxpert-code` build completes
 during install. Pick a provider with `--llm <name>`.
+
+### LLM Providers
+
+| Provider | Source | Typical use |
+|----------|--------|-------------|
+| `anthropic` | Claude API | Production default; requires `ANTHROPIC_API_KEY` |
+| `openai` | OpenAI API | Alternative hosted; requires `OPENAI_API_KEY` |
+| `ollama` | Local Ollama | Fully local; requires a running `ollama serve` |
+| `private` | Any OpenAI-compatible endpoint | Internal deployments; requires `PERFXPERT_LLM_PRIVATE_URL` + `PERFXPERT_LLM_PRIVATE_MODEL`; CLI preflight also needs `PERFXPERT_LLM_PRIVATE_API_KEY` or `--llm-api-key` |
+| `opencode` | Bundled opencode CLI | Used by `perfxpert-code`; not callable from inside opencode itself (recursion-guarded) |
+
+Private endpoint example:
+
+```bash
+# SKIP-SAMPLE — requires a real trace.db and reachable private endpoint
+export PERFXPERT_LLM_PRIVATE_URL="https://llm-api.iexample.com/OpenAI"
+export PERFXPERT_LLM_PRIVATE_MODEL="gpt-5.3-codex"
+# Required by CLI preflight; use a real key or a gateway-accepted placeholder
+# if authentication is entirely header-based.
+export PERFXPERT_LLM_PRIVATE_API_KEY="..."
+export PERFXPERT_LLM_PRIVATE_HEADERS='{
+  "Ocp-Apim-Subscription-Key": ".......",
+  "user": ".....",
+  "api-version": "preview"
+}'
+perfxpert analyze -i trace.db --llm private
+```
 
 ### Run
 

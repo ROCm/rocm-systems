@@ -64,7 +64,9 @@ backend CLI instead.
 
 ### Distro package setup
 
-Use a virtual environment for the supported install flow. Package setup
+Use a virtual environment for the supported install flow. The GitHub
+wrapper path has been validated in clean containers for Ubuntu 22.04,
+Ubuntu 24.04, UBI/RHEL 9, UBI/RHEL 10, and SLES 15.6. Package setup
 differs slightly by distro:
 
 ```bash
@@ -96,6 +98,10 @@ zypper install -y curl git unzip python311 python311-pip
 python3.11 -m venv .venv
 . .venv/bin/activate
 ```
+
+UBI/RHEL base images can provide `curl` through `curl-minimal`. That is
+valid for the wrapper and for pip's bun bootstrap; do not force dnf to
+replace it with the full `curl` package unless `command -v curl` fails.
 
 If the venv's pip/setuptools are too old and metadata preparation fails
 with `filename has 'perfxpert', but metadata has 'unknown'`, upgrade
@@ -221,10 +227,14 @@ Opt-outs:
 It applies all 26 patches in `.patches/` (AMD branding, color palette,
 per-model system-prompt preambles with the STRICT-TOOL-DISCIPLINE
 stanza, the tool-priority gate, and the deep-rebrand session UI) to the
-pinned `opencode` submodule, then runs `bun build` to produce the
-bundled binary at `perfxpert/_bundled/opencode`. Subsequent `pip install`
-invocations skip the rebuild if the binary is already newer than every
-patch file.
+pinned `opencode` submodule, runs the locked root `bun install`, then
+compiles the current-platform binary with `bun run build --single
+--skip-install`. The explicit `--skip-install` avoids opencode's
+secondary dynamic package install during the compile step; the locked
+install already populated the dependencies needed for the bundled
+binary. The final executable is copied to
+`perfxpert/_bundled/opencode`. Subsequent `pip install` invocations skip
+the rebuild if the binary is already newer than every patch file.
 
 **Opt-out:** set `PERFXPERT_SKIP_BUNDLED_BUILD=1` only in offline /
 sandboxed CI that intentionally skips the interactive TUI build.
@@ -970,7 +980,7 @@ a one-line stderr WARNING so you know which credential is active):
 |---------|-----------------|-----------------|-------|
 | `anthropic` | `ANTHROPIC_API_KEY` | `PERFXPERT_LLM_ANTHROPIC_KEY` | Either works; alias kept for migration parity |
 | `openai` | `OPENAI_API_KEY` | `PERFXPERT_LLM_OPENAI_KEY` | Either works |
-| `private` | `PERFXPERT_LLM_PRIVATE_API_KEY` | — | Plus `PERFXPERT_LLM_PRIVATE_URL` (required) |
+| `private` | `PERFXPERT_LLM_PRIVATE_API_KEY` | — | Plus `PERFXPERT_LLM_PRIVATE_URL` (required) and normally `PERFXPERT_LLM_PRIVATE_MODEL` |
 | `ollama` | — (no key) | — | Plus `PERFXPERT_LLM_LOCAL_URL` (default `http://localhost:11434`) |
 | `opencode` | — (no key) | — | Default `perfxpert-code` uses the bundled binary; `PERFXPERT_OPENCODE_PATH` is only for `perfxpert-code opencode ...` |
 
@@ -1232,8 +1242,8 @@ optional; all analysis runs locally without internet when you omit
 | `anthropic` | `ANTHROPIC_API_KEY` | Claude API (production default) |
 | `openai` | `OPENAI_API_KEY` | OpenAI hosted API |
 | `ollama` | `PERFXPERT_LLM_LOCAL_URL` (compat: `OLLAMA_HOST`, default `http://localhost:11434`) | Local Ollama daemon — fully offline once the model is pulled |
-| `private` | `PERFXPERT_LLM_PRIVATE_URL`, `PERFXPERT_LLM_PRIVATE_MODEL`, optional `PERFXPERT_LLM_PRIVATE_API_KEY`, optional `PERFXPERT_LLM_PRIVATE_HEADERS` (JSON), optional `PERFXPERT_LLM_PRIVATE_VERIFY_SSL=false` | Any OpenAI-compatible endpoint (enterprise / self-hosted) |
-| `opencode` | none required (bundled) | Bundled opencode CLI — subprocess wrapper |
+| `private` | `PERFXPERT_LLM_PRIVATE_URL`, `PERFXPERT_LLM_PRIVATE_MODEL`, `PERFXPERT_LLM_PRIVATE_API_KEY` or `--llm-api-key`, optional `PERFXPERT_LLM_PRIVATE_HEADERS` (JSON), optional `PERFXPERT_LLM_PRIVATE_VERIFY_SSL=false` | Any OpenAI-compatible endpoint (enterprise / self-hosted) |
+| `opencode` | none required (bundled) | Bundled opencode CLI — subprocess wrapper; recursion-guarded inside `perfxpert-code` |
 
 ```bash
 # SKIP-SAMPLE — requires a real trace.db and an LLM credential
@@ -1244,12 +1254,17 @@ export OPENAI_API_KEY="sk-..."
 perfxpert analyze -i trace.db --llm openai --llm-model gpt-4o
 
 # Private endpoint (any OpenAI-compatible server)
-export PERFXPERT_LLM_PRIVATE_URL="https://llm.corp.internal/v1"
-export PERFXPERT_LLM_PRIVATE_MODEL="llama-3-70b"
-# Optional: API key for endpoints that require Bearer auth
+export PERFXPERT_LLM_PRIVATE_URL="https://llm-api.iexample.com/OpenAI"
+export PERFXPERT_LLM_PRIVATE_MODEL="gpt-5.3-codex"
+# Required by CLI preflight; use a real key or a gateway-accepted placeholder
+# if authentication is entirely header-based.
 export PERFXPERT_LLM_PRIVATE_API_KEY="..."
 # Optional: extra HTTP headers as a JSON object (corp gateways, traceability)
-export PERFXPERT_LLM_PRIVATE_HEADERS='{"X-Tenant-Id":"team-perf","X-Auth-Token":"..."}'
+export PERFXPERT_LLM_PRIVATE_HEADERS='{
+  "Ocp-Apim-Subscription-Key": ".......",
+  "user": ".....",
+  "api-version": "preview"
+}'
 # Optional: bypass TLS verification for self-signed CAs (off by default)
 export PERFXPERT_LLM_PRIVATE_VERIFY_SSL=false
 perfxpert analyze -i trace.db --llm private

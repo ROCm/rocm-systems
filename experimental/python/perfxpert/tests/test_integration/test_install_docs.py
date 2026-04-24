@@ -12,6 +12,7 @@ from pathlib import Path
 _APP_ROOT = Path(__file__).resolve().parents[2]
 _README = _APP_ROOT / "README.md"
 _GETTING_STARTED = _APP_ROOT / "docs" / "guides" / "getting-started.md"
+_AGENTIC_MODE = _APP_ROOT / "docs" / "guides" / "agentic-mode.md"
 _INSTALL_WRAPPER = _APP_ROOT / "scripts" / "pip-install-from-git.sh"
 
 
@@ -96,6 +97,22 @@ def test_readme_keeps_customer_install_flow_curl_only() -> None:
     assert "No separate `opencode` install is needed" in text
     assert "bundled `perfxpert-code` binary was built" in text
     assert "builds the patched bundled" in text
+    for distro in (
+        "Ubuntu 22.04",
+        "Ubuntu 24.04",
+        "UBI/RHEL 9",
+        "UBI/RHEL 10",
+        "SLES 15.6",
+    ):
+        assert distro in text
+    assert "curl-minimal" in text
+    assert "| `private` | Any OpenAI-compatible endpoint |" in text
+    assert "PERFXPERT_LLM_PRIVATE_URL" in text
+    assert "PERFXPERT_LLM_PRIVATE_MODEL" in text
+    assert "PERFXPERT_LLM_PRIVATE_API_KEY" in text
+    assert "PERFXPERT_LLM_PRIVATE_HEADERS" in text
+    assert "https://llm-api.iexample.com/OpenAI" in text
+    assert "Ocp-Apim-Subscription-Key" in text
     assert 'REF=<SHA>; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"' in text
     assert "GIT_CONFIG_COUNT=1" not in text
     assert "git clone --depth 1 --no-recurse-submodules" not in text
@@ -113,10 +130,23 @@ def test_getting_started_keeps_internal_install_detail() -> None:
     assert "never downloads a separate" in text
     assert "Python runtime" in text
     assert "pip bootstraps\nbun when the OS prerequisites are available" in text
+    for distro in (
+        "Ubuntu 22.04",
+        "Ubuntu 24.04",
+        "UBI/RHEL 9",
+        "UBI/RHEL 10",
+        "SLES 15.6",
+    ):
+        assert distro in text
+    assert "curl-minimal" in text
     assert "command -v curl >/dev/null || dnf install -y curl" in text
     assert "dnf install -y git unzip python3.11 python3.11-pip" in text
     assert "dnf install -y git unzip python3 python3-pip" in text
     assert "zypper install -y curl git unzip python311 python311-pip" in text
+    assert "bun run build --single\n--skip-install" in text
+    assert "PERFXPERT_LLM_PRIVATE_API_KEY` or `--llm-api-key" in text
+    assert "https://llm-api.iexample.com/OpenAI" in text
+    assert "Ocp-Apim-Subscription-Key" in text
     assert "python3.11 -m venv .venv" in text
     assert 'REF=<SHA>; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"' in text
     assert "GIT_CONFIG_COUNT=1" in text
@@ -142,6 +172,18 @@ def test_install_docs_explain_perfxpert_code_follow_up() -> None:
     assert "Direct\npip/editable paths use the same `setup.py` build hook" in guide
     assert "pip exits with distro-specific package-manager guidance" in guide
     assert "opencode.ai/install" not in readme
+
+
+def test_provider_docs_keep_private_endpoint_contract_current() -> None:
+    for doc in (_README, _GETTING_STARTED, _AGENTIC_MODE):
+        text = doc.read_text(encoding="utf-8")
+        assert "PERFXPERT_LLM_PRIVATE_URL" in text
+        assert "PERFXPERT_LLM_PRIVATE_MODEL" in text
+        assert "PERFXPERT_LLM_PRIVATE_API_KEY" in text
+        assert "PERFXPERT_LLM_PRIVATE_HEADERS" in text
+        assert "https://llm-api.iexample.com/OpenAI" in text
+        assert "Ocp-Apim-Subscription-Key" in text
+        assert "ROCPD_LLM_PRIVATE" not in text
 
 
 def test_install_wrapper_reports_missing_prereqs_when_package_manager_unavailable(tmp_path: Path) -> None:
