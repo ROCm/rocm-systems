@@ -64,6 +64,9 @@ perfxpert analyze -i trace.db --llm private
 
 ### Analyze
 
+`--format` accepts `text` (default), `json`, `markdown`, and `webview`
+(AMD-themed HTML).
+
 ```bash
 # SKIP-SAMPLE — requires a real trace.db and provider credentials
 export ANTHROPIC_API_KEY="sk-ant-..."
@@ -162,14 +165,6 @@ an [RFC](docs/rfcs/README.md).
 |------|---------|---------|
 | `PERFXPERT_OPENCODE_PATH` | unset | Explicit upstream-opencode escape hatch used only by `perfxpert-code opencode ...`; the default TUI ignores it |
 
-The agentic runtime is the sole execution path; no feature flag
-toggles it. Setting any of the following has no effect:
-
-- `PERFXPERT_USE_AGENTS` — removed in Phase 7.1.
-- `PERFXPERT_LEGACY` — removed in Phase 7.1.
-
-See [CHANGELOG.md](CHANGELOG.md) for the removal history.
-
 ## Supported GPUs
 
 | Arch | GPU | CDNA/RDNA |
@@ -180,10 +175,6 @@ See [CHANGELOG.md](CHANGELOG.md) for the removal history.
 | gfx950 | MI350X/MI355X | CDNA4 |
 | gfx1030 | RX 6900 XT | RDNA2 |
 | gfx1100 | RX 7900 XTX | RDNA3 |
-
-## Output formats
-
-`--format` accepts: `text` (default), `json`, `markdown`, `webview` (AMD-themed HTML).
 
 ## Documentation
 
