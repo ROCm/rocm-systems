@@ -6,12 +6,12 @@ set(TRANSPORT_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/p2p.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/net.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/net_ib.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/net_ib_cast.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/coll_net.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/shm.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/generic.cc
 )
 
+add_subdirectory(net_ib_cast)
 add_subdirectory(gdaki)
 
 # Add transport sources to parent scope
