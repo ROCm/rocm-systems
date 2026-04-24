@@ -33,7 +33,7 @@ struct gpu_perf_counter_traits
     template <typename Settings>
     [[nodiscard]] static enabled_metrics_t get_enabled_metrics()
     {
-        return Settings::get_gpu_perf_counter_enabled_metrics();
+        return to_enabled_metrics(Settings::get_gpu_perf_counter_enabled_metrics());
     }
 
     template <typename Cache>

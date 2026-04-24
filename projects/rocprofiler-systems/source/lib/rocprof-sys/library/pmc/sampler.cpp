@@ -370,8 +370,21 @@ register_gpu_perf_counter_source(const std::vector<std::shared_ptr<agent>>& agen
 
     try
     {
-        const auto enabled_metrics =
+        auto settings =
             collectors::settings_policy::get_gpu_perf_counter_enabled_metrics();
+
+        auto counters = std::move(settings.explicit_counters);
+        // counters without :device= are broadcast to every GPU agent
+        for(const auto& name : settings.broadcast_names)
+        {
+            for(const auto& gpu_agent : agent_list)
+            {
+                counters.push_back({ name, gpu_agent->device_type_index });
+            }
+        }
+
+        const auto enabled_metrics =
+            collectors::gpu_perf_counter::enabled_metrics{ std::move(counters) };
 
         g_gpu_perf_counter_provider =
             std::make_shared<gpu_perf_counter_provider_t>(agent_list, enabled_metrics);

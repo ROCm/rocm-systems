@@ -77,6 +77,12 @@ struct counter_definition_hash
     }
 };
 
+struct gpu_perf_counter_settings
+{
+    std::vector<counter_definition> explicit_counters;
+    std::vector<std::string>        broadcast_names;
+};
+
 struct enabled_metrics
 {
     enabled_metrics() = default;
@@ -93,6 +99,18 @@ struct enabled_metrics
 private:
     std::unordered_set<counter_definition, counter_definition_hash> m_counters;
 };
+
+inline enabled_metrics
+to_enabled_metrics(enabled_metrics enabled) noexcept
+{
+    return enabled;
+}
+
+inline enabled_metrics
+to_enabled_metrics(gpu_perf_counter_settings settings) noexcept
+{
+    return enabled_metrics{ std::move(settings.explicit_counters) };
+}
 
 inline std::string
 format_track_name(size_t gpu_id, const std::string& qualified_name)
