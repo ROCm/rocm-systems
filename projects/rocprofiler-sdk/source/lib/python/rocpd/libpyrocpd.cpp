@@ -653,7 +653,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                 // Suggestions for the future schema updates:
                 // - Make info_pmc joinable with samples via the name field
                 // - Add short_description for perfetto counter tracks.
-                const std::string create_info_pmc_table = std::string{R"(
+                auto create_info_pmc_table = std::string{};
+                create_info_pmc_table.append(R"(
                             CREATE TEMP TABLE IF NOT EXISTS
                                 `info_pmc_schema_3_0` AS
                             SELECT
@@ -664,9 +665,11 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                 PMC_I.name AS name_plain,
                                 PMC_I.description,
                                 PMC_I.symbol,
-                                )"} + pmc_units_sql_string +
-                                                          R"(,)" + pmc_symbol_sql_string +
-                                                          R"(,
+                                )");
+                create_info_pmc_table.append(pmc_units_sql_string);
+                create_info_pmc_table.append(R"(,)");
+                create_info_pmc_table.append(pmc_symbol_sql_string);
+                create_info_pmc_table.append(R"(,
                                 A.absolute_index AS agent_abs_index,
                                 A.type_index AS agent_type_index,
                                 PMC_I.guid
@@ -674,7 +677,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                 `rocpd_info_pmc` PMC_I
                                 INNER JOIN `rocpd_info_agent` A ON A.id = PMC_I.agent_id
                                 AND A.guid = PMC_I.guid;
-                        )";
+                        )");
 
                 execute_raw_sql_statements(conn, create_info_pmc_table);
 
