@@ -864,9 +864,11 @@ if(NOT SKIP_NATIVE_TOOL_BUILD)
 else()
     # Install source files for runtime compilation
     install(
-        FILES src/lib/rocprofiler_compute_tool.cpp src/lib/helper.cpp src/lib/helper.hpp
+        DIRECTORY src/lib/
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
         COMPONENT main
+        PATTERN "_build" EXCLUDE
+        PATTERN "tests" EXCLUDE
     )
 endif()
 
