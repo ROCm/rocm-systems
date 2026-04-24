@@ -30,11 +30,12 @@ if(PERFXPERT_INSTALL_PYTHON)
     endif()
 
     # Install the perfxpert Python package into the standard site-packages
+    # Dependencies are resolved by pip here; distro packaging can override
+    # this path when dependencies are provided by system packages instead.
     install(
         CODE "execute_process(
             COMMAND ${Python3_EXECUTABLE} -m pip install
                 --prefix \"\${CMAKE_INSTALL_PREFIX}\"
-                --no-deps
                 --no-build-isolation
                 \"${CMAKE_CURRENT_SOURCE_DIR}\"
             RESULT_VARIABLE _pip_result
@@ -42,13 +43,6 @@ if(PERFXPERT_INSTALL_PYTHON)
         if(NOT _pip_result EQUAL 0)
             message(FATAL_ERROR \"pip install failed: \${_pip_result}\")
         endif()"
-    )
-
-    # Also expose the entry-point script
-    install(
-        PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/perfxpert"
-        DESTINATION bin
-        OPTIONAL
     )
 endif()
 
