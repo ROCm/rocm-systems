@@ -2,6 +2,15 @@
 
 AI-powered AMD ROCm GPU trace analysis.
 
+## Caution
+
+> **Experimental software.** PerfXpert is still evolving and is provided
+> without warranties or guarantees. AI-generated analysis, explanations, and
+> recommendations can be incomplete or incorrect, so verify important results
+> before relying on them in production or performance-critical workflows.
+
+
+
 ## Quickstart
 
 ### Prerequisites
@@ -216,13 +225,6 @@ See [CHANGELOG.md](CHANGELOG.md) for the removal history.
     - [External-tool dependencies (`require_tool`)](docs/contributing/external-tools.md)
 - **Other**
   - [Historical migration notes](docs/archive/migration-to-agentic.md)
-
-## Caution
-
-> **Experimental software.** PerfXpert is still evolving and is provided
-> without warranties or guarantees. AI-generated analysis, explanations, and
-> recommendations can be incomplete or incorrect, so verify important results
-> before relying on them in production or performance-critical workflows.
 
 ## Licensing
 

@@ -53,6 +53,13 @@ public:
   void set_l2_cache(L2Cache *l2) { l2_cache_ = l2; }
   void add_shader_engine(ShaderEngine *se) { shader_engines_.push_back(se); }
 
+  /// @brief Set the execution plugin group on CP and all CUs (shared ownership).
+  void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
+    cp_->set_plugin_group(pg);
+    for (auto *se : shader_engines_)
+      se->set_plugin_group(pg);
+  }
+
   /// @brief Wire topology links between CP→CU and CU→L2.
   ///
   /// @details L2→HBM/fabric wiring is done by SoC::initialize() since the

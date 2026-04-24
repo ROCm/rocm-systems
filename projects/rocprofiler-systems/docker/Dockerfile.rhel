@@ -30,15 +30,21 @@ ARG ROCM_PATCH=0
 ARG ROCM_VERSION_URL=0.0
 ARG ROCM_VERSN=0
 
+# Use only the major OS version in the ROCm repo URL (el8/el9/el10).
+# The Rocky Linux base image uses a floating tag (e.g. :9) that resolves to
+# the latest point release, and AMD does not publish repo packages for every
+# minor version. The major-version path is stable across all point releases.
 RUN if [ "${ROCM_MAJOR}" != "0" ] || [ "${ROCM_MINOR}" != "0" ]; then \
-        OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
-        OS_VERSION_MAJOR=$(echo "$OS_VERSION" | cut -d'.' -f1) && \
-        RPM_TAG=".el${OS_VERSION_MAJOR}" && \
+        OS_VERSION_MAJOR=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"' | cut -d. -f1) && \
+        printf '%s\n' '[rocm]' \
+            "name=ROCm ${ROCM_VERSION_URL} repository" \
+            "baseurl=https://repo.radeon.com/rocm/el${OS_VERSION_MAJOR}/${ROCM_VERSION_URL}/main" \
+            'enabled=1' 'priority=50' 'gpgcheck=1' \
+            'gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key' > /etc/yum.repos.d/rocm.repo && \
         if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi && \
         dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir && \
-        yum install -y https://repo.radeon.com/amdgpu-install/${ROCM_VERSION_URL}/rhel/${OS_VERSION}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm && \
-        yum install -y rocm-dev && \
-        yum clean all; \
+        dnf install -y rocm-dev && \
+        dnf clean all; \
     fi
 
 ARG PYTHON_VERSIONS="8 9 10 11 12 13"
