@@ -72,6 +72,7 @@ perfxpert analyze -i trace.db --llm anthropic --format webview -o report.html
 export OPENAI_API_KEY="sk-..."
 perfxpert analyze -i trace.db --llm openai --llm-model gpt-4o-mini --format markdown -o report.md
 
+# Air-gap mode: no LLM calls, deterministic local analysis only.
 PERFXPERT_AIRGAP=1 perfxpert analyze -i trace.db --format markdown -o report.md
 ```
 
