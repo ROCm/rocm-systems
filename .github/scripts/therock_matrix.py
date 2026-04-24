@@ -28,7 +28,8 @@ subtree_to_project_map = {
     "projects/roctracer": "profiler",
     "shared/amdgpu-windows-interop": "runtimes",
 }
-
+# Below is the comprehensive list which the rock-ci runs for bump PRs. TO DO - fetch this list programatically using therock fetch_test_configuration.py
+therock_projects_to_test = "hip-tests, rocrtst, rocprofiler-sdk, rocr-debug-agent, rocgdb, rocprim, hipcub, rocthrust, rocrand, hiprand, hipblaslt, rocblas, hipblas, rocroller, miopen, miopenprovider, hipfft, rocfft, rocsparse, hipsparse, hipsparselt, rocsolver, hipsolver, rocwmma"
 project_map = {
     "core": {
         "cmake_options": ["-DTHEROCK_ENABLE_CORE=ON", "-DTHEROCK_ENABLE_ALL=OFF"],
@@ -72,7 +73,7 @@ project_map = {
     # the full math library stack. This matches nightly test coverage for gfx94x.
     "runtimes": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
-        "projects_to_test": "hip-tests, rocrtst, rocprofiler-sdk, rocr-debug-agent, rocgdb, rocprim, hipcub, rocthrust, rocrand, hiprand, hipblaslt, rocblas, hipblas, rocroller, miopen, miopenprovider, hipfft, rocfft, rocsparse, hipsparse, hipsparselt, rocsolver, hipsolver, rocwmma",
+        "projects_to_test": therock_projects_to_test,
     },
     "all": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
@@ -81,8 +82,8 @@ project_map = {
     # Same test coverage as TheRock submodule-bump PRs (rocm-systems scope).
     # Nightly (schedule) uses this entry explicitly for alignment with runtimes coverage.
     "nightly": {
-        "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
-        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb, rocprim, hipcub, rocthrust, rocrand, hiprand, hipblaslt, rocblas, hipblas, rocroller, miopen, miopenprovider, hipfft, rocfft, rocsparse, hipsparse, hipsparselt, rocsolver, hipsolver, rocwmma",
+        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
+        "projects_to_test": therock_projects_to_test,
     },
 }
 
