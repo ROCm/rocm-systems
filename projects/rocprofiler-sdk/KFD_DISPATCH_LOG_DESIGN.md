@@ -134,37 +134,45 @@ Two design options were considered:
  * pqm_update_dispatch_record - configure or clear the MEC firmware
  *                              dispatch profiling ring for a queue
  * @pqm:               process queue manager (caller holds p->mutex)
+ * @gpu_id:            user_gpu_id from the ioctl; must match the queue's
+ *                     device or -EINVAL is returned (closes the
+ *                     gpu_id<>queue_id binding gap)
  * @qid:               KFD queue id
  * @addr:              GPU VA of the ring buffer (0 = disable)
  * @num_records:       capacity in records (power-of-2; non-zero when addr != 0)
- * @record_size_bytes: size of one record in bytes (non-zero when addr != 0)
  *
- * The kernel uses record_size_bytes only for BO-mapping size validation.
- * Userspace MUST keep this in sync with the descriptor; see Task 2.
+ * The kernel derives the per-record byte size from the device's
+ * static dispatch-log descriptor (see kfd_dispatch_log_get_blob).
+ * Userspace does NOT pass a record size — this closes the
+ * "two authorities for record size" footgun where the ioctl arg and
+ * the descriptor could disagree (R5 in the original draft).
  *
- * Returns 0 on success; -EINVAL on bad inputs; -EFAULT if the buffer
- * is not GPU-mapped; -ENODEV if no pdd; or whatever amdgpu_bo_reserve
- * or dqm->ops.update_queue returns.
+ * Returns 0 on success; -EINVAL on bad inputs (including gpu_id
+ * mismatching the queue's device); -EFAULT if the buffer is not
+ * GPU-mapped; -ENODEV if no pdd; -ENOTSUPP if the device does not
+ * have a dispatch-log descriptor; or whatever amdgpu_bo_reserve or
+ * dqm->ops.update_queue returns.
  */
 int pqm_update_dispatch_record(struct process_queue_manager *pqm,
+			       u32 gpu_id,
 			       unsigned int qid,
 			       u64 addr,
-			       u32 num_records,
-			       u32 record_size_bytes);
+			       u32 num_records);
 ```
 
-**Body** (extracted from current lines 609-655, with the `* 40` literal
-replaced by `record_size_bytes` and an overflow guard added):
+**Body** (extracted from current lines 609-655, with kernel-derived
+record size and explicit `gpu_id<>queue_id` device binding):
 
 ```c
 int pqm_update_dispatch_record(struct process_queue_manager *pqm,
+			       u32 gpu_id,
 			       unsigned int qid,
 			       u64 addr,
-			       u32 num_records,
-			       u32 record_size_bytes)
+			       u32 num_records)
 {
 	struct process_queue_node *pqn;
 	struct kfd_process_device *pdd;
+	const struct kfd_dispatch_log_blob *blob;
 	struct amdgpu_vm *vm;
 	struct queue *q;
 	struct amdgpu_bo *new_bo = NULL;
@@ -181,6 +189,24 @@ int pqm_update_dispatch_record(struct process_queue_manager *pqm,
 	if (!pdd)
 		return -ENODEV;
 
+	/* Closes the gpu_id<>queue_id binding gap: caller must name the
+	 * device that owns the queue. Otherwise a multi-GPU caller
+	 * could pass mismatched (gpu_id, qid) and the kernel would
+	 * silently operate on whichever device the queue happened to be
+	 * on. */
+	if (pdd->user_gpu_id != gpu_id) {
+		pr_debug("gpu_id %u does not match queue %d device %u\n",
+			 gpu_id, qid, pdd->user_gpu_id);
+		return -EINVAL;
+	}
+
+	/* Kernel is the sole authority for record size. The descriptor
+	 * for this device declares it; we just multiply. No userspace
+	 * input here. */
+	blob = kfd_dispatch_log_get_blob(q->device);
+	if (!blob)
+		return -ENOTSUPP;
+
 	vm = drm_priv_to_vm(pdd->drm_priv);
 	err = amdgpu_bo_reserve(vm->root.bo, false);
 	if (err)
@@ -189,17 +215,16 @@ int pqm_update_dispatch_record(struct process_queue_manager *pqm,
 	if (addr) {
 		uint64_t buf_byte_size;
 
-		if (!num_records || !is_power_of_2(num_records) ||
-		    !record_size_bytes) {
+		if (!num_records || !is_power_of_2(num_records)) {
 			amdgpu_bo_unreserve(vm->root.bo);
 			return -EINVAL;
 		}
 		/* overflow guard */
-		if (record_size_bytes > U32_MAX / num_records) {
+		if (blob->record_size_bytes > U32_MAX / num_records) {
 			amdgpu_bo_unreserve(vm->root.bo);
 			return -EINVAL;
 		}
-		buf_byte_size = (uint64_t)num_records * record_size_bytes;
+		buf_byte_size = (uint64_t)num_records * blob->record_size_bytes;
 
 		if (kfd_queue_buffer_get(vm, (void *)addr, &new_bo,
 					 buf_byte_size)) {
@@ -274,8 +299,11 @@ at `kfd_chardev.c:3487-3488`.
  * Sub-op of AMDKFD_IOC_PROFILER (KFD_IOC_PROFILER_DISPATCH_LOG).
  *
  *   SET (op=0):
- *     queue_id, addr, num_records, record_size_bytes -> configure ring;
- *     addr=0 disables. Requires CAP_PERFMON.
+ *     queue_id, addr, num_records -> configure ring; addr=0 disables.
+ *     Requires CAP_PERFMON. Kernel derives the per-record byte size
+ *     from the device's static descriptor (no userspace-supplied
+ *     record_size_bytes).  gpu_id MUST match the queue's device or
+ *     -EINVAL is returned.
  *   GET_DESCRIPTOR (op=1):
  *     addr = userspace destination ptr;
  *     num_records (IN) = caller buffer bytes, (OUT) = bytes required;
@@ -286,33 +314,43 @@ at `kfd_chardev.c:3487-3488`.
  *     decode rings they observe in core files or shared memory.
  *
  * gpu_id is required for all sub-ops.
+ * All padN / reserved fields MUST be zero on input. The handler
+ * rejects non-zero reserved bytes with -EINVAL so the kernel can
+ * repurpose them in a future minor version without ambiguity.
  */
 struct kfd_ioctl_dispatch_log_args {
 	__u32 op;                  /* enum kfd_dispatch_log_op */
 	__u32 gpu_id;
-	__u32 queue_id;
-	__u32 pad0;
-	__u64 addr;
-	__u32 num_records;
-	__u32 record_size_bytes;
-	__u32 desc_version;
-	__u32 pad1;
+	__u32 queue_id;            /* SET only; must be zero for GET_DESCRIPTOR */
+	__u32 pad0;                /* must be zero */
+	__u64 addr;                /* SET: ring buffer GPU VA (0 = disable);
+				    * GET_DESCRIPTOR: __u64 cast of userspace
+				    * destination pointer */
+	__u32 num_records;         /* SET: ring capacity in records (power-of-2);
+				    * GET_DESCRIPTOR: in bytes (caller buffer
+				    * size; on return, bytes required) */
+	__u32 reserved;            /* must be zero (was record_size_bytes;
+				    * removed because the kernel-owned
+				    * descriptor is now the sole authority) */
+	__u32 desc_version;        /* GET_DESCRIPTOR out only;
+				    * SET: must be zero */
+	__u32 pad1;                /* must be zero */
 };
 ```
 
 **Offset/size table:**
 
-| Offset | Size | Field             |
-|--------|------|-------------------|
-| 0x00   | 4    | op                |
-| 0x04   | 4    | gpu_id            |
-| 0x08   | 4    | queue_id          |
-| 0x0C   | 4    | pad0              |
-| 0x10   | 8    | addr              |
-| 0x18   | 4    | num_records       |
-| 0x1C   | 4    | record_size_bytes |
-| 0x20   | 4    | desc_version      |
-| 0x24   | 4    | pad1              |
+| Offset | Size | Field        |
+|--------|------|--------------|
+| 0x00   | 4    | op           |
+| 0x04   | 4    | gpu_id       |
+| 0x08   | 4    | queue_id     |
+| 0x0C   | 4    | pad0         |
+| 0x10   | 8    | addr         |
+| 0x18   | 4    | num_records  |
+| 0x1C   | 4    | reserved     |
+| 0x20   | 4    | desc_version |
+| 0x24   | 4    | pad1         |
 
 Total: 0x28 bytes. 8-byte aligned for `addr`.
 
@@ -359,47 +397,76 @@ struct kfd_ioctl_profiler_args {
 static int kfd_profiler_dispatch_log(struct kfd_process *p,
 				     struct kfd_ioctl_dispatch_log_args *args)
 {
+	struct kfd_dev_id_blob {
+		struct kfd_node                    *dev;
+		const struct kfd_dispatch_log_blob *blob;
+	} snap = {};
 	struct kfd_process_device *pdd;
 	int ret;
 
 	if (args->pad0 || args->pad1)
 		return -EINVAL;
 
-	mutex_lock(&p->mutex);
-	pdd = kfd_process_device_data_by_id(p, args->gpu_id);
-	if (!pdd) {
-		mutex_unlock(&p->mutex);
-		return -EINVAL;
-	}
-
 	switch (args->op) {
+
 	case KFD_IOC_DISPATCH_LOG_SET:
-		if (!perfmon_capable()) {
-			ret = -EPERM;
-			break;
+		if (!perfmon_capable())
+			return -EPERM;
+		if (args->reserved || args->desc_version)
+			return -EINVAL;
+
+		mutex_lock(&p->mutex);
+		pdd = kfd_process_device_data_by_id(p, args->gpu_id);
+		if (!pdd) {
+			mutex_unlock(&p->mutex);
+			return -EINVAL;
 		}
 		ret = pqm_update_dispatch_record(&p->pqm,
+						 args->gpu_id,
 						 args->queue_id,
 						 args->addr,
-						 args->num_records,
-						 args->record_size_bytes);
-		break;
+						 args->num_records);
+		mutex_unlock(&p->mutex);
+		return ret;
+
 	case KFD_IOC_DISPATCH_LOG_GET_DESCRIPTOR:
 		/* Unprivileged: any caller may read the static descriptor
-		 * for the device's firmware variant. */
-		ret = kfd_dispatch_log_get_descriptor(pdd,
-						      (void __user *)args->addr,
-						      &args->num_records,
-						      &args->desc_version);
-		break;
-	default:
-		ret = -EINVAL;
-	}
+		 * for the device's firmware variant. queue_id and reserved
+		 * MUST be zero on input. */
+		if (args->queue_id || args->reserved)
+			return -EINVAL;
 
-	mutex_unlock(&p->mutex);
-	return ret;
+		/* Snapshot device + blob pointer under p->mutex; the blob
+		 * lives in .rodata so it is safe to dereference after
+		 * unlock. The mutex is only protecting pdd lookup. This
+		 * keeps copy_to_user OUT from under the lock — addresses
+		 * Major review finding M5 (unbounded faultable user
+		 * access while holding p->mutex). */
+		mutex_lock(&p->mutex);
+		pdd = kfd_process_device_data_by_id(p, args->gpu_id);
+		if (pdd) {
+			snap.dev  = pdd->dev;
+			snap.blob = kfd_dispatch_log_get_blob(pdd->dev);
+		}
+		mutex_unlock(&p->mutex);
+		if (!snap.dev)
+			return -EINVAL;
+		if (!snap.blob)
+			return -ENOTSUPP;
+
+		return kfd_dispatch_log_emit_descriptor(
+			snap.blob,
+			(void __user *)args->addr,
+			&args->num_records,
+			&args->desc_version);
+
+	default:
+		return -EINVAL;
+	}
 }
 ```
+
+The helper is now blob-driven and lock-free:
 
 **Extend dispatch in `kfd_ioctl_profiler`** at `kfd_chardev.c:3505-3519`:
 
@@ -643,7 +710,8 @@ The only descriptor-related sub-op is
   Returns `-E2BIG` if caller buffer is too small (and `num_records` is
   set to the required size). `gpu_id` selects which device's descriptor
   to return — different ASIC families ship different descriptors.
-  `queue_id` and `record_size_bytes` are ignored. **No CAP_PERFMON
+  `queue_id` and `reserved` MUST be zero on input (rejected with
+  `-EINVAL` otherwise). **No CAP_PERFMON
   requirement** — any process holding `/dev/kfd` may read.
 
 **Storage:** the descriptor is a `static const char[]` compiled into
@@ -665,20 +733,29 @@ selects the right blob:
 
 ```c
 struct kfd_dispatch_log_blob {
-	const char *bytes;
-	u32         len;
-	u32         version;
+	const char *bytes;             /* JSON descriptor payload (.rodata) */
+	u32         len;               /* descriptor byte length */
+	u32         version;           /* matches KFD_DISPATCH_LOG_DESC_VERSION */
+
+	/* Canonical per-record byte size for this firmware variant. The
+	 * kernel uses this for buffer-size validation in pqm_update_
+	 * dispatch_record, eliminating the user-supplied record_size_bytes
+	 * footgun (R5 in the original draft). The descriptor JSON declares
+	 * the same value redundantly for userspace parsers; the C field
+	 * exists so the kernel does not need to parse JSON. */
+	u32         record_size_bytes;
 };
 
 const struct kfd_dispatch_log_blob *
 kfd_dispatch_log_get_blob(struct kfd_node *dev);
 ```
 
-The accessor inspects `dev->kfd->mec_fw_version` (or whatever existing
-field encodes the family/firmware combo) and returns the matching
-blob. If the device's firmware does not support the dispatch ring,
-`kfd_dispatch_log_get_blob` returns `NULL` and the ioctl returns
-`-ENOTSUPP`.
+The accessor selects the blob by **firmware version primarily, with
+ASIC family as the disambiguating fallback** — see §7 / open question 3
+for the rationale and §3.G for the table. If the device's firmware
+does not support the dispatch ring (e.g., gfx9 family but pre-MEC-ring
+firmware on MI200), `kfd_dispatch_log_get_blob` returns `NULL` and the
+ioctl returns `-ENOTSUPP`.
 
 **Maximum descriptor size:** No cap needed — the blob is part of
 `.rodata` and its size is fixed at module-build time. The current
@@ -698,26 +775,29 @@ types in future kernel rebuilds.
  * dispatch ring, -E2BIG if the caller buffer is too small, or
  * -EFAULT on copy_to_user failure.
  */
-static int kfd_dispatch_log_get_descriptor(struct kfd_process_device *pdd,
-					   void __user *user_buf,
-					   u32 *inout_byte_len,
-					   u32 *out_version);
+static int kfd_dispatch_log_emit_descriptor(
+	const struct kfd_dispatch_log_blob *blob,
+	void __user                        *user_buf,
+	u32                                *inout_byte_len,
+	u32                                *out_version);
 ```
+
+The handler resolves the blob pointer from `pdd->dev` under
+`p->mutex`, drops the lock, then invokes this emitter — addressing
+review finding M5 ("`copy_to_user` while holding `p->mutex`"). The
+blob lives in `.rodata` so the pointer remains valid after unlock for
+the lifetime of the kernel module.
 
 Implementation sketch:
 
 ```c
-static int kfd_dispatch_log_get_descriptor(struct kfd_process_device *pdd,
-					   void __user *user_buf,
-					   u32 *inout_byte_len,
-					   u32 *out_version)
+static int kfd_dispatch_log_emit_descriptor(
+	const struct kfd_dispatch_log_blob *blob,
+	void __user                        *user_buf,
+	u32                                *inout_byte_len,
+	u32                                *out_version)
 {
-	const struct kfd_dispatch_log_blob *blob =
-		kfd_dispatch_log_get_blob(pdd->dev);
 	u32 caller_size = *inout_byte_len;
-
-	if (!blob)
-		return -ENOTSUPP;
 
 	*inout_byte_len = blob->len;
 	*out_version    = blob->version;
@@ -819,6 +899,45 @@ Three independent levels:
 Userspace must check both (1) format_version major and (2) profiler
 version ≥ 2 before issuing the new sub-op.
 
+### 3.G Descriptor selector — keying strategy
+
+Addresses review finding M4 ("descriptor selection key unresolved").
+The accessor `kfd_dispatch_log_get_blob(struct kfd_node *dev)` selects
+the right blob via the table below. Selection is firmware-version
+primary, ASIC family secondary:
+
+| ASIC family       | MEC fw version range supporting dispatch ring | Returned blob | Notes |
+|-------------------|-----------------------------------------------|---------------|-------|
+| gfx9 / MI200      | none today                                    | NULL → -ENOTSUPP | MI200 firmware does not write dispatch records. |
+| gfx9 / MI300A     | none today                                    | NULL → -ENOTSUPP | Same — no firmware support yet. |
+| gfx9_5_0 / MI350  | `gc_9_5_0_mec.bin` ≥ build with `SubAqlProfBufWriteRecord` (the custom MI350 firmware tracked in `~/onboarding_docs`). Reading `dev->mec_fw_version` against a kernel-tracked threshold value `KFD_DISPATCH_LOG_MIN_MI350_FW_VER` decides. | `gfx9_5_0_dispatch_log_v1[]` | Today's only working combination. |
+| gfx10 / RDNA2     | not implemented                               | NULL → -ENOTSUPP | Requires firmware port (see expertise notes in the leadership summary). |
+| gfx11 / RDNA3     | not implemented                               | NULL → -ENOTSUPP | Requires firmware port. |
+| gfx12             | not implemented                               | NULL → -ENOTSUPP | Requires firmware port. |
+
+**Implementation:** `kfd_dispatch_log_get_blob` dispatches on
+`dev->kfd->mec_fw_version` against per-family threshold constants in
+`kfd_dispatch_log_descriptor.c`. If the firmware version is below
+threshold or the family has no entry, return NULL.
+
+**Why firmware-version primary:** the same ASIC family (gfx9) covers
+MI200, MI300, and MI350 — but only MI350 firmware writes the dispatch
+records today. Keying on family alone would either falsely advertise
+support for MI200 (firmware writes nothing → drainer hangs waiting for
+records) or refuse support on a future MI300 firmware that adds it.
+
+**Why family is the secondary key:** if a future ASIC ships firmware
+that writes the *same* 16-byte record format but with a different MEC
+fw build identifier scheme, we want to fall back to "this family
+supports the format" rather than enumerate every fw version. Concretely:
+`kfd_dispatch_log_get_blob` first checks the per-family fw-version
+threshold; if no threshold is defined for the family, it returns NULL.
+
+The threshold values are KFD-internal constants. They do not appear in
+UAPI. Userspace just sees `-ENOTSUPP` from `GET_DESCRIPTOR` and falls
+back per §3.E. This is how the kernel asserts authority over the
+firmware-format coupling without exposing it.
+
 ---
 
 ## 4. Combined UAPI changes — verbatim additions to `kfd_ioctl.h`
@@ -884,14 +1003,23 @@ struct kfd_ioctl_pmc_settings {
 
 struct kfd_ioctl_dispatch_log_args {
 	__u32 op;                  /* enum kfd_dispatch_log_op */
-	__u32 gpu_id;
-	__u32 queue_id;
-	__u32 pad0;
-	__u64 addr;
-	__u32 num_records;
-	__u32 record_size_bytes;
-	__u32 desc_version;
-	__u32 pad1;
+	__u32 gpu_id;              /* SET: must match the queue's device or
+				    * -EINVAL is returned;
+				    * GET_DESCRIPTOR: device whose
+				    * descriptor to return */
+	__u32 queue_id;            /* SET only; must be zero for GET_DESCRIPTOR */
+	__u32 pad0;                /* must be zero */
+	__u64 addr;                /* SET: ring buffer GPU VA (0 = disable);
+				    * GET_DESCRIPTOR: __u64 cast of userspace
+				    * destination pointer */
+	__u32 num_records;         /* SET: ring capacity in records (power-of-2);
+				    * GET_DESCRIPTOR: in bytes (caller buffer
+				    * size; on return, bytes required) */
+	__u32 reserved;            /* must be zero (was record_size_bytes;
+				    * removed because the kernel-owned
+				    * descriptor is now the sole authority) */
+	__u32 desc_version;        /* GET_DESCRIPTOR out only; SET: must be zero */
+	__u32 pad1;                /* must be zero */
 };
 
 struct kfd_ioctl_profiler_args {
@@ -927,6 +1055,89 @@ ioctl number and macro stay; only the union grows.
 Critically: **the firmware row used to read "MEC firmware: Write
 0x00100001/0x00100002 to DW2 instead of bare 1/2" — that row is now
 gone.** No firmware coordination needed.
+
+### 5.1 Concrete UAPI migration shim for libhsakmt + ROCr
+
+Addresses review finding M2 ("migration plan internally contradictory
+for mixed-version deployments"). The strategy is:
+
+1. **`KFD_IOCTL_MINOR_VERSION` is the single source of truth.**
+   libhsakmt (`hsaKmt.h`) keeps its `KFD_IOCTL_MINOR_VERSION` mirror
+   in sync with the kernel header it was built against. At init, it
+   issues `AMDKFD_IOC_GET_VERSION` and stashes the running kernel's
+   minor in a global.
+2. **Two side-by-side code paths in libhsakmt's queue layer:**
+   * `hsaKmtSetQueueProfilingBuffer_v1()` — issues `UPDATE_QUEUE`
+     with the OLD struct layout that includes
+     `dispatch_record_buffer_*` fields. Used when running on a kernel
+     with `minor < 23`. Built using a copy of the pre-1.23 struct
+     definition kept verbatim in `libhsakmt/src/compat_v22.h`.
+   * `hsaKmtSetQueueProfilingBuffer_v2()` — issues
+     `AMDKFD_IOC_PROFILER` with `op=KFD_IOC_PROFILER_DISPATCH_LOG,
+     sub_op=SET`. Used when `minor >= 23`.
+3. **Public API stays the same.** `hsaKmtSetQueueProfilingBuffer()`
+   dispatches to `_v1` or `_v2` based on the runtime version.
+   ROCr's `AqlQueue::SetProfiling` does not change at all — it still
+   calls the same thunk function.
+4. **Build-time ABI assertion.** `compat_v22.h` carries a
+   `static_assert(sizeof(struct kfd_ioctl_update_queue_args_v22) ==
+   0x28, "compat shim ABI drift")` so a future kernel header change
+   that perturbs the struct can't silently break the v1 path.
+5. **rocprofiler-sdk** does not need shim — it only ever talks to the
+   new ioctl, falling back to its hardcoded 16-byte parser if
+   `KFD_IOC_PROFILER_VERSION` returns < 2 (already in §3.E).
+
+The shim lives entirely in libhsakmt. When libhsakmt eventually drops
+support for kernels older than 1.23 (e.g., next major release),
+`compat_v22.h` and `_v1` are deleted in a single commit.
+
+### 5.2 `_IOC_SIZE` compatibility matrix
+
+Addresses review finding M3. `AMDKFD_IOC_PROFILER` is defined as
+`_IOWR('K', 0x86, struct kfd_ioctl_profiler_args)`, so the encoded
+ioctl number includes `sizeof(struct kfd_ioctl_profiler_args)` in its
+high bits. Any change to that struct's size causes the encoded number
+to differ between old and new builds. Behavior:
+
+| Userspace | Kernel | `_IOC_NR` match | `_IOC_SIZE` match | Outcome |
+|---|---|---|---|---|
+| v22 (old) | v22 (old) | yes | yes | works (baseline) |
+| v22 (old) | v23 (new) | yes | **NO** (kernel grew the union, struct grew) | `kfd_ioctl()` `_IOC_SIZE` check returns `-EINVAL`; old userspace cannot reach new sub-ops at all. **Acceptable** — old userspace doesn't know about `KFD_IOC_PROFILER_DISPATCH_LOG`, so it has no reason to issue this. Old userspace's existing PMC / PC_SAMPLE calls also fail with `-EINVAL`. **PROBLEM:** that means PMC and PC_SAMPLE break for old userspace on a new kernel. Mitigation in §5.3. |
+| v23 (new) | v22 (old) | yes | **NO** (userspace's struct is bigger) | same `-EINVAL`; new userspace falls back per §3.E (probes `KFD_IOC_PROFILER_VERSION`, which itself fails, and uses legacy UPDATE_QUEUE path via the shim). |
+| v23 | v23 | yes | yes | works |
+| 32-bit user / 64-bit kernel | — | depends on compat layer | should be size-equal because all fields are explicit `__u32`/`__u64` | tested via the existing 32-bit compat path in `kfd_chardev.c:3858+` (KFD already supports compat ioctl). |
+
+The only real hazard is the v22-userspace + v23-kernel combination:
+existing PMC / PC_SAMPLE consumers built against v22 will fail.
+
+### 5.3 Mitigation: dual ioctl size handling
+
+Linux kernel convention for growing an ioctl args struct is to either
+(a) use `_IOC_SIZEMASK` to compare just the struct identity (the
+"writable" approach), or (b) accept multiple sizes via per-version
+ioctl macros. Stock KFD uses (b) for some grown structs. The
+recommended fix here:
+
+1. **Don't grow `struct kfd_ioctl_profiler_args`.** Keep the union the
+   same size as v22 — `kfd_ioctl_pc_sample_args` is currently 40
+   bytes, `kfd_ioctl_pmc_settings` is 12, the version `__u32` is 4.
+   The new `kfd_ioctl_dispatch_log_args` we defined is 0x28 = 40
+   bytes — **exactly the size of the largest existing union member**.
+   The union does not grow. `sizeof(struct kfd_ioctl_profiler_args)`
+   stays at 44 bytes (`__u32 op` + 40-byte union).
+2. **Verify with a static assertion** in the kernel UAPI header:
+   ```c
+   static_assert(sizeof(struct kfd_ioctl_dispatch_log_args)
+       <= sizeof(struct kfd_ioctl_pc_sample_args),
+       "dispatch_log_args must not grow the profiler union");
+   ```
+3. **Result:** v22 userspace continues to work against v23 kernel for
+   PMC and PC_SAMPLE. Only the new `KFD_IOC_PROFILER_DISPATCH_LOG`
+   sub-op is unreachable from v22 userspace, which it doesn't know
+   about anyway.
+
+This collapses M3 into a verified static assertion plus a one-line
+explicit non-grow constraint on the args struct design.
 
 ---
 
@@ -1006,8 +1217,10 @@ profiler_lock must NOT block dispatch_log.
 * `gpu_id` invalid: `-EINVAL`.
 * `queue_id` invalid (SET): `-EFAULT`.
 * `num_records` not power-of-2 with `addr != 0`: `-EINVAL`.
-* `record_size_bytes = 0` with `addr != 0`: `-EINVAL`.
-* `num_records * record_size_bytes` overflows u32: `-EINVAL`.
+* `gpu_id` does not match the queue's device on SET: `-EINVAL`.
+* `reserved` or `desc_version` non-zero on SET: `-EINVAL`.
+* `queue_id` or `reserved` non-zero on GET_DESCRIPTOR: `-EINVAL`.
+* `num_records * blob->record_size_bytes` overflows u32 on SET: `-EINVAL`.
 
 ### 6.12 rocprofiler-sdk integration
 
@@ -1037,41 +1250,55 @@ libhsakmt/ROCr.
 
 ## 7. Open questions
 
-1. **Is `pqm_update_dispatch_record` correct to call
-   `dqm->ops.update_queue` unconditionally?** Today's
-   `pqm_update_queue_properties` calls it once after both ring-bo and
-   dispatch-record-bo work. By splitting them we now call
-   `update_queue` from two paths if both UPDATE_QUEUE and
-   DISPATCH_LOG fire on the same queue back-to-back. The MQD writes
-   are idempotent so this is safe, but it doubles the HWS preemption
-   latency. Acceptable? (Likely yes — DISPATCH_LOG is rare; profiling
-   setup is one-shot per queue.)
-2. **Should `pqm_update_dispatch_record` defend against the queue
-   being mid-destroy?** `get_queue_by_qid` doesn't take a lock beyond
-   `p->mutex`. Today's code has the same exposure.
-3. **Per-ASIC-family blob selection.** The accessor
-   `kfd_dispatch_log_get_blob` needs to map the device to a blob.
-   Open: do we key on ASIC family (gfx9/gfx10/...) only, or on
-   firmware version too? gfx9 covers MI200/MI300/MI350 — same family,
-   but only MI350 firmware writes the dispatch ring today. If the
-   blob is keyed by firmware version we can return `-ENOTSUPP` for
-   non-supporting MI200 firmware automatically. Recommended:
-   firmware-version-keyed, with a fallback to family for forward
-   compatibility.
-4. **The `record_size_bytes` field in SET is duplicate info** (also
-   encoded in the descriptor). They can disagree → kernel sizes BO
-   check against ioctl field, firmware writes records of descriptor's
-   declared size, mismatch = corruption. For Phase 1: document that
-   `record_size_bytes` is authoritative for kernel BO validation
-   only, and userspace MUST keep it in sync with what it parsed from
-   the descriptor. For Phase 2: kernel could parse the JSON enough to
-   extract the size for type_id=1 (dispatch start) — but this brings
-   parsing into the kernel, which we want to avoid.
-5. **Should the static blob be per-`kfd_node` rather than per
+Several previously-open questions have been resolved by review-cycle
+revisions. They are listed here as resolved-with-pointer for trace.
+
+**Resolved:**
+
+* ~~Is `pqm_update_dispatch_record` correct to call
+  `dqm->ops.update_queue` unconditionally?~~ → **Yes.** SET is rare
+  (typically one-shot per queue at profiling enable); the doubled
+  preemption latency relative to a hypothetical single-call merge is
+  in the noise. The MQD writes are idempotent. (Was M6.)
+* ~~Mid-destroy race for `pqm_update_dispatch_record`?~~ → Same
+  exposure as today's `pqm_update_queue_properties`; both rely on
+  `p->mutex` to serialize against destroy. The new function inherits
+  the existing locking contract — no regression. Resolved by
+  documenting the locking contract in the doxygen header for
+  `pqm_update_dispatch_record` (§2.3).
+* ~~Per-ASIC-family blob selection: family vs firmware version?~~ →
+  See §3.G. Firmware-version primary, family secondary.
+* ~~`record_size_bytes` duplicate authority?~~ → Removed from the
+  UAPI struct. The kernel-owned blob carries the canonical
+  `record_size_bytes`; the SET handler reads it from
+  `kfd_dispatch_log_get_blob(dev)->record_size_bytes`. Userspace no
+  longer passes a size at all. (Was C1 / R5.)
+* ~~`gpu_id` not bound to `queue_id` in SET?~~ → SET path now
+  rejects with `-EINVAL` when `pdd->user_gpu_id` doesn't match the
+  queue's device (§2.3 body). (Was Major M1.)
+* ~~`copy_to_user` under `p->mutex`?~~ → Handler now snapshots the
+  blob pointer under the lock and emits after unlock; helper
+  `kfd_dispatch_log_emit_descriptor` operates on a stable
+  `.rodata` pointer. (Was Major M5.)
+
+**Still open:**
+
+1. **Should the static blob be per-`kfd_node` rather than per
    `kfd_dev`?** Multi-XCD MI300/MI350 expose multiple `kfd_node`s per
    `kfd_dev`. Open whether the descriptor needs per-node specialization
    (probably not — wire format is determined by firmware, which is
    per-`kfd_dev`).
+2. **Should `KFD_IOC_PROFILER_DISPATCH_LOG` be SELinux-labeled
+   distinctly from PMC / PC_SAMPLE?** All three sub-ops go through
+   the same `AMDKFD_IOC_PROFILER` ioctl number, so they share the
+   same label. If a security policy wanted to allow dispatch-log
+   inspection in containers but block PMC, it cannot today. Defer
+   pending downstream policy requirements.
+3. **Container / namespace semantics.** A `GET_DESCRIPTOR` issued
+   from inside a container returns the host's static blob — same
+   answer for every namespace. This is correct (the descriptor
+   describes hardware/firmware, not container state) but worth
+   documenting in the PR description.
 
 ---
 
@@ -1080,11 +1307,13 @@ libhsakmt/ROCr.
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|---|
 | R1 | Static blob in kernel goes stale relative to firmware (firmware adds a new `record_type` that the kernel-shipped descriptor doesn't list) | Low (kernel rebuilds in lockstep with firmware drops) | Medium (drainer aborts queue scan with clear logged error — not silent corruption) | Bump `KFD_DISPATCH_LOG_DESC_VERSION` and update the blob whenever firmware adds a record type. Detect via "unknown record_type N" log line. Coordination point is the kernel/firmware release, not a userspace coordination. |
-| R2 | libhsakmt + ROCr roll out before kernel — userspace tries new ioctl on old kernel | Medium | Profiling silently disabled | Userspace probes `KFD_IOC_PROFILER_VERSION` and falls back to legacy UPDATE_QUEUE path on version < 2. But UPDATE_QUEUE no longer accepts the fields in the new userspace build — fallback requires keeping the old code paths in libhsakmt/ROCr behind a runtime check. Document in PR. |
+| R2 | libhsakmt rolled out without compat shim — new userspace fails on old kernels | Low (mitigation is in §5.1) | Medium | libhsakmt carries the v1/v2 dual code path in `compat_v22.h`; runtime probe selects which to issue. Static assertion catches drift. |
 | R3 | Splitting `pqm_update_queue_properties` introduces a regression in the queue update path | Medium | High (any KFD queue update breaks) | Diff the new `pqm_update_queue_properties` against `pqm.c.orig` — should be byte-identical. CI: run `kfdtest` on the test machine. |
 | R4 | `KFD_IOC_PROFILER_VERSION_NUM` bump breaks existing PMC/PC_SAMPLE callers that gate on `version == 1` | Low | Low | Convention is `>=`, not `==`. Audit; current callers use `>=`. |
-| R5 | `record_size_bytes` field in SET disagrees with descriptor's declared size | Medium | Medium (kernel sizes BO check based on ioctl field; firmware writes per-its-knowledge; mismatch = corruption) | Phase 1: document as caller responsibility (userspace parses descriptor and passes the correct size). Phase 2: kernel could parse just enough JSON to derive size — but this brings parsing into kernel, which we want to avoid. |
+| R5 | `dispatch_log_args` grows beyond the existing union — breaks v22 userspace's PMC / PC_SAMPLE on a v23 kernel | Low (size budgeted in §5.3) | High | Compile-time `static_assert(sizeof(kfd_ioctl_dispatch_log_args) <= sizeof(kfd_ioctl_pc_sample_args))`. Args struct is exactly 0x28 = 40 bytes today; PC_SAMPLE union member is 40 bytes. Net union size is unchanged. |
 | R6 | `GET_DESCRIPTOR` returns `-ENOTSUPP` on unsupported devices but caller doesn't distinguish from other errors | Low | Low | Document the error code. Userspace sample code shows the right pattern. |
+| R7 | gpu_id<>queue_id mismatch on SET corrupts a different device's queue | Resolved | High | SET handler now rejects mismatched gpu_id with `-EINVAL` (§2.3 body, addresses Major M1). |
+| R8 | Long lock hold time on `GET_DESCRIPTOR` due to `copy_to_user` | Resolved | Medium | Handler now snapshots blob pointer under `p->mutex` and copies after unlock (§2.4, addresses Major M5). |
 | R7 | Descriptor blob increases kernel module image size | Low | Negligible | ~1 KB per ASIC family in `.rodata`. Module size growth is tiny. |
 
 ---
