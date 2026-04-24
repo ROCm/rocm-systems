@@ -65,7 +65,9 @@ perfxpert analyze -i trace.db --llm private
 ### Analyze
 
 `--format` accepts `text` (default), `json`, `markdown`, and `webview`
-(AMD-themed HTML).
+(AMD-themed HTML). `text` prints to stdout unless `-o/-d` is supplied;
+all other formats write a report file by default, even when `-o` and `-d`
+are omitted.
 
 LLM-backed analysis uses Chat Completions-style requests. Choose a provider
 model or private endpoint model that supports the Chat Completions API;
