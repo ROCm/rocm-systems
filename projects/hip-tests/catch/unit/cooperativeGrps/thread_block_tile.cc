@@ -1107,6 +1107,10 @@ TEST_CASE(Unit_Thread_Block_Tile_Inclusive_Scan_Basic)
   testScanForTileSize<8>();
   testScanForTileSize<16>();
   testScanForTileSize<32>();
+
+  if (getWarpSize() == 64) {
+    testScanForTileSize<64>();
+  }
 }
 
 /**

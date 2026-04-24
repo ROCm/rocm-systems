@@ -13,7 +13,29 @@
 
 extern "C" __device__ __attribute__((const)) int __ockl_wfscan_add_i32(int x, bool inclusive);
 
+
 namespace cooperative_groups {
+namespace impl {
+  // these functions allow to make use of C++ function overloads, instead of having to code
+  // a big if-constexpr according to operand type
+  template <bool Inclusive>
+  __device__ inline int scan_add(int val)
+  {
+    return __ockl_wfscan_add_i32(val, Inclusive);
+  }
+
+  // not all types could be used with wfscan (e.g. user defined types), this predicate indicates whether that is the case
+  template <typename T, typename = void>
+  struct has_scan_add : __hip_internal::false_type {
+  };
+
+  template <typename T>
+  struct has_scan_add<T,
+                 __hip_internal::void_t<decltype(scan_add<false>(T {}))>
+    > : __hip_internal::true_type {
+  };
+}
+
 template <typename TyGroup, typename TyVal, typename TyFn>
 __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& op) -> decltype(op(val, val)) {
   using Op = typename __hip_internal::remove_cvref<TyFn>::type;
@@ -56,10 +78,13 @@ __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& o
     mask <<= 64 - laneId;
   }
 
-#ifdef __OPTIMIZE__  // at the time of this writing the ockl wfred functions do not compile when
+#ifdef __OPTIMIZE__  // at the time of this writing the ockl wfscan functions do not compile when
                      // using -O0
   if (maskNumBits == warpSize) {
-    return __ockl_wfscan_add_i32(val, true);
+    if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value &&
+                  impl::has_scan_add<Val>::value) {
+      return impl::scan_add<true>(val);
+    }
   }
 #endif
 
