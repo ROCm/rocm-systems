@@ -1184,7 +1184,7 @@ device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
   uint deviceQueueSize = 0;
 
   if (queue != nullptr) {
-    profiling = queue->properties().test(CL_QUEUE_PROFILING_ENABLE);
+    profiling = queue->properties().test(amd::QueueProperties::Profiling);
     if (queue->asHostQueue() != nullptr) {
       bool interopQueue = (0 != (queue->context().info().flags_ &
                                  (amd::Context::GLDeviceKhr | amd::Context::D3D10DeviceKhr |
