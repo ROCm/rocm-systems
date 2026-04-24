@@ -25,6 +25,7 @@ jobs:
       changed_dockerfile: ${{ steps.ci-flags.outputs.changed_dockerfile }}
       ci_matrix: ${{ steps.matrices.outputs.ci_matrix }}
       build_ci_image_matrix: ${{ steps.matrices.outputs.build_ci_image_matrix }}
+      ci_images: ${{ steps.ci-images.outputs.ci_images }}
     env:
       # Matrix variables go here in JSON notation.
       # '>-' strips newlines
@@ -152,6 +153,58 @@ jobs:
           echo "hipFile Build CI Image Matrix: "
           echo "${build_ci_image_matrix}" | jq .
           echo "build_ci_image_matrix=${build_ci_image_matrix}" >> ${GITHUB_OUTPUT}
+      - name: Compute CI image names
+        id: ci-images
+        env:
+          REGISTRY_URL: ghcr.io/${{ github.repository_owner }}
+          CHANGED_DOCKERFILE: ${{ steps.ci-flags.outputs.changed_dockerfile }}
+          BUILD_CI_IMAGE_MATRIX: ${{ steps.matrices.outputs.build_ci_image_matrix }}
+        run: |
+          if [ "${CHANGED_DOCKERFILE}" = "1" ]; then
+            # sanitize ref for tag
+            tag="$(echo "${GITHUB_REF}" | sed 's|[^a-zA-Z0-9]|-|g')-rocm"
+          else
+            tag="latest-rocm"
+          fi
+          # Consume build_ci_image_matrix.include directly: it is already
+          # the deduplicated set of (platform, version) pairs we need to
+          # build, derived from the full GHA-style expansion of ci_matrix.
+          # Single source of truth -- no parallel exclude/include logic
+          # here. Partial-axis include rows produce malformed image URLs
+          # (e.g. "...:latest-rocm" with no version); the resulting docker
+          # pull failure surfaces the malformed include to the maintainer.
+          ci_images=$(
+            jq -c -n \
+              --arg registry "${REGISTRY_URL}" \
+              --arg tag "$tag" \
+              --argjson build_matrix "${BUILD_CI_IMAGE_MATRIX}" \
+              '
+                $build_matrix.include
+                | map({ platform: .supported_platforms,
+                        version:  .rocm_versions })
+                | reduce .[] as $combo (
+                    {}; . + {
+                      ($combo.platform + "-" + $combo.version): (
+                        ( $combo
+                          | .image_name    = ($registry + "/hipfile/ais_ci_" + .platform)
+                          | .image         = (.image_name + ":" + $tag + .version)
+                          | .cache         = (.image_name + ":latest-rocm" + .version + "-cache")
+                          | .image_nvidia  = (.image_name + ":" + $tag + .version + "-nvidia")
+                          | .cache_nvidia  = (.image_name + ":latest-rocm" + .version + "-nvidia-cache")
+                        ) | {
+                          ci_image:              (.image        | ascii_downcase),
+                          ci_image_cache:        (.cache        | ascii_downcase),
+                          ci_image_nvidia:       (.image_nvidia | ascii_downcase),
+                          ci_image_nvidia_cache: (.cache_nvidia | ascii_downcase)
+                        }
+                      )
+                    }
+                  )
+              '
+          )
+          echo "List of CI Images: "
+          echo "${ci_images}" | jq .
+          echo "ci_images=${ci_images}" >> "${GITHUB_OUTPUT}"
 
   Linux:
     needs: [Precheck]
