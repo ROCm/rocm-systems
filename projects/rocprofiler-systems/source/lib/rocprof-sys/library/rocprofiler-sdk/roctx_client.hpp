@@ -4,6 +4,7 @@
 #pragma once
 
 #include "core/control/session.hpp"
+#include "core/control/triggers/roctx.hpp"
 #include "library/rocprofiler-sdk/marker_writer.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -45,6 +46,7 @@ public:
     void configure_services(rocprofiler_context_id_t ctx);
 
     std::shared_ptr<control::session> get_session() const { return m_session; }
+    control::triggers::roctx&         get_trigger() { return *m_trigger; }
 
 private:
     struct marker_range_entry
@@ -57,10 +59,11 @@ private:
 
     using marker_range_stack_t = std::vector<marker_range_entry>;
 
-    rocprofiler_context_id_t          m_ctx{ 0 };
-    roctx_client_config               m_config;
-    marker_writer<MarkerWriterPolicy> m_writer;
-    std::shared_ptr<control::session> m_session{};
+    rocprofiler_context_id_t                  m_ctx{ 0 };
+    roctx_client_config                       m_config;
+    marker_writer<MarkerWriterPolicy>         m_writer;
+    std::shared_ptr<control::session>         m_session;
+    std::unique_ptr<control::triggers::roctx> m_trigger;
 
     static thread_local marker_range_stack_t m_pushed_ranges;
     static thread_local marker_range_stack_t m_started_ranges;
@@ -81,11 +84,6 @@ private:
                                         void* callback_data);
 };
 
-// ---------------------------------------------------------------------------
-// Template definitions that must be visible to all translation units
-// so that roctx_client can be instantiated with any MarkerWriterPolicy.
-// ---------------------------------------------------------------------------
-
 template <typename MarkerWriterPolicy>
 thread_local typename roctx_client<MarkerWriterPolicy>::marker_range_stack_t
     roctx_client<MarkerWriterPolicy>::m_pushed_ranges{};
@@ -99,8 +97,12 @@ roctx_client<MarkerWriterPolicy>::roctx_client(const roctx_client_config& roctx_
 : m_config{ roctx_cfg }
 , m_writer{ roctx_cfg.use_perfetto, roctx_cfg.use_timemory,
             roctx_cfg.perfetto_annotations }
-, m_session{ std::make_shared<control::session>(roctx_cfg.selected_trace_regions) }
-{}
+, m_session{ std::make_shared<control::session>() }
+, m_trigger{ std::make_unique<control::triggers::roctx>(
+      *m_session, roctx_cfg.selected_trace_regions) }
+{
+    m_session->attach(*m_trigger);
+}
 
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys
