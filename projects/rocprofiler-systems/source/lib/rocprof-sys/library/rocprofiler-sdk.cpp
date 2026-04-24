@@ -2805,7 +2805,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     {
         roctx_client->configure_services(_data->get_control_context());
 
-        const auto filtering_active = roctx_client->get_session()->region_filter_active();
+        const auto filtering_active = roctx_client->get_trigger().filter_active();
         if(!filtering_active)
         {
             start();
