@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "id",
+      "category",
+      "technique",
+      "preconditions",
+      "expected_impact",
+      "effort",
+      "risk"
+    ],
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "category": {
+        "type": "string",
+        "enum": [
+          "compute",
+          "memory",
+          "latency"
+        ]
+      },
+      "technique": {
+        "type": "string"
+      },
+      "preconditions": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "expected_impact": {
+        "type": "string"
+      },
+      "effort": {
+        "type": "string",
+        "enum": [
+          "very_low",
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "risk": {
+        "type": "string",
+        "enum": [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "description": {
+        "type": "string"
+      }
+    }
+  }
+}

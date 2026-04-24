@@ -1757,7 +1757,8 @@ device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
 
   bool profiling = (queue != nullptr) && queue->properties().test(CL_QUEUE_PROFILING_ENABLE);
   bool cooperative = false;
-  bool dedicated_queue = (queue != nullptr) && queue->isDedicatedQueue();
+  bool dedicated_queue = (queue != nullptr) && queue->isDedicatedQueue() &&
+                         (settings().dynamic_queues_ >= 2);
 
   // If amd command queue is null, then it's an internal device queue
   if (queue == nullptr) {

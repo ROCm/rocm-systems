@@ -1,0 +1,117 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "perfxpert"
+version = "0.2.0"
+description = "AI-powered GPU trace analysis for rocprofiler-sdk databases"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Advanced Micro Devices, Inc." }]
+requires-python = ">=3.10"
+# The agentic runtime uses pydantic/pyyaml/jsonschema for structured
+# knowledge loading and schema validation. LLM enhancement still requires
+# anthropic or openai (optional extras below).
+dependencies = [
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "jsonschema>=4.0",
+    "httpx>=0.25",
+    "mcp>=1.0",
+    # numpy is used by perfxpert.runtime.gate_cascade for the regression
+    # aggregation math; loaded eagerly during `perfxpert doctor` and any
+    # `perfxpert analyze` invocation. Required (not optional).
+    "numpy>=1.24",
+    # openai-agents is the agentic-runtime SDK (imported as `agents`) that
+    # perfxpert.agents.framework lazily loads whenever the agentic path
+    # dispatches an LLM-backed action. `perfxpert doctor` also reports
+    # its install status, so keep it as a required runtime dep.
+    "openai-agents>=0.1",
+    # tomlkit is used by the Codex backend adapter to round-trip edits
+    # to ~/.codex/config.toml while preserving user comments/formatting.
+    # Required (not optional) so `perfxpert-code codex` works out of the box.
+    "tomlkit>=0.12",
+]
+
+[project.optional-dependencies]
+llm  = ["anthropic>=0.18", "openai>=1.0"]
+rich = ["rich>=13.0"]
+# litellm routes non-OpenAI providers (anthropic, ollama, private) through
+# the openai-agents SDK via agents.extensions.models.litellm_model.LitellmModel.
+# Without it, framework._sdk_invoke() silently routes every model string to
+# OpenAI's endpoint and fails with "requested model does not exist" for
+# Anthropic/Ollama models (Phase 8 fix).
+litellm = ["litellm>=1.50"]
+all  = [
+    "anthropic>=0.18",
+    "openai>=1.0",
+    "rich>=13.0",
+    "litellm>=1.50",
+]
+dev  = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.21",
+    "flake8",
+    "black",
+    "pexpect>=4.8",
+    "pytest-xdist>=3.5",    # parallel red-team / parity execution
+    "hypothesis>=6.100",    # property-based fuzz for sanitizer
+    "rich>=13.0",           # exit-dashboard rendering (already a runtime dep; dev pin kept for parity)
+]
+
+[project.scripts]
+perfxpert = "perfxpert.__main__:main"
+perfxpert-code = "perfxpert.cli.opencode_launcher:main"
+perfxpert-mcp = "mcp_server.server:main"
+
+[project.urls]
+Homepage      = "https://github.com/ROCm/rocm-systems"
+Documentation = "https://rocm.docs.amd.com"
+
+[tool.setuptools]
+# Auto-discover every perfxpert.* subpackage + mcp_server. The explicit
+# list was fragile — new subpackages (perfxpert.tools, perfxpert.agents,
+# perfxpert.knowledge, perfxpert.fence, perfxpert.conversation,
+# perfxpert.cli._backend, perfxpert.cli._gate_hooks) silently dropped
+# from the wheel, so a fresh `pip install perfxpert` would import-fail
+# at runtime on `from perfxpert.tools._tooldep import require_tool`.
+
+[tool.setuptools.packages.find]
+include = ["perfxpert*", "mcp_server*"]
+exclude = ["tests*", "opencode*"]
+
+[tool.setuptools.package-data]
+perfxpert = [
+    "formatters/templates/*.html",
+    "_bundled/**/*",
+    "_bundled/opencode_config/*",
+    "knowledge/*.yaml",
+    "knowledge/_schemas/*.json",
+    "agents/fence/*.md",
+    "agents/templates/*",
+    "../NOTICE",
+    "../opencode/LICENSE",
+]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+]
+python_files = ["test_*.py"]
+addopts = "-ra"
+markers = [
+    "parity: parity (new-path vs old-path) tests — can be slow",
+    "red_team: adversarial tests; every one MUST pass",
+    "regression_gate: proven-optimization false-positive tests",
+    "dashboard: exit-dashboard contract tests",
+    "slow: runs > 10s; excluded from default CI",
+]
+
+[tool.black]
+line-length = 120
+target-version = ["py38", "py310"]
+
+[tool.flake8]
+max-line-length = 120
+extend-ignore = ["E203", "W503"]
