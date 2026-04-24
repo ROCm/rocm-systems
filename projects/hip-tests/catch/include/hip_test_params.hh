@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <string>
 #include <map>
 #include <memory>
+#include <cstdint>
 
 /**
  * @brief Global parameter store for test configuration.
@@ -105,10 +106,34 @@ public:
     int getWarmupsForCurrentLevel() const;
 
     /**
+     * @brief Get cooperative groups iterations for current test level
+     * @return Number of iterations
+     */
+    int getCgIterationsForCurrentLevel() const;
+
+    /**
+     * @brief Get math accuracy iteration count for current test level
+     * @return Number of math accuracy iterations
+     */
+    uint64_t getMathAccuracyIterationsForCurrentLevel() const;
+
+    /**
+     * @brief Get math accuracy max memory percentage for current test level
+     * @return Percentage (0-100) of available memory to use for math accuracy tests
+     */
+    int getMathAccuracyMaxMemoryPercentageForCurrentLevel() const;
+
+    /**
      * @brief Get maximum memory for current test level
      * @return Maximum memory in bytes
      */
-    size_t getMaxMemoryForCurrentLevel() const;
+    size_t getMathMaxMemoryForCurrentLevel() const;
+
+    /**
+     * @brief Get math reduction factor for current test level
+     * @return Reduction factor applied to math test workloads
+     */
+    double getMathReductionFactorForCurrentLevel() const;
 
     /**
      * @brief Clear all stored data
@@ -128,7 +153,11 @@ public:
     std::map<std::string, std::vector<int>> levelBlockSizes;
     std::map<std::string, int> levelIterations;
     std::map<std::string, int> levelWarmups;
-    std::map<std::string, size_t> levelMaxMemory;
+    std::map<std::string, size_t> levelCgIterations;
+    std::map<std::string, uint64_t> levelMathAccuracyIterations;
+    std::map<std::string, int> levelMathAccuracyMaxMemoryPercentage;
+    std::map<std::string, size_t> levelMathMaxMemory;
+    std::map<std::string, double> levelMathReductionFactor;
 
 private:
     TestParameterStore() = default;
@@ -147,5 +176,9 @@ private:
     static constexpr std::array<int, 10> defaultBlockSizes = {32, 64, 96, 128, 192, 256, 384, 512, 768, 1024};
     static constexpr int defaultIterations = 5;
     static constexpr int defaultWarmups = 5;
+    static constexpr int defaultCgIterations = 1;
+    static constexpr uint64_t defaultMathAccuracyIterations = 4294967296; // 2^32
+    static constexpr int defaultMathAccuracyMaxMemoryPercentage = 80;
     static constexpr size_t defaultMaxMemory = 8589934592; // 8G
+    static constexpr double defaultMathReductionFactor = 0.1;
 };
