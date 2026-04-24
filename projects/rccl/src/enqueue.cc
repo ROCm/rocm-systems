@@ -1343,6 +1343,12 @@ static ncclResult_t scheduleP2pTasksToPlan(
 
   // Save the total count of send/recv tasks in the plan
   int planTotalTasks[2] = {comm->planner.nTasksP2pRecv, comm->planner.nTasksP2pSend};
+  // Each non-self P2P round generates up to 2*nChannelsMax proxy ops (send+recv
+  // per channel part). Track the estimate so we can split the plan before
+  // approaching MAX_OPS_PER_PEER and causing the host to spin-wait on proxy
+  // pool free entries during uploadProxyOps.
+  int planProxyOpsEst = 0;
+  int proxyOpsPerRound = 2 * nChannelsMax;
   while (comm->planner.nTasksP2p != 0) {
     for (int round=0; round < nRanks; round++) {
       int sendRank = comm->p2pSchedule[round].sendRank;
@@ -1381,8 +1387,19 @@ static ncclResult_t scheduleP2pTasksToPlan(
         if (!testBudget(budget, plan->nWorkBatches+nChannelsMax, plan->workBytes + sizeof(struct ncclDevWorkP2p))) {
           return ncclSuccess;
         }
+        // Split the plan before proxy ops approach the pool limit. At large
+        // node counts with P2P batching, merged batches pack many rounds into
+        // each plan, pushing the proxy op count close to MAX_OPS_PER_PEER.
+        // When plan N+1's uploadProxyOps runs, plan N's pool entries are still
+        // being processed, leaving very few free entries and causing a
+        // spin-wait livelock in ncclLocalOpAppend.
+        if (sendRank != comm->rank &&
+            planProxyOpsEst + proxyOpsPerRound > MAX_OPS_PER_PEER * 3 / 4) {
+          return ncclSuccess;
+        }
         struct ncclTaskP2p* p2pTasks[2] = { recv, send };
         NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, round, sendRank, sendBuff, sendBytes, recvRank, recvBuff, recvBytes, send ? send->opCount : 0, recv ? recv->opCount : 0, planTotalTasks, p2pTasks));
+        if (sendRank != comm->rank) planProxyOpsEst += proxyOpsPerRound;
         if (send != nullptr) {
           ncclIntruQueueDequeue(&peers[sendRank].sendQueue);
           // Profiler - We can overwrite groupAPI event handles here since all operations here belong to the same group
