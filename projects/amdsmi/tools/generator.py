@@ -261,11 +261,15 @@ def _build_candidate_paths():
     candidates = []
 
     if context == "pip":
-        # .so lives alongside the wrapper inside the wheel / site-packages
+        # .so is self-contained inside the wheel / site-packages.
+        # Do NOT fall back to the system libamd_smi.so: loading both libraries
+        # in the same process causes segfaults during static initialisation of
+        # std::variant tables on older toolchains (GCC 8 / glibc 2.28).
         candidates.append(base / "libamd_smi_python.so")
-    else:
-        # System package - .so lives under <rocm_root>/lib/
-        candidates.append(base / "lib" / "{library_name}")
+        return candidates
+
+    # System package - .so lives under <rocm_root>/lib/
+    candidates.append(base / "lib" / "{library_name}")
 
     # Fallbacks
     for env_var in ("ROCM_HOME", "ROCM_PATH"):

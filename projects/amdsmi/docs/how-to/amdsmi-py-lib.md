@@ -21,7 +21,10 @@ See the [requirements](#install_reqs) section for more information.
 
 1. Ensure `amdgpu` drivers are installed properly for initialization.
 
-2. Export `LD_LIBRARY_PATH` to the `amdsmi` installation directory.
+2. For system packages (RPM / DEB), `LD_LIBRARY_PATH` is not required for the
+   Python wrapper — it loads `libamd_smi.so` directly from the ROCm library
+   directory. It may still be needed for C/C++ programs that link against the
+   library at runtime. If required, export it as follows:
 
    ```bash
    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib:/opt/rocm/lib64:

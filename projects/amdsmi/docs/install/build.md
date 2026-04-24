@@ -82,6 +82,33 @@ import order (see
 [pytorch#175648](https://github.com/pytorch/pytorch/pull/175648) and
 [rocm-systems#3702](https://github.com/ROCm/TheRock/issues/3702)).
 
+(build_python_wheel)=
+## Building a pip wheel
+
+To build a self-contained Python wheel (for distribution via pip rather than
+as a system package), enable the `BUILD_PYTHON_LIB` CMake option:
+
+```bash
+cmake -B build-amdsmi \
+      -DCMAKE_INSTALL_PREFIX=/opt/rocm \
+      -DBUILD_PYTHON_LIB=ON \
+      projects/amdsmi
+
+cmake --build build-amdsmi --parallel $(nproc)
+cmake --build build-amdsmi --target python_wheel
+```
+
+With `BUILD_PYTHON_LIB=ON` the build produces `libamd_smi_python.so` (a
+separately-named copy of the library) and bundles it into the wheel so the
+package is self-contained. The wheel is written to
+`build-amdsmi/py-interface/python_package/`.
+
+```{note}
+Building the wheel (`--target python_wheel`) is an explicit opt-in step and
+is not part of the default build. `pip` must be available in the build
+environment.
+```
+
 (rebuild_py_wrapper)=
 ## Rebuild the Python wrapper
 
