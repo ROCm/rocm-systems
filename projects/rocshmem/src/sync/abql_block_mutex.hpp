@@ -117,9 +117,9 @@ class ABQLBlockMutexProxy {
   using ProxyT = DeviceProxy<HIPDefaultFinegrainedAllocator, ABQLBlockMutex>;
 
  public:
-  explicit ABQLBlockMutexProxy(const MemoryAllocator& alloc = *get_default_allocator(),
+  explicit ABQLBlockMutexProxy([[maybe_unused]] const MemoryAllocator& alloc = *get_default_allocator(),
                                size_t num_elems = 1)
-      : allocator_{alloc}, proxy_{num_elems} {}
+      : proxy_{num_elems} {}
 
   ABQLBlockMutexProxy(const ABQLBlockMutexProxy& other) = delete;
 
@@ -132,7 +132,6 @@ class ABQLBlockMutexProxy {
   __host__ __device__ ABQLBlockMutex* get() { return proxy_.get(); }
 
  private:
-  MemoryAllocator allocator_{};
   ProxyT proxy_{};
 };
 
