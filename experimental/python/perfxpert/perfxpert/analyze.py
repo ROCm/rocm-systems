@@ -944,6 +944,7 @@ def _format_agentic_output(
     metadata = dict(_read("metadata", {}) or {})
 
     payload = analysis_payload or {}
+    warnings.extend(str(w) for w in payload.get("warnings", []) or [])
 
     time_breakdown = payload.get("time_breakdown") or {}
     hotspots = payload.get("hotspots") or []

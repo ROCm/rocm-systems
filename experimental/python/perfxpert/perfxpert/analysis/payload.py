@@ -63,6 +63,19 @@ def tier0_dict_to_ns(d: Dict[str, Any]) -> Any:
     return SimpleNamespace(**(d or {}))
 
 
+def _format_recoverable_warning(section: str, exc: BaseException) -> str:
+    """Return a concise user-facing warning for a recoverable section failure."""
+    detail = str(exc).strip()
+    suffix = f": {detail}" if detail else ""
+    return f"{section} unavailable ({type(exc).__name__}{suffix})"
+
+
+def _append_recoverable_warning(
+    payload: Dict[str, Any], section: str, exc: BaseException
+) -> None:
+    payload.setdefault("warnings", []).append(_format_recoverable_warning(section, exc))
+
+
 # ---------------------------------------------------------------------------
 # Tier-0 source scanner (lightweight)
 # ---------------------------------------------------------------------------
@@ -396,6 +409,7 @@ def build_analysis_payload(
         "tier0_findings": None,
         "recommendations_deterministic": [],
         "metadata": {},
+        "warnings": [],
         # Phase 10 — RCCL / NIC communication section. Populated only when
         # the trace actually contains RCCL spans; absent otherwise so
         # formatters can short-circuit the block.
@@ -414,7 +428,8 @@ def build_analysis_payload(
         # 1. Time breakdown
         try:
             payload["time_breakdown"] = compute_time_breakdown(connection) or {}
-        except Exception:
+        except Exception as exc:
+            _append_recoverable_warning(payload, "time breakdown", exc)
             payload["time_breakdown"] = {}
 
         # 2. Hotspots
@@ -422,13 +437,15 @@ def build_analysis_payload(
             payload["hotspots"] = identify_hotspots(
                 connection, top_n=top_kernels, min_duration=min_duration
             ) or []
-        except Exception:
+        except Exception as exc:
+            _append_recoverable_warning(payload, "hotspot analysis", exc)
             payload["hotspots"] = []
 
         # 3. Memory copy analysis
         try:
             payload["memory_analysis"] = analyze_memory_copies(connection) or {}
-        except Exception:
+        except Exception as exc:
+            _append_recoverable_warning(payload, "memory-copy analysis", exc)
             payload["memory_analysis"] = {}
 
         # 4. Hardware counters (Tier 2)
@@ -438,7 +455,8 @@ def build_analysis_payload(
                 "metrics": {},
                 "counters": {},
             }
-        except Exception:
+        except Exception as exc:
+            _append_recoverable_warning(payload, "hardware-counter analysis", exc)
             payload["hardware_counters"] = {"has_counters": False, "metrics": {}, "counters": {}}
 
         # 4b. RCCL / NIC communication analysis (Phase 10). Populated only
@@ -460,13 +478,15 @@ def build_analysis_payload(
                     row = cur.fetchone()
                     if row and row[0]:
                         gfx_id = str(row[0])
-                except Exception:
+                except Exception as exc:
+                    _append_recoverable_warning(payload, "GPU architecture lookup", exc)
                     gfx_id = None
 
                 comm = analyze_collectives(database_path, gfx_id=gfx_id)
                 if comm and comm.get("collectives"):
                     payload["communication"] = comm
-            except Exception:
+            except Exception as exc:
+                _append_recoverable_warning(payload, "communication analysis", exc)
                 payload["communication"] = None
 
         # 4c. Live Roofline points (Phase 10). Deterministic per-kernel
@@ -484,7 +504,8 @@ def build_analysis_payload(
                 rf = plot_points(database_path, top_k=top_kernels)
                 if rf and rf.get("kernels"):
                     payload["roofline"] = rf
-            except Exception:
+            except Exception as exc:
+                _append_recoverable_warning(payload, "roofline analysis", exc)
                 payload["roofline"] = None
 
         # 5. Kernel resources / occupancy (best-effort — requires kernel symbols)
@@ -492,13 +513,15 @@ def build_analysis_payload(
             payload["kernel_resources"] = analyze_kernel_resources(
                 connection, payload["hotspots"]
             ) or {}
-        except Exception:
+        except Exception as exc:
+            _append_recoverable_warning(payload, "kernel-resource analysis", exc)
             payload["kernel_resources"] = {}
 
         # 6. API overhead breakdown
         try:
             payload["api_overhead"] = analyze_api_overhead(connection) or {}
-        except Exception:
+        except Exception as exc:
+            _append_recoverable_warning(payload, "API-overhead analysis", exc)
             payload["api_overhead"] = {}
 
         # 7. Warmup outlier detection
@@ -506,14 +529,16 @@ def build_analysis_payload(
             payload["warmup_issues"] = detect_warmup_issues(
                 connection, payload["hotspots"]
             ) or {"has_warmup_issues": False, "outliers": []}
-        except Exception:
+        except Exception as exc:
+            _append_recoverable_warning(payload, "warmup analysis", exc)
             payload["warmup_issues"] = {"has_warmup_issues": False, "outliers": []}
 
     # 8. Thread trace (Tier 3) — only when --att-dir is supplied
     if att_dir:
         try:
             payload["thread_trace"] = analyze_thread_trace(att_dir)
-        except Exception:
+        except Exception as exc:
+            _append_recoverable_warning(payload, "ATT analysis", exc)
             payload["thread_trace"] = {"has_att_data": False, "reason": "parse error"}
 
     # 9. Tier-0 source scan — only when --source-dir is supplied
@@ -526,7 +551,8 @@ def build_analysis_payload(
         if connection is not None:
             try:
                 already_collected = _detect_already_collected(connection) or frozenset()
-            except Exception:
+            except Exception as exc:
+                _append_recoverable_warning(payload, "collection-context detection", exc)
                 already_collected = frozenset()
         payload["recommendations_deterministic"] = generate_recommendations(
             time_breakdown=payload.get("time_breakdown") or {},
@@ -538,7 +564,8 @@ def build_analysis_payload(
             warmup_issues=payload.get("warmup_issues"),
             api_overhead=payload.get("api_overhead"),
         ) or []
-    except Exception:
+    except Exception as exc:
+        _append_recoverable_warning(payload, "recommendation generation", exc)
         payload["recommendations_deterministic"] = []
 
     # Bug 3 — only ``code_patterns`` (real code-level perf issues) feed the
