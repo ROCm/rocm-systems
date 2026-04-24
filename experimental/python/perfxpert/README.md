@@ -41,13 +41,6 @@ TUI. See [docs/guides/getting-started.md](docs/guides/getting-started.md)
 for the Ubuntu/RHEL/SLES package matrix, direct-pip equivalent, editable
 installs, and troubleshooting.
 
-PyPI install, when published:
-
-```bash
-# SKIP-SAMPLE — install from PyPI after publication
-pip install "perfxpert[all]"
-```
-
 ### LLM Providers
 
 | Provider | Source | Typical use |
