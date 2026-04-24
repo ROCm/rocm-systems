@@ -15,6 +15,7 @@ the server in isolation, avoiding MCP SDK client dependencies.
 """
 
 import json
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -25,13 +26,9 @@ import pytest
 
 def _perfxpert_mcp_path() -> Path:
     """Locate the perfxpert-mcp entry point."""
-    result = subprocess.run(
-        ["which", "perfxpert-mcp"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0:
-        return Path(result.stdout.strip())
+    found = shutil.which("perfxpert-mcp")
+    if found:
+        return Path(found)
     raise RuntimeError(
         "perfxpert-mcp not found in PATH. Install with: pip install -e ."
     )
