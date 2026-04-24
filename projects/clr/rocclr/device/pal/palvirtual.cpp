@@ -1885,7 +1885,7 @@ void VirtualGPU::submitFillMemory(amd::FillMemoryCommand& cmd) {
   std::scoped_lock lock(execution());
 
   profilingBegin(cmd);
-  if (cmd.type() == CL_COMMAND_FILL_IMAGE) {
+  if (cmd.type() == amd::CommandType::FillImage) {
     if (!fillMemory(cmd.type(), &cmd.memory(), cmd.pattern(), cmd.patternSize(), cmd.origin(),
                     cmd.size())) {
       cmd.setStatus(amd::Status::InvalidOperation);
