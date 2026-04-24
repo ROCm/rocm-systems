@@ -356,10 +356,7 @@ class RocProfCompute_Base:
             native_tool_finder = NativeToolFinder(
                 Path(sources_path), Path(args.rocprofiler_sdk_tool_path)
             )
-            native_tool_path = native_tool_finder.get_collector_library_path()
-            native_tool_path_str = str(
-                native_tool_path
-            )  # for compatibility with downstream code
+            native_tool_path_str = str(native_tool_finder.get_collector_library_path())
 
         if self.__profiler == "rocprofiler-sdk":
             options = self.get_profiler_options(native_tool_path=native_tool_path_str)
