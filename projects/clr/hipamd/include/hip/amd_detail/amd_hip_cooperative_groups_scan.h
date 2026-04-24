@@ -80,9 +80,19 @@ __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& o
 
 #ifdef __OPTIMIZE__  // at the time of this writing the ockl wfscan functions do not compile when
                      // using -O0
-  if (maskNumBits == warpSize) {
+  if (impl::isTiledGroup<TyGroup>::value) {
     if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value &&
                   impl::has_scan_add<Val>::value) {
+      // for tiled_groups might know at compile time that whether we can call the ockl intrinsics or
+      // not; if the block tile is actually the whole warp
+      if (impl::tiledGroupSize<TyGroup>::value == warpSize) {
+        // TODO g-h-c check that his condition is compiled away by the compiler
+        return impl::scan_add<true>(val);
+      }
+    }
+  } else if constexpr (__hip_internal::is_same<TyGroup, cooperative_groups::coalesced_group>::value) {
+    // for the coalesced_group case we do need to check at runtime
+    if (maskNumBits == warpSize) {
       return impl::scan_add<true>(val);
     }
   }

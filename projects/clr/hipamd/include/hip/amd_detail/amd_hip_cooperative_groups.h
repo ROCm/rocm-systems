@@ -1057,6 +1057,16 @@ struct isTiledGroup<cooperative_groups::thread_block_tile<N, ParentCGTy>>
          N == 16 || N == 32 || N == 64)> {
 };
 
+// returns the size of tile_group provided it is known at compile time
+template <class TyGroup>
+struct tiledGroupSize : __hip_internal::integral_constant<int, 0> {
+
+};
+template <unsigned int N, class ParentCGTy>
+struct tiledGroupSize<cooperative_groups::thread_block_tile<N, ParentCGTy>>
+  : __hip_internal::integral_constant<int, N> {
+};
+
 template <class TyGroup>
 struct isCoalescedGroup : __hip_internal::false_type {
 };
