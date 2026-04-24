@@ -19,13 +19,13 @@ from perfxpert.agents.compute_specialist import (
 from perfxpert.agents.framework import Agent, ToolBinding, run_agent
 from perfxpert.tools import arch, bottleneck, predict_impact, unified_memory
 
-
 _FENCE_PATH = Path(__file__).parent / "fence" / "memory_specialist.md"
 
 
 def _fetch_catalog(gfx_id: str) -> List[Dict[str, Any]]:
     try:
         from perfxpert.tools import memory_techniques  # type: ignore
+
         return memory_techniques.catalog(gfx_id=gfx_id)
     except ImportError:
         return []  # defensive fallback if memory_techniques tool is absent
@@ -87,9 +87,7 @@ def run_memory_specialist(
     )
 
     if raw.get("_mode") == "airgap":
-        techniques = attach_predictions_to_techniques(
-            _rank_memory_catalog(catalog), payload
-        )
+        techniques = attach_predictions_to_techniques(_rank_memory_catalog(catalog), payload)
         return schemas.MemorySpecialistOutput(
             techniques=techniques,
             confidence=0.6,

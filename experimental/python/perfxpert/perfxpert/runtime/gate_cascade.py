@@ -32,7 +32,6 @@ import numpy as np
 import tempfile
 from pathlib import Path
 
-
 # -- Debug-loop caps (spec §5) ---------------------------------------------
 
 MAX_OPTIMIZATION_CYCLES_PER_KERNEL = 5
@@ -41,10 +40,10 @@ MAX_SESSION_LLM_TURNS = 100
 
 # -- Thresholds (spec §5) --------------------------------------------------
 
-REGRESSION_NOISE_THRESHOLD_PCT = 3.0   # >3% total regression → fail
+REGRESSION_NOISE_THRESHOLD_PCT = 3.0  # >3% total regression → fail
 HOT_KERNEL_INDIVIDUAL_THRESHOLD_PCT = 10.0  # any hot kernel >10% slower → fail
-TAIL_GEOMEAN_THRESHOLD_PCT = 5.0        # weighted-geomean degradation > 5% → fail
-SOL_MAX_REASONABLE_SPEEDUP = 50.0       # claimed speedup > peak_ratio × 50 → reject
+TAIL_GEOMEAN_THRESHOLD_PCT = 5.0  # weighted-geomean degradation > 5% → fail
+SOL_MAX_REASONABLE_SPEEDUP = 50.0  # claimed speedup > peak_ratio × 50 → reject
 
 
 @dataclass(frozen=True)
@@ -54,6 +53,7 @@ class GateVerdict:
     Correctness never produces one of these — it receives one from
     `evaluate()` and narrates it.
     """
+
     status: Literal["pass", "reject", "regressed"]
     failing_gate: Optional[Literal["compile", "sol", "bitwise", "regression", "anchors"]]
     detail: str
@@ -65,9 +65,11 @@ class GateVerdict:
 
 # -- Gate implementations (thin wrappers around execution tools) -----------
 
+
 def _run_compile_gate(patch_file: str, flags: List[str]) -> Dict[str, Any]:
     """Delegate to tools.compile.build. Exposed at module level for test mocking."""
     from perfxpert.tools import compile as compile_tool  # type: ignore
+
     return compile_tool.build(patch_file, flags)
 
 
@@ -125,20 +127,24 @@ def _run_sol_gate(
 
 def _run_bitwise_gate(baseline_db: str, candidate_db: str) -> Dict[str, Any]:
     from perfxpert.tools import patch as patch_tool  # type: ignore
+
     return patch_tool.verify_output(baseline=baseline_db, new=candidate_db)
 
 
 def _run_regression_gate(baseline_db: str, candidate_db: str) -> Dict[str, Any]:
     from perfxpert.tools import regression
+
     return regression.compare_runs(db_before=baseline_db, db_after=candidate_db)
 
 
 def _run_anchors_gate(binary_path: str) -> Dict[str, Any]:
     from perfxpert.tools import anchors  # type: ignore
+
     return anchors.check(test_suite="default", new_binary=binary_path)
 
 
 # -- Cascade --------------------------------------------------------------
+
 
 def evaluate(
     *,
@@ -166,7 +172,8 @@ def evaluate(
     r = _run_compile_gate(patch_file, flags)
     if not r.get("ok", False):
         return GateVerdict(
-            status="reject", failing_gate="compile",
+            status="reject",
+            failing_gate="compile",
             detail=f"build failed: {r.get('stderr', '')[:200]}",
             metrics={"compile": r},
             rejected_patch_sha=patch_sha,
@@ -174,13 +181,15 @@ def evaluate(
 
     # Gate 2: SOL sanity (anti-Sakana)
     r = _run_sol_gate(
-        claimed_speedup, gfx_id,
+        claimed_speedup,
+        gfx_id,
         achieved_flops_per_sec=achieved_flops_per_sec,
         kernel_type=kernel_type,
     )
     if not r.get("ok", False):
         return GateVerdict(
-            status="reject", failing_gate="sol",
+            status="reject",
+            failing_gate="sol",
             detail=f"claimed speedup {claimed_speedup}× exceeds SOL; ratio {r.get('peak_ratio')}",
             metrics={"sol": r},
             rejected_patch_sha=patch_sha,
@@ -190,7 +199,8 @@ def evaluate(
     r = _run_bitwise_gate(baseline_db, candidate_db)
     if not r.get("ok", False):
         return GateVerdict(
-            status="reject", failing_gate="bitwise",
+            status="reject",
+            failing_gate="bitwise",
             detail=f"output diverged: {r.get('diff')}",
             metrics={"bitwise": r},
             rejected_patch_sha=patch_sha,
@@ -208,17 +218,19 @@ def evaluate(
     # regression.compare_runs are fractions; REGRESSION_NOISE_THRESHOLD_PCT
     # (3.0) and TAIL_GEOMEAN_THRESHOLD_PCT (5.0) are percent — divide by 100.
     r = _run_regression_gate(baseline_db, candidate_db)
-    total_delta = r.get("total_delta_pct", 0.0)          # fraction, e.g. 0.15
+    total_delta = r.get("total_delta_pct", 0.0)  # fraction, e.g. 0.15
     tail_delta = r.get("weighted_geomean_delta_pct", 0.0)  # fraction
     # Only flag kernels that are hot AND regressed beyond the threshold
     hot_failures = [
-        k for k in r.get("per_kernel_deltas", [])
-        if k.get("was_hot", False)
-        and k.get("delta_pct", 0.0) > HOT_KERNEL_INDIVIDUAL_THRESHOLD_PCT / 100.0
+        k
+        for k in r.get("per_kernel_deltas", [])
+        if k.get("was_hot", False) and k.get("delta_pct", 0.0) > HOT_KERNEL_INDIVIDUAL_THRESHOLD_PCT / 100.0
     ]
-    if (total_delta > REGRESSION_NOISE_THRESHOLD_PCT / 100.0
-            or tail_delta > TAIL_GEOMEAN_THRESHOLD_PCT / 100.0
-            or hot_failures):
+    if (
+        total_delta > REGRESSION_NOISE_THRESHOLD_PCT / 100.0
+        or tail_delta > TAIL_GEOMEAN_THRESHOLD_PCT / 100.0
+        or hot_failures
+    ):
         detail_parts = []
         if total_delta > REGRESSION_NOISE_THRESHOLD_PCT / 100.0:
             detail_parts.append(f"total +{total_delta * 100:.1f}%")
@@ -227,7 +239,8 @@ def evaluate(
         if hot_failures:
             detail_parts.append(f"{len(hot_failures)} hot kernel(s) regressed >10%")
         return GateVerdict(
-            status="regressed", failing_gate="regression",
+            status="regressed",
+            failing_gate="regression",
             detail="; ".join(detail_parts),
             metrics={"regression": r},
             rejected_patch_sha=patch_sha,
@@ -241,7 +254,8 @@ def evaluate(
         r = _run_anchors_gate(candidate_binary)
         if not r.get("ok", False):
             return GateVerdict(
-                status="reject", failing_gate="anchors",
+                status="reject",
+                failing_gate="anchors",
                 detail=f"anchor tests failed: {r.get('failed', [])}",
                 metrics={"anchors": r, "gates_run": 5},
                 rejected_patch_sha=patch_sha,
@@ -252,13 +266,11 @@ def evaluate(
     if gate5_ran:
         detail = "all 5 gates passed"
     else:
-        detail = (
-            "4 gates passed; Gate 5 (anchors) skipped"
-            " — no candidate_binary provided"
-        )
+        detail = "4 gates passed; Gate 5 (anchors) skipped" " — no candidate_binary provided"
 
     return GateVerdict(
-        status="pass", failing_gate=None,
+        status="pass",
+        failing_gate=None,
         detail=detail,
         metrics={"claimed_speedup": claimed_speedup, "gates_run": gates_run},
         delta_pct=total_delta,
@@ -267,9 +279,11 @@ def evaluate(
 
 # -- Test-friendly API (red-team test support) --------------------------------
 
+
 @dataclass
 class KernelRuntime:
     """Simple kernel runtime snapshot for testing."""
+
     kernel_name: str
     total_runtime_ns: int
     share: float
@@ -283,6 +297,7 @@ class GateInput:
     (verify_output_baseline/new, baseline_kernel_runtimes/new_kernel_runtimes)
     specifications for testing individual gates in isolation.
     """
+
     kernel_name: str
     claimed_speedup: float
     arch: str
@@ -340,7 +355,8 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
     # Check for plateau (5+ consecutive failures)
     if gate_input.loop_counter >= 5:
         return GateVerdict(
-            status="reject", failing_gate="regression",
+            status="reject",
+            failing_gate="regression",
             detail="5 consecutive failures detected; deeper-tier debugging required (plateau)",
             metrics={"loop_counter": gate_input.loop_counter},
             rejected_patch_sha=gate_input.patch_sha,
@@ -369,7 +385,8 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
                 r = stubs_compile("dummy.hip", [])
                 if not r.get("ok", False):
                     return GateVerdict(
-                        status="reject", failing_gate="compile",
+                        status="reject",
+                        failing_gate="compile",
                         detail="build failed: compilation failed",
                         metrics={"compile": r},
                         rejected_patch_sha=gate_input.patch_sha,
@@ -381,7 +398,7 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
             # Map arch to peak performance (simplified)
             arch_peak = {
                 "gfx942": 1307.0,  # MI300X BF16 MFMA peak TFLOPS
-                "gfx90a": 120.0,   # MI250X
+                "gfx90a": 120.0,  # MI250X
             }
             peak_tflops = arch_peak.get(gate_input.arch, 1000.0)
 
@@ -395,7 +412,8 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
             with mock_patch.object(current_module, "_run_sol_gate", sol_stub):
                 if not ok_sol:
                     return GateVerdict(
-                        status="reject", failing_gate="sol",
+                        status="reject",
+                        failing_gate="sol",
                         detail=f"claimed speedup {gate_input.claimed_speedup}× exceeds SOL; sanity check failed",
                         metrics={"sol": sol_stub.return_value},
                         rejected_patch_sha=gate_input.patch_sha,
@@ -409,18 +427,20 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
                 # Check if arrays diverge beyond tolerance
                 max_diff = float(np.max(np.abs(gate_input.verify_output_baseline - gate_input.verify_output_new)))
                 ok_bitwise = np.allclose(
-                    gate_input.verify_output_baseline,
-                    gate_input.verify_output_new,
-                    rtol=1e-5, atol=1e-5
+                    gate_input.verify_output_baseline, gate_input.verify_output_new, rtol=1e-5, atol=1e-5
                 )
-                bitwise_stub.return_value = {"ok": ok_bitwise, "diff": f"max_abs={max_diff}" if not ok_bitwise else None}
+                bitwise_stub.return_value = {
+                    "ok": ok_bitwise,
+                    "diff": f"max_abs={max_diff}" if not ok_bitwise else None,
+                }
             else:
                 bitwise_stub.return_value = {"ok": True, "diff": None}
 
             with mock_patch.object(current_module, "_run_bitwise_gate", bitwise_stub):
                 if not ok_bitwise:
                     return GateVerdict(
-                        status="reject", failing_gate="bitwise",
+                        status="reject",
+                        failing_gate="bitwise",
                         detail=f"output diverged: {bitwise_stub.return_value.get('diff')}",
                         metrics={"bitwise": bitwise_stub.return_value},
                         rejected_patch_sha=gate_input.patch_sha,
@@ -434,18 +454,25 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
                 # Compute per-kernel deltas
                 hot_kernels = []
                 import math
+
                 # Compute weighted geomean: baseline-share weighted geomean of regression ratios only
                 log_sum = 0.0
                 for new_rt in gate_input.new_kernel_runtimes:
-                    baseline_rt = next((b for b in gate_input.baseline_kernel_runtimes
-                                      if b.kernel_name == new_rt.kernel_name), None)
+                    baseline_rt = next(
+                        (b for b in gate_input.baseline_kernel_runtimes if b.kernel_name == new_rt.kernel_name), None
+                    )
                     if baseline_rt:
-                        delta_pct = ((new_rt.total_runtime_ns - baseline_rt.total_runtime_ns)
-                                   / baseline_rt.total_runtime_ns * 100.0)
-                        hot_kernels.append({
-                            "kernel_name": new_rt.kernel_name,
-                            "delta_pct": delta_pct,
-                        })
+                        delta_pct = (
+                            (new_rt.total_runtime_ns - baseline_rt.total_runtime_ns)
+                            / baseline_rt.total_runtime_ns
+                            * 100.0
+                        )
+                        hot_kernels.append(
+                            {
+                                "kernel_name": new_rt.kernel_name,
+                                "delta_pct": delta_pct,
+                            }
+                        )
                         # For geomean: only include regressions (delta_pct > 0)
                         if delta_pct > 0 and baseline_rt.total_runtime_ns > 0:
                             ratio = new_rt.total_runtime_ns / baseline_rt.total_runtime_ns
@@ -471,8 +498,11 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
                 }
             else:
                 # Simple overall speedup check
-                delta_pct = ((gate_input.achieved_runtime_ns - gate_input.baseline_runtime_ns)
-                           / gate_input.baseline_runtime_ns * 100.0)
+                delta_pct = (
+                    (gate_input.achieved_runtime_ns - gate_input.baseline_runtime_ns)
+                    / gate_input.baseline_runtime_ns
+                    * 100.0
+                )
                 regression_stub.return_value = {
                     "ok": delta_pct <= REGRESSION_NOISE_THRESHOLD_PCT,
                     "total_delta_pct": delta_pct,
@@ -484,12 +514,15 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
                 r = regression_stub.return_value
                 total_delta = r.get("total_delta_pct", 0.0)
                 tail_delta = r.get("weighted_geomean_delta_pct", 0.0)
-                hot_failures = [k for k in r.get("hot_kernels", [])
-                               if k.get("delta_pct", 0.0) > HOT_KERNEL_INDIVIDUAL_THRESHOLD_PCT]
+                hot_failures = [
+                    k for k in r.get("hot_kernels", []) if k.get("delta_pct", 0.0) > HOT_KERNEL_INDIVIDUAL_THRESHOLD_PCT
+                ]
 
-                if (total_delta > REGRESSION_NOISE_THRESHOLD_PCT
-                        or tail_delta > TAIL_GEOMEAN_THRESHOLD_PCT
-                        or hot_failures):
+                if (
+                    total_delta > REGRESSION_NOISE_THRESHOLD_PCT
+                    or tail_delta > TAIL_GEOMEAN_THRESHOLD_PCT
+                    or hot_failures
+                ):
                     detail_parts = []
                     if total_delta > REGRESSION_NOISE_THRESHOLD_PCT:
                         detail_parts.append(f"total +{total_delta:.1f}%")
@@ -498,7 +531,8 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
                     if hot_failures:
                         detail_parts.append(f"{len(hot_failures)} hot kernel(s) regressed >10%")
                     return GateVerdict(
-                        status="regressed", failing_gate="regression",
+                        status="regressed",
+                        failing_gate="regression",
                         detail="; ".join(detail_parts),
                         metrics={"regression": r},
                         rejected_patch_sha=gate_input.patch_sha,
@@ -523,7 +557,8 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
             with mock_patch.object(current_module, "_run_anchors_gate", anchors_stub):
                 if not ok_anchors:
                     return GateVerdict(
-                        status="reject", failing_gate="anchors",
+                        status="reject",
+                        failing_gate="anchors",
                         detail=f"anchor tests failed: {removed_tests}",
                         metrics={"anchors": anchors_stub.return_value},
                         rejected_patch_sha=gate_input.patch_sha,
@@ -536,7 +571,8 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
 
     # All gates passed
     return GateVerdict(
-        status="pass", failing_gate=None,
+        status="pass",
+        failing_gate=None,
         detail="all 5 gates passed",
         metrics={"claimed_speedup": gate_input.claimed_speedup},
         delta_pct=0.0,

@@ -42,17 +42,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from perfxpert.tools._class import ToolClass, tool_class
 
-
-_BUBBLE_MIN_NS = 2_000     # 2 us — ignore < 2 us gaps (scheduler noise)
+_BUBBLE_MIN_NS = 2_000  # 2 us — ignore < 2 us gaps (scheduler noise)
 _BUBBLE_MAX_TRACKED = 256  # cap on the number of bubbles returned
 
 
 def _find_dispatch_tables(conn: sqlite3.Connection) -> Optional[Tuple[str, str]]:
     cur = conn.cursor()
-    cur.execute(
-        "SELECT name FROM sqlite_master "
-        "WHERE type='table' AND name LIKE 'rocpd_kernel_dispatch%'"
-    )
+    cur.execute("SELECT name FROM sqlite_master " "WHERE type='table' AND name LIKE 'rocpd_kernel_dispatch%'")
     row = cur.fetchone()
     if not row:
         return None
@@ -95,23 +91,23 @@ def _fetch_nodes(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
 
     nodes: List[Dict[str, Any]] = []
     for i, (start, end, name, stream) in enumerate(rows):
-        nodes.append({
-            "id": f"k{i}",
-            "name": name or f"kernel_{i}",
-            "start_ns": int(start),
-            "end_ns": int(end),
-            "duration_ns": int(end) - int(start),
-            "stream": int(stream or 0),
-        })
+        nodes.append(
+            {
+                "id": f"k{i}",
+                "name": name or f"kernel_{i}",
+                "start_ns": int(start),
+                "end_ns": int(end),
+                "duration_ns": int(end) - int(start),
+                "stream": int(stream or 0),
+            }
+        )
     return nodes
 
 
 def _wait_event_count(conn: sqlite3.Connection) -> int:
     """Count hipStreamWaitEvent / hipEventSynchronize calls (if in HIP trace)."""
     cur = conn.cursor()
-    cur.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_hip_api%'"
-    )
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_hip_api%'")
     row = cur.fetchone()
     if not row:
         return 0
@@ -138,11 +134,13 @@ def _edges_and_per_stream_chains(
     edges: List[Dict[str, Any]] = []
     for stream_idx_list in streams.values():
         for a, b in zip(stream_idx_list, stream_idx_list[1:]):
-            edges.append({
-                "from": nodes[a]["id"],
-                "to": nodes[b]["id"],
-                "kind": "stream_order",
-            })
+            edges.append(
+                {
+                    "from": nodes[a]["id"],
+                    "to": nodes[b]["id"],
+                    "kind": "stream_order",
+                }
+            )
     return edges, streams
 
 
@@ -181,12 +179,14 @@ def _detect_bubbles(
             if gap >= _BUBBLE_MIN_NS:
                 total += gap
                 if len(bubbles) < _BUBBLE_MAX_TRACKED:
-                    bubbles.append({
-                        "start": nodes[a]["end_ns"],
-                        "end": nodes[b]["start_ns"],
-                        "cause": f"idle_gap_stream_{s}",
-                        "duration_ns": int(gap),
-                    })
+                    bubbles.append(
+                        {
+                            "start": nodes[a]["end_ns"],
+                            "end": nodes[b]["start_ns"],
+                            "cause": f"idle_gap_stream_{s}",
+                            "duration_ns": int(gap),
+                        }
+                    )
     return bubbles, int(total)
 
 
@@ -215,16 +215,24 @@ def reconstruct_dag(db_path: str) -> Dict[str, Any]:
         conn = sqlite3.connect(db_path)
     except sqlite3.Error:
         return {
-            "nodes": [], "edges": [], "critical_path": [],
-            "bubbles": [], "total_bubble_ns": 0, "sync_event_count": 0,
+            "nodes": [],
+            "edges": [],
+            "critical_path": [],
+            "bubbles": [],
+            "total_bubble_ns": 0,
+            "sync_event_count": 0,
         }
 
     try:
         nodes = _fetch_nodes(conn)
         if not nodes:
             return {
-                "nodes": [], "edges": [], "critical_path": [],
-                "bubbles": [], "total_bubble_ns": 0, "sync_event_count": 0,
+                "nodes": [],
+                "edges": [],
+                "critical_path": [],
+                "bubbles": [],
+                "total_bubble_ns": 0,
+                "sync_event_count": 0,
             }
         edges, streams = _edges_and_per_stream_chains(nodes)
         critical = _critical_path(nodes, streams)

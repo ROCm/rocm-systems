@@ -8,10 +8,7 @@ import pytest
 
 from perfxpert.knowledge import load_yaml
 
-SCHEMA_PATH = (
-    Path(__file__).parent.parent.parent
-    / "perfxpert" / "knowledge" / "_schemas" / "gpu_specs.schema.json"
-)
+SCHEMA_PATH = Path(__file__).parent.parent.parent / "perfxpert" / "knowledge" / "_schemas" / "gpu_specs.schema.json"
 
 
 def test_gpu_specs_loads_without_error():
@@ -74,10 +71,16 @@ def test_schema_rejects_invalid_arch_id_pattern():
     schema = json.loads(SCHEMA_PATH.read_text())
     invalid_data = {
         "invalid_key_not_gfx": {
-            "name": "X", "codename": "Y",
-            "peak_fp64_tflops": 1, "peak_fp32_tflops": 1,
-            "memory_bandwidth_tbs": 1, "cu_count": 1, "lds_kb": 64,
-            "wave_size": 64, "max_vgprs_per_thread": 256, "ridge_point": 1,
+            "name": "X",
+            "codename": "Y",
+            "peak_fp64_tflops": 1,
+            "peak_fp32_tflops": 1,
+            "memory_bandwidth_tbs": 1,
+            "cu_count": 1,
+            "lds_kb": 64,
+            "wave_size": 64,
+            "max_vgprs_per_thread": 256,
+            "ridge_point": 1,
         }
     }
     with pytest.raises(jsonschema.exceptions.ValidationError):
@@ -88,10 +91,16 @@ def test_schema_rejects_missing_required_field():
     """Schema enforces required fields like peak_fp64_tflops."""
     schema = json.loads(SCHEMA_PATH.read_text())
     incomplete_arch = {
-        "name": "fake", "codename": "X",
+        "name": "fake",
+        "codename": "X",
         # missing peak_fp64_tflops
-        "peak_fp32_tflops": 1, "memory_bandwidth_tbs": 1, "cu_count": 1,
-        "lds_kb": 64, "wave_size": 64, "max_vgprs_per_thread": 256, "ridge_point": 1,
+        "peak_fp32_tflops": 1,
+        "memory_bandwidth_tbs": 1,
+        "cu_count": 1,
+        "lds_kb": 64,
+        "wave_size": 64,
+        "max_vgprs_per_thread": 256,
+        "ridge_point": 1,
     }
     with pytest.raises(jsonschema.exceptions.ValidationError):
         jsonschema.validate(incomplete_arch, schema["properties"]["arch_entry"])

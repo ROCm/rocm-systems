@@ -16,10 +16,7 @@ OUTCOMES_DIR = Path(__file__).parent / "_attack_outcomes"
 
 @pytest.mark.red_team
 def test_every_attack_registered() -> None:
-    assert len(ATTACKS) == 14, (
-        f"Red-team suite requires exactly 14 attacks (spec §5.8); "
-        f"got {len(ATTACKS)}"
-    )
+    assert len(ATTACKS) == 14, f"Red-team suite requires exactly 14 attacks (spec §5.8); " f"got {len(ATTACKS)}"
     ids = [a.id for a in ATTACKS]
     assert len(set(ids)) == 14, f"Duplicate attack ids: {ids}"
 

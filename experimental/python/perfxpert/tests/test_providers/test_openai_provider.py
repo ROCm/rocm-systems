@@ -34,9 +34,7 @@ def test_complete_returns_response(monkeypatch):
     from perfxpert.providers.openai_provider import OpenAIProvider
 
     fake = MagicMock()
-    fake.chat.completions.create.return_value = _fake_response(
-        text="greetings", inp=8, out=12, model="gpt-4o"
-    )
+    fake.chat.completions.create.return_value = _fake_response(text="greetings", inp=8, out=12, model="gpt-4o")
     mock_sdk = MagicMock()
     mock_sdk.OpenAI.return_value = fake
     with patch.object(_oaimod, "_SDK", mock_sdk):
@@ -118,7 +116,8 @@ def test_missing_sdk_raises_external_tool_missing(monkeypatch):
 
     with patch("perfxpert.providers.openai_provider.require_tool") as mock_rt:
         mock_rt.side_effect = ExternalToolMissing(
-            name="openai", install_hint="pip install openai",
+            name="openai",
+            install_hint="pip install openai",
         )
         monkeypatch.setenv("PERFXPERT_LLM_OPENAI_KEY", "sk-test")
         with pytest.raises(ExternalToolMissing) as exc_info:

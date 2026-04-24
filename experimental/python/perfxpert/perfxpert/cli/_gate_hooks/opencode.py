@@ -81,7 +81,5 @@ def evaluate(
 
     return {
         "block": True,
-        "retryWith": GATE_REJECTION_REASON_TEMPLATE.format(
-            classify_tool=classify_tool
-        ),
+        "retryWith": GATE_REJECTION_REASON_TEMPLATE.format(classify_tool=classify_tool),
     }

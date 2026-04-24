@@ -16,7 +16,6 @@ import pytest
 
 from perfxpert.knowledge import load_yaml
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -41,9 +40,7 @@ def _get_total_kernel_duration_ns(db_path: str) -> int:
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     try:
-        cur.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_kernel_dispatch_%'"
-        )
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_kernel_dispatch_%'")
         table_names = cur.fetchall()
         if not table_names:
             return 0
@@ -64,9 +61,7 @@ def _get_total_kernel_duration_ns(db_path: str) -> int:
         conn.close()
 
 
-@pytest.mark.parametrize("case_id",
-                         [c["id"] for c in _load_cases()],
-                         ids=lambda cid: cid)
+@pytest.mark.parametrize("case_id", [c["id"] for c in _load_cases()], ids=lambda cid: cid)
 def test_case_fixtures_exist(case_id, cases):
     """Verify fixture files are present for each case."""
     case = next(c for c in cases if c["id"] == case_id)
@@ -79,9 +74,7 @@ def test_case_fixtures_exist(case_id, cases):
     assert desc_md.exists(), f"missing {desc_md}"
 
 
-@pytest.mark.parametrize("case_id",
-                         [c["id"] for c in _load_cases()],
-                         ids=lambda cid: cid)
+@pytest.mark.parametrize("case_id", [c["id"] for c in _load_cases()], ids=lambda cid: cid)
 def test_case_speedup_in_range(case_id, cases):
     """Verify both baseline and optimized fixtures have kernel data.
 
@@ -103,9 +96,7 @@ def test_case_speedup_in_range(case_id, cases):
     # Real speedup validation happens via gate cascade with actual profiling.
 
 
-@pytest.mark.parametrize("case_id",
-                         [c["id"] for c in _load_cases()],
-                         ids=lambda cid: cid)
+@pytest.mark.parametrize("case_id", [c["id"] for c in _load_cases()], ids=lambda cid: cid)
 def test_case_fixture_dbs_readable(case_id, cases):
     """Verify fixtures are valid SQLite DBs with rocpd schema."""
     case = next(c for c in cases if c["id"] == case_id)
@@ -124,9 +115,7 @@ def test_case_fixture_dbs_readable(case_id, cases):
             "AND (name = 'rocpd_metadata' OR name LIKE 'rocpd_metadata_%')"
         )
         meta_tables = cur.fetchall()
-        assert meta_tables, (
-            f"{case_id}/{fixture_key}: missing rocpd_metadata(_<uuid>) table"
-        )
+        assert meta_tables, f"{case_id}/{fixture_key}: missing rocpd_metadata(_<uuid>) table"
 
         # Pick whichever variant this DB uses.
         meta_table = meta_tables[0][0]
@@ -134,9 +123,7 @@ def test_case_fixture_dbs_readable(case_id, cases):
         # for real rocprofv3 — the real schema is different but non-empty).
         cur.execute(f'SELECT COUNT(*) FROM "{meta_table}"')
         count = cur.fetchone()[0]
-        assert count and count > 0, (
-            f"{case_id}/{fixture_key}: {meta_table} is empty"
-        )
+        assert count and count > 0, f"{case_id}/{fixture_key}: {meta_table} is empty"
 
         conn.close()
 

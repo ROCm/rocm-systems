@@ -12,7 +12,6 @@ import os
 import sys
 from typing import Optional
 
-
 __all__ = ["DEFAULT_CI_THRESHOLD_PCT", "add_args", "resolve_ci_threshold", "run_ci"]
 
 
@@ -99,8 +98,7 @@ def run_ci(args: argparse.Namespace) -> int:
 
     if wall_pct > threshold:
         print(
-            f"perfxpert ci: runtime regressed by {wall_pct:+.2f}% "
-            f"(threshold: {threshold:.2f}%)",
+            f"perfxpert ci: runtime regressed by {wall_pct:+.2f}% " f"(threshold: {threshold:.2f}%)",
             file=sys.stderr,
         )
         return 1

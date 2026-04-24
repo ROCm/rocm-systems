@@ -31,7 +31,6 @@ import perfxpert.providers.ollama_provider  # noqa: F401
 import perfxpert.providers.private_provider  # noqa: F401
 import perfxpert.providers.opencode_provider  # noqa: F401
 
-
 _EXPECTED_PROVIDERS = {"anthropic", "openai", "ollama", "private", "opencode"}
 _EXPECTED_ROLES = [
     "root",
@@ -58,9 +57,7 @@ def _setup_env(monkeypatch, tmp_path):
 
 def test_registry_contains_all_five_providers():
     registered = set(list_providers().keys())
-    assert _EXPECTED_PROVIDERS.issubset(registered), (
-        f"missing: {_EXPECTED_PROVIDERS - registered}"
-    )
+    assert _EXPECTED_PROVIDERS.issubset(registered), f"missing: {_EXPECTED_PROVIDERS - registered}"
 
 
 def test_all_five_providers_dry_run_no_network():

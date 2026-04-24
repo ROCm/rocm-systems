@@ -16,6 +16,7 @@ def test_build_is_execution_class():
 
 # -- flag allowlist ---------------------------------------------------------
 
+
 def test_build_rejects_unlisted_flag(tmp_path: Path):
     src = tmp_path / "src.cpp"
     src.write_text("int main(){return 0;}\n")
@@ -34,9 +35,7 @@ def test_build_accepts_allowlisted_flags(tmp_path: Path, monkeypatch):
     src.write_text("int main(){return 0;}\n")
 
     # Mock subprocess so we don't actually compile
-    fake_run = mock.MagicMock(return_value=mock.MagicMock(
-        returncode=0, stdout=b"", stderr=b""
-    ))
+    fake_run = mock.MagicMock(return_value=mock.MagicMock(returncode=0, stdout=b"", stderr=b""))
     monkeypatch.setattr("perfxpert.tools.compile_runner.subprocess.run", fake_run)
 
     result = compile_runner.build(
@@ -54,6 +53,7 @@ def test_build_accepts_allowlisted_flags(tmp_path: Path, monkeypatch):
 
 def test_build_rejects_path_traversal_in_source(tmp_path: Path):
     from perfxpert.tools._safety import PathConfinementError
+
     with pytest.raises(PathConfinementError):
         compile_runner.build(
             project_root=tmp_path,
@@ -85,11 +85,13 @@ def test_build_parses_error_output(tmp_path: Path, monkeypatch):
     src.write_text("bad syntax\n")
     monkeypatch.setattr(
         "perfxpert.tools.compile_runner.subprocess.run",
-        mock.MagicMock(return_value=mock.MagicMock(
-            returncode=1,
-            stdout=b"",
-            stderr=b"src.cpp:1:1: error: expected unqualified-id\n",
-        )),
+        mock.MagicMock(
+            return_value=mock.MagicMock(
+                returncode=1,
+                stdout=b"",
+                stderr=b"src.cpp:1:1: error: expected unqualified-id\n",
+            )
+        ),
     )
     result = compile_runner.build(project_root=tmp_path, source_rel="src.cpp", flags=["-O2"])
     assert result["returncode"] == 1

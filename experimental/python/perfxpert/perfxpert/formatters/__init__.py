@@ -67,7 +67,7 @@ def format_analysis_output(
     kernel_resources: Optional[Dict[str, Any]] = None,
     api_overhead: Optional[Dict[str, Any]] = None,
     communication: Optional[Dict[str, Any]] = None,  # Phase 10 RCCL / NIC
-    roofline: Optional[Dict[str, Any]] = None,       # Phase 10 Live Roofline
+    roofline: Optional[Dict[str, Any]] = None,  # Phase 10 Live Roofline
 ) -> str:
     """
     Format analysis results for display.
@@ -126,11 +126,7 @@ def format_analysis_output(
         return output
 
     if output_format == "markdown":
-        _detected_kernels = (
-            getattr(tier0_result, "detected_kernels", None)
-            if tier0_result is not None
-            else None
-        )
+        _detected_kernels = getattr(tier0_result, "detected_kernels", None) if tier0_result is not None else None
         output = _format_as_markdown(
             time_breakdown=time_breakdown,
             hotspots=hotspots,
@@ -208,13 +204,9 @@ def format_analysis_output(
 
     kernel_time_ms = time_breakdown.get("total_kernel_time", 0) / 1e6
     memcpy_time_ms = time_breakdown.get("total_memcpy_time", 0) / 1e6
-    runtime_for_breakdown_ms = (
-        time_breakdown.get("normalized_runtime", time_breakdown.get("total_runtime", 0)) / 1e6
-    )
+    runtime_for_breakdown_ms = time_breakdown.get("normalized_runtime", time_breakdown.get("total_runtime", 0)) / 1e6
     overhead_time_ms = (
-        max(0.0, runtime_for_breakdown_ms - kernel_time_ms - memcpy_time_ms)
-        if runtime_for_breakdown_ms > 0
-        else 0
+        max(0.0, runtime_for_breakdown_ms - kernel_time_ms - memcpy_time_ms) if runtime_for_breakdown_ms > 0 else 0
     )
 
     lines.append(
@@ -248,9 +240,7 @@ def format_analysis_output(
 
         # Table header
         _avg_hdr = "Avg (\u03bcs)"
-        lines.append(
-            f" #  {'Kernel Name':<30}  {'Calls':>6}  {'Total (ms)':>10}  {_avg_hdr:>9}  {'% Total':>7}"
-        )
+        lines.append(f" #  {'Kernel Name':<30}  {'Calls':>6}  {'Total (ms)':>10}  {_avg_hdr:>9}  {'% Total':>7}")
         lines.append("\u2500" * width)
 
         # Cross-reference hotspots with Tier-0 source locations so each row
@@ -259,11 +249,8 @@ def format_analysis_output(
             correlate_hotspots_with_source as _corr_hs,
             format_source_citation_inline as _cite_hs,
         )
-        _text_detected = (
-            getattr(tier0_result, "detected_kernels", None)
-            if tier0_result is not None
-            else None
-        )
+
+        _text_detected = getattr(tier0_result, "detected_kernels", None) if tier0_result is not None else None
         _text_annotated = _corr_hs(hotspots, _text_detected)
 
         # Table rows
@@ -277,9 +264,7 @@ def format_analysis_output(
             avg_us = kernel.get("avg_duration", 0) / 1e3
             percent = kernel.get("percent_of_total", 0)
 
-            lines.append(
-                f"{i:2}  {name:<30}  {calls:6}  {total_ms:10,.2f}  {avg_us:9,.1f}  {percent:6.1f}%"
-            )
+            lines.append(f"{i:2}  {name:<30}  {calls:6}  {total_ms:10,.2f}  {avg_us:9,.1f}  {percent:6.1f}%")
             _cite = _cite_hs(kernel.get("source_locations"))
             if _cite:
                 lines.append(f"      Source: {_cite}")
@@ -292,9 +277,7 @@ def format_analysis_output(
         lines.append("KERNEL RESOURCES".center(width))
         lines.append("\u2501" * width)
         lines.append("")
-        lines.append(
-            f" #  {'Kernel Name':<30}  {'Block':<10}  {'VGPR':>5}  {'SGPR':>5}  {'Scratch':>9}  {'LDS':>9}"
-        )
+        lines.append(f" #  {'Kernel Name':<30}  {'Block':<10}  {'VGPR':>5}  {'SGPR':>5}  {'Scratch':>9}  {'LDS':>9}")
         lines.append("\u2500" * width)
         for i, kr in enumerate(kernel_resources["kernels"], 1):
             kname = kr.get("name", "unknown")
@@ -307,9 +290,7 @@ def format_analysis_output(
             lds = kr.get("lds_bytes", 0)
             scratch_s = f"{scratch} B" if scratch < 1024 else f"{scratch / 1024:.1f} KB"
             lds_s = f"{lds} B" if lds < 1024 else f"{lds / 1024:.1f} KB"
-            lines.append(
-                f"{i:2}  {kname:<30}  {block:<10}  {vgpr:5}  {sgpr:5}  {scratch_s:>9}  {lds_s:>9}"
-            )
+            lines.append(f"{i:2}  {kname:<30}  {block:<10}  {vgpr:5}  {sgpr:5}  {scratch_s:>9}  {lds_s:>9}")
         lines.append("")
         # Occupancy
         arch = kernel_resources.get("arch")
@@ -324,9 +305,7 @@ def format_analysis_output(
                 pct = occ["percent"]
                 lim = occ["limiting_resource"]
                 lim_str = f"limited by {lim}" if lim != "none" else "no resource bottleneck"
-                lines.append(
-                    f"  Occupancy ({arch}): {w}/{mw} waves/SIMD ({pct:.0f}%) \u2014 {lim_str}  [{kname}]"
-                )
+                lines.append(f"  Occupancy ({arch}): {w}/{mw} waves/SIMD ({pct:.0f}%) \u2014 {lim_str}  [{kname}]")
         lines.append("")
 
     # Memory Analysis
@@ -337,9 +316,7 @@ def format_analysis_output(
         lines.append("")
 
         # Table header
-        lines.append(
-            f"{'Direction':<20}  {'Count':>6}  {'Total Size':>12}  {'Duration':>10}  {'Bandwidth':>10}"
-        )
+        lines.append(f"{'Direction':<20}  {'Count':>6}  {'Total Size':>12}  {'Duration':>10}  {'Bandwidth':>10}")
         lines.append("\u2500" * width)
 
         # Table rows
@@ -384,9 +361,7 @@ def format_analysis_output(
 
             if "gpu_utilization_percent" in metrics:
                 util_pct = metrics["gpu_utilization_percent"]
-                lines.append(
-                    f"  GPU Utilization:        {util_pct:6.1f}%  {make_bar(util_pct)}"
-                )
+                lines.append(f"  GPU Utilization:        {util_pct:6.1f}%  {make_bar(util_pct)}")
 
             if "avg_waves" in metrics:
                 avg_waves = metrics["avg_waves"]
@@ -403,9 +378,7 @@ def format_analysis_output(
         if counters:
             lines.append("Collected Counters:")
             lines.append("")
-            lines.append(
-                f"{'Counter Name':<25}  {'Avg Value':>15}  {'Min Value':>15}  {'Max Value':>15}"
-            )
+            lines.append(f"{'Counter Name':<25}  {'Avg Value':>15}  {'Min Value':>15}  {'Max Value':>15}")
             lines.append("\u2500" * width)
 
             for counter_name, stats in counters.items():
@@ -413,9 +386,7 @@ def format_analysis_output(
                 min_val = stats.get("min_value", 0)
                 max_val = stats.get("max_value", 0)
 
-                lines.append(
-                    f"{counter_name:<25}  {avg:15,.1f}  {min_val:15,.1f}  {max_val:15,.1f}"
-                )
+                lines.append(f"{counter_name:<25}  {avg:15,.1f}  {min_val:15,.1f}  {max_val:15,.1f}")
 
             lines.append("")
 
@@ -455,14 +426,9 @@ def format_analysis_output(
         ridge_ai = float((roofline.get("ridge_point") or {}).get("ai", 0.0))
         arch = roofline.get("arch", "unknown")
         dtype = str(roofline.get("dtype", "fp32")).upper()
-        lines.append(
-            f"  Arch: {arch}   dominant dtype: {dtype}   "
-            f"ridge @ {ridge_ai:.1f} FLOPs/Byte"
-        )
+        lines.append(f"  Arch: {arch}   dominant dtype: {dtype}   " f"ridge @ {ridge_ai:.1f} FLOPs/Byte")
         lines.append("")
-        lines.append(
-            f"  {'Kernel':<40}  {'AI':>8}  {'GFLOPs/s':>10}  {'Regime':<9}  {'dtype':<5}"
-        )
+        lines.append(f"  {'Kernel':<40}  {'AI':>8}  {'GFLOPs/s':>10}  {'Regime':<9}  {'dtype':<5}")
         lines.append("\u2500" * width)
         for k in roofline["kernels"]:
             name = str(k.get("name", "unknown"))
@@ -472,9 +438,7 @@ def format_analysis_output(
             gflops = float(k.get("achieved_flops_per_s", 0)) / 1e9
             regime = str(k.get("bottleneck_class", "-"))
             ftype = str(k.get("fp_type", "-"))
-            lines.append(
-                f"  {name:<40}  {ai:8.2f}  {gflops:10,.1f}  {regime:<9}  {ftype:<5}"
-            )
+            lines.append(f"  {name:<40}  {ai:8.2f}  {gflops:10,.1f}  {regime:<9}  {ftype:<5}")
         lines.append("")
 
     # TraceLens: Kernel Category Breakdown
@@ -491,9 +455,7 @@ def format_analysis_output(
             bar = "\u2588" * int(bar_width * pct / max(max_pct, 1))
             cnt = cat["count"]
             avg_us = cat["avg_duration_ns"] / 1_000
-            lines.append(
-                f"  {cat['category']:<15} {bar:<30} {pct:5.1f}%  ({cnt} kernels, avg {avg_us:.1f}\u03bcs)"
-            )
+            lines.append(f"  {cat['category']:<15} {bar:<30} {pct:5.1f}%  ({cnt} kernels, avg {avg_us:.1f}\u03bcs)")
         lines.append("")
 
     # TraceLens: Short Kernel Analysis
@@ -505,9 +467,7 @@ def format_analysis_output(
         thresh = short_kernels.get("threshold_us", 10)
         count = short_kernels["short_kernel_count"]
         wasted = short_kernels["wasted_pct_of_kernel_time"]
-        lines.append(
-            f"  {count} kernels below {thresh}\u03bcs threshold \u2014 {wasted:.1f}% of kernel time wasted"
-        )
+        lines.append(f"  {count} kernels below {thresh}\u03bcs threshold \u2014 {wasted:.1f}% of kernel time wasted")
         if short_kernels.get("histogram"):
             hist_str = "  Histogram: " + "  ".join(
                 f"[{b['bucket_label']}]: {b['count']}" for b in short_kernels["histogram"]
@@ -516,9 +476,7 @@ def format_analysis_output(
         if short_kernels.get("top_offenders"):
             lines.append("  Top offenders:")
             for off in short_kernels["top_offenders"][:5]:
-                lines.append(
-                    f"    {off['name'][:50]:<52} \u00d7{off['count']}  avg {off['avg_us']:.1f}\u03bcs"
-                )
+                lines.append(f"    {off['name'][:50]:<52} \u00d7{off['count']}  avg {off['avg_us']:.1f}\u03bcs")
         lines.append("")
 
     # Communication (RCCL / NIC) — Phase 10
@@ -535,23 +493,16 @@ def format_analysis_output(
         _peak = _summary.get("peak_bw_gbps")
         _peak_s = f"{_peak:.0f} GB/s" if _peak else "n/a"
         _ranks = _summary.get("ranks", 0)
+        lines.append(f"  {_op_count} collective(s)  \u2014  dominant: {_dominant}  " f"\u2014  ranks: {_ranks}")
         lines.append(
-            f"  {_op_count} collective(s)  \u2014  dominant: {_dominant}  "
-            f"\u2014  ranks: {_ranks}"
-        )
-        lines.append(
-            f"  Peak busBW: {_peak_s}   Avg efficiency: {_avg_eff:.1f}%   "
-            f"Comm/Compute overlap: {_overlap:.1f}%"
+            f"  Peak busBW: {_peak_s}   Avg efficiency: {_avg_eff:.1f}%   " f"Comm/Compute overlap: {_overlap:.1f}%"
         )
         if _summary.get("capture_incomplete"):
-            lines.append(
-                "  [note] Capture incomplete \u2014 fell back to kernel-name regex."
-            )
+            lines.append("  [note] Capture incomplete \u2014 fell back to kernel-name regex.")
         lines.append("")
         # Box-drawn table.
         hdr = (
-            f" {'Op':<16}  {'Bytes':>10}  {'Duration':>10}  "
-            f"{'Bus BW':>12}  {'Peak':>10}  {'Eff%':>6}  {'Ovlp%':>6}"
+            f" {'Op':<16}  {'Bytes':>10}  {'Duration':>10}  " f"{'Bus BW':>12}  {'Peak':>10}  {'Eff%':>6}  {'Ovlp%':>6}"
         )
         lines.append(hdr)
         lines.append("\u2500" * width)
@@ -574,8 +525,7 @@ def format_analysis_output(
             ov = c.get("overlap_ratio", 0) or 0
             op_s = str(c.get("op_type", "?"))[:16]
             lines.append(
-                f" {op_s:<16}  {mb_s:>10}  {dur_ms:>8.2f}ms  "
-                f"{bw:>9.2f}GB/s  {pk_s:>10}  {eff:>5.1f}%  {ov:>5.1f}%"
+                f" {op_s:<16}  {mb_s:>10}  {dur_ms:>8.2f}ms  " f"{bw:>9.2f}GB/s  {pk_s:>10}  {eff:>5.1f}%  {ov:>5.1f}%"
             )
         lines.append("")
 
@@ -619,14 +569,8 @@ def format_analysis_output(
             pred_conf = rec.get("predicted_confidence")
             if pred_conf is None:
                 pred_conf = rec.get("confidence")
-            pconf_str = (
-                f" (conf {int(float(pred_conf) * 100)}%)"
-                if pred_conf is not None
-                else ""
-            )
-            lines.append(
-                f"  Predicted: {float(lo):.2f}-{float(hi):.2f}x{pconf_str}"
-            )
+            pconf_str = f" (conf {int(float(pred_conf) * 100)}%)" if pred_conf is not None else ""
+            lines.append(f"  Predicted: {float(lo):.2f}-{float(hi):.2f}x{pconf_str}")
             lines.append("")
         if commands:
             lines.append("  Recommended Commands:")
@@ -669,9 +613,7 @@ def format_analysis_output(
             avg_stall = k.get("avg_stall_ratio", 0.0) * 100.0
             category = k.get("stall_category", "").replace("att_", "").replace("_", " ")
             lines.append(f"  Kernel: {kname}")
-            lines.append(
-                f"    Avg stall ratio: {avg_stall:.1f}%   Category: {category or 'unknown'}"
-            )
+            lines.append(f"    Avg stall ratio: {avg_stall:.1f}%   Category: {category or 'unknown'}")
             top_instrs = k.get("top_stalling_instructions", [])[:3]
             for instr in top_instrs:
                 pc = instr.get("pc_offset", "?")
@@ -679,15 +621,9 @@ def format_analysis_output(
                 src = instr.get("source_line", "")
                 src_part = f"  {src}" if src else ""
                 weighted = instr.get("weighted_stall", 0)
-                lines.append(
-                    f"    {pc}: stall {stall_pct:.0f}%  weighted={weighted:,}{src_part}"
-                )
+                lines.append(f"    {pc}: stall {stall_pct:.0f}%  weighted={weighted:,}{src_part}")
             lines.append("")
-    elif (
-        att_analysis
-        and not att_analysis.get("has_att_data")
-        and att_analysis.get("reason")
-    ):
+    elif att_analysis and not att_analysis.get("has_att_data") and att_analysis.get("reason"):
         lines.append("\u2501" * width)
         lines.append("TIER 3: ATT".center(width))
         lines.append("\u2501" * width)

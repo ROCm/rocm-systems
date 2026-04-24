@@ -27,6 +27,7 @@ def opencode_available():
         return True
     try:
         from importlib import resources
+
         with resources.as_file(resources.files("perfxpert") / "_bundled" / "opencode") as p:
             if p.is_file():
                 return True
@@ -45,6 +46,7 @@ def test_perfxpert_code_launches_if_opencode_available(opencode_available):
     # wait briefly for the banner, then kill it. We only assert the banner
     # emerged — proving the launcher ran.
     import signal
+
     proc = subprocess.Popen(
         ["perfxpert-code"],
         stdin=subprocess.PIPE,
@@ -55,6 +57,7 @@ def test_perfxpert_code_launches_if_opencode_available(opencode_available):
     )
     try:
         import time as _t
+
         _t.sleep(1.5)
     finally:
         try:
@@ -76,14 +79,23 @@ def test_mcp_server_accepts_a_call_from_shell(opencode_available):
     # Start perfxpert-mcp with stdio
     p = subprocess.Popen(
         ["perfxpert-mcp"],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
     try:
         # Send an MCP initialize request (simplified; real MCP uses JSON-RPC framing)
-        init = json.dumps({
-            "jsonrpc": "2.0", "id": 1, "method": "initialize",
-            "params": {"protocolVersion": "2024-11-05", "capabilities": {}},
-        }) + "\n"
+        init = (
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {"protocolVersion": "2024-11-05", "capabilities": {}},
+                }
+            )
+            + "\n"
+        )
         p.stdin.write(init.encode("utf-8"))
         p.stdin.flush()
         time.sleep(0.5)

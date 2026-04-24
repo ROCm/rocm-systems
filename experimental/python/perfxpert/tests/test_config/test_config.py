@@ -92,16 +92,12 @@ def test_yaml_file_loaded(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     cfg_dir = tmp_path / ".config" / "perfxpert"
     cfg_dir.mkdir(parents=True)
-    (cfg_dir / "config.yaml").write_text(
-        textwrap.dedent(
-            """
+    (cfg_dir / "config.yaml").write_text(textwrap.dedent("""
             provider: openai
             model: gpt-4o
             fence_profile: minimal
             regression_threshold_pct: 5.0
-            """
-        )
-    )
+            """))
     c = load_config()
     assert c.provider == "openai"
     assert c.model == "gpt-4o"

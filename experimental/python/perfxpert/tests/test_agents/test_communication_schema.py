@@ -39,6 +39,7 @@ def _valid_entry_kwargs(**overrides):
 # 1. Valid payload — round-trip through the validator and back to dict.
 # ---------------------------------------------------------------------------
 
+
 def test_communication_block_accepts_valid_payload():
     block = CommunicationBlock(
         collectives=[CollectiveEntry(**_valid_entry_kwargs())],
@@ -65,6 +66,7 @@ def test_communication_block_accepts_valid_payload():
 # 2. Invalid efficiency_label — rejected at the boundary.
 # ---------------------------------------------------------------------------
 
+
 def test_collective_entry_rejects_invalid_efficiency_label():
     with pytest.raises(ValidationError) as excinfo:
         CollectiveEntry(**_valid_entry_kwargs(efficiency_label="excellent"))
@@ -78,6 +80,7 @@ def test_collective_entry_rejects_invalid_efficiency_label():
 # ---------------------------------------------------------------------------
 # 3. Missing required field — rejected at the boundary.
 # ---------------------------------------------------------------------------
+
 
 def test_collective_entry_rejects_missing_required_field():
     kwargs = _valid_entry_kwargs()

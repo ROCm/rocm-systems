@@ -22,7 +22,6 @@ import pytest
 
 from perfxpert.cli._backend import _prompt_adapter as pa
 
-
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "prompts"
 SOURCE = FIXTURES_DIR / "agents_source.md"
 TOOLS: tuple[str, ...] = ("intent_classify", "next_step", "report")
@@ -171,9 +170,7 @@ def test_is_git_tracked_true(tmp_path: Path) -> None:
     f = tmp_path / "tracked.md"
     f.write_text("hi")
     subprocess.run(["git", "add", "tracked.md"], cwd=str(tmp_path), check=True)
-    subprocess.run(
-        ["git", "commit", "-q", "-m", "init"], cwd=str(tmp_path), check=True
-    )
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=str(tmp_path), check=True)
     assert pa.is_git_tracked(f, tmp_path) is True
 
 

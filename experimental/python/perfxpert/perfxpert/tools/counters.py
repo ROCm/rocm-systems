@@ -16,9 +16,7 @@ from perfxpert.tools._class import ToolClass, tool_class
 _TCC_DERIVED = frozenset({"FETCH_SIZE", "WRITE_SIZE"})
 
 
-def _build_multi_pass_escalation(
-    passes: List[List[str]], gpu_arch: str
-) -> Dict[str, Any]:
+def _build_multi_pass_escalation(passes: List[List[str]], gpu_arch: str) -> Dict[str, Any]:
     """Return concrete guidance for multi-pass counter collection."""
     pass_specs = [
         {
@@ -53,8 +51,7 @@ def _build_multi_pass_escalation(
             {
                 "tool": "rocprofv3",
                 "description": (
-                    "Write one pmc group per line, then collect the requested "
-                    "passes with rocprofv3 -i."
+                    "Write one pmc group per line, then collect the requested " "passes with rocprofv3 -i."
                 ),
                 "full_command": "rocprofv3 -i pmc_groups.txt -- ./app",
             },

@@ -20,7 +20,7 @@ def test_5_consecutive_failures_triggers_deeper_tier(outcomes_dir) -> None:
             baseline_runtime_ns=1_000_000,
             achieved_runtime_ns=9_000_000,  # regresses every time
             patch_sha=f"cycle{i:02d}",
-            loop_counter=i + 1,              # runtime tracks this
+            loop_counter=i + 1,  # runtime tracks this
         )
         verdict = run_gate_cascade(gate_input, stop_at="regression")
         verdicts.append(verdict)
@@ -29,8 +29,7 @@ def test_5_consecutive_failures_triggers_deeper_tier(outcomes_dir) -> None:
     last = verdicts[-1]
     assert last.status in ("regressed", "reject")
     assert last.detail and (
-        "deeper" in last.detail.lower() or "plateau" in last.detail.lower() or
-        "5" in last.detail
+        "deeper" in last.detail.lower() or "plateau" in last.detail.lower() or "5" in last.detail
     ), f"expected deeper-tier trigger, got {last.detail!r}"
 
     record_outcome(

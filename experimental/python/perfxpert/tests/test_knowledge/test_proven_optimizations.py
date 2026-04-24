@@ -9,8 +9,7 @@ import pytest
 from perfxpert.knowledge import load_yaml
 
 SCHEMA_PATH = (
-    Path(__file__).parent.parent.parent
-    / "perfxpert" / "knowledge" / "_schemas" / "proven_optimizations.schema.json"
+    Path(__file__).parent.parent.parent / "perfxpert" / "knowledge" / "_schemas" / "proven_optimizations.schema.json"
 )
 
 EXPECTED_CASE_IDS = {
@@ -76,6 +75,5 @@ def test_bottleneck_types_referenced_are_known():
     known_bt = {entry["name"] for entry in bt}
     for c in cases:
         assert c["bottleneck_type"] in known_bt, (
-            f"{c['id']}: bottleneck_type {c['bottleneck_type']!r} "
-            f"not in bottleneck_types.yaml: {known_bt}"
+            f"{c['id']}: bottleneck_type {c['bottleneck_type']!r} " f"not in bottleneck_types.yaml: {known_bt}"
         )

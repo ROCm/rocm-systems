@@ -47,7 +47,6 @@ from perfxpert.cli._backend.protocol import (
     UninstallReport,
 )
 
-
 # Snapshot real subprocess.run so fake _run helpers can still invoke git.
 _REAL_RUN = subprocess.run
 
@@ -84,12 +83,8 @@ def project_cwd(isolated_home: Path) -> Path:
         check=True,
         capture_output=True,
     )
-    subprocess.run(
-        ["git", "config", "user.email", "t@e.com"], cwd=str(cwd), check=True
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "t"], cwd=str(cwd), check=True
-    )
+    subprocess.run(["git", "config", "user.email", "t@e.com"], cwd=str(cwd), check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(cwd), check=True)
     return cwd
 
 
@@ -120,9 +115,7 @@ def _fake_codex_subprocess(
 
     def _run(cmd, *args, **kwargs):
         class _R:
-            def __init__(
-                self, rc: int, stdout: bytes = b"", stderr: bytes = b""
-            ) -> None:
+            def __init__(self, rc: int, stdout: bytes = b"", stderr: bytes = b"") -> None:
                 self.returncode = rc
                 self.stdout = stdout
                 self.stderr = stderr
@@ -221,9 +214,7 @@ def test_check_available_happy_path(
 # ---------------------------------------------------------------------------
 
 
-def test_check_trust_parses_trusted_and_untrusted(
-    isolated_home: Path, project_cwd: Path
-) -> None:
+def test_check_trust_parses_trusted_and_untrusted(isolated_home: Path, project_cwd: Path) -> None:
     """I-N3 / plan B3: read `[projects."<cwd>"].trust_level`."""
     resolved = str(project_cwd.expanduser().resolve())
     adapter = CodexAdapter()
@@ -251,14 +242,10 @@ def test_check_trust_parses_trusted_and_untrusted(
     assert adapter._check_trust(other) == TrustStatus.UNKNOWN
 
 
-def test_check_trust_tolerates_invalid_toml(
-    isolated_home: Path, project_cwd: Path
-) -> None:
+def test_check_trust_tolerates_invalid_toml(isolated_home: Path, project_cwd: Path) -> None:
     """Malformed ~/.codex/config.toml → UNKNOWN (fail-soft)."""
     _write_user_codex_config(isolated_home, "}}}not toml{{{")
-    assert (
-        CodexAdapter()._check_trust(project_cwd) == TrustStatus.UNKNOWN
-    )
+    assert CodexAdapter()._check_trust(project_cwd) == TrustStatus.UNKNOWN
 
 
 # ---------------------------------------------------------------------------
@@ -266,9 +253,7 @@ def test_check_trust_tolerates_invalid_toml(
 # ---------------------------------------------------------------------------
 
 
-def test_plan_lists_targets(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_plan_lists_targets(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     plan = CodexAdapter().plan(project_cwd)
     assert isinstance(plan, Plan)
     assert plan.backend == "codex"
@@ -372,6 +357,7 @@ def test_install_falls_back_to_user_scope_on_still_untrusted(
     fixture) so the trust-gate interactive prompt is what actually
     runs in this test.
     """
+
     # Interactive TTY that answers "n" to the trust-gate prompt.
     class _FakeStdin:
         def isatty(self) -> bool:
@@ -416,6 +402,7 @@ def test_install_reprompts_consent_after_scope_falls_back_to_user(
 
     monkeypatch.setattr(sys, "stdin", _FakeStdin())
     monkeypatch.delenv("PERFXPERT_ASSUME_CONSENT", raising=False)
+
     def _fake_prompt(*args, **kwargs):
         plan_lines = kwargs.get("plan_lines")
         if plan_lines is None and len(args) >= 3:
@@ -469,8 +456,7 @@ def test_install_uses_tomlkit_lazy_import_in_fallback(
     class _Sentinel:
         def __getattr__(self, name: str):
             raise RuntimeError(
-                f"tomlkit should NOT be imported on the primary "
-                f"`codex mcp add` path (attribute access: {name!r})"
+                f"tomlkit should NOT be imported on the primary " f"`codex mcp add` path (attribute access: {name!r})"
             )
 
     # Insert a sentinel that claims to be tomlkit; if any code does
@@ -525,12 +511,8 @@ def test_install_never_touches_tracked_agents_md(
     `AGENTS.override.md` that shadows it safely for Codex."""
     tracked = project_cwd / "AGENTS.md"
     tracked.write_text("USER CONTENT — do not touch\n")
-    subprocess.run(
-        ["git", "add", "AGENTS.md"], cwd=str(project_cwd), check=True
-    )
-    subprocess.run(
-        ["git", "commit", "-q", "-m", "init"], cwd=str(project_cwd), check=True
-    )
+    subprocess.run(["git", "add", "AGENTS.md"], cwd=str(project_cwd), check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=str(project_cwd), check=True)
 
     _mark_trusted(isolated_home, project_cwd)
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
@@ -646,9 +628,7 @@ def test_install_allows_recreating_tracked_deleted_override_with_flag(
 # ---------------------------------------------------------------------------
 
 
-def test_spawn_uses_execvpe_not_subprocess_run(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_spawn_uses_execvpe_not_subprocess_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """I1: codex is a TUI — spawn must use os.execvpe."""
     called: dict = {}
 
@@ -686,14 +666,14 @@ def test_uninstall_removes_only_managed_block(
     cfg = project_cwd / ".codex" / "config.toml"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text(
-        '[mcp_servers.other]\n'
+        "[mcp_servers.other]\n"
         'command = "other-bin"\n'
-        'args = []\n'
-        '\n'
-        '[mcp_servers.perfxpert]\n'
+        "args = []\n"
+        "\n"
+        "[mcp_servers.perfxpert]\n"
         'command = "perfxpert-mcp"\n'
-        'args = []\n'
-        'enabled = true\n'
+        "args = []\n"
+        "enabled = true\n"
     )
 
     # Shell-out path absent → use tomlkit fallback.
@@ -716,11 +696,7 @@ def test_uninstall_refuses_on_marker_drift(
     """If `perfxpert` table points at a DIFFERENT command, refuse to remove it."""
     cfg = project_cwd / ".codex" / "config.toml"
     cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text(
-        '[mcp_servers.perfxpert]\n'
-        'command = "NOT-ours"\n'
-        'args = []\n'
-    )
+    cfg.write_text("[mcp_servers.perfxpert]\n" 'command = "NOT-ours"\n' "args = []\n")
 
     monkeypatch.setattr("shutil.which", lambda _: None)
 
@@ -736,9 +712,7 @@ def test_uninstall_refuses_on_marker_drift(
 # ---------------------------------------------------------------------------
 
 
-def test_verify_mcp_live_happy_path(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_verify_mcp_live_happy_path(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """codex mcp list output contains 'perfxpert' → mcp_healthy=True."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
     monkeypatch.setattr(
@@ -754,9 +728,7 @@ def test_verify_mcp_live_happy_path(
     assert report.gate_hook_installed is False
 
 
-def test_verify_mcp_live_missing_perfxpert(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_verify_mcp_live_missing_perfxpert(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """No perfxpert token in `codex mcp list` → error surfaced."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
     monkeypatch.setattr(
@@ -772,9 +744,7 @@ def test_verify_mcp_live_missing_perfxpert(
     assert "perfxpert" in (report.error or "").lower()
 
 
-def test_verify_mcp_live_binary_missing(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_verify_mcp_live_binary_missing(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """codex not on PATH → mcp_healthy=False with binary-missing error."""
     monkeypatch.setattr("shutil.which", lambda _: None)
     report = CodexAdapter().verify_mcp_live(project_cwd)
@@ -810,16 +780,12 @@ def test_install_is_idempotent_when_mcp_list_already_has_perfxpert(
 
         return _R()
 
-    monkeypatch.setattr(
-        "perfxpert.cli._backend.codex.subprocess.run", _run
-    )
+    monkeypatch.setattr("perfxpert.cli._backend.codex.subprocess.run", _run)
     CodexAdapter().install(project_cwd, scope="project")
     # `mcp add` must NOT appear among the calls once listing already
     # shows perfxpert.
     add_calls = [c for c in calls if "add" in c and "perfxpert" in c]
-    assert not add_calls, (
-        f"expected no `codex mcp add` call on idempotent path; got {calls}"
-    )
+    assert not add_calls, f"expected no `codex mcp add` call on idempotent path; got {calls}"
 
 
 def test_install_raises_config_clobber_on_conflicting_entry(
@@ -832,11 +798,7 @@ def test_install_raises_config_clobber_on_conflicting_entry(
     _mark_trusted(isolated_home, project_cwd)
     cfg = project_cwd / ".codex" / "config.toml"
     cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text(
-        '[mcp_servers.perfxpert]\n'
-        'command = "someone-elses-mcp"\n'
-        'args = []\n'
-    )
+    cfg.write_text("[mcp_servers.perfxpert]\n" 'command = "someone-elses-mcp"\n' "args = []\n")
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
     # Force fallback path: `codex mcp add` fails.
     monkeypatch.setattr(
@@ -867,9 +829,7 @@ def test_install_rejects_oversized_prompt(
     )
     # Monkey-patch _render_prompt_for_codex to return a 33 KiB string.
     oversize = "A" * (33 * 1024)
-    monkeypatch.setattr(
-        CodexAdapter, "_render_prompt_for_codex", lambda self: oversize
-    )
+    monkeypatch.setattr(CodexAdapter, "_render_prompt_for_codex", lambda self: oversize)
     from perfxpert.cli._backend.protocol import PartialInstall
 
     with pytest.raises(PartialInstall, match="32 KiB"):
@@ -924,9 +884,7 @@ def test_install_report_shape(
 # ---------------------------------------------------------------------------
 
 
-def test_mark_trusted_refuses_git_tracked_config(
-    isolated_home: Path, project_cwd: Path
-) -> None:
+def test_mark_trusted_refuses_git_tracked_config(isolated_home: Path, project_cwd: Path) -> None:
     """Dotfiles-style: `~/.codex/config.toml` is git-tracked → ConfigClobber.
 
     Initialise a repo at $HOME, commit an empty ~/.codex/config.toml, then
@@ -1060,8 +1018,8 @@ def test_install_consent_denied_leaves_codex_home_untouched(
 @pytest.mark.parametrize(
     "bad_toml",
     [
-        "[bad\nno_close_bracket = true\n",   # unclosed table header
-        "bare_key_no_equals\n",              # missing `=`
+        "[bad\nno_close_bracket = true\n",  # unclosed table header
+        "bare_key_no_equals\n",  # missing `=`
         '[projects."x"]\ntrust_level = \n',  # value missing
     ],
     ids=["unclosed-bracket", "bare-key", "missing-value"],
@@ -1084,14 +1042,12 @@ def test_mark_trusted_on_malformed_toml_raises_config_clobber(
     assert "Traceback" not in msg
 
 
-def test_structured_remove_on_malformed_toml_raises_config_clobber(
-    isolated_home: Path, project_cwd: Path
-) -> None:
+def test_structured_remove_on_malformed_toml_raises_config_clobber(isolated_home: Path, project_cwd: Path) -> None:
     """Malformed project-scope config.toml → _structured_remove raises
     ConfigClobber (caller translates to drift + action message)."""
     cfg = project_cwd / ".codex" / "config.toml"
     cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text("[mcp_servers.perfxpert\ncommand = \"perfxpert-mcp\"\n")
+    cfg.write_text('[mcp_servers.perfxpert\ncommand = "perfxpert-mcp"\n')
 
     drifted: list[Path] = []
     with pytest.raises(ConfigClobber) as excinfo:

@@ -22,14 +22,16 @@ def patches(monkeypatch):
         "compile": MagicMock(return_value={"ok": True, "stderr": ""}),
         "sol": MagicMock(return_value={"ok": True, "peak_ratio": 0.8}),
         "bitwise": MagicMock(return_value={"ok": True, "diff": None}),
-        "regression": MagicMock(return_value={
-            "ok": True,
-            "verdict": "improved",
-            "total_delta_pct": -0.08,         # fraction: -8% improvement
-            "weighted_geomean_delta_pct": -0.075,
-            "per_kernel_deltas": [],           # real key (was "hot_kernels")
-            "threshold_pct": 0.03,
-        }),
+        "regression": MagicMock(
+            return_value={
+                "ok": True,
+                "verdict": "improved",
+                "total_delta_pct": -0.08,  # fraction: -8% improvement
+                "weighted_geomean_delta_pct": -0.075,
+                "per_kernel_deltas": [],  # real key (was "hot_kernels")
+                "threshold_pct": 0.03,
+            }
+        ),
         "anchors": MagicMock(return_value={"ok": True, "failed": []}),
     }
     monkeypatch.setattr(gate_cascade, "_run_compile_gate", stubs["compile"])
@@ -42,9 +44,12 @@ def patches(monkeypatch):
 
 def test_all_gates_pass_returns_pass(patches):
     v = gate_cascade.evaluate(
-        baseline_db="b.db", candidate_db="c.db",
-        patch_file="foo.hip", patch_sha="abc123",
-        gfx_id="gfx942", claimed_speedup=1.5,
+        baseline_db="b.db",
+        candidate_db="c.db",
+        patch_file="foo.hip",
+        patch_sha="abc123",
+        gfx_id="gfx942",
+        claimed_speedup=1.5,
     )
     assert isinstance(v, GateVerdict)
     assert v.status == "pass"
@@ -53,9 +58,12 @@ def test_all_gates_pass_returns_pass(patches):
 
 def test_gates_execute_in_cascade_order(patches):
     gate_cascade.evaluate(
-        baseline_db="b.db", candidate_db="c.db",
-        patch_file="foo.hip", patch_sha="abc123",
-        gfx_id="gfx942", claimed_speedup=1.5,
+        baseline_db="b.db",
+        candidate_db="c.db",
+        patch_file="foo.hip",
+        patch_sha="abc123",
+        gfx_id="gfx942",
+        claimed_speedup=1.5,
         candidate_binary="./my_binary",
     )
     # All 5 gates should have been called
@@ -66,9 +74,12 @@ def test_gates_execute_in_cascade_order(patches):
 def test_compile_failure_short_circuits(patches):
     patches["compile"].return_value = {"ok": False, "stderr": "undefined reference"}
     v = gate_cascade.evaluate(
-        baseline_db="b.db", candidate_db="c.db",
-        patch_file="foo.hip", patch_sha="abc123",
-        gfx_id="gfx942", claimed_speedup=1.5,
+        baseline_db="b.db",
+        candidate_db="c.db",
+        patch_file="foo.hip",
+        patch_sha="abc123",
+        gfx_id="gfx942",
+        claimed_speedup=1.5,
     )
     assert v.status == "reject"
     assert v.failing_gate == "compile"
@@ -80,9 +91,12 @@ def test_sol_violation_flagged_as_reject(patches):
     """Anti-Sakana: claimed 1000× speedup rejected by SOL sanity."""
     patches["sol"].return_value = {"ok": False, "peak_ratio": 1500.0}
     v = gate_cascade.evaluate(
-        baseline_db="b.db", candidate_db="c.db",
-        patch_file="foo.hip", patch_sha="abc123",
-        gfx_id="gfx942", claimed_speedup=1000.0,
+        baseline_db="b.db",
+        candidate_db="c.db",
+        patch_file="foo.hip",
+        patch_sha="abc123",
+        gfx_id="gfx942",
+        claimed_speedup=1000.0,
     )
     assert v.status == "reject"
     assert v.failing_gate == "sol"
@@ -91,9 +105,12 @@ def test_sol_violation_flagged_as_reject(patches):
 def test_bitwise_mismatch_rejects(patches):
     patches["bitwise"].return_value = {"ok": False, "diff": "max_abs=0.01"}
     v = gate_cascade.evaluate(
-        baseline_db="b.db", candidate_db="c.db",
-        patch_file="foo.hip", patch_sha="abc123",
-        gfx_id="gfx942", claimed_speedup=1.5,
+        baseline_db="b.db",
+        candidate_db="c.db",
+        patch_file="foo.hip",
+        patch_sha="abc123",
+        gfx_id="gfx942",
+        claimed_speedup=1.5,
     )
     assert v.status == "reject"
     assert v.failing_gate == "bitwise"
@@ -108,17 +125,20 @@ def test_regression_over_threshold_returns_regressed(patches):
     patches["regression"].return_value = {
         "ok": False,
         "verdict": "regressed",
-        "total_delta_pct": 0.15,          # fraction: 15%
-        "per_kernel_deltas": [            # real key — was "hot_kernels"
+        "total_delta_pct": 0.15,  # fraction: 15%
+        "per_kernel_deltas": [  # real key — was "hot_kernels"
             {"kernel": "[K1]", "delta_pct": 0.15, "was_hot": True},
         ],
         "weighted_geomean_delta_pct": 0.12,
         "threshold_pct": 0.03,
     }
     v = gate_cascade.evaluate(
-        baseline_db="b.db", candidate_db="c.db",
-        patch_file="foo.hip", patch_sha="abc123",
-        gfx_id="gfx942", claimed_speedup=1.5,
+        baseline_db="b.db",
+        candidate_db="c.db",
+        patch_file="foo.hip",
+        patch_sha="abc123",
+        gfx_id="gfx942",
+        claimed_speedup=1.5,
     )
     assert v.status == "regressed"
     assert v.failing_gate == "regression"
@@ -133,15 +153,18 @@ def test_weighted_geomean_catches_tail_regressions(patches):
     patches["regression"].return_value = {
         "ok": False,
         "verdict": "regressed",
-        "total_delta_pct": 0.02,            # fraction: 2% total — barely noticeable
-        "per_kernel_deltas": [],            # real key — no single hot kernel > 10%
+        "total_delta_pct": 0.02,  # fraction: 2% total — barely noticeable
+        "per_kernel_deltas": [],  # real key — no single hot kernel > 10%
         "weighted_geomean_delta_pct": 0.095,  # fraction: 9.5% — tail regressions add up
         "threshold_pct": 0.03,
     }
     v = gate_cascade.evaluate(
-        baseline_db="b.db", candidate_db="c.db",
-        patch_file="foo.hip", patch_sha="abc123",
-        gfx_id="gfx942", claimed_speedup=1.05,
+        baseline_db="b.db",
+        candidate_db="c.db",
+        patch_file="foo.hip",
+        patch_sha="abc123",
+        gfx_id="gfx942",
+        claimed_speedup=1.05,
     )
     assert v.status == "regressed"
     assert v.failing_gate == "regression"
@@ -150,9 +173,12 @@ def test_weighted_geomean_catches_tail_regressions(patches):
 def test_anchor_failure_rejects(patches):
     patches["anchors"].return_value = {"ok": False, "failed": ["test_conv_forward"]}
     v = gate_cascade.evaluate(
-        baseline_db="b.db", candidate_db="c.db",
-        patch_file="foo.hip", patch_sha="abc123",
-        gfx_id="gfx942", claimed_speedup=1.5,
+        baseline_db="b.db",
+        candidate_db="c.db",
+        patch_file="foo.hip",
+        patch_sha="abc123",
+        gfx_id="gfx942",
+        claimed_speedup=1.5,
         candidate_binary="./my_binary",
     )
     assert v.status == "reject"
@@ -176,9 +202,12 @@ def test_run_sol_gate_does_not_mutate_tool_result(monkeypatch):
 
 def test_verdict_is_frozen(patches):
     v = gate_cascade.evaluate(
-        baseline_db="b.db", candidate_db="c.db",
-        patch_file="foo.hip", patch_sha="abc123",
-        gfx_id="gfx942", claimed_speedup=1.5,
+        baseline_db="b.db",
+        candidate_db="c.db",
+        patch_file="foo.hip",
+        patch_sha="abc123",
+        gfx_id="gfx942",
+        claimed_speedup=1.5,
     )
     with pytest.raises((AttributeError, TypeError)):
         v.status = "reject"  # frozen dataclass
@@ -193,13 +222,17 @@ def test_debug_loop_caps_exist():
 
 # -- Finding #20: short-circuit coverage for Gates 2 / 3 / 4 ----------------
 
+
 def test_sol_failure_short_circuits_bitwise_regression_anchors(patches):
     """Gate 2 (SOL) failing must skip Gates 3, 4, 5 entirely."""
     patches["sol"].return_value = {"ok": False, "peak_ratio": 9999.0}
     v = gate_cascade.evaluate(
-        baseline_db="b.db", candidate_db="c.db",
-        patch_file="foo.hip", patch_sha="abc123",
-        gfx_id="gfx942", claimed_speedup=1000.0,
+        baseline_db="b.db",
+        candidate_db="c.db",
+        patch_file="foo.hip",
+        patch_sha="abc123",
+        gfx_id="gfx942",
+        claimed_speedup=1000.0,
     )
     assert v.status == "reject"
     assert v.failing_gate == "sol"
@@ -213,9 +246,12 @@ def test_bitwise_failure_short_circuits_regression_anchors(patches):
     """Gate 3 (bitwise) failing must skip Gates 4 and 5 entirely."""
     patches["bitwise"].return_value = {"ok": False, "diff": "max_abs=0.5"}
     v = gate_cascade.evaluate(
-        baseline_db="b.db", candidate_db="c.db",
-        patch_file="foo.hip", patch_sha="abc123",
-        gfx_id="gfx942", claimed_speedup=1.5,
+        baseline_db="b.db",
+        candidate_db="c.db",
+        patch_file="foo.hip",
+        patch_sha="abc123",
+        gfx_id="gfx942",
+        claimed_speedup=1.5,
     )
     assert v.status == "reject"
     assert v.failing_gate == "bitwise"
@@ -235,9 +271,12 @@ def test_regression_failure_short_circuits_anchors(patches):
         "weighted_geomean_delta_pct": 20.0,
     }
     v = gate_cascade.evaluate(
-        baseline_db="b.db", candidate_db="c.db",
-        patch_file="foo.hip", patch_sha="abc123",
-        gfx_id="gfx942", claimed_speedup=1.5,
+        baseline_db="b.db",
+        candidate_db="c.db",
+        patch_file="foo.hip",
+        patch_sha="abc123",
+        gfx_id="gfx942",
+        claimed_speedup=1.5,
     )
     assert v.status == "regressed"
     assert v.failing_gate == "regression"
@@ -251,6 +290,7 @@ def test_regression_failure_short_circuits_anchors(patches):
 # ---------------------------------------------------------------------------
 # Finding #2 — _run_sol_gate un-mocked integration tests
 # ---------------------------------------------------------------------------
+
 
 class TestRunSolGateUnmocked:
     """Call _run_sol_gate DIRECTLY (no mocking) — exercises the real sol.sanity_check
@@ -300,53 +340,57 @@ class TestRunSolGateUnmocked:
         speedup ratio is modest.  This is the Sakana-style attack path."""
         # MI300X fp64 peak = 81.7 TFLOPS; claim 500 TFLOPS → impossible
         r = gate_cascade._run_sol_gate(
-            claimed_speedup=3.0,   # ratio looks innocent
+            claimed_speedup=3.0,  # ratio looks innocent
             gfx_id="gfx942",
             achieved_flops_per_sec=500e12,  # but absolute FLOPS exceed hardware peak
             kernel_type="fp64",
         )
-        assert r["ok"] is False, (
-            "500 TFLOPS fp64 exceeds MI300X peak 81.7 TFLOPS — must reject"
-        )
+        assert r["ok"] is False, "500 TFLOPS fp64 exceeds MI300X peak 81.7 TFLOPS — must reject"
 
     def test_evaluate_rejects_1000x_claimed_speedup_end_to_end(self, monkeypatch):
         """evaluate() with claimed_speedup=1000× must fail at Gate 2 even when
         all other gates are mocked as passing.  This would have silently passed
         before the fix (TypeError was swallowed)."""
         monkeypatch.setattr(
-            gate_cascade, "_run_compile_gate",
+            gate_cascade,
+            "_run_compile_gate",
             MagicMock(return_value={"ok": True, "stderr": ""}),
         )
         # Do NOT mock _run_sol_gate — it must run for real
         monkeypatch.setattr(
-            gate_cascade, "_run_bitwise_gate",
+            gate_cascade,
+            "_run_bitwise_gate",
             MagicMock(return_value={"ok": True, "diff": None}),
         )
         monkeypatch.setattr(
-            gate_cascade, "_run_regression_gate",
-            MagicMock(return_value={
-                "ok": True,
-                "total_delta_pct": 0.0,
-                "weighted_geomean_delta_pct": 0.0,
-                "per_kernel_deltas": [],
-            }),
+            gate_cascade,
+            "_run_regression_gate",
+            MagicMock(
+                return_value={
+                    "ok": True,
+                    "total_delta_pct": 0.0,
+                    "weighted_geomean_delta_pct": 0.0,
+                    "per_kernel_deltas": [],
+                }
+            ),
         )
 
         v = gate_cascade.evaluate(
-            baseline_db="b.db", candidate_db="c.db",
-            patch_file="foo.hip", patch_sha="abc123",
+            baseline_db="b.db",
+            candidate_db="c.db",
+            patch_file="foo.hip",
+            patch_sha="abc123",
             gfx_id="gfx942",
             claimed_speedup=1000.0,
         )
-        assert v.status == "reject", (
-            f"1000× speedup must be rejected at Gate 2, got: {v.status}"
-        )
+        assert v.status == "reject", f"1000× speedup must be rejected at Gate 2, got: {v.status}"
         assert v.failing_gate == "sol"
 
 
 # ---------------------------------------------------------------------------
 # Finding #3 — Gate 4 wrong key + unit mismatch
 # ---------------------------------------------------------------------------
+
 
 class TestRegressionGateRealSchema:
     """Tests that pass regression.compare_runs real output schema through evaluate().
@@ -366,19 +410,23 @@ class TestRegressionGateRealSchema:
         """Helper: stub compile/sol/bitwise/anchors as passing; let regression return
         the supplied dict (real schema from regression.compare_runs)."""
         monkeypatch.setattr(
-            gate_cascade, "_run_compile_gate",
+            gate_cascade,
+            "_run_compile_gate",
             MagicMock(return_value={"ok": True, "stderr": ""}),
         )
         monkeypatch.setattr(
-            gate_cascade, "_run_sol_gate",
+            gate_cascade,
+            "_run_sol_gate",
             MagicMock(return_value={"ok": True, "peak_ratio": 1.5}),
         )
         monkeypatch.setattr(
-            gate_cascade, "_run_bitwise_gate",
+            gate_cascade,
+            "_run_bitwise_gate",
             MagicMock(return_value={"ok": True, "diff": None}),
         )
         monkeypatch.setattr(
-            gate_cascade, "_run_regression_gate",
+            gate_cascade,
+            "_run_regression_gate",
             MagicMock(return_value=regression_return),
         )
 
@@ -387,7 +435,7 @@ class TestRegressionGateRealSchema:
         Gate 4 failure.  Before the fix: 0.15 > 10.0 is False → silently passed."""
         regression_output = {
             "verdict": "regressed",
-            "total_delta_pct": 0.02,      # 2% total — below 3% noise floor
+            "total_delta_pct": 0.02,  # 2% total — below 3% noise floor
             "weighted_geomean_delta_pct": 0.02,
             "per_kernel_deltas": [
                 {"kernel": "matmul", "delta_pct": 0.15, "was_hot": True},
@@ -398,9 +446,12 @@ class TestRegressionGateRealSchema:
         self._make_stubs_pass_except_regression(monkeypatch, regression_output)
 
         v = gate_cascade.evaluate(
-            baseline_db="b.db", candidate_db="c.db",
-            patch_file="foo.hip", patch_sha="abc123",
-            gfx_id="gfx942", claimed_speedup=1.1,
+            baseline_db="b.db",
+            candidate_db="c.db",
+            patch_file="foo.hip",
+            patch_sha="abc123",
+            gfx_id="gfx942",
+            claimed_speedup=1.1,
         )
         assert v.status == "regressed", (
             "matmul is hot and regressed 15% (fraction 0.15 > threshold 0.10) — "
@@ -413,7 +464,7 @@ class TestRegressionGateRealSchema:
         """Only kernels with was_hot=True should trigger the hot-kernel failure path."""
         regression_output = {
             "verdict": "neutral",
-            "total_delta_pct": 0.01,    # 1% total — within noise
+            "total_delta_pct": 0.01,  # 1% total — within noise
             "weighted_geomean_delta_pct": 0.01,
             "per_kernel_deltas": [
                 # delta_pct=0.15 (15%) but was_hot=False → should NOT trigger hot-kernel gate
@@ -424,14 +475,15 @@ class TestRegressionGateRealSchema:
         self._make_stubs_pass_except_regression(monkeypatch, regression_output)
 
         v = gate_cascade.evaluate(
-            baseline_db="b.db", candidate_db="c.db",
-            patch_file="foo.hip", patch_sha="abc123",
-            gfx_id="gfx942", claimed_speedup=1.1,
+            baseline_db="b.db",
+            candidate_db="c.db",
+            patch_file="foo.hip",
+            patch_sha="abc123",
+            gfx_id="gfx942",
+            claimed_speedup=1.1,
         )
         # total_delta 0.01 < 0.03 threshold, was_hot=False → pass
-        assert v.status == "pass", (
-            f"Non-hot kernel regression should not trigger Gate 4, got: {v.status!r}"
-        )
+        assert v.status == "pass", f"Non-hot kernel regression should not trigger Gate 4, got: {v.status!r}"
 
     def test_real_regression_db_fixtures_flow_through_gate4(self, monkeypatch):
         """Use the real regression fixture DBs with _run_regression_gate un-mocked.
@@ -445,15 +497,18 @@ class TestRegressionGateRealSchema:
 
         # Mock everything EXCEPT _run_regression_gate
         monkeypatch.setattr(
-            gate_cascade, "_run_compile_gate",
+            gate_cascade,
+            "_run_compile_gate",
             MagicMock(return_value={"ok": True, "stderr": ""}),
         )
         monkeypatch.setattr(
-            gate_cascade, "_run_sol_gate",
+            gate_cascade,
+            "_run_sol_gate",
             MagicMock(return_value={"ok": True, "peak_ratio": 1.0}),
         )
         monkeypatch.setattr(
-            gate_cascade, "_run_bitwise_gate",
+            gate_cascade,
+            "_run_bitwise_gate",
             MagicMock(return_value={"ok": True, "diff": None}),
         )
         # _run_regression_gate is NOT mocked — runs for real
@@ -461,8 +516,10 @@ class TestRegressionGateRealSchema:
         v = gate_cascade.evaluate(
             baseline_db=BASELINE,
             candidate_db=TAIL_HURT,
-            patch_file="foo.hip", patch_sha="abc123",
-            gfx_id="gfx942", claimed_speedup=1.0,
+            patch_file="foo.hip",
+            patch_sha="abc123",
+            gfx_id="gfx942",
+            claimed_speedup=1.0,
         )
         assert v.status == "regressed", (
             "regression_tail_hurt.db has conv2d (hot kernel) regressing 15%; "
@@ -473,6 +530,7 @@ class TestRegressionGateRealSchema:
 # ---------------------------------------------------------------------------
 # Finding #11 — Gate 5 silent skip with misleading verdict
 # ---------------------------------------------------------------------------
+
 
 class TestGate5SkipVerdict:
     """Tests for Finding #11: when candidate_binary is None, Gate 5 is skipped
@@ -488,30 +546,37 @@ class TestGate5SkipVerdict:
     def _make_all_pass_stubs(monkeypatch):
         """Stub gates 1-5 as all passing."""
         monkeypatch.setattr(
-            gate_cascade, "_run_compile_gate",
+            gate_cascade,
+            "_run_compile_gate",
             MagicMock(return_value={"ok": True, "stderr": ""}),
         )
         monkeypatch.setattr(
-            gate_cascade, "_run_sol_gate",
+            gate_cascade,
+            "_run_sol_gate",
             MagicMock(return_value={"ok": True, "peak_ratio": 1.5}),
         )
         monkeypatch.setattr(
-            gate_cascade, "_run_bitwise_gate",
+            gate_cascade,
+            "_run_bitwise_gate",
             MagicMock(return_value={"ok": True, "diff": None}),
         )
         monkeypatch.setattr(
-            gate_cascade, "_run_regression_gate",
-            MagicMock(return_value={
-                "ok": True,
-                "verdict": "improved",
-                "total_delta_pct": -0.05,
-                "weighted_geomean_delta_pct": -0.05,
-                "per_kernel_deltas": [],
-                "threshold_pct": 0.03,
-            }),
+            gate_cascade,
+            "_run_regression_gate",
+            MagicMock(
+                return_value={
+                    "ok": True,
+                    "verdict": "improved",
+                    "total_delta_pct": -0.05,
+                    "weighted_geomean_delta_pct": -0.05,
+                    "per_kernel_deltas": [],
+                    "threshold_pct": 0.03,
+                }
+            ),
         )
         monkeypatch.setattr(
-            gate_cascade, "_run_anchors_gate",
+            gate_cascade,
+            "_run_anchors_gate",
             MagicMock(return_value={"ok": True, "failed": []}),
         )
 
@@ -520,10 +585,13 @@ class TestGate5SkipVerdict:
         self._make_all_pass_stubs(monkeypatch)
 
         v = gate_cascade.evaluate(
-            baseline_db="b.db", candidate_db="c.db",
-            patch_file="foo.hip", patch_sha="abc123",
-            gfx_id="gfx942", claimed_speedup=1.2,
-            candidate_binary=None,   # Gate 5 skipped
+            baseline_db="b.db",
+            candidate_db="c.db",
+            patch_file="foo.hip",
+            patch_sha="abc123",
+            gfx_id="gfx942",
+            claimed_speedup=1.2,
+            candidate_binary=None,  # Gate 5 skipped
         )
         assert v.status == "pass"
         assert v.detail != "all 5 gates passed", (
@@ -536,40 +604,47 @@ class TestGate5SkipVerdict:
         self._make_all_pass_stubs(monkeypatch)
 
         v = gate_cascade.evaluate(
-            baseline_db="b.db", candidate_db="c.db",
-            patch_file="foo.hip", patch_sha="abc123",
-            gfx_id="gfx942", claimed_speedup=1.2,
+            baseline_db="b.db",
+            candidate_db="c.db",
+            patch_file="foo.hip",
+            patch_sha="abc123",
+            gfx_id="gfx942",
+            claimed_speedup=1.2,
             candidate_binary=None,
         )
-        assert "skipped" in v.detail.lower(), (
-            f"Detail should mention that Gate 5 was skipped. Got: {v.detail!r}"
-        )
-        assert "candidate_binary" in v.detail.lower() or "anchors" in v.detail.lower(), (
-            f"Detail should explain WHY Gate 5 was skipped. Got: {v.detail!r}"
-        )
+        assert "skipped" in v.detail.lower(), f"Detail should mention that Gate 5 was skipped. Got: {v.detail!r}"
+        assert (
+            "candidate_binary" in v.detail.lower() or "anchors" in v.detail.lower()
+        ), f"Detail should explain WHY Gate 5 was skipped. Got: {v.detail!r}"
 
     def test_no_candidate_binary_gates_run_is_4(self, monkeypatch):
         """metrics['gates_run'] must be 4 when Gate 5 was skipped."""
         self._make_all_pass_stubs(monkeypatch)
 
         v = gate_cascade.evaluate(
-            baseline_db="b.db", candidate_db="c.db",
-            patch_file="foo.hip", patch_sha="abc123",
-            gfx_id="gfx942", claimed_speedup=1.2,
+            baseline_db="b.db",
+            candidate_db="c.db",
+            patch_file="foo.hip",
+            patch_sha="abc123",
+            gfx_id="gfx942",
+            claimed_speedup=1.2,
             candidate_binary=None,
         )
-        assert v.metrics.get("gates_run") == 4, (
-            f"Expected gates_run=4 when Gate 5 skipped, got: {v.metrics.get('gates_run')!r}"
-        )
+        assert (
+            v.metrics.get("gates_run") == 4
+        ), f"Expected gates_run=4 when Gate 5 skipped, got: {v.metrics.get('gates_run')!r}"
 
     def test_with_candidate_binary_detail_is_all_5_passed(self, monkeypatch):
         """When candidate_binary is provided and Gate 5 passes, detail IS 'all 5 gates passed'."""
         self._make_all_pass_stubs(monkeypatch)
 
         v = gate_cascade.evaluate(
-            baseline_db="b.db", candidate_db="c.db",
-            patch_file="foo.hip", patch_sha="abc123",
-            gfx_id="gfx942", claimed_speedup=1.2,
+            baseline_db="b.db",
+            candidate_db="c.db",
+            patch_file="foo.hip",
+            patch_sha="abc123",
+            gfx_id="gfx942",
+            claimed_speedup=1.2,
             candidate_binary="./my_binary",  # Gate 5 runs
         )
         assert v.status == "pass"
@@ -584,9 +659,12 @@ class TestGate5SkipVerdict:
         self._make_all_pass_stubs(monkeypatch)
 
         v = gate_cascade.evaluate(
-            baseline_db="b.db", candidate_db="c.db",
-            patch_file="foo.hip", patch_sha="abc123",
-            gfx_id="gfx942", claimed_speedup=1.2,
+            baseline_db="b.db",
+            candidate_db="c.db",
+            patch_file="foo.hip",
+            patch_sha="abc123",
+            gfx_id="gfx942",
+            claimed_speedup=1.2,
             candidate_binary="./my_binary",
         )
         assert v.metrics.get("gates_run") == 5

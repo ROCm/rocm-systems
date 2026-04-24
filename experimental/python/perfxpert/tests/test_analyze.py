@@ -49,7 +49,6 @@ import pytest
 
 from perfxpert.tools._tooldep import ExternalToolMissing, check_tool_available
 
-
 HAS_ROCPROF_TRACE_DECODER = check_tool_available("rocprof-trace-decoder")[0]
 
 
@@ -379,9 +378,7 @@ def test_tier2_low_occupancy_fires():
     """Tier 2: avg_waves > 0 and < 16 triggers 'Low Occupancy' HIGH."""
     from perfxpert.analyze import generate_recommendations
 
-    recs = generate_recommendations(
-        _empty_breakdown(), [], {}, _hw_counters(avg_waves=8.0)
-    )
+    recs = generate_recommendations(_empty_breakdown(), [], {}, _hw_counters(avg_waves=8.0))
     matches = [r for r in recs if r["category"] == "Low Occupancy"]
     assert len(matches) == 1
     assert matches[0]["priority"] == "HIGH"
@@ -392,9 +389,7 @@ def test_tier2_low_occupancy_boundary_does_not_fire():
     """Tier 2: avg_waves exactly 16 does NOT trigger (threshold is < 16)."""
     from perfxpert.analyze import generate_recommendations
 
-    recs = generate_recommendations(
-        _empty_breakdown(), [], {}, _hw_counters(avg_waves=16.0)
-    )
+    recs = generate_recommendations(_empty_breakdown(), [], {}, _hw_counters(avg_waves=16.0))
     assert not any(r["category"] == "Low Occupancy" for r in recs)
 
 
@@ -410,9 +405,7 @@ def test_tier2_low_gpu_utilization_fires():
     """Tier 2: gpu_utilization_percent > 0 and < 70 triggers 'GPU Utilization' MEDIUM."""
     from perfxpert.analyze import generate_recommendations
 
-    recs = generate_recommendations(
-        _empty_breakdown(), [], {}, _hw_counters(gpu_util=50.0)
-    )
+    recs = generate_recommendations(_empty_breakdown(), [], {}, _hw_counters(gpu_util=50.0))
     matches = [r for r in recs if r["category"] == "GPU Utilization"]
     assert len(matches) == 1
     assert matches[0]["priority"] == "MEDIUM"
@@ -423,9 +416,7 @@ def test_tier2_gpu_utilization_boundary_does_not_fire():
     """Tier 2: gpu_utilization exactly 70% does NOT trigger (threshold is < 70)."""
     from perfxpert.analyze import generate_recommendations
 
-    recs = generate_recommendations(
-        _empty_breakdown(), [], {}, _hw_counters(gpu_util=70.0)
-    )
+    recs = generate_recommendations(_empty_breakdown(), [], {}, _hw_counters(gpu_util=70.0))
     assert not any(r["category"] == "GPU Utilization" for r in recs)
 
 
@@ -504,9 +495,7 @@ def test_summary_memory_transfer_high_confidence():
     """memcpy_pct > 30 → memory_transfer with confidence 0.85."""
     from perfxpert.analyze import _build_summary
 
-    result = _build_summary(
-        {"memcpy_percent": 35, "kernel_percent": 50, "overhead_percent": 15}, [], False
-    )
+    result = _build_summary({"memcpy_percent": 35, "kernel_percent": 50, "overhead_percent": 15}, [], False)
     assert result["primary_bottleneck"] == "memory_transfer"
     assert result["confidence"] == 0.85
 
@@ -515,9 +504,7 @@ def test_summary_memory_transfer_medium_confidence():
     """memcpy_pct 20-30 → memory_transfer with confidence 0.70."""
     from perfxpert.analyze import _build_summary
 
-    result = _build_summary(
-        {"memcpy_percent": 25, "kernel_percent": 60, "overhead_percent": 15}, [], False
-    )
+    result = _build_summary({"memcpy_percent": 25, "kernel_percent": 60, "overhead_percent": 15}, [], False)
     assert result["primary_bottleneck"] == "memory_transfer"
     assert result["confidence"] == 0.70
 
@@ -526,9 +513,7 @@ def test_summary_latency_bottleneck():
     """overhead_pct > 25 (memcpy < 20) → latency with confidence 0.75."""
     from perfxpert.analyze import _build_summary
 
-    result = _build_summary(
-        {"memcpy_percent": 10, "kernel_percent": 60, "overhead_percent": 30}, [], False
-    )
+    result = _build_summary({"memcpy_percent": 10, "kernel_percent": 60, "overhead_percent": 30}, [], False)
     assert result["primary_bottleneck"] == "latency"
     assert result["confidence"] == 0.75
 
@@ -537,9 +522,7 @@ def test_summary_compute_with_counters():
     """kernel_pct > 70 + has_counters=True → compute with confidence 0.80."""
     from perfxpert.analyze import _build_summary
 
-    result = _build_summary(
-        {"memcpy_percent": 5, "kernel_percent": 80, "overhead_percent": 5}, [], True
-    )
+    result = _build_summary({"memcpy_percent": 5, "kernel_percent": 80, "overhead_percent": 5}, [], True)
     assert result["primary_bottleneck"] == "compute"
     assert result["confidence"] == 0.80
 
@@ -548,9 +531,7 @@ def test_summary_compute_without_counters():
     """kernel_pct > 70 + has_counters=False → compute with confidence 0.60."""
     from perfxpert.analyze import _build_summary
 
-    result = _build_summary(
-        {"memcpy_percent": 5, "kernel_percent": 80, "overhead_percent": 5}, [], False
-    )
+    result = _build_summary({"memcpy_percent": 5, "kernel_percent": 80, "overhead_percent": 5}, [], False)
     assert result["primary_bottleneck"] == "compute"
     assert result["confidence"] == 0.60
 
@@ -559,9 +540,7 @@ def test_summary_mixed_bottleneck():
     """Low percentages all round → mixed with confidence 0.50."""
     from perfxpert.analyze import _build_summary
 
-    result = _build_summary(
-        {"memcpy_percent": 10, "kernel_percent": 50, "overhead_percent": 10}, [], False
-    )
+    result = _build_summary({"memcpy_percent": 10, "kernel_percent": 50, "overhead_percent": 10}, [], False)
     assert result["primary_bottleneck"] == "mixed"
     assert result["confidence"] == 0.50
 
@@ -583,9 +562,7 @@ def test_summary_empty_hotspots_shows_na():
     """Empty hotspots → top kernel reported as 'N/A' in key_findings."""
     from perfxpert.analyze import _build_summary
 
-    result = _build_summary(
-        {"memcpy_percent": 5, "kernel_percent": 80, "overhead_percent": 5}, [], False
-    )
+    result = _build_summary({"memcpy_percent": 5, "kernel_percent": 80, "overhead_percent": 5}, [], False)
     assert any("N/A" in f for f in result["key_findings"])
 
 
@@ -604,9 +581,7 @@ def test_summary_has_required_keys():
     """Summary dict contains all required schema keys."""
     from perfxpert.analyze import _build_summary
 
-    result = _build_summary(
-        {"memcpy_percent": 10, "kernel_percent": 60, "overhead_percent": 10}, [], False
-    )
+    result = _build_summary({"memcpy_percent": 10, "kernel_percent": 60, "overhead_percent": 10}, [], False)
     for key in (
         "overall_assessment",
         "primary_bottleneck",
@@ -740,9 +715,7 @@ def test_recs_json_stable_ids_for_known_categories():
     out = _build_recommendations_json(recs)
     by_cat = {r["category"]: r["id"] for r in out}
     for cat, expected_id in expected.items():
-        assert (
-            by_cat[cat] == expected_id
-        ), f"{cat}: expected {expected_id}, got {by_cat[cat]}"
+        assert by_cat[cat] == expected_id, f"{cat}: expected {expected_id}, got {by_cat[cat]}"
 
 
 def test_recs_json_duplicate_category_gets_incremented_id():
@@ -988,9 +961,7 @@ def test_format_json_analysis_tier_with_counters():
     from perfxpert.analyze import _format_as_json
 
     hw = {"has_counters": True, "metrics": {}, "counters": {}}
-    doc = json.loads(
-        _format_as_json(_empty_breakdown(), [], {}, [], hardware_counters=hw)
-    )
+    doc = json.loads(_format_as_json(_empty_breakdown(), [], {}, [], hardware_counters=hw))
     assert doc["profiling_info"]["analysis_tier"] == 2
     assert doc["hardware_counters"]["has_counters"] is True
 
@@ -1008,9 +979,7 @@ def test_format_json_database_path_in_metadata():
     """database_file in metadata reflects the database_path argument."""
     from perfxpert.analyze import _format_as_json
 
-    doc = json.loads(
-        _format_as_json(_empty_breakdown(), [], {}, [], database_path="/data/trace.db")
-    )
+    doc = json.loads(_format_as_json(_empty_breakdown(), [], {}, [], database_path="/data/trace.db"))
     assert doc["metadata"]["database_file"] == "/data/trace.db"
 
 
@@ -1074,9 +1043,7 @@ def test_format_output_text():
     from perfxpert.analyze import format_analysis_output
 
     td, hs, mem, recs = _full_sample_data()
-    out = format_analysis_output(
-        td, hs, mem, recs, output_format="text", database_path="/test/db.db"
-    )
+    out = format_analysis_output(td, hs, mem, recs, output_format="text", database_path="/test/db.db")
     assert isinstance(out, str)
     assert "ROCPD AI PERFORMANCE ANALYSIS" in out
     assert "TIME BREAKDOWN" in out
@@ -1119,9 +1086,7 @@ def test_format_output_markdown():
     from perfxpert.analyze import format_analysis_output
 
     td, hs, mem, recs = _full_sample_data()
-    out = format_analysis_output(
-        td, hs, mem, recs, output_format="markdown", database_path="/test/db.db"
-    )
+    out = format_analysis_output(td, hs, mem, recs, output_format="markdown", database_path="/test/db.db")
     assert isinstance(out, str)
     assert out.startswith("# PerfXpert AI Performance Analysis")
     assert "## Time Breakdown" in out
@@ -1164,9 +1129,7 @@ def test_format_output_markdown_with_hardware_counters():
         },
         "counters": {},
     }
-    out = format_analysis_output(
-        td, hs, mem, recs, hardware_counters=hw, output_format="markdown"
-    )
+    out = format_analysis_output(td, hs, mem, recs, hardware_counters=hw, output_format="markdown")
     assert "## Hardware Counters (Tier 2)" in out
     assert "65.0%" in out
 
@@ -1184,9 +1147,7 @@ def test_format_output_unknown_format_falls_back_to_text():
 # ---------------------------------------------------------------------------
 
 
-def _pmc_cmd(
-    counters="GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES", extra_flags=None, extra_args=None
-):
+def _pmc_cmd(counters="GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES", extra_flags=None, extra_args=None):
     """Build a minimal rocprofv3 recommendation command with a --pmc arg."""
     flags = ["--sys-trace"] + (extra_flags or [])
     args = [
@@ -1199,9 +1160,7 @@ def _pmc_cmd(
         "description": "Collect hardware counters",
         "flags": flags,
         "args": args,
-        "full_command": (
-            f"rocprofv3 --sys-trace --pmc {counters} -d ./output -o profile -- ./app"
-        ),
+        "full_command": (f"rocprofv3 --sys-trace --pmc {counters} -d ./output -o profile -- ./app"),
     }
 
 
@@ -1209,9 +1168,7 @@ def test_filter_pmc_all_counters_already_collected_drops_command():
     """When every --pmc counter is already in pmc_events, the command is dropped."""
     from perfxpert.analyze import _filter_rec_commands
 
-    already = frozenset(
-        {"--sys-trace", "pmc:GRBM_COUNT", "pmc:GRBM_GUI_ACTIVE", "pmc:SQ_WAVES"}
-    )
+    already = frozenset({"--sys-trace", "pmc:GRBM_COUNT", "pmc:GRBM_GUI_ACTIVE", "pmc:SQ_WAVES"})
     result = _filter_rec_commands([_pmc_cmd()], already)
     assert result == [], "Command with all counters already collected should be dropped"
 
@@ -1277,9 +1234,7 @@ def test_filter_pmc_kernel_names_alone_not_meaningful():
         ' --kernel-include-regex "my_kernel" -d ./output -o profile -- ./app'
     )
     # All three counters already collected + sys-trace → nothing new
-    already = frozenset(
-        {"--sys-trace", "pmc:GRBM_COUNT", "pmc:GRBM_GUI_ACTIVE", "pmc:SQ_WAVES"}
-    )
+    already = frozenset({"--sys-trace", "pmc:GRBM_COUNT", "pmc:GRBM_GUI_ACTIVE", "pmc:SQ_WAVES"})
     result = _filter_rec_commands([cmd], already)
     assert result == [], "Command with only scope+output args remaining should be dropped"
 
@@ -1295,9 +1250,7 @@ def test_filter_pmc_rocprof_compute_always_kept():
         "args": [{"name": "profile", "value": None}],
         "full_command": "rocprof-compute profile -- ./app",
     }
-    already = frozenset(
-        {"--sys-trace", "pmc:GRBM_COUNT", "pmc:GRBM_GUI_ACTIVE", "pmc:SQ_WAVES"}
-    )
+    already = frozenset({"--sys-trace", "pmc:GRBM_COUNT", "pmc:GRBM_GUI_ACTIVE", "pmc:SQ_WAVES"})
     result = _filter_rec_commands([compute_cmd], already)
     assert len(result) == 1
     assert result[0] is compute_cmd
@@ -1313,9 +1266,7 @@ def _att_csv_content(rows):
     header = "Instruction ID,Hitcount,Latency (cycles),Stall cycles,Source line"
     lines = [header]
     for r in rows:
-        lines.append(
-            f"{r['pc']},{r['hitcount']},{r['latency']},{r['stall']},{r.get('src', '')}"
-        )
+        lines.append(f"{r['pc']},{r['hitcount']},{r['latency']},{r['stall']},{r.get('src', '')}")
     return "\n".join(lines) + "\n"
 
 
@@ -1533,15 +1484,11 @@ def test_att_multiple_kernels_sorted_by_weighted_stall():
     with tempfile.TemporaryDirectory() as d:
         # Kernel A: small weighted stall
         (pathlib.Path(d) / "stats_kernel_a.csv").write_text(
-            _att_csv_content(
-                [{"pc": "0x0000", "hitcount": 1000, "latency": 100, "stall": 50}]
-            )
+            _att_csv_content([{"pc": "0x0000", "hitcount": 1000, "latency": 100, "stall": 50}])
         )
         # Kernel B: large weighted stall
         (pathlib.Path(d) / "stats_kernel_b.csv").write_text(
-            _att_csv_content(
-                [{"pc": "0x0000", "hitcount": 100000, "latency": 200, "stall": 190}]
-            )
+            _att_csv_content([{"pc": "0x0000", "hitcount": 100000, "latency": 200, "stall": 190}])
         )
         result = analyze_thread_trace(d)
 
@@ -1563,15 +1510,11 @@ def test_att_summary_counts():
     with tempfile.TemporaryDirectory() as d:
         # High stall (stall_ratio=0.90, hitcount=8192)
         (pathlib.Path(d) / "stats_kernel_high.csv").write_text(
-            _att_csv_content(
-                [{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 90}]
-            )
+            _att_csv_content([{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 90}])
         )
         # Low stall (stall_ratio=0.10, hitcount=8192)
         (pathlib.Path(d) / "stats_kernel_low.csv").write_text(
-            _att_csv_content(
-                [{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 10}]
-            )
+            _att_csv_content([{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 10}])
         )
         result = analyze_thread_trace(d)
 
@@ -1590,9 +1533,7 @@ def test_att_json_output_includes_att_trace_field():
 
     with tempfile.TemporaryDirectory() as d:
         (pathlib.Path(d) / "stats_k.csv").write_text(
-            _att_csv_content(
-                [{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 80}]
-            )
+            _att_csv_content([{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 80}])
         )
         att = analyze_thread_trace(d)
 
@@ -1604,9 +1545,7 @@ def test_att_json_output_includes_att_trace_field():
         att_analysis=att,
     )
     doc = json.loads(output)
-    assert (
-        "att_trace" in doc
-    ), "att_trace key should appear in JSON when ATT data is present"
+    assert "att_trace" in doc, "att_trace key should appear in JSON when ATT data is present"
     assert doc["schema_version"] == "0.4.0"
     assert doc["profiling_info"]["analysis_tier"] == 3
 
@@ -1672,9 +1611,7 @@ def test_att_malformed_csv_skipped_gracefully():
         (pathlib.Path(d) / "stats_bad_kernel.csv").write_text("not,valid,csv\nfoo,bar")
         # Valid CSV alongside it
         (pathlib.Path(d) / "stats_good_kernel.csv").write_text(
-            _att_csv_content(
-                [{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 80}]
-            )
+            _att_csv_content([{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 80}])
         )
         result = analyze_thread_trace(d)
 

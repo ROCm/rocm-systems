@@ -28,12 +28,12 @@ def test_3_5_pct_improvement_above_noise_passes() -> None:
         patch_sha="near_thresh_01",
         baseline_kernel_runtimes=baseline_runs,
         new_kernel_runtimes=new_runs,
-        skip_compile=True, skip_bitwise=True, skip_anchors=True,
+        skip_compile=True,
+        skip_bitwise=True,
+        skip_anchors=True,
     )
     verdict = run_gate_cascade(gate_input)
-    assert verdict.status == "pass", (
-        f"3.5% improvement above noise was FALSE-rejected: {verdict.detail}"
-    )
+    assert verdict.status == "pass", f"3.5% improvement above noise was FALSE-rejected: {verdict.detail}"
 
 
 @pytest.mark.regression_gate
@@ -57,9 +57,9 @@ def test_5_pct_win_with_sub_10_pct_kernel_regression_passes() -> None:
         patch_sha="near_thresh_02",
         baseline_kernel_runtimes=baseline_runs,
         new_kernel_runtimes=new_runs,
-        skip_compile=True, skip_bitwise=True, skip_anchors=True,
+        skip_compile=True,
+        skip_bitwise=True,
+        skip_anchors=True,
     )
     verdict = run_gate_cascade(gate_input)
-    assert verdict.status == "pass", (
-        f"5% win with 8% non-hot kernel regression was FALSE-rejected: {verdict.detail}"
-    )
+    assert verdict.status == "pass", f"5% win with 8% non-hot kernel regression was FALSE-rejected: {verdict.detail}"

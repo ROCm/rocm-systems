@@ -72,6 +72,7 @@ def test_provider_chain_exhausted_tracks_attempted_providers_and_last_error():
 def test_dry_run_response_is_singleton():
     from perfxpert.providers._exceptions import DryRunResponse as A
     from perfxpert.providers._exceptions import DryRunResponse as B
+
     assert A is B
 
 
@@ -96,5 +97,6 @@ def test_public_exports_available_from_package():
         TransientError,
         TimeoutError,
     )
+
     assert ProviderError is not None
     assert DryRunResponse is not None

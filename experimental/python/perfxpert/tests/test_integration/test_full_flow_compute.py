@@ -41,9 +41,7 @@ def test_analysis_classifies_compute_bound_fixture(compute_bound_db):
     Classifier must return compute (confidence >= 0.5).
     """
     session = build_session(airgap=True)
-    out = session.run_analysis(
-        schemas.AnalysisInput(database_path=str(compute_bound_db), top_kernels=10)
-    )
+    out = session.run_analysis(schemas.AnalysisInput(database_path=str(compute_bound_db), top_kernels=10))
     assert out.primary_bottleneck == "compute", (
         f"Expected 'compute' for MFMA fixture but got '{out.primary_bottleneck}'. "
         f"counter_data_available={out.counter_data_available}"
@@ -58,16 +56,12 @@ def test_recommendation_dispatches_compute_specialist_in_airgap(compute_bound_db
     which correctly classifies as 'compute'. The load-bearing pytest.skip is removed.
     """
     session = build_session(airgap=True)
-    findings = session.run_analysis(
-        schemas.AnalysisInput(database_path=str(compute_bound_db))
-    )
+    findings = session.run_analysis(schemas.AnalysisInput(database_path=str(compute_bound_db)))
     assert findings.primary_bottleneck == "compute", (
         f"Pre-condition failed: expected 'compute' but got '{findings.primary_bottleneck}'. "
         "Check compute_bound.db fixture — it should be the MFMA GEMM DB with PMC counters."
     )
-    rec_out = session.run_recommendation(
-        schemas.RecommendationInput(findings=findings, gfx_id=test_gfx_id)
-    )
+    rec_out = session.run_recommendation(schemas.RecommendationInput(findings=findings, gfx_id=test_gfx_id))
     assert rec_out.specialist_used == "compute"
 
 
@@ -79,9 +73,7 @@ def test_trace_only_classifies_data_insufficient(trace_only_elementwise_db):
     must return data_insufficient instead of the silent mixed@0.5 fallback.
     """
     session = build_session(airgap=True)
-    out = session.run_analysis(
-        schemas.AnalysisInput(database_path=str(trace_only_elementwise_db))
-    )
+    out = session.run_analysis(schemas.AnalysisInput(database_path=str(trace_only_elementwise_db)))
     assert out.primary_bottleneck == "data_insufficient", (
         f"Expected 'data_insufficient' for trace-only DB but got '{out.primary_bottleneck}'. "
         "The classifier must be loud when no counter data is available."
@@ -94,14 +86,10 @@ def test_data_insufficient_verdict_suppresses_recommendations(trace_only_element
     and return no techniques (specialist_used='none').
     """
     session = build_session(airgap=True)
-    findings = session.run_analysis(
-        schemas.AnalysisInput(database_path=str(trace_only_elementwise_db))
-    )
+    findings = session.run_analysis(schemas.AnalysisInput(database_path=str(trace_only_elementwise_db)))
     assert findings.primary_bottleneck == "data_insufficient"
 
-    rec_out = session.run_recommendation(
-        schemas.RecommendationInput(findings=findings, gfx_id=test_gfx_id)
-    )
+    rec_out = session.run_recommendation(schemas.RecommendationInput(findings=findings, gfx_id=test_gfx_id))
     # No recommendations should be generated when data is insufficient
     assert rec_out.specialist_used == "none"
     assert rec_out.recommendations == []

@@ -17,16 +17,16 @@ FIXTURE_ROOT = Path(__file__).parent.parent / "fixtures"
 
 @dataclass(frozen=True)
 class ParityFixture:
-    id: str                              # stable id for reporting
-    db_path: Path                        # relative to fixture root
-    scenario: str                        # human description
-    expected_bottleneck: str             # canonical label from bottleneck_types.yaml
-    expected_rec_type: Optional[str]     # "compute" | "memory" | "latency" | "info" | None
+    id: str  # stable id for reporting
+    db_path: Path  # relative to fixture root
+    scenario: str  # human description
+    expected_bottleneck: str  # canonical label from bottleneck_types.yaml
+    expected_rec_type: Optional[str]  # "compute" | "memory" | "latency" | "info" | None
     expected_rec_technique: Optional[str]  # e.g. "launch_bounds", "lds_tiling"
-    tier: Literal[1, 2, 3]               # 1 = trace only; 2 = with counters; 3 = with ATT
-    gfx_id: str = "gfx942"               # hardware context for recommendation routing
-    source_only: bool = False            # Tier 0 source-only contract, excluded from parity gate
-    source_dir: Optional[Path] = None    # optional Tier 0 source path
+    tier: Literal[1, 2, 3]  # 1 = trace only; 2 = with counters; 3 = with ATT
+    gfx_id: str = "gfx942"  # hardware context for recommendation routing
+    source_only: bool = False  # Tier 0 source-only contract, excluded from parity gate
+    source_dir: Optional[Path] = None  # optional Tier 0 source path
     notes: str = ""
 
 
@@ -90,7 +90,7 @@ PARITY_FIXTURES: List[ParityFixture] = [
         db_path=FIXTURE_ROOT / "mixed_balanced.db",
         scenario="No dominant bottleneck; kernel 60%, memcpy 15%, overhead 10%",
         expected_bottleneck="mixed",
-        expected_rec_type=None,   # both paths expected to return INFO / triage rec
+        expected_rec_type=None,  # both paths expected to return INFO / triage rec
         expected_rec_technique=None,
         tier=1,
     ),
@@ -112,7 +112,7 @@ PARITY_FIXTURES: List[ParityFixture] = [
         scenario="Real 2000-dispatch rocprofv3 trace from build tree",
         expected_bottleneck="compute",  # validated manually
         expected_rec_type="compute",
-        expected_rec_technique=None,    # any compute-class technique acceptable
+        expected_rec_technique=None,  # any compute-class technique acceptable
         tier=2,
         notes="Source-of-truth real trace; absence tolerated (skipped) when not present",
     ),
@@ -194,10 +194,7 @@ PARITY_FIXTURES: List[ParityFixture] = [
 
 def available_fixtures() -> List[ParityFixture]:
     """Return every fixture present on disk (including Tier 0 source-only ones)."""
-    return [
-        fx for fx in PARITY_FIXTURES
-        if fx.db_path.exists() or (fx.source_dir and fx.source_dir.exists())
-    ]
+    return [fx for fx in PARITY_FIXTURES if fx.db_path.exists() or (fx.source_dir and fx.source_dir.exists())]
 
 
 def available_parity_fixtures() -> List[ParityFixture]:

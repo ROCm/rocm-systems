@@ -28,36 +28,43 @@ def main() -> int:
         try:
             baseline_ns = _run_kernel_once(kernel_dir, "baseline")
             analysis = _run_perfxpert_analysis(kernel_dir)
-            results.append({
-                "kernel": kernel_dir.name,
-                "baseline_ns": baseline_ns,
-                "analysis_succeeded": analysis["analysis_succeeded"],
-                "recommendation_count": analysis["recommendation_count"],
-                "report_path": analysis["report_path"],
-            })
+            results.append(
+                {
+                    "kernel": kernel_dir.name,
+                    "baseline_ns": baseline_ns,
+                    "analysis_succeeded": analysis["analysis_succeeded"],
+                    "recommendation_count": analysis["recommendation_count"],
+                    "report_path": analysis["report_path"],
+                }
+            )
         except Exception as e:
             print(f"[warn] {kernel_dir.name} failed: {e}", file=sys.stderr)
-            results.append({
-                "kernel": kernel_dir.name,
-                "baseline_ns": 0,
-                "analysis_succeeded": False,
-                "recommendation_count": 0,
-                "report_path": None,
-                "error": str(e),
-            })
+            results.append(
+                {
+                    "kernel": kernel_dir.name,
+                    "baseline_ns": 0,
+                    "analysis_succeeded": False,
+                    "recommendation_count": 0,
+                    "report_path": None,
+                    "error": str(e),
+                }
+            )
 
-    (suite / "analysis_summary.json").write_text(json.dumps({
-        "suite": "tritonbench-rocm",
-        "mode": "analysis_only",
-        "results": results,
-    }, indent=2))
+    (suite / "analysis_summary.json").write_text(
+        json.dumps(
+            {
+                "suite": "tritonbench-rocm",
+                "mode": "analysis_only",
+                "results": results,
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
 def _run_kernel_once(kdir: Path, label: str) -> int:
-    out = subprocess.run(
-        ["./run.sh"], cwd=kdir, capture_output=True, text=True, timeout=600
-    )
+    out = subprocess.run(["./run.sh"], cwd=kdir, capture_output=True, text=True, timeout=600)
     m = re.search(r"median_ns:\s*(\d+)", out.stdout)
     if not m:
         raise RuntimeError(f"no median_ns in {label} output:\n{out.stdout[-1000:]}")
@@ -77,13 +84,23 @@ def _run_perfxpert_analysis(kdir: Path) -> dict:
     report_path = report_dir / "analysis.json"
     if report_path.exists():
         report_path.unlink()
-    r = subprocess.run([
-        "perfxpert", "analyze",
-        "-i", str(db),
-        "--format", "json",
-        "-d", str(report_dir),
-        "-o", "analysis",
-    ], capture_output=True, text=True, timeout=300)
+    r = subprocess.run(
+        [
+            "perfxpert",
+            "analyze",
+            "-i",
+            str(db),
+            "--format",
+            "json",
+            "-d",
+            str(report_dir),
+            "-o",
+            "analysis",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
     if r.returncode != 0 or not report_path.exists():
         return {
             "analysis_succeeded": False,

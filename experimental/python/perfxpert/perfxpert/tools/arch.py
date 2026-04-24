@@ -16,7 +16,6 @@ from typing import Any, Dict
 from perfxpert.knowledge import load_yaml
 from perfxpert.tools._class import ToolClass, tool_class
 
-
 _RIDGE_PEAK_KEYS = {
     "fp64": "peak_fp64_tflops",
     "fp32": "peak_fp32_tflops",
@@ -94,8 +93,5 @@ def lookup_peaks(gfx_id: str) -> Dict[str, Any]:
 
     result = dict(specs[gfx_id])
     result["ridge_point"] = _ridge_point_from_specs(result, dtype="fp32")
-    result["ridge_points"] = {
-        dtype: _ridge_point_from_specs(result, dtype=dtype)
-        for dtype in _RIDGE_PEAK_KEYS
-    }
+    result["ridge_points"] = {dtype: _ridge_point_from_specs(result, dtype=dtype) for dtype in _RIDGE_PEAK_KEYS}
     return result

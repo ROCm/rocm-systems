@@ -18,6 +18,7 @@ from perfxpert.tools._class import ToolClass, tool_class
 @dataclass(frozen=True)
 class KernelRuntime:
     """Simple kernel runtime snapshot for testing and analysis."""
+
     kernel_name: str
     total_runtime_ns: int
     share: float
@@ -25,7 +26,7 @@ class KernelRuntime:
 
 HOT_COVERAGE_PCT = 0.80
 HOT_INDIVIDUAL_PCT = 0.03
-REGRESSION_THRESHOLD_PCT = 0.10    # a hot kernel > 10% worse = regression
+REGRESSION_THRESHOLD_PCT = 0.10  # a hot kernel > 10% worse = regression
 
 
 def _kernel_durations(db_path: str) -> Dict[str, float]:
@@ -37,9 +38,7 @@ def _kernel_durations(db_path: str) -> Dict[str, float]:
 
     # Find the kernel_dispatch table (may have UUID suffix)
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_kernel_dispatch%'"
-    )
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_kernel_dispatch%'")
     kt_result = cursor.fetchone()
     if not kt_result:
         conn.close()
@@ -96,10 +95,7 @@ def identify_hot_kernels(db_path: str) -> List[Dict[str, Any]]:
         return []
 
     # Annotate + sort
-    ranked = [
-        {"name": n, "total_ns": d, "pct_total": d / total}
-        for n, d in durations.items()
-    ]
+    ranked = [{"name": n, "total_ns": d, "pct_total": d / total} for n, d in durations.items()]
     ranked.sort(key=lambda x: x["total_ns"], reverse=True)
 
     # Top-K covering 80%

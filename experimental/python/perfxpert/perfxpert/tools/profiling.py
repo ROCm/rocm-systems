@@ -10,7 +10,6 @@ from typing import Any, Dict, Optional, Set
 
 from perfxpert.tools._class import ToolClass, tool_class
 
-
 # Cost order: read-from-db (free) < source-scan (cheap) < rocprofv3 --sys-trace
 # < rocprofv3 --pmc < --pc-sampling < --att < rocprof-compute
 _LADDER = [

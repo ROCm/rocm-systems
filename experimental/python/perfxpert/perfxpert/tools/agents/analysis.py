@@ -63,9 +63,7 @@ def agent_analysis(
         "confidence": getattr(output, "confidence", 0.0),
         "time_breakdown": dict(getattr(output, "time_breakdown", {}) or {}),
         "hot_kernels": list(getattr(output, "hot_kernels", []) or []),
-        "counter_data_available": getattr(
-            output, "counter_data_available", False
-        ),
+        "counter_data_available": getattr(output, "counter_data_available", False),
     }
 
 

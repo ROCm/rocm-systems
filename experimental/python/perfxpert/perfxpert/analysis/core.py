@@ -100,24 +100,14 @@ def compute_time_breakdown(connection: RocpdImportData) -> Dict[str, Any]:
         }
 
         if getattr(connection, "db_count", 1) > 1:
-            normalized_runtime = connection.sum_shard_runtime_envelopes(
-                ["kernels", "memory_copies"]
-            )
+            normalized_runtime = connection.sum_shard_runtime_envelopes(["kernels", "memory_copies"])
             if normalized_runtime > 0:
                 breakdown["normalized_runtime"] = normalized_runtime
-                breakdown["kernel_percent"] = (
-                    breakdown["total_kernel_time"] * 100.0 / normalized_runtime
-                )
-                breakdown["memcpy_percent"] = (
-                    breakdown["total_memcpy_time"] * 100.0 / normalized_runtime
-                )
+                breakdown["kernel_percent"] = breakdown["total_kernel_time"] * 100.0 / normalized_runtime
+                breakdown["memcpy_percent"] = breakdown["total_memcpy_time"] * 100.0 / normalized_runtime
                 breakdown["overhead_percent"] = max(
                     0.0,
-                    (
-                        normalized_runtime
-                        - breakdown["total_kernel_time"]
-                        - breakdown["total_memcpy_time"]
-                    )
+                    (normalized_runtime - breakdown["total_kernel_time"] - breakdown["total_memcpy_time"])
                     * 100.0
                     / normalized_runtime,
                 )
@@ -137,9 +127,7 @@ def compute_time_breakdown(connection: RocpdImportData) -> Dict[str, Any]:
         }
 
 
-def identify_hotspots(
-    connection: RocpdImportData, top_n: int = 10, min_duration: float = 0.0
-) -> List[Dict[str, Any]]:
+def identify_hotspots(connection: RocpdImportData, top_n: int = 10, min_duration: float = 0.0) -> List[Dict[str, Any]]:
     """
     Identify top N kernels by total execution time.
 
@@ -409,12 +397,14 @@ def detect_warmup_issues(
             if first_duration > 0 and avg_duration > 0:
                 ratio = first_duration / avg_duration
                 if ratio > 2.0:
-                    outliers.append({
-                        "kernel_name": kernel_name,
-                        "first_duration_ns": first_duration,
-                        "avg_duration_ns": avg_duration,
-                        "ratio": ratio,
-                    })
+                    outliers.append(
+                        {
+                            "kernel_name": kernel_name,
+                            "first_duration_ns": first_duration,
+                            "avg_duration_ns": avg_duration,
+                            "ratio": ratio,
+                        }
+                    )
         except Exception:
             continue
     return {"has_warmup_issues": len(outliers) > 0, "outliers": outliers}
@@ -583,12 +573,14 @@ def analyze_api_overhead(connection: RocpdImportData) -> Dict[str, Any]:
 
         for row in rows:
             name, calls, total_ns, avg_ns = row[0], row[1], row[2] or 0, row[3] or 0
-            api_calls.append({
-                "name": name,
-                "calls": calls,
-                "total_ns": total_ns,
-                "avg_ns": avg_ns,
-            })
+            api_calls.append(
+                {
+                    "name": name,
+                    "calls": calls,
+                    "total_ns": total_ns,
+                    "avg_ns": avg_ns,
+                }
+            )
             total_api_ns += total_ns
             if name and "hipLaunchKernel" in name:
                 launch_overhead_ns += total_ns

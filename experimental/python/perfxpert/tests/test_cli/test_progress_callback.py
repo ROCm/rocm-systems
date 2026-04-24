@@ -111,9 +111,7 @@ def _airgap_env(monkeypatch, tmp_path):
     env["PERFXPERT_AIRGAP"] = "1"
     env.pop("ANTHROPIC_API_KEY", None)
     env.pop("PERFXPERT_LLM_ANTHROPIC_KEY", None)
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(Path(__file__).resolve().parents[2]), env.get("PYTHONPATH", "")]
-    )
+    env["PYTHONPATH"] = os.pathsep.join([str(Path(__file__).resolve().parents[2]), env.get("PYTHONPATH", "")])
     return env
 
 
@@ -132,20 +130,14 @@ def test_analyze_cli_non_tty_prints_status_lines(_airgap_env):
         env=env,
         timeout=30,
     )
-    assert res.returncode == 0, (
-        f"exit={res.returncode}\nstderr={res.stderr!r}\nstdout={res.stdout!r}"
-    )
+    assert res.returncode == 0, f"exit={res.returncode}\nstderr={res.stderr!r}\nstdout={res.stdout!r}"
     # stdout should be JSON-ish (the formatted agentic output).
     assert res.stdout.strip(), "stdout must contain the analysis output"
     assert _ansi_free(res.stdout), "stdout must be ANSI-free when piped"
     # stderr has at least one [perfxpert] status line.
-    assert "[perfxpert]" in res.stderr, (
-        f"expected plain status lines on stderr; got {res.stderr!r}"
-    )
+    assert "[perfxpert]" in res.stderr, f"expected plain status lines on stderr; got {res.stderr!r}"
     # No spinner escape codes on a piped stream.
-    assert _ansi_free(res.stderr), (
-        f"stderr escape codes leaked on non-TTY: {res.stderr!r}"
-    )
+    assert _ansi_free(res.stderr), f"stderr escape codes leaked on non-TTY: {res.stderr!r}"
 
 
 def test_analyze_cli_env_airgap_suppresses_llm_progress(_airgap_env):
@@ -160,14 +152,11 @@ def test_analyze_cli_env_airgap_suppresses_llm_progress(_airgap_env):
         env=_airgap_env,
         timeout=30,
     )
-    assert res.returncode == 0, (
-        f"exit={res.returncode}\nstderr={res.stderr!r}\nstdout={res.stdout!r}"
-    )
+    assert res.returncode == 0, f"exit={res.returncode}\nstderr={res.stderr!r}\nstdout={res.stdout!r}"
     assert res.stdout.strip(), "stdout must contain the analysis output"
     assert _ansi_free(res.stdout), "stdout must be ANSI-free when piped"
     assert "[perfxpert]" not in res.stderr, (
-        "PERFXPERT_AIRGAP=1 must disable LLM-only progress UX; "
-        f"got stderr={res.stderr!r}"
+        "PERFXPERT_AIRGAP=1 must disable LLM-only progress UX; " f"got stderr={res.stderr!r}"
     )
     assert _ansi_free(res.stderr), "stderr must remain ANSI-free when piped"
 
@@ -186,10 +175,6 @@ def test_analyze_cli_no_progress_flag_silent(_airgap_env):
         env=env,
         timeout=30,
     )
-    assert res.returncode == 0, (
-        f"exit={res.returncode}\nstderr={res.stderr!r}\nstdout={res.stdout!r}"
-    )
+    assert res.returncode == 0, f"exit={res.returncode}\nstderr={res.stderr!r}\nstdout={res.stdout!r}"
     assert res.stdout.strip(), "stdout must still contain the analysis output"
-    assert "[perfxpert]" not in res.stderr, (
-        f"--no-progress must silence status lines; got stderr={res.stderr!r}"
-    )
+    assert "[perfxpert]" not in res.stderr, f"--no-progress must silence status lines; got stderr={res.stderr!r}"

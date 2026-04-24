@@ -17,11 +17,10 @@ from typing import Any, Dict
 
 from perfxpert.tools._class import ToolClass, tool_class
 
-
 # Bytes per KiB (binary)
 _BYTES_PER_KIB = 1024
 # Bytes per GiB (binary)
-_BYTES_PER_GIB = 1024 ** 3
+_BYTES_PER_GIB = 1024**3
 # Bytes per GB (decimal, SI) — for bandwidth reporting against vendor specs
 _BYTES_PER_GB = 1_000_000_000
 # Nanoseconds per second

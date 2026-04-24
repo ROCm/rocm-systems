@@ -10,9 +10,7 @@ def test_every_arch_in_vgpr_occupancy_has_gpu_specs_entry():
     specs = load_yaml("gpu_specs")
     vgpr = load_yaml("vgpr_occupancy_tables")
     for gfx in vgpr:
-        assert gfx in specs, (
-            f"vgpr_occupancy_tables has gfx={gfx!r} not in gpu_specs"
-        )
+        assert gfx in specs, f"vgpr_occupancy_tables has gfx={gfx!r} not in gpu_specs"
 
 
 def test_gpu_specs_runtime_caps_cover_all_vgpr_table_archs():
@@ -31,9 +29,7 @@ def test_counter_catalog_blocks_appear_in_pmc_limits():
 
     blocks_in_catalog = {entry["block"] for entry in catalog}
     for block in blocks_in_catalog:
-        assert block in limits, (
-            f"counter_catalog references block {block!r} not in pmc_limits"
-        )
+        assert block in limits, f"counter_catalog references block {block!r} not in pmc_limits"
 
 
 def test_bottleneck_types_metrics_documented():
@@ -46,17 +42,22 @@ def test_bottleneck_types_metrics_documented():
 
     # Metrics we can produce via analysis tools
     producible = {
-        "valu_util_pct", "mfma_util_pct",
-        "arithmetic_intensity_above_ridge", "arithmetic_intensity_below_ridge",
-        "memcpy_pct", "hbm_bw_utilization",
-        "avg_waves_per_cu", "gpu_util_pct", "occupancy_pct",
-        "api_overhead_pct", "avg_kernel_duration_us", "total_kernel_calls",
+        "valu_util_pct",
+        "mfma_util_pct",
+        "arithmetic_intensity_above_ridge",
+        "arithmetic_intensity_below_ridge",
+        "memcpy_pct",
+        "hbm_bw_utilization",
+        "avg_waves_per_cu",
+        "gpu_util_pct",
+        "occupancy_pct",
+        "api_overhead_pct",
+        "avg_kernel_duration_us",
+        "total_kernel_calls",
         "no_dominant_bottleneck",
     }
     undocumented = referenced - producible
-    assert not undocumented, (
-        f"bottleneck_types references metrics that no tool produces: {undocumented}"
-    )
+    assert not undocumented, f"bottleneck_types references metrics that no tool produces: {undocumented}"
 
 
 def test_amdahl_thresholds_high_greater_than_low():
@@ -69,9 +70,7 @@ def test_optimization_techniques_categories_valid():
     techs = load_yaml("optimization_techniques")
     valid = {"compute", "memory", "latency"}
     for t in techs:
-        assert t["category"] in valid, (
-            f"technique {t['id']!r} has invalid category {t['category']!r}"
-        )
+        assert t["category"] in valid, f"technique {t['id']!r} has invalid category {t['category']!r}"
 
 
 def test_sol_metrics_have_sensible_thresholds():

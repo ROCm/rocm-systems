@@ -7,7 +7,6 @@ import pytest
 from perfxpert.tools import regression
 from perfxpert.tools._class import ToolClass
 
-
 FIX = Path(__file__).parent.parent / "fixtures"
 BASELINE = FIX / "regression_baseline.db"
 IMPROVED = FIX / "regression_improved.db"

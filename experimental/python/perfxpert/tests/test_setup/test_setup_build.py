@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import setuptools
 
-
 _COUNTER = itertools.count()
 _SETUP_PY = Path(__file__).resolve().parents[2] / "setup.py"
 _BUILD_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "build-bundled-opencode.sh"
@@ -24,9 +23,7 @@ def _load_setup_module(monkeypatch):
     return module
 
 
-def test_ensure_bun_on_path_refuses_network_download(
-    monkeypatch, capsys
-) -> None:
+def test_ensure_bun_on_path_refuses_network_download(monkeypatch, capsys) -> None:
     module = _load_setup_module(monkeypatch)
     monkeypatch.setenv("PATH", "/usr/bin")
     monkeypatch.setattr(module.shutil, "which", lambda _: None)
@@ -34,9 +31,7 @@ def test_ensure_bun_on_path_refuses_network_download(
     assert "refusing to download build tooling" in capsys.readouterr().err
 
 
-def test_opencode_dir_is_populated_requires_git_metadata(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_opencode_dir_is_populated_requires_git_metadata(monkeypatch, tmp_path: Path) -> None:
     module = _load_setup_module(monkeypatch)
     opencode_dir = tmp_path / "opencode"
     opencode_dir.mkdir(parents=True)
@@ -49,9 +44,7 @@ def test_opencode_dir_is_populated_requires_git_metadata(
     assert module._opencode_dir_is_populated() is True
 
 
-def test_ensure_opencode_checkout_uses_scoped_submodule_update(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_ensure_opencode_checkout_uses_scoped_submodule_update(monkeypatch, tmp_path: Path) -> None:
     module = _load_setup_module(monkeypatch)
     repo_root = tmp_path / "repo"
     package_root = repo_root / "experimental" / "python" / "perfxpert"
@@ -96,9 +89,7 @@ def test_ensure_opencode_checkout_uses_scoped_submodule_update(
     ]
 
 
-def test_ensure_opencode_checkout_refuses_direct_network_clone(
-    monkeypatch, tmp_path: Path, capsys
-) -> None:
+def test_ensure_opencode_checkout_refuses_direct_network_clone(monkeypatch, tmp_path: Path, capsys) -> None:
     module = _load_setup_module(monkeypatch)
     package_root = tmp_path / "pkg"
     opencode_dir = package_root / "opencode"

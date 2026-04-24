@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-
 FENCE_DIR = Path(__file__).parent.parent.parent / "perfxpert" / "agents" / "fence"
 
 REQUIRED_FENCE_FILES = [

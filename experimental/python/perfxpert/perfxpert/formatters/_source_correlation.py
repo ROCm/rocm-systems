@@ -34,7 +34,6 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-
 _LAUNCH_KIND = {
     "GLOBAL_KERNEL_DEF": "definition",
     "HIP_KERNEL_LAUNCH": "launch",
@@ -128,9 +127,7 @@ def correlate_hotspots_with_source(
         hname = out.get("name") or ""
         key = _demangle_basename(hname)
         locs = index.get(key, []) if key else []
-        sev_id, sev_label, sev_color = _classify_severity(
-            out.get("percent_of_total", 0.0)
-        )
+        sev_id, sev_label, sev_color = _classify_severity(out.get("percent_of_total", 0.0))
         kind_rank = {"definition": 0, "launch": 1}
         locs = sorted(
             (dict(loc) for loc in locs),

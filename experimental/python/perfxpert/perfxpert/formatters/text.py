@@ -29,9 +29,7 @@ Text formatting functions for PerfXpert analysis results.
 from typing import Any, Dict, List
 
 
-def _tier0_recommendations_text(
-    recommendations: List[Dict[str, Any]], width: int = 80
-) -> List[str]:
+def _tier0_recommendations_text(recommendations: List[Dict[str, Any]], width: int = 80) -> List[str]:
     """Render Tier 0 recommendations as text lines (same format as Tier 1/2)."""
     lines = []
     for rec in recommendations:
@@ -63,14 +61,8 @@ def _tier0_recommendations_text(
             pred_conf = rec.get("predicted_confidence")
             if pred_conf is None:
                 pred_conf = rec.get("confidence")
-            pconf_str = (
-                f" (conf {int(float(pred_conf) * 100)}%)"
-                if pred_conf is not None
-                else ""
-            )
-            lines.append(
-                f"  Predicted: {float(lo):.2f}-{float(hi):.2f}x{pconf_str}"
-            )
+            pconf_str = f" (conf {int(float(pred_conf) * 100)}%)" if pred_conf is not None else ""
+            lines.append(f"  Predicted: {float(lo):.2f}-{float(hi):.2f}x{pconf_str}")
             lines.append("")
         if commands:
             lines.append("  Recommended Commands:")
@@ -107,10 +99,7 @@ def _format_tier0_text(tier0_result: Any) -> str:
     lines.append(f"Source Directory: {tier0_result.source_dir}")
     lines.append(f"Analysis Date:    {tier0_result.analysis_timestamp}")
     lines.append(f"Programming Model: {tier0_result.programming_model}")
-    lines.append(
-        f"Files Scanned:    {tier0_result.files_scanned}  "
-        f"(skipped: {tier0_result.files_skipped})"
-    )
+    lines.append(f"Files Scanned:    {tier0_result.files_scanned}  " f"(skipped: {tier0_result.files_skipped})")
     lines.append("")
 
     # Kernels
@@ -156,9 +145,7 @@ def _format_tier0_text(tier0_result: Any) -> str:
 
     # ROCTx
     if tier0_result.already_instrumented:
-        lines.append(
-            f"  \u2713 ROCTx markers detected ({tier0_result.roctx_marker_count} markers)"
-        )
+        lines.append(f"  \u2713 ROCTx markers detected ({tier0_result.roctx_marker_count} markers)")
         lines.append("")
 
     # Recommended counters

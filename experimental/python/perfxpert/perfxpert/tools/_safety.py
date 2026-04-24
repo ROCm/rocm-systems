@@ -34,6 +34,7 @@ class DangerousCommandError(SafetyError):
 
 # -- path confinement -------------------------------------------------------
 
+
 def confine_to_project_root(project_root: Path, user_path: str) -> Path:
     """Resolve `user_path` under `project_root`; reject if it escapes.
 
@@ -55,9 +56,7 @@ def confine_to_project_root(project_root: Path, user_path: str) -> Path:
     try:
         resolved.relative_to(root)
     except ValueError:
-        raise PathConfinementError(
-            f"path {user_path!r} resolves to {resolved} which is outside project root {root}"
-        )
+        raise PathConfinementError(f"path {user_path!r} resolves to {resolved} which is outside project root {root}")
     return resolved
 
 
@@ -75,9 +74,7 @@ def reject_shell_metachars(s: str) -> None:
     BEFORE it flows into subprocess or patch operations.
     """
     if _SHELL_METACHARS.search(s):
-        raise ShellMetacharError(
-            f"string contains shell metacharacter: {s!r}"
-        )
+        raise ShellMetacharError(f"string contains shell metacharacter: {s!r}")
 
 
 # -- destructive-command denylist -------------------------------------------
@@ -103,13 +100,12 @@ def strip_dangerous_patterns(s: str) -> str:
     """
     for pat in _DANGEROUS_PATTERNS:
         if pat.search(s):
-            raise DangerousCommandError(
-                f"string matches denylisted destructive pattern {pat.pattern!r}: {s!r}"
-            )
+            raise DangerousCommandError(f"string matches denylisted destructive pattern {pat.pattern!r}: {s!r}")
     return s
 
 
 # -- flag allowlist helper --------------------------------------------------
+
 
 def filter_by_allowlist(
     flags: Iterable[str],

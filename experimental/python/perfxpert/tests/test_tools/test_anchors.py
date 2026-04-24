@@ -17,11 +17,13 @@ def test_check_all_pass(tmp_path: Path, monkeypatch):
     # Fake test runner that returns 0
     monkeypatch.setattr(
         "perfxpert.tools.anchors.subprocess.run",
-        mock.MagicMock(return_value=mock.MagicMock(
-            returncode=0,
-            stdout=b"4 passed in 0.02s\n",
-            stderr=b"",
-        )),
+        mock.MagicMock(
+            return_value=mock.MagicMock(
+                returncode=0,
+                stdout=b"4 passed in 0.02s\n",
+                stderr=b"",
+            )
+        ),
     )
     r = anchors.check(
         project_root=tmp_path,
@@ -34,11 +36,13 @@ def test_check_all_pass(tmp_path: Path, monkeypatch):
 def test_check_some_fail(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
         "perfxpert.tools.anchors.subprocess.run",
-        mock.MagicMock(return_value=mock.MagicMock(
-            returncode=1,
-            stdout=b"3 passed, 1 failed\n",
-            stderr=b"",
-        )),
+        mock.MagicMock(
+            return_value=mock.MagicMock(
+                returncode=1,
+                stdout=b"3 passed, 1 failed\n",
+                stderr=b"",
+            )
+        ),
     )
     r = anchors.check(project_root=tmp_path, test_command=["pytest", "tests/"])
     assert r["all_passed"] is False
@@ -46,6 +50,7 @@ def test_check_some_fail(tmp_path: Path, monkeypatch):
 
 def test_check_rejects_shell_metachars(tmp_path: Path):
     from perfxpert.tools._safety import ShellMetacharError
+
     with pytest.raises(ShellMetacharError):
         anchors.check(
             project_root=tmp_path,

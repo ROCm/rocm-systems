@@ -167,9 +167,7 @@ def test_session_live_call_scopes_explicit_api_key(monkeypatch):
     monkeypatch.setattr(runtime_module.root, "run_root", _fake_run_root)
 
     session = runtime_module.build_session(provider="openai", api_key="sk-new")
-    assert session.run_root(
-        schemas.RootInput(user_query="why slow?", database_path=None)
-    ) == expected
+    assert session.run_root(schemas.RootInput(user_query="why slow?", database_path=None)) == expected
     assert seen["during"] == "sk-new"
     assert os.environ.get("OPENAI_API_KEY") == "sk-old"
 

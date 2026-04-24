@@ -35,9 +35,7 @@ def test_primary_regressions_are_not_truncated_by_top_kernels(monkeypatch):
     result = trace_diff.diff_runs("baseline.db", "new.db", top_kernels=1)
 
     assert [row["name"] for row in result["per_kernel"]] == ["k1"]
-    assert any(
-        row["name"] == "k3" for row in result["primary_regressions"]
-    ), result["primary_regressions"]
+    assert any(row["name"] == "k3" for row in result["primary_regressions"]), result["primary_regressions"]
 
 
 def test_verdict_is_regressed_when_primary_regressions_exist(monkeypatch):
@@ -61,9 +59,7 @@ def test_verdict_is_regressed_when_primary_regressions_exist(monkeypatch):
 
     result = trace_diff.diff_runs("baseline.db", "new.db", top_kernels=10)
 
-    assert any(
-        row["name"] == "k3" for row in result["primary_regressions"]
-    ), result["primary_regressions"]
+    assert any(row["name"] == "k3" for row in result["primary_regressions"]), result["primary_regressions"]
     assert result["wall_delta_pct"] < result["verdict_threshold_pct"]
     assert result["verdict"] == "regressed"
 

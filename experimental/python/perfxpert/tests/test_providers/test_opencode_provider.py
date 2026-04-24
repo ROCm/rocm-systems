@@ -23,6 +23,7 @@ def test_dry_run_no_subprocess(monkeypatch):
     monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", "/usr/local/bin/opencode")
     monkeypatch.delenv("PERFXPERT_IN_OPENCODE_SESSION", raising=False)
     from perfxpert.providers.opencode_provider import OpencodeProvider
+
     with patch("perfxpert.providers.opencode_provider.subprocess.run") as mr:
         assert OpencodeProvider().complete([], dry_run=True) is DryRunResponse
         mr.assert_not_called()
@@ -32,6 +33,7 @@ def test_recursion_guard_raises(monkeypatch):
     monkeypatch.setenv("PERFXPERT_IN_OPENCODE_SESSION", "1")
     monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", "/usr/local/bin/opencode")
     from perfxpert.providers.opencode_provider import OpencodeProvider
+
     prov = OpencodeProvider()
     with pytest.raises(ProviderError, match="recursion guard"):
         prov.complete([{"role": "user", "content": "hi"}])
@@ -41,6 +43,7 @@ def test_binary_path_from_env(monkeypatch):
     monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", "/custom/path/opencode")
     monkeypatch.delenv("PERFXPERT_IN_OPENCODE_SESSION", raising=False)
     from perfxpert.providers.opencode_provider import OpencodeProvider
+
     with patch(
         "perfxpert.providers.opencode_provider.subprocess.run",
         return_value=_fake_completed(),
@@ -54,6 +57,7 @@ def test_binary_path_from_shutil_which(monkeypatch):
     monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
     monkeypatch.delenv("PERFXPERT_IN_OPENCODE_SESSION", raising=False)
     from perfxpert.providers.opencode_provider import OpencodeProvider
+
     with patch(
         "perfxpert.providers.opencode_provider.shutil.which",
         return_value="/opt/bin/opencode",
@@ -71,6 +75,7 @@ def test_no_binary_found_raises(monkeypatch):
     monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
     monkeypatch.delenv("PERFXPERT_IN_OPENCODE_SESSION", raising=False)
     from perfxpert.providers.opencode_provider import OpencodeProvider
+
     with patch("perfxpert.providers.opencode_provider.shutil.which", return_value=None):
         with pytest.raises(ProviderError, match="opencode"):
             OpencodeProvider()
@@ -80,6 +85,7 @@ def test_subprocess_output_parsed(monkeypatch):
     monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", "/bin/opencode")
     monkeypatch.delenv("PERFXPERT_IN_OPENCODE_SESSION", raising=False)
     from perfxpert.providers.opencode_provider import OpencodeProvider
+
     with patch(
         "perfxpert.providers.opencode_provider.subprocess.run",
         return_value=_fake_completed(stdout="the-answer"),
@@ -95,6 +101,7 @@ def test_timeout_mapped(monkeypatch):
     import subprocess as sp
 
     from perfxpert.providers.opencode_provider import OpencodeProvider
+
     with patch(
         "perfxpert.providers.opencode_provider.subprocess.run",
         side_effect=sp.TimeoutExpired(cmd="opencode", timeout=1.0),
@@ -107,6 +114,7 @@ def test_nonzero_exit_raises(monkeypatch):
     monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", "/bin/opencode")
     monkeypatch.delenv("PERFXPERT_IN_OPENCODE_SESSION", raising=False)
     from perfxpert.providers.opencode_provider import OpencodeProvider
+
     with patch(
         "perfxpert.providers.opencode_provider.subprocess.run",
         return_value=_fake_completed(stdout="", returncode=2),
@@ -118,4 +126,5 @@ def test_nonzero_exit_raises(monkeypatch):
 def test_registered():
     from perfxpert.providers import registry
     import perfxpert.providers.opencode_provider  # noqa: F401
+
     assert "opencode" in registry.list_providers()

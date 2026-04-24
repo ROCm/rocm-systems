@@ -14,7 +14,6 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-
 __all__ = ["DIFF_FORMATS", "add_args", "render_diff", "run_diff"]
 
 
@@ -48,10 +47,7 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         type=str,
         default=None,
         metavar="NAME",
-        help=(
-            "Output filename stem. Default: stdout for text/markdown/json, "
-            "auto-named file for webview."
-        ),
+        help=("Output filename stem. Default: stdout for text/markdown/json, " "auto-named file for webview."),
     )
     parser.add_argument(
         "-d",
@@ -206,7 +202,7 @@ def run_diff(args: argparse.Namespace) -> int:
     if output_name is not None:
         output_dir.mkdir(parents=True, exist_ok=True)
         ext = ext_map[args.format]
-        stem = output_name[:-len(ext)] if output_name.endswith(ext) else output_name
+        stem = output_name[: -len(ext)] if output_name.endswith(ext) else output_name
         output_path = output_dir / (stem + ext)
         output_path.write_text(rendered, encoding="utf-8")
         print(f"Wrote {args.format} diff report to {output_path}")

@@ -7,7 +7,6 @@ from typing import Any, Dict, List
 from perfxpert.tools._class import ToolClass, tool_class
 from perfxpert.tools._technique_catalog import catalog_for
 
-
 _MEMORY_NAMES = [
     "memory_coalescing_stride_fix",
     "lds_tiling_matmul",

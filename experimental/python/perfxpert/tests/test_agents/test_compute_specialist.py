@@ -6,7 +6,9 @@ from unittest.mock import MagicMock
 from perfxpert.agents import compute_specialist as cs_module
 from perfxpert.agents import schemas
 from perfxpert.agents.framework import (
-    AgentConstructionError, FakeProviderResponse, HandoffPolicyViolation,
+    AgentConstructionError,
+    FakeProviderResponse,
+    HandoffPolicyViolation,
     dispatch_handoff,
 )
 
@@ -48,8 +50,20 @@ def test_compute_specialist_ranks_techniques_llm_mode(fake_provider):
     fake_provider.return_value = FakeProviderResponse(
         structured_output={
             "techniques": [
-                {"name": "launch_bounds", "rationale": "Reduce VGPR", "expected_impact": 0.25, "effort": "low", "risk": "low"},
-                {"name": "mfma_enablement", "rationale": "Use MFMA intrinsics", "expected_impact": 0.50, "effort": "high", "risk": "medium"},
+                {
+                    "name": "launch_bounds",
+                    "rationale": "Reduce VGPR",
+                    "expected_impact": 0.25,
+                    "effort": "low",
+                    "risk": "low",
+                },
+                {
+                    "name": "mfma_enablement",
+                    "rationale": "Use MFMA intrinsics",
+                    "expected_impact": 0.50,
+                    "effort": "high",
+                    "risk": "medium",
+                },
             ],
             "confidence": 0.85,
             "citations": ["GEAK+CDNA3 occupancy tables"],
@@ -73,7 +87,8 @@ def test_compute_specialist_airgap_returns_sorted_catalog(monkeypatch):
     monkeypatch.setenv("PERFXPERT_AIRGAP", "1")
     # Stub the catalog tool
     monkeypatch.setattr(
-        cs_module, "_fetch_catalog",
+        cs_module,
+        "_fetch_catalog",
         lambda gfx_id: [
             {"name": "A", "expected_impact": 0.3, "effort_factor": 1.0, "risk": "low"},
             {"name": "B", "expected_impact": 0.5, "effort_factor": 2.0, "risk": "medium"},

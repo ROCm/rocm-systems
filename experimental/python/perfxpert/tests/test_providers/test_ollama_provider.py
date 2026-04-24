@@ -22,6 +22,7 @@ def _fake_response(text="ola", model="llama3", inp=4, out=5):
 
 def test_dry_run_no_network():
     from perfxpert.providers.ollama_provider import OllamaProvider
+
     with patch("perfxpert.providers.ollama_provider.httpx.post") as mock_post:
         p = OllamaProvider()
         assert p.complete([], dry_run=True) is DryRunResponse
@@ -31,6 +32,7 @@ def test_dry_run_no_network():
 def test_default_url_localhost(monkeypatch):
     monkeypatch.delenv("PERFXPERT_LLM_LOCAL_URL", raising=False)
     from perfxpert.providers.ollama_provider import OllamaProvider
+
     with patch(
         "perfxpert.providers.ollama_provider.httpx.post",
         return_value=_fake_response(),
@@ -43,6 +45,7 @@ def test_default_url_localhost(monkeypatch):
 def test_custom_url_from_env(monkeypatch):
     monkeypatch.setenv("PERFXPERT_LLM_LOCAL_URL", "http://gpu-box:11434")
     from perfxpert.providers.ollama_provider import OllamaProvider
+
     with patch(
         "perfxpert.providers.ollama_provider.httpx.post",
         return_value=_fake_response(),
@@ -53,6 +56,7 @@ def test_custom_url_from_env(monkeypatch):
 
 def test_complete_response_shape():
     from perfxpert.providers.ollama_provider import OllamaProvider
+
     with patch(
         "perfxpert.providers.ollama_provider.httpx.post",
         return_value=_fake_response(text="llama-out", inp=7, out=11),
@@ -74,6 +78,7 @@ def test_timeout_maps_to_timeout_error():
     import httpx
 
     from perfxpert.providers.ollama_provider import OllamaProvider
+
     with patch(
         "perfxpert.providers.ollama_provider.httpx.post",
         side_effect=httpx.TimeoutException("slow"),
@@ -86,10 +91,9 @@ def test_http_error_maps_to_provider_error():
     import httpx
 
     from perfxpert.providers.ollama_provider import OllamaProvider
+
     mock_resp = MagicMock(status_code=500, text="server crashed")
-    mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
-        "500", request=MagicMock(), response=mock_resp
-    )
+    mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError("500", request=MagicMock(), response=mock_resp)
     with patch("perfxpert.providers.ollama_provider.httpx.post", return_value=mock_resp):
         with pytest.raises(ProviderError):
             OllamaProvider().complete([{"role": "user", "content": "x"}])
@@ -98,4 +102,5 @@ def test_http_error_maps_to_provider_error():
 def test_registered():
     from perfxpert.providers import registry
     import perfxpert.providers.ollama_provider  # noqa: F401
+
     assert "ollama" in registry.list_providers()

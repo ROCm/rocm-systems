@@ -14,17 +14,15 @@ from mcp_server._registry import discover_read_only_tools
 def test_no_execution_tools_in_registry():
     registered = discover_read_only_tools()
     for name, fn in registered.items():
-        assert getattr(fn, "__tool_class__", None) == ToolClass.READ_ONLY, (
-            f"MCP registry contains non-READ_ONLY tool: {name}"
-        )
+        assert (
+            getattr(fn, "__tool_class__", None) == ToolClass.READ_ONLY
+        ), f"MCP registry contains non-READ_ONLY tool: {name}"
 
 
 def test_registry_discovers_expected_tools():
     """Sanity: at least 30 read-only tools are discovered (baseline floor ~25)."""
     registered = discover_read_only_tools()
-    assert len(registered) >= 30, (
-        f"registry has only {len(registered)} tools — did tool discovery break?"
-    )
+    assert len(registered) >= 30, f"registry has only {len(registered)} tools — did tool discovery break?"
 
 
 def test_known_read_only_tools_present():

@@ -45,7 +45,6 @@ from perfxpert.cli._gate_hooks import (
     GATE_STATE_LIFTED_SENTINEL,
 )
 
-
 __all__ = [
     "ClaudeGateHook",
     "ClaudeGateInstallResult",
@@ -198,10 +197,7 @@ class ClaudeGateHook:
         the settings.json cannot be safely merged (I-N1).
         """
         if os.environ.get(GATE_HOOK_DISABLED_ENV, "").strip() == "0":
-            raise GateHookUnsupported(
-                f"{GATE_HOOK_DISABLED_ENV}=0 — gate hook install skipped "
-                "by user request"
-            )
+            raise GateHookUnsupported(f"{GATE_HOOK_DISABLED_ENV}=0 — gate hook install skipped " "by user request")
 
         cwd = Path(cwd).expanduser().resolve()
         settings = _settings_path(cwd)
@@ -237,38 +233,26 @@ class ClaudeGateHook:
             post_script=post_script,
         )
 
-    def _merge_settings(
-        self, settings: Path, pre_script: Path, post_script: Path
-    ) -> None:
+    def _merge_settings(self, settings: Path, pre_script: Path, post_script: Path) -> None:
         settings.parent.mkdir(parents=True, exist_ok=True)
         existing: dict[str, Any] = {}
         if settings.is_file():
             try:
                 existing = json.loads(settings.read_text())
             except json.JSONDecodeError as exc:
-                raise GateHookUnsupported(
-                    f"{settings} is not valid JSON; refusing to merge ({exc})"
-                )
+                raise GateHookUnsupported(f"{settings} is not valid JSON; refusing to merge ({exc})")
             if not isinstance(existing, dict):
-                raise GateHookUnsupported(
-                    f"{settings} top-level JSON must be an object"
-                )
+                raise GateHookUnsupported(f"{settings} top-level JSON must be an object")
 
         hooks = existing.setdefault("hooks", {})
         if not isinstance(hooks, dict):
-            raise GateHookUnsupported(
-                f"{settings}['hooks'] must be an object"
-            )
+            raise GateHookUnsupported(f"{settings}['hooks'] must be an object")
 
         pre_entry = _make_hook_entry(pre_script, marker=self.MARKER_SUBSTRING)
         post_entry = _make_hook_entry(post_script, marker=self.MARKER_SUBSTRING)
 
-        hooks["PreToolUse"] = _merge_hook_list(
-            hooks.get("PreToolUse"), pre_entry, marker=self.MARKER_SUBSTRING
-        )
-        hooks["PostToolUse"] = _merge_hook_list(
-            hooks.get("PostToolUse"), post_entry, marker=self.MARKER_SUBSTRING
-        )
+        hooks["PreToolUse"] = _merge_hook_list(hooks.get("PreToolUse"), pre_entry, marker=self.MARKER_SUBSTRING)
+        hooks["PostToolUse"] = _merge_hook_list(hooks.get("PostToolUse"), post_entry, marker=self.MARKER_SUBSTRING)
 
         pa.atomic_write(settings, json.dumps(existing, indent=2) + "\n")
 
@@ -296,11 +280,7 @@ class ClaudeGateHook:
             entries = hooks.get(event)
             if not entries:
                 continue
-            hooks[event] = [
-                e
-                for e in entries
-                if self.MARKER_SUBSTRING not in json.dumps(e)
-            ]
+            hooks[event] = [e for e in entries if self.MARKER_SUBSTRING not in json.dumps(e)]
             if not hooks[event]:
                 hooks.pop(event)
         if not hooks:
@@ -356,9 +336,7 @@ def evaluate_gate_state(
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
-            "permissionDecisionReason": GATE_REJECTION_REASON_TEMPLATE.format(
-                classify_tool=classify_tool
-            ),
+            "permissionDecisionReason": GATE_REJECTION_REASON_TEMPLATE.format(classify_tool=classify_tool),
         }
     }
 
@@ -380,9 +358,7 @@ def _make_hook_entry(script: Path, *, marker: str) -> dict:
     }
 
 
-def _merge_hook_list(
-    existing: Any, new_entry: dict, *, marker: str
-) -> list[dict]:
+def _merge_hook_list(existing: Any, new_entry: dict, *, marker: str) -> list[dict]:
     """Append `new_entry` to an existing hook list, replacing any prior
     perfxpert entry (idempotent reinstall).
 

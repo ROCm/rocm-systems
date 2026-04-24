@@ -42,10 +42,7 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         dest="output_file",
         default=None,
         metavar="NAME",
-        help=(
-            "Base name for output file (without extension). "
-            "Extension is added automatically based on --format."
-        ),
+        help=("Base name for output file (without extension). " "Extension is added automatically based on --format."),
     )
     parser.add_argument(
         "-d",

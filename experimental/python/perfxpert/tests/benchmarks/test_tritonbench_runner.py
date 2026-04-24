@@ -7,7 +7,6 @@ import pytest
 
 from tests.benchmarks.tritonbench_runner import parse_tritonbench_output, RunResult
 
-
 FIXTURE = Path(__file__).parent / "fixtures" / "tritonbench_sample.json"
 
 
@@ -29,12 +28,32 @@ def test_parse_extracts_kernel_id_baseline_optimized_ns():
 
 
 def _sample_raw() -> str:
-    return json.dumps({
-        "suite": "tritonbench-rocm",
-        "mode": "analysis_only",
-        "results": [
-            {"kernel": "matmul_f16_256x256", "baseline_ns": 1_000_000, "analysis_succeeded": True, "recommendation_count": 2, "report_path": "/tmp/matmul.json"},
-            {"kernel": "softmax_f32_1024", "baseline_ns": 500_000, "analysis_succeeded": True, "recommendation_count": 1, "report_path": "/tmp/softmax.json"},
-            {"kernel": "layernorm_f16_4096", "baseline_ns": 800_000, "analysis_succeeded": False, "recommendation_count": 0, "report_path": None},
-        ],
-    })
+    return json.dumps(
+        {
+            "suite": "tritonbench-rocm",
+            "mode": "analysis_only",
+            "results": [
+                {
+                    "kernel": "matmul_f16_256x256",
+                    "baseline_ns": 1_000_000,
+                    "analysis_succeeded": True,
+                    "recommendation_count": 2,
+                    "report_path": "/tmp/matmul.json",
+                },
+                {
+                    "kernel": "softmax_f32_1024",
+                    "baseline_ns": 500_000,
+                    "analysis_succeeded": True,
+                    "recommendation_count": 1,
+                    "report_path": "/tmp/softmax.json",
+                },
+                {
+                    "kernel": "layernorm_f16_4096",
+                    "baseline_ns": 800_000,
+                    "analysis_succeeded": False,
+                    "recommendation_count": 0,
+                    "report_path": None,
+                },
+            ],
+        }
+    )

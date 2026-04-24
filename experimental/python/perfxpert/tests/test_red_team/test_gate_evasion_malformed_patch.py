@@ -11,8 +11,7 @@ import pytest
 from perfxpert.runtime.gate_cascade import GateInput, run_gate_cascade
 from tests.test_red_team.conftest import record_outcome
 
-MALFORMED_DIFF = textwrap.dedent(
-    """\
+MALFORMED_DIFF = textwrap.dedent("""\
     --- a/main.cpp
     +++ b/main.cpp
     @@ -1,3 +1,5 @@
@@ -21,8 +20,7 @@ MALFORMED_DIFF = textwrap.dedent(
     +    float x = ;
      return 0;
      }
-    """
-)
+    """)
 
 
 @pytest.mark.red_team

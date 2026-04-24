@@ -8,8 +8,7 @@ import jsonschema
 from perfxpert.knowledge import load_yaml
 
 SCHEMA_PATH = (
-    Path(__file__).parent.parent.parent
-    / "perfxpert" / "knowledge" / "_schemas" / "derived_metrics.schema.json"
+    Path(__file__).parent.parent.parent / "perfxpert" / "knowledge" / "_schemas" / "derived_metrics.schema.json"
 )
 
 
@@ -39,6 +38,4 @@ def test_components_reference_existing_counters():
     known_counters = {c["name"] for c in catalog}
     for m in entries:
         for c in m["components"]:
-            assert c in known_counters, (
-                f"derived_metrics[{m['name']}] references unknown counter: {c}"
-            )
+            assert c in known_counters, f"derived_metrics[{m['name']}] references unknown counter: {c}"

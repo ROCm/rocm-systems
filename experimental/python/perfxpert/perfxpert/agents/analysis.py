@@ -60,9 +60,7 @@ except ImportError:
 
             conn = PerfxpertConnection(db_path)
             try:
-                hotspots = identify_hotspots(
-                    conn, top_n=top_n, min_duration=min_duration
-                )
+                hotspots = identify_hotspots(conn, top_n=top_n, min_duration=min_duration)
             except TypeError:
                 # Backward-compat for tests and older shims that still expose
                 # ``identify_hotspots(conn, top_n=...)`` without the
@@ -83,10 +81,7 @@ except ImportError:
 
             conn = PerfxpertConnection(db_path)
             # pmc_events is a VIEW in rocpd databases — check both table and view
-            tables_query = (
-                "SELECT name FROM sqlite_master "
-                "WHERE (type='table' OR type='view') AND name='pmc_events'"
-            )
+            tables_query = "SELECT name FROM sqlite_master " "WHERE (type='table' OR type='view') AND name='pmc_events'"
             result = execute_statement(conn, tables_query).fetchone()
             has_pmc = result is not None
 
@@ -128,7 +123,7 @@ def build_analysis_agent() -> Agent:
         input_schema=schemas.AnalysisInput,
         output_schema=schemas.AnalysisOutput,
         tools=tools,
-        allowed_handoffs=[],   # Layer-1 returns to Root
+        allowed_handoffs=[],  # Layer-1 returns to Root
         token_budget=4096,
     )
 
@@ -227,9 +222,7 @@ def _extract_hw_metrics(db: str) -> Dict[str, Any]:
             write = counters["WRITE_SIZE"]["total"]
             # Get total trace duration from kernels table
             try:
-                dur_row = execute_statement(
-                    conn, "SELECT MAX(end) - MIN(start) FROM kernels"
-                ).fetchone()
+                dur_row = execute_statement(conn, "SELECT MAX(end) - MIN(start) FROM kernels").fetchone()
                 trace_dur_ns = dur_row[0] if dur_row and dur_row[0] else 1
                 total_bytes = (fetch or 0) + (write or 0)
                 peak_bytes = peak_bw_bytes_per_ns * trace_dur_ns
@@ -246,8 +239,11 @@ def _extract_hw_metrics(db: str) -> Dict[str, Any]:
                 ridge_point = arch_tools.lookup_ridge_point(gfx_id, dtype="fp32")
             except KeyError:
                 ridge_point = None
-        if ridge_point and "FETCH_SIZE" in counters and "WRITE_SIZE" in counters and (
-            "SQ_INSTS_VALU" in counters or "SQ_INSTS_VALU_MFMA" in counters
+        if (
+            ridge_point
+            and "FETCH_SIZE" in counters
+            and "WRITE_SIZE" in counters
+            and ("SQ_INSTS_VALU" in counters or "SQ_INSTS_VALU_MFMA" in counters)
         ):
             fetch_t = counters["FETCH_SIZE"]["total"] or 0
             write_t = counters["WRITE_SIZE"]["total"] or 0
@@ -256,7 +252,9 @@ def _extract_hw_metrics(db: str) -> Dict[str, Any]:
             wave_size = int((arch_specs or {}).get("wave_size") or 64)
             valu_t = counters.get("SQ_INSTS_VALU", {}).get("total", 0) or 0
             mfma_t = counters.get("SQ_INSTS_VALU_MFMA", {}).get("total", 0) or 0
-            total_flops = valu_t * wave_size * 2 + mfma_t * 512  # MFMA legacy counter uses a coarse fp32-equivalent weight.
+            total_flops = (
+                valu_t * wave_size * 2 + mfma_t * 512
+            )  # MFMA legacy counter uses a coarse fp32-equivalent weight.
             if total_bytes_ai > 0:
                 ai = total_flops / total_bytes_ai
                 hw["arithmetic_intensity_above_ridge"] = 1 if ai > ridge_point else 0
@@ -272,8 +270,7 @@ def _extract_hw_metrics(db: str) -> Dict[str, Any]:
 
     except (sqlite3.OperationalError, sqlite3.DatabaseError) as e:
         _log.exception(
-            "_extract_hw_metrics: DB error reading pmc_events — user will see "
-            "'data_insufficient'; real cause: %s", e
+            "_extract_hw_metrics: DB error reading pmc_events — user will see " "'data_insufficient'; real cause: %s", e
         )
         return {"_error": str(e)}  # marker so callers can surface the real reason
     except Exception:
@@ -319,9 +316,7 @@ def _extract_dispatch_metrics(db: str, hotspots: list) -> Dict[str, Any]:
         from perfxpert.connection import PerfxpertConnection, execute_statement
 
         conn = PerfxpertConnection(db)
-        row = execute_statement(
-            conn, "SELECT COUNT(*), AVG(duration) FROM kernels"
-        ).fetchone()
+        row = execute_statement(conn, "SELECT COUNT(*), AVG(duration) FROM kernels").fetchone()
         if row:
             total_calls = row[0] or 0
             avg_dur_ns = row[1] or 0
@@ -332,7 +327,8 @@ def _extract_dispatch_metrics(db: str, hotspots: list) -> Dict[str, Any]:
     except (sqlite3.OperationalError, sqlite3.DatabaseError) as e:
         _log.exception(
             "_extract_dispatch_metrics: DB error reading kernels table — "
-            "dispatch metrics unavailable; real cause: %s", e
+            "dispatch metrics unavailable; real cause: %s",
+            e,
         )
         return {
             "total_kernel_calls": None,
@@ -616,6 +612,7 @@ def run_analysis(
     db_error = facts.get("db_error")
     if db_error:
         import sys
+
         print(
             f"\nERROR: Database query failed during metric extraction:\n  {db_error}\n"
             "PerfXpert cannot classify the bottleneck because the database could not be read.\n"
@@ -650,9 +647,7 @@ def run_analysis(
 
     so = raw.get("structured_output") or {}
     return schemas.AnalysisOutput(
-        primary_bottleneck=_validated_bottleneck_type(
-            so.get("primary_bottleneck", rule_verdict["type"])
-        ),
+        primary_bottleneck=_validated_bottleneck_type(so.get("primary_bottleneck", rule_verdict["type"])),
         confidence=so.get("confidence", rule_verdict["confidence"]),
         time_breakdown=so.get("time_breakdown", facts["time_breakdown"]),
         hot_kernels=so.get("hot_kernels", facts["hot_kernels"]),

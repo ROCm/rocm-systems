@@ -122,10 +122,10 @@ class Agent:
     """
 
     name: str
-    layer: int                              # 0=Root, 1=DecisionMaker, 2=Specialist
-    fence_path: Optional[str]               # None = no fence file (test/placeholder)
-    input_schema: Type                      # Pydantic model (or dict for tests)
-    output_schema: Type                     # Pydantic model (or dict for tests)
+    layer: int  # 0=Root, 1=DecisionMaker, 2=Specialist
+    fence_path: Optional[str]  # None = no fence file (test/placeholder)
+    input_schema: Type  # Pydantic model (or dict for tests)
+    output_schema: Type  # Pydantic model (or dict for tests)
     tools: Tuple[ToolBinding, ...] = field(default_factory=tuple)
     allowed_handoffs: Tuple[str, ...] = field(default_factory=tuple)
     token_budget: int = 4096
@@ -140,8 +140,7 @@ class Agent:
 
         if self.layer not in (0, 1, 2):
             raise AgentConstructionError(
-                f"Agent {self.name}: layer={self.layer} — must be 0 (Root), "
-                "1 (DecisionMaker), or 2 (Specialist)"
+                f"Agent {self.name}: layer={self.layer} — must be 0 (Root), " "1 (DecisionMaker), or 2 (Specialist)"
             )
 
         if len(tools) > 5:
@@ -224,8 +223,7 @@ def _build_sdk_run_config(provider: str) -> Any:
                 from agents.extensions.models.litellm_provider import LitellmProvider  # type: ignore[import-not-found]
             except ImportError as exc:
                 raise RuntimeError(
-                    "framework: LiteLLM provider support missing; install perfxpert[litellm] "
-                    "or perfxpert[all]"
+                    "framework: LiteLLM provider support missing; install perfxpert[litellm] " "or perfxpert[all]"
                 ) from exc
             provider_map.add_provider(provider, LitellmProvider())
         elif provider == "private":
@@ -452,15 +450,13 @@ def _sdk_invoke(agent: "Agent", input_payload: Any, provider: str) -> FakeProvid
     """
     if not _SDK_AVAILABLE or SdkAgent is None or SdkRunner is None or SdkRunConfig is None:
         raise RuntimeError(
-            "OpenAI Agents SDK not installed; run `pip install openai-agents` "
-            "or set PERFXPERT_AIRGAP=1"
+            "OpenAI Agents SDK not installed; run `pip install openai-agents` " "or set PERFXPERT_AIRGAP=1"
         )
 
     model = _resolve_model(provider)
     tools = _translate_tools(list(agent.tools))
     instructions = agent.fence_text or (
-        f"You are the {agent.name} agent. "
-        "Follow the JSON payload contract defined in the perfxpert fence."
+        f"You are the {agent.name} agent. " "Follow the JSON payload contract defined in the perfxpert fence."
     )
 
     try:

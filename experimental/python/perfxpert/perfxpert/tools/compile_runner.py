@@ -23,7 +23,6 @@ from perfxpert.tools._safety import (
 )
 from perfxpert.tools._tooldep import require_tool
 
-
 _DEFAULT_CXX = os.environ.get("PERFXPERT_CXX", "amdclang++")
 _BUILD_TIMEOUT_SEC = 120
 
@@ -96,9 +95,7 @@ def build(
     # For value-taking flags like --offload-arch=gfx942, match on the key
     accepted, rejected = filter_by_allowlist(flags, allowed)
     if rejected:
-        raise CompileFlagError(
-            f"flags not in compiler_flags.yaml allowlist: {rejected!r}"
-        )
+        raise CompileFlagError(f"flags not in compiler_flags.yaml allowlist: {rejected!r}")
 
     # Build argv
     argv: List[str] = [_DEFAULT_CXX, str(source)]

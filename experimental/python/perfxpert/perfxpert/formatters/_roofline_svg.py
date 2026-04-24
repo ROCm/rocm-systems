@@ -37,7 +37,6 @@ import math
 import re
 from typing import Any, Dict, List, Optional
 
-
 __all__ = ["render_roofline_svg", "sanitize_rec_anchor"]
 
 
@@ -58,16 +57,16 @@ _DTYPE_COLOR = {
     "fp32": "#4d8ef2",
     "fp16": "#3acc66",
     "bf16": "#28bca8",
-    "fp8":  "#f08432",
+    "fp8": "#f08432",
     "int8": "#caa828",
 }
 
 _REGIME_COLOR = {
-    "compute":  "#e84040",
-    "memory":   "#f08432",
+    "compute": "#e84040",
+    "memory": "#f08432",
     "balanced": "#4d8ef2",
-    "mixed":    "#9866cc",
-    "unknown":  "#7f7f7f",
+    "mixed": "#9866cc",
+    "unknown": "#7f7f7f",
 }
 
 
@@ -101,9 +100,7 @@ def _log_x(ai: float) -> float:
     if ai <= 0:
         ai = _X_MIN
     ai = max(_X_MIN, min(_X_MAX, ai))
-    lx = (math.log10(ai) - math.log10(_X_MIN)) / (
-        math.log10(_X_MAX) - math.log10(_X_MIN)
-    )
+    lx = (math.log10(ai) - math.log10(_X_MIN)) / (math.log10(_X_MAX) - math.log10(_X_MIN))
     return _PAD_L + lx * (_W - _PAD_L - _PAD_R)
 
 
@@ -111,9 +108,7 @@ def _log_y(rate: float) -> float:
     if rate <= 0:
         rate = _Y_MIN
     rate = max(_Y_MIN, min(_Y_MAX, rate))
-    ly = (math.log10(rate) - math.log10(_Y_MIN)) / (
-        math.log10(_Y_MAX) - math.log10(_Y_MIN)
-    )
+    ly = (math.log10(rate) - math.log10(_Y_MIN)) / (math.log10(_Y_MAX) - math.log10(_Y_MIN))
     return _H - _PAD_B - ly * (_H - _PAD_T - _PAD_B)
 
 
@@ -166,7 +161,7 @@ def render_roofline_svg(
 
     axes_parts: List[str] = []
     for exp in range(-2, 4):
-        v = 10.0 ** exp
+        v = 10.0**exp
         gx = _log_x(v)
         axes_parts.append(
             f'<line x1="{gx:.1f}" y1="{_PAD_T}" x2="{gx:.1f}" y2="{_H - _PAD_B}" '
@@ -178,7 +173,7 @@ def render_roofline_svg(
             f'fill="#6868a0" font-size="11" text-anchor="middle">{label}</text>'
         )
     for exp in range(10, 15):
-        v = 10.0 ** exp
+        v = 10.0**exp
         gy = _log_y(v)
         axes_parts.append(
             f'<line x1="{_PAD_L}" y1="{gy:.1f}" x2="{_W - _PAD_R}" y2="{gy:.1f}" '
@@ -192,13 +187,13 @@ def render_roofline_svg(
     axes_parts.append(
         f'<text x="{(_W + _PAD_L - _PAD_R) / 2:.1f}" y="{_H - 14}" '
         f'fill="#a8aace" font-size="12" text-anchor="middle" font-weight="600">'
-        f'Arithmetic Intensity (FLOPs / Byte)</text>'
+        f"Arithmetic Intensity (FLOPs / Byte)</text>"
     )
     axes_parts.append(
         f'<text x="14" y="{(_H + _PAD_T - _PAD_B) / 2:.1f}" '
         f'fill="#a8aace" font-size="12" text-anchor="middle" font-weight="600" '
         f'transform="rotate(-90 14 {(_H + _PAD_T - _PAD_B) / 2:.1f})">'
-        f'Achieved Performance (FLOPs/s)</text>'
+        f"Achieved Performance (FLOPs/s)</text>"
     )
 
     diag_parts: List[str] = []
@@ -220,7 +215,7 @@ def render_roofline_svg(
         diag_parts.append(
             f'<text x="{mid_x:.1f}" y="{mid_y - 6:.1f}" fill="#f08432" '
             f'font-size="11" font-weight="600" transform="rotate(-22 {mid_x:.1f} {mid_y:.1f})">'
-            f'HBM {_fmt_bw(hbm_bps)}</text>'
+            f"HBM {_fmt_bw(hbm_bps)}</text>"
         )
 
     ceiling_parts: List[str] = []
@@ -282,17 +277,16 @@ def render_roofline_svg(
             f'stroke="#e0e3f2" stroke-width="2" stroke-dasharray="3,2"/>'
             f'<text x="{rx + 10:.1f}" y="{ry - 8:.1f}" fill="#e0e3f2" '
             f'font-size="11" font-weight="700">'
-            f'{_html.escape(arch)} &middot; {_fmt_tflops(ridge_rate)} &middot; '
-            f'{_fmt_bw(hbm_bps)} &middot; ridge @ {ridge_ai:.1f} FLOPs/B'
-            f'</text>'
+            f"{_html.escape(arch)} &middot; {_fmt_tflops(ridge_rate)} &middot; "
+            f"{_fmt_bw(hbm_bps)} &middot; ridge @ {ridge_ai:.1f} FLOPs/B"
+            f"</text>"
         )
 
     legend_parts: List[str] = []
     for regime in ("compute", "memory", "balanced"):
         c = _REGIME_COLOR[regime]
         legend_parts.append(
-            f'<div class="leg"><div class="dot" style="background:{c}"></div>'
-            f'{regime.title()}-bound</div>'
+            f'<div class="leg"><div class="dot" style="background:{c}"></div>' f"{regime.title()}-bound</div>"
         )
     for dt in ("fp64", "fp32", "fp16", "bf16", "fp8", "int8"):
         if float(peaks.get(dt) or 0) <= 0:
@@ -302,11 +296,10 @@ def render_roofline_svg(
         legend_parts.append(
             f'<div class="leg" style="opacity:{opacity}">'
             f'<div class="dot" style="background:{c};border-radius:2px"></div>'
-            f'{dt.upper()} peak</div>'
+            f"{dt.upper()} peak</div>"
         )
     legend_parts.append(
-        '<div class="leg"><div class="dot" style="background:#f08432;'
-        'border-radius:2px"></div>HBM BW</div>'
+        '<div class="leg"><div class="dot" style="background:#f08432;' 'border-radius:2px"></div>HBM BW</div>'
     )
     legend_html = '<div class="legend" style="margin-top:.8rem">' + "".join(legend_parts) + "</div>"
 
@@ -318,7 +311,9 @@ def render_roofline_svg(
         + "".join(ceiling_parts)
         + "".join(diag_parts)
         + ridge_annot
-        + '<g id="rf-dots">' + "".join(dot_parts) + "</g>"
+        + '<g id="rf-dots">'
+        + "".join(dot_parts)
+        + "</g>"
         + "</svg>"
     )
 
@@ -341,16 +336,12 @@ def render_roofline_svg(
         '<section class="scard">'
         '<div class="shdr">'
         '<span class="shdr-icon">&#128200;</span>'
-        '<h2>Live Roofline</h2>'
+        "<h2>Live Roofline</h2>"
         f'<span class="shdr-badge sbadge-info">{_html.escape(arch)} &middot; {dominant_dtype.upper()}</span>'
-        '</div>'
+        "</div>"
         '<div class="sbody">'
         '<p class="hint" style="margin-bottom:.8rem">'
-        'Log-log roofline. Click any dot to jump to its recommendation. '
-        'Scroll-wheel to zoom, double-click to reset.'
-        '</p>'
-        + svg
-        + legend_html
-        + js
-        + '</div></section>'
+        "Log-log roofline. Click any dot to jump to its recommendation. "
+        "Scroll-wheel to zoom, double-click to reset."
+        "</p>" + svg + legend_html + js + "</div></section>"
     )

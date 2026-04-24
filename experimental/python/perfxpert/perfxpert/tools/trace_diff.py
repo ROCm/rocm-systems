@@ -46,7 +46,6 @@ from typing import Any, Dict, List
 
 from perfxpert.tools._class import ToolClass, tool_class
 
-
 _SCHEMA_VERSION = "0.3.1"
 
 
@@ -118,30 +117,15 @@ def _airgap_narrative(result: Dict[str, Any]) -> str:
 
     if regressions:
         if wall_pct > 0.5:
-            headline = (
-                f"Runtime regressed by {wall_pct:+.2f}% "
-                f"({len(regressions)} kernel regression(s) detected)."
-            )
+            headline = f"Runtime regressed by {wall_pct:+.2f}% " f"({len(regressions)} kernel regression(s) detected)."
         else:
-            headline = (
-                f"Kernel-level regressions detected while wall time stayed within "
-                f"noise ({wall_pct:+.2f}%)."
-            )
+            headline = f"Kernel-level regressions detected while wall time stayed within " f"noise ({wall_pct:+.2f}%)."
     elif wall_pct < -0.5:
-        headline = (
-            f"Runtime improved by {wall_pct:+.2f}% "
-            f"({len(improvements)} kernel improvement(s) detected)."
-        )
+        headline = f"Runtime improved by {wall_pct:+.2f}% " f"({len(improvements)} kernel improvement(s) detected)."
     elif improvements:
-        headline = (
-            f"Kernel-level improvements detected while wall time stayed within "
-            f"noise ({wall_pct:+.2f}%)."
-        )
+        headline = f"Kernel-level improvements detected while wall time stayed within " f"noise ({wall_pct:+.2f}%)."
     elif wall_pct > 0.5:
-        headline = (
-            f"Runtime regressed by {wall_pct:+.2f}% "
-            f"({len(regressions)} kernel regression(s) detected)."
-        )
+        headline = f"Runtime regressed by {wall_pct:+.2f}% " f"({len(regressions)} kernel regression(s) detected)."
     else:
         headline = (
             f"Runtime within noise ({wall_pct:+.2f}%); "
@@ -152,17 +136,11 @@ def _airgap_narrative(result: Dict[str, Any]) -> str:
     if regressions:
         lines.append("Primary regressions:")
         for r in regressions[:3]:
-            lines.append(
-                f"  - {r['name']}: {r['delta_pct']:+.1f}% "
-                f"({r['baseline_ns']:,} ns → {r['new_ns']:,} ns)"
-            )
+            lines.append(f"  - {r['name']}: {r['delta_pct']:+.1f}% " f"({r['baseline_ns']:,} ns → {r['new_ns']:,} ns)")
     if improvements:
         lines.append("Primary improvements:")
         for r in improvements[:3]:
-            lines.append(
-                f"  - {r['name']}: {r['delta_pct']:+.1f}% "
-                f"({r['baseline_ns']:,} ns → {r['new_ns']:,} ns)"
-            )
+            lines.append(f"  - {r['name']}: {r['delta_pct']:+.1f}% " f"({r['baseline_ns']:,} ns → {r['new_ns']:,} ns)")
     return "\n".join(lines)
 
 

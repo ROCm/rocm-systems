@@ -7,7 +7,6 @@ import pytest
 from .fixtures_inventory import available_source_only_fixtures
 from .parity_runner import ParityRunner
 
-
 SOURCE_ONLY_FIXTURES = available_source_only_fixtures()
 
 

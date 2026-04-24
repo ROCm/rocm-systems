@@ -34,13 +34,15 @@ def parse_tritonbench_output(raw: str) -> List[RunResult]:
     data = json.loads(raw)
     out: List[RunResult] = []
     for entry in data["results"]:
-        out.append(RunResult(
-            kernel_id=entry["kernel"],
-            baseline_ns=int(entry["baseline_ns"]),
-            analysis_succeeded=bool(entry["analysis_succeeded"]),
-            recommendation_count=int(entry.get("recommendation_count", 0)),
-            report_path=entry.get("report_path"),
-        ))
+        out.append(
+            RunResult(
+                kernel_id=entry["kernel"],
+                baseline_ns=int(entry["baseline_ns"]),
+                analysis_succeeded=bool(entry["analysis_succeeded"]),
+                recommendation_count=int(entry.get("recommendation_count", 0)),
+                report_path=entry.get("report_path"),
+            )
+        )
     return out
 
 
@@ -57,14 +59,15 @@ def run_tritonbench(
     """
     env_driver = Path(__file__).parent / "drive_tritonbench.py"
     cmd = [
-        "python3", str(env_driver),
-        "--suite-root", str(suite_root),
-        "--filter", kernel_filter,
+        "python3",
+        str(env_driver),
+        "--suite-root",
+        str(suite_root),
+        "--filter",
+        kernel_filter,
     ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
     if r.returncode != 0:
-        raise RuntimeError(
-            f"tritonbench driver exited {r.returncode}:\n{r.stderr[-2000:]}"
-        )
+        raise RuntimeError(f"tritonbench driver exited {r.returncode}:\n{r.stderr[-2000:]}")
     results_path = suite_root / "analysis_summary.json"
     return parse_tritonbench_output(results_path.read_text())

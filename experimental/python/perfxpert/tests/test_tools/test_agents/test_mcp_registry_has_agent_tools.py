@@ -11,7 +11,6 @@ import pytest
 
 from perfxpert.tools._class import ToolClass
 
-
 # ---------------------------------------------------------------------------
 # Expected wire tool names (keys in the registry, in dot notation)
 # ---------------------------------------------------------------------------
@@ -34,10 +33,7 @@ def test_registry_exposes_all_eight_agent_tools() -> None:
 
     reg = discover_read_only_tools()
     missing = _EXPECTED_AGENT_TOOLS - set(reg.keys())
-    assert not missing, (
-        f"agent tools missing from MCP registry: {missing}; "
-        f"registry has {sorted(reg.keys())}"
-    )
+    assert not missing, f"agent tools missing from MCP registry: {missing}; " f"registry has {sorted(reg.keys())}"
 
 
 def test_agent_tools_are_read_only_in_registry() -> None:
@@ -49,9 +45,7 @@ def test_agent_tools_are_read_only_in_registry() -> None:
     for key in _EXPECTED_AGENT_TOOLS:
         fn = reg.get(key)
         assert fn is not None, key
-        assert (
-            getattr(fn, "__tool_class__", None) is ToolClass.READ_ONLY
-        ), f"{key} is not READ_ONLY"
+        assert getattr(fn, "__tool_class__", None) is ToolClass.READ_ONLY, f"{key} is not READ_ONLY"
 
 
 def test_old_run_root_analysis_tool_is_gone() -> None:
@@ -95,10 +89,7 @@ def test_total_tool_count_is_56() -> None:
     from mcp_server._registry import discover_read_only_tools
 
     reg = discover_read_only_tools()
-    assert len(reg) == 56, (
-        f"expected 56 tools (48 non-agent + 8 agent); got {len(reg)}: "
-        f"{sorted(reg.keys())}"
-    )
+    assert len(reg) == 56, f"expected 56 tools (48 non-agent + 8 agent); got {len(reg)}: " f"{sorted(reg.keys())}"
     # arch.lookup_peaks is the single canonical name; the sol / roofline
     # aliases were dropped in the Phase-10 polish sweep.
     assert "arch.lookup_peaks" in reg

@@ -36,9 +36,7 @@ def test_format_flag_propagates():
     """`--format json` must surface as `output_format="json"` in process_args."""
     process_args, ns = _build_parsed_args(["--format", "json"])
     kwargs = process_args(_FakeConn(), ns)
-    assert kwargs.get("output_format") == "json", (
-        f"--format must map to output_format kwarg; got {kwargs}"
-    )
+    assert kwargs.get("output_format") == "json", f"--format must map to output_format kwarg; got {kwargs}"
     # Defensive: the legacy name must NOT leak through; _execute_agentic
     # looks for `output_format`, not `format`.
     assert "format" not in kwargs
@@ -56,12 +54,8 @@ def test_llm_flag_propagates():
     `enable_llm=True` so `_execute_agentic` activates the live path."""
     process_args, ns = _build_parsed_args(["--llm", "openai"])
     kwargs = process_args(_FakeConn(), ns)
-    assert kwargs.get("llm_provider") == "openai", (
-        f"--llm must map to llm_provider kwarg; got {kwargs}"
-    )
-    assert kwargs.get("enable_llm") is True, (
-        "passing --llm must flip enable_llm so agentic runtime uses the provider"
-    )
+    assert kwargs.get("llm_provider") == "openai", f"--llm must map to llm_provider kwarg; got {kwargs}"
+    assert kwargs.get("enable_llm") is True, "passing --llm must flip enable_llm so agentic runtime uses the provider"
     # Defensive: the pre-rename name must NOT leak through.
     assert "llm" not in kwargs
 
@@ -95,9 +89,7 @@ def test_llm_flag_absent_does_not_set_enable_llm():
 
 def test_format_and_llm_flags_compose():
     """Both flags set in the same invocation must both propagate."""
-    process_args, ns = _build_parsed_args(
-        ["--format", "markdown", "--llm", "anthropic"]
-    )
+    process_args, ns = _build_parsed_args(["--format", "markdown", "--llm", "anthropic"])
     kwargs = process_args(_FakeConn(), ns)
     assert kwargs["output_format"] == "markdown"
     assert kwargs["llm_provider"] == "anthropic"
@@ -214,12 +206,14 @@ def test_execute_agentic_warns_on_unknown_kwargs(tmp_path, monkeypatch):
                 primary_bottleneck = "mixed"
                 warnings = []
                 metadata: dict = {}
+
             return _Out()
 
     def _build_stub(**_kwargs):
         return _StubSession()
 
     import perfxpert.agents.runtime as runtime_mod
+
     monkeypatch.setattr(runtime_mod, "build_session", _build_stub)
 
     # Build a minimal RocpdImportData-shaped object: None is accepted.
@@ -230,11 +224,6 @@ def test_execute_agentic_warns_on_unknown_kwargs(tmp_path, monkeypatch):
             config=None,
             some_future_flag="bogus",
         )
-    assert any(
-        issubclass(w.category, RuntimeWarning)
-        and "some_future_flag" in str(w.message)
-        for w in caught
-    ), (
-        f"expected RuntimeWarning mentioning 'some_future_flag'; got "
-        f"{[str(w.message) for w in caught]}"
+    assert any(issubclass(w.category, RuntimeWarning) and "some_future_flag" in str(w.message) for w in caught), (
+        f"expected RuntimeWarning mentioning 'some_future_flag'; got " f"{[str(w.message) for w in caught]}"
     )

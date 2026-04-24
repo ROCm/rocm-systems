@@ -62,9 +62,7 @@ class RootInput(_FrozenModel):
     user_query: str
     database_path: Optional[str] = None
     source_dir: Optional[str] = None
-    provider: Optional[
-        Literal["anthropic", "openai", "ollama", "private", "opencode"]
-    ] = None
+    provider: Optional[Literal["anthropic", "openai", "ollama", "private", "opencode"]] = None
     airgap: bool = False
     session_id: Optional[str] = None
     intent_hint: Optional[str] = None  # populated by intent.classify upstream
@@ -201,6 +199,7 @@ class LatencySpecialistOutput(_FrozenModel):
 # "improvements":[...]}) — the MCP tool wrapper flattens them back to
 # top-level keys for the public return shape documented in
 # agent-hierarchy.md.
+
 
 class DiffSpecialistInput(_FrozenModel):
     baseline_db: str = Field(..., description="Path to baseline rocprofiler-sdk .db")

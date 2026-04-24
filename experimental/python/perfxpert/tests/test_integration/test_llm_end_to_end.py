@@ -98,6 +98,7 @@ def test_llm_enabled_produces_rec_type():
         airgap=False,
         session_id=session.session_id,
     )
+
     def _walk_causes(err: BaseException):
         seen = set()
         cur: BaseException | None = err
@@ -153,21 +154,15 @@ def test_llm_enabled_produces_rec_type():
     except RuntimeError as e:
         kind = _classify(e)
         if kind == "quota":
-            pytest.skip(
-                f"LLM quota exhausted (environmental, not a code defect): {e}"
-            )
+            pytest.skip(f"LLM quota exhausted (environmental, not a code defect): {e}")
         if kind == "auth":
             pytest.skip(f"LLM auth failed (environmental, not a code defect): {e}")
         if kind == "transient":
-            pytest.skip(
-                f"LLM transient error (environmental, not a code defect): {e}"
-            )
+            pytest.skip(f"LLM transient error (environmental, not a code defect): {e}")
         raise
 
     # Schema assertions below must still fail loudly on real defects.
     assert out.primary_bottleneck, "primary_bottleneck should be populated"
     assert out.narrative, "narrative should be non-empty"
     assert out.recommendations, "recommendations list should not be empty"
-    assert out.recommendations[0].get("type"), (
-        f"recommendations[0].type missing — {out.recommendations[0]}"
-    )
+    assert out.recommendations[0].get("type"), f"recommendations[0].type missing — {out.recommendations[0]}"

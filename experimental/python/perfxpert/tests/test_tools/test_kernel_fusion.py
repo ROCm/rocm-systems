@@ -37,8 +37,7 @@ def _make_fixture_db(tmp_path: Path, rows: list) -> Path:
         names.add((kid, name))
         conn.execute(
             f"INSERT INTO {kd_table} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (start, end, kid, block[0], block[1], block[2],
-             grid[0], grid[1], grid[2]),
+            (start, end, kid, block[0], block[1], block[2], grid[0], grid[1], grid[2]),
         )
     for kid, n in names:
         conn.execute(f"INSERT INTO {info_table} VALUES (?, ?)", (kid, n))
@@ -55,7 +54,7 @@ def test_happy_path_finds_adjacent_short_kernels(tmp_path):
     """Two short adjacent kernels with the same signature produce a candidate."""
     rows = [
         # start, end, kid, name, block, grid
-        (0,     2_000, 1, "add_kernel", (256, 1, 1), (64, 1, 1)),
+        (0, 2_000, 1, "add_kernel", (256, 1, 1), (64, 1, 1)),
         (2_100, 4_000, 1, "add_kernel", (256, 1, 1), (64, 1, 1)),  # same sig, 100ns gap
     ]
     db = _make_fixture_db(tmp_path, rows)
@@ -71,7 +70,7 @@ def test_happy_path_finds_adjacent_short_kernels(tmp_path):
 def test_result_sorted_by_hi_speedup(tmp_path):
     rows = [
         # small gap -> high confidence + bigger lo bound
-        (0,     2_000, 1, "add_a", (256, 1, 1), (64, 1, 1)),
+        (0, 2_000, 1, "add_a", (256, 1, 1), (64, 1, 1)),
         (2_050, 4_000, 1, "add_a", (256, 1, 1), (64, 1, 1)),
         # Large gap (but still under 500ns) -> larger hi bound
         (10_000, 12_000, 2, "mul_b", (128, 1, 1), (32, 1, 1)),
@@ -97,8 +96,8 @@ def test_edge_case_empty_db_returns_empty_list(tmp_path):
 def test_edge_case_long_kernels_skipped(tmp_path):
     """Kernels >= 10us are not fusion candidates."""
     rows = [
-        (0,          15_000, 1, "long", (256, 1, 1), (64, 1, 1)),
-        (15_050,     30_000, 1, "long", (256, 1, 1), (64, 1, 1)),
+        (0, 15_000, 1, "long", (256, 1, 1), (64, 1, 1)),
+        (15_050, 30_000, 1, "long", (256, 1, 1), (64, 1, 1)),
     ]
     db = _make_fixture_db(tmp_path, rows)
     assert kernel_fusion.find_fusion_candidates(str(db)) == []
@@ -107,7 +106,7 @@ def test_edge_case_long_kernels_skipped(tmp_path):
 def test_edge_case_large_gap_skipped(tmp_path):
     """Gap > max_gap_ns -> not a candidate even if kernels are short."""
     rows = [
-        (0,     2_000, 1, "add", (256, 1, 1), (64, 1, 1)),
+        (0, 2_000, 1, "add", (256, 1, 1), (64, 1, 1)),
         (5_000, 6_000, 1, "add", (256, 1, 1), (64, 1, 1)),  # gap = 3000 ns
     ]
     db = _make_fixture_db(tmp_path, rows)
@@ -117,7 +116,7 @@ def test_edge_case_large_gap_skipped(tmp_path):
 def test_edge_case_signature_mismatch_rejects(tmp_path):
     """Different block dims -> different signature -> no candidate."""
     rows = [
-        (0,     2_000, 1, "add", (256, 1, 1), (64, 1, 1)),
+        (0, 2_000, 1, "add", (256, 1, 1), (64, 1, 1)),
         (2_100, 4_000, 2, "add", (128, 1, 1), (64, 1, 1)),
     ]
     db = _make_fixture_db(tmp_path, rows)

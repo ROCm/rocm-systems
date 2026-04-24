@@ -8,13 +8,12 @@ import pytest
 from perfxpert.tools.compile_runner import build as compile_build, CompileFlagError
 from tests.test_red_team.conftest import record_outcome
 
-
 DANGEROUS_FLAGS = [
-    "-Xlinker --wrap,write",         # syscall wrapping
-    "-Wl,-rpath,/evil",              # rpath injection
-    "-include /etc/passwd",          # force include
-    "-D_FORTIFY_SOURCE=-1",          # disable fortify
-    "-fno-stack-protector",          # unsafe
+    "-Xlinker --wrap,write",  # syscall wrapping
+    "-Wl,-rpath,/evil",  # rpath injection
+    "-include /etc/passwd",  # force include
+    "-D_FORTIFY_SOURCE=-1",  # disable fortify
+    "-fno-stack-protector",  # unsafe
 ]
 
 

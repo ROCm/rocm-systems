@@ -138,15 +138,12 @@ def render_att_flamegraph(
         label = _CATEGORY_LABEL[cat]
         color = _CATEGORY_COLOR[cat]
         legend_x -= 14
-        parts.append(
-            f'<rect x="{legend_x - 10}" y="10" width="10" height="10" '
-            f'fill="{color}" rx="2"/>'
-        )
+        parts.append(f'<rect x="{legend_x - 10}" y="10" width="10" height="10" ' f'fill="{color}" rx="2"/>')
         legend_x -= 6 + 6 * len(label)
         parts.append(
             f'<text x="{legend_x}" y="20" fill="{fg}" '
             f'font-family="system-ui,sans-serif" font-size="11">'
-            f'{_esc(label)}</text>'
+            f"{_esc(label)}</text>"
         )
         legend_x -= 10
 
@@ -182,7 +179,7 @@ def render_att_flamegraph(
                     f'<text x="{cx + 6}" y="{y + _ROW_HEIGHT - 9}" '
                     f'fill="#fff" font-family="system-ui,sans-serif" '
                     f'font-size="11" pointer-events="none">'
-                    f'{_esc(label)} {pct_of_row:.0f}%</text>'
+                    f"{_esc(label)} {pct_of_row:.0f}%</text>"
                 )
             parts.append(
                 f'<rect class="att-flame-rect" '
@@ -190,14 +187,14 @@ def render_att_flamegraph(
                 f'height="{_ROW_HEIGHT}" fill="{color}" '
                 f'data-k="{_esc(slug)}" data-cat="{_esc(cat)}" '
                 f'data-tip="{tip}" '
-                f'onclick="var t=document.getElementById(\'rec-{_esc(slug)}\');'
-                f'if(t){{t.scrollIntoView({{behavior:\'smooth\',block:\'center\'}});'
-                f't.classList.add(\'rec-flash\');'
-                f'setTimeout(function(){{t.classList.remove(\'rec-flash\');}},1400);}}" '
+                f"onclick=\"var t=document.getElementById('rec-{_esc(slug)}');"
+                f"if(t){{t.scrollIntoView({{behavior:'smooth',block:'center'}});"
+                f"t.classList.add('rec-flash');"
+                f"setTimeout(function(){{t.classList.remove('rec-flash');}},1400);}}\" "
                 f'style="cursor:pointer"/>'
             )
             parts.append(
-                f'<title>{_esc(name)} - {_esc(label)}: {pct_of_row:.1f}% '
+                f"<title>{_esc(name)} - {_esc(label)}: {pct_of_row:.1f}% "
                 f'(avg stall {row["avg_ratio"]:.1f}%)</title>'
             )
             if inline:

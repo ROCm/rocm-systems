@@ -12,9 +12,7 @@ def test_fingerprint_captures_sys_trace():
 
 
 def test_fingerprint_captures_pmc_counters():
-    fp = trace_fingerprint.fingerprint(
-        "rocprofv3 --pmc SQ_WAVES GRBM_COUNT -- ./app"
-    )
+    fp = trace_fingerprint.fingerprint("rocprofv3 --pmc SQ_WAVES GRBM_COUNT -- ./app")
     assert "pmc:SQ_WAVES" in fp
     assert "pmc:GRBM_COUNT" in fp
 

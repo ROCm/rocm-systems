@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 BASELINE_DB = FIXTURES / "regression_baseline.db"

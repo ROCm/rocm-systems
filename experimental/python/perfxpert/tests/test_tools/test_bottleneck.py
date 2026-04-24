@@ -5,8 +5,8 @@ import pytest
 from perfxpert.tools import bottleneck
 from perfxpert.tools._class import ToolClass
 
-
 # -- classify_from_metrics ---------------------------------------------------
+
 
 def test_classify_compute_bound_kernel():
     metrics = {
@@ -98,10 +98,10 @@ def test_data_insufficient_empty_dict():
 def test_mixed_returned_when_data_available_but_no_dominant():
     """With some data present but no dominant bottleneck, mixed is still returned (not data_insufficient)."""
     metrics = {
-        "valu_util_pct": 0.40,      # present but fails compute threshold
-        "memcpy_pct": 0.10,          # present but fails memory threshold
-        "gpu_util_pct": 0.65,        # present but fails latency threshold
-        "api_overhead_pct": 0.05,    # present but fails api threshold
+        "valu_util_pct": 0.40,  # present but fails compute threshold
+        "memcpy_pct": 0.10,  # present but fails memory threshold
+        "gpu_util_pct": 0.65,  # present but fails latency threshold
+        "api_overhead_pct": 0.05,  # present but fails api threshold
     }
     result = bottleneck.classify_from_metrics(metrics)
     # Must be mixed, not data_insufficient, because metrics ARE available
@@ -122,6 +122,7 @@ def test_classify_is_read_only_class():
 
 # -- lookup_signatures ------------------------------------------------------
 
+
 def test_lookup_signatures_returns_entry_for_compute():
     sig = bottleneck.lookup_signatures("compute")
     assert sig["name"] == "compute"
@@ -134,6 +135,7 @@ def test_lookup_signatures_unknown_raises():
 
 
 # -- prioritize_by_amdahl ---------------------------------------------------
+
 
 def test_amdahl_above_threshold_high_priority():
     result = bottleneck.prioritize_by_amdahl(execution_time_pct=0.35)
@@ -151,6 +153,7 @@ def test_amdahl_below_threshold_low_priority():
 
 
 # -- Trace-only memcpy path (FINDING #22) ------------------------------------
+
 
 def test_classify_trace_only_memcpy_above_threshold_returns_non_data_insufficient():
     """Tier 1 trace only — only memcpy_pct extracted (no PMC counters).
@@ -189,6 +192,7 @@ def test_classify_trace_only_memcpy_above_threshold_returns_non_data_insufficien
 
 # -- Finding #26: Partial-PMC confidence weighting (FIXED) -------------------
 
+
 def test_partial_pmc_rules_confidence_lower_than_full_pmc():
     """2-of-3 compute rules matching must return strictly lower confidence than 3-of-3.
 
@@ -200,26 +204,26 @@ def test_partial_pmc_rules_confidence_lower_than_full_pmc():
     both cases.
     """
     # 2 of 3 compute rules evaluated (valu_util + ai_above_ridge, mfma absent)
-    partial = bottleneck.classify_from_metrics({
-        "valu_util_pct": 0.85,
-        "arithmetic_intensity_above_ridge": True,
-        # mfma_util_pct absent → not evaluated
-    })
+    partial = bottleneck.classify_from_metrics(
+        {
+            "valu_util_pct": 0.85,
+            "arithmetic_intensity_above_ridge": True,
+            # mfma_util_pct absent → not evaluated
+        }
+    )
 
     # 3 of 3 compute rules evaluated and all match
-    full = bottleneck.classify_from_metrics({
-        "valu_util_pct": 0.85,
-        "mfma_util_pct": 0.70,
-        "arithmetic_intensity_above_ridge": True,
-    })
+    full = bottleneck.classify_from_metrics(
+        {
+            "valu_util_pct": 0.85,
+            "mfma_util_pct": 0.70,
+            "arithmetic_intensity_above_ridge": True,
+        }
+    )
 
     # Both should classify as compute
-    assert partial["type"] == "compute", (
-        f"partial metrics should still classify as compute; got {partial['type']!r}"
-    )
-    assert full["type"] == "compute", (
-        f"full metrics should classify as compute; got {full['type']!r}"
-    )
+    assert partial["type"] == "compute", f"partial metrics should still classify as compute; got {partial['type']!r}"
+    assert full["type"] == "compute", f"full metrics should classify as compute; got {full['type']!r}"
 
     # Full evidence must be strictly higher than partial evidence.
     assert full["confidence"] > partial["confidence"], (
@@ -231,12 +235,10 @@ def test_partial_pmc_rules_confidence_lower_than_full_pmc():
     # Exact expected values (3-rule signature):
     # partial: 2/2 match × 2/3 evidence = 0.667
     # full:    3/3 match × 3/3 evidence = 1.0
-    assert abs(partial["confidence"] - 2 / 3) < 0.01, (
-        f"partial confidence expected ≈ 0.667, got {partial['confidence']:.3f}"
-    )
-    assert abs(full["confidence"] - 1.0) < 0.01, (
-        f"full confidence expected 1.0, got {full['confidence']:.3f}"
-    )
+    assert (
+        abs(partial["confidence"] - 2 / 3) < 0.01
+    ), f"partial confidence expected ≈ 0.667, got {partial['confidence']:.3f}"
+    assert abs(full["confidence"] - 1.0) < 0.01, f"full confidence expected 1.0, got {full['confidence']:.3f}"
 
 
 def test_single_rule_match_returns_mixed_not_full_confidence():

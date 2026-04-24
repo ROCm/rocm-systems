@@ -15,13 +15,12 @@ from perfxpert.knowledge import load_yaml
 from perfxpert.runtime.gate_cascade import GateInput, GateVerdict, run_gate_cascade
 from perfxpert.tools.regression import extract_kernel_runtimes_from_db
 
-
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "proven_optimizations"
 
 
 @dataclass(frozen=True)
 class ProvenOptimizationCase:
-    case_id: str               # matches YAML entry id (e.g. "vgpr_reduction_compute_bound")
+    case_id: str  # matches YAML entry id (e.g. "vgpr_reduction_compute_bound")
     bottleneck: str
     technique: str
     measured_impact_min: float

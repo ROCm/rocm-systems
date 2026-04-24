@@ -20,10 +20,10 @@ from typing import Any, Dict
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers — copied from test_mcp_protocol.py pattern
 # ---------------------------------------------------------------------------
+
 
 def _perfxpert_mcp_path() -> Path:
     """Locate the perfxpert-mcp entry point."""
@@ -34,9 +34,7 @@ def _perfxpert_mcp_path() -> Path:
     )
     if result.returncode == 0:
         return Path(result.stdout.strip())
-    raise RuntimeError(
-        "perfxpert-mcp not found in PATH. Install with: pip install -e ."
-    )
+    raise RuntimeError("perfxpert-mcp not found in PATH. Install with: pip install -e .")
 
 
 class MCPClient:
@@ -96,9 +94,7 @@ def _call_tool(client: MCPClient, tool_name: str, arguments: Dict[str, Any]) -> 
         "tools/call",
         {"name": tool_name, "arguments": arguments},
     )
-    assert "result" in response, (
-        f"tools/call {tool_name!r}: expected 'result' key, got: {response}"
-    )
+    assert "result" in response, f"tools/call {tool_name!r}: expected 'result' key, got: {response}"
     content_list = response["result"].get("content", [])
     assert len(content_list) > 0, f"tools/call {tool_name!r}: empty content"
     first = content_list[0]
@@ -109,6 +105,7 @@ def _call_tool(client: MCPClient, tool_name: str, arguments: Dict[str, Any]) -> 
 # ---------------------------------------------------------------------------
 # Fixture
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mcp_proc():
@@ -135,6 +132,7 @@ def mcp_proc():
 # Finding #25 coverage tests — 5 representative tools
 # ---------------------------------------------------------------------------
 
+
 def test_mcp_coverage_arch_lookup_peaks(mcp_proc):
     """arch_lookup_peaks: gfx942 → peak_fp64_tflops == 81.7 (MI300X spec).
 
@@ -144,12 +142,10 @@ def test_mcp_coverage_arch_lookup_peaks(mcp_proc):
     try:
         _initialize(client)
         result = _call_tool(client, "arch_lookup_peaks", {"gfx_id": "gfx942"})
-        assert "peak_fp64_tflops" in result, (
-            f"arch_lookup_peaks response missing 'peak_fp64_tflops': {result}"
-        )
-        assert result["peak_fp64_tflops"] == pytest.approx(81.7, rel=0.01), (
-            f"MI300X FP64 peak should be 81.7 TFLOPS, got {result['peak_fp64_tflops']}"
-        )
+        assert "peak_fp64_tflops" in result, f"arch_lookup_peaks response missing 'peak_fp64_tflops': {result}"
+        assert result["peak_fp64_tflops"] == pytest.approx(
+            81.7, rel=0.01
+        ), f"MI300X FP64 peak should be 81.7 TFLOPS, got {result['peak_fp64_tflops']}"
     finally:
         client.close()
 
@@ -171,12 +167,10 @@ def test_mcp_coverage_bottleneck_classify_compute(mcp_proc):
             "bottleneck_classify_from_metrics",
             {"metrics": {"valu_util_pct": 0.85, "arithmetic_intensity_above_ridge": 1}},
         )
-        assert "type" in result, (
-            f"bottleneck_classify_from_metrics missing 'type': {result}"
-        )
-        assert result["type"] == "compute", (
-            f"valu_util_pct=0.85 + AI above ridge should classify as 'compute', got {result['type']!r}"
-        )
+        assert "type" in result, f"bottleneck_classify_from_metrics missing 'type': {result}"
+        assert (
+            result["type"] == "compute"
+        ), f"valu_util_pct=0.85 + AI above ridge should classify as 'compute', got {result['type']!r}"
     finally:
         client.close()
 
@@ -199,12 +193,10 @@ def test_mcp_coverage_sol_sanity_check_implausible(mcp_proc):
                 "gfx_id": "gfx942",
             },
         )
-        assert "plausible" in result, (
-            f"sol_sanity_check response missing 'plausible': {result}"
-        )
-        assert result["plausible"] is False, (
-            f"1e20 FLOPS/s fp32 must be implausible for gfx942, got plausible={result['plausible']}"
-        )
+        assert "plausible" in result, f"sol_sanity_check response missing 'plausible': {result}"
+        assert (
+            result["plausible"] is False
+        ), f"1e20 FLOPS/s fp32 must be implausible for gfx942, got plausible={result['plausible']}"
     finally:
         client.close()
 
@@ -222,13 +214,10 @@ def test_mcp_coverage_intent_classify_analyze(mcp_proc):
             "intent_classify",
             {"user_query": "why is my kernel slow"},
         )
-        assert "intent" in result, (
-            f"intent_classify response missing 'intent': {result}"
-        )
+        assert "intent" in result, f"intent_classify response missing 'intent': {result}"
         # Diagnostic phrasing → analyze (or explain — both route to analysis)
         assert result["intent"] in ("analyze", "explain"), (
-            f"'why is my kernel slow' should map to 'analyze'/'explain', "
-            f"got {result['intent']!r}"
+            f"'why is my kernel slow' should map to 'analyze'/'explain', " f"got {result['intent']!r}"
         )
     finally:
         client.close()
@@ -247,14 +236,10 @@ def test_mcp_coverage_counters_lookup_info_sq_waves(mcp_proc):
             "counters_lookup_info",
             {"name": "SQ_WAVES"},
         )
-        assert "block" in result, (
-            f"counters_lookup_info(SQ_WAVES) response missing 'block': {result}"
-        )
-        assert result["block"] == "SQ", (
-            f"SQ_WAVES should be in block 'SQ', got {result['block']!r}"
-        )
-        assert "name" in result and result["name"] == "SQ_WAVES", (
-            f"Response name should be 'SQ_WAVES', got {result.get('name')!r}"
-        )
+        assert "block" in result, f"counters_lookup_info(SQ_WAVES) response missing 'block': {result}"
+        assert result["block"] == "SQ", f"SQ_WAVES should be in block 'SQ', got {result['block']!r}"
+        assert (
+            "name" in result and result["name"] == "SQ_WAVES"
+        ), f"Response name should be 'SQ_WAVES', got {result.get('name')!r}"
     finally:
         client.close()

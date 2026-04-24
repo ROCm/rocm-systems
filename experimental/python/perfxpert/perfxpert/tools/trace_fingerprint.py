@@ -15,11 +15,18 @@ from typing import FrozenSet
 
 from perfxpert.tools._class import ToolClass, tool_class
 
-
-_NAMED_TRACE_FLAGS = frozenset({
-    "--sys-trace", "--hip-trace", "--kernel-trace", "--memory-copy-trace",
-    "--hsa-trace", "--stats", "--att", "--pc-sampling",
-})
+_NAMED_TRACE_FLAGS = frozenset(
+    {
+        "--sys-trace",
+        "--hip-trace",
+        "--kernel-trace",
+        "--memory-copy-trace",
+        "--hsa-trace",
+        "--stats",
+        "--att",
+        "--pc-sampling",
+    }
+)
 
 _OUTPUT_FLAGS = {"-d", "--output-dir", "-o", "--output"}
 

@@ -10,7 +10,6 @@ from typing import Any, Dict, List
 
 from perfxpert.tools._class import ToolClass, tool_class
 
-
 _PLATEAU_THRESHOLD_PCT = 0.02
 _PLATEAU_MIN_ITERATIONS = 2
 
@@ -22,7 +21,7 @@ def check(history: List[Dict[str, Any]]) -> Dict[str, Any]:
         return {"plateau_detected": False, "reason": "insufficient history"}
 
     # Check last N iterations: each < threshold vs the previous
-    recent = history[-(_PLATEAU_MIN_ITERATIONS + 1):]
+    recent = history[-(_PLATEAU_MIN_ITERATIONS + 1) :]
     deltas = []
     for i in range(1, len(recent)):
         prev = recent[i - 1]["total_runtime_ns"]

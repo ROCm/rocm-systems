@@ -35,35 +35,22 @@ def test_minimum_viable_fixture_floor() -> None:
     )
     actionable = [fx for fx in fixtures if fx.expected_rec_type is not None]
     assert len(actionable) >= MIN_ACTIONABLE_FIXTURES, (
-        f"Parity suite requires at least {MIN_ACTIONABLE_FIXTURES} fixtures with "
-        "non-null recommendation categories."
+        f"Parity suite requires at least {MIN_ACTIONABLE_FIXTURES} fixtures with " "non-null recommendation categories."
     )
 
-    bottlenecks = {
-        fx.expected_bottleneck
-        for fx in fixtures
-        if fx.expected_bottleneck is not None
-    }
+    bottlenecks = {fx.expected_bottleneck for fx in fixtures if fx.expected_bottleneck is not None}
     assert len(bottlenecks) >= MIN_DISTINCT_BOTTLENECKS, (
         "Parity floor is too weak: present fixtures do not cover enough distinct "
         f"bottleneck classes ({sorted(bottlenecks)})."
     )
 
-    rec_types = {
-        fx.expected_rec_type
-        for fx in fixtures
-        if fx.expected_rec_type is not None
-    }
+    rec_types = {fx.expected_rec_type for fx in fixtures if fx.expected_rec_type is not None}
     assert len(rec_types) >= MIN_DISTINCT_REC_TYPES, (
         "Parity floor is too weak: present fixtures do not cover enough distinct "
         f"recommendation categories ({sorted(rec_types)})."
     )
 
-    techniques = {
-        fx.expected_rec_technique
-        for fx in fixtures
-        if fx.expected_rec_technique is not None
-    }
+    techniques = {fx.expected_rec_technique for fx in fixtures if fx.expected_rec_technique is not None}
     assert len(techniques) >= MIN_DISTINCT_TECHNIQUES, (
         "Parity floor is too weak: present fixtures do not cover enough distinct "
         f"optimization techniques ({sorted(techniques)})."

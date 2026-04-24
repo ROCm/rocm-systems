@@ -40,9 +40,7 @@ _CATEGORY_PATTERNS: List[Tuple[str, Any]] = [
     ("GEMM", re.compile(r"gemm|gemv|xdlops_gemm|Cijk_|rocblas_gemm", re.IGNORECASE)),
     (
         "SDPA",
-        re.compile(
-            r"flash_attention|fmha|scaled_dot_product|FlashAttention", re.IGNORECASE
-        ),
+        re.compile(r"flash_attention|fmha|scaled_dot_product|FlashAttention", re.IGNORECASE),
     ),
     (
         "NCCL",
@@ -53,9 +51,7 @@ _CATEGORY_PATTERNS: List[Tuple[str, Any]] = [
     ),
     (
         "Elementwise",
-        re.compile(
-            r"vectorized_elementwise|aten_add|aten_mul|relu|gelu|silu", re.IGNORECASE
-        ),
+        re.compile(r"vectorized_elementwise|aten_add|aten_mul|relu|gelu|silu", re.IGNORECASE),
     ),
     (
         "Normalization",
@@ -105,9 +101,7 @@ def _total_ns(intervals: List[Tuple[int, int]]) -> int:
     return sum(end - start for start, end in intervals)
 
 
-def _subtract_intervals(
-    a: List[Tuple[int, int]], b: List[Tuple[int, int]]
-) -> List[Tuple[int, int]]:
+def _subtract_intervals(a: List[Tuple[int, int]], b: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
     """Return intervals in *a* that do not overlap with any interval in *b*.
 
     Both inputs must already be merged (non-overlapping, sorted).
@@ -155,27 +149,15 @@ def compute_interval_timeline(connection: RocpdImportData) -> Dict[str, Any]:
     """
     # Load kernel intervals
     try:
-        kernel_rows = execute_statement(
-            connection, "SELECT start, end FROM kernels", ()
-        ).fetchall()
-        kernel_intervals = [
-            (int(r[0]), int(r[1]))
-            for r in kernel_rows
-            if r[0] is not None and r[1] is not None
-        ]
+        kernel_rows = execute_statement(connection, "SELECT start, end FROM kernels", ()).fetchall()
+        kernel_intervals = [(int(r[0]), int(r[1])) for r in kernel_rows if r[0] is not None and r[1] is not None]
     except Exception:
         kernel_intervals = []
 
     # Load memcpy intervals
     try:
-        memcpy_rows = execute_statement(
-            connection, "SELECT start, end FROM memory_copies", ()
-        ).fetchall()
-        memcpy_intervals = [
-            (int(r[0]), int(r[1]))
-            for r in memcpy_rows
-            if r[0] is not None and r[1] is not None
-        ]
+        memcpy_rows = execute_statement(connection, "SELECT start, end FROM memory_copies", ()).fetchall()
+        memcpy_intervals = [(int(r[0]), int(r[1])) for r in memcpy_rows if r[0] is not None and r[1] is not None]
     except Exception:
         memcpy_intervals = []
 
@@ -250,9 +232,7 @@ def analyze_kernels_by_category(
     - total_wall_ns==0   → pct_of_total_time=0.0 for all categories
     """
     try:
-        rows = execute_statement(
-            connection, "SELECT name, duration FROM kernels", ()
-        ).fetchall()
+        rows = execute_statement(connection, "SELECT name, duration FROM kernels", ()).fetchall()
     except Exception:
         return []
 
@@ -281,12 +261,8 @@ def analyze_kernels_by_category(
         count = data["count"]
         total_ns = data["total_ns"]
         avg_ns = total_ns // count if count > 0 else 0
-        pct_kernel = (
-            round(100.0 * total_ns / total_kernel_ns, 2) if total_kernel_ns > 0 else 0.0
-        )
-        pct_wall = (
-            round(100.0 * total_ns / total_wall_ns, 2) if total_wall_ns > 0 else 0.0
-        )
+        pct_kernel = round(100.0 * total_ns / total_kernel_ns, 2) if total_kernel_ns > 0 else 0.0
+        pct_wall = round(100.0 * total_ns / total_wall_ns, 2) if total_wall_ns > 0 else 0.0
         result.append(
             {
                 "category": category,
@@ -317,9 +293,7 @@ def analyze_short_kernels(
     threshold_ns = int(threshold_us * 1_000)
 
     try:
-        all_rows = execute_statement(
-            connection, "SELECT name, duration FROM kernels", ()
-        ).fetchall()
+        all_rows = execute_statement(connection, "SELECT name, duration FROM kernels", ()).fetchall()
     except Exception:
         all_rows = []
 
@@ -328,19 +302,13 @@ def analyze_short_kernels(
 
     # Filter short kernels
     short_rows = [
-        (str(r[0]), int(r[1]))
-        for r in all_rows
-        if r[0] is not None and r[1] is not None and int(r[1]) < threshold_ns
+        (str(r[0]), int(r[1])) for r in all_rows if r[0] is not None and r[1] is not None and int(r[1]) < threshold_ns
     ]
 
     short_count = len(short_rows)
     wasted_ns = sum(d for _, d in short_rows)
-    short_pct = (
-        round(100.0 * short_count / total_kernels, 2) if total_kernels > 0 else 0.0
-    )
-    wasted_pct = (
-        round(100.0 * wasted_ns / total_kernel_ns, 2) if total_kernel_ns > 0 else 0.0
-    )
+    short_pct = round(100.0 * short_count / total_kernels, 2) if total_kernels > 0 else 0.0
+    wasted_pct = round(100.0 * wasted_ns / total_kernel_ns, 2) if total_kernel_ns > 0 else 0.0
 
     # Histogram buckets (matching TraceLens short kernel histogram)
     buckets = [

@@ -89,9 +89,7 @@ class ParityRunner:
             )
         else:
             session = build_session(airgap=True)
-            analysis_output = session.run_analysis(
-                schemas.AnalysisInput(database_path=str(fx.db_path))
-            )
+            analysis_output = session.run_analysis(schemas.AnalysisInput(database_path=str(fx.db_path)))
             recommendation_output = session.run_recommendation(
                 schemas.RecommendationInput(findings=analysis_output, gfx_id=fx.gfx_id)
             )

@@ -18,28 +18,41 @@ from perfxpert.tools._class import ToolClass, tool_class
 from perfxpert.tools._safety import build_safe_env, reject_shell_metachars
 from perfxpert.tools._tooldep import require_tool
 
-
 _ROCPROFV3_TIMEOUT_SEC = 600
 
 # Authoritative rocprofv3 flag allowlist. Extend via knowledge yaml in a
 # future task — hard-coded here so a hostile YAML can't widen it.
 _ROCPROFV3_FLAGS: Set[str] = {
     # trace modes
-    "--sys-trace", "--hip-trace", "--kernel-trace", "--memory-copy-trace",
-    "--hsa-trace", "--stats",
+    "--sys-trace",
+    "--hip-trace",
+    "--kernel-trace",
+    "--memory-copy-trace",
+    "--hsa-trace",
+    "--stats",
     # ATT
-    "--att", "--att-library-path", "--att-target-cu", "--att-simd-select",
-    "--att-buffer-size", "--att-activity",
+    "--att",
+    "--att-library-path",
+    "--att-target-cu",
+    "--att-simd-select",
+    "--att-buffer-size",
+    "--att-activity",
     # PC sampling
     "--pc-sampling",
     # counters
     "--pmc",
     # output
-    "-d", "--output-dir", "-o", "--output",
+    "-d",
+    "--output-dir",
+    "-o",
+    "--output",
     # process controls
-    "--process-sync", "--pid",
+    "--process-sync",
+    "--pid",
     # listing / info
-    "--list-avail", "--list-counters", "--help",
+    "--list-avail",
+    "--list-counters",
+    "--help",
     # discovery separator
     "--",
 }
@@ -63,7 +76,7 @@ def _validate_argv(argv: List[str]) -> None:
         sep = len(argv)
 
     rocprof_tokens = argv[1:sep]
-    target_tokens = argv[sep + 1:] if sep < len(argv) else []
+    target_tokens = argv[sep + 1 :] if sep < len(argv) else []
 
     # Flag allowlist for rocprofv3 flags
     i = 0
@@ -72,9 +85,7 @@ def _validate_argv(argv: List[str]) -> None:
         if tok.startswith("--") or tok.startswith("-"):
             key = tok.split("=", 1)[0]
             if key not in _ROCPROFV3_FLAGS:
-                raise RocprofFlagError(
-                    f"rocprofv3 flag not in allowlist: {tok!r}"
-                )
+                raise RocprofFlagError(f"rocprofv3 flag not in allowlist: {tok!r}")
         # value-takers: skip one more token if no `=`
         i += 1
 

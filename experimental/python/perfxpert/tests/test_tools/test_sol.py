@@ -5,8 +5,8 @@ import pytest
 from perfxpert.tools import sol
 from perfxpert.tools._class import ToolClass
 
-
 # -- sanity_check (anti-Sakana) --------------------------------------------
+
 
 def test_claimed_speedup_within_sol_passes():
     """Normal optimization — 2× speedup on fp64 kernel ~ 40 TFLOPS on MI300X (peak 81.7)."""
@@ -59,6 +59,7 @@ def test_unknown_kernel_type_raises():
 
 
 # -- classify_utilization --------------------------------------------------
+
 
 def test_utilization_high():
     assert sol.classify_utilization(0.85)["category"] == "high"

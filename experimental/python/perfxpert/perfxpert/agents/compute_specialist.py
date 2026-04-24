@@ -27,7 +27,6 @@ from perfxpert.agents._predict_attach import attach_predictions_to_techniques
 from perfxpert.agents.framework import Agent, ToolBinding, run_agent
 from perfxpert.tools import arch, compiler, kernel_fusion, roofline
 
-
 _FENCE_PATH = Path(__file__).parent / "fence" / "compute_specialist.md"
 
 
@@ -35,6 +34,7 @@ def _fetch_catalog(gfx_id: str) -> List[Dict[str, Any]]:
     """Delegate to tools.compute_techniques.catalog. Module-level for test injection."""
     try:
         from perfxpert.tools import compute_techniques  # type: ignore
+
         return compute_techniques.catalog(gfx_id=gfx_id)
     except ImportError:
         return []  # defensive fallback if compute_techniques tool is absent
@@ -61,7 +61,7 @@ def build_compute_specialist() -> Agent:
         input_schema=schemas.ComputeSpecialistInput,
         output_schema=schemas.ComputeSpecialistOutput,
         tools=tools,
-        allowed_handoffs=[],    # Layer-2 returns to Recommendation
+        allowed_handoffs=[],  # Layer-2 returns to Recommendation
         token_budget=3072,
     )
 
@@ -94,14 +94,8 @@ def _rank_compute_catalog(
     payload: schemas.ComputeSpecialistInput,
 ) -> List[Dict[str, Any]]:
     ranked = _rank_catalog_deterministic(catalog)
-    hot_kernel_names = [
-        str(kernel.get("name", "")).lower() for kernel in (payload.hot_kernels or [])
-    ]
-    if any(
-        token in kernel_name
-        for kernel_name in hot_kernel_names
-        for token in ("gemm", "matmul", "mfma", "mma")
-    ):
+    hot_kernel_names = [str(kernel.get("name", "")).lower() for kernel in (payload.hot_kernels or [])]
+    if any(token in kernel_name for kernel_name in hot_kernel_names for token in ("gemm", "matmul", "mfma", "mma")):
         ranked = _promote_named_technique(ranked, "mfma_enablement")
     return ranked
 

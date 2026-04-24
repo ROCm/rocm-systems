@@ -56,6 +56,7 @@ def _rec_anchor_id(rec: Dict[str, Any], idx: int) -> str:
     key = rec.get("target") or rec.get("issue") or f"idx_{idx}"
     return f"rec-{_rec_slug(str(key))}"
 
+
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
 
@@ -166,9 +167,7 @@ def _format_as_webview(
     assessment = summary.get("overall_assessment", "")
     key_findings = summary.get("key_findings", [])
     metrics = hw.get("metrics", {}) or {}
-    gpu_util = metrics.get("gpu_utilization_pct") or metrics.get(
-        "gpu_utilization_percent"
-    )
+    gpu_util = metrics.get("gpu_utilization_pct") or metrics.get("gpu_utilization_percent")
     avg_waves = metrics.get("avg_waves")
     max_waves = metrics.get("max_waves")
 
@@ -204,11 +203,7 @@ def _format_as_webview(
         actions_li = "".join(f"<li>{_h(a)}</li>" for a in rec.get("actions", []))
         actions_html = f'<ol class="r-actions">{actions_li}</ol>' if actions_li else ""
         impact = rec.get("estimated_impact", "")
-        impact_html = (
-            f'<p class="r-impact">&#9889; Expected impact: {_h(impact)}</p>'
-            if impact
-            else ""
-        )
+        impact_html = f'<p class="r-impact">&#9889; Expected impact: {_h(impact)}</p>' if impact else ""
         # Phase 10 — Change-Impact Prediction. Only rendered when the
         # specialist (or the analyze.py final-pass) attached
         # predicted_impact_range on the rec.
@@ -219,14 +214,10 @@ def _format_as_webview(
             _pconf = rec.get("predicted_confidence")
             if _pconf is None:
                 _pconf = rec.get("confidence")
-            _pconf_txt = (
-                f" (confidence {int(float(_pconf) * 100)}%)"
-                if _pconf is not None
-                else ""
-            )
+            _pconf_txt = f" (confidence {int(float(_pconf) * 100)}%)" if _pconf is not None else ""
             predicted_html = (
                 f'<p class="r-predicted"><strong>Predicted:</strong> '
-                f'{float(_plo):.2f}-{float(_phi):.2f}&#215;{_h(_pconf_txt)}</p>'
+                f"{float(_plo):.2f}-{float(_phi):.2f}&#215;{_h(_pconf_txt)}</p>"
             )
         cmds_parts = []
         for ci, cmd in enumerate(rec.get("commands", [])):
@@ -249,7 +240,11 @@ def _format_as_webview(
         issue_txt = rec.get("issue", "")
         suggest = rec.get("suggestion", "")
         conf = rec.get("confidence")
-        conf_html = f'<span class="r-conf" style="margin-left:8px;opacity:0.7;font-size:0.85em">Confidence: {int(conf * 100)}%</span>' if conf is not None else ""
+        conf_html = (
+            f'<span class="r-conf" style="margin-left:8px;opacity:0.7;font-size:0.85em">Confidence: {int(conf * 100)}%</span>'
+            if conf is not None
+            else ""
+        )
         r_anchor = _rec_anchor_id(rec, ri)
         recs_parts.append(
             f'<div class="r-card" id="{r_anchor}" style="border-left-color:{fg}" data-p="{_h(p)}">'
@@ -257,7 +252,7 @@ def _format_as_webview(
             f'<span class="r-priority-icon">{picon}</span>'
             f'<span class="r-badge" style="background:{fg};color:#fff">{_h(p)}</span>'
             f'<span class="r-cat">{_h(cat)}</span>'
-            f'{conf_html}'
+            f"{conf_html}"
             f'<span class="r-chev">&#9660;</span>'
             f"</div>"
             f'<div class="r-body">'
@@ -266,10 +261,7 @@ def _format_as_webview(
             f"{actions_html}{impact_html}{predicted_html}{cmds_html}"
             f"</div></div>"
         )
-    recs_html = (
-        "".join(recs_parts)
-        or '<p class="dim">No recommendations \u2014 workload looks well-optimized.</p>'
-    )
+    recs_html = "".join(recs_parts) or '<p class="dim">No recommendations \u2014 workload looks well-optimized.</p>'
 
     # -- hotspots table --
     # Cross-reference each hotspot with Tier-0 detected_kernels so each row
@@ -285,9 +277,7 @@ def _format_as_webview(
         "TRIPLE_ANGLE_LAUNCH": ("&lt;&lt;&lt; &gt;&gt;&gt;", "var(--purple)"),
     }
 
-    def _render_source_panel(
-        idx: int, locs: List[Dict[str, Any]], pct: float = 0.0
-    ) -> str:
+    def _render_source_panel(idx: int, locs: List[Dict[str, Any]], pct: float = 0.0) -> str:
         """Inner cell body for the expandable Source-location panel.
 
         ``pct`` is the owning hotspot's ``percent_of_total`` — used to
@@ -326,7 +316,7 @@ def _format_as_webview(
         sev_badge = (
             f'<span class="h-src-sev-badge" '
             f'style="background:{sev_color};color:#fff;'
-            f'padding:2px 6px;border-radius:3px;'
+            f"padding:2px 6px;border-radius:3px;"
             f'font-size:0.75em;font-weight:600;margin-right:6px">'
             f"{sev_label}</span>"
         )
@@ -335,9 +325,7 @@ def _format_as_webview(
             kind = lo.get("kind", "definition")
             kind_label = "Definition" if kind == "definition" else "Launch site"
             lt = lo.get("launch_type", "GLOBAL_KERNEL_DEF")
-            badge_text, badge_color = _LAUNCH_BADGE.get(
-                lt, (lt.replace("_", " "), "var(--teal)")
-            )
+            badge_text, badge_color = _LAUNCH_BADGE.get(lt, (lt.replace("_", " "), "var(--teal)"))
             file_ = _h(lo.get("file", "?"))
             line = int(lo.get("line", 0))
             cite = f"{file_}:{line}"
@@ -355,9 +343,7 @@ def _format_as_webview(
         return (
             f'<div class="h-src-panel" '
             f'data-severity="{sev_id}" '
-            f'style="{border_style}">'
-            + "".join(rows)
-            + "</div>"
+            f'style="{border_style}">' + "".join(rows) + "</div>"
         )
 
     hotspot_rows = []
@@ -371,11 +357,7 @@ def _format_as_webview(
         # expanded; when no --source-dir was supplied the panel explains
         # how to enable the correlation.
         has_match = bool(locs)
-        chevron_title = (
-            "Show source location"
-            if has_match
-            else "No matching source location (pass --source-dir)"
-        )
+        chevron_title = "Show source location" if has_match else "No matching source location (pass --source-dir)"
         toggle_btn = (
             f'<button class="h-src-toggle" type="button" '
             f'onclick="toggleHSrc(this)" '
@@ -393,6 +375,7 @@ def _format_as_webview(
         # ``h-src-hot``, ``h-src-warm``, ``h-src-cool`` keeps the naming
         # consistent and makes the severity tier queryable from CSS.
         from ._source_correlation import _classify_severity as _cls_sev
+
         _sev_id_for_row, _, _ = _cls_sev(pct)
         _H_SRC_SEV_CLASS = {
             "HIGH": "h-src-critical",
@@ -406,7 +389,7 @@ def _format_as_webview(
             f"<td>{i + 1}</td>"
             f'<td class="kname" title="{_h(name)}">'
             f"{toggle_btn}"
-            f'<code>{_h(name)}</code>'
+            f"<code>{_h(name)}</code>"
             f"</td>"
             f'<td data-v="{k.get("calls", 0)}">{int(k.get("calls", 0)):,}</td>'
             f'<td data-v="{k.get("total_duration", 0)}">{_fmt_ns(k.get("total_duration", 0))}</td>'
@@ -422,9 +405,7 @@ def _format_as_webview(
         # yellow/blue cue as the surrounding recommendation cards).
         hotspot_rows.append(
             f'<tr class="h-src-row {_h_src_sev_cls}" hidden>'
-            f'<td colspan="7">'
-            + _render_source_panel(i, locs, pct)
-            + "</td></tr>"
+            f'<td colspan="7">' + _render_source_panel(i, locs, pct) + "</td></tr>"
         )
     hotspots_html = ""
     if hotspot_rows:
@@ -603,9 +584,9 @@ def _format_as_webview(
         if pmc_groups_text:
             groups_html = (
                 f'<p class="hint" style="margin-top:.5rem">'
-                f'Write these lines to <code>{_h(pmc_groups_path)}</code>:</p>'
+                f"Write these lines to <code>{_h(pmc_groups_path)}</code>:</p>"
                 f'<pre style="margin:.35rem 0 0; padding:.8rem 1rem; '
-                f'background:rgba(255,255,255,.03); border:1px solid var(--bdr); '
+                f"background:rgba(255,255,255,.03); border:1px solid var(--bdr); "
                 f'border-radius:12px; overflow:auto;"><code>{_h(pmc_groups_text)}</code></pre>'
             )
         command_rows = []
@@ -618,10 +599,7 @@ def _format_as_webview(
             desc = command.get("description", "")
             label = ""
             if tool or desc:
-                label = (
-                    f'<p class="hint" style="margin-top:.75rem"><strong>{_h(tool)}</strong>'
-                    f' - {_h(desc)}</p>'
-                )
+                label = f'<p class="hint" style="margin-top:.75rem"><strong>{_h(tool)}</strong>' f" - {_h(desc)}</p>"
             command_rows.append(
                 f"{label}"
                 f'<div class="cmd-row" id="{cid}">'
@@ -795,30 +773,20 @@ def _format_as_webview(
 
     _badge_parts = []
     if n_high:
-        _badge_parts.append(
-            f'<span class="hbadge hbadge-crit">&#9679; {n_high} Critical</span>'
-        )
+        _badge_parts.append(f'<span class="hbadge hbadge-crit">&#9679; {n_high} Critical</span>')
     if n_medium:
-        _badge_parts.append(
-            f'<span class="hbadge hbadge-warn">&#9679; {n_medium} Warning</span>'
-        )
+        _badge_parts.append(f'<span class="hbadge hbadge-warn">&#9679; {n_medium} Warning</span>')
     if n_low:
         _badge_parts.append(f'<span class="hbadge hbadge-ok">&#9679; {n_low} Low</span>')
     if n_info:
-        _badge_parts.append(
-            f'<span class="hbadge hbadge-info">&#9679; {n_info} Info</span>'
-        )
+        _badge_parts.append(f'<span class="hbadge hbadge-info">&#9679; {n_info} Info</span>')
     header_badges_html = " ".join(_badge_parts)
 
     _recs_badge_html = ""
     if n_high:
-        _recs_badge_html += (
-            f'<span class="shdr-badge sbadge-crit">{n_high} Critical</span> '
-        )
+        _recs_badge_html += f'<span class="shdr-badge sbadge-crit">{n_high} Critical</span> '
     if n_medium:
-        _recs_badge_html += (
-            f'<span class="shdr-badge sbadge-warn">{n_medium} Warning</span>'
-        )
+        _recs_badge_html += f'<span class="shdr-badge sbadge-warn">{n_medium} Warning</span>'
 
     _tier_icon = "&#128300;" if has_counters else "&#128225;"
     _tier_status_lbl = "HW Counters" if has_counters else "Trace Only"
@@ -959,27 +927,15 @@ def _format_as_webview(
             top_ratio = float(top.get("stall_ratio", 0)) * 100
             weighted = int(k.get("total_weighted_stall", 0))
             # color by avg stall ratio
-            ratio_color = (
-                "#e84040"
-                if avg_ratio >= 60
-                else ("#ff8800" if avg_ratio >= 40 else "#44dd66")
-            )
-            top_color = (
-                "#e84040"
-                if top_ratio >= 60
-                else ("#ff8800" if top_ratio >= 40 else "#44dd66")
-            )
+            ratio_color = "#e84040" if avg_ratio >= 60 else ("#ff8800" if avg_ratio >= 40 else "#44dd66")
+            top_color = "#e84040" if top_ratio >= 60 else ("#ff8800" if top_ratio >= 40 else "#44dd66")
             bar_w = min(100, avg_ratio)
 
             # expand sub-instructions
             sub_rows = ""
             for instr in (k.get("top_stalling_instructions") or [])[:5]:
                 i_ratio = float(instr.get("stall_ratio", 0)) * 100
-                i_color = (
-                    "#e84040"
-                    if i_ratio >= 60
-                    else ("#ff8800" if i_ratio >= 40 else "#44dd66")
-                )
+                i_color = "#e84040" if i_ratio >= 60 else ("#ff8800" if i_ratio >= 40 else "#44dd66")
                 sub_rows += (
                     f'<tr style="background:rgba(0,0,0,.18);font-size:.82rem">'
                     f'<td colspan="2" style="padding-left:2.5rem;font-family:monospace;color:#b0b8d8">'
@@ -1056,9 +1012,7 @@ def _format_as_webview(
             "</p>"
             "\n</div>\n</section>"
         )
-        att_section = att_section.replace(
-            "%%ATT_FLAMEGRAPH_SECTION%%", att_flame_block
-        )
+        att_section = att_section.replace("%%ATT_FLAMEGRAPH_SECTION%%", att_flame_block)
         html = html.replace("<!-- ATT_SECTION_PLACEHOLDER -->", att_section)
     else:
         html = html.replace("<!-- ATT_SECTION_PLACEHOLDER -->", "")
@@ -1162,12 +1116,12 @@ def _format_as_webview(
             peak_s = f"{peak_v:.0f} GB/s" if peak_v else "\u2014"
             comm_rows.append(
                 f"<tr>"
-                f'<td><code>{_h(op)}</code></td>'
+                f"<td><code>{_h(op)}</code></td>"
                 f"<td>{_fmt_bytes_comm(mb)}</td>"
                 f"<td>{_fmt_ns(dur_ns)}</td>"
                 f"<td>"
                 f'<div class="btrack" style="width:120px;height:10px;'
-                f'background:#1a1a2e;border-radius:4px;overflow:hidden;'
+                f"background:#1a1a2e;border-radius:4px;overflow:hidden;"
                 f'display:inline-block;vertical-align:middle">'
                 f'<div class="bfill" style="width:{bar_w:.1f}%;height:100%;'
                 f'background:{eff_color};border-radius:4px"></div>'
@@ -1201,9 +1155,7 @@ def _format_as_webview(
             "</table></div>"
         )
 
-        ov_color = "#44dd66" if c_overlap >= 50 else (
-            "#ff8800" if c_overlap >= 20 else "#e84040"
-        )
+        ov_color = "#44dd66" if c_overlap >= 50 else ("#ff8800" if c_overlap >= 20 else "#e84040")
         overlap_donut = (
             '<div class="gauge-wrap" style="margin-top:1rem">'
             f'{_svg_gauge(c_overlap, ov_color, "Comm/Compute Overlap", f"{c_overlap:.0f}%")}'
@@ -1215,12 +1167,16 @@ def _format_as_webview(
         )
 
         incomplete_note = (
-            '<p class="dim" style="margin-top:.75rem;font-size:.82rem">'
-            "&#9888; Capture incomplete \u2014 fell back to kernel-name regex "
-            "(no <code>category='RCCL'</code> spans in DB; install "
-            "<code>rocprofv3 &ge; 6.2</code> for full RCCL arg capture)."
-            "</p>"
-        ) if c_incomplete else ""
+            (
+                '<p class="dim" style="margin-top:.75rem;font-size:.82rem">'
+                "&#9888; Capture incomplete \u2014 fell back to kernel-name regex "
+                "(no <code>category='RCCL'</code> spans in DB; install "
+                "<code>rocprofv3 &ge; 6.2</code> for full RCCL arg capture)."
+                "</p>"
+            )
+            if c_incomplete
+            else ""
+        )
 
         comm_section = (
             '\n<section class="scard">'
@@ -1290,11 +1246,7 @@ def _format_tier0_webview(
     # -- Counts --
     # Bug 3: render the code-level patterns list here, NOT the
     # profiling-plan actions. The plan has its own block below.
-    recs = (
-        getattr(tier0_result, "code_patterns", None)
-        or tier0_result.recommendations
-        or []
-    )
+    recs = getattr(tier0_result, "code_patterns", None) or tier0_result.recommendations or []
     n_high = sum(1 for r in recs if r.get("priority") == "HIGH")
     n_medium = sum(1 for r in recs if r.get("priority") == "MEDIUM")
     n_low = sum(1 for r in recs if r.get("priority") == "LOW")
@@ -1302,30 +1254,20 @@ def _format_tier0_webview(
 
     _badge_parts = []
     if n_high:
-        _badge_parts.append(
-            f'<span class="hbadge hbadge-crit">&#9679; {n_high} Critical</span>'
-        )
+        _badge_parts.append(f'<span class="hbadge hbadge-crit">&#9679; {n_high} Critical</span>')
     if n_medium:
-        _badge_parts.append(
-            f'<span class="hbadge hbadge-warn">&#9679; {n_medium} Warning</span>'
-        )
+        _badge_parts.append(f'<span class="hbadge hbadge-warn">&#9679; {n_medium} Warning</span>')
     if n_low:
         _badge_parts.append(f'<span class="hbadge hbadge-ok">&#9679; {n_low} Low</span>')
     if n_info:
-        _badge_parts.append(
-            f'<span class="hbadge hbadge-info">&#9679; {n_info} Info</span>'
-        )
+        _badge_parts.append(f'<span class="hbadge hbadge-info">&#9679; {n_info} Info</span>')
     header_badges_html = " ".join(_badge_parts)
 
     _recs_badge_html = ""
     if n_high:
-        _recs_badge_html += (
-            f'<span class="shdr-badge sbadge-crit">{n_high} Critical</span> '
-        )
+        _recs_badge_html += f'<span class="shdr-badge sbadge-crit">{n_high} Critical</span> '
     if n_medium:
-        _recs_badge_html += (
-            f'<span class="shdr-badge sbadge-warn">{n_medium} Warning</span>'
-        )
+        _recs_badge_html += f'<span class="shdr-badge sbadge-warn">{n_medium} Warning</span>'
 
     # -- Recommendations HTML (same .r-card format as Tier 1/2) --
     recs_parts = []
@@ -1337,11 +1279,7 @@ def _format_tier0_webview(
         actions_li = "".join(f"<li>{_h(a)}</li>" for a in rec.get("actions", []))
         actions_html = f'<ol class="r-actions">{actions_li}</ol>' if actions_li else ""
         impact = rec.get("estimated_impact", "")
-        impact_html = (
-            f'<p class="r-impact">&#9889; Expected impact: {_h(impact)}</p>'
-            if impact
-            else ""
-        )
+        impact_html = f'<p class="r-impact">&#9889; Expected impact: {_h(impact)}</p>' if impact else ""
         # Phase 10 — Change-Impact Prediction. Only rendered when the
         # specialist (or the analyze.py final-pass) attached
         # predicted_impact_range on the rec.
@@ -1352,14 +1290,10 @@ def _format_tier0_webview(
             _pconf = rec.get("predicted_confidence")
             if _pconf is None:
                 _pconf = rec.get("confidence")
-            _pconf_txt = (
-                f" (confidence {int(float(_pconf) * 100)}%)"
-                if _pconf is not None
-                else ""
-            )
+            _pconf_txt = f" (confidence {int(float(_pconf) * 100)}%)" if _pconf is not None else ""
             predicted_html = (
                 f'<p class="r-predicted"><strong>Predicted:</strong> '
-                f'{float(_plo):.2f}-{float(_phi):.2f}&#215;{_h(_pconf_txt)}</p>'
+                f"{float(_plo):.2f}-{float(_phi):.2f}&#215;{_h(_pconf_txt)}</p>"
             )
         cmds_parts = []
         for ci, cmd in enumerate(rec.get("commands", [])):
@@ -1382,7 +1316,11 @@ def _format_tier0_webview(
         issue_txt = rec.get("issue", "")
         suggest = rec.get("suggestion", "")
         conf = rec.get("confidence")
-        conf_html = f'<span class="r-conf" style="margin-left:8px;opacity:0.7;font-size:0.85em">Confidence: {int(conf * 100)}%</span>' if conf is not None else ""
+        conf_html = (
+            f'<span class="r-conf" style="margin-left:8px;opacity:0.7;font-size:0.85em">Confidence: {int(conf * 100)}%</span>'
+            if conf is not None
+            else ""
+        )
         r_anchor = _rec_anchor_id(rec, ri)
         recs_parts.append(
             f'<div class="r-card" id="{r_anchor}" style="border-left-color:{fg}" data-p="{_h(p)}">'
@@ -1390,7 +1328,7 @@ def _format_tier0_webview(
             f'<span class="r-priority-icon">{picon}</span>'
             f'<span class="r-badge" style="background:{fg};color:#fff">{_h(p)}</span>'
             f'<span class="r-cat">{_h(cat)}</span>'
-            f'{conf_html}'
+            f"{conf_html}"
             f'<span class="r-chev">&#9660;</span>'
             f"</div>"
             f'<div class="r-body">'
@@ -1399,10 +1337,7 @@ def _format_tier0_webview(
             f"{actions_html}{impact_html}{predicted_html}{cmds_html}"
             f"</div></div>"
         )
-    recs_html = (
-        "".join(recs_parts)
-        or '<p class="dim">No recommendations \u2014 workload looks well-optimized.</p>'
-    )
+    recs_html = "".join(recs_parts) or '<p class="dim">No recommendations \u2014 workload looks well-optimized.</p>'
 
     # -- Kernels table --
     # Build a hotspot lookup so each detected source kernel can be colored
@@ -1413,6 +1348,7 @@ def _format_tier0_webview(
         _classify_severity as _cls_sev_t0,
         _demangle_basename as _demangle_t0,
     )
+
     _hotspot_pct_by_key: Dict[str, float] = {}
     if hotspots:
         for _hs in hotspots:
@@ -1449,9 +1385,7 @@ def _format_tier0_webview(
             _k_sev_id, _, _ = _cls_sev_t0(_k_pct)
             _row_cls = _T0_SEV_CLASS.get(_k_sev_id, "")
             if _show_runtime_col:
-                _rt_cell = (
-                    f'<td class="tier0-sev-pct" data-v="{_k_pct}">{_k_pct:.1f}%</td>'
-                )
+                _rt_cell = f'<td class="tier0-sev-pct" data-v="{_k_pct}">{_k_pct:.1f}%</td>'
         _cls_attr = f' class="{_row_cls}"' if _row_cls else ""
         kernel_rows.append(
             f"<tr{_cls_attr}>"
@@ -1575,11 +1509,7 @@ def _format_tier0_webview(
     )
     counters_section = ""
     if tier0_result.suggested_counters and not has_profiling:
-        collect_cmd = (
-            "rocprofv3 --sys-trace --pmc "
-            + " ".join(tier0_result.suggested_counters)
-            + " -- ./your_app"
-        )
+        collect_cmd = "rocprofv3 --sys-trace --pmc " + " ".join(tier0_result.suggested_counters) + " -- ./your_app"
         counters_section = (
             '<section class="scard">'
             '<div class="shdr">'
@@ -1605,15 +1535,12 @@ def _format_tier0_webview(
     # searches for to confirm separation from the main recs table.
     profiling_plan = getattr(tier0_result, "profiling_plan", None) or {}
     suggested_cmd = (
-        (profiling_plan.get("suggested_first_command") if isinstance(profiling_plan, dict) else None)
-        or tier0_result.suggested_first_command
-    )
+        profiling_plan.get("suggested_first_command") if isinstance(profiling_plan, dict) else None
+    ) or tier0_result.suggested_first_command
     start_here_section = ""
     if (suggested_cmd or profiling_plan) and not has_profiling:
         desc = (
-            profiling_plan.get("description")
-            if isinstance(profiling_plan, dict)
-            else None
+            profiling_plan.get("description") if isinstance(profiling_plan, dict) else None
         ) or "Run this command to collect profiling data for Tier 1/2 analysis:"
         cmd_block = ""
         if suggested_cmd:
@@ -1623,11 +1550,7 @@ def _format_tier0_webview(
                 f'<button class="cp-btn" onclick="cpCmd(\'cmd-start\')">Copy</button>'
                 "</div>"
             )
-        actions_list = (
-            profiling_plan.get("actions")
-            if isinstance(profiling_plan, dict)
-            else None
-        ) or []
+        actions_list = (profiling_plan.get("actions") if isinstance(profiling_plan, dict) else None) or []
         extra_actions = [a for a in actions_list if a and a != suggested_cmd]
         extras_html = ""
         if extra_actions:
@@ -1847,9 +1770,7 @@ def _format_diff_webview(
         '<span class="shdr-icon">&#128200;</span>'
         "<h2>Per-kernel delta</h2>"
         "</div>"
-        '<div class="sbody">'
-        + ("".join(bars) or '<p class="dim">No kernels in common.</p>')
-        + "</div></section>"
+        '<div class="sbody">' + ("".join(bars) or '<p class="dim">No kernels in common.</p>') + "</div></section>"
     )
 
     # Sortable speedup table.
@@ -1965,7 +1886,7 @@ def _format_diff_webview(
         "</head><body>"
         '<div class="hdr"><h1>PerfXpert &mdash; Trace diff</h1>'
         f'<div class="hdr-sub">baseline: <code>{_h(baseline_db)}</code> '
-        f'&rarr; new: <code>{_h(new_db)}</code></div></div>'
+        f"&rarr; new: <code>{_h(new_db)}</code></div></div>"
         f"{overview_html}{bars_html}{table_html}{narrative_html}"
         f"{js}"
         "</body></html>"

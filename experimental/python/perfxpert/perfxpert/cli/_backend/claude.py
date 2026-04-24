@@ -56,7 +56,6 @@ from perfxpert.cli._consent import (
     revoke_consent,
 )
 
-
 __all__ = ["ClaudeCodeAdapter", "SKIP_LIVE_CHECK_ENV"]
 
 
@@ -95,9 +94,7 @@ class ClaudeCodeAdapter:
 
     name: str = "claude"
     binary_name: str = "claude"
-    install_hint: str = (
-        "Install via https://code.claude.com/docs/en/install"
-    )
+    install_hint: str = "Install via https://code.claude.com/docs/en/install"
     min_version: str | None = "2.1.59"
     known_schema_versions: tuple[str, ...] = ("1.x",)
     tool_name_template: str = "mcp__perfxpert__{tool}"
@@ -115,9 +112,7 @@ class ClaudeCodeAdapter:
     _POINTER_FILE = "CLAUDE.local.md"
     # Legacy pointer locations we need to clean up on uninstall for users
     # who installed before the CLAUDE.local.md fix.
-    _LEGACY_POINTER_PATHS = (
-        (".claude", "CLAUDE.md"),
-    )
+    _LEGACY_POINTER_PATHS = ((".claude", "CLAUDE.md"),)
     _PERFXPERT_DIR = ".perfxpert"
     _AGENTS_FILE = "AGENTS.md"
 
@@ -151,8 +146,7 @@ class ClaudeCodeAdapter:
         version_line = (result.stdout or result.stderr or "").strip()
         if self.min_version and not _version_at_or_above(version_line, self.min_version):
             return False, (
-                f"{self.binary_name} version {version_line!r} is below the "
-                f"minimum required {self.min_version!r}."
+                f"{self.binary_name} version {version_line!r} is below the " f"minimum required {self.min_version!r}."
             )
         return True, version_line
 
@@ -257,9 +251,7 @@ class ClaudeCodeAdapter:
         self._log_step(quiet, f"[3/4] Writing pointer at {pointer_rel} ...")
         pointer_contents = self._make_pointer(agents_cache, cwd)
         # Never touch a git-tracked CLAUDE.local.md unless explicit opt-in.
-        if pointer.exists() and pa.is_git_tracked(
-            Path(pointer_rel), cwd
-        ) and not allow_agents_md_append:
+        if pointer.exists() and pa.is_git_tracked(Path(pointer_rel), cwd) and not allow_agents_md_append:
             raise ConfigClobber(
                 f"{pointer} is tracked in git. Pass --allow-agents-md-append "
                 "to merge, or remove the file first. CLAUDE.local.md is "
@@ -284,8 +276,7 @@ class ClaudeCodeAdapter:
             report = self.verify_mcp_live(cwd)
             if not report.mcp_healthy:
                 raise PartialInstall(
-                    f"perfxpert MCP registered but live-check failed: "
-                    f"{report.error or 'unknown reason'}"
+                    f"perfxpert MCP registered but live-check failed: " f"{report.error or 'unknown reason'}"
                 )
 
         # Persist consent on success.
@@ -302,9 +293,7 @@ class ClaudeCodeAdapter:
     # verify_mcp_live (Task 4c) — retry-aware MCP handshake + gate probe.
     # ------------------------------------------------------------------
 
-    def verify_mcp_live(
-        self, cwd: Path, telemetry: bool = False
-    ) -> LiveCheckReport:
+    def verify_mcp_live(self, cwd: Path, telemetry: bool = False) -> LiveCheckReport:
         """Spawn `claude mcp list`, assert perfxpert is listed + healthy.
 
         Wraps the probe in `retry_mcp_handshake` for the MCP bootstrap
@@ -344,21 +333,17 @@ class ClaudeCodeAdapter:
             )
             if result.returncode != 0:
                 raise PartialInstall(
-                    f"claude mcp list exit {result.returncode}: "
-                    f"{result.stderr.decode('utf-8', errors='replace')}"
+                    f"claude mcp list exit {result.returncode}: " f"{result.stderr.decode('utf-8', errors='replace')}"
                 )
             stdout = result.stdout.decode("utf-8", errors="replace")
             servers = _parse_mcp_list_text(stdout)
             if "perfxpert" not in servers:
                 raise PartialInstall(
-                    f"perfxpert entry missing from claude mcp list output "
-                    f"(observed: {sorted(servers)})"
+                    f"perfxpert entry missing from claude mcp list output " f"(observed: {sorted(servers)})"
                 )
             status = servers["perfxpert"]
             if not _is_healthy_status(status):
-                raise PartialInstall(
-                    f"perfxpert entry present but unhealthy: {status!r}"
-                )
+                raise PartialInstall(f"perfxpert entry present but unhealthy: {status!r}")
             # Plain-text `mcp list` does not expose per-server tool names;
             # leave the observed list empty — consumers treat empty as
             # "unavailable" rather than "zero tools".
@@ -423,9 +408,7 @@ class ClaudeCodeAdapter:
 
     def _probe_telemetry_log(self, cwd: Path) -> bool:
         """Inspect the perfxpert-mcp telemetry log for `intent_classify`."""
-        xdg_cache = os.environ.get("XDG_CACHE_HOME") or str(
-            Path.home() / ".cache"
-        )
+        xdg_cache = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
         log_path = Path(xdg_cache) / "perfxpert" / "mcp-telemetry.log"
         if not log_path.is_file():
             return True  # Absent log = unknown, treat as non-blocking.
@@ -439,9 +422,7 @@ class ClaudeCodeAdapter:
     # spawn
     # ------------------------------------------------------------------
 
-    def spawn(
-        self, argv: list[str], env: dict[str, str], cwd: Path
-    ) -> int:
+    def spawn(self, argv: list[str], env: dict[str, str], cwd: Path) -> int:
         """Replace the Python process with the claude TUI via execvpe."""
         os.chdir(str(cwd))
         os.execvpe(self.binary_name, [self.binary_name, *argv], env)
@@ -482,15 +463,10 @@ class ClaudeCodeAdapter:
                     removed.append(candidate)
                     actions.append(f"removed pointer {candidate}")
                 except OSError as exc:
-                    actions.append(
-                        f"failed to remove pointer {candidate}: {exc}"
-                    )
+                    actions.append(f"failed to remove pointer {candidate}: {exc}")
             else:
                 drifted.append(candidate)
-                actions.append(
-                    f"refused to remove {candidate} — content drifted from "
-                    "managed sentinel"
-                )
+                actions.append(f"refused to remove {candidate} — content drifted from " "managed sentinel")
 
         # Cache file — safe to remove (we own the .perfxpert dir).
         if agents_cache.exists():
@@ -584,9 +560,7 @@ class ClaudeCodeAdapter:
 
     # ---- MCP registration -------------------------------------------------
 
-    def _register_mcp(
-        self, cwd: Path, mcp_config: Path, scope: Literal["project", "user"]
-    ) -> None:
+    def _register_mcp(self, cwd: Path, mcp_config: Path, scope: Literal["project", "user"]) -> None:
         """Primary: `claude mcp add perfxpert --scope <s> -- perfxpert-mcp`.
 
         Idempotent: if `claude mcp get perfxpert` returns 0 already, skip.
@@ -643,8 +617,7 @@ class ClaudeCodeAdapter:
             # Refuse structured edit on user scope — that file is
             # multi-MB and contains session history (I4).
             raise BackendNotFound(
-                "cannot register perfxpert in user scope without the "
-                "`claude` CLI; run the printed command manually."
+                "cannot register perfxpert in user scope without the " "`claude` CLI; run the printed command manually."
             )
 
         # 4) Structured edit of .mcp.json (project scope is a small
@@ -676,9 +649,7 @@ class ClaudeCodeAdapter:
             try:
                 data = json.loads(mcp_config.read_text())
             except json.JSONDecodeError as exc:
-                raise PartialInstall(
-                    f"{mcp_config} is not valid JSON; cannot merge: {exc}"
-                ) from exc
+                raise PartialInstall(f"{mcp_config} is not valid JSON; cannot merge: {exc}") from exc
 
         servers = data.setdefault("mcpServers", {})
         existing = servers.get("perfxpert")
@@ -749,9 +720,7 @@ def _version_at_or_above(line: str, minimum: str) -> bool:
 
 _HEALTHY_STATUS_MARKERS = ("✓", "Connected", "connected", "OK", "ok")
 _UNHEALTHY_STATUS_MARKERS = ("✘", "failed", "Failed", "error", "Error")
-_MCP_LIST_LINE_RE = re.compile(
-    r"^(?P<name>[^:]+):\s+(?P<endpoint>\S.*?)\s+-\s+(?P<status>.+?)\s*$"
-)
+_MCP_LIST_LINE_RE = re.compile(r"^(?P<name>[^:]+):\s+(?P<endpoint>\S.*?)\s+-\s+(?P<status>.+?)\s*$")
 
 
 def _parse_mcp_list_text(output: str) -> dict[str, str]:

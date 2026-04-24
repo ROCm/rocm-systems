@@ -11,9 +11,7 @@ def test_check_llm_providers_accepts_canonical_env_names(monkeypatch):
 
     configured, unconfigured = perfxpert_main._check_llm_providers()
 
-    assert configured == sorted(
-        ["anthropic", "ollama", "opencode", "openai", "private"]
-    )
+    assert configured == sorted(["anthropic", "ollama", "opencode", "openai", "private"])
     assert unconfigured == []
 
 

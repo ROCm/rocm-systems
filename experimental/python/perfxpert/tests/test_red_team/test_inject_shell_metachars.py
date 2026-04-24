@@ -25,12 +25,7 @@ def test_sanitizer_redacts_shell_metachars(outcomes_dir, malicious_db_factory) -
         profile_run(argv=["rocprofv3", "--kernel-trace", evil_name, "--", "./app"], cwd="/tmp")
 
     # patch.apply with a diff mentioning the bad path must reject
-    evil_diff = (
-        "--- a/" + evil_name + "\n"
-        "+++ b/" + evil_name + "\n"
-        "@@ -1,1 +1,1 @@\n"
-        "-old\n+new\n"
-    )
+    evil_diff = "--- a/" + evil_name + "\n" "+++ b/" + evil_name + "\n" "@@ -1,1 +1,1 @@\n" "-old\n+new\n"
     with pytest.raises(ShellMetacharError):
         patch_apply(project_root="/tmp", rel_path=evil_name, new_content="new")
 

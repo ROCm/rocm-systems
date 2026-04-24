@@ -6,7 +6,9 @@ from unittest.mock import MagicMock
 from perfxpert.agents import recommendation as rec_module
 from perfxpert.agents import schemas
 from perfxpert.agents.framework import (
-    FakeProviderResponse, HandoffPolicyViolation, dispatch_handoff,
+    FakeProviderResponse,
+    HandoffPolicyViolation,
+    dispatch_handoff,
 )
 from perfxpert.tools import profiling
 
@@ -49,7 +51,9 @@ def test_recommendation_no_execution_tools():
 def test_recommendation_handoff_whitelist_is_specialists_only():
     agent = rec_module.build_recommendation_agent()
     assert set(agent.allowed_handoffs) == {
-        "compute_specialist", "memory_specialist", "latency_specialist",
+        "compute_specialist",
+        "memory_specialist",
+        "latency_specialist",
     }
 
 
@@ -63,17 +67,20 @@ def test_recommendation_cannot_handoff_to_analysis_or_correctness():
 
 def test_recommendation_routes_compute_bottleneck_to_compute_specialist(monkeypatch):
     called = {}
+
     def fake_compute(payload, **kw):
         called["compute"] = True
         called["payload"] = payload
         return schemas.ComputeSpecialistOutput(
-            techniques=[{"name": "launch_bounds"}], confidence=0.9,
+            techniques=[{"name": "launch_bounds"}],
+            confidence=0.9,
         )
+
     monkeypatch.setattr(rec_module, "_run_specialist_compute", fake_compute)
 
     result = rec_module.run_recommendation(
         schemas.RecommendationInput(findings=_findings("compute"), gfx_id="gfx950"),
-        airgap=True,   # skip LLM, exercise routing
+        airgap=True,  # skip LLM, exercise routing
     )
     assert called.get("compute") is True
     assert called["payload"].gfx_id == "gfx950"
@@ -82,12 +89,15 @@ def test_recommendation_routes_compute_bottleneck_to_compute_specialist(monkeypa
 
 def test_recommendation_routes_memory_bottleneck_to_memory_specialist(monkeypatch):
     called = {}
+
     def fake_memory(payload, **kw):
         called["memory"] = True
         called["payload"] = payload
         return schemas.MemorySpecialistOutput(
-            techniques=[{"name": "coalesce"}], confidence=0.9,
+            techniques=[{"name": "coalesce"}],
+            confidence=0.9,
         )
+
     monkeypatch.setattr(rec_module, "_run_specialist_memory", fake_memory)
 
     result = rec_module.run_recommendation(
@@ -101,12 +111,15 @@ def test_recommendation_routes_memory_bottleneck_to_memory_specialist(monkeypatc
 
 def test_recommendation_routes_latency_bottleneck_to_latency_specialist(monkeypatch):
     called = {}
+
     def fake_latency(payload, **kw):
         called["latency"] = True
         called["payload"] = payload
         return schemas.LatencySpecialistOutput(
-            techniques=[{"name": "fuse_kernels"}], confidence=0.9,
+            techniques=[{"name": "fuse_kernels"}],
+            confidence=0.9,
         )
+
     monkeypatch.setattr(rec_module, "_run_specialist_latency", fake_latency)
 
     result = rec_module.run_recommendation(
@@ -120,6 +133,7 @@ def test_recommendation_routes_latency_bottleneck_to_latency_specialist(monkeypa
 
 def test_recommendation_dedups_seen_hashes(monkeypatch):
     """Recommendation drops techniques whose hash is in seen_recommendation_hashes."""
+
     def fake_compute(payload, **kw):
         return schemas.ComputeSpecialistOutput(
             techniques=[
@@ -128,10 +142,12 @@ def test_recommendation_dedups_seen_hashes(monkeypatch):
             ],
             confidence=0.9,
         )
+
     monkeypatch.setattr(rec_module, "_run_specialist_compute", fake_compute)
 
     # Compute a hash matching the first technique
     import hashlib, json
+
     h = hashlib.sha256(json.dumps({"name": "launch_bounds"}, sort_keys=True).encode()).hexdigest()
 
     result = rec_module.run_recommendation(
@@ -149,10 +165,11 @@ def test_recommendation_dedups_seen_hashes(monkeypatch):
 
 def test_recommendation_plateau_detection(monkeypatch):
     """If plateau.check returns True → plateau_detected=True in output."""
-    monkeypatch.setattr(rec_module, "_plateau_check",
-                        lambda history: {"plateau_detected": True, "iterations": 3})
+    monkeypatch.setattr(rec_module, "_plateau_check", lambda history: {"plateau_detected": True, "iterations": 3})
+
     def fake_compute(payload, **kw):
         return schemas.ComputeSpecialistOutput(techniques=[], confidence=0.0)
+
     monkeypatch.setattr(rec_module, "_run_specialist_compute", fake_compute)
 
     result = rec_module.run_recommendation(
@@ -179,16 +196,14 @@ def test_recommendation_mixed_bottleneck_emits_triage():
     )
     assert result.specialist_used == "none"
     # Must have at least one triage technique — not silently empty
-    assert len(result.recommendations) >= 1, (
-        "Expected at least one triage recommendation for 'mixed' bottleneck, got none."
-    )
+    assert (
+        len(result.recommendations) >= 1
+    ), "Expected at least one triage recommendation for 'mixed' bottleneck, got none."
     triage = result.recommendations[0]
-    assert triage.get("name") == "mixed_bottleneck_triage", (
-        f"Expected 'mixed_bottleneck_triage', got {triage.get('name')!r}"
-    )
-    assert "ATT" in triage.get("description", ""), (
-        "Triage recommendation must mention ATT as the next step."
-    )
+    assert (
+        triage.get("name") == "mixed_bottleneck_triage"
+    ), f"Expected 'mixed_bottleneck_triage', got {triage.get('name')!r}"
+    assert "ATT" in triage.get("description", ""), "Triage recommendation must mention ATT as the next step."
 
 
 def test_recommendation_raises_on_unknown_bottleneck(monkeypatch):

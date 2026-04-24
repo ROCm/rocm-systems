@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pytest
 
-
 _PERFXPERT_ROOT = Path(__file__).resolve().parents[2]
 _OPENCODE_DIR = _PERFXPERT_ROOT / "opencode"
 _SCRIPT = _PERFXPERT_ROOT / "scripts" / "apply-opencode-patches.sh"
@@ -83,8 +82,7 @@ def test_apply_script_check_only_is_clean() -> None:
         text=True,
     )
     assert result.returncode == 0, (
-        f"script exited {result.returncode}\n"
-        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        f"script exited {result.returncode}\n" f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert "CHECK OK" in result.stdout, result.stdout
 
@@ -96,9 +94,7 @@ def test_apply_script_check_only_is_clean() -> None:
         text=True,
     )
     assert git_status.returncode == 0
-    assert git_status.stdout.strip() == "", (
-        f"submodule is dirty after check-only apply:\n{git_status.stdout}"
-    )
+    assert git_status.stdout.strip() == "", f"submodule is dirty after check-only apply:\n{git_status.stdout}"
 
 
 @pytest.mark.skipif(
@@ -119,9 +115,7 @@ def test_every_patch_has_a_target() -> None:
                 targets.append(a_path)
         assert targets, f"{patch.name} contains no 'diff --git' header"
         for t in targets:
-            assert (_OPENCODE_DIR / t).exists(), (
-                f"{patch.name}: target {t!r} not found in submodule"
-            )
+            assert (_OPENCODE_DIR / t).exists(), f"{patch.name}: target {t!r} not found in submodule"
 
 
 def test_apply_script_check_only_succeeds_with_matching_manifest(tmp_path: Path) -> None:
@@ -141,8 +135,7 @@ def test_apply_script_check_only_succeeds_with_matching_manifest(tmp_path: Path)
         text=True,
     )
     assert result.returncode == 0, (
-        f"script exited {result.returncode}\n"
-        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        f"script exited {result.returncode}\n" f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert "manifest OK" in result.stdout
 

@@ -6,11 +6,7 @@ import pytest
 
 from perfxpert.fence import FenceBuilder
 
-
-_SLICES_DIR = (
-    Path(__file__).parent.parent.parent
-    / "perfxpert" / "fence" / "slices"
-)
+_SLICES_DIR = Path(__file__).parent.parent.parent / "perfxpert" / "fence" / "slices"
 
 
 ROLES = [
@@ -36,9 +32,7 @@ def test_bit_identical_across_three_calls():
 def test_each_slice_under_400_lines():
     for slice_path in sorted(_SLICES_DIR.glob("*.md")):
         lines = slice_path.read_text().splitlines()
-        assert len(lines) <= 400, (
-            f"slice {slice_path.name} has {len(lines)} lines (limit 400)"
-        )
+        assert len(lines) <= 400, f"slice {slice_path.name} has {len(lines)} lines (limit 400)"
 
 
 def test_full_fence_under_60kb():

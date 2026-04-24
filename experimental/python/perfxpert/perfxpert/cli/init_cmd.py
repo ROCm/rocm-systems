@@ -26,7 +26,6 @@ from perfxpert.config._cli import _config_path as _default_config_path
 from perfxpert.config._config import PerfXpertConfig
 from perfxpert.tools.arch import lookup_peaks
 
-
 __all__ = ["add_args", "run_init"]
 
 
@@ -277,11 +276,7 @@ def _suggest_first_command(framework_info: Dict[str, Any]) -> List[str]:
             "GRBM_COUNT",
             "GRBM_GUI_ACTIVE",
         ]
-        commands.append(
-            "rocprofv3 --pmc "
-            + " ".join(counters)
-            + f" -d ./profile_out_pmc -- {target}"
-        )
+        commands.append("rocprofv3 --pmc " + " ".join(counters) + f" -d ./profile_out_pmc -- {target}")
     return commands
 
 
@@ -300,8 +295,7 @@ def _print_step(n: int, total: int, title: str, body: str, stream=sys.stdout) ->
 def _format_gpu_info(gpu_info: Optional[Dict[str, Any]]) -> str:
     if gpu_info is None:
         return (
-            "could not detect GPU via rocm-smi or rocminfo.\n"
-            "pass `--arch gfx942` (or similar) to proceed manually."
+            "could not detect GPU via rocm-smi or rocminfo.\n" "pass `--arch gfx942` (or similar) to proceed manually."
         )
     gfx_id = gpu_info.get("gfx_id", "unknown")
     peaks = gpu_info.get("peaks") or {}
@@ -312,9 +306,7 @@ def _format_gpu_info(gpu_info: Optional[Dict[str, Any]]) -> str:
     bandwidth = peaks.get("memory_bandwidth_tbs", "?")
     fp32 = peaks.get("peak_fp32_tflops", "?")
     return (
-        f"detected: {gfx_id} ({name}, {cu_count} CU)\n"
-        f"  peak FP32: {fp32} TFLOPS\n"
-        f"  peak HBM : {bandwidth} TB/s"
+        f"detected: {gfx_id} ({name}, {cu_count} CU)\n" f"  peak FP32: {fp32} TFLOPS\n" f"  peak HBM : {bandwidth} TB/s"
     )
 
 
@@ -350,9 +342,7 @@ def _format_suggested_cmds(commands: List[str]) -> str:
     for index, command in enumerate(commands):
         prefix = "primary : " if index == 0 else "extra   : "
         lines.append(prefix + command)
-    lines.append(
-        "(--pc-sampling / --att are second-tier - run after Tier-1 identifies hot kernels)"
-    )
+    lines.append("(--pc-sampling / --att are second-tier - run after Tier-1 identifies hot kernels)")
     return "\n".join(lines)
 
 

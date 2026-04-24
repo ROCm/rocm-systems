@@ -8,7 +8,6 @@ from perfxpert import analyze as analyze_mod
 from perfxpert import output_config
 from perfxpert.connection import PerfxpertConnection as RocpdImportData
 
-
 _EXT_BY_FORMAT = {
     "json": ".json",
     "markdown": ".md",
@@ -53,10 +52,7 @@ def test_db_backed_compute_reports_preserve_analysis_bottleneck(
     tmp_path: Path,
 ) -> None:
     rendered = _render_all_formats(compute_bound_db, tmp_path)
-    verdicts = {
-        fmt: _extract_primary_bottleneck(fmt, text)
-        for fmt, text in rendered.items()
-    }
+    verdicts = {fmt: _extract_primary_bottleneck(fmt, text) for fmt, text in rendered.items()}
     assert set(verdicts.values()) == {"compute"}, verdicts
 
 
@@ -65,8 +61,5 @@ def test_trace_only_reports_preserve_data_insufficient_bottleneck(
     tmp_path: Path,
 ) -> None:
     rendered = _render_all_formats(trace_only_elementwise_db, tmp_path)
-    verdicts = {
-        fmt: _extract_primary_bottleneck(fmt, text)
-        for fmt, text in rendered.items()
-    }
+    verdicts = {fmt: _extract_primary_bottleneck(fmt, text) for fmt, text in rendered.items()}
     assert set(verdicts.values()) == {"data_insufficient"}, verdicts

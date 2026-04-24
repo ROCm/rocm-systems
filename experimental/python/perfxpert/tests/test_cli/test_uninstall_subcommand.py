@@ -62,27 +62,21 @@ def test_route_uninstall_is_perfxpert_kind() -> None:
     assert kind == "perfxpert"
 
 
-def test_uninstall_missing_backend_name_returns_2(
-    isolated_home: Path, capsys: pytest.CaptureFixture
-) -> None:
+def test_uninstall_missing_backend_name_returns_2(isolated_home: Path, capsys: pytest.CaptureFixture) -> None:
     rc = main(["uninstall"])
     assert rc == 2
     err = capsys.readouterr().err
     assert "which backend" in err.lower()
 
 
-def test_uninstall_unknown_backend_returns_2(
-    isolated_home: Path, capsys: pytest.CaptureFixture
-) -> None:
+def test_uninstall_unknown_backend_returns_2(isolated_home: Path, capsys: pytest.CaptureFixture) -> None:
     rc = main(["uninstall", "bogus"])
     assert rc == 2
     err = capsys.readouterr().err
     assert "unknown backend" in err.lower()
 
 
-def test_uninstall_codex_routes_to_adapter(
-    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_uninstall_codex_routes_to_adapter(isolated_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Codex uninstall now dispatches to CodexAdapter.uninstall, not a stub.
 
     The output must NOT contain the word "stub" or "ships in PR" (those
@@ -114,9 +108,7 @@ def test_uninstall_codex_routes_to_adapter(
 # ---------------------------------------------------------------------------
 
 
-def test_install_then_uninstall_round_trip_claude(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_then_uninstall_round_trip_claude(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("shutil.which", lambda _: None)  # no claude CLI
     # Import after monkeypatching to ensure structured-edit fallback path.
     from perfxpert.cli._backend.claude import ClaudeCodeAdapter
@@ -142,9 +134,7 @@ def test_uninstall_refuses_on_pointer_drift(
     project_cwd: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     # Pre-seed a user-edited pointer (no sentinel) so uninstall refuses it.
-    (project_cwd / "CLAUDE.local.md").write_text(
-        "user's own content — no perfxpert reference\n"
-    )
+    (project_cwd / "CLAUDE.local.md").write_text("user's own content — no perfxpert reference\n")
     monkeypatch.setattr("shutil.which", lambda _: None)
 
     rc = main(["uninstall", "--yes", "claude"])
@@ -159,9 +149,7 @@ def test_uninstall_refuses_on_pointer_drift(
 # ---------------------------------------------------------------------------
 
 
-def test_uninstall_gemini_removes_perfxpert_entries(
-    project_cwd: Path, isolated_home: Path
-) -> None:
+def test_uninstall_gemini_removes_perfxpert_entries(project_cwd: Path, isolated_home: Path) -> None:
     from perfxpert.cli._backend.gemini import GeminiAdapter
 
     GeminiAdapter().install(project_cwd)
@@ -191,9 +179,7 @@ def test_uninstall_refuses_without_yes_in_non_tty(
     assert "--yes" in err or "ASSUME_CONSENT" in err
 
 
-def test_uninstall_env_assume_consent_skips_prompt(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_uninstall_env_assume_consent_skips_prompt(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # No --yes, but env set → no interactive prompt, proceeds.
     monkeypatch.setenv("PERFXPERT_ASSUME_CONSENT", "1")
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
@@ -201,9 +187,7 @@ def test_uninstall_env_assume_consent_skips_prompt(
     # to do and doesn't error on drift.
     claude_dir = project_cwd / ".claude"
     claude_dir.mkdir()
-    (claude_dir / "CLAUDE.md").write_text(
-        "<!-- perfxpert-managed pointer file. -->\n@.perfxpert/AGENTS.md\n"
-    )
+    (claude_dir / "CLAUDE.md").write_text("<!-- perfxpert-managed pointer file. -->\n@.perfxpert/AGENTS.md\n")
     monkeypatch.setattr("shutil.which", lambda _: None)
     rc = main(["uninstall", "claude"])
     assert rc == 0

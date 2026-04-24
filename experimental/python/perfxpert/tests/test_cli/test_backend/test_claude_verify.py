@@ -28,7 +28,6 @@ from perfxpert.cli._backend import _prompt_adapter as pa
 from perfxpert.cli._backend.claude import ClaudeCodeAdapter
 from perfxpert.cli._backend.protocol import LiveCheckReport
 
-
 _REAL_RUN = subprocess.run
 
 
@@ -59,6 +58,7 @@ def _fake_mcp_list_response(
     `status` defaults to "✓ Connected" (healthy). Pass `status="✘ failed"`
     to simulate an unhealthy entry.
     """
+
     class _R:
         pass
 
@@ -81,21 +81,15 @@ def _fake_mcp_list_response(
     return r
 
 
-def test_verify_mcp_live_happy_path(
-    cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_verify_mcp_live_happy_path(cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
 
     def _run(cmd, *a, **kw):
         if cmd[:1] == ["git"]:
             return _REAL_RUN(cmd, *a, **kw)
-        return _fake_mcp_list_response(
-            {"mcpServers": {"perfxpert": {"command": "perfxpert-mcp"}}}
-        )
+        return _fake_mcp_list_response({"mcpServers": {"perfxpert": {"command": "perfxpert-mcp"}}})
 
-    monkeypatch.setattr(
-        "perfxpert.cli._backend.claude.subprocess.run", _run
-    )
+    monkeypatch.setattr("perfxpert.cli._backend.claude.subprocess.run", _run)
     report = ClaudeCodeAdapter().verify_mcp_live(cwd)
     assert isinstance(report, LiveCheckReport)
     assert report.mcp_listed is True
@@ -103,22 +97,16 @@ def test_verify_mcp_live_happy_path(
     assert report.error is None
 
 
-def test_verify_mcp_live_detects_unhealthy_entry(
-    cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_verify_mcp_live_detects_unhealthy_entry(cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """B1: perfxpert entry missing from list → healthy=False."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
 
     def _run(cmd, *a, **kw):
         if cmd[:1] == ["git"]:
             return _REAL_RUN(cmd, *a, **kw)
-        return _fake_mcp_list_response(
-            {"mcpServers": {"other": {"command": "other-bin"}}}
-        )
+        return _fake_mcp_list_response({"mcpServers": {"other": {"command": "other-bin"}}})
 
-    monkeypatch.setattr(
-        "perfxpert.cli._backend.claude.subprocess.run", _run
-    )
+    monkeypatch.setattr("perfxpert.cli._backend.claude.subprocess.run", _run)
     # Force the retry helper to sleep 0 so tests run fast.
     monkeypatch.setattr(pa.time, "sleep", lambda _s: None)
     monkeypatch.setenv("PERFXPERT_MCP_RETRY_BUDGET_S", "100")
@@ -133,9 +121,7 @@ def test_verify_mcp_live_detects_unhealthy_entry(
 # ---------------------------------------------------------------------------
 
 
-def test_verify_mcp_live_retries_with_backoff_2_4_8(
-    cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_verify_mcp_live_retries_with_backoff_2_4_8(cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """I-N5: on transient failure, retry 3× with backoff 2s / 4s / 8s."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
 
@@ -153,16 +139,12 @@ def test_verify_mcp_live_retries_with_backoff_2_4_8(
                 stderr = b"transient bootstrap failure"
 
             return _R()
-        return _fake_mcp_list_response(
-            {"mcpServers": {"perfxpert": {"command": "perfxpert-mcp"}}}
-        )
+        return _fake_mcp_list_response({"mcpServers": {"perfxpert": {"command": "perfxpert-mcp"}}})
 
     sleeps: list[float] = []
     monkeypatch.setattr(pa.time, "sleep", lambda s: sleeps.append(s))
     monkeypatch.setenv("PERFXPERT_MCP_RETRY_BUDGET_S", "100")
-    monkeypatch.setattr(
-        "perfxpert.cli._backend.claude.subprocess.run", _run
-    )
+    monkeypatch.setattr("perfxpert.cli._backend.claude.subprocess.run", _run)
 
     report = ClaudeCodeAdapter().verify_mcp_live(cwd)
     assert report.mcp_healthy is True
@@ -171,9 +153,7 @@ def test_verify_mcp_live_retries_with_backoff_2_4_8(
     assert attempts["n"] == 3
 
 
-def test_verify_mcp_live_exits_early_when_budget_exhausted(
-    cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_verify_mcp_live_exits_early_when_budget_exhausted(cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """I-N5: respect PERFXPERT_MCP_RETRY_BUDGET_S early-exit."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
     attempts = {"n": 0}
@@ -197,9 +177,7 @@ def test_verify_mcp_live_exits_early_when_budget_exhausted(
     monkeypatch.setattr(pa.time, "monotonic", lambda: fake_time["t"])
 
     monkeypatch.setenv("PERFXPERT_MCP_RETRY_BUDGET_S", "5")
-    monkeypatch.setattr(
-        "perfxpert.cli._backend.claude.subprocess.run", _run
-    )
+    monkeypatch.setattr("perfxpert.cli._backend.claude.subprocess.run", _run)
     report = ClaudeCodeAdapter().verify_mcp_live(cwd)
     assert report.mcp_healthy is False
     # With 5s budget: attempt 1 fails, sleep 2s (elapsed=2, <=5),
@@ -213,29 +191,21 @@ def test_verify_mcp_live_exits_early_when_budget_exhausted(
 # ---------------------------------------------------------------------------
 
 
-def test_gate_hook_none_when_env_disables(
-    cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_gate_hook_none_when_env_disables(cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PERFXPERT_GATE_HOOK", "0")
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
 
     def _run(cmd, *a, **kw):
         if cmd[:1] == ["git"]:
             return _REAL_RUN(cmd, *a, **kw)
-        return _fake_mcp_list_response(
-            {"mcpServers": {"perfxpert": {"command": "perfxpert-mcp"}}}
-        )
+        return _fake_mcp_list_response({"mcpServers": {"perfxpert": {"command": "perfxpert-mcp"}}})
 
-    monkeypatch.setattr(
-        "perfxpert.cli._backend.claude.subprocess.run", _run
-    )
+    monkeypatch.setattr("perfxpert.cli._backend.claude.subprocess.run", _run)
     report = ClaudeCodeAdapter().verify_mcp_live(cwd)
     assert report.gate_hook_installed is None
 
 
-def test_gate_hook_false_when_settings_missing(
-    cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_gate_hook_false_when_settings_missing(cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """I-N1: documented-known-limit — surface unsupported / not installed."""
     monkeypatch.delenv("PERFXPERT_GATE_HOOK", raising=False)
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
@@ -243,20 +213,14 @@ def test_gate_hook_false_when_settings_missing(
     def _run(cmd, *a, **kw):
         if cmd[:1] == ["git"]:
             return _REAL_RUN(cmd, *a, **kw)
-        return _fake_mcp_list_response(
-            {"mcpServers": {"perfxpert": {"command": "perfxpert-mcp"}}}
-        )
+        return _fake_mcp_list_response({"mcpServers": {"perfxpert": {"command": "perfxpert-mcp"}}})
 
-    monkeypatch.setattr(
-        "perfxpert.cli._backend.claude.subprocess.run", _run
-    )
+    monkeypatch.setattr("perfxpert.cli._backend.claude.subprocess.run", _run)
     report = ClaudeCodeAdapter().verify_mcp_live(cwd)
     assert report.gate_hook_installed is False
 
 
-def test_gate_hook_true_when_settings_has_hook(
-    cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_gate_hook_true_when_settings_has_hook(cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     settings = cwd / ".claude" / "settings.json"
     settings.parent.mkdir()
     settings.write_text(
@@ -284,13 +248,9 @@ def test_gate_hook_true_when_settings_has_hook(
     def _run(cmd, *a, **kw):
         if cmd[:1] == ["git"]:
             return _REAL_RUN(cmd, *a, **kw)
-        return _fake_mcp_list_response(
-            {"mcpServers": {"perfxpert": {"command": "perfxpert-mcp"}}}
-        )
+        return _fake_mcp_list_response({"mcpServers": {"perfxpert": {"command": "perfxpert-mcp"}}})
 
-    monkeypatch.setattr(
-        "perfxpert.cli._backend.claude.subprocess.run", _run
-    )
+    monkeypatch.setattr("perfxpert.cli._backend.claude.subprocess.run", _run)
     report = ClaudeCodeAdapter().verify_mcp_live(cwd)
     assert report.gate_hook_installed is True
 
@@ -316,13 +276,9 @@ def test_telemetry_probe_reads_log_for_intent_classify(
     def _run(cmd, *a, **kw):
         if cmd[:1] == ["git"]:
             return _REAL_RUN(cmd, *a, **kw)
-        return _fake_mcp_list_response(
-            {"mcpServers": {"perfxpert": {"command": "perfxpert-mcp"}}}
-        )
+        return _fake_mcp_list_response({"mcpServers": {"perfxpert": {"command": "perfxpert-mcp"}}})
 
-    monkeypatch.setattr(
-        "perfxpert.cli._backend.claude.subprocess.run", _run
-    )
+    monkeypatch.setattr("perfxpert.cli._backend.claude.subprocess.run", _run)
     report = ClaudeCodeAdapter().verify_mcp_live(cwd, telemetry=True)
     assert report.mcp_healthy is True
 
@@ -344,13 +300,9 @@ def test_telemetry_probe_flags_missing_intent_classify(
     def _run(cmd, *a, **kw):
         if cmd[:1] == ["git"]:
             return _REAL_RUN(cmd, *a, **kw)
-        return _fake_mcp_list_response(
-            {"mcpServers": {"perfxpert": {"command": "perfxpert-mcp"}}}
-        )
+        return _fake_mcp_list_response({"mcpServers": {"perfxpert": {"command": "perfxpert-mcp"}}})
 
-    monkeypatch.setattr(
-        "perfxpert.cli._backend.claude.subprocess.run", _run
-    )
+    monkeypatch.setattr("perfxpert.cli._backend.claude.subprocess.run", _run)
     report = ClaudeCodeAdapter().verify_mcp_live(cwd, telemetry=True)
     assert report.mcp_healthy is False
     assert report.error and "telemetry" in report.error
@@ -361,9 +313,7 @@ def test_telemetry_probe_flags_missing_intent_classify(
 # ---------------------------------------------------------------------------
 
 
-def test_verify_mcp_live_missing_binary(
-    cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_verify_mcp_live_missing_binary(cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("shutil.which", lambda _: None)
     report = ClaudeCodeAdapter().verify_mcp_live(cwd)
     assert report.mcp_healthy is False

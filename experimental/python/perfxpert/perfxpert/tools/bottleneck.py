@@ -14,7 +14,6 @@ from typing import Any, Dict, List
 from perfxpert.knowledge import load_yaml
 from perfxpert.tools._class import ToolClass, tool_class
 
-
 _OPS = {
     ">": lambda a, b: a > b,
     ">=": lambda a, b: a >= b,

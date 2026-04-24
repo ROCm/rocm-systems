@@ -32,9 +32,7 @@ def _perfxpert_mcp_path() -> Path:
     )
     if result.returncode == 0:
         return Path(result.stdout.strip())
-    raise RuntimeError(
-        "perfxpert-mcp not found in PATH. Install with: pip install -e ."
-    )
+    raise RuntimeError("perfxpert-mcp not found in PATH. Install with: pip install -e .")
 
 
 class MCPClient:
@@ -115,17 +113,11 @@ def test_mcp_initialize_handshake(mcp_proc):
             },
         )
         # Server should respond with capabilities
-        assert "result" in response or "error" in response, (
-            f"initialize: invalid response structure: {response}"
-        )
+        assert "result" in response or "error" in response, f"initialize: invalid response structure: {response}"
         if "result" in response:
             result = response["result"]
-            assert "protocolVersion" in result, (
-                "initialize result must include protocolVersion"
-            )
-            assert "capabilities" in result, (
-                "initialize result must include capabilities"
-            )
+            assert "protocolVersion" in result, "initialize result must include protocolVersion"
+            assert "capabilities" in result, "initialize result must include capabilities"
     finally:
         client.close()
 
@@ -145,16 +137,12 @@ def test_mcp_tools_list_returns_many(mcp_proc):
         )
 
         response = client.send_request("tools/list")
-        assert "result" in response, (
-            f"tools/list: no result in response: {response}"
-        )
+        assert "result" in response, f"tools/list: no result in response: {response}"
 
         # Unpack tools list from result.tools
         tools = response["result"].get("tools", [])
 
-        assert len(tools) >= 33, (
-            f"Expected ≥33 tools, got {len(tools)}"
-        )
+        assert len(tools) >= 33, f"Expected ≥33 tools, got {len(tools)}"
 
         # Validate tool schema structure
         for tool in tools[:5]:  # spot-check first 5
@@ -162,9 +150,7 @@ def test_mcp_tools_list_returns_many(mcp_proc):
             assert "description" in tool, f"tool {tool.get('name')} missing 'description'"
             assert "inputSchema" in tool, f"tool {tool.get('name')} missing 'inputSchema'"
             schema = tool["inputSchema"]
-            assert schema.get("type") == "object", (
-                f"inputSchema for {tool.get('name')} must be type=object"
-            )
+            assert schema.get("type") == "object", f"inputSchema for {tool.get('name')} must be type=object"
     finally:
         client.close()
 
@@ -178,8 +164,8 @@ def test_mcp_call_arch_lookup_peaks(mcp_proc):
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "perfxpert-test", "version": "1.0"}
-            }
+                "clientInfo": {"name": "perfxpert-test", "version": "1.0"},
+            },
         )
 
         response = client.send_request(
@@ -191,9 +177,7 @@ def test_mcp_call_arch_lookup_peaks(mcp_proc):
         )
 
         # Response must have result with content array
-        assert "result" in response, (
-            f"tools/call: no result: {response}"
-        )
+        assert "result" in response, f"tools/call: no result: {response}"
 
         content_list = response["result"].get("content", [])
         assert len(content_list) > 0, "tools/call returned no content"
@@ -203,12 +187,8 @@ def test_mcp_call_arch_lookup_peaks(mcp_proc):
         assert "text" in first, f"content missing 'text': {first}"
 
         result = json.loads(first["text"])
-        assert "peak_fp64_tflops" in result, (
-            f"arch lookup result missing peak_fp64_tflops: {result}"
-        )
-        assert result["peak_fp64_tflops"] == 81.7, (
-            f"MI300X FP64 peak should be 81.7, got {result['peak_fp64_tflops']}"
-        )
+        assert "peak_fp64_tflops" in result, f"arch lookup result missing peak_fp64_tflops: {result}"
+        assert result["peak_fp64_tflops"] == 81.7, f"MI300X FP64 peak should be 81.7, got {result['peak_fp64_tflops']}"
     finally:
         client.close()
 
@@ -222,8 +202,8 @@ def test_mcp_call_bottleneck_classify(mcp_proc):
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "perfxpert-test", "version": "1.0"}
-            }
+                "clientInfo": {"name": "perfxpert-test", "version": "1.0"},
+            },
         )
 
         # Synthetic metrics: memory-bound kernel
@@ -243,21 +223,15 @@ def test_mcp_call_bottleneck_classify(mcp_proc):
             },
         )
 
-        assert "result" in response, (
-            f"bottleneck/classify: no result: {response}"
-        )
+        assert "result" in response, f"bottleneck/classify: no result: {response}"
 
         content_list = response["result"].get("content", [])
         assert len(content_list) > 0, "bottleneck/classify returned no content"
 
         result = json.loads(content_list[0]["text"])
-        assert "type" in result, (
-            f"bottleneck result missing type: {result}"
-        )
+        assert "type" in result, f"bottleneck result missing type: {result}"
         # Result may be "memory_transfer", "mixed", etc. Just verify it's present
-        assert isinstance(result["type"], str), (
-            f"Expected type to be string, got {result}"
-        )
+        assert isinstance(result["type"], str), f"Expected type to be string, got {result}"
     finally:
         client.close()
 
@@ -271,8 +245,8 @@ def test_mcp_call_roofline_classify(mcp_proc):
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "perfxpert-test", "version": "1.0"}
-            }
+                "clientInfo": {"name": "perfxpert-test", "version": "1.0"},
+            },
         )
 
         response = client.send_request(
@@ -287,19 +261,13 @@ def test_mcp_call_roofline_classify(mcp_proc):
             },
         )
 
-        assert "result" in response, (
-            f"roofline/classify: no result: {response}"
-        )
+        assert "result" in response, f"roofline/classify: no result: {response}"
 
         content_list = response["result"].get("content", [])
         result = json.loads(content_list[0]["text"])
         assert "regime" in result, f"roofline result missing regime: {result}"
-        assert result["regime"] in ["compute", "memory", "balanced"], (
-            f"unexpected regime: {result['regime']}"
-        )
-        assert "arithmetic_intensity" in result, (
-            f"roofline result missing arithmetic_intensity: {result}"
-        )
+        assert result["regime"] in ["compute", "memory", "balanced"], f"unexpected regime: {result['regime']}"
+        assert "arithmetic_intensity" in result, f"roofline result missing arithmetic_intensity: {result}"
     finally:
         client.close()
 
@@ -313,8 +281,8 @@ def test_mcp_call_sol_sanity_check(mcp_proc):
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "perfxpert-test", "version": "1.0"}
-            }
+                "clientInfo": {"name": "perfxpert-test", "version": "1.0"},
+            },
         )
 
         # Valid: 50 TFLOPS fp64 (below MI300X peak of 81.7)
@@ -330,16 +298,12 @@ def test_mcp_call_sol_sanity_check(mcp_proc):
             },
         )
 
-        assert "result" in response, (
-            f"sol/sanity_check: no result: {response}"
-        )
+        assert "result" in response, f"sol/sanity_check: no result: {response}"
 
         content_list = response["result"].get("content", [])
         result = json.loads(content_list[0]["text"])
         assert "plausible" in result, f"sol result missing plausible: {result}"
-        assert result["plausible"] is True, (
-            "50 TFLOPS should be plausible for MI300X fp64"
-        )
+        assert result["plausible"] is True, "50 TFLOPS should be plausible for MI300X fp64"
     finally:
         client.close()
 
@@ -353,8 +317,8 @@ def test_mcp_call_intent_classify(mcp_proc):
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "perfxpert-test", "version": "1.0"}
-            }
+                "clientInfo": {"name": "perfxpert-test", "version": "1.0"},
+            },
         )
 
         response = client.send_request(
@@ -367,16 +331,18 @@ def test_mcp_call_intent_classify(mcp_proc):
             },
         )
 
-        assert "result" in response, (
-            f"intent/classify: no result: {response}"
-        )
+        assert "result" in response, f"intent/classify: no result: {response}"
 
         content_list = response["result"].get("content", [])
         result = json.loads(content_list[0]["text"])
         assert "intent" in result, f"intent result missing intent: {result}"
-        assert result["intent"] in ["optimize", "analyze", "explain", "help", "verify"], (
-            f"unexpected intent: {result['intent']}"
-        )
+        assert result["intent"] in [
+            "optimize",
+            "analyze",
+            "explain",
+            "help",
+            "verify",
+        ], f"unexpected intent: {result['intent']}"
     finally:
         client.close()
 
@@ -390,8 +356,8 @@ def test_mcp_error_unknown_tool(mcp_proc):
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "perfxpert-test", "version": "1.0"}
-            }
+                "clientInfo": {"name": "perfxpert-test", "version": "1.0"},
+            },
         )
 
         response = client.send_request(
@@ -403,9 +369,9 @@ def test_mcp_error_unknown_tool(mcp_proc):
         )
 
         # Server should return either a JSON-RPC error or result with isError=True
-        assert "error" in response or response.get("result", {}).get("isError"), (
-            f"Expected error for unknown tool, got: {response}"
-        )
+        assert "error" in response or response.get("result", {}).get(
+            "isError"
+        ), f"Expected error for unknown tool, got: {response}"
     finally:
         client.close()
 
@@ -419,8 +385,8 @@ def test_mcp_error_invalid_arguments(mcp_proc):
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "perfxpert-test", "version": "1.0"}
-            }
+                "clientInfo": {"name": "perfxpert-test", "version": "1.0"},
+            },
         )
 
         # arch.lookup_peaks requires gfx_id; omit it
@@ -433,9 +399,9 @@ def test_mcp_error_invalid_arguments(mcp_proc):
         )
 
         # Server should return error gracefully
-        assert "error" in response or "result" in response, (
-            f"Expected error or graceful handling for missing arg: {response}"
-        )
+        assert (
+            "error" in response or "result" in response
+        ), f"Expected error or graceful handling for missing arg: {response}"
     finally:
         client.close()
 
@@ -452,8 +418,8 @@ def test_mcp_concurrent_calls(mcp_proc):
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "perfxpert-test", "version": "1.0"}
-            }
+                "clientInfo": {"name": "perfxpert-test", "version": "1.0"},
+            },
         )
 
         # Send 3 requests without waiting for responses
@@ -499,9 +465,7 @@ def test_mcp_concurrent_calls(mcp_proc):
 
         # Each should either have result or error
         for r in responses:
-            assert "result" in r or "error" in r, (
-                f"Response missing result/error: {r}"
-            )
+            assert "result" in r or "error" in r, f"Response missing result/error: {r}"
     finally:
         client.close()
 
@@ -520,8 +484,8 @@ def test_mcp_large_result_handling(mcp_proc):
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "perfxpert-test", "version": "1.0"}
-            }
+                "clientInfo": {"name": "perfxpert-test", "version": "1.0"},
+            },
         )
 
         # Skip if regression tool unavailable (may not be in registry if no DB support)
@@ -547,9 +511,7 @@ def test_mcp_large_result_handling(mcp_proc):
                 )
 
         # Response should be present (may be error if DB doesn't exist, but not truncated)
-        assert "result" in response or "error" in response, (
-            f"regression/compare_runs: no result/error: {response}"
-        )
+        assert "result" in response or "error" in response, f"regression/compare_runs: no result/error: {response}"
         # If result exists, it should be a valid text content
         if "result" in response:
             assert len(response["result"]) > 0, "Empty result"
@@ -566,8 +528,8 @@ def test_mcp_stdin_close_exits_cleanly(mcp_proc):
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "perfxpert-test", "version": "1.0"}
-            }
+                "clientInfo": {"name": "perfxpert-test", "version": "1.0"},
+            },
         )
         # Now close stdin (normal client disconnect)
         client.close()
@@ -580,8 +542,6 @@ def test_mcp_stdin_close_exits_cleanly(mcp_proc):
             mcp_proc.kill()
             pytest.fail("Server did not exit within 5s after stdin close")
         # Server exited cleanly
-        assert exit_code == 0 or exit_code is None, (
-            f"Server exited with non-zero code: {exit_code}"
-        )
+        assert exit_code == 0 or exit_code is None, f"Server exited with non-zero code: {exit_code}"
     except AssertionError:
         raise

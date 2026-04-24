@@ -35,7 +35,6 @@ from perfxpert.cli._gate_hooks import (
     GATE_STATE_LIFTED_SENTINEL,
 )
 
-
 __all__ = [
     "GeminiGateHook",
     "GeminiGateInstallResult",
@@ -169,9 +168,7 @@ class GeminiGateHook:
         classify_tool: str = "mcp_perfxpert_intent_classify",
     ) -> GeminiGateInstallResult:
         if os.environ.get(GATE_HOOK_DISABLED_ENV, "").strip() == "0":
-            raise GateHookUnsupported(
-                f"{GATE_HOOK_DISABLED_ENV}=0 — Gemini gate hook install skipped"
-            )
+            raise GateHookUnsupported(f"{GATE_HOOK_DISABLED_ENV}=0 — Gemini gate hook install skipped")
 
         cwd = Path(cwd).expanduser().resolve()
         settings = _settings_path(cwd)
@@ -202,38 +199,26 @@ class GeminiGateHook:
             post_script=post_script,
         )
 
-    def _merge_settings(
-        self, settings: Path, pre_script: Path, post_script: Path
-    ) -> None:
+    def _merge_settings(self, settings: Path, pre_script: Path, post_script: Path) -> None:
         settings.parent.mkdir(parents=True, exist_ok=True)
         existing: dict[str, Any] = {}
         if settings.is_file():
             try:
                 existing = json.loads(settings.read_text())
             except json.JSONDecodeError as exc:
-                raise GateHookUnsupported(
-                    f"{settings} is not valid JSON: {exc}"
-                )
+                raise GateHookUnsupported(f"{settings} is not valid JSON: {exc}")
             if not isinstance(existing, dict):
-                raise GateHookUnsupported(
-                    f"{settings} top-level must be an object"
-                )
+                raise GateHookUnsupported(f"{settings} top-level must be an object")
 
         hooks = existing.setdefault("hooks", {})
         if not isinstance(hooks, dict):
-            raise GateHookUnsupported(
-                f"{settings}['hooks'] must be an object"
-            )
+            raise GateHookUnsupported(f"{settings}['hooks'] must be an object")
 
         pre_entry = _make_hook_entry(pre_script, marker=self.MARKER_SUBSTRING)
         post_entry = _make_hook_entry(post_script, marker=self.MARKER_SUBSTRING)
 
-        hooks["BeforeTool"] = _merge_hook_list(
-            hooks.get("BeforeTool"), pre_entry, marker=self.MARKER_SUBSTRING
-        )
-        hooks["AfterTool"] = _merge_hook_list(
-            hooks.get("AfterTool"), post_entry, marker=self.MARKER_SUBSTRING
-        )
+        hooks["BeforeTool"] = _merge_hook_list(hooks.get("BeforeTool"), pre_entry, marker=self.MARKER_SUBSTRING)
+        hooks["AfterTool"] = _merge_hook_list(hooks.get("AfterTool"), post_entry, marker=self.MARKER_SUBSTRING)
 
         pa.atomic_write(settings, json.dumps(existing, indent=2) + "\n")
 
@@ -252,11 +237,7 @@ class GeminiGateHook:
                     entries = hooks.get(event)
                     if not entries:
                         continue
-                    hooks[event] = [
-                        entry
-                        for entry in entries
-                        if self.MARKER_SUBSTRING not in json.dumps(entry)
-                    ]
+                    hooks[event] = [entry for entry in entries if self.MARKER_SUBSTRING not in json.dumps(entry)]
                     if not hooks[event]:
                         hooks.pop(event)
                 if not hooks:
@@ -312,9 +293,7 @@ def evaluate_gate_state(
         return {"allowed": True}
     return {
         "allowed": False,
-        "reason": GATE_REJECTION_REASON_TEMPLATE.format(
-            classify_tool=classify_tool
-        ),
+        "reason": GATE_REJECTION_REASON_TEMPLATE.format(classify_tool=classify_tool),
     }
 
 
@@ -330,9 +309,7 @@ def _make_hook_entry(script: Path, *, marker: str) -> dict[str, Any]:
     }
 
 
-def _merge_hook_list(
-    existing: Any, new_entry: dict[str, Any], *, marker: str
-) -> list[dict[str, Any]]:
+def _merge_hook_list(existing: Any, new_entry: dict[str, Any], *, marker: str) -> list[dict[str, Any]]:
     if existing is None:
         return [new_entry]
     if isinstance(existing, list):

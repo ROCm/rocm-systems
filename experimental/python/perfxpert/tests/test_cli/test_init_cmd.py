@@ -72,9 +72,7 @@ def test_init_writes_config_to_custom_path(tmp_path, monkeypatch) -> None:
     cfg = tmp_path / "nested" / "pxcfg.yaml"
     monkeypatch.setattr(init_cmd, "_detect_gpu", lambda override=None: None)
 
-    rc = init_cmd.run_init(
-        _mk_args(source_dir=str(tmp_path), provider="opencode", config_path=str(cfg))
-    )
+    rc = init_cmd.run_init(_mk_args(source_dir=str(tmp_path), provider="opencode", config_path=str(cfg)))
 
     assert rc == 0
     assert cfg.exists()
@@ -115,9 +113,7 @@ def test_init_suggests_command_with_framework_shim() -> None:
 def test_init_returns_rc0_on_clean_run(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(init_cmd, "_detect_gpu", lambda override=None: None)
     cfg = tmp_path / "pxcfg.yaml"
-    rc = init_cmd.run_init(
-        _mk_args(source_dir=str(tmp_path), provider="opencode", config_path=str(cfg))
-    )
+    rc = init_cmd.run_init(_mk_args(source_dir=str(tmp_path), provider="opencode", config_path=str(cfg)))
     assert rc == 0
 
 
@@ -141,7 +137,5 @@ def test_init_returns_rc1_on_unwritable_config_path(tmp_path, monkeypatch) -> No
     monkeypatch.setattr(init_cmd, "_write_config", _boom)
 
     cfg = tmp_path / "ro" / "pxcfg.yaml"
-    rc = init_cmd.run_init(
-        _mk_args(source_dir=str(tmp_path), provider="opencode", config_path=str(cfg))
-    )
+    rc = init_cmd.run_init(_mk_args(source_dir=str(tmp_path), provider="opencode", config_path=str(cfg)))
     assert rc == 1

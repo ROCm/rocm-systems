@@ -17,9 +17,7 @@ from contextvars import ContextVar
 from typing import Dict, Iterator, Mapping, Optional
 
 _ENV_VAR = "PERFXPERT_IN_OPENCODE_SESSION"
-_LOCAL_SESSION_OVERRIDE: ContextVar[bool | None] = ContextVar(
-    "perfxpert_in_opencode_session", default=None
-)
+_LOCAL_SESSION_OVERRIDE: ContextVar[bool | None] = ContextVar("perfxpert_in_opencode_session", default=None)
 
 
 class RecursionGuardViolation(RuntimeError):

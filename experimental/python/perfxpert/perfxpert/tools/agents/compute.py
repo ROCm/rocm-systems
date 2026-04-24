@@ -54,9 +54,7 @@ def agent_compute_specialist(
         progress_callback=progress_callback,
     )
     payload = schemas.ComputeSpecialistInput(**input)
-    output = session.run_compute_specialist(
-        payload, progress_callback=progress_callback
-    )
+    output = session.run_compute_specialist(payload, progress_callback=progress_callback)
 
     if hasattr(output, "model_dump"):
         return output.model_dump()

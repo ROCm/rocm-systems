@@ -44,7 +44,5 @@ def lookup_peaks(gfx_id: str) -> Dict[str, Any]:
     specs = load_yaml("interconnect_specs")
     if gfx_id not in specs:
         known = ", ".join(sorted(specs.keys()))
-        raise KeyError(
-            f"Unknown interconnect id {gfx_id!r}; known: {known}"
-        )
+        raise KeyError(f"Unknown interconnect id {gfx_id!r}; known: {known}")
     return specs[gfx_id]

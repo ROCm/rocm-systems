@@ -12,6 +12,7 @@ import pytest
 @dataclass
 class FakeProviderResponse:
     """Emulates what framework.run_agent returns under mocked providers."""
+
     text: str = ""
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
     structured_output: Optional[Dict[str, Any]] = None

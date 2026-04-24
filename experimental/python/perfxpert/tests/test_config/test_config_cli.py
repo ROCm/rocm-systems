@@ -37,6 +37,7 @@ def test_config_set_preserves_other_keys(tmp_path, monkeypatch):
 
 def test_config_set_rejects_invalid_field(tmp_path, monkeypatch):
     import pytest
+
     monkeypatch.setenv("HOME", str(tmp_path))
     with pytest.raises(SystemExit):
         run_config_set("bogus_field", "x")

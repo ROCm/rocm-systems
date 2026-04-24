@@ -23,9 +23,7 @@ def test_run_rejects_unknown_flag(tmp_path: Path):
 
 
 def test_run_accepts_known_flags(tmp_path: Path, monkeypatch):
-    fake = mock.MagicMock(return_value=mock.MagicMock(
-        returncode=0, stdout=b"", stderr=b""
-    ))
+    fake = mock.MagicMock(return_value=mock.MagicMock(returncode=0, stdout=b"", stderr=b""))
     monkeypatch.setattr("perfxpert.tools.profile_runner.subprocess.run", fake)
 
     result = profile_runner.run(
@@ -40,6 +38,7 @@ def test_run_accepts_known_flags(tmp_path: Path, monkeypatch):
 
 def test_run_rejects_shell_injection_in_args(tmp_path: Path):
     from perfxpert.tools._safety import ShellMetacharError
+
     with pytest.raises(ShellMetacharError):
         profile_runner.run(
             argv=["rocprofv3", "--sys-trace", "--", "./app;rm -rf ~"],

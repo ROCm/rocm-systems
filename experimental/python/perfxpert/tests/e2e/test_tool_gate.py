@@ -26,7 +26,6 @@ from pathlib import Path
 
 import pytest
 
-
 REPO = Path(__file__).resolve().parents[2]
 PATCH_DIR = REPO / ".patches"
 PATCH_FILE = PATCH_DIR / "0020-perfxpert-tool-gate.patch"
@@ -51,11 +50,8 @@ def test_mcp_tool_description_leads_with_allcaps_gate_bracket() -> None:
     for name, fn in tools.items():
         schema = _fn_to_tool_schema(name, fn)
         desc = schema.description  # type: ignore[attr-defined]
-        assert desc.startswith(
-            "[MUST BE CALLED FIRST FOR GPU-PERF QUERIES]"
-        ), (
-            f"{name!r} MCP tool description lost the cycle-4 B1 gate "
-            f"bracket — got: {desc[:80]!r}"
+        assert desc.startswith("[MUST BE CALLED FIRST FOR GPU-PERF QUERIES]"), (
+            f"{name!r} MCP tool description lost the cycle-4 B1 gate " f"bracket — got: {desc[:80]!r}"
         )
 
 
@@ -65,9 +61,7 @@ def test_mcp_tool_description_leads_with_allcaps_gate_bracket() -> None:
 
 
 def test_tool_gate_patch_file_present() -> None:
-    assert PATCH_FILE.exists(), (
-        f"0020-perfxpert-tool-gate.patch missing at {PATCH_FILE}"
-    )
+    assert PATCH_FILE.exists(), f"0020-perfxpert-tool-gate.patch missing at {PATCH_FILE}"
 
 
 def test_tool_gate_patch_covers_all_primary_prompts() -> None:
@@ -88,21 +82,14 @@ def test_tool_gate_patch_covers_all_primary_prompts() -> None:
         "beast.txt",
         "trinity.txt",
     ]
-    missing = [
-        name
-        for name in expected_prompts
-        if f"src/session/prompt/{name}" not in text
-    ]
-    assert not missing, (
-        f"0020 does not patch these primary prompt files: {missing}"
-    )
+    missing = [name for name in expected_prompts if f"src/session/prompt/{name}" not in text]
+    assert not missing, f"0020 does not patch these primary prompt files: {missing}"
 
 
 def test_tool_gate_patch_documents_escape_hatch() -> None:
     text = PATCH_FILE.read_text()
     assert "PERFXPERT_DISABLE_TOOL_GATE" in text, (
-        "cycle-4 B1 requires a PERFXPERT_DISABLE_TOOL_GATE escape hatch "
-        "documented in the tool-gate prompt"
+        "cycle-4 B1 requires a PERFXPERT_DISABLE_TOOL_GATE escape hatch " "documented in the tool-gate prompt"
     )
 
 
@@ -125,8 +112,7 @@ def test_tool_gate_patch_mentions_intent_classify() -> None:
     """The gate must redirect to intent_classify as the canonical first call."""
     text = PATCH_FILE.read_text()
     assert "intent_classify" in text, (
-        "tool-gate patch must redirect non-perfxpert first calls to "
-        "intent_classify (the workflow's entry point)"
+        "tool-gate patch must redirect non-perfxpert first calls to " "intent_classify (the workflow's entry point)"
     )
 
 

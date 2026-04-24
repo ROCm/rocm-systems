@@ -20,7 +20,6 @@ from typing import Literal, Optional
 
 from perfxpert.tools import intent as intent_tool
 
-
 Intent = Literal["analyze", "optimize", "verify", "explain", "help"]
 
 

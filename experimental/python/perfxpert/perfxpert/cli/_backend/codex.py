@@ -82,7 +82,6 @@ from perfxpert.cli._consent import (
     revoke_consent,
 )
 
-
 __all__ = [
     "CodexAdapter",
     "TrustStatus",
@@ -143,10 +142,7 @@ class CodexAdapter:
 
     name: str = "codex"
     binary_name: str = "codex"
-    install_hint: str = (
-        "Install via https://developers.openai.com/codex/cli "
-        "(npm i -g @openai/codex or equivalent)"
-    )
+    install_hint: str = "Install via https://developers.openai.com/codex/cli " "(npm i -g @openai/codex or equivalent)"
     min_version: str | None = "0.7.0"
     known_schema_versions: tuple[str, ...] = ("0.7.x",)
     # Codex's MCP tool name wire format is `mcp_<server>_<tool>` per
@@ -185,14 +181,11 @@ class CodexAdapter:
         except (OSError, subprocess.TimeoutExpired) as exc:
             return False, f"{self.binary_name} --version failed: {exc}"
         if result.returncode != 0:
-            return False, (
-                f"{self.binary_name} --version returned {result.returncode}"
-            )
+            return False, (f"{self.binary_name} --version returned {result.returncode}")
         line = (result.stdout or result.stderr or "").strip()
         if self.min_version and not _version_at_or_above(line, self.min_version):
             return False, (
-                f"{self.binary_name} version {line!r} is below the "
-                f"minimum required {self.min_version!r}."
+                f"{self.binary_name} version {line!r} is below the " f"minimum required {self.min_version!r}."
             )
         return True, line
 
@@ -203,9 +196,7 @@ class CodexAdapter:
     def _user_codex_config_path(self, home: Path | None = None) -> Path:
         return (home or Path.home()) / self._CODEX_CFG_REL
 
-    def _check_trust(
-        self, cwd: Path, home: Path | None = None
-    ) -> TrustStatus:
+    def _check_trust(self, cwd: Path, home: Path | None = None) -> TrustStatus:
         """Return trust status for `cwd` per `~/.codex/config.toml`.
 
         **API drift note.** The original plan assumed a
@@ -250,9 +241,7 @@ class CodexAdapter:
     # plan
     # ------------------------------------------------------------------
 
-    def _scope_config_dir(
-        self, cwd: Path, scope: Literal["project", "user"]
-    ) -> Path:
+    def _scope_config_dir(self, cwd: Path, scope: Literal["project", "user"]) -> Path:
         """Return the directory whose `config.toml` we should edit."""
         if scope == "project":
             return Path(cwd) / ".codex"
@@ -416,9 +405,7 @@ class CodexAdapter:
             if report.success:
                 actions.append(f"warmed perfxpert-mcp in {report.duration_s:.2f}s")
             else:
-                actions.append(
-                    f"warmup skipped/failed: {report.error or 'unknown'}"
-                )
+                actions.append(f"warmup skipped/failed: {report.error or 'unknown'}")
         except Exception as exc:  # pragma: no cover - defensive
             _LOG.debug("warmup failed: %s", exc)
             actions.append(f"warmup raised: {exc}")
@@ -438,8 +425,7 @@ class CodexAdapter:
             live = self.verify_mcp_live(cwd)
             if not live.mcp_healthy:
                 raise PartialInstall(
-                    f"perfxpert MCP registered but live-check failed: "
-                    f"{live.error or 'unknown reason'}"
+                    f"perfxpert MCP registered but live-check failed: " f"{live.error or 'unknown reason'}"
                 )
 
         grant_consent(self.name, cwd, effective_fset)
@@ -502,17 +488,11 @@ class CodexAdapter:
                 "This bypasses Codex's trust gate.\n"
             )
             sys.stderr.flush()
-            _LOG.info(
-                "%s=1 auto-trust granted for %s", AUTO_TRUST_ENV, cwd
-            )
+            _LOG.info("%s=1 auto-trust granted for %s", AUTO_TRUST_ENV, cwd)
             return scope
 
-        interactive = (
-            sys.stdin.isatty() if hasattr(sys.stdin, "isatty") else False
-        )
-        assume_consent = (
-            os.environ.get(CONSENT_ASSUME_ENV, "").strip() == "1"
-        )
+        interactive = sys.stdin.isatty() if hasattr(sys.stdin, "isatty") else False
+        assume_consent = os.environ.get(CONSENT_ASSUME_ENV, "").strip() == "1"
 
         # Path 2: non-interactive, no consent env → raise.
         if not interactive and not assume_consent:
@@ -568,9 +548,7 @@ class CodexAdapter:
             return False
         return answer in {"y", "yes"}
 
-    def _mark_trusted(
-        self, cwd: Path, home: Path | None = None
-    ) -> None:
+    def _mark_trusted(self, cwd: Path, home: Path | None = None) -> None:
         """Write `[projects."<cwd>"].trust_level = "trusted"` into
         `~/.codex/config.toml`, preserving every other key + comment.
 
@@ -593,9 +571,7 @@ class CodexAdapter:
         cfg.parent.mkdir(parents=True, exist_ok=True)
         existing = cfg.read_text(encoding="utf-8") if cfg.is_file() else ""
 
-        tomlkit_mod = _lazy_import_tomlkit(
-            "marking a project trusted in ~/.codex/config.toml"
-        )
+        tomlkit_mod = _lazy_import_tomlkit("marking a project trusted in ~/.codex/config.toml")
 
         try:
             doc = tomlkit_mod.parse(existing)
@@ -697,9 +673,8 @@ class CodexAdapter:
             return False
         if result.returncode != 0:
             return False
-        output = (
-            (result.stdout or b"").decode("utf-8", errors="replace")
-            + (result.stderr or b"").decode("utf-8", errors="replace")
+        output = (result.stdout or b"").decode("utf-8", errors="replace") + (result.stderr or b"").decode(
+            "utf-8", errors="replace"
         )
         # `codex mcp list` output format is version-dependent; we
         # match on the bare server name token. Safe because we
@@ -724,16 +699,10 @@ class CodexAdapter:
         """
         self._refuse_if_git_tracked(config_toml)
 
-        tomlkit_mod = _lazy_import_tomlkit(
-            "editing codex config.toml directly"
-        )
+        tomlkit_mod = _lazy_import_tomlkit("editing codex config.toml directly")
 
         config_toml.parent.mkdir(parents=True, exist_ok=True)
-        existing = (
-            config_toml.read_text(encoding="utf-8")
-            if config_toml.is_file()
-            else ""
-        )
+        existing = config_toml.read_text(encoding="utf-8") if config_toml.is_file() else ""
         doc = tomlkit_mod.parse(existing)
 
         servers = doc.get("mcp_servers")
@@ -745,8 +714,7 @@ class CodexAdapter:
             cmd = existing_entry.get("command")
             if cmd != "perfxpert-mcp":
                 raise ConfigClobber(
-                    f"{config_toml} already has [mcp_servers.perfxpert] "
-                    f"with command {cmd!r}; refuse to overwrite."
+                    f"{config_toml} already has [mcp_servers.perfxpert] " f"with command {cmd!r}; refuse to overwrite."
                 )
             # Same entry — idempotent no-op.
             return
@@ -764,9 +732,7 @@ class CodexAdapter:
     # verify_mcp_live
     # ------------------------------------------------------------------
 
-    def verify_mcp_live(
-        self, cwd: Path, telemetry: bool = False
-    ) -> LiveCheckReport:
+    def verify_mcp_live(self, cwd: Path, telemetry: bool = False) -> LiveCheckReport:
         """Verify codex sees the perfxpert MCP entry.
 
         Uses `codex mcp list` (no `--json` flag exists as of April
@@ -796,14 +762,11 @@ class CodexAdapter:
             )
             if result.returncode != 0:
                 raise PartialInstall(
-                    f"codex mcp list exit {result.returncode}: "
-                    f"{result.stderr.decode('utf-8', errors='replace')}"
+                    f"codex mcp list exit {result.returncode}: " f"{result.stderr.decode('utf-8', errors='replace')}"
                 )
             output = result.stdout.decode("utf-8", errors="replace")
             if "perfxpert" not in output:
-                raise PartialInstall(
-                    "perfxpert entry missing from `codex mcp list` output"
-                )
+                raise PartialInstall("perfxpert entry missing from `codex mcp list` output")
             return True
 
         try:
@@ -905,9 +868,7 @@ class CodexAdapter:
 
         # Remove project prompt file / managed block.
         try:
-            prompt_action, removed_path = self._remove_codex_prompt_file(
-                cwd, agents_file
-            )
+            prompt_action, removed_path = self._remove_codex_prompt_file(cwd, agents_file)
             if prompt_action:
                 actions.append(prompt_action)
             if removed_path is not None:
@@ -923,9 +884,7 @@ class CodexAdapter:
                 removed.append(legacy_agents_cache)
                 actions.append(f"removed legacy cache {legacy_agents_cache}")
             except OSError as exc:
-                actions.append(
-                    f"failed to remove legacy cache {legacy_agents_cache}: {exc}"
-                )
+                actions.append(f"failed to remove legacy cache {legacy_agents_cache}: {exc}")
 
         # Remove .perfxpert/ if empty.
         perfxpert_dir = cwd / self._PERFXPERT_DIR
@@ -962,9 +921,7 @@ class CodexAdapter:
             skipped_due_to_drift=tuple(drifted),
         )
 
-    def _structured_remove(
-        self, config_toml: Path, drifted: list[Path]
-    ) -> bool:
+    def _structured_remove(self, config_toml: Path, drifted: list[Path]) -> bool:
         """Remove `[mcp_servers.perfxpert]` from `config_toml`.
 
         Returns True iff the entry was present AND removed.
@@ -987,9 +944,7 @@ class CodexAdapter:
             drifted.append(config_toml)
             return False
         try:
-            doc = tomlkit_mod.parse(
-                config_toml.read_text(encoding="utf-8")
-            )
+            doc = tomlkit_mod.parse(config_toml.read_text(encoding="utf-8"))
         except Exception as exc:
             raise ConfigClobber(
                 f"{config_toml} is not valid TOML: {exc}. "
@@ -1168,21 +1123,14 @@ class CodexAdapter:
         body = rendered.rstrip("\n")
         return f"{begin}\n{body}\n{end}\n"
 
-    def _make_shadow_copy_prompt(
-        self, base_text: str, managed_block: str
-    ) -> str:
+    def _make_shadow_copy_prompt(self, base_text: str, managed_block: str) -> str:
         base_body = base_text.rstrip("\n")
-        header = (
-            "<!-- perfxpert-managed codex shadow-copy "
-            f"source=AGENTS.md base_sha={_sha8(base_body)} -->"
-        )
+        header = "<!-- perfxpert-managed codex shadow-copy " f"source=AGENTS.md base_sha={_sha8(base_body)} -->"
         if base_body:
             return f"{header}\n{base_body}\n\n{managed_block}"
         return managed_block
 
-    def _upsert_managed_prompt_block(
-        self, existing: str, managed_block: str
-    ) -> str:
+    def _upsert_managed_prompt_block(self, existing: str, managed_block: str) -> str:
         parsed = self._split_managed_prompt_block(existing)
         if parsed is None:
             trimmed = existing.rstrip("\n")
@@ -1196,9 +1144,7 @@ class CodexAdapter:
             return "\n\n".join([*parts, managed_block.rstrip("\n")]) + "\n"
         return managed_block
 
-    def _remove_codex_prompt_file(
-        self, cwd: Path, prompt_file: Path
-    ) -> tuple[str | None, Path | None]:
+    def _remove_codex_prompt_file(self, cwd: Path, prompt_file: Path) -> tuple[str | None, Path | None]:
         """Remove only the perfxpert-managed prompt block from Codex instructions."""
         if not prompt_file.exists():
             return None, None
@@ -1225,9 +1171,7 @@ class CodexAdapter:
         prompt_file.unlink()
         return f"removed {prompt_file}", prompt_file
 
-    def _split_managed_prompt_block(
-        self, text: str
-    ) -> tuple[str, str] | None:
+    def _split_managed_prompt_block(self, text: str) -> tuple[str, str] | None:
         """Return the text before and after our managed prompt block."""
         start = text.find("<!-- BEGIN perfxpert-managed v1 cache=")
         end = text.find(pa.END_MARKER_FMT, start if start != -1 else 0)
@@ -1302,8 +1246,7 @@ def _sha8(text: str) -> str:
 
 
 _SHADOW_COPY_RE = re.compile(
-    r"^<!-- perfxpert-managed codex shadow-copy "
-    r"source=AGENTS\.md base_sha=(?P<sha>[0-9a-f]{8}) -->\n?"
+    r"^<!-- perfxpert-managed codex shadow-copy " r"source=AGENTS\.md base_sha=(?P<sha>[0-9a-f]{8}) -->\n?"
 )
 
 

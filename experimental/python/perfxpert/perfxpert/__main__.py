@@ -133,10 +133,7 @@ def main(argv=None):
 
     init_parser = subparsers.add_parser(
         "init",
-        help=(
-            "First-run wizard: detect GPU + framework, generate "
-            "config, and print a suggested rocprofv3 command"
-        ),
+        help=("First-run wizard: detect GPU + framework, generate " "config, and print a suggested rocprofv3 command"),
         description=(
             "Guided first-run wizard.\n"
             "  1. GPU detection via rocm-smi (fallback: rocminfo)\n"
@@ -364,6 +361,7 @@ def _check_opencode_bundled_config() -> tuple[bool, str]:
     (cycle-2 nitpick 3).
     """
     from perfxpert.cli.opencode_launcher import resolve_config_dir
+
     try:
         p = resolve_config_dir()
         return True, f"Bundled opencode config dir present at {p}"

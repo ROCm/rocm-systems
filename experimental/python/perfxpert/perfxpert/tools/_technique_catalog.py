@@ -9,7 +9,6 @@ from typing import Any, Dict, Iterable, List
 
 from perfxpert.knowledge import load_yaml
 
-
 _ENTRY_SPECS: Dict[str, Dict[str, Any]] = {
     "vgpr_reduction_compute_bound": {
         "prediction_id": "vgpr_reduction",

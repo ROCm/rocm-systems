@@ -9,7 +9,11 @@ from perfxpert.runtime.recursion_guard import (
 )
 
 __all__ = [
-    "GateVerdict", "evaluate_gates",
-    "IntentVerdict", "classify_intent",
-    "RecursionGuardViolation", "ensure_not_recursive", "opencode_session",
+    "GateVerdict",
+    "evaluate_gates",
+    "IntentVerdict",
+    "classify_intent",
+    "RecursionGuardViolation",
+    "ensure_not_recursive",
+    "opencode_session",
 ]

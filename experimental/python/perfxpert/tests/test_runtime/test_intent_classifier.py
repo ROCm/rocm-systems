@@ -13,16 +13,19 @@ def test_classify_returns_verdict():
 
 def test_classify_handles_empty_query():
     v = intent_classifier.classify_intent("")
-    assert v.intent == "analyze"   # default
+    assert v.intent == "analyze"  # default
     assert v.confidence < 0.5
 
 
-@pytest.mark.parametrize("q,expected", [
-    ("did my patch help?", "verify"),
-    ("suggest optimizations", "optimize"),
-    ("what is MFMA?", "explain"),
-    ("help", "help"),
-])
+@pytest.mark.parametrize(
+    "q,expected",
+    [
+        ("did my patch help?", "verify"),
+        ("suggest optimizations", "optimize"),
+        ("what is MFMA?", "explain"),
+        ("help", "help"),
+    ],
+)
 def test_parametric_classification(q, expected):
     v = intent_classifier.classify_intent(q)
     assert v.intent == expected

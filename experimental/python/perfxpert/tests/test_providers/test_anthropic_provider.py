@@ -23,6 +23,7 @@ def test_import_registers_anthropic(monkeypatch):
     import importlib
 
     import perfxpert.providers.anthropic_provider as mod
+
     importlib.reload(mod)
     assert "anthropic" in registry.list_providers()
 
@@ -140,9 +141,9 @@ def test_anthropic_api_timeout_normalized_to_provider_timeout_error(monkeypatch)
         with pytest.raises(ProviderTimeoutError) as exc_info:
             provider.complete([{"role": "user", "content": "hi"}])
 
-    assert exc_info.value.provider == "anthropic", (
-        f"TimeoutError.provider must be 'anthropic', got {exc_info.value.provider!r}"
-    )
+    assert (
+        exc_info.value.provider == "anthropic"
+    ), f"TimeoutError.provider must be 'anthropic', got {exc_info.value.provider!r}"
 
 
 def test_missing_sdk_raises_external_tool_missing(monkeypatch):
@@ -152,7 +153,8 @@ def test_missing_sdk_raises_external_tool_missing(monkeypatch):
 
     with patch("perfxpert.providers.anthropic_provider.require_tool") as mock_rt:
         mock_rt.side_effect = ExternalToolMissing(
-            name="anthropic", install_hint="pip install anthropic",
+            name="anthropic",
+            install_hint="pip install anthropic",
         )
         monkeypatch.setenv("PERFXPERT_LLM_ANTHROPIC_KEY", "sk-test")
         with pytest.raises(ExternalToolMissing) as exc_info:

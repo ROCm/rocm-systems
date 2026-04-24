@@ -22,7 +22,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol, runtime_checkable
 
-
 # ---------------------------------------------------------------------------
 # Error taxonomy (cycle-2 Task 1 / I-N1 added GateHookUnsupported)
 # ---------------------------------------------------------------------------

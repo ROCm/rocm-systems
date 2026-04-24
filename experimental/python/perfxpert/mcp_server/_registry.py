@@ -23,7 +23,6 @@ from typing import Callable, Dict
 import perfxpert.tools as _tools_pkg
 from perfxpert.tools._class import ToolClass
 
-
 _SKIP_MODULES = {
     "_class",
     "_safety",
@@ -48,11 +47,9 @@ def discover_read_only_tools() -> Dict[str, Callable]:
     """
     registry: Dict[str, Callable] = {}
     prefix = _tools_pkg.__name__ + "."
-    for mod_info in pkgutil.walk_packages(
-        _tools_pkg.__path__, prefix=prefix
-    ):
+    for mod_info in pkgutil.walk_packages(_tools_pkg.__path__, prefix=prefix):
         # Drop the "perfxpert.tools." prefix so keys stay short.
-        rel_name = mod_info.name[len(prefix):]
+        rel_name = mod_info.name[len(prefix) :]
         # Skip the private helpers and any dotted-path whose final
         # segment is on the skip list.
         if rel_name.split(".")[-1] in _SKIP_MODULES:

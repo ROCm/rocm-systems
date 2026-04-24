@@ -7,10 +7,7 @@ import jsonschema
 
 from perfxpert.knowledge import load_yaml
 
-SCHEMA_PATH = (
-    Path(__file__).parent.parent.parent
-    / "perfxpert" / "knowledge" / "_schemas" / "sol_metrics.schema.json"
-)
+SCHEMA_PATH = Path(__file__).parent.parent.parent / "perfxpert" / "knowledge" / "_schemas" / "sol_metrics.schema.json"
 
 
 def test_sol_metrics_loads_without_error():

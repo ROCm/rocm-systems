@@ -79,9 +79,7 @@ def _detect_already_collected(connection: RocpdImportData) -> frozenset:
     )
     for table, key in checks:
         try:
-            row = execute_statement(
-                connection, f"SELECT COUNT(*) FROM {table} LIMIT 1", ()
-            ).fetchone()
+            row = execute_statement(connection, f"SELECT COUNT(*) FROM {table} LIMIT 1", ()).fetchone()
             if row and row[0] > 0:
                 if key == "kernels":
                     has_kernels = True
@@ -107,9 +105,7 @@ def _detect_already_collected(connection: RocpdImportData) -> frozenset:
     # Detect which hardware counters are already present in pmc_events.
     # Stored as "pmc:<COUNTER_NAME>" to avoid collisions with flag strings.
     try:
-        rows = execute_statement(
-            connection, "SELECT DISTINCT counter_name FROM pmc_events", ()
-        ).fetchall()
+        rows = execute_statement(connection, "SELECT DISTINCT counter_name FROM pmc_events", ()).fetchall()
         for row in rows:
             if row and row[0]:
                 covered.add(f"pmc:{row[0]}")
@@ -174,9 +170,7 @@ def _filter_rec_commands(
         if tool == "rocprof-sys" and has_sys_trace:
             # --trace alone ~ rocprofv3 --sys-trace; drop if it adds nothing new
             extra_flags = [f for f in flags if f != "--trace"]
-            meaningful_args = [
-                a for a in args if a.get("name", "") not in _OUTPUT_ONLY_ARGS
-            ]
+            meaningful_args = [a for a in args if a.get("name", "") not in _OUTPUT_ONLY_ARGS]
             if not extra_flags and not meaningful_args:
                 continue  # equivalent to already-collected sys-trace data
             # Has meaningful extra flags (e.g. --trace-gpu-memory) -> keep as-is
@@ -199,9 +193,7 @@ def _filter_rec_commands(
         pmc_counters: list = []
         new_pmc: list = []
         removed_pmc: list = []
-        pmc_idx = next(
-            (i for i, a in enumerate(new_args) if a.get("name") == "--pmc"), -1
-        )
+        pmc_idx = next((i for i, a in enumerate(new_args) if a.get("name") == "--pmc"), -1)
         if pmc_idx >= 0:
             pmc_val = new_args[pmc_idx].get("value") or ""
             pmc_counters = pmc_val.split()
@@ -233,9 +225,7 @@ def _filter_rec_commands(
         if removed_pmc:
             old_pmc_block = "--pmc " + " ".join(pmc_counters)
             if new_pmc:
-                new_full_cmd = new_full_cmd.replace(
-                    old_pmc_block, "--pmc " + " ".join(new_pmc)
-                )
+                new_full_cmd = new_full_cmd.replace(old_pmc_block, "--pmc " + " ".join(new_pmc))
             else:
                 new_full_cmd = new_full_cmd.replace(" " + old_pmc_block, "")
                 new_full_cmd = new_full_cmd.replace(old_pmc_block, "")
@@ -252,17 +242,14 @@ def _filter_rec_commands(
         if removed_pmc:
             note_parts.append(f"PMC counters: {' '.join(sorted(removed_pmc))}")
         new_cmd["description"] = (
-            new_cmd.get("description", "")
-            + f" (Already collected in this run: {'; '.join(note_parts)})"
+            new_cmd.get("description", "") + f" (Already collected in this run: {'; '.join(note_parts)})"
         )
         filtered.append(new_cmd)
 
     return filtered
 
 
-def _build_api_overhead_issue(
-    overhead_percent: float, api_overhead: Optional[Dict[str, Any]]
-) -> str:
+def _build_api_overhead_issue(overhead_percent: float, api_overhead: Optional[Dict[str, Any]]) -> str:
     """Build the API overhead issue text with optional per-API breakdown."""
     if api_overhead and api_overhead.get("has_api_data"):
         top_calls = api_overhead["api_calls"][:3]
@@ -585,8 +572,7 @@ def generate_recommendations(
     kernel_pct = time_breakdown.get("kernel_percent", 0)
     total_runtime_ns = time_breakdown.get("total_runtime", 0)
     _is_init_overhead = (
-        kernel_pct < _INIT_OVERHEAD_MAX_KERNEL_PCT
-        and 0 < total_runtime_ns < _INIT_OVERHEAD_MAX_RUNTIME_NS
+        kernel_pct < _INIT_OVERHEAD_MAX_KERNEL_PCT and 0 < total_runtime_ns < _INIT_OVERHEAD_MAX_RUNTIME_NS
     )
 
     if _is_init_overhead and not recommendations:
@@ -688,9 +674,7 @@ def generate_recommendations(
                 else:
                     _rule3_category = "Memory-Bound Kernel"
                     _rule3_confidence = 0.80
-                    _suggestion = (
-                        f"GPU utilization is only {_gpu_util:.1f}% — significant room for improvement"
-                    )
+                    _suggestion = f"GPU utilization is only {_gpu_util:.1f}% — significant room for improvement"
                     _actions = [
                         f"GPU utilization: {_gpu_util:.1f}%, wave occupancy: {_avg_w:.0f} avg",
                         "Low utilization suggests memory-bound or stalled execution",
@@ -784,6 +768,7 @@ def generate_recommendations(
             try:
                 from perfxpert.tools import pragma as _pragma_tool
                 from perfxpert.knowledge import load_yaml as _load_yaml
+
                 _catalog = _load_yaml("compiler_pragmas") or []
                 _unroll_count = next(
                     (e for e in _catalog if e.get("pragma") == "clang_loop_unroll_count"),
@@ -826,11 +811,7 @@ def generate_recommendations(
     if hotspots:
         total_calls = sum(k.get("calls", 0) for k in hotspots)
         if total_calls > 1000:
-            avg_duration = (
-                time_breakdown.get("total_kernel_time", 0) / total_calls
-                if total_calls > 0
-                else 0
-            )
+            avg_duration = time_breakdown.get("total_kernel_time", 0) / total_calls if total_calls > 0 else 0
             if avg_duration < 10000:  # Less than 10 microseconds
                 recommendations.append(
                     {
@@ -1012,27 +993,27 @@ def generate_recommendations(
             kname = outlier["kernel_name"]
             first_us = outlier["first_duration_ns"] / 1e3
             avg_us = outlier["avg_duration_ns"] / 1e3
-            recommendations.append({
-                "priority": "INFO",
-                "category": "Warmup",
-                "issue": f"First dispatch of '{kname}' is {ratio:.1f}x slower than average ({first_us:.1f}\u03bcs vs {avg_us:.1f}\u03bcs)",
-                "suggestion": "Add a warmup launch before timing to exclude one-time GPU initialization costs",
-                "actions": [
-                    "Add a dummy kernel launch before the timed section",
-                    "Use roctx markers to separate warmup from the figure-of-merit region",
-                    "If using roctx, check that first dispatch falls inside a 'warmup' range, not the timing range",
-                ],
-                "estimated_impact": f"First dispatch adds {first_us - avg_us:.1f}\u03bcs ({(ratio - 1) * 100:.0f}% overhead) to the first iteration",
-                "confidence": 0.80,
-                "commands": [],
-            })
+            recommendations.append(
+                {
+                    "priority": "INFO",
+                    "category": "Warmup",
+                    "issue": f"First dispatch of '{kname}' is {ratio:.1f}x slower than average ({first_us:.1f}\u03bcs vs {avg_us:.1f}\u03bcs)",
+                    "suggestion": "Add a warmup launch before timing to exclude one-time GPU initialization costs",
+                    "actions": [
+                        "Add a dummy kernel launch before the timed section",
+                        "Use roctx markers to separate warmup from the figure-of-merit region",
+                        "If using roctx, check that first dispatch falls inside a 'warmup' range, not the timing range",
+                    ],
+                    "estimated_impact": f"First dispatch adds {first_us - avg_us:.1f}\u03bcs ({(ratio - 1) * 100:.0f}% overhead) to the first iteration",
+                    "confidence": 0.80,
+                    "commands": [],
+                }
+            )
 
     # Strip or drop commands whose flags are already covered by the original run
     if already_collected:
         for rec in recommendations:
-            rec["commands"] = _filter_rec_commands(
-                rec.get("commands", []), already_collected
-            )
+            rec["commands"] = _filter_rec_commands(rec.get("commands", []), already_collected)
 
     return recommendations
 
@@ -1069,25 +1050,17 @@ def build_pragma_recommendation(
         f"Location: {source_file}:{source_line}",
     ]
     if factor_sweep:
-        actions.append(
-            f"Try unroll factors {factor_sweep} (no other values — YAML-locked)"
-        )
-    actions.append(
-        "Verify with: perfxpert diff -i <baseline>.db -i <new>.db"
-    )
+        actions.append(f"Try unroll factors {factor_sweep} (no other values — YAML-locked)")
+    actions.append("Verify with: perfxpert diff -i <baseline>.db -i <new>.db")
 
     return {
         "priority": "MEDIUM",
         "subtype": "pragma",
         "category": f"Loop Hint ({pragma_id})",
-        "issue": (
-            f"Kernel '{kernel_name}' matches the `{pragma_id}` trigger: "
-            f"{description}"
-        ),
+        "issue": (f"Kernel '{kernel_name}' matches the `{pragma_id}` trigger: " f"{description}"),
         "suggestion": f"Apply `{syntax}` at {source_file}:{source_line}",
         "actions": actions,
-        "estimated_impact": expected_impact
-        or pragma_entry.get("expected_impact", "1.05x-1.3x"),
+        "estimated_impact": expected_impact or pragma_entry.get("expected_impact", "1.05x-1.3x"),
         "confidence": 0.55,
         "commands": [],
         "source_file": source_file,

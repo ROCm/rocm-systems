@@ -47,6 +47,7 @@ def test_lookup_peaks_is_read_only_class():
 def test_lookup_peaks_is_deterministic_no_network():
     """Pure function — no I/O beyond YAML load."""
     import time
+
     start = time.time()
     arch.lookup_peaks("gfx942")
     duration_ms = (time.time() - start) * 1000

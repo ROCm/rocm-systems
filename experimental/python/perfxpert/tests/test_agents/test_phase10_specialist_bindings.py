@@ -58,6 +58,7 @@ def test_latency_does_not_bind_gpu_runtime_monitor():
 def test_all_phase10_tools_discoverable_via_mcp():
     """Sanity check — the new modules are visible to the MCP registry."""
     from mcp_server._registry import discover_read_only_tools
+
     tools = discover_read_only_tools()
     expected = {
         "kernel_fusion.find_fusion_candidates",

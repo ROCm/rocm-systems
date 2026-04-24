@@ -32,9 +32,13 @@ def test_latency_specialist_cannot_handoff_laterally():
 
 
 def test_latency_specialist_returns_techniques(fake_provider, monkeypatch):
-    monkeypatch.setattr(ls_module, "_fetch_catalog", lambda gfx_id: [
-        {"name": "fuse_kernels", "expected_impact": 0.4, "effort_factor": 1.0, "risk": "low"},
-    ])
+    monkeypatch.setattr(
+        ls_module,
+        "_fetch_catalog",
+        lambda gfx_id: [
+            {"name": "fuse_kernels", "expected_impact": 0.4, "effort_factor": 1.0, "risk": "low"},
+        ],
+    )
     fake_provider.return_value = FakeProviderResponse(
         structured_output={
             "techniques": [{"name": "fuse_kernels", "expected_impact": 0.4}],
@@ -56,10 +60,14 @@ def test_latency_specialist_returns_techniques(fake_provider, monkeypatch):
 
 def test_latency_specialist_airgap_sorts_deterministically(monkeypatch):
     monkeypatch.setenv("PERFXPERT_AIRGAP", "1")
-    monkeypatch.setattr(ls_module, "_fetch_catalog", lambda gfx_id: [
-        {"name": "A", "expected_impact": 0.1, "effort_factor": 1.0, "risk": "low"},
-        {"name": "B", "expected_impact": 0.7, "effort_factor": 1.0, "risk": "low"},
-    ])
+    monkeypatch.setattr(
+        ls_module,
+        "_fetch_catalog",
+        lambda gfx_id: [
+            {"name": "A", "expected_impact": 0.1, "effort_factor": 1.0, "risk": "low"},
+            {"name": "B", "expected_impact": 0.7, "effort_factor": 1.0, "risk": "low"},
+        ],
+    )
     result = ls_module.run_latency_specialist(
         schemas.LatencySpecialistInput(gfx_id="gfx942", hot_kernels=[]),
         airgap=True,

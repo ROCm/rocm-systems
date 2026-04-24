@@ -26,7 +26,7 @@ def test_sol_rejects_impossible_speedup(outcomes_dir) -> None:
         claimed_speedup=1000.0,
         arch="gfx942",
         baseline_runtime_ns=1_000_000,
-        achieved_runtime_ns=1_000,            # would be 1000× if real
+        achieved_runtime_ns=1_000,  # would be 1000× if real
         patch_sha="deadbeef",
     )
 
@@ -74,14 +74,12 @@ def test_sol_gate_unmocked_rejects_flops_exceeding_peak(outcomes_dir) -> None:
     """
     # MI300X fp64 peak = 81.7 TFLOPS; 500 TFLOPS is impossible
     r = _run_sol_gate(
-        claimed_speedup=3.0,        # ratio looks innocent
+        claimed_speedup=3.0,  # ratio looks innocent
         gfx_id="gfx942",
-        achieved_flops_per_sec=500e12,   # absolute FLOPS exceed hardware peak
+        achieved_flops_per_sec=500e12,  # absolute FLOPS exceed hardware peak
         kernel_type="fp64",
     )
-    assert r["ok"] is False, (
-        "500 TFLOPS fp64 exceeds MI300X peak (81.7 TFLOPS) — must reject. Got: {r}"
-    )
+    assert r["ok"] is False, "500 TFLOPS fp64 exceeds MI300X peak (81.7 TFLOPS) — must reject. Got: {r}"
 
     record_outcome(
         outcomes_dir,

@@ -246,9 +246,9 @@ def test_execute_agentic_preserves_provider_taxonomy():
 
 def test_legacy_symbols_are_absent():
     """Regression guard: removed legacy symbols must stay gone."""
-    assert not hasattr(analyze_mod, "_execute_legacy"), (
-        "_execute_legacy was removed during the agentic refactor and must stay gone"
-    )
+    assert not hasattr(
+        analyze_mod, "_execute_legacy"
+    ), "_execute_legacy was removed during the agentic refactor and must stay gone"
     import importlib
 
     with pytest.raises(ModuleNotFoundError):

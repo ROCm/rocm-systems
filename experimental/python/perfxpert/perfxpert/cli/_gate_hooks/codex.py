@@ -40,7 +40,6 @@ from perfxpert.cli._gate_hooks import (
     GATE_REJECTION_REASON_TEMPLATE,
 )
 
-
 __all__ = [
     "install",
     "uninstall",
@@ -108,7 +107,5 @@ def evaluate_gate_state(
     return {
         "allowed": False,
         "enforced_by": "prompt-layer",
-        "reason": GATE_REJECTION_REASON_TEMPLATE.format(
-            classify_tool=classify_tool
-        ),
+        "reason": GATE_REJECTION_REASON_TEMPLATE.format(classify_tool=classify_tool),
     }

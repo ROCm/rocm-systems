@@ -22,7 +22,7 @@ def lookup_waves_per_eu(vgpr_count: int, gfx_id: str) -> int:
     for entry in tables[gfx_id]:
         if vgpr_count <= entry["max_vgprs"]:
             return entry["waves_per_eu"]
-    return 1   # fallback — too many VGPRs for any category
+    return 1  # fallback — too many VGPRs for any category
 
 
 @tool_class(ToolClass.READ_ONLY)

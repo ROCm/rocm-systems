@@ -11,13 +11,17 @@ from unittest.mock import MagicMock
 from perfxpert.agents import root as root_module
 from perfxpert.agents import schemas
 from perfxpert.agents.framework import (
-    Agent, AgentConstructionError, HandoffPolicyViolation, ToolAllowlistViolation,
-    FakeProviderResponse, dispatch_tool,
+    Agent,
+    AgentConstructionError,
+    HandoffPolicyViolation,
+    ToolAllowlistViolation,
+    FakeProviderResponse,
+    dispatch_tool,
 )
 from perfxpert.tools import tasks as tasks_tool
 
-
 # -- Construction ---------------------------------------------------------
+
 
 def test_root_agent_builds():
     agent = root_module.build_root_agent()
@@ -84,14 +88,19 @@ def test_root_cannot_handoff_to_specialist():
     agent = root_module.build_root_agent()
     with pytest.raises(HandoffPolicyViolation):
         from perfxpert.agents.framework import dispatch_handoff
+
         dispatch_handoff(agent, "compute_specialist")
 
 
 def test_root_cannot_call_execution_tool():
     agent = root_module.build_root_agent()
     forbidden = [
-        "patch.apply", "patch.revert", "patch.verify_output",
-        "compile.build", "profile.run", "anchors.check",
+        "patch.apply",
+        "patch.revert",
+        "patch.verify_output",
+        "compile.build",
+        "profile.run",
+        "anchors.check",
     ]
     for tool in forbidden:
         assert not agent.has_tool(tool), f"Root must NOT have execution tool {tool!r}"
@@ -99,15 +108,18 @@ def test_root_cannot_call_execution_tool():
 
 # -- Routing --------------------------------------------------------------
 
+
 def test_root_routes_analyze_intent_to_analysis(fake_provider, monkeypatch):
     """Rule-first routing: intent=analyze → handoff to Analysis."""
     fake_provider.return_value = FakeProviderResponse(
-        text="routed", handoff="analysis",
+        text="routed",
+        handoff="analysis",
         structured_output={
             "narrative": "Routed to analysis.",
             "recommendations": [],
             "primary_bottleneck": "mixed",
-            "warnings": [], "metadata": {},
+            "warnings": [],
+            "metadata": {},
         },
     )
     result = root_module.run_root(
@@ -119,12 +131,14 @@ def test_root_routes_analyze_intent_to_analysis(fake_provider, monkeypatch):
 
 def test_root_routes_verify_intent_to_correctness(fake_provider):
     fake_provider.return_value = FakeProviderResponse(
-        text="routed", handoff="correctness",
+        text="routed",
+        handoff="correctness",
         structured_output={
             "narrative": "Routed to correctness.",
             "recommendations": [],
             "primary_bottleneck": "mixed",
-            "warnings": [], "metadata": {},
+            "warnings": [],
+            "metadata": {},
         },
     )
     result = root_module.run_root(
@@ -136,12 +150,14 @@ def test_root_routes_verify_intent_to_correctness(fake_provider):
 
 def test_root_routes_optimize_intent_to_recommendation(fake_provider):
     fake_provider.return_value = FakeProviderResponse(
-        text="routed", handoff="recommendation",
+        text="routed",
+        handoff="recommendation",
         structured_output={
             "narrative": "Routed to recommendation.",
             "recommendations": [],
             "primary_bottleneck": "mixed",
-            "warnings": [], "metadata": {},
+            "warnings": [],
+            "metadata": {},
         },
     )
     result = root_module.run_root(
@@ -152,6 +168,7 @@ def test_root_routes_optimize_intent_to_recommendation(fake_provider):
 
 
 # -- Air-gap routing parity -----------------------------------------------
+
 
 def test_root_routing_is_deterministic_in_airgap(monkeypatch):
     """Spec §5 invariant: air-gap routing decisions identical to LLM mode."""
@@ -196,6 +213,7 @@ def test_root_airgap_uses_analysis_bottleneck_for_db_queries(monkeypatch):
 
 # -- Narrative assembly ---------------------------------------------------
 
+
 def test_root_writes_bottleneck_narrative(fake_provider):
     """Absorbed from former Bottleneck-Narrator (review N3).
 
@@ -211,7 +229,8 @@ def test_root_writes_bottleneck_narrative(fake_provider):
             ),
             "recommendations": [{"title": "coalesce loads", "priority": "high"}],
             "primary_bottleneck": "memory_transfer",
-            "warnings": [], "metadata": {},
+            "warnings": [],
+            "metadata": {},
         },
     )
     result = root_module.run_root(
@@ -223,6 +242,7 @@ def test_root_writes_bottleneck_narrative(fake_provider):
 
 
 # -- Finding #24: Root lambda stubs for tasks.* never validated ---------------
+
 
 def test_root_lambdas_for_tasks_never_invoked_during_routing(monkeypatch, fake_provider):
     """Root's tasks.* are stubbed as lambdas returning None. Ensure run_root
@@ -281,9 +301,7 @@ def test_root_tasks_bindings_are_real():
     agent = root_module.build_root_agent()
     tasks_tools = [tb for tb in agent.tools if tb.name.startswith("tasks.")]
 
-    assert len(tasks_tools) >= 1, (
-        "Root should declare at least one tasks.* tool per fence spec"
-    )
+    assert len(tasks_tools) >= 1, "Root should declare at least one tasks.* tool per fence spec"
 
     expected = {
         "tasks.next": tasks_mod.next_task,
@@ -301,9 +319,9 @@ def test_root_tasks_bindings_are_real():
         if "lambda" in src and ("None" in src or ": None" in src):
             lambda_stubs.append(tb.name)
         if tb.name in expected:
-            assert tb.fn is expected[tb.name], (
-                f"{tb.name} should be wired to perfxpert.tools.tasks.{expected[tb.name].__name__}"
-            )
+            assert (
+                tb.fn is expected[tb.name]
+            ), f"{tb.name} should be wired to perfxpert.tools.tasks.{expected[tb.name].__name__}"
 
     assert not lambda_stubs, (
         f"Root still uses lambda stub(s) for: {lambda_stubs}. "
@@ -312,6 +330,7 @@ def test_root_tasks_bindings_are_real():
 
 
 # -- Fence allowlist helper -----------------------------------------------
+
 
 def _extract_fence_tool_names(fence_text):
     """Parse Tool allowlist section from a fence markdown file.
@@ -337,21 +356,22 @@ def _extract_fence_tool_names(fence_text):
 
 # -- Fence / allowlist alignment (design N29) ----------------------------
 
+
 def test_root_fence_tools_match_allowlist():
     """Fence-declared tools must be subset of agent actual allowlist (N29)."""
     from pathlib import Path
+
     agent = root_module.build_root_agent()
     allowed = {t.name for t in agent.tools}
     fence_path = Path(root_module.__file__).parent / "fence" / "root.md"
     fence_text = fence_path.read_text()
     fence_tools = _extract_fence_tool_names(fence_text)
     violations = fence_tools - allowed
-    assert not violations, (
-        f"Root fence lists tools not in agent allowlist: {violations}"
-    )
+    assert not violations, f"Root fence lists tools not in agent allowlist: {violations}"
 
 
 # -- Fence / allowlist alignment for ALL agents (design N29 full audit) --
+
 
 def _agent_fence_allowlist_cases():
     from pathlib import Path
@@ -363,21 +383,31 @@ def _agent_fence_allowlist_cases():
         memory_specialist as ms_mod,
         latency_specialist as ls_mod,
     )
+
     return [
-        ("Root", root_module.build_root_agent,
-         Path(root_module.__file__).parent / "fence" / "root.md"),
-        ("Analysis", analysis_mod.build_analysis_agent,
-         Path(analysis_mod.__file__).parent / "fence" / "analysis.md"),
-        ("Recommendation", rec_mod.build_recommendation_agent,
-         Path(rec_mod.__file__).parent / "fence" / "recommendation.md"),
-        ("Correctness", cor_mod.build_correctness_agent,
-         Path(cor_mod.__file__).parent / "fence" / "correctness.md"),
-        ("ComputeSpecialist", cs_mod.build_compute_specialist,
-         Path(cs_mod.__file__).parent / "fence" / "compute_specialist.md"),
-        ("MemorySpecialist", ms_mod.build_memory_specialist,
-         Path(ms_mod.__file__).parent / "fence" / "memory_specialist.md"),
-        ("LatencySpecialist", ls_mod.build_latency_specialist,
-         Path(ls_mod.__file__).parent / "fence" / "latency_specialist.md"),
+        ("Root", root_module.build_root_agent, Path(root_module.__file__).parent / "fence" / "root.md"),
+        ("Analysis", analysis_mod.build_analysis_agent, Path(analysis_mod.__file__).parent / "fence" / "analysis.md"),
+        (
+            "Recommendation",
+            rec_mod.build_recommendation_agent,
+            Path(rec_mod.__file__).parent / "fence" / "recommendation.md",
+        ),
+        ("Correctness", cor_mod.build_correctness_agent, Path(cor_mod.__file__).parent / "fence" / "correctness.md"),
+        (
+            "ComputeSpecialist",
+            cs_mod.build_compute_specialist,
+            Path(cs_mod.__file__).parent / "fence" / "compute_specialist.md",
+        ),
+        (
+            "MemorySpecialist",
+            ms_mod.build_memory_specialist,
+            Path(ms_mod.__file__).parent / "fence" / "memory_specialist.md",
+        ),
+        (
+            "LatencySpecialist",
+            ls_mod.build_latency_specialist,
+            Path(ls_mod.__file__).parent / "fence" / "latency_specialist.md",
+        ),
     ]
 
 
@@ -391,6 +421,4 @@ def test_all_agents_fence_tools_subset_of_allowlist(agent_name, builder, fence_p
     fence_text = fence_path.read_text()
     fence_tools = _extract_fence_tool_names(fence_text)
     violations = fence_tools - allowed
-    assert not violations, (
-        f"{agent_name}: fence lists tools NOT in allowlist: {violations}"
-    )
+    assert not violations, f"{agent_name}: fence lists tools NOT in allowlist: {violations}"

@@ -37,7 +37,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from perfxpert.tools._class import ToolClass, tool_class
 
-
 # MI300X cross-die (XCD<->XCD via AID fabric) latency overhead vs local HBM.
 # Empirical per-access penalty (ns). Extend via knowledge/memory_patterns.yaml.
 _MI300X_CROSS_DIE_NS_PER_ACCESS = 30
@@ -48,20 +47,14 @@ _PAGING_MEMCPY_MIN_BYTES = 1 << 20  # 1 MiB
 
 def _find_memcpy_table(conn: sqlite3.Connection) -> Optional[str]:
     cur = conn.cursor()
-    cur.execute(
-        "SELECT name FROM sqlite_master "
-        "WHERE type='table' AND name LIKE 'rocpd_memory_copy%'"
-    )
+    cur.execute("SELECT name FROM sqlite_master " "WHERE type='table' AND name LIKE 'rocpd_memory_copy%'")
     row = cur.fetchone()
     return row[0] if row else None
 
 
 def _find_page_fault_table(conn: sqlite3.Connection) -> Optional[str]:
     cur = conn.cursor()
-    cur.execute(
-        "SELECT name FROM sqlite_master "
-        "WHERE type='table' AND name LIKE '%page_fault%'"
-    )
+    cur.execute("SELECT name FROM sqlite_master " "WHERE type='table' AND name LIKE '%page_fault%'")
     row = cur.fetchone()
     return row[0] if row else None
 
@@ -80,9 +73,7 @@ def _count_paging_memcpy(conn: sqlite3.Connection, memcpy_table: str) -> Tuple[i
 
     try:
         if kind_col:
-            rows = conn.execute(
-                f"SELECT {size_col}, {kind_col} FROM {memcpy_table}"
-            ).fetchall()
+            rows = conn.execute(f"SELECT {size_col}, {kind_col} FROM {memcpy_table}").fetchall()
         else:
             rows = conn.execute(f"SELECT {size_col}, NULL FROM {memcpy_table}").fetchall()
     except sqlite3.OperationalError:
@@ -96,18 +87,13 @@ def _count_paging_memcpy(conn: sqlite3.Connection, memcpy_table: str) -> Tuple[i
         # "HtoD" / "DtoH" or numeric kind codes that indicate host-device
         # migrations — anything not pure DtoD counts as a "paging-like" move.
         kstr = str(kind or "").upper()
-        is_host_dev = (
-            "HTOD" in kstr or "DTOH" in kstr or "HOST" in kstr
-            or kstr in ("1", "2")  # legacy numeric kinds
-        )
+        is_host_dev = "HTOD" in kstr or "DTOH" in kstr or "HOST" in kstr or kstr in ("1", "2")  # legacy numeric kinds
         if is_host_dev and size >= _PAGING_MEMCPY_MIN_BYTES:
             count += 1
     return count, total
 
 
-def _cross_die_bytes_estimate(
-    conn: sqlite3.Connection, memcpy_table: str
-) -> int:
+def _cross_die_bytes_estimate(conn: sqlite3.Connection, memcpy_table: str) -> int:
     """Best-effort estimate of XCD<->XCD bytes on MI300X.
 
     Without PCIe-peer column data we approximate using DtoD memcpys that
@@ -127,9 +113,7 @@ def _cross_die_bytes_estimate(
         return 0
 
     try:
-        rows = conn.execute(
-            f"SELECT {size_col} FROM {memcpy_table} WHERE {src} != {dst}"
-        ).fetchall()
+        rows = conn.execute(f"SELECT {size_col} FROM {memcpy_table} WHERE {src} != {dst}").fetchall()
     except sqlite3.OperationalError:
         return 0
     return int(sum(r[0] or 0 for r in rows))
@@ -197,7 +181,9 @@ def analyze_paging(db_path: str) -> Dict[str, Any]:
         conn = sqlite3.connect(db_path)
     except sqlite3.Error:
         return {
-            "paging_events": 0, "cross_die_bytes": 0, "page_faults": 0,
+            "paging_events": 0,
+            "cross_die_bytes": 0,
+            "page_faults": 0,
             "estimated_penalty_ns": 0,
             "recommendations": ["DB unreadable — skipping unified-memory analysis."],
         }
@@ -223,9 +209,7 @@ def analyze_paging(db_path: str) -> Dict[str, Any]:
             "cross_die_bytes": int(cross_die_bytes),
             "page_faults": int(page_faults),
             "estimated_penalty_ns": int(estimated_penalty_ns),
-            "recommendations": _recommendations(
-                paging_events, cross_die_bytes, page_faults
-            ),
+            "recommendations": _recommendations(paging_events, cross_die_bytes, page_faults),
         }
     finally:
         conn.close()

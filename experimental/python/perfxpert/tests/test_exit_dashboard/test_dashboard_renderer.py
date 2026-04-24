@@ -13,9 +13,9 @@ SCRIPT = Path(__file__).parent.parent.parent / "scripts" / "exit_dashboard.py"
 def test_render_mode_prints_table(tmp_path: Path) -> None:
     out = tmp_path / "dash.json"
     proc = subprocess.run(
-        [sys.executable, str(SCRIPT),
-         "--output", str(out), "--render", "--allow-partial"],
-        capture_output=True, text=True,
+        [sys.executable, str(SCRIPT), "--output", str(out), "--render", "--allow-partial"],
+        capture_output=True,
+        text=True,
     )
     # Look for table-ish output in stdout
     stdout = proc.stdout

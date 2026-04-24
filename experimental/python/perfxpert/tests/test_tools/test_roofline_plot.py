@@ -20,12 +20,7 @@ import pytest
 
 from perfxpert.tools import roofline
 
-
-_FIXTURE = (
-    Path(__file__).resolve().parent.parent
-    / "fixtures"
-    / "compute_bound.db"
-)
+_FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "compute_bound.db"
 
 
 def _build_db(tmp_path: Path, rows: list[tuple]) -> Path:
@@ -36,13 +31,8 @@ def _build_db(tmp_path: Path, rows: list[tuple]) -> Path:
     p = tmp_path / "fake.db"
     conn = sqlite3.connect(str(p))
     cur = conn.cursor()
-    cur.execute(
-        "CREATE TABLE rocpd_info_agent (id INTEGER PRIMARY KEY, name TEXT, "
-        "type TEXT)"
-    )
-    cur.execute(
-        "INSERT INTO rocpd_info_agent (name, type) VALUES ('gfx942', 'GPU')"
-    )
+    cur.execute("CREATE TABLE rocpd_info_agent (id INTEGER PRIMARY KEY, name TEXT, " "type TEXT)")
+    cur.execute("INSERT INTO rocpd_info_agent (name, type) VALUES ('gfx942', 'GPU')")
     cur.execute(
         "CREATE TABLE pmc_events ("
         "name TEXT, counter_name TEXT, counter_value REAL, "

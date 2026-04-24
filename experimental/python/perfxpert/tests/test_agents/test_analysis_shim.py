@@ -13,13 +13,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helper: build a minimal PerfxpertConnection stand-in
 # ---------------------------------------------------------------------------
 
+
 class _FakeConn:
     """Stand-in for PerfxpertConnection — accepted by monkeypatched functions."""
+
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
 
@@ -27,6 +28,7 @@ class _FakeConn:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 def test_shim_delegates_compute_time_breakdown_to_analyze_module(monkeypatch):
     """Monkeypatch perfxpert.analyze.compute_time_breakdown; call the shim;
@@ -96,6 +98,7 @@ def test_shim_used_when_trace_analysis_module_absent(monkeypatch):
         # Remove the cached analysis module so the try/except re-runs on reload.
         saved_analysis = sys.modules.pop("perfxpert.agents.analysis", None)
         import perfxpert.agents.analysis as fresh_mod
+
         importlib.reload(fresh_mod)
 
         ta = fresh_mod.trace_analysis
@@ -111,4 +114,5 @@ def test_shim_used_when_trace_analysis_module_absent(monkeypatch):
             sys.modules["perfxpert.tools.trace_analysis"] = saved
         # Reload to restore to normal state
         import perfxpert.agents.analysis as analysis_mod
+
         importlib.reload(analysis_mod)

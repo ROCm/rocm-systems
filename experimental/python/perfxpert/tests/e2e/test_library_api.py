@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "regression_baseline.db"
 
 

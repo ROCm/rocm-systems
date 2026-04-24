@@ -44,7 +44,6 @@ from perfxpert.cli._backend.protocol import (
     UninstallReport,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures.
 # ---------------------------------------------------------------------------
@@ -204,9 +203,7 @@ def _fake_claude_subprocess_factory(
     return _run
 
 
-def test_install_shells_out_to_claude_mcp_add(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_shells_out_to_claude_mcp_add(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
     called: list[list[str]] = []
 
@@ -225,9 +222,7 @@ def test_install_shells_out_to_claude_mcp_add(
             return _R(1)
         return _R(0)
 
-    monkeypatch.setattr(
-        "perfxpert.cli._backend.claude.subprocess.run", _run
-    )
+    monkeypatch.setattr("perfxpert.cli._backend.claude.subprocess.run", _run)
 
     adapter = ClaudeCodeAdapter()
     report = adapter.install(project_cwd, scope="project")
@@ -237,9 +232,7 @@ def test_install_shells_out_to_claude_mcp_add(
     assert add_calls, f"expected `claude mcp add perfxpert` call; got {called}"
 
 
-def test_install_idempotent_via_mcp_get(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_idempotent_via_mcp_get(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """If `claude mcp get perfxpert` returns 0, skip the add."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
     seen_verbs: list[str] = []
@@ -257,9 +250,7 @@ def test_install_idempotent_via_mcp_get(
             seen_verbs.append(verb)
         return _R()
 
-    monkeypatch.setattr(
-        "perfxpert.cli._backend.claude.subprocess.run", _run
-    )
+    monkeypatch.setattr("perfxpert.cli._backend.claude.subprocess.run", _run)
     adapter = ClaudeCodeAdapter()
     adapter.install(project_cwd)
     # "get" should appear (the idempotency probe); "add" should NOT.
@@ -290,9 +281,7 @@ def test_install_fallback_structured_edit_on_shellout_failure(
             return _REAL_RUN(cmd, *args, **kwargs)
         return _R(1)  # every claude invocation fails
 
-    monkeypatch.setattr(
-        "perfxpert.cli._backend.claude.subprocess.run", _run
-    )
+    monkeypatch.setattr("perfxpert.cli._backend.claude.subprocess.run", _run)
     adapter = ClaudeCodeAdapter()
     adapter.install(project_cwd, scope="project")
     mcp_config = project_cwd / ".mcp.json"
@@ -301,9 +290,7 @@ def test_install_fallback_structured_edit_on_shellout_failure(
     assert data["mcpServers"]["perfxpert"]["command"] == "perfxpert-mcp"
 
 
-def test_install_user_scope_refuses_whole_file_edit(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_user_scope_refuses_whole_file_edit(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """I4: user scope has no cli → structured edit is refused."""
     monkeypatch.setattr("shutil.which", lambda _: None)  # no claude binary
     adapter = ClaudeCodeAdapter()
@@ -311,17 +298,13 @@ def test_install_user_scope_refuses_whole_file_edit(
         adapter.install(project_cwd, scope="user")
 
 
-def test_install_preserves_existing_mcp_servers(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_preserves_existing_mcp_servers(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Existing non-perfxpert entries in .mcp.json must survive."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
 
     # Pre-existing config with another MCP server.
     mcp_config = project_cwd / ".mcp.json"
-    mcp_config.write_text(
-        json.dumps({"mcpServers": {"other": {"command": "other-bin", "args": []}}})
-    )
+    mcp_config.write_text(json.dumps({"mcpServers": {"other": {"command": "other-bin", "args": []}}}))
 
     def _run(cmd, *args, **kwargs):
         class _R:
@@ -333,9 +316,7 @@ def test_install_preserves_existing_mcp_servers(
             return _REAL_RUN(cmd, *args, **kwargs)
         return _R()
 
-    monkeypatch.setattr(
-        "perfxpert.cli._backend.claude.subprocess.run", _run
-    )
+    monkeypatch.setattr("perfxpert.cli._backend.claude.subprocess.run", _run)
     adapter = ClaudeCodeAdapter()
     adapter.install(project_cwd)
     data = json.loads(mcp_config.read_text())
@@ -343,19 +324,13 @@ def test_install_preserves_existing_mcp_servers(
     assert data["mcpServers"]["perfxpert"]["command"] == "perfxpert-mcp"
 
 
-def test_install_raises_on_conflicting_entry(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_raises_on_conflicting_entry(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """ConfigClobber: an existing `perfxpert` entry with a different
     command must NOT be silently overwritten."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
 
     mcp_config = project_cwd / ".mcp.json"
-    mcp_config.write_text(
-        json.dumps(
-            {"mcpServers": {"perfxpert": {"command": "different-bin", "args": []}}}
-        )
-    )
+    mcp_config.write_text(json.dumps({"mcpServers": {"perfxpert": {"command": "different-bin", "args": []}}}))
 
     def _run(cmd, *args, **kwargs):
         class _R:
@@ -367,17 +342,13 @@ def test_install_raises_on_conflicting_entry(
             return _REAL_RUN(cmd, *args, **kwargs)
         return _R()
 
-    monkeypatch.setattr(
-        "perfxpert.cli._backend.claude.subprocess.run", _run
-    )
+    monkeypatch.setattr("perfxpert.cli._backend.claude.subprocess.run", _run)
     adapter = ClaudeCodeAdapter()
     with pytest.raises(ConfigClobber):
         adapter.install(project_cwd)
 
 
-def test_install_adds_mcp_json_to_gitignore(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_adds_mcp_json_to_gitignore(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Phase-8 convenience: if .gitignore already exists, append .mcp.json."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
     (project_cwd / ".gitignore").write_text("*.pyc\n")
@@ -405,9 +376,7 @@ def test_install_refuses_when_claude_md_tracked_without_flag(
     tracked = project_cwd / "CLAUDE.local.md"
     tracked.write_text("user's own content\n")
     subprocess.run(["git", "add", "CLAUDE.local.md"], cwd=str(project_cwd), check=True)
-    subprocess.run(
-        ["git", "commit", "-q", "-m", "init"], cwd=str(project_cwd), check=True
-    )
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=str(project_cwd), check=True)
 
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
     monkeypatch.setattr(
@@ -425,9 +394,7 @@ def test_install_refuses_when_claude_md_tracked_without_flag(
 # ---------------------------------------------------------------------------
 
 
-def test_install_raises_consent_denied(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_raises_consent_denied(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PERFXPERT_ASSUME_CONSENT", raising=False)
     # Force prompt to decline.
     monkeypatch.setattr(
@@ -473,9 +440,7 @@ def test_spawn_uses_execvpe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_uninstall_refuses_on_pointer_drift(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_uninstall_refuses_on_pointer_drift(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """If the pointer file was edited (no longer contains the sentinel),
     uninstall must list it in `skipped_due_to_drift`."""
     # Simulate a user-edited pointer.
@@ -490,15 +455,11 @@ def test_uninstall_refuses_on_pointer_drift(
     assert pointer in report.skipped_due_to_drift
 
 
-def test_uninstall_removes_sentinel_pointer(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_uninstall_removes_sentinel_pointer(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Happy path: sentinel present → pointer removed."""
     pointer = project_cwd / ".claude" / "CLAUDE.md"
     pointer.parent.mkdir()
-    pointer.write_text(
-        "<!-- perfxpert-managed pointer file. -->\n@.perfxpert/AGENTS.md\n"
-    )
+    pointer.write_text("<!-- perfxpert-managed pointer file. -->\n@.perfxpert/AGENTS.md\n")
     monkeypatch.setattr("shutil.which", lambda _: None)
     adapter = ClaudeCodeAdapter()
     report = adapter.uninstall(project_cwd)

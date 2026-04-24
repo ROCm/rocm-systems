@@ -7,7 +7,9 @@ import sys
 def _run(args: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "perfxpert"] + args,
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 
@@ -16,9 +18,11 @@ def test_interactive_flag_rejected():
     # argparse returns 2 on unrecognized flag
     assert result.returncode == 2
     assert "--interactive" in (result.stderr + result.stdout)
-    assert ("unrecognized" in result.stderr.lower()
-            or "not allowed" in result.stderr.lower()
-            or "invalid" in result.stderr.lower())
+    assert (
+        "unrecognized" in result.stderr.lower()
+        or "not allowed" in result.stderr.lower()
+        or "invalid" in result.stderr.lower()
+    )
 
 
 def test_resume_session_flag_rejected():

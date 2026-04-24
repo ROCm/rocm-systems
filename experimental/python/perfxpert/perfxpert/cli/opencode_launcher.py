@@ -41,31 +41,33 @@ _BRANDING_VERSION = "0.2.0"
 # Known opencode subcommands (v1.4.x) — a single bare positional that matches
 # one of these MUST be forwarded as a subcommand, not treated as the CWD.
 # Derived from opencode/packages/opencode/src/cli/cmd/*.ts.
-_OPENCODE_SUBCOMMANDS = frozenset({
-    "account",
-    "acp",
-    "agent",
-    "auth",      # legacy alias for account
-    "config",
-    "db",
-    "debug",
-    "export",
-    "generate",
-    "github",
-    "import",
-    "mcp",
-    "models",
-    "pr",
-    "plug",
-    "plugin",
-    "providers",
-    "run",
-    "serve",
-    "session",
-    "stats",
-    "tui",
-    "web",
-})
+_OPENCODE_SUBCOMMANDS = frozenset(
+    {
+        "account",
+        "acp",
+        "agent",
+        "auth",  # legacy alias for account
+        "config",
+        "db",
+        "debug",
+        "export",
+        "generate",
+        "github",
+        "import",
+        "mcp",
+        "models",
+        "pr",
+        "plug",
+        "plugin",
+        "providers",
+        "run",
+        "serve",
+        "session",
+        "stats",
+        "tui",
+        "web",
+    }
+)
 
 # Subcommands the perfxpert launcher handles itself (does NOT exec opencode).
 # Kept in sync with `perfxpert/__main__.py`; descriptions are surfaced by
@@ -85,9 +87,7 @@ _PERFXPERT_SUBCOMMANDS: "dict[str, str]" = {
 # Subcommand names the launcher itself dispatches to `python -m perfxpert`
 # or handles inline. These must short-circuit BEFORE resolve_opencode_binary()
 # so they work on a fresh install without opencode on disk.
-_PERFXPERT_DISPATCH_SUBCOMMANDS = frozenset(
-    {"init", "diff", "ci", "doctor", "install-patches", "uninstall"}
-)
+_PERFXPERT_DISPATCH_SUBCOMMANDS = frozenset({"init", "diff", "ci", "doctor", "install-patches", "uninstall"})
 
 
 # Cycle-2 Task 2: third-party agent backends the launcher dispatches to via
@@ -388,7 +388,7 @@ def _run_install_patches(argv: list[str]) -> int:
     here = Path(__file__).resolve()
     candidates = [
         here.parent.parent.parent / "scripts" / "build-bundled-opencode.sh",  # editable install
-        Path.cwd() / "scripts" / "build-bundled-opencode.sh",                 # dev cwd
+        Path.cwd() / "scripts" / "build-bundled-opencode.sh",  # dev cwd
     ]
     script: Path | None = None
     for c in candidates:
@@ -515,8 +515,7 @@ def _run_uninstall(remaining_argv: list[str]) -> int:
 
     if backend is None:
         sys.stderr.write(
-            "perfxpert-code uninstall: which backend?\n"
-            "  Usage: perfxpert-code uninstall {claude,gemini,codex}\n"
+            "perfxpert-code uninstall: which backend?\n" "  Usage: perfxpert-code uninstall {claude,gemini,codex}\n"
         )
         return 2
 
@@ -535,8 +534,7 @@ def _run_uninstall(remaining_argv: list[str]) -> int:
         adapter = CodexAdapter()
     else:
         sys.stderr.write(
-            f"perfxpert-code uninstall: unknown backend {backend!r}. "
-            "Expected one of: claude, gemini, codex.\n"
+            f"perfxpert-code uninstall: unknown backend {backend!r}. " "Expected one of: claude, gemini, codex.\n"
         )
         return 2
 
@@ -547,9 +545,7 @@ def _run_uninstall(remaining_argv: list[str]) -> int:
     # Dry-run preview + confirmation.
     plan = adapter.plan(cwd)
     if not quiet:
-        sys.stderr.write(
-            f"perfxpert-code uninstall {backend}: will remove\n"
-        )
+        sys.stderr.write(f"perfxpert-code uninstall {backend}: will remove\n")
         for action in plan.actions:
             sys.stderr.write(f"    - (reverse) {action}\n")
 
@@ -579,9 +575,7 @@ def _run_uninstall(remaining_argv: list[str]) -> int:
         for action in report.actions:
             sys.stderr.write(f"  {action}\n")
         if report.skipped_due_to_drift:
-            sys.stderr.write(
-                "\nRefused to remove these files (marker drift):\n"
-            )
+            sys.stderr.write("\nRefused to remove these files (marker drift):\n")
             for p in report.skipped_due_to_drift:
                 sys.stderr.write(f"  - {p}\n")
             return 1
@@ -722,9 +716,7 @@ def _prepare_runtime_config_dir(src_config_dir: Path) -> Path:
                 shutil.copy2(f, target)
         return runtime_dir
 
-    cache_root = Path(
-        os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))
-    ).expanduser()
+    cache_root = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))).expanduser()
     try:
         return _stage_into(cache_root / "perfxpert" / "opencode")
     except OSError:

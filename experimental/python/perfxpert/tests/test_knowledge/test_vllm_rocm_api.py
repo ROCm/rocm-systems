@@ -7,10 +7,7 @@ import jsonschema
 
 from perfxpert.knowledge import load_yaml
 
-SCHEMA_PATH = (
-    Path(__file__).parent.parent.parent
-    / "perfxpert" / "knowledge" / "_schemas" / "vllm_rocm_api.schema.json"
-)
+SCHEMA_PATH = Path(__file__).parent.parent.parent / "perfxpert" / "knowledge" / "_schemas" / "vllm_rocm_api.schema.json"
 
 
 def test_vllm_rocm_api_loads_without_error():

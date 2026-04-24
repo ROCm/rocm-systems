@@ -36,7 +36,6 @@ from typing import Any, Dict, List
 from perfxpert.knowledge import load_yaml
 from perfxpert.tools._class import ToolClass, tool_class
 
-
 # Amdahl gate: kernel must be at least this fraction of total runtime
 # before we even consider emitting a pragma rec.
 _MIN_HOTSPOT_PCT = 5.0
@@ -67,10 +66,7 @@ def lookup_pragmas(gpu_only: bool = True) -> List[Dict[str, Any]]:
     """
     catalog = load_yaml("compiler_pragmas") or []
     if gpu_only:
-        return [
-            e for e in catalog
-            if e.get("gpu_applicable", False) and e.get("allowlist", False)
-        ]
+        return [e for e in catalog if e.get("gpu_applicable", False) and e.get("allowlist", False)]
     return list(catalog)
 
 
@@ -132,10 +128,7 @@ def suggest_pragmas_for_kernel(
 
     catalog = load_yaml("compiler_pragmas") or []
     # Only iterate allowlisted GPU-applicable entries.
-    allowlisted = [
-        e for e in catalog
-        if e.get("gpu_applicable", False) and e.get("allowlist", False)
-    ]
+    allowlisted = [e for e in catalog if e.get("gpu_applicable", False) and e.get("allowlist", False)]
 
     results: List[Dict[str, Any]] = []
 
@@ -159,11 +152,7 @@ def suggest_pragmas_for_kernel(
             body = sigs.get("loop_body_size")
             if valu_util is not None and vgpr is not None and body is not None:
                 try:
-                    if (
-                        float(valu_util) > 0.50
-                        and int(vgpr) < 64
-                        and int(body) < 20
-                    ):
+                    if float(valu_util) > 0.50 and int(vgpr) < 64 and int(body) < 20:
                         fired = True
                 except (TypeError, ValueError):
                     fired = False
@@ -175,10 +164,7 @@ def suggest_pragmas_for_kernel(
             waves = sigs.get("waves_per_eu", 8)
             if vgpr is not None:
                 try:
-                    if (
-                        int(vgpr) >= 0.80 * int(arch_max)
-                        and (int(scratch) > 0 or int(waves) <= 2)
-                    ):
+                    if int(vgpr) >= 0.80 * int(arch_max) and (int(scratch) > 0 or int(waves) <= 2):
                         fired = True
                 except (TypeError, ValueError):
                     fired = False

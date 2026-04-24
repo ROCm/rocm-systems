@@ -22,7 +22,7 @@ def _fake_payload(num_kernels: int = 3) -> dict:
             "fp16": 1307e12,
             "bf16": 1307e12,
             "fp64": 81.7e12,
-            "fp8":  2614e12,
+            "fp8": 2614e12,
             "int8": 2614e12,
         },
         "hbm_bandwidth_bytes_per_s": 5.3e12,
@@ -102,18 +102,12 @@ def test_render_roofline_svg_empty_payload_is_empty_string() -> None:
 
 
 def test_sanitize_rec_anchor_strips_args_and_templates() -> None:
-    assert sanitize_rec_anchor(
-        "heavy_valu_kernel(float const*, float*, int, int)"
-    ) == "heavy_valu_kernel"
+    assert sanitize_rec_anchor("heavy_valu_kernel(float const*, float*, int, int)") == "heavy_valu_kernel"
     assert sanitize_rec_anchor("ns::foo<int>::bar(float)") == "bar"
     assert sanitize_rec_anchor("gemm_bf16_kernel") == "gemm_bf16_kernel"
 
 
-_FIXTURE = (
-    Path(__file__).resolve().parent.parent
-    / "fixtures"
-    / "compute_bound.db"
-)
+_FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "compute_bound.db"
 
 
 def test_webview_has_single_doctype_after_roofline_section(tmp_path, monkeypatch) -> None:
@@ -129,12 +123,13 @@ def test_webview_has_single_doctype_after_roofline_section(tmp_path, monkeypatch
 
     out_dir = tmp_path / "out_webview"
     out_dir.mkdir()
-    cfg = output_config.output_config(
-        output_file="report", output_path=str(out_dir)
-    )
+    cfg = output_config.output_config(output_file="report", output_path=str(out_dir))
     conn = PerfxpertConnection([str(_FIXTURE)])
     analyze_mod._execute_agentic(
-        conn, config=cfg, output_format="webview", source_dir=None,
+        conn,
+        config=cfg,
+        output_format="webview",
+        source_dir=None,
     )
     out = (out_dir / "report.html").read_text()
 

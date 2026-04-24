@@ -69,14 +69,8 @@ def _format_as_json(
     # Derive API/idle time from the same denominator that produced the
     # percentages so multi-DB overlap reports stay internally consistent.
     api_overhead_ns = max(0, int(normalized_runtime_ns * overhead_pct / 100.0))
-    idle_time_ns = max(
-        0, normalized_runtime_ns - kernel_time_ns - memcpy_time_ns - api_overhead_ns
-    )
-    idle_pct = (
-        float(idle_time_ns / normalized_runtime_ns * 100.0)
-        if normalized_runtime_ns > 0
-        else 0.0
-    )
+    idle_time_ns = max(0, normalized_runtime_ns - kernel_time_ns - memcpy_time_ns - api_overhead_ns)
+    idle_pct = float(idle_time_ns / normalized_runtime_ns * 100.0) if normalized_runtime_ns > 0 else 0.0
 
     # --- metadata ---
     has_counters = bool(hw.get("has_counters", False))
@@ -93,9 +87,7 @@ def _format_as_json(
         # --- profiling_info ---
         "profiling_info": {
             "total_duration_ns": total_runtime_ns,
-            "profiling_mode": (
-                "sys_trace_with_counters" if has_counters else "sys_trace_only"
-            ),
+            "profiling_mode": ("sys_trace_with_counters" if has_counters else "sys_trace_only"),
             "analysis_tier": 2 if has_counters else 1,
             "gpus": [],
         },
@@ -124,9 +116,7 @@ def _format_as_json(
                 "total_duration_ns": int(s.get("total_duration", 0)),
                 "avg_bytes": float(s.get("avg_bytes", 0)),
                 "avg_duration_ns": float(s.get("avg_duration", 0)),
-                "bandwidth_gbps": round(
-                    float(s.get("bandwidth_bytes_per_sec", 0)) / 1e9, 4
-                ),
+                "bandwidth_gbps": round(float(s.get("bandwidth_bytes_per_sec", 0)) / 1e9, 4),
             }
             for direction, s in (memory_analysis or {}).items()
         },
@@ -156,9 +146,7 @@ def _format_as_json(
         doc["metadata"]["analysis_version"] = "0.3.0"
     # 0.3.1: hotspots[*].source_locations cross-reference with Tier-0
     # detected_kernels (Confluence row #5 — Source Code Line numbers).
-    if detected_kernels is not None and any(
-        h.get("source_locations") for h in doc.get("hotspots", [])
-    ):
+    if detected_kernels is not None and any(h.get("source_locations") for h in doc.get("hotspots", [])):
         doc["schema_version"] = "0.3.1"
         doc["metadata"]["analysis_version"] = "0.3.1"
     # 0.3.2: RCCL / NIC ``communication`` section (Phase 10). Additive —
@@ -173,10 +161,7 @@ def _format_as_json(
     # predicted_rationale, source_citation, roofline_delta) emitted by
     # perfxpert.tools.predict_impact. ATT (0.4.0) + roofline (0.3.4)
     # still trump below.
-    if any(
-        r.get("predicted_impact_range") is not None
-        for r in doc.get("recommendations", [])
-    ):
+    if any(r.get("predicted_impact_range") is not None for r in doc.get("recommendations", [])):
         doc["schema_version"] = "0.3.3"
         doc["metadata"]["analysis_version"] = "0.3.3"
     # 0.3.4: Live Roofline points (Phase 10 advanced-specialists). Additive
@@ -401,9 +386,7 @@ def _build_recommendations_json(
     seen_ids: Dict[str, int] = {}
     for rec in recommendations:
         category = rec.get("category", "General")
-        base_id = _CATEGORY_IDS.get(
-            category, f"ROCPD-{category.upper().replace(' ', '-')[:12]}-001"
-        )
+        base_id = _CATEGORY_IDS.get(category, f"ROCPD-{category.upper().replace(' ', '-')[:12]}-001")
         count = seen_ids.get(base_id, 0) + 1
         seen_ids[base_id] = count
         rec_id = base_id if count == 1 else f"{base_id[:-3]}{count:03d}"
@@ -441,13 +424,9 @@ def _build_warnings_json(has_counters: bool) -> List[Dict[str, Any]]:
         return [
             {
                 "severity": "warning",
-                "message": (
-                    "No hardware counters collected. Analysis limited to "
-                    "Tier 1 (trace data only)."
-                ),
+                "message": ("No hardware counters collected. Analysis limited to " "Tier 1 (trace data only)."),
                 "recommendation": (
-                    "Collect counters with: "
-                    "rocprofv3 --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -- ./app"
+                    "Collect counters with: " "rocprofv3 --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -- ./app"
                 ),
             }
         ]
@@ -462,11 +441,7 @@ def _tier0_to_dict(tier0_result: Any, has_profiling: bool = False) -> Dict[str, 
     # empty dicts when a pre-refactor tier0 dict is supplied.
     profiling_plan = getattr(tier0_result, "profiling_plan", None) or {}
     profiling_plan_actions = getattr(tier0_result, "profiling_plan_actions", None) or []
-    code_patterns = (
-        getattr(tier0_result, "code_patterns", None)
-        or tier0_result.recommendations
-        or []
-    )
+    code_patterns = getattr(tier0_result, "code_patterns", None) or tier0_result.recommendations or []
     return {
         "source_dir": tier0_result.source_dir,
         "analysis_timestamp": tier0_result.analysis_timestamp,
@@ -531,9 +506,7 @@ def _format_tier0_json(tier0_result: Any, has_profiling: bool = False) -> str:
         # Main recommendations list — Bug 3: code-level items only; the
         # profiling-plan actions live under `tier0.profiling_plan`.
         "recommendations": _build_recommendations_json(
-            getattr(tier0_result, "code_patterns", None)
-            or tier0_result.recommendations
-            or []
+            getattr(tier0_result, "code_patterns", None) or tier0_result.recommendations or []
         ),
         "warnings": [],
         "errors": [],

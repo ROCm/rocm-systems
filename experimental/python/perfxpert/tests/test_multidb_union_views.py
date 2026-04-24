@@ -22,36 +22,20 @@ import sqlite3
 def _create_test_db(path, kernel_name, kernel_duration):
     """Create a minimal DB with real analysis VIEWs over backing tables."""
     conn = sqlite3.connect(str(path))
-    conn.execute(
-        "CREATE TABLE kernels_data (name TEXT, start INTEGER, end INTEGER, "
-        "duration INTEGER)"
-    )
+    conn.execute("CREATE TABLE kernels_data (name TEXT, start INTEGER, end INTEGER, " "duration INTEGER)")
     conn.execute(
         "INSERT INTO kernels_data VALUES (?, 100, ?, ?)",
         (kernel_name, 100 + kernel_duration, kernel_duration),
     )
+    conn.execute("CREATE VIEW kernels AS " "SELECT name, start, end, duration FROM kernels_data")
     conn.execute(
-        "CREATE VIEW kernels AS "
-        "SELECT name, start, end, duration FROM kernels_data"
+        "CREATE TABLE memory_copies_data " "(name TEXT, start INTEGER, end INTEGER, duration INTEGER, " "size INTEGER)"
     )
+    conn.execute("CREATE VIEW memory_copies AS " "SELECT name, start, end, duration, size FROM memory_copies_data")
     conn.execute(
-        "CREATE TABLE memory_copies_data "
-        "(name TEXT, start INTEGER, end INTEGER, duration INTEGER, "
-        "size INTEGER)"
+        "CREATE TABLE regions_data " "(name TEXT, category TEXT, start INTEGER, end INTEGER, " "duration INTEGER)"
     )
-    conn.execute(
-        "CREATE VIEW memory_copies AS "
-        "SELECT name, start, end, duration, size FROM memory_copies_data"
-    )
-    conn.execute(
-        "CREATE TABLE regions_data "
-        "(name TEXT, category TEXT, start INTEGER, end INTEGER, "
-        "duration INTEGER)"
-    )
-    conn.execute(
-        "CREATE VIEW regions AS "
-        "SELECT name, category, start, end, duration FROM regions_data"
-    )
+    conn.execute("CREATE VIEW regions AS " "SELECT name, category, start, end, duration FROM regions_data")
     conn.execute(
         "CREATE TABLE pmc_events "
         "(id INTEGER PRIMARY KEY, dispatch_id INTEGER, "
@@ -62,9 +46,7 @@ def _create_test_db(path, kernel_name, kernel_duration):
 
 
 class TestMultiFileUnionViews:
-    def test_time_breakdown_percentages_do_not_exceed_100_for_multidb_overlap(
-        self, tmp_path
-    ):
+    def test_time_breakdown_percentages_do_not_exceed_100_for_multidb_overlap(self, tmp_path):
         """Multi-DB breakdown must preserve wall-clock runtime and expose a
         separate normalization runtime for overlap-safe percentages."""
         db0 = tmp_path / "shard0.db"
@@ -121,9 +103,7 @@ class TestMultiFileUnionViews:
 
         conn = sqlite3.connect(str(db1))
         conn.execute("DELETE FROM kernels_data")
-        conn.execute(
-            "INSERT INTO memory_copies_data VALUES ('copy_B', 100, 120, 20, 1024)"
-        )
+        conn.execute("INSERT INTO memory_copies_data VALUES ('copy_B', 100, 120, 20, 1024)")
         conn.commit()
         conn.close()
 
@@ -147,9 +127,7 @@ class TestMultiFileUnionViews:
         _create_test_db(db1, "kernel_B", 20)
 
         conn = sqlite3.connect(str(db0))
-        conn.execute(
-            "INSERT INTO memory_copies_data VALUES ('copy_A', 300, 340, 40, 1024)"
-        )
+        conn.execute("INSERT INTO memory_copies_data VALUES ('copy_A', 300, 340, 40, 1024)")
         conn.commit()
         conn.close()
 
@@ -171,9 +149,7 @@ class TestMultiFileUnionViews:
 
         for path in (db0, db1):
             conn = sqlite3.connect(str(path))
-            obj_type = conn.execute(
-                "SELECT type FROM sqlite_master WHERE name='kernels'"
-            ).fetchone()[0]
+            obj_type = conn.execute("SELECT type FROM sqlite_master WHERE name='kernels'").fetchone()[0]
             conn.close()
             assert obj_type == "view"
 
@@ -183,9 +159,7 @@ class TestMultiFileUnionViews:
         )
 
         conn = PerfxpertConnection([str(db0), str(db1)])
-        rows = execute_statement(
-            conn, "SELECT name FROM kernels ORDER BY name"
-        ).fetchall()
+        rows = execute_statement(conn, "SELECT name FROM kernels ORDER BY name").fetchall()
         names = [r[0] for r in rows]
         assert "kernel_A" in names
         assert "kernel_B" in names
@@ -211,9 +185,7 @@ class TestMultiFileUnionViews:
         )
 
         conn = PerfxpertConnection([str(db0), str(db1)])
-        rows = execute_statement(
-            conn, "SELECT name FROM memory_copies"
-        ).fetchall()
+        rows = execute_statement(conn, "SELECT name FROM memory_copies").fetchall()
         assert len(rows) == 2
 
     def test_regions_from_both_dbs(self, tmp_path):
@@ -271,12 +243,9 @@ class TestMultiFileUnionViews:
         # shard1: identical table but with an extra "extra_col" column
         conn1 = sqlite3.connect(str(db1))
         conn1.execute(
-            "CREATE TABLE kernels (name TEXT, start INTEGER, end INTEGER, "
-            "duration INTEGER, extra_col TEXT)"
+            "CREATE TABLE kernels (name TEXT, start INTEGER, end INTEGER, " "duration INTEGER, extra_col TEXT)"
         )
-        conn1.execute(
-            "INSERT INTO kernels VALUES ('kernel_B', 100, 200, 100, 'x')"
-        )
+        conn1.execute("INSERT INTO kernels VALUES ('kernel_B', 100, 200, 100, 'x')")
         conn1.execute(
             "CREATE TABLE pmc_events "
             "(id INTEGER PRIMARY KEY, dispatch_id INTEGER, "
@@ -296,9 +265,7 @@ class TestMultiFileUnionViews:
 
         # Rows from both shards must be visible — no OperationalError at
         # query time.
-        rows = execute_statement(
-            conn, "SELECT name FROM kernels ORDER BY name"
-        ).fetchall()
+        rows = execute_statement(conn, "SELECT name FROM kernels ORDER BY name").fetchall()
         assert {r[0] for r in rows} == {"kernel_A", "kernel_B"}
 
         # The dropped "extra_col" must NOT be addressable through the
@@ -307,15 +274,8 @@ class TestMultiFileUnionViews:
             execute_statement(conn, "SELECT extra_col FROM kernels").fetchall()
 
         # A RuntimeWarning must have surfaced, naming the dropped column.
-        matches = [
-            w for w in caught
-            if issubclass(w.category, RuntimeWarning)
-            and "extra_col" in str(w.message)
-        ]
-        assert matches, (
-            f"expected RuntimeWarning mentioning 'extra_col'; got: "
-            f"{[str(w.message) for w in caught]}"
-        )
+        matches = [w for w in caught if issubclass(w.category, RuntimeWarning) and "extra_col" in str(w.message)]
+        assert matches, f"expected RuntimeWarning mentioning 'extra_col'; got: " f"{[str(w.message) for w in caught]}"
 
     def test_mixed_schema_shards_extra_col_on_shard0(self, tmp_path):
         """Symmetric case: extra column on shard[0] instead of shard[1]
@@ -330,12 +290,9 @@ class TestMultiFileUnionViews:
         # shard0: extra column
         conn0 = sqlite3.connect(str(db0))
         conn0.execute(
-            "CREATE TABLE kernels (name TEXT, start INTEGER, end INTEGER, "
-            "duration INTEGER, extra_col TEXT)"
+            "CREATE TABLE kernels (name TEXT, start INTEGER, end INTEGER, " "duration INTEGER, extra_col TEXT)"
         )
-        conn0.execute(
-            "INSERT INTO kernels VALUES ('kernel_A', 0, 100, 100, 'y')"
-        )
+        conn0.execute("INSERT INTO kernels VALUES ('kernel_A', 0, 100, 100, 'y')")
         conn0.execute(
             "CREATE TABLE pmc_events "
             "(id INTEGER PRIMARY KEY, dispatch_id INTEGER, "
@@ -356,19 +313,13 @@ class TestMultiFileUnionViews:
             warnings.simplefilter("always")
             conn = PerfxpertConnection([str(db0), str(db1)])
 
-        rows = execute_statement(
-            conn, "SELECT name FROM kernels ORDER BY name"
-        ).fetchall()
+        rows = execute_statement(conn, "SELECT name FROM kernels ORDER BY name").fetchall()
         assert {r[0] for r in rows} == {"kernel_A", "kernel_B"}
 
         with __import__("pytest").raises(sqlite3.OperationalError):
             execute_statement(conn, "SELECT extra_col FROM kernels").fetchall()
 
-        assert any(
-            issubclass(w.category, RuntimeWarning)
-            and "extra_col" in str(w.message)
-            for w in caught
-        )
+        assert any(issubclass(w.category, RuntimeWarning) and "extra_col" in str(w.message) for w in caught)
 
     def test_view_missing_from_one_shard_does_not_break(self, tmp_path):
         """If a shard lacks one of the analysis views, union the rest."""
@@ -378,13 +329,8 @@ class TestMultiFileUnionViews:
 
         # shard1 has kernels but NO memory_copies / regions
         conn1 = sqlite3.connect(str(db1))
-        conn1.execute(
-            "CREATE TABLE kernels (name TEXT, start INTEGER, end INTEGER, "
-            "duration INTEGER)"
-        )
-        conn1.execute(
-            "INSERT INTO kernels VALUES ('kernel_B', 100, 200, 100)"
-        )
+        conn1.execute("CREATE TABLE kernels (name TEXT, start INTEGER, end INTEGER, " "duration INTEGER)")
+        conn1.execute("INSERT INTO kernels VALUES ('kernel_B', 100, 200, 100)")
         conn1.execute(
             "CREATE TABLE pmc_events "
             "(id INTEGER PRIMARY KEY, dispatch_id INTEGER, "
@@ -400,12 +346,8 @@ class TestMultiFileUnionViews:
 
         conn = PerfxpertConnection([str(db0), str(db1)])
         # kernels exists in both shards → both names visible
-        rows = execute_statement(
-            conn, "SELECT name FROM kernels ORDER BY name"
-        ).fetchall()
+        rows = execute_statement(conn, "SELECT name FROM kernels ORDER BY name").fetchall()
         assert {r[0] for r in rows} == {"kernel_A", "kernel_B"}
         # memory_copies exists only in shard0 → still queryable
-        rows_mc = execute_statement(
-            conn, "SELECT COUNT(*) FROM memory_copies"
-        ).fetchone()
+        rows_mc = execute_statement(conn, "SELECT COUNT(*) FROM memory_copies").fetchone()
         assert rows_mc[0] == 0

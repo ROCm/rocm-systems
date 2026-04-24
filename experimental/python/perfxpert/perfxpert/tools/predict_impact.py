@@ -39,7 +39,6 @@ from typing import Any, Dict, List, Optional
 from perfxpert.knowledge import load_yaml
 from perfxpert.tools._class import ToolClass, tool_class
 
-
 # ---------------------------------------------------------------------------
 # In-process prediction store (Phase 11 will make this durable).
 # ---------------------------------------------------------------------------
@@ -120,6 +119,7 @@ def _kernel_time_pct(baseline_db: str, kernel_name: str) -> Optional[float]:
     """
     try:
         from perfxpert.tools import regression as _reg
+
         runtimes = _reg.extract_kernel_runtimes_from_db(baseline_db)
     except Exception:
         return None
@@ -310,8 +310,7 @@ def predict_change_impact(
         # Defensive — catalog malformed; fall back to catalog lo on both ends.
         conservative_hi = lo
     assumptions.append(
-        f"catalog bounds = [{catalog_lo:.2f}, {catalog_hi:.2f}] "
-        f"(conservative hi = hi × {_CONSERVATIVE_HI_FACTOR})"
+        f"catalog bounds = [{catalog_lo:.2f}, {catalog_hi:.2f}] " f"(conservative hi = hi × {_CONSERVATIVE_HI_FACTOR})"
     )
     if ktp is not None:
         assumptions.append(f"kernel_time_pct={ktp:.4f}")
@@ -374,8 +373,7 @@ def explain_prediction(prediction_id: str) -> Dict[str, Any]:
     with _STORE_LOCK:
         if prediction_id not in _PREDICTION_STORE:
             raise KeyError(
-                f"prediction_id {prediction_id!r} not found — "
-                "predictions persist in-process only in Phase 10."
+                f"prediction_id {prediction_id!r} not found — " "predictions persist in-process only in Phase 10."
             )
         return dict(_PREDICTION_STORE[prediction_id])
 

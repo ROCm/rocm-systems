@@ -8,8 +8,7 @@ import jsonschema
 from perfxpert.knowledge import load_yaml
 
 SCHEMA_PATH = (
-    Path(__file__).parent.parent.parent
-    / "perfxpert" / "knowledge" / "_schemas" / "compiler_flags.schema.json"
+    Path(__file__).parent.parent.parent / "perfxpert" / "knowledge" / "_schemas" / "compiler_flags.schema.json"
 )
 
 

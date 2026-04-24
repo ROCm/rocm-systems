@@ -16,7 +16,6 @@ from perfxpert.agents import (
     build_latency_specialist,
 )
 
-
 AGENT_BUILDERS = [
     build_root_agent,
     build_analysis_agent,
@@ -27,11 +26,17 @@ AGENT_BUILDERS = [
     build_latency_specialist,
 ]
 
-EXECUTION_TOOLS = frozenset({
-    # spec §5.8 execution class
-    "patch.apply", "patch.revert", "patch.verify_output",
-    "compile.build", "profile.run", "anchors.check",
-})
+EXECUTION_TOOLS = frozenset(
+    {
+        # spec §5.8 execution class
+        "patch.apply",
+        "patch.revert",
+        "patch.verify_output",
+        "compile.build",
+        "profile.run",
+        "anchors.check",
+    }
+)
 
 
 @pytest.mark.parametrize("builder", AGENT_BUILDERS)

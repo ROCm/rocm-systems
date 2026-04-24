@@ -20,7 +20,6 @@ from perfxpert.cli import _backend_dispatch, opencode_launcher
 from perfxpert.cli._backend_dispatch import RECURSION_GUARD_ENV, is_help_request
 from perfxpert.cli.opencode_launcher import main, route_subcommand
 
-
 # ---------------------------------------------------------------------------
 # route_subcommand — third-party backend recognition.
 # ---------------------------------------------------------------------------
@@ -94,9 +93,7 @@ def test_codex_adapter_dispatches_cleanly(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("name", ["claude", "gemini", "codex"])
-def test_real_adapters_registered_for_all_three_backends(
-    name: str, monkeypatch
-) -> None:
+def test_real_adapters_registered_for_all_three_backends(name: str, monkeypatch) -> None:
     """Task 6 (claude, gemini) + PR-2 Task 10 (codex): real adapter
     runners replace the Task-2 stubs. Invoking the handler reaches
     the install flow (we don't verify the full install here — other
@@ -137,9 +134,7 @@ def test_real_adapters_registered_for_all_three_backends(
 # ---------------------------------------------------------------------------
 
 
-def test_recursion_guard_refuses_when_env_set(
-    capsys, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_recursion_guard_refuses_when_env_set(capsys, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(RECURSION_GUARD_ENV, "claude")
     rc = _backend_dispatch._exec_backend("claude", [])
     assert rc == 3
@@ -163,9 +158,7 @@ def test_recursion_guard_force_overrides(monkeypatch: pytest.MonkeyPatch) -> Non
         "install",
         lambda self, cwd, **kw: _make_install_report(self.name),
     )
-    monkeypatch.setattr(
-        codex_mod.CodexAdapter, "spawn", lambda self, a, e, c: 77
-    )
+    monkeypatch.setattr(codex_mod.CodexAdapter, "spawn", lambda self, a, e, c: 77)
     monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
     rc = _backend_dispatch._exec_backend("codex", ["--force", "hello"])
     # rc==77 proves the spawn ran (guard was bypassed), rc==3 would
@@ -173,9 +166,7 @@ def test_recursion_guard_force_overrides(monkeypatch: pytest.MonkeyPatch) -> Non
     assert rc == 77
 
 
-def test_recursion_guard_does_not_treat_backend_args_as_force(
-    capsys, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_recursion_guard_does_not_treat_backend_args_as_force(capsys, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(RECURSION_GUARD_ENV, "claude")
     rc = _backend_dispatch._exec_backend("claude", ["explain", "--force"])
     assert rc == 3
@@ -195,9 +186,7 @@ def test_recursion_guard_empty_env_does_not_trigger(
         "install",
         lambda self, cwd, **kw: _make_install_report(self.name),
     )
-    monkeypatch.setattr(
-        codex_mod.CodexAdapter, "spawn", lambda self, a, e, c: 77
-    )
+    monkeypatch.setattr(codex_mod.CodexAdapter, "spawn", lambda self, a, e, c: 77)
     monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
     rc = _backend_dispatch._exec_backend("codex", [])
     assert rc == 77
@@ -235,9 +224,7 @@ def test_is_help_request_false_for_empty() -> None:
 
 
 @pytest.mark.parametrize("name", ["claude", "codex", "gemini"])
-def test_main_dispatches_backend_to_stub(
-    name: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_dispatches_backend_to_stub(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """`perfxpert-code <backend>` reaches _exec_backend (not opencode)."""
     monkeypatch.delenv(RECURSION_GUARD_ENV, raising=False)
     calls: list[tuple[str, list[str]]] = []
@@ -246,9 +233,7 @@ def test_main_dispatches_backend_to_stub(
         calls.append((backend_name, remaining_argv))
         return 0
 
-    monkeypatch.setattr(
-        "perfxpert.cli._backend_dispatch._exec_backend", _fake_exec_backend
-    )
+    monkeypatch.setattr("perfxpert.cli._backend_dispatch._exec_backend", _fake_exec_backend)
     rc = main([name, "arg1", "arg2"])
     assert rc == 0
     assert calls == [(name, ["arg1", "arg2"])]
@@ -263,9 +248,7 @@ def test_main_backend_path_does_not_resolve_opencode(
     def _fake_exec_backend(_name, _argv):
         return 0
 
-    monkeypatch.setattr(
-        "perfxpert.cli._backend_dispatch._exec_backend", _fake_exec_backend
-    )
+    monkeypatch.setattr("perfxpert.cli._backend_dispatch._exec_backend", _fake_exec_backend)
 
     def _no_binary():
         raise AssertionError("resolve_opencode_binary should NOT be called")
@@ -306,9 +289,7 @@ def test_parse_dispatcher_flags_all() -> None:
 
 def test_parse_dispatcher_flags_stops_at_first_non_flag() -> None:
     """Anything after the first non-dispatcher token stays intact for the backend."""
-    f = _backend_dispatch.parse_dispatcher_flags(
-        ["--quiet", "hello", "--dry-run"]
-    )
+    f = _backend_dispatch.parse_dispatcher_flags(["--quiet", "hello", "--dry-run"])
     assert f.quiet is True
     assert f.remaining == ["hello", "--dry-run"]
 
@@ -354,9 +335,7 @@ def test_quiet_flag_forwarded_to_install(monkeypatch: pytest.MonkeyPatch) -> Non
         return InstallReport(backend=self.name)
 
     monkeypatch.setattr(claude_mod.ClaudeCodeAdapter, "install", _fake_install)
-    monkeypatch.setattr(
-        claude_mod.ClaudeCodeAdapter, "spawn", lambda self, a, e, c: 0
-    )
+    monkeypatch.setattr(claude_mod.ClaudeCodeAdapter, "spawn", lambda self, a, e, c: 0)
     monkeypatch.delenv(RECURSION_GUARD_ENV, raising=False)
 
     _backend_dispatch._exec_backend("claude", ["--quiet", "--dry-run"])
@@ -375,14 +354,10 @@ def test_allow_agents_md_append_forwarded(monkeypatch: pytest.MonkeyPatch) -> No
         return InstallReport(backend=self.name)
 
     monkeypatch.setattr(claude_mod.ClaudeCodeAdapter, "install", _fake_install)
-    monkeypatch.setattr(
-        claude_mod.ClaudeCodeAdapter, "spawn", lambda self, a, e, c: 0
-    )
+    monkeypatch.setattr(claude_mod.ClaudeCodeAdapter, "spawn", lambda self, a, e, c: 0)
     monkeypatch.delenv(RECURSION_GUARD_ENV, raising=False)
 
-    _backend_dispatch._exec_backend(
-        "claude", ["--allow-agents-md-append", "--dry-run"]
-    )
+    _backend_dispatch._exec_backend("claude", ["--allow-agents-md-append", "--dry-run"])
     assert captured["allow_agents_md_append"] is True
 
 
@@ -412,9 +387,7 @@ def test_recursion_guard_env_set_before_spawn(
     assert captured_env.get(RECURSION_GUARD_ENV) == "claude"
 
 
-def test_successful_install_logs_launch_handoff(
-    capsys, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_successful_install_logs_launch_handoff(capsys, monkeypatch: pytest.MonkeyPatch) -> None:
     import perfxpert.cli._backend.codex as codex_mod
 
     def _fake_install(self, cwd, **kw):
@@ -437,9 +410,7 @@ def test_successful_install_logs_launch_handoff(
     assert "MCP verified; launching codex" in err
 
 
-def test_quiet_successful_install_suppresses_launch_handoff(
-    capsys, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_quiet_successful_install_suppresses_launch_handoff(capsys, monkeypatch: pytest.MonkeyPatch) -> None:
     import perfxpert.cli._backend.codex as codex_mod
 
     def _fake_install(self, cwd, **kw):
@@ -489,9 +460,7 @@ def test_help_passthrough_does_not_install(
     assert install_calls == []
 
 
-def test_main_default_still_uses_opencode(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
+def test_main_default_still_uses_opencode(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Regression: bare `perfxpert-code` still stages the runtime cfg dir
     and launches the opencode binary (Task 2 must not regress this path)."""
     fake_bin = tmp_path / "opencode"
@@ -504,12 +473,8 @@ def test_main_default_still_uses_opencode(
     runtime_cfg.mkdir()
     (runtime_cfg / "opencode.json").write_text("{}")
 
-    monkeypatch.setattr(
-        "perfxpert.cli.opencode_launcher.resolve_opencode_binary", lambda: fake_bin
-    )
-    monkeypatch.setattr(
-        "perfxpert.cli.opencode_launcher.resolve_config_dir", lambda: fake_cfg
-    )
+    monkeypatch.setattr("perfxpert.cli.opencode_launcher.resolve_opencode_binary", lambda: fake_bin)
+    monkeypatch.setattr("perfxpert.cli.opencode_launcher.resolve_config_dir", lambda: fake_cfg)
     monkeypatch.setattr(
         "perfxpert.cli.opencode_launcher._prepare_runtime_config_dir",
         lambda _: runtime_cfg,
@@ -525,9 +490,7 @@ def test_main_default_still_uses_opencode(
         calls.append((cmd, kwargs))
         return _FakeProc()
 
-    monkeypatch.setattr(
-        "perfxpert.cli.opencode_launcher.subprocess.run", _fake_run
-    )
+    monkeypatch.setattr("perfxpert.cli.opencode_launcher.subprocess.run", _fake_run)
     rc = main([])
     assert rc == 0
     assert len(calls) == 1
@@ -551,6 +514,7 @@ def test_consent_denied_returns_rc_nonzero(monkeypatch: pytest.MonkeyPatch) -> N
         raise ConsentDenied("user declined install (unit test)")
 
     monkeypatch.setattr(claude_mod.ClaudeCodeAdapter, "install", _fake_install)
+
     # spawn should NEVER be called after a consent denial.
     def _no_spawn(self, a, e, c):
         raise AssertionError("spawn must not be called when consent denied")
@@ -561,6 +525,5 @@ def test_consent_denied_returns_rc_nonzero(monkeypatch: pytest.MonkeyPatch) -> N
 
     rc = _backend_dispatch._exec_backend("claude", ["--quiet", "--dry-run", "hello"])
     assert rc == 1, (
-        "consent-declined install must return rc=1 so CI pipelines "
-        "don't green-light a failed install (Blocker 5)"
+        "consent-declined install must return rc=1 so CI pipelines " "don't green-light a failed install (Blocker 5)"
     )

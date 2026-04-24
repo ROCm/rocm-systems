@@ -18,7 +18,6 @@ import pytest
 from perfxpert import analyze
 from perfxpert.analysis.recommendations import build_pragma_recommendation
 
-
 # ---------------------------------------------------------------------------
 # Argparse propagation
 # ---------------------------------------------------------------------------
@@ -39,8 +38,7 @@ def test_advanced_flag_default_off():
     """Default: --advanced is NOT present in kwargs."""
     kwargs = _parse_and_process([])
     assert "advanced" not in kwargs, (
-        "--advanced unset should drop from kwargs to preserve "
-        "the 'user did not set this' signal."
+        "--advanced unset should drop from kwargs to preserve " "the 'user did not set this' signal."
     )
 
 
@@ -150,6 +148,6 @@ def test_build_pragma_recommendation_has_required_fields():
     assert rec["source_line"] == 17
     assert rec["pragma_id"] == "clang_loop_unroll_full"
     # Mandatory footer per fence rules.
-    assert any("perfxpert diff" in a for a in rec["actions"]), (
-        "every pragma card MUST carry the 'Verify with: perfxpert diff' line"
-    )
+    assert any(
+        "perfxpert diff" in a for a in rec["actions"]
+    ), "every pragma card MUST carry the 'Verify with: perfxpert diff' line"

@@ -8,7 +8,6 @@ import pytest
 from perfxpert.tools import patch_mgr, profile_runner, compile_runner
 from perfxpert.tools._safety import ShellMetacharError
 
-
 SHELL_PAYLOADS = [
     "kernel;rm -rf ~",
     "kernel|cat /etc/passwd",

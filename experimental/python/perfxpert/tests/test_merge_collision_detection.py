@@ -1,4 +1,5 @@
 """Tests for merge_sqlite_dbs primary key collision detection."""
+
 import sqlite3
 import pytest
 
@@ -25,6 +26,7 @@ class TestMergeCollisionDetection:
         _create_db_with_pmc(db1, 1, "GRBM_COUNT", 1000.0)  # same id=1
 
         from perfxpert.connection import merge_sqlite_dbs
+
         merged = tmp_path / "merged.db"
         with pytest.raises(ValueError, match="collision|overlap"):
             merge_sqlite_dbs([str(db0), str(db1)], str(merged))
@@ -36,6 +38,7 @@ class TestMergeCollisionDetection:
         _create_db_with_pmc(db1, 2, "GRBM_COUNT", 1000.0)  # different id
 
         from perfxpert.connection import merge_sqlite_dbs
+
         merged = tmp_path / "merged.db"
         merge_sqlite_dbs([str(db0), str(db1)], str(merged))
         conn = sqlite3.connect(str(merged))
@@ -56,5 +59,6 @@ class TestMergeCollisionDetection:
             conn.close()
 
         from perfxpert.connection import merge_sqlite_dbs
+
         merged = tmp_path / "merged.db"
         merge_sqlite_dbs([str(db0), str(db1)], str(merged))

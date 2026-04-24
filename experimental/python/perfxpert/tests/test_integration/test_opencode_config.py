@@ -3,11 +3,7 @@
 import json
 from pathlib import Path
 
-
-CONFIG_DIR = (
-    Path(__file__).parent.parent.parent
-    / "perfxpert" / "_bundled" / "opencode_config"
-)
+CONFIG_DIR = Path(__file__).parent.parent.parent / "perfxpert" / "_bundled" / "opencode_config"
 
 
 def test_config_dir_exists():

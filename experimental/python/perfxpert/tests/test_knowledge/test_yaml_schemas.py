@@ -10,10 +10,7 @@ import jsonschema
 import pytest
 import yaml
 
-
-KNOWLEDGE_DIR = (
-    Path(__file__).parent.parent.parent / "perfxpert" / "knowledge"
-)
+KNOWLEDGE_DIR = Path(__file__).parent.parent.parent / "perfxpert" / "knowledge"
 SCHEMAS_DIR = KNOWLEDGE_DIR / "_schemas"
 
 # The 21 YAML files expected per spec Appendix B

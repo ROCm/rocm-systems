@@ -23,13 +23,13 @@ from perfxpert.agents.compute_specialist import _rank_catalog_deterministic
 from perfxpert.agents.framework import Agent, ToolBinding, run_agent
 from perfxpert.tools import arch, dependency_graph, interconnect, rccl_analysis
 
-
 _FENCE_PATH = Path(__file__).parent / "fence" / "latency_specialist.md"
 
 
 def _fetch_catalog(gfx_id: str) -> List[Dict[str, Any]]:
     try:
         from perfxpert.tools import latency_techniques  # type: ignore
+
         return latency_techniques.catalog(gfx_id=gfx_id)
     except ImportError:
         return []  # defensive fallback if latency_techniques tool is absent
@@ -86,9 +86,7 @@ def run_latency_specialist(
     )
 
     if raw.get("_mode") == "airgap":
-        techniques = attach_predictions_to_techniques(
-            _rank_catalog_deterministic(catalog), payload
-        )
+        techniques = attach_predictions_to_techniques(_rank_catalog_deterministic(catalog), payload)
         return schemas.LatencySpecialistOutput(
             techniques=techniques,
             confidence=0.6,

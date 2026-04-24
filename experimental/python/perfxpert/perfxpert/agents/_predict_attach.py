@@ -25,7 +25,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-
 _CATALOG_IDS_CACHE: Optional[set] = None
 
 
@@ -34,6 +33,7 @@ def _catalog_ids() -> set:
     if _CATALOG_IDS_CACHE is None:
         try:
             from perfxpert.tools import predict_impact  # type: ignore
+
             entries = predict_impact.list_supported_changes()
             _CATALOG_IDS_CACHE = {e.get("id") for e in entries if e.get("id")}
         except Exception:

@@ -49,9 +49,7 @@ _SYS_TRACE_IMPLIED: frozenset = frozenset(
 )
 
 # Args that only specify output location -- not considered "new data collection"
-_OUTPUT_ONLY_ARGS: frozenset = frozenset(
-    {"-d", "-o", "--output-directory", "--output-file"}
-)
+_OUTPUT_ONLY_ARGS: frozenset = frozenset({"-d", "-o", "--output-directory", "--output-file"})
 
 # Hardware counter collection limits for rocprofv3 --pmc.
 #
@@ -179,17 +177,14 @@ def _split_pmc_into_passes(
         if n > 1:
             for idx, cmd in enumerate(all_cmds):
                 out_name = f"{output_prefix}_pass{idx + 1}"
-                pmc_val = next(
-                    (a["value"] for a in cmd["args"] if a["name"] == "--pmc"), ""
-                )
+                pmc_val = next((a["value"] for a in cmd["args"] if a["name"] == "--pmc"), "")
                 flags_str = " ".join(base_flags)
                 cmd["description"] = f"{description} (pass {idx + 1}/{n})"
                 for arg in cmd["args"]:
                     if arg["name"] == "-o":
                         arg["value"] = out_name
                 cmd["full_command"] = (
-                    f"rocprofv3 {flags_str} --pmc {pmc_val}"
-                    f" -d {output_dir} -o {out_name} -- {app_placeholder}"
+                    f"rocprofv3 {flags_str} --pmc {pmc_val}" f" -d {output_dir} -o {out_name} -- {app_placeholder}"
                 ).strip()
         return all_cmds
 
@@ -202,8 +197,7 @@ def _split_pmc_into_passes(
         return []
 
     n_passes = max(
-        (len(cs) + _pmc_block_limit(blk) - 1) // max(_pmc_block_limit(blk), 1)
-        for blk, cs in block_groups.items()
+        (len(cs) + _pmc_block_limit(blk) - 1) // max(_pmc_block_limit(blk), 1) for blk, cs in block_groups.items()
     )
 
     pass_counters: List[List[str]] = [[] for _ in range(n_passes)]
@@ -229,8 +223,7 @@ def _split_pmc_into_passes(
             {"name": "-o", "value": out_name},
         ]
         full_cmd = (
-            f"rocprofv3 {flags_str} --pmc {pmc_str}"
-            f" -d {output_dir} -o {out_name} -- {app_placeholder}"
+            f"rocprofv3 {flags_str} --pmc {pmc_str}" f" -d {output_dir} -o {out_name} -- {app_placeholder}"
         ).strip()
         commands.append(
             {

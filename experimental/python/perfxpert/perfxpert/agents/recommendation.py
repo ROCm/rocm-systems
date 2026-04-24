@@ -25,7 +25,6 @@ from perfxpert.agents import compute_specialist, latency_specialist, memory_spec
 from perfxpert.agents.framework import Agent, ToolBinding, run_agent
 from perfxpert.tools import plateau, profiling, trace_fingerprint
 
-
 _FENCE_PATH = Path(__file__).parent / "fence" / "recommendation.md"
 
 

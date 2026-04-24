@@ -28,6 +28,7 @@ def test_short_v_flag():
 
 def test_version_has_version_number():
     import re
+
     result = subprocess.run(
         ["perfxpert-code", "--version"],
         capture_output=True,

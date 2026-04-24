@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-
 _OPENCODE_SCHEMA_URL = "https://opencode.ai/config.json"
 _SCHEMA_CACHE = Path("/tmp/opencode-config-schema.json")
 
@@ -39,18 +38,14 @@ def test_bundled_opencode_json_validates_against_opencode_schema():
     import jsonschema
 
     schema = _get_schema()
-    with resources.as_file(
-        resources.files("perfxpert") / "_bundled" / "opencode_config" / "opencode.json"
-    ) as p:
+    with resources.as_file(resources.files("perfxpert") / "_bundled" / "opencode_config" / "opencode.json") as p:
         config = json.loads(p.read_text())
     jsonschema.validate(config, schema)
 
 
 def test_bundled_config_files_exist():
     """Ensure all 4 required config files are present."""
-    config_dir = (
-        resources.files("perfxpert") / "_bundled" / "opencode_config"
-    )
+    config_dir = resources.files("perfxpert") / "_bundled" / "opencode_config"
     required_files = ["opencode.json", "mcp.json", "amd-theme.json", "AGENTS.md"]
     for filename in required_files:
         with resources.as_file(config_dir / filename) as p:

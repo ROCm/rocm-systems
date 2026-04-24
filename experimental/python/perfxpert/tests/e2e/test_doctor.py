@@ -7,9 +7,7 @@ from pathlib import Path
 
 import pytest
 
-
-FIXTURE = (Path(__file__).parent.parent / "fixtures" / "doctor"
-           / "expected_clean_output.txt")
+FIXTURE = Path(__file__).parent.parent / "fixtures" / "doctor" / "expected_clean_output.txt"
 
 # Use opencode binary from ~/.opencode if available
 _OPENCODE_PATH = str(Path.home() / ".opencode" / "bin" / "opencode")

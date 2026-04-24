@@ -13,7 +13,6 @@ import yaml
 
 from perfxpert.knowledge import load_yaml
 
-
 _CORE = {
     "gpu_specs": ["all"],
     "metric_thresholds": ["all"],

@@ -26,7 +26,6 @@ from perfxpert.cli._gate_hooks.codex import (
     uninstall,
 )
 
-
 # ---------------------------------------------------------------------------
 # Direct hook-module invariants.
 # ---------------------------------------------------------------------------
@@ -42,9 +41,7 @@ def test_install_raises_gate_hook_unsupported_unconditionally(
         install(tmp_path)
 
 
-def test_install_respects_env_disable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_respects_env_disable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """PERFXPERT_GATE_HOOK=0 → user disabled the gate; the error
     message distinguishes 'user disabled' from 'surface unsupported'."""
     monkeypatch.setenv("PERFXPERT_GATE_HOOK", "0")
@@ -71,9 +68,7 @@ def test_uninstall_is_noop(tmp_path: Path) -> None:
 
 def test_evaluate_permits_perfxpert_tool_always() -> None:
     """Any `mcp_perfxpert_*` tool is allowed before intent_classify."""
-    r = evaluate_gate_state(
-        "mcp_perfxpert_intent_classify", intent_classify_observed=False
-    )
+    r = evaluate_gate_state("mcp_perfxpert_intent_classify", intent_classify_observed=False)
     assert r["allowed"] is True
 
 
@@ -83,26 +78,20 @@ def test_evaluate_rejects_non_perfxpert_before_intent_classify() -> None:
     B-N3 event-based rule: no turn counter; lift requires
     intent_classify-returned-in-session.
     """
-    r = evaluate_gate_state(
-        "Bash", intent_classify_observed=False
-    )
+    r = evaluate_gate_state("Bash", intent_classify_observed=False)
     assert r["allowed"] is False
     assert "intent_classify" in r["reason"].lower()
 
 
 def test_evaluate_permits_after_intent_classify() -> None:
     """Once intent_classify has returned, any tool is permitted."""
-    r = evaluate_gate_state(
-        "Bash", intent_classify_observed=True
-    )
+    r = evaluate_gate_state("Bash", intent_classify_observed=True)
     assert r["allowed"] is True
 
 
 def test_evaluate_marks_enforced_by_prompt_layer_on_codex() -> None:
     """Documents that Codex gate is prompt-layer-only (not server-side)."""
-    r = evaluate_gate_state(
-        "Bash", intent_classify_observed=False
-    )
+    r = evaluate_gate_state("Bash", intent_classify_observed=False)
     assert r.get("enforced_by") == "prompt-layer"
 
 
@@ -111,9 +100,7 @@ def test_evaluate_marks_enforced_by_prompt_layer_on_codex() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _fake_codex_subprocess(
-    *, list_stdout: bytes = b"perfxpert\n", add_exit: int = 0
-):
+def _fake_codex_subprocess(*, list_stdout: bytes = b"perfxpert\n", add_exit: int = 0):
     """Fake subprocess.run for codex CLI — happy path defaults."""
     import subprocess
 
@@ -142,9 +129,7 @@ def _fake_codex_subprocess(
 
 
 @pytest.fixture
-def isolated_home_with_trust(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> tuple[Path, Path]:
+def isolated_home_with_trust(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     """Redirect HOME + XDG_CONFIG_HOME; pre-trust the project cwd.
 
     Returns (home, project_cwd). The project cwd is marked trusted
@@ -167,19 +152,13 @@ def isolated_home_with_trust(
         check=True,
         capture_output=True,
     )
-    subprocess.run(
-        ["git", "config", "user.email", "t@e.com"], cwd=str(cwd), check=True
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "t"], cwd=str(cwd), check=True
-    )
+    subprocess.run(["git", "config", "user.email", "t@e.com"], cwd=str(cwd), check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(cwd), check=True)
     # Pre-mark trusted so the install's trust-gate passes.
     codex_cfg = tmp_path / ".codex" / "config.toml"
     codex_cfg.parent.mkdir(parents=True, exist_ok=True)
     resolved = str(cwd.expanduser().resolve())
-    codex_cfg.write_text(
-        f'[projects."{resolved}"]\ntrust_level = "trusted"\n'
-    )
+    codex_cfg.write_text(f'[projects."{resolved}"]\ntrust_level = "trusted"\n')
     return tmp_path, cwd
 
 
@@ -230,9 +209,7 @@ def test_codex_hook_install_raises_before_mcp_registration_on_unsupported_surfac
         return _R()
 
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
-    monkeypatch.setattr(
-        "perfxpert.cli._backend.codex.subprocess.run", _run
-    )
+    monkeypatch.setattr("perfxpert.cli._backend.codex.subprocess.run", _run)
 
     report = CodexAdapter().install(cwd, scope="project")
 
@@ -242,13 +219,8 @@ def test_codex_hook_install_raises_before_mcp_registration_on_unsupported_surfac
     mcp_calls = [c for c in call_order if c.startswith("mcp_")]
     # Every MCP call occurred AFTER the gate-hook attempt.
     if mcp_calls:
-        first_mcp_idx = next(
-            i for i, c in enumerate(call_order) if c.startswith("mcp_")
-        )
-        assert hook_idx < first_mcp_idx, (
-            f"gate_hook_install must run BEFORE mcp_register; "
-            f"got order {call_order}"
-        )
+        first_mcp_idx = next(i for i, c in enumerate(call_order) if c.startswith("mcp_"))
+        assert hook_idx < first_mcp_idx, f"gate_hook_install must run BEFORE mcp_register; " f"got order {call_order}"
 
     # Install should have completed successfully (prompt-layer-only
     # fallback, NOT an abort).

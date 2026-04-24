@@ -46,7 +46,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from perfxpert.tools._class import ToolClass, tool_class
 
-
 _DEFAULT_MAX_GAP_NS = 500
 _SHORT_KERNEL_NS = 10_000  # 10 us
 # Launch overhead saved per fused pair (empirical — HIP kernel launch).
@@ -62,10 +61,7 @@ def _find_kernel_dispatch_table(conn: sqlite3.Connection) -> Optional[Tuple[str,
     rocprofiler-sdk tables carry a UUID suffix; both tables share it.
     """
     cur = conn.cursor()
-    cur.execute(
-        "SELECT name FROM sqlite_master "
-        "WHERE type='table' AND name LIKE 'rocpd_kernel_dispatch%'"
-    )
+    cur.execute("SELECT name FROM sqlite_master " "WHERE type='table' AND name LIKE 'rocpd_kernel_dispatch%'")
     row = cur.fetchone()
     if not row:
         return None
@@ -77,8 +73,12 @@ def _find_kernel_dispatch_table(conn: sqlite3.Connection) -> Optional[Tuple[str,
 
 def _kernel_signature(
     display_name: str,
-    block_x: int, block_y: int, block_z: int,
-    grid_x: int, grid_y: int, grid_z: int,
+    block_x: int,
+    block_y: int,
+    block_z: int,
+    grid_x: int,
+    grid_y: int,
+    grid_z: int,
 ) -> str:
     """Derive a tensor-shape signature for a single dispatch.
 
@@ -116,8 +116,14 @@ def _fetch_dispatches(db_path: str) -> List[Dict[str, Any]]:
         cols = {r[1] for r in cur.fetchall()}
 
         dim_cols = []
-        for c in ("workgroup_size_x", "workgroup_size_y", "workgroup_size_z",
-                  "grid_size_x", "grid_size_y", "grid_size_z"):
+        for c in (
+            "workgroup_size_x",
+            "workgroup_size_y",
+            "workgroup_size_z",
+            "grid_size_x",
+            "grid_size_y",
+            "grid_size_z",
+        ):
             dim_cols.append(c if c in cols else "NULL")
 
         dim_select = ", ".join(dim_cols)
@@ -138,16 +144,17 @@ def _fetch_dispatches(db_path: str) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
         for r in rows:
             start, end, name = r[0], r[1], r[2]
-            bx, by, bz, gx, gy, gz = (r[3] or 0, r[4] or 0, r[5] or 0,
-                                     r[6] or 0, r[7] or 0, r[8] or 0)
-            out.append({
-                "start_ns": int(start),
-                "end_ns": int(end),
-                "duration_ns": int(end) - int(start),
-                "name": name or "",
-                "block_dim": (int(bx), int(by), int(bz)),
-                "grid_dim": (int(gx), int(gy), int(gz)),
-            })
+            bx, by, bz, gx, gy, gz = (r[3] or 0, r[4] or 0, r[5] or 0, r[6] or 0, r[7] or 0, r[8] or 0)
+            out.append(
+                {
+                    "start_ns": int(start),
+                    "end_ns": int(end),
+                    "duration_ns": int(end) - int(start),
+                    "name": name or "",
+                    "block_dim": (int(bx), int(by), int(bz)),
+                    "grid_dim": (int(gx), int(gy), int(gz)),
+                }
+            )
         return out
     finally:
         conn.close()
@@ -237,19 +244,21 @@ def find_fusion_candidates(
 
         pair_dur = a["duration_ns"] + b["duration_ns"]
         lo, hi = _estimate_speedup_bounds(pair_dur, gap)
-        candidates.append({
-            "pair": [a["name"], b["name"]],
-            "signature": sig_a,
-            "gap_ns": int(gap),
-            "est_speedup_lo": lo,
-            "est_speedup_hi": hi,
-            # Propagate the same ``units`` vocabulary that
-            # knowledge/fusion_patterns.yaml uses so downstream consumers
-            # never have to guess whether a number is a fractional time
-            # saved or a multiplicative speedup.
-            "expected_impact_units": "speedup_multiplier",
-            "confidence": _confidence(gap, max_gap_ns),
-        })
+        candidates.append(
+            {
+                "pair": [a["name"], b["name"]],
+                "signature": sig_a,
+                "gap_ns": int(gap),
+                "est_speedup_lo": lo,
+                "est_speedup_hi": hi,
+                # Propagate the same ``units`` vocabulary that
+                # knowledge/fusion_patterns.yaml uses so downstream consumers
+                # never have to guess whether a number is a fractional time
+                # saved or a multiplicative speedup.
+                "expected_impact_units": "speedup_multiplier",
+                "confidence": _confidence(gap, max_gap_ns),
+            }
+        )
 
     candidates.sort(key=lambda c: c["est_speedup_hi"], reverse=True)
     return candidates

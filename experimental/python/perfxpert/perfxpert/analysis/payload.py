@@ -40,7 +40,6 @@ from .core import (
 from .att import analyze_thread_trace
 from .recommendations import _detect_already_collected, generate_recommendations
 
-
 __all__ = [
     "build_analysis_payload",
     "merge_recommendations",
@@ -60,6 +59,7 @@ def tier0_dict_to_ns(d: Dict[str, Any]) -> Any:
     unchanged without re-plumbing every attribute access.
     """
     from types import SimpleNamespace
+
     return SimpleNamespace(**(d or {}))
 
 
@@ -87,14 +87,28 @@ def tier0_dict_to_ns(d: Dict[str, Any]) -> Any:
 # This is the dict shape the formatters' tier0 helpers (already present in
 # ``perfxpert/formatters/``) expect when a tier-0-capable result is passed in.
 
-_GPU_EXTS = frozenset(
-    {".hip", ".cu", ".cuh", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".cl", ".py"}
+_GPU_EXTS = frozenset({".hip", ".cu", ".cuh", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".cl", ".py"})
+_SKIP_DIRS = frozenset(
+    {
+        ".git",
+        ".svn",
+        "build",
+        "_build",
+        ".build",
+        "__pycache__",
+        "node_modules",
+        ".cache",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+        "CMakeFiles",
+        "dist",
+        "vendor",
+        "third_party",
+        "thirdparty",
+        "extern",
+    }
 )
-_SKIP_DIRS = frozenset({
-    ".git", ".svn", "build", "_build", ".build", "__pycache__",
-    "node_modules", ".cache", ".tox", ".mypy_cache", ".pytest_cache",
-    "CMakeFiles", "dist", "vendor", "third_party", "thirdparty", "extern",
-})
 _MAX_FILES = 500
 _MAX_FILE_SIZE = 512 * 1024
 
@@ -104,9 +118,7 @@ _TRIPLE_LAUNCH_RE = re.compile(r"(\w+)\s*<<<[^>]*>>>\s*\(")
 _SYNCHRONIZE_RE = re.compile(r"hipDeviceSynchronize|cudaDeviceSynchronize|hipStreamSynchronize")
 _HIPMEMCPY_RE = re.compile(r"\bhipMemcpy\b|\bcudaMemcpy\b")
 _ASYNC_MEMCPY_RE = re.compile(r"\bhipMemcpyAsync\b|\bcudaMemcpyAsync\b")
-_STREAM_CREATE_RE = re.compile(
-    r"\b(?:hip|cuda)Stream(?:Create|CreateWithFlags|CreateWithPriority)\b"
-)
+_STREAM_CREATE_RE = re.compile(r"\b(?:hip|cuda)Stream(?:Create|CreateWithFlags|CreateWithPriority)\b")
 _ROCTX_RE = re.compile(r"roctxRangePush|roctxRangePop|roctxMark")
 
 
@@ -178,16 +190,22 @@ def scan_tier0_sources(source_dir: str) -> Optional[Dict[str, Any]]:
             # detect kernels
             for m in _KERNEL_RE.finditer(text):
                 line = text[: m.start()].count("\n") + 1
-                detected_kernels.append({"name": m.group(1), "file": rel, "line": line, "launch_type": "GLOBAL_KERNEL_DEF"})
+                detected_kernels.append(
+                    {"name": m.group(1), "file": rel, "line": line, "launch_type": "GLOBAL_KERNEL_DEF"}
+                )
                 has_hip = True
             for m in _HIP_LAUNCH_RE.finditer(text):
                 line = text[: m.start()].count("\n") + 1
-                detected_kernels.append({"name": m.group(1), "file": rel, "line": line, "launch_type": "HIP_KERNEL_LAUNCH"})
+                detected_kernels.append(
+                    {"name": m.group(1), "file": rel, "line": line, "launch_type": "HIP_KERNEL_LAUNCH"}
+                )
                 launch_locations.append((rel, line))
                 has_hip = True
             for m in _TRIPLE_LAUNCH_RE.finditer(text):
                 line = text[: m.start()].count("\n") + 1
-                detected_kernels.append({"name": m.group(1), "file": rel, "line": line, "launch_type": "TRIPLE_ANGLE_LAUNCH"})
+                detected_kernels.append(
+                    {"name": m.group(1), "file": rel, "line": line, "launch_type": "TRIPLE_ANGLE_LAUNCH"}
+                )
                 launch_locations.append((rel, line))
                 has_hip = True
             if ".cl" == ext:
@@ -226,22 +244,21 @@ def scan_tier0_sources(source_dir: str) -> Optional[Dict[str, Any]]:
             "device_sync": ("low", "synchronization", "Explicit device synchronization points"),
             "default_stream": ("medium", "launch_overhead", "Kernel launches stay on the default stream"),
         }.get(pid, ("info", "pattern", pid.replace("_", " ")))
-        patterns.append({
-            "pattern_id": pid,
-            "severity": cat[0],
-            "category": cat[1],
-            "description": cat[2],
-            "count": cnt,
-            "locations": pattern_locations.get(pid, [])[:10],
-        })
+        patterns.append(
+            {
+                "pattern_id": pid,
+                "severity": cat[0],
+                "category": cat[1],
+                "description": cat[2],
+                "count": cnt,
+                "locations": pattern_locations.get(pid, [])[:10],
+            }
+        )
         if cat[0] in ("high", "medium"):
             risks.append(cat[2])
 
     suggested_counters = ["SQ_WAVES", "GRBM_GUI_ACTIVE", "GRBM_COUNT"]
-    suggested_cmd = (
-        "rocprofv3 --sys-trace -d ./profile_out -- ./your_app"
-        if detected_kernels else ""
-    )
+    suggested_cmd = "rocprofv3 --sys-trace -d ./profile_out -- ./your_app" if detected_kernels else ""
 
     # Bug 3 — two-bucket separation:
     #
@@ -258,34 +275,42 @@ def scan_tier0_sources(source_dir: str) -> Optional[Dict[str, Any]]:
     code_patterns: List[Dict[str, Any]] = []
 
     if detected_kernels:
-        profiling_plan_actions.append({
-            "priority": "INFO",
-            "category": "Tier-0 Profiling Plan",
-            "issue": f"Found {len(detected_kernels)} GPU kernel(s) in {files_scanned} source file(s)",
-            "suggestion": "Start with a --sys-trace baseline then add --pmc for hardware counters.",
-            "actions": [suggested_cmd] if suggested_cmd else [],
-        })
+        profiling_plan_actions.append(
+            {
+                "priority": "INFO",
+                "category": "Tier-0 Profiling Plan",
+                "issue": f"Found {len(detected_kernels)} GPU kernel(s) in {files_scanned} source file(s)",
+                "suggestion": "Start with a --sys-trace baseline then add --pmc for hardware counters.",
+                "actions": [suggested_cmd] if suggested_cmd else [],
+            }
+        )
     if pattern_counts.get("memcpy_sync", 0) >= 1:
-        code_patterns.append({
-            "priority": "MEDIUM",
-            "category": "Memory Transfer",
-            "issue": "Multiple synchronous hipMemcpy calls detected — may bottleneck end-to-end time.",
-            "suggestion": "Consider pinned memory + hipMemcpyAsync with an explicit stream.",
-        })
+        code_patterns.append(
+            {
+                "priority": "MEDIUM",
+                "category": "Memory Transfer",
+                "issue": "Multiple synchronous hipMemcpy calls detected — may bottleneck end-to-end time.",
+                "suggestion": "Consider pinned memory + hipMemcpyAsync with an explicit stream.",
+            }
+        )
     if pattern_counts.get("device_sync", 0) >= 1:
-        code_patterns.append({
-            "priority": "MEDIUM",
-            "category": "Synchronization",
-            "issue": "Repeated hipDeviceSynchronize calls serialize work and add avoidable latency.",
-            "suggestion": "Remove device-wide syncs from the hot path and synchronize only at true dependencies.",
-        })
+        code_patterns.append(
+            {
+                "priority": "MEDIUM",
+                "category": "Synchronization",
+                "issue": "Repeated hipDeviceSynchronize calls serialize work and add avoidable latency.",
+                "suggestion": "Remove device-wide syncs from the hot path and synchronize only at true dependencies.",
+            }
+        )
     if pattern_counts.get("default_stream", 0) >= 1:
-        code_patterns.append({
-            "priority": "MEDIUM",
-            "category": "No Streams",
-            "issue": "Kernel launches appear to stay on the default stream, limiting overlap opportunities.",
-            "suggestion": "Move copies and launches onto explicit non-default streams so transfer and compute can overlap.",
-        })
+        code_patterns.append(
+            {
+                "priority": "MEDIUM",
+                "category": "No Streams",
+                "issue": "Kernel launches appear to stay on the default stream, limiting overlap opportunities.",
+                "suggestion": "Move copies and launches onto explicit non-default streams so transfer and compute can overlap.",
+            }
+        )
 
     # Build the ``profiling_plan`` dict surfaced under
     # ``tier0_findings.profiling_plan`` — the dedicated section formatters
@@ -296,10 +321,7 @@ def scan_tier0_sources(source_dir: str) -> Optional[Dict[str, Any]]:
         "actions": [suggested_cmd] if suggested_cmd else [],
         "kernel_count": len(detected_kernels),
         "programming_model": model,
-        "description": (
-            "Start with a --sys-trace baseline then add --pmc for hardware "
-            "counters."
-        ),
+        "description": ("Start with a --sys-trace baseline then add --pmc for hardware " "counters."),
     }
 
     return {
@@ -419,9 +441,7 @@ def build_analysis_payload(
 
         # 2. Hotspots
         try:
-            payload["hotspots"] = identify_hotspots(
-                connection, top_n=top_kernels, min_duration=min_duration
-            ) or []
+            payload["hotspots"] = identify_hotspots(connection, top_n=top_kernels, min_duration=min_duration) or []
         except Exception:
             payload["hotspots"] = []
 
@@ -454,9 +474,7 @@ def build_analysis_payload(
                 # without a peak (efficiency_pct just stays at 0).
                 gfx_id = None
                 try:
-                    cur = connection.execute(
-                        "SELECT name FROM rocpd_info_agent WHERE type='GPU' LIMIT 1"
-                    )
+                    cur = connection.execute("SELECT name FROM rocpd_info_agent WHERE type='GPU' LIMIT 1")
                     row = cur.fetchone()
                     if row and row[0]:
                         gfx_id = str(row[0])
@@ -474,9 +492,7 @@ def build_analysis_payload(
         # pmc_events. Only populated when hardware counters are actually
         # available so the webview doesn't render an empty chart for
         # Tier-1 traces.
-        has_counters = bool(
-            payload.get("hardware_counters", {}).get("has_counters", False)
-        )
+        has_counters = bool(payload.get("hardware_counters", {}).get("has_counters", False))
         if has_counters and database_path:
             try:
                 from perfxpert.tools.roofline import plot_points
@@ -489,9 +505,7 @@ def build_analysis_payload(
 
         # 5. Kernel resources / occupancy (best-effort — requires kernel symbols)
         try:
-            payload["kernel_resources"] = analyze_kernel_resources(
-                connection, payload["hotspots"]
-            ) or {}
+            payload["kernel_resources"] = analyze_kernel_resources(connection, payload["hotspots"]) or {}
         except Exception:
             payload["kernel_resources"] = {}
 
@@ -503,9 +517,10 @@ def build_analysis_payload(
 
         # 7. Warmup outlier detection
         try:
-            payload["warmup_issues"] = detect_warmup_issues(
-                connection, payload["hotspots"]
-            ) or {"has_warmup_issues": False, "outliers": []}
+            payload["warmup_issues"] = detect_warmup_issues(connection, payload["hotspots"]) or {
+                "has_warmup_issues": False,
+                "outliers": [],
+            }
         except Exception:
             payload["warmup_issues"] = {"has_warmup_issues": False, "outliers": []}
 
@@ -528,16 +543,19 @@ def build_analysis_payload(
                 already_collected = _detect_already_collected(connection) or frozenset()
             except Exception:
                 already_collected = frozenset()
-        payload["recommendations_deterministic"] = generate_recommendations(
-            time_breakdown=payload.get("time_breakdown") or {},
-            hotspots=payload.get("hotspots") or [],
-            memory_analysis=payload.get("memory_analysis") or {},
-            hardware_counters=payload.get("hardware_counters") or {},
-            already_collected=already_collected,
-            att_analysis=payload.get("thread_trace"),
-            warmup_issues=payload.get("warmup_issues"),
-            api_overhead=payload.get("api_overhead"),
-        ) or []
+        payload["recommendations_deterministic"] = (
+            generate_recommendations(
+                time_breakdown=payload.get("time_breakdown") or {},
+                hotspots=payload.get("hotspots") or [],
+                memory_analysis=payload.get("memory_analysis") or {},
+                hardware_counters=payload.get("hardware_counters") or {},
+                already_collected=already_collected,
+                att_analysis=payload.get("thread_trace"),
+                warmup_issues=payload.get("warmup_issues"),
+                api_overhead=payload.get("api_overhead"),
+            )
+            or []
+        )
     except Exception:
         payload["recommendations_deterministic"] = []
 
@@ -551,13 +569,9 @@ def build_analysis_payload(
         # kept in sync for legacy callers but now also holds only code-level
         # items. Falling back keeps pre-refactor tier0 dicts working.
         code_recs = list(
-            payload["tier0_findings"].get("code_patterns")
-            or payload["tier0_findings"].get("recommendations")
-            or []
+            payload["tier0_findings"].get("code_patterns") or payload["tier0_findings"].get("recommendations") or []
         )
-        payload["recommendations_deterministic"] = (
-            list(payload["recommendations_deterministic"]) + code_recs
-        )
+        payload["recommendations_deterministic"] = list(payload["recommendations_deterministic"]) + code_recs
 
     _progress("Deterministic analysis done")
 
@@ -576,6 +590,7 @@ def _rec_key(rec: Dict[str, Any]) -> tuple:
     otherwise falls back to ``(category, issue)``. Both forms are
     case-insensitive and whitespace-normalised.
     """
+
     def _norm(v: Any) -> str:
         return str(v or "").strip().lower()
 
@@ -632,8 +647,14 @@ def merge_recommendations(
             # LLM version wins, but carry forward deterministic citation /
             # code snippets so we don't lose ground-truth evidence.
             idx = seen[key]
-            for field in ("citation", "code_snippet_before", "code_snippet_after",
-                          "actions", "commands", "estimated_impact"):
+            for field in (
+                "citation",
+                "code_snippet_before",
+                "code_snippet_after",
+                "actions",
+                "commands",
+                "estimated_impact",
+            ):
                 if r.get(field) and not merged[idx].get(field):
                     merged[idx][field] = r[field]
             continue

@@ -16,7 +16,7 @@ _PATH_PATTERN = re.compile(
 )
 
 # Regex to match relative path traversal (e.g. ../../secret/file)
-_RELATIVE_PATH_PATTERN = re.compile(r'(?:\.\./)+\S+')
+_RELATIVE_PATH_PATTERN = re.compile(r"(?:\.\./)+\S+")
 
 
 def redact_paths(value: str) -> str:

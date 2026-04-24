@@ -213,9 +213,7 @@ def test_resolve_binary_autodiscovers_home_opencode_bin(tmp_path: Path, monkeypa
         ".local/bin/opencode",
     ],
 )
-def test_resolve_binary_autodiscovers_multiple_wellknown_paths(
-    tmp_path: Path, monkeypatch, subpath
-):
+def test_resolve_binary_autodiscovers_multiple_wellknown_paths(tmp_path: Path, monkeypatch, subpath):
     """Each of the well-known install locations must be auto-discovered."""
     fake_home = tmp_path
     fake_bin = fake_home / subpath
@@ -258,9 +256,7 @@ def test_resolve_binary_missing_suggests_install_command(monkeypatch, tmp_path: 
     with pytest.raises(FileNotFoundError) as exc:
         opencode_launcher.resolve_opencode_binary()
     msg = str(exc.value)
-    assert "opencode.ai/install.sh" in msg, (
-        "install hint must surface the upstream installer URL"
-    )
+    assert "opencode.ai/install.sh" in msg, "install hint must surface the upstream installer URL"
 
 
 def test_wellknown_paths_list_includes_home_opencode():

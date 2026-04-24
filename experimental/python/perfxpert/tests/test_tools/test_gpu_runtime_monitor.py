@@ -82,10 +82,12 @@ def test_parse_rocm_smi_edge_case_bad_json(tmp_path):
 
 
 def test_analyze_thermal_healthy_verdict():
-    metrics = {"samples": [
-        {"gpu_id": 0, "temp_c": 60.0, "power_w": 200.0},
-        {"gpu_id": 0, "temp_c": 62.0, "power_w": 210.0},
-    ]}
+    metrics = {
+        "samples": [
+            {"gpu_id": 0, "temp_c": 60.0, "power_w": 200.0},
+            {"gpu_id": 0, "temp_c": 62.0, "power_w": 210.0},
+        ]
+    }
     out = gpu_runtime_monitor.analyze_thermal(metrics, tjmax_c=105.0)
     assert out["verdict"] == "healthy"
     assert out["throttle_events"] == 0
@@ -94,9 +96,11 @@ def test_analyze_thermal_healthy_verdict():
 
 def test_analyze_thermal_throttling_verdict():
     # Temp at tjmax_c - throttle_margin triggers throttling verdict.
-    metrics = {"samples": [
-        {"gpu_id": 0, "temp_c": 100.0, "power_w": 300.0},
-    ]}
+    metrics = {
+        "samples": [
+            {"gpu_id": 0, "temp_c": 100.0, "power_w": 300.0},
+        ]
+    }
     out = gpu_runtime_monitor.analyze_thermal(metrics, tjmax_c=105.0)
     assert out["verdict"] == "throttling"
     assert out["throttle_events"] >= 1
@@ -109,9 +113,7 @@ def test_analyze_thermal_empty_samples_edge_case():
 
 
 def test_resolve_monitor_log_path_env(monkeypatch, tmp_path):
-    monkeypatch.setenv(
-        gpu_runtime_monitor.PERFXPERT_GPU_MONITOR_LOG, str(tmp_path / "log.json")
-    )
+    monkeypatch.setenv(gpu_runtime_monitor.PERFXPERT_GPU_MONITOR_LOG, str(tmp_path / "log.json"))
     assert gpu_runtime_monitor.resolve_monitor_log_path().endswith("log.json")
 
 

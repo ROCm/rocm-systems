@@ -25,9 +25,7 @@ def outcomes_dir() -> Path:
     return root
 
 
-def record_outcome(
-    outcomes_dir: Path, attack_id: str, *, status: str, details: Dict[str, object]
-) -> None:
+def record_outcome(outcomes_dir: Path, attack_id: str, *, status: str, details: Dict[str, object]) -> None:
     """Write a JSON record of one attack outcome. status ∈ {defeated, succeeded}."""
     (outcomes_dir / f"{attack_id}.json").write_text(
         json.dumps({"attack_id": attack_id, "status": status, "details": details}, indent=2)
@@ -49,8 +47,7 @@ def malicious_db_factory(tmp_path):
         conn = sqlite3.connect(db_path)
         uuid_hex = uuid.uuid4().hex
         # Minimal rocpd schema (UUID-based) — enough for analyze_database to load
-        conn.executescript(
-            f"""
+        conn.executescript(f"""
             CREATE TABLE rocpd_metadata (
                 uuid TEXT PRIMARY KEY,
                 created_at TEXT
@@ -66,8 +63,7 @@ def malicious_db_factory(tmp_path):
                 grid_x INTEGER, grid_y INTEGER, grid_z INTEGER,
                 workgroup_x INTEGER, workgroup_y INTEGER, workgroup_z INTEGER
             );
-            """
-        )
+            """)
         conn.execute(
             f"INSERT INTO rocpd_kernel_dispatch_{uuid_hex} "
             f"(id, kernel_name, start_ns, end_ns, duration_ns, "
@@ -77,9 +73,7 @@ def malicious_db_factory(tmp_path):
         )
         if extra_meta:
             for k, v in extra_meta.items():
-                conn.execute(
-                    "INSERT INTO rocpd_metadata VALUES (?, ?)", (f"{k}_{uuid_hex}", v)
-                )
+                conn.execute("INSERT INTO rocpd_metadata VALUES (?, ?)", (f"{k}_{uuid_hex}", v))
         conn.commit()
         conn.close()
         return db_path

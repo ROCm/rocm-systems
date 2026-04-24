@@ -74,9 +74,7 @@ def _format_as_markdown(
         lines.append(f"**Database:** `{database_path}`")
     lines.append(f"**Analysis Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     tier = 2 if has_counters else 1
-    lines.append(
-        f"**Analysis Tier:** {tier} ({'Hardware Counters' if has_counters else 'Trace Only'})"
-    )
+    lines.append(f"**Analysis Tier:** {tier} ({'Hardware Counters' if has_counters else 'Trace Only'})")
     lines.append("")
 
     lines.append("## Time Breakdown")
@@ -84,27 +82,17 @@ def _format_as_markdown(
     if "normalized_runtime" in breakdown:
         lines.append(f"Wall-clock total runtime: {total_runtime_ms:,.2f} ms")
         lines.append("")
-        lines.append(
-            f"Normalized runtime for percentage math: {breakdown['normalized_runtime'] / 1e6:,.2f} ms"
-        )
+        lines.append(f"Normalized runtime for percentage math: {breakdown['normalized_runtime'] / 1e6:,.2f} ms")
         lines.append("")
     lines.append("| Category | Time (ms) | Percentage |")
     lines.append("|----------|-----------|------------|")
     lines.append(f"| Kernel Execution | {kernel_ms:,.2f} | {kernel_pct:.1f}% normalized |")
     lines.append(f"| Memory Copies | {memcpy_ms:,.2f} | {memcpy_pct:.1f}% normalized |")
-    runtime_for_breakdown_ms = (
-        breakdown.get("normalized_runtime", breakdown.get("total_runtime", 0)) / 1e6
-    )
-    overhead_ms = (
-        max(0.0, runtime_for_breakdown_ms - kernel_ms - memcpy_ms)
-        if runtime_for_breakdown_ms > 0
-        else 0
-    )
+    runtime_for_breakdown_ms = breakdown.get("normalized_runtime", breakdown.get("total_runtime", 0)) / 1e6
+    overhead_ms = max(0.0, runtime_for_breakdown_ms - kernel_ms - memcpy_ms) if runtime_for_breakdown_ms > 0 else 0
     lines.append(f"| API Overhead | {overhead_ms:,.2f} | {overhead_pct:.1f}% normalized |")
     if "normalized_runtime" in breakdown:
-        lines.append(
-            f"| **Normalized Total** | **{runtime_for_breakdown_ms:,.2f}** | **100% normalized** |"
-        )
+        lines.append(f"| **Normalized Total** | **{runtime_for_breakdown_ms:,.2f}** | **100% normalized** |")
     else:
         lines.append(f"| **Total** | **{total_runtime_ms:,.2f}** | **100%** |")
     lines.append("")
@@ -133,12 +121,8 @@ def _format_as_markdown(
     if memory_analysis:
         lines.append("## Memory Copy Analysis")
         lines.append("")
-        lines.append(
-            "| Direction | Count | Total Size | Duration (ms) | Bandwidth (GB/s) |"
-        )
-        lines.append(
-            "|-----------|-------|------------|---------------|-----------------|"
-        )
+        lines.append("| Direction | Count | Total Size | Duration (ms) | Bandwidth (GB/s) |")
+        lines.append("|-----------|-------|------------|---------------|-----------------|")
         for direction, s in memory_analysis.items():
             tb = s.get("total_bytes", 0)
             if tb >= 1e9:
@@ -162,14 +146,10 @@ def _format_as_markdown(
         lines.append("")
         if has_counters:
             if "gpu_utilization_percent" in metrics:
-                lines.append(
-                    f"- **GPU Utilization:** {metrics['gpu_utilization_percent']:.1f}%"
-                )
+                lines.append(f"- **GPU Utilization:** {metrics['gpu_utilization_percent']:.1f}%")
             if "avg_waves" in metrics:
                 lines.append(f"- **Avg Wave Occupancy:** {metrics['avg_waves']:.1f} waves")
-                lines.append(
-                    f"- **Max Wave Occupancy:** {metrics.get('max_waves', 0):.1f} waves"
-                )
+                lines.append(f"- **Max Wave Occupancy:** {metrics.get('max_waves', 0):.1f} waves")
         else:
             lines.append("- No hardware counter samples were present in this report.")
         if escalation:
@@ -242,15 +222,9 @@ def _format_as_markdown(
                 pred_conf = rec.get("predicted_confidence")
                 if pred_conf is None:
                     pred_conf = rec.get("confidence")
-                conf_str = (
-                    f" (confidence {int(float(pred_conf) * 100)}%)"
-                    if pred_conf is not None
-                    else ""
-                )
+                conf_str = f" (confidence {int(float(pred_conf) * 100)}%)" if pred_conf is not None else ""
                 lines.append("")
-                lines.append(
-                    f"**Predicted:** {float(lo):.2f}-{float(hi):.2f}\u00d7{conf_str}"
-                )
+                lines.append(f"**Predicted:** {float(lo):.2f}-{float(hi):.2f}\u00d7{conf_str}")
             commands = rec.get("commands", [])
             if commands:
                 lines.append("")
@@ -270,9 +244,7 @@ def _format_as_markdown(
                         for a in args:
                             name = a.get("name", "")
                             value = a.get("value")
-                            arg_strs.append(
-                                f"{name} {value}" if value is not None else name
-                            )
+                            arg_strs.append(f"{name} {value}" if value is not None else name)
                         lines.append(f"- Args: `{' '.join(arg_strs)}`")
                     if full_command:
                         lines.append(f"```bash\n{full_command}\n```")
@@ -296,17 +268,10 @@ def _format_as_markdown(
         )
         if summary.get("capture_incomplete"):
             lines.append("")
-            lines.append(
-                "*Capture incomplete: fell back to kernel-name regex "
-                "(no `category='RCCL'` spans in DB).*"
-            )
+            lines.append("*Capture incomplete: fell back to kernel-name regex " "(no `category='RCCL'` spans in DB).*")
         lines.append("")
-        lines.append(
-            "| Op | Bytes | Duration | Bus BW | Peak | Efficiency% | Overlap% |"
-        )
-        lines.append(
-            "|----|-------|----------|--------|------|-------------|----------|"
-        )
+        lines.append("| Op | Bytes | Duration | Bus BW | Peak | Efficiency% | Overlap% |")
+        lines.append("|----|-------|----------|--------|------|-------------|----------|")
         for c in communication["collectives"]:
             mb = c.get("msg_bytes", 0) or 0
             if mb >= 1e9:
@@ -338,8 +303,7 @@ def _format_as_markdown(
         for cat in kernel_categories:
             avg_us = cat["avg_duration_ns"] / 1_000
             lines.append(
-                f"| {cat['category']} | {cat['count']} | "
-                f"{cat['pct_of_kernel_time']:.1f}% | {avg_us:.1f}\u03bcs |"
+                f"| {cat['category']} | {cat['count']} | " f"{cat['pct_of_kernel_time']:.1f}% | {avg_us:.1f}\u03bcs |"
             )
         lines.append("")
 
@@ -350,8 +314,7 @@ def _format_as_markdown(
         count = short_kernels["short_kernel_count"]
         wasted = short_kernels["wasted_pct_of_kernel_time"]
         lines.append(
-            f"**{count} kernels** below {thresh}\u03bcs threshold \u2014 "
-            f"**{wasted:.1f}%** of kernel time wasted"
+            f"**{count} kernels** below {thresh}\u03bcs threshold \u2014 " f"**{wasted:.1f}%** of kernel time wasted"
         )
         lines.append("")
         if short_kernels.get("histogram"):
@@ -364,15 +327,11 @@ def _format_as_markdown(
             lines.append("**Top offenders by wasted time:**")
             lines.append("")
             for off in short_kernels["top_offenders"][:5]:
-                lines.append(
-                    f"- `{off['name']}` \u2014 \u00d7{off['count']} calls, avg {off['avg_us']:.1f}\u03bcs"
-                )
+                lines.append(f"- `{off['name']}` \u2014 \u00d7{off['count']} calls, avg {off['avg_us']:.1f}\u03bcs")
             lines.append("")
 
     lines.append("---")
-    lines.append(
-        f"*Generated by PerfXpert analyze \u2022 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*"
-    )
+    lines.append(f"*Generated by PerfXpert analyze \u2022 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
     return "\n".join(lines)
 
 
@@ -397,13 +356,9 @@ def _format_tier0_markdown(tier0_result: Any, has_profiling: bool = False) -> st
         lines.append("|--------|-------------|------|------|")
         for k in tier0_result.detected_kernels[:20]:
             fname = k.get("file", "").split("/")[-1]
-            lines.append(
-                f"| `{k['name']}` | {k.get('launch_type', '')} | {fname} | {k.get('line', '')} |"
-            )
+            lines.append(f"| `{k['name']}` | {k.get('launch_type', '')} | {fname} | {k.get('line', '')} |")
         if len(tier0_result.detected_kernels) > 20:
-            lines.append(
-                f"\n*... and {len(tier0_result.detected_kernels) - 20} more kernels*"
-            )
+            lines.append(f"\n*... and {len(tier0_result.detected_kernels) - 20} more kernels*")
     else:
         lines.append("*No GPU kernels detected in source.*")
     lines.append("")
@@ -448,9 +403,7 @@ def _format_tier0_markdown(tier0_result: Any, has_profiling: bool = False) -> st
             lines.append(desc)
             lines.append("")
         suggested_cmd = (
-            profiling_plan.get("suggested_first_command")
-            if isinstance(profiling_plan, dict)
-            else None
+            profiling_plan.get("suggested_first_command") if isinstance(profiling_plan, dict) else None
         ) or tier0_result.suggested_first_command
         if suggested_cmd:
             lines.append("**Suggested first command:**")
@@ -459,11 +412,7 @@ def _format_tier0_markdown(tier0_result: Any, has_profiling: bool = False) -> st
             lines.append(suggested_cmd)
             lines.append("```")
             lines.append("")
-        actions_list = (
-            profiling_plan.get("actions")
-            if isinstance(profiling_plan, dict)
-            else None
-        ) or []
+        actions_list = (profiling_plan.get("actions") if isinstance(profiling_plan, dict) else None) or []
         extra_actions = [a for a in actions_list if a and a != suggested_cmd]
         if extra_actions:
             lines.append("**Additional actions:**")
@@ -475,11 +424,7 @@ def _format_tier0_markdown(tier0_result: Any, has_profiling: bool = False) -> st
     lines.append("### Detected Code Patterns")
     lines.append("")
     priority_emoji = {"HIGH": "\U0001f534", "MEDIUM": "\U0001f7e1", "LOW": "\U0001f7e2", "INFO": "\U0001f535"}
-    code_recs = (
-        getattr(tier0_result, "code_patterns", None)
-        or tier0_result.recommendations
-        or []
-    )
+    code_recs = getattr(tier0_result, "code_patterns", None) or tier0_result.recommendations or []
     if not code_recs:
         lines.append("*No code-level performance patterns detected.*")
         lines.append("")
@@ -508,15 +453,9 @@ def _format_tier0_markdown(tier0_result: Any, has_profiling: bool = False) -> st
             pred_conf = rec.get("predicted_confidence")
             if pred_conf is None:
                 pred_conf = rec.get("confidence")
-            conf_str = (
-                f" (confidence {int(float(pred_conf) * 100)}%)"
-                if pred_conf is not None
-                else ""
-            )
+            conf_str = f" (confidence {int(float(pred_conf) * 100)}%)" if pred_conf is not None else ""
             lines.append("")
-            lines.append(
-                f"**Predicted:** {float(lo):.2f}-{float(hi):.2f}\u00d7{conf_str}"
-            )
+            lines.append(f"**Predicted:** {float(lo):.2f}-{float(hi):.2f}\u00d7{conf_str}")
         commands = rec.get("commands", [])
         if commands:
             lines.append("")
@@ -550,7 +489,5 @@ def _format_tier0_markdown(tier0_result: Any, has_profiling: bool = False) -> st
         lines.append("")
 
     lines.append("---")
-    lines.append(
-        f"*Generated by PerfXpert analyze (Tier 0) \u2022 {tier0_result.analysis_timestamp}*"
-    )
+    lines.append(f"*Generated by PerfXpert analyze (Tier 0) \u2022 {tier0_result.analysis_timestamp}*")
     return "\n".join(lines)

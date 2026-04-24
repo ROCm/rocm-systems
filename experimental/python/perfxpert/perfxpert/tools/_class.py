@@ -15,8 +15,8 @@ T = TypeVar("T", bound=Callable)
 class ToolClass(Enum):
     """MCP exposure class for tools. See spec §5.8."""
 
-    READ_ONLY = "read_only"     # lookups, analysis, classification — safe for MCP
-    EXECUTION = "execution"     # modifies filesystem/processes — in-process only
+    READ_ONLY = "read_only"  # lookups, analysis, classification — safe for MCP
+    EXECUTION = "execution"  # modifies filesystem/processes — in-process only
 
 
 def tool_class(klass: ToolClass) -> Callable[[T], T]:
@@ -33,7 +33,9 @@ def tool_class(klass: ToolClass) -> Callable[[T], T]:
     ToolClass.READ_ONLY. CI test test_mcp_exposure.py enforces that no
     EXECUTION tool is in the MCP registry.
     """
+
     def decorator(fn: T) -> T:
         fn.__tool_class__ = klass  # type: ignore[attr-defined]
         return fn
+
     return decorator

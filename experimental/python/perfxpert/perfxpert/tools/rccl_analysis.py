@@ -47,7 +47,6 @@ from perfxpert.tracelens_port import (
     categorize_kernel_name,
 )
 
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -56,10 +55,25 @@ from perfxpert.tracelens_port import (
 # Keep this list conservative: anything unknown falls back to 4 bytes so a
 # missing mapping never silently zeroes out the message size.
 _DTYPE_BYTES: Dict[str, int] = {
-    "int8": 1, "uint8": 1, "char": 1,
-    "float16": 2, "half": 2, "bfloat16": 2, "bf16": 2, "fp16": 2, "int16": 2,
-    "float32": 4, "float": 4, "fp32": 4, "int32": 4, "uint32": 4,
-    "float64": 8, "double": 8, "fp64": 8, "int64": 8, "uint64": 8,
+    "int8": 1,
+    "uint8": 1,
+    "char": 1,
+    "float16": 2,
+    "half": 2,
+    "bfloat16": 2,
+    "bf16": 2,
+    "fp16": 2,
+    "int16": 2,
+    "float32": 4,
+    "float": 4,
+    "fp32": 4,
+    "int32": 4,
+    "uint32": 4,
+    "float64": 8,
+    "double": 8,
+    "fp64": 8,
+    "int64": 8,
+    "uint64": 8,
 }
 
 _OP_RE = re.compile(
@@ -77,6 +91,7 @@ _RCCL_KERNEL_RE = re.compile(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _detect_op_type(name: str) -> str:
     """Map a region / kernel name to a canonical collective op type."""
@@ -159,6 +174,7 @@ def _lookup_peak(gfx_id: Optional[str]) -> Optional[float]:
         return None
     try:
         from perfxpert.tools.interconnect import lookup_peaks as _p
+
         entry = _p(gfx_id)
     except Exception:
         return None
@@ -176,18 +192,13 @@ def _open_raw(db_path: str) -> sqlite3.Connection:
 def _rccl_regions(conn: sqlite3.Connection) -> List[sqlite3.Row]:
     """Fetch RCCL regions via the ``regions`` view. Empty list on any error."""
     try:
-        cur = conn.execute(
-            "SELECT id, name, start, end, pid, tid, event_id "
-            "FROM regions WHERE category='RCCL'"
-        )
+        cur = conn.execute("SELECT id, name, start, end, pid, tid, event_id " "FROM regions WHERE category='RCCL'")
         return cur.fetchall()
     except sqlite3.OperationalError:
         return []
 
 
-def _args_for_events(
-    conn: sqlite3.Connection, event_ids: List[int]
-) -> Dict[int, Dict[str, str]]:
+def _args_for_events(conn: sqlite3.Connection, event_ids: List[int]) -> Dict[int, Dict[str, str]]:
     """Return ``{event_id: {arg_name: arg_value}}`` for a list of event_ids.
 
     Uses parameter binding with chunking so very large event-id lists do
@@ -198,12 +209,11 @@ def _args_for_events(
     out: Dict[int, Dict[str, str]] = {}
     CHUNK = 500
     for i in range(0, len(event_ids), CHUNK):
-        chunk = event_ids[i:i + CHUNK]
+        chunk = event_ids[i : i + CHUNK]
         placeholders = ",".join(["?"] * len(chunk))
         try:
             cur = conn.execute(
-                f"SELECT event_id, name, value FROM rocpd_arg "
-                f"WHERE event_id IN ({placeholders})",
+                f"SELECT event_id, name, value FROM rocpd_arg " f"WHERE event_id IN ({placeholders})",
                 chunk,
             )
             for row in cur.fetchall():
@@ -265,9 +275,7 @@ def _compute_overlap_ratio(conn: sqlite3.Connection) -> float:
     return 0.0 (missing data is surfaced, not errored).
     """
     try:
-        rows = conn.execute(
-            "SELECT name, start, end FROM kernels"
-        ).fetchall()
+        rows = conn.execute("SELECT name, start, end FROM kernels").fetchall()
     except sqlite3.OperationalError:
         return 0.0
 
@@ -306,9 +314,7 @@ def _fallback_from_kernels(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     zeroed message size (we have no arg table binding) but real durations.
     """
     try:
-        rows = conn.execute(
-            "SELECT name, start, end FROM kernels"
-        ).fetchall()
+        rows = conn.execute("SELECT name, start, end FROM kernels").fetchall()
     except sqlite3.OperationalError:
         return []
     out: List[Dict[str, Any]] = []
@@ -318,14 +324,14 @@ def _fallback_from_kernels(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
             continue
         start = int(r[1] if not isinstance(r, sqlite3.Row) else r["start"])
         end = int(r[2] if not isinstance(r, sqlite3.Row) else r["end"])
-        out.append({"op_type": _detect_op_type(name), "name": name,
-                    "start": start, "end": end})
+        out.append({"op_type": _detect_op_type(name), "name": name, "start": start, "end": end})
     return out
 
 
 # ---------------------------------------------------------------------------
 # Public tool
 # ---------------------------------------------------------------------------
+
 
 @tool_class(ToolClass.READ_ONLY)
 def analyze_collectives(
@@ -385,20 +391,22 @@ def analyze_collectives(
                 dur_s = duration_ns / 1e9 if duration_ns > 0 else 0.0
                 bw_gbps = (msg_bytes * factor / dur_s / 1e9) if dur_s > 0 else 0.0
                 eff_pct = (bw_gbps / peak * 100.0) if (peak and peak > 0) else 0.0
-                collectives.append({
-                    "op_type": op,
-                    "msg_bytes": int(msg_bytes),
-                    "duration_ns": int(duration_ns),
-                    "effective_bw_gbps": round(bw_gbps, 3),
-                    "peak_bw_gbps": round(peak, 3) if peak else None,
-                    "efficiency_pct": round(eff_pct, 2),
-                    "efficiency_label": _classify_efficiency(eff_pct),
-                    "overlap_ratio": overlap_pct,
-                    "algo_hint": _algo_hint(op, msg_bytes),
-                    "topology_hint": _topology_hint(n_ranks),
-                    "regime": _regime(msg_bytes),
-                    "ranks": n_ranks,
-                })
+                collectives.append(
+                    {
+                        "op_type": op,
+                        "msg_bytes": int(msg_bytes),
+                        "duration_ns": int(duration_ns),
+                        "effective_bw_gbps": round(bw_gbps, 3),
+                        "peak_bw_gbps": round(peak, 3) if peak else None,
+                        "efficiency_pct": round(eff_pct, 2),
+                        "efficiency_label": _classify_efficiency(eff_pct),
+                        "overlap_ratio": overlap_pct,
+                        "algo_hint": _algo_hint(op, msg_bytes),
+                        "topology_hint": _topology_hint(n_ranks),
+                        "regime": _regime(msg_bytes),
+                        "ranks": n_ranks,
+                    }
+                )
         else:
             # Fallback: kernel-name regex.
             kernel_hits = _fallback_from_kernels(conn)
@@ -408,30 +416,32 @@ def analyze_collectives(
                     op = k["op_type"]
                     duration_ns = max(0, k["end"] - k["start"])
                     factor = _busbw_factor(op, n_ranks)
-                    collectives.append({
-                        "op_type": op,
-                        "msg_bytes": 0,
-                        "duration_ns": int(duration_ns),
-                        "effective_bw_gbps": 0.0,
-                        "peak_bw_gbps": round(peak, 3) if peak else None,
-                        "efficiency_pct": 0.0,
-                        "efficiency_label": "unknown",
-                        "overlap_ratio": overlap_pct,
-                        "algo_hint": _algo_hint(op, 0),
-                        "topology_hint": _topology_hint(n_ranks),
-                        "regime": _regime(0),
-                        "ranks": n_ranks,
-                    })
+                    collectives.append(
+                        {
+                            "op_type": op,
+                            "msg_bytes": 0,
+                            "duration_ns": int(duration_ns),
+                            "effective_bw_gbps": 0.0,
+                            "peak_bw_gbps": round(peak, 3) if peak else None,
+                            "efficiency_pct": 0.0,
+                            "efficiency_label": "unknown",
+                            "overlap_ratio": overlap_pct,
+                            "algo_hint": _algo_hint(op, 0),
+                            "topology_hint": _topology_hint(n_ranks),
+                            "regime": _regime(0),
+                            "ranks": n_ranks,
+                        }
+                    )
             # else: no RCCL signal at all — return the empty-shape response.
 
-        summary = _build_summary(collectives, n_ranks, peak, overlap_pct,
-                                 capture_incomplete)
+        summary = _build_summary(collectives, n_ranks, peak, overlap_pct, capture_incomplete)
         # Validate at the boundary via the Pydantic CommunicationBlock
         # model — downstream consumers (formatters, Latency specialist,
         # MCP clients) then get a single source of truth for field names
         # + types. ``model_dump()`` casts back to the dict shape the rest
         # of the codebase already consumes.
         from perfxpert.agents.schemas import CommunicationBlock
+
         block = CommunicationBlock(
             collectives=collectives,  # Pydantic validates each entry as CollectiveEntry
             summary=summary,

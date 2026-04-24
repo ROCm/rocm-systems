@@ -39,6 +39,7 @@ def test_rocpd_legacy_env_honored_with_warning(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("ROCPD_LLM_OPENAI_KEY", "sk-legacy-rocpd")
     from perfxpert.providers.openai_provider import OpenAIProvider
+
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         mock_sdk = MagicMock()
@@ -53,6 +54,7 @@ def test_anthropic_auth_error_normalized(monkeypatch):
     import anthropic as real
 
     from perfxpert.providers.anthropic_provider import AnthropicProvider
+
     fake_client = MagicMock()
     fake_client.messages.create.side_effect = real.AuthenticationError(
         message="bad key",
@@ -76,6 +78,7 @@ def test_openai_rate_limit_normalized(monkeypatch):
     import openai as real
 
     from perfxpert.providers.openai_provider import OpenAIProvider
+
     fake_client = MagicMock()
     fake_client.chat.completions.create.side_effect = real.RateLimitError(
         message="slow down",

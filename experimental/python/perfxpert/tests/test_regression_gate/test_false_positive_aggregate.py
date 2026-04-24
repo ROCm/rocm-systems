@@ -13,7 +13,6 @@ from tests.test_regression_gate.proven_optimization_runner import (
     ProvenOptimizationRunner,
 )
 
-
 FALSE_POSITIVE_THRESHOLD = 0.05
 
 OUTPUT_DIR = Path(__file__).parent / "_runner_outputs"

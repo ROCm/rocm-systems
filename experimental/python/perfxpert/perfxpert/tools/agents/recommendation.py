@@ -54,9 +54,7 @@ def agent_recommendation(
         progress_callback=progress_callback,
     )
     payload = schemas.RecommendationInput(**input)
-    output = session.run_recommendation(
-        payload, progress_callback=progress_callback
-    )
+    output = session.run_recommendation(payload, progress_callback=progress_callback)
 
     if hasattr(output, "model_dump"):
         return output.model_dump()

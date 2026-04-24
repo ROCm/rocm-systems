@@ -6,20 +6,23 @@ from perfxpert.tools import intent
 from perfxpert.tools._class import ToolClass
 
 
-@pytest.mark.parametrize("query, expected", [
-    ("Why is my kernel slow?", "analyze"),
-    ("analyze this trace", "analyze"),
-    ("what's the bottleneck", "analyze"),
-    ("how do I fix the memcpy overhead", "optimize"),
-    ("suggest optimizations for my matmul kernel", "optimize"),
-    ("did my patch help", "verify"),
-    ("is this better than before", "verify"),
-    ("compare run 1 vs run 2", "verify"),
-    ("explain what MFMA means", "explain"),
-    ("what is the ridge point", "explain"),
-    ("help", "help"),
-    ("huh", "analyze"),  # ambiguous default
-])
+@pytest.mark.parametrize(
+    "query, expected",
+    [
+        ("Why is my kernel slow?", "analyze"),
+        ("analyze this trace", "analyze"),
+        ("what's the bottleneck", "analyze"),
+        ("how do I fix the memcpy overhead", "optimize"),
+        ("suggest optimizations for my matmul kernel", "optimize"),
+        ("did my patch help", "verify"),
+        ("is this better than before", "verify"),
+        ("compare run 1 vs run 2", "verify"),
+        ("explain what MFMA means", "explain"),
+        ("what is the ridge point", "explain"),
+        ("help", "help"),
+        ("huh", "analyze"),  # ambiguous default
+    ],
+)
 def test_intent_classification(query, expected):
     r = intent.classify(query)
     assert r["intent"] == expected

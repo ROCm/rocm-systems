@@ -23,7 +23,6 @@ from perfxpert.agents import schemas
 from perfxpert.agents.framework import Agent, ToolBinding, run_agent
 from perfxpert.tools import regression, roofline, trace_diff
 
-
 _FENCE_PATH = Path(__file__).parent / "fence" / "diff_specialist.md"
 
 
@@ -67,16 +66,10 @@ def _airgap_narrative(diff_result: Dict[str, Any]) -> str:
     n_imp = len(improvements)
     if regressions:
         top = regressions[0]
-        top_part = (
-            f" Top regression: {top.get('name', '<unknown>')} "
-            f"({float(top.get('delta_pct', 0.0)):+.1f}%)."
-        )
+        top_part = f" Top regression: {top.get('name', '<unknown>')} " f"({float(top.get('delta_pct', 0.0)):+.1f}%)."
     elif improvements:
         top = improvements[0]
-        top_part = (
-            f" Top improvement: {top.get('name', '<unknown>')} "
-            f"({float(top.get('delta_pct', 0.0)):+.1f}%)."
-        )
+        top_part = f" Top improvement: {top.get('name', '<unknown>')} " f"({float(top.get('delta_pct', 0.0)):+.1f}%)."
     else:
         top_part = ""
     return (
@@ -100,12 +93,8 @@ def run_diff_specialist(
         top_kernels=payload.top_kernels,
     )
 
-    regressions: List[Dict[str, Any]] = list(
-        diff_result.get("primary_regressions", []) or []
-    )
-    improvements: List[Dict[str, Any]] = list(
-        diff_result.get("primary_improvements", []) or []
-    )
+    regressions: List[Dict[str, Any]] = list(diff_result.get("primary_regressions", []) or [])
+    improvements: List[Dict[str, Any]] = list(diff_result.get("primary_improvements", []) or [])
     verdict = _classify_verdict(diff_result)
     wall_delta_pct = float(diff_result.get("wall_delta_pct", 0.0) or 0.0)
 

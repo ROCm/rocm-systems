@@ -8,8 +8,8 @@ from perfxpert.tools import patch_mgr
 from perfxpert.tools._class import ToolClass
 from perfxpert.tools._safety import PathConfinementError, ShellMetacharError
 
-
 # -- tool-class marker ------------------------------------------------------
+
 
 def test_patch_apply_is_execution_class():
     assert patch_mgr.apply.__tool_class__ == ToolClass.EXECUTION
@@ -24,6 +24,7 @@ def test_patch_verify_output_is_execution_class():
 
 
 # -- patch.apply -----------------------------------------------------------
+
 
 def test_apply_writes_file_and_saves_bak(tmp_path: Path):
     src = tmp_path / "kernel.cpp"
@@ -68,6 +69,7 @@ def test_apply_is_idempotent_when_called_twice(tmp_path: Path):
 
 # -- patch.revert ----------------------------------------------------------
 
+
 def test_revert_restores_from_bak(tmp_path: Path):
     src = tmp_path / "k.cpp"
     src.write_text("original\n")
@@ -94,6 +96,7 @@ def test_revert_rejects_path_traversal(tmp_path: Path):
 
 
 # -- patch.verify_output ---------------------------------------------------
+
 
 def test_verify_output_bit_exact_passes(tmp_path: Path):
     baseline = tmp_path / "baseline.out"

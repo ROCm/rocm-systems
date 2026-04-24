@@ -20,9 +20,9 @@ def test_plateau_when_within_threshold_for_min_iterations():
     """Spec §5: < 2% change for 2+ consecutive iterations = plateau."""
     history = [
         {"total_runtime_ns": 1000000},
-        {"total_runtime_ns": 1005000},   # +0.5%
-        {"total_runtime_ns": 998000},    # -0.7%
-        {"total_runtime_ns": 1002000},   # +0.4% from prior
+        {"total_runtime_ns": 1005000},  # +0.5%
+        {"total_runtime_ns": 998000},  # -0.7%
+        {"total_runtime_ns": 1002000},  # +0.4% from prior
     ]
     r = plateau.check(history)
     assert r["plateau_detected"] is True

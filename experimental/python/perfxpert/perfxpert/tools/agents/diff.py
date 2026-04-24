@@ -80,9 +80,7 @@ def agent_diff_specialist(
         top_kernels=top_kernels,
         user_intent=user_intent,
     )
-    output = session.run_diff_specialist(
-        payload, progress_callback=progress_callback
-    )
+    output = session.run_diff_specialist(payload, progress_callback=progress_callback)
 
     if hasattr(output, "model_dump"):
         raw = output.model_dump()

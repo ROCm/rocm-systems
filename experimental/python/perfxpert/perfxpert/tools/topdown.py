@@ -12,9 +12,7 @@ from perfxpert.tools._class import ToolClass, tool_class
 
 
 @tool_class(ToolClass.READ_ONLY)
-def classify_overhead(
-    memcpy_pct: float, api_pct: float, idle_pct: float
-) -> List[Dict[str, Any]]:
+def classify_overhead(memcpy_pct: float, api_pct: float, idle_pct: float) -> List[Dict[str, Any]]:
     """Identify red flags in time breakdown.
 
     Returns a list of {red_flag_name, priority, message, current_value} for
@@ -34,12 +32,14 @@ def classify_overhead(
         metric = flag["metric"]
         value = current_values.get(metric, 0.0)
         if value >= flag["threshold"]:
-            triggered.append({
-                "red_flag_name": name,
-                "metric": metric,
-                "value": value,
-                "threshold": flag["threshold"],
-                "priority": flag["priority"],
-                "message": flag["message"],
-            })
+            triggered.append(
+                {
+                    "red_flag_name": name,
+                    "metric": metric,
+                    "value": value,
+                    "threshold": flag["threshold"],
+                    "priority": flag["priority"],
+                    "message": flag["message"],
+                }
+            )
     return triggered

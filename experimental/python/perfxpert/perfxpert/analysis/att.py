@@ -143,10 +143,7 @@ def analyze_thread_trace(att_dir: str) -> Dict[str, Any]:
 
             # Normalise header names (strip whitespace + surrounding quotes, lowercase)
             for row in reader:
-                row_lower = {
-                    k.strip().strip('"').lower(): v.strip().strip('"')
-                    for k, v in row.items()
-                }
+                row_lower = {k.strip().strip('"').lower(): v.strip().strip('"') for k, v in row.items()}
 
                 def _col(*candidates: str) -> str:
                     for c in candidates:
@@ -156,9 +153,7 @@ def analyze_thread_trace(att_dir: str) -> Dict[str, Any]:
 
                 # Real rocprofv3 --att CSV: "CodeObj","Vaddr","Instruction",
                 # "Hitcount","Latency","Stall","Idle","Source"
-                instr_name = _col(
-                    "instruction", "instruction id", "pc_offset", "pc offset", "offset"
-                )
+                instr_name = _col("instruction", "instruction id", "pc_offset", "pc offset", "offset")
                 hitcount_s = _col("hitcount", "hit count", "count")
                 latency_s = _col("latency (cycles)", "latency", "total latency")
                 stall_s = _col("stall cycles", "stall", "stalls")
@@ -174,9 +169,7 @@ def analyze_thread_trace(att_dir: str) -> Dict[str, Any]:
                 # Comment rows (Hitcount=0, Latency=0) embed the demangled kernel
                 # name in the Source column: "; _Zmangled...", Source="demangled()"
                 if hitcount == 0 and total_latency == 0:
-                    demangled = (
-                        source_line  # e.g. "heavy_elementwise_kernel(float*, int)"
-                    )
+                    demangled = source_line  # e.g. "heavy_elementwise_kernel(float*, int)"
                     if demangled:
                         # Use just the function name without arguments
                         kernel_name = demangled.split("(")[0].strip()
@@ -219,20 +212,14 @@ def analyze_thread_trace(att_dir: str) -> Dict[str, Any]:
         top_stalling = instructions[:10]
 
         total_weighted = sum(i["weighted_stall"] for i in instructions)
-        avg_stall = (
-            sum(i["stall_ratio"] for i in instructions) / len(instructions)
-            if instructions
-            else 0.0
-        )
+        avg_stall = sum(i["stall_ratio"] for i in instructions) / len(instructions) if instructions else 0.0
 
         # Classify bottleneck from the top stalling instruction's PC prefix
         top_pc = top_stalling[0]["pc_offset"] if top_stalling else ""
         stall_category = _att_stall_category(top_pc)
 
         is_high_stall = (
-            top_stalling
-            and top_stalling[0]["stall_ratio"] >= 0.60
-            and top_stalling[0]["hitcount"] >= _ATT_MIN_HITCOUNT
+            top_stalling and top_stalling[0]["stall_ratio"] >= 0.60 and top_stalling[0]["hitcount"] >= _ATT_MIN_HITCOUNT
         )
         if is_high_stall:
             high_stall_count += 1
@@ -259,7 +246,5 @@ def analyze_thread_trace(att_dir: str) -> Dict[str, Any]:
             "kernel_count": len(kernels_data),
             "high_stall_kernels": high_stall_count,
         },
-        "reason": (
-            "" if kernels_data else "No valid ATT data could be parsed from CSV files"
-        ),
+        "reason": ("" if kernels_data else "No valid ATT data could be parsed from CSV files"),
     }

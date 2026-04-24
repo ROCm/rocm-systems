@@ -48,7 +48,6 @@ import pytest
 
 from perfxpert.formatters.webview import _format_tier0_webview
 
-
 # ---------------------------------------------------------------------------
 # Test fixture helpers
 # ---------------------------------------------------------------------------
@@ -102,9 +101,7 @@ def test_detected_kernels_table_has_severity_class_on_matching_hotspot():
             "total_duration": 1_000_000,
         }
     ]
-    html = _format_tier0_webview(
-        _make_tier0_ns(detected), has_profiling=True, hotspots=hotspots
-    )
+    html = _format_tier0_webview(_make_tier0_ns(detected), has_profiling=True, hotspots=hotspots)
     # The row for the matched kernel must carry the critical-severity class.
     assert 'class="h-src-critical"' in html
     # And the kernel name must still appear in the table (sanity).
@@ -127,9 +124,7 @@ def test_detected_kernels_without_hotspot_match_has_no_severity_class():
             "percent_of_total": 50.0,
         }
     ]
-    html = _format_tier0_webview(
-        _make_tier0_ns(detected), has_profiling=True, hotspots=hotspots
-    )
+    html = _format_tier0_webview(_make_tier0_ns(detected), has_profiling=True, hotspots=hotspots)
     # The cold kernel row is present but must not carry any h-src-* class.
     # The only h-src-* classes in the document for the detected-kernel row
     # would be inside the <tbody>; check there is no per-row coloring
@@ -173,9 +168,7 @@ def test_severity_buckets_per_threshold(pct: float, expected_cls: str):
             "percent_of_total": pct,
         }
     ]
-    html = _format_tier0_webview(
-        _make_tier0_ns(detected), has_profiling=True, hotspots=hotspots
-    )
+    html = _format_tier0_webview(_make_tier0_ns(detected), has_profiling=True, hotspots=hotspots)
     assert f'class="{expected_cls}"' in html
 
 
@@ -200,9 +193,7 @@ def test_severity_bucket_zero_percent_has_no_coloring():
             "percent_of_total": 0.0,
         }
     ]
-    html = _format_tier0_webview(
-        _make_tier0_ns(detected), has_profiling=True, hotspots=hotspots
-    )
+    html = _format_tier0_webview(_make_tier0_ns(detected), has_profiling=True, hotspots=hotspots)
     # 0.0 % is < 1 % -> INFO -> h-src-cool (still colored as a match).
     assert 'class="h-src-cool"' in html
 
@@ -248,9 +239,7 @@ def test_detected_kernels_legend_present_when_hotspots_passed():
     hotspots = [
         {"name": "legend_kernel(int)", "percent_of_total": 42.0},
     ]
-    html_with = _format_tier0_webview(
-        _make_tier0_ns(detected), has_profiling=True, hotspots=hotspots
-    )
+    html_with = _format_tier0_webview(_make_tier0_ns(detected), has_profiling=True, hotspots=hotspots)
     assert "Row color indicates runtime share" in html_with
 
     html_without = _format_tier0_webview(_make_tier0_ns(detected), hotspots=None)

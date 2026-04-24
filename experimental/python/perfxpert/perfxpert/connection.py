@@ -16,13 +16,13 @@ import sqlite3
 from pathlib import Path
 from typing import List, Optional, Union
 
-
 __all__ = ["PerfxpertConnection", "execute_statement"]
 
 
 # ---------------------------------------------------------------------------
 # Compatibility alias used throughout analyze.py (same name as rocpd class)
 # ---------------------------------------------------------------------------
+
 
 def execute_statement(conn, statement, params=()):
     """Execute a SQL statement on a PerfxpertConnection or raw sqlite3.Connection."""
@@ -119,8 +119,7 @@ class PerfxpertConnection:
             shard_sources = []
             for source in sources:
                 check = self.connection.execute(
-                    f"SELECT COUNT(*) FROM {alias}.sqlite_master "
-                    f"WHERE (type='table' OR type='view') AND name=?",
+                    f"SELECT COUNT(*) FROM {alias}.sqlite_master " f"WHERE (type='table' OR type='view') AND name=?",
                     (source,),
                 ).fetchone()
                 if check and check[0] > 0:
@@ -129,11 +128,7 @@ class PerfxpertConnection:
             if not shard_sources:
                 continue
 
-            shard_query = (
-                "SELECT COALESCE(MAX(end) - MIN(start), 0) FROM ("
-                + " UNION ALL ".join(shard_sources)
-                + ")"
-            )
+            shard_query = "SELECT COALESCE(MAX(end) - MIN(start), 0) FROM (" + " UNION ALL ".join(shard_sources) + ")"
             shard_runtime = self.connection.execute(shard_query).fetchone()
             total_runtime += shard_runtime[0] or 0
 
@@ -224,9 +219,7 @@ class PerfxpertConnection:
             # surface a warning once so the operator knows data is
             # being trimmed. This is quiet by default (single warning
             # per table) to avoid noise on happy-path multi-DB.
-            dropped_per_shard = [
-                sorted(set(s) - common) for s in per_shard_cols
-            ]
+            dropped_per_shard = [sorted(set(s) - common) for s in per_shard_cols]
             if any(dropped_per_shard):
                 warnings.warn(
                     f"perfxpert.connection: schema-mixed shards for table "
@@ -237,14 +230,9 @@ class PerfxpertConnection:
                 )
 
             col_list = ", ".join(cols)
-            parts = [
-                f"SELECT {col_list} FROM {s}.{table}"
-                for s in schemas_with_table
-            ]
+            parts = [f"SELECT {col_list} FROM {s}.{table}" for s in schemas_with_table]
             union_sql = " UNION ALL ".join(parts)
-            conn.execute(
-                f"CREATE TEMP VIEW IF NOT EXISTS {table} AS {union_sql}"
-            )
+            conn.execute(f"CREATE TEMP VIEW IF NOT EXISTS {table} AS {union_sql}")
 
         # Union analysis-facing views (kernels, memory_copies, regions)
         # that are defined as SQL VIEWs inside each rocpd database
@@ -276,9 +264,7 @@ class PerfxpertConnection:
                     continue
                 # PRAGMA table_info works on views as well as tables.
                 try:
-                    cursor = conn.execute(
-                        f"PRAGMA {alias}.table_info({view_name})"
-                    )
+                    cursor = conn.execute(f"PRAGMA {alias}.table_info({view_name})")
                     shard_cols = [row[1] for row in cursor.fetchall()]
                 except sqlite3.OperationalError:
                     shard_cols = []
@@ -306,9 +292,7 @@ class PerfxpertConnection:
                 )
                 continue
 
-            dropped_per_shard = [
-                sorted(set(s) - common) for s in per_shard_cols
-            ]
+            dropped_per_shard = [sorted(set(s) - common) for s in per_shard_cols]
             if any(dropped_per_shard):
                 warnings.warn(
                     f"perfxpert.connection: schema-mixed shards for analysis "
@@ -320,20 +304,15 @@ class PerfxpertConnection:
                 )
 
             col_list = ", ".join(cols)
-            parts = [
-                f"SELECT {col_list} FROM {alias}.{view_name}"
-                for alias in shards_with_view
-            ]
+            parts = [f"SELECT {col_list} FROM {alias}.{view_name}" for alias in shards_with_view]
             union_sql = " UNION ALL ".join(parts)
-            conn.execute(
-                f"CREATE TEMP VIEW IF NOT EXISTS [{view_name}] "
-                f"AS {union_sql}"
-            )
+            conn.execute(f"CREATE TEMP VIEW IF NOT EXISTS [{view_name}] " f"AS {union_sql}")
 
 
 # ---------------------------------------------------------------------------
 # Convenience: merge multiple .db files into a single output file (pure SQL)
 # ---------------------------------------------------------------------------
+
 
 def merge_sqlite_dbs(
     db_paths: List[Union[str, Path]],
@@ -379,31 +358,20 @@ def merge_sqlite_dbs(
         for idx, src in enumerate(db_paths[1:], start=1):
             alias = f"src{idx}"
             conn.execute(f"ATTACH DATABASE ? AS {alias}", (str(src),))
-            cursor = conn.execute(
-                f"SELECT type, name FROM {alias}.sqlite_master "
-                f"WHERE type = 'table'"
-            )
-            tables = [
-                row[1]
-                for row in cursor.fetchall()
-                if not row[1].startswith("sqlite_")
-            ]
+            cursor = conn.execute(f"SELECT type, name FROM {alias}.sqlite_master " f"WHERE type = 'table'")
+            tables = [row[1] for row in cursor.fetchall() if not row[1].startswith("sqlite_")]
             for table in tables:
                 try:
                     # Check for primary key collisions before inserting
                     pk_cols = [
-                        row[1] for row in conn.execute(
-                            f"PRAGMA table_info({table})"
-                        ).fetchall()
+                        row[1]
+                        for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
                         if row[5] > 0  # row[5] is the 'pk' column
                     ]
                     if pk_cols:
-                        pk_join = " AND ".join(
-                            f"src.{c} = dst.{c}" for c in pk_cols
-                        )
+                        pk_join = " AND ".join(f"src.{c} = dst.{c}" for c in pk_cols)
                         collision = conn.execute(
-                            f"SELECT COUNT(*) FROM {alias}.{table} src "
-                            f"INNER JOIN main.{table} dst ON {pk_join}"
+                            f"SELECT COUNT(*) FROM {alias}.{table} src " f"INNER JOIN main.{table} dst ON {pk_join}"
                         ).fetchone()
                         if collision and collision[0] > 0:
                             raise ValueError(
@@ -414,10 +382,7 @@ def merge_sqlite_dbs(
                                 f"multi-DB analysis instead of physical merge."
                             )
                     # No collision (or no PK) — safe to insert
-                    conn.execute(
-                        f"INSERT INTO main.{table} "
-                        f"SELECT * FROM {alias}.{table}"
-                    )
+                    conn.execute(f"INSERT INTO main.{table} " f"SELECT * FROM {alias}.{table}")
                 except sqlite3.OperationalError:
                     pass  # table may have different schema in this shard
             conn.commit()

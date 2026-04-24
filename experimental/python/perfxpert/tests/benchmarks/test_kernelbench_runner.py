@@ -7,7 +7,6 @@ import pytest
 
 from tests.benchmarks.kernelbench_runner import parse_kernelbench_output, RunResult
 
-
 FIXTURE = Path(__file__).parent / "fixtures" / "kernelbench_sample.csv"
 
 
@@ -29,11 +28,25 @@ def test_parse_extracts_kernel_id_baseline_optimized_ns():
 
 
 def _sample_raw() -> str:
-    return json.dumps({
-        "suite": "kernelbench-rocm:level1",
-        "mode": "analysis_only",
-        "results": [
-            {"kernel": "gemm_rocblas", "baseline_ns": 1_000_000, "analysis_succeeded": True, "recommendation_count": 1, "report_path": "/tmp/gemm.json"},
-            {"kernel": "softmax_fused", "baseline_ns": 500_000, "analysis_succeeded": False, "recommendation_count": 0, "report_path": None},
-        ],
-    })
+    return json.dumps(
+        {
+            "suite": "kernelbench-rocm:level1",
+            "mode": "analysis_only",
+            "results": [
+                {
+                    "kernel": "gemm_rocblas",
+                    "baseline_ns": 1_000_000,
+                    "analysis_succeeded": True,
+                    "recommendation_count": 1,
+                    "report_path": "/tmp/gemm.json",
+                },
+                {
+                    "kernel": "softmax_fused",
+                    "baseline_ns": 500_000,
+                    "analysis_succeeded": False,
+                    "recommendation_count": 0,
+                    "report_path": None,
+                },
+            ],
+        }
+    )

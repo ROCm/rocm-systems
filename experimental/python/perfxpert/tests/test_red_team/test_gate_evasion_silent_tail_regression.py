@@ -15,23 +15,13 @@ from tests.test_red_team.conftest import record_outcome
 def test_regression_catches_silent_tail_via_weighted_geomean(outcomes_dir) -> None:
     # 10 kernels at 8% each (all hot by ≥3% individually, cumulative 80%).
     # Each regresses 6% — individually invisible to a 10% per-kernel rule.
-    baseline_runs = [
-        KernelRuntime(kernel_name=f"k{i}", total_runtime_ns=800_000, share=0.08)
-        for i in range(10)
-    ]
+    baseline_runs = [KernelRuntime(kernel_name=f"k{i}", total_runtime_ns=800_000, share=0.08) for i in range(10)]
     # Plus one non-hot kernel at 20%
-    baseline_runs.append(
-        KernelRuntime(kernel_name="cold", total_runtime_ns=2_000_000, share=0.20)
-    )
+    baseline_runs.append(KernelRuntime(kernel_name="cold", total_runtime_ns=2_000_000, share=0.20))
     # After: each hot kernel 7% slower; cold kernel 10% faster
     # 7% per-kernel regresses to ~5.6% weighted-geomean (exceeds 5% threshold)
-    new_runs = [
-        KernelRuntime(kernel_name=f"k{i}", total_runtime_ns=856_000, share=0.08)
-        for i in range(10)
-    ]
-    new_runs.append(
-        KernelRuntime(kernel_name="cold", total_runtime_ns=1_800_000, share=0.18)
-    )
+    new_runs = [KernelRuntime(kernel_name=f"k{i}", total_runtime_ns=856_000, share=0.08) for i in range(10)]
+    new_runs.append(KernelRuntime(kernel_name="cold", total_runtime_ns=1_800_000, share=0.18))
 
     gate_input = GateInput(
         kernel_name="workload",

@@ -10,12 +10,11 @@ import pytest
 from perfxpert.tools.profile_runner import run as profile_run, RocprofFlagError
 from tests.test_red_team.conftest import record_outcome
 
-
 INVALID_ROCPROFV3_FLAGS = [
-    "--hip-api-trace",              # fake flag in legacy AI output
-    "--kernel-names evil_name",     # value-taker rocprofv3 doesn't accept
-    "--exec-shell /bin/sh",         # outright malicious
-    "--output-dir /etc/",            # absolute path outside allowed output roots
+    "--hip-api-trace",  # fake flag in legacy AI output
+    "--kernel-names evil_name",  # value-taker rocprofv3 doesn't accept
+    "--exec-shell /bin/sh",  # outright malicious
+    "--output-dir /etc/",  # absolute path outside allowed output roots
 ]
 
 

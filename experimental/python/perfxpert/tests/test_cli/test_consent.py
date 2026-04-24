@@ -33,7 +33,6 @@ from perfxpert.cli._consent import (
     revoke_consent,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures — isolate HOME + XDG_CONFIG_HOME so no tests touch the real home.
 # ---------------------------------------------------------------------------
@@ -111,9 +110,7 @@ def test_consent_invalidated_when_file_set_changes(isolated_home: Path) -> None:
     assert has_consent("claude", isolated_home, fset2) is False
 
 
-def test_consent_invalidated_when_cwd_changes(
-    isolated_home: Path, tmp_path: Path
-) -> None:
+def test_consent_invalidated_when_cwd_changes(isolated_home: Path, tmp_path: Path) -> None:
     other = tmp_path / "other"
     other.mkdir()
     fset = file_set_hash([(other / "CLAUDE.md", False, False)])
@@ -148,90 +145,53 @@ def test_revoke_consent_removes_all_fset_variants(isolated_home: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_env_override_auto_grants(
-    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_env_override_auto_grants(isolated_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(CONSENT_ASSUME_ENV, "1")
     buf = io.StringIO()
-    assert (
-        prompt_consent_interactive(
-            "claude", isolated_home, ["install stuff"], stream=buf
-        )
-        is True
-    )
+    assert prompt_consent_interactive("claude", isolated_home, ["install stuff"], stream=buf) is True
     assert "auto-grant" in buf.getvalue()
 
 
 @pytest.mark.parametrize("env_val", ["true", "YES", "1"])
-def test_env_override_accepts_truthy_values(
-    env_val: str, isolated_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_env_override_accepts_truthy_values(env_val: str, isolated_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(CONSENT_ASSUME_ENV, env_val)
     buf = io.StringIO()
-    assert (
-        prompt_consent_interactive("claude", isolated_home, [], stream=buf) is True
-    )
+    assert prompt_consent_interactive("claude", isolated_home, [], stream=buf) is True
 
 
-def test_non_tty_refuses_without_env(
-    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_non_tty_refuses_without_env(isolated_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(CONSENT_ASSUME_ENV, raising=False)
     # Force stdin.isatty to return False.
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     buf = io.StringIO()
-    assert (
-        prompt_consent_interactive(
-            "claude", isolated_home, ["action 1"], stream=buf
-        )
-        is False
-    )
+    assert prompt_consent_interactive("claude", isolated_home, ["action 1"], stream=buf) is False
     assert CONSENT_ASSUME_ENV in buf.getvalue()
     assert "non-interactive" in buf.getvalue()
 
 
-def test_interactive_yes_grants(
-    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_interactive_yes_grants(isolated_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(CONSENT_ASSUME_ENV, raising=False)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda: "y")
     buf = io.StringIO()
-    assert (
-        prompt_consent_interactive(
-            "claude", isolated_home, ["action 1"], stream=buf
-        )
-        is True
-    )
+    assert prompt_consent_interactive("claude", isolated_home, ["action 1"], stream=buf) is True
 
 
-def test_interactive_no_declines(
-    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_interactive_no_declines(isolated_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(CONSENT_ASSUME_ENV, raising=False)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda: "n")
     buf = io.StringIO()
-    assert (
-        prompt_consent_interactive(
-            "claude", isolated_home, ["action 1"], stream=buf
-        )
-        is False
-    )
+    assert prompt_consent_interactive("claude", isolated_home, ["action 1"], stream=buf) is False
 
 
-def test_interactive_enter_declines(
-    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_interactive_enter_declines(isolated_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Default (bare Enter) should be the safe "no" path."""
     monkeypatch.delenv(CONSENT_ASSUME_ENV, raising=False)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda: "")
     buf = io.StringIO()
-    assert (
-        prompt_consent_interactive("claude", isolated_home, ["x"], stream=buf)
-        is False
-    )
+    assert prompt_consent_interactive("claude", isolated_home, ["x"], stream=buf) is False
 
 
 # ---------------------------------------------------------------------------
@@ -239,9 +199,7 @@ def test_interactive_enter_declines(
 # ---------------------------------------------------------------------------
 
 
-def test_xdg_config_home_honored(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_xdg_config_home_honored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     xdg = tmp_path / "custom_xdg"
     xdg.mkdir()
     monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
@@ -253,9 +211,7 @@ def test_xdg_config_home_honored(
     assert p.name == "consent.yaml"
 
 
-def test_home_isolation_defaults_to_dot_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_home_isolation_defaults_to_dot_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """With HOME set and XDG_CONFIG_HOME unset, consent lives under HOME/.config."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)

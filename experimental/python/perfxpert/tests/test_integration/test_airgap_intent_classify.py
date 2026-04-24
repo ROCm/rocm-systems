@@ -9,7 +9,6 @@ import pytest
 
 from perfxpert.runtime.intent_classifier import classify_intent
 
-
 QUERIES_AND_EXPECTED = [
     ("Why is my matmul slow?", "analyze"),
     ("How do I make this faster?", "analyze"),
@@ -45,4 +44,6 @@ def test_intent_identical_with_and_without_llm(query: str, expected: str) -> Non
         a = classify_intent(query)
     with airgap_env(on=True):
         b = classify_intent(query)
-    assert a.intent == b.intent == expected, f"Mismatch: with_llm={a.intent!r}, airgap={b.intent!r}, expected={expected!r}"
+    assert (
+        a.intent == b.intent == expected
+    ), f"Mismatch: with_llm={a.intent!r}, airgap={b.intent!r}, expected={expected!r}"

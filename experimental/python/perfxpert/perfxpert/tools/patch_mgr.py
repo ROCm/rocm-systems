@@ -17,7 +17,6 @@ from perfxpert.tools._safety import (
     reject_shell_metachars,
 )
 
-
 _BACKUP_SUFFIX = ".bak"
 
 
@@ -107,6 +106,7 @@ def verify_output(
     # Numeric path for .npy/.npz
     if baseline.suffix in {".npy", ".npz"} and tolerance is not None:
         import numpy as np  # imported lazily; test guards with importorskip
+
         a = np.load(baseline)
         b = np.load(new)
         match = bool(np.allclose(a, b, rtol=tolerance, atol=tolerance))

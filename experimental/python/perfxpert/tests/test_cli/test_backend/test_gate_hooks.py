@@ -35,32 +35,25 @@ from perfxpert.cli._gate_hooks import claude as claude_hook
 from perfxpert.cli._gate_hooks import gemini as gemini_hook
 from perfxpert.cli._gate_hooks import opencode as opencode_hook
 
-
 # ---------------------------------------------------------------------------
 # opencode.
 # ---------------------------------------------------------------------------
 
 
 def test_opencode_gate_rejects_bash_before_intent_classify() -> None:
-    result = opencode_hook.evaluate(
-        "bash", intent_classify_observed=False
-    )
+    result = opencode_hook.evaluate("bash", intent_classify_observed=False)
     assert result.get("block") is True
     assert "intent_classify" in result["retryWith"]
 
 
 def test_opencode_gate_lifts_after_intent_classify() -> None:
-    result = opencode_hook.evaluate(
-        "bash", intent_classify_observed=True
-    )
+    result = opencode_hook.evaluate("bash", intent_classify_observed=True)
     assert result == {}
 
 
 def test_opencode_permits_bash_on_turn_2_after_intent_classify_on_turn_1() -> None:
     """B-N3 false-refusal regression: turn number is NOT consulted."""
-    turn1 = opencode_hook.evaluate(
-        "perfxpert_intent_classify", intent_classify_observed=False
-    )
+    turn1 = opencode_hook.evaluate("perfxpert_intent_classify", intent_classify_observed=False)
     assert turn1 == {}  # perfxpert-prefixed tool is always allowed.
     # Simulate intent_classify having returned — session-state flipped.
     turn2 = opencode_hook.evaluate("bash", intent_classify_observed=True)
@@ -70,10 +63,7 @@ def test_opencode_permits_bash_on_turn_2_after_intent_classify_on_turn_1() -> No
 def test_opencode_perfxpert_tools_always_allowed() -> None:
     """Even before intent_classify returns, the perfxpert_* namespace is open."""
     for tool in ("perfxpert_intent_classify", "mcp__perfxpert__report"):
-        assert (
-            opencode_hook.evaluate(tool, intent_classify_observed=False)
-            == {}
-        )
+        assert opencode_hook.evaluate(tool, intent_classify_observed=False) == {}
 
 
 def test_opencode_documents_fork_only_dependency_in_docstring() -> None:
@@ -107,22 +97,16 @@ def test_claude_evaluate_rejects_non_perfxpert_before_intent_classify() -> None:
 
 
 def test_claude_evaluate_lifts_after_intent_classify() -> None:
-    out = claude_hook.evaluate_gate_state(
-        "Bash", intent_classify_observed=True
-    )
+    out = claude_hook.evaluate_gate_state("Bash", intent_classify_observed=True)
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
 def test_claude_evaluate_always_allows_mcp_perfxpert() -> None:
-    out = claude_hook.evaluate_gate_state(
-        "mcp__perfxpert__intent_classify", intent_classify_observed=False
-    )
+    out = claude_hook.evaluate_gate_state("mcp__perfxpert__intent_classify", intent_classify_observed=False)
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
-def test_claude_gate_install_writes_script_and_settings(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_claude_gate_install_writes_script_and_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(GATE_HOOK_DISABLED_ENV, raising=False)
     result = claude_hook.ClaudeGateHook().install(tmp_path)
     assert result.hook_script.is_file()
@@ -159,15 +143,7 @@ def test_claude_gate_install_preserves_existing_pre_tool_use_hooks(
     settings = tmp_path / ".claude" / "settings.json"
     settings.parent.mkdir(parents=True)
     settings.write_text(
-        json.dumps(
-            {
-                "hooks": {
-                    "PreToolUse": [
-                        {"hooks": [{"type": "command", "command": "/user/other.sh"}]}
-                    ]
-                }
-            }
-        )
+        json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "/user/other.sh"}]}]}})
     )
     claude_hook.ClaudeGateHook().install(tmp_path)
     data = json.loads(settings.read_text())
@@ -189,9 +165,7 @@ def test_claude_gate_install_raises_on_invalid_existing_json(
     assert not (tmp_path / ".claude" / "hooks" / "perfxpert-gate.sh").exists()
 
 
-def test_claude_gate_install_raises_when_env_disabled(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_claude_gate_install_raises_when_env_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(GATE_HOOK_DISABLED_ENV, "0")
     with pytest.raises(GateHookUnsupported, match="0"):
         claude_hook.ClaudeGateHook().install(tmp_path)
@@ -303,16 +277,12 @@ def test_gemini_evaluate_rejects_before_intent_classify() -> None:
 
 
 def test_gemini_evaluate_lifts_after_intent_classify() -> None:
-    out = gemini_hook.evaluate_gate_state(
-        "Bash", intent_classify_observed=True
-    )
+    out = gemini_hook.evaluate_gate_state("Bash", intent_classify_observed=True)
     assert out["allowed"] is True
 
 
 def test_gemini_evaluate_perfxpert_prefix_always_allowed() -> None:
-    out = gemini_hook.evaluate_gate_state(
-        "mcp_perfxpert_intent_classify", intent_classify_observed=False
-    )
+    out = gemini_hook.evaluate_gate_state("mcp_perfxpert_intent_classify", intent_classify_observed=False)
     assert out["allowed"] is True
 
 
@@ -355,16 +325,12 @@ def test_gemini_gate_install_preserves_existing_beforetool_hooks(
     )
     gemini_hook.GeminiGateHook().install(proj)
     data = json.loads(settings.read_text())
-    commands = [
-        entry["hooks"][0]["command"] for entry in data["hooks"]["BeforeTool"]
-    ]
+    commands = [entry["hooks"][0]["command"] for entry in data["hooks"]["BeforeTool"]]
     assert "/user/other.sh" in commands
     assert any("perfxpert-gate" in command for command in commands)
 
 
-def test_gemini_gate_install_raises_when_env_disabled(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_gemini_gate_install_raises_when_env_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(GATE_HOOK_DISABLED_ENV, "0")
     with pytest.raises(GateHookUnsupported):
         gemini_hook.GeminiGateHook().install(tmp_path / "proj")
@@ -379,9 +345,7 @@ def test_gemini_gate_install_raises_when_env_disabled(
     ],
     ids=["invalid-json", "top-level-list", "hooks-not-object"],
 )
-def test_gemini_gate_install_rolls_back_scripts_on_invalid_settings(
-    tmp_path: Path, existing: str
-) -> None:
+def test_gemini_gate_install_rolls_back_scripts_on_invalid_settings(tmp_path: Path, existing: str) -> None:
     proj = tmp_path / "proj"
     settings = proj / ".gemini" / "settings.json"
     settings.parent.mkdir(parents=True, exist_ok=True)
@@ -476,7 +440,7 @@ def test_gate_rejection_template_shared_across_backends() -> None:
     """The rejection reason text is sourced from ONE template; drift
     between prompt-layer and hook messaging is a bug (I-N3)."""
     reason = GATE_REJECTION_REASON_TEMPLATE.format(classify_tool="X")
-    claude_reason = claude_hook.evaluate_gate_state(
-        "Bash", intent_classify_observed=False, classify_tool="X"
-    )["hookSpecificOutput"]["permissionDecisionReason"]
+    claude_reason = claude_hook.evaluate_gate_state("Bash", intent_classify_observed=False, classify_tool="X")[
+        "hookSpecificOutput"
+    ]["permissionDecisionReason"]
     assert claude_reason == reason

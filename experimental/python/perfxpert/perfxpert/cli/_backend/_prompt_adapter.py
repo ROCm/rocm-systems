@@ -29,7 +29,6 @@ import time
 from pathlib import Path
 from typing import Callable, TypeVar
 
-
 __all__ = [
     "BEGIN_MARKER_FMT",
     "END_MARKER_FMT",
@@ -80,9 +79,7 @@ rest of the session.
 
 
 _BACKEND_BLOCK_RE = re.compile(
-    r"<!--backend:(?P<name>[a-zA-Z0-9_-]+)-->"
-    r"(?P<body>.*?)"
-    r"<!--/backend:(?P=name)-->",
+    r"<!--backend:(?P<name>[a-zA-Z0-9_-]+)-->" r"(?P<body>.*?)" r"<!--/backend:(?P=name)-->",
     re.DOTALL,
 )
 
@@ -96,9 +93,7 @@ def _strip_non_target_backend_blocks(src: str, target_backend: str) -> str:
     return _BACKEND_BLOCK_RE.sub(_replace, src)
 
 
-def _substitute_tool_names(
-    src: str, tool_name_template: str, known_tools: tuple[str, ...]
-) -> str:
+def _substitute_tool_names(src: str, tool_name_template: str, known_tools: tuple[str, ...]) -> str:
     """Replace every `perfxpert_<tool>` token with the rendered backend form.
 
     `tool_name_template` is expected to contain exactly one `{tool}`

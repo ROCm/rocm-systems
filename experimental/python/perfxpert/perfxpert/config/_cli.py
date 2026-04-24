@@ -11,7 +11,6 @@ import yaml
 
 from perfxpert.config._config import PerfXpertConfig, load_config
 
-
 _VALID_FIELDS = set(PerfXpertConfig.model_fields.keys())
 
 

@@ -28,11 +28,7 @@ _PERFXPERT_ROOT = "experimental/python/perfxpert"
 
 def _fmt(result: subprocess.CompletedProcess) -> str:
     """Compact error summary for pytest failure output."""
-    return (
-        f"exit={result.returncode}\n"
-        f"--- stdout ---\n{result.stdout}\n"
-        f"--- stderr ---\n{result.stderr}"
-    )
+    return f"exit={result.returncode}\n" f"--- stdout ---\n{result.stdout}\n" f"--- stderr ---\n{result.stderr}"
 
 
 def test_lint_sh_strict_exits_clean():
@@ -43,9 +39,7 @@ def test_lint_sh_strict_exits_clean():
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, (
-        "scripts/lint.sh --strict reported violations:\n" + _fmt(result)
-    )
+    assert result.returncode == 0, "scripts/lint.sh --strict reported violations:\n" + _fmt(result)
 
 
 def test_link_checker_strict_exits_clean():
@@ -56,9 +50,7 @@ def test_link_checker_strict_exits_clean():
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, (
-        "scripts/link-checker.py --strict reported dead links:\n" + _fmt(result)
-    )
+    assert result.returncode == 0, "scripts/link-checker.py --strict reported dead links:\n" + _fmt(result)
 
 
 def test_test_samples_strict_exits_clean():
@@ -69,7 +61,4 @@ def test_test_samples_strict_exits_clean():
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, (
-        "scripts/test-samples.py --strict reported failing samples:\n"
-        + _fmt(result)
-    )
+    assert result.returncode == 0, "scripts/test-samples.py --strict reported failing samples:\n" + _fmt(result)

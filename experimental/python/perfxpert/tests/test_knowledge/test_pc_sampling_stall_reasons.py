@@ -9,7 +9,10 @@ from perfxpert.knowledge import load_yaml
 
 SCHEMA_PATH = (
     Path(__file__).parent.parent.parent
-    / "perfxpert" / "knowledge" / "_schemas" / "pc_sampling_stall_reasons.schema.json"
+    / "perfxpert"
+    / "knowledge"
+    / "_schemas"
+    / "pc_sampling_stall_reasons.schema.json"
 )
 
 

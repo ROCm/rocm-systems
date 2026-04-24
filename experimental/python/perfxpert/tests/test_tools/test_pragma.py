@@ -15,14 +15,12 @@ import pytest
 from perfxpert.tools import pragma
 from perfxpert.tools._class import ToolClass
 
-
 # -- lookup_pragmas -------------------------------------------------------
+
 
 def test_lookup_pragmas_gpu_only_returns_allowlist():
     entries = pragma.lookup_pragmas(gpu_only=True)
-    assert len(entries) == 3, (
-        "Phase 10 spec: exactly 3 allowlisted GPU-applicable pragmas."
-    )
+    assert len(entries) == 3, "Phase 10 spec: exactly 3 allowlisted GPU-applicable pragmas."
     for e in entries:
         assert e["gpu_applicable"] is True
         assert e["allowlist"] is True
@@ -36,9 +34,7 @@ def test_lookup_pragmas_gpu_only_returns_allowlist():
 
 def test_lookup_pragmas_not_gpu_only_returns_all():
     entries = pragma.lookup_pragmas(gpu_only=False)
-    assert len(entries) >= 10, (
-        "Spec: 3 allowlisted + 7 explicitly rejected = 10 entries total."
-    )
+    assert len(entries) >= 10, "Spec: 3 allowlisted + 7 explicitly rejected = 10 entries total."
     pragma_ids = {e["pragma"] for e in entries}
     # Explicitly rejected entries the fence must *see* to refuse.
     for rejected in (
@@ -55,6 +51,7 @@ def test_lookup_pragmas_not_gpu_only_returns_all():
 
 # -- explain_pragma -------------------------------------------------------
 
+
 def test_explain_pragma_known():
     info = pragma.explain_pragma("clang_loop_unroll_count")
     assert info["pragma"] == "clang_loop_unroll_count"
@@ -69,6 +66,7 @@ def test_explain_pragma_unknown_raises_KeyError():
 
 
 # -- suggest_pragmas_for_kernel (Amdahl gate + Triton skip) ---------------
+
 
 def test_suggest_pragmas_for_kernel_honors_amdahl():
     """Kernel with <5% total time → empty list."""
@@ -87,6 +85,7 @@ def test_suggest_pragmas_skips_triton_kernel():
 
 
 # -- suggest_pragmas_for_kernel (rule firing) -----------------------------
+
 
 def test_suggest_pragmas_unroll_full_when_literal_trip_count():
     signals = {"loop_trip_count": 16, "hotspot_pct": 25}
@@ -110,16 +109,18 @@ def test_suggest_pragmas_unroll_count_when_valu_stalled():
     ids = {r["pragma"] for r in out}
     assert "clang_loop_unroll_count" in ids
     unroll_count_rec = [r for r in out if r["pragma"] == "clang_loop_unroll_count"][0]
-    assert unroll_count_rec["factor_sweep"] == [2, 4, 8], (
-        "YAML-locked factor sweep — the agent must NEVER invent other values."
-    )
+    assert unroll_count_rec["factor_sweep"] == [
+        2,
+        4,
+        8,
+    ], "YAML-locked factor sweep — the agent must NEVER invent other values."
 
 
 def test_suggest_pragmas_unroll_disable_when_vgpr_pressure():
     # VGPR at 80% of arch max + scratch > 0 fires the disable rule.
     signals = {
         "hotspot_pct": 20,
-        "vgpr_per_thread": 208,      # 208 / 256 = 0.8125 >= 0.80
+        "vgpr_per_thread": 208,  # 208 / 256 = 0.8125 >= 0.80
         "arch_max_vgpr": 256,
         "scratch_size": 64,
         "waves_per_eu": 1,
@@ -130,6 +131,7 @@ def test_suggest_pragmas_unroll_disable_when_vgpr_pressure():
 
 
 # -- tool class enforcement -----------------------------------------------
+
 
 def test_all_three_tools_are_read_only():
     assert pragma.lookup_pragmas.__tool_class__ == ToolClass.READ_ONLY

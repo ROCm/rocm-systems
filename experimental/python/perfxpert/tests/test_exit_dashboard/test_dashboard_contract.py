@@ -9,10 +9,7 @@ from pathlib import Path
 
 import pytest
 
-
-SCRIPT = (
-    Path(__file__).parent.parent.parent / "scripts" / "exit_dashboard.py"
-)
+SCRIPT = Path(__file__).parent.parent.parent / "scripts" / "exit_dashboard.py"
 
 
 EXPECTED_METRIC_KEYS = {
@@ -22,9 +19,9 @@ EXPECTED_METRIC_KEYS = {
     "regression_gate_false_positive_rate",
     "per_agent_narrow_scope_violations",
     "tool_class_split_violations",
-    "provider_smoke_status",      # may be "nightly-only" in PR lane
-    "benchmark_geomean",          # may be "nightly-only"
-    "user_signoff",               # may be "pending"
+    "provider_smoke_status",  # may be "nightly-only" in PR lane
+    "benchmark_geomean",  # may be "nightly-only"
+    "user_signoff",  # may be "pending"
 }
 
 

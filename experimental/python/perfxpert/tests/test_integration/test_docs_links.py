@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 # Anchor at the perfxpert app root (tests/ -> perfxpert app root).
 _APP_ROOT = Path(__file__).resolve().parents[2]
 
@@ -24,9 +23,7 @@ def test_mcp_server_doc_exists() -> None:
 def test_mcp_server_doc_is_non_empty() -> None:
     """Sanity check — the port should have copied a meaningful doc."""
     target = _APP_ROOT / "docs" / "integration" / "mcp-server.md"
-    assert target.stat().st_size > 1_000, (
-        f"{target} is smaller than expected (<1KB); port likely truncated."
-    )
+    assert target.stat().st_size > 1_000, f"{target} is smaller than expected (<1KB); port likely truncated."
 
 
 def test_integration_readme_exists() -> None:

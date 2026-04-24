@@ -8,7 +8,6 @@ except framework.py itself.
 import ast
 from pathlib import Path
 
-
 AGENT_PKG = Path(__file__).parent.parent.parent / "perfxpert" / "agents"
 RUNTIME_PKG = Path(__file__).parent.parent.parent / "perfxpert" / "runtime"
 
@@ -36,10 +35,7 @@ def _is_sdk_import(node: ast.AST) -> bool:
 
 def test_no_sdk_import_in_agents_package():
     violators = _scan_tree(AGENT_PKG)
-    assert not violators, (
-        f"These files import openai_agents directly — must go via framework.py: "
-        f"{violators}"
-    )
+    assert not violators, f"These files import openai_agents directly — must go via framework.py: " f"{violators}"
 
 
 def test_no_sdk_import_in_runtime_package():

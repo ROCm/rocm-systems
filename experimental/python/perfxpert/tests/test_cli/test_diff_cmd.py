@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 BASELINE_DB = FIXTURES / "regression_baseline.db"
@@ -30,9 +29,7 @@ def _run_perfxpert(args, check=False, **kwargs):
     cmd = [sys.executable, "-m", "perfxpert", *args]
     env = os.environ.copy()
     current_pythonpath = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = (
-        f"{PACKAGE_ROOT}{os.pathsep}{current_pythonpath}" if current_pythonpath else str(PACKAGE_ROOT)
-    )
+    env["PYTHONPATH"] = f"{PACKAGE_ROOT}{os.pathsep}{current_pythonpath}" if current_pythonpath else str(PACKAGE_ROOT)
     return subprocess.run(
         cmd,
         capture_output=True,
@@ -83,8 +80,6 @@ def test_diff_cmd_webview_writes_report(tmp_path, _fixtures_exist) -> None:
 
 
 def test_diff_cmd_missing_db_returns_rc2(tmp_path) -> None:
-    proc = _run_perfxpert(
-        ["diff", str(tmp_path / "nope.db"), str(tmp_path / "also_nope.db"), "--format", "text"]
-    )
+    proc = _run_perfxpert(["diff", str(tmp_path / "nope.db"), str(tmp_path / "also_nope.db"), "--format", "text"])
     assert proc.returncode == 2
     assert "not found" in proc.stderr.lower()

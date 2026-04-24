@@ -15,7 +15,6 @@ from typing import Any, Dict, List
 from perfxpert.tools._class import ToolClass, tool_class
 from perfxpert.tools._safety import build_safe_env, reject_shell_metachars
 
-
 _ANCHOR_TIMEOUT_SEC = 300
 
 

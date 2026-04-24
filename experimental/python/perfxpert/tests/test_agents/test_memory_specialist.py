@@ -34,9 +34,13 @@ def test_memory_specialist_cannot_handoff_laterally():
 
 
 def test_memory_specialist_returns_techniques(fake_provider, monkeypatch):
-    monkeypatch.setattr(ms_module, "_fetch_catalog", lambda gfx_id: [
-        {"name": "coalesce_loads", "expected_impact": 0.5, "effort_factor": 1.0, "risk": "low"},
-    ])
+    monkeypatch.setattr(
+        ms_module,
+        "_fetch_catalog",
+        lambda gfx_id: [
+            {"name": "coalesce_loads", "expected_impact": 0.5, "effort_factor": 1.0, "risk": "low"},
+        ],
+    )
     fake_provider.return_value = FakeProviderResponse(
         structured_output={
             "techniques": [{"name": "coalesce_loads", "expected_impact": 0.5}],
@@ -57,10 +61,14 @@ def test_memory_specialist_returns_techniques(fake_provider, monkeypatch):
 
 def test_memory_specialist_airgap_sorts_deterministically(monkeypatch):
     monkeypatch.setenv("PERFXPERT_AIRGAP", "1")
-    monkeypatch.setattr(ms_module, "_fetch_catalog", lambda gfx_id: [
-        {"name": "X", "expected_impact": 0.2, "effort_factor": 1.0, "risk": "low"},
-        {"name": "Y", "expected_impact": 0.6, "effort_factor": 1.0, "risk": "low"},
-    ])
+    monkeypatch.setattr(
+        ms_module,
+        "_fetch_catalog",
+        lambda gfx_id: [
+            {"name": "X", "expected_impact": 0.2, "effort_factor": 1.0, "risk": "low"},
+            {"name": "Y", "expected_impact": 0.6, "effort_factor": 1.0, "risk": "low"},
+        ],
+    )
     result = ms_module.run_memory_specialist(
         schemas.MemorySpecialistInput(gfx_id="gfx942", hot_kernels=[]),
         airgap=True,
@@ -70,20 +78,24 @@ def test_memory_specialist_airgap_sorts_deterministically(monkeypatch):
 
 def test_memory_specialist_airgap_promotes_stream_overlap(monkeypatch):
     monkeypatch.setenv("PERFXPERT_AIRGAP", "1")
-    monkeypatch.setattr(ms_module, "_fetch_catalog", lambda gfx_id: [
-        {
-            "name": "memory_coalescing_stride_fix",
-            "expected_impact": 4.0,
-            "effort_factor": 2.0,
-            "risk": "medium",
-        },
-        {
-            "name": "hip_stream_overlap",
-            "expected_impact": 0.7,
-            "effort_factor": 2.0,
-            "risk": "low",
-        },
-    ])
+    monkeypatch.setattr(
+        ms_module,
+        "_fetch_catalog",
+        lambda gfx_id: [
+            {
+                "name": "memory_coalescing_stride_fix",
+                "expected_impact": 4.0,
+                "effort_factor": 2.0,
+                "risk": "medium",
+            },
+            {
+                "name": "hip_stream_overlap",
+                "expected_impact": 0.7,
+                "effort_factor": 2.0,
+                "risk": "low",
+            },
+        ],
+    )
     result = ms_module.run_memory_specialist(
         schemas.MemorySpecialistInput(gfx_id="gfx942", hot_kernels=[]),
         airgap=True,

@@ -100,6 +100,7 @@ def compute_time_breakdown(connection: RocpdImportData) -> Dict[str, Any]:
     finally:
         _m.execute_statement = _saved
 
+
 __all__ = [
     "compute_time_breakdown",
     "identify_hotspots",
@@ -133,8 +134,6 @@ from .formatters import (  # noqa: F401 -- re-exports for backward compat
     format_analysis_output,
     _CATEGORY_IDS,
 )
-
-
 
 
 def add_args(parser: argparse.ArgumentParser):
@@ -292,7 +291,6 @@ def add_args(parser: argparse.ArgumentParser):
             "Example: --att-dir ./att_output"
         ),
     )
-
 
     llm_options.add_argument(
         "--llm-thinking",
@@ -548,13 +546,9 @@ def _render_diff_scard_html(diff_result: Dict[str, Any]) -> str:
     wall_ns = int(diff_result.get("wall_delta_ns", 0))
     regs = diff_result.get("primary_regressions", []) or []
     imps = diff_result.get("primary_improvements", []) or []
-    color = (
-        "#e84040"
-        if wall_pct > 5.0
-        else ("#3acc66" if wall_pct < -5.0 else "#4d8ef2")
-    )
+    color = "#e84040" if wall_pct > 5.0 else ("#3acc66" if wall_pct < -5.0 else "#4d8ef2")
     rows = []
-    for k in (diff_result.get("per_kernel") or []):
+    for k in diff_result.get("per_kernel") or []:
         dp = float(k.get("delta_pct", 0.0))
         rc = "#e84040" if dp > 3 else ("#3acc66" if dp < -3 else "var(--sub)")
         rows.append(
@@ -569,25 +563,23 @@ def _render_diff_scard_html(diff_result: Dict[str, Any]) -> str:
         '<section class="scard" id="trace-diff">'
         '<div class="shdr">'
         '<span class="shdr-icon">&#128200;</span>'
-        '<h2>Changed vs baseline</h2>'
-        '</div>'
+        "<h2>Changed vs baseline</h2>"
+        "</div>"
         '<div class="sbody">'
         f'<p style="margin-bottom:.75rem">Baseline: <code>{_h(diff_result.get("baseline_db"))}</code> '
         f'&rarr; New: <code>{_h(diff_result.get("new_db"))}</code></p>'
         f'<p style="margin-bottom:.75rem;color:{color};font-weight:600">'
-        f'Wall-time delta: {wall_pct:+.2f}% ({wall_ns:+,} ns) — '
-        f'{len(regs)} regression(s), {len(imps)} improvement(s).</p>'
+        f"Wall-time delta: {wall_pct:+.2f}% ({wall_ns:+,} ns) — "
+        f"{len(regs)} regression(s), {len(imps)} improvement(s).</p>"
         '<div class="tbl-wrap"><table class="dtable">'
-        '<thead><tr><th>Kernel</th><th>Baseline (ns)</th>'
-        '<th>New (ns)</th><th>Δ %</th></tr></thead>'
-        '<tbody>' + "".join(rows) + '</tbody></table></div>'
-        '</div></section>'
+        "<thead><tr><th>Kernel</th><th>Baseline (ns)</th>"
+        "<th>New (ns)</th><th>Δ %</th></tr></thead>"
+        "<tbody>" + "".join(rows) + "</tbody></table></div>"
+        "</div></section>"
     )
 
 
-def _build_summary_scard(
-    *, narrative: str, primary_bottleneck: str, warnings: list
-) -> str:
+def _build_summary_scard(*, narrative: str, primary_bottleneck: str, warnings: list) -> str:
     """Render the agent Summary as a standard ``.scard``.
 
     The narrative goes in a ``<p>`` inside ``.sbody`` (preserving
@@ -606,17 +598,12 @@ def _build_summary_scard(
     if primary_bottleneck:
         body_parts.append(
             f'<p class="assess"><strong>Primary bottleneck:</strong> '
-            f'{_html_mod.escape(str(primary_bottleneck))}</p>'
+            f"{_html_mod.escape(str(primary_bottleneck))}</p>"
         )
     for para in paragraphs:
-        body_parts.append(
-            f'<p style="margin-bottom:.8rem;line-height:1.65">'
-            f'{_html_mod.escape(para)}</p>'
-        )
+        body_parts.append(f'<p style="margin-bottom:.8rem;line-height:1.65">' f"{_html_mod.escape(para)}</p>")
     if warnings:
-        w_items = "".join(
-            f"<li>{_html_mod.escape(str(w))}</li>" for w in warnings
-        )
+        w_items = "".join(f"<li>{_html_mod.escape(str(w))}</li>" for w in warnings)
         body_parts.append(
             '<p style="margin-top:.85rem;color:var(--sub);font-size:.9rem">'
             "Warnings:</p>"
@@ -624,21 +611,18 @@ def _build_summary_scard(
         )
     bn_badge = ""
     if primary_bottleneck:
-        bn_badge = (
-            f'<span class="shdr-badge sbadge-info">'
-            f'{_html_mod.escape(str(primary_bottleneck))}</span>'
-        )
+        bn_badge = f'<span class="shdr-badge sbadge-info">' f"{_html_mod.escape(str(primary_bottleneck))}</span>"
     return (
         '\n<section class="scard" id="agentic-narrative">'
         '\n<div class="shdr">'
         '\n<span class="shdr-icon">&#128220;</span>'
-        '\n<h2>Summary</h2>'
+        "\n<h2>Summary</h2>"
         f"\n{bn_badge}"
-        '\n</div>'
+        "\n</div>"
         '\n<div class="sbody">'
         f'\n{"".join(body_parts)}'
-        '\n</div>'
-        '\n</section>\n'
+        "\n</div>"
+        "\n</section>\n"
     )
 
 
@@ -728,25 +712,25 @@ def _build_tier0_wrapper_scard(tier0_full_html: str) -> str:
             '\n<section class="scard" id="tier0-scan">'
             '\n<div class="shdr">'
             '\n<span class="shdr-icon">&#128187;</span>'
-            '\n<h2>Tier-0 Source Scan</h2>'
-            '\n</div>'
+            "\n<h2>Tier-0 Source Scan</h2>"
+            "\n</div>"
             '\n<div class="sbody">'
-            '\n<!-- tier-0 scards not found; raw content omitted -->'
-            '\n</div>'
-            '\n</section>\n'
+            "\n<!-- tier-0 scards not found; raw content omitted -->"
+            "\n</div>"
+            "\n</section>\n"
         )
     inner = "\n".join(inner_sections)
     return (
         '\n<section class="scard" id="tier0-scan">'
         '\n<div class="shdr">'
         '\n<span class="shdr-icon">&#128187;</span>'
-        '\n<h2>Tier-0 Source Scan</h2>'
+        "\n<h2>Tier-0 Source Scan</h2>"
         '\n<span class="shdr-badge sbadge-info">Static source analysis</span>'
-        '\n</div>'
+        "\n</div>"
         '\n<div class="sbody">'
-        f'\n{inner}'
-        '\n</div>'
-        '\n</section>\n'
+        f"\n{inner}"
+        "\n</div>"
+        "\n</section>\n"
     )
 
 
@@ -978,19 +962,12 @@ def _format_agentic_output(
         merged_recs,
         hotspots=hotspots,
         primary_bottleneck=primary_bottleneck,
-        counter_data_available=bool(
-            (hardware_counters or {}).get("has_counters")
-        ),
+        counter_data_available=bool((hardware_counters or {}).get("has_counters")),
     )
 
     # Source-only path: dispatch entirely to the tier-0 formatters when
     # there is no DB-side data at all.
-    tier0_only = (
-        tier0_findings is not None
-        and not time_breakdown
-        and not hotspots
-        and not memory_analysis
-    )
+    tier0_only = tier0_findings is not None and not time_breakdown and not hotspots and not memory_analysis
     if tier0_only:
         # Attach narrative + merged recs onto the tier-0 result so the
         # tier-0 formatters carry the agent brain through the output.
@@ -1006,6 +983,7 @@ def _format_agentic_output(
             # callers expect the agentic keys too (narrative / primary_bottleneck /
             # warnings) so we merge them in post-hoc.
             import json as _json
+
             base = _format_tier0_json(tier0_ns)
             try:
                 doc = _json.loads(base)
@@ -1029,9 +1007,7 @@ def _format_agentic_output(
             md = _format_tier0_markdown(tier0_ns)
             summary_parts: list = []
             if primary_bottleneck:
-                summary_parts.append(
-                    f"**Primary bottleneck:** {primary_bottleneck}"
-                )
+                summary_parts.append(f"**Primary bottleneck:** {primary_bottleneck}")
                 summary_parts.append("")
             if narrative:
                 summary_parts.append(narrative.rstrip())
@@ -1041,12 +1017,7 @@ def _format_agentic_output(
                     summary_parts.append(f"- \u26a0 {w}")
                 summary_parts.append("")
             if summary_parts:
-                md = (
-                    "## Summary\n\n"
-                    + "\n".join(summary_parts).rstrip()
-                    + "\n\n---\n\n"
-                    + md
-                )
+                md = "## Summary\n\n" + "\n".join(summary_parts).rstrip() + "\n\n---\n\n" + md
             return md
         if output_format == "webview":
             html = _format_tier0_webview(tier0_ns)
@@ -1062,19 +1033,20 @@ def _format_agentic_output(
         # the title remain green even on the tier-0-only path.
         tier0_text = _format_tier0_text(tier0_ns)
         width = 80
-        banner = (
-            "=" * width + "\n"
-            + "PERFXPERT ANALYSIS".center(width) + "\n"
-            + "=" * width + "\n"
-        )
+        banner = "=" * width + "\n" + "PERFXPERT ANALYSIS".center(width) + "\n" + "=" * width + "\n"
         if "PERFXPERT ANALYSIS" not in tier0_text:
             tier0_text = banner + tier0_text
         if narrative:
             summary = (
-                "\n" + ("\u2501" * width) + "\n"
-                + "SUMMARY".center(width) + "\n"
-                + ("\u2501" * width) + "\n"
-                + narrative.rstrip() + "\n"
+                "\n"
+                + ("\u2501" * width)
+                + "\n"
+                + "SUMMARY".center(width)
+                + "\n"
+                + ("\u2501" * width)
+                + "\n"
+                + narrative.rstrip()
+                + "\n"
             )
             tier0_text = summary + tier0_text
         return tier0_text
@@ -1098,6 +1070,7 @@ def _format_agentic_output(
             roofline=roofline_points,
         )
         import json as _json
+
         try:
             doc = _json.loads(base_json)
         except Exception:
@@ -1127,9 +1100,7 @@ def _format_agentic_output(
                     "profiling_plan_actions",
                     "suggested_first_command",
                 }
-                doc["tier0_findings"] = {
-                    k: v for k, v in tier0_findings.items() if k not in _strip_keys
-                }
+                doc["tier0_findings"] = {k: v for k, v in tier0_findings.items() if k not in _strip_keys}
             else:
                 doc["tier0_findings"] = tier0_findings
         # Schema bump: the agentic pipeline adds
@@ -1200,9 +1171,7 @@ def _format_agentic_output(
         #   ## Time Breakdown
         summary_parts: list = []
         if primary_bottleneck:
-            summary_parts.append(
-                f"**Primary bottleneck:** {primary_bottleneck}"
-            )
+            summary_parts.append(f"**Primary bottleneck:** {primary_bottleneck}")
             summary_parts.append("")
         if narrative:
             summary_parts.append(narrative.rstrip())
@@ -1213,11 +1182,7 @@ def _format_agentic_output(
             summary_parts.append("")
         summary_block = ""
         if summary_parts:
-            summary_block = (
-                "## Summary\n\n"
-                + "\n".join(summary_parts).rstrip()
-                + "\n\n---\n\n"
-            )
+            summary_block = "## Summary\n\n" + "\n".join(summary_parts).rstrip() + "\n\n---\n\n"
         if summary_block:
             anchor = "**Database:**"
             idx = md.find(anchor)
@@ -1227,17 +1192,12 @@ def _format_agentic_output(
                 line_start = md.rfind("\n", 0, idx)
                 if line_start < 0:
                     line_start = 0
-                md = md[:line_start + 1] + summary_block + md[line_start + 1:]
+                md = md[: line_start + 1] + summary_block + md[line_start + 1 :]
             else:
                 # No metadata block — splice Summary right under the H1.
                 h1_end = md.find("\n", md.find("# "))
                 if h1_end != -1:
-                    md = (
-                        md[: h1_end + 1]
-                        + "\n"
-                        + summary_block
-                        + md[h1_end + 1:]
-                    )
+                    md = md[: h1_end + 1] + "\n" + summary_block + md[h1_end + 1 :]
                 else:
                     md = summary_block + md
         if tier0_findings is not None:
@@ -1288,9 +1248,7 @@ def _format_agentic_output(
             # by the matched Tier-1 % Total bucket. Source-only callers
             # upstream (formatters/__init__.py source_only path) do not
             # have hotspots and pass None → no severity coloring.
-            tier0_full = _format_tier0_webview(
-                tier0_ns, has_profiling=True, hotspots=hotspots
-            )
+            tier0_full = _format_tier0_webview(tier0_ns, has_profiling=True, hotspots=hotspots)
             tier0_wrapper = _build_tier0_wrapper_scard(tier0_full)
             html = _splice_before_wrap_end(html, tier0_wrapper)
         return html
@@ -1381,9 +1339,11 @@ def _progress_context(*, enable_llm: bool, no_progress: bool, verbose: bool):
 
     # Silent modes — callback is None, zero overhead.
     if not enable_llm or no_progress or verbose:
+
         @contextlib.contextmanager
         def _silent():
             yield
+
         return None, _silent()
 
     # stderr decides whether we draw a spinner or plain lines. The
@@ -1395,9 +1355,11 @@ def _progress_context(*, enable_llm: bool, no_progress: bool, verbose: bool):
         print(f"[perfxpert] {msg}", file=sys.stderr, flush=True)
 
     if not stderr_is_tty:
+
         @contextlib.contextmanager
         def _plain():
             yield
+
         return _plain_callback, _plain()
 
     # TTY path — try to build a Rich spinner; fall back to plain lines
@@ -1409,9 +1371,11 @@ def _progress_context(*, enable_llm: bool, no_progress: bool, verbose: bool):
         from rich.spinner import Spinner
         from rich.text import Text
     except ImportError:
+
         @contextlib.contextmanager
         def _plain_tty():
             yield
+
         return _plain_callback, _plain_tty()
 
     console = Console(stderr=True)
@@ -1447,15 +1411,11 @@ def _progress_context(*, enable_llm: bool, no_progress: bool, verbose: bool):
 _PROVIDER_CREDENTIALS = {
     "anthropic": {
         "env_vars": ("ANTHROPIC_API_KEY", "PERFXPERT_LLM_ANTHROPIC_KEY"),
-        "hint": (
-            "no API key — pass --llm-api-key sk-ant-… or export ANTHROPIC_API_KEY"
-        ),
+        "hint": ("no API key — pass --llm-api-key sk-ant-… or export ANTHROPIC_API_KEY"),
     },
     "openai": {
         "env_vars": ("OPENAI_API_KEY", "PERFXPERT_LLM_OPENAI_KEY"),
-        "hint": (
-            "no API key — pass --llm-api-key sk-… or export OPENAI_API_KEY"
-        ),
+        "hint": ("no API key — pass --llm-api-key sk-… or export OPENAI_API_KEY"),
     },
     "private": {
         "env_vars": ("PERFXPERT_LLM_PRIVATE_API_KEY",),
@@ -1476,8 +1436,7 @@ _PROVIDER_CREDENTIALS = {
     "opencode": {
         "env_vars": (),
         "hint": (
-            "opencode provider requires the bundled CLI on PATH or set "
-            "PERFXPERT_OPENCODE_PATH=/path/to/opencode"
+            "opencode provider requires the bundled CLI on PATH or set " "PERFXPERT_OPENCODE_PATH=/path/to/opencode"
         ),
         "required_env": (),
     },
@@ -1543,8 +1502,7 @@ def _warn_if_flag_overrides_env(provider: str, flag_api_key: str) -> None:
         env_val = os.environ.get(var)
         if env_val and env_val != flag_api_key:
             print(
-                f"⚠ --llm-api-key overrides {var} (env value ignored for "
-                f"this run)",
+                f"⚠ --llm-api-key overrides {var} (env value ignored for " f"this run)",
                 file=sys.stderr,
             )
             return
@@ -1554,42 +1512,44 @@ def _warn_if_flag_overrides_env(provider: str, flag_api_key: str) -> None:
 # Any kwarg not in this set that is forwarded from `execute()` will emit a
 # WARNING so future argparse additions cannot silently drop through the
 # agentic pipeline (cycle-2 I-1 regression guard).
-_KNOWN_EXECUTE_KWARGS = frozenset({
-    # Output routing
-    "format",
-    "output_format",
-    "output_file",
-    "output_path",
-    # LLM provider wiring
-    "enable_llm",
-    "llm_provider",
-    "llm_api_key",
-    "llm_model",
-    "llm_thinking",
-    "llm_local",
-    "llm_local_model",
-    # Analysis options forwarded through RootInput.analysis_options
-    "source_dir",
-    "att_dir",
-    "prompt",
-    "custom_prompt",  # historical alias for prompt
-    "top_kernels",
-    "min_duration",
-    # Execution flags
-    "verbose",
-    "no_progress",
-    # ``perfxpert analyze --baseline <db>`` splice (Confluence row #7).
-    # The baseline DB is diffed via ``trace_diff.diff_runs`` after the
-    # agentic Root emits its report — the path here is plumbed through
-    # so ``_execute_agentic`` does not emit a RuntimeWarning about
-    # unused kwargs.
-    "baseline_db",
-    # ``--advanced`` (Phase 10): include advanced specialist recs
-    # (currently pragma loop-hint advice) in the report. When False
-    # pragma recs are filtered out before formatting. Also honours
-    # the ``PERFXPERT_ADVANCED_RECS=1`` env var.
-    "advanced",
-})
+_KNOWN_EXECUTE_KWARGS = frozenset(
+    {
+        # Output routing
+        "format",
+        "output_format",
+        "output_file",
+        "output_path",
+        # LLM provider wiring
+        "enable_llm",
+        "llm_provider",
+        "llm_api_key",
+        "llm_model",
+        "llm_thinking",
+        "llm_local",
+        "llm_local_model",
+        # Analysis options forwarded through RootInput.analysis_options
+        "source_dir",
+        "att_dir",
+        "prompt",
+        "custom_prompt",  # historical alias for prompt
+        "top_kernels",
+        "min_duration",
+        # Execution flags
+        "verbose",
+        "no_progress",
+        # ``perfxpert analyze --baseline <db>`` splice (Confluence row #7).
+        # The baseline DB is diffed via ``trace_diff.diff_runs`` after the
+        # agentic Root emits its report — the path here is plumbed through
+        # so ``_execute_agentic`` does not emit a RuntimeWarning about
+        # unused kwargs.
+        "baseline_db",
+        # ``--advanced`` (Phase 10): include advanced specialist recs
+        # (currently pragma loop-hint advice) in the report. When False
+        # pragma recs are filtered out before formatting. Also honours
+        # the ``PERFXPERT_ADVANCED_RECS=1`` env var.
+        "advanced",
+    }
+)
 
 
 def _execute_agentic(
@@ -1609,8 +1569,7 @@ def _execute_agentic(
         from perfxpert import api as perfxpert_api  # 1:1 mirror of agent MCP tools
     except ImportError as e:
         raise RuntimeError(
-            "perfxpert.api is not available. "
-            "perfxpert.tools.agents must be importable for the agentic path."
+            "perfxpert.api is not available. " "perfxpert.tools.agents must be importable for the agentic path."
         ) from e
 
     # Guard rail against silent kwarg drop — any new CLI flag that isn't
@@ -1618,6 +1577,7 @@ def _execute_agentic(
     _unused = set(kwargs) - _KNOWN_EXECUTE_KWARGS
     if _unused:
         import warnings
+
         warnings.warn(
             f"perfxpert.analyze: unused kwargs ignored by agentic runtime: "
             f"{sorted(_unused)}. Wire them in _execute_agentic or drop the "
@@ -1635,9 +1595,7 @@ def _execute_agentic(
     # Get database path for display
     database_path = ""
     if input is not None and hasattr(input, "_paths") and input._paths:
-        database_path = str(
-            input._paths[0] if isinstance(input._paths, list) else input._paths
-        )
+        database_path = str(input._paths[0] if isinstance(input._paths, list) else input._paths)
 
     # Get source_dir if provided (for Tier 0 analysis)
     source_dir = kwargs.get("source_dir")
@@ -1707,6 +1665,7 @@ def _execute_agentic(
     tier0_only = input is None and source_dir and progress_cb is not None
     if tier0_only:
         import time as _time
+
         _t0 = _time.monotonic()
     else:
         _t0 = None
@@ -1721,6 +1680,7 @@ def _execute_agentic(
     # exceptions (schema / wiring bugs, our own code) get wrapped as
     # RuntimeError with the "Agentic root analysis failed" diagnostic.
     from perfxpert.providers._exceptions import ProviderError
+
     try:
         with progress_cm:
             root_output = perfxpert_api.agent_root(
@@ -1742,6 +1702,7 @@ def _execute_agentic(
     # took > 500 ms (per the phase-8 design).
     if tier0_only and progress_cb is not None and _t0 is not None:
         import time as _time
+
         if (_time.monotonic() - _t0) > 0.5:
             progress_cb("Source scan done")
 
@@ -1751,6 +1712,7 @@ def _execute_agentic(
     # whether an LLM is in the loop. The airgap path takes this path too;
     # only the LLM narrative is skipped under airgap.
     from perfxpert.analysis.payload import build_analysis_payload as _build_payload
+
     try:
         analysis_payload = _build_payload(
             input,
@@ -1765,6 +1727,7 @@ def _execute_agentic(
         # gracefully by emitting an empty payload the formatters can
         # still render a skeleton from.
         import warnings as _warnings
+
         _warnings.warn(
             f"perfxpert.analyze: deterministic pass failed ({_payload_exc}); "
             "formats will render the LLM-only skeleton.",
@@ -1900,6 +1863,7 @@ def main(argv=None) -> int:
         # output file the formatter may have touched, and return rc=2
         # to distinguish from unrelated failures (rc=1).
         from perfxpert.providers._exceptions import ProviderError
+
         if isinstance(e, ProviderError):
             _cleanup_empty_output(args)
             _render_cli_error(e)
@@ -1984,8 +1948,7 @@ def _render_cli_error(exc: BaseException) -> int:
             "claude-code": "PERFXPERT_OPENCODE_PATH",
         }.get(prov, f"{prov.upper()}_API_KEY")
         print(
-            f"⚠ LLM auth failed for {prov}. "
-            f"Check {env_var} is set correctly.",
+            f"⚠ LLM auth failed for {prov}. " f"Check {env_var} is set correctly.",
             file=sys.stderr,
         )
     elif isinstance(exc, RateLimitError):
@@ -2000,8 +1963,7 @@ def _render_cli_error(exc: BaseException) -> int:
         timeout_seconds = getattr(exc, "timeout_seconds", 0.0)
         timeout_detail = f" after {timeout_seconds}s" if timeout_seconds else ""
         print(
-            f"⚠ LLM provider {prov} timed out{timeout_detail}; "
-            f"retry, switch provider, or PERFXPERT_AIRGAP=1.",
+            f"⚠ LLM provider {prov} timed out{timeout_detail}; " f"retry, switch provider, or PERFXPERT_AIRGAP=1.",
             file=sys.stderr,
         )
     elif isinstance(exc, TransientError):
@@ -2029,6 +1991,7 @@ def _render_cli_error(exc: BaseException) -> int:
 
     if debug:
         import traceback
+
         traceback.print_exception(type(exc), exc, exc.__traceback__, file=sys.stderr)
 
     return 1

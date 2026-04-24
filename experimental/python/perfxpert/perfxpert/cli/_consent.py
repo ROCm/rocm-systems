@@ -32,7 +32,6 @@ from typing import Iterable
 
 import yaml
 
-
 __all__ = [
     "CONSENT_ASSUME_ENV",
     "ConsentRecord",
@@ -89,8 +88,7 @@ def file_set_hash(files: Iterable[tuple[Path, bool, bool]]) -> str:
     Input tuples are sorted so the hash is order-independent.
     """
     normalized = sorted(
-        (str(Path(p).expanduser().resolve()), bool(exists), bool(tracked))
-        for p, exists, tracked in files
+        (str(Path(p).expanduser().resolve()), bool(exists), bool(tracked)) for p, exists, tracked in files
     )
     return _sha8(repr(normalized))
 
@@ -140,17 +138,13 @@ def _key(record: ConsentRecord) -> str:
 def has_consent(backend: str, cwd: Path, fset_hash: str) -> bool:
     """True iff the user has previously granted consent for this triple."""
     data = _load_cache()
-    record = ConsentRecord(
-        backend=backend, cwd_hash=cwd_hash(cwd), file_set_hash=fset_hash
-    )
+    record = ConsentRecord(backend=backend, cwd_hash=cwd_hash(cwd), file_set_hash=fset_hash)
     return bool(data.get(_key(record)))
 
 
 def grant_consent(backend: str, cwd: Path, fset_hash: str) -> None:
     data = _load_cache()
-    record = ConsentRecord(
-        backend=backend, cwd_hash=cwd_hash(cwd), file_set_hash=fset_hash
-    )
+    record = ConsentRecord(backend=backend, cwd_hash=cwd_hash(cwd), file_set_hash=fset_hash)
     data[_key(record)] = {
         "backend": record.backend,
         "cwd_hash": record.cwd_hash,
@@ -169,10 +163,9 @@ def revoke_consent(backend: str, cwd: Path) -> None:
     data = _load_cache()
     target_cwd = cwd_hash(cwd)
     to_drop = [
-        k for k, v in data.items()
-        if isinstance(v, dict)
-        and v.get("backend") == backend
-        and v.get("cwd_hash") == target_cwd
+        k
+        for k, v in data.items()
+        if isinstance(v, dict) and v.get("backend") == backend and v.get("cwd_hash") == target_cwd
     ]
     for k in to_drop:
         data.pop(k, None)
@@ -199,9 +192,7 @@ def prompt_consent_interactive(
     out = stream if stream is not None else sys.stderr
 
     if os.environ.get(CONSENT_ASSUME_ENV, "").strip().lower() in {"1", "true", "yes"}:
-        out.write(
-            f"[consent] {CONSENT_ASSUME_ENV}=1 → auto-grant for {backend} in {cwd}\n"
-        )
+        out.write(f"[consent] {CONSENT_ASSUME_ENV}=1 → auto-grant for {backend} in {cwd}\n")
         return True
 
     if not sys.stdin.isatty():

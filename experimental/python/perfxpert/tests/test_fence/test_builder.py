@@ -4,7 +4,6 @@ import pytest
 
 from perfxpert.fence import FenceBuilder
 
-
 VALID_ROLES = [
     "root",
     "analysis",

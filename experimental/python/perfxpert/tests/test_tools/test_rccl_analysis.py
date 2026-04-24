@@ -14,6 +14,7 @@ def _require(path: Path) -> str:
     """Regenerate fixtures on demand — the CI checkout may not carry them."""
     if not path.exists():
         from tests.fixtures import _generate_rccl_fixture  # type: ignore
+
         _generate_rccl_fixture.main()
     return str(path)
 
@@ -21,6 +22,7 @@ def _require(path: Path) -> str:
 # --------------------------------------------------------------------------- #
 # analyze_collectives                                                         #
 # --------------------------------------------------------------------------- #
+
 
 def test_analyze_collectives_empty_returns_empty_list():
     """DB with no RCCL spans at all -> {collectives: [], capture_incomplete: False}."""
@@ -43,7 +45,7 @@ def test_analyze_collectives_computes_busbw_allreduce():
     # busBW = 1048576 * 1.5 / 1e-3 / 1e9 = 1.572864 GB/s
     expected = 1048576 * 1.5 / 1e-3 / 1e9
     assert abs(first["effective_bw_gbps"] - expected) < 0.01
-    assert first["peak_bw_gbps"] == 340.0   # from interconnect_specs (MI300X)
+    assert first["peak_bw_gbps"] == 340.0  # from interconnect_specs (MI300X)
     # 4 collectives, dominant AllReduce.
     assert r["summary"]["dominant_op"] == "AllReduce"
     assert r["summary"]["op_count"] == 4
@@ -61,20 +63,25 @@ def test_analyze_collectives_fallback_regex_marks_incomplete():
 
 
 def test_analyze_collectives_is_read_only_class():
-    assert (
-        rccl_analysis.analyze_collectives.__tool_class__ == ToolClass.READ_ONLY
-    )
+    assert rccl_analysis.analyze_collectives.__tool_class__ == ToolClass.READ_ONLY
 
 
 # --------------------------------------------------------------------------- #
 # interconnect.lookup_peaks                                                   #
 # --------------------------------------------------------------------------- #
 
+
 def test_interconnect_lookup_peaks_returns_dict_per_arch():
     """gfx90a / gfx942 / gfx950 each return all required fields."""
     required = {
-        "name", "xgmi_peak_gbps", "xgmi_links", "xgmi_per_link_gbps",
-        "pcie_tier", "pcie_peak_gbps", "achievable_gbps", "source_url",
+        "name",
+        "xgmi_peak_gbps",
+        "xgmi_links",
+        "xgmi_per_link_gbps",
+        "pcie_tier",
+        "pcie_peak_gbps",
+        "achievable_gbps",
+        "source_url",
         "measured_with",
     }
     for gfx in ("gfx90a", "gfx942", "gfx950"):
@@ -103,9 +110,11 @@ def test_interconnect_lookup_peaks_includes_nic_entries():
 # MCP registry                                                                #
 # --------------------------------------------------------------------------- #
 
+
 def test_rccl_and_interconnect_exposed_via_mcp():
     """Both Phase-10 tools discovered by the MCP read-only registry."""
     from mcp_server._registry import discover_read_only_tools
+
     reg = discover_read_only_tools()
     assert "rccl_analysis.analyze_collectives" in reg
     assert "interconnect.lookup_peaks" in reg

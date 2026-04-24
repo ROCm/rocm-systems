@@ -18,7 +18,8 @@ def test_launcher_sets_recursion_guard(monkeypatch):
 
     monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
     monkeypatch.setattr(
-        opencode_launcher, "resolve_opencode_binary",
+        opencode_launcher,
+        "resolve_opencode_binary",
         lambda: Path("/bin/true"),
     )
     monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
@@ -31,6 +32,7 @@ def test_launcher_sets_recursion_guard(monkeypatch):
 def test_recursion_guard_documented_in_agents_md():
     """AGENTS.md should warn future maintainers about the recursion guard."""
     from importlib import resources
+
     with resources.as_file(resources.files("perfxpert") / "_bundled" / "opencode_config" / "AGENTS.md") as p:
         content = p.read_text()
     # AGENTS.md covers the master agent's mandatory behavior; recursion guard

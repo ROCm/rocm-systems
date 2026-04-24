@@ -7,10 +7,7 @@ import jsonschema
 
 from perfxpert.knowledge import load_yaml
 
-SCHEMA_PATH = (
-    Path(__file__).parent.parent.parent
-    / "perfxpert" / "knowledge" / "_schemas" / "pmc_limits.schema.json"
-)
+SCHEMA_PATH = Path(__file__).parent.parent.parent / "perfxpert" / "knowledge" / "_schemas" / "pmc_limits.schema.json"
 
 
 def test_pmc_limits_loads():

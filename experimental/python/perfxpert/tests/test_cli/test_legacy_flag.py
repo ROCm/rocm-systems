@@ -22,7 +22,9 @@ def test_perfxpert_analyze_help_does_not_mention_removed_flags():
     """--interactive and --resume-session should be absent from --help (flags removed)."""
     result = subprocess.run(
         _perfxpert_cli() + ["analyze", "--help"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert result.returncode == 0
     help_text = result.stdout
@@ -37,7 +39,10 @@ def test_doctor_reports_agentic_mode():
 
     result = subprocess.run(
         _perfxpert_cli() + ["doctor"],
-        capture_output=True, text=True, check=False, env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
     )
     out = result.stdout + result.stderr
     assert "Mode: agentic" in out

@@ -35,7 +35,6 @@ from perfxpert.agents import (
 )
 from perfxpert.runtime import ensure_not_recursive
 
-
 # Defensive import — fallback registry keeps this module importable when
 # the providers package is not yet loaded in isolated test contexts.
 try:
@@ -80,9 +79,7 @@ def _parse_fallback_chain(primary: str) -> tuple[str, ...]:
 
 
 @contextlib.contextmanager
-def _override_provider_env(
-    provider: Optional[str], api_key: Optional[str]
-) -> Iterator[None]:
+def _override_provider_env(provider: Optional[str], api_key: Optional[str]) -> Iterator[None]:
     """Temporarily inject ``api_key`` into the provider's canonical env var.
 
     The override is protected by a process-wide re-entrant lock because
@@ -158,9 +155,7 @@ class AnalysisSession:
         del progress_callback
         if self.airgap:
             return root.run_root(payload, airgap=True)
-        return self._run_live(
-            lambda prov: root.run_root(payload, provider=prov)
-        )  # type: ignore[return-value]
+        return self._run_live(lambda prov: root.run_root(payload, provider=prov))  # type: ignore[return-value]
 
     def run_analysis(
         self,
@@ -170,9 +165,7 @@ class AnalysisSession:
         del progress_callback
         if self.airgap:
             return analysis.run_analysis(payload, airgap=True)
-        return self._run_live(
-            lambda prov: analysis.run_analysis(payload, provider=prov)
-        )  # type: ignore[return-value]
+        return self._run_live(lambda prov: analysis.run_analysis(payload, provider=prov))  # type: ignore[return-value]
 
     def run_recommendation(
         self,
@@ -207,9 +200,7 @@ class AnalysisSession:
         if self.airgap:
             return compute_specialist.run_compute_specialist(payload, airgap=True)
         return self._run_live(
-            lambda prov: compute_specialist.run_compute_specialist(
-                payload, provider=prov
-            )
+            lambda prov: compute_specialist.run_compute_specialist(payload, provider=prov)
         )  # type: ignore[return-value]
 
     def run_memory_specialist(
@@ -221,9 +212,7 @@ class AnalysisSession:
         if self.airgap:
             return memory_specialist.run_memory_specialist(payload, airgap=True)
         return self._run_live(
-            lambda prov: memory_specialist.run_memory_specialist(
-                payload, provider=prov
-            )
+            lambda prov: memory_specialist.run_memory_specialist(payload, provider=prov)
         )  # type: ignore[return-value]
 
     def run_latency_specialist(
@@ -235,9 +224,7 @@ class AnalysisSession:
         if self.airgap:
             return latency_specialist.run_latency_specialist(payload, airgap=True)
         return self._run_live(
-            lambda prov: latency_specialist.run_latency_specialist(
-                payload, provider=prov
-            )
+            lambda prov: latency_specialist.run_latency_specialist(payload, provider=prov)
         )  # type: ignore[return-value]
 
     def run_diff_specialist(

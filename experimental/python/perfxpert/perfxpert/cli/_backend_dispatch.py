@@ -14,7 +14,6 @@ import sys
 from pathlib import Path
 from typing import Callable, Dict, List
 
-
 __all__ = [
     "_exec_backend",
     "is_help_request",
@@ -157,24 +156,17 @@ def _run_adapter(adapter, remaining_argv: list[str]) -> int:
             quiet=flags.quiet,
         )
     except Exception as exc:
-        sys.stderr.write(
-            f"perfxpert-code {adapter.name}: install failed: {exc}\n"
-        )
+        sys.stderr.write(f"perfxpert-code {adapter.name}: install failed: {exc}\n")
         return 1
 
     if flags.dry_run:
-        sys.stderr.write(
-            f"[DRY-RUN] Would exec: {adapter.binary_name} {' '.join(flags.remaining)}\n"
-        )
+        sys.stderr.write(f"[DRY-RUN] Would exec: {adapter.binary_name} {' '.join(flags.remaining)}\n")
         return 0
 
     env = dict(os.environ)
     env[RECURSION_GUARD_ENV] = adapter.name
     if not flags.quiet:
-        sys.stderr.write(
-            f"perfxpert-code {adapter.name}: MCP verified; launching "
-            f"{adapter.binary_name} ...\n"
-        )
+        sys.stderr.write(f"perfxpert-code {adapter.name}: MCP verified; launching " f"{adapter.binary_name} ...\n")
         sys.stderr.flush()
     return adapter.spawn(flags.remaining, env, Path.cwd())
 
@@ -202,9 +194,7 @@ def _exec_backend(name: str, remaining_argv: list[str]) -> int:
 
     handler = BACKEND_REGISTRY.get(name)
     if handler is None:
-        sys.stderr.write(
-            f"perfxpert-code: no handler registered for backend {name!r}.\n"
-        )
+        sys.stderr.write(f"perfxpert-code: no handler registered for backend {name!r}.\n")
         return 2
 
     return handler(remaining_argv)

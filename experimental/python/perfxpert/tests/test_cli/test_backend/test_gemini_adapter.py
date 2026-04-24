@@ -77,9 +77,7 @@ def test_install_writes_project_mcp_servers_perfxpert(project_cwd: Path) -> None
     assert data["mcpServers"]["perfxpert"]["command"] == "perfxpert-mcp"
 
 
-def test_install_does_not_write_user_global_settings_when_not_needed(
-    project_cwd: Path, isolated_home: Path
-) -> None:
+def test_install_does_not_write_user_global_settings_when_not_needed(project_cwd: Path, isolated_home: Path) -> None:
     GeminiAdapter().install(project_cwd)
     assert not (isolated_home / ".gemini" / "settings.json").exists()
 
@@ -87,15 +85,7 @@ def test_install_does_not_write_user_global_settings_when_not_needed(
 def test_install_list_appends_context_filename(project_cwd: Path) -> None:
     settings = _project_settings(project_cwd)
     settings.parent.mkdir(parents=True)
-    settings.write_text(
-        json.dumps(
-            {
-                "context": {
-                    "fileName": ["~/.gemini/my-context.md", "/abs/file.md"]
-                }
-            }
-        )
-    )
+    settings.write_text(json.dumps({"context": {"fileName": ["~/.gemini/my-context.md", "/abs/file.md"]}}))
     GeminiAdapter().install(project_cwd)
     data = json.loads(settings.read_text())
     files = data["context"]["fileName"]
@@ -119,9 +109,7 @@ def test_install_does_not_duplicate_context_filename_on_rerun(
 def test_install_preserves_existing_mcp_servers(project_cwd: Path) -> None:
     settings = _project_settings(project_cwd)
     settings.parent.mkdir(parents=True)
-    settings.write_text(
-        json.dumps({"mcpServers": {"other": {"command": "other-bin", "args": []}}})
-    )
+    settings.write_text(json.dumps({"mcpServers": {"other": {"command": "other-bin", "args": []}}}))
     GeminiAdapter().install(project_cwd)
     data = json.loads(settings.read_text())
     assert data["mcpServers"]["other"]["command"] == "other-bin"
@@ -156,15 +144,7 @@ def test_install_preserves_existing_perfxpert_subkeys(project_cwd: Path) -> None
 def test_install_refuses_clobber(project_cwd: Path) -> None:
     settings = _project_settings(project_cwd)
     settings.parent.mkdir(parents=True)
-    settings.write_text(
-        json.dumps(
-            {
-                "mcpServers": {
-                    "perfxpert": {"command": "different-bin", "args": []}
-                }
-            }
-        )
-    )
+    settings.write_text(json.dumps({"mcpServers": {"perfxpert": {"command": "different-bin", "args": []}}}))
     with pytest.raises(ConfigClobber):
         GeminiAdapter().install(project_cwd)
 
@@ -177,9 +157,7 @@ def test_install_idempotent(project_cwd: Path) -> None:
     assert isinstance(r2, InstallReport)
 
 
-def test_install_fails_closed_when_gate_hook_disabled(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_fails_closed_when_gate_hook_disabled(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PERFXPERT_GATE_HOOK", "0")
 
     with pytest.raises(GateHookUnsupported):
@@ -211,12 +189,8 @@ def test_install_does_not_touch_legacy_user_settings(project_cwd: Path, isolated
     legacy.write_text(
         json.dumps(
             {
-                "mcpServers": {
-                    "perfxpert": {"command": "perfxpert-mcp", "args": []}
-                },
-                "context": {
-                    "fileName": [str(project_cwd / ".perfxpert" / "AGENTS.md")]
-                },
+                "mcpServers": {"perfxpert": {"command": "perfxpert-mcp", "args": []}},
+                "context": {"fileName": [str(project_cwd / ".perfxpert" / "AGENTS.md")]},
                 "allowedTools": ["mcp_perfxpert_*"],
                 "tools": {"allowed": ["mcp_perfxpert_*"]},
             }
@@ -229,9 +203,7 @@ def test_install_does_not_touch_legacy_user_settings(project_cwd: Path, isolated
     assert legacy.read_text() == before
 
 
-def test_install_does_not_touch_legacy_user_settings_with_auth_fields(
-    project_cwd: Path, isolated_home: Path
-) -> None:
+def test_install_does_not_touch_legacy_user_settings_with_auth_fields(project_cwd: Path, isolated_home: Path) -> None:
     legacy = isolated_home / ".gemini" / "settings.json"
     legacy.parent.mkdir(parents=True)
     legacy.write_text(
@@ -244,9 +216,7 @@ def test_install_does_not_touch_legacy_user_settings_with_auth_fields(
                         "timeout": 30000,
                     }
                 },
-                "context": {
-                    "fileName": [str(project_cwd / ".perfxpert" / "AGENTS.md")]
-                },
+                "context": {"fileName": [str(project_cwd / ".perfxpert" / "AGENTS.md")]},
                 "tools": {"allowed": ["mcp_perfxpert_*"]},
                 "security": {"auth": {"selectedType": "oauth-personal"}},
                 "theme": "ansi",
@@ -267,12 +237,8 @@ def test_install_does_not_touch_legacy_nested_tools_allowed_for_this_project(
     legacy.write_text(
         json.dumps(
             {
-                "mcpServers": {
-                    "perfxpert": {"command": "perfxpert-mcp", "args": []}
-                },
-                "context": {
-                    "fileName": [str(project_cwd / ".perfxpert" / "AGENTS.md")]
-                },
+                "mcpServers": {"perfxpert": {"command": "perfxpert-mcp", "args": []}},
+                "context": {"fileName": [str(project_cwd / ".perfxpert" / "AGENTS.md")]},
                 "tools": {"allowed": ["mcp_perfxpert_*"]},
             }
         )
@@ -283,9 +249,7 @@ def test_install_does_not_touch_legacy_nested_tools_allowed_for_this_project(
     assert legacy.read_text() == before
 
 
-def test_install_does_not_touch_other_projects_legacy_user_state(
-    project_cwd: Path, isolated_home: Path
-) -> None:
+def test_install_does_not_touch_other_projects_legacy_user_state(project_cwd: Path, isolated_home: Path) -> None:
     legacy = isolated_home / ".gemini" / "settings.json"
     other_agents = isolated_home / "other" / ".perfxpert" / "AGENTS.md"
     other_agents.parent.mkdir(parents=True)
@@ -294,9 +258,7 @@ def test_install_does_not_touch_other_projects_legacy_user_state(
     legacy.write_text(
         json.dumps(
             {
-                "mcpServers": {
-                    "perfxpert": {"command": "perfxpert-mcp", "args": []}
-                },
+                "mcpServers": {"perfxpert": {"command": "perfxpert-mcp", "args": []}},
                 "context": {"fileName": [str(other_agents)]},
                 "allowedTools": ["mcp_perfxpert_*"],
                 "tools": {"allowed": ["mcp_perfxpert_*"]},
@@ -348,9 +310,7 @@ def test_install_never_touches_gemini_md(project_cwd: Path) -> None:
     assert gemini_md.read_bytes() == snapshot
 
 
-def test_verify_mcp_live_healthy_after_install(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_verify_mcp_live_healthy_after_install(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     GeminiAdapter().install(project_cwd)
     os.environ.pop("PERFXPERT_SKIP_LIVE_CHECK", None)
 
@@ -389,9 +349,7 @@ def test_verify_mcp_live_treats_missing_list_entry_as_advisory(
     assert "advisory" in (report.error or "").lower()
 
 
-def test_install_succeeds_when_mcp_list_probe_is_advisory(
-    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_install_succeeds_when_mcp_list_probe_is_advisory(project_cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def _fake_run(*_args, **_kwargs):
         return subprocess.CompletedProcess(
             args=["gemini", "mcp", "list"],
@@ -419,9 +377,7 @@ def test_verify_mcp_live_rejects_malformed_perfxpert_entry(project_cwd: Path) ->
 def test_verify_mcp_live_rejects_wrong_command_entry(project_cwd: Path) -> None:
     settings = _project_settings(project_cwd)
     settings.parent.mkdir(parents=True)
-    settings.write_text(
-        json.dumps({"mcpServers": {"perfxpert": {"command": "wrong-bin"}}})
-    )
+    settings.write_text(json.dumps({"mcpServers": {"perfxpert": {"command": "wrong-bin"}}}))
     report = GeminiAdapter().verify_mcp_live(project_cwd)
     assert report.mcp_healthy is False
     assert "malformed" in (report.error or "").lower()
@@ -461,12 +417,8 @@ def test_uninstall_does_not_touch_legacy_user_settings(project_cwd: Path, isolat
     legacy.write_text(
         json.dumps(
             {
-                "mcpServers": {
-                    "perfxpert": {"command": "perfxpert-mcp", "args": []}
-                },
-                "context": {
-                    "fileName": [str(project_cwd / ".perfxpert" / "AGENTS.md")]
-                },
+                "mcpServers": {"perfxpert": {"command": "perfxpert-mcp", "args": []}},
+                "context": {"fileName": [str(project_cwd / ".perfxpert" / "AGENTS.md")]},
                 "allowedTools": ["mcp_perfxpert_*"],
                 "tools": {"allowed": ["mcp_perfxpert_*"]},
             }
@@ -486,9 +438,7 @@ def test_uninstall_returns_report(project_cwd: Path) -> None:
     assert isinstance(report, UninstallReport)
 
 
-def test_spawn_uses_execvpe(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_spawn_uses_execvpe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     called: dict[str, object] = {}
 
     def _fake_execvpe(name, argv, env):

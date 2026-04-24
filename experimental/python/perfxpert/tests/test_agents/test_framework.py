@@ -372,9 +372,7 @@ def test_sdk_invoke_raises_runtime_error_when_sdk_missing(monkeypatch):
 
     from perfxpert.agents.framework import Agent, _sdk_invoke
 
-    agent = Agent(
-        name="T", layer=1, fence_path=None, input_schema=dict, output_schema=dict, tools=[]
-    )
+    agent = Agent(name="T", layer=1, fence_path=None, input_schema=dict, output_schema=dict, tools=[])
     with pytest.raises(RuntimeError, match="openai-agents"):
         _sdk_invoke(agent, "x", provider="openai")
 

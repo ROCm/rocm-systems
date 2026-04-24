@@ -33,6 +33,7 @@ try:
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
     from mcp.types import TextContent, Tool
+
     _MCP_AVAILABLE = True
 except (ImportError, ExternalToolMissing):
     Server = object  # type: ignore
@@ -40,7 +41,6 @@ except (ImportError, ExternalToolMissing):
     Tool = None  # type: ignore
 
 from mcp_server._registry import discover_read_only_tools
-
 
 _LOG = logging.getLogger("perfxpert-mcp")
 _LOG.setLevel(logging.INFO)
@@ -72,7 +72,7 @@ def _fn_to_tool_schema(name: str, fn: Callable) -> Tool:
     )
     description = priority_hint + doc.split("\n\n", 1)[0]
     return Tool(
-        name=name.replace(".", "_"),          # MCP tool names disallow dots
+        name=name.replace(".", "_"),  # MCP tool names disallow dots
         description=description,
         inputSchema={
             "type": "object",
@@ -151,10 +151,12 @@ def build_server() -> Server:
 
         _LOG.info("perfxpert-mcp: calling %s with %r", original_name, arguments)
         result = fn(**arguments)
-        return [TextContent(
-            type="text",
-            text=json.dumps(result, default=str, indent=2),
-        )]
+        return [
+            TextContent(
+                type="text",
+                text=json.dumps(result, default=str, indent=2),
+            )
+        ]
 
     return server
 

@@ -22,10 +22,7 @@ def _make_memcpy_db(tmp_path: Path, rows: list, with_agent: bool = False) -> Pat
     db = tmp_path / "um.db"
     conn = sqlite3.connect(db)
     if with_agent:
-        conn.execute(
-            f"CREATE TABLE {table} (size INTEGER, kind TEXT, "
-            f"src_agent_id INTEGER, dst_agent_id INTEGER)"
-        )
+        conn.execute(f"CREATE TABLE {table} (size INTEGER, kind TEXT, " f"src_agent_id INTEGER, dst_agent_id INTEGER)")
         for size, kind, src, dst in rows:
             conn.execute(
                 f"INSERT INTO {table} VALUES (?, ?, ?, ?)",

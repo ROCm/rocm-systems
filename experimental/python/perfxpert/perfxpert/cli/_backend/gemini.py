@@ -39,7 +39,6 @@ from perfxpert.cli._consent import (
     revoke_consent,
 )
 
-
 __all__ = ["GeminiAdapter"]
 
 
@@ -67,9 +66,7 @@ class GeminiAdapter:
 
     name: str = "gemini"
     binary_name: str = "gemini"
-    install_hint: str = (
-        "Install via https://github.com/google-gemini/gemini-cli"
-    )
+    install_hint: str = "Install via https://github.com/google-gemini/gemini-cli"
     min_version: str | None = "0.2.0"
     known_schema_versions: tuple[str, ...] = ("1.x",)
     tool_name_template: str = "mcp_perfxpert_{tool}"
@@ -210,21 +207,17 @@ class GeminiAdapter:
             self._log_step(quiet, "[4/5] Verifying perfxpert MCP is live ...")
             report = self.verify_mcp_live(cwd)
             if not report.mcp_healthy:
-                raise PartialInstall(
-                    f"gemini MCP registered but live-check failed: {report.error}"
-                )
+                raise PartialInstall(f"gemini MCP registered but live-check failed: {report.error}")
             if report.gate_hook_installed is not True:
                 raise PartialInstall(
-                    "gemini gate hook is missing after install; refusing to "
-                    "leave the backend partially installed"
+                    "gemini gate hook is missing after install; refusing to " "leave the backend partially installed"
                 )
         else:
             self._log_step(quiet, "[4/5] SKIPPED (PERFXPERT_SKIP_LIVE_CHECK=1)")
             report = self.verify_mcp_live(cwd)
             if report.gate_hook_installed is not True:
                 raise PartialInstall(
-                    "gemini gate hook is missing after install; refusing to "
-                    "leave the backend partially installed"
+                    "gemini gate hook is missing after install; refusing to " "leave the backend partially installed"
                 )
 
         # Step 5/5: Done. Gemini installs are project-local only.
@@ -242,9 +235,7 @@ class GeminiAdapter:
     # verify_mcp_live
     # ------------------------------------------------------------------
 
-    def verify_mcp_live(
-        self, cwd: Path, telemetry: bool = False
-    ) -> LiveCheckReport:
+    def verify_mcp_live(self, cwd: Path, telemetry: bool = False) -> LiveCheckReport:
         """Probe the workspace MCP registration and Gemini's own view of it."""
         cwd = Path(cwd).expanduser().resolve()
         settings = self._settings_path(cwd)
@@ -269,10 +260,7 @@ class GeminiAdapter:
 
         servers = data.get("mcpServers") or {}
         perfxpert_entry = servers.get("perfxpert")
-        listed = (
-            isinstance(perfxpert_entry, dict)
-            and perfxpert_entry.get("command") == "perfxpert-mcp"
-        )
+        listed = isinstance(perfxpert_entry, dict) and perfxpert_entry.get("command") == "perfxpert-mcp"
         gate = self._probe_gate_hook_installed(cwd, data)
         if not listed:
             return LiveCheckReport(
@@ -338,9 +326,7 @@ class GeminiAdapter:
     # uninstall
     # ------------------------------------------------------------------
 
-    def uninstall(
-        self, cwd: Path, scope: Literal["project", "user"] = "project"
-    ) -> UninstallReport:
+    def uninstall(self, cwd: Path, scope: Literal["project", "user"] = "project") -> UninstallReport:
         cwd = Path(cwd).expanduser().resolve()
         settings = self._settings_path(cwd)
         agents = cwd / self._PERFXPERT_DIR / self._AGENTS_FILE
@@ -446,9 +432,7 @@ class GeminiAdapter:
             reject_language=True,
         )
 
-    def _merge_settings(
-        self, settings: Path, agents: Path, _cwd: Path
-    ) -> None:
+    def _merge_settings(self, settings: Path, agents: Path, _cwd: Path) -> None:
         """Atomically merge workspace mcpServers.perfxpert + context.fileName.
 
         Preserves every existing key. Raises `ConfigClobber` if a
@@ -459,26 +443,17 @@ class GeminiAdapter:
             try:
                 data = json.loads(settings.read_text())
             except json.JSONDecodeError as exc:
-                raise PartialInstall(
-                    f"{settings} is not valid JSON: {exc}"
-                ) from exc
+                raise PartialInstall(f"{settings} is not valid JSON: {exc}") from exc
             if not isinstance(data, dict):
-                raise PartialInstall(
-                    f"{settings} top-level must be an object"
-                )
+                raise PartialInstall(f"{settings} top-level must be an object")
 
         # mcpServers.perfxpert.
         servers = data.setdefault("mcpServers", {})
         if not isinstance(servers, dict):
-            raise PartialInstall(
-                f"{settings}['mcpServers'] must be an object"
-            )
+            raise PartialInstall(f"{settings}['mcpServers'] must be an object")
         existing = servers.get("perfxpert")
         if existing is not None and not isinstance(existing, dict):
-            raise ConfigClobber(
-                f"{settings} already has a non-object perfxpert MCP entry; "
-                "refuse to overwrite."
-            )
+            raise ConfigClobber(f"{settings} already has a non-object perfxpert MCP entry; " "refuse to overwrite.")
         if existing and existing.get("command") not in (None, "perfxpert-mcp"):
             raise ConfigClobber(
                 f"{settings} already has a perfxpert MCP entry with "
@@ -497,14 +472,10 @@ class GeminiAdapter:
         # context.fileName (list-append).
         context = data.setdefault("context", {})
         if not isinstance(context, dict):
-            raise PartialInstall(
-                f"{settings}['context'] must be an object"
-            )
+            raise PartialInstall(f"{settings}['context'] must be an object")
         existing_files = context.setdefault("fileName", [])
         if not isinstance(existing_files, list):
-            raise PartialInstall(
-                f"{settings}['context']['fileName'] must be a list"
-            )
+            raise PartialInstall(f"{settings}['context']['fileName'] must be a list")
         new_entry = str(agents)
         if new_entry not in existing_files:
             existing_files.append(new_entry)

@@ -12,40 +12,51 @@ from typing import Any, Dict, Literal
 
 from perfxpert.tools._class import ToolClass, tool_class
 
-
 Intent = Literal["analyze", "optimize", "verify", "explain", "help"]
 
 
 _PATTERNS = [
     # verify checks must precede help so "did my patch help" routes to verify
     # (verify pattern `\bdid\b.+\b(help|...)\b` vs help's bare `\bhelp\b`)
-    ("verify", [
-        r"\bdid\b.+\b(help|improve|work)\b",
-        r"\bcompare\b.+\brun\b",
-        r"\bis this better\b",
-        r"\bregression\b",
-        r"\bverify\b",
-    ]),
+    (
+        "verify",
+        [
+            r"\bdid\b.+\b(help|improve|work)\b",
+            r"\bcompare\b.+\brun\b",
+            r"\bis this better\b",
+            r"\bregression\b",
+            r"\bverify\b",
+        ],
+    ),
     ("help", [r"\bhelp\b", r"\bwhat can\b", r"\bhow do I use\b"]),
-    ("optimize", [
-        r"\b(how|what).*\b(fix|improve|optimize|speed up)\b",
-        r"\bsuggest\b.*\boptimizations?\b",
-        r"\bsuggest optimization\b",
-        r"\brecommend\b",
-        r"\boptimiz",
-    ]),
-    ("explain", [
-        r"\bwhat (is|does|means?)\b",
-        r"\bexplain\b",
-        r"\bdefine\b",
-    ]),
-    ("analyze", [
-        r"\banalyze\b",
-        r"\b(why|what).*\b(slow|bottleneck|performance|fast)\b",
-        r"\btrace\b",
-        r"\bprofile\b",
-        r"\binvestigate\b",
-    ]),
+    (
+        "optimize",
+        [
+            r"\b(how|what).*\b(fix|improve|optimize|speed up)\b",
+            r"\bsuggest\b.*\boptimizations?\b",
+            r"\bsuggest optimization\b",
+            r"\brecommend\b",
+            r"\boptimiz",
+        ],
+    ),
+    (
+        "explain",
+        [
+            r"\bwhat (is|does|means?)\b",
+            r"\bexplain\b",
+            r"\bdefine\b",
+        ],
+    ),
+    (
+        "analyze",
+        [
+            r"\banalyze\b",
+            r"\b(why|what).*\b(slow|bottleneck|performance|fast)\b",
+            r"\btrace\b",
+            r"\bprofile\b",
+            r"\binvestigate\b",
+        ],
+    ),
 ]
 
 

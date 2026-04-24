@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from perfxpert.tools._class import ToolClass, tool_class
+
 # Imported as a private alias so the tool registry (which walks
 # perfxpert.tools.* and collects public READ_ONLY callables) does not
 # re-register this as `roofline.lookup_peaks`. Canonical name is
@@ -31,7 +32,6 @@ from perfxpert.tools.arch import (
     lookup_peaks as _lookup_peaks,
     lookup_ridge_point as _lookup_ridge_point,
 )
-
 
 _BALANCED_TOLERANCE = 0.05  # +/-5% around ridge = "balanced"
 
@@ -125,7 +125,7 @@ def _peak_for_dtype(specs: Dict[str, Any], dtype: str) -> float:
         "fp32": "peak_fp32_tflops",
         "fp16": "peak_fp16_tflops",
         "bf16": "peak_bf16_tflops",
-        "fp8":  "peak_fp8_tflops",
+        "fp8": "peak_fp8_tflops",
         "int8": "peak_int8_tops",
     }
     k = key_map.get(dtype, "peak_fp32_tflops")
@@ -135,9 +135,7 @@ def _peak_for_dtype(specs: Dict[str, Any], dtype: str) -> float:
 
 def _detect_gfx_id(conn: sqlite3.Connection) -> str:
     try:
-        cur = conn.execute(
-            "SELECT name FROM rocpd_info_agent WHERE name LIKE 'gfx%' LIMIT 1"
-        )
+        cur = conn.execute("SELECT name FROM rocpd_info_agent WHERE name LIKE 'gfx%' LIMIT 1")
         row = cur.fetchone()
     except sqlite3.DatabaseError:
         row = None
@@ -170,9 +168,9 @@ def _fetch_kernel_counters(conn: sqlite3.Connection) -> Dict[str, Dict[str, Any]
         return out
     for row in cur.fetchall():
         name, cname, total, duration = (
-            row[0], row[1], row[2], row[3]
-        ) if not hasattr(row, "keys") else (
-            row["name"], row["counter_name"], row[2], row[3]
+            (row[0], row[1], row[2], row[3])
+            if not hasattr(row, "keys")
+            else (row["name"], row["counter_name"], row[2], row[3])
         )
         k = str(name or "unknown")
         slot = out.setdefault(k, {"_duration_ns": 0})
@@ -182,13 +180,8 @@ def _fetch_kernel_counters(conn: sqlite3.Connection) -> Dict[str, Dict[str, Any]
     return out
 
 
-def _mfma_flops_from_counters(
-    ctrs: Dict[str, Any], fp_type: str, mfma_table: Dict[str, Any]
-) -> float:
-    mops_flops = sum(
-        float(ctrs.get(counter_name, 0)) * _MFMA_MOPS_FLOPS_PER_COUNT
-        for counter_name in _MOPS_COUNTERS
-    )
+def _mfma_flops_from_counters(ctrs: Dict[str, Any], fp_type: str, mfma_table: Dict[str, Any]) -> float:
+    mops_flops = sum(float(ctrs.get(counter_name, 0)) * _MFMA_MOPS_FLOPS_PER_COUNT for counter_name in _MOPS_COUNTERS)
     if mops_flops > 0:
         return mops_flops
 
@@ -269,9 +262,7 @@ def plot_points(
     kernels_out: List[Dict[str, Any]] = []
     dtype_votes: Dict[str, float] = {}
 
-    total_duration_ns = sum(
-        int(v.get("_duration_ns", 0)) for v in per_kernel.values()
-    )
+    total_duration_ns = sum(int(v.get("_duration_ns", 0)) for v in per_kernel.values())
 
     for name, ctrs in per_kernel.items():
         valu = float(ctrs.get("SQ_INSTS_VALU", 0))
@@ -300,15 +291,11 @@ def plot_points(
         rate = flops / (duration_ns / 1e9)
 
         try:
-            regime = classify(flops=flops, bytes=bytes_total, gfx_id=gfx_id)[
-                "regime"
-            ]
+            regime = classify(flops=flops, bytes=bytes_total, gfx_id=gfx_id)["regime"]
         except (ValueError, KeyError):
             regime = "balanced"
 
-        duration_pct = (
-            (duration_ns / total_duration_ns * 100.0) if total_duration_ns > 0 else 0.0
-        )
+        duration_pct = (duration_ns / total_duration_ns * 100.0) if total_duration_ns > 0 else 0.0
 
         kernels_out.append(
             {
@@ -334,9 +321,7 @@ def plot_points(
         dtype_confidence = "from_kernel_name"
     elif dtype_votes:
         dominant_dtype = max(dtype_votes.items(), key=lambda kv: kv[1])[0]
-        dtype_confidence = (
-            "from_kernel_name" if dominant_dtype != "fp32" else "default"
-        )
+        dtype_confidence = "from_kernel_name" if dominant_dtype != "fp32" else "default"
     else:
         dominant_dtype = "fp32"
         dtype_confidence = "default"
@@ -346,7 +331,7 @@ def plot_points(
         "fp16": _peak_for_dtype(specs, "fp16"),
         "bf16": _peak_for_dtype(specs, "bf16"),
         "fp64": float(specs.get("peak_fp64_tflops") or 0.0) * 1e12,
-        "fp8":  _peak_for_dtype(specs, "fp8"),
+        "fp8": _peak_for_dtype(specs, "fp8"),
         "int8": _peak_for_dtype(specs, "int8"),
     }
     hbm_bps = float(specs.get("memory_bandwidth_tbs") or 0.0) * 1e12

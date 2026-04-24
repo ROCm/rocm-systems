@@ -26,7 +26,6 @@ from perfxpert.cli._mcp_warmup import (
     warmup_perfxpert_mcp,
 )
 
-
 # ---------------------------------------------------------------------------
 # A fake subprocess module suitable for unit tests.
 # ---------------------------------------------------------------------------
@@ -135,9 +134,7 @@ def test_warmup_spawns_and_closes_cleanly(
         lambda name: "/usr/bin/perfxpert-mcp" if name == "perfxpert-mcp" else None,
     )
     fake_proc = _FakeProcess(returncode_after_wait=0)
-    report = warmup_perfxpert_mcp(
-        subprocess_module=_FakeSubprocess(fake_proc)
-    )
+    report = warmup_perfxpert_mcp(subprocess_module=_FakeSubprocess(fake_proc))
     assert isinstance(report, WarmupReport)
     assert report.success is True
     assert fake_proc.stdin.closed is True
@@ -150,12 +147,8 @@ def test_warmup_spawns_and_closes_cleanly(
 
 def test_warmup_reports_duration(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(WARMUP_ENABLED_ENV, raising=False)
-    monkeypatch.setattr(
-        "shutil.which", lambda _: "/usr/bin/perfxpert-mcp"
-    )
-    report = warmup_perfxpert_mcp(
-        subprocess_module=_FakeSubprocess(_FakeProcess())
-    )
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/perfxpert-mcp")
+    report = warmup_perfxpert_mcp(subprocess_module=_FakeSubprocess(_FakeProcess()))
     assert report.duration_s >= 0
     assert report.duration_s < 5.0  # generous upper bound for fake
 
@@ -164,15 +157,9 @@ def test_warmup_idempotent_on_second_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv(WARMUP_ENABLED_ENV, raising=False)
-    monkeypatch.setattr(
-        "shutil.which", lambda _: "/usr/bin/perfxpert-mcp"
-    )
-    r1 = warmup_perfxpert_mcp(
-        subprocess_module=_FakeSubprocess(_FakeProcess())
-    )
-    r2 = warmup_perfxpert_mcp(
-        subprocess_module=_FakeSubprocess(_FakeProcess())
-    )
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/perfxpert-mcp")
+    r1 = warmup_perfxpert_mcp(subprocess_module=_FakeSubprocess(_FakeProcess()))
+    r2 = warmup_perfxpert_mcp(subprocess_module=_FakeSubprocess(_FakeProcess()))
     assert r1.success and r2.success
 
 
@@ -194,9 +181,7 @@ def test_warmup_skipped_when_env_zero(
     monkeypatch.setattr("shutil.which", _bad_which)
     # Even if which() would succeed, the warmup should not spawn.
     fake_proc = _FakeProcess()
-    report = warmup_perfxpert_mcp(
-        subprocess_module=_FakeSubprocess(fake_proc)
-    )
+    report = warmup_perfxpert_mcp(subprocess_module=_FakeSubprocess(fake_proc))
     assert report.success is True
     assert report.duration_s == 0.0
     # Popen was not exercised.
@@ -217,9 +202,7 @@ def test_warmup_honors_timeout_env(
             captured_timeout.append(timeout)
             return super().wait(timeout)
 
-    warmup_perfxpert_mcp(
-        subprocess_module=_FakeSubprocess(_CaptureProc())
-    )
+    warmup_perfxpert_mcp(subprocess_module=_FakeSubprocess(_CaptureProc()))
     # First wait() (normal exit path) should see the env-override value.
     assert captured_timeout[0] == 2.0
 
@@ -231,9 +214,7 @@ def test_warmup_timeout_path_sends_sigterm_not_kill(
     monkeypatch.delenv(WARMUP_ENABLED_ENV, raising=False)
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/perfxpert-mcp")
     fake_proc = _FakeProcess(raise_on_wait=True)
-    report = warmup_perfxpert_mcp(
-        subprocess_module=_FakeSubprocess(fake_proc)
-    )
+    report = warmup_perfxpert_mcp(subprocess_module=_FakeSubprocess(fake_proc))
     assert report.success is False
     assert fake_proc.terminated is True
     # terminate → wait(2s) which in our fake resolves cleanly → kill NOT called.
@@ -247,9 +228,7 @@ def test_warmup_does_not_block_on_stdout_readline(
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/perfxpert-mcp")
     fake_proc = _FakeProcess()
     fake_proc.stdout = _ReadlineTrapPipe()
-    report = warmup_perfxpert_mcp(
-        subprocess_module=_FakeSubprocess(fake_proc)
-    )
+    report = warmup_perfxpert_mcp(subprocess_module=_FakeSubprocess(fake_proc))
     assert report.success is True
 
 
@@ -260,9 +239,7 @@ def test_warmup_handles_missing_stdin_pipe(
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/perfxpert-mcp")
     fake_proc = _FakeProcess()
     fake_proc.stdin = None
-    report = warmup_perfxpert_mcp(
-        subprocess_module=_FakeSubprocess(fake_proc)
-    )
+    report = warmup_perfxpert_mcp(subprocess_module=_FakeSubprocess(fake_proc))
     assert report.success is False
     assert "stdin pipe" in (report.error or "")
 
@@ -273,9 +250,7 @@ def test_warmup_escalates_to_kill_only_when_terminate_fails(
     monkeypatch.delenv(WARMUP_ENABLED_ENV, raising=False)
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/perfxpert-mcp")
     fake_proc = _FakeProcess(raise_on_wait=True, raise_on_second_wait=True)
-    warmup_perfxpert_mcp(
-        subprocess_module=_FakeSubprocess(fake_proc)
-    )
+    warmup_perfxpert_mcp(subprocess_module=_FakeSubprocess(fake_proc))
     # Both wait() calls timed out → kill() as last resort.
     assert fake_proc.terminated is True
     assert fake_proc.killed is True
@@ -287,9 +262,7 @@ def test_warmup_nonzero_exit_is_reported_as_failure(
     monkeypatch.delenv(WARMUP_ENABLED_ENV, raising=False)
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/perfxpert-mcp")
     fake_proc = _FakeProcess(returncode_after_wait=7)
-    report = warmup_perfxpert_mcp(
-        subprocess_module=_FakeSubprocess(fake_proc)
-    )
+    report = warmup_perfxpert_mcp(subprocess_module=_FakeSubprocess(fake_proc))
     assert report.success is False
     assert "exited 7" in (report.error or "")
 
@@ -332,9 +305,7 @@ def test_warmup_handles_popen_oserror(
 # ---------------------------------------------------------------------------
 
 
-def test_warmup_leaves_no_orphan_wal_or_shm_files(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_warmup_leaves_no_orphan_wal_or_shm_files(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """I-N6: after warmup returns, the tmp dir must be clean of -wal / -shm."""
     monkeypatch.delenv(WARMUP_ENABLED_ENV, raising=False)
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/perfxpert-mcp")
@@ -344,9 +315,7 @@ def test_warmup_leaves_no_orphan_wal_or_shm_files(
     # perfxpert-mcp writes into its own state dir; this test codifies
     # "the warmup harness itself doesn't leak".)
     before = {p.name for p in tmp_path.iterdir()}
-    warmup_perfxpert_mcp(
-        subprocess_module=_FakeSubprocess(_FakeProcess())
-    )
+    warmup_perfxpert_mcp(subprocess_module=_FakeSubprocess(_FakeProcess()))
     after = {p.name for p in tmp_path.iterdir()}
     assert before == after
     # Belt-and-braces: no `-wal` or `-shm` should appear anywhere in tmp_path.

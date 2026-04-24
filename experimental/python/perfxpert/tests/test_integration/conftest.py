@@ -10,7 +10,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
 
 

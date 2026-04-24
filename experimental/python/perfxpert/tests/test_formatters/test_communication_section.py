@@ -47,10 +47,14 @@ def comm_payload() -> Dict[str, Any]:
 
 def _base_args() -> Dict[str, Any]:
     return {
-        "time_breakdown": {"total_runtime": 10_000_000, "kernel_percent": 60.0,
-                           "memcpy_percent": 10.0, "overhead_percent": 5.0,
-                           "total_kernel_time": 6_000_000,
-                           "total_memcpy_time": 1_000_000},
+        "time_breakdown": {
+            "total_runtime": 10_000_000,
+            "kernel_percent": 60.0,
+            "memcpy_percent": 10.0,
+            "overhead_percent": 5.0,
+            "total_kernel_time": 6_000_000,
+            "total_memcpy_time": 1_000_000,
+        },
         "hotspots": [],
         "memory_analysis": {},
         "recommendations": [],
@@ -62,6 +66,7 @@ def _base_args() -> Dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Webview: section exists + class="scard" present                             #
 # --------------------------------------------------------------------------- #
+
 
 def test_webview_renders_communication_scard(comm_payload):
     args = _base_args()
@@ -77,6 +82,7 @@ def test_webview_renders_communication_scard(comm_payload):
 # Markdown: ## Communication + table header                                   #
 # --------------------------------------------------------------------------- #
 
+
 def test_markdown_renders_communication_section(comm_payload):
     args = _base_args()
     md = _format_as_markdown(communication=comm_payload, **args)
@@ -89,6 +95,7 @@ def test_markdown_renders_communication_section(comm_payload):
 # --------------------------------------------------------------------------- #
 # Text (via format_analysis_output): COMMUNICATION header box                 #
 # --------------------------------------------------------------------------- #
+
 
 def test_text_renders_communication_box(comm_payload):
     args = _base_args()
@@ -105,8 +112,10 @@ def test_text_renders_communication_box(comm_payload):
 # JSON: passthrough + schema bump                                             #
 # --------------------------------------------------------------------------- #
 
+
 def test_json_passthrough_bumps_schema(comm_payload):
     import json as _json
+
     args = _base_args()
     out = _format_as_json(communication=comm_payload, **args)
     doc = _json.loads(out)
@@ -118,6 +127,7 @@ def test_json_passthrough_bumps_schema(comm_payload):
 def test_json_att_trumps_communication(comm_payload):
     """Even with communication present, ATT data bumps schema to 0.4.0."""
     import json as _json
+
     args = _base_args()
     att = {"has_att_data": True, "kernels": [], "summary": {}}
     out = _format_as_json(communication=comm_payload, att_analysis=att, **args)
@@ -129,11 +139,13 @@ def test_json_att_trumps_communication(comm_payload):
 # Absent key: no section rendered                                             #
 # --------------------------------------------------------------------------- #
 
+
 def test_formatters_skip_communication_when_absent():
     args = _base_args()
     html = _format_as_webview(**args)
     md = _format_as_markdown(**args)
     import json as _json
+
     doc = _json.loads(_format_as_json(**args))
     assert "<h2>Communication</h2>" not in html
     assert "## Communication" not in md

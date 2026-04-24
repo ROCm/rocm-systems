@@ -8,7 +8,6 @@ from typing import List, Optional
 
 from perfxpert.runtime import recursion_guard
 
-
 _AMD_RED = "#ED1C24"
 
 
@@ -78,9 +77,7 @@ def launch_opencode(
     """
     binary = opencode_path or os.environ.get("PERFXPERT_OPENCODE_PATH") or shutil.which("opencode")
     if not binary:
-        raise FileNotFoundError(
-            "opencode binary not found (set PERFXPERT_OPENCODE_PATH or install opencode on PATH)"
-        )
+        raise FileNotFoundError("opencode binary not found (set PERFXPERT_OPENCODE_PATH or install opencode on PATH)")
 
     argv: List[str] = [binary]
     if extra_args:

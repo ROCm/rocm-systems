@@ -20,7 +20,6 @@ from pathlib import Path
 
 import pytest
 
-
 _CHECKOUT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -33,9 +32,7 @@ def _opencode_available():
 
 def _llm_key_set():
     """Check if at least one LLM API key is set."""
-    return bool(os.environ.get("OPENAI_API_KEY")) or bool(
-        os.environ.get("ANTHROPIC_API_KEY")
-    )
+    return bool(os.environ.get("OPENAI_API_KEY")) or bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
 def _perfxpert_code_cmd() -> list[str]:
@@ -65,9 +62,7 @@ def _checkout_python_env() -> dict[str, str]:
     not _llm_key_set(),
     reason="no LLM API key (OPENAI_API_KEY / ANTHROPIC_API_KEY)",
 )
-def test_perfxpert_code_calls_mcp_and_returns_expected_value(
-    monkeypatch, tmp_path: Path
-):
+def test_perfxpert_code_calls_mcp_and_returns_expected_value(monkeypatch, tmp_path: Path):
     """Real LLM call through perfxpert-code → opencode → perfxpert-mcp → arch.lookup_peaks."""
     monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
 
@@ -121,27 +116,20 @@ def test_perfxpert_code_calls_mcp_and_returns_expected_value(
 
     if "pragma wal_checkpoint(passive)" in low:
         pytest.skip(
-            "upstream opencode local database state is unhealthy "
-            "(environmental, not a perfxpert MCP defect)"
+            "upstream opencode local database state is unhealthy " "(environmental, not a perfxpert MCP defect)"
         )
 
     # Check exit code
     assert result.returncode == 0, (
-        f"perfxpert-code failed with rc={result.returncode}\n"
-        f"stderr: {result.stderr[:500]}"
+        f"perfxpert-code failed with rc={result.returncode}\n" f"stderr: {result.stderr[:500]}"
     )
 
     # Our MCP tool-call marker appears in stderr (opencode prints progress there)
     assert "perfxpert_arch_lookup_peaks" in result.stderr, (
-        f"no MCP tool call marker in stderr\n"
-        f"stdout: {result.stdout[:500]}\n"
-        f"stderr: {result.stderr[:500]}"
+        f"no MCP tool call marker in stderr\n" f"stdout: {result.stdout[:500]}\n" f"stderr: {result.stderr[:500]}"
     )
 
     # The actual number: MI300X peak FP64 TFLOPS = 81.7
     # (not the incorrect 163.4 from some datasheets due to OI counting)
     # This appears in stdout as the final LLM response
-    assert "81.7" in result.stdout, (
-        f"expected 81.7 in stdout\n"
-        f"stdout: {result.stdout[:500]}"
-    )
+    assert "81.7" in result.stdout, f"expected 81.7 in stdout\n" f"stdout: {result.stdout[:500]}"

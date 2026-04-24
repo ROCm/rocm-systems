@@ -10,12 +10,12 @@ Tool class: READ_ONLY.
 from typing import Any, Dict, Literal
 
 from perfxpert.tools._class import ToolClass, tool_class
+
 # Imported as a private alias so the tool registry (which walks
 # perfxpert.tools.* and collects public READ_ONLY callables) does not
 # re-register this as `sol.lookup_peaks`. Canonical name is
 # `arch.lookup_peaks`; this module re-uses it internally only.
 from perfxpert.tools.arch import lookup_peaks as _lookup_peaks
-
 
 KernelType = Literal["fp64", "fp32", "bf16"]
 

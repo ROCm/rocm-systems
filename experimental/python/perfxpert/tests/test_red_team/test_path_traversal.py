@@ -7,7 +7,6 @@ import pytest
 from perfxpert.tools import patch_mgr
 from perfxpert.tools._safety import PathConfinementError
 
-
 TRAVERSAL_PAYLOADS = [
     "../../../etc/passwd",
     "../outside",

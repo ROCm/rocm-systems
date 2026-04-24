@@ -8,8 +8,7 @@ import jsonschema
 from perfxpert.knowledge import load_yaml
 
 SCHEMA_PATH = (
-    Path(__file__).parent.parent.parent
-    / "perfxpert" / "knowledge" / "_schemas" / "metric_thresholds.schema.json"
+    Path(__file__).parent.parent.parent / "perfxpert" / "knowledge" / "_schemas" / "metric_thresholds.schema.json"
 )
 
 
@@ -39,6 +38,4 @@ def test_high_exceeds_medium_exceeds_low():
     """Each metric must have monotonic thresholds: high > medium > low."""
     data = load_yaml("metric_thresholds")
     for name, entry in data.items():
-        assert entry["high"] > entry["medium"] > entry["low"], (
-            f"metric {name} has non-monotonic thresholds"
-        )
+        assert entry["high"] > entry["medium"] > entry["low"], f"metric {name} has non-monotonic thresholds"

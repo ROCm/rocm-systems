@@ -5,7 +5,6 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-
 FIXTURES_DIR = Path(__file__).parent
 
 
@@ -13,8 +12,7 @@ def _connect(path: Path) -> sqlite3.Connection:
     if path.exists():
         path.unlink()
     conn = sqlite3.connect(path)
-    conn.executescript(
-        """
+    conn.executescript("""
         CREATE TABLE kernels (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
@@ -45,8 +43,7 @@ def _connect(path: Path) -> sqlite3.Connection:
             counter_name TEXT NOT NULL,
             counter_value REAL NOT NULL
         );
-        """
-    )
+        """)
     return conn
 
 
@@ -65,8 +62,7 @@ def create_compute_bound(path: Path) -> None:
             ("SQ_WAVES", 24.0),
         ):
             conn.execute(
-                "INSERT INTO pmc_events (name, dispatch_id, counter_name, counter_value) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO pmc_events (name, dispatch_id, counter_name, counter_value) " "VALUES (?, ?, ?, ?)",
                 ("matmul", dispatch_id, counter_name, value),
             )
     conn.commit()
@@ -80,8 +76,7 @@ def create_memory_transfer(path: Path) -> None:
         (1, "postprocess", 0, 100_000, 100_000),
     )
     conn.execute(
-        "INSERT INTO memory_copies (id, category, start, end, size, duration) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO memory_copies (id, category, start, end, size, duration) " "VALUES (?, ?, ?, ?, ?, ?)",
         (1, "HostToDevice", 100_000, 500_000, 4 * 1024 * 1024, 400_000),
     )
     conn.commit()

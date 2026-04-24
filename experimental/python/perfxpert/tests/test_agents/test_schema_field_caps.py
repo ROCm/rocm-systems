@@ -4,7 +4,6 @@ import pytest
 
 from perfxpert.agents import schemas
 
-
 INPUT_SCHEMAS = [
     "RootInput",
     "AnalysisInput",

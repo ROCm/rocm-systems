@@ -48,18 +48,16 @@ def test_every_array_property_has_items():
         for pname, pschema in _walk_props(tool.inputSchema.get("properties", {})):
             if pschema.get("type") == "array" and "items" not in pschema:
                 offenders.append(f"{name}::{pname}")
-    assert not offenders, (
-        f"arrays without items (OpenAI rejects): {offenders}"
-    )
+    assert not offenders, f"arrays without items (OpenAI rejects): {offenders}"
 
 
 def test_every_input_schema_has_type_object():
     """Every tool's inputSchema must be type=object (MCP + OpenAI requirement)."""
     for name, fn in discover_read_only_tools().items():
         tool = _fn_to_tool_schema(name, fn)
-        assert tool.inputSchema.get("type") == "object", (
-            f"{name} inputSchema must be type=object, got {tool.inputSchema.get('type')}"
-        )
+        assert (
+            tool.inputSchema.get("type") == "object"
+        ), f"{name} inputSchema must be type=object, got {tool.inputSchema.get('type')}"
 
 
 def test_object_properties_have_additionalproperties():
@@ -68,6 +66,6 @@ def test_object_properties_have_additionalproperties():
         tool = _fn_to_tool_schema(name, fn)
         for pname, pschema in _walk_props(tool.inputSchema.get("properties", {})):
             if pschema.get("type") == "object":
-                assert "additionalProperties" in pschema or "properties" in pschema, (
-                    f"{name}::{pname} is type=object but missing additionalProperties"
-                )
+                assert (
+                    "additionalProperties" in pschema or "properties" in pschema
+                ), f"{name}::{pname} is type=object but missing additionalProperties"

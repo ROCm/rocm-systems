@@ -37,9 +37,7 @@ def _find_binary(explicit: Optional[str]) -> str:
     found = shutil.which("opencode")
     if found:
         return found
-    raise ProviderError(
-        "[opencode] binary not found (set PERFXPERT_OPENCODE_PATH or install opencode on PATH)"
-    )
+    raise ProviderError("[opencode] binary not found (set PERFXPERT_OPENCODE_PATH or install opencode on PATH)")
 
 
 def _flatten_messages(messages: List[Dict[str, Any]], system: str) -> str:
@@ -79,8 +77,7 @@ class OpencodeProvider(Provider):
 
         if os.environ.get("PERFXPERT_IN_OPENCODE_SESSION") == "1":
             raise ProviderError(
-                "[opencode] recursion guard tripped — "
-                "cannot invoke opencode provider inside an opencode session"
+                "[opencode] recursion guard tripped — " "cannot invoke opencode provider inside an opencode session"
             )
 
         prompt = _flatten_messages(messages, system)
@@ -103,9 +100,7 @@ class OpencodeProvider(Provider):
             raise ProviderError(f"[opencode] exec failure: {e}") from e
 
         if completed.returncode != 0:
-            raise ProviderError(
-                f"[opencode] exit={completed.returncode}: {completed.stderr.strip()[:200]}"
-            )
+            raise ProviderError(f"[opencode] exit={completed.returncode}: {completed.stderr.strip()[:200]}")
 
         return ProviderResponse(
             content=completed.stdout,

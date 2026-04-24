@@ -7,7 +7,6 @@ import pytest
 
 from perfxpert.tools import compile_runner
 
-
 SMUGGLED_FLAGS = [
     "-Xlinker",
     "-Wl,-rpath,/evil",
@@ -35,9 +34,7 @@ def test_allowlisted_flags_still_work(tmp_path: Path, monkeypatch):
     (tmp_path / "src.cpp").write_text("int main(){return 0;}\n")
     monkeypatch.setattr(
         "perfxpert.tools.compile_runner.subprocess.run",
-        mock.MagicMock(return_value=mock.MagicMock(
-            returncode=0, stdout=b"", stderr=b""
-        )),
+        mock.MagicMock(return_value=mock.MagicMock(returncode=0, stdout=b"", stderr=b"")),
     )
     result = compile_runner.build(
         project_root=tmp_path,

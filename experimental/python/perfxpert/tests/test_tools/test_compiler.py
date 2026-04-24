@@ -15,7 +15,7 @@ def test_lookup_returns_only_allowlisted():
 def test_lookup_excludes_denylisted():
     flags = compiler.lookup_flags()
     names = {f["flag"] for f in flags}
-    assert "-Xlinker" not in names   # denylisted for security
+    assert "-Xlinker" not in names  # denylisted for security
 
 
 def test_explain_known_flag():

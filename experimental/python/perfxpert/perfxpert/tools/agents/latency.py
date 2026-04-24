@@ -55,9 +55,7 @@ def agent_latency_specialist(
         progress_callback=progress_callback,
     )
     payload = schemas.LatencySpecialistInput(**input)
-    output = session.run_latency_specialist(
-        payload, progress_callback=progress_callback
-    )
+    output = session.run_latency_specialist(payload, progress_callback=progress_callback)
 
     if hasattr(output, "model_dump"):
         return output.model_dump()

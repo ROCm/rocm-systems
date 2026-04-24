@@ -26,11 +26,11 @@ from perfxpert.agents.framework import Agent, ToolBinding, run_agent
 from perfxpert.tools import tasks as tasks_tool
 from perfxpert.tools import trace_fingerprint
 
-
 _FENCE_PATH = Path(__file__).parent / "fence" / "correctness.md"
 
 
 # -- Module-level delegators (for test injection) -------------------------
+
 
 def _tasks_query_by_kernel(kernel_name: str, root: Optional[str] = None) -> List[Dict[str, Any]]:
     if root:
@@ -46,6 +46,7 @@ def _tasks_create(*, root: Optional[str] = None, **kw) -> str:
 
 # -- Builder --------------------------------------------------------------
 
+
 def build_correctness_agent() -> Agent:
     tools = [
         ToolBinding(name="tasks.query_by_kernel", fn=_tasks_query_by_kernel),
@@ -59,12 +60,13 @@ def build_correctness_agent() -> Agent:
         input_schema=schemas.CorrectnessInput,
         output_schema=schemas.CorrectnessOutput,
         tools=tools,
-        allowed_handoffs=[],   # returns to Root
+        allowed_handoffs=[],  # returns to Root
         token_budget=3072,
     )
 
 
 # -- Deterministic narrative template -------------------------------------
+
 
 def _airgap_narrative(v: schemas.GateVerdictModel) -> str:
     gate = v.failing_gate or "all"
@@ -90,8 +92,7 @@ def _validate_tasks_create_binding() -> None:
     missing = sorted(required - names)
     if missing:
         raise TypeError(
-            "tasks.create binding must accept title and meta keyword arguments; "
-            f"missing {', '.join(missing)}"
+            "tasks.create binding must accept title and meta keyword arguments; " f"missing {', '.join(missing)}"
         )
 
 
@@ -110,15 +111,14 @@ def _create_reject_follow_up(
     return _tasks_create(root=source_dir, title=title, meta=meta)
 
 
-def _select_untried_alternative(
-    candidate: Optional[str], tried: set[str], fallback: Optional[str]
-) -> Optional[str]:
+def _select_untried_alternative(candidate: Optional[str], tried: set[str], fallback: Optional[str]) -> Optional[str]:
     if candidate and candidate not in tried:
         return candidate
     return fallback
 
 
 # -- Runner ---------------------------------------------------------------
+
 
 def run_correctness(
     payload: schemas.CorrectnessInput,

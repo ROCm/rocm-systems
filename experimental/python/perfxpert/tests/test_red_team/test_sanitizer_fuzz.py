@@ -19,8 +19,14 @@ from perfxpert.tools._safety import reject_shell_metachars, ShellMetacharError
 # Exact same pattern as in _safety.py
 _SHELL_METACHARS = re.compile(r"[;&|`$()<>\n\r\0]|\\\\|\\\"|\\'")
 PROMPT_INJECTION_MARKERS = [
-    "IGNORE PREVIOUS", "IGNORE ABOVE", "SYSTEM:", "<|im_start|>", "<|im_end|>",
-    "ASSISTANT:", "</system>", "---END OF FENCE---",
+    "IGNORE PREVIOUS",
+    "IGNORE ABOVE",
+    "SYSTEM:",
+    "<|im_start|>",
+    "<|im_end|>",
+    "ASSISTANT:",
+    "</system>",
+    "---END OF FENCE---",
 ]
 
 

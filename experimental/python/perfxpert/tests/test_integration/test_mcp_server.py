@@ -15,6 +15,7 @@ def test_server_constructs_when_sdk_present():
     except ImportError:
         pytest.skip("MCP SDK not installed")
     from mcp_server.server import build_server
+
     s = build_server()
     assert s is not None
 
@@ -30,19 +31,21 @@ def test_build_server_raises_without_sdk():
 
     # Patch sys.modules to make MCP imports fail
     mcp_modules = {
-        'mcp': None,
-        'mcp.server': None,
-        'mcp.server.stdio': None,
-        'mcp.types': None,
+        "mcp": None,
+        "mcp.server": None,
+        "mcp.server.stdio": None,
+        "mcp.types": None,
     }
     with patch.dict(sys.modules, mcp_modules):
         # Force reimport of mcp_server.server to see the patched modules
         import importlib
-        if 'mcp_server.server' in sys.modules:
-            del sys.modules['mcp_server.server']
-        if 'mcp_server' in sys.modules:
-            del sys.modules['mcp_server']
+
+        if "mcp_server.server" in sys.modules:
+            del sys.modules["mcp_server.server"]
+        if "mcp_server" in sys.modules:
+            del sys.modules["mcp_server"]
 
         from mcp_server.server import build_server
+
         with pytest.raises(RuntimeError, match="MCP SDK not available"):
             build_server()

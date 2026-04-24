@@ -33,9 +33,7 @@ class RateLimitError(ProviderError):
         self.provider = provider
         self.retry_after = retry_after
         detail = f": {message}" if message else ""
-        super().__init__(
-            f"[{provider}] rate limited (retry_after={retry_after}s){detail}"
-        )
+        super().__init__(f"[{provider}] rate limited (retry_after={retry_after}s){detail}")
 
 
 class QuotaExceededError(ProviderError):
@@ -78,9 +76,7 @@ class TimeoutError(ProviderError):
         self.provider = provider
         self.timeout_seconds = timeout_seconds
         detail = f": {message}" if message else ""
-        super().__init__(
-            f"[{provider}] timed out after {timeout_seconds}s{detail}"
-        )
+        super().__init__(f"[{provider}] timed out after {timeout_seconds}s{detail}")
 
 
 class ProviderChainExhausted(ProviderError):
