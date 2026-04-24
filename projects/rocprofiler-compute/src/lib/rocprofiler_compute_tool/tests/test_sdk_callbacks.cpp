@@ -222,7 +222,7 @@ void TestSdkCallbacks::invoke_record_callback(uint64_t           counter_id,
                                               const std::string& counter_name,
                                               double             counter_value)
 {
-    rocprofiler_dispatch_counting_service_data_t dispatch_data;
+    rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
     dispatch_data.dispatch_info.dispatch_id        = 100;
     dispatch_data.dispatch_info.agent_id.handle    = 200;
     dispatch_data.dispatch_info.kernel_id          = 300;
@@ -311,6 +311,14 @@ void TestSdkCallbacksMultiplexing::SetUp()
     m_multiplexing_mode = GetParam();
 }
 
+INSTANTIATE_TEST_SUITE_P(
+    Multiplexing,
+    TestSdkCallbacksMultiplexing,
+    ::testing::Values(rocprofiler_compute_tool::iteration_multiplexing_mode_t::DISABLED,
+                      rocprofiler_compute_tool::iteration_multiplexing_mode_t::KERNEL,
+                      rocprofiler_compute_tool::iteration_multiplexing_mode_t::LAUNCH));
+
+
 //////////////////////////////////////////////////////////////////////////
 /// TestSdkCallbacksKernelFiltering
 void TestSdkCallbacksKernelFiltering::SetUp()
@@ -318,3 +326,20 @@ void TestSdkCallbacksKernelFiltering::SetUp()
     TestSdkCallbacks::SetUp();
     m_filtering_params = GetParam();
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    KernelFiltering,
+    TestSdkCallbacksKernelFiltering,
+    ::testing::Values(
+        kernel_filtering_test_params_t{"_Z10my_kernel", "my_kernel()", ".*my_kernel.*"},
+        kernel_filtering_test_params_t{"_ZN3hip12vector_add_1Ev", "hip::vector_add_1()", ".*vector_add.*"},
+        kernel_filtering_test_params_t{"_Z6kernelIiEvv", "void kernel<int>()", ".*kernel.*"},
+        kernel_filtering_test_params_t{
+            "_ZN2at6native18elementwise_kernelILi128ELi4EZNS0_15gpu_kernel_implIZZZNS0_31direct_"
+            "copy_"
+            "kernel_cuda_gpu_nuERKNS_10TensorIterEEENKUlvE_clEvEUlvE_EEvS5_T_EUlfE_EEvS5_SB_",
+            "void at::native::elementwise_kernel<128, 4, "
+            "at::native::gpu_kernel_impl<direct_copy_kernel_cuda_gpu_nu(at::TensorIter "
+            "const&)::{lambda()#1}::operator()() const::{lambda()#1}>(at::TensorIter const&, "
+            "{lambda()#1})::{lambda(float)#1}>(at::TensorIter const&, {lambda(float)#1})",
+            ".*elementwise_kernel.*"}));

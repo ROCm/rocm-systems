@@ -42,13 +42,6 @@ protected:
         rocprofiler_compute_tool::iteration_multiplexing_mode_t::DISABLED;
 };
 
-INSTANTIATE_TEST_SUITE_P(
-    Multiplexing,
-    TestSdkCallbacksMultiplexing,
-    ::testing::Values(rocprofiler_compute_tool::iteration_multiplexing_mode_t::DISABLED,
-                      rocprofiler_compute_tool::iteration_multiplexing_mode_t::KERNEL,
-                      rocprofiler_compute_tool::iteration_multiplexing_mode_t::LAUNCH));
-
 struct kernel_filtering_test_params_t
 {
     std::string mangled_kernel_name;
@@ -64,20 +57,3 @@ protected:
     void                           SetUp() override;
     kernel_filtering_test_params_t m_filtering_params = {};
 };
-
-INSTANTIATE_TEST_SUITE_P(
-    KernelFiltering,
-    TestSdkCallbacksKernelFiltering,
-    ::testing::Values(
-        kernel_filtering_test_params_t{"_Z10my_kernel", "my_kernel()", ".*my_kernel.*"},
-        kernel_filtering_test_params_t{"_ZN3hip12vector_add_1Ev", "hip::vector_add_1()", ".*vector_add.*"},
-        kernel_filtering_test_params_t{"_Z6kernelIiEvv", "void kernel<int>()", ".*kernel.*"},
-        kernel_filtering_test_params_t{
-            "_ZN2at6native18elementwise_kernelILi128ELi4EZNS0_15gpu_kernel_implIZZZNS0_31direct_"
-            "copy_"
-            "kernel_cuda_gpu_nuERKNS_10TensorIterEEENKUlvE_clEvEUlvE_EEvS5_T_EUlfE_EEvS5_SB_",
-            "void at::native::elementwise_kernel<128, 4, "
-            "at::native::gpu_kernel_impl<direct_copy_kernel_cuda_gpu_nu(at::TensorIter "
-            "const&)::{lambda()#1}::operator()() const::{lambda()#1}>(at::TensorIter const&, "
-            "{lambda()#1})::{lambda(float)#1}>(at::TensorIter const&, {lambda(float)#1})",
-            ".*elementwise_kernel.*"}));
