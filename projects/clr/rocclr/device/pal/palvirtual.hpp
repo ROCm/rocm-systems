@@ -630,7 +630,7 @@ class VirtualGPU : public device::VirtualDevice {
   );
 
   //! Common function for fill memory used by both svm Fill and non-svm fill
-  bool fillMemory(cl_command_type type,        //!< the command type
+  bool fillMemory(amd::CommandType type,        //!< the command type
                   amd::Memory* amdMemory,      //!< memory object to fill
                   const void* pattern,         //!< pattern to fill the memory
                   size_t patternSize,          //!< pattern size
@@ -639,7 +639,7 @@ class VirtualGPU : public device::VirtualDevice {
                   bool forceBlit = false       //!< force shader blit path
   );
 
-  bool copyMemory(cl_command_type type,            //!< the command type
+  bool copyMemory(amd::CommandType type,            //!< the command type
                   amd::Memory& srcMem,             //!< source memory object
                   amd::Memory& dstMem,             //!< destination memory object
                   bool entire,                     //!< flag of entire memory copy

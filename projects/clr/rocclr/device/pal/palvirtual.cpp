@@ -1198,25 +1198,25 @@ void VirtualGPU::submitReadMemory(amd::ReadMemoryCommand& vcmd) {
   profilingBegin(vcmd);
 
   memory->syncCacheFromHost(*this);
-  cl_command_type type = vcmd.type();
+  amd::CommandType type = vcmd.type();
   bool result = false;
   amd::Memory* bufferFromImage = nullptr;
 
   // Force buffer read for IMAGE1D_BUFFER
-  if ((type == CL_COMMAND_READ_IMAGE) &&
+  if ((type == amd::CommandType::ReadImage) &&
       (vcmd.source().getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
     bufferFromImage = createBufferFromImage(vcmd.source());
     if (nullptr == bufferFromImage) {
       LogError("We should not fail buffer creation from image_buffer!");
     } else {
-      type = CL_COMMAND_READ_BUFFER;
+      type = amd::CommandType::ReadBuffer;
       memory = dev().getGpuMemory(bufferFromImage);
     }
   }
 
   // Process different write commands
   switch (type) {
-    case CL_COMMAND_READ_BUFFER: {
+    case amd::CommandType::ReadBuffer: {
       amd::Coord3D origin(vcmd.origin()[0]);
       amd::Coord3D size(vcmd.size()[0]);
       if (nullptr != bufferFromImage) {
@@ -1259,7 +1259,7 @@ void VirtualGPU::submitReadMemory(amd::ReadMemoryCommand& vcmd) {
         bufferFromImage->release();
       }
     } break;
-    case CL_COMMAND_READ_BUFFER_RECT: {
+    case amd::CommandType::ReadBufferRect: {
       amd::BufferRect hostbufferRect;
       amd::Coord3D region(0);
       amd::Coord3D hostOrigin(vcmd.hostRect().start_ + offset);
@@ -1274,7 +1274,7 @@ void VirtualGPU::submitReadMemory(amd::ReadMemoryCommand& vcmd) {
                                      vcmd.size(), vcmd.isEntireMemory(), vcmd.copyMetadata());
       }
     } break;
-    case CL_COMMAND_READ_IMAGE:
+    case amd::CommandType::ReadImage:
       if (memory->memoryType() == Resource::ImageBuffer) {
         Image* imageBuffer = static_cast<Image*>(memory);
         // Check if synchronization has to be performed
@@ -1333,25 +1333,25 @@ void VirtualGPU::submitWriteMemory(amd::WriteMemoryCommand& vcmd) {
   syncFlags.skipEntire_ = entire;
   memory->syncCacheFromHost(*this, syncFlags);
 
-  cl_command_type type = vcmd.type();
+  amd::CommandType type = vcmd.type();
   bool result = false;
   amd::Memory* bufferFromImage = nullptr;
 
   // Force buffer write for IMAGE1D_BUFFER
-  if ((type == CL_COMMAND_WRITE_IMAGE) &&
+  if ((type == amd::CommandType::WriteImage) &&
       (vcmd.destination().getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
     bufferFromImage = createBufferFromImage(vcmd.destination());
     if (nullptr == bufferFromImage) {
       LogError("We should not fail buffer creation from image_buffer!");
     } else {
-      type = CL_COMMAND_WRITE_BUFFER;
+      type = amd::CommandType::WriteBuffer;
       memory = dev().getGpuMemory(bufferFromImage);
     }
   }
 
   // Process different write commands
   switch (type) {
-    case CL_COMMAND_WRITE_BUFFER: {
+    case amd::CommandType::WriteBuffer: {
       amd::Coord3D origin(vcmd.origin()[0]);
       amd::Coord3D size(vcmd.size()[0]);
       if (nullptr != bufferFromImage) {
@@ -1394,7 +1394,7 @@ void VirtualGPU::submitWriteMemory(amd::WriteMemoryCommand& vcmd) {
         bufferFromImage->release();
       }
     } break;
-    case CL_COMMAND_WRITE_BUFFER_RECT: {
+    case amd::CommandType::WriteBufferRect: {
       amd::BufferRect hostbufferRect;
       amd::Coord3D region(0);
       amd::Coord3D hostOrigin(vcmd.hostRect().start_ + offset);
@@ -1408,7 +1408,7 @@ void VirtualGPU::submitWriteMemory(amd::WriteMemoryCommand& vcmd) {
                                            vcmd.size(), vcmd.isEntireMemory(), vcmd.copyMetadata());
       }
     } break;
-    case CL_COMMAND_WRITE_IMAGE:
+    case amd::CommandType::WriteImage:
       if (hostMemory != nullptr) {
         // Accelerated buffer to image transfer without pinning
         amd::Coord3D srcOrigin(offset);
@@ -1436,7 +1436,7 @@ void VirtualGPU::submitWriteMemory(amd::WriteMemoryCommand& vcmd) {
   profilingEnd(vcmd);
 }
 
-bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memory& dstMem,
+bool VirtualGPU::copyMemory(amd::CommandType type, amd::Memory& srcMem, amd::Memory& dstMem,
                             bool entire, const amd::Coord3D& srcOrigin,
                             const amd::Coord3D& dstOrigin, const amd::Coord3D& size,
                             const amd::BufferRect& srcRect, const amd::BufferRect& dstRect,
@@ -1478,18 +1478,18 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
     }
   }
 
-  type = static_cast<cl_command_type>(getCopyCommandType(
-      static_cast<amd::CommandType>(type),
+  type = getCopyCommandType(
+      type,
       static_cast<amd::MemObjectType>(srcMem.getType()),
-      static_cast<amd::MemObjectType>(dstMem.getType())));
+      static_cast<amd::MemObjectType>(dstMem.getType()));
 
   bool result = false;
 
   // Check if HW can be used for memory copy
   switch (type) {
-    case CL_COMMAND_MAKE_BUFFERS_RESIDENT_AMD:
-    case CL_COMMAND_SVM_MEMCPY:
-    case CL_COMMAND_COPY_BUFFER: {
+    case static_cast<amd::CommandType>(CL_COMMAND_MAKE_BUFFERS_RESIDENT_AMD):
+    case amd::CommandType::SvmMemcpy:
+    case amd::CommandType::CopyBuffer: {
       amd::Coord3D realSrcOrigin(srcOrigin[0]);
       amd::Coord3D realDstOrigin(dstOrigin[0]);
       amd::Coord3D realSize(size.c[0], size.c[1], size.c[2]);
@@ -1510,11 +1510,11 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
       result = blitMgr().copyBuffer(*srcMemory, *dstMemory, realSrcOrigin, realDstOrigin, realSize,
                                     entire, copyMetadata);
     } break;
-    case CL_COMMAND_COPY_BUFFER_RECT:
+    case amd::CommandType::CopyBufferRect:
       result = blitMgr().copyBufferRect(*srcMemory, *dstMemory, srcRect, dstRect, size, entire,
                                         copyMetadata);
       break;
-    case CL_COMMAND_COPY_IMAGE_TO_BUFFER: {
+    case amd::CommandType::CopyImageToBuffer: {
       amd::Coord3D realDstOrigin(dstOrigin);
       if (nullptr != bufferFromImageDst) {
         const size_t elemSize = dstMem.asImage()->getImageFormat().getElementSize();
@@ -1525,7 +1525,7 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
                                       dstRect.rowPitch_, dstRect.slicePitch_, copyMetadata);
       break;
     }
-    case CL_COMMAND_COPY_BUFFER_TO_IMAGE: {
+    case amd::CommandType::CopyBufferToImage: {
       amd::Coord3D realSrcOrigin(srcOrigin);
       if (nullptr != bufferFromImageSrc) {
         const size_t elemSize = srcMem.asImage()->getImageFormat().getElementSize();
@@ -1536,7 +1536,7 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
                                       srcRect.rowPitch_, srcRect.slicePitch_, copyMetadata);
       break;
     }
-    case CL_COMMAND_COPY_IMAGE:
+    case amd::CommandType::CopyImage:
       result = blitMgr().copyImage(*srcMemory, *dstMemory, srcOrigin, dstOrigin, size, entire,
                                    copyMetadata);
       break;
@@ -1566,7 +1566,7 @@ void VirtualGPU::submitCopyMemory(amd::CopyMemoryCommand& vcmd) {
 
   profilingBegin(vcmd);
 
-  cl_command_type type = vcmd.type();
+  amd::CommandType type = vcmd.type();
   bool entire = vcmd.isEntireMemory();
 
   if (!copyMemory(type, vcmd.source(), vcmd.destination(), entire, vcmd.srcOrigin(),
@@ -1583,7 +1583,7 @@ void VirtualGPU::submitSvmCopyMemory(amd::SvmCopyMemoryCommand& vcmd) {
   std::scoped_lock lock(execution());
   profilingBegin(vcmd);
 
-  cl_command_type type = vcmd.type();
+  amd::CommandType type = vcmd.type();
   // no op for FGS supported device
   if (!dev().isFineGrainedSystem()) {
     amd::Coord3D srcOrigin(0, 0, 0);
@@ -1813,7 +1813,7 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& vcmd) {
     profilingEnd(vcmd);
 }
 
-bool VirtualGPU::fillMemory(cl_command_type type, amd::Memory* amdMemory, const void* pattern,
+bool VirtualGPU::fillMemory(amd::CommandType type, amd::Memory* amdMemory, const void* pattern,
                             size_t patternSize, const amd::Coord3D& origin,
                             const amd::Coord3D& size, bool forceBlit) {
   pal::Memory* memory = dev().getGpuMemory(amdMemory);
@@ -1829,20 +1829,20 @@ bool VirtualGPU::fillMemory(cl_command_type type, amd::Memory* amdMemory, const 
   float fillValue[4];
 
   // Force fill buffer for IMAGE1D_BUFFER
-  if ((type == CL_COMMAND_FILL_IMAGE) && (amdMemory->getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
+  if ((type == amd::CommandType::FillImage) && (amdMemory->getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
     bufferFromImage = createBufferFromImage(*amdMemory);
     if (nullptr == bufferFromImage) {
       LogError("We should not fail buffer creation from image_buffer!");
     } else {
-      type = CL_COMMAND_FILL_BUFFER;
+      type = amd::CommandType::FillBuffer;
       memory = dev().getGpuMemory(bufferFromImage);
     }
   }
 
   // Find the the right fill operation
   switch (type) {
-    case CL_COMMAND_FILL_BUFFER:
-    case CL_COMMAND_SVM_MEMFILL: {
+    case amd::CommandType::FillBuffer:
+    case amd::CommandType::SvmMemfill: {
       amd::Coord3D realOrigin(origin[0]);
       amd::Coord3D realSize(size[0]);
       // Reprogram fill parameters if it's an IMAGE1D_BUFFER object
@@ -1861,7 +1861,7 @@ bool VirtualGPU::fillMemory(cl_command_type type, amd::Memory* amdMemory, const 
         bufferFromImage->release();
       }
     } break;
-    case CL_COMMAND_FILL_IMAGE:
+    case amd::CommandType::FillImage:
       result = blitMgr().fillImage(*memory, pattern, origin, size,
                                    amdMemory->isEntirelyCovered(origin, size));
       break;
@@ -1952,7 +1952,7 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
 
   bool result = false;
   switch (cmd.type()) {
-    case CL_COMMAND_COPY_BUFFER: {
+    case amd::CommandType::CopyBuffer: {
       amd::Coord3D srcOrigin(cmd.srcOrigin()[0]);
       amd::Coord3D dstOrigin(cmd.dstOrigin()[0]);
 
@@ -1988,7 +1988,7 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
       }
       break;
     }
-    case CL_COMMAND_COPY_BUFFER_RECT: {
+    case amd::CommandType::CopyBufferRect: {
       if (p2pAllowed) {
         result = blitMgr().copyBufferRect(*srcDevMem, *dstDevMem, cmd.srcRect(), cmd.dstRect(),
                                           size, cmd.isEntireMemory(), cmd.copyMetadata());
@@ -2048,9 +2048,9 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
       }
       break;
     }
-    case CL_COMMAND_COPY_IMAGE:
-    case CL_COMMAND_COPY_IMAGE_TO_BUFFER:
-    case CL_COMMAND_COPY_BUFFER_TO_IMAGE:
+    case amd::CommandType::CopyImage:
+    case amd::CommandType::CopyImageToBuffer:
+    case amd::CommandType::CopyBufferToImage:
       LogError("Unsupported P2P type!");
       break;
     default:
@@ -2274,7 +2274,7 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
   std::scoped_lock lock(execution());
   profilingBegin(cmd);
 
-  const cl_command_type type = cmd.type();
+  const amd::CommandType type = cmd.type();
   const uint64_t value = cmd.value();
   const uint64_t mask = cmd.mask();
   const unsigned int flags = cmd.flags();
@@ -3026,7 +3026,7 @@ void VirtualGPU::submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& 
   profilingBegin(cmd);
 
   switch (cmd.type()) {
-    case CL_COMMAND_THREAD_TRACE_MEM: {
+    case static_cast<amd::CommandType>(CL_COMMAND_THREAD_TRACE_MEM): {
       amd::ThreadTrace* amdThreadTrace = &cmd.getThreadTrace();
       ThreadTrace* threadTrace = static_cast<ThreadTrace*>(amdThreadTrace->getDeviceThreadTrace());
 
@@ -3077,7 +3077,7 @@ void VirtualGPU::submitThreadTrace(amd::ThreadTraceCommand& cmd) {
   profilingBegin(cmd);
 
   switch (cmd.type()) {
-    case CL_COMMAND_THREAD_TRACE: {
+    case static_cast<amd::CommandType>(CL_COMMAND_THREAD_TRACE): {
       amd::ThreadTrace* amdThreadTrace = static_cast<amd::ThreadTrace*>(&cmd.getThreadTrace());
       ThreadTrace* threadTrace = static_cast<ThreadTrace*>(amdThreadTrace->getDeviceThreadTrace());
 
@@ -3160,7 +3160,7 @@ void VirtualGPU::submitSignal(amd::SignalCommand& vcmd) {
   GpuEvent gpuEvent;
   uint32_t value = vcmd.markerValue();
 
-  if (vcmd.type() == CL_COMMAND_WAIT_SIGNAL_AMD) {
+  if (vcmd.type() == static_cast<amd::CommandType>(CL_COMMAND_WAIT_SIGNAL_AMD)) {
     eventBegin(MainEngine);
     addVmMemory(pGpuMemory);
 
@@ -3168,7 +3168,7 @@ void VirtualGPU::submitSignal(amd::SignalCommand& vcmd) {
                                               Pal::CompareFunc::GreaterEqual);
     eventEnd(MainEngine, gpuEvent);
 
-  } else if (vcmd.type() == CL_COMMAND_WRITE_SIGNAL_AMD) {
+  } else if (vcmd.type() == static_cast<amd::CommandType>(CL_COMMAND_WRITE_SIGNAL_AMD)) {
     EngineType activeEngineID = engineID_;
     engineID_ = static_cast<EngineType>(pGpuMemory->getGpuEvent(*this)->engineId_);
 
