@@ -6,14 +6,14 @@ from unittest.mock import patch
 
 import pytest
 
-from utils.native_tool import NativeTool
+from utils.native_tool_finder import NativeToolFinder
 
 
-class TestNativeTool:
+class TestNativeToolFinder:
     def test_when_incorrect_opt_path_provided__asserts(self, sources_path: Path):
         lib_path = None
         with pytest.raises(AssertionError):
-            lib_path = NativeTool(sources_path, Path("incorrect_path"))
+            lib_path = NativeToolFinder(sources_path, Path("incorrect_path"))
         assert lib_path is None
 
     def test_when_run_from_opt__finds_prebuilt_native_collector(
@@ -22,7 +22,7 @@ class TestNativeTool:
         installed_lib_path: Path,
         installed_sdk_tool_path: Path,
     ) -> None:
-        lib_path = NativeTool(
+        lib_path = NativeToolFinder(
             sources_path, installed_sdk_tool_path
         ).get_collector_library_path()
         assert lib_path == installed_lib_path
@@ -31,28 +31,34 @@ class TestNativeTool:
         self, sources_path, installed_sdk_tool_path: Path
     ):
         def mock_build_collector(_: Path) -> None:
-            self.__create_file(sources_path, Path(NativeTool.lib_relative_path))
+            self.__create_file(sources_path, Path(NativeToolFinder.lib_relative_path))
 
         with (
-            patch.object(NativeTool, "_generate_cmake_project", return_value=True),
             patch.object(
-                NativeTool, "_build_cmake_project", side_effect=mock_build_collector
+                NativeToolFinder, "_generate_cmake_project", return_value=True
+            ),
+            patch.object(
+                NativeToolFinder,
+                "_build_cmake_project",
+                side_effect=mock_build_collector,
             ),
         ):
-            lib_path = NativeTool(
+            lib_path = NativeToolFinder(
                 sources_path, installed_sdk_tool_path
             ).get_collector_library_path()
-        assert lib_path == sources_path / NativeTool.lib_relative_path
+        assert lib_path == sources_path / NativeToolFinder.lib_relative_path
 
     def test_when_run_from_source_dir_and_generation_fails__returns_none(
         self, installed_sdk_tool_path: Path, sources_path: Path
     ):
         lib_path = None
         with (
-            patch.object(NativeTool, "_generate_cmake_project", return_value=False),
-            patch.object(NativeTool, "_build_cmake_project", return_value=False),
+            patch.object(
+                NativeToolFinder, "_generate_cmake_project", return_value=False
+            ),
+            patch.object(NativeToolFinder, "_build_cmake_project", return_value=False),
         ):
-            lib_path = NativeTool(
+            lib_path = NativeToolFinder(
                 sources_path, installed_sdk_tool_path
             ).get_collector_library_path()
         assert lib_path == None
@@ -72,7 +78,7 @@ class TestNativeTool:
     ) -> Path:
         return self.__create_file(
             rocm_path,
-            Path(f"{request.param}/rocprofiler-compute/{NativeTool.lib_name}"),
+            Path(f"{request.param}/rocprofiler-compute/{NativeToolFinder.lib_name}"),
         )
 
     @pytest.fixture
@@ -83,7 +89,9 @@ class TestNativeTool:
 
     @pytest.fixture()
     def sources_lib_path(self, sources_path: Path) -> Path:
-        return self.__create_file(sources_path, Path(NativeTool.lib_relative_path))
+        return self.__create_file(
+            sources_path, Path(NativeToolFinder.lib_relative_path)
+        )
 
     def __create_file(self, rocm_path: Path, file_subpath: Path):
         file_path = rocm_path / file_subpath

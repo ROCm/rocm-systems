@@ -7,7 +7,7 @@ from utils.logger import console_debug, console_error, console_log
 from utils.utils_common import capture_subprocess_output
 
 
-class NativeTool:
+class NativeToolFinder:
     sources_dir_name = "lib"
     sources_build_subdir_name = "_build"
     sources_bin_subdir_name = "lib"

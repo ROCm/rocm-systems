@@ -19,7 +19,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.native_tool import NativeTool
+from utils.native_tool_finder import NativeToolFinder
 from utils.utils_common import (
     format_time,
     get_job_rank_and_size,
@@ -353,10 +353,10 @@ class RocProfCompute_Base:
             and not is_only_pc_sampling(args.filter_blocks)
         ):
             sources_path = Path(__file__).resolve().parents[1]
-            native_tool = NativeTool(
+            native_tool_finder = NativeToolFinder(
                 Path(sources_path), Path(args.rocprofiler_sdk_tool_path)
             )
-            native_tool_path = native_tool.get_collector_library_path()
+            native_tool_path = native_tool_finder.get_collector_library_path()
             native_tool_path_str = str(
                 native_tool_path
             )  # for compatibility with downstream code
