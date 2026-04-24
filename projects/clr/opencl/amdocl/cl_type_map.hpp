@@ -302,9 +302,9 @@ static_assert(sizeof(amd::DeviceTopology) != sizeof(cl_device_topology_amd),
 inline cl_device_topology_amd to_cl(const amd::DeviceTopology& t) {
   cl_device_topology_amd result{};
   result.pcie.type     = t.type;
-  result.pcie.bus      = static_cast<cl_char>(t.bus);
-  result.pcie.device   = static_cast<cl_char>(t.device);
-  result.pcie.function = static_cast<cl_char>(t.function);
+  result.pcie.bus      = t.bus;
+  result.pcie.device   = t.device;
+  result.pcie.function = t.function;
   return result;
 }
 
