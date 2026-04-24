@@ -141,7 +141,7 @@ public:
     void handle(const scratch_memory_sample&) {}
     void handle(const gpu_pmc_sample&) {}
     void handle(const ainic_pmc_sample&) {}
-    void handle(const cpu_freq_sample&) {}
+    void handle(const cpu_pmc_sample&) {}
     void handle(const backtrace_region_sample&) {}
 
 private:
