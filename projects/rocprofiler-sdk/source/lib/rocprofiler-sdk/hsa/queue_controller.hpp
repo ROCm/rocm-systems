@@ -125,6 +125,20 @@ get_queue_controller();
 bool
 enable_queue_intercept();
 
+// True if at least one registered context requires either packet rewriting
+// (counter/ATT/scratch/PCS) OR firmware-ring-mode kernel tracing. Used by
+// queue_controller_init to decide whether to wrap hsa_queue_create/destroy
+// (which is required for QueueController::add_queue → create_queue_state).
+bool
+needs_queue_object_tracking();
+
+// True if at least one registered context requires WriteInterceptor packet
+// rewriting and signal allocation. Used inside hsa::create_queue to decide
+// between hsa_amd_queue_intercept_create_fn (full intercept) and
+// hsa_queue_create_fn (tracing-only).
+bool
+needs_packet_rewriting_intercept();
+
 void
 queue_controller_init(HsaApiTable* table);
 

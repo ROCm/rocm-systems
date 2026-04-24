@@ -352,7 +352,7 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
     // checks return the correct value.
     dispatch_ring_buffer_resolve_apis();
 
-    if(enable_queue_intercept())
+    if(needs_queue_object_tracking())
     {
         if(*(get_attach_table()))
         {
@@ -573,6 +573,37 @@ enable_queue_intercept()
             return true;
     }
     return false;
+}
+
+bool
+needs_queue_object_tracking()
+{
+    for(const auto& itr : context::get_registered_contexts())
+    {
+        const bool has_kernel_tracing =
+            itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) ||
+            itr->is_tracing(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
+        const bool has_scratch_reporting =
+            itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY) ||
+            itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
+
+        if(itr->dispatch_counter_collection || itr->pc_sampler ||
+           itr->device_counter_collection   || itr->device_thread_trace ||
+           itr->dispatch_thread_trace       || has_scratch_reporting   ||
+           has_kernel_tracing)  // tracing-only fw-ring mode also needs QueueState
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool
+needs_packet_rewriting_intercept()
+{
+    // Identical to today's enable_queue_intercept: returns true when
+    // packet rewriting / signal allocation is required.
+    return enable_queue_intercept();
 }
 
 void
