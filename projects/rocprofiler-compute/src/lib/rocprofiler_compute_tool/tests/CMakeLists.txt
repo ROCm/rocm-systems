@@ -1,6 +1,6 @@
 ## Copyright (c) Advanced Micro Devices, Inc.
 ## SPDX-License-Identifier:  MIT
-set(target test_rocprofiler_compute)
+set(target test-rocprofiler-compute-tool)
 
 add_executable(
     ${target}

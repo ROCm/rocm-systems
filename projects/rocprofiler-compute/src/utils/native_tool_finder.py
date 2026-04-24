@@ -24,7 +24,7 @@ class NativeToolFinder:
             f"Incorrect sdk_tool_path: {sdk_tool_path}"
         )
         console_debug("Searching for native collector.")
-        console_debug(f"Compute script path: {src_path}")
+        console_debug(f"Source directory: {src_path}")
         console_debug(f"ROCm Profiler SDK Tool path: {sdk_tool_path}")
 
         self.src_path = src_path
@@ -40,6 +40,7 @@ class NativeToolFinder:
 
     def __find_installed_collector(self) -> Path | None:
         rocm_root_path = self.__get_installed_rocm_root_path()
+        # lib* glob pattern is used to handle CMAKE_INSTALL_LIBDIR variations
         pattern = f"lib*/rocprofiler-compute/{self.lib_name}"
         console_debug(f"Searching {rocm_root_path} by {pattern} for native collector")
         return self.__find_file_by_glob_pattern(rocm_root_path, pattern)
