@@ -216,7 +216,7 @@ class Program : public RuntimeObject {
 
   //! Returns the program built status
   bool IsProgramBuilt(const Device& device) {
-    return 0 == devicePrograms_[&device]->buildStatus();  // CL_BUILD_SUCCESS == 0
+    return BuildStatus::Success == devicePrograms_[&device]->buildStatus();
   }
 };
 
