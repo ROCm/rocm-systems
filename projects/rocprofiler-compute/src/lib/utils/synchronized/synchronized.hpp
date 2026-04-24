@@ -25,7 +25,7 @@ inline namespace common
  *
  * Example usage:
  *
- * synchronized<int> x(9);
+ * synchronized_t<int> x(9);
  * x.rlock([](const auto& data){
  *  // data = 9
  * });
@@ -35,24 +35,24 @@ inline namespace common
  * });
  */
 template <typename LockedType, bool IsMappedTypeV = false>
-class synchronized
+class synchronized_t
 {
 public:
     using value_type = LockedType;
-    using this_type  = synchronized<value_type, IsMappedTypeV>;
+    using this_type  = synchronized_t<value_type, IsMappedTypeV>;
 
-    synchronized()  = default;
-    ~synchronized() = default;
+    synchronized_t()  = default;
+    ~synchronized_t() = default;
 
-    explicit synchronized(value_type&& data)
+    explicit synchronized_t(value_type&& data)
     : m_data{ std::move(data) }
     {}
 
-    synchronized(synchronized&& data) noexcept            = default;
-    synchronized& operator=(synchronized&& data) noexcept = default;
+    synchronized_t(synchronized_t&& data) noexcept            = default;
+    synchronized_t& operator=(synchronized_t&& data) noexcept = default;
 
     // Do not allow this data structure to be copied, std::move only.
-    synchronized(const synchronized&) = delete;
+    synchronized_t(const synchronized_t&) = delete;
 
     template <typename FuncT, typename... Args>
     decltype(auto) rlock(FuncT&& lambda, Args&&... args) const;
@@ -82,7 +82,7 @@ private:
 template <typename LockedType, bool IsMappedTypeV>
 template <typename FuncT, typename... Args>
 decltype(auto)
-synchronized<LockedType, IsMappedTypeV>::rlock(FuncT&& lambda, Args&&... args) const
+synchronized_t<LockedType, IsMappedTypeV>::rlock(FuncT&& lambda, Args&&... args) const
 {
     static_assert(std::is_invocable<FuncT, const value_type&, Args...>::value,
                   "function must accept const reference to locked type");
@@ -94,7 +94,7 @@ synchronized<LockedType, IsMappedTypeV>::rlock(FuncT&& lambda, Args&&... args) c
 template <typename LockedType, bool IsMappedTypeV>
 template <typename FuncT, typename... Args>
 decltype(auto)
-synchronized<LockedType, IsMappedTypeV>::wlock(FuncT&& lambda, Args&&... args)
+synchronized_t<LockedType, IsMappedTypeV>::wlock(FuncT&& lambda, Args&&... args)
 {
     static_assert(std::is_invocable<FuncT, value_type&, Args...>::value,
                   "function must accept reference to locked type");
@@ -109,7 +109,7 @@ template <typename LockedType, bool IsMappedTypeV>
 template <typename FuncT, typename... Args, bool EnableForMappedType,
           std::enable_if_t<EnableForMappedType, int>>
 decltype(auto)
-synchronized<LockedType, IsMappedTypeV>::wlock(FuncT&& lambda, Args&&... args) const
+synchronized_t<LockedType, IsMappedTypeV>::wlock(FuncT&& lambda, Args&&... args) const
 {
     return const_cast<this_type*>(this)->wlock(std::forward<FuncT>(lambda),
                                                std::forward<Args>(args)...);
@@ -120,7 +120,7 @@ synchronized<LockedType, IsMappedTypeV>::wlock(FuncT&& lambda, Args&&... args) c
 template <typename LockedType, bool IsMappedTypeV>
 template <typename ReadFuncT, typename WriteFuncT, typename... Args>
 bool
-synchronized<LockedType, IsMappedTypeV>::ulock(ReadFuncT&& read, WriteFuncT&& write,
+synchronized_t<LockedType, IsMappedTypeV>::ulock(ReadFuncT&& read, WriteFuncT&& write,
                                                Args&&... args)
 {
     static_assert(std::is_invocable<ReadFuncT, const value_type&, Args...>::value,

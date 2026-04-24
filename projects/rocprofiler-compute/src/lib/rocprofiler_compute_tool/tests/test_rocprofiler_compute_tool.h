@@ -6,7 +6,7 @@
 
 #include <memory>
 
-class TestRocprofilerComputeTool : public ::testing::Test
+class test_rocprofiler_compute_tool_t : public ::testing::Test
 {
 protected:
     void SetUp() override;

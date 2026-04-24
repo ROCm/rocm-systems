@@ -86,7 +86,7 @@ struct tool_data_t
     std::vector<counter_info_record_t>         counter_records;
     std::set<uint64_t>                         target_kernel_ids{};
     iteration_multiplexing_mode_t iteration_multiplexing_mode{iteration_multiplexing_mode_t::DISABLED};
-    rocprof_compute::synchronized<pc_sampling_collector_t> pc_sampling_collector;
+    rocprof_compute::synchronized_t<pc_sampling_collector_t> pc_sampling_collector;
 };
 
 class sdk_callbacks_t

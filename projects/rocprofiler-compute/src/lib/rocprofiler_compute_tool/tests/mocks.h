@@ -35,7 +35,7 @@ private:
 class mock_sdk_wrapper_t : public rocprofiler_compute_tool::sdk_wrapper_t
 {
 public:
-    struct dispatch_counting_service_info
+    struct dispatch_counting_service_info_t
     {
         uint64_t context                = 0;
         void*    dispatch_callback      = nullptr;
@@ -44,12 +44,12 @@ public:
         void*    record_callback_args   = nullptr;
     };
 
-    struct create_counter_config_info
+    struct create_counter_config_info_t
     {
         std::vector<std::string> counter_names;
     };
 
-    struct query_counter_record_info
+    struct query_counter_record_info_t
     {
         uint64_t counter_instance_id = 0;
         uint64_t counter_id          = 0;
@@ -87,33 +87,33 @@ public:
     void set_available_counters(const std::vector<std::string>& counter_names);
     const std::vector<uint64_t>&                       get_created_contexts() const;
     const std::vector<uint64_t>&                       get_started_contexts() const;
-    const std::vector<dispatch_counting_service_info>& get_dispatch_counting_service_info() const;
-    const std::vector<create_counter_config_info>&     get_create_counter_config_info() const;
-    const std::vector<query_counter_record_info>&      get_query_counter_record_info() const;
+    const std::vector<dispatch_counting_service_info_t>& get_dispatch_counting_service_info() const;
+    const std::vector<create_counter_config_info_t>&     get_create_counter_config_info() const;
+    const std::vector<query_counter_record_info_t>&      get_query_counter_record_info() const;
 
 private:
     std::vector<rocprofiler_counter_id_t> get_counters() const;
 
     std::vector<uint64_t>                       m_created_contexts;
     std::vector<uint64_t>                       m_started_contexts;
-    std::vector<dispatch_counting_service_info> m_dispatch_counting_service_info;
-    std ::vector<create_counter_config_info>    m_create_counter_config_info;
-    std::vector<query_counter_record_info>      m_query_counter_record_info;
+    std::vector<dispatch_counting_service_info_t> m_dispatch_counting_service_info;
+    std ::vector<create_counter_config_info_t>    m_create_counter_config_info;
+    std::vector<query_counter_record_info_t>      m_query_counter_record_info;
     std::vector<std::string>                    m_counter_names;
 };
 
 class mock_counters_writer_t : public rocprofiler_compute_tool::counters_writer_t
 {
 public:
-    struct write_counters_info
+    struct write_counters_info_t
     {
         std::vector<uint64_t> counter_ids;
         std::vector<uint64_t> kernel_id;
     };
 
     void write_counters(rocprofiler_compute_tool::tool_data_t* tool_data) override;
-    const std::vector<write_counters_info>& get_write_counters_info() const;
+    const std::vector<write_counters_info_t>& get_write_counters_info() const;
 
 private:
-    std::vector<write_counters_info> m_write_counters_args;
+    std::vector<write_counters_info_t> m_write_counters_args;
 };

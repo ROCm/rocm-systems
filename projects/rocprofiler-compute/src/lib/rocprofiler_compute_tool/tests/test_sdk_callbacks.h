@@ -3,7 +3,7 @@
 #pragma once
 #include "mocks.h"
 
-class TestSdkCallbacks : public ::testing::Test
+class test_sdk_callbacks_t : public ::testing::Test
 {
 protected:
     void SetUp() override;
@@ -31,8 +31,8 @@ protected:
     const uint64_t                 m_invalid_config_id = ~0u;
 };
 
-class TestSdkCallbacksMultiplexing
-    : public TestSdkCallbacks
+class test_sdk_callbacks_multiplexing_t
+    : public test_sdk_callbacks_t
     , public ::testing::WithParamInterface<rocprofiler_compute_tool::iteration_multiplexing_mode_t>
 {
 protected:
@@ -49,8 +49,8 @@ struct kernel_filtering_test_params_t
     std::string kernel_regex;
 };
 
-class TestSdkCallbacksKernelFiltering
-    : public TestSdkCallbacks
+class test_sdk_callbacks_kernel_filtering_t
+    : public test_sdk_callbacks_t
     , public ::testing::WithParamInterface<kernel_filtering_test_params_t>
 {
 protected:

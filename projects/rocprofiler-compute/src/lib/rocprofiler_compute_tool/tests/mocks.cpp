@@ -69,7 +69,7 @@ void mock_sdk_wrapper_t::configure_callback_dispatch_counting_service(
     void*                                      record_callback_args)
 {
     m_dispatch_counting_service_info.push_back(
-        dispatch_counting_service_info{context_id.handle,
+        dispatch_counting_service_info_t{context_id.handle,
                                        reinterpret_cast<void*>(dispatch_callback),
                                        dispatch_callback_args,
                                        reinterpret_cast<void*>(record_callback),
@@ -127,7 +127,7 @@ void mock_sdk_wrapper_t::create_counter_config(rocprofiler_agent_id_t           
                                            rocprofiler_counter_config_id_t* config_id)
 {
     Expects(counters_count <= m_counter_names.size());
-    create_counter_config_info info;
+    create_counter_config_info_t info;
     for (size_t i = 0; i < counters_count; ++i)
     {
         Expects(counters_list[i].handle < m_counter_names.size());
@@ -159,18 +159,18 @@ const std::vector<uint64_t>& mock_sdk_wrapper_t::get_started_contexts() const
     return m_started_contexts;
 }
 
-const std::vector<mock_sdk_wrapper_t::dispatch_counting_service_info>&
+const std::vector<mock_sdk_wrapper_t::dispatch_counting_service_info_t>&
     mock_sdk_wrapper_t::get_dispatch_counting_service_info() const
 {
     return m_dispatch_counting_service_info;
 }
 
-const std::vector<mock_sdk_wrapper_t::create_counter_config_info>& mock_sdk_wrapper_t::get_create_counter_config_info() const
+const std::vector<mock_sdk_wrapper_t::create_counter_config_info_t>& mock_sdk_wrapper_t::get_create_counter_config_info() const
 {
     return m_create_counter_config_info;
 }
 
-const std::vector<mock_sdk_wrapper_t::query_counter_record_info>& mock_sdk_wrapper_t::get_query_counter_record_info() const
+const std::vector<mock_sdk_wrapper_t::query_counter_record_info_t>& mock_sdk_wrapper_t::get_query_counter_record_info() const
 {
     return m_query_counter_record_info;
 }
@@ -179,7 +179,7 @@ const std::vector<mock_sdk_wrapper_t::query_counter_record_info>& mock_sdk_wrapp
 // mock_counters_writer_t
 void mock_counters_writer_t::write_counters(rocprofiler_compute_tool::tool_data_t* tool_data)
 {
-    write_counters_info args;
+    write_counters_info_t args;
     for (const auto& counter : tool_data->counter_records)
     {
         args.counter_ids.push_back(counter.counter_id);
@@ -188,7 +188,7 @@ void mock_counters_writer_t::write_counters(rocprofiler_compute_tool::tool_data_
     m_write_counters_args.push_back(std::move(args));
 }
 
-const std::vector<mock_counters_writer_t::write_counters_info>& mock_counters_writer_t::get_write_counters_info() const
+const std::vector<mock_counters_writer_t::write_counters_info_t>& mock_counters_writer_t::get_write_counters_info() const
 {
     return m_write_counters_args;
 }
