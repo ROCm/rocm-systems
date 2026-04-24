@@ -98,6 +98,9 @@ struct kfd_ioctl_update_queue_args {
 	__u32 ring_size;		/* to KFD */
 	__u32 queue_percentage;	/* to KFD */
 	__u32 queue_priority;	/* to KFD */
+	__u64 dispatch_record_buffer_addr;	/* to KFD: GPU VA (0 = disable) */
+	__u32 dispatch_record_buffer_size;	/* to KFD: capacity in records */
+	__u32 pad;
 };
 
 struct kfd_ioctl_set_cu_mask_args {

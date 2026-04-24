@@ -46,12 +46,14 @@
 #include <memory>
 #include <new>
 #include <set>
+#include <shared_mutex>
 #include <typeinfo>
 #include <utility>
 #include <vector>
 
 #include "core/inc/agent.h"
 #include "core/inc/amd_aie_agent.h"
+#include "core/inc/amd_aql_queue.h"
 #include "core/inc/amd_cpu_agent.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
@@ -638,6 +640,39 @@ hsa_status_t hsa_amd_profiling_set_profiler_enabled(hsa_queue_t* queue, int enab
   cmd_queue->SetProfiling(enable);
 
   return HSA_STATUS_SUCCESS;
+  CATCH;
+}
+
+hsa_status_t hsa_amd_queue_iterate(hsa_status_t (*callback)(hsa_queue_t* queue, void* data),
+                                   void* data) {
+  TRY;
+  IS_OPEN();
+  if (!callback) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  for (core::Agent* agent : core::Runtime::runtime_singleton_->gpu_agents()) {
+    auto* gpu = static_cast<AMD::GpuAgent*>(agent);
+    std::shared_lock<std::shared_mutex> lock(gpu->AqlQueuesMutex());
+    for (auto* q : gpu->GetAqlQueues()) {
+      hsa_status_t st = callback(q->public_handle(), data);
+      if (st == HSA_STATUS_INFO_BREAK) return HSA_STATUS_SUCCESS;
+      if (st != HSA_STATUS_SUCCESS) return st;
+    }
+  }
+  return HSA_STATUS_SUCCESS;
+  CATCH;
+}
+
+hsa_status_t hsa_amd_profiling_get_dispatch_records(hsa_queue_t* queue, void** buffer_base,
+                                                    uint32_t* buffer_size,
+                                                    volatile uint32_t** write_ptr) {
+  TRY;
+  IS_OPEN();
+  if (!queue || !buffer_base || !buffer_size || !write_ptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  core::Queue* cmd_queue = core::Queue::Convert(queue);
+  IS_VALID(cmd_queue);
+  if (!AqlQueue::IsType(cmd_queue)) return HSA_STATUS_ERROR_INVALID_QUEUE;
+  return static_cast<AqlQueue*>(cmd_queue)->GetProfilingDispatchRecords(buffer_base, buffer_size,
+                                                                        write_ptr);
   CATCH;
 }
 

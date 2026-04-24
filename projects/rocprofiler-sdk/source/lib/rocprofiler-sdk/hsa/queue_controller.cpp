@@ -25,8 +25,11 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/dispatch_ring_buffer_support.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_intercept.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/firmware_ring_drainer.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <hsa/amd_hsa_queue.h>
 
@@ -343,6 +346,12 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
         }
     }
 
+    // Resolve the optional ROCr firmware-ring APIs (hsa_amd_queue_iterate,
+    // hsa_amd_profiling_get_dispatch_records). Must run before
+    // enable_queue_intercept() so its firmware_dispatch_ring_available()
+    // checks return the correct value.
+    dispatch_ring_buffer_resolve_apis();
+
     if(enable_queue_intercept())
     {
         if(*(get_attach_table()))
@@ -547,8 +556,19 @@ enable_queue_intercept()
         bool has_scratch_reporting = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY) ||
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
 
-        if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
-           has_scratch_reporting || itr->device_counter_collection || itr->device_thread_trace ||
+        // When the MEC firmware-assisted dispatch ring is available, kernel
+        // dispatch tracing is satisfied by the firmware ring drainer instead
+        // of HSA queue interception. This eliminates per-dispatch packet
+        // wrapping/signal-pool overhead and enables late-attach. Counter
+        // collection, scratch tracing, thread trace, and (for now) PC
+        // sampling all still require interception.
+        const bool has_fw_ring = firmware_dispatch_ring_available();
+        const bool need_intercept_for_dispatch_tracing =
+            has_kernel_tracing && !has_fw_ring;
+
+        if(itr->dispatch_counter_collection || itr->pc_sampler ||
+           need_intercept_for_dispatch_tracing || has_scratch_reporting ||
+           itr->device_counter_collection || itr->device_thread_trace ||
            itr->dispatch_thread_trace)
             return true;
     }
@@ -561,6 +581,30 @@ queue_controller_init(HsaApiTable* table)
     CHECK_NOTNULL(get_queue_controller())->init(*table->core_, *table->amd_ext_);
 
     if(enable_queue_intercept()) queue_init();
+
+    // Start the firmware-ring drainer if the runtime exposes the firmware
+    // dispatch ring APIs and any registered context wants kernel-dispatch
+    // tracing without PC sampling. With the firmware ring path, kernel
+    // dispatch records are produced from a polled host-visible ring buffer
+    // instead of via HSA queue interception.
+    if(firmware_dispatch_ring_available())
+    {
+        bool needs_drainer = false;
+        for(const auto& itr : context::get_registered_contexts())
+        {
+            const bool has_kernel_tracing =
+                itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) ||
+                itr->is_tracing(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
+            // PC sampling still owns the queue; firmware ring path is
+            // restricted to no-PCS contexts in this iteration.
+            if(has_kernel_tracing && itr->pc_sampler == nullptr)
+            {
+                needs_drainer = true;
+                break;
+            }
+        }
+        if(needs_drainer) kernel_dispatch::start_firmware_dispatch_ring_drainer();
+    }
 }
 
 void
@@ -573,6 +617,10 @@ queue_controller_sync()
 void
 queue_controller_fini()
 {
+    // Stop the firmware-ring drainer (no-op if it was never started). Done
+    // before queue sync so the drainer thread is not racing teardown.
+    kernel_dispatch::stop_firmware_dispatch_ring_drainer();
+
     if(get_queue_controller())
         get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
 

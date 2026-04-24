@@ -1383,6 +1383,17 @@ hsa_status_t HSA_API hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *
   return amdExtTable->hsa_amd_signal_get_event_id_fn(signal, event_id);
 }
 
+hsa_status_t HSA_API hsa_amd_queue_iterate(
+    hsa_status_t (*callback)(hsa_queue_t* queue, void* data), void* data) {
+  return amdExtTable->hsa_amd_queue_iterate_fn(callback, data);
+}
+
+hsa_status_t HSA_API hsa_amd_profiling_get_dispatch_records(
+    hsa_queue_t* queue, void** buffer_base, uint32_t* buffer_size, volatile uint32_t** write_ptr) {
+  return amdExtTable->hsa_amd_profiling_get_dispatch_records_fn(queue, buffer_base, buffer_size,
+                                                                write_ptr);
+}
+
 // Tools only table interfaces.
 namespace rocr {
 

@@ -65,6 +65,13 @@ hsa_status_t hsa_amd_coherency_set_type(hsa_agent_t agent,
 hsa_status_t
     hsa_amd_profiling_set_profiler_enabled(hsa_queue_t* queue, int enable);
 
+hsa_status_t hsa_amd_queue_iterate(hsa_status_t (*callback)(hsa_queue_t* queue, void* data),
+                                   void* data);
+
+hsa_status_t hsa_amd_profiling_get_dispatch_records(hsa_queue_t* queue, void** buffer_base,
+                                                    uint32_t* buffer_size,
+                                                    volatile uint32_t** write_ptr);
+
 // Mirrors Amd Extension Apis
 hsa_status_t
     hsa_amd_profiling_async_copy_enable(bool enable);

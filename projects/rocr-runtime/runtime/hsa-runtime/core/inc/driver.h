@@ -181,6 +181,18 @@ public:
                                    HSA::hsa_amd_queue_priority_internal_t priority, void* queue_addr,
                                    uint64_t queue_size_bytes, HsaEvent* event) const = 0;
 
+  /// @brief Configure MEC dispatch profiling ring buffer for a queue (KFD-specific).
+  /// @details When unsupported by the kernel thunk, returns ::HSA_STATUS_ERROR_NOT_SUPPORTED.
+  virtual hsa_status_t SetQueueProfilingBuffer(HSA_QUEUEID queue_id, void* buffer_base,
+                                               uint32_t num_records,
+                                               volatile uint32_t* wptr_host_addr) const {
+    (void)queue_id;
+    (void)buffer_base;
+    (void)num_records;
+    (void)wptr_host_addr;
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+  }
+
   /// @brief Set the CU mask for a queue.
   /// @details This sets the CU bitmask for a queue. The CU mask determines which CUs
   /// a queue's dispatches can target. Currently this is only supported for GPU devices.

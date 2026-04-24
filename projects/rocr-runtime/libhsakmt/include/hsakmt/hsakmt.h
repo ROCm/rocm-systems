@@ -409,6 +409,19 @@ hsaKmtUpdateQueue(
     );
 
 /**
+  Configures MEC dispatch profiling ring buffer for a queue (optional; KFD support required).
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtSetQueueProfilingBuffer(
+    HSA_QUEUEID         QueueId,        //IN
+    void*               BufferBase,     //IN GPU-accessible ring base
+    HSAuint32           NumRecords,     //IN ring length (power of two)
+    volatile HSAuint32* WptrHostAddr    //IN host-coherent write pointer
+    );
+
+/**
   Destroys a queue
 */
 

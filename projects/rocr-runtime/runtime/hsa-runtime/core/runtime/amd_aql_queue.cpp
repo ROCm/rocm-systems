@@ -41,6 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "core/inc/amd_aql_queue.h"
+#include "core/inc/mec_dispatch_record.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -352,6 +353,18 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 }
 
 AqlQueue::~AqlQueue() {
+  if (agent_) {
+    agent_->ClearTrapDoorbellMapping(uintptr_t(signal_.hardware_doorbell_ptr), &amd_queue_);
+    if (dispatch_record_buffer_) {
+      agent_->driver().SetQueueProfilingBuffer(queue_id_, nullptr, 0, nullptr);
+      agent_->system_deallocator()(dispatch_record_buffer_);
+      dispatch_record_buffer_ = nullptr;
+      dispatch_record_buffer_size_ = 0;
+      dispatch_record_wptr_ = 0;
+    }
+    agent_->RemoveAqlQueue(this);
+  }
+
   // Remove error handler synchronously.
   // Sequences error handler callbacks with queue destroy.
   dynamicScratchState |= ERROR_HANDLER_TERMINATE;
@@ -1534,10 +1547,47 @@ hsa_status_t AqlQueue::GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mas
 }
 
 void AqlQueue::SetProfiling(bool enabled) {
-  Queue::SetProfiling(enabled);
+  std::lock_guard<std::mutex> lock(scratch_lock_);
 
+  Queue::SetProfiling(enabled);
   if (enabled) agent_->CheckClockTicks();
-  return;
+
+  if (enabled && !dispatch_record_buffer_) {
+    constexpr uint32_t num_records = 65536;
+    const size_t buf_size = size_t(num_records) * sizeof(mec_dispatch_record);
+    constexpr size_t kCacheLineAlign = 64;
+    dispatch_record_buffer_ = agent_->system_allocator()(
+        buf_size, kCacheLineAlign, core::MemoryRegion::AllocateNonPaged);
+    if (dispatch_record_buffer_ == nullptr) return;
+    memset(dispatch_record_buffer_, 0, buf_size);
+    dispatch_record_buffer_size_ = num_records;
+    dispatch_record_wptr_ = 0;
+
+    agent_->driver().SetQueueProfilingBuffer(
+        queue_id_, dispatch_record_buffer_, num_records, &dispatch_record_wptr_);
+    Suspend();
+    Resume();
+    return;
+  }
+
+  if (!enabled && dispatch_record_buffer_) {
+    agent_->driver().SetQueueProfilingBuffer(queue_id_, nullptr, 0, nullptr);
+    agent_->system_deallocator()(dispatch_record_buffer_);
+    dispatch_record_buffer_ = nullptr;
+    dispatch_record_buffer_size_ = 0;
+    dispatch_record_wptr_ = 0;
+    Suspend();
+    Resume();
+  }
+}
+
+hsa_status_t AqlQueue::GetProfilingDispatchRecords(void** buffer_base, uint32_t* buffer_size,
+                                                   volatile uint32_t** write_ptr) const {
+  if (!dispatch_record_buffer_) return HSA_STATUS_ERROR_NOT_INITIALIZED;
+  *buffer_base = dispatch_record_buffer_;
+  *buffer_size = dispatch_record_buffer_size_ * static_cast<uint32_t>(sizeof(mec_dispatch_record));
+  *write_ptr = &dispatch_record_wptr_;
+  return HSA_STATUS_SUCCESS;
 }
 
 // If in_signal is NULL then this ExecutePM4 will block and wait for PM4 commands to complete

@@ -45,6 +45,7 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_GPU_AGENT_H_
 #define HSA_RUNTIME_CORE_INC_AMD_GPU_AGENT_H_
 
+#include <shared_mutex>
 #include <vector>
 #include <list>
 #include <map>
@@ -224,6 +225,8 @@ class GpuAgentInt : public core::Agent {
    virtual hsa_status_t
    PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession &session) = 0;
 };
+
+class AqlQueue;
 
 class GpuAgent : public GpuAgentInt {
  public:
@@ -550,6 +553,14 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Get list of AQL queues for core dump filtering
   const std::vector<core::Queue*>& GetAqlQueues() const { return aql_queues_; }
 
+  std::shared_mutex& AqlQueuesMutex() { return aql_queues_mutex_; }
+
+  /// @brief Remove queue from @p aql_queues_ and clear trap-handler doorbell mapping.
+  void RemoveAqlQueue(AqlQueue* q);
+
+  /// @brief Clear trap-handler doorbell slot if it still references @p amd_q.
+  void ClearTrapDoorbellMapping(uintptr_t doorbell_addr, const amd_queue_v2_t* amd_q);
+
  protected:
   // Sizes are in packets.
   const uint32_t minAqlSize_ = 0x40;     // 4KB min
@@ -830,6 +841,7 @@ class GpuAgent : public GpuAgentInt {
   } gws_queue_;
 
   // @brief list of AQL queues owned by this agent. Indexed by queue pointer
+  mutable std::shared_mutex aql_queues_mutex_;
   std::vector<core::Queue*> aql_queues_;
 
   // Sets and Tracks pending SDMA status check or request counts

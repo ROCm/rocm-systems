@@ -2275,7 +2275,10 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
   auto aql_queue = new AqlQueue(shared_queue, this, size, node_id(), scratch, event_callback, data,
                                 metadata_queue, flags);
   *queue = aql_queue;
-  aql_queues_.push_back(aql_queue);
+  {
+    std::unique_lock<std::shared_mutex> lock(aql_queues_mutex_);
+    aql_queues_.push_back(aql_queue);
+  }
 
   if (doorbell_queue_map_) {
     // Calculate index of the queue doorbell within the doorbell aperture.
@@ -2571,8 +2574,21 @@ void GpuAgent::ReleaseScratch(void* base, size_t size, bool large) {
   ClearScratchNotifiers();
 }
 
+void GpuAgent::ClearTrapDoorbellMapping(uintptr_t doorbell_addr, const amd_queue_v2_t* amd_q) {
+  if (!doorbell_queue_map_ || amd_q == nullptr) return;
+  auto doorbell_idx = (doorbell_addr >> 3) & (MAX_NUM_DOORBELLS - 1);
+  if (doorbell_queue_map_[doorbell_idx] == amd_q) doorbell_queue_map_[doorbell_idx] = nullptr;
+}
+
+void GpuAgent::RemoveAqlQueue(AqlQueue* q) {
+  if (q == nullptr) return;
+  std::unique_lock<std::shared_mutex> lock(aql_queues_mutex_);
+  aql_queues_.erase(std::remove(aql_queues_.begin(), aql_queues_.end(), q), aql_queues_.end());
+}
+
 // Go through all the AQL queues and try to release scratch memory
 void GpuAgent::AsyncReclaimScratchQueues() {
+  std::shared_lock<std::shared_mutex> lock(aql_queues_mutex_);
   for (auto iter : aql_queues_) {
     auto aqlQueue = static_cast<AqlQueue*>(iter);
     aqlQueue->AsyncReclaimMainScratch();
@@ -2585,9 +2601,12 @@ hsa_status_t GpuAgent::SetAsyncScratchThresholds(size_t use_once_limit) {
 
   scratch_limit_async_threshold_ = use_once_limit;
 
-  for (auto iter : aql_queues_) {
-    auto aqlQueue = static_cast<AqlQueue*>(iter);
-    aqlQueue->CheckScratchLimits();
+  {
+    std::shared_lock<std::shared_mutex> lock(aql_queues_mutex_);
+    for (auto iter : aql_queues_) {
+      auto aqlQueue = static_cast<AqlQueue*>(iter);
+      aqlQueue->CheckScratchLimits();
+    }
   }
   return HSA_STATUS_SUCCESS;
 }
