@@ -1574,6 +1574,14 @@ static ncclResult_t uploadProxyOps(struct ncclComm* comm, struct ncclKernelPlan*
   comm->sharedRes->collOpCount += plan->collOpCount;
   comm->collOpCount += plan->collOpCount;
 
+  // Pipeline proxy op upload: flush accumulated ops to the proxy thread
+  // periodically so it can start processing (and freeing pool entries) while
+  // we continue uploading. Without this, at large node counts the pool fills
+  // entirely before the proxy gets any work, causing a spin-wait livelock in
+  // ncclLocalOpAppend when subsequent plans need pool entries.
+  int nUploaded = 0;
+  int flushInterval = MAX_OPS_PER_PEER / 2;
+
   struct ncclProxyOp* op = ncclIntruQueueHead(&plan->proxyOpQueue);
   while (op != nullptr) {
     op->profilerContext = comm->profilerContext;
@@ -1597,6 +1605,10 @@ static ncclResult_t uploadProxyOps(struct ncclComm* comm, struct ncclKernelPlan*
     NCCLCHECK(ncclProxySaveOp(comm, op, nullptr));
     op->opCount = oldId; // Restore for next uploadProxyOps()
     op = op->enqNext;
+
+    if (++nUploaded % flushInterval == 0) {
+      NCCLCHECK(ncclProxyFlush(comm));
+    }
   }
 
   if (hasp2p) {

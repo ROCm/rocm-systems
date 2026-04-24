@@ -1065,6 +1065,22 @@ ncclResult_t ncclProxyStart(struct ncclComm* comm) {
   return ncclSuccess;
 }
 
+// Post accumulated proxy ops to the proxy thread without advancing opCount.
+// Used mid-upload to give the proxy a head start on processing, so pool
+// entries are freed before the pool fills and the host spin-waits.
+ncclResult_t ncclProxyFlush(struct ncclComm* comm) {
+  struct ncclProxyOps* proxyOps = comm->proxyState->proxyOps;
+  if (proxyOps == NULL) return ncclSuccess;
+  for (int r = 0; r < comm->sharedRes->tpNLocalRanks; r++) {
+    struct ncclProxyOps* ops = proxyOps + r;
+    if (ops->pool == NULL || ops->nextOps == -1) continue;
+    NCCLCHECK(ncclProxyPost(ops->pool, ops->nextOps, ops->nextOpsEnd));
+    ops->nextOps = ops->nextOpsEnd = -1;
+    ops->count = 0;
+  }
+  return ncclSuccess;
+}
+
 static ncclResult_t ncclProxyProgressCreate(struct ncclProxyState* proxyState) {
   struct ncclProxyProgressState* state = &proxyState->progressState;
   if (!state->thread) {
