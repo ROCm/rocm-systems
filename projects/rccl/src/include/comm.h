@@ -789,6 +789,16 @@ struct ncclComm {
   // Temporary Buffer [RCCL]
   void* tempBuff;
 
+  // Two-shot AllReduce: imported base pointer to each rank's tempBuff (IPC or same-PID direct).
+  void** peerTempImported;
+  // 1 if peerTempImported[r] came from cudaIpcOpenMemHandle and must be closed on destroy.
+  uint8_t* peerTempIpcOpened;
+  // Per-rank uint32_t[nRanks] on device: peer p writes slot p for stream batch-mem-op arrival sync (HIP).
+  void* twoShotSyncBuff;
+  void** peerTwoShotSyncImported;
+  uint8_t* peerTwoShotSyncIpcOpened;
+  uint32_t twoShotBarrierSeq;
+
   uint64_t endMagic;
 };
 

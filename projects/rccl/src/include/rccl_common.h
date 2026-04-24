@@ -117,6 +117,7 @@ NCCL_API(ncclResult_t, rcclGetAlgoName, int algo, const char** algoName);
 NCCL_API(ncclResult_t, rcclGetProtocolName, int protocol, const char** algoName);
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize);
+bool rcclUseTwoShotAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op);
 bool rcclUseAlltoAllGda(struct ncclComm* comm);
 void rcclSetPxn(struct ncclComm* comm,  int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm,  int& rcclP2pNetChunkSize);
@@ -127,6 +128,7 @@ bool validHsaScratchEnvSetting(const char*hsaScratchEnv, int hipRuntimeVersion, 
 
 // Direct ReduceScatter Limit
 RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
+RCCL_PARAM_DECLARE(TwoShotAllReduce);
 // Hierarchical AllGather enabled
 RCCL_PARAM_DECLARE(HierarchicalAllGather);
 #define HIERARCHICAL_AG_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB

@@ -42,6 +42,7 @@ RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
 RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
 RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
 RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
+RCCL_PARAM(TwoShotAllReduce, "TWO_SHOT_ALLREDUCE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 #ifdef ENABLE_WARP_SPEED
@@ -456,6 +457,32 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   //return (comm->enableCustColl && (comm->nNodes > 1) && (msgSize <= threshold) && (threshold != -1))
   return (comm->enableCustColl && (msgSize <= threshold) && (threshold != -1) && !rankMultiple)
     ;
+}
+
+bool rcclUseTwoShotAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op) {
+  (void)op;
+  if (!rcclParamTwoShotAllReduce()) return false;
+  if (comm == nullptr || count == 0) return false;
+  const int nRanks = comm->nRanks;
+  if (nRanks < 2) return false;
+  if (count % (size_t)nRanks) return false;
+  const size_t el = ncclTypeSize(datatype);
+  if (el == 0) return false;
+  const size_t chunkElems = count / (size_t)nRanks;
+  const size_t stagingBytes = (size_t)nRanks * chunkElems * el;
+  const size_t rsOutBytes = chunkElems * el;
+  // Must match TEMP_BUFF_SIZE in init.cc (staging layout + one reduced chunk scratch).
+  constexpr size_t kTempBuffSize = 4ull * 1024 * 1024;
+  if (stagingBytes + rsOutBytes > kTempBuffSize) return false;
+  const size_t msgSize = count * el;
+  int64_t thr = rcclParamDirectReduceScatterThreshold();
+  if (thr > -1) {
+    thr = std::min(thr, (int64_t)2097152);
+  } else {
+    thr = 2097152;
+  }
+  if ((size_t)thr < msgSize) return false;
+  return true;
 }
 
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {

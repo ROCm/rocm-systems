@@ -7,6 +7,11 @@
 #include "argcheck.h" // Need some checks here since we access comm
 #include "collectives.h"
 #include "enqueue.h"
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+#include <hip/hip_runtime.h>
+#endif
+
 #include "graph/topo.h"
 #include "nccl.h"
 #include "api_trace.h"
@@ -378,6 +383,194 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
     chunkSteps, sliceSteps, nullptr };
 
   NCCLCHECK(Recorder::instance().record(rrAllReduce, info));
+
+  // Two-shot AllReduce (opt-in via RCCL_TWO_SHOT_ALLREDUCE=1):
+  // Shot 1 — reduce-scatter: CE/SDMA-style async copies into each peer's tempBuff staging
+  // (registered at ncclCommInit via IPC or same-PID direct pointers), then a device reduce
+  // kernel (direct ReduceScatter path) over tempBuff. Shot 2 — direct allgather into recvbuff.
+  if (ncclGroupDepth == 0 && comm->tempBuff && rcclUseTwoShotAllReduce(comm, count, datatype, op)) {
+    int nRanks, rank;
+    NCCLCHECK(ncclCommCount(comm, &nRanks));
+    NCCLCHECK(ncclCommUserRank(comm, &rank));
+    if (count == 0) return ncclSuccess;
+
+    cudaStreamCaptureStatus capSt = cudaStreamCaptureStatusNone;
+    unsigned long long captureIdIgnored = 0;
+    CUDACHECK(hipStreamGetCaptureInfo_v2(stream, &capSt, &captureIdIgnored, nullptr, nullptr, nullptr));
+    if (capSt == cudaStreamCaptureStatusActive) {
+      return ncclEnqueueCheck(&info);
+    }
+
+    const size_t chunkElems = count / (size_t)nRanks;
+    const size_t el = ncclTypeSize(datatype);
+    const size_t chunkBytes = chunkElems * el;
+    void* tempbuff = comm->tempBuff;
+    void* rsScratch = (char*)tempbuff + (size_t)nRanks * chunkBytes;
+
+    INFO(NCCL_INIT,
+         "RCCL TWO-SHOT ALLREDUCE count=%zu chunkElems=%zu rank=%d nRanks=%d comm=%p stream=%p sendbuff=%p recvbuff=%p",
+         count, chunkElems, rank, nRanks, comm, stream, sendbuff, recvbuff);
+
+    const bool hipBatchedStaging =
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+        (comm->peerTempImported != nullptr && comm->peerTwoShotSyncImported != nullptr);
+#else
+        false;
+#endif
+    if (!hipBatchedStaging) {
+      NCCLCHECK(ncclCudaMemcpyAsync((char*)tempbuff + rank * chunkBytes, (char*)sendbuff + rank * chunkBytes,
+                                    chunkBytes, stream));
+    }
+
+    if (comm->peerTempImported) {
+      if (comm->peerTwoShotSyncImported) {
+        // Batched SDMA copies + stream-ordered device fence (no host barrier).
+        const uint32_t seq = ++comm->twoShotBarrierSeq;
+        void** batchDst = nullptr;
+        void** batchSrc = nullptr;
+        size_t* batchSz = nullptr;
+        hipStreamBatchMemOpParams* memOps = nullptr;
+        ncclResult_t ts = ncclSuccess;
+
+        NCCLCHECKGOTO(ncclCalloc(&batchDst, nRanks), ts, twoshot_cleanup);
+        NCCLCHECKGOTO(ncclCalloc(&batchSrc, nRanks), ts, twoshot_cleanup);
+        NCCLCHECKGOTO(ncclCalloc(&batchSz, nRanks), ts, twoshot_cleanup);
+
+        for (int d = 0; d < nRanks; d++) {
+          if (d == rank) {
+            batchDst[d] = (char*)tempbuff + rank * chunkBytes;
+            batchSrc[d] = (char*)sendbuff + rank * chunkBytes;
+          } else {
+            batchDst[d] = (char*)comm->peerTempImported[d] + rank * chunkBytes;
+            batchSrc[d] = (char*)sendbuff + d * chunkBytes;
+          }
+          batchSz[d] = chunkBytes;
+        }
+        CUDACHECKGOTO(hipMemcpyBatchAsync(batchDst, batchSrc, batchSz, (size_t)nRanks, nullptr, nullptr, 0,
+                                          nullptr, stream), ts, twoshot_cleanup);
+
+        const unsigned int nPeer = (unsigned int)(nRanks - 1);
+        const unsigned int nMemOps = 2 * nPeer;
+        NCCLCHECKGOTO(ncclCalloc(&memOps, nMemOps), ts, twoshot_cleanup);
+        unsigned int oi = 0;
+        for (int dest = 0; dest < nRanks; dest++) {
+          if (dest == rank) continue;
+          memOps[oi] = {};
+          memOps[oi].writeValue.operation = hipStreamMemOpWriteValue32;
+          memOps[oi].writeValue.address =
+              (hipDeviceptr_t)((uint32_t*)comm->peerTwoShotSyncImported[dest] + rank);
+          memOps[oi].writeValue.value = seq;
+          memOps[oi].writeValue.flags = hipStreamWriteValueDefault;
+          oi++;
+        }
+        for (int peer = 0; peer < nRanks; peer++) {
+          if (peer == rank) continue;
+          memOps[oi] = {};
+          memOps[oi].waitValue.operation = hipStreamMemOpWaitValue32;
+          memOps[oi].waitValue.address = (hipDeviceptr_t)((uint32_t*)comm->twoShotSyncBuff + peer);
+          memOps[oi].waitValue.value = seq;
+          memOps[oi].waitValue.flags = hipStreamWaitValueEq;
+          oi++;
+        }
+        CUDACHECKGOTO(hipStreamBatchMemOp(stream, oi, memOps, 0), ts, twoshot_cleanup);
+
+twoshot_cleanup:
+        free(memOps);
+        free(batchDst);
+        free(batchSrc);
+        free(batchSz);
+        NCCLCHECK(ts);
+      } 
+    comm->enableDirectReduceScatter = 1;
+    struct ncclInfo rsInfo = {ncclFuncReduceScatter, "ReduceScatter",
+                              sendbuff, rsScratch, chunkElems, datatype, op, 0, comm, stream,
+                              REDUCESCATTER_CHUNKSTEPS,
+                              comm->rcclUseOneSlice ? REDUCESCATTER_SLICESTEPS_SINGLE_NODE : REDUCESCATTER_SLICESTEPS,
+                              nullptr};
+    NCCLCHECK(ncclEnqueueCheck(&rsInfo));
+    comm->enableDirectReduceScatter = 0;
+    NCCLCHECK(ncclCudaMemcpyAsync((char*)recvbuff + rank * chunkBytes, rsScratch, chunkBytes, stream));
+
+    if (hipBatchedStaging) {
+      // Allgather: batched push of this rank's shard into each peer's tempBuff, device fence, then
+      // batched local copies from tempBuff into recvbuff (user buffer not IPC-visible).
+      const uint32_t agSeq = ++comm->twoShotBarrierSeq;
+      void** agPushDst = nullptr;
+      void** agPushSrc = nullptr;
+      size_t* agPushSz = nullptr;
+      void** agPullDst = nullptr;
+      void** agPullSrc = nullptr;
+      size_t* agPullSz = nullptr;
+      hipStreamBatchMemOpParams* agMemOps = nullptr;
+      ncclResult_t agTs = ncclSuccess;
+
+      NCCLCHECKGOTO(ncclCalloc(&agPushDst, nRanks), agTs, ag_cleanup);
+      NCCLCHECKGOTO(ncclCalloc(&agPushSrc, nRanks), agTs, ag_cleanup);
+      NCCLCHECKGOTO(ncclCalloc(&agPushSz, nRanks), agTs, ag_cleanup);
+
+      for (int d = 0; d < nRanks; d++) {
+        agPushDst[d] =
+            (d == rank) ? (char*)tempbuff + rank * chunkBytes : (char*)comm->peerTempImported[d] + rank * chunkBytes;
+        agPushSrc[d] = (char*)recvbuff + rank * chunkBytes;
+        agPushSz[d] = chunkBytes;
+      }
+      CUDACHECKGOTO(hipMemcpyBatchAsync(agPushDst, agPushSrc, agPushSz, (size_t)nRanks, nullptr, nullptr, 0, nullptr,
+                                        stream),
+                    agTs, ag_cleanup);
+
+      const unsigned int agNPeer = (unsigned int)(nRanks - 1);
+      const unsigned int agNMemOps = 2 * agNPeer;
+      NCCLCHECKGOTO(ncclCalloc(&agMemOps, agNMemOps), agTs, ag_cleanup);
+      unsigned int agOi = 0;
+      for (int dest = 0; dest < nRanks; dest++) {
+        if (dest == rank) continue;
+        agMemOps[agOi] = {};
+        agMemOps[agOi].writeValue.operation = hipStreamMemOpWriteValue32;
+        agMemOps[agOi].writeValue.address =
+            (hipDeviceptr_t)((uint32_t*)comm->peerTwoShotSyncImported[dest] + rank);
+        agMemOps[agOi].writeValue.value = agSeq;
+        agMemOps[agOi].writeValue.flags = hipStreamWriteValueDefault;
+        agOi++;
+      }
+      for (int peer = 0; peer < nRanks; peer++) {
+        if (peer == rank) continue;
+        agMemOps[agOi] = {};
+        agMemOps[agOi].waitValue.operation = hipStreamMemOpWaitValue32;
+        agMemOps[agOi].waitValue.address = (hipDeviceptr_t)((uint32_t*)comm->twoShotSyncBuff + peer);
+        agMemOps[agOi].waitValue.value = agSeq;
+        agMemOps[agOi].waitValue.flags = hipStreamWaitValueEq;
+        agOi++;
+      }
+      CUDACHECKGOTO(hipStreamBatchMemOp(stream, agOi, agMemOps, 0), agTs, ag_cleanup);
+
+      const int nPull = nRanks - 1;
+      NCCLCHECKGOTO(ncclCalloc(&agPullDst, nPull), agTs, ag_cleanup);
+      NCCLCHECKGOTO(ncclCalloc(&agPullSrc, nPull), agTs, ag_cleanup);
+      NCCLCHECKGOTO(ncclCalloc(&agPullSz, nPull), agTs, ag_cleanup);
+      int pi = 0;
+      for (int p = 0; p < nRanks; p++) {
+        if (p == rank) continue;
+        agPullDst[pi] = (char*)recvbuff + p * chunkBytes;
+        agPullSrc[pi] = (char*)tempbuff + p * chunkBytes;
+        agPullSz[pi] = chunkBytes;
+        pi++;
+      }
+      CUDACHECKGOTO(hipMemcpyBatchAsync(agPullDst, agPullSrc, agPullSz, (size_t)nPull, nullptr, nullptr, 0, nullptr,
+                                        stream),
+                    agTs, ag_cleanup);
+
+ag_cleanup:
+      free(agMemOps);
+      free(agPullDst);
+      free(agPullSrc);
+      free(agPullSz);
+      free(agPushDst);
+      free(agPushSrc);
+      free(agPushSz);
+      NCCLCHECK(agTs);
+    }
+	return ncclSuccess;
+    }
 
   return ncclEnqueueCheck(&info);
 }
