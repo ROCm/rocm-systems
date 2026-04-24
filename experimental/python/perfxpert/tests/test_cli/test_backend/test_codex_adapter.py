@@ -109,6 +109,12 @@ def _mark_trusted(home: Path, cwd: Path) -> None:
     )
 
 
+def test_codex_user_paths_honor_home_env(isolated_home: Path, project_cwd: Path) -> None:
+    adapter = CodexAdapter()
+    assert adapter._user_codex_config_path() == isolated_home / ".codex" / "config.toml"
+    assert adapter._scope_config_dir(project_cwd, "user") == isolated_home / ".codex"
+
+
 def _fake_codex_subprocess(
     *,
     list_exit: int = 0,

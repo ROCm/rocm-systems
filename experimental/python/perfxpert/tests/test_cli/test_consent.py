@@ -261,7 +261,7 @@ def test_home_isolation_defaults_to_dot_config(
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     p = consent_path()
     assert str(tmp_path) in str(p)
-    assert ".config/perfxpert/consent.yaml" in str(p)
+    assert p == tmp_path / ".config" / "perfxpert" / "consent.yaml"
 
 
 def test_grant_does_not_touch_other_home(

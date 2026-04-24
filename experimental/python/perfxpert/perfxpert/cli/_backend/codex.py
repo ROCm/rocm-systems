@@ -81,6 +81,7 @@ from perfxpert.cli._consent import (
     prompt_consent_interactive,
     revoke_consent,
 )
+from perfxpert.cli._paths import user_home
 
 
 __all__ = [
@@ -200,7 +201,7 @@ class CodexAdapter:
     # ------------------------------------------------------------------
 
     def _user_codex_config_path(self, home: Path | None = None) -> Path:
-        return (home or Path.home()) / self._CODEX_CFG_REL
+        return (home or user_home()) / self._CODEX_CFG_REL
 
     def _check_trust(
         self, cwd: Path, home: Path | None = None
@@ -255,7 +256,7 @@ class CodexAdapter:
         """Return the directory whose `config.toml` we should edit."""
         if scope == "project":
             return Path(cwd) / ".codex"
-        return Path.home() / ".codex"
+        return user_home() / ".codex"
 
     def _target_paths(
         self,
