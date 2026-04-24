@@ -643,6 +643,7 @@ void GpuAgent::InitCacheList() {
                                      cache_props_[i].CacheLevel, cache_props_[i].CacheSize));
 }
 
+
 void GpuAgent::InitDerivedCuid() {
   memset(derived_cuid_, 0, sizeof(derived_cuid_));
 
