@@ -769,17 +769,8 @@ if(NOT RDC_ISA_PER_ARCH)
   endif()
 endif()
 
-# Under the per-arch -fgpu-rdc-isa pipeline, all __global__ kernels and device
-# functions are compiled by the aux/spec/common targets in RdcIsaDevice.cmake.
-# The main rccl target holds only host-facing TUs; compile it --offload-host-only
-# so clang doesn't run a per-TU amdgcn device link that would try to resolve
-# ncclDevFunc_* references pulled in via device_table.h (those symbols live in
-# the per-arch device.elf, not in any of main rccl's TUs).  RCCL_NO_EXTERN_SHMEM
-# makes common.h emit plain (non-extern) __shared__ decls, which newer clang
-# requires at file scope in host-only mode.  RCCL_DEVICE_TABLE_OMIT suppresses
-# the __device__ ncclDevFuncTable_*[] array (and references to ncclDevFunc_*)
-# inside device_table.h; main rccl has no TUs that call ncclKernelMain, so
-# omitting the table is safe.
+# Per-arch -fgpu-rdc-isa: main rccl is host-only; device code lives in the
+# per-arch targets. Skip extern __shared__ and the devfunc table here.
 if(RDC_ISA_PER_ARCH)
   target_compile_definitions(rccl PRIVATE RCCL_NO_EXTERN_SHMEM)
   target_compile_definitions(rccl PRIVATE RCCL_DEVICE_TABLE_OMIT)

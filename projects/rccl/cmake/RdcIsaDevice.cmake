@@ -90,12 +90,8 @@ add_library(rccl_rdi_defs INTERFACE)
 
 get_target_property(_rccl_defs rccl COMPILE_DEFINITIONS)
 if(_rccl_defs)
-  # The per-arch device pipeline compiles spec_*.cpp + common.cu.cpp which
-  # DO need ncclDevFuncTable_*[] (dispatched from ncclKernelMain's else-branch).
-  # RCCL_DEVICE_TABLE_OMIT is only appropriate for the main rccl target; filter
-  # it out here so per-arch OBJECT libraries keep the tables.  Same for
-  # RCCL_NO_EXTERN_SHMEM: device-only per-arch compiles rely on extern __shared__
-  # which ld.lld resolves via postRelocatePass.
+  # Strip main-rccl-only defines; per-arch targets opt in to these explicitly
+  # below so inheritance stays auditable.
   list(REMOVE_ITEM _rccl_defs RCCL_DEVICE_TABLE_OMIT RCCL_NO_EXTERN_SHMEM)
   target_compile_definitions(rccl_rdi_defs INTERFACE ${_rccl_defs})
 endif()
@@ -276,11 +272,21 @@ foreach(RDI_GPU_TARGET ${RDI_GPU_TARGETS})
   )
   target_link_libraries(${_dev_target} PRIVATE rccl_rdi_defs)
 
+  # RCCL_DEVICE_LINKER: use indirect dispatch and drop __noinline__ on devfuncs
+  # (saves a call hop on the LL hot path).
+  # RCCL_NO_EXTERN_SHMEM: plain __shared__ gives predictable LDS offsets; avoids
+  # SIMPLE-protocol perf loss from dynamic-shmem aliasing.
+  target_compile_definitions(${_dev_target} PRIVATE
+    RCCL_DEVICE_LINKER
+    RCCL_NO_EXTERN_SHMEM
+  )
+
   target_compile_options(${_dev_target} PRIVATE
     -x hip
     --offload-device-only
     --offload-arch=${RDI_GPU_TARGET}
     -fgpu-rdc-isa
+    -mllvm -amdgpu-enable-lower-module-lds=1
     ${RDI_OPT_FLAGS}
     -std=c++17
     -w
@@ -356,13 +362,8 @@ endif()
 add_library(rccl_rdi_host OBJECT ${HIPIFY_DIR}/src/device/common.cu.cpp)
 target_link_libraries(rccl_rdi_host PRIVATE rccl_rdi_defs)
 
-# RCCL_NO_EXTERN_SHMEM is a matched pair of guards in common.h / common.cu:
-#   - in common.h: emits plain (non-extern) __shared__ declarations, satisfying
-#     the host parser (newer clang rejects `extern __shared__` at file scope
-#     in --offload-host-only).  Host never reads these; device bodies are
-#     skipped in host-only mode.
-#   - in common.cu: skips its own __shared__ definition so common.h's copy is
-#     the sole definition in this TU (no redefinition conflict).
+# Plain __shared__ in common.h for host-only parse (newer clang rejects
+# `extern __shared__` at file scope in --offload-host-only).
 target_compile_definitions(rccl_rdi_host PRIVATE RCCL_NO_EXTERN_SHMEM)
 
 target_compile_options(rccl_rdi_host PRIVATE
@@ -402,15 +403,8 @@ add_library(rccl_rdi_aux OBJECT
 )
 target_link_libraries(rccl_rdi_aux PRIVATE rccl_rdi_defs)
 
-# Plain (non-extern) __shared__ in common.h — same rationale as rccl_rdi_host:
-# these TUs include common.h but never read ncclShmem; without RDC, newer clang
-# rejects `extern __shared__` at file scope.
-#
-# RCCL_DEVICE_TABLE_OMIT suppresses the __device__ ncclDevFuncTable_*[] array
-# (and its references to ncclDevFunc_* symbols that only exist in the per-arch
-# specialized pipeline).  onerank.cu.cpp and collectives.cc don't invoke
-# ncclKernelMain, so dropping the table is safe and avoids the per-TU
-# amdgcn device link trying to resolve those symbols.
+# Host-only parse of common.h (plain __shared__) + skip the devfunc table,
+# since these TUs don't invoke ncclKernelMain and the symbols live elsewhere.
 target_compile_definitions(rccl_rdi_aux PRIVATE
   RCCL_NO_EXTERN_SHMEM
   RCCL_DEVICE_TABLE_OMIT

@@ -190,18 +190,8 @@ struct ncclShmemData {
 };
 
 #if defined(RCCL_NO_EXTERN_SHMEM)
-// RCCL_NO_EXTERN_SHMEM is set for TUs that do not want `extern __shared__`
-// declarations.  This happens in two situations under the -fgpu-rdc-isa
-// per-arch pipeline:
-//   (a) host-only compiles that include common.h but will not device-link
-//       (newer clang rejects `extern __shared__` at file scope in host mode), and
-//   (b) TUs in the main rccl target that merely include common.h and do not
-//       participate in the per-arch device link.
-// Use plain (non-extern) __shared__ instead; the compiler allocates each
-// variable at a separate, non-overlapping offset, matching the layout the
-// device linker produces in the default build.  common.cu's own definitions
-// are guarded by #ifndef RCCL_NO_EXTERN_SHMEM so there is no redefinition
-// conflict when common.cu.cpp is compiled with this define.
+// Emit plain __shared__ instead of `extern __shared__`: gives predictable
+// compile-time LDS offsets and satisfies newer clang host-only parsing rules.
 __shared__ ncclShmemData ncclShmem;
 __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
 #else
@@ -695,7 +685,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       SpecializedRunWorkBatch().run();
     } else {
 #ifndef RCCL_DEVICE_TABLE_OMIT
-#ifdef USE_INDIRECT_FUNCTION_CALL
+#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
       if (COLL_UNROLL == 1)
         ncclDevFuncTable_1[ncclShmem.funcId]();
       else if (COLL_UNROLL == 2)
@@ -755,7 +745,9 @@ __global__ void ncclDevKernelDebug_Generic_4(ncclDevKernelArgsDefaultStorage NCC
 #define DEFINE_ncclDevKernel_nop(suffix, coll, redop, ty, algo, proto, specializedFnId) \
   __global__ void ncclDevKernel_##suffix(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {}
 
-#ifdef USE_INDIRECT_FUNCTION_CALL
+#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
+// Indirect dispatch: drop __noinline__ on ncclDevFunc_* (saves a call hop);
+// runRing<> keeps its own noinline to stay out-of-line.
 #define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
   __device__ void ncclDevFunc_##suffix() { \
     RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(); \

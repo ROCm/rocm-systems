@@ -9,10 +9,8 @@
 #include "common.h"
 
 #ifndef RCCL_NO_EXTERN_SHMEM
-// Under the -fgpu-rdc-isa per-arch pipeline, common.cu.cpp is compiled with
-// RCCL_NO_EXTERN_SHMEM defined.  In that mode common.h already provides a
-// plain (non-extern) definition of ncclShmem / ncclShmemPerWarp, so we skip
-// this definition here to avoid redefinition.
+// When RCCL_NO_EXTERN_SHMEM is set, common.h already defines these; skip to
+// avoid redefinition.
 __shared__ ncclShmemData ncclShmem;
 #if __CUDA_ARCH__ < 700
   __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
@@ -44,7 +42,7 @@ __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Gener
 }
 #endif
 
-#ifdef USE_INDIRECT_FUNCTION_CALL
+#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
 __device__ void ncclDevFunc_Nop();
 #else
 __device__ __attribute__((noinline)) void ncclDevFunc_Nop();

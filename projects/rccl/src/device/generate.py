@@ -417,12 +417,8 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
       out("%s %s();\n" % (func_declaration, sym))
   out("\n")
 
-  # Everything below (table definitions + Caller templates + NCCL_CALL_FUNCTIONS_*)
-  # references every ncclDevFunc_* symbol.  TUs that only need the forward
-  # declarations (e.g. host-only compiles and the aux target under the
-  # -fgpu-rdc-isa per-arch pipeline) define RCCL_DEVICE_TABLE_OMIT to suppress
-  # this block, avoiding per-TU device-link errors for symbols that live in
-  # the per-arch specialized pipeline.
+  # ncclDevFuncTable_*[] + Caller templates reference every ncclDevFunc_*; let
+  # TUs that only need the forward decls suppress this block via RCCL_DEVICE_TABLE_OMIT.
   index = {val: None for val in all_unrolls}
   out("#ifndef RCCL_DEVICE_TABLE_OMIT\n")
   out("typedef void(*ncclDevFuncPtr_t)();\n\n")
@@ -652,13 +648,24 @@ if is_specialized:
     filepath = os.path.join(specialized_dir, fname)
     with open(filepath, "w") as f:
       out = f.write
+      # Spec TUs only need their own fast path; skip the indirect-dispatch
+      # table/switch so it doesn't get inlined into every devfunc.
+      out('#define RCCL_DEVICE_TABLE_OMIT\n')
       out('#include "common.h"\n')
       out('#include "%s.h"\n' % lower_coll)
       guard = get_arch_guard(fn)
       if guard:
         out("#if %s\n" % guard)
+      # Emit a __global__ anchor kernel so the backend sees a real call-graph
+      # rooted at __launch_bounds__, keeping runRing<> out-of-line (unused at runtime).
       out(
-        "DEFINE_ncclDevFunc({sym}, ncclFunc{coll}, {redop_cxx}, {ty_cxx}, NCCL_ALGO_{algo}, NCCL_PROTO_{proto}, {acc}, {pipeline}, {unroll})\n"
+        "DEFINE_ncclDevFunc({sym}, ncclFunc{coll}, {redop_cxx}, {ty_cxx}, NCCL_ALGO_{algo}, NCCL_PROTO_{proto}, {acc}, {pipeline}, {unroll})\n\n"
+        "__launch_bounds__(NCCL_MAX_NTHREADS, 1)\n"
+        "__global__ void ncclDevKernel_{sym}_Specialized(\n"
+        "    ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {{\n"
+        "  ncclShmemPerWarp[0].x = 0;\n"
+        "  ncclDevFunc_{sym}();\n"
+        "}}\n"
         .format(sym=sym, coll=fn.coll, redop_cxx=redop_to_cxx[fn.redop], ty_cxx=ty_to_cxx[fn.ty],
                 algo=(fn.algo or "RING"), proto=(fn.proto or "SIMPLE"), acc=fn.acc, pipeline=fn.pipeline, unroll=fn.unroll)
       )
