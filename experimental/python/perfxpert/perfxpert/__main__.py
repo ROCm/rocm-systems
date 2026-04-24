@@ -407,6 +407,22 @@ def _report_active_mode() -> str:
     return "Mode: agentic"
 
 
+def _status_symbol(kind: str, stream=None) -> str:
+    """Return a status symbol representable by the target stream."""
+    import sys
+
+    stream = stream or sys.stdout
+    glyphs = {"ok": "✓", "warn": "⚠", "fail": "✗"}
+    fallback = {"ok": "OK", "warn": "WARN", "fail": "FAIL"}
+    glyph = glyphs[kind]
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    try:
+        glyph.encode(encoding)
+    except UnicodeEncodeError:
+        return fallback[kind]
+    return glyph
+
+
 def _run_doctor():
     """Run all health checks and print results in canonical format."""
     import sys
@@ -423,8 +439,9 @@ def _run_doctor():
 
     all_ok = True
     for name, (ok, msg) in checks:
-        symbol = "✓" if ok else "⚠" if "unknown" in msg.lower() else "✗"
-        if not ok and symbol == "✗":
+        kind = "ok" if ok else "warn" if "unknown" in msg.lower() else "fail"
+        symbol = _status_symbol(kind, sys.stdout)
+        if not ok and kind == "fail":
             all_ok = False
         print(f"{symbol} {msg}")
 
@@ -433,7 +450,7 @@ def _run_doctor():
     all_ok = all_ok and len(configured) > 0  # at least one provider configured
     configured_str = ", ".join(configured) if configured else "(none)"
     unconfigured_str = ", ".join(unconfigured) if unconfigured else "(all configured)"
-    print(f"✓ {len(configured)}/5 LLM providers configured ({configured_str})")
+    print(f"{_status_symbol('ok', sys.stdout)} {len(configured)}/5 LLM providers configured ({configured_str})")
     if unconfigured:
         print(f"  {len(unconfigured)}/5 providers unconfigured ({unconfigured_str}) — see README")
 
@@ -444,10 +461,10 @@ def _run_doctor():
     # Final status
     print()
     if all_ok:
-        print("✓ ALL CLEAN")
+        print(f"{_status_symbol('ok', sys.stdout)} ALL CLEAN")
         return 0
     else:
-        print(f"✗ Issues found — see above")
+        print(f"{_status_symbol('fail', sys.stdout)} Issues found — see above")
         return 1
 
 
