@@ -21,6 +21,7 @@ from perfxpert.providers._exceptions import (
     ProviderError,
     TimeoutError,
 )
+from perfxpert.providers._sanitization import redact_paths, sanitize_messages
 from perfxpert.providers.registry import register
 
 _DEFAULT_TIMEOUT = 180.0
@@ -82,7 +83,7 @@ class OpencodeProvider(Provider):
                 "cannot invoke opencode provider inside an opencode session"
             )
 
-        prompt = _flatten_messages(messages, system)
+        prompt = _flatten_messages(sanitize_messages(messages), redact_paths(system))
         cmd = [self._binary, "run", "--no-color"]
         if model:
             cmd += ["--model", model]

@@ -21,6 +21,7 @@ from perfxpert.providers._exceptions import (
     ProviderError,
     TimeoutError,
 )
+from perfxpert.providers._sanitization import redact_paths, sanitize_messages
 from perfxpert.providers.registry import register
 
 _DEFAULT_TIMEOUT = 120.0
@@ -103,6 +104,8 @@ class PrivateProvider(Provider):
             return DryRunResponse
 
         model_id = model or self._model_default
+        messages = sanitize_messages(messages)
+        system = redact_paths(system)
         full = [{"role": "system", "content": system}] if system else []
         full.extend(messages)
 

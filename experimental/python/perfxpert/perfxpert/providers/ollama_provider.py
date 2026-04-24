@@ -13,6 +13,7 @@ from perfxpert.providers._exceptions import (
     ProviderError,
     TimeoutError,
 )
+from perfxpert.providers._sanitization import redact_paths, sanitize_messages
 from perfxpert.providers.registry import register
 
 _DEFAULT_URL = "http://localhost:11434"
@@ -53,6 +54,8 @@ class OllamaProvider(Provider):
             return DryRunResponse
 
         model_id = model or _DEFAULT_MODEL
+        messages = sanitize_messages(messages)
+        system = redact_paths(system)
         full = [{"role": "system", "content": system}] if system else []
         full.extend(messages)
 

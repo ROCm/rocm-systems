@@ -103,6 +103,25 @@ def test_custom_headers_merged(monkeypatch):
         assert headers["X-Trace"] == "1"
 
 
+def test_provider_payload_redacts_paths(monkeypatch):
+    monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_URL", "https://llm.corp.internal/v1")
+    monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_MODEL", "internal-xl")
+    from perfxpert.providers.private_provider import PrivateProvider
+
+    with patch(
+        "perfxpert.providers.private_provider.httpx.post",
+        return_value=_fake_chat_response(),
+    ) as mp:
+        PrivateProvider().complete(
+            [{"role": "user", "content": "analyze /tmp/private/trace.db"}],
+            system=r"project is C:\Users\dev\repo",
+        )
+        payload = mp.call_args.kwargs["json"]
+        assert "/tmp/private/trace.db" not in str(payload)
+        assert r"C:\Users\dev\repo" not in str(payload)
+        assert "[REDACTED]" in str(payload)
+
+
 def test_verify_ssl_disabled_when_env_zero(monkeypatch):
     monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_URL", "https://internal.corp/v1")
     monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_MODEL", "m")
