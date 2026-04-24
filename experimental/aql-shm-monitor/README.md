@@ -123,6 +123,40 @@ into HIP/CLR and is intended for a real tool flow later.
 `aqlmon_trace_json` correlates packet, completion, and code-object records by
 `pid + queue_id + dispatch_id` and writes Chrome/Perfetto JSON.
 
+For lossless packet-trace validation, enable strict export:
+
+```bash
+AQLMON_TRACE_STRICT=1 \
+  /home/aelwazir/install/aqlmon-stack/bin/aqlmon_trace_json \
+  /aqlmon-demo \
+  /tmp/aqlmon-demo-trace.json
+```
+
+Strict mode fails the export if the shared-memory stream reports dropped records,
+dropped packets, a wrapped ring, or a missing record sequence. This makes packet
+loss visible instead of silently producing a partial trace.
+
+By default, strict mode guarantees the full kernel dispatch packet trace. If a
+packet has a matching completion record, the trace event uses completion
+timestamps. If completion is missing, the exporter keeps the packet as a
+zero-duration dispatch event with `completion_observed=false`. This preserves the
+complete dispatch trace while making missing completion data explicit.
+
+To require complete packet-to-completion correlation as well, set:
+
+```bash
+AQLMON_TRACE_STRICT=1 AQLMON_TRACE_REQUIRE_COMPLETION=1 \
+  /home/aelwazir/install/aqlmon-stack/bin/aqlmon_trace_json \
+  /aqlmon-demo \
+  /tmp/aqlmon-demo-trace.json
+```
+
+Kernel names are transported through the existing per-packet `kernel_name` field
+in shared memory. The monitor caches `kernel_object -> kernel_name` from ROCr
+executable symbol queries and stamps packet records before export. The JSON
+event name uses that value when present and also emits it under
+`args.kernel_name`.
+
 ## Runtime Contract
 
 The public ABI is in [`aqlmon/runtime_contract.h`](source/include/aqlmon/runtime_contract.h).
@@ -170,6 +204,11 @@ Completion handling is also off the producer thread:
 - runtime-provided completion signals are preferred when granted
 - otherwise `aqlmon` falls back to its own pooled signal injection
 - a separate completion thread emits timing records into the same shm ring
+
+Shutdown drains queue publication before HSA teardown so packets already made
+visible through the shadow doorbell path are written to the shared-memory stream
+before the sample exits. The completion worker also drains pending completion
+trackers before exit, bounded by `AQLMONITOR_FINAL_DRAIN_TIMEOUT_NS`.
 
 ## Limitations
 

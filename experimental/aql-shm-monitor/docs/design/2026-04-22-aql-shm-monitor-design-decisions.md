@@ -163,7 +163,7 @@ Operational constraints for this path:
 - no allocation
 - no syscall
 - no mutex
-- no symbol lookup
+- no uncached symbol lookup
 - no code-object lookup
 - fixed-size record reservation only
 - contiguous batch publication only
@@ -292,6 +292,8 @@ The watcher thread sits on the delayed-publication path, so its behavior must be
 - it never publishes reserved-but-not-ready slots
 - it should use a dedicated polling thread rather than pushing work back onto runtime submit
   threads
+- shutdown performs a bounded final drain before HSA teardown, so already-published shadow
+  doorbells are either emitted to the shared-memory stream or counted as dropped
 
 ## Shared-Memory Stream
 
@@ -319,8 +321,41 @@ Required correlation keys are intentionally basic:
 - queue identity
 - completion-signal identity where applicable
 - code-object identity
+- kernel-object identity
 
 The goal is low-overhead capture first and richer resolution later.
+
+### Lossless Packet Trace Validation
+
+The sample exporter supports a strict validation mode for the shared-memory transport.
+
+With `AQLMON_TRACE_STRICT=1`, export fails if the stream reports dropped records, dropped
+packets, ring wrap before export, or a missing sequence number. This is the sample-tool
+definition of packet-lossless export: every kernel dispatch packet present in the stream must
+produce a dispatch trace event.
+
+Completion correlation is intentionally a separate policy. By default, strict mode preserves
+packet records even if the matching completion record is missing. Those events are emitted with
+`completion_observed=false` and zero duration. If the consumer needs complete packet-to-completion
+coverage, it can also set `AQLMON_TRACE_REQUIRE_COMPLETION=1`, which makes missing or invalid
+completion timestamps fail the export.
+
+### Kernel Names
+
+Kernel names are captured before export, not by parsing code objects in the exporter. The monitor
+caches the ROCr executable symbol mapping:
+
+- `hsa_executable_get_symbol_by_name`
+- `hsa_executable_symbol_get_info(...KERNEL_OBJECT...)`
+- `hsa_executable_iterate_symbols`
+
+That cache maps `kernel_object` to the executable symbol name. When a kernel dispatch packet is
+published to shared memory, the monitor copies the cached name into the existing fixed-size
+`kernel_name` packet field. The JSON sample uses that field as the Chrome trace event name and
+also exposes it as `args.kernel_name`.
+
+This keeps symbol discovery outside the per-packet export pass while still allowing packet-backed
+lossless traces to carry human-readable kernel names.
 
 ## Current Branch Scope
 
@@ -333,6 +368,8 @@ What exists now:
 - HIP/CLR as the first runtime example
 - a per-kernel fast-path bit in HIP/ROCclr to request runtime-provided completion signals
 - the current preload monitor consuming that POC mode decision
+- strict sample export for packet-lossless trace validation
+- kernel-name transport in packet records
 
 What still remains to reach the full design:
 
