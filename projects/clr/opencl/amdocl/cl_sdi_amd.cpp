@@ -28,7 +28,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueWaitSignalAMD,
     return CL_INVALID_MEM_OBJECT;
   }
 
-  if ((buffer->getMemFlags() & static_cast<amd::MemFlags>(CL_MEM_BUS_ADDRESSABLE_AMD)) ==
+  if ((buffer->getMemFlags() & amd::MemFlags::BusAddressable) ==
       amd::MemFlags::Empty) {
     return CL_INVALID_MEM_OBJECT;
   }
@@ -94,7 +94,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueWriteSignalAMD,
     return CL_INVALID_MEM_OBJECT;
   }
 
-  if ((buffer->getMemFlags() & static_cast<amd::MemFlags>(CL_MEM_EXTERNAL_PHYSICAL_AMD)) ==
+  if ((buffer->getMemFlags() & amd::MemFlags::ExternalPhysical) ==
       amd::MemFlags::Empty) {
     return CL_INVALID_MEM_OBJECT;
   }
@@ -182,7 +182,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueMakeBuffersResidentAMD,
       return CL_INVALID_MEM_OBJECT;
     }
 
-    if ((buffer->getMemFlags() & static_cast<amd::MemFlags>(CL_MEM_BUS_ADDRESSABLE_AMD)) ==
+    if ((buffer->getMemFlags() & amd::MemFlags::BusAddressable) ==
         amd::MemFlags::Empty) {
       return CL_INVALID_MEM_OBJECT;
     }

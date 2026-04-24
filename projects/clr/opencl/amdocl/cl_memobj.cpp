@@ -450,7 +450,7 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateSubBuffer,
     return NULL;
   }
 
-  if (static_cast<uint64_t>(buffer.getMemFlags()) & (CL_MEM_EXTERNAL_PHYSICAL_AMD | CL_MEM_BUS_ADDRESSABLE_AMD)) {
+  if ((buffer.getMemFlags() & (amd::MemFlags::ExternalPhysical | amd::MemFlags::BusAddressable)) != amd::MemFlags::Empty) {
     *not_null(errcode_ret) = CL_INVALID_VALUE;
     return NULL;
   }
@@ -581,7 +581,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueReadBuffer,
     return CL_INVALID_MEM_OBJECT;
   }
 
-  if (static_cast<uint64_t>(srcBuffer->getMemFlags()) & (CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) {
+  if ((srcBuffer->getMemFlags() & (amd::MemFlags::HostWriteOnly | amd::MemFlags::HostNoAccess)) != amd::MemFlags::Empty) {
     return CL_INVALID_OPERATION;
   }
 
@@ -723,7 +723,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueWriteBuffer,
     return CL_INVALID_MEM_OBJECT;
   }
 
-  if (static_cast<uint64_t>(dstBuffer->getMemFlags()) & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) {
+  if ((dstBuffer->getMemFlags() & (amd::MemFlags::HostReadOnly | amd::MemFlags::HostNoAccess)) != amd::MemFlags::Empty) {
     return CL_INVALID_OPERATION;
   }
 
@@ -1028,7 +1028,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueReadBufferRect,
     return CL_INVALID_MEM_OBJECT;
   }
 
-  if (static_cast<uint64_t>(srcBuffer->getMemFlags()) & (CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) {
+  if ((srcBuffer->getMemFlags() & (amd::MemFlags::HostWriteOnly | amd::MemFlags::HostNoAccess)) != amd::MemFlags::Empty) {
     return CL_INVALID_OPERATION;
   }
 
@@ -1213,7 +1213,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueWriteBufferRect,
     return CL_INVALID_MEM_OBJECT;
   }
 
-  if (static_cast<uint64_t>(dstBuffer->getMemFlags()) & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) {
+  if ((dstBuffer->getMemFlags() & (amd::MemFlags::HostReadOnly | amd::MemFlags::HostNoAccess)) != amd::MemFlags::Empty) {
     return CL_INVALID_OPERATION;
   }
 
@@ -2157,7 +2157,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueReadImage,
     return CL_INVALID_MEM_OBJECT;
   }
 
-  if (static_cast<uint64_t>(srcImage->getMemFlags()) & (CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) {
+  if ((srcImage->getMemFlags() & (amd::MemFlags::HostWriteOnly | amd::MemFlags::HostNoAccess)) != amd::MemFlags::Empty) {
     return CL_INVALID_OPERATION;
   }
 
@@ -2341,7 +2341,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueWriteImage,
     return CL_INVALID_MEM_OBJECT;
   }
 
-  if (static_cast<uint64_t>(dstImage->getMemFlags()) & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) {
+  if ((dstImage->getMemFlags() & (amd::MemFlags::HostReadOnly | amd::MemFlags::HostNoAccess)) != amd::MemFlags::Empty) {
     return CL_INVALID_OPERATION;
   }
 
@@ -3047,19 +3047,19 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapBuffer,
     return NULL;
   }
 
-  if ((static_cast<uint64_t>(srcBuffer->getMemFlags()) & (CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) &&
+  if (((srcBuffer->getMemFlags() & (amd::MemFlags::HostWriteOnly | amd::MemFlags::HostNoAccess)) != amd::MemFlags::Empty) &&
       (map_flags & CL_MAP_READ)) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
     return NULL;
   }
 
-  if ((static_cast<uint64_t>(srcBuffer->getMemFlags()) & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) &&
+  if (((srcBuffer->getMemFlags() & (amd::MemFlags::HostReadOnly | amd::MemFlags::HostNoAccess)) != amd::MemFlags::Empty) &&
       (map_flags & (CL_MAP_WRITE | CL_MAP_WRITE_INVALIDATE_REGION))) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
     return NULL;
   }
 
-  if (static_cast<uint64_t>(srcBuffer->getMemFlags()) & CL_MEM_EXTERNAL_PHYSICAL_AMD) {
+  if ((srcBuffer->getMemFlags() & amd::MemFlags::ExternalPhysical) != amd::MemFlags::Empty) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
     return NULL;
   }
@@ -3112,7 +3112,7 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapBuffer,
     return NULL;
   }
 
-  if (static_cast<uint64_t>(srcBuffer->getMemFlags()) & CL_MEM_USE_PERSISTENT_MEM_AMD) {
+  if ((srcBuffer->getMemFlags() & amd::MemFlags::UsePersistentMemAmd) != amd::MemFlags::Empty) {
     // [Windows VidMM restriction]
     // Runtime can't map persistent memory if it's still busy or
     // even wasn't submitted to HW from the worker thread yet
@@ -3297,13 +3297,13 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
     return NULL;
   }
 
-  if ((static_cast<uint64_t>(srcImage->getMemFlags()) & (CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) &&
+  if (((srcImage->getMemFlags() & (amd::MemFlags::HostWriteOnly | amd::MemFlags::HostNoAccess)) != amd::MemFlags::Empty) &&
       (map_flags & CL_MAP_READ)) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
     return NULL;
   }
 
-  if ((static_cast<uint64_t>(srcImage->getMemFlags()) & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) &&
+  if (((srcImage->getMemFlags() & (amd::MemFlags::HostReadOnly | amd::MemFlags::HostNoAccess)) != amd::MemFlags::Empty) &&
       (map_flags & (CL_MAP_WRITE | CL_MAP_WRITE_INVALIDATE_REGION))) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
     return NULL;
@@ -3388,7 +3388,7 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
     return NULL;
   }
 
-  if (static_cast<uint64_t>(srcImage->getMemFlags()) & CL_MEM_USE_PERSISTENT_MEM_AMD) {
+  if ((srcImage->getMemFlags() & amd::MemFlags::UsePersistentMemAmd) != amd::MemFlags::Empty) {
     // [Windows VidMM restriction]
     // Runtime can't map persistent memory if it's still busy or
     // even wasn't submitted to HW from the worker thread yet
@@ -3615,7 +3615,7 @@ RUNTIME_ENTRY(cl_int, clGetMemObjectInfo,
     case CL_MEM_HOST_PTR: {
       amd::Memory* memory = as_amd(memobj);
       const void* hostPtr =
-          (static_cast<uint64_t>(memory->getMemFlags()) & CL_MEM_USE_HOST_PTR) ? memory->getHostMem() : NULL;
+          ((memory->getMemFlags() & amd::MemFlags::UseHostPtr) != amd::MemFlags::Empty) ? memory->getHostMem() : NULL;
       return amd::clGetInfo(hostPtr, param_value_size, param_value, param_value_size_ret);
     }
     case CL_MEM_MAP_COUNT: {
