@@ -11,16 +11,19 @@ not exercised here. Their coverage depends on the backend rocSHMEM was
 built with and belongs in rocSHMEM's own integration tests, not in the
 Python-binding test suite.
 """
-
-import os
 import pytest
-import torch
-import rocshmem4py
 
-pytestmark = pytest.mark.skipif(
-    int(os.environ.get("WORLD_SIZE") or os.environ.get("OMPI_COMM_WORLD_SIZE") or 1) < 2,
-    reason="Requires at least 2 PEs",
-)
+from conftest import requires_multi_pe, requires_torch  # noqa: E402
+
+try:
+    import torch
+except ImportError:
+    torch = None  # type: ignore[assignment]
+
+import rocshmem4py  # noqa: E402
+from rocshmem4py.interop import torch as rshmem_torch  # noqa: E402
+
+pytestmark = [requires_torch, requires_multi_pe]
 
 
 def _pe_info():
@@ -34,8 +37,8 @@ def test_getmem_on_stream():
     my_pe, n_pes, peer = _pe_info()
     nelems = 64
 
-    src = rocshmem4py.rocshmem_create_tensor((nelems,), torch.int32)
-    dst = rocshmem4py.rocshmem_create_tensor((nelems,), torch.int32)
+    src = rshmem_torch.create_tensor((nelems,), torch.int32)
+    dst = rshmem_torch.create_tensor((nelems,), torch.int32)
     src.fill_(my_pe)
     dst.fill_(-1)
     torch.cuda.synchronize()
@@ -56,8 +59,8 @@ def test_putmem_on_stream():
     my_pe, n_pes, peer = _pe_info()
     nelems = 128
 
-    src = rocshmem4py.rocshmem_create_tensor((nelems,), torch.float32)
-    dst = rocshmem4py.rocshmem_create_tensor((nelems,), torch.float32)
+    src = rshmem_torch.create_tensor((nelems,), torch.float32)
+    dst = rshmem_torch.create_tensor((nelems,), torch.float32)
     src.fill_(float(my_pe))
     dst.fill_(-1.0)
     torch.cuda.synchronize()
@@ -81,7 +84,7 @@ def test_tensor_list_intra_node():
     my_pe, n_pes, peer = _pe_info()
     nelems_per_rank = 32
 
-    buf = rocshmem4py.rocshmem_create_tensor((n_pes * nelems_per_rank,), torch.int32)
+    buf = rshmem_torch.create_tensor((n_pes * nelems_per_rank,), torch.int32)
     buf.fill_(0)
     torch.cuda.synchronize()
 
@@ -108,26 +111,82 @@ def test_tensor_list_intra_node():
 
 
 def test_symm_rocshmem_tensor_peer_view():
-    """Validate that ``symm_rocshmem_tensor`` returns a zero-copy view on
-    backends where ``rocshmem_ptr`` exposes remote symmetric memory
-    (IPC). On backends where ``rocshmem_ptr`` returns NULL,
-    the helper raises -- so we accept either success or the documented
-    RuntimeError without aborting the suite.
+    """``get_peer_tensor`` returns a zero-copy view of peer's symmetric tensor
+    on IPC backends.  On backends without direct remote memory access,
+    ``rocshmem_ptr`` returns NULL and the function raises -- skipped here;
+    the explicit copy path is covered by ``test_getmem_on_stream`` above.
     """
     my_pe, n_pes, peer = _pe_info()
-    t = rocshmem4py.rocshmem_create_tensor((16,), torch.float32)
+    t = rshmem_torch.create_tensor((16,), torch.float32)
     t.fill_(float(my_pe))
     torch.cuda.synchronize()
     rocshmem4py.rocshmem_barrier_all()
 
     try:
-        peer_view = rocshmem4py.symm_rocshmem_tensor(t, peer)
+        peer_view = rshmem_torch.get_peer_tensor(t, peer)
     except RuntimeError:
         pytest.skip("rocshmem_ptr returned NULL -- backend lacks direct remote access")
 
     assert peer_view.is_cuda
     assert peer_view.shape == t.shape
     assert peer_view.dtype == t.dtype
+    torch.cuda.synchronize()
+    expected = torch.full((16,), float(peer), dtype=torch.float32, device="cuda")
+    torch.testing.assert_close(peer_view, expected)
+
+
+def test_interop_torch_put_get():
+    """Tensor-aware ``interop.torch.put`` / ``get`` / ``barrier_all`` wrappers.
+
+    These wrappers accept torch tensors directly and default the stream to
+    ``torch.cuda.current_stream()``.  Portable across every rocSHMEM backend
+    since they delegate to the ``*_on_stream`` primitives.
+    """
+    my_pe, n_pes, peer = _pe_info()
+    nelems = 64
+
+    src = rshmem_torch.create_tensor((nelems,), torch.int32)
+    dst = rshmem_torch.create_tensor((nelems,), torch.int32)
+    src.fill_(my_pe)
+    dst.fill_(-1)
+    torch.cuda.synchronize()
+    rshmem_torch.barrier_all()  # default stream
+
+    # get: pull peer's src into local dst
+    rshmem_torch.get(dst, src, peer)  # default stream
+    rshmem_torch.barrier_all()
+    torch.cuda.synchronize()
+
+    torch.testing.assert_close(
+        dst, torch.full((nelems,), peer, dtype=torch.int32, device="cuda")
+    )
+
+    # put: push local src (still filled with my_pe) to peer's dst
+    dst.fill_(-1)
+    torch.cuda.synchronize()
+    rshmem_torch.barrier_all()
+
+    stream = torch.cuda.current_stream()
+    rshmem_torch.put(dst, src, peer, stream=stream)
+    rshmem_torch.barrier_all(stream=stream)
+    torch.cuda.synchronize()
+
+    sender = (my_pe - 1 + n_pes) % n_pes
+    torch.testing.assert_close(
+        dst, torch.full((nelems,), sender, dtype=torch.int32, device="cuda")
+    )
+
+
+def test_interop_torch_put_get_nbytes_mismatch():
+    """``put`` / ``get`` wrappers must reject nbytes mismatches up-front."""
+    my_pe, n_pes, peer = _pe_info()
+    a = rshmem_torch.create_tensor((8,), torch.int32)
+    b = rshmem_torch.create_tensor((16,), torch.int32)  # different nbytes
+
+    with pytest.raises(ValueError, match="nbytes"):
+        rshmem_torch.put(a, b, peer)
+    with pytest.raises(ValueError, match="nbytes"):
+        rshmem_torch.get(a, b, peer)
 
 
 if __name__ == "__main__":

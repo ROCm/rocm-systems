@@ -38,6 +38,7 @@ IF (BUILD_PYTHON_TESTS)
                  COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
 
     rocm_install(FILES
+        ${CMAKE_SOURCE_DIR}/python/tests/test_smoke.py
         ${CMAKE_SOURCE_DIR}/python/tests/test_basic.py
         ${CMAKE_SOURCE_DIR}/python/tests/test_collective.py
         ${CMAKE_SOURCE_DIR}/python/tests/conftest.py

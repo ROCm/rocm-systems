@@ -1,8 +1,17 @@
 """Single-PE tests for rocshmem4py."""
 
 import pytest
-import torch
-import rocshmem4py
+
+from conftest import requires_torch  # noqa: E402
+
+# `torch` is not a hard dependency of rocshmem4py.  Tests that need it are
+# marked individually with ``@requires_torch``; torch-free tests always run.
+try:
+    import torch
+except ImportError:
+    torch = None  # type: ignore[assignment]
+
+import rocshmem4py  # noqa: E402
 
 
 def test_import_and_constants():
@@ -32,7 +41,20 @@ def test_malloc_free():
     rocshmem4py.rocshmem_free(ptr)
 
 
+def test_barrier_all():
+    # barrier_all is implemented across every rocSHMEM backend and is the
+    # minimum sync primitive the bindings need to pass-through correctly.
+    rocshmem4py.rocshmem_barrier_all()
+
+
+@requires_torch
 def test_symmetric_buffer():
+    """SymmetricBuffer with torch integration: __cuda_array_interface__, torch.as_tensor,
+    non-owning view, _device attribute.
+
+    The torch-free RAII lifecycle (allocation, pointer validity, remote ptr, free)
+    is covered by ``test_smoke.py::test_symmetric_buffer_lifecycle``.
+    """
     size = 1024
     buf = rocshmem4py.SymmetricBuffer(size)
 
@@ -43,8 +65,8 @@ def test_symmetric_buffer():
     assert int(buf) == buf.ptr
     assert isinstance(buf._device, int) and buf._device >= 0
 
-    cai = buf.__cuda_array_interface__
-    assert cai == {
+    iface = buf.__cuda_array_interface__
+    assert iface == {
         "data": (buf.ptr, False),
         "shape": (size,),
         "typestr": "<i1",
@@ -68,27 +90,24 @@ def test_symmetric_buffer():
     assert buf._freed is True
 
 
-def test_barrier_all():
-    # barrier_all is implemented across every rocSHMEM backend and is the
-    # minimum sync primitive the bindings need to pass-through correctly.
-    rocshmem4py.rocshmem_barrier_all()
-
-
+@requires_torch
 def test_barrier_all_on_stream():
-    import torch
     stream = torch.cuda.current_stream()
     rocshmem4py.rocshmem_barrier_all_on_stream(stream.cuda_stream)
     torch.cuda.synchronize()
 
 
+@requires_torch
 def test_create_tensor():
+    from rocshmem4py.interop import torch as rshmem_torch
+
     for dtype in (torch.float32, torch.bfloat16, torch.int32):
-        t = rocshmem4py.rocshmem_create_tensor((16,), dtype)
+        t = rshmem_torch.create_tensor((16,), dtype)
         assert t.shape == (16,) and t.dtype == dtype and t.is_cuda
         assert getattr(t, "__symm_tensor__", False) is True
 
-    t = rocshmem4py.rocshmem_create_tensor((8,), torch.float32)
-    view = rocshmem4py.symm_rocshmem_tensor(t, rocshmem4py.rocshmem_my_pe())
+    t = rshmem_torch.create_tensor((8,), torch.float32)
+    view = rshmem_torch.get_peer_tensor(t, rocshmem4py.rocshmem_my_pe())
     assert view.data_ptr() == t.data_ptr()
 
 

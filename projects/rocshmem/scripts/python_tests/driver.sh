@@ -30,7 +30,12 @@
 #   rocshmem_python_driver.sh <python_src_dir> <test_type> <log_dir> [hostfile]
 #
 #   python_src_dir : Path to rocshmem python/ source directory (for pip install)
-#   test_type      : "all", "basic", "collective"
+#   test_type      : "all", "basic", "collective", "raw"
+#                    - raw:        torch-free ctypes/HIP smoke tests
+#                                  (runs on torch-less hosts)
+#                    - basic:      single-PE tensor API tests  (require torch)
+#                    - collective: multi-PE tensor API tests   (require torch)
+#                    - all:        raw + basic + collective
 #   log_dir        : Directory for test output logs
 #   hostfile       : (optional) MPI hostfile for multi-node
 #
@@ -49,7 +54,7 @@ ValidateInput() {
   if [ $1 -lt 3 ]; then
     echo "Usage: $0 <python_src_dir> <test_type> <log_dir> [hostfile]"
     echo "  python_src_dir : Path to rocshmem python/ source directory"
-    echo "  test_type      : all, basic, collective"
+    echo "  test_type      : all, basic, collective, raw"
     echo "  log_dir        : Directory for test output logs"
     echo "  hostfile       : (optional) MPI hostfile"
     exit 1
@@ -101,16 +106,15 @@ ExecPythonTest() {
         ${TIMEOUT:+--timeout "$TIMEOUT"}
         ${HOSTFILE:+--hostfile "$HOSTFILE"}
         --map-by numa
-        pytest $TEST_FILES -v
+        pytest $TEST_FILES -v --tb=short -rA --color=no
       )
 
   local TEST_LOG_NAME="python_${TEST_NAME}_n${NUM_RANKS}"
   echo "Test:   $TEST_LOG_NAME"
   echo "# ${cmd[*]}" > "$LOG_DIR/$TEST_LOG_NAME.log"
 
-  # Use `if` so `set -e` does not terminate the script on mpirun failure,
-  # otherwise the log is never cat'd and the real error stays hidden in CI.
-  if ! "${cmd[@]}" >> "$LOG_DIR/$TEST_LOG_NAME.log" 2>&1; then
+  "${cmd[@]}" >> "$LOG_DIR/$TEST_LOG_NAME.log" 2>&1
+  if [ $? -ne 0 ]; then
     echo "FAILED: $TEST_LOG_NAME"
     cat "$LOG_DIR/$TEST_LOG_NAME.log"
     DRIVER_RETURN_STATUS=1
@@ -126,8 +130,14 @@ TestCollective() {
   ExecPythonTest "collective" 2 "$PYTHON_SRC_DIR/tests/test_collective.py"
 }
 
+# test_smoke.py is the torch-free smoke suite; runs even on torch-less hosts
+# (e.g. current Jenkins) so the native library is exercised in every CI pass.
+TestRaw() {
+  ExecPythonTest "raw" 2 "$PYTHON_SRC_DIR/tests/test_smoke.py"
+}
+
 TestAll() {
-  ExecPythonTest "all" 2 "$PYTHON_SRC_DIR/tests/test_basic.py $PYTHON_SRC_DIR/tests/test_collective.py"
+  ExecPythonTest "all" 2 "$PYTHON_SRC_DIR/tests/test_smoke.py $PYTHON_SRC_DIR/tests/test_basic.py $PYTHON_SRC_DIR/tests/test_collective.py"
 }
 
 # --- Main ---
@@ -142,55 +152,11 @@ HOSTFILE=$4
 ValidateLogDir "$LOG_DIR"
 DetectGPUs
 
-# ---------------------------------------------------------------------------
-# TEMP: remove before merge
-# Print the active MPI/UCX environment BEFORE pip install, so any linkage
-# mismatch is visible in the Jenkins log even when the test itself fails.
-# ---------------------------------------------------------------------------
-echo "=== TEMP MPI/UCX env diagnostics (remove before merge) ==="
-{
-  echo "--- which mpirun / version ---"
-  command -v mpirun && mpirun --version 2>&1 | head -3
-  echo "--- PATH ---"; echo "$PATH"
-  echo "--- LD_LIBRARY_PATH ---"; echo "${LD_LIBRARY_PATH:-<unset>}"
-  echo "--- ompi_info pml/osc components ---"
-  ompi_info --param pml all --level 9 2>/dev/null | grep -E 'MCA pml:' | head -5 || true
-  ompi_info --param osc all --level 9 2>/dev/null | grep -E 'MCA osc:' | head -5 || true
-} 2>&1
-echo "=== end env diagnostics ==="
-echo ""
-
 # Ensure rocshmem4py is installed
 if ! python3 -c "import rocshmem4py" 2>/dev/null; then
   echo "Installing rocshmem4py from $PYTHON_SRC_DIR ..."
   pip install -e "$PYTHON_SRC_DIR" || { echo "pip install failed"; exit 1; }
 fi
-
-# TEMP: remove before merge -- linkage of the just-built extension
-echo "=== TEMP _rocshmem4py.so linkage (remove before merge) ==="
-{
-  _rocshmem4py_so=$(python3 -c 'import _rocshmem4py; print(_rocshmem4py.__file__)' 2>/dev/null) || true
-  if [ -n "$_rocshmem4py_so" ]; then
-    echo "$_rocshmem4py_so"
-    ldd "$_rocshmem4py_so" 2>&1 | grep -E 'mpi|ucx' || true
-  else
-    echo "(could not locate _rocshmem4py extension)"
-  fi
-  # Avoid `import mpi4py.MPI` here -- it calls MPI_Init outside mpirun and
-  # spits a harmless but confusing "rendezvous file" error on stderr.
-  python3 -c '
-import mpi4py, os, glob
-print("mpi4py module:", mpi4py.__file__)
-ext = glob.glob(os.path.join(os.path.dirname(mpi4py.__file__), "MPI*.so"))
-print("mpi4py MPI ext:", ext[0] if ext else "<not found>")
-' 2>/dev/null || true
-  ext=$(python3 -c "import mpi4py, os, glob; print(glob.glob(os.path.join(os.path.dirname(mpi4py.__file__), 'MPI*.so'))[0])" 2>/dev/null) || true
-  if [ -n "$ext" ]; then
-    ldd "$ext" 2>&1 | grep -E 'mpi|ucx' || true
-  fi
-} 2>&1
-echo "=== end linkage diagnostics ==="
-echo ""
 
 echo "Python tests: type=$TEST, GPUs=$NUM_GPUS"
 echo ""
@@ -205,9 +171,12 @@ case $TEST in
   "collective")
     TestCollective
     ;;
+  "raw")
+    TestRaw
+    ;;
   *)
     echo "Unknown test type: $TEST"
-    echo "Valid types: all, basic, collective"
+    echo "Valid types: all, basic, collective, raw"
     exit 1
     ;;
 esac

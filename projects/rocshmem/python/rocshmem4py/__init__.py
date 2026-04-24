@@ -2,6 +2,17 @@
 
 Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 Licensed under the MIT License. See LICENSE for details.
+
+Module layout
+-------------
+``rocshmem4py``
+    Core host API — framework-agnostic.  Works without any ML framework.
+    Symmetric memory is represented by :class:`SymmetricBuffer`, which
+    exposes a raw HIP device pointer via ``.ptr`` and implements
+    ``__cuda_array_interface__`` for zero-copy interop with PyTorch.
+
+``rocshmem4py.interop.torch``
+    PyTorch-specific helpers (requires ``torch``).
 """
 
 import os
@@ -74,10 +85,11 @@ __all__ = [
     *_HOST_API_BINDINGS,
     'ROCSHMEM_TEAM_INVALID',
     'ROCSHMEM_TEAM_WORLD',
+    # Core framework-agnostic symmetric memory
     'SymmetricBuffer',
-    'rocshmem_create_tensor',
-    'symm_rocshmem_tensor',
-    'rocshmem_create_tensor_list_intra_node',
+    'rocshmem_create_buffer',
+    'rocshmem_get_peer_buffer',
+    # init / finalize
     'init_rocshmem_by_uniqueid',
     'init_with_mpi',
     'init_with_torch',
@@ -97,8 +109,12 @@ def _set_hip_device_from_env():
 
 
 class SymmetricBuffer:
-    """RAII wrapper for rocshmem_malloc with ``__cuda_array_interface__``
-    so the buffer can be used with PyTorch tensors via ``torch.as_tensor``.
+    """RAII wrapper around ``rocshmem_malloc`` that exposes the
+    ``__cuda_array_interface__`` protocol for zero-copy interop with
+    PyTorch (``torch.as_tensor``) and any other framework that
+    implements that protocol.
+
+    Framework-agnostic: works without any ML framework installed.
     """
 
     def __init__(self, size: int, *, ptr: Optional[int] = None,
@@ -187,55 +203,57 @@ class SymmetricBuffer:
         return f"SymmetricBuffer(ptr=0x{self.ptr:x}, {status})"
 
 
-def rocshmem_create_tensor(shape: Sequence[int], dtype) -> 'torch.Tensor':
-    """Allocate symmetric memory and return it as a PyTorch tensor.
+# ---------------------------------------------------------------------------
+# Framework-agnostic symmetric memory allocation
+# ---------------------------------------------------------------------------
 
-    **IMPORTANT**: This is a collective operation - all PEs must call this                                                                                                                 
-    function with the same arguments, or the program will hang.
+def rocshmem_create_buffer(nbytes: int) -> SymmetricBuffer:
+    """Collectively allocate ``nbytes`` of symmetric memory.
 
-    Sets ``__symm_tensor__ = True`` on the returned tensor.
+    Returns a :class:`SymmetricBuffer` that exposes
+    ``__cuda_array_interface__`` for zero-copy integration with PyTorch
+    (``torch.as_tensor``), and any other ``__cuda_array_interface__`` consumer.
+
+    **This is a collective operation** — all PEs must call this function
+    with the same ``nbytes`` argument, matching the SHMEM symmetric heap
+    contract.
+
+    For the PyTorch convenience wrapper see :mod:`rocshmem4py.interop.torch`.
     """
-    import torch
-
-    nbytes = torch.Size(shape).numel() * dtype.itemsize
-    torch.cuda.synchronize()
-    ptr = rocshmem_malloc(nbytes)
-    buf = SymmetricBuffer(nbytes, ptr=ptr, dtype=dtype, own_data=True)
-    # Dtype reinterpretation via view(dtype) is required to preserve zero-copy
-    # semantics for symmetric memory tensors.
-    t = torch.as_tensor(buf, device="cuda").view(dtype).view(shape)
-    setattr(t, "__symm_tensor__", True)
-    return t
+    return SymmetricBuffer(nbytes)
 
 
-def symm_rocshmem_tensor(tensor: 'torch.Tensor', peer: int) -> 'torch.Tensor':
-    """Return a tensor viewing the symmetric buffer on *peer*."""
-    import torch
+def rocshmem_get_peer_buffer(buf: SymmetricBuffer, peer: int) -> SymmetricBuffer:
+    """Return a non-owning :class:`SymmetricBuffer` view of *peer*'s buffer.
 
-    if not getattr(tensor, "__symm_tensor__", False):
-        raise ValueError("tensor is not a symm_tensor")
-    if not tensor.is_cuda:
-        raise ValueError("tensor must be on a CUDA device")
+    Wraps ``rocshmem_ptr``.  Returns a zero-copy view that maps directly
+    into the peer's symmetric heap — no data is copied.  The caller must
+    not call ``free()`` on the returned buffer; the peer's original buffer
+    must remain alive while the view is in use.
 
+    Available only on backends that support direct remote memory access
+    (IPC).  On other backends ``rocshmem_ptr`` returns NULL and this
+    function raises :class:`RuntimeError`.
+
+    For backends without direct remote access, use ``rocshmem_getmem``
+    (or the ``*_on_stream`` variants) to explicitly copy peer data into a
+    local symmetric buffer.
+    """
     if peer == rocshmem_my_pe():
-        return tensor
-
-    ptr = rocshmem_ptr(tensor.data_ptr(), peer)
+        return buf
+    ptr = rocshmem_ptr(buf.ptr, peer)
     if ptr == 0:
         raise RuntimeError(
-            f"rocshmem_ptr returned NULL for peer {peer} — remote direct access "
-            "not supported by the current backend"
+            f"rocshmem_ptr returned NULL for peer {peer} — remote direct "
+            "memory access not supported by the current backend. "
+            "Use rocshmem_getmem to copy peer data instead."
         )
-    buf = SymmetricBuffer(tensor.nbytes, ptr=ptr, dtype=tensor.dtype, own_data=False)
-    return torch.as_tensor(buf, device="cuda").view(tensor.dtype).view(tensor.shape)
+    return SymmetricBuffer(buf.nbytes, ptr=ptr, own_data=False)
 
 
-def rocshmem_create_tensor_list_intra_node(
-        shape: Sequence[int], dtype) -> 'list[torch.Tensor]':
-    """Allocate a symmetric tensor and return views for every PE on the node."""
-    t = rocshmem_create_tensor(shape, dtype)
-    return [symm_rocshmem_tensor(t, i) for i in range(rocshmem_n_pes())]
-
+# ---------------------------------------------------------------------------
+# Initialization helpers
+# ---------------------------------------------------------------------------
 
 def init_rocshmem_by_uniqueid(group: 'torch.distributed.ProcessGroup'):
     """Broadcast unique ID from rank 0 and call ``rocshmem_init_attr``."""

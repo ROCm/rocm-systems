@@ -8,9 +8,10 @@
 ## Features
 
 - **Core rocSHMEM API**: Memory management, data transfer, atomics, synchronization
-- **PyTorch Integration**: `init_with_torch()` / `finalize_with_torch()` for seamless PyTorch workflows
-- **Symmetric Tensor Helpers**: `rocshmem_create_tensor`, `symm_rocshmem_tensor`, `rocshmem_create_tensor_list_intra_node` matching the Triton-distributed `pyrocshmem` API
+- **Framework-agnostic allocation**: `rocshmem_create_buffer` / `rocshmem_get_peer_buffer` work without any ML framework
 - **`__cuda_array_interface__`**: Zero-copy interop between `SymmetricBuffer` and PyTorch tensors
+- **PyTorch interop submodule**: `rocshmem4py.interop.torch` for tensor allocation and tensor-aware RMA (`put`, `get`, `barrier_all`)
+- **PyTorch coordination**: `init_with_torch()` / `finalize_with_torch()` for torch.distributed-based init
 - **MPI Integration**: `init_with_mpi()` for existing MPI applications
 
 ## API Coverage
@@ -63,6 +64,7 @@ pip install -e .
 ```python
 import torch
 import rocshmem4py
+from rocshmem4py.interop import torch as rshmem_torch
 
 # RO backend:   mpirun -n 2 python my_script.py
 # IPC/GDA:      torchrun --standalone --nproc_per_node=2 my_script.py
@@ -72,17 +74,18 @@ my_pe = rocshmem4py.rocshmem_my_pe()
 n_pes = rocshmem4py.rocshmem_n_pes()
 
 # Allocate a symmetric tensor (backed by rocshmem_malloc)
-t = rocshmem4py.rocshmem_create_tensor((64,), torch.float32)
-t.fill_(float(my_pe))
+src = rshmem_torch.create_tensor((64,), torch.float32)
+dst = rshmem_torch.create_tensor((64,), torch.float32)
+src.fill_(float(my_pe))
+dst.fill_(-1.0)
 torch.cuda.synchronize()
 
-# Transfer data to the next PE
+# Stream-ordered transfer to the next PE (portable across all backends)
 peer = (my_pe + 1) % n_pes
-rocshmem4py.rocshmem_barrier_all()
-rocshmem4py.rocshmem_putmem(
-    t.data_ptr(), t.data_ptr(), t.nbytes, peer)
-rocshmem4py.rocshmem_quiet()
-rocshmem4py.rocshmem_barrier_all()
+rshmem_torch.barrier_all()
+rshmem_torch.put(dst, src, peer)
+rshmem_torch.barrier_all()
+torch.cuda.synchronize()
 
 rocshmem4py.finalize_with_torch()
 ```
@@ -129,15 +132,27 @@ rocshmem4py.rocshmem_finalize()
 
 ### Memory Management
 
+#### Framework-agnostic (`rocshmem4py`)
+
 | Function | Description |
 |---|---|
-| `rocshmem_malloc(size)` | Allocate symmetric memory (returns pointer) |
+| `rocshmem_malloc(size)` | Allocate symmetric memory (returns raw pointer) |
 | `rocshmem_free(ptr)` | Free symmetric memory |
-| `rocshmem_ptr(dest, pe)` | Get remote symmetric pointer |
-| `SymmetricBuffer(size)` | RAII wrapper with `__cuda_array_interface__` |
-| `rocshmem_create_tensor(shape, dtype)` | Allocate symmetric memory as a PyTorch tensor |
-| `symm_rocshmem_tensor(tensor, peer)` | View a symmetric tensor on a remote PE |
-| `rocshmem_create_tensor_list_intra_node(shape, dtype)` | Symmetric tensor views for all PEs |
+| `rocshmem_ptr(dest, pe)` | Get remote symmetric pointer (IPC backends only) |
+| `SymmetricBuffer(size)` | RAII wrapper; exposes `__cuda_array_interface__` for zero-copy torch interop |
+| `rocshmem_create_buffer(nbytes)` | Collective allocation returning a `SymmetricBuffer` |
+| `rocshmem_get_peer_buffer(buf, peer)` | Non-owning `SymmetricBuffer` view of a peer's buffer (IPC only) |
+
+#### PyTorch interop (`rocshmem4py.interop.torch`)
+
+| Function | Description |
+|---|---|
+| `create_tensor(shape, dtype)` | Collective allocation returning a symmetric `torch.Tensor` |
+| `get_peer_tensor(tensor, peer)` | Zero-copy tensor view of a peer's symmetric tensor (IPC only) |
+| `free_tensor(tensor)` | Explicit collective-safe deallocation |
+| `put(dst, src, peer, stream=None)` | Stream-ordered put (all backends) |
+| `get(dst, src, peer, stream=None)` | Stream-ordered get (all backends) |
+| `barrier_all(stream=None)` | Stream-ordered collective barrier |
 
 ### Data Transfer
 
@@ -223,8 +238,9 @@ If you hit rendezvous port conflicts under `torchrun`, set `MASTER_PORT`
 
 | File | Scope |
 |---|---|
-| `test_basic.py` | Single-PE: constants, SymmetricBuffer, tensor helpers, barrier |
-| `test_collective.py` | Multi-PE: stream-based put/get, stream barriers, peer views (data-verified) |
+| `test_smoke.py` | Single- and multi-PE torch-free tests via ctypes + HIP: `rocshmem_create_buffer`, `SymmetricBuffer` lifecycle, H2D/D2H roundtrip, stream-based put/get, `rocshmem_get_peer_buffer` |
+| `test_basic.py` | Single-PE: constants, `SymmetricBuffer`, `interop.torch` tensor helpers, barrier |
+| `test_collective.py` | Multi-PE: stream-based put/get, stream barriers, peer views, `interop.torch` RMA wrappers (data-verified) |
 
 ### Design: the wheel and its tests are backend-agnostic
 
@@ -242,7 +258,7 @@ surface that every backend implements:
 - `rocshmem_barrier_all` / `rocshmem_barrier_all_on_stream`
 - `rocshmem_putmem_on_stream` / `rocshmem_getmem_on_stream`
 - `rocshmem_putmem_signal_on_stream` / `rocshmem_signal_wait_until_on_stream`
-- `rocshmem_ptr` and symmetric tensor helpers
+- `rocshmem_ptr` / `rocshmem_create_buffer` / `rocshmem_get_peer_buffer`
 
 ## Troubleshooting
 
