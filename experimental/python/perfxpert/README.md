@@ -104,7 +104,6 @@ perfxpert-code uninstall claude
 ```bash
 # SKIP-SAMPLE — requires real trace DB paths
 perfxpert diff baseline.db candidate.db --format markdown
-perfxpert ci baseline.db candidate.db --threshold 3.0
 perfxpert doctor
 ```
 
