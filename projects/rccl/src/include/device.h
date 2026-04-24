@@ -97,7 +97,7 @@ struct ncclDevRedOpFull {
 };
 
 #ifdef __HIP_DEVICE_COMPILE__
-#include "device/rccl_ptr.h"
+#include "rccl_ptr.h"
 #endif
 
 union ncclLLFifoLine {
