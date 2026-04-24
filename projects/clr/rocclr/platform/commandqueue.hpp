@@ -58,7 +58,7 @@ class CommandQueue : public RuntimeObject {
       return true;
     }
 
-    bool test(value_type bits) const { return static_cast<uint64_t>(value_ & bits) != 0; }
+    bool test(value_type bits) const { return (value_ & bits) != value_type::None; }
   };
 
   //! Return the context this command queue is part of.

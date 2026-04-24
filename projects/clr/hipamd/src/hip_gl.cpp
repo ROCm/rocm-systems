@@ -644,7 +644,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
 
     int iBytesPerPixel = 0;
     if (!amd::getCLFormatFromGL(amdContext, glInternalFormat, &clImageFormat, &iBytesPerPixel,
-                                static_cast<amd::MemFlags>(cl_flags))) {
+                                cl_flags)) {
       LogWarning("\"texture\" format does not map to an appropriate CL image format");
       HIP_RETURN(hipErrorInvalidValue);
     }
@@ -671,7 +671,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   target = (glTarget == GL_TEXTURE_CUBE_MAP) ? target : 0;
 
   pImageGL = new (amdContext)
-      amd::ImageGL(amdContext, clType, static_cast<amd::MemFlags>(cl_flags), clImageFormat,
+      amd::ImageGL(amdContext, clType, cl_flags, clImageFormat,
                    static_cast<size_t>(gliTexWidth), static_cast<size_t>(gliTexHeight),
                    static_cast<size_t>(gliTexDepth), glTarget, image, 0, glInternalFormat,
                    clGLType, numSamples, target);
@@ -782,7 +782,7 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
   }  // Release scoped lock
 
   // Now create BufferGL object
-  pBufferGL = new (amdContext) amd::BufferGL(amdContext, static_cast<amd::MemFlags>(cl_flags),
+  pBufferGL = new (amdContext) amd::BufferGL(amdContext, cl_flags,
                                              gliSize, 0, buffer);
   if (!pBufferGL->create()) {
     pBufferGL->release();
