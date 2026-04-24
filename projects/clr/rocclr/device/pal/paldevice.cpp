@@ -2602,7 +2602,8 @@ bool Sampler::create(const amd::Sampler& owner) {
   if (0 == hwSrd_) {
     return false;
   }
-  dev_.fillHwSampler(owner.state(), hwState_, HsaSamplerObjectSize, owner.addessMode(),
+  dev_.fillHwSampler(owner.state(), hwState_, HsaSamplerObjectSize,
+                     reinterpret_cast<const uint*>(owner.addessMode()),
                      owner.mipFilter(), owner.minLod(), owner.maxLod());
   return true;
 }

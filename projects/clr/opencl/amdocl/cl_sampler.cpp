@@ -310,11 +310,11 @@ RUNTIME_ENTRY(cl_int, clGetSamplerInfo,
       return amd::clGetInfo(context, param_value_size, param_value, param_value_size_ret);
     }
     case CL_SAMPLER_ADDRESSING_MODE: {
-      cl_addressing_mode addressing = as_amd(sampler)->addressingMode();
+      cl_addressing_mode addressing = static_cast<cl_addressing_mode>(as_amd(sampler)->addressingMode());
       return amd::clGetInfo(addressing, param_value_size, param_value, param_value_size_ret);
     }
     case CL_SAMPLER_FILTER_MODE: {
-      cl_filter_mode filter = as_amd(sampler)->filterMode();
+      cl_filter_mode filter = static_cast<cl_filter_mode>(as_amd(sampler)->filterMode());
       return amd::clGetInfo(filter, param_value_size, param_value, param_value_size_ret);
     }
     case CL_SAMPLER_NORMALIZED_COORDS: {

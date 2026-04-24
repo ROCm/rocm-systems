@@ -925,14 +925,14 @@ bool Device::createSampler(const amd::Sampler& owner, device::Sampler** sampler)
 void Sampler::fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescriptor,
                                    const amd::Sampler& sampler) const {
   samplerDescriptor.filter_mode =
-      sampler.filterMode() == static_cast<uint>(amd::FilterMode::Nearest)
+      sampler.filterMode() == amd::FilterMode::Nearest
           ? HSA_EXT_SAMPLER_FILTER_MODE_NEAREST
           : HSA_EXT_SAMPLER_FILTER_MODE_LINEAR;
-  switch (sampler.mipFilter()) {
-    case static_cast<uint>(amd::FilterMode::Nearest):
+  switch (static_cast<amd::FilterMode>(sampler.mipFilter())) {
+    case amd::FilterMode::Nearest:
       samplerDescriptor.mipmap_filter_mode = HSA_EXT_SAMPLER_FILTER_MODE_NEAREST;
       break;
-    case static_cast<uint>(amd::FilterMode::Linear):
+    case amd::FilterMode::Linear:
       samplerDescriptor.mipmap_filter_mode = HSA_EXT_SAMPLER_FILTER_MODE_LINEAR;
       break;
     default:
@@ -943,19 +943,19 @@ void Sampler::fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescr
                                           : HSA_EXT_SAMPLER_COORDINATE_MODE_UNNORMALIZED;
   for (int i = 0; i < 3; i++) {
     switch (sampler.addressingMode(i)) {
-      case static_cast<uint>(amd::AddressingMode::ClampToEdge):
+      case amd::AddressingMode::ClampToEdge:
         samplerDescriptor.address_modes[i] = HSA_EXT_SAMPLER_ADDRESSING_MODE_CLAMP_TO_EDGE;
         break;
-      case static_cast<uint>(amd::AddressingMode::Repeat):
+      case amd::AddressingMode::Repeat:
         samplerDescriptor.address_modes[i] = HSA_EXT_SAMPLER_ADDRESSING_MODE_REPEAT;
         break;
-      case static_cast<uint>(amd::AddressingMode::Clamp):
+      case amd::AddressingMode::Clamp:
         samplerDescriptor.address_modes[i] = HSA_EXT_SAMPLER_ADDRESSING_MODE_CLAMP_TO_BORDER;
         break;
-      case static_cast<uint>(amd::AddressingMode::MirroredRepeat):
+      case amd::AddressingMode::MirroredRepeat:
         samplerDescriptor.address_modes[i] = HSA_EXT_SAMPLER_ADDRESSING_MODE_MIRRORED_REPEAT;
         break;
-      case static_cast<uint>(amd::AddressingMode::NoAddressing):
+      case amd::AddressingMode::NoAddressing:
         samplerDescriptor.address_modes[i] = HSA_EXT_SAMPLER_ADDRESSING_MODE_UNDEFINED;
         break;
       default:

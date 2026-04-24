@@ -36,7 +36,7 @@ class Sampler : public RuntimeObject {
   float minLod_;                   //!< min level of detail
   float maxLod_;                   //!< max level of detail
   DeviceSamplers deviceSamplers_;  //!< Container for the device samplers
-  uint addressMode_[3];            //!< address modes in X, Y and Z
+  amd::AddressingMode addressMode_[3];  //!< address modes in X, Y and Z
 
  public:
   Sampler(Context& context,    //!< context for OCL
@@ -52,7 +52,7 @@ class Sampler : public RuntimeObject {
         minLod_(minLod),
         maxLod_(maxLod) {  // Packs the sampler state into uint32_t for kernel execution
     state_ = 0;
-    for (int i = 0; i < 3; i++) addressMode_[i] = addrMode;
+    for (int i = 0; i < 3; i++) addressMode_[i] = static_cast<amd::AddressingMode>(addrMode);
 
     // Set normalized state
     if (normCoords) {
@@ -62,7 +62,7 @@ class Sampler : public RuntimeObject {
     }
 
     // Program the sampler filter mode
-    if (filterMode == CL_FILTER_LINEAR) {
+    if (static_cast<amd::FilterMode>(filterMode) == amd::FilterMode::Linear) {
       state_ |= StateFilterLinear;
     } else {
       state_ |= StateFilterNearest;
@@ -78,8 +78,8 @@ class Sampler : public RuntimeObject {
           float maxLod             //!< max level of detail
           )
       : Sampler(context, normCoords, addrMode[0], filterMode, mipFilterMode, minLod, maxLod) {
-    addressMode_[1] = addrMode[1];
-    addressMode_[2] = addrMode[2];
+    addressMode_[1] = static_cast<amd::AddressingMode>(addrMode[1]);
+    addressMode_[2] = static_cast<amd::AddressingMode>(addrMode[2]);
   }
 
   virtual ~Sampler() {
@@ -116,14 +116,14 @@ class Sampler : public RuntimeObject {
   uint mipFilter() const { return mipFilter_; }
   float minLod() const { return minLod_; }
   float maxLod() const { return maxLod_; }
-  const uint* addessMode() const { return addressMode_; }
+  const amd::AddressingMode* addessMode() const { return addressMode_; }
   bool normalizedCoords() const { return (state_ & StateNormalizedCoordsTrue) ? true : false; }
 
-  uint inline addressingMode(const int index = 0) const { return addressMode_[index]; }
+  amd::AddressingMode inline addressingMode(const int index = 0) const { return addressMode_[index]; }
 
-  uint filterMode() const {
-    return ((state_ & StateFilterMask) == StateFilterNearest) ? CL_FILTER_NEAREST
-                                                              : CL_FILTER_LINEAR;
+  amd::FilterMode filterMode() const {
+    return ((state_ & StateFilterMask) == StateFilterNearest) ? amd::FilterMode::Nearest
+                                                              : amd::FilterMode::Linear;
   }
 
   //! RTTI internal implementation
