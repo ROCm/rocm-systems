@@ -795,6 +795,12 @@ install(
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
 )
+# counter grouping inspector tool
+install(
+    FILES tools/counter_grouping_inspector.py
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
+)
 
 # ==============================================================================
 # Vendored Dependencies Installation
