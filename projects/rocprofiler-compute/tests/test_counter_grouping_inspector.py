@@ -134,7 +134,7 @@ def test_counter_grouping_inspector_invalid_arch():
         text=True,
         timeout=60,
     )
-    # argparse exits with status 2 for argument errors (see SystemExit in argparse docs),
+    # argparse exits with status 2 for argument errors (see SystemExit in argparse docs)
     # including when --arch is not in the script's allowed choices list.
     assert result.returncode == 2
     err = (result.stderr or "") + (result.stdout or "")
