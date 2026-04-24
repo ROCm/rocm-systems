@@ -48,6 +48,12 @@
 
 include_guard(GLOBAL)
 
+# Bundled Dyninst (ROCm dyninst_13 + no-Boost / dyncompat) does not use Boost; skip
+# find_package / from-source Boost so external-prebuild does not pull Boost in.
+if(ROCPROFSYS_BUILD_DYNINST)
+    return()
+endif()
+
 if(NOT ROCPROFSYS_BUILD_BOOST)
     find_package(Boost)
 endif()
