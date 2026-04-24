@@ -1511,9 +1511,9 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
     type = Resource::RemoteUSWC;
   }
 
-  if (owner.getMemFlags() & CL_MEM_BUS_ADDRESSABLE_AMD) {
+  if ((owner.getMemFlags() & amd::MemFlags::BusAddressable) != amd::MemFlags::Empty) {
     type = Resource::BusAddressable;
-  } else if (owner.getMemFlags() & CL_MEM_EXTERNAL_PHYSICAL_AMD) {
+  } else if ((owner.getMemFlags() & amd::MemFlags::ExternalPhysical) != amd::MemFlags::Empty) {
     type = Resource::ExternalPhysical;
   } else if ((owner.getMemFlags() & amd::MemFlags::VaRangeAmd) != amd::MemFlags::Empty) {
     type = Resource::VaRange;

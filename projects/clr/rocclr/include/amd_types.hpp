@@ -155,9 +155,16 @@ enum class MemFlags : uint64_t {
   HsaUncached        = (uint64_t(1) << 27), // ROCCLR_MEM_HSA_UNCACHED
   VaRangeAmd         = (uint64_t(1) << 28), // CL_MEM_VA_RANGE_AMD (AMD extension)
   InternalMemory     = (uint64_t(1) << 29), // ROCCLR_MEM_INTERNAL_MEMORY
-  HsaSignalMemory    = (uint64_t(1) << 30), // ROCCLR_MEM_HSA_SIGNAL_MEMORY
+  HsaSignalMemory      = (uint64_t(1) << 30), // ROCCLR_MEM_HSA_SIGNAL_MEMORY
+  BusAddressable       = (uint64_t(1) << 30), // CL_MEM_BUS_ADDRESSABLE_AMD — intentional alias of HsaSignalMemory
   FollowUserNumaPolicy = (uint64_t(1) << 31), // CL_MEM_FOLLOW_USER_NUMA_POLICY (AMD extension)
+  ExternalPhysical     = (uint64_t(1) << 31), // CL_MEM_EXTERNAL_PHYSICAL_AMD — intentional alias of FollowUserNumaPolicy
 };
+// Verify CL extension flag values match our enum aliases.
+static_assert(static_cast<uint64_t>(MemFlags::BusAddressable) == (uint64_t(1) << 30),
+              "BusAddressable must match CL_MEM_BUS_ADDRESSABLE_AMD (1<<30)");
+static_assert(static_cast<uint64_t>(MemFlags::ExternalPhysical) == (uint64_t(1) << 31),
+              "ExternalPhysical must match CL_MEM_EXTERNAL_PHYSICAL_AMD (1<<31)");
 inline MemFlags operator|(MemFlags a, MemFlags b) {
   return static_cast<MemFlags>(static_cast<uint64_t>(a) | static_cast<uint64_t>(b));
 }
