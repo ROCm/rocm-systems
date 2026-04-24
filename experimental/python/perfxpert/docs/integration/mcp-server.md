@@ -26,12 +26,12 @@ perfxpert-mcp
 ```
 
 The entry point is registered in `pyproject.toml` (`perfxpert-mcp`).
-Current wheels/install-from-source builds already depend on the Python
-`mcp` package, so no separate extra is required:
+Use the same GitHub wrapper as the main README so the package, MCP
+entry point, and bundled `perfxpert-code` build are installed together:
 
 ```bash
-# SKIP-SAMPLE — pip install is in the destructive-skip list
-pip install perfxpert
+# SKIP-SAMPLE — installs from the ROCm/rocm-systems monorepo
+REF=develop; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
 ```
 
 Under `PERFXPERT_AIRGAP=1`, the server still serves cached READ_ONLY
