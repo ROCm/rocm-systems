@@ -1,10 +1,12 @@
-# perfxpert — development dependencies
-# Equivalent to: pip install -e ".[all,dev]"
+# perfxpert development install
+# Keep this fallback file in sync with pyproject.toml: project.dependencies + [all,dev].
+
 -r requirements.txt
 
-# Testing
-pytest
-
-# Linting / formatting
+pytest>=8.0
+pytest-asyncio>=0.21
 flake8
 black
+pexpect>=4.8
+pytest-xdist>=3.5
+hypothesis>=6.100
