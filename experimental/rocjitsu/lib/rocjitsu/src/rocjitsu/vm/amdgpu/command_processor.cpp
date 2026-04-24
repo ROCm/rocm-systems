@@ -263,12 +263,18 @@ bool CommandProcessor::step() {
       cu->retire_halted_wfs();
       if (!cu->can_accept_workgroup(pkt.wfs_per_workgroup))
         continue;
+      std::vector<Wavefront *> wg_wavefronts;
+      wg_wavefronts.reserve(pkt.wfs_per_workgroup);
       for (uint32_t w = 0; w < pkt.wfs_per_workgroup; ++w) {
         Wavefront *wf =
             cu->dispatch_wf(wg, pkt.kernel_entry_pc, pkt.sgprs_per_wf, pkt.vgprs_per_wf);
         assert(wf && "dispatch_wf failed after can_accept_workgroup returned true");
         init_wavefront_regs(cu, wf, pkt, global_wg_id, w);
+        wg_wavefronts.push_back(wf);
       }
+      plugin_group_->onAmdgpuDispatchWorkgroup(
+            global_wg_id, pkt.vgprs_per_wf, pkt.sgprs_per_wf,
+            std::span<Wavefront *>(wg_wavefronts));
       next_cu_ = (cu_idx + 1) % cus_.size();
       wg_dispatched = true;
     }
@@ -723,6 +729,8 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
     cus_[0]->flush_all();
     util::Logger::vm("CP: acquire fence scope=", acquire_scope, " → L1+L2 flush+invalidate");
   }
+
+  plugin_group_->onAmdgpuKernelDispatch(pkt.kernel_object, entry_pc);
 
   dispatch_queue_.push_back(std::move(dp));
 }
