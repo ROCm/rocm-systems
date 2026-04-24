@@ -42,9 +42,26 @@ Everything else flows from those three facts.
 | rocprofiler-sdk | Standalone polling drainer reads the ring at 1ms cadence, pairs START/END, emits `KERNEL_DISPATCH_COMPLETE` records | Posted at `users/bewelton/cpc_tracing` |
 
 This baseline produces correct kernel timing on MI350 today.
-**Performance regression vs stock** on a pathological per-dispatch-sync
-microbenchmark is +1.7 µs / dispatch (+10.9%); on real workloads
-(batched inference, training, Triton) the regression is &lt;0.1%.
+
+**Performance impact on the non-profiling path is dependent on the
+ratio of kernel launches to device syncs.** The cost lives in MEC
+firmware's `AqlConnect` path (the routine that runs when the hardware
+scheduler attaches a queue to a compute pipe), which now does two
+extra TC reads of the MQD to pick up the dispatch ring buffer config.
+That work happens **per queue-reconnect, not per dispatch**.
+`hipDeviceSynchronize()` typically forces a queue drain → eviction →
+re-connect, so syncing after every launch puts the cost on the per-
+dispatch path. Workloads with batched dispatches between syncs
+amortize the cost over many launches.
+
+| Workload pattern                                | Measured / estimated overhead |
+|-------------------------------------------------|-------------------------------|
+| 1 launch + 1 sync, microbenchmark (worst case)  | +1.7 µs / dispatch (+10.9%) — measured |
+| graphbench (batched, real workload)             | &lt;0.4% — measured, in the noise floor |
+| Typical batched inference / training / Triton   | Expected near-zero by extension of the graphbench result; not yet measured per-workload |
+
+The per-`AqlConnect` overhead is the only added cost on the
+non-profiling path; the per-dispatch path itself is unchanged.
 
 ## What's broken / missing today
 
