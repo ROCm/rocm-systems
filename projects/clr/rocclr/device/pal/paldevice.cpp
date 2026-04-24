@@ -278,7 +278,7 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
                                 const Pal::GpuMemoryHeapProperties heaps[Pal::GpuHeapCount],
                                 size_t maxTextureSize, uint numComputeRings,
                                 uint numExclusiveComputeRings, Pal::IDevice* pal_device) {
-  info_.type_ = CL_DEVICE_TYPE_GPU;
+  info_.type_ = amd::DeviceType::GPU;
   info_.vendorId_ = palProp.vendorId;
   // Set uuid
   Pal::DeviceProperties palPropTmp = palProp;
@@ -336,9 +336,9 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   info_.globalMemCacheLineSize_ = settings().cacheLineSize_;
   info_.globalMemCacheSize_ = settings().cacheSize_;
   if ((settings().cacheLineSize_ != 0) || (settings().cacheSize_ != 0)) {
-    info_.globalMemCacheType_ = CL_READ_WRITE_CACHE;
+    info_.globalMemCacheType_ = amd::MemCacheType::ReadWriteCache;
   } else {
-    info_.globalMemCacheType_ = CL_NONE;
+    info_.globalMemCacheType_ = amd::MemCacheType::None;
   }
 
   uint64_t localRAM;
@@ -456,7 +456,7 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   info_.compilerAvailable_ = true;
   info_.linkerAvailable_ = true;
 
-  info_.executionCapabilities_ = CL_EXEC_KERNEL;
+  info_.executionCapabilities_ = amd::ExecCapabilities::Kernel;
   info_.preferredPlatformAtomicAlignment_ = 0;
   info_.preferredGlobalAtomicAlignment_ = 0;
   info_.preferredLocalAtomicAlignment_ = 0;
@@ -549,10 +549,10 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
     ::strncpy(info_.boardName_, palProp.gpuName,
               ::strnlen(palProp.gpuName, sizeof(info_.boardName_) - 1));
 
-    info_.deviceTopology_.pcie.type = CL_DEVICE_TOPOLOGY_TYPE_PCIE_AMD;
-    info_.deviceTopology_.pcie.bus = palProp.pciProperties.busNumber;
-    info_.deviceTopology_.pcie.device = palProp.pciProperties.deviceNumber;
-    info_.deviceTopology_.pcie.function = palProp.pciProperties.functionNumber;
+    info_.deviceTopology_.type     = CL_DEVICE_TOPOLOGY_TYPE_PCIE_AMD;
+    info_.deviceTopology_.bus      = static_cast<uint8_t>(palProp.pciProperties.busNumber);
+    info_.deviceTopology_.device   = static_cast<uint8_t>(palProp.pciProperties.deviceNumber);
+    info_.deviceTopology_.function = static_cast<uint8_t>(palProp.pciProperties.functionNumber);
 
     info_.simdPerCU_ = settings().enableWgpMode_
                            ? (2 * palProp.gfxipProperties.shaderCore.numSimdsPerCu)
@@ -1609,7 +1609,7 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
         type = Resource::P2PAccess;
       }
     }
-    params.interprocess_ = (owner.getMemFlags() & ROCCLR_MEM_INTERPROCESS) ? true : false;
+    params.interprocess_ = (owner.getMemFlags() & amd::MemFlags::Interprocess) != amd::MemFlags::Empty;
     // Disable interprocess for >3GBs local memory due to PAL failure.
     if ((type == Resource::Local || type == Resource::Persistent) && owner.getSize() > 3 * Gi) {
       params.interprocess_ = false;
