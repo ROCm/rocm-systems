@@ -193,7 +193,7 @@ TEST_F(TestSdkCallbacks, ProvidedCallbackTracingRecordInMemory_StoresCodeObjectI
 
     m_sdk_callbacks->code_object_tracing_callback(record, &m_tool_data);
 
-    //m_tool_data->pc_sampling_collector;
+    m_tool_data->pc_sampling_collector;
 }
 
 //////////////////////////////////////////////////////////////////////////

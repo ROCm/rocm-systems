@@ -2,7 +2,9 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
+#include "pc_sampling_collector.h"
 #include "sdk_wrapper.h"
+#include "synchronized.hpp"
 
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -84,6 +86,7 @@ struct tool_data_t
     std::vector<counter_info_record_t>         counter_records;
     std::set<uint64_t>                         target_kernel_ids{};
     iteration_multiplexing_mode_t iteration_multiplexing_mode{iteration_multiplexing_mode_t::DISABLED};
+    rocprof_compute::synchronized<PcSamplingCollector> pc_sampling_collector;
 };
 
 class SdkCallbacks
@@ -124,8 +127,7 @@ public:
 
     void tool_tracing_callback(rocprofiler_callback_tracing_record_t record, void* callback_data) override;
 
-    void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                      void*                                 data) override;
+    void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record, void* data) override;
 
 private:
     static bool is_targeted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration);
