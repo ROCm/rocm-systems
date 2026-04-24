@@ -8,6 +8,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added `oam_id` to `amdsmi_enumeration_info_t`**.
+  - `amd-smi list -e` now displays `OAM_ID` (Physical XGMI ID / OAM ID).
+  - Added `--enumeration` as a long-form alias for `-e` in `amd-smi list`.
+
 - **Added support for GPU metrics v1.9 new fields**.  
   - Added new temperature fields to `amdsmi_gpu_metrics_t`:
     - `temperature_hbm_stacks` — per-stack HBM temperatures (°C)

@@ -875,7 +875,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
 }
 
 void
-perfetto_processor_t::handle(const cpu_freq_sample& _cpu_sample)
+perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
 {
     using process_page_track = perfetto_counter_track<category::process_page>;
     using process_virt_track = perfetto_counter_track<category::process_virt>;
@@ -885,11 +885,18 @@ perfetto_processor_t::handle(const cpu_freq_sample& _cpu_sample)
     using process_user_track = perfetto_counter_track<category::process_user_mode_time>;
     using process_kern_track = perfetto_counter_track<category::process_kernel_mode_time>;
     using cpu_freq_track     = perfetto_counter_track<category::cpu_freq>;
+    using cpu_load_track     = perfetto_counter_track<category::cpu_load>;
 
     struct core_freq_sample
     {
         size_t id;
         float  value;
+    };
+
+    struct core_load_sample
+    {
+        size_t id;
+        double value;
     };
 
     auto deserialize_freqs = [](const std::vector<uint8_t>& buffer) {
@@ -908,6 +915,22 @@ perfetto_processor_t::handle(const cpu_freq_sample& _cpu_sample)
         return result;
     };
 
+    auto deserialize_loads = [](const std::vector<uint8_t>& buffer) {
+        std::vector<core_load_sample> result;
+        size_t                        offset = 0;
+
+        while(offset + sizeof(double) + sizeof(size_t) <= buffer.size())
+        {
+            core_load_sample core_sample;
+            std::memcpy(&core_sample.id, buffer.data() + offset, sizeof(size_t));
+            offset += sizeof(size_t);
+            std::memcpy(&core_sample.value, buffer.data() + offset, sizeof(double));
+            offset += sizeof(double);
+            result.push_back(core_sample);
+        }
+        return result;
+    };
+
     static std::once_flag init_flag;
     std::call_once(init_flag, []() {
         process_page_track::emplace(0, "CPU Memory Usage (S)", "MB");
@@ -919,49 +942,91 @@ perfetto_processor_t::handle(const cpu_freq_sample& _cpu_sample)
         process_kern_track::emplace(0, "CPU Kernel Time (S)", "sec");
     });
 
-    auto _ts = _cpu_sample.timestamp;
+    const auto  _ts        = _cpu_sample.timestamp;
+    const auto& _em        = _cpu_sample.enabled_metric;
+    const auto  _device_id = _cpu_sample.device_id;
 
-    TRACE_COUNTER(trait::name<category::process_page>::value,
-                  process_page_track::at(0, 0), _ts,
-                  static_cast<double>(_cpu_sample.page_rss) / units::megabyte);
+    // Process-level metrics are global — emit once from the lowest selected socket
+    static auto s_process_device_id = _device_id;
+    const bool  _is_process_owner   = (_device_id == s_process_device_id);
 
-    TRACE_COUNTER(trait::name<category::process_virt>::value,
-                  process_virt_track::at(0, 0), _ts,
-                  static_cast<double>(_cpu_sample.virt_mem_usage) / units::megabyte);
-
-    TRACE_COUNTER(trait::name<category::process_peak>::value,
-                  process_peak_track::at(0, 0), _ts,
-                  static_cast<double>(_cpu_sample.peak_rss) / units::megabyte);
-
-    TRACE_COUNTER(trait::name<category::process_context_switch>::value,
-                  process_cntx_track::at(0, 0), _ts,
-                  static_cast<double>(_cpu_sample.context_switch_count));
-
-    TRACE_COUNTER(trait::name<category::process_page_fault>::value,
-                  process_flts_track::at(0, 0), _ts,
-                  static_cast<double>(_cpu_sample.page_faults));
-
-    TRACE_COUNTER(trait::name<category::process_user_mode_time>::value,
-                  process_user_track::at(0, 0), _ts,
-                  static_cast<double>(_cpu_sample.user_mode_time) / units::sec);
-
-    TRACE_COUNTER(trait::name<category::process_kernel_mode_time>::value,
-                  process_kern_track::at(0, 0), _ts,
-                  static_cast<double>(_cpu_sample.kernel_mode_time) / units::sec);
-
-    auto cpu_freqs = deserialize_freqs(_cpu_sample.freqs);
-    for(const auto& cpu_data : cpu_freqs)
+    if(_is_process_owner)
     {
-        size_t cpu_id = cpu_data.id;
-        if(!cpu_freq_track::exists(cpu_id))
-        {
-            std::string track_name = "CPU Frequency [" + std::to_string(cpu_id) + "] (S)";
-            cpu_freq_track::emplace(cpu_id, track_name, "MHz");
-        }
+        if(_em.bits.page_rss)
+            TRACE_COUNTER(trait::name<category::process_page>::value,
+                          process_page_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.page_rss) /
+                              units::megabyte);
 
-        TRACE_COUNTER(trait::name<category::cpu_freq>::value,
-                      cpu_freq_track::at(cpu_id, 0), _ts,
-                      static_cast<double>(cpu_data.value));
+        if(_em.bits.virt_mem)
+            TRACE_COUNTER(trait::name<category::process_virt>::value,
+                          process_virt_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.virt_mem) /
+                              units::megabyte);
+        if(_em.bits.peak_rss)
+            TRACE_COUNTER(trait::name<category::process_peak>::value,
+                          process_peak_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.peak_rss) /
+                              units::megabyte);
+
+        if(_em.bits.ctx_switches)
+            TRACE_COUNTER(trait::name<category::process_context_switch>::value,
+                          process_cntx_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.context_switches));
+
+        if(_em.bits.page_faults)
+            TRACE_COUNTER(trait::name<category::process_page_fault>::value,
+                          process_flts_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.page_faults));
+
+        if(_em.bits.user_time)
+            TRACE_COUNTER(trait::name<category::process_user_mode_time>::value,
+                          process_user_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.user_mode_time) /
+                              units::sec);
+
+        if(_em.bits.kernel_time)
+            TRACE_COUNTER(trait::name<category::process_kernel_mode_time>::value,
+                          process_kern_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.kernel_mode_time) /
+                              units::sec);
+    }
+
+    if(_em.bits.frequency)
+    {
+        const auto cpu_freqs = deserialize_freqs(_cpu_sample.freqs);
+        for(const auto& cpu_data : cpu_freqs)
+        {
+            const size_t cpu_id = cpu_data.id;
+            if(!cpu_freq_track::exists(cpu_id))
+            {
+                const auto track_name = "CPU [" + std::to_string(_device_id) +
+                                        "] Core [" + std::to_string(cpu_id) +
+                                        "] Frequency (S)";
+                cpu_freq_track::emplace(cpu_id, track_name, "MHz");
+            }
+            TRACE_COUNTER(trait::name<category::cpu_freq>::value,
+                          cpu_freq_track::at(cpu_id, 0), _ts,
+                          static_cast<double>(cpu_data.value));
+        }
+    }
+
+    if(_em.bits.load)
+    {
+        const auto cpu_loads = deserialize_loads(_cpu_sample.loads);
+        for(const auto& cpu_data : cpu_loads)
+        {
+            const size_t cpu_id = cpu_data.id;
+            if(!cpu_load_track::exists(cpu_id))
+            {
+                const auto track_name = "CPU [" + std::to_string(_device_id) +
+                                        "] Core [" + std::to_string(cpu_id) +
+                                        "] Load (S)";
+                cpu_load_track::emplace(cpu_id, track_name, "%");
+            }
+            TRACE_COUNTER(trait::name<category::cpu_load>::value,
+                          cpu_load_track::at(cpu_id, 0), _ts, cpu_data.value);
+        }
     }
 }
 

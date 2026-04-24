@@ -1,25 +1,18 @@
-# Supported OS combinations for continuous integration
+# Supported OS + ROCm combinations for continuous integration.
+# The container build workflow computes: distros x rocm-versions (cross-product).
+# The GHCR workflow uses only the distros list (cross-product with GPU types).
 
-matrix:
-  # ubuntu
-  - distro: "ubuntu"
-    version: "22.04"
-  - distro: "ubuntu"
-    version: "24.04"
-  # debian
-  - distro: "debian"
-    version: "12"
-  # opensuse
-  - distro: "opensuse"
-    version: "15.5"
-  - distro: "opensuse"
-    version: "15.6"
-  # RHEL8
-  - distro: "rhel"
-    version: "8.10"
-  # RHEL9
-  - distro: "rhel"
-    version: "9"
-  # RHEL10
-  - distro: "rhel"
-    version: "10"
+distros:
+  - { distro: "ubuntu", version: "22.04" }
+  - { distro: "ubuntu", version: "24.04" }
+  - { distro: "debian", version: "12" }
+  - { distro: "rhel", version: "8.10" }
+  - { distro: "rhel", version: "9" }
+  - { distro: "rhel", version: "10" }
+
+rocm-versions:
+  - "6.3"
+  - "6.4"
+  - "7.0"
+  - "7.1"
+  - "7.2"

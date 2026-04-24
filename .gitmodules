@@ -1,3 +1,7 @@
+[submodule "experimental/python/perfxpert/opencode"]
+	path = experimental/python/perfxpert/opencode
+	url = https://github.com/sst/opencode.git
+	shallow = true
 [submodule "projects/rccl/ext-src/mscclpp"]
 	path = projects/rccl/ext-src/mscclpp
 	url = https://github.com/microsoft/mscclpp.git

@@ -422,16 +422,15 @@ __device__ uint64_t GDAContext::signal_fetch(const uint64_t *sig_addr) {
 }
 
 __device__ uint64_t GDAContext::signal_fetch_wg(const uint64_t *sig_addr) {
-  __shared__ uint64_t value;
   if (is_thread_zero_in_block()) {
     ActiveWFInfo wf_info(my_pe, ThreadScope::wg);
     int qp_index = get_qp_index(my_pe, wf_info);
     uint64_t *dst = const_cast<uint64_t*>(sig_addr);
-    value = internal_amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, my_pe,
-              qp_index, wf_info);
+    wg_signal_scratch = internal_amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0,
+                                                         my_pe, qp_index, wf_info);
   }
-  __threadfence_block();
-  return value;
+  __syncthreads();
+  return wg_signal_scratch;
 }
 
 __device__ uint64_t GDAContext::signal_fetch_wave(const uint64_t *sig_addr) {

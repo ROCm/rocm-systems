@@ -72,6 +72,7 @@ ssize_t
 Fallback::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
                    hoff_t file_offset, hoff_t buffer_offset, size_t chunk_size)
 {
+    StatsIoTracker ioTracker{type, StatsBackend::Fallback};
     if (!Context<Configuration>::get()->fallback()) {
         throw BackendDisabled();
     }
@@ -130,16 +131,7 @@ Fallback::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
         }
     } while (static_cast<size_t>(total_io_bytes) < size);
 
-    switch (type) {
-        case (IoType::Read):
-            statsAddFallbackPathRead(static_cast<size_t>(total_io_bytes));
-            break;
-        case (IoType::Write):
-            statsAddFallbackPathWrite(static_cast<size_t>(total_io_bytes));
-            break;
-        default:
-            break;
-    }
+    ioTracker.complete(static_cast<size_t>(total_io_bytes));
 
     return total_io_bytes;
 }

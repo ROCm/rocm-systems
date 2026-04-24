@@ -1,5 +1,7 @@
 # rocjitsu: ROCm&trade; Just-in-Time Suite
 
+[![rocjitsu CI](https://github.com/ROCm/rocm-systems/actions/workflows/rocjitsu-ci.yml/badge.svg)](https://github.com/ROCm/rocm-systems/actions/workflows/rocjitsu-ci.yml)
+
 rocjitsu is a set of simulation, virtualization, and instrumentation tools for ROCm&trade; AMD GPU
 applications.
 
@@ -73,7 +75,8 @@ tools/
   simgui/               Optional simulation GUI
 tests/                  Google Test suite + scaling test
   kernels/              HIP device kernels for integration testing
-scripts/                Utility scripts (clang_format.sh)
+scripts/                Utility scripts (clang_format.sh, install-git-hooks.sh)
+  git-hooks/            Tracked git hook scripts (installed via install-git-hooks.sh)
 ```
 
 ## Prerequisites
@@ -126,6 +129,35 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_SANITIZER=ubsan
 # Build with clang-tidy
 cmake -B build -G Ninja -DRJ_CLANG_TIDY=ON
 ```
+
+## Git hooks for developers
+
+A pre-commit hook is provided to enforce that any staged `.cpp`/`.h` file
+under `experimental/rocjitsu` is clang-format-clean. The hook is a no-op
+for commits that do not touch that directory, so it is safe to install in
+the parent rocm-systems repo.
+
+Install once per clone:
+
+```bash
+./scripts/install-git-hooks.sh
+```
+
+This symlinks `scripts/git-hooks/pre-commit` into the enclosing repo's
+hooks directory. The installer refuses to overwrite an existing
+`pre-commit` hook; pass `--force` to replace it.
+
+If a commit is rejected, run the formatter, re-stage the affected files,
+and commit again:
+
+```bash
+bash scripts/clang_format.sh
+git add <reformatted files>   # or `git add -u` if they are already tracked
+git commit
+```
+
+The hook can be bypassed with `git commit --no-verify` (a built-in git
+escape hatch).
 
 ## Running tests
 
@@ -231,6 +263,8 @@ bash scripts/clang_format.sh
 
 Hand-written files (`isa.h`, `insts.h`, `mfma_exec.h`, `addr_calc.h/.cpp`) are
 not overwritten by the generator.
+
+You can find the MR ISA in the artifacts directory.
 
 ## Usage examples
 
