@@ -290,7 +290,7 @@ bool RocJpegStreamParser::ParseDHT() {
         huffman_table_id = index & 0x0F;
 
         if (huffman_table_id >= HUFFMAN_TABLES) {
-            ErrorLog(g_rocjpeg_logger,"invlaid number of Huffman table!");
+            ErrorLog(g_rocjpeg_logger,"invalid number of Huffman table!");
             return false;
         }
 
