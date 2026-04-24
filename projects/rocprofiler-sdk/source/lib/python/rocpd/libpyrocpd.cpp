@@ -68,6 +68,7 @@
 #include <future>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -192,6 +193,118 @@ struct jinja_variables
     py::str guid = py::none{};
 };
 }  // namespace rocpd
+
+namespace
+{
+std::string
+sql_single_quoted_literal(std::string_view s)
+{
+    std::string out;
+    out.reserve(s.size() + 2);
+    out.push_back('\'');
+    for(const char c : s)
+    {
+        if(c == '\'') out.push_back('\'');
+        out.push_back(c);
+    }
+    out.push_back('\'');
+    return out;
+}
+
+// Build SQL string: CASE PMC_I.units WHEN ... THEN <expr> ... ELSE PMC_I.units END AS units
+std::string
+build_pmc_units_case_stmt_for_sql()
+{
+    // These are the mappings for the rocprof-sys PMC units to strings we want to show in perfetto.
+    static constexpr std::pair<std::string_view, std::string_view>
+        pmc_units_to_user_friendly_names[] = {
+            {"W", "watts"},
+            {"°C", "deg C"},
+        };
+
+    std::string when_clauses;
+    for(const auto& [units, tail] : pmc_units_to_user_friendly_names)
+    {
+        when_clauses += fmt::format("\n                                    WHEN {} THEN {}",
+                                    sql_single_quoted_literal(units),
+                                    sql_single_quoted_literal(tail));
+    }
+    return fmt::format("CASE PMC_I.units{}"
+                       "\n                                    ELSE PMC_I.units"
+                       "\n                                END AS units",
+                       when_clauses);
+}
+
+// Build SQL string: CASE WHEN PMC_I.symbol = <expr> ... THEN <expr> ... ELSE PMC_I.description END
+// AS short_description
+std::string
+build_pmc_symbol_short_description_case_stmt_for_sql()
+{
+    constexpr std::string_view pmc_arch_sql_string = "COALESCE(PMC_I.target_arch, A.type, 'Agent')";
+
+    // These names map well, just prefix with "target_arch"
+    static constexpr std::string_view pmc_symbols_already_user_friendly[] = {
+        "Context Switches",
+        "GFX Busy",
+        "Kernel Time",
+        "MM Busy",
+        "Peak Memory",
+        "UMC Busy",
+        "User Time",
+        "Virtual Memory Usage",
+    };
+
+    // These are mappings for the rocprof-sys PMC symbols to friendly names we want to show
+    static constexpr std::pair<std::string_view, std::string_view>
+        pmc_symbol_to_user_friendly_names[] = {
+            {"MemUsg", " || ' Memory Usage'"},
+            {"Memory Usage", " || ' Page Faults'"},
+            {"Pow", " || ' Current Power'"},
+            {"Temp", " || ' Temperature'"},
+        };
+
+    // These are mappings for the rocprof-sys thread PMC symbols to friendly names we want to show
+    static constexpr std::pair<std::string_view, std::string_view> pmc_symbols_for_threads[] = {
+        {"thread_context_switch", "'Thread' || ' Context Switches'"},
+        {"thread_cpu_time", "'Thread' || ' CPU Time'"},
+        {"thread_page_fault", "'Thread' || ' Page Faults'"},
+        {"thread_peak_memory", "'Thread' || ' Peak Memory Usage'"},
+    };
+
+    std::string when_clauses;
+    // rocprof-sys may store a leading space before "GPU ". Trim & match so LIKE 'GPU %' applies
+    when_clauses +=
+        "\n                                    WHEN TRIM(PMC_I.symbol) LIKE 'GPU %' THEN "
+        "TRIM(PMC_I.symbol)";
+    for(const std::string_view sym : pmc_symbols_already_user_friendly)
+    {
+        when_clauses +=
+            fmt::format("\n                                    WHEN PMC_I.symbol = {} THEN {} "
+                        "|| ' ' || PMC_I.symbol",
+                        sql_single_quoted_literal(sym),
+                        pmc_arch_sql_string);
+    }
+    for(const auto& [sym, tail] : pmc_symbol_to_user_friendly_names)
+    {
+        when_clauses +=
+            fmt::format("\n                                    WHEN PMC_I.symbol = {} THEN {}{}",
+                        sql_single_quoted_literal(sym),
+                        pmc_arch_sql_string,
+                        tail);
+    }
+    for(const auto& [sym, then_sql] : pmc_symbols_for_threads)
+    {
+        when_clauses +=
+            fmt::format("\n                                    WHEN PMC_I.symbol = {} THEN {}",
+                        sql_single_quoted_literal(sym),
+                        then_sql);
+    }
+    return fmt::format("\n                                CASE{}"
+                       "\n                                    ELSE PMC_I.description"
+                       "\n                                END AS short_description",
+                       when_clauses);
+}
+}  // namespace
 
 PYBIND11_MODULE(libpyrocpd, pyrocpd)
 {
@@ -533,12 +646,14 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
             auto sqlgen_perf = common::simple_timer{
                 fmt::format("Perfetto generation from {} SQL database(s)", data.size())};
+            auto pmc_symbol_sql_string = build_pmc_symbol_short_description_case_stmt_for_sql();
+            auto pmc_units_sql_string  = build_pmc_units_case_stmt_for_sql();
             for(auto obj : {data.connection})
             {
                 // Suggestions for the future schema updates:
                 // - Make info_pmc joinable with samples via the name field
                 // - Add short_description for perfetto counter tracks.
-                const std::string create_info_pmc_table = R"(
+                const std::string create_info_pmc_table = std::string{R"(
                             CREATE TEMP TABLE IF NOT EXISTS
                                 `info_pmc_schema_3_0` AS
                             SELECT
@@ -547,32 +662,11 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                     ELSE PMC_I.name
                                 END AS name,
                                 PMC_I.name AS name_plain,
-                                PMC_I.symbol,
-                                CASE PMC_I.units
-                                    WHEN 'W' THEN 'watts'
-                                    WHEN '°C' THEN 'deg C'
-                                    ELSE PMC_I.units
-                                END AS units,
                                 PMC_I.description,
-                                CASE PMC_I.symbol
-                                    WHEN 'Context Switches' THEN 'CPU Context Switches'
-                                    WHEN 'GFX Busy' THEN 'GPU GFX Busy'
-                                    WHEN 'Kernel Time' THEN 'CPU Kernel Time'
-                                    WHEN 'MM Busy' THEN 'GPU MM Busy'
-                                    WHEN 'MemUsg' THEN 'GPU Memory Usage'
-                                    WHEN 'Memory Usage' THEN 'CPU Page Faults'
-                                    WHEN 'Peak Memory' THEN 'CPU Peak Memory'
-                                    WHEN 'Pow' THEN 'GPU Current Power'
-                                    WHEN 'Temp' THEN 'GPU Temperature'
-                                    WHEN 'UMC Busy' THEN 'GPU UMC Busy'
-                                    WHEN 'User Time' THEN 'CPU User Time'
-                                    WHEN 'Virtual Memory Usage' THEN 'CPU Virtual Memory Usage'
-                                    WHEN 'thread_context_switch' THEN 'Thread Context Switches'
-                                    WHEN 'thread_cpu_time' THEN 'Thread CPU Time'
-                                    WHEN 'thread_page_fault' THEN 'Thread Page Faults'
-                                    WHEN 'thread_peak_memory' THEN 'Thread Peak Memory Usage'
-                                    ELSE PMC_I.description
-                                END AS short_description,
+                                PMC_I.symbol,
+                                )"} + pmc_units_sql_string +
+                                                          R"(,)" + pmc_symbol_sql_string +
+                                                          R"(,
                                 A.absolute_index AS agent_abs_index,
                                 A.type_index AS agent_type_index,
                                 PMC_I.guid
