@@ -1,20 +1,20 @@
 ---
 stress:
-  Stress_deviceAllocation_malloc_Even: *level_default
-  Stress_deviceAllocation_malloc_Odd: *level_default
-  Stress_deviceAllocation_new_Even: *level_default
-  Stress_deviceAllocation_new_Odd: *level_default
-  Stress_deviceAllocation_malloc_hipmallocmanaged: *level_default
-  Stress_deviceAllocation_new_hipmallocmanaged: *level_default
-  Stress_deviceAllocation_malloc_hipmalloc: *level_default
-  Stress_deviceAllocation_new_hipmalloc: *level_default
-  Stress_deviceAllocation_Negative: *level_default
-  Stress_deviceAllocation_malloc_loop_singlekernel: *level_default
-  Stress_deviceAllocation_new_loop_singlekernel: *level_default
-  Stress_deviceAllocation_malloc_loop_multkernel: *level_default
-  Stress_deviceAllocation_new_loop_multkernel: *level_default
+  Stress_deviceAllocation_malloc_Even: *level_stress
+  Stress_deviceAllocation_malloc_Odd: *level_stress
+  Stress_deviceAllocation_new_Even: *level_stress
+  Stress_deviceAllocation_new_Odd: *level_stress
+  Stress_deviceAllocation_malloc_hipmallocmanaged: *level_stress
+  Stress_deviceAllocation_new_hipmallocmanaged: *level_stress
+  Stress_deviceAllocation_malloc_hipmalloc: *level_stress
+  Stress_deviceAllocation_new_hipmalloc: *level_stress
+  Stress_deviceAllocation_Negative: *level_stress
+  Stress_deviceAllocation_malloc_loop_singlekernel: *level_stress
+  Stress_deviceAllocation_new_loop_singlekernel: *level_stress
+  Stress_deviceAllocation_malloc_loop_multkernel: *level_stress
+  Stress_deviceAllocation_new_loop_multkernel: *level_stress
   Stress_hipMalloc:
-    <<: *level_default
+    <<: *level_stress
     tags: [DifferentSizes]
   Stress_hipMemcpy_multiDevice_AllAPIs: *level_default
   Stress_hipMallocManaged_MultiSize: *level_default
@@ -48,5 +48,5 @@ stress:
   Stress_hipMalloc_LoopRegressionAllocFreeCycles: *level_default
   Stress_hipMalloc_AllocateAndPoolBuffers: *level_default
   Stress_hipMalloc_Multithreaded_MultiGPU:
-    <<: *level_default
+    <<: *level_stress
     tags: [multigpu]
