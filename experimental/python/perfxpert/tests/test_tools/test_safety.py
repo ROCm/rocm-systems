@@ -7,6 +7,13 @@ import pytest
 from perfxpert.tools import _safety
 
 
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink creation unavailable on this host: {exc}")
+
+
 # -- confine_to_project_root ------------------------------------------------
 
 def test_confine_to_project_root_accepts_relative(tmp_path: Path):
@@ -31,7 +38,7 @@ def test_confine_to_project_root_resolves_symlink_escape(tmp_path: Path):
     """Symlink pointing outside the project root must be rejected."""
     outside = tmp_path.parent / "outside_target"
     outside.write_text("hi")
-    (tmp_path / "link").symlink_to(outside)
+    _symlink_or_skip(tmp_path / "link", outside)
     with pytest.raises(_safety.PathConfinementError):
         _safety.confine_to_project_root(tmp_path, "link")
 
