@@ -9,8 +9,8 @@
 
 #include <random>
 
-#include <cmd_options.hh>
 #include <cpu_grid.h>
+#include <hip_test_params.hh>
 #include <resource_guards.hh>
 
 /**
@@ -701,9 +701,11 @@ __global__ void coalesced_group_sync_check(T* global_data, unsigned int* wait_mo
 }
 
 template <bool global_memory, typename T> void CoalescedGroupSyncTest() {
+  const auto cg_iterations = TestParameterStore::instance().getCgIterationsForCurrentLevel();
+
   const int warp_size = getWarpSize();
 
-  const auto randomized_run_count = GENERATE(range(0, cmd_options.cg_iterations));
+  const auto randomized_run_count = GENERATE_COPY(range(0, cg_iterations));
   const auto blocks = GenerateBlockDimensionsForShuffle();
   const auto threads = GenerateThreadDimensionsForShuffle();
   auto test_case = GENERATE(range(0, 4));

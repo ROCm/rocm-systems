@@ -15,7 +15,6 @@
 
 #include <hip_test_common.hh>
 #include <hip_array_common.hh>
-#include <cmd_options.hh>
 #include <iostream>
 #include <sstream>
 #include <iomanip>

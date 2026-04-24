@@ -87,6 +87,7 @@ def generate_parameter_header(cmd_options, output_path):
         f.write("#pragma once\n\n")
         f.write("#include <vector>\n")
         f.write("#include <cstddef>\n")
+        f.write("#include <cstdint>\n")
         f.write("#include <string>\n")
         f.write("#include <map>\n\n")
         
@@ -122,14 +123,26 @@ def generate_parameter_header(cmd_options, output_path):
             if "warmups" in options:
                 f.write(f"inline const int {level_name}_warmups = {options['warmups']};\n\n")
             
-            # Max memory
-            if "max_memory" in options:
-                max_mem = parse_size_string(str(options["max_memory"]))
-                f.write(f"inline const size_t {level_name}_max_memory = {max_mem};\n\n")
-            
-            # Reduction factor
-            if "reduction_factor" in options:
-                f.write(f"inline const double {level_name}_reduction_factor = {options['reduction_factor']};\n\n")
+            # CG iterations
+            if "cg_iterations" in options:
+                f.write(f"inline const int {level_name}_cg_iterations = {options['cg_iterations']};\n\n")
+
+            # Math accuracy iterations
+            if "math_accuracy_iterations" in options:
+                f.write(f"inline const uint64_t {level_name}_math_accuracy_iterations = {options['math_accuracy_iterations']}ULL;\n\n")
+
+            # Math accuracy max memory percentage
+            if "math_accuracy_max_memory_percentage" in options:
+                f.write(f"inline const int {level_name}_math_accuracy_max_memory_percentage = {options['math_accuracy_max_memory_percentage']};\n\n")
+
+            # Math max memory
+            if "math_max_memory" in options:
+                math_max_mem = parse_size_string(str(options["math_max_memory"]))
+                f.write(f"inline const size_t {level_name}_math_max_memory = {math_max_mem};\n\n")
+
+            # Math reduction factor
+            if "math_reduction_factor" in options:
+                f.write(f"inline const double {level_name}_math_reduction_factor = {options['math_reduction_factor']};\n\n")
         
         # Generate LevelParameters struct and initialization function
         f.write(f"// {'=' * 76}\n")
@@ -141,8 +154,11 @@ def generate_parameter_header(cmd_options, output_path):
         f.write("    std::vector<int> block_sizes;\n")
         f.write("    int iterations = 0;\n")
         f.write("    int warmups = 0;\n")
-        f.write("    size_t max_memory = 0;\n")
-        f.write("    double reduction_factor = 0.0;\n")
+        f.write("    int cg_iterations = 0;\n")
+        f.write("    uint64_t math_accuracy_iterations = 0;\n")
+        f.write("    int math_accuracy_max_memory_percentage = 0;\n")
+        f.write("    size_t math_max_memory = 0;\n")
+        f.write("    double math_reduction_factor = 0.0;\n")
         f.write("};\n\n")
         
         f.write("inline std::map<std::string, LevelParameters> initializeLevelParameters() {\n")
@@ -155,8 +171,11 @@ def generate_parameter_header(cmd_options, output_path):
             f.write(f"        {level_name}_block_sizes,\n")
             f.write(f"        {level_name}_iterations,\n")
             f.write(f"        {level_name}_warmups,\n")
-            f.write(f"        {level_name}_max_memory,\n")
-            f.write(f"        {level_name}_reduction_factor\n")
+            f.write(f"        {level_name}_cg_iterations,\n")
+            f.write(f"        {level_name}_math_accuracy_iterations,\n")
+            f.write(f"        {level_name}_math_accuracy_max_memory_percentage,\n")
+            f.write(f"        {level_name}_math_max_memory,\n")
+            f.write(f"        {level_name}_math_reduction_factor\n")
             f.write(f"    }};\n\n")
         
         f.write("    return params;\n")

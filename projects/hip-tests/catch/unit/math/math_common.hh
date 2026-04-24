@@ -6,8 +6,8 @@
 
 #pragma once
 
-#include <cmd_options.hh>
 #include <hip_test_common.hh>
+#include <hip_test_params.hh>
 #include <resource_guards.hh>
 
 #include <hip/hip_cooperative_groups.h>
@@ -198,18 +198,26 @@ template <typename F> auto GetOccupancyMaxPotentialBlockSize(F kernel) {
 }
 
 inline size_t GetMaxAllowedDeviceMemoryUsage() {
+  const auto max_memory = TestParameterStore::instance().getMathMaxMemoryForCurrentLevel();
+  const auto max_memory_percentage =
+      TestParameterStore::instance().getMathAccuracyMaxMemoryPercentageForCurrentLevel();
+
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
-  return props.totalGlobalMem > cmd_options.max_memory
-      ? cmd_options.max_memory
-      : props.totalGlobalMem * (cmd_options.accuracy_max_memory * 0.01f);
+  return props.totalGlobalMem > max_memory ? max_memory
+                                           : props.totalGlobalMem * (max_memory_percentage * 0.01f);
 }
 
-inline double GetTestReductionFactor() { return cmd_options.reduction_factor * 0.01; }
+inline double GetTestReductionFactor() {
+  const auto reduction_factor =
+      TestParameterStore::instance().getMathReductionFactorForCurrentLevel();
+  return reduction_factor * 0.01;
+}
 
 inline uint64_t GetTestIterationCount() {
-  return static_cast<uint64_t>(
-      std::ceil(cmd_options.accuracy_iterations * GetTestReductionFactor()));
+  const auto accuracy_iterations =
+      TestParameterStore::instance().getMathAccuracyIterationsForCurrentLevel();
+  return static_cast<uint64_t>(std::ceil(accuracy_iterations * GetTestReductionFactor()));
 }
 
 template <typename T, typename... Ts> using kernel_sig = void (*)(T*, const size_t, Ts*...);
