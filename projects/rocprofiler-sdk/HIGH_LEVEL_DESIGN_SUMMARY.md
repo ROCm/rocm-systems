@@ -57,7 +57,7 @@ amortize the cost over many launches.
 | Workload pattern                                | Measured / estimated overhead |
 |-------------------------------------------------|-------------------------------|
 | 1 launch + 1 sync, microbenchmark (worst case)  | +1.7 µs / dispatch (+10.9%) — measured |
-| graphbench (batched, real workload)             | &lt;0.4% — measured, in the noise floor |
+| graphbench (batched, real workload)             | &lt;0.4% — **preliminary measurement, subject to change** (in the noise floor of the run) |
 | Typical batched inference / training / Triton   | Expected near-zero by extension of the graphbench result; not yet measured per-workload |
 
 The per-`AqlConnect` overhead is the only added cost on the
