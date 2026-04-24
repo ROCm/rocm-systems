@@ -84,6 +84,7 @@ exclude = ["tests*", "opencode*"]
 [tool.setuptools.package-data]
 perfxpert = [
     "formatters/templates/*.html",
+    "_bundled/opencode",
     "_bundled/**/*",
     "_bundled/opencode_config/*",
     "knowledge/*.yaml",

@@ -10,6 +10,7 @@ import setuptools
 
 _COUNTER = itertools.count()
 _SETUP_PY = Path(__file__).resolve().parents[2] / "setup.py"
+_PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
 _BUILD_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "build-bundled-opencode.sh"
 
 
@@ -22,6 +23,13 @@ def _load_setup_module(monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_pyproject_packages_top_level_bundled_opencode_binary() -> None:
+    text = _PYPROJECT.read_text()
+
+    assert '"_bundled/opencode"' in text
+    assert '"_bundled/**/*"' in text
 
 
 def test_ensure_bun_on_path_bootstraps_user_local_bun(
