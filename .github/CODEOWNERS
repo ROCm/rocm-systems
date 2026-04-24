@@ -60,6 +60,7 @@
 
 # Experimental
 /experimental/perf-dkms                                               @bwelton
+/experimental/sqtt-instrumentation                                    @ApoKalipse-V
 
 # Emulation
 /emulation/                                                           @atgutier
