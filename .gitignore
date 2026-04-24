@@ -12,6 +12,3 @@
 # Visual Studio Code settings
 .vscode/
 /.rocshmem-worktree
-
-# Python artifacts
-*.pyc

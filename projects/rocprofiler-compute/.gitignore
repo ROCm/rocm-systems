@@ -24,6 +24,7 @@ VERSION.sha
 /tests/Testing
 
 # documentation artifacts
+/_build
 _toc.yml
 
 # Backup directories

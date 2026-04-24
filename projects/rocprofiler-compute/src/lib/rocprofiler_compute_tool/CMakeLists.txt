@@ -14,7 +14,6 @@ add_library(
     input_parameters.cpp
     sdk_wrapper.h
     sdk_wrapper.cpp
-    counters_writer.h
 )
 
 target_include_directories(${target} PUBLIC .)
