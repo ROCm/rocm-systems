@@ -356,7 +356,7 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
     }
 }
 
-#ifdef 0
+#ifdef DISABLED_CODE
 // reference code from SDK (to be deleted after implementation
 void SdkCallbacksImpl::code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                                     rocprofiler_user_data_t*              user_data,
@@ -444,8 +444,9 @@ void SdkCallbacksImpl::code_object_tracing_callback(rocprofiler_callback_tracing
 #endif
 
 void SdkCallbacksImpl::code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                                    rocprofiler_user_data_t*              user_data,
-                                                    void* data){}
+                                                    void* data)
+{
+}
 
 std::string SdkCallbacksImpl::truncate_name(std::string_view name)
 {

@@ -182,14 +182,18 @@ TEST_P(TestSdkCallbacksKernelFiltering, ProvidedKernelFilteringEnabled_ReturnsKe
 
 TEST_F(TestSdkCallbacks, ProvidedCallbackTracingRecordInMemory_StoresCodeObjectInformation)
 {
-    rocprofiler_callback_tracing_code_object_load_data_t payload;
+    rocprofiler_callback_tracing_code_object_load_data_t payload = {};
     payload.storage_type = ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY;
 
-    rocprofiler_callback_tracing_record_t record;
+    rocprofiler_callback_tracing_record_t record = {};
     record.kind      = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
     record.operation = ROCPROFILER_CODE_OBJECT_LOAD;
     record.phase     = ROCPROFILER_CALLBACK_PHASE_LOAD;
     record.payload   = &payload;
+
+    m_sdk_callbacks->code_object_tracing_callback(record, &m_tool_data);
+
+    //m_tool_data->pc_sampling_collector;
 }
 
 //////////////////////////////////////////////////////////////////////////
