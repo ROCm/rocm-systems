@@ -182,6 +182,11 @@ def resolve_user_opencode_binary() -> Path:
                 f"PERFXPERT_OPENCODE_PATH={override!r} does not exist. "
                 "Correct the path or unset the variable to use normal opencode lookup."
             )
+        if not os.access(p, os.X_OK):
+            raise FileNotFoundError(
+                f"PERFXPERT_OPENCODE_PATH={override!r} is not executable. "
+                "Fix permissions or unset the variable to use normal opencode lookup."
+            )
         return p
 
     for candidate in _wellknown_opencode_paths():
@@ -616,6 +621,8 @@ def main(argv: list[str] | None = None) -> int:
         return _exec_backend(backend_name, remaining)
 
     if kind == "user_opencode":
+        if _printed_perfxpert_help:
+            return 0
         try:
             binary = resolve_user_opencode_binary()
         except FileNotFoundError as e:

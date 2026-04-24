@@ -75,6 +75,27 @@ def test_ensure_bun_on_path_fails_when_unzip_missing(monkeypatch) -> None:
         raise AssertionError("expected SystemExit when unzip is missing")
 
 
+def test_ensure_bun_on_path_accepts_existing_bun_without_bootstrap_tools(
+    monkeypatch,
+) -> None:
+    module = _load_setup_module(monkeypatch)
+    monkeypatch.setenv("PATH", "/opt/bun/bin")
+
+    def _fake_which(name: str, path: str | None = None) -> str | None:
+        if name == "bun":
+            return "/opt/bun/bin/bun"
+        return None
+
+    monkeypatch.setattr(module.shutil, "which", _fake_which)
+    monkeypatch.setattr(
+        module,
+        "_run_bun_install_script",
+        lambda _env: (_ for _ in ()).throw(AssertionError("unexpected bootstrap")),
+    )
+
+    assert module._ensure_bun_on_path() == "/opt/bun/bin"
+
+
 def test_opencode_dir_is_populated_requires_git_metadata(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -177,6 +198,21 @@ def test_run_opencode_build_fails_when_checkout_unavailable(
         assert exc.code == 1
     else:
         raise AssertionError("expected SystemExit when opencode checkout is unavailable")
+
+
+def test_run_opencode_build_fails_when_build_script_missing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_setup_module(monkeypatch)
+    monkeypatch.setattr(module, "_BUILD_SCRIPT", tmp_path / "missing-build.sh")
+    monkeypatch.setattr(module, "_BUNDLE_PATH", tmp_path / "missing-opencode")
+
+    try:
+        module._run_opencode_build()
+    except SystemExit as exc:
+        assert exc.code == 1
+    else:
+        raise AssertionError("expected SystemExit when build script is missing")
 
 
 def test_run_opencode_build_fails_when_build_script_fails(

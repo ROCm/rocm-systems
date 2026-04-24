@@ -80,6 +80,18 @@ def test_resolve_user_binary_raises_when_override_missing(tmp_path: Path, monkey
         opencode_launcher.resolve_user_opencode_binary()
 
 
+def test_resolve_user_binary_raises_when_override_not_executable(
+    tmp_path: Path, monkeypatch
+):
+    """The explicit upstream-opencode escape hatch validates execute bit."""
+    fake_bin = tmp_path / "fake-opencode"
+    fake_bin.write_text("#!/bin/sh\necho fake\n")
+    fake_bin.chmod(0o644)
+    monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", str(fake_bin))
+    with pytest.raises(FileNotFoundError, match="not executable"):
+        opencode_launcher.resolve_user_opencode_binary()
+
+
 def test_prepare_runtime_config_dir_skips_subdirectories(tmp_path: Path):
     """_prepare_runtime_config_dir must not crash on subdirectories in src_config_dir."""
     src = tmp_path / "src_config"

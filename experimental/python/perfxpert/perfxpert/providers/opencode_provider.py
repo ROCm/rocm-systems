@@ -7,7 +7,8 @@ opencode-launched session from spawning another opencode.
 Binary resolution order:
     1. constructor kwarg `opencode_path`
     2. env var PERFXPERT_OPENCODE_PATH
-    3. shutil.which("opencode") on PATH
+    3. bundled patched perfxpert opencode binary
+    4. shutil.which("opencode") on PATH
 """
 
 from __future__ import annotations
@@ -34,11 +35,18 @@ def _find_binary(explicit: Optional[str]) -> str:
     env = os.environ.get("PERFXPERT_OPENCODE_PATH")
     if env:
         return env
+    try:
+        from perfxpert.cli.opencode_launcher import resolve_opencode_binary
+
+        return str(resolve_opencode_binary())
+    except FileNotFoundError:
+        pass
     found = shutil.which("opencode")
     if found:
         return found
     raise ProviderError(
-        "[opencode] binary not found (set PERFXPERT_OPENCODE_PATH or install opencode on PATH)"
+        "[opencode] binary not found (reinstall perfxpert so the bundled binary is built, "
+        "set PERFXPERT_OPENCODE_PATH, or install opencode on PATH)"
     )
 
 

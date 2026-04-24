@@ -107,12 +107,24 @@ def _package_manager_prereq_hint() -> str:
     )
 
 
-def _missing_os_prereqs() -> list[str]:
+def _missing_tools(tools: tuple[str, ...]) -> list[str]:
     missing: list[str] = []
-    for tool in ("bash", "curl", "git", "unzip"):
+    for tool in tools:
         if shutil.which(tool) is None:
             missing.append(tool)
     return missing
+
+
+def _missing_build_prereqs() -> list[str]:
+    return _missing_tools(("bash", "git"))
+
+
+def _missing_bun_bootstrap_prereqs() -> list[str]:
+    return _missing_tools(("bash", "curl", "unzip"))
+
+
+def _missing_os_prereqs() -> list[str]:
+    return _missing_tools(("bash", "curl", "git", "unzip"))
 
 
 def _fail_build(message: str) -> None:
@@ -125,11 +137,17 @@ def _fail_build(message: str) -> None:
 
 def _run_bun_install_script(env: dict[str, str]) -> int:
     url = os.environ.get("PERFXPERT_BUN_INSTALL_URL", _DEFAULT_BUN_INSTALL_URL)
+    missing = _missing_bun_bootstrap_prereqs()
+    if missing:
+        _fail_build(
+            "missing OS prerequisites for bun bootstrap: "
+            + ", ".join(missing)
+            + "."
+        )
     curl = shutil.which("curl")
     bash = shutil.which("bash")
-    if curl is None or bash is None:
-        missing = ", ".join(_missing_os_prereqs())
-        _fail_build(f"missing OS prerequisites for bun bootstrap: {missing}.")
+    assert curl is not None
+    assert bash is not None
 
     curl_proc = subprocess.Popen(
         [curl, "-fsSL", url],
@@ -162,10 +180,10 @@ def _ensure_bun_on_path() -> str | None:
     existing = shutil.which("bun")
     if existing:
         return os.environ.get("PATH", "")
-    missing = _missing_os_prereqs()
+    missing = _missing_bun_bootstrap_prereqs()
     if missing:
         _fail_build(
-            "missing OS prerequisites for bundled perfxpert-code build: "
+            "missing OS prerequisites for bun bootstrap: "
             + ", ".join(missing)
             + "."
         )
@@ -358,7 +376,7 @@ def _opencode_build_needed() -> tuple[bool, str]:
     if os.environ.get(_SKIP_ENV, "").strip() in {"1", "true", "yes"}:
         return False, f"{_SKIP_ENV}=1 — skipping bundled opencode build"
     if not _BUILD_SCRIPT.is_file():
-        return False, f"build script missing ({_BUILD_SCRIPT}); nothing to do"
+        return True, f"build script missing ({_BUILD_SCRIPT})"
     # Rebuild when the binary is missing OR older than the newest patch.
     if not _BUNDLE_PATH.is_file():
         return True, "bundled opencode binary missing — building"
@@ -375,7 +393,12 @@ def _run_opencode_build() -> None:
     print(f"[perfxpert/setup.py] opencode build: {reason}", file=sys.stderr)
     if not should_build:
         return
-    missing = _missing_os_prereqs()
+    if not _BUILD_SCRIPT.is_file():
+        _fail_build(
+            f"required bundled opencode build script is missing: {_BUILD_SCRIPT}. "
+            f"Set {_SKIP_ENV}=1 only if this build intentionally excludes perfxpert-code."
+        )
+    missing = _missing_build_prereqs()
     if missing:
         _fail_build(
             "missing OS prerequisites for bundled perfxpert-code build: "

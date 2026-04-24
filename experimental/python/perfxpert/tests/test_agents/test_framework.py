@@ -1,5 +1,7 @@
 """Tests for perfxpert.agents.framework — the SDK facade."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from perfxpert.agents import framework
@@ -421,7 +423,10 @@ def test_sdk_invoke_preserves_provider_taxonomy(monkeypatch):
         ("private", "private/gpt-4o-mini"),
     ],
 )
-def test_resolve_model_qualifies_non_openai_providers(provider, expected):
+def test_resolve_model_qualifies_non_openai_providers(provider, expected, monkeypatch):
+    monkeypatch.delenv("PERFXPERT_LLM_PRIVATE_MODEL", raising=False)
+    monkeypatch.delenv(f"PERFXPERT_AGENTS_MODEL_{provider.upper()}", raising=False)
+    monkeypatch.delenv("PERFXPERT_LLM_MODEL", raising=False)
     assert framework._resolve_model(provider) == expected
 
 
@@ -431,6 +436,11 @@ def test_resolve_model_preserves_explicit_prefixed_override(monkeypatch):
         "litellm/anthropic/claude-3-7-sonnet-latest",
     )
     assert framework._resolve_model("anthropic") == "litellm/anthropic/claude-3-7-sonnet-latest"
+
+
+def test_resolve_model_uses_private_specific_model_env(monkeypatch):
+    monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_MODEL", "gpt-5.3-codex")
+    assert framework._resolve_model("private") == "private/gpt-5.3-codex"
 
 
 def test_sdk_invoke_builds_litellm_route_for_anthropic(monkeypatch):
@@ -490,8 +500,27 @@ def test_sdk_invoke_private_provider_uses_custom_openai_base_url(monkeypatch):
             captured["run_config"] = run_config
             return _FakeRunResult()
 
+    import agents.models.openai_provider as openai_provider_module
+    import openai as openai_module
+
+    class _FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+    class _FakeOpenAIProvider:
+        def __init__(self, **kwargs):
+            captured["provider_kwargs"] = kwargs
+
+    monkeypatch.setattr(openai_module, "AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr(openai_provider_module, "OpenAIProvider", _FakeOpenAIProvider)
+
     monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_URL", "https://llm.example/v1")
+    monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_MODEL", "internal-xl")
     monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_API_KEY", "sk-private")
+    monkeypatch.setenv(
+        "PERFXPERT_LLM_PRIVATE_HEADERS",
+        '{"Ocp-Apim-Subscription-Key": "secret", "api-version": "preview"}',
+    )
     monkeypatch.setattr(framework, "_SDK_AVAILABLE", True)
     monkeypatch.setattr(framework, "SdkAgent", _FakeSdkAgent)
     monkeypatch.setattr(framework, "SdkRunner", _FakeRunner)
@@ -509,8 +538,57 @@ def test_sdk_invoke_private_provider_uses_custom_openai_base_url(monkeypatch):
 
     framework._sdk_invoke(agent, {"user_query": "?"}, provider="private")
 
-    assert captured["model"] == "private/gpt-4o-mini"
+    assert captured["model"] == "private/internal-xl"
+    assert captured["client_kwargs"] == {
+        "api_key": "sk-private",
+        "base_url": "https://llm.example/v1",
+        "default_headers": {
+            "Ocp-Apim-Subscription-Key": "secret",
+            "api-version": "preview",
+        },
+    }
+    assert "openai_client" in captured["provider_kwargs"]
+    assert captured["provider_kwargs"]["use_responses"] is False
     assert "model_provider" in captured["run_config"]["kwargs"]
+
+
+def test_sdk_invoke_opencode_dispatches_to_subprocess_provider(monkeypatch):
+    captured = {}
+
+    class _FakeOpencodeProvider:
+        def complete(self, messages, *, system="", model=None, **_kwargs):
+            captured["messages"] = messages
+            captured["system"] = system
+            captured["model"] = model
+            return SimpleNamespace(
+                content='{"narrative": "ok"}',
+                provider="opencode",
+                model=model or "opencode-default",
+            )
+
+    import perfxpert.providers.opencode_provider as opencode_provider_module
+
+    monkeypatch.setenv("PERFXPERT_AGENTS_MODEL_OPENCODE", "github-copilot/gpt-5")
+    monkeypatch.setattr(opencode_provider_module, "OpencodeProvider", _FakeOpencodeProvider)
+    monkeypatch.setattr(framework, "_SDK_AVAILABLE", False)
+
+    agent = Agent(
+        name="T",
+        layer=1,
+        fence_path=None,
+        input_schema=dict,
+        output_schema=dict,
+        tools=[],
+    )
+
+    response = framework._sdk_invoke(agent, {"user_query": "?"}, provider="opencode")
+
+    assert captured["model"] == "github-copilot/gpt-5"
+    assert captured["messages"][0]["role"] == "user"
+    assert "user_query" in captured["messages"][0]["content"]
+    assert "You are the T agent" in captured["system"]
+    assert response.text == '{"narrative": "ok"}'
+    assert response.structured_output == {"narrative": "ok"}
 
 
 def test_sdk_invoke_maps_rate_limit_like_runtime_errors(monkeypatch):

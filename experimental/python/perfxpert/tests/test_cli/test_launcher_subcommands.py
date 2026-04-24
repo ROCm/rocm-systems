@@ -376,6 +376,20 @@ class TestBundledPriority:
         assert seen["cmd"] == [str(explicit), "models"]
         assert "PERFXPERT_IN_OPENCODE_SESSION" not in seen["env"]
 
+    def test_explicit_opencode_help_does_not_require_user_binary(
+        self, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        monkeypatch.setattr(
+            opencode_launcher,
+            "resolve_user_opencode_binary",
+            lambda: (_ for _ in ()).throw(FileNotFoundError("missing")),
+        )
+
+        rc = opencode_launcher.main(["--help", "opencode"])
+
+        assert rc == 0
+        assert "perfxpert-code opencode [args]" in capsys.readouterr().out
+
 
 class TestRunAutoAgentInject:
     """`perfxpert-code run ...` must load the perfxpert agent

@@ -1281,8 +1281,9 @@ Model selection ladder (first hit wins, resolved at session boot):
 
 1. `PERFXPERT_AGENTS_MODEL_<PROVIDER>` — per-provider pin, e.g.
    `PERFXPERT_AGENTS_MODEL_OPENAI=gpt-4o-mini`
-2. `PERFXPERT_LLM_MODEL` — cross-provider override
-3. Built-in default (anthropic: `claude-sonnet-4-20250514`, openai:
+2. `PERFXPERT_LLM_PRIVATE_MODEL` — private-provider model pin
+3. `PERFXPERT_LLM_MODEL` — cross-provider override
+4. Built-in default (anthropic: `claude-sonnet-4-20250514`, openai:
    `gpt-4o-mini`)
 
 ### Fallback chain (recommended for interactive use)
