@@ -11,7 +11,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Changed
 
-* `__reduce_and_sync()`, `__reduce_or_sync()` and `__reduce_xor_sync()` now provide a consistent behaviour for all masks values and with CUDA. Before, some masks would be translated to bitwise operations but other would not (like the ones containing "holes"). Now all masks cause bitwise instructions to be emitted. This is a change of behaviour from previous versions.
+* `__reduce_and_sync()`, `__reduce_or_sync()` and `__reduce_xor_sync()` now provide a consistent behavior for all masks values and with CUDA. Before, some masks would be translated to bitwise operations but other would not (like the ones containing "holes"). Now all masks cause bitwise instructions to be emitted. This is a change of behavior from previous versions.
 
 ## HIP 7.12 for ROCm 7.12
 
