@@ -4,14 +4,11 @@
 #pragma once
 
 #include "subscriber.hpp"
+#include "trigger.hpp"
 
 #include <atomic>
-#include <cstdint>
 #include <mutex>
-#include <set>
-#include <string>
-#include <string_view>
-#include <unordered_set>
+#include <unordered_map>
 #include <vector>
 
 namespace rocprofsys::control
@@ -19,7 +16,7 @@ namespace rocprofsys::control
 class session
 {
 public:
-    explicit session(std::string_view trace_regions = {});
+    session()  = default;
     ~session() = default;
 
     session(const session&)            = delete;
@@ -31,37 +28,35 @@ public:
 
     void subscribe(subscriber sub);
 
-    [[nodiscard]] bool region_filter_active() const noexcept
-    {
-        return m_region_filter_active.load(std::memory_order_relaxed);
-    }
+    /// Register a trigger and seed its initial vote.
+    /// Subscribers are NOT notified on initial registration; the resolved
+    /// initial state is reflected only in is_active().
+    void attach(trigger& trig);
+
+    /// Called by triggers when their vote changes. Recomputes the resolved
+    /// state under the unanimous-active policy (any paused vote -> paused);
+    /// fires pause/resume callbacks only on transitions.
+    void publish(const trigger& trig, vote v);
+
+    /// If the session is currently paused, fire pause on all subscribers
+    /// to reflect the initial state. Subscribers default to "running", so
+    /// only the paused-initial case needs to be broadcast.
+    void force_initial_pause();
 
     [[nodiscard]] bool is_active() const noexcept
     {
         return m_active.load(std::memory_order_relaxed);
     }
 
-    void force_initial_pause();
-
-    void handle_range_start(std::uint64_t range_id, const char* message);
-    void handle_range_stop(std::uint64_t range_id);
-    void handle_pause(std::uint64_t tid);
-    void handle_resume(std::uint64_t tid);
-
 private:
-    std::set<std::string, std::less<>> m_trace_regions;
-    std::unordered_set<std::uint64_t>  m_active_range_ids;
-    std::atomic<bool>                  m_region_filter_active{ false };
-    std::atomic<std::uint32_t>         m_active_region_count{ 0 };
-    std::atomic<bool>                  m_user_paused{ false };
-    std::atomic<bool>                  m_active{ true };
+    std::unordered_map<const trigger*, vote> m_votes;
+    std::vector<subscriber>                  m_subscribers;
+    std::atomic<bool>                        m_active{ true };
 
-    std::vector<subscriber> m_subscribers;
-
-    std::mutex m_region_mutex;
+    std::mutex m_votes_mutex;
     std::mutex m_subscribers_mutex;
 
-    void recompute_active();
+    bool resolve_locked() const;
     void notify_pause();
     void notify_resume();
 };
