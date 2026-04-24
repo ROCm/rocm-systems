@@ -161,6 +161,30 @@ class RocProfCompute_Base:
                 "Please remove one of these options."
             )
 
+        if getattr(args, "torch_trace", False):
+            if args.attach_pid:
+                console_error(
+                    "--torch-trace cannot be used with --attach-pid. "
+                    "Torch trace requires injecting ROCTX markers into the "
+                    "workload at launch; already-running processes cannot be "
+                    "instrumented. Please remove one of these options."
+                )
+
+            if args.attach_duration_msec:
+                console_error(
+                    "--torch-trace cannot be used with --attach-duration-msec. "
+                    "--attach-duration-msec only applies to --attach-pid, which "
+                    "is incompatible with --torch-trace. Please remove one of "
+                    "these options."
+                )
+
+            if args.spatial_multiplexing is not None:
+                console_error(
+                    "--torch-trace does not yet support multi-node profiling "
+                    "via --spatial-multiplexing. Please remove one of these "
+                    "options."
+                )
+
         # verify correct formatting for application binary
         args.remaining = args.remaining[1:]
         resolved_exec_path: Optional[Path] = None

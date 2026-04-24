@@ -27,6 +27,8 @@ def _make_sanitize_args(remaining, torch_trace=False):
         no_native_tool=False,
         iteration_multiplexing=None,
         attach_pid=None,
+        attach_duration_msec=None,
+        spatial_multiplexing=None,
         remaining=["--"] + remaining,
         torch_trace=torch_trace,
     )
