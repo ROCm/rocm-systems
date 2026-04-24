@@ -1376,21 +1376,19 @@ amdsmi_status_t amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processo
   info->oam_id = std::numeric_limits<uint32_t>::max();
 
   // Retrieve OAM ID (XGMI Physical ID)
-  uint16_t tmp_oam_id = 0;
-  amdsmi_status_t oam_status =
-      rsmi_wrapper(rsmi_dev_xgmi_physical_id_get, processor_handle, 0, &tmp_oam_id);
+  auto tmp_oam_id = uint16_t(0);
+  const amdsmi_status_t oam_status =
+      rsmi_wrapper(rsmi_dev_xgmi_physical_id_get, processor_handle, 0, &(tmp_oam_id));
+
   std::ostringstream oam_ss;
-  if (oam_status == AMDSMI_STATUS_SUCCESS) {
-    if (tmp_oam_id == std::numeric_limits<uint16_t>::max()) {
-      info->oam_id = std::numeric_limits<uint32_t>::max();
-      oam_ss << "oam_id not supported/N/A";
-    } else {
-      info->oam_id = tmp_oam_id;
-      oam_ss << "oam_id retrieved successfully: " << info->oam_id;
-    }
-  } else {
+  if (oam_status != AMDSMI_STATUS_SUCCESS) {
     oam_ss << "oam_id retrieval failed with status: "
            << smi_amdgpu_get_status_string(oam_status, false);
+  } else if (tmp_oam_id == std::numeric_limits<uint16_t>::max()) {
+    oam_ss << "oam_id not supported/N/A";
+  } else {
+    info->oam_id = tmp_oam_id;
+    oam_ss << "oam_id retrieved successfully: " << info->oam_id;
   }
   LOG_DEBUG(oam_ss);
 
