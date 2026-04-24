@@ -157,6 +157,9 @@ ncclResult_t ncclP2PPreconnectFunc(struct ncclAsyncJob* job_) {
   NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 1));
   if (comm->p2pNet) NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
   if (mode != cudaStreamCaptureModeRelaxed) CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+  INFO(NCCL_INIT, "rank %d/%d cudaDev %d nvmlDev %d busId %#llx commId 0x%016llx Send/Recv P2P transport setup complete (p2pNet=%d)",
+    comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev,
+    (unsigned long long)comm->busId, (unsigned long long)comm->commHash, comm->p2pNet ? 1 : 0);
   return ncclSuccess;
 }
 

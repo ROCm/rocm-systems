@@ -735,7 +735,6 @@ def create_mem_chart_diagram(
 
 
 def plot_mem_chart(
-    arch: str,
     normal_unit: str,
     metric_dict: dict[str, Any],
     *,
