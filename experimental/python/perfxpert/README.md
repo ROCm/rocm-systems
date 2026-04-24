@@ -67,6 +67,10 @@ perfxpert analyze -i trace.db --llm private
 `--format` accepts `text` (default), `json`, `markdown`, and `webview`
 (AMD-themed HTML).
 
+LLM-backed analysis uses Chat Completions-style requests. Choose a provider
+model or private endpoint model that supports the Chat Completions API;
+Responses-only, embeddings-only, or non-chat models will fail.
+
 ```bash
 # SKIP-SAMPLE — requires a real trace.db and provider credentials
 export ANTHROPIC_API_KEY="sk-ant-..."
