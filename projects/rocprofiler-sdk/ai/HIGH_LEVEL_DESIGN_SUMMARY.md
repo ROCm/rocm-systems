@@ -162,24 +162,6 @@ original MI350 implementation. **This is the longest-pole item by
 far** — the SDK and KFD changes are in the weeks-of-effort range; each
 firmware port is months including build/sign/deploy/validate cycles.
 
-## Critical constraints (please read)
-
-* **NO queue interception.** This is the defining property of the
-  whole architecture. Any review comment that says "just intercept
-  the queue" is rejecting the design itself.
-* **NO packet rewriting.** The SDK never touches the application's AQL
-  packets. The 1:1 packet invariant is trivially satisfied because
-  there is no rewriting at all.
-* **NO completion signal allocation by the SDK.** The firmware ring's
-  END record IS the completion event. Any review comment that says
-  "use a completion signal for this" is rejecting the design.
-
-These three are not optimizations — they are the entire point of the
-architecture. The firmware-ring path is what makes late-attach,
-custom-runtime profiling, and zero-overhead dispatch possible.
-Reverting any of the three collapses us back to the standard
-intercept-and-wrap path with all its limitations.
-
 ## Expertise required to land this
 
 | Area | Expertise needed | Why |
