@@ -1019,7 +1019,7 @@ static ncclResult_t repairMissingChannels(struct ncclTopoRanks** allTopoRanks, i
     for (int c = 1; c < nChannels; c++) {
       // 1. RING REPAIR: Handle uninitialized Ring data
       // Check if current channel is 0 (uninitialized) but Channel 0 has data
-      if (allTopoRanks[r]->ringNext[c] == 0 && allTopoRanks[r]->ringPrev[c] == 0) {
+      if (allTopoRanks[r]->ringNext[c] == -1 && allTopoRanks[r]->ringPrev[c] == -1) {
         allTopoRanks[r]->ringNext[c] = allTopoRanks[r]->ringNext[0];
         allTopoRanks[r]->ringPrev[c] = allTopoRanks[r]->ringPrev[0];
         allTopoRanks[r]->ringSend[c] = allTopoRanks[r]->ringSend[0];
