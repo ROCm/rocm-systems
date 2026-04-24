@@ -72,8 +72,7 @@ endif()
 
 if("${_max_ver}" VERSION_EQUAL "0.0" AND NOT "x${_version_file_path}" STREQUAL "x")
     file(
-        STRINGS
-        "${_version_file_path}"
+        STRINGS "${_version_file_path}"
         _version_line
         REGEX "^#define _ELFUTILS_VERSION[ \t]+[0-9]+"
     )
