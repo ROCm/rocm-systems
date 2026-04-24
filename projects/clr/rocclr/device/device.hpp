@@ -1345,7 +1345,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   amd::Memory* createBufferFromImage(
       amd::Memory& amdImage  //! The parent image object(untiled images only)
   ) {
-    amd::Memory* mem = new (amdImage.getContext()) amd::Buffer(amdImage, 0, 0, amdImage.getSize());
+    amd::Memory* mem = new (amdImage.getContext()) amd::Buffer(amdImage, amd::MemFlags::Empty, 0, amdImage.getSize());
     mem->setVirtualDevice(this);
     if ((mem != nullptr) && !mem->create()) {
       mem->release();
@@ -1670,7 +1670,7 @@ class Device : public RuntimeObject {
   // Max Scratch size is based on ISA and thus per device.
   // Def value is as per GFX9 being the least among supported devices.
   size_t maxStackSize_ = kMaxStackSize9X;
-  static cl_int gpu_error_;  //!< Store the GPU error cause during kernel launch
+  static int gpu_error_;  //!< Store the GPU error cause during kernel launch
 
   typedef std::list<CommandQueue*> CommandQueues;
 
@@ -1727,16 +1727,15 @@ class Device : public RuntimeObject {
 
   //! Return svm support capability.
   bool svmSupport() const {
-    return static_cast<uint64_t>(
-               info().svmCapabilities_ &
-               (amd::SvmCapabilities::CoarseGrainBuffer | amd::SvmCapabilities::FineGrainBuffer |
-                amd::SvmCapabilities::FineGrainSystem)) != 0;
+    return (info().svmCapabilities_ &
+            (amd::SvmCapabilities::CoarseGrainBuffer | amd::SvmCapabilities::FineGrainBuffer |
+             amd::SvmCapabilities::FineGrainSystem)) != static_cast<amd::SvmCapabilities>(0);
   }
 
   //! check svm FGS support capability.
   inline bool isFineGrainedSystem(bool FGSOPT = false) const {
-    return FGSOPT && static_cast<uint64_t>(info().svmCapabilities_ &
-                                           amd::SvmCapabilities::FineGrainSystem) != 0;
+    return FGSOPT && (info().svmCapabilities_ &
+                      amd::SvmCapabilities::FineGrainSystem) != static_cast<amd::SvmCapabilities>(0);
   }
 
   //! Return this device's type.
@@ -2050,7 +2049,7 @@ class Device : public RuntimeObject {
                                    const std::vector<void*>& hw_events) const {}
 
   virtual const bool isFineGrainSupported() const {
-    return static_cast<uint64_t>(info().svmCapabilities_ & amd::SvmCapabilities::Atomics) != 0;
+    return (info().svmCapabilities_ & amd::SvmCapabilities::Atomics) != static_cast<amd::SvmCapabilities>(0);
   }
 
   /// @brief  Creates HW user event for OpenCL implementation
@@ -2238,8 +2237,8 @@ class Device : public RuntimeObject {
 #endif
 #endif
 
-  static bool IsGPUInError() { return (gpu_error_ != CL_SUCCESS); }
-  static cl_int GetGPUError() { return gpu_error_; }
+  static bool IsGPUInError() { return (gpu_error_ != 0); }
+  static int GetGPUError() { return gpu_error_; }
 
   bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle);
 

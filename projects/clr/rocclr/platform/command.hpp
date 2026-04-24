@@ -971,7 +971,7 @@ class StreamOperationCommand : public OneMemoryArgCommand {
             (cmdType == static_cast<amd::CommandType>(ROCCLR_COMMAND_STREAM_WAIT_VALUE)) ||
             ((cmdType == static_cast<amd::CommandType>(ROCCLR_COMMAND_STREAM_WAIT_VALUE)) &&
              GPU_STREAMOPS_CP_WAIT &&
-             (static_cast<uint64_t>(memory_->getMemFlags()) & ROCCLR_MEM_HSA_SIGNAL_MEMORY))) &&
+             (memory_->getMemFlags() & amd::MemFlags::HsaSignalMemory) != amd::MemFlags::Empty)) &&
            "Invalid Stream Operation");
   }
 
