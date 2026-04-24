@@ -1,20 +1,27 @@
-include(FetchContent)
+include(${CMAKE_CURRENT_LIST_DIR}/GitSubmodule.cmake)
 
 if(ENABLE_TESTS)
-    FetchContent_Declare(
-        googletest
-        GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG
-            52eb8108c5bdec04579160ae17225d66034bd723 # 1.17.0
+    rocprofiler_compute_checkout_git_submodule(
+        RELATIVE_PATH googletest
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        TEST_FILE CMakeLists.txt
+        REPO_URL https://github.com/google/googletest.git
+        REPO_BRANCH "v1.17.0"
     )
-    FetchContent_MakeAvailable(googletest)
+
+    set(BUILD_GMOCK ON CACHE BOOL "Build GMock" FORCE)
+    set(INSTALL_GTEST OFF CACHE BOOL "Disable GTest installation" FORCE)
+    add_subdirectory(googletest)
 endif()
 
-FetchContent_Declare(
-    fmt
-    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-    GIT_TAG
-        407c905e45ad75fc29bf0f9bb7c5c2fd3475976f # 12.1.0
+rocprofiler_compute_checkout_git_submodule(
+    RELATIVE_PATH fmt
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    TEST_FILE CMakeLists.txt
+    REPO_URL https://github.com/fmtlib/fmt.git
+    REPO_BRANCH "12.1.0"
 )
 
-FetchContent_MakeAvailable(fmt)
+set(FMT_INSTALL OFF CACHE BOOL "Disable fmt installation" FORCE)
+set(FMT_TEST OFF CACHE BOOL "Disable fmt tests" FORCE)
+add_subdirectory(fmt)
