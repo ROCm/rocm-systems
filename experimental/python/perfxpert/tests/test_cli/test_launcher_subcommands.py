@@ -331,6 +331,35 @@ class TestBundledPriority:
         with pytest.raises(FileNotFoundError, match="bundled patched opencode"):
             opencode_launcher.resolve_opencode_binary()
 
+    def test_windows_bundled_exe_is_resolved(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """Windows wheels bundle opencode.exe, not the POSIX opencode name."""
+        bundled = tmp_path / "bundled" / "opencode.exe"
+        bundled.parent.mkdir(parents=True)
+        bundled.write_text("MZ")
+        bundled.chmod(0o755)
+
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _fake_as_file(p):
+            yield bundled
+
+        class _FakeTraversable:
+            def __truediv__(self, other):
+                return self
+
+            def is_file(self):
+                return True
+
+        monkeypatch.setattr(opencode_launcher, "_bundled_opencode_names", lambda: ["opencode.exe"])
+        monkeypatch.setattr(opencode_launcher.resources, "as_file", _fake_as_file)
+        monkeypatch.setattr(opencode_launcher.resources, "files", lambda _pkg: _FakeTraversable())
+        monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+
+        assert opencode_launcher.resolve_opencode_binary() == bundled
+
     def test_explicit_opencode_escape_hatch_uses_env_override(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
@@ -476,10 +505,10 @@ class TestRunAutoAgentInject:
         assert cfg is not None
         assert cfg.endswith("opencode.json"), cfg
 
-    def test_main_run_preserves_user_opencode_config(
+    def test_main_run_overrides_user_opencode_config(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """If user already exported OPENCODE_CONFIG, don't clobber it."""
+        """The managed PerfXpert path must not inherit user opencode config."""
         fake_bin = tmp_path / "opencode"
         fake_bin.write_text("#!/bin/sh\nexit 0\n")
         fake_bin.chmod(0o755)
@@ -510,7 +539,10 @@ class TestRunAutoAgentInject:
         rc = main(["run", "hello"])
         assert rc == 0
         env = captured["env"]
-        assert env.get("OPENCODE_CONFIG") == "/user/custom.json"  # type: ignore[union-attr]
+        cfg = env.get("OPENCODE_CONFIG")  # type: ignore[union-attr]
+        assert cfg != "/user/custom.json"
+        assert isinstance(cfg, str)
+        assert cfg.endswith("opencode.json")
 
 
 def test_main_install_patches_dispatches_inline(
@@ -527,6 +559,7 @@ def test_main_install_patches_dispatches_inline(
     monkeypatch.setattr(
         "perfxpert.cli.opencode_launcher.subprocess.run", _fake_run
     )
+    monkeypatch.setattr(opencode_launcher, "_is_windows_platform", lambda: False)
     rc = main(["install-patches"])
     assert rc == 0
     cmd = captured["cmd"]
@@ -534,6 +567,27 @@ def test_main_install_patches_dispatches_inline(
     assert isinstance(cmd, list)
     assert cmd[0] == "bash"
     assert cmd[1].endswith("build-bundled-opencode.sh")
+
+
+def test_main_install_patches_uses_powershell_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        captured["cmd"] = cmd
+        return _FakeProc(0)
+
+    monkeypatch.setattr(opencode_launcher, "_is_windows_platform", lambda: True)
+    monkeypatch.setattr(opencode_launcher, "_powershell_executable", lambda: "pwsh.exe")
+    monkeypatch.setattr("perfxpert.cli.opencode_launcher.subprocess.run", _fake_run)
+
+    rc = main(["install-patches"])
+    assert rc == 0
+    cmd = captured["cmd"]
+    assert isinstance(cmd, list)
+    assert cmd[:6] == ["pwsh.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"]
+    assert cmd[6].endswith("build-bundled-opencode.ps1")
 
 
 # ---------------------------------------------------------------------------

@@ -75,9 +75,10 @@ and MCP wiring ready to go.*
 No subcommand, no extra backend install. In packaged installs the
 launcher uses the bundled AMD-branded patched binary. In source/editable
 checkouts it prefers a locally built patched binary from
-`experimental/python/perfxpert/opencode`. Only when neither patched
-copy exists does it fall back to an upstream `opencode` on disk, with a
-warning and without the fork-only gate behavior.
+`experimental/python/perfxpert/opencode`. If neither patched copy exists,
+the default command fails with an actionable reinstall hint; a user-owned
+upstream `opencode` binary is available only through the explicit
+`perfxpert-code opencode ...` escape hatch.
 
 ```bash
 # SKIP-SAMPLE — requires a patched opencode path (repo-local build or bundled wheel)
@@ -381,6 +382,28 @@ Fix: inspect the file manually. If it's git-tracked, `git rm --cached
 fix the syntax (`codex mcp list` will hard-error on parse failure
 too) and re-run. Other backends in the same uninstall invocation
 are unaffected — they already cleaned up.
+
+### Codex CLI is not on `PATH` in PowerShell
+
+Symptom: `perfxpert-code codex` writes `.codex/config.toml`, warms
+`perfxpert-mcp`, then reports that `codex` is not on `PATH`.
+
+Cause: the project configuration can be written directly, but launching
+Codex still requires a `codex` executable in the shell that started
+`perfxpert-code`. This is common when Codex Desktop is installed but a
+normal PowerShell session does not expose a `codex` command.
+
+Fix: install the Codex CLI or add the directory that contains
+`codex.exe` to `PATH`, then re-run:
+
+```powershell
+Get-Command codex
+perfxpert-code codex
+```
+
+When the config entry is present but the CLI is missing, PerfXpert
+treats the MCP registration as configured and reports the launch problem
+separately instead of calling the install partially failed.
 
 ### MCP warmup times out
 

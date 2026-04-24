@@ -84,6 +84,8 @@ def test_resolve_user_binary_raises_when_override_not_executable(
     tmp_path: Path, monkeypatch
 ):
     """The explicit upstream-opencode escape hatch validates execute bit."""
+    if os.name == "nt":
+        pytest.skip("Windows does not expose a POSIX execute bit through chmod.")
     fake_bin = tmp_path / "fake-opencode"
     fake_bin.write_text("#!/bin/sh\necho fake\n")
     fake_bin.chmod(0o644)
@@ -177,6 +179,114 @@ def test_recursion_guard_env_set(monkeypatch):
     assert captured_env.get("PERFXPERT_IN_OPENCODE_SESSION") == "1"
 
 
+def test_default_launch_isolates_global_opencode_config(monkeypatch, tmp_path: Path):
+    """Bundled PerfXpert launch must not read the user's global opencode config.
+
+    opencode loads $XDG_CONFIG_HOME/opencode/opencode.json unconditionally.
+    If another agent backend wrote a different schema there, default
+    perfxpert-code startup should still use the bundled PerfXpert config.
+    """
+    fake_user_config_home = tmp_path / "user-config"
+    bad_global = fake_user_config_home / "opencode"
+    bad_global.mkdir(parents=True)
+    (bad_global / "opencode.json").write_text('{"mcpServers": {"bad": {}}}')
+
+    fake_cfg = tmp_path / "cfg"
+    fake_cfg.mkdir()
+    (fake_cfg / "opencode.json").write_text('{"mcp": {"perfxpert": {}}}')
+    (fake_cfg / "AGENTS.md").write_text("PerfXpert instructions")
+
+    captured_env: dict[str, str] = {}
+
+    def fake_run(cmd, **kwargs):
+        captured_env.update(kwargs.get("env") or {})
+        return mock.MagicMock(returncode=0)
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        opencode_launcher,
+        "resolve_opencode_binary",
+        lambda: Path("/bin/true"),
+    )
+    monkeypatch.setattr(opencode_launcher, "resolve_config_dir", lambda: fake_cfg)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_user_config_home))
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    rc = opencode_launcher.main([])
+
+    assert rc == 0
+    isolated = Path(captured_env["XDG_CONFIG_HOME"])
+    assert isolated != fake_user_config_home
+    assert (isolated / "opencode" / "opencode.json").read_text() == (
+        fake_cfg / "opencode.json"
+    ).read_text()
+    assert captured_env["OPENCODE_CONFIG_DIR"] != str(bad_global)
+
+
+def test_default_launch_overrides_inherited_opencode_config(
+    monkeypatch, tmp_path: Path
+):
+    fake_cfg = tmp_path / "cfg"
+    fake_cfg.mkdir()
+    bundled = fake_cfg / "opencode.json"
+    bundled.write_text('{"mcp": {"perfxpert": {}}}')
+    captured_env: dict[str, str] = {}
+
+    def fake_run(cmd, **kwargs):
+        captured_env.update(kwargs.get("env") or {})
+        return mock.MagicMock(returncode=0)
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        opencode_launcher,
+        "resolve_opencode_binary",
+        lambda: Path("/bin/true"),
+    )
+    monkeypatch.setattr(opencode_launcher, "resolve_config_dir", lambda: fake_cfg)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("OPENCODE_CONFIG", r"C:\Users\aelwazir\.config\opencode\opencode.json")
+    monkeypatch.setenv("OPENCODE_CONFIG_CONTENT", '{"mcpServers": {"bad": {}}}')
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    rc = opencode_launcher.main([])
+
+    assert rc == 0
+    assert captured_env["OPENCODE_CONFIG"] != r"C:\Users\aelwazir\.config\opencode\opencode.json"
+    assert Path(captured_env["OPENCODE_CONFIG"]).name == "opencode.json"
+    assert Path(captured_env["OPENCODE_CONFIG"]).read_text() == bundled.read_text()
+    assert "OPENCODE_CONFIG_CONTENT" not in captured_env
+
+
+def test_default_launch_prepends_python_scripts_to_path(monkeypatch, tmp_path: Path):
+    fake_scripts = tmp_path / "Scripts"
+    fake_scripts.mkdir()
+    captured_env: dict[str, str] = {}
+
+    def fake_run(cmd, **kwargs):
+        captured_env.update(kwargs.get("env") or {})
+        return mock.MagicMock(returncode=0)
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        opencode_launcher,
+        "resolve_opencode_binary",
+        lambda: Path("/bin/true"),
+    )
+    monkeypatch.setattr(
+        opencode_launcher.sysconfig, "get_path", lambda _name: str(fake_scripts)
+    )
+    monkeypatch.setenv("PATH", "C:\\other")
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    rc = opencode_launcher.main([])
+
+    assert rc == 0
+    path_value = captured_env.get("PATH") or captured_env.get("Path")
+    assert path_value is not None
+    assert path_value.split(os.pathsep)[0] == str(fake_scripts)
+
+
 def test_amd_red_in_banner(monkeypatch):
     """Banner includes AMD red ANSI color code."""
     # Verify the function itself contains the AMD red color code
@@ -202,6 +312,7 @@ def test_resolve_user_binary_autodiscovers_home_opencode_bin(tmp_path: Path, mon
 
     # Isolate: no override, no bundled binary, no PATH hit.
     monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+    monkeypatch.setattr(opencode_launcher, "_is_windows_platform", lambda: False)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
     monkeypatch.setattr(opencode_launcher.shutil, "which", lambda _: None)
 
@@ -236,6 +347,7 @@ def test_resolve_user_binary_autodiscovers_multiple_wellknown_paths(
     fake_bin.chmod(0o755)
 
     monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+    monkeypatch.setattr(opencode_launcher, "_is_windows_platform", lambda: False)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
     monkeypatch.setattr(opencode_launcher.shutil, "which", lambda _: None)
 
@@ -288,7 +400,12 @@ def test_resolve_user_binary_missing_suggests_upstream_install(
 
 def test_wellknown_paths_list_includes_home_opencode():
     """Sanity: the well-known paths helper lists `~/.opencode/bin/opencode`."""
-    paths = opencode_launcher._wellknown_opencode_paths()
+    original = opencode_launcher._is_windows_platform
+    opencode_launcher._is_windows_platform = lambda: False
+    try:
+        paths = opencode_launcher._wellknown_opencode_paths()
+    finally:
+        opencode_launcher._is_windows_platform = original
     # The upstream installer's default must be listed.
     home_opencode = Path.home() / ".opencode" / "bin" / "opencode"
     assert home_opencode in paths

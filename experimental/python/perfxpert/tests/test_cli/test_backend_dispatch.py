@@ -229,6 +229,24 @@ def test_is_help_request_false_for_empty() -> None:
     assert is_help_request([]) is False
 
 
+def test_help_passthrough_reports_spawn_oserror(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class _Adapter:
+        name = "codex"
+        binary_name = "codex"
+
+        def spawn(self, argv, env, cwd):
+            raise PermissionError("blocked")
+
+    rc = _backend_dispatch._run_adapter(_Adapter(), ["--help"])
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "launching 'codex' failed" in err
+    assert "blocked" in err
+
+
 # ---------------------------------------------------------------------------
 # main() end-to-end — backend dispatch path.
 # ---------------------------------------------------------------------------
@@ -434,7 +452,7 @@ def test_successful_install_logs_launch_handoff(
 
     assert rc == 0
     err = capsys.readouterr().err
-    assert "MCP verified; launching codex" in err
+    assert "MCP configured; launching codex" in err
 
 
 def test_quiet_successful_install_suppresses_launch_handoff(
@@ -458,7 +476,35 @@ def test_quiet_successful_install_suppresses_launch_handoff(
     rc = _backend_dispatch._exec_backend("codex", ["--quiet"])
 
     assert rc == 0
-    assert "MCP verified; launching codex" not in capsys.readouterr().err
+    assert "MCP configured; launching codex" not in capsys.readouterr().err
+
+
+def test_missing_backend_binary_after_install_reports_cleanly(
+    capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A configured backend with no launchable binary should not traceback."""
+    import perfxpert.cli._backend.codex as codex_mod
+
+    monkeypatch.delenv(RECURSION_GUARD_ENV, raising=False)
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+    monkeypatch.setattr(
+        codex_mod.CodexAdapter,
+        "install",
+        lambda self, cwd, **kw: _make_install_report(self.name),
+    )
+
+    def _missing_spawn(self, argv, env, cwd):
+        raise FileNotFoundError("codex")
+
+    monkeypatch.setattr(codex_mod.CodexAdapter, "spawn", _missing_spawn)
+
+    rc = _backend_dispatch._exec_backend("codex", ["--quiet"])
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "install completed" in err
+    assert "could not launch" in err
+    assert "codex" in err
 
 
 def test_help_passthrough_does_not_install(

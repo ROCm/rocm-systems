@@ -103,6 +103,46 @@ def test_verify_mcp_live_happy_path(
     assert report.error is None
 
 
+def test_verify_mcp_live_prepares_env_for_console_scripts(
+    cwd: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    scripts_dir = tmp_path / "Scripts"
+    scripts_dir.mkdir()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.claude.sysconfig.get_path",
+        lambda name: str(scripts_dir) if name == "scripts" else None,
+    )
+    monkeypatch.setattr(
+        ClaudeCodeAdapter,
+        "_with_wsl_node_shim",
+        lambda _self, env, _cwd: env,
+    )
+
+    def _run(cmd, *a, **kw):
+        if cmd[:1] == ["git"]:
+            return _REAL_RUN(cmd, *a, **kw)
+        captured["env"] = kw["env"]
+        captured["timeout"] = kw["timeout"]
+        return _fake_mcp_list_response(
+            {"mcpServers": {"perfxpert": {"command": "perfxpert-mcp"}}}
+        )
+
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.claude.subprocess.run", _run
+    )
+
+    report = ClaudeCodeAdapter().verify_mcp_live(cwd)
+
+    assert report.mcp_healthy is True
+    env = captured["env"]  # type: ignore[assignment]
+    first_path = env["PATH"].split(os.pathsep)[0]  # type: ignore[index]
+    assert str(scripts_dir) == first_path
+    assert captured["timeout"] >= 30
+
+
 def test_verify_mcp_live_detects_unhealthy_entry(
     cwd: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -161,6 +201,11 @@ def test_verify_mcp_live_retries_with_backoff_2_4_8(
     monkeypatch.setattr(pa.time, "sleep", lambda s: sleeps.append(s))
     monkeypatch.setenv("PERFXPERT_MCP_RETRY_BUDGET_S", "100")
     monkeypatch.setattr(
+        ClaudeCodeAdapter,
+        "_with_wsl_node_shim",
+        lambda _self, env, _cwd: env,
+    )
+    monkeypatch.setattr(
         "perfxpert.cli._backend.claude.subprocess.run", _run
     )
 
@@ -197,6 +242,11 @@ def test_verify_mcp_live_exits_early_when_budget_exhausted(
     monkeypatch.setattr(pa.time, "monotonic", lambda: fake_time["t"])
 
     monkeypatch.setenv("PERFXPERT_MCP_RETRY_BUDGET_S", "5")
+    monkeypatch.setattr(
+        ClaudeCodeAdapter,
+        "_with_wsl_node_shim",
+        lambda _self, env, _cwd: env,
+    )
     monkeypatch.setattr(
         "perfxpert.cli._backend.claude.subprocess.run", _run
     )

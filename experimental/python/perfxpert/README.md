@@ -41,6 +41,12 @@ TUI. See [docs/guides/getting-started.md](docs/guides/getting-started.md)
 for the Ubuntu/RHEL/SLES package matrix, direct-pip equivalent, editable
 installs, and troubleshooting.
 
+On Windows PowerShell, direct pip installs build the bundled
+`perfxpert/_bundled/opencode.exe` with `scripts/build-bundled-opencode.ps1`.
+If pip warns that `perfxpert-code.exe` was installed outside `PATH`, add
+the active Python `Scripts` directory to your session before invoking
+`perfxpert-code`.
+
 ### LLM Providers
 
 | Provider | Source | Typical use |

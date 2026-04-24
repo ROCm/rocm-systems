@@ -20,6 +20,7 @@ import os
 import shutil
 import subprocess
 import sys
+import sysconfig
 from importlib import resources
 from pathlib import Path
 from typing import Iterable
@@ -107,6 +108,28 @@ def _perfxpert_version() -> str:
         return _BRANDING_VERSION
 
 
+def _is_windows_platform() -> bool:
+    return os.name == "nt"
+
+
+def _opencode_binary_name() -> str:
+    return "opencode.exe" if _is_windows_platform() else "opencode"
+
+
+def _bundled_opencode_names() -> "list[str]":
+    if _is_windows_platform():
+        return ["opencode.exe", "opencode"]
+    return ["opencode"]
+
+
+def _powershell_executable() -> str | None:
+    for name in ("pwsh", "pwsh.exe", "powershell", "powershell.exe"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
 def _wellknown_opencode_paths() -> "list[Path]":
     """Canonical well-known install locations for a user-owned `opencode` binary.
 
@@ -115,12 +138,25 @@ def _wellknown_opencode_paths() -> "list[Path]":
     submodule.
     """
     home = Path.home()
-    return [
-        home / ".opencode" / "bin" / "opencode",
-        home / ".local" / "bin" / "opencode",
-        Path("/usr/local/bin/opencode"),
-        Path("/opt/opencode/bin/opencode"),
+    binary_name = _opencode_binary_name()
+    paths = [
+        home / ".opencode" / "bin" / binary_name,
+        home / ".local" / "bin" / binary_name,
     ]
+    if _is_windows_platform():
+        paths.extend(
+            [
+                home / "AppData" / "Local" / "opencode" / "bin" / binary_name,
+            ]
+        )
+    else:
+        paths.extend(
+            [
+                Path("/usr/local/bin/opencode"),
+                Path("/opt/opencode/bin/opencode"),
+            ]
+        )
+    return paths
 
 
 def _repo_local_patched_opencode_paths() -> "list[Path]":
@@ -133,12 +169,16 @@ def _repo_local_patched_opencode_paths() -> "list[Path]":
     """
     package_root = Path(__file__).resolve().parents[2]
     submodule = package_root / "opencode" / "packages" / "opencode" / "dist"
+    binary_name = _opencode_binary_name()
     return [
+        submodule / "opencode-windows-x64" / "bin" / "opencode.exe",
+        submodule / "opencode-windows-x64-baseline" / "bin" / "opencode.exe",
+        submodule / "opencode-windows-arm64" / "bin" / "opencode.exe",
         submodule / "opencode-linux-x64" / "bin" / "opencode",
         submodule / "opencode-linux-arm64" / "bin" / "opencode",
         submodule / "opencode-darwin-x64" / "bin" / "opencode",
         submodule / "opencode-darwin-arm64" / "bin" / "opencode",
-        submodule / "opencode" / "bin" / "opencode",
+        submodule / "opencode" / "bin" / binary_name,
     ]
 
 
@@ -157,12 +197,13 @@ def resolve_opencode_binary() -> Path:
             return candidate
 
     # Bundled binary built during pip install.
-    try:
-        with resources.as_file(resources.files("perfxpert") / "_bundled" / "opencode") as p:
-            if p.is_file() and os.access(p, os.X_OK):
-                return p
-    except (ModuleNotFoundError, FileNotFoundError):
-        pass
+    for bundled_name in _bundled_opencode_names():
+        try:
+            with resources.as_file(resources.files("perfxpert") / "_bundled" / bundled_name) as p:
+                if p.is_file() and os.access(p, os.X_OK):
+                    return p
+        except (ModuleNotFoundError, FileNotFoundError):
+            pass
 
     raise FileNotFoundError(
         "bundled patched opencode binary not found. Reinstall perfxpert with the "
@@ -362,7 +403,7 @@ def route_subcommand(argv: list[str]) -> tuple[str, list[str]]:
 
 
 def _run_install_patches(argv: list[str]) -> int:
-    """Run scripts/build-bundled-opencode.sh.
+    """Run scripts/build-bundled-opencode.{sh,ps1}.
 
     The script lives alongside the perfxpert source tree; from a wheel
     install it is reachable because pyproject includes the scripts/
@@ -372,9 +413,10 @@ def _run_install_patches(argv: list[str]) -> int:
     """
     # Path discovery — search candidate locations for the build script.
     here = Path(__file__).resolve()
+    script_name = "build-bundled-opencode.ps1" if _is_windows_platform() else "build-bundled-opencode.sh"
     candidates = [
-        here.parent.parent.parent / "scripts" / "build-bundled-opencode.sh",  # editable install
-        Path.cwd() / "scripts" / "build-bundled-opencode.sh",                 # dev cwd
+        here.parent.parent.parent / "scripts" / script_name,  # editable install
+        Path.cwd() / "scripts" / script_name,                 # dev cwd
     ]
     script: Path | None = None
     for c in candidates:
@@ -396,7 +438,7 @@ def _run_install_patches(argv: list[str]) -> int:
 
     if script is None:
         sys.stderr.write(
-            "\033[31mperfxpert-code install-patches: build-bundled-opencode.sh not found.\n"
+            f"\033[31mperfxpert-code install-patches: {script_name} not found.\n"
             "  Expected alongside perfxpert source at experimental/python/perfxpert/scripts/.\n"
             "  This command is for editable/source installs; wheel users should already\n"
             "  have a bundled binary — if not, reinstall perfxpert from source.\033[0m\n"
@@ -404,7 +446,25 @@ def _run_install_patches(argv: list[str]) -> int:
         return 2
 
     # Forward remaining argv (e.g. --skip-install) to the build script.
-    cmd = ["bash", str(script), *argv[1:]]
+    if script.suffix.lower() == ".ps1":
+        powershell = _powershell_executable()
+        if powershell is None:
+            sys.stderr.write(
+                "\033[31mperfxpert-code install-patches: PowerShell executable not found.\033[0m\n"
+            )
+            return 2
+        cmd = [
+            powershell,
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+            *argv[1:],
+        ]
+    else:
+        cmd = ["bash", str(script), *argv[1:]]
     print(f"perfxpert-code install-patches: running {script.name}")
     try:
         proc = subprocess.run(cmd, check=False)
@@ -670,9 +730,19 @@ def main(argv: list[str] | None = None) -> int:
     env = dict(os.environ)
     # Recursion guard marker (spec §5.8 / R10)
     env["PERFXPERT_IN_OPENCODE_SESSION"] = "1"
+    scripts_dir = sysconfig.get_path("scripts")
+    if scripts_dir:
+        path_key = "Path" if os.name == "nt" and "Path" in env else "PATH"
+        env[path_key] = scripts_dir + os.pathsep + env.get(path_key, env.get("PATH", ""))
     # Disable opencode's auto-update check — it prompts with upstream branding
     # and, if confirmed, would replace our patched bundle with upstream.
     env.setdefault("OPENCODE_DISABLE_AUTOUPDATE", "1")
+
+    # opencode also loads $XDG_CONFIG_HOME/opencode/opencode.json and any
+    # inherited OPENCODE_CONFIG override. Keep managed launches on the staged
+    # PerfXpert config so user/global opencode config cannot break startup.
+    env["XDG_CONFIG_HOME"] = str(runtime_cfg_dir.parent)
+    env["OPENCODE_CONFIG_DIR"] = str(runtime_cfg_dir)
 
     # Point opencode at our bundled config regardless of cwd.
     # Previously `perfxpert-code run ...` preserved the user's CWD (so they
@@ -680,11 +750,11 @@ def main(argv: list[str] | None = None) -> int:
     # picked up the bundled opencode.json → users got the default `build`
     # agent instead of our `perfxpert` agent, and the tool-priority gate in
     # AGENTS.md never loaded. OPENCODE_CONFIG=<file> force-loads our
-    # bundled opencode.json globally; the user's own opencode.json (if any)
-    # still merges on top.
+    # bundled opencode.json for the current session.
     bundled_cfg_file = runtime_cfg_dir / "opencode.json"
-    if bundled_cfg_file.is_file() and "OPENCODE_CONFIG" not in env:
+    if bundled_cfg_file.is_file():
         env["OPENCODE_CONFIG"] = str(bundled_cfg_file)
+    env.pop("OPENCODE_CONFIG_CONTENT", None)
 
     # Subcommand dispatch:
     #   - Known opencode subcommands (stats/run/auth/…) are NOT executed from
@@ -730,4 +800,4 @@ def _prepare_runtime_config_dir(src_config_dir: Path) -> Path:
     except OSError:
         # Some test and sandbox environments expose a read-only HOME cache.
         # Fall back to a private temp dir so the launcher remains runnable.
-        return _stage_into(Path(tempfile.mkdtemp(prefix="perfxpert-opencode-")))
+        return _stage_into(Path(tempfile.mkdtemp(prefix="perfxpert-")) / "opencode")

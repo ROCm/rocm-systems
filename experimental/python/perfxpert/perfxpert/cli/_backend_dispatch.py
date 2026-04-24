@@ -136,7 +136,20 @@ def _run_adapter(adapter, remaining_argv: list[str]) -> int:
         # the exit code if spawn_strategy == "subprocess".
         env = dict(os.environ)
         env[RECURSION_GUARD_ENV] = adapter.name
-        return adapter.spawn(remaining_argv, env, Path.cwd())
+        try:
+            return adapter.spawn(remaining_argv, env, Path.cwd())
+        except FileNotFoundError as exc:
+            sys.stderr.write(
+                f"perfxpert-code {adapter.name}: could not launch "
+                f"{adapter.binary_name!r}: {exc}\n"
+            )
+            return 1
+        except OSError as exc:
+            sys.stderr.write(
+                f"perfxpert-code {adapter.name}: launching "
+                f"{adapter.binary_name!r} failed: {exc}\n"
+            )
+            return 1
 
     flags = parse_dispatcher_flags(remaining_argv)
 
@@ -172,11 +185,24 @@ def _run_adapter(adapter, remaining_argv: list[str]) -> int:
     env[RECURSION_GUARD_ENV] = adapter.name
     if not flags.quiet:
         sys.stderr.write(
-            f"perfxpert-code {adapter.name}: MCP verified; launching "
+            f"perfxpert-code {adapter.name}: MCP configured; launching "
             f"{adapter.binary_name} ...\n"
         )
         sys.stderr.flush()
-    return adapter.spawn(flags.remaining, env, Path.cwd())
+    try:
+        return adapter.spawn(flags.remaining, env, Path.cwd())
+    except FileNotFoundError as exc:
+        sys.stderr.write(
+            f"perfxpert-code {adapter.name}: install completed, but "
+            f"could not launch {adapter.binary_name!r}: {exc}\n"
+        )
+        return 1
+    except OSError as exc:
+        sys.stderr.write(
+            f"perfxpert-code {adapter.name}: install completed, but "
+            f"launching {adapter.binary_name!r} failed: {exc}\n"
+        )
+        return 1
 
 
 def _exec_backend(name: str, remaining_argv: list[str]) -> int:

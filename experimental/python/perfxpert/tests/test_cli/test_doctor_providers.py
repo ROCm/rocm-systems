@@ -3,6 +3,29 @@
 from perfxpert import __main__ as perfxpert_main
 
 
+class _Stream:
+    def __init__(self, encoding: str):
+        self.encoding = encoding
+
+
+def test_doctor_status_tokens_use_unicode_when_supported():
+    assert perfxpert_main._doctor_status_tokens(_Stream("utf-8")) == (
+        "✓",
+        "⚠",
+        "✗",
+        "—",
+    )
+
+
+def test_doctor_status_tokens_fallback_to_ascii_for_cp1252():
+    assert perfxpert_main._doctor_status_tokens(_Stream("cp1252")) == (
+        "[OK]",
+        "[WARN]",
+        "[FAIL]",
+        "-",
+    )
+
+
 def test_check_llm_providers_accepts_canonical_env_names(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")

@@ -57,10 +57,25 @@ silently producing a broken `perfxpert-code`.
 
 #### Note on Windows
 
-PerfXpert does not auto-bootstrap bun on Windows. If the bundled
-`opencode` build is not available on your host, use the multi-backend
-launcher (`perfxpert-code claude` / `codex` / `gemini`) against a native
-backend CLI instead.
+On Windows, direct PowerShell installs use the native
+`scripts/build-bundled-opencode.ps1` path and bundle
+`perfxpert/_bundled/opencode.exe`. Git, PowerShell, Python 3.10+, and
+`bun` are required; if `bun` is not already on `PATH`, setup bootstraps
+it with `https://bun.sh/install.ps1`.
+
+Pip may install the console scripts into a per-user Python `Scripts`
+directory that is not on `PATH`. In the current PowerShell session:
+
+```powershell
+# SKIP-SAMPLE — make pip-installed console scripts visible in this shell
+$scripts = python -c "import sysconfig; print(sysconfig.get_path('scripts'))"
+$env:Path = "$scripts;$env:Path"
+perfxpert-code --version
+```
+
+`perfxpert-code` is a console script, not an importable Python module; use
+`perfxpert-code ...` or the full `...\Scripts\perfxpert-code.exe` path,
+not `python -m perfxpert-code`.
 
 ### Distro package setup
 

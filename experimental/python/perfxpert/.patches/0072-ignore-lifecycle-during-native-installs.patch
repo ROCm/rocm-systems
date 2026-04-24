@@ -1,0 +1,8 @@
+diff --git a/packages/opencode/script/build.ts b/packages/opencode/script/build.ts
+--- a/packages/opencode/script/build.ts
++++ b/packages/opencode/script/build.ts
+@@ -167,2 +167,2 @@
+-  await $`bun install --os="*" --cpu="*" @opentui/core@${pkg.dependencies["@opentui/core"]}`
+-  await $`bun install --os="*" --cpu="*" @parcel/watcher@${pkg.dependencies["@parcel/watcher"]}`
++  await $`bun install --ignore-scripts --os="*" --cpu="*" @opentui/core@${pkg.dependencies["@opentui/core"]}`
++  await $`bun install --ignore-scripts --os="*" --cpu="*" @parcel/watcher@${pkg.dependencies["@parcel/watcher"]}`

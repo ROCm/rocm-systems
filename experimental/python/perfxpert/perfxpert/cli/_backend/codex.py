@@ -10,7 +10,8 @@ the `codex` CLI. Covers:
   April 2026 — API drift from the original plan, see decision record).
 * `plan()` / `install()` / `uninstall()` / `spawn()` — full lifecycle.
 * `verify_mcp_live()` — shells out to `codex mcp list` + probes for
-  the perfxpert entry.
+  the perfxpert entry, or falls back to reading Codex config when the
+  CLI is unavailable.
 
 Trust-gate behavior (plan Task 10):
   1. untrusted + non-interactive + no ASSUME_CONSENT → TrustRequired.
@@ -120,6 +121,78 @@ _KNOWN_TOOLS: tuple[str, ...] = (
 )
 
 
+def _is_windows_platform() -> bool:
+    return os.name == "nt"
+
+
+def _run_windows_tui(
+    cmd: list[str], *, cwd: Path, env: dict[str, str]
+) -> int:
+    process = subprocess.Popen(cmd, cwd=str(cwd), env=env)
+    try:
+        return process.wait()
+    except KeyboardInterrupt:
+        try:
+            return process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+            return 130
+
+
+def _is_windowsapps_codex_alias(path: str | os.PathLike[str] | None) -> bool:
+    """Return True for protected Codex app-alias paths on Windows."""
+    if path is None:
+        return False
+    normalized = os.fspath(path).replace("/", "\\").lower()
+    return "\\windowsapps\\" in normalized and "\\openai.codex_" in normalized
+
+
+def _codex_localcache_candidates() -> list[Path]:
+    """Known Codex Desktop install locations with a directly runnable CLI."""
+    if not _is_windows_platform():
+        return []
+
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if not local_app_data:
+        return []
+
+    packages_root = Path(local_app_data) / "Packages"
+    try:
+        packages = list(packages_root.glob("OpenAI.Codex_*"))
+    except OSError:
+        return []
+
+    return [
+        package
+        / "LocalCache"
+        / "Local"
+        / "OpenAI"
+        / "Codex"
+        / "bin"
+        / "codex.exe"
+        for package in packages
+    ]
+
+
+def _resolve_codex_executable(binary_name: str = "codex") -> str | None:
+    """Resolve a usable Codex executable, avoiding Windows protected aliases."""
+    found = shutil.which(binary_name)
+    if found and not _is_windowsapps_codex_alias(found):
+        return found
+
+    if binary_name.lower() == "codex":
+        for candidate in _codex_localcache_candidates():
+            if candidate.is_file():
+                return str(candidate)
+
+    return None
+
+
 class TrustStatus(enum.Enum):
     """Result of probing `~/.codex/config.toml` for a cwd's trust_level.
 
@@ -165,7 +238,7 @@ class CodexAdapter:
     # ------------------------------------------------------------------
 
     def check_available(self) -> tuple[bool, str]:
-        path = shutil.which(self.binary_name)
+        path = _resolve_codex_executable(self.binary_name)
         if not path:
             return False, f"{self.binary_name!r} not found on PATH. {self.install_hint}"
         ok, detail = self._probe_version(path)
@@ -435,12 +508,15 @@ class CodexAdapter:
             )
         else:
             self._log_step(quiet, "[5/5] Verifying perfxpert MCP is live ...")
-            live = self.verify_mcp_live(cwd)
+            live = self.verify_mcp_live(cwd, scope=scope)
             if not live.mcp_healthy:
                 raise PartialInstall(
                     f"perfxpert MCP registered but live-check failed: "
                     f"{live.error or 'unknown reason'}"
                 )
+            if live.error:
+                self._log_step(quiet, f"  note: {live.error}")
+                actions.append(live.error)
 
         grant_consent(self.name, cwd, effective_fset)
         _ = gate_installed  # quiets type-checker on unused when no telem.
@@ -638,7 +714,7 @@ class CodexAdapter:
         `[mcp_servers.perfxpert]` into `config_toml` directly
         (preserves comments + unknown keys).
         """
-        binary = shutil.which(self.binary_name)
+        binary = _resolve_codex_executable(self.binary_name)
 
         # 1) Idempotency: skip if already registered.
         if binary and self._mcp_already_registered(binary, cwd):
@@ -760,12 +836,34 @@ class CodexAdapter:
 
         pa.atomic_write(config_toml, tomlkit_mod.dumps(doc))
 
+    def _config_toml_has_perfxpert_entry(self, config_toml: Path) -> bool:
+        """Return True when Codex config contains our MCP entry."""
+        if not config_toml.is_file():
+            return False
+        try:
+            tomlkit_mod = _lazy_import_tomlkit(
+                "verifying codex config.toml directly"
+            )
+            doc = tomlkit_mod.parse(config_toml.read_text(encoding="utf-8"))
+        except Exception as exc:  # pragma: no cover - defensive parse path
+            _LOG.debug("failed to inspect %s: %s", config_toml, exc)
+            return False
+        servers = doc.get("mcp_servers")
+        if servers is None:
+            return False
+        entry = servers.get("perfxpert")
+        return entry is not None and entry.get("command") == "perfxpert-mcp"
+
     # ------------------------------------------------------------------
     # verify_mcp_live
     # ------------------------------------------------------------------
 
     def verify_mcp_live(
-        self, cwd: Path, telemetry: bool = False
+        self,
+        cwd: Path,
+        telemetry: bool = False,
+        *,
+        scope: Literal["project", "user"] = "project",
     ) -> LiveCheckReport:
         """Verify codex sees the perfxpert MCP entry.
 
@@ -774,10 +872,23 @@ class CodexAdapter:
         token). Falls back to reading `config.toml` if the binary
         is missing at verify time.
         """
-        binary = shutil.which(self.binary_name)
+        binary = _resolve_codex_executable(self.binary_name)
         gate_installed = self._probe_gate_hook_installed(cwd)
 
         if binary is None:
+            config_toml = self._target_paths(cwd, scope)[0]
+            if self._config_toml_has_perfxpert_entry(config_toml):
+                return LiveCheckReport(
+                    backend=self.name,
+                    mcp_listed=True,
+                    mcp_healthy=True,
+                    gate_hook_installed=gate_installed,
+                    error=(
+                        f"{self.binary_name!r} not on PATH at verify "
+                        f"time; verified perfxpert MCP config entry in "
+                        f"{config_toml}"
+                    ),
+                )
             return LiveCheckReport(
                 backend=self.name,
                 mcp_listed=False,
@@ -843,7 +954,7 @@ class CodexAdapter:
         return False
 
     # ------------------------------------------------------------------
-    # spawn — execvpe into codex.
+    # spawn — hand off to codex.
     # ------------------------------------------------------------------
 
     def spawn(
@@ -852,8 +963,25 @@ class CodexAdapter:
         env: dict[str, str],
         cwd: Path,
     ) -> int:
+        executable = _resolve_codex_executable(self.binary_name)
+        if executable is None:
+            raise FileNotFoundError(
+                f"{self.binary_name!r} not found on PATH or in the "
+                "Codex Desktop Windows install location"
+            )
+        if os.path.isabs(executable):
+            env = dict(env)
+            env["PATH"] = (
+                f"{Path(executable).parent}{os.pathsep}{env.get('PATH', '')}"
+            )
+        if _is_windows_platform():
+            return _run_windows_tui(
+                [executable, *argv],
+                cwd=str(cwd),
+                env=env,
+            )
         os.chdir(str(cwd))
-        os.execvpe(self.binary_name, [self.binary_name, *argv], env)
+        os.execvpe(executable, [self.binary_name, *argv], env)
         return 127  # pragma: no cover
 
     # ------------------------------------------------------------------
@@ -873,7 +1001,7 @@ class CodexAdapter:
         drifted: list[Path] = []
 
         # Remove MCP entry — prefer shell-out.
-        binary = shutil.which(self.binary_name)
+        binary = _resolve_codex_executable(self.binary_name)
         if binary is not None:
             try:
                 subprocess.run(

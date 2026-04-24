@@ -407,10 +407,22 @@ def _report_active_mode() -> str:
     return "Mode: agentic"
 
 
-def _run_doctor():
-    """Run all health checks and print results in canonical format."""
+def _doctor_status_tokens(stream=None) -> tuple[str, str, str, str]:
+    """Return printable doctor status tokens for the active output encoding."""
     import sys
 
+    stream = stream or sys.stdout
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    try:
+        "✓⚠✗—".encode(encoding)
+    except (LookupError, UnicodeEncodeError):
+        return "[OK]", "[WARN]", "[FAIL]", "-"
+    return "✓", "⚠", "✗", "—"
+
+
+def _run_doctor():
+    """Run all health checks and print results in canonical format."""
+    ok_symbol, warn_symbol, fail_symbol, dash = _doctor_status_tokens()
     checks = [
         ("perfxpert version", _check_version()),
         ("Python version", _check_python_version()),
@@ -423,8 +435,8 @@ def _run_doctor():
 
     all_ok = True
     for name, (ok, msg) in checks:
-        symbol = "✓" if ok else "⚠" if "unknown" in msg.lower() else "✗"
-        if not ok and symbol == "✗":
+        symbol = ok_symbol if ok else warn_symbol if "unknown" in msg.lower() else fail_symbol
+        if not ok and symbol == fail_symbol:
             all_ok = False
         print(f"{symbol} {msg}")
 
@@ -433,9 +445,9 @@ def _run_doctor():
     all_ok = all_ok and len(configured) > 0  # at least one provider configured
     configured_str = ", ".join(configured) if configured else "(none)"
     unconfigured_str = ", ".join(unconfigured) if unconfigured else "(all configured)"
-    print(f"✓ {len(configured)}/5 LLM providers configured ({configured_str})")
+    print(f"{ok_symbol} {len(configured)}/5 LLM providers configured ({configured_str})")
     if unconfigured:
-        print(f"  {len(unconfigured)}/5 providers unconfigured ({unconfigured_str}) — see README")
+        print(f"  {len(unconfigured)}/5 providers unconfigured ({unconfigured_str}) {dash} see README")
 
     # Report active mode
     print()
@@ -444,10 +456,10 @@ def _run_doctor():
     # Final status
     print()
     if all_ok:
-        print("✓ ALL CLEAN")
+        print(f"{ok_symbol} ALL CLEAN")
         return 0
     else:
-        print(f"✗ Issues found — see above")
+        print(f"{fail_symbol} Issues found {dash} see above")
         return 1
 
 
@@ -458,10 +470,10 @@ def _get_version():
         return version("perfxpert")
     except (ImportError, ModuleNotFoundError):
         # importlib.metadata not available (Python < 3.8 edge case)
-        return "0.1.0"
+        return "0.2.0"
     except ValueError:
         # Package not installed / metadata lookup failed
-        return "0.1.0"
+        return "0.2.0"
 
 
 if __name__ == "__main__":

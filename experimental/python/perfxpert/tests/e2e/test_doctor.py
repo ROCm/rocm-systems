@@ -3,6 +3,7 @@
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -32,7 +33,12 @@ def _run_doctor(env=None) -> tuple[int, str]:
     if Path(_OPENCODE_PATH).exists():
         env["PERFXPERT_OPENCODE_PATH"] = _OPENCODE_PATH
 
-    r = subprocess.run(["perfxpert", "doctor"], capture_output=True, text=True, env=env)
+    r = subprocess.run(
+        [sys.executable, "-m", "perfxpert", "doctor"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
     return r.returncode, r.stdout
 
 
@@ -44,20 +50,22 @@ def test_doctor_succeeds_and_emits_all_clean_token():
         assert exit_code == 0, f"exit={exit_code}\noutput: {out}"
         assert "ALL CLEAN" in out, out
     assert "perfxpert" in out
-    assert "✓" in out or "✗" in out  # Has status indicators
+    assert re.search(r"✓|✗|\[OK\]|\[FAIL\]", out), out
 
 
 def test_doctor_emits_expected_lines():
     """Doctor output should contain expected status lines in canonical format."""
     exit_code, out = _run_doctor()
     # These patterns should always be present (regardless of whether all checks pass)
+    ok = r"(?:✓|\[OK\])"
+    fail = r"(?:✗|\[FAIL\])"
     essential_patterns = [
-        r"✓ perfxpert \d+\.\d+\.\d+",
-        r"✓ Python 3\.\d+",
-        r"(✓|✗) (openai-agents|openai-agents \d+\.\d+\.\d+)",
-        r"✓ MCP server",
-        r"✓ Python task store",
-        r"(✓|✗) (opencode|Bundled opencode)",
+        rf"{ok} perfxpert \d+\.\d+\.\d+",
+        rf"{ok} Python 3\.\d+",
+        rf"({ok}|{fail}) (openai-agents|openai-agents \d+\.\d+\.\d+)",
+        rf"{ok} MCP server",
+        rf"{ok} Python task store",
+        rf"({ok}|{fail}) (opencode|Bundled opencode)",
         r"\d+/5 LLM providers configured",
     ]
     for pat in essential_patterns:
@@ -68,7 +76,7 @@ def test_doctor_has_no_leading_whitespace_on_primary_lines():
     """Sub-lines (unconfigured providers) start with 2 spaces; primary lines don't."""
     exit_code, out = _run_doctor()
     for line in out.splitlines():
-        if line.startswith(("✓", "⚠", "✗")):
+        if line.startswith(("✓", "⚠", "✗", "[OK]", "[WARN]", "[FAIL]")):
             assert not line.startswith(" "), f"leading whitespace on primary: {line!r}"
 
 

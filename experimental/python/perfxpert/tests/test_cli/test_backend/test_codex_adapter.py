@@ -34,6 +34,8 @@ from perfxpert.cli._backend.codex import (
     SKIP_LIVE_CHECK_ENV,
     CodexAdapter,
     TrustStatus,
+    _is_windowsapps_codex_alias,
+    _resolve_codex_executable,
 )
 from perfxpert.cli._backend.protocol import (
     BackendAdapter,
@@ -65,7 +67,10 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     trust set it themselves so untrust tests stay honest.
     """
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "LocalAppData"))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setenv("PERFXPERT_ASSUME_CONSENT", "1")
     monkeypatch.setenv(SKIP_LIVE_CHECK_ENV, "1")
     # Belt-and-braces: reset any env the harness may have inherited.
@@ -102,7 +107,7 @@ def _write_user_codex_config(home: Path, contents: str) -> Path:
 
 def _mark_trusted(home: Path, cwd: Path) -> None:
     """Pre-populate the trusted-projects table for `cwd`."""
-    resolved = str(cwd.expanduser().resolve())
+    resolved = str(cwd.expanduser().resolve()).replace("\\", "\\\\")
     _write_user_codex_config(
         home,
         f'[projects."{resolved}"]\ntrust_level = "trusted"\n',
@@ -173,6 +178,7 @@ def test_check_available_missing_binary(
 ) -> None:
     """Missing codex binary → (False, install hint)."""
     monkeypatch.setattr("shutil.which", lambda _: None)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
     ok, reason = CodexAdapter().check_available()
     assert ok is False
     assert "not found on PATH" in reason
@@ -216,6 +222,58 @@ def test_check_available_happy_path(
     assert ok is True
 
 
+def test_windowsapps_codex_alias_is_detected() -> None:
+    alias = (
+        r"C:\Program Files\WindowsApps\OpenAI.Codex_26.422.1952.0_x64__"
+        r"2p2nqsd0c76g0\app\resources\codex"
+    )
+    assert _is_windowsapps_codex_alias(alias) is True
+    assert _is_windowsapps_codex_alias(r"C:\tools\codex.exe") is False
+
+
+def test_resolve_codex_prefers_normal_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("shutil.which", lambda _: r"C:\tools\codex.exe")
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex._codex_localcache_candidates",
+        lambda: [Path(r"C:\Users\u\AppData\Local\Packages\OpenAI.Codex_x\LocalCache\Local\OpenAI\Codex\bin\codex.exe")],
+    )
+    assert _resolve_codex_executable() == r"C:\tools\codex.exe"
+
+
+def test_resolve_codex_uses_localcache_for_windowsapps_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    alias = (
+        r"C:\Program Files\WindowsApps\OpenAI.Codex_26.422.1952.0_x64__"
+        r"2p2nqsd0c76g0\app\resources\codex"
+    )
+    candidate = tmp_path / "codex.exe"
+    candidate.write_text("fake")
+    monkeypatch.setattr("shutil.which", lambda _: alias)
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex._codex_localcache_candidates",
+        lambda: [candidate],
+    )
+    assert _resolve_codex_executable() == str(candidate)
+
+
+def test_resolve_codex_uses_localcache_when_not_on_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = tmp_path / "codex.exe"
+    candidate.write_text("fake")
+    monkeypatch.setattr("shutil.which", lambda _: None)
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex._codex_localcache_candidates",
+        lambda: [candidate],
+    )
+    assert _resolve_codex_executable() == str(candidate)
+
+
 # ---------------------------------------------------------------------------
 # _check_trust — parses trusted / untrusted / unknown from config.toml.
 # ---------------------------------------------------------------------------
@@ -226,6 +284,7 @@ def test_check_trust_parses_trusted_and_untrusted(
 ) -> None:
     """I-N3 / plan B3: read `[projects."<cwd>"].trust_level`."""
     resolved = str(project_cwd.expanduser().resolve())
+    toml_resolved = resolved.replace("\\", "\\\\")
     adapter = CodexAdapter()
 
     # (a) No config file → UNKNOWN.
@@ -234,14 +293,14 @@ def test_check_trust_parses_trusted_and_untrusted(
     # (b) Trusted.
     _write_user_codex_config(
         isolated_home,
-        f'[projects."{resolved}"]\ntrust_level = "trusted"\n',
+        f'[projects."{toml_resolved}"]\ntrust_level = "trusted"\n',
     )
     assert adapter._check_trust(project_cwd) == TrustStatus.TRUSTED
 
     # (c) Untrusted.
     _write_user_codex_config(
         isolated_home,
-        f'[projects."{resolved}"]\ntrust_level = "untrusted"\n',
+        f'[projects."{toml_resolved}"]\ntrust_level = "untrusted"\n',
     )
     assert adapter._check_trust(project_cwd) == TrustStatus.UNTRUSTED
 
@@ -357,7 +416,7 @@ def test_install_auto_trusts_with_env_var(
     assert cfg.is_file()
     text = cfg.read_text()
     resolved = str(project_cwd.expanduser().resolve())
-    assert resolved in text
+    assert resolved.replace("\\", "\\\\") in text
     assert 'trust_level = "trusted"' in text
 
 
@@ -524,7 +583,7 @@ def test_install_never_touches_tracked_agents_md(
     leave the committed file byte-identical and write a discovered
     `AGENTS.override.md` that shadows it safely for Codex."""
     tracked = project_cwd / "AGENTS.md"
-    tracked.write_text("USER CONTENT — do not touch\n")
+    tracked.write_text("USER CONTENT — do not touch\n", encoding="utf-8")
     subprocess.run(
         ["git", "add", "AGENTS.md"], cwd=str(project_cwd), check=True
     )
@@ -542,11 +601,11 @@ def test_install_never_touches_tracked_agents_md(
     CodexAdapter().install(project_cwd, scope="project")
 
     # Tracked AGENTS.md unchanged.
-    assert tracked.read_text() == "USER CONTENT — do not touch\n"
+    assert tracked.read_text(encoding="utf-8") == "USER CONTENT — do not touch\n"
     # Codex-discovered override staged at project root.
     override = project_cwd / "AGENTS.override.md"
     assert override.is_file()
-    override_text = override.read_text()
+    override_text = override.read_text(encoding="utf-8")
     assert "USER CONTENT — do not touch" in override_text
     assert "<!-- BEGIN perfxpert-managed v1 cache=" in override_text
 
@@ -572,7 +631,7 @@ def test_install_refreshes_generated_shadow_copy_on_rerun(
     adapter.install(project_cwd, scope="project")
 
     override = project_cwd / "AGENTS.override.md"
-    text = override.read_text()
+    text = override.read_text(encoding="utf-8")
     assert "BASE v2" in text
     assert "BASE v1" not in text
 
@@ -651,6 +710,8 @@ def test_spawn_uses_execvpe_not_subprocess_run(
 ) -> None:
     """I1: codex is a TUI — spawn must use os.execvpe."""
     called: dict = {}
+    executable = tmp_path / "codex.exe"
+    executable.write_text("fake")
 
     def _fake_execvpe(name, argv, env):
         called["name"] = name
@@ -660,14 +721,100 @@ def test_spawn_uses_execvpe_not_subprocess_run(
 
     monkeypatch.setattr("os.execvpe", _fake_execvpe)
     monkeypatch.setattr("os.chdir", lambda _p: None)
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex._is_windows_platform",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex._resolve_codex_executable",
+        lambda _binary_name="codex": str(executable),
+    )
 
     adapter = CodexAdapter()
     with pytest.raises(RuntimeError, match="stopped"):
         adapter.spawn(["hello"], {"K": "V"}, tmp_path)
 
-    assert called["name"] == "codex"
+    assert called["name"] == str(executable)
     assert called["argv"] == ["codex", "hello"]
-    assert called["env"] == {"K": "V"}
+    assert called["env"]["K"] == "V"
+    assert str(executable.parent) in called["env"]["PATH"]
+
+
+def test_spawn_waits_for_codex_on_windows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Windows uses a foreground child process so PowerShell keeps stdin blocked."""
+    executable = tmp_path / "codex.exe"
+    executable.write_text("fake")
+    captured: dict[str, object] = {}
+
+    class _Process:
+        def wait(self, timeout=None):
+            return 23
+
+    def _fake_popen(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return _Process()
+
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex._is_windows_platform",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex._resolve_codex_executable",
+        lambda _binary_name="codex": str(executable),
+    )
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex.subprocess.Popen",
+        _fake_popen,
+    )
+
+    rc = CodexAdapter().spawn(["hello"], {"K": "V"}, tmp_path)
+
+    assert rc == 23
+    assert captured["cmd"] == [str(executable), "hello"]
+    kwargs = captured["kwargs"]
+    assert kwargs["cwd"] == str(tmp_path)  # type: ignore[index]
+    env = kwargs["env"]  # type: ignore[index]
+    assert env["K"] == "V"
+    assert str(executable.parent) in env["PATH"]
+
+
+def test_spawn_handles_windows_tui_keyboard_interrupt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    executable = tmp_path / "codex.exe"
+    executable.write_text("fake")
+    waits: list[object] = []
+
+    class _Process:
+        def wait(self, timeout=None):
+            waits.append(timeout)
+            if timeout is None:
+                raise KeyboardInterrupt
+            return 130
+
+        def terminate(self):
+            raise AssertionError("process should get a chance to exit first")
+
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex._is_windows_platform",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex._resolve_codex_executable",
+        lambda _binary_name="codex": str(executable),
+    )
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex.subprocess.Popen",
+        lambda *a, **kw: _Process(),
+    )
+
+    rc = CodexAdapter().spawn([], {}, tmp_path)
+
+    assert rc == 130
+    assert waits == [None, 5]
 
 
 # ---------------------------------------------------------------------------
@@ -780,6 +927,28 @@ def test_verify_mcp_live_binary_missing(
     report = CodexAdapter().verify_mcp_live(project_cwd)
     assert report.mcp_healthy is False
     assert "PATH" in (report.error or "")
+
+
+def test_verify_mcp_live_binary_missing_accepts_config_entry(
+    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When codex is absent, a matching TOML entry verifies configuration."""
+    cfg = project_cwd / ".codex" / "config.toml"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text(
+        '[mcp_servers.perfxpert]\n'
+        'command = "perfxpert-mcp"\n'
+        'args = []\n'
+        'enabled = true\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("shutil.which", lambda _: None)
+
+    report = CodexAdapter().verify_mcp_live(project_cwd)
+
+    assert report.mcp_listed is True
+    assert report.mcp_healthy is True
+    assert str(cfg) in (report.error or "")
 
 
 # ---------------------------------------------------------------------------
@@ -1168,7 +1337,7 @@ def test_install_appends_managed_block_to_existing_override(
 
     CodexAdapter().install(project_cwd, scope="project")
 
-    text = override.read_text()
+    text = override.read_text(encoding="utf-8")
     assert "EXISTING OVERRIDE" in text
     assert "<!-- BEGIN perfxpert-managed v1 cache=" in text
 
@@ -1193,7 +1362,7 @@ def test_uninstall_removes_only_perfxpert_block_from_existing_override(
 
     assert isinstance(report, UninstallReport)
     assert override.is_file()
-    text = override.read_text()
+    text = override.read_text(encoding="utf-8")
     assert text == "EXISTING OVERRIDE\n"
 
 
@@ -1244,13 +1413,18 @@ def test_uninstall_preserves_user_edited_generated_override(
     adapter.install(project_cwd, scope="project")
 
     override = project_cwd / "AGENTS.override.md"
-    override.write_text(override.read_text().replace("ROOT AGENTS", "ROOT AGENTS\nUSER EDIT"))
+    override.write_text(
+        override.read_text(encoding="utf-8").replace(
+            "ROOT AGENTS", "ROOT AGENTS\nUSER EDIT"
+        ),
+        encoding="utf-8",
+    )
 
     report = adapter.uninstall(project_cwd, scope="project")
 
     assert isinstance(report, UninstallReport)
     assert override.exists()
-    text = override.read_text()
+    text = override.read_text(encoding="utf-8")
     assert "USER EDIT" in text
     assert "<!-- BEGIN perfxpert-managed v1 cache=" not in text
 

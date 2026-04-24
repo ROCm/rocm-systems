@@ -27,9 +27,11 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
+import sysconfig
 import time
 from pathlib import Path
 from typing import Literal
@@ -90,6 +92,87 @@ _KNOWN_TOOLS: tuple[str, ...] = (
 )
 
 
+_CLAUDE_MCP_LIST_TIMEOUT_S = 45
+
+
+def _is_windows_platform() -> bool:
+    return os.name == "nt"
+
+
+def _run_windows_tui(
+    cmd: list[str], *, cwd: Path, env: dict[str, str]
+) -> int:
+    process = subprocess.Popen(cmd, cwd=str(cwd), env=env)
+    try:
+        return process.wait()
+    except KeyboardInterrupt:
+        try:
+            return process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+            return 130
+
+
+def _is_windowsapps_path(path: str | os.PathLike[str] | None) -> bool:
+    if path is None:
+        return False
+    return "\\windowsapps\\" in os.fspath(path).replace("/", "\\").lower()
+
+
+def _windows_path_to_wsl(path: Path) -> str | None:
+    """Convert a Windows absolute path to `/mnt/<drive>/...` for WSL hooks."""
+    resolved = Path(path).resolve()
+    drive = resolved.drive.rstrip(":")
+    if not drive:
+        return None
+    rest = resolved.as_posix()[len(f"{drive}:") :].lstrip("/")
+    return f"/mnt/{drive.lower()}/{rest}"
+
+
+def _find_windows_node_exe() -> Path | None:
+    """Find a real node.exe, avoiding WindowsApps aliases that WSL cannot run."""
+    candidates: list[Path] = []
+
+    override = os.environ.get("PERFXPERT_NODE_EXE")
+    if override:
+        candidates.append(Path(override))
+
+    home = Path.home()
+    candidates.append(
+        home
+        / ".cache"
+        / "codex-runtimes"
+        / "codex-primary-runtime"
+        / "dependencies"
+        / "node"
+        / "bin"
+        / "node.exe"
+    )
+
+    for env_name in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
+        root = os.environ.get(env_name)
+        if root:
+            candidates.append(Path(root) / "nodejs" / "node.exe")
+
+    for name in ("node.exe", "node"):
+        found = shutil.which(name)
+        if found and not _is_windowsapps_path(found):
+            candidates.append(Path(found))
+
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
 class ClaudeCodeAdapter:
     """Adapter for the `claude` CLI (Claude Code)."""
 
@@ -120,6 +203,7 @@ class ClaudeCodeAdapter:
     )
     _PERFXPERT_DIR = ".perfxpert"
     _AGENTS_FILE = "AGENTS.md"
+    _BIN_DIR = "bin"
 
     # ------------------------------------------------------------------
     # check_available
@@ -332,13 +416,15 @@ class ClaudeCodeAdapter:
                 gate_hook_installed=None,
                 error=f"{self.binary_name!r} not on PATH at verify time",
             )
+        env = self._claude_subprocess_env(cwd)
 
         def _list_probe() -> tuple[bool, tuple[str, ...]]:
             """Single attempt — raises on error so the retry helper can backoff."""
             result = subprocess.run(
                 [binary, "mcp", "list"],
                 cwd=str(cwd),
-                timeout=15,
+                timeout=_CLAUDE_MCP_LIST_TIMEOUT_S,
+                env=env,
                 capture_output=True,
                 check=False,
             )
@@ -442,11 +528,118 @@ class ClaudeCodeAdapter:
     def spawn(
         self, argv: list[str], env: dict[str, str], cwd: Path
     ) -> int:
-        """Replace the Python process with the claude TUI via execvpe."""
+        """Hand off to the Claude TUI."""
+        cwd = Path(cwd).expanduser().resolve()
+        env = self._claude_subprocess_env(cwd, env)
+        if _is_windows_platform():
+            return _run_windows_tui(
+                [self.binary_name, *argv],
+                cwd=str(cwd),
+                env=env,
+            )
         os.chdir(str(cwd))
         os.execvpe(self.binary_name, [self.binary_name, *argv], env)
         # execvpe never returns on success; reach here = failure.
         return 127  # pragma: no cover
+
+    def _claude_subprocess_env(
+        self, cwd: Path, env: dict[str, str] | None = None
+    ) -> dict[str, str]:
+        """Environment for Claude child commands.
+
+        Keep the perfxpert console scripts reachable even when the
+        launching shell has not refreshed PATH, then apply the existing
+        Windows node shim for Claude hooks.
+        """
+        prepared = self._with_python_scripts_on_path(dict(env or os.environ))
+        return self._with_wsl_node_shim(prepared, cwd)
+
+    def _with_python_scripts_on_path(
+        self, env: dict[str, str]
+    ) -> dict[str, str]:
+        scripts_dir = sysconfig.get_path("scripts")
+        if not scripts_dir:
+            return env
+        try:
+            scripts_path = Path(scripts_dir)
+            if not scripts_path.is_dir():
+                return env
+        except OSError:
+            return env
+
+        path_key = "PATH"
+        path = env.get(path_key, "")
+        norm_scripts = os.path.normcase(os.path.abspath(str(scripts_path)))
+        parts = [p for p in path.split(os.pathsep) if p]
+        if any(
+            os.path.normcase(os.path.abspath(part)) == norm_scripts
+            for part in parts
+        ):
+            return env
+
+        updated = dict(env)
+        updated[path_key] = (
+            f"{scripts_path}{os.pathsep}{path}" if path else str(scripts_path)
+        )
+        return updated
+
+    def _with_wsl_node_shim(self, env: dict[str, str], cwd: Path) -> dict[str, str]:
+        """Make `node` visible to WSL bash hooks launched by Claude on Windows."""
+        if os.name != "nt" or not env.get("PATH") or not shutil.which("bash"):
+            return env
+
+        try:
+            probe = subprocess.run(
+                ["bash", "-lc", "command -v node >/dev/null 2>&1"],
+                env=env,
+                timeout=5,
+                capture_output=True,
+                check=False,
+            )
+            if probe.returncode == 0:
+                return env
+        except (OSError, subprocess.TimeoutExpired):
+            return env
+
+        node_exe = _find_windows_node_exe()
+        if node_exe is None:
+            return env
+
+        node_wsl = _windows_path_to_wsl(node_exe)
+        if node_wsl is None:
+            return env
+
+        shim_dir = cwd / self._PERFXPERT_DIR / self._BIN_DIR
+        shim_path = shim_dir / "node"
+        shim_dir.mkdir(parents=True, exist_ok=True)
+        shim_tmp = shim_path.with_name("node.tmp")
+        with open(shim_tmp, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(
+                "#!/usr/bin/env bash\n"
+                f"exec {shlex.quote(node_wsl)} \"$@\"\n"
+            )
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except OSError:
+                pass
+        os.replace(shim_tmp, shim_path)
+        shim_wsl = _windows_path_to_wsl(shim_path)
+        if shim_wsl is not None:
+            try:
+                subprocess.run(
+                    ["bash", "-lc", f"chmod +x {shlex.quote(shim_wsl)}"],
+                    env=env,
+                    timeout=5,
+                    capture_output=True,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+
+        updated = dict(env)
+        updated["PATH"] = f"{shim_dir}{os.pathsep}{env.get('PATH', '')}"
+        return updated
 
     # ------------------------------------------------------------------
     # uninstall
@@ -510,12 +703,14 @@ class ClaudeCodeAdapter:
                 pass
 
         # MCP entry — shell out to `claude mcp remove perfxpert`.
-        if shutil.which(self.binary_name):
+        binary = shutil.which(self.binary_name)
+        if binary:
             try:
                 subprocess.run(
-                    [self.binary_name, "mcp", "remove", "perfxpert"],
+                    [binary, "mcp", "remove", "perfxpert"],
                     cwd=str(cwd),
                     timeout=15,
+                    env=self._claude_subprocess_env(cwd),
                     capture_output=True,
                     check=False,
                 )
@@ -596,9 +791,10 @@ class ClaudeCodeAdapter:
         rewrite there).
         """
         binary = shutil.which(self.binary_name)
+        env = self._claude_subprocess_env(cwd)
 
         # 1) Idempotency: if entry is already present + identical, skip.
-        if binary and self._mcp_already_registered(binary, cwd):
+        if binary and self._mcp_already_registered(binary, cwd, env):
             _LOG.debug("perfxpert MCP entry already present; skipping add")
             return
 
@@ -618,6 +814,7 @@ class ClaudeCodeAdapter:
                     ],
                     cwd=str(cwd),
                     timeout=15,
+                    env=env,
                     capture_output=True,
                     check=False,
                 )
@@ -651,12 +848,15 @@ class ClaudeCodeAdapter:
         #    dedicated file — safe to edit atomically).
         self._structured_edit_mcp_json(mcp_config)
 
-    def _mcp_already_registered(self, binary: str, cwd: Path) -> bool:
+    def _mcp_already_registered(
+        self, binary: str, cwd: Path, env: dict[str, str]
+    ) -> bool:
         try:
             result = subprocess.run(
                 [binary, "mcp", "get", "perfxpert"],
                 cwd=str(cwd),
                 timeout=10,
+                env=env,
                 capture_output=True,
                 check=False,
             )

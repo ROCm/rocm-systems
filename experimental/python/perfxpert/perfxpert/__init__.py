@@ -17,7 +17,7 @@ CLI
     perfxpert analyze -i trace.db --format json
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "Advanced Micro Devices, Inc."
 
 from .connection import PerfxpertConnection, execute_statement, merge_sqlite_dbs

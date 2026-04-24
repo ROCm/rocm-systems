@@ -33,6 +33,7 @@ import pytest
 from perfxpert.cli._backend.claude import (
     ClaudeCodeAdapter,
     SKIP_LIVE_CHECK_ENV,
+    _windows_path_to_wsl,
 )
 from perfxpert.cli._backend.protocol import (
     BackendAdapter,
@@ -458,6 +459,10 @@ def test_spawn_uses_execvpe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
 
     monkeypatch.setattr("os.execvpe", _fake_execvpe)
     monkeypatch.setattr("os.chdir", lambda _p: None)
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.claude._is_windows_platform",
+        lambda: False,
+    )
 
     adapter = ClaudeCodeAdapter()
     with pytest.raises(RuntimeError, match="stopped"):
@@ -465,7 +470,135 @@ def test_spawn_uses_execvpe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
 
     assert called["name"] == "claude"
     assert called["argv"] == ["claude", "hello"]
-    assert called["env"] == {"K": "V"}
+    assert called["env"]["K"] == "V"
+
+
+def test_spawn_waits_for_claude_on_windows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Windows uses a foreground child process so PowerShell keeps stdin blocked."""
+    captured: dict[str, object] = {}
+
+    class _Process:
+        def wait(self, timeout=None):
+            return 23
+
+    def _fake_popen(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        captured["kwargs"] = kwargs
+        return _Process()
+
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.claude._is_windows_platform",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.claude.subprocess.Popen",
+        _fake_popen,
+    )
+    monkeypatch.setattr(
+        ClaudeCodeAdapter,
+        "_with_wsl_node_shim",
+        lambda _self, env, _cwd: env,
+    )
+
+    rc = ClaudeCodeAdapter().spawn(["hello"], {"K": "V"}, tmp_path)
+
+    assert rc == 23
+    assert captured["cmd"] == ["claude", "hello"]
+    kwargs = captured["kwargs"]
+    assert kwargs["cwd"] == str(tmp_path)  # type: ignore[index]
+    assert kwargs["env"]["K"] == "V"  # type: ignore[index]
+
+
+def test_spawn_handles_windows_tui_keyboard_interrupt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    waits: list[object] = []
+
+    class _Process:
+        def wait(self, timeout=None):
+            waits.append(timeout)
+            if timeout is None:
+                raise KeyboardInterrupt
+            return 130
+
+        def terminate(self):
+            raise AssertionError("process should get a chance to exit first")
+
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.claude._is_windows_platform",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.claude.subprocess.Popen",
+        lambda *a, **kw: _Process(),
+    )
+    monkeypatch.setattr(
+        ClaudeCodeAdapter,
+        "_with_wsl_node_shim",
+        lambda _self, env, _cwd: env,
+    )
+
+    rc = ClaudeCodeAdapter().spawn([], {}, tmp_path)
+
+    assert rc == 130
+    assert waits == [None, 5]
+
+
+def test_spawn_adds_node_shim_for_wsl_hooks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Windows Claude hooks run in bash; add a `node` shim when bash lacks one."""
+    called = {}
+    node_exe = tmp_path / "node.exe"
+    node_exe.write_text("fake")
+
+    class _Result:
+        def __init__(self, returncode: int) -> None:
+            self.returncode = returncode
+            self.stdout = b""
+            self.stderr = b""
+
+    def _fake_run(cmd, *args, **kwargs):
+        if cmd[:2] == ["bash", "-lc"] and "command -v node" in cmd[2]:
+            return _Result(1)
+        return _Result(0)
+
+    def _fake_execvpe(name, argv, env):
+        called["name"] = name
+        called["argv"] = list(argv)
+        called["env"] = dict(env)
+        raise RuntimeError("stopped")
+
+    monkeypatch.setattr("perfxpert.cli._backend.claude.os.name", "nt")
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.claude._is_windows_platform",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.claude.shutil.which",
+        lambda name: r"C:\tools\bash.exe" if name == "bash" else None,
+    )
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.claude._find_windows_node_exe",
+        lambda: node_exe,
+    )
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.claude.subprocess.run",
+        _fake_run,
+    )
+    monkeypatch.setattr("os.execvpe", _fake_execvpe)
+    monkeypatch.setattr("os.chdir", lambda _p: None)
+
+    with pytest.raises(RuntimeError, match="stopped"):
+        ClaudeCodeAdapter().spawn(["hello"], {"PATH": r"C:\base"}, tmp_path)
+
+    shim = tmp_path / ".perfxpert" / "bin" / "node"
+    assert shim.is_file()
+    assert _windows_path_to_wsl(node_exe) in shim.read_text()
+    assert str(shim.parent) in called["env"]["PATH"]
+    assert called["argv"] == ["claude", "hello"]
 
 
 # ---------------------------------------------------------------------------
