@@ -79,6 +79,7 @@ class NativeToolFinder:
         generate_command = (
             "cmake --build "
             + f"{src_path}/{self.sources_dir_name}/{self.sources_build_subdir_name}"
+            + "--parallel"
         )
         console_debug(
             f"Generating native tool project using command: {generate_command}"
