@@ -1239,7 +1239,10 @@ static ncclResult_t initNvlDomainInfo(struct ncclComm* comm) {
 
   return ncclSuccess;
 }
-
+/**
+ * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes. 
+ */
+RCCL_PARAM( InitChannels, "INIT_CHANNELS", -1) ;
 static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* parent, uint64_t timers[TIMERS_INIT_COUNT]) {
   // We use 2 AllGathers
   // 1. { peerInfo, comm, compCap}
@@ -1468,6 +1471,28 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(ncclTopoCompute(comm->topo, ringGraph), ret, fail);
   NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, ringGraph), ret, fail);
 
+  if( IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151" ) ) {
+    /**
+     *  gfx1151 has 1GPU/node and nNode configuration with  nNode (usually = 4). With nNodes, we get nNodes/2 
+     *  Edge-Disjoint Hamiltonian rings (known result). In connectRingsLoadBalanced() in ncclTopoPostset(), we use 
+     *  this result for Walecki construction + greedy-heuristic method to generate 'nChannel' internode rings. 
+     *  It should balance the ethernet based network load as the nNodes grows up for larger clusters for different topolgies 
+     *  like fat-tree / clos network. our choice nChannels depends on number nodes in the network. 
+     *  We assume all the 'nNode' nodes form fully connected graph ( via hops is fine ).
+     *  
+     *  ncclTopoCompute() sets ringGraph->nChannels while searching topology. we overwrite this for gfx1151 as nChannels is 
+     *  dependent on nNodes, missing channel initializations are handled by repairMissingChannels() in ncclTopoPostset()
+     * 
+     *  The following calculation is 2 * number of neighbors, But we have following dependency on determining nNodes 
+     *  ncclTopoPreset -> bootStrapAllGather -> nNodes -> ncclTopoPostSet., but nChannels is read in ncclTopoPreset, meaning that 
+     *  we dont have information on nNodes while determining a candidate value for nChannels, A env var set by user is recommended.
+     *  6 channels balances inter-node load perfectly in a 4 Node system with Greedy/Walecki construction.
+     */
+    int numChannels = rcclParamInitChannels() > 0 ? rcclParamInitChannels() : 6 /* 2 X (comm->nNodes - 1)  */;
+    ringGraph->nChannels = std::max(ringGraph->minChannels, std::min(ringGraph->maxChannels,(int32_t) numChannels));
+  }
+  INFO(NCCL_INIT,"ringGraph->nChannels = %d ", ringGraph->nChannels);
+
   memset(treeGraph, 0, sizeof(struct ncclTopoGraph));
   treeGraph->id = 1;
   treeGraph->pattern = NCCL_TOPO_PATTERN_BALANCED_TREE;
@@ -1681,26 +1706,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       INFO(NCCL_GRAPH, "CPUs with mixed vendors were detected.");
     }
   }
-
-  if( IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151" ) ) {
-    /**
-     *  gfx1151 has 1GPU/node and nNode configuration with  nNode (usually = 4). With nNodes, we get nNodes/2 
-     *  Edge-Disjoint Hamiltonian rings (known result). In connectRingsLoadBalanced() in ncclTopoPostset(), we use 
-     *  this result for Walecki construction + greedy-heuristic method to generate 'nChannel' internode rings. 
-     *  It should balance the ethernet based network load as the nNodes grows up for larger clusters for different topolgies 
-     *  like fat-tree / clos network. our choice nChannels depends on number nodes in the network. 
-     *  We assume all the 'nNode' nodes form fully connected graph ( via hops is fine ).
-     *  
-     *  ncclTopoCompute() sets ringGraph->nChannels while searching topology. we overwrite this for gfx1151 as nChannels is 
-     *  dependent on nNodes, missing channel initializations are handled by repairMissingChannels() in ncclTopoPostset()
-     * 
-     *  The following calculation is 2 * number of neighbors
-     */
-    int32_t numChannelsForNNodes =  2 * (comm->nNodes - 1) ;
-    INFO(NCCL_INIT," numChannelsForNNodes : %d", numChannelsForNNodes);
-    comm->nChannels = treeGraph->nChannels = ringGraph->nChannels = std::max(ringGraph->minChannels, std::min(ringGraph->maxChannels,(int32_t) numChannelsForNNodes ));
-  }
-  INFO(NCCL_INIT,"ringGraph->nChannels = %d ", ringGraph->nChannels);
   
   // Now that we know nNodes, alloc nodeRanks and compute localRanks for each node
   NCCLCHECKGOTO(ncclCalloc(&comm->nodeRanks, comm->nNodes), ret, fail);
