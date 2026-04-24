@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "name",
+      "description",
+      "unit",
+      "high_threshold",
+      "medium_threshold"
+    ],
+    "properties": {
+      "name": {
+        "type": "string"
+      },
+      "description": {
+        "type": "string"
+      },
+      "unit": {
+        "type": "string"
+      },
+      "high_threshold": {
+        "type": "number"
+      },
+      "medium_threshold": {
+        "type": "number"
+      }
+    }
+  }
+}

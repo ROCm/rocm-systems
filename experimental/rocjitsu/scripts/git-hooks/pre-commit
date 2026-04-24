@@ -1,0 +1,121 @@
+#!/bin/bash
+
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Pre-commit hook: enforce clang-format on rocjitsu C++ source files.
+#
+# Aborts the commit if any staged .cpp/.h file anywhere under the
+# rocjitsu directory is not clang-format-clean. Run scripts/clang_format.sh
+# to fix.
+#
+# This hook is installed by scripts/install-git-hooks.sh, which symlinks
+# it from the enclosing repository's hooks directory. Because the rocjitsu
+# subdirectory may be relocated within its parent repo, the watched path is
+# computed dynamically from the hook's own location.
+#
+# The hook checks the *staged* content of each file (git's `:0:<path>`
+# blob), not the working-tree file. This means partial staging (git
+# add -p) is handled correctly: only what's about to be committed is
+# checked.
+
+# Strict bash mode: exit on error (-e), error on undefined vars (-u),
+# fail a pipeline if any stage fails (-o pipefail).
+set -euo pipefail
+
+# ${BASH_SOURCE[0]} is the path this script was invoked as. Because git
+# calls us through a symlink in .git/hooks/, that path is the symlink
+# itself, not the real file. `readlink -f` follows the symlink to the
+# actual location under scripts/git-hooks/, which is what we want for
+# computing paths relative to the rocjitsu source tree.
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+HOOK_DIR="$(dirname "$SCRIPT_PATH")"          # .../scripts/git-hooks
+ROCJITSU_DIR="$(cd "$HOOK_DIR/../.." && pwd)" # .../<rocjitsu root>
+
+# `git rev-parse --show-toplevel` prints the absolute path to the root of
+# the enclosing git repo. For the rocjitsu-in-rocm-systems layout, that's
+# the parent rocm-systems repo, NOT the rocjitsu directory.
+GIT_ROOT="$(git rev-parse --show-toplevel)"
+
+# Strip the git root prefix to get rocjitsu's path *as git sees it*. This
+# is what `git diff --cached` will report file paths relative to.
+ROCJITSU_REL="${ROCJITSU_DIR#"$GIT_ROOT"/}"
+WATCH_PREFIX="$ROCJITSU_REL/"
+
+# Find staged files this hook cares about.
+#   -C "$GIT_ROOT"      run git from the repo toplevel so pathspecs are
+#                       interpreted relative to it (git invokes hooks from
+#                       the toplevel anyway, but be explicit so the hook
+#                       also works when run by hand from a subdirectory)
+#   --cached            look at the staged content (what the commit will
+#                       record), not the working tree
+#   --name-only         just print paths, no diff hunks
+#   --diff-filter=ACM   only Added / Copied / Modified files (skip deletes
+#                       and pure renames — nothing to format there)
+#   -z                  separate paths with NUL instead of LF, and emit
+#                       them verbatim (no quote-escaping) — handles
+#                       filenames containing spaces, tabs, or newlines
+#   -- "$WATCH_PREFIX"  restrict to paths under the watched directory
+# `grep -z` operates on NUL-delimited records to keep the same framing.
+# `|| true` keeps the pipeline from failing under `set -e` when grep
+# finds no matches (grep exits 1 then). `mapfile -d ''` reads
+# NUL-delimited input into the array, one element per file.
+mapfile -d '' -t staged < <(
+  git -C "$GIT_ROOT" diff --cached --name-only --diff-filter=ACM -z \
+       -- "$WATCH_PREFIX" \
+    | grep -zE '\.(cpp|h)$' || true
+)
+
+# No staged files in the watched dir → nothing to check, let the commit
+# through. This is the common case for commits in the parent rocm-systems
+# repo that don't touch rocjitsu at all.
+if [ ${#staged[@]} -eq 0 ]; then
+  exit 0
+fi
+
+# Fail loudly rather than silently skipping if the formatter is missing —
+# silent skips would defeat the whole point of the hook.
+if ! command -v clang-format &>/dev/null; then
+  echo "error: clang-format not found in PATH" >&2
+  echo "       (required by rocjitsu pre-commit hook for $WATCH_PREFIX)" >&2
+  exit 1
+fi
+
+# Check each file by piping its *staged* content into clang-format.
+#   git show ":0:$f"   the contents of $f at stage 0 of the index (i.e.
+#                      what will be committed). This is independent of any
+#                      unstaged edits to the working-tree file.
+#   --dry-run --Werror makes clang-format exit non-zero if the input would
+#                      be reformatted, without producing any output.
+#   --assume-filename  needed when reading from stdin so per-file style
+#                      rules (extension-driven) still apply.
+#   -style=file:...    pin the style file to rocjitsu's own .clang-format
+#                      rather than letting clang-format search upward
+#                      (which could pick up a different config from the
+#                      parent repo).
+bad=()
+for f in "${staged[@]}"; do
+  if ! git -C "$GIT_ROOT" show ":0:$f" \
+        | clang-format --dry-run --Werror \
+                       -style=file:"$ROCJITSU_DIR/.clang-format" \
+                       --assume-filename="$f" \
+                       &>/dev/null; then
+    bad+=("$f")
+  fi
+done
+
+# If any file would be reformatted, abort the commit with a message
+# pointing the user at the fix. Exit 1 tells git to reject the commit.
+if [ ${#bad[@]} -gt 0 ]; then
+  echo "error: the following staged files are not clang-format-clean:" >&2
+  for f in "${bad[@]}"; do
+    echo "  $f" >&2
+  done
+  echo >&2
+  echo "Run: bash $ROCJITSU_REL/scripts/clang_format.sh" >&2
+  echo "Then re-stage the files and commit again." >&2
+  exit 1
+fi
+
+# All checked files are clean → exit 0 lets the commit proceed.
+exit 0

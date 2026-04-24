@@ -93,13 +93,13 @@ public:
     /// Changes the event state to _set_
     ///
     /// @returns Success unless the Event has not been initialized yet (@ref ErrorUnavailable) or an unexpected internal
-    ///          error occured when calling the OS (ErrorUnknown).
+    ///          error occurred when calling the OS (ErrorUnknown).
     Result Set() const;
 
     /// Changes the event state to _reset_.
     ///
     /// @returns Success unless the Event has not been initialized yet (ErrorUnavailable) or an unexpected
-    ///         internal error occured when calling the OS (ErrorUnknown).
+    ///         internal error occurred when calling the OS (ErrorUnknown).
     Result Reset() const;
 
     /// Waits for the event to enter the _set_ state before returning control to the caller.  The event will change to
@@ -133,8 +133,8 @@ public:
 private:
     EventHandle m_hEvent;      // OS-specific event handle.
     bool        m_isReference; // If true, the event is a global sharing object handle (not a duplicate) which is
-                               // imported from external, so it can't be closed in the currect destructor, and can only
-                               // be closed by the creater.
+                               // imported from external, so it can't be closed in the current destructor, and can only
+                               // be closed by the creator.
 
     PAL_DISALLOW_COPY_AND_ASSIGN(Event);
 };

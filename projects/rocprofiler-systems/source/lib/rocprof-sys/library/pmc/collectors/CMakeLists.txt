@@ -7,6 +7,7 @@
 add_subdirectory(common)
 add_subdirectory(base)
 add_subdirectory(gpu)
+add_subdirectory(cpu)
 
 # Conditionally compile NIC collector based on AINIC support
 # ROCPROFSYS_BUILD_AINIC is set in cmake/Packages.cmake based on:
@@ -16,6 +17,10 @@ if(ROCPROFSYS_BUILD_AINIC)
     add_subdirectory(nic)
 else()
     set(pmc_nic_sources "")
+    # NIC device tests use a mock driver with no AMD SMI dependency
+    if(ROCPROFSYS_BUILD_TESTING)
+        add_subdirectory(nic/tests)
+    endif()
 endif()
 
 # Collect all sources
@@ -23,6 +28,7 @@ set(pmc_collectors_sources
     ${pmc_common_sources}
     ${pmc_base_sources}
     ${pmc_gpu_sources}
+    ${pmc_cpu_sources}
     ${pmc_nic_sources}
 )
 

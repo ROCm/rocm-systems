@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "core/sdma_feature.hpp"
+
 #include <cstdint>
 #include <memory>
 
@@ -169,61 +171,6 @@ struct driver
                                                 amdsmi_proc_info_t*     list)
     {
         return amdsmi_get_gpu_process_list(processor_handle, max_processes, list);
-    }
-#endif
-
-#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-    /**
-     * @brief Get NIC ASIC information including vendor and product names.
-     * @param processor_handle NIC processor to query.
-     * @param asic_info Pointer to structure to receive ASIC information.
-     * @return AMD SMI status code indicating success or failure.
-     */
-    static amdsmi_status_t get_nic_asic_info(amdsmi_processor_handle processor_handle,
-                                             amdsmi_nic_asic_info_t* asic_info)
-    {
-        return amdsmi_get_nic_asic_info(processor_handle, asic_info);
-    }
-
-    /**
-     * @brief Get NIC port information.
-     * @param processor_handle NIC processor to query.
-     * @param port_info Pointer to structure to receive port information.
-     * @return AMD SMI status code indicating success or failure.
-     */
-    static amdsmi_status_t get_nic_port_info(amdsmi_processor_handle processor_handle,
-                                             amdsmi_nic_port_info_t* port_info)
-    {
-        return amdsmi_get_nic_port_info(processor_handle, port_info);
-    }
-
-    /**
-     * @brief Get NIC RDMA device information.
-     * @param processor_handle NIC processor to query.
-     * @param rdma_info Pointer to structure to receive RDMA device info.
-     * @return AMD SMI status code indicating success or failure.
-     */
-    static amdsmi_status_t get_nic_rdma_dev_info(
-        amdsmi_processor_handle         processor_handle,
-        amdsmi_nic_rdma_devices_info_t* rdma_info)
-    {
-        return amdsmi_get_nic_rdma_dev_info(processor_handle, rdma_info);
-    }
-
-    /**
-     * @brief Get NIC RDMA port statistics.
-     * @param processor_handle NIC processor to query.
-     * @param rdma_port_idx RDMA port index.
-     * @param num_stats Pointer to number of stats (input/output).
-     * @param stats Pointer to array to receive statistics (can be nullptr for count).
-     * @return AMD SMI status code indicating success or failure.
-     */
-    static amdsmi_status_t get_nic_rdma_port_statistics(
-        amdsmi_processor_handle processor_handle, uint8_t rdma_port_idx,
-        uint32_t* num_stats, amdsmi_nic_stat_t* stats)
-    {
-        return amdsmi_get_nic_rdma_port_statistics(processor_handle, rdma_port_idx,
-                                                   num_stats, stats);
     }
 #endif
 };

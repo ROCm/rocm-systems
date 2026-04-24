@@ -101,7 +101,7 @@ jobs:
 
     steps:
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         sparse-checkout: |
           .github/actions/rocprofiler-sdk-util
@@ -140,7 +140,7 @@ jobs:
       run: git submodule update --init --recursive --jobs 16
 
     - name: Clone ROCDecode
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         repository: 'ROCm/rocDecode'
         ref: 'release/rocm-rel-7.0'
@@ -148,7 +148,7 @@ jobs:
         path: 'rocDecode'
 
     - name: Clone ROCJPEG
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         repository: 'ROCm/rocJPEG'
         ref: 'release/rocm-rel-7.0'
@@ -391,7 +391,7 @@ jobs:
 
     - name: Archive Code Coverage Data
       if: ${{ github.event_name == 'workflow_dispatch' }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: code-coverage-details
         path: |
