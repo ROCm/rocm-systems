@@ -484,6 +484,10 @@ class UserEvent : public Command {
 
   //! Sets the execution status of the user event
   bool SetExecutionStatus(cl_int status) {
+    // Valid CL inputs: CL_COMPLETE(0) or any negative error code per the OpenCL spec.
+    // Positive values (CL_RUNNING=1, CL_SUBMITTED=2, CL_QUEUED=3) are not valid for
+    // user events per the spec, so we assert here in debug builds.
+    assert((status == 0 || status < 0) && "SetExecutionStatus: only CL_COMPLETE or error codes are valid");
     if (AMD_DIRECT_DISPATCH) {
       // If it's invalid status, then mark dependent commands as invalid
       if (status < 0) {  // negative status is an error code
