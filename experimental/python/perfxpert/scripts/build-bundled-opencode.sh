@@ -97,8 +97,8 @@ else
 fi
 
 cd "${SUBMODULE}/packages/opencode"
-echo "build-bundled-opencode: compiling opencode (bun run build --single)"
-bun run build --single
+echo "build-bundled-opencode: compiling opencode (bun run build --single --skip-install)"
+bun run build --single --skip-install
 
 file_size_bytes() {
   local path="$1"

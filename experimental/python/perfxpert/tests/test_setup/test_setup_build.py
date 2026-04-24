@@ -217,3 +217,4 @@ def test_build_script_retries_when_frozen_lockfile_install_fails() -> None:
     assert "bun install --frozen-lockfile --ignore-scripts" in text
     assert "frozen lockfile install failed; retrying" in text
     assert "bun install --ignore-scripts" in text
+    assert "bun run build --single --skip-install" in text
