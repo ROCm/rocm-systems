@@ -63,6 +63,10 @@ struct trace_callback_data_t
 trace_callback_data_t
 iterate_data(aqlprofile_handle_t handle)
 {
+    // NOTE: This intentionally captures only the LAST callback invocation.
+    // In single-shader-engine triple-buffer mode, aqlprofile_att_iterate_data
+    // is expected to fire exactly once per call. If multi-SE triple-buffer
+    // support is added, this needs to accumulate chunks instead of overwriting.
     auto thread_trace_callback = [](uint32_t, void* buffer, uint64_t size, void* userdata) {
         auto& data = *static_cast<trace_callback_data_t*>(userdata);
         data.data  = buffer;
@@ -165,12 +169,20 @@ producer_loop(
     auto& read_index    = parameters.shared->read_index;
     auto& buffer_packet = *CHECK_NOTNULL(parameters.buffer_packet);
 
-    auto submit_signal = scoped_signal_t{};
+    // Submit signal lives in shared state so stop_thread_trace can force-wake
+    // us out of any blocking signal_wait when WORKER_FLAG_DESTRUCTOR is set.
+    auto* submit_signal = parameters.shared->producer_submit_signal.get();
+    ROCP_FATAL_IF(submit_signal == nullptr) << "producer_submit_signal not initialized";
 
     auto start_t0 = std::chrono::system_clock::now();
     bool do_sleep{false};
     // Wait until ATT start packets have been executed
     signal_wait(*CHECK_NOTNULL(parameters.start_pkt_signal));
+    if(worker_flag.load() == WORKER_FLAG_DESTRUCTOR)
+    {
+        ROCP_INFO << "Producer woken at start by destructor; bailing out";
+        return;
+    }
 
     auto sleep_fn = [&]() {
         sched_yield();
@@ -190,7 +202,7 @@ producer_loop(
         // Perform the actual GPU->CPU memory copy into our triple-buffer slot
         if(!isHeader)
             parameters.copy_data_fn(
-                buffer.memory, src, near_cpu_v, hsa_agent_v, size, &submit_signal.sig);
+                buffer.memory, src, near_cpu_v, hsa_agent_v, size, submit_signal);
         else
             std::memcpy(buffer.memory, src, size);
 
@@ -207,9 +219,16 @@ producer_loop(
     };
 
     auto iterate_trace = [&]() {
-        // Wait consumer to catch up before adding to next buffer
-        while(read_index < write_index)
+        // Wait consumer to catch up before adding to next buffer.
+        // WORKER_FLAG_STOP is the graceful shutdown path and we still want to
+        // drain the consumer; only WORKER_FLAG_DESTRUCTOR (forcible teardown)
+        // bypasses the drain so the producer can join during shutdown.
+        while(read_index < write_index && worker_flag.load() != WORKER_FLAG_DESTRUCTOR)
             sleep_fn();
+
+        if(worker_flag.load() == WORKER_FLAG_DESTRUCTOR && read_index < write_index)
+            ROCP_WARNING << "iterate_trace bailing out with " << (write_index - read_index)
+                         << " un-drained buffer(s) due to forcible teardown";
 
         auto wptr = iterate_data(parameters.control_packet->GetHandle());
         buffer_packet.reset_current_buffer();
@@ -225,10 +244,10 @@ producer_loop(
         // PHASE 1: Poll SQTT buffer status
         // Send a query packet to the GPU asking if the trace buffer is full and ready to swap.
         // This is a non-blocking query that completes via signal.
-        att_queue_submit(queue, &buffer_packet.query_status, &submit_signal.sig);
-        signal_wait(submit_signal.sig);
+        att_queue_submit(queue, &buffer_packet.query_status, submit_signal);
+        signal_wait(*submit_signal);
 
-        if(auto status = buffer_packet.query_buffer_status())
+        if(auto status = buffer_packet.query_buffer_status_fn(buffer_packet))
         {
             ROCP_TRACE << "Sending buffer swap";
             // PHASE 2: Copy GPU buffer to CPU memory
@@ -236,7 +255,7 @@ producer_loop(
             // a) Submit a packet to trigger GPU-side buffer swap
             // b) Copy the full buffer from GPU memory to our CPU-side triple buffer
             // Query returned buffer full: Send packet to trigger a buffer swap
-            att_queue_submit(queue, &status->packet, &submit_signal.sig);
+            att_queue_submit(queue, &status->packet, submit_signal);
             ROCP_FATAL_IF(status->size != buffer_size)
                 << "GPU buffer overflow: " << status->size << " vs " << buffer_size;
 
@@ -272,7 +291,7 @@ producer_loop(
             // The status_query test verifies we immediately poll again after consuming a
             // buffer, so skip the backoff when a flip just occurred.
             do_sleep = false;
-            signal_wait(submit_signal.sig);
+            signal_wait(*submit_signal);
         }
     }
     stop_trace();

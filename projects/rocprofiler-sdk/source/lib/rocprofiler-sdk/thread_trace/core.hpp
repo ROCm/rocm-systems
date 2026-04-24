@@ -56,6 +56,10 @@ class AQLPacket;
 
 namespace thread_trace
 {
+// Forward declaration to avoid pulling in threading.hpp from this header
+// (incomplete type is fine because we only hold it via shared_ptr).
+struct triple_buffer_shared_data_t;
+
 /// Collection of user-provided knobs that steer an ATT capture session.
 /// The struct mirrors the public C API parameters and is validated before any
 /// hardware programming happens.
@@ -136,6 +140,10 @@ private:
     std::thread                       consumer{};
     std::thread                       producer{};
     std::shared_ptr<std::atomic<int>> worker_flag{nullptr};
+
+    // Held so stop_thread_trace can reach the producer's blocking signals when
+    // a forcible (DESTRUCTOR) teardown is in progress. Reset after threads join.
+    std::shared_ptr<triple_buffer_shared_data_t> shared_data{};
 };
 
 class DispatchThreadTracer

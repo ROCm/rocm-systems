@@ -28,7 +28,7 @@
 #define CHECK_HSA(fn, message)                                                                     \
     {                                                                                              \
         auto _status = (fn);                                                                       \
-        ROCP_FATAL_IF(_status != HSA_STATUS_SUCCESS) << "HSA Err: " << _status;                    \
+        ROCP_FATAL_IF(_status != HSA_STATUS_SUCCESS) << message << ": " << _status;                \
     }
 
 namespace rocprofiler
@@ -112,6 +112,11 @@ default_submit(const att_queue_t& q, hsa_ext_amd_aql_pm4_packet_t* packet, hsa_s
 {
     auto* core = CHECK_NOTNULL(hsa::get_core_table());
 
+    // NOTE: This does not check for queue-full. With QUEUE_SIZE=256 and bursts of
+    // up to 6 packets per buffer swap, the producer can in theory overrun the queue
+    // if the GPU stalls. In practice the GPU consumes packets fast enough relative
+    // to the producer's ~2ms polling cadence. If queue overrun is observed, add a
+    // load_read_index check + wait here.
     const uint64_t write_idx = core->hsa_queue_add_write_index_relaxed_fn(q.hsa_queue, 1);
 
     size_t index = (write_idx % q.hsa_queue->size) * sizeof(hsa_ext_amd_aql_pm4_packet_t);
@@ -149,9 +154,17 @@ att_queue_create(const hsa::AgentCache& agent, size_t triple_buffer_size)
     auto* core = CHECK_NOTNULL(hsa::get_core_table());
     auto* ext  = CHECK_NOTNULL(hsa::get_amd_ext_table());
 
+    // MULTI is required because submissions arrive from multiple producers:
+    //   - the producer_loop thread (triple buffering)
+    //   - HSA loader threads driving load_codeobj/unload_codeobj callbacks
+    // The default_submit path uses an atomic write-index increment and a release
+    // store of the packet header, which is safe under MULTI. Doorbell stores from
+    // racing producers may be written out of order, but the HSA runtime tolerates
+    // monotonic-or-greater doorbell values, so the worst case is a slightly
+    // delayed wakeup on the GPU side.
     auto status = core->hsa_queue_create_fn(q.hsa_agent,
                                             QUEUE_SIZE,
-                                            HSA_QUEUE_TYPE_SINGLE,
+                                            HSA_QUEUE_TYPE_MULTI,
                                             nullptr,
                                             nullptr,
                                             UINT32_MAX,
@@ -188,6 +201,7 @@ att_queue_destroy(att_queue_t& q)
 
     for(auto* memory : q.triple_buffer_memory)
     {
+        if(memory == nullptr) continue;
         auto _mem_status = hsa::get_amd_ext_table()->hsa_amd_memory_pool_free_fn(memory);
         ROCP_WARNING_IF(_mem_status != HSA_STATUS_SUCCESS)
             << "Failed to free memory pool: " << _mem_status;

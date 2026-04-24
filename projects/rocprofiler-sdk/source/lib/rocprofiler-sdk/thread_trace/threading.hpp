@@ -66,6 +66,16 @@ struct triple_buffer_shared_data_t
     std::atomic<size_t>     read_index{0};
 
     std::array<buffer_slot_t, NUM_CPU_BUFFERS> buffers{};
+
+    // Producer's polling/swap submit signal. Held in shared state so the
+    // destructor path can force-wake the producer when WORKER_FLAG_DESTRUCTOR
+    // is set (HSA permits writing 0 to a signal to wake all waiters in MULTI
+    // queue mode).
+    signal_ptr_t producer_submit_signal{};
+    // Signal returned by the initial att_queue_submit_and_signal_last for the
+    // "before" packets. Stored so the destructor can also force-wake the
+    // producer's wait at producer_loop entry.
+    std::shared_ptr<hsa_signal_t> start_pkt_signal{};
 };
 
 /// Parameters passed into the consumer worker thread.

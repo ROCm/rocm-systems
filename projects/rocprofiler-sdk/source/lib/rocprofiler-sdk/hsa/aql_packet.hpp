@@ -245,26 +245,32 @@ struct sqtt_buffer_status_t
     bool                         gpu_full{};
 };
 
-// Virtual members for mocking in tests
-class SQTTBufferingPackets
+// Plain struct: all fields public, no virtual functions. Tests inject custom
+// behavior by overwriting the query_buffer_status_fn function pointer rather
+// than subclassing.
+struct SQTTBufferingPackets
 {
-public:
-    SQTTBufferingPackets(aqlprofile_handle_t handle, int shader_engine_id);
-    virtual ~SQTTBufferingPackets() = default;
+    using query_buffer_status_fn_t = std::optional<sqtt_buffer_status_t> (*)(SQTTBufferingPackets&);
 
-    hsa_ext_amd_aql_pm4_packet_t                query_status{};
-    virtual std::optional<sqtt_buffer_status_t> query_buffer_status();
+    SQTTBufferingPackets(aqlprofile_handle_t handle, int shader_engine_id);
 
     void reset_current_buffer() { current_buffer = 0; };
 
-    const aqlprofile_handle_t handle;
-    const int                 shader_engine_id;
-    uint64_t                  header{0};
-
-private:
+    hsa_ext_amd_aql_pm4_packet_t              query_status{};
+    const aqlprofile_handle_t                 handle;
+    const int                                 shader_engine_id;
+    uint64_t                                  header{0};
     size_t                                    current_buffer{0};
     std::vector<hsa_ext_amd_aql_pm4_packet_t> buffer_swap{};
+
+    // Defaulted to query_buffer_status_default; tests may override.
+    query_buffer_status_fn_t query_buffer_status_fn{nullptr};
 };
+
+// Production implementation of the buffer-status query. Calls into AQLProfile
+// to determine whether a buffer swap is needed and returns the swap packet.
+std::optional<sqtt_buffer_status_t>
+query_buffer_status_default(SQTTBufferingPackets& self);
 
 }  // namespace hsa
 }  // namespace rocprofiler

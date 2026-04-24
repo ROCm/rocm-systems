@@ -286,6 +286,11 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         auto worker_data   = std::make_shared<triple_buffer_shared_data_t>();
         worker_data->queue = queue.get();  // non-owning; ThreadTracerAgent owns queue
 
+        // The destructor path uses these to force-wake the producer out of any
+        // blocking signal_wait when WORKER_FLAG_DESTRUCTOR is set.
+        worker_data->producer_submit_signal = make_signal();
+        worker_data->start_pkt_signal       = shared_signal;
+
         // Initialize buffer memory pointers from the queue's triple buffer
         for(size_t i = 0; i < worker_data->buffers.size(); i++)
             worker_data->buffers.at(i).memory = worker_data->queue->triple_buffer_memory.at(i);
@@ -303,8 +308,17 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         consumer_data.userdata    = params.callback_userdata;
         consumer_data.shared      = worker_data;
 
+        // Keep a reference so stop_thread_trace can poke the producer's signals
+        // when tearing down forcibly.
+        shared_data = worker_data;
+
+        // Other call sites (kfd, internal_threading) wrap each std::thread
+        // creation in its own pre/post pair, so match that convention.
         internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
         producer = std::thread{producer_loop, std::move(producer_data)};
+        internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
+
+        internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
         consumer = std::thread{consumer_loop, std::move(consumer_data)};
         internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
     }
@@ -324,10 +338,28 @@ ThreadTracerAgent::stop_thread_trace()
         int expected = WORKER_FLAG_RUNNING;
         worker_flag->compare_exchange_strong(expected, WORKER_FLAG_STOP);
 
+        // If we're in forcible-teardown mode, force-wake any signal_wait inside
+        // the producer thread by storing 0 to its blocking signals. HSA permits
+        // this in MULTI queue mode; the producer rechecks worker_flag and
+        // bails out.
+        if(worker_flag && worker_flag->load() == WORKER_FLAG_DESTRUCTOR && shared_data)
+        {
+            auto* core = hsa::get_core_table();
+            if(core)
+            {
+                if(shared_data->producer_submit_signal)
+                    core->hsa_signal_store_screlease_fn(*shared_data->producer_submit_signal, 0);
+                if(shared_data->start_pkt_signal)
+                    core->hsa_signal_store_screlease_fn(*shared_data->start_pkt_signal, 0);
+            }
+        }
+
         if(producer.joinable()) producer.join();
         if(consumer.joinable()) consumer.join();
         active_traces.fetch_sub(1);
         worker_flag = nullptr;
+        // Release the signals' lifetime now that no one is waiting on them.
+        shared_data = nullptr;
         return nullptr;
     }
     else

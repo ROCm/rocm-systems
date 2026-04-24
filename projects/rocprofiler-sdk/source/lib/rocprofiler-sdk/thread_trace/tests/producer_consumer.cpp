@@ -37,6 +37,9 @@
 
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <functional>
+#include <memory>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace rocprofiler
@@ -89,16 +92,34 @@ make_mock_queue(const hsa::AgentCache& agent)
 
 using query_status_t = std::function<std::optional<hsa::sqtt_buffer_status_t>(void)>;
 
-class MockPackets : public hsa::SQTTBufferingPackets
+// Per-instance trampoline storage so the C-style function pointer in
+// SQTTBufferingPackets can dispatch to a std::function captured from the test.
+inline std::unordered_map<hsa::SQTTBufferingPackets*, query_status_t>&
+mock_query_map()
 {
-public:
-    MockPackets(aqlprofile_handle_t _handle, query_status_t _query)
-    : hsa::SQTTBufferingPackets(_handle, 0)
-    , query_fn(_query){};
+    static std::unordered_map<hsa::SQTTBufferingPackets*, query_status_t> _v;
+    return _v;
+}
 
-    std::optional<hsa::sqtt_buffer_status_t> query_buffer_status() override { return query_fn(); };
-    query_status_t                           query_fn;
-};
+inline std::optional<hsa::sqtt_buffer_status_t>
+mock_query_trampoline(hsa::SQTTBufferingPackets& self)
+{
+    auto& map = mock_query_map();
+    auto  it  = map.find(&self);
+    if(it == map.end()) return std::nullopt;
+    return it->second();
+}
+
+// Constructs a SQTTBufferingPackets in production mode then swaps the function
+// pointer so the test's lambda drives query_buffer_status.
+inline std::unique_ptr<hsa::SQTTBufferingPackets>
+make_mock_packets(aqlprofile_handle_t handle, query_status_t query)
+{
+    auto pkt                    = std::make_unique<hsa::SQTTBufferingPackets>(handle, 0);
+    mock_query_map()[pkt.get()] = std::move(query);
+    pkt->query_buffer_status_fn = &mock_query_trampoline;
+    return pkt;
+}
 
 struct consumer_producer_t
 {
@@ -142,11 +163,16 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     auto factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(
         *agent, params, *table.core_, *table.amd_ext_);
     auto control_packet = factory->construct_control_packet();
-    auto buffer_packet  = std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn);
+    auto buffer_packet  = make_mock_packets(control_packet->GetHandle(), query_fn);
 
     auto mock_queue    = make_mock_queue(*agent);
     auto worker_data   = std::make_shared<triple_buffer_shared_data_t>();
     worker_data->queue = mock_queue.get();
+
+    // The production code populates these in start_thread_trace; mirror that
+    // here so the producer's ROCP_FATAL_IF guard is satisfied and the
+    // destructor wake path is exercisable from the test.
+    worker_data->producer_submit_signal = make_signal();
 
     // Initialize buffer memory pointers from the queue's triple buffer
     for(size_t i = 0; i < worker_data->buffers.size(); i++)
@@ -157,6 +183,7 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
             signal_destroy(*s);
             delete s;
         });
+    worker_data->start_pkt_signal = start_signal;
 
     auto producer_data             = triple_buffer_producer_data_t{};
     producer_data.producer_running = running_flag;
