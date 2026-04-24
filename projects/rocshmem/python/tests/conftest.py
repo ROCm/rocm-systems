@@ -4,6 +4,11 @@ Shared helpers exported to all test modules:
   - ``_world_size()``    : reads WORLD_SIZE / OMPI_COMM_WORLD_SIZE at collection time.
   - ``requires_torch``   : skip marker for tests that need PyTorch.
   - ``requires_multi_pe``: skip marker for tests that need at least 2 PEs.
+
+Init priority
+  1. torch   → ``init_with_torch()``  (torch.distributed rendezvous)
+  2. mpi4py  → ``init_with_mpi()``    (Python MPI wrapper)
+  3. neither → ``rocshmem_init()``    (rocSHMEM calls MPI_Init internally)
 """
 
 import os
@@ -19,13 +24,19 @@ def _torch_available() -> bool:
         return False
 
 
+def _mpi4py_available() -> bool:
+    try:
+        from mpi4py import MPI  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def _use_torch_init() -> bool:
     """Use torch init if torch is available AND not explicitly disabled.
 
-    ROCSHMEM_USE_TORCH_INIT=0 forces MPI init regardless of torch presence.
-    When torch is absent the function always returns False so the session
-    fixture automatically falls back to init_with_mpi() without any env-var
-    configuration required in CI.
+    ROCSHMEM_USE_TORCH_INIT=0 forces the mpi4py/raw path regardless of
+    torch presence.  When torch is absent the function always returns False.
     """
     if not _torch_available():
         return False
@@ -63,8 +74,23 @@ def rocshmem_session():
     global _rocshmem_initialized
     if _use_torch_init():
         rocshmem4py.init_with_torch()
-    else:
+    elif _mpi4py_available():
         rocshmem4py.init_with_mpi()
+    else:
+        # Neither torch nor mpi4py available (e.g. bare CI image).
+        # rocshmem_init() calls MPI_Init internally — works under mpirun
+        # with no Python MPI wrapper required.
+        local_rank = (
+            os.environ.get("LOCAL_RANK")
+            or os.environ.get("OMPI_COMM_WORLD_LOCAL_RANK")
+        )
+        if local_rank is not None:
+            try:
+                hip = ctypes.CDLL("libamdhip64.so")
+                hip.hipSetDevice(int(local_rank))
+            except OSError:
+                pass
+        rocshmem4py.rocshmem_init()
     _rocshmem_initialized = True
 
     yield
@@ -79,6 +105,8 @@ def pytest_sessionfinish(session, exitstatus):
     if _use_torch_init():
         rocshmem4py.finalize_with_torch()
     else:
+        # Sync device before the collective barrier so no rank enters
+        # finalize while another is still executing GPU work.
         try:
             hip = ctypes.CDLL("libamdhip64.so")
             hip.hipDeviceSynchronize()
