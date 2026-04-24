@@ -761,14 +761,14 @@ if(EXISTS "${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake")
     message(STATUS "Applying test categories for rocrtst64")
     apply_test_category_labels(
       rocrtst64
-      "$${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+      "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
       "${PROJECT_BINARY_DIR}"
       "${INSTALL_TEST_FILE}"
     )
 
     install(
         FILES "${INSTALL_TEST_FILE}"
-        DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}-tests"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
         COMPONENT tests
         RENAME "CTestTestfile.cmake"
     )
@@ -776,7 +776,7 @@ else()
     message(
         STATUS
         "Shared CTest categories not found at "
-        "${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake - "
+        "${CMAKE_CURRENT_SOURCE_DIR}/TestCategories.cmake - "
         "skipping rocrtst64 test category labels"
     )
 endif()
