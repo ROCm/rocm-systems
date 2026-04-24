@@ -183,6 +183,10 @@ AMD SMI provides tools to programmatically monitor GPU violations and throttling
 ::::{tab-item} C/C++
 
 The AMD SMI library provides APIs to query violation status.
+See [GPU monitoring](/doxygen/docBin/html/group__tagGPUMonitor) and [Clock,
+power, and performance
+queries](/doxygen/docBin/html/group__tagClkPowerPerfQuery) for more
+information.
 
 **Related AMD SMI APIs:**
 
