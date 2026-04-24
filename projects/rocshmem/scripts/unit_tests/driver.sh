@@ -86,6 +86,8 @@ if [ -n "$(rocminfo | grep gfx1201)" ];
 then
   echo "Unit tests disabled in gfx1201"
   echo "See AIROCSHMEM-393"
+  # Create empty log files for jenkins to be happy
+  >$log_file
   exit
 fi
 
