@@ -5,12 +5,13 @@ myst:
     "keywords": "gpu, violations, throttling, pviol, tviol, power, thermal, performance, throttle_status, gpu_metrics, prochot, ppt, hbm, mi300x"
 ---
 
-# GPU Violations
+# GPU violations
 
 GPU violations monitoring in AMD SMI tracks throttling events caused by power or thermal limits. When your GPU throttles, performance decreases to protect the hardware from damage due to overheating or excessive power draw. AMD SMI provides APIs to monitor violation percentages and identify the specific causes of throttling, enabling system administrators and developers to maintain GPU health and optimize performance.
 
 :::{note}
 NVML users: the closest equivalent to `nvmlDeviceGetViolationStatus()` is `amdsmi_get_violation_status()`.
+See [GPU monitoring](/doxygen/docBin/html/group__tagGPUMonitor) for more information.
 
 | nvidia-smi command | amd-smi equivalent | Notes |
 |--------------------|--------------------|-------|
@@ -21,7 +22,7 @@ NVML users: the closest equivalent to `nvmlDeviceGetViolationStatus()` is `amdsm
 :::
 
 
-## Key Concepts
+## Key concepts
 
 **PVIOL (Power Violation)**: Percentage of time the GPU throttled due to power limits. This occurs when the GPU's power consumption exceeds safe limits, triggering power throttling to stay within the power budget.
 
@@ -37,7 +38,7 @@ NVML users: the closest equivalent to `nvmlDeviceGetViolationStatus()` is `amdsm
 
 **gpu_metrics versions**: Navi/MI1x/MI2x use gpu_metrics v1.3 (fixed layout with `indep_throttle_status`). MI3x+ requires at minimum gpu_metrics v1.8, which introduced per-XCP/XCC violation fields. gpu_metrics v1.9+ adds a fully dynamic layout. The available fields differ between these versions.
 
-## GPU Architecture Support
+## GPU architecture support
 
 `throttle_status` and the violation API target different GPU generations and rely on different gpu_metrics versions:
 
@@ -52,7 +53,7 @@ NVML users: the closest equivalent to `nvmlDeviceGetViolationStatus()` is `amdsm
 
 **MI3x+ (MI300X and newer):** Use `amd-smi metric --violation` or `amd-smi monitor --violation` for detailed violation data (PROCHOT, PPT, Socket Thermal, VR Thermal, HBM Thermal). The `THROTTLE_STATUS` field in `metric --power` shows N/A on these ASICs.
 
-## Common Questions
+## Common questions
 
 ### What's the difference between throttle_status and violation API output in AMD SMI?
 
@@ -60,7 +61,7 @@ NVML users: the closest equivalent to `nvmlDeviceGetViolationStatus()` is `amdsm
 
 ### Can you use the violations API to infer the same info provided in throttle_status?
 
-No. The violations API (MI3x+ only) provides time-based percentages (PVIOL%, TVIOL%) showing *how much* throttling occurred. `throttle_status` (Navi/MI1x/MI2x) provides bit flags showing *whether* throttling is happening. These APIs target different GPU generations—see [GPU Architecture Support](#gpu-architecture-support).
+No. The violations API (MI3x+ only) provides time-based percentages (PVIOL%, TVIOL%) showing *how much* throttling occurred. `throttle_status` (Navi/MI1x/MI2x) provides bit flags showing *whether* throttling is happening. These APIs target different GPU generations—see [](#gpu-architecture-support).
 
 ### How can I monitor PROCHOT throttling using AMD SMI?
 
@@ -98,7 +99,7 @@ Throttling directly reduces GPU clock speeds to stay within power/thermal limits
 
 **PVIOL (power)** = hitting wattage limits, GPU draws too much power. **TVIOL (thermal)** = hitting temperature limits, GPU too hot. A GPU can have both simultaneously (e.g., 30% PVIOL + 20% TVIOL). On **MI3x+**: Check both percentages via `amdsmi_get_violation_status()` or `amd-smi metric --violation`. On **Navi/MI1x/MI2x**: Use `throttle_status` bit flags in `amd-smi metric --power` to see if PPT (power) or thermal throttling is active.
 
-## Interpreting Violation Results
+## Interpreting violation results
 
 | Value | Meaning |
 |-------|----------|
@@ -108,7 +109,7 @@ Throttling directly reduces GPU clock speeds to stay within power/thermal limits
 | 50-100% | Heavy throttling - significant performance degradation |
 | N/A or max_uint | Feature not supported on this GPU |
 
-## Violation Status Fields
+## Violation status fields
 
 The `amdsmi_violation_status_t` struct (returned by `amdsmi_get_violation_status()`) provides three categories of data for each violation type. These fields are available on **MI3x+ only**; older ASICs return max_uint (unsupported).
 
@@ -181,8 +182,19 @@ AMD SMI provides tools to programmatically monitor GPU violations and throttling
 
 ::::{tab-item} C/C++
 
-The AMD SMI library provides APIs to query violation status. See
-[`example/amd_smi_drm_example.cc`](../../example/amd_smi_drm_example.cc)
+The AMD SMI library provides APIs to query violation status.
+
+**Related AMD SMI APIs:**
+
+- `amdsmi_get_violation_status()` - Get violation percentages
+- `amdsmi_get_gpu_metrics_info()` - Get throttle_status and detailed metrics
+- `amdsmi_get_temp_metric()` - Monitor GPU temperatures
+- `amdsmi_get_power_cap_info()` - Check power limits
+- `amdsmi_get_gpu_activity()` - Monitor GPU utilization
+- `amdsmi_get_gpu_asic_info()` - Check ASIC capabilities
+- `amdsmi_get_gpu_bdf_id()` - Identify GPU device
+
+See [`example/amd_smi_drm_example.cc`](../../example/amd_smi_drm_example.cc)
 for a complete working example.
 
 ```cpp
@@ -201,6 +213,16 @@ if (ret == AMDSMI_STATUS_SUCCESS) {
 ::::
 
 ::::{tab-item} Python
+
+See related APIs:
+
+- [](/reference/amdsmi-py-api.md#amdsmi_get_violation_status)
+- [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_metrics_info)
+- [](/reference/amdsmi-py-api.md#amdsmi_get_temp_metric)
+- [](/reference/amdsmi-py-api.md#amdsmi_get_power_cap_info)
+- [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_activity)
+- [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_asic_info)
+- [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_bdf_id)
 
 See
 [`example/amd_smi_violation_example.py`](../../example/amd_smi_violation_example.py)
@@ -269,7 +291,7 @@ amd-smi metric --gpu all --power --temperature
 
 ### High PVIOL (Power Violations)?
 
-- Check power limit settings with `amdsmi_get_power_cap()`
+- Check power limit settings with `amdsmi_get_power_cap_info()`
 - View static power cap details (default, min, max): `amd-smi static --limit`
 - Monitor live power consumption: `amd-smi monitor --power`
 - Verify adequate PSU capacity for your system
@@ -294,7 +316,7 @@ amd-smi metric --gpu all --power --temperature
 - **For `THROTTLE_STATUS` in `metric --power` showing N/A:** This field is available on Navi/MI1x/MI2x (gpu_metrics v1.3) but not on MI3x+. On MI3x+, use `amd-smi metric --violation` or `amd-smi monitor --violation` instead.
 - Check your ASIC generation with `amdsmi_get_gpu_asic_info()` or `amd-smi static --asic`
 
-## Adjusting Clock Limits (MI3x+)
+## Adjusting clock limits (MI3x+)
 
 Some MI3x+ variants support adjusting the Graphics clock (SCLK) and memory clock (MCLK) min/max limits, which can help manage power violations by capping clock speeds before the hardware throttles.
 
@@ -320,28 +342,6 @@ sudo amd-smi reset --clocks
 
 Lowering the SCLK maximum reduces peak power draw, which can reduce PVIOL percentage at the cost of peak compute throughput. See `amd-smi set -h` for the full list of supported options for your hardware.
 
-## See Also
+## Further reading
 
-**Related AMD SMI APIs:**
-
-- `amdsmi_get_violation_status()` - Get violation percentages
-- `amdsmi_get_gpu_metrics_info()` - Get throttle_status and detailed metrics
-- `amdsmi_get_temp_metric()` - Monitor GPU temperatures
-- `amdsmi_get_power_cap()` - Check power limits
-- `amdsmi_get_gpu_activity()` - Monitor GPU utilization
-- `amdsmi_get_gpu_asic_info()` - Check ASIC capabilities
-- `amdsmi_get_gpu_bdf_id()` - Identify GPU device
-
-**Related Topics:**
-
-- GPU Throttling
-- Performance Monitoring
-- Power Management
-- Thermal Management
-- NVML Compatibility
-
-**ROCm AMD SMI Documentation:**
-
-- [AMD SMI API Documentation](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-cpp-api.html)
-- [AMD SMI GitHub Repository](https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi)
-- [ROCm Documentation](https://rocm.docs.amd.com/)
+- [GPU Power/Thermal Controls and Monitoring (Linux kernel)](https://docs.kernel.org/gpu/amdgpu/thermal.html#gpu-metrics)
