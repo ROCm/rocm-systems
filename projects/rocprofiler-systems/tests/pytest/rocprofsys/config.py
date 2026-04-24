@@ -28,6 +28,8 @@ class RocprofsysConfig:
         - rocprofsys_sample: Path to rocprof-sys-sample executable
         - rocprofsys_causal: Path to rocprof-sys-causal executable
         - rocprofsys_avail: Path to rocprof-sys-avail executable
+        - rocprofsys_attach: Path to rocprof-sys-attach executable (optional;
+            None if the binary was not built)
         - rocm_path: Path to ROCm installation directory
         - rocprofsys_lib_dir: Path to rocprofsys library directory
         - rocprofsys_bin_dir: Path to rocprofsys binary directory
@@ -53,6 +55,7 @@ class RocprofsysConfig:
     rocprofsys_sample: Path
     rocprofsys_causal: Path
     rocprofsys_avail: Path
+    rocprofsys_attach: Optional[Path]
     rocm_path: Path
     rocprofsys_lib_dir: Path
     rocprofsys_bin_dir: Path
@@ -493,6 +496,7 @@ def _find_rocprofsys_executables(search_paths: list[Path]) -> dict[str, Optional
     rocprof_run = _find_executable("rocprof-sys-run", search_paths)
     rocprof_causal = _find_executable("rocprof-sys-causal", search_paths)
     rocprof_avail = _find_executable("rocprof-sys-avail", search_paths)
+    rocprof_attach = _find_executable("rocprof-sys-attach", search_paths)
 
     required_executables = {
         "rocprof-sys-instrument": rocprof_instrument,
@@ -509,7 +513,8 @@ def _find_rocprofsys_executables(search_paths: list[Path]) -> dict[str, Optional
             f"Searched in: {search_paths}"
         )
 
-    return required_executables
+    # rocprof-sys-attach is optional: tests that need it should skip when None.
+    return {**required_executables, "rocprof-sys-attach": rocprof_attach}
 
 
 def discover_install_config(
@@ -607,6 +612,7 @@ def discover_install_config(
         rocprofsys_sample=sys_execs["rocprof-sys-sample"],
         rocprofsys_causal=sys_execs["rocprof-sys-causal"],
         rocprofsys_avail=sys_execs["rocprof-sys-avail"],
+        rocprofsys_attach=sys_execs["rocprof-sys-attach"],
         rocm_path=rocm_path,
         rocprofsys_lib_dir=lib_dir,
         rocprofsys_bin_dir=bin_dir,
@@ -702,6 +708,7 @@ def discover_build_config(
         rocprofsys_sample=sys_execs["rocprof-sys-sample"],
         rocprofsys_causal=sys_execs["rocprof-sys-causal"],
         rocprofsys_avail=sys_execs["rocprof-sys-avail"],
+        rocprofsys_attach=sys_execs["rocprof-sys-attach"],
         rocm_path=rocm_path,
         rocprofsys_lib_dir=lib_dir,
         rocprofsys_bin_dir=bin_dir,
