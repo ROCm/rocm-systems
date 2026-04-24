@@ -1,9 +1,9 @@
 """interconnect — XGMI / PCIe / NIC peak lookup tool.
 
-Structured lookup for RCCL communication analysis. Returns per-arch XGMI
-aggregate + per-link bandwidths, the PCIe tier, and an "achievable" RCCL
-AllReduce busBW number (typical field observation) so the Latency
-Specialist can classify bus-bandwidth efficiency.
+Structured lookup for RCCL communication analysis. Returns per-arch vendor
+IF/XGMI aggregate + per-link bandwidths, the PCIe tier, and an empirical
+"achievable" RCCL AllReduce busBW number so the Latency Specialist can
+classify bus-bandwidth efficiency.
 
 Tool class: READ_ONLY (MCP-safe).
 
@@ -39,7 +39,7 @@ def lookup_peaks(gfx_id: str) -> Dict[str, Any]:
         >>> from perfxpert.tools.interconnect import lookup_peaks
         >>> mi300x = lookup_peaks("gfx942")
         >>> mi300x["xgmi_peak_gbps"]
-        448.0
+        1024.0
     """
     specs = load_yaml("interconnect_specs")
     if gfx_id not in specs:
