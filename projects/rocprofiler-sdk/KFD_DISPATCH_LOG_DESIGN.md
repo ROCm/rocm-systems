@@ -28,8 +28,10 @@ are wrong on three counts:
   end up oversized.
 * **Wrong format coupling.** The kernel-side validation hardcodes a
   record size; userspace tools hardcode `mec_dispatch_record_16` C
-  structs. Adding a new record type requires coordinated
-  kernel + libhsakmt + ROCr + rocprofiler-sdk releases.
+  structs. Adding a new record type today requires coordinated kernel
+  + libhsakmt + ROCr + rocprofiler-sdk releases. The new design has
+  the kernel ship the format as data and rocprofiler-sdk talk to KFD
+  directly — collapsing the cross-layer coordination.
 
 This plan does two things:
 
@@ -822,34 +824,99 @@ need to store the descriptor anywhere — `.rodata` is the storage.
 * Endianness: irrelevant for the descriptor itself (text); the
   descriptor specifies `u32le`/`u16le` etc. for the on-wire records.
 
-### 3.E Userspace flow (rocprofiler-sdk)
+### 3.E Userspace flow — rocprofiler-sdk talks directly to KFD
+
+The new ioctl is **HSA-independent at every layer**. With a dedicated
+profiler sub-op and a kernel-owned descriptor, there is no longer any
+reason to route the ring-buffer setup through libhsakmt or ROCr —
+that was a vestige of the original `UPDATE_QUEUE`-based design.
+
+In the new design, **rocprofiler-sdk owns the full lifecycle**:
+
+* opens `/dev/kfd` itself
+* allocates the ring buffer via `hsa_amd_memory_pool_allocate` (an
+  existing HSA API; no new code in ROCr)
+* obtains the KFD `queue_id` via a small new HSA query (§3.E.1)
+* issues `KFD_IOC_PROFILER_DISPATCH_LOG, sub_op = SET` directly
+* tracks per-queue BO ownership and disables on shutdown via
+  `addr=0` SET
+
+**libhsakmt and ROCr are not in the SET path at all.** This collapses
+the v22/v23 thunk shim entirely (see §5 — the migration table no
+longer carries libhsakmt or ROCr SetProfiling rows).
+
+#### 3.E.1 The single new HSA addition needed
+
+To go direct, rocprofiler-sdk needs a way to map an `hsa_queue_t*` to
+the underlying KFD queue id. ROCr already has this mapping internally
+(it issued the original `hsaKmtCreateQueue` and stashed the returned
+`HSA_QUEUEID`). The cleanest addition is an attribute query on the
+existing `hsa_amd_queue_get_info`:
+
+```c
+typedef enum {
+    /* existing attributes ... */
+    HSA_AMD_QUEUE_INFO_KFD_QUEUE_ID = /* next free */,
+} hsa_amd_queue_info_t;
+```
+
+Returns the `uint64_t` KFD queue id (the value originally returned by
+`hsaKmtCreateQueue` on this queue). Add ~5 lines to ROCr's
+`hsa_amd_queue_get_info` switch.
+
+This is the only HSA API addition required for the new path.
+Everything else uses APIs that already exist (`hsa_amd_queue_iterate`
+from our earlier work, `hsa_amd_memory_pool_allocate` long-existing,
+`hsa_amd_profiling_convert_tick_to_system_domain` long-existing).
+
+The cpc_tracing branch's other HSA additions
+(`hsa_amd_profiling_get_dispatch_records`, the `mec_dispatch_record.h`
+struct, the `hsaKmtSetQueueProfilingBuffer` thunk, the
+dispatch_record_buffer fields on `AqlQueue`) become **unnecessary** in
+the new design. They were needed only because ROCr was the one
+calling the ioctl; with rocprofiler-sdk going direct they all collapse.
+
+#### 3.E.2 Drainer init flow
 
 Files affected:
 
 * `projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_dispatch/firmware_ring_drainer.cpp`
 * `projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/kernel_dispatch/firmware_ring_drainer.hpp`
 * `projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/queue_controller.cpp`
+* `projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/hsa/dispatch_ring_buffer_support.{cpp,hpp}` (already exists; gains the direct-ioctl path)
 
-**Drainer init flow:**
+Init sequence:
 
-1. Open KFD device.
-2. Issue `AMDKFD_IOC_PROFILER` with `op = KFD_IOC_PROFILER_VERSION` to
-   confirm version ≥ 2.
-3. If ≥ 2: issue
-   `op = KFD_IOC_PROFILER_DISPATCH_LOG, sub_op = GET_DESCRIPTOR` with
-   `gpu_id` for each device. First call with `num_records = 0` to learn
-   the required size; second call with the right buffer to receive the
-   blob. Parse JSON into a `RecordDescriptor` C++ struct (one entry
-   per `type_id` holding `{size, fields}`).
-4. If `-ENOTSUPP` (firmware doesn't support dispatch ring): fall back
-   to hardcoded `mec_dispatch_record_16` parser if any older firmware
-   ring records show up; otherwise simply skip drainer registration
-   for this device. Log once.
-5. If profiler version < 2: fall back to hardcoded parser. Log once.
+1. Open `/dev/kfd` (or `/dev/dri/renderD<N>` if that's the standard
+   in this tree). One file descriptor per process; cached in the
+   drainer's static state.
+2. Issue `AMDKFD_IOC_PROFILER` with `op = KFD_IOC_PROFILER_VERSION`
+   to confirm version ≥ 2.
+3. If ≥ 2: for each `gpu_id` of interest, issue `op =
+   KFD_IOC_PROFILER_DISPATCH_LOG, sub_op = GET_DESCRIPTOR`. First
+   call with `num_records = 0` to learn the required size; second
+   call with the right buffer. Parse JSON into a `RecordDescriptor`
+   C++ struct.
+4. Enumerate queues via `hsa_amd_queue_iterate`. For each queue:
+   * Query `HSA_AMD_QUEUE_INFO_KFD_QUEUE_ID` to get the KFD id.
+   * Allocate the ring buffer via `hsa_amd_memory_pool_allocate`
+     from the system memory pool with the queue's agent as accessor.
+   * Issue `KFD_IOC_PROFILER_DISPATCH_LOG, sub_op = SET` with
+     `gpu_id`, `queue_id`, `addr`, `num_records`. Kernel derives
+     record byte size from the descriptor (no userspace input).
+   * Stash the `(queue, bo_handle, ring_va)` tuple in the drainer's
+     state.
+5. If `-ENOTSUPP` (firmware doesn't support dispatch ring on this
+   device): skip drainer registration for this device. Log once.
+6. If profiler version < 2: fall back to whatever the cpc_tracing
+   branch was doing (drainer runs over no-descriptor pre-existing
+   rings). Log once.
 
-**Per-record parse loop replacement.** Today's drainer (per
-`firmware_ring_drainer.cpp` `mec_dispatch_record_16`) casts each 16-byte
-slot to a hardcoded struct and dispatches on `record_type`. New loop:
+#### 3.E.3 Per-record parse loop
+
+Today's drainer (per `firmware_ring_drainer.cpp` `mec_dispatch_record_16`)
+casts each 16-byte slot to a hardcoded struct and dispatches on
+`record_type`. New loop:
 
 ```cpp
 while (have_more_records()) {
@@ -871,12 +938,28 @@ The 16-byte fast path stays as a separate code path gated on the
 fallback flag — small enough to keep, removes perf-regression risk
 during migration.
 
+#### 3.E.4 Shutdown
+
+For each queue the drainer is tracking:
+
+1. Issue `SET` with `addr = 0` to disable.
+2. Free the BO via `hsa_amd_memory_pool_free`.
+3. Drop the queue from drainer state.
+
+Then close the `/dev/kfd` fd.
+
+If the process exits abruptly without disabling: the kernel's queue-
+destroy path still releases the BO via `kfd_queue_release_buffers`
+(`kfd_queue.c:344-365`, unchanged from today). No leak.
+
 **Migration path:**
 
 * Phase 1 (this PR set): kernel ships descriptor as `.rodata`;
-  rocprofiler-sdk reads it via `GET_DESCRIPTOR`. Producers
-  (libhsakmt, ROCr) need no changes for the descriptor — they just
-  call the new `SET` sub-op for ring buffer setup.
+  rocprofiler-sdk reads it via `GET_DESCRIPTOR` and issues `SET`
+  directly. ROCr exports `HSA_AMD_QUEUE_INFO_KFD_QUEUE_ID`. ROCr's
+  `AqlQueue::SetProfiling` no longer participates in dispatch ring
+  setup (the dispatch_record_buffer fields and helper methods on it
+  are removed; the `hsaKmtSetQueueProfilingBuffer` thunk is removed).
 * Phase 2: once telemetry confirms all consumers go through the
   descriptor, remove the 16-byte fallback in rocprofiler-sdk.
 
@@ -1040,58 +1123,36 @@ ioctl number and macro stay; only the union grows.
 
 ## 5. Migration / compatibility analysis
 
+The new ioctl is **HSA-independent** at every layer, including the
+caller side: rocprofiler-sdk talks to KFD directly. libhsakmt and
+ROCr's `AqlQueue::SetProfiling` are no longer in the SET path — that
+was a vestige of the original `UPDATE_QUEUE`-based design where
+libhsakmt was the natural thunk site.
+
 | Component | Change required | Where | Breakage if not done |
 |---|---|---|---|
 | **KFD (kernel)** | Revert UPDATE_QUEUE fields, add new sub-op (SET + GET_DESCRIPTOR), add static `.rodata` descriptor blob + accessor | `kfd_ioctl.h`, `kfd_chardev.c`, `kfd_process_queue_manager.c`, `kfd_priv.h`, **new** `kfd_dispatch_log_descriptor.{c,h}` | — (this is the change) |
 | **MEC firmware** | **None.** Wire format unchanged. | — | — |
-| **libhsakmt** | Replace `hsaKmtSetQueueProfilingBuffer` with `hsaKmtSetQueueDispatchLog` calling new ioctl (SET only — no descriptor upload) | rocm-systems libhsakmt | Build failure: UPDATE_QUEUE no longer has dispatch_record fields |
-| **ROCr** `AqlQueue::SetProfiling` | Switch to new thunk for ring buffer setup. Does NOT upload a descriptor (kernel owns it). | `rocr-runtime/.../amd_aql_queue.cpp` | Profiling silently no-ops |
-| **rocprofiler-sdk** | (a) Query descriptor from kernel at drainer init via `GET_DESCRIPTOR` (§3.E). (b) Replace hardcoded `mec_dispatch_record_16` with descriptor-driven parser. (c) Keep 16-byte fallback for older kernels. | `firmware_ring_drainer.{cpp,hpp}`, `queue_controller.cpp` | Drainer reads correctly today (16-byte fast path) but blocks Phase 2 cleanup |
+| **ROCr** | Add `HSA_AMD_QUEUE_INFO_KFD_QUEUE_ID` attribute to `hsa_amd_queue_get_info` (returns the KFD `queue_id` for a given `hsa_queue_t*`). ~5 lines. **Remove** the cpc_tracing branch's `dispatch_record_buffer_*` fields on `AqlQueue`, `AqlQueue::SetProfiling`'s dispatch-ring code, and the `hsa_amd_profiling_get_dispatch_records` API. | `rocr-runtime/.../inc/hsa_ext_amd.h`, `core/runtime/hsa_ext_amd.cpp`, `core/runtime/amd_aql_queue.cpp`, `core/inc/amd_aql_queue.h` | rocprofiler-sdk can't map HSA queue handle → KFD queue id; SET fails |
+| **libhsakmt** | **Remove** `hsaKmtSetQueueProfilingBuffer` thunk. No replacement — rocprofiler-sdk talks to KFD directly. | `libhsakmt/src/queues.c`, `libhsakmt/include/hsakmt/hsakmt.h` | Dead symbol stays exported (harmless, but worth cleaning) |
+| **rocprofiler-sdk** | (a) Open `/dev/kfd` directly. (b) Enumerate queues via `hsa_amd_queue_iterate`; map each to KFD id via the new attribute. (c) Allocate ring buffer via `hsa_amd_memory_pool_allocate`. (d) Issue `KFD_IOC_PROFILER_DISPATCH_LOG, SET`. (e) Query `GET_DESCRIPTOR`; replace hardcoded `mec_dispatch_record_16` with descriptor-driven parser. (f) Keep 16-byte fallback for older kernels. | `firmware_ring_drainer.{cpp,hpp}`, `queue_controller.cpp`, `dispatch_ring_buffer_support.{cpp,hpp}` | Drainer reads correctly today (16-byte fast path) but blocks Phase 2 cleanup |
 | **cpc_tracing branch consumers** | Audit any branch-private code that touches `properties.dispatch_record_buffer_addr` directly | Branch-local | Branch-private; trivial |
-| **Firmware-onboarding test machine** (`gbt350-odcdh5-wbc1-b.png-odc.dcgpu`) | Re-deploy: amdgpu module (new UAPI + descriptor blob), libhsakmt (.so), libhsa-runtime64 (.so), rocprofiler-sdk (.so). Firmware untouched. | Remote | Profiling stops working until userspace + kernel match |
-| **Older userspace running on new kernel** | Will trigger `_IOC_SIZE` mismatch in `kfd_ioctl()` (`kfd_chardev.c:3820-3823`). Behavior: ioctl works but tail bytes are ignored. | N/A | Acceptable on private branch |
-| **Other tools (crash dumpers, third-party profilers)** | Can now ask KFD for the format directly via `GET_DESCRIPTOR` — no co-build with libhsakmt/ROCr required. | N/A | — (this is a new capability) |
+| **Firmware-onboarding test machine** (`gbt350-odcdh5-wbc1-b.png-odc.dcgpu`) | Re-deploy: amdgpu module (new UAPI + descriptor blob), libhsa-runtime64 (.so) (with the new attribute), rocprofiler-sdk (.so) (direct path). libhsakmt rebuild only to drop the dead symbol. Firmware untouched. | Remote | Profiling stops working until userspace + kernel match |
+| **Older userspace running on new kernel** | Will trigger `_IOC_SIZE` mismatch on `AMDKFD_IOC_PROFILER` if the union size grows. **Mitigation in §5.1.** | N/A | Old PMC / PC_SAMPLE callers break |
+| **Other tools (crash dumpers, third-party profilers)** | Can ask KFD for the format directly via `GET_DESCRIPTOR` and (if they have a queue) issue `SET` themselves — no libhsakmt or ROCr dependency. | N/A | — (this is a new capability) |
 
 Critically: **the firmware row used to read "MEC firmware: Write
 0x00100001/0x00100002 to DW2 instead of bare 1/2" — that row is now
 gone.** No firmware coordination needed.
 
-### 5.1 Concrete UAPI migration shim for libhsakmt + ROCr
+The earlier draft of this spec proposed a libhsakmt v22/v23 compat
+shim to handle the case where new userspace runs on an old kernel.
+**That shim is no longer needed** because libhsakmt is no longer in
+the dispatch-ring path at all. Old kernels are handled by
+rocprofiler-sdk's existing fallback (probe profiler version; if < 2,
+use the hardcoded 16-byte parser path).
 
-Addresses review finding M2 ("migration plan internally contradictory
-for mixed-version deployments"). The strategy is:
-
-1. **`KFD_IOCTL_MINOR_VERSION` is the single source of truth.**
-   libhsakmt (`hsaKmt.h`) keeps its `KFD_IOCTL_MINOR_VERSION` mirror
-   in sync with the kernel header it was built against. At init, it
-   issues `AMDKFD_IOC_GET_VERSION` and stashes the running kernel's
-   minor in a global.
-2. **Two side-by-side code paths in libhsakmt's queue layer:**
-   * `hsaKmtSetQueueProfilingBuffer_v1()` — issues `UPDATE_QUEUE`
-     with the OLD struct layout that includes
-     `dispatch_record_buffer_*` fields. Used when running on a kernel
-     with `minor < 23`. Built using a copy of the pre-1.23 struct
-     definition kept verbatim in `libhsakmt/src/compat_v22.h`.
-   * `hsaKmtSetQueueProfilingBuffer_v2()` — issues
-     `AMDKFD_IOC_PROFILER` with `op=KFD_IOC_PROFILER_DISPATCH_LOG,
-     sub_op=SET`. Used when `minor >= 23`.
-3. **Public API stays the same.** `hsaKmtSetQueueProfilingBuffer()`
-   dispatches to `_v1` or `_v2` based on the runtime version.
-   ROCr's `AqlQueue::SetProfiling` does not change at all — it still
-   calls the same thunk function.
-4. **Build-time ABI assertion.** `compat_v22.h` carries a
-   `static_assert(sizeof(struct kfd_ioctl_update_queue_args_v22) ==
-   0x28, "compat shim ABI drift")` so a future kernel header change
-   that perturbs the struct can't silently break the v1 path.
-5. **rocprofiler-sdk** does not need shim — it only ever talks to the
-   new ioctl, falling back to its hardcoded 16-byte parser if
-   `KFD_IOC_PROFILER_VERSION` returns < 2 (already in §3.E).
-
-The shim lives entirely in libhsakmt. When libhsakmt eventually drops
-support for kernels older than 1.23 (e.g., next major release),
-`compat_v22.h` and `_v1` are deleted in a single commit.
-
-### 5.2 `_IOC_SIZE` compatibility matrix
+### 5.1 `_IOC_SIZE` compatibility matrix
 
 Addresses review finding M3. `AMDKFD_IOC_PROFILER` is defined as
 `_IOWR('K', 0x86, struct kfd_ioctl_profiler_args)`, so the encoded
@@ -1102,7 +1163,7 @@ to differ between old and new builds. Behavior:
 | Userspace | Kernel | `_IOC_NR` match | `_IOC_SIZE` match | Outcome |
 |---|---|---|---|---|
 | v22 (old) | v22 (old) | yes | yes | works (baseline) |
-| v22 (old) | v23 (new) | yes | **NO** (kernel grew the union, struct grew) | `kfd_ioctl()` `_IOC_SIZE` check returns `-EINVAL`; old userspace cannot reach new sub-ops at all. **Acceptable** — old userspace doesn't know about `KFD_IOC_PROFILER_DISPATCH_LOG`, so it has no reason to issue this. Old userspace's existing PMC / PC_SAMPLE calls also fail with `-EINVAL`. **PROBLEM:** that means PMC and PC_SAMPLE break for old userspace on a new kernel. Mitigation in §5.3. |
+| v22 (old) | v23 (new) | yes | **NO** (kernel grew the union, struct grew) | `kfd_ioctl()` `_IOC_SIZE` check returns `-EINVAL`; old userspace cannot reach new sub-ops at all. **Acceptable** — old userspace doesn't know about `KFD_IOC_PROFILER_DISPATCH_LOG`, so it has no reason to issue this. Old userspace's existing PMC / PC_SAMPLE calls also fail with `-EINVAL`. **PROBLEM:** that means PMC and PC_SAMPLE break for old userspace on a new kernel. Mitigation in §5.2. |
 | v23 (new) | v22 (old) | yes | **NO** (userspace's struct is bigger) | same `-EINVAL`; new userspace falls back per §3.E (probes `KFD_IOC_PROFILER_VERSION`, which itself fails, and uses legacy UPDATE_QUEUE path via the shim). |
 | v23 | v23 | yes | yes | works |
 | 32-bit user / 64-bit kernel | — | depends on compat layer | should be size-equal because all fields are explicit `__u32`/`__u64` | tested via the existing 32-bit compat path in `kfd_chardev.c:3858+` (KFD already supports compat ioctl). |
@@ -1110,7 +1171,7 @@ to differ between old and new builds. Behavior:
 The only real hazard is the v22-userspace + v23-kernel combination:
 existing PMC / PC_SAMPLE consumers built against v22 will fail.
 
-### 5.3 Mitigation: dual ioctl size handling
+### 5.2 Mitigation: dual ioctl size handling
 
 Linux kernel convention for growing an ioctl args struct is to either
 (a) use `_IOC_SIZEMASK` to compare just the struct identity (the
@@ -1307,10 +1368,10 @@ revisions. They are listed here as resolved-with-pointer for trace.
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|---|
 | R1 | Static blob in kernel goes stale relative to firmware (firmware adds a new `record_type` that the kernel-shipped descriptor doesn't list) | Low (kernel rebuilds in lockstep with firmware drops) | Medium (drainer aborts queue scan with clear logged error — not silent corruption) | Bump `KFD_DISPATCH_LOG_DESC_VERSION` and update the blob whenever firmware adds a record type. Detect via "unknown record_type N" log line. Coordination point is the kernel/firmware release, not a userspace coordination. |
-| R2 | libhsakmt rolled out without compat shim — new userspace fails on old kernels | Low (mitigation is in §5.1) | Medium | libhsakmt carries the v1/v2 dual code path in `compat_v22.h`; runtime probe selects which to issue. Static assertion catches drift. |
+| R2 | New rocprofiler-sdk runs against old kernel without `KFD_IOC_PROFILER_DISPATCH_LOG` | Low | Medium | rocprofiler-sdk probes `KFD_IOC_PROFILER_VERSION` at init; if < 2, falls back to existing 16-byte hardcoded path that works against current cpc_tracing-branch kernel. No libhsakmt shim involved. |
 | R3 | Splitting `pqm_update_queue_properties` introduces a regression in the queue update path | Medium | High (any KFD queue update breaks) | Diff the new `pqm_update_queue_properties` against `pqm.c.orig` — should be byte-identical. CI: run `kfdtest` on the test machine. |
 | R4 | `KFD_IOC_PROFILER_VERSION_NUM` bump breaks existing PMC/PC_SAMPLE callers that gate on `version == 1` | Low | Low | Convention is `>=`, not `==`. Audit; current callers use `>=`. |
-| R5 | `dispatch_log_args` grows beyond the existing union — breaks v22 userspace's PMC / PC_SAMPLE on a v23 kernel | Low (size budgeted in §5.3) | High | Compile-time `static_assert(sizeof(kfd_ioctl_dispatch_log_args) <= sizeof(kfd_ioctl_pc_sample_args))`. Args struct is exactly 0x28 = 40 bytes today; PC_SAMPLE union member is 40 bytes. Net union size is unchanged. |
+| R5 | `dispatch_log_args` grows beyond the existing union — breaks v22 userspace's PMC / PC_SAMPLE on a v23 kernel | Low (size budgeted in §5.2) | High | Compile-time `static_assert(sizeof(kfd_ioctl_dispatch_log_args) <= sizeof(kfd_ioctl_pc_sample_args))`. Args struct is exactly 0x28 = 40 bytes today; PC_SAMPLE union member is 40 bytes. Net union size is unchanged. |
 | R6 | `GET_DESCRIPTOR` returns `-ENOTSUPP` on unsupported devices but caller doesn't distinguish from other errors | Low | Low | Document the error code. Userspace sample code shows the right pattern. |
 | R7 | gpu_id<>queue_id mismatch on SET corrupts a different device's queue | Resolved | High | SET handler now rejects mismatched gpu_id with `-EINVAL` (§2.3 body, addresses Major M1). |
 | R8 | Long lock hold time on `GET_DESCRIPTOR` due to `copy_to_user` | Resolved | Medium | Handler now snapshots blob pointer under `p->mutex` and copies after unlock (§2.4, addresses Major M5). |
