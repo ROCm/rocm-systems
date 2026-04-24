@@ -6950,16 +6950,16 @@ def test_format_stats_boundary():
 
 def test_format_stats_basic():
     result = format_stats(3, 1.5)
-    assert "kernel_launches: 3" in result
-    assert "total_duration: 1.50 ms" in result
+    assert "dispatches: 3" in result
+    assert "total: 1.50 ms" in result
 
 
 def test_rollup_leaf_node():
     node = CallTreeNode(name="leaf")
     node.kernels["kern_a"] = KernelStats(launches=2, total_duration_ns=1000.0)
-    launches, dur_ns = rollup_node_stats(node)
-    assert launches == 2
-    assert dur_ns == 1000.0
+    rollup = rollup_node_stats(node)
+    assert rollup.launches == 2
+    assert rollup.total_duration_ns == 1000.0
     assert node.kernel_launches == 2
 
 
@@ -7126,7 +7126,7 @@ def test_show_call_tree_prints_location_and_stats(capsys):
     show_call_tree({"main.py:10": root})
     output = capsys.readouterr().out
     assert "main.py:10" in output
-    assert "kernel_launches: 1" in output
+    assert "dispatches: 1" in output
     assert "kern" in output
 
 
@@ -7166,7 +7166,7 @@ def test_print_operator_node_branching_shows_stats(capsys):
     node.kernels["k2"] = KernelStats(launches=1, total_duration_ns=2_500_000.0)
     print_operator_node(node)
     output = capsys.readouterr().out
-    assert "kernel_launches: 2" in output
+    assert "dispatches: 2" in output
     assert "k1" in output
     assert "k2" in output
 
@@ -7180,7 +7180,7 @@ def test_print_operator_node_non_branching_omits_stats(capsys):
     output = capsys.readouterr().out
     lines = output.strip().split("\n")
     assert "└─ single" in lines[0]
-    assert "kernel_launches" not in lines[0]
+    assert "dispatches" not in lines[0]
 
 
 def test_print_operator_node_long_kernel_wraps(capsys):

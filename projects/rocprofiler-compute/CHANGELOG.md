@@ -8,6 +8,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added ``--bench-only`` profile mode option to run the roofline microbenchmark standalone (without profiling an application or collecting performance counters). No application run is required. Useful for regenerating ``roofline.csv`` in an existing workload directory or running the microbenchmark on systems where only HIP is available. ``--bench-only`` is mutually exclusive with ``--block``, ``--set``, ``--roof-only``, and ``--no-roof``.
 * Added backward compatibility for live attach mode to work with older ROCm 7.x.x releases.
+* Added per-operator stats (calls, dispatch min/max/mean) and a flat operator summary table to ``--experimental analyze --list-torch-operators`` / ``--torch-operator`` output.
 
 ### Changed
 

@@ -681,12 +681,27 @@ Display all PyTorch operators captured during profiling:
    Grouped by source location, sorted by total GPU kernel duration.
    ================================================================================
 
-   main.py:60 (kernel_launches: 110, total_duration: 59.31 ms)
-   └─ nn.Module.Net.forward (kernel_launches: 110, total_duration: 59.31 ms)
-      ├─ nn.Module.Conv2d.forward
-      |  └─ torch.nn.functional.conv2d (kernel_launches: 40, total_duration: 27.08 ms)
-      └─ nn.Module.Linear.forward
-         └─ torch.nn.functional.linear (kernel_launches: 20, total_duration: 15.41 ms)
+   main.py:60 (dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
+   └─ nn.Module.Net.forward (calls: 10, dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
+      ├─ torch.nn.functional.conv2d (calls: 20)
+      |  └─ conv2d_fwd (dispatches: 40, total: 27.08 ms)
+      ├─ torch.nn.functional.linear (calls: 20)
+      |  └─ gemm (dispatches: 20, total: 15.41 ms)
+      └─ torch.nn.functional.relu (calls: 40)
+         └─ relu_kernel (dispatches: 30, total: 0.31 ms)
+
+   Operator summary (Min/Max/Mean are per-dispatch over the subtree; sorted by Total):
+   ╒══════════════════════════════════════════════════╤═════════╤══════════════╤══════════════╤═══════════╤══════════════════╤═════════════╤════════════╤════════════╕
+   │ Operator                                         │   Calls │   Dispatches │   Total (ms) │   % Total │   Mean/Call (ms) │   Mean (us) │   Min (us) │   Max (us) │
+   ╞══════════════════════════════════════════════════╪═════════╪══════════════╪══════════════╪═══════════╪══════════════════╪═════════════╪════════════╪════════════╡
+   │ nn.Module.Net.forward                            │      10 │           90 │        42.80 │    100.00 │           4.2800 │      475.56 │      10.00 │    2100.00 │
+   ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────────┼───────────┼──────────────────┼─────────────┼────────────┼────────────┤
+   │ nn.Module.Net.forward/torch.nn.functional.conv2d │      20 │           40 │        27.08 │     63.27 │           1.3540 │      677.00 │     210.00 │    2100.00 │
+   ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────────┼───────────┼──────────────────┼─────────────┼────────────┼────────────┤
+   │ nn.Module.Net.forward/torch.nn.functional.linear │      20 │           20 │        15.41 │     36.00 │           0.7705 │      770.50 │     130.00 │    1820.00 │
+   ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────────┼───────────┼──────────────────┼─────────────┼────────────┼────────────┤
+   │ nn.Module.Net.forward/torch.nn.functional.relu   │      40 │           30 │         0.31 │      0.72 │           0.0077 │       10.33 │      10.00 │      20.00 │
+   ╘══════════════════════════════════════════════════╧═════════╧══════════════╧══════════════╧═══════════╧══════════════════╧═════════════╧════════════╧════════════╛
 
 Output is grouped by source location (``file:line``) and shows full operator
 hierarchy (``/``-separated) and kernel stats. A consolidated CSV

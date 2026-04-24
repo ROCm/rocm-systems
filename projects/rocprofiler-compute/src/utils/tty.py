@@ -473,7 +473,7 @@ def show_call_tree(call_trees: dict[str, CallTreeNode]) -> None:
             print_operator_node(child)
 
 
-OPERATOR_NAME_WRAP_WIDTH = 48
+OPERATOR_NAME_WRAP_WIDTH = 72
 
 
 def show_operator_summary(summary_df: pd.DataFrame) -> None:
@@ -481,41 +481,49 @@ def show_operator_summary(summary_df: pd.DataFrame) -> None:
 
     Visually matches the rest of the analyze CLI: ``fancy_grid`` bordered
     table via ``tabulate``. The ``Operator`` column is wrapped at
-    ``OPERATOR_NAME_WRAP_WIDTH`` so deep call-stack paths do not blow out
-    the right margin. Per-column ``floatfmt`` keeps ``ms`` columns at 4
-    decimals and ``us``/percentage columns at 2. ``NaN`` values render as
-    ``"N/A"``.
+    ``OPERATOR_NAME_WRAP_WIDTH`` only when an operator path exceeds that
+    width; numeric columns size to content. A header line above the table
+    spells out the aggregation basis so the column names can stay short.
+    ``NaN`` values render as ``"N/A"``.
     """
     if summary_df is None or summary_df.empty:
         print("\nOperator summary: (no operators with recorded calls)")
         return
 
-    display_columns = [
-        "Operator",
-        "Calls",
-        "Dispatches",
-        "Total_GPU_ms",
-        "Pct_Total_GPU",
-        "Mean_Per_Call_ms",
-        "Mean_Per_Dispatch_us",
-        "Min_Dispatch_us",
-        "Max_Dispatch_us",
+    # (DataFrame column, display label) pairs. DataFrame names are the
+    # programmatic schema (OPERATOR_SUMMARY_COLUMNS); display labels are
+    # short because the header line below explains units and semantics.
+    column_map = [
+        ("Operator", "Operator"),
+        ("Calls", "Calls"),
+        ("Dispatches", "Dispatches"),
+        ("Total_GPU_ms", "Total (ms)"),
+        ("Pct_Total_GPU", "% Total"),
+        ("Mean_Per_Call_ms", "Mean/Call (ms)"),
+        ("Mean_Per_Dispatch_us", "Mean (us)"),
+        ("Min_Dispatch_us", "Min (us)"),
+        ("Max_Dispatch_us", "Max (us)"),
     ]
-    display_df = summary_df[display_columns].copy()
+    source_cols = [c for c, _ in column_map]
+    headers = [h for _, h in column_map]
+
+    display_df = summary_df[source_cols].copy()
     display_df["Operator"] = display_df["Operator"].astype(str).apply(
         lambda s: textwrap.fill(s, width=OPERATOR_NAME_WRAP_WIDTH)
     )
 
-    # Per-column float format; "" for string and integer columns (tabulate
-    # picks a sensible default for those).
-    floatfmt = ("", "", "", ".4f", ".2f", ".4f", ".2f", ".2f", ".2f")
-    colalign = ("left",) + ("right",) * (len(display_columns) - 1)
+    # Per-column float format; "" for string and integer columns.
+    floatfmt = ("", "", "", ".2f", ".2f", ".4f", ".2f", ".2f", ".2f")
+    colalign = ("left",) + ("right",) * (len(headers) - 1)
 
-    print("\nOperator summary (sorted by Total_GPU_ms):")
+    print(
+        "\nOperator summary (Min/Max/Mean are per-dispatch over the subtree; "
+        "sorted by Total):"
+    )
     print(
         tabulate(
             display_df.values,
-            headers=display_columns,
+            headers=headers,
             tablefmt="fancy_grid",
             floatfmt=floatfmt,
             colalign=colalign,
