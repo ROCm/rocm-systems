@@ -2284,7 +2284,7 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
   amd::Memory* amdMemory = &cmd.memory();
   Memory* memory = dev().getGpuMemory(amdMemory);
 
-  if (type == ROCCLR_COMMAND_STREAM_WAIT_VALUE) {
+  if (type == static_cast<amd::CommandType>(ROCCLR_COMMAND_STREAM_WAIT_VALUE)) {
     // Use a blit kernel to perform the wait operation
     // mask is applied on value before performing
     // the comparision defined by 'condition'
@@ -2297,7 +2297,7 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
     if (!result) {
       LogError("submitStreamOperation: Wait failed!");
     }
-  } else if (type == ROCCLR_COMMAND_STREAM_WRITE_VALUE) {
+  } else if (type == static_cast<amd::CommandType>(ROCCLR_COMMAND_STREAM_WRITE_VALUE)) {
     bool result;
     switch (flags) {
       case ROCCLR_STREAM_WRITE_VALUE_DEFAULT: {
