@@ -105,3 +105,18 @@ def test_build_safe_env_only_whitelist(monkeypatch):
     assert "PATH" in env
     assert "ROCM_PATH" in env
     assert "ANTHROPIC_API_KEY" not in env, "API keys must NOT leak to subprocess"
+
+
+def test_build_safe_env_filters_extra_env():
+    env = _safety.build_safe_env(
+        extra={
+            "OPENAI_API_KEY": "sk-secret",
+            "PATH": "/custom/bin",
+            "ROCPROFV3_LOG_LEVEL": "debug",
+            "UNRELATED": "drop-me",
+        }
+    )
+    assert env["PATH"] == "/custom/bin"
+    assert env["ROCPROFV3_LOG_LEVEL"] == "debug"
+    assert "OPENAI_API_KEY" not in env
+    assert "UNRELATED" not in env

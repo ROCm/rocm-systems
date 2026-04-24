@@ -154,16 +154,22 @@ _ENV_PREFIX_WHITELIST = (
 )
 
 
+def _env_key_allowed(key: str) -> bool:
+    return key in _ENV_WHITELIST or any(key.startswith(p) for p in _ENV_PREFIX_WHITELIST)
+
+
 def build_safe_env(extra: dict | None = None) -> dict:
     """Construct a minimal subprocess env containing only whitelisted keys.
 
     - API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, …) are NEVER forwarded.
-    - Adds anything in `extra` last (caller responsibility for those values).
+    - `extra` is filtered through the same allowlist as the parent env.
     """
     safe = {}
     for k, v in os.environ.items():
-        if k in _ENV_WHITELIST or any(k.startswith(p) for p in _ENV_PREFIX_WHITELIST):
+        if _env_key_allowed(k):
             safe[k] = v
     if extra:
-        safe.update(extra)
+        for k, v in extra.items():
+            if _env_key_allowed(k):
+                safe[k] = v
     return safe
