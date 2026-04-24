@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import jsonschema
-import pytest
 
 from perfxpert.knowledge import load_yaml
 

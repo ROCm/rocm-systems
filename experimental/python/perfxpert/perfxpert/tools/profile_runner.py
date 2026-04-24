@@ -63,8 +63,6 @@ def _validate_argv(argv: List[str]) -> None:
         sep = len(argv)
 
     rocprof_tokens = argv[1:sep]
-    target_tokens = argv[sep + 1:] if sep < len(argv) else []
-
     # Flag allowlist for rocprofv3 flags
     i = 0
     while i < len(rocprof_tokens):

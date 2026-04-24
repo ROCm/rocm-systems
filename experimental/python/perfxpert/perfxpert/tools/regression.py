@@ -65,7 +65,7 @@ def _kernel_durations(db_path: str) -> Dict[str, float]:
         """).fetchall()
         conn.close()
         return {name: float(total) for name, total in rows}
-    except Exception as e:
+    except Exception:
         # Fall back to legacy schema
         try:
             rows = conn.execute(f"""

@@ -3,7 +3,6 @@
 import json
 from pathlib import Path
 
-import pytest
 
 from tests.benchmarks.tritonbench_runner import parse_tritonbench_output, RunResult
 

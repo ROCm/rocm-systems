@@ -174,7 +174,7 @@ def test_classify_trace_only_memcpy_above_threshold_returns_non_data_insufficien
     # Must NOT be data_insufficient — we have real evidence (memcpy is high).
     # With evidence weighting, 1/3 rules → confidence 0.33 → returns 'mixed'.
     assert result["type"] != "data_insufficient", (
-        f"Got 'data_insufficient' for memcpy_pct=0.25 (25% > 20% threshold). "
+        "Got 'data_insufficient' for memcpy_pct=0.25 (25% > 20% threshold). "
         "The classifier must not report data_insufficient when concrete evidence "
         "is present — it should return 'mixed' (insufficient evidence for a "
         "confident classification)."

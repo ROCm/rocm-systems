@@ -5,7 +5,6 @@ message because you moved an EXECUTION tool into the MCP-exposed list,
 STOP and open an architectural RFC per spec §5.8.
 """
 
-import pytest
 
 from perfxpert.tools._class import ToolClass
 from mcp_server._registry import discover_read_only_tools

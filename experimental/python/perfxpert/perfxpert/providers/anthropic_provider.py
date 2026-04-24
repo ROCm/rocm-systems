@@ -1,7 +1,7 @@
 """Anthropic provider -- Claude via official `anthropic` SDK (spec N28)."""
 from __future__ import annotations
 import os
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional
 from perfxpert.providers._base import Provider, ProviderResponse
 from perfxpert.providers._exceptions import (
     AuthError, DryRunResponse, ProviderError, RateLimitError, TimeoutError,

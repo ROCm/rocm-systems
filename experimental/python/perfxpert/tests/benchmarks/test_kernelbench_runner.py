@@ -3,7 +3,6 @@
 import json
 from pathlib import Path
 
-import pytest
 
 from tests.benchmarks.kernelbench_runner import parse_kernelbench_output, RunResult
 

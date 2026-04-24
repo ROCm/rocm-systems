@@ -1,12 +1,11 @@
 """Isolation tests for Recommendation decision-maker (Layer 1)."""
 
 import pytest
-from unittest.mock import MagicMock
 
 from perfxpert.agents import recommendation as rec_module
 from perfxpert.agents import schemas
 from perfxpert.agents.framework import (
-    FakeProviderResponse, HandoffPolicyViolation, dispatch_handoff,
+    HandoffPolicyViolation, dispatch_handoff,
 )
 from perfxpert.tools import profiling
 
@@ -131,7 +130,8 @@ def test_recommendation_dedups_seen_hashes(monkeypatch):
     monkeypatch.setattr(rec_module, "_run_specialist_compute", fake_compute)
 
     # Compute a hash matching the first technique
-    import hashlib, json
+    import hashlib
+    import json
     h = hashlib.sha256(json.dumps({"name": "launch_bounds"}, sort_keys=True).encode()).hexdigest()
 
     result = rec_module.run_recommendation(

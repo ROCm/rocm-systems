@@ -1,6 +1,5 @@
 """Tests for perfxpert.fence._filters."""
 
-import pytest
 
 from perfxpert.fence._filters import (
     ROLE_YAML_MAP,

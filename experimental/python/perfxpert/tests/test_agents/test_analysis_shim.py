@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import importlib
 import sys
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -94,7 +93,7 @@ def test_shim_used_when_trace_analysis_module_absent(monkeypatch):
 
     try:
         # Remove the cached analysis module so the try/except re-runs on reload.
-        saved_analysis = sys.modules.pop("perfxpert.agents.analysis", None)
+        sys.modules.pop("perfxpert.agents.analysis", None)
         import perfxpert.agents.analysis as fresh_mod
         importlib.reload(fresh_mod)
 

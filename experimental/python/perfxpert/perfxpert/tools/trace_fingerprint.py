@@ -9,7 +9,6 @@ and --pmc counter names. Ignores output paths (-d, -o) and app args.
 Tool class: READ_ONLY.
 """
 
-import re
 import shlex
 from typing import FrozenSet
 

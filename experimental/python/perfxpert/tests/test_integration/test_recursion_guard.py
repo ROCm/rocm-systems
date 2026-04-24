@@ -1,10 +1,8 @@
 """Verify the opencode launcher sets PERFXPERT_IN_OPENCODE_SESSION=1 (recursion guard)."""
 
-import os
 from pathlib import Path
 from unittest import mock
 
-import pytest
 
 from perfxpert.cli import opencode_launcher
 

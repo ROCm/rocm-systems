@@ -564,7 +564,7 @@ def _run_uninstall(remaining_argv: list[str]) -> int:
                 "export PERFXPERT_ASSUME_CONSENT=1 to confirm.\n"
             )
             return 2
-        sys.stderr.write(f"\nProceed? [y/N] ")
+        sys.stderr.write("\nProceed? [y/N] ")
         sys.stderr.flush()
         try:
             answer = input().strip().lower()

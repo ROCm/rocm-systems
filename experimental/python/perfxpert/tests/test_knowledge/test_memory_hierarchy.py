@@ -26,5 +26,5 @@ def test_memory_hierarchy_validates_against_schema():
 
 def test_memory_hierarchy_has_expected_content():
     data = load_yaml("memory_hierarchy")
-    level_names = {l["name"] for l in data["levels"]}
+    level_names = {level["name"] for level in data["levels"]}
     assert level_names == {"VGPR", "LDS", "L1", "L2", "HBM"}

@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from perfxpert.tools import tasks
-from perfxpert.tools._class import ToolClass
 
 
 @pytest.fixture
@@ -43,7 +42,7 @@ def test_next_returns_none_when_all_blocked(store):
     """If nothing is ready, next() returns None."""
     parent = store.create("blocker")
     # Block child, don't close parent — nothing ready except parent itself
-    child = store.create("blocked", depends_on=[parent])
+    store.create("blocked", depends_on=[parent])
     store.update(parent, status="in_progress")
     # next() should return None — only parent was ready and it's in-progress now
     assert store.next() is None

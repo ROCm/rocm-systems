@@ -1,6 +1,5 @@
 """Tests for perfxpert.tools._tooldep — external-tool verifier."""
 
-import os
 import subprocess
 from unittest import mock
 

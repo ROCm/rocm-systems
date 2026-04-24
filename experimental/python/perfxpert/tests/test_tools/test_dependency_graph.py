@@ -6,7 +6,6 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-import pytest
 
 from perfxpert.tools import dependency_graph
 from perfxpert.tools._class import ToolClass

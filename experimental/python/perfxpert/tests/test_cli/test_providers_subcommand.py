@@ -1,9 +1,6 @@
 """Tests for `perfxpert providers list` subcommand."""
 
-import subprocess
-import sys
 
-import pytest
 
 from perfxpert.__main__ import main as perfxpert_main
 

@@ -9,7 +9,6 @@ left to run for real — this is the path that was silently broken before the fi
 """
 
 import pytest
-from unittest.mock import MagicMock
 
 from perfxpert.runtime import gate_cascade
 from perfxpert.runtime.gate_cascade import run_gate_cascade, GateInput, _run_sol_gate

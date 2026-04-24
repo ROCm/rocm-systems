@@ -6,7 +6,6 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-import pytest
 
 from perfxpert.tools import unified_memory
 from perfxpert.tools._class import ToolClass

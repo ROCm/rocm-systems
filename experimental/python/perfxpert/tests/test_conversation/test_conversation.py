@@ -1,6 +1,5 @@
 """Tests for perfxpert.conversation."""
 
-import pytest
 
 from perfxpert.conversation import Conversation
 

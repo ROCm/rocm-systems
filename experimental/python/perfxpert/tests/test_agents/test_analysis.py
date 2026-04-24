@@ -4,7 +4,6 @@ import sys
 import types
 
 import pytest
-from unittest.mock import MagicMock
 
 from perfxpert.agents import analysis as analysis_module
 from perfxpert.agents import schemas

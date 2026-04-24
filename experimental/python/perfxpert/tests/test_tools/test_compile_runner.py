@@ -1,6 +1,5 @@
 """Tests for perfxpert.tools.compile_runner — EXECUTION class."""
 
-import os
 from pathlib import Path
 from unittest import mock
 

@@ -9,9 +9,7 @@ Fixture taxonomy:
   Expected: classify as "data_insufficient" (classifier is flying blind).
 """
 
-from unittest.mock import MagicMock
 
-import pytest
 
 from perfxpert.agents import build_session
 from perfxpert.agents import schemas

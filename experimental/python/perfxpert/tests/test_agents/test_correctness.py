@@ -5,7 +5,6 @@ a GateVerdict. Tests script verdict inputs directly.
 """
 
 import pytest
-from unittest.mock import MagicMock
 
 from perfxpert.agents import correctness as cor_module
 from perfxpert.agents import schemas
@@ -229,7 +228,6 @@ def test_correctness_airgap_narrative_is_deterministic_template(monkeypatch):
 def test_correctness_does_not_invoke_gates(monkeypatch):
     """Spec §5.0: Correctness NEVER calls compile/sol/bitwise/regression/anchors."""
     from perfxpert.runtime import gate_cascade
-    original_evaluate = gate_cascade.evaluate
 
     def fail_if_called(*args, **kwargs):
         raise AssertionError("Correctness must not invoke gate_cascade.evaluate")

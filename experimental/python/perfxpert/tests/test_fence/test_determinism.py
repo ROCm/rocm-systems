@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-import pytest
 
 from perfxpert.fence import FenceBuilder
 

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from perfxpert.providers import registry
-from perfxpert.providers._exceptions import AuthError, DryRunResponse, RateLimitError
+from perfxpert.providers._exceptions import AuthError, DryRunResponse
 import perfxpert.providers.anthropic_provider as _anthmod
 
 

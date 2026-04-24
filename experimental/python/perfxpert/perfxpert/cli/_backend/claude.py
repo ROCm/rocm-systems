@@ -45,7 +45,6 @@ from perfxpert.cli._backend.protocol import (
     PartialInstall,
     Plan,
     UninstallReport,
-    VersionTooOld,
 )
 from perfxpert.cli._consent import (
     CONSENT_ASSUME_ENV,
@@ -575,7 +574,6 @@ class ClaudeCodeAdapter:
 
     def _make_pointer(self, agents_cache: Path, cwd: Path) -> str:
         """Return the pointer file body (distinctive so uninstall can detect drift)."""
-        rel = agents_cache.relative_to(cwd)
         return (
             "<!-- perfxpert-managed pointer file. Do not edit inside this file — "
             "your perfxpert config lives in .perfxpert/ and .mcp.json. -->\n"

@@ -71,7 +71,6 @@ def test_every_yaml_has_a_schema():
 def test_no_orphan_schemas():
     """Every schema must have a matching YAML."""
     for schema_path in SCHEMAS_DIR.glob("*.schema.json"):
-        yaml_path = KNOWLEDGE_DIR / f"{schema_path.stem.replace('.schema', '')}.yaml"
         # schema.stem is 'foo.schema' — we want 'foo'
         stem = schema_path.name.replace(".schema.json", "")
         target = KNOWLEDGE_DIR / f"{stem}.yaml"

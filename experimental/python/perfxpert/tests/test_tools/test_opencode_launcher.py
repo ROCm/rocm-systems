@@ -1,6 +1,5 @@
 """Unit tests for perfxpert.cli.opencode_launcher."""
 
-import os
 from pathlib import Path
 from unittest import mock
 

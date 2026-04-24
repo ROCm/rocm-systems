@@ -9,7 +9,6 @@ Fixtures are synthetic (hand-constructed), so this test does NOT run the full
 """
 
 from pathlib import Path
-from typing import Any, Dict
 import sqlite3
 
 import pytest

@@ -301,8 +301,8 @@ def _check_mcp_server() -> tuple[bool, str]:
         from mcp_server._registry import discover_read_only_tools
 
         server = build_server()  # noqa: F841
-        n = len(discover_read_only_tools())
-        return True, f"MCP server reachable"
+        discover_read_only_tools()
+        return True, "MCP server reachable"
     except Exception as e:
         return False, f"MCP server FAILED: {e}"
 
@@ -409,7 +409,6 @@ def _report_active_mode() -> str:
 
 def _run_doctor():
     """Run all health checks and print results in canonical format."""
-    import sys
 
     checks = [
         ("perfxpert version", _check_version()),
@@ -447,7 +446,7 @@ def _run_doctor():
         print("✓ ALL CLEAN")
         return 0
     else:
-        print(f"✗ Issues found — see above")
+        print("✗ Issues found — see above")
         return 1
 
 

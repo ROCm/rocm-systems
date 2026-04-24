@@ -1,6 +1,5 @@
 """Tests for perfxpert.tools.plateau."""
 
-import pytest
 
 from perfxpert.tools import plateau
 from perfxpert.tools._class import ToolClass

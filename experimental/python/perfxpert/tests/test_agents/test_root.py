@@ -6,13 +6,11 @@ handoff / output shape.
 
 from pathlib import Path
 import pytest
-from unittest.mock import MagicMock
 
 from perfxpert.agents import root as root_module
 from perfxpert.agents import schemas
 from perfxpert.agents.framework import (
-    Agent, AgentConstructionError, HandoffPolicyViolation, ToolAllowlistViolation,
-    FakeProviderResponse, dispatch_tool,
+    HandoffPolicyViolation, FakeProviderResponse, dispatch_tool,
 )
 from perfxpert.tools import tasks as tasks_tool
 

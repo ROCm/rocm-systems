@@ -1,6 +1,5 @@
 """Tests for perfxpert.tools.trace_fingerprint."""
 
-import pytest
 
 from perfxpert.tools import trace_fingerprint
 from perfxpert.tools._class import ToolClass

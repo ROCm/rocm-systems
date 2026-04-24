@@ -7,7 +7,6 @@ the hierarchy is callable from backend TUIs without a forced handoff.
 
 from __future__ import annotations
 
-import pytest
 
 from perfxpert.tools._class import ToolClass
 

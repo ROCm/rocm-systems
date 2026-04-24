@@ -111,8 +111,8 @@ def render_att_flamegraph(
 
     parts: List[str] = []
     parts.append(
-        f'<div class="att-flame" data-tip="ATT stall flame graph - click a '
-        f'rect to jump to its recommendation card.">'
+        '<div class="att-flame" data-tip="ATT stall flame graph - click a '
+        'rect to jump to its recommendation card.">'
     )
     parts.append(
         f'<svg class="att-flame-svg" xmlns="http://www.w3.org/2000/svg" '

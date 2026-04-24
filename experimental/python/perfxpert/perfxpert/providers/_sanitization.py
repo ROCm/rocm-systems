@@ -8,7 +8,6 @@ These helpers are pure, deterministic, and unit-testable.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List
 
 _PATH_PATTERN = re.compile(
     r'(/home/[^\s,"\';>]+|/opt/[^\s,"\';>]+|/root/[^\s,"\';>]+|'

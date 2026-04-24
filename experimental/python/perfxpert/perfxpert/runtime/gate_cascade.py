@@ -26,7 +26,7 @@ GateVerdict directly.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional
 import numpy as np
 import tempfile
@@ -378,12 +378,6 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
         # Gate 2: SOL sanity
         if stop_index >= 2:
             sol_stub = MagicMock()
-            # Map arch to peak performance (simplified)
-            arch_peak = {
-                "gfx942": 1307.0,  # MI300X BF16 MFMA peak TFLOPS
-                "gfx90a": 120.0,   # MI250X
-            }
-            peak_tflops = arch_peak.get(gate_input.arch, 1000.0)
 
             ok_sol = gate_input.claimed_speedup <= 50.0  # SOL_MAX_REASONABLE_SPEEDUP
             sol_stub.return_value = {

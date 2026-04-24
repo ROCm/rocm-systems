@@ -15,13 +15,10 @@ Covers:
 from __future__ import annotations
 
 import io
-import os
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
-from perfxpert.cli import _consent
 from perfxpert.cli._consent import (
     CONSENT_ASSUME_ENV,
     consent_path,

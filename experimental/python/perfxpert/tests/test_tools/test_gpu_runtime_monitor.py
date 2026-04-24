@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-import pytest
 
 from perfxpert.tools import gpu_runtime_monitor
 from perfxpert.tools._class import ToolClass

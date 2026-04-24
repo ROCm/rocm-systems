@@ -54,7 +54,6 @@ def test_launch_opencode_missing_binary_raises(monkeypatch):
 
 def test_launch_opencode_sets_recursion_env(monkeypatch):
     monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", "/bin/opencode")
-    import os as _os
     captured_env = {}
 
     def fake_execvpe(path, argv, env):  # noqa: D401

@@ -40,7 +40,7 @@ def _disable_repo_local_patched_binary(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-class TestHelpFlag:
+class TestComposedHelpFlag:
     """Bare `perfxpert-code --help` must print the perfxpert-owned banner.
 
     Per review I4: help flag discovery must list the documented

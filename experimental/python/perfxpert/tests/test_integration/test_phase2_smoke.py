@@ -19,7 +19,6 @@ from perfxpert.fence import FenceBuilder
 from perfxpert.providers import (
     DryRunResponse,
     Provider,
-    ProviderResponse,
     get_provider,
     list_providers,
 )

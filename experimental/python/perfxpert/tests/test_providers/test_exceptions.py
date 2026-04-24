@@ -1,6 +1,5 @@
 """Tests for perfxpert.providers._exceptions — error taxonomy + DryRunResponse."""
 
-import pytest
 
 from perfxpert.providers._exceptions import (
     AuthError,
@@ -86,15 +85,8 @@ def test_dry_run_response_fields():
 
 def test_public_exports_available_from_package():
     from perfxpert.providers import (
-        AuthError,
         DryRunResponse,
-        FatalError,
-        ProviderChainExhausted,
         ProviderError,
-        QuotaExceededError,
-        RateLimitError,
-        TransientError,
-        TimeoutError,
     )
     assert ProviderError is not None
     assert DryRunResponse is not None

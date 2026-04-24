@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
 
 from perfxpert.formatters._roofline_svg import (
     render_roofline_svg,

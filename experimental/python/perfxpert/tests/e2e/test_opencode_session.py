@@ -71,7 +71,8 @@ def test_perfxpert_code_launches_if_opencode_available(opencode_available):
 
 def test_mcp_server_accepts_a_call_from_shell(opencode_available):
     """Verify perfxpert-mcp at least starts and can receive an initialization message."""
-    import json, time
+    import json
+    import time
 
     # Start perfxpert-mcp with stdio
     p = subprocess.Popen(

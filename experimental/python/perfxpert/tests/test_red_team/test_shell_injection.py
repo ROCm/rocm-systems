@@ -1,7 +1,6 @@
 """Red-team: shell injection via kernel names, compile flags, rocprofv3 args."""
 
 from pathlib import Path
-from unittest import mock
 
 import pytest
 

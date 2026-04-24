@@ -9,7 +9,6 @@ Ensures that:
   available via the MCP surface only (Feature B policy).
 """
 
-import pytest
 
 from perfxpert.agents import (
     build_compute_specialist,

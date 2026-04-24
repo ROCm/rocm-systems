@@ -1,6 +1,5 @@
 """Tests for perfxpert.providers._sanitization."""
 
-import pytest
 
 from perfxpert.providers._sanitization import (
     redact_paths,

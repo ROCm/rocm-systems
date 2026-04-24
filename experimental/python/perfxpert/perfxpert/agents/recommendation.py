@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from perfxpert.agents import compute_specialist, latency_specialist, memory_specialist, schemas
-from perfxpert.agents.framework import Agent, ToolBinding, run_agent
+from perfxpert.agents.framework import Agent, ToolBinding
 from perfxpert.tools import plateau, profiling, trace_fingerprint
 
 

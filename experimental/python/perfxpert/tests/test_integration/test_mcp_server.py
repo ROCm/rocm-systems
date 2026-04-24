@@ -37,7 +37,6 @@ def test_build_server_raises_without_sdk():
     }
     with patch.dict(sys.modules, mcp_modules):
         # Force reimport of mcp_server.server to see the patched modules
-        import importlib
         if 'mcp_server.server' in sys.modules:
             del sys.modules['mcp_server.server']
         if 'mcp_server' in sys.modules:

@@ -782,7 +782,6 @@ def generate_recommendations(
         _pr_pct = float(_pr_top.get("percent_of_total", 0) or 0)
         if _pr_gpu_util > 90 and _pr_pct >= 10.0:
             try:
-                from perfxpert.tools import pragma as _pragma_tool
                 from perfxpert.knowledge import load_yaml as _load_yaml
                 _catalog = _load_yaml("compiler_pragmas") or []
                 _unroll_count = next(

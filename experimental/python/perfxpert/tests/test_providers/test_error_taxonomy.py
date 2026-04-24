@@ -12,9 +12,7 @@ import pytest
 
 from perfxpert.providers._exceptions import (
     AuthError,
-    ProviderError,
     RateLimitError,
-    TimeoutError as PTO,
     _legacy_env_warn,
 )
 import perfxpert.providers.anthropic_provider as _anthmod

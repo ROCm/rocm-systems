@@ -9,7 +9,6 @@ regardless of mode).
 """
 
 import pytest
-from unittest.mock import MagicMock
 
 from perfxpert.agents import build_session, schemas
 from perfxpert.agents.framework import FakeProviderResponse

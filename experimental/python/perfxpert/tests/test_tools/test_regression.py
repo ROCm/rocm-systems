@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-import pytest
 
 from perfxpert.tools import regression
 from perfxpert.tools._class import ToolClass
