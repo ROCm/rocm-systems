@@ -144,8 +144,11 @@ def test_parse_headers_valid_json_dict():
 def test_parse_headers_invalid_json_raises_value_error():
     from perfxpert.providers.private_provider import _parse_headers
 
-    with pytest.raises(ValueError, match="invalid JSON"):
-        _parse_headers("not-json{{{")
+    secret = '{"Authorization": "Bearer super-secret"'
+    with pytest.raises(ValueError, match="invalid JSON") as exc:
+        _parse_headers(secret)
+    assert "super-secret" not in str(exc.value)
+    assert "Authorization" not in str(exc.value)
 
 
 def test_parse_headers_non_dict_json_raises_value_error():

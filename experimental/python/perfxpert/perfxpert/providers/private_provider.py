@@ -32,7 +32,8 @@ def _parse_headers(raw: str) -> Dict[str, str]:
         obj = json.loads(raw)
     except json.JSONDecodeError as e:
         raise ValueError(
-            f"PERFXPERT_LLM_PRIVATE_HEADERS contains invalid JSON: {e}. " f"Value was: {raw[:80]!r}"
+            f"PERFXPERT_LLM_PRIVATE_HEADERS contains invalid JSON at "
+            f"line {e.lineno} column {e.colno}: {e.msg}"
         ) from e
     if not isinstance(obj, dict):
         raise ValueError(f"PERFXPERT_LLM_PRIVATE_HEADERS must be a JSON object, got {type(obj).__name__}")
