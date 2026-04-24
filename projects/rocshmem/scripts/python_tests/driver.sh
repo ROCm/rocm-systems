@@ -36,8 +36,11 @@
 #
 # Example:
 #   ./rocshmem_python_driver.sh /path/to/rocshmem/python all /tmp/python_logs
-
-set -e
+#
+# NOTE: do NOT add `set -e` here. The functional_tests/ and unit_tests/
+# drivers in this repo deliberately omit it so that per-test failures can be
+# captured (`if [ $? -ne 0 ]; then cat $LOG; ...`) rather than aborting the
+# whole script and hiding the log.
 
 DRIVER_RETURN_STATUS=0
 FAILED_LIST=""
@@ -88,8 +91,8 @@ ExecPythonTest() {
   cmd=( mpirun
         --allow-run-as-root
         -n "$NUM_RANKS"
-        -mca pml ucx
-        -mca osc ucx
+        -mca pml "${OMPI_MCA_pml:-ucx}"
+        -mca osc "${OMPI_MCA_osc:-ucx}"
         -x "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
         -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=${UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS:-16384}"
         -x "LD_LIBRARY_PATH"
@@ -139,25 +142,33 @@ HOSTFILE=$4
 ValidateLogDir "$LOG_DIR"
 DetectGPUs
 
+# ---------------------------------------------------------------------------
+# TEMP: remove before merge
+# Print the active MPI/UCX environment BEFORE pip install, so any linkage
+# mismatch is visible in the Jenkins log even when the test itself fails.
+# ---------------------------------------------------------------------------
+echo "=== TEMP MPI/UCX env diagnostics (remove before merge) ==="
+{
+  echo "--- which mpirun / version ---"
+  command -v mpirun && mpirun --version 2>&1 | head -3
+  echo "--- PATH ---"; echo "$PATH"
+  echo "--- LD_LIBRARY_PATH ---"; echo "${LD_LIBRARY_PATH:-<unset>}"
+  echo "--- ompi_info pml/osc components ---"
+  ompi_info --param pml all --level 9 2>/dev/null | grep -E 'MCA pml:' | head -5 || true
+  ompi_info --param osc all --level 9 2>/dev/null | grep -E 'MCA osc:' | head -5 || true
+} 2>&1
+echo "=== end env diagnostics ==="
+echo ""
+
 # Ensure rocshmem4py is installed
 if ! python3 -c "import rocshmem4py" 2>/dev/null; then
   echo "Installing rocshmem4py from $PYTHON_SRC_DIR ..."
   pip install -e "$PYTHON_SRC_DIR" || { echo "pip install failed"; exit 1; }
 fi
 
-echo "Python tests: type=$TEST, GPUs=$NUM_GPUS"
-echo ""
-
-# ---------------------------------------------------------------------------
-# TEMP: remove before merge
-# One-shot MPI / UCX / rocshmem4py linkage diagnostics so that any future CI
-# failure shows the runtime environment without needing a re-run.
-# ---------------------------------------------------------------------------
-echo "=== TEMP MPI/UCX diagnostics (remove before merge) ==="
+# TEMP: remove before merge -- linkage of the just-built extension
+echo "=== TEMP _rocshmem4py.so linkage (remove before merge) ==="
 {
-  echo "--- mpirun ---"
-  command -v mpirun && mpirun --version 2>&1 | head -3
-  echo "--- _rocshmem4py.so ldd (mpi/ucx) ---"
   _rocshmem4py_so=$(python3 -c 'import _rocshmem4py; print(_rocshmem4py.__file__)' 2>/dev/null) || true
   if [ -n "$_rocshmem4py_so" ]; then
     echo "$_rocshmem4py_so"
@@ -165,13 +176,23 @@ echo "=== TEMP MPI/UCX diagnostics (remove before merge) ==="
   else
     echo "(could not locate _rocshmem4py extension)"
   fi
-  echo "--- mpi4py library version ---"
-  python3 -c 'import mpi4py.MPI as M; print(M.Get_library_version())' 2>&1 | head -3 || true
-  echo "--- ompi_info pml/osc components ---"
-  ompi_info --param pml all --level 9 2>/dev/null | grep -E 'MCA pml:' | head -5 || true
-  ompi_info --param osc all --level 9 2>/dev/null | grep -E 'MCA osc:' | head -5 || true
+  # Avoid `import mpi4py.MPI` here -- it calls MPI_Init outside mpirun and
+  # spits a harmless but confusing "rendezvous file" error on stderr.
+  python3 -c '
+import mpi4py, os, glob
+print("mpi4py module:", mpi4py.__file__)
+ext = glob.glob(os.path.join(os.path.dirname(mpi4py.__file__), "MPI*.so"))
+print("mpi4py MPI ext:", ext[0] if ext else "<not found>")
+' 2>/dev/null || true
+  ext=$(python3 -c "import mpi4py, os, glob; print(glob.glob(os.path.join(os.path.dirname(mpi4py.__file__), 'MPI*.so'))[0])" 2>/dev/null) || true
+  if [ -n "$ext" ]; then
+    ldd "$ext" 2>&1 | grep -E 'mpi|ucx' || true
+  fi
 } 2>&1
-echo "=== end diagnostics ==="
+echo "=== end linkage diagnostics ==="
+echo ""
+
+echo "Python tests: type=$TEST, GPUs=$NUM_GPUS"
 echo ""
 
 case $TEST in
