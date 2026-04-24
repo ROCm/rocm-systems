@@ -141,6 +141,13 @@ def test_parse_headers_valid_json_dict():
     assert result == {"X-Tenant": "amd", "X-Version": "1"}
 
 
+def test_parse_headers_accepts_python_literal_dict_for_legacy_shell_snippets():
+    from perfxpert.providers.private_provider import _parse_headers
+
+    result = _parse_headers("{'Ocp-Apim-Subscription-Key': 'abc', 'user': 'amd'}")
+    assert result == {"Ocp-Apim-Subscription-Key": "abc", "user": "amd"}
+
+
 def test_parse_headers_invalid_json_raises_value_error():
     from perfxpert.providers.private_provider import _parse_headers
 

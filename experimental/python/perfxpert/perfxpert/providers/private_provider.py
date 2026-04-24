@@ -7,6 +7,7 @@ Optional TLS bypass for self-signed CAs (opt-in via env).
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 from typing import Any, Dict, List, Optional, Union
@@ -31,9 +32,13 @@ def _parse_headers(raw: str) -> Dict[str, str]:
     try:
         obj = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise ValueError(
-            f"PERFXPERT_LLM_PRIVATE_HEADERS contains invalid JSON: {e}. " f"Value was: {raw[:80]!r}"
-        ) from e
+        try:
+            obj = ast.literal_eval(raw)
+        except (SyntaxError, ValueError) as literal_error:
+            raise ValueError(
+                "PERFXPERT_LLM_PRIVATE_HEADERS contains invalid JSON "
+                f"or Python literal dict: {e}. Value was: {raw[:80]!r}"
+            ) from literal_error
     if not isinstance(obj, dict):
         raise ValueError(f"PERFXPERT_LLM_PRIVATE_HEADERS must be a JSON object, got {type(obj).__name__}")
     return {str(k): str(v) for k, v in obj.items()}
