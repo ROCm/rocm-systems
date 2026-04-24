@@ -1602,6 +1602,75 @@ ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** sy
     NCCLCHECKGOTO(ncclTopoFuseXml(xml, peerXml), ret, fail);
   }
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+#ifdef USE_AMDSMI
+  // Synthesize cross-node UALoE xgmi links for GPUs in the same fabric clique.
+  // comm->peerInfo is fully populated from AllGather1 before this function runs,
+  // so we can infer inter-node UALoE connectivity without an extra bootstrap round-trip.
+  {
+    struct ncclXmlNode* gpuNode = NULL;
+    NCCLCHECKGOTO(xmlFindTag(xml, "gpu", &gpuNode), ret, fail);
+    while (gpuNode) {
+      const char* gpuBusId = NULL;
+      NCCLCHECKGOTO(xmlGetAttr(gpuNode, "busid", &gpuBusId), ret, fail);
+      if (gpuBusId == NULL) {
+        NCCLCHECKGOTO(xmlFindNextTag(xml, "gpu", gpuNode, &gpuNode), ret, fail);
+        continue;
+      }
+
+      // Find which rank owns this GPU
+      int ownerRank = -1;
+      for (int r = 0; r < comm->nRanks; r++) {
+        char rankBusId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+        NCCLCHECKGOTO(int64ToBusId(comm->peerInfo[r].busId, rankBusId), ret, fail);
+        for (int c = 0; rankBusId[c]; c++) rankBusId[c] = tolower(rankBusId[c]);
+        if (strcmp(rankBusId, gpuBusId) == 0) { ownerRank = r; break; }
+      }
+      if (ownerRank == -1 || !comm->peerInfo[ownerRank].fabricInfo.fabricSupported) {
+        NCCLCHECKGOTO(xmlFindNextTag(xml, "gpu", gpuNode, &gpuNode), ret, fail);
+        continue;
+      }
+
+      auto* myFab = &comm->peerInfo[ownerRank].fabricInfo;
+
+      for (int r = 0; r < comm->nRanks; r++) {
+        // Skip same-node ranks (already handled by intra-node fusion)
+        if (comm->peerInfo[r].hostHash == comm->peerInfo[ownerRank].hostHash) continue;
+        auto* peerFab = &comm->peerInfo[r].fabricInfo;
+        if (!peerFab->fabricSupported) continue;
+        if (memcmp(myFab->clusterUuid, peerFab->clusterUuid, sizeof(myFab->clusterUuid)) != 0) continue;
+        if (myFab->cliqueId != peerFab->cliqueId) continue;
+
+        char peerBusId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+        NCCLCHECKGOTO(int64ToBusId(comm->peerInfo[r].busId, peerBusId), ret, fail);
+        for (int c = 0; peerBusId[c]; c++) peerBusId[c] = tolower(peerBusId[c]);
+
+        struct ncclXmlNode* nvlNode = NULL;
+        NCCLCHECKGOTO(xmlGetSubKv(gpuNode, "xgmi", &nvlNode, "target", peerBusId), ret, fail);
+        if (nvlNode == NULL) {
+          NCCLCHECKGOTO(xmlAddNode(xml, gpuNode, "xgmi", &nvlNode), ret, fail);
+          NCCLCHECKGOTO(xmlSetAttr(nvlNode, "target", peerBusId), ret, fail);
+          NCCLCHECKGOTO(xmlSetAttrInt(nvlNode, "fabric_supported", 1), ret, fail);
+          NCCLCHECKGOTO(xmlSetAttrInt(nvlNode, "accelerator_id", (int)peerFab->acceleratorId), ret, fail);
+          NCCLCHECKGOTO(xmlSetAttrInt(nvlNode, "bandwidth", (int)peerFab->bandwidth), ret, fail);
+          NCCLCHECKGOTO(xmlSetAttrInt(nvlNode, "latency", (int)peerFab->latency), ret, fail);
+          uint64_t uuidHigh = 0, uuidLow = 0;
+          memcpy(&uuidHigh, peerFab->clusterUuid, sizeof(uuidHigh));
+          memcpy(&uuidLow, peerFab->clusterUuid + sizeof(uuidHigh), sizeof(uuidLow));
+          NCCLCHECKGOTO(xmlSetAttrUint64(nvlNode, "uuidHigh", uuidHigh), ret, fail);
+          NCCLCHECKGOTO(xmlSetAttrUint64(nvlNode, "uuidLow", uuidLow), ret, fail);
+          NCCLCHECKGOTO(xmlSetAttrInt(nvlNode, "ppod_size", (int)peerFab->ppodSize), ret, fail);
+          NCCLCHECKGOTO(xmlSetAttrInt(nvlNode, "vpod_id", (int)peerFab->cliqueId), ret, fail);
+          NCCLCHECKGOTO(xmlSetAttrInt(nvlNode, "vpod_size", (int)peerFab->vpodSize), ret, fail);
+          NCCLCHECKGOTO(xmlSetAttrInt(nvlNode, "count", 1), ret, fail);
+        }
+      }
+      NCCLCHECKGOTO(xmlFindNextTag(xml, "gpu", gpuNode, &gpuNode), ret, fail);
+    }
+  }
+#endif // USE_AMDSMI
+#endif // __HIP_PLATFORM_AMD__
+
   if (dumpXmlFile && comm->rank == ncclParamTopoDumpFileRank()) {
     INFO(NCCL_ENV, "NCCL_TOPO_DUMP_FILE set by environment to %s", dumpXmlFile);
     NCCLCHECKGOTO(ncclTopoDumpXmlToFile(dumpXmlFile, xml), ret, fail);
