@@ -13,6 +13,12 @@
 #include "rings.h"
 #include "topo.h"
 
+#include <stdio.h>      // For NULL and
+#include <stdlib.h>     // For malloc(), calloc(), and free()
+#include <stdint.h>     // For uint8_t and other fixed-width types
+#include <string.h>     // For memset()
+#include <limits.h>     // For INT_MAX
+
 
 /******************************************************************/
 /********************* Internode connection ***********************/
@@ -327,70 +333,89 @@ static void generateWaleckiOdd(int nNodes, int channel, int* order) {
  * 
  * Assumptions : nodeOrder is pointer to flattened 2D array of size nNodes*nChannels*sizeof(int), and is pre-allocated before invoking this function.
  */
-static void generateGreedyNodeOrder(int nNodes, int nChannels, int* nodeOrder) {
-  // --- SAFETY CHECK: Guard against invalid cluster sizes ---
-  if (nNodes <= 0 || nChannels <= 0 || nodeOrder == nullptr) return;
-  // Handle degenerate cases (N=1, N=2) where Hamiltonian diversity is impossible
-  if (nNodes < 3) {
-    for (int c = 0; c < nChannels; c++) {
-      for (int n = 0; n < nNodes; n++) {
-        nodeOrder[c * nNodes + n] = n;
-      }
-    }
-    return;
-  }
-
-  std::vector<std::vector<int>> edgeUsage(nNodes, std::vector<int>(nNodes, 0));
-  int startNode = 0;
-  for (int c = 0; c < nChannels; c++) {
-    // 1. Initial Seeding (Optional but good)
-    if (c < nNodes / 2) {
-      if (nNodes % 2 == 0)  {
-        generateWaleckiEven(nNodes, c, &nodeOrder[c*nNodes]);
-      } else { 
-        generateWaleckiOdd(nNodes, c, &nodeOrder[c*nNodes]); 
-      }
-
-      for (int i = 0; i < nNodes; i++) {
-        edgeUsage[nodeOrder[c*nNodes+i]][nodeOrder[c*nNodes+((i+1)%nNodes)]]++;
-      }
-      continue;
-    }
-
-    // 2. Balanced Greedy Search
-    std::vector<bool> visited(nNodes, false);
-    startNode = (startNode + 1) % nNodes; // Rotate start to vary first-hop pressure
-    int curr = startNode;
-    nodeOrder[c*nNodes + 0] = curr;
-    visited[curr] = true;
-
-    for (int step = 1; step < nNodes; step++) {
-      int bestNext = -1;
-      double minCost = 1e9;
-
-      for (int next = 0; next < nNodes; next++) {
-        if (!visited[next]) {
-          // Primary Cost: Usage of this specific directed edge
-          double cost = edgeUsage[curr][next];
-          // Forward-Looking Heuristic: 
-          // If this is the second-to-last node, factor in the cost of getting home
-          if (step == nNodes - 1) {
-            cost += edgeUsage[next][startNode]; 
-          }
-
-          if (cost < minCost) {
-            minCost = cost;
-            bestNext = next;
-          }
+static ncclResult_t generateGreedyNodeOrder(int nNodes, uint8_t nChannels, int* nodeOrder) {
+    // --- SAFETY CHECK: Guard against invalid cluster sizes ---
+    if (nNodes <= 0 || nChannels <= 0 || nodeOrder == NULL) return ncclInvalidArgument;
+    // Handle degenerate cases (N=1, N=2) where Hamiltonian diversity is impossible
+    if (nNodes < 3) {
+        for (int c = 0; c < nChannels; c++) {
+            for (int n = 0; n < nNodes; n++) {
+                nodeOrder[c * nNodes + n] = n;
+            }
         }
-      }
-      nodeOrder[c*nNodes + step] = bestNext;
-      visited[bestNext] = true;
-      edgeUsage[curr][bestNext]++;
-      curr = bestNext;
+        return ncclSuccess;
     }
-    edgeUsage[curr][startNode]++;
-  }
+
+    void (*ringGen)(int, int, int*) = (nNodes % 2 == 0) ? generateWaleckiEven : generateWaleckiOdd;
+    if (nChannels <= (nNodes / 2)) {
+        for (int c = 0; c < nChannels; c++) {
+            ringGen(nNodes, c, &nodeOrder[c * nNodes]);
+        }
+        return ncclSuccess;
+    }
+
+    // Choose to augment with Greedy approach only if nNodes/2 channels are not sufficient. Most systems 
+    // do not execute below code as we have MAXCHANNELS = 128.
+    // Optimization: uint8_t is sufficient for nChannels <= 255, In RCCL we limit it to 128 channels now. 
+    uint8_t* edgeUsage = (uint8_t*)calloc(nNodes * nNodes, sizeof(uint8_t));
+    uint8_t* visited = (uint8_t*)malloc(nNodes * sizeof(uint8_t));
+
+    if (!edgeUsage || !visited) {
+        if (edgeUsage) free(edgeUsage);
+        if (visited) free(visited);
+        WARN("Unable to allocate memory with malloc/calloc");
+        return ncclInternalError;
+    }
+
+    int startNode = 0;
+    for (int c = 0; c < nChannels; c++) {
+        if (c < nNodes / 2) {
+            ringGen(nNodes, c, &nodeOrder[c * nNodes]);
+            for (int i = 0; i < nNodes; i++) {
+                int u = nodeOrder[c * nNodes + i];
+                int v = nodeOrder[c * nNodes + ((i + 1) % nNodes)];
+                edgeUsage[u * nNodes + v]++;
+            }
+            continue;
+        }
+        //Set all non-visited
+        memset(visited, 0, nNodes * sizeof(uint8_t));
+        // Only to reduce the pressure on starting node 
+        startNode = (startNode + 1) % nNodes;
+        int curr = startNode;
+        nodeOrder[c * nNodes + 0] = curr;
+        visited[curr] = 1;
+
+        for (int step = 1; step < nNodes; step++) {
+            int bestNext = -1;
+            int minCost = INT_MAX;
+
+            for (int next = 0; next < nNodes; next++) {
+                if (!visited[next]) {
+                    int cost = (int)edgeUsage[curr * nNodes + next];
+
+                    // Without this check, a greedy algorithm might pick a "cheap" bestNext for the second-to-last
+                    // node, but that node might have a very "expensive" (heavily used) link back to the start.
+                    if (step == nNodes - 1) {
+                        cost += (int)edgeUsage[next * nNodes + startNode];
+                    }
+
+                    if (cost < minCost) {
+                        minCost = cost;
+                        bestNext = next;
+                    }
+                }
+            }
+            nodeOrder[c * nNodes + step] = bestNext;
+            visited[bestNext] = 1;
+            edgeUsage[curr * nNodes + bestNext]++;
+            curr = bestNext;
+        }
+        edgeUsage[curr * nNodes + startNode]++;
+    }
+    free(visited);
+    free(edgeUsage);
+    return ncclSuccess;
 }
 
 /**
@@ -440,13 +465,18 @@ static ncclResult_t connectRingsLoadBalanced(struct ncclComm* comm, int* ringRec
   int nChannels = comm->nChannels;
   int nNodes = comm->nNodes;
   int nRanks = comm->nRanks;
+  if( nChannels <= 0 || nNodes <= 0 || nRanks <= 0 ) return ncclInvalidArgument;
 
   // 1. Allocate flat memory for nodeOrder [nChannels * nNodes]
   int* nodeOrder = nullptr;
   NCCLCHECK(ncclCalloc(&nodeOrder, nChannels * nNodes));
 
-  // 2. Populate the Diverse/Greedy Node Order
   // Note: generateGreedyNodeOrder needs to handle the flat indexing (c * nNodes + i)
+  if ( nChannels > MAXCHANNELS || nChannels >= 255 ) {
+    WARN(" generateGreedyNodeOrder is implemented with an assumption nChannels [=%d] < 255 as an optimization. Update the implementaion to accept uint16/32 for nChannels ",nChannels );
+  }
+
+  // 2. Populate the Diverse/Greedy Node Order
   generateGreedyNodeOrder(nNodes, nChannels, nodeOrder);
 
   for (int c = 0; c < nChannels; c++) {
@@ -968,7 +998,8 @@ ncclResult_t connectRailOptimizedTrees(struct ncclComm* comm, int* treeToParent,
  * Check if search actually filled all requested channels
  * It is expected that these structures are filled by individual ranks followed by bootstrap allgather.
  * gfx1151 having 1-GPU/node communicating via ethernet is special case
- * But call to this function is a safety net for all architectures, and is idempotent.
+ * But call to this function is a safety net for all architectures, and is idempotent, This only 
+ * handles Ring and Trees
  */ 
 static ncclResult_t repairMissingChannels(struct ncclTopoRanks** allTopoRanks, int nranks, int nChannels) {
   for (int r = 0; r < nranks; r++) {
@@ -988,11 +1019,6 @@ static ncclResult_t repairMissingChannels(struct ncclTopoRanks** allTopoRanks, i
         allTopoRanks[r]->treeToParent[c] = allTopoRanks[r]->treeToParent[0];
         allTopoRanks[r]->treeToChild0[c] = allTopoRanks[r]->treeToChild0[0];
         allTopoRanks[r]->treeToChild1[c] = allTopoRanks[r]->treeToChild1[0];
-      }
-
-      // 3. NVLS REPAIR: Check pointer validity before access
-      if (allTopoRanks[r]->nvlsHeads[c] == 0) {
-        allTopoRanks[r]->nvlsHeads[c] = allTopoRanks[r]->nvlsHeads[0];
       }
     }
   }
@@ -1076,9 +1102,18 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
       nvlsHeads[c * nNodes + n] = allTopoRanks[r]->nvlsHeads[c];
     }
   }
-
-  // Connect rings and trees. This should also duplicate the channels.
-  NCCLCHECK(connectRingsLoadBalanced(comm, ringRecv, ringSend, ringPrev, ringNext));
+ 
+  /**
+   * The following if/else assumes cluster is homogeneous w.r.t gfx arch
+   * Ideally All the ranks should have consensus on to graphs.
+   */
+  if ( IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151") ) {
+    NCCLCHECK(connectRingsLoadBalanced(comm, ringRecv, ringSend, ringPrev, ringNext));
+  } else {
+    // Connect rings and trees. This should also duplicate the channels.
+    NCCLCHECK(connectRings(comm, ringRecv, ringSend, ringPrev, ringNext));
+  }
+  
 
   // [RCCL] Connect rail-optimized trees
   if (comm->topo->useRailOptimizedTrees) {

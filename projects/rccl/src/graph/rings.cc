@@ -6,6 +6,11 @@
 
 #include "core.h"
 
+#include <stdio.h>      
+#include <stdlib.h>     
+#include <stdint.h>    
+#include <string.h> 
+
 void dumpLine(int* values, int nranks, const char* prefix) {
   constexpr int line_length = 128;
   char line[line_length];
@@ -85,8 +90,17 @@ ncclResult_t ncclBuildRings(int nrings, int* rings, int rank, int nranks, int* p
  * - O( nRings * nRanks ) Algorithmic complexity 
  */
 ncclResult_t rcclBuildRings(int nrings, int* rings, int rank, int nranks, int* prev, int* next) {
-  // Use a bitmask/flag array for O(N) validation instead of O(N^2)
-  std::vector<char> found(nranks, 0);
+  // Use a stack-allocated buffer for O(N) validation.
+  // If nranks > 1024, consider using malloc/free
+  ncclResult_t res = ncclSuccess;
+  uint8_t found_stackalloc[1024];
+  uint8_t* found = found_stackalloc;
+  int heap_allocated = 0;
+  if(nranks > 1024) {
+    found = (uint8_t*)malloc(nranks * sizeof(uint8_t));
+    if (found == NULL) return ncclInternalError;
+    heap_allocated = 1;
+  }
 
   for (int r = 0; r < nrings; r++) {
     int* current_ring = rings + (r * nranks);
@@ -94,50 +108,71 @@ ncclResult_t rcclBuildRings(int nrings, int* rings, int rank, int nranks, int* p
     int* current_prev = prev + (r * nranks);
 
     int current = rank;
-    std::fill(found.begin(), found.end(), 0);
+    // Initilize to not found
+    memset(found, 0, nranks * sizeof(uint8_t));
 
     for (int i = 0; i < nranks; i++) {
       // Safety: Check for out-of-bounds rank pointers
       if (current < 0 || current >= nranks) {
         WARN("Ring %d: Found invalid rank index %d", r, current);
-        return ncclInternalError;
+        res = ncclInternalError;
+        goto exit;
+      }
+
+      // Check for sub-loops/cycles before we finish (Safety check)
+      if (found[current] == 1) {
+        WARN("Ring %d: Unexpected sub-loop detected at rank %d", r, current);
+        res = ncclInternalError;
+        goto exit;
       }
 
       current_ring[i] = current;
       found[current] = 1;
 
-      // --- The Consistency Check (Where current_prev is used) ---
+      // --- The Consistency Check ---
       int next_rank = current_next[current];
       if (next_rank >= 0 && next_rank < nranks) {
+        // Verify that if I think 'next_rank' is my next, 
+        // 'next_rank' must think I am its previous.
         if (current_prev[next_rank] != current) {
-          WARN("Ring %d: Asymmetric link detected! Rank %d -> %d, but %d -> %d", 
+          WARN("Ring %d: Asymmetric link! Rank %d -> %d, but %d -> %d", 
                r, current, next_rank, next_rank, current_prev[next_rank]);
-          return ncclInternalError;
+          res = ncclInternalError;
+          goto exit;
         }
+      } else {
+        WARN("Ring %d: Rank %d pointed to invalid next_rank %d", r, current, next_rank);
+        res = ncclInternalError;
+        goto exit;
       }
 
       current = next_rank;
     }
 
+    // Assumptions check
     if (rank == 0) {
       char prefix[40];
       snprintf(prefix, sizeof(prefix), "Channel %02d/%02d :", r, nrings);
-      dumpLine(rings+r*nranks, nranks, prefix);
+      dumpLine(rings + r * nranks, nranks, prefix);
     }
 
-    // Assumption: The path must close a perfect circle
+    // 1. Must close the loop
     if (current != rank) {
       WARN("Ring %d: Failed to loop back. Ended at %d instead of %d", r, current, rank);
-      return ncclInternalError;
+      res = ncclInternalError;
+      goto exit;
     }
 
-    // Assumption: Every single rank in the communicator must be present in the ring
+    // 2. Must visit every rank (already partially checked by sub-loop check)
     for (int i = 0; i < nranks; i++) {
       if (found[i] == 0) {
-        WARN("Ring %d: Incomplete. Rank %d is missing from the ring.", r, i);
-        return ncclInternalError;
+        WARN("Ring %d: Incomplete. Rank %d is missing.", r, i);
+        res = ncclInternalError;
+        goto exit;
       }
     }
   }
-  return ncclSuccess;
+exit:
+  if(heap_allocated) free(found);
+  return res;
 }

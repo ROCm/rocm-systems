@@ -156,9 +156,11 @@ struct ncclSharedResources {
   struct ncclProxyState* proxyState;
 };
 
-/*
-** This struct doen't contain any internal pointers, As of now, it is safe to shallow copy.
-*/
+ /**
+  * NOTE: This struct contains pointer members. Shallow copies are only intended during early initialization,
+  * before these pointers are populated or before ownership/lifetime of the pointed-to resources matters.
+  * Do not treat an initialized ncclChannel as generally safe to shallow copy.
+  */
 struct ncclChannel {
   struct ncclChannelPeer** peers;
   struct ncclDevChannelPeer** devPeers;
