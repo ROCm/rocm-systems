@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
-class PcSamplingCollector
+class pc_sampling_collector_t
 {
 public:
-    virtual ~PcSamplingCollector() = default;
+    virtual ~pc_sampling_collector_t() = default;
 };

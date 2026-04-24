@@ -86,13 +86,13 @@ struct tool_data_t
     std::vector<counter_info_record_t>         counter_records;
     std::set<uint64_t>                         target_kernel_ids{};
     iteration_multiplexing_mode_t iteration_multiplexing_mode{iteration_multiplexing_mode_t::DISABLED};
-    rocprof_compute::synchronized<PcSamplingCollector> pc_sampling_collector;
+    rocprof_compute::synchronized<pc_sampling_collector_t> pc_sampling_collector;
 };
 
-class SdkCallbacks
+class sdk_callbacks_t
 {
 public:
-    virtual ~SdkCallbacks() = default;
+    virtual ~sdk_callbacks_t() = default;
 
     virtual void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
 
@@ -111,10 +111,10 @@ public:
                                               void*                                 data) = 0;
 };
 
-class SdkCallbacksImpl : public SdkCallbacks
+class sdk_callbacks_impl_t : public sdk_callbacks_t
 {
 public:
-    SdkCallbacksImpl(const std::shared_ptr<SdkWrapper>& sdk_wrapper);
+    sdk_callbacks_impl_t(const std::shared_ptr<sdk_wrapper_t>& sdk_wrapper);
 
     void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                            rocprofiler_counter_config_id_t*             config,
@@ -136,7 +136,7 @@ private:
         rocprofiler_agent_id_t agent_id,
         std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>>& profile_cache) const;
 
-    std::shared_ptr<SdkWrapper>            m_sdk_wrapper;
+    std::shared_ptr<sdk_wrapper_t>         m_sdk_wrapper;
     std::unordered_map<uint64_t, uint64_t> m_kernel_dispatch_count_by_kernel_id{};
     std::shared_mutex                      m_kernel_id_iteration_mutex;
     std::shared_mutex                      m_mutex = {};

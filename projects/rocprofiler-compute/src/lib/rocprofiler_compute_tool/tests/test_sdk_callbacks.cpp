@@ -186,10 +186,10 @@ TEST_F(TestSdkCallbacks, ProvidedCallbackTracingRecordInMemory_StoresCodeObjectI
     payload.storage_type = ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY;
 
     rocprofiler_callback_tracing_record_t record = {};
-    record.kind      = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
-    record.operation = ROCPROFILER_CODE_OBJECT_LOAD;
-    record.phase     = ROCPROFILER_CALLBACK_PHASE_LOAD;
-    record.payload   = &payload;
+    record.kind                                  = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
+    record.operation                             = ROCPROFILER_CODE_OBJECT_LOAD;
+    record.phase                                 = ROCPROFILER_CALLBACK_PHASE_LOAD;
+    record.payload                               = &payload;
 
     m_sdk_callbacks->code_object_tracing_callback(record, &m_tool_data);
 
@@ -200,9 +200,9 @@ TEST_F(TestSdkCallbacks, ProvidedCallbackTracingRecordInMemory_StoresCodeObjectI
 /// TestSdkCallbacks
 void TestSdkCallbacks::SetUp()
 {
-    m_sdk_wrapper = std::make_shared<MockSdkWrapper>();
+    m_sdk_wrapper = std::make_shared<mock_sdk_wrapper_t>();
     test_knobs::set_sdk_wrapper(m_sdk_wrapper);
-    m_sdk_callbacks = std::make_shared<SdkCallbacksImpl>(m_sdk_wrapper);
+    m_sdk_callbacks = std::make_shared<sdk_callbacks_impl_t>(m_sdk_wrapper);
     m_tool_data     = std::make_unique<tool_data_t>();
 }
 

@@ -3,7 +3,6 @@
 
 #include "rocprofiler_compute_tool.h"
 
-#include "counters_writer.h"
 #include "input_parameters.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
@@ -16,23 +15,23 @@
 
 using namespace rocprofiler_compute_tool;
 
-static std::shared_ptr<InputParameters> g_input_parameters = std::make_shared<EnvInputParameters>();
-static std::shared_ptr<SdkWrapper>      g_sdk_wrapper      = std::make_shared<SdkWrapperImpl>();
-static std::shared_ptr<SdkCallbacks> g_sdk_callbacks = std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper);
-static std::shared_ptr<CountersWriter> g_counters_writer = std::make_shared<CsvCountersWriter>();
+static std::shared_ptr<input_parameters_t> g_input_parameters = std::make_shared<env_input_parameters_t>();
+static std::shared_ptr<sdk_wrapper_t> g_sdk_wrapper = std::make_shared<sdk_wrapper_impl_t>();
+static std::shared_ptr<sdk_callbacks_t> g_sdk_callbacks = std::make_shared<sdk_callbacks_impl_t>(g_sdk_wrapper);
+static std::shared_ptr<counters_writer_t> g_counters_writer = std::make_shared<csv_counters_writer_t>();
 static std::shared_ptr<rocprofiler_tool_configure_result_t> g_cfg;
 
-void test_knobs::set_input_parameters(const std::shared_ptr<InputParameters>& input_parameters)
+void test_knobs::set_input_parameters(const std::shared_ptr<input_parameters_t>& input_parameters)
 {
     g_input_parameters = input_parameters;
 }
 
-void test_knobs::set_sdk_wrapper(const std::shared_ptr<SdkWrapper>& sdk_wrapper)
+void test_knobs::set_sdk_wrapper(const std::shared_ptr<sdk_wrapper_t>& sdk_wrapper)
 {
     g_sdk_wrapper = sdk_wrapper;
 }
 
-void test_knobs::set_csv_writer(const std::shared_ptr<CountersWriter>& csv_writer)
+void test_knobs::set_csv_writer(const std::shared_ptr<counters_writer_t>& csv_writer)
 {
     g_counters_writer = csv_writer;
 }

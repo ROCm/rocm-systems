@@ -212,9 +212,9 @@ TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCountersAndKernelFiltering_
 /// TestRocprofilerComputeTool
 void TestRocprofilerComputeTool::SetUp()
 {
-    m_input_parameters = std::make_shared<MockInputParameters>();
-    m_sdk_wrapper      = std::make_shared<MockSdkWrapper>();
-    m_counters_writer  = std::make_shared<MockCountersWriter>();
+    m_input_parameters = std::make_shared<mock_input_parameters_t>();
+    m_sdk_wrapper      = std::make_shared<mock_sdk_wrapper_t>();
+    m_counters_writer  = std::make_shared<mock_counters_writer_t>();
 
     test_knobs::set_input_parameters(m_input_parameters);
     test_knobs::set_sdk_wrapper(m_sdk_wrapper);

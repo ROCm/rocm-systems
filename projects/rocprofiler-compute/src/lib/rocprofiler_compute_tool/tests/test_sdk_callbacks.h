@@ -23,9 +23,9 @@ protected:
     static std::vector<std::string> concat_counters(const std::vector<std::string>& v0,
                                                     const std::vector<std::string>& v1);
 
-    std::shared_ptr<MockSdkWrapper>                             m_sdk_wrapper;
-    std::shared_ptr<rocprofiler_compute_tool::SdkCallbacksImpl> m_sdk_callbacks;
-    std::unique_ptr<rocprofiler_compute_tool::tool_data_t>      m_tool_data;
+    std::shared_ptr<mock_sdk_wrapper_t>                                 m_sdk_wrapper;
+    std::shared_ptr<rocprofiler_compute_tool::sdk_callbacks_impl_t> m_sdk_callbacks;
+    std::unique_ptr<rocprofiler_compute_tool::tool_data_t>          m_tool_data;
     const std::vector<std::string> m_counters_pmc0     = {"counter0", "counter1"};
     const std::vector<std::string> m_counters_pmc1     = {"counter2"};
     const uint64_t                 m_invalid_config_id = ~0u;

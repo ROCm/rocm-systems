@@ -15,13 +15,13 @@
 using namespace rocprofiler_compute_tool;
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 
-SdkCallbacksImpl::SdkCallbacksImpl(const std::shared_ptr<SdkWrapper>& sdk_wrapper)
+sdk_callbacks_impl_t::sdk_callbacks_impl_t(const std::shared_ptr<sdk_wrapper_t>& sdk_wrapper)
     : m_sdk_wrapper(sdk_wrapper)
 {
     Expects(m_sdk_wrapper)
 }
 
-void SdkCallbacksImpl::dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+void sdk_callbacks_impl_t::dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                                          rocprofiler_counter_config_id_t*             config,
                                          void* callback_data_args)
 {
@@ -156,7 +156,7 @@ void SdkCallbacksImpl::dispatch_callback(rocprofiler_dispatch_counting_service_d
     set_config_from_cache();
 }
 
-bool SdkCallbacksImpl::is_targeted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration)
+bool sdk_callbacks_impl_t::is_targeted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration)
 {
     if (!tool->target_kernel_ids.empty() && !tool->target_kernel_ids.count(kernel_id))
         return false;
@@ -172,7 +172,7 @@ bool SdkCallbacksImpl::is_targeted_dispatch(const tool_data_t* tool, uint64_t ke
     return true;
 }
 
-void SdkCallbacksImpl::create_counter_collection_profile(
+void sdk_callbacks_impl_t::create_counter_collection_profile(
     tool_data_t*                                                                tool,
     rocprofiler_agent_id_t                                                      agent_id,
     std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>>& profile_cache) const
@@ -279,7 +279,7 @@ void SdkCallbacksImpl::create_counter_collection_profile(
     }
 }
 
-void SdkCallbacksImpl::record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+void sdk_callbacks_impl_t::record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                                        rocprofiler_counter_record_t*                record_data,
                                        size_t                                       record_count,
                                        void* callback_data_args)
@@ -313,7 +313,7 @@ void SdkCallbacksImpl::record_callback(rocprofiler_dispatch_counting_service_dat
     }
 }
 
-void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
+void sdk_callbacks_impl_t::tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                              void*                                 callback_data)
 {
     if (record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD &&
@@ -358,7 +358,7 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
 
 #ifdef DISABLED_CODE
 // reference code from SDK (to be deleted after implementation
-void SdkCallbacksImpl::code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
+void sdk_callbacks_impl_t::code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                                     rocprofiler_user_data_t*              user_data,
                                                     void*                                 data)
 {
@@ -443,12 +443,12 @@ void SdkCallbacksImpl::code_object_tracing_callback(rocprofiler_callback_tracing
 }
 #endif
 
-void SdkCallbacksImpl::code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
+void sdk_callbacks_impl_t::code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                                     void* data)
 {
 }
 
-std::string SdkCallbacksImpl::truncate_name(std::string_view name)
+std::string sdk_callbacks_impl_t::truncate_name(std::string_view name)
 {
     // The function extracts the kernel name from
     // input string. By using the iterators it finds the
@@ -502,7 +502,7 @@ std::string SdkCallbacksImpl::truncate_name(std::string_view name)
     return std::string{name.substr(rend - rit, rit - rbeg)};
 }
 
-std::string SdkCallbacksImpl::cxa_demangle(const std::string& mangled_name, int* status)
+std::string sdk_callbacks_impl_t::cxa_demangle(const std::string& mangled_name, int* status)
 {
     // return the mangled since there is no buffer
     if (mangled_name.empty())
@@ -572,7 +572,7 @@ std::string SdkCallbacksImpl::cxa_demangle(const std::string& mangled_name, int*
     return _demangled_name;
 }
 
-std::vector<std::string> SdkCallbacksImpl::split_by_regex(const std::string& s,
+std::vector<std::string> sdk_callbacks_impl_t::split_by_regex(const std::string& s,
                                                           const std::string& regex_pattern)
 {
     std::vector<std::string> tokens;

@@ -6,14 +6,14 @@
 namespace rocprofiler_compute_tool
 {
 
-class CountersWriter
+class counters_writer_t
 {
 public:
-    virtual ~CountersWriter()                           = default;
+    virtual ~counters_writer_t()                           = default;
     virtual void write_counters(tool_data_t* tool_data) = 0;
 };
 
-class CsvCountersWriter : public CountersWriter
+class csv_counters_writer_t : public counters_writer_t
 {
 public:
     void write_counters(tool_data_t* tool_data) override;

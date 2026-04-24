@@ -4,64 +4,64 @@
 
 #include "gsl_assert.h"
 
-const char* MockInputParameters::get_output_path()
+const char* mock_input_parameters_t::get_output_path()
 {
     return m_output_path.c_str();
 }
 
-const char* MockInputParameters::get_requested_counters()
+const char* mock_input_parameters_t::get_requested_counters()
 {
     return m_requested_counters.c_str();
 }
 
-const char* MockInputParameters::get_iteration_multiplexing_mode()
+const char* mock_input_parameters_t::get_iteration_multiplexing_mode()
 {
     return m_iteration_multiplexing_mode.c_str();
 }
 
-const char* MockInputParameters::get_kernel_filter_include_regex()
+const char* mock_input_parameters_t::get_kernel_filter_include_regex()
 {
     return m_kernel_filter_include_regex.c_str();
 }
 
-const char* MockInputParameters::get_kernel_filter_range()
+const char* mock_input_parameters_t::get_kernel_filter_range()
 {
     return m_kernel_filter_range.c_str();
 }
 
-void MockInputParameters::set_output_path(const std::string& output_path)
+void mock_input_parameters_t::set_output_path(const std::string& output_path)
 {
     m_output_path = output_path;
 }
 
-void MockInputParameters::set_requested_counters(const std::string& counters)
+void mock_input_parameters_t::set_requested_counters(const std::string& counters)
 {
     m_requested_counters = counters;
 }
 
-void MockInputParameters::set_iteration_multiplexing_mode(const std::string& mode)
+void mock_input_parameters_t::set_iteration_multiplexing_mode(const std::string& mode)
 {
     m_iteration_multiplexing_mode = mode;
 }
 
-void MockInputParameters::set_kernel_filter_include_regex(const std::string& regex)
+void mock_input_parameters_t::set_kernel_filter_include_regex(const std::string& regex)
 {
     m_kernel_filter_include_regex = regex;
 }
 
-void MockInputParameters::set_kernel_filter_range(const std::string& range)
+void mock_input_parameters_t::set_kernel_filter_range(const std::string& range)
 {
     m_kernel_filter_range = range;
 }
 
 /////////////////////////////////////////////////////////////////////////
-// MockSdkWrapper
-void MockSdkWrapper::create_context(rocprofiler_context_id_t* context_id)
+// mock_sdk_wrapper_t
+void mock_sdk_wrapper_t::create_context(rocprofiler_context_id_t* context_id)
 {
     m_created_contexts.push_back(context_id->handle);
 }
 
-void MockSdkWrapper::configure_callback_dispatch_counting_service(
+void mock_sdk_wrapper_t::configure_callback_dispatch_counting_service(
     rocprofiler_context_id_t                   context_id,
     rocprofiler_dispatch_counting_service_cb_t dispatch_callback,
     void*                                      dispatch_callback_args,
@@ -76,7 +76,7 @@ void MockSdkWrapper::configure_callback_dispatch_counting_service(
                                        record_callback_args});
 }
 
-void MockSdkWrapper::configure_callback_tracing_service(rocprofiler_context_id_t context_id,
+void mock_sdk_wrapper_t::configure_callback_tracing_service(rocprofiler_context_id_t context_id,
                                                         rocprofiler_callback_tracing_kind_t kind,
                                                         const rocprofiler_tracing_operation_t* operations,
                                                         size_t operations_count,
@@ -85,12 +85,12 @@ void MockSdkWrapper::configure_callback_tracing_service(rocprofiler_context_id_t
 {
 }
 
-void MockSdkWrapper::start_context(rocprofiler_context_id_t context_id)
+void mock_sdk_wrapper_t::start_context(rocprofiler_context_id_t context_id)
 {
     m_started_contexts.push_back(context_id.handle);
 }
 
-void MockSdkWrapper::iterate_agent_supported_counters(rocprofiler_agent_id_t              agent_id,
+void mock_sdk_wrapper_t::iterate_agent_supported_counters(rocprofiler_agent_id_t              agent_id,
                                                       rocprofiler_available_counters_cb_t cb,
                                                       void*                               user_data)
 {
@@ -98,7 +98,7 @@ void MockSdkWrapper::iterate_agent_supported_counters(rocprofiler_agent_id_t    
     cb(agent_id, counters.data(), counters.size(), user_data);
 }
 
-std::vector<rocprofiler_counter_id_t> MockSdkWrapper::get_counters() const
+std::vector<rocprofiler_counter_id_t> mock_sdk_wrapper_t::get_counters() const
 {
     std::vector<rocprofiler_counter_id_t> counters;
     for (uint32_t i = 0; i < m_counter_names.size(); ++i)
@@ -109,7 +109,7 @@ std::vector<rocprofiler_counter_id_t> MockSdkWrapper::get_counters() const
     return counters;
 }
 
-void MockSdkWrapper::query_counter_info(rocprofiler_counter_id_t              counter_id,
+void mock_sdk_wrapper_t::query_counter_info(rocprofiler_counter_id_t              counter_id,
                                         rocprofiler_counter_info_version_id_t version,
                                         void*                                 info)
 {
@@ -121,7 +121,7 @@ void MockSdkWrapper::query_counter_info(rocprofiler_counter_id_t              co
     counter_info->name      = m_counter_names[counter_id.handle].c_str();
 }
 
-void MockSdkWrapper::create_counter_config(rocprofiler_agent_id_t           agent_id,
+void mock_sdk_wrapper_t::create_counter_config(rocprofiler_agent_id_t           agent_id,
                                            rocprofiler_counter_id_t*        counters_list,
                                            size_t                           counters_count,
                                            rocprofiler_counter_config_id_t* config_id)
@@ -137,47 +137,47 @@ void MockSdkWrapper::create_counter_config(rocprofiler_agent_id_t           agen
     config_id->handle = m_create_counter_config_info.size() - 1;
 }
 
-void MockSdkWrapper::query_record_counter_id(rocprofiler_counter_instance_id_t id,
+void mock_sdk_wrapper_t::query_record_counter_id(rocprofiler_counter_instance_id_t id,
                                              rocprofiler_counter_id_t*         counter_id)
 {
     m_query_counter_record_info.push_back({id, id});
     counter_id->handle = id;
 }
 
-void MockSdkWrapper::set_available_counters(const std::vector<std::string>& counter_names)
+void mock_sdk_wrapper_t::set_available_counters(const std::vector<std::string>& counter_names)
 {
     m_counter_names = counter_names;
 }
 
-const std::vector<uint64_t>& MockSdkWrapper::get_created_contexts() const
+const std::vector<uint64_t>& mock_sdk_wrapper_t::get_created_contexts() const
 {
     return m_created_contexts;
 }
 
-const std::vector<uint64_t>& MockSdkWrapper::get_started_contexts() const
+const std::vector<uint64_t>& mock_sdk_wrapper_t::get_started_contexts() const
 {
     return m_started_contexts;
 }
 
-const std::vector<MockSdkWrapper::dispatch_counting_service_info>&
-    MockSdkWrapper::get_dispatch_counting_service_info() const
+const std::vector<mock_sdk_wrapper_t::dispatch_counting_service_info>&
+    mock_sdk_wrapper_t::get_dispatch_counting_service_info() const
 {
     return m_dispatch_counting_service_info;
 }
 
-const std::vector<MockSdkWrapper::create_counter_config_info>& MockSdkWrapper::get_create_counter_config_info() const
+const std::vector<mock_sdk_wrapper_t::create_counter_config_info>& mock_sdk_wrapper_t::get_create_counter_config_info() const
 {
     return m_create_counter_config_info;
 }
 
-const std::vector<MockSdkWrapper::query_counter_record_info>& MockSdkWrapper::get_query_counter_record_info() const
+const std::vector<mock_sdk_wrapper_t::query_counter_record_info>& mock_sdk_wrapper_t::get_query_counter_record_info() const
 {
     return m_query_counter_record_info;
 }
 
 /////////////////////////////////////////////////////////////////////////
-// MockCountersWriter
-void MockCountersWriter::write_counters(rocprofiler_compute_tool::tool_data_t* tool_data)
+// mock_counters_writer_t
+void mock_counters_writer_t::write_counters(rocprofiler_compute_tool::tool_data_t* tool_data)
 {
     write_counters_info args;
     for (const auto& counter : tool_data->counter_records)
@@ -188,7 +188,7 @@ void MockCountersWriter::write_counters(rocprofiler_compute_tool::tool_data_t* t
     m_write_counters_args.push_back(std::move(args));
 }
 
-const std::vector<MockCountersWriter::write_counters_info>& MockCountersWriter::get_write_counters_info() const
+const std::vector<mock_counters_writer_t::write_counters_info>& mock_counters_writer_t::get_write_counters_info() const
 {
     return m_write_counters_args;
 }

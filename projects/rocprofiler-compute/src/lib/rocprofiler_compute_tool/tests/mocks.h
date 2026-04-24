@@ -8,7 +8,7 @@
 
 #include <gmock/gmock.h>
 
-class MockInputParameters : public rocprofiler_compute_tool::InputParameters
+class mock_input_parameters_t : public rocprofiler_compute_tool::input_parameters_t
 {
 public:
     const char* get_output_path() override;
@@ -32,7 +32,7 @@ private:
     std::string m_kernel_filter_range         = m_non_empty_str;
 };
 
-class MockSdkWrapper : public rocprofiler_compute_tool::SdkWrapper
+class mock_sdk_wrapper_t : public rocprofiler_compute_tool::sdk_wrapper_t
 {
 public:
     struct dispatch_counting_service_info
@@ -55,7 +55,7 @@ public:
         uint64_t counter_id          = 0;
     };
 
-    ~MockSdkWrapper() override = default;
+    ~mock_sdk_wrapper_t() override = default;
     void create_context(rocprofiler_context_id_t* context_id) override;
     void configure_callback_dispatch_counting_service(
         rocprofiler_context_id_t                   context_id,
@@ -102,7 +102,7 @@ private:
     std::vector<std::string>                    m_counter_names;
 };
 
-class MockCountersWriter : public rocprofiler_compute_tool::CountersWriter
+class mock_counters_writer_t : public rocprofiler_compute_tool::counters_writer_t
 {
 public:
     struct write_counters_info

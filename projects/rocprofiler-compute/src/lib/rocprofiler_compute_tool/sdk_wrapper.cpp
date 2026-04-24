@@ -23,12 +23,12 @@ using namespace rocprofiler_compute_tool;
         }                                                                                              \
     }
 
-void SdkWrapperImpl::create_context(rocprofiler_context_id_t* context_id)
+void sdk_wrapper_impl_t::create_context(rocprofiler_context_id_t* context_id)
 {
     ROCPROFILER_CALL(rocprofiler_create_context(context_id), "context creation");
 }
 
-void SdkWrapperImpl::configure_callback_dispatch_counting_service(
+void sdk_wrapper_impl_t::configure_callback_dispatch_counting_service(
     rocprofiler_context_id_t                   context_id,
     rocprofiler_dispatch_counting_service_cb_t dispatch_callback,
     void*                                      dispatch_callback_args,
@@ -43,7 +43,7 @@ void SdkWrapperImpl::configure_callback_dispatch_counting_service(
                      "setup counting service");
 }
 
-void SdkWrapperImpl::configure_callback_tracing_service(rocprofiler_context_id_t context_id,
+void sdk_wrapper_impl_t::configure_callback_tracing_service(rocprofiler_context_id_t context_id,
                                                         rocprofiler_callback_tracing_kind_t kind,
                                                         const rocprofiler_tracing_operation_t* operations,
                                                         size_t operations_count,
@@ -59,12 +59,12 @@ void SdkWrapperImpl::configure_callback_tracing_service(rocprofiler_context_id_t
                      "setup code object tracing service");
 }
 
-void SdkWrapperImpl::start_context(rocprofiler_context_id_t context_id)
+void sdk_wrapper_impl_t::start_context(rocprofiler_context_id_t context_id)
 {
     ROCPROFILER_CALL(rocprofiler_start_context(context_id), "start context");
 }
 
-void SdkWrapperImpl::iterate_agent_supported_counters(rocprofiler_agent_id_t              agent_id,
+void sdk_wrapper_impl_t::iterate_agent_supported_counters(rocprofiler_agent_id_t              agent_id,
                                                       rocprofiler_available_counters_cb_t cb,
                                                       void*                               user_data)
 {
@@ -72,14 +72,14 @@ void SdkWrapperImpl::iterate_agent_supported_counters(rocprofiler_agent_id_t    
                      "iterate agent supported counters");
 }
 
-void SdkWrapperImpl::query_counter_info(rocprofiler_counter_id_t              counter_id,
+void sdk_wrapper_impl_t::query_counter_info(rocprofiler_counter_id_t              counter_id,
                                         rocprofiler_counter_info_version_id_t version,
                                         void*                                 info)
 {
     ROCPROFILER_CALL(rocprofiler_query_counter_info(counter_id, version, info), "query counter info");
 }
 
-void SdkWrapperImpl::create_counter_config(rocprofiler_agent_id_t           agent_id,
+void sdk_wrapper_impl_t::create_counter_config(rocprofiler_agent_id_t           agent_id,
                                            rocprofiler_counter_id_t*        counters_list,
                                            size_t                           counters_count,
                                            rocprofiler_counter_config_id_t* config_id)
@@ -88,7 +88,7 @@ void SdkWrapperImpl::create_counter_config(rocprofiler_agent_id_t           agen
                      "create counter config");
 }
 
-void SdkWrapperImpl::query_record_counter_id(rocprofiler_counter_instance_id_t id,
+void sdk_wrapper_impl_t::query_record_counter_id(rocprofiler_counter_instance_id_t id,
                                              rocprofiler_counter_id_t*         counter_id)
 {
     ROCPROFILER_CALL(rocprofiler_query_record_counter_id(id, counter_id), "query record counter id");
