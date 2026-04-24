@@ -344,22 +344,9 @@ class RocProfCompute_Base:
         status_msg = f"{msg} (Roofline Only)" if self.__args.roof_only else msg
         print_status(status_msg)
 
-        native_tool_path_str = None
-        if (
-            self.__profiler == "rocprofiler-sdk"
-            and not args.no_native_tool
-            and int(self._soc._mspec.rocm_version.split(".")[0]) >= 7
-            and not args.attach_pid
-            and not is_only_pc_sampling(args.filter_blocks)
-        ):
-            sources_path = Path(__file__).resolve().parents[1]
-            native_tool_finder = NativeToolFinder(
-                Path(sources_path), Path(args.rocprofiler_sdk_tool_path)
-            )
-            native_tool_path_str = str(native_tool_finder.get_collector_library_path())
-
+        native_tool_path = self.__get_native_tool_path(args)
         if self.__profiler == "rocprofiler-sdk":
-            options = self.get_profiler_options(native_tool_path=native_tool_path_str)
+            options = self.get_profiler_options(native_tool_path=native_tool_path)
         else:
             options = self.get_profiler_options()
 
@@ -391,7 +378,7 @@ class RocProfCompute_Base:
         total_profiling_time = 0.0
 
         if args.iteration_multiplexing is not None:
-            if native_tool_path_str is None:
+            if native_tool_path is None:
                 console_error(
                     "Native tool is not supported which is required for "
                     "iteration multiplexing."
@@ -489,6 +476,35 @@ class RocProfCompute_Base:
             "profiling",
             f"The time of pc sampling profiling is {int(duration / 60)} m "
             f"{duration % 60} sec",
+        )
+
+    def __get_native_tool_path(self, args: argparse.Namespace) -> str | None:
+        sources_path = Path(__file__).resolve().parents[1]
+        try:
+            if (
+                self.__is_native_tool_requested(args)  # noqa: E501
+                and self.__is_native_tool_supported(args)
+            ):
+                native_tool_finder = NativeToolFinder(
+                    Path(sources_path), Path(args.rocprofiler_sdk_tool_path)
+                )
+                return str(native_tool_finder.get_collector_library_path())
+            return None
+        except Exception:
+            console_error(
+                "Failed to use native counter collection tool.\n"
+                "Please ensure the native tool library is installed "
+                "or source files are present."
+            )
+
+    def __is_native_tool_requested(self, args: argparse.Namespace) -> bool:
+        return self.__profiler == "rocprofiler-sdk" and not args.no_native_tool
+
+    def __is_native_tool_supported(self, args: argparse.Namespace) -> bool:
+        return (
+            int(self._soc._mspec.rocm_version.split(".")[0]) >= 7
+            and not args.attach_pid
+            and not is_only_pc_sampling(args.filter_blocks)
         )
 
     @abstractmethod
