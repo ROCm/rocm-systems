@@ -12,6 +12,7 @@ _COUNTER = itertools.count()
 _SETUP_PY = Path(__file__).resolve().parents[2] / "setup.py"
 _PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
 _BUILD_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "build-bundled-opencode.sh"
+_BUILD_SCRIPT_PS1 = Path(__file__).resolve().parents[2] / "scripts" / "build-bundled-opencode.ps1"
 
 
 def _load_setup_module(monkeypatch):
@@ -29,6 +30,7 @@ def test_pyproject_packages_top_level_bundled_opencode_binary() -> None:
     text = _PYPROJECT.read_text()
 
     assert '"_bundled/opencode"' in text
+    assert '"_bundled/opencode.exe"' in text
     assert '"_bundled/**/*"' in text
 
 
@@ -248,12 +250,75 @@ def test_run_opencode_build_fails_when_build_script_fails(
         raise AssertionError("expected SystemExit when bundled opencode build fails")
 
 
+def test_setup_selects_powershell_build_script_on_windows(monkeypatch) -> None:
+    module = _load_setup_module(monkeypatch)
+    monkeypatch.setattr(module.sys, "platform", "win32")
+    assert module._build_script_path().name == "build-bundled-opencode.ps1"
+    assert module._bundle_path().name == "opencode.exe"
+
+
+def test_setup_uses_powershell_command_on_windows(monkeypatch, tmp_path: Path) -> None:
+    module = _load_setup_module(monkeypatch)
+    monkeypatch.setattr(module.sys, "platform", "win32")
+
+    def _fake_which(name: str, path: str | None = None) -> str | None:
+        if name in {"pwsh", "pwsh.exe", "powershell", "powershell.exe"}:
+            return "C:/Program Files/PowerShell/7/pwsh.exe"
+        return None
+
+    monkeypatch.setattr(module.shutil, "which", _fake_which)
+    script = tmp_path / "build-bundled-opencode.ps1"
+    cmd = module._build_script_command(script)
+
+    assert cmd[0].endswith("pwsh.exe")
+    assert cmd[1:6] == ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"]
+    assert cmd[6] == str(script)
+
+
+def test_windows_bun_bootstrap_uses_powershell(monkeypatch) -> None:
+    module = _load_setup_module(monkeypatch)
+    monkeypatch.setattr(module.sys, "platform", "win32")
+    monkeypatch.setenv("PERFXPERT_BUN_INSTALL_PS1_URL", "https://example.invalid/install.ps1")
+
+    def _fake_which(name: str, path: str | None = None) -> str | None:
+        if name in {"pwsh", "pwsh.exe", "powershell", "powershell.exe"}:
+            return "pwsh.exe"
+        return None
+
+    class _Result:
+        returncode = 0
+
+    captured: dict[str, object] = {}
+
+    def _fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return _Result()
+
+    monkeypatch.setattr(module.shutil, "which", _fake_which)
+    monkeypatch.setattr(module.subprocess, "run", _fake_run)
+
+    assert module._run_bun_install_script({}) == 0
+    cmd = captured["cmd"]
+    assert isinstance(cmd, list)
+    assert cmd[:6] == ["pwsh.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"]
+    assert "install.ps1" in cmd[6]
+
+
 def test_build_script_has_portable_size_and_sha_helpers() -> None:
     text = _BUILD_SCRIPT.read_text()
     assert "stat -c%s" in text
     assert "stat -f%z" in text
     assert "sha256sum" in text
     assert "shasum -a 256" in text
+
+
+def test_windows_build_script_has_native_bundle_contract() -> None:
+    text = _BUILD_SCRIPT_PS1.read_text()
+    assert "Get-FileHash -Algorithm SHA256" in text
+    assert "opencode-windows-x64" in text
+    assert "opencode.exe" in text
+    assert "bun run build --single" in text
 
 
 def test_build_script_retries_when_frozen_lockfile_install_fails() -> None:

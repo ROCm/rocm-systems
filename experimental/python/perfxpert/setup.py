@@ -1,6 +1,7 @@
-"""Setuptools shim — runs `scripts/build-bundled-opencode.sh` automatically
+"""Setuptools shim — runs `scripts/build-bundled-opencode.{sh,ps1}` automatically
 during `pip install` (wheel + editable) so the patched opencode binary is
-bundled into ``perfxpert/_bundled/opencode`` as part of install.
+bundled into ``perfxpert/_bundled/opencode`` (POSIX) or
+``perfxpert/_bundled/opencode.exe`` (Windows) as part of install.
 
 Project metadata lives in ``pyproject.toml``. This file only exists to
 inject a pre-build hook. Deleting it would leave users needing to run
@@ -82,13 +83,54 @@ except ImportError:  # older setuptools
 
 
 _HERE = Path(__file__).resolve().parent
-_BUILD_SCRIPT = _HERE / "scripts" / "build-bundled-opencode.sh"
-_BUNDLE_PATH = _HERE / "perfxpert" / "_bundled" / "opencode"
+_BUILD_SCRIPT_SH = _HERE / "scripts" / "build-bundled-opencode.sh"
+_BUILD_SCRIPT_PS1 = _HERE / "scripts" / "build-bundled-opencode.ps1"
+_BUILD_SCRIPT = _BUILD_SCRIPT_SH
+_BUNDLE_DIR = _HERE / "perfxpert" / "_bundled"
+_BUNDLE_PATH = _BUNDLE_DIR / "opencode"
 _PATCHES_DIR = _HERE / ".patches"
 _OPENCODE_DIR = _HERE / "opencode"
 _SKIP_ENV = "PERFXPERT_SKIP_BUNDLED_BUILD"
 _SKIP_OPENCODE_FETCH_ENV = "PERFXPERT_SKIP_OPENCODE_FETCH"
 _DEFAULT_BUN_INSTALL_URL = "https://bun.sh/install"
+_DEFAULT_BUN_INSTALL_PS1_URL = "https://bun.sh/install.ps1"
+
+
+def _is_windows() -> bool:
+    return sys.platform == "win32"
+
+
+def _build_script_path() -> Path:
+    return _BUILD_SCRIPT_PS1 if _is_windows() else _BUILD_SCRIPT
+
+
+def _bundle_path() -> Path:
+    return _BUNDLE_DIR / "opencode.exe" if _is_windows() else _BUNDLE_PATH
+
+
+def _powershell_executable() -> str | None:
+    for name in ("pwsh", "pwsh.exe", "powershell", "powershell.exe"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+def _build_script_command(script: Path) -> list[str]:
+    if _is_windows():
+        powershell = _powershell_executable()
+        if powershell is None:
+            _fail_build("PowerShell executable not found; cannot build bundled opencode on Windows.")
+        return [
+            powershell,
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+        ]
+    return ["bash", str(script)]
 
 
 def _package_manager_prereq_hint() -> str:
@@ -104,6 +146,8 @@ def _package_manager_prereq_hint() -> str:
         "    dnf install -y git unzip python3 python3-pip\n"
         "  SLES 15:\n"
         "    zypper install -y curl git unzip python311 python311-pip\n"
+        "  Windows:\n"
+        "    Install Git for Windows and Python 3.10+; PowerShell is required.\n"
     )
 
 
@@ -116,14 +160,26 @@ def _missing_tools(tools: tuple[str, ...]) -> list[str]:
 
 
 def _missing_build_prereqs() -> list[str]:
+    if _is_windows():
+        missing = _missing_tools(("git",))
+        if _powershell_executable() is None:
+            missing.append("powershell")
+        return missing
     return _missing_tools(("bash", "git"))
 
 
 def _missing_bun_bootstrap_prereqs() -> list[str]:
+    if _is_windows():
+        return [] if _powershell_executable() is not None else ["powershell"]
     return _missing_tools(("bash", "curl", "unzip"))
 
 
 def _missing_os_prereqs() -> list[str]:
+    if _is_windows():
+        missing = _missing_tools(("git",))
+        if _powershell_executable() is None:
+            missing.append("powershell")
+        return missing
     return _missing_tools(("bash", "curl", "git", "unzip"))
 
 
@@ -136,6 +192,27 @@ def _fail_build(message: str) -> None:
 
 
 def _run_bun_install_script(env: dict[str, str]) -> int:
+    if _is_windows():
+        url = os.environ.get("PERFXPERT_BUN_INSTALL_PS1_URL", _DEFAULT_BUN_INSTALL_PS1_URL)
+        powershell = _powershell_executable()
+        if powershell is None:
+            _fail_build("PowerShell executable not found; cannot bootstrap bun on Windows.")
+        install_cmd = f"irm {url!r} | iex"
+        result = subprocess.run(
+            [
+                powershell,
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                install_cmd,
+            ],
+            env=env,
+            check=False,
+        )
+        return result.returncode
+
     url = os.environ.get("PERFXPERT_BUN_INSTALL_URL", _DEFAULT_BUN_INSTALL_URL)
     missing = _missing_bun_bootstrap_prereqs()
     if missing:
@@ -375,12 +452,14 @@ def _opencode_build_needed() -> tuple[bool, str]:
     """Return (should_build, reason). ``should_build=False`` stops here."""
     if os.environ.get(_SKIP_ENV, "").strip() in {"1", "true", "yes"}:
         return False, f"{_SKIP_ENV}=1 — skipping bundled opencode build"
-    if not _BUILD_SCRIPT.is_file():
-        return True, f"build script missing ({_BUILD_SCRIPT})"
+    build_script = _build_script_path()
+    if not build_script.is_file():
+        return True, f"build script missing ({build_script})"
     # Rebuild when the binary is missing OR older than the newest patch.
-    if not _BUNDLE_PATH.is_file():
+    bundle_path = _bundle_path()
+    if not bundle_path.is_file():
         return True, "bundled opencode binary missing — building"
-    binary_mtime = _BUNDLE_PATH.stat().st_mtime
+    binary_mtime = bundle_path.stat().st_mtime
     if _PATCHES_DIR.is_dir():
         for patch in _PATCHES_DIR.glob("*.patch"):
             if patch.stat().st_mtime > binary_mtime:
@@ -393,9 +472,10 @@ def _run_opencode_build() -> None:
     print(f"[perfxpert/setup.py] opencode build: {reason}", file=sys.stderr)
     if not should_build:
         return
-    if not _BUILD_SCRIPT.is_file():
+    build_script = _build_script_path()
+    if not build_script.is_file():
         _fail_build(
-            f"required bundled opencode build script is missing: {_BUILD_SCRIPT}. "
+            f"required bundled opencode build script is missing: {build_script}. "
             f"Set {_SKIP_ENV}=1 only if this build intentionally excludes perfxpert-code."
         )
     missing = _missing_build_prereqs()
@@ -422,14 +502,14 @@ def _run_opencode_build() -> None:
     env = os.environ.copy()
     env["PATH"] = build_path
     result = subprocess.run(
-        ["bash", str(_BUILD_SCRIPT)],
+        _build_script_command(build_script),
         cwd=str(_HERE),
         env=env,
         check=False,
     )
     if result.returncode != 0:
         _fail_build(
-            f"build-bundled-opencode.sh exited {result.returncode}; "
+            f"{build_script.name} exited {result.returncode}; "
             "bundled perfxpert-code was not produced."
         )
 
