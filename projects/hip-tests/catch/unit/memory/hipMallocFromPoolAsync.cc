@@ -815,11 +815,11 @@ static void runMThreadReleaseThresholdTest(enum eTestValue testtype) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipMallocFromPoolAsync_MThread_DefaultThresh) {
+HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_MThread_DefaultThresh) {
   runMThreadReleaseThresholdTest(testdefault);
 }
 
-TEST_CASE(Unit_hipMallocFromPoolAsync_MThread_MaxThresh) {
+HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_MThread_MaxThresh) {
   runMThreadReleaseThresholdTest(testMaximum);
 }
 

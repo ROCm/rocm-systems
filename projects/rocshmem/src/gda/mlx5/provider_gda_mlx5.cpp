@@ -27,8 +27,9 @@
 #include <type_traits>
 #include <hip/hip_runtime.h>
 
+#include "bit.hpp"
+#include "log.hpp"
 #include "util.hpp"
-#include "gda/bit.hpp"
 #include "gda/ibv_wrapper.hpp"
 #include "gda/mlx5/provider_gda_mlx5.hpp"
 #include "gda/mlx5/mlx5dv_core.hpp"
@@ -138,8 +139,11 @@ struct mlx5_qp_umem_alloc_info {
   // WQ always at beginning of umem allocation
   static constexpr size_t wq_offset = 0;
 
+  // use only one CQE
+  static constexpr size_t cq_depth = 1;
+
   // align CQ and doorbell records to cache line size
-  static constexpr size_t cq_size       = mlx5_align_amdgpu_cache_line(sizeof(mlx5_cqe64[2]));
+  static constexpr size_t cq_size       = mlx5_align_amdgpu_cache_line(sizeof(mlx5_cqe64) * cq_depth);
   static constexpr size_t qp_dbrec_size = mlx5_align_amdgpu_cache_line(MLX5_DOORBELL_RECORD_SIZE);
   static constexpr size_t cq_dbrec_size = mlx5_align_amdgpu_cache_line(MLX5_DOORBELL_RECORD_SIZE);
 
@@ -208,13 +212,6 @@ static inline mlx5dv_devx_umem* mlx5_umem_reg(const mlx5dv_funcs_t& mlx5dv,
   return umem;
 }
 
-static inline void mlx5_initialize_cq_buffer(mlx5_cqe64* cq, uint32_t cq_depth) {
-  // CQEs must have opcode set to Invalid = 0xF and be in hardware ownership
-  constexpr uint8_t op_own_init = (MLX5_CQE_INVALID << 4) | MLX5_CQE_OWNER_MASK;
-  // simplest way is to set all bytes in the CQ to op_own_init = 0xF1
-  QPAllocator::memset(cq, op_own_init, sizeof(mlx5_cqe64) * cq_depth);
-}
-
 static inline uint32_t mlx5_pdn(const mlx5dv_funcs_t& mlx5dv, struct ibv_pd *pd) {
   mlx5dv_pd mlx5_pd;
   mlx5dv_obj obj = {};
@@ -239,7 +236,7 @@ static inline uint32_t mlx5_mtu(enum ibv_mtu mtu) {
   case IBV_MTU_4096:
     return MLX5_QPC_MTU_4K_BYTES;
   default:
-    fprintf(stderr, "Error: invalid ibv_mtu enumerator %u\n", static_cast<uint32_t>(mtu));
+    LOG_ERROR("invalid ibv_mtu enumerator %u", static_cast<uint32_t>(mtu));
     return static_cast<uint32_t>(mtu);
   }
 }
@@ -300,6 +297,8 @@ int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
   int err = 0;
 
   qp.ctx = ctx;
+  qp.pd  = pd;
+  qp.ah  = nullptr;
 
   // calculate buffer size needed for WQ + CQ + QP dbrec + CQ dbrec
   mlx5_qp_umem_alloc_info umem_alloc_info{sq_depth};
@@ -313,6 +312,7 @@ int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
   qp.cq       = umem_alloc_info.cq_addr(umem_buffer);
   qp.cq_dbrec = umem_alloc_info.cq_dbrec_addr(umem_buffer);
   qp.qp_dbrec = umem_alloc_info.qp_dbrec_addr(umem_buffer);
+  qp.cq_depth = umem_alloc_info.cq_depth;
   qp.sq_depth = umem_alloc_info.sq_depth;
 
   /* allocate UAR
@@ -322,7 +322,20 @@ int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
    * MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED dynamically allocates a UAR page, but these are limited
    * using MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED requires rdma-core v45 or later (released March 2023)
    * see https://github.com/linux-rdma/rdma-core/commit/bf550b9fa83374cfed51330760a583d82a7600f4 */
+  errno = 0;
   qp.uar = mlx5dv.devx_alloc_uar(ctx, MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED);
+
+  /* It is recommended that the user upgrade their network stack.
+   * However, this is a fall-back mechanism to notify the user of this issue.  */
+  if (NULL == qp.uar && EOPNOTSUPP == errno) {
+    fprintf(stderr,
+            "[Warning] Cannot provide dedicated DBs to each QP, "
+            "rocSHMEM correctness is not guaranteed "
+            "MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED is not supported by the installed rdma-core/OFED."
+            "Please upgrade network stack to rdma-core v45 or later.\n");
+
+    qp.uar = mlx5dv.devx_alloc_uar(ctx, MLX5DV_UAR_ALLOC_TYPE_BF);
+  }
   CHECK_NNULL(qp.uar, "mlx5dv_devx_alloc_uar");
 
   // create CQ
@@ -384,8 +397,15 @@ int mlx5dv_funcs_t::destroy_qp(mlx5_devx_qp& qp) {
 
   QPAllocator::free(qp.sq);
 
+  if (nullptr != qp.ah) {
+    err = ibv.destroy_ah(qp.ah);
+    CHECK_ZERO(err, "ibv_destroy_ah");
+  }
+
   // clear the object's fields
   qp.ctx         = nullptr;
+  qp.ah          = nullptr;
+  qp.pd          = nullptr;
   qp.devx_cq_obj = nullptr;
   qp.devx_qp_obj = nullptr;
   qp.uar         = nullptr;
@@ -396,6 +416,7 @@ int mlx5dv_funcs_t::destroy_qp(mlx5_devx_qp& qp) {
   qp.qp_dbrec    = nullptr;
   qp.cqn         = 0;
   qp.qpn         = 0;
+  qp.cq_depth    = 0;
   qp.sq_depth    = 0;
 
   return err;
@@ -411,9 +432,10 @@ static int mlx5_create_cq(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp) {
 
   DEVX_SET(create_cq_in, in, opcode, MLX5_CMD_OP_CREATE_CQ);
 
-  // use CQ length 2 until we enable true 1-CQE/collapsed CQ
-  constexpr uint32_t cq_depth = 2;
-  mlx5_initialize_cq_buffer(reinterpret_cast<mlx5_cqe64*>(qp.cq), cq_depth);
+  // CQEs must be initialized with opcode set to Invalid = 0xF and in hardware ownership
+  constexpr uint8_t op_own_init = (MLX5_CQE_INVALID << 4) | MLX5_CQE_OWNER_MASK;
+  // simplest way is to set all bytes in the CQ to op_own_init = 0xF1
+  QPAllocator::memset(qp.cq, op_own_init, sizeof(mlx5_cqe64) * qp.cq_depth);
 
   // get EQN, we don't use it but it needs to be set when creating the CQ
   uint32_t eqn = 0;
@@ -421,9 +443,11 @@ static int mlx5_create_cq(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp) {
   CHECK_ZERO(err, "mlx5dv_devx_query_eqn");
 
   DEVX_SET(cqc, cqc, cqe_sz,               MLX5_CQC_CQE_SZ_64_BYTES);
+  // set CQE collapsing so all CQEs are written to first CQ entry
+  DEVX_SET(cqc, cqc, cc,                   true);
   // set overrun ignore so that we don't need to ring the CQ doorbell
   DEVX_SET(cqc, cqc, oi,                   true);
-  DEVX_SET(cqc, cqc, log_cq_size,          bit_log2(cq_depth));
+  DEVX_SET(cqc, cqc, log_cq_size,          bit_log2(qp.cq_depth));
   // we don't ring the CQ doorbell anyway
   DEVX_SET(cqc, cqc, uar_page,             qp.uar->page_id);
   DEVX_SET(cqc, cqc, c_eqn_or_ext_element, eqn);
@@ -581,14 +605,23 @@ static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& q
   if (gid_type == IBV_GID_TYPE_ROCE_V1 ||
       gid_type == IBV_GID_TYPE_ROCE_V2) {
     assert(ah_attr->is_global && "ibv_qp_attr::ah_attr::is_global not set, but gid_type is RoCE");
-    // get remote MAC address
-    uint8_t remote_mac[ETHERNET_LL_SIZE];
-    int err = ibv.resolve_eth_l2_from_gid(qp.ctx, ah_attr, remote_mac, /* VLAN id */ nullptr);
-    CHECK_ZERO(err, "ibv_resolve_eth_l2_from_gid");
 
     DEVX_SET(ads, primary_addr, eth_prio, ah_attr->sl);
+
+    qp.ah = ibv.create_ah(qp.pd, ah_attr);
+    CHECK_NNULL(qp.ah, "ibv_create_ah");
+
+    struct mlx5dv_obj  dv;
+    struct mlx5dv_ah   dah;
+
+    dv.ah.in = qp.ah;
+    dv.ah.out = &dah;
+
+    int err = mlx5dv.init_obj(&dv, MLX5DV_OBJ_AH);
+    CHECK_ZERO(err, "mlx5dv_init_obj (AH)");
+
     // remote MAC address gets copied directly
-    memcpy(rmac, &remote_mac, sizeof(remote_mac));
+    memcpy(rmac, &dah.av->rmac, sizeof(dah.av->rmac));
   }
 
   // RoCE v2
@@ -629,24 +662,25 @@ static int mlx5_modify_qp_rtr2rts(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp
 }
 
 void mlx5_devx_qp::dump([[maybe_unused]] int conn_num) {
-  DPRINTF("\n");
-  DPRINTF("===============================================\n");
-  DPRINTF("     INITIALIZED MLX5_DEVX_QP FOR CONNECTION#%d\n", conn_num);
-  DPRINTF("===============================================\n");
-  DPRINTF("=================== QP_DUMP ===================\n");
-  DPRINTF("  (uint32_t)  qpn              = 0x%x\n",  this->qpn);
-  DPRINTF("  (void*)     sq               = %p\n",    this->sq);
-  DPRINTF("  (uint16_t)  sq_depth         = %hu\n",   this->sq_depth);
-  DPRINTF("  (uint32_t*) qp_dbrec         = %p\n",    this->qp_dbrec);
-  DPRINTF("  (uint32_t)  cqn              = 0x%x\n",  this->cqn);
-  DPRINTF("  (void*)     cq               = %p\n",    this->cq);
-  DPRINTF("  (uint32_t*) cq_dbrec         = %p\n",    this->cq_dbrec);
-  DPRINTF("  (void*)     uar->reg_addr    = %p\n",    this->uar->reg_addr);
-  DPRINTF("  (void*)     uar->base_addr   = %p\n",    this->uar->base_addr);
-  DPRINTF("  (uint32_t)  uar->page_id     = 0x%x\n",  this->uar->page_id);
-  DPRINTF("  (off_t)     uar->mmap_offset = 0x%lx\n", this->uar->mmap_off);
-  DPRINTF("  (uint64_t)  uar->comp_mask   = 0x%lx\n", this->uar->comp_mask);
-  DPRINTF("================== QP_DUMP_END ================\n");
+  LOG_TRACE("== MLX5_DEVX_QP CONNECTION#%d ================================\n"
+            "  (uint32_t)  qpn              = 0x%x\n"
+            "  (void*)     sq               = %p\n"
+            "  (uint16_t)  sq_depth         = %hu\n"
+            "  (uint32_t*) qp_dbrec         = %p\n"
+            "  (uint32_t)  cqn              = 0x%x\n"
+            "  (void*)     cq               = %p\n"
+            "  (uint32_t)  cq_depth         = %u\n"
+            "  (uint32_t*) cq_dbrec         = %p\n"
+            "  (void*)     uar->reg_addr    = %p\n"
+            "  (void*)     uar->base_addr   = %p\n"
+            "  (uint32_t)  uar->page_id     = 0x%x\n"
+            "  (off_t)     uar->mmap_offset = 0x%lx\n"
+            "  (uint64_t)  uar->comp_mask   = 0x%lx\n"
+            "========",
+            conn_num, this->qpn, this->sq, this->sq_depth, this->qp_dbrec,
+            this->cqn, this->cq, this->cq_depth, this->cq_dbrec,
+            this->uar->reg_addr, this->uar->base_addr, this->uar->page_id,
+            this->uar->mmap_off, this->uar->comp_mask);
 }
 
 }  // namespace rocshmem

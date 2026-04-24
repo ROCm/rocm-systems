@@ -725,16 +725,6 @@ struct ncclComm {
   // shared structures for finalization
   int finalizeRankCnt;
 
-#if defined(ENABLE_MSCCLPP)
-  // Whether this comm is compatible with MSCCLPP
-  bool mscclppCompatible;
-  struct mscclppComm* mscclpp_comm;
-  size_t mscclpp_threshold;
-  bool mscclppForceEnable;
-#endif
-
-  // Whether this comm is compatible with MSCCL
-  bool mscclCompatible;
   // group job to support multi-thread FT
   struct ncclGroupJob *groupJob;
 

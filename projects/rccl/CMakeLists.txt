@@ -94,14 +94,9 @@ option(BUILD_EXT_EXAMPLES                      "Build ext-{net,tuner,profiler} e
 option(COLLTRACE                               "Collective Trace Option"                       ON)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
-option(ENABLE_MSCCL_KERNEL                     "Enable MSCCL while compiling"                  OFF)
-option(ENABLE_MSCCLPP                          "Enable MSCCL++"                                OFF)
-option(ENABLE_MSCCLPP_CLIP                     "Enable MSCCL++ CLIP"                           OFF)
-option(ENABLE_MSCCLPP_EXECUTOR                 "Enable MSCCL++ Executor"                       OFF)
-option(ENABLE_MSCCLPP_FORMAT_CHECKS            "Enable formatting checks in MSCCL++"           OFF)
-option(MSCCLPP_APPLY_PATCHES                   "Apply source code patches to MSCCL++"          ON)
 option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
+option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
@@ -151,7 +146,8 @@ set(DEFAULT_GPUS
       gfx1102
       gfx1151
       gfx1200
-      gfx1201)
+      gfx1201
+      gfx1250)
 
 # Load CMake modules
 #==================================================================================================
@@ -159,8 +155,6 @@ include(CheckIncludeFiles)
 include(CheckSymbolExists)
 include(cmake/Dependencies.cmake) # GTest, rocm-cmake, rocm_local_targets
 include(cmake/CheckSymbolExistsNoWarn.cmake)
-include(cmake/MSCCLPP.cmake)
-
 # Include rocSHMEM build module only if enabled
 if(ENABLE_ROCSHMEM)
   include(cmake/ROCSHMEM.cmake)
@@ -276,7 +270,7 @@ endif()
 #==================================================================================================
 set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "")
 set(CMAKE_CXX_STANDARD   17)   # We use C++17 features, this will add compile option: -std=c++17
-set(CMAKE_CXX_EXTENSIONS OFF)  # Without this line, it will add -std=gnu++17 instead, which has some issues.
+set(CMAKE_CXX_EXTENSIONS OFF)  # Without this line, it will add -std=gnu++20 instead, which has some issues.
 if(ROCM_PATH)
   list(APPEND CMAKE_PREFIX_PATH  # Add ROCM_PATH to CMake search paths (for finding HIP / HSA
               ${ROCM_PATH}
@@ -513,33 +507,6 @@ if (HAVE_PARALLEL_JOBS)
   message(STATUS "Parallel jobs enabled")
 endif()
 
-## Disable building MSCCL++ if the build environment is invalid
-## Currently MSCCL++ is supported only on gfx942 and gfx950, and only on Ubuntu and CentOS
-set(MSCCLPP_SUPPORTED_ARCHS "gfx942" "gfx942:xnack-" "gfx942:xnack+" "gfx950" "gfx950:xnack-" "gfx950:xnack+")
-
-
-# Check if any of the supported architectures are in GPU_TARGETS
-set(ARCH_MATCH_FOUND OFF)
-set(MSCCLPP_GPU_TARGETS "")
-foreach(ARCH IN LISTS GPU_TARGETS)
-  if(ARCH IN_LIST MSCCLPP_SUPPORTED_ARCHS)
-    set(ARCH_MATCH_FOUND ON)
-    list(APPEND MSCCLPP_GPU_TARGETS "${ARCH}")
-  endif()
-endforeach()
-set(MSCCLPP_GPU_TARGETS "${MSCCLPP_GPU_TARGETS}" CACHE STRING "GPU Targets supported by MSCCL++" FORCE)
-
-if (ENABLE_MSCCLPP AND NOT ARCH_MATCH_FOUND)
-  set(ENABLE_MSCCLPP OFF)
-  message(WARNING "Can only build MSCCL++ for supported GPU_TARGETS: ${MSCCLPP_SUPPORTED_ARCHS}; current GPU_TARGETS: ${GPU_TARGETS}; so disabling MSCCL++ build")
-endif()
-
-# MSCCL++ is only supported on ROCm 6.2.0 or newer
-if (ENABLE_MSCCLPP AND ROCM_VERSION VERSION_LESS "60200")
-  set(ENABLE_MSCCLPP OFF)
-  message(WARNING "MSCCL++ integration only supported on ROCm 6.2.0 or greater; disabling MSCCL++ build")
-endif()
-
 ## Disable WARP_SPEED if the build environment is invalid
 set(WARP_SPEED_SUPPORTED_ARCHS "gfx950" "gfx950:xnack-" "gfx950:xnack+")
 set(ARCH_MATCH_FOUND OFF)
@@ -566,11 +533,6 @@ execute_process(
   OUTPUT_VARIABLE HOST_OS_FAMILY
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
-
-if (ENABLE_MSCCLPP AND NOT(${HOST_OS_ID} STREQUAL "ubuntu" OR ${HOST_OS_ID} STREQUAL "centos"))
-  set(ENABLE_MSCCLPP OFF)
-  message(WARNING "MSCCL++ integration not supported on this OS (${HOST_OS_ID}); disabling MSCCL++ build")
-endif()
 
 # Check for ROCTX
 if(ROCTX)
@@ -682,12 +644,9 @@ rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/rccl/rccl.h src/include/p
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
 rocm_install(FILES       src/include/api_trace.h
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl/amd_detail)
-file(COPY tools/msccl-algorithms DESTINATION ${PROJECT_BINARY_DIR})
-file(COPY tools/msccl-unit-test-algorithms DESTINATION ${PROJECT_BINARY_DIR})
-## Install Algorithm files under share folder
-rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/msccl-algorithms DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
-rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/msccl-unit-test-algorithms DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
-
+## Install tuner config directory for CSV-based tuner
+file(COPY tuner DESTINATION ${PROJECT_BINARY_DIR})
+rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/tuner DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
 rocm_export_targets(
   NAMESPACE roc::
   TARGETS   rccl
@@ -703,6 +662,7 @@ endif()
 rocm_package_add_dependencies(DEPENDS "${DEPENDS_HIP_RUNTIME} >= 4.5.0" "${SMI_LIB_NAME}")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS "${ROCM_PATH}/lib")
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/opt" "${ROCM_PATH}")
 

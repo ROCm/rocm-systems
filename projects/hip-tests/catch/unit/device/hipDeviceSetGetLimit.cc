@@ -325,21 +325,21 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_DecreaseIncrease) {
   HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, orgValue));
 }
 
-static constexpr size_t SIZE = 4 * 1024;
-static constexpr size_t SIZE_BYTES = SIZE * sizeof(int);
+static constexpr size_t kBufferSize = 4 * 1024;
+static constexpr size_t kBufferSizeBytes = kBufferSize * sizeof(int);
 static constexpr int N_BYTES = sizeof(int);
 
 /*
  * Kernel function uses the scratch memory and fill the value
  */
 __global__ void addOneKernelUseScratch(int* arr) {
-  int localArr[SIZE];
-  for (int i = 0; i < SIZE; i++) {
+  int localArr[kBufferSize];
+  for (int i = 0; i < kBufferSize; i++) {
     localArr[i] = i;
   }
 
   int sum = 0;
-  for (int i = 0; i < SIZE; i += 1) {
+  for (int i = 0; i < kBufferSize; i += 1) {
     sum += localArr[i];
   }
 
@@ -381,16 +381,16 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetBeforeKernelLaunch) {
   size_t orgValue = 0;
   HIP_CHECK(hipDeviceGetLimit(&orgValue, hipExtLimitScratchCurrent));
 
-  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, SIZE_BYTES));
+  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, kBufferSizeBytes));
 
   size_t getValue = 0;
   HIP_CHECK(hipDeviceGetLimit(&getValue, hipExtLimitScratchCurrent));
-  REQUIRE(getValue == SIZE_BYTES);
+  REQUIRE(getValue == kBufferSizeBytes);
 
   addOneKernelUseScratch<<<1, 1, 0, stream>>>(devMem);
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  int hostMem = 0, expectedValue = ((SIZE - 1) * (SIZE)) / 2;
+  int hostMem = 0, expectedValue = ((kBufferSize - 1) * (kBufferSize)) / 2;
   HIP_CHECK(hipMemcpy(&hostMem, devMem, N_BYTES, hipMemcpyDeviceToHost));
   REQUIRE(hostMem == expectedValue);
 
@@ -450,7 +450,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_MultiDevice) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 

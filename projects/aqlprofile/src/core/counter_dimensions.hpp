@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <hsa/hsa_ven_amd_aqlprofile.h>
+#include "hsa_includes.h"
 #include "def/gpu_block_info.h"
 #include "core/aql_profile.hpp"
 #include "core/pm4_factory.h"

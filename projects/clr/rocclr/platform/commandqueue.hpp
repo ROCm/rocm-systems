@@ -280,8 +280,8 @@ class HostQueue : public CommandQueue {
     lastEnqueueCommand_ = command;
   }
 
-  //! Returns true if the batch size exceeds the flush threshold
-  bool ShouldFlushBatch() const { return size_ > DEBUG_CLR_MAX_BATCH_SIZE; }
+  //! Flushes submitted commands if the batch size significantly grew
+  void FlushSubmissionBatch();
   //! Reset the command batch list
   void ResetSubmissionBatch() {
     head_ = nullptr;

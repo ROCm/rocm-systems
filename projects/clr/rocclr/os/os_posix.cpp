@@ -964,9 +964,9 @@ void Os::CloseIpcMemory(const FileDesc desc, const void* ptr, size_t size) {
 void Os::PrintLibraryLocation() {
   Dl_info dl_info;
   if (dladdr(reinterpret_cast<void*>(Os::loadLibrary), &dl_info) && dl_info.dli_fname) {
-    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Library Path: %s", dl_info.dli_fname);
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Runtime Library Path: %s", dl_info.dli_fname);
   } else {
-    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Library Path: <unknown>");
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Runtime Library Path: <unknown>");
   }
 }
 

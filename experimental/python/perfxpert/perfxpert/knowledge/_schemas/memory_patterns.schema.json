@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "description": "Phase-10 Features C+E unified-memory + multi-level memory signatures. Consumed by the Memory Specialist.",
+  "required": ["version"],
+  "properties": {
+    "version": {"type": "integer", "minimum": 1},
+    "unified_memory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "description"],
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "detector": {"type": "string"},
+          "arch": {"type": "string"},
+          "threshold": {"type": "object"},
+          "recommend": {
+            "type": "array",
+            "items": {"type": "string"}
+          }
+        }
+      }
+    },
+    "multi_level_memory_chain": {
+      "type": "object",
+      "properties": {
+        "description": {"type": "string"},
+        "levels": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["level", "classifier", "bottleneck_when"],
+            "properties": {
+              "level": {"type": "string"},
+              "classifier": {"type": "string"},
+              "bottleneck_when": {"type": "string"},
+              "recommend": {
+                "type": "array",
+                "items": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "notes": {"type": "string"}
+  }
+}

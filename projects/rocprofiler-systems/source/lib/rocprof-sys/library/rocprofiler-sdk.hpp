@@ -45,6 +45,9 @@ resume();
 std::shared_ptr<control::trace_control>
 get_trace_controller();
 
+void
+reset_sdk_session_guards();
+
 std::vector<hardware_counter_info>
 get_rocm_events_info();
 }  // namespace rocprofiler_sdk

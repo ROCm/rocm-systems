@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include "debug.h"
 #include "amdsmi_wrap.h"
 #include "include/graph.h"
+#include "register.h"
 
 
 // Use this param to experiment pipelining new data types besides bfloat16
@@ -369,12 +370,6 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
       case rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER:
         *algoName = "Direct";
         break;
-      case rcclAddonAlgos_t::RCCL_MSCCL:
-        *algoName = "MSCCL";
-        break;
-      case rcclAddonAlgos_t::RCCL_MSCCLPP:
-        *algoName = "MSCCLPP";
-        break;
 #ifdef ENABLE_WARP_SPEED
       case rcclAddonAlgos_t::RCCL_WARP_SPEED:
         *algoName = "RING*"; // WarpSpeed (*) uses RING algorithm
@@ -415,6 +410,11 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   static int userDirectAllGatherInput = rcclParamDirectAllGatherDisable();
   if (userDirectAllGatherInput != 0) {
     INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER has been disabled by environment variable.");
+    return false;
+  }
+
+  // Direct AllGather incompatible with UBR
+  if (ncclParamLocalRegister()) {
     return false;
   }
 

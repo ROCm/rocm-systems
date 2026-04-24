@@ -115,6 +115,11 @@ static const char* kDevXGMIErrorFName = "xgmi_error";
 static const char* kDevSerialNumberFName = "serial_number";
 static const char* kDevNumaNodeFName = "numa_node";
 static const char* kDevGpuMetricsFName = "gpu_metrics";
+
+// GPU Overdrive (gpu_od) paths - used internally via Device helper methods
+static const char* kDevGpuOdPath = "gpu_od";
+static const char* kDevGpuOdFanMinPwmFName = "gpu_od/fan_ctrl/fan_minimum_pwm";
+
 static const char* kDevGpuPartitionMetricsFName = "xcp/xcp_metrics";
 static const char* kDevPmMetricsFName = "pm_metrics";  // PM log
 static const char* kDevRegMetricsFName = "reg_state";  // register table
@@ -708,6 +713,15 @@ Device::Device(std::string p, RocmSMI_env_vars const* e)
 
 Device::~Device() { shared_mutex_close(mutex_); }
 
+/**
+ * @brief Get the full sysfs path to the gpu_od fan_minimum_pwm file
+ * @return Full path to fan_minimum_pwm file (e.g.,
+ * /sys/class/drm/card0/device/gpu_od/fan_ctrl/fan_minimum_pwm)
+ */
+std::string Device::get_gpu_od_fan_min_pwm_path(void) const {
+  return path_ + "/device/" + kDevGpuOdFanMinPwmFName;
+}
+
 template <typename T>
 int Device::openDebugFileStream(DevInfoTypes type, T* fs, const char* str) {
   std::string debugfs_path;
@@ -1067,8 +1081,11 @@ int Device::readDevInfoLine(DevInfoTypes type, std::string* line) {
   }
 
   std::getline(fs, *line);
-  ss << "Successfully read DevInfoLine for DevInfoType (" << get_type_string(type)
-     << "), returning *line = " << *line;
+
+  ss << __PRETTY_FUNCTION__
+     << " | Success | Read SYSFS file: " << get_sys_file_path_by_type(type, true)
+     << " | Type: " << get_type_string(type) << " | Data: " << *line
+     << " | Returning: " << std::to_string(ret) << " | ";
   LOG_INFO(ss);
   fs.close();
   return 0;
@@ -1764,7 +1781,7 @@ rsmi_status_t Device::isRestartInProgress(bool* isRestartInProgress, bool* isAMD
   if ((success == true) && (!out.empty())) {
     isSystemAMDGPUModuleLive = containsString(out, "live");
   }
-  if (*isAMDGPUModuleLive) {
+  if (isSystemAMDGPUModuleLive) {
     deviceRestartInProgress = false;
   }
   *isRestartInProgress = deviceRestartInProgress;
