@@ -1,6 +1,5 @@
 # Firmware-Assisted Kernel Dispatch Tracing — Design Summary
 
-> Audience: leadership review and cross-team discussion.
 > Detail docs: `KNOWN_ISSUES.md`, `FIRMWARE_RING_HYBRID_DESIGN.md`,
 > `KFD_DISPATCH_LOG_DESIGN.md` (in this directory).
 
@@ -182,17 +181,4 @@ intercept-and-wrap path with all its limitations.
 | KFD implementation | not yet started — gated on KFD-team review of the plan |
 | Firmware port to non-MI350 | not yet started — **requires firmware-team engagement** |
 
-## Single-paragraph summary for a slide
 
-> Re-architect rocprofiler-sdk's kernel-dispatch tracing path to use
-> MEC firmware-written ring buffer records for timestamps and a thin
-> launching-thread doorbell hook for correlation. **No HSA queue
-> interception. No AQL packet rewriting. No SDK-allocated completion
-> signals.** Enables true late-attach profiling and effectively-zero
-> per-dispatch CPU overhead. Working today on MI350; depends on
-> PR 5219's doorbell-wrap infrastructure for the correlation hook.
-> KFD-side cleanup migrates the buffer-setup ioctl out of
-> `UPDATE_QUEUE` and adds a kernel-shipped JSON format descriptor so
-> any tool can decode the ring without depending on libhsakmt.
-> **Bringing this to ASIC families beyond MI350 requires firmware
-> engineering effort per family — this is the long pole.**
