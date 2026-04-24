@@ -32,6 +32,8 @@ from typing import Iterable
 
 import yaml
 
+from perfxpert.cli._paths import xdg_config_home
+
 
 __all__ = [
     "CONSENT_ASSUME_ENV",
@@ -55,10 +57,7 @@ CONSENT_ASSUME_ENV = "PERFXPERT_ASSUME_CONSENT"
 
 
 def _xdg_config_home() -> Path:
-    override = os.environ.get("XDG_CONFIG_HOME", "").strip()
-    if override:
-        return Path(override)
-    return Path.home() / ".config"
+    return xdg_config_home()
 
 
 def consent_path() -> Path:
