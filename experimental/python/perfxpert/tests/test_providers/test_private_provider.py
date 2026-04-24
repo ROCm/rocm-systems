@@ -102,6 +102,21 @@ def test_verify_ssl_disabled_when_env_zero(monkeypatch):
         assert mp.call_args.kwargs["verify"] is False
 
 
+def test_verify_ssl_from_env_defaults_true(monkeypatch):
+    monkeypatch.delenv("PERFXPERT_LLM_PRIVATE_VERIFY_SSL", raising=False)
+    from perfxpert.providers.private_provider import _verify_ssl_from_env
+
+    assert _verify_ssl_from_env() is True
+
+
+@pytest.mark.parametrize("value", ["0", "false", "False", "no", "NO", "off", "OFF"])
+def test_verify_ssl_from_env_false_values(monkeypatch, value):
+    monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_VERIFY_SSL", value)
+    from perfxpert.providers.private_provider import _verify_ssl_from_env
+
+    assert _verify_ssl_from_env() is False
+
+
 def test_response_parsed(monkeypatch):
     monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_URL", "https://llm.corp.internal/v1")
     monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_MODEL", "internal-xl")

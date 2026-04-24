@@ -44,6 +44,11 @@ def _parse_headers(raw: str) -> Dict[str, str]:
     return {str(k): str(v) for k, v in obj.items()}
 
 
+def _verify_ssl_from_env() -> bool:
+    env_flag = os.environ.get("PERFXPERT_LLM_PRIVATE_VERIFY_SSL", "1")
+    return env_flag.lower() not in ("0", "false", "no", "off")
+
+
 class PrivateProvider(Provider):
     """Generic OpenAI-compatible private endpoint."""
 
@@ -73,8 +78,7 @@ class PrivateProvider(Provider):
         self._extra_headers = merged
 
         if verify_ssl is None:
-            env_flag = os.environ.get("PERFXPERT_LLM_PRIVATE_VERIFY_SSL", "1")
-            verify_ssl = env_flag not in ("0", "false", "False", "no", "NO")
+            verify_ssl = _verify_ssl_from_env()
         self._verify_ssl = bool(verify_ssl)
         self._timeout = timeout
 
@@ -137,4 +141,4 @@ register(
 )
 
 
-__all__ = ["PrivateProvider"]
+__all__ = ["PrivateProvider", "_parse_headers", "_verify_ssl_from_env"]
