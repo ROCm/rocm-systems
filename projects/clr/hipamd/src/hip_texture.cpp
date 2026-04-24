@@ -375,7 +375,7 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
 
   void* texObjectBuffer = nullptr;
   hipError_t err =
-      ihipMalloc(&texObjectBuffer, sizeof(__hip_texture), static_cast<unsigned int>(amd::MemFlags::SvmFineGrain));
+      ihipMalloc(&texObjectBuffer, sizeof(__hip_texture), amd::MemFlags::SvmFineGrain);
   if (texObjectBuffer == nullptr || err != hipSuccess) {
     return hipErrorOutOfMemory;
   }

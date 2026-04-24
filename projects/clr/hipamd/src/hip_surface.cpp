@@ -65,7 +65,7 @@ hipError_t ihipCreateSurfaceObject(hipSurfaceObject_t* pSurfObject,
 
   void* surfObjectBuffer = nullptr;
   hipError_t err =
-      ihipMalloc(&surfObjectBuffer, sizeof(__hip_surface), static_cast<unsigned int>(amd::MemFlags::SvmFineGrain));
+      ihipMalloc(&surfObjectBuffer, sizeof(__hip_surface), amd::MemFlags::SvmFineGrain);
   if (surfObjectBuffer == nullptr || err != hipSuccess) {
     return hipErrorOutOfMemory;
   }

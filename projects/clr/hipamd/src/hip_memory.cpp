@@ -305,7 +305,7 @@ hipError_t hipDestroyExternalSemaphore(hipExternalSemaphore_t extSem) {
 
 
 // ================================================================================================
-hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
+hipError_t ihipMalloc(void** ptr, size_t sizeBytes, amd::MemFlags flags) {
   if (ptr == nullptr) {
     return hipErrorInvalidValue;
   }
@@ -314,7 +314,7 @@ hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
     return hipSuccess;
   }
 
-  bool useHostDevice = (flags & static_cast<unsigned int>(amd::MemFlags::SvmFineGrain)) != 0;
+  bool useHostDevice = (flags & amd::MemFlags::SvmFineGrain) != amd::MemFlags::Empty;
   amd::Context* curDevContext = hip::getCurrentDevice()->asContext();
   amd::Context* amdContext = useHostDevice ? hip::host_context : curDevContext;
 
@@ -334,7 +334,7 @@ hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
     return hipErrorOutOfMemory;
   }
 
-  *ptr = amd::SvmBuffer::malloc(*amdContext, static_cast<amd::MemFlags>(flags), sizeBytes, dev_info.memBaseAddrAlign_,
+  *ptr = amd::SvmBuffer::malloc(*amdContext, flags, sizeBytes, dev_info.memBaseAddrAlign_,
                                 useHostDevice ? curDevContext->svmDevices()[0] : nullptr);
 
   if (*ptr == nullptr) {
@@ -379,7 +379,7 @@ hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
     return hipErrorInvalidValue;
   }
 
-  unsigned int ihipFlags = static_cast<unsigned int>(amd::MemFlags::SvmFineGrain);
+  amd::MemFlags ihipFlags = amd::MemFlags::SvmFineGrain;
   if (flags & hipHostMallocUncached) {
     if (IS_WINDOWS) {
       return hipErrorInvalidValue;
@@ -387,22 +387,22 @@ hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
     if (flags & (hipHostMallocNonCoherent | hipHostMallocCoherent)) {
       return hipErrorInvalidValue;
     }
-    ihipFlags |= static_cast<unsigned int>(amd::MemFlags::HsaUncached);
+    ihipFlags |= amd::MemFlags::HsaUncached;
   }
 
   if (flags == 0 ||
       flags & (hipHostMallocCoherent | hipHostMallocMapped | hipHostMallocNumaUser |
                hipHostMallocUncached) ||
       (!(flags & hipHostMallocNonCoherent) && HIP_HOST_COHERENT)) {
-    ihipFlags |= static_cast<unsigned int>(amd::MemFlags::SvmAtomics);
+    ihipFlags |= amd::MemFlags::SvmAtomics;
   }
 
   if (flags & hipHostMallocNumaUser) {
-    ihipFlags |= static_cast<unsigned int>(amd::MemFlags::FollowUserNumaPolicy);
+    ihipFlags |= amd::MemFlags::FollowUserNumaPolicy;
   }
 
   if (flags & hipHostMallocNonCoherent) {
-    ihipFlags &= ~static_cast<unsigned int>(amd::MemFlags::SvmAtomics);
+    ihipFlags &= ~amd::MemFlags::SvmAtomics;
   }
 
   hipError_t status = ihipMalloc(ptr, sizeBytes, ihipFlags);
@@ -840,17 +840,17 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
 hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes, unsigned int flags) {
   HIP_INIT_API(hipExtMallocWithFlags, ptr, sizeBytes, flags);
 
-  unsigned int ihipFlags = 0;
+  amd::MemFlags ihipFlags = amd::MemFlags::Empty;
   if (flags == hipDeviceMallocDefault) {
-    ihipFlags = 0;
+    ihipFlags = amd::MemFlags::Empty;
   } else if (flags == hipDeviceMallocFinegrained) {
-    ihipFlags = static_cast<unsigned int>(amd::MemFlags::SvmAtomics);
+    ihipFlags = amd::MemFlags::SvmAtomics;
   } else if (flags == hipDeviceMallocUncached) {
-    ihipFlags = static_cast<unsigned int>(amd::MemFlags::HsaUncached);
+    ihipFlags = amd::MemFlags::HsaUncached;
   } else if (flags == hipDeviceMallocContiguous) {
-    ihipFlags = static_cast<unsigned int>(amd::MemFlags::HsaContiguous | amd::MemFlags::HsaUncached);
+    ihipFlags = amd::MemFlags::HsaContiguous | amd::MemFlags::HsaUncached;
   } else if (flags == hipMallocSignalMemory) {
-    ihipFlags = static_cast<unsigned int>(amd::MemFlags::SvmAtomics | amd::MemFlags::SvmFineGrain | amd::MemFlags::HsaSignalMemory);
+    ihipFlags = amd::MemFlags::SvmAtomics | amd::MemFlags::SvmFineGrain | amd::MemFlags::HsaSignalMemory;
     if (sizeBytes != 8) {
       HIP_RETURN(hipErrorInvalidValue);
     }
@@ -872,7 +872,7 @@ hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes, unsigned int flag
 hipError_t hipMalloc(void** ptr, size_t sizeBytes) {
   HIP_INIT_API(hipMalloc, ptr, sizeBytes);
   CHECK_STREAM_CAPTURE_SUPPORTED();
-  HIP_RETURN_DURATION(ihipMalloc(ptr, sizeBytes, 0), ReturnPtrValue(ptr));
+  HIP_RETURN_DURATION(ihipMalloc(ptr, sizeBytes, amd::MemFlags::Empty), ReturnPtrValue(ptr));
 }
 
 hipError_t hipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
@@ -4439,7 +4439,7 @@ hipError_t hipMemcpyAtoH(void* dstHost, hipArray_t srcArray, size_t srcOffset, s
 hipError_t hipMallocHost(void** ptr, size_t size) {
   HIP_INIT_API(hipMallocHost, ptr, size);
   CHECK_STREAM_CAPTURE_SUPPORTED();
-  HIP_RETURN_DURATION(ihipMalloc(ptr, size, static_cast<unsigned int>(amd::MemFlags::SvmFineGrain)), ReturnPtrValue(ptr));
+  HIP_RETURN_DURATION(ihipMalloc(ptr, size, amd::MemFlags::SvmFineGrain), ReturnPtrValue(ptr));
 }
 
 hipError_t hipFreeHost(void* ptr) {
