@@ -113,44 +113,50 @@ perfxpert doctor
 
 ## Architecture (v0.2.0+)
 
-```
-┌────────────────────────────────────────────────────────────┐
-│  User shell                                                 │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │ perfxpert   │  │ perfxpert-   │  │ Library API       │  │
-│  │ analyze     │  │ code (TUI)   │  │ (Python)          │  │
-│  └──────┬──────┘  └──────┬───────┘  └────────┬──────────┘  │
-│         │                │                    │             │
-│         └────────────────┴────────────────────┘             │
-│                          │                                   │
-│                          ▼                                   │
-│             OpenAI Agents SDK hierarchy                      │
-│   (Root → Analysis → Recommendation → Specialists)           │
-│   — all 8 agents callable via MCP + perfxpert.api            │
-│                          │                                   │
-│                          ▼                                   │
-│    Deterministic middleware (gate_cascade, intent router)    │
-│                          │                                   │
-│                          ▼                                   │
-│  56 READ_ONLY MCP tools (8 agent + 47 classifier + 1 diff)   │
-│            + ~22 knowledge YAMLs                             │
-│                                                              │
-└────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+  classDef entry fill:#e8f3ff,stroke:#1664ad,color:#0f2f4a,stroke-width:1px
+  classDef runtime fill:#fff4d8,stroke:#a66a00,color:#4a3100,stroke-width:1px
+  classDef agent fill:#eaf8ef,stroke:#227343,color:#143b26,stroke-width:1px
+  classDef guard fill:#ffe9e4,stroke:#b94a36,color:#5c2016,stroke-width:1px
+  classDef data fill:#f4edff,stroke:#7250b5,color:#34205c,stroke-width:1px
+
+  subgraph entry["Entry surfaces"]
+    analyze["perfxpert analyze<br/>batch reports"]
+    code["perfxpert-code<br/>bundled patched TUI"]
+    mcp["perfxpert-mcp<br/>external MCP clients"]
+    api["perfxpert.api<br/>Python embedding"]
+  end
+
+  runtime["Shared agent runtime/session<br/>same analysis brain for every shell"]
+  hierarchy["8-agent hierarchy<br/>Root → Analysis / Recommendation / Correctness<br/>Compute / Memory / Latency / Diff specialists"]
+  knowledge["Deterministic tools + validated knowledge YAMLs<br/>classifiers, counters, hardware facts, trace diff"]
+  gates["Correctness middleware<br/>gate_cascade + intent router"]
+  readonly["56 READ_ONLY MCP tools<br/>8 agent tools + 47 classifier/knowledge tools + 1 diff tool"]
+
+  analyze --> runtime
+  code --> runtime
+  api --> runtime
+  mcp --> readonly
+  readonly --> runtime
+  runtime --> hierarchy
+  hierarchy --> knowledge
+  hierarchy --> gates
+  knowledge --> gates
+
+  class analyze,code,mcp,api entry
+  class runtime runtime
+  class hierarchy agent
+  class gates guard
+  class knowledge,readonly data
 ```
 
-Core analysis is self-contained — `pip install perfxpert` handles all
-profiling + recommendation features. The default `perfxpert-code` path
-uses only the bundled AMD-branded opencode binary built from the pinned
+The GitHub wrapper is the supported install path today. It installs
+PerfXpert and builds the default `perfxpert-code` TUI from the pinned
 `experimental/python/perfxpert/opencode` submodule plus the local patch
-series. If the build prerequisites are missing, pip fails with the
-missing package-manager pieces instead of falling back to an arbitrary
-opencode binary.
-
-Advanced: `PERFXPERT_SKIP_BUNDLED_BUILD=1` is only for tightly-sandboxed
-CI that intentionally skips the interactive TUI build. Users who
-explicitly want their own upstream opencode can run
-`perfxpert-code opencode ...`; the default `perfxpert-code` command
-continues to require the bundled submodule-built binary.
+series. If build prerequisites are missing, install fails with
+package-manager guidance instead of falling back to an arbitrary opencode
+binary.
 
 ## Contributing
 
