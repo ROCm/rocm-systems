@@ -203,6 +203,8 @@ setup()
 
     try
     {
+        g_collector_slices.clear();
+
         g_cpu_provider  = cpu_provider_factory_t::create();
         g_cpu_collector = std::make_unique<cpu_collector_t>(g_cpu_provider);
 
@@ -218,16 +220,15 @@ setup()
             g_nic_collector = std::make_unique<nic_collector_t>(g_device_provider);
 #endif
 
-            g_collector_slices.clear();
             g_collector_slices.emplace_back(*g_gpu_collector);
 #if defined(ROCPROFSYS_BUILD_AINIC)
             g_collector_slices.emplace_back(*g_nic_collector);
 #endif
+        }
 
-            for(auto& slice : g_collector_slices)
-            {
-                slice.setup();
-            }
+        for(auto& slice : g_collector_slices)
+        {
+            slice.setup();
         }
         is_initialized() = true;
     } catch(const std::runtime_error& _e)
