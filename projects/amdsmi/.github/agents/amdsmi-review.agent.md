@@ -115,13 +115,9 @@ Every comprehensive review **must** include a PR splitting assessment.
 **Rationale:** [Why split helps or why single PR is fine]
 ```
 
-## Project Layout & High-Churn Hotspots
+## Project Layout
 
-Before reviewing, load the project map for directory layout, critical files, API cascade path, and formatter configuration:
-
-1. Load the `populate-project-map` skill.
-2. If `.claude/project-map.md` is missing or stale, run the skill to regenerate it.
-3. Read `.claude/project-map.md` and use its **Critical Files**, **API Cascade Path**, and **Source Directories** sections to guide the review.
+Project structure, API cascade path, and build/test paths are stored in repo memories. Use them to orient yourself before reviewing.
 
 ## Review Output
 

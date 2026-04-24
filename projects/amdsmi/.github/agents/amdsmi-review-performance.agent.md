@@ -12,11 +12,11 @@ You review performance and efficiency for the amd-smi project.
 
 ## Project Layout
 
-Read `.claude/project-map.md` for directory layout, critical files, and API cascade path. If missing or stale, load the `populate-project-map` skill to regenerate it.
+Project structure is stored in repo memories.
 
 ## High-Churn Hotspots
 
-Read `.claude/project-map.md` for the current hotspots list. Key areas to watch: core C library hot paths, Python ctypes overhead, CLI device iteration.
+Key areas to watch: core C library hot paths (`src/amd_smi/`), Python ctypes overhead (`py-interface/`), CLI device iteration (`amdsmi_cli/`).
 
 ## Your Job
 

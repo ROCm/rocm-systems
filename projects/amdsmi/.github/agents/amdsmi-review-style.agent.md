@@ -23,7 +23,6 @@ The project uses **pre-commit** hooks. Style violations are **❌ BLOCKING** —
 Additional hooks: `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, `check-added-large-files`.
 
 **Load `amdsmi-python-style-guide` skill when reviewing Python files.**
-**Load `amdsmi-c-cpp-style-guide` skill when reviewing C/C++ files.**
 
 ## Naming Conventions
 

@@ -12,7 +12,7 @@ You review documentation, comments, help text, and docstrings for the amd-smi pr
 
 ## Project Layout
 
-Read `.claude/project-map.md` for directory layout, critical files, and API cascade path. If missing or stale, load the `populate-project-map` skill to regenerate it.
+Project structure and API cascade path are stored in repo memories.
 
 ## Your Job
 

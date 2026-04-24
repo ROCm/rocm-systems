@@ -28,7 +28,7 @@ Parse output: any `[  FAILED  ]` → ❌ BLOCKING.
 
 ## Project Layout
 
-Read `.claude/project-map.md` for directory layout, critical files, and API cascade path. If missing or stale, load the `populate-project-map` skill to regenerate it.
+Project structure and test directories are stored in repo memories.
 
 ## Your Job
 

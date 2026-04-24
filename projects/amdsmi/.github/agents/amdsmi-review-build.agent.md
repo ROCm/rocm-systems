@@ -12,7 +12,7 @@ You review CMake configuration, packaging, install targets, and build system pat
 
 ## Project Layout
 
-Read `.claude/project-map.md` for directory layout, critical files, and API cascade path. If missing or stale, load the `populate-project-map` skill to regenerate it.
+Project structure and build/packaging paths are stored in repo memories.
 
 ## Key Build Artifacts & Packaging
 
