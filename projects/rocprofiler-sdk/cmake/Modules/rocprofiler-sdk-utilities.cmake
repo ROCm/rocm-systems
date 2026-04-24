@@ -91,7 +91,8 @@ function(rocprofiler_sdk_pc_sampling_stochastic_disabled _VAR)
     list(GET rocprofiler-sdk-tests-gfx-info 0 pc-sampling-gpu-0-gfx-info)
 
     if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx94[0-9]$"
-       OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx95[0-9]$")
+       OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx95[0-9]$"
+       OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx1250$")
         # PC sampling is enabled on this architecture.
         set(${_VAR}
             FALSE
