@@ -109,6 +109,8 @@ static inline __device__ void reduceScatter(
     int pattern) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
+    // pattern = 2 performs reduce (one-shot)
+    // pattern = 1 performs reduce-scatter (two-shot)	  
     size_t srcIdx = (pattern == 2) ? idx : (idx + selfRank * idxEnd);
     size_t destIdx = (pattern == 1) ? (idx + selfRank * idxEnd) : idx;
 

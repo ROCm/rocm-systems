@@ -372,6 +372,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   // RCCL update slice steps for AllReduce if single node
   const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
+  const bool isGfx942 = IsArchMatch(comm->archName, "gfx942");
   int chunkSteps = (isGfx950 && comm->rcclUseOneSlice)? 1 : ALLREDUCE_CHUNKSTEPS;
   int sliceSteps = comm->rcclUseOneSlice
       ? (isGfx950 ? 1 : ALLREDUCE_SLICESTEPS_SINGLE_NODE)
@@ -384,6 +385,11 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   NCCLCHECK(Recorder::instance().record(rrAllReduce, info));
 
   size_t ddaThreshold =  rcclParamDdaThreshold();
+  if (isGfx942) {
+     ddaThreshold = (size_t)(8388608);
+  } else if (!isGfx950) {
+     ddaThreshold = -1;	
+  }
 
   if (rcclParamDdaEnable() && (count * ncclTypeSize(datatype) <= ddaThreshold) && ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op) && ncclGroupDepth == 0) {
     NCCLCHECK(ncclAllReduceDdaIpc(
