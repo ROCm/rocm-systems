@@ -188,6 +188,7 @@ struct FallbackParam : ::testing::TestWithParam<IoType> {
     StrictMock<MLibMountHelper>  mlibmounthelper{};
     StrictMock<MConfiguration>   mcfg{};
     StrictMock<MStatsCollection> mstats{};
+    StrictMock<MStatsServer>     mserver{};
 
     FallbackParam()
     {

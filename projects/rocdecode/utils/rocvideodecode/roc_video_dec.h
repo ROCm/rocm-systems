@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <string>
 #include <iostream>
 #include <sstream>
+#include <iomanip>
 #include <string.h>
 #include <queue>
 #include <stdexcept>
@@ -39,7 +40,6 @@ THE SOFTWARE.
 #include <ctime>
 #include <time.h>
 #include <unistd.h>
-#include <sys/syscall.h>
 #include <hip/hip_runtime.h>
 #include "rocdecode/rocdecode.h"
 #include "rocdecode/rocparser.h"
@@ -48,16 +48,19 @@ THE SOFTWARE.
 #define ROCVIDEODEC_STR(X) std::string(X)
 
 // Simple logging macros - format matches src/commons.h:
-//   [0, Critical] filename:line: timestamp_us us: [pid:X tid:Y] func(): message
+//   [0, Critical] filename:line: timestamp_us us: [pid:X tid: 0xYYYYY] func(): message
 #define RocVideoDecCriticalLog(msg) \
     do { \
         struct timespec _ts_; \
         clock_gettime(CLOCK_MONOTONIC, &_ts_); \
         uint64_t _us_ = static_cast<uint64_t>(_ts_.tv_sec) * 1000000ULL + _ts_.tv_nsec / 1000ULL; \
         const char *_f_ = strrchr(__FILE__, '/'); \
+        std::ostringstream _tid_oss_; \
+        _tid_oss_ << "0x" << std::hex << std::setw(5) << std::setfill('0') \
+                  << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); \
         std::cerr << "[0, Critical] " << (_f_ ? _f_ + 1 : __FILE__) \
                   << ":" << __LINE__ << ": " << _us_ << " us: [pid:" \
-                  << getpid() << " tid:" << syscall(SYS_gettid) << "] " \
+                  << getpid() << " tid: " << _tid_oss_.str() << "] " \
                   << __func__ << "(): " << (msg) << std::endl; \
     } while (0)
 
