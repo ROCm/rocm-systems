@@ -36,20 +36,21 @@ This plan does two things:
 **Task 1 — Migrate to `AMDKFD_IOC_PROFILER`.** Revert
 `kfd_ioctl_update_queue_args` and its handler to upstream-clean shape.
 Add `KFD_IOC_PROFILER_DISPATCH_LOG = 3` as a new sub-op of the existing
-union-discriminated profiler ioctl, with sub-ops `SET`,
-`SET_DESCRIPTOR`, `GET_DESCRIPTOR`. The handler reuses
-`pqm_update_queue_properties`'s machinery via a new extracted helper
-`pqm_update_dispatch_record`, so the MQD write at
-`kfd_mqd_manager_v9.c:379-392` is unchanged.
+union-discriminated profiler ioctl, with two op modes: `SET` (configure
+the ring buffer) and `GET_DESCRIPTOR` (fetch the kernel-owned JSON
+format descriptor). The handler reuses `pqm_update_queue_properties`'s
+machinery via a new extracted helper `pqm_update_dispatch_record`, so
+the MQD write at `kfd_mqd_manager_v9.c:379-392` is unchanged.
 
-**Task 2 — Self-describing JSON descriptor.** Userspace uploads a
-JSON blob describing each record type (id, name, size, fields).
-The kernel stores it opaquely per-`kfd_process_device` and returns it
-on demand. The kernel never parses it. The drainer in rocprofiler-sdk
-queries the descriptor at init and uses it as the source of truth for
-record size and field offsets. **No firmware change is needed** — the
-size for each `record_type` is declared in the descriptor, not encoded
-in the wire record.
+**Task 2 — Self-describing JSON descriptor (KFD-owned).** The KFD
+driver itself ships a JSON blob describing each record type (id, name,
+size, fields). Userspace queries the descriptor from the kernel via a
+new `GET_DESCRIPTOR` sub-op. Any tool — rocprofiler-sdk, a crash
+dumper, a custom profiler — can ask KFD what the wire format is
+without coordinating with the producer side (libhsakmt/ROCr). The
+kernel never parses the JSON; it just hands back a static byte array.
+**No firmware change is needed** — the size for each `record_type` is
+declared in the descriptor, not encoded in the wire record.
 
 Both changes bump `KFD_IOCTL_MINOR_VERSION` 22→23 and
 `KFD_IOC_PROFILER_VERSION_NUM` 1→2. The `dispatch_record_buffer_*`
@@ -274,18 +275,17 @@ at `kfd_chardev.c:3487-3488`.
  *
  *   SET (op=0):
  *     queue_id, addr, num_records, record_size_bytes -> configure ring;
- *     addr=0 disables.
- *   SET_DESCRIPTOR (op=1):
- *     addr = userspace ptr to descriptor bytes (cast to __u64);
- *     num_records = byte length (max KFD_DISPATCH_LOG_DESC_MAX_BYTES);
- *     desc_version = monotonic version (caller's choice).
- *   GET_DESCRIPTOR (op=2):
+ *     addr=0 disables. Requires CAP_PERFMON.
+ *   GET_DESCRIPTOR (op=1):
  *     addr = userspace destination ptr;
- *     num_records (IN) = caller buffer bytes, (OUT) = bytes written;
- *     desc_version (OUT) = stored version.
+ *     num_records (IN) = caller buffer bytes, (OUT) = bytes required;
+ *     desc_version (OUT) = kernel-shipped descriptor version (matches
+ *       the static blob compiled into the kernel module).
+ *     Unprivileged: any process holding /dev/kfd may call this so
+ *     non-profiler tools (crash dumpers, format inspectors, etc.) can
+ *     decode rings they observe in core files or shared memory.
  *
  * gpu_id is required for all sub-ops.
- * Requires CAP_PERFMON (perfmon_capable()).
  */
 struct kfd_ioctl_dispatch_log_args {
 	__u32 op;                  /* enum kfd_dispatch_log_op */
@@ -328,8 +328,7 @@ enum kfd_profiler_ops {
 
 enum kfd_dispatch_log_op {
 	KFD_IOC_DISPATCH_LOG_SET            = 0,
-	KFD_IOC_DISPATCH_LOG_SET_DESCRIPTOR = 1,
-	KFD_IOC_DISPATCH_LOG_GET_DESCRIPTOR = 2,
+	KFD_IOC_DISPATCH_LOG_GET_DESCRIPTOR = 1,
 };
 ```
 
@@ -363,9 +362,6 @@ static int kfd_profiler_dispatch_log(struct kfd_process *p,
 	struct kfd_process_device *pdd;
 	int ret;
 
-	if (!perfmon_capable())
-		return -EPERM;
-
 	if (args->pad0 || args->pad1)
 		return -EINVAL;
 
@@ -378,19 +374,19 @@ static int kfd_profiler_dispatch_log(struct kfd_process *p,
 
 	switch (args->op) {
 	case KFD_IOC_DISPATCH_LOG_SET:
+		if (!perfmon_capable()) {
+			ret = -EPERM;
+			break;
+		}
 		ret = pqm_update_dispatch_record(&p->pqm,
 						 args->queue_id,
 						 args->addr,
 						 args->num_records,
 						 args->record_size_bytes);
 		break;
-	case KFD_IOC_DISPATCH_LOG_SET_DESCRIPTOR:
-		ret = kfd_dispatch_log_set_descriptor(pdd,
-						      (void __user *)args->addr,
-						      args->num_records,
-						      args->desc_version);
-		break;
 	case KFD_IOC_DISPATCH_LOG_GET_DESCRIPTOR:
+		/* Unprivileged: any caller may read the static descriptor
+		 * for the device's firmware variant. */
 		ret = kfd_dispatch_log_get_descriptor(pdd,
 						      (void __user *)args->addr,
 						      &args->num_records,
@@ -471,19 +467,38 @@ Compared four candidates:
   drainer init.
 * Debuggability — developers can read the descriptor with `cat`.
 
-**Should the descriptor live entirely in userspace?** Considered.
-Rejected because:
+**Where does the descriptor live?** Three options were considered:
 
-1. The descriptor describes what *firmware* writes. Firmware/driver/
-   runtime versions can drift independently. The kernel knows which
-   firmware loaded; it's the natural source of truth.
-2. The drainer in rocprofiler-sdk doesn't necessarily share a build
-   with the producer — test harnesses, CRIU restores, different SDK
-   versions may attach.
-3. Kernel storage costs are tiny (8 KB cap per `kfd_process_device`).
+1. **Userspace-only**, distributed in libhsakmt or rocprofiler-sdk.
+   Rejected because the descriptor describes what *firmware* writes;
+   firmware/driver/runtime versions drift independently, and any tool
+   not co-built with the producer (crash dumpers, third-party
+   profilers, CRIU restore tools) would have to maintain its own
+   parallel copy.
+2. **Userspace uploads to kernel** via a `SET_DESCRIPTOR` ioctl;
+   kernel caches and serves it back. Rejected because (a) it requires
+   coordinating who uploads first; (b) any tool that queries before
+   the producer uploads gets `-ENOENT`; (c) the kernel becomes the
+   storage layer for whatever JSON userspace decided to ship, which
+   has no firmware-grounded source of truth.
+3. **Kernel ships the descriptor as a static `const char[]`** compiled
+   into the KFD module. Per-ASIC-family selection happens inside the
+   kernel (via the device's MQD-manager family — gfx9, gfx10, etc.).
+   Userspace queries via `GET_DESCRIPTOR`; the kernel `copy_to_user`s
+   the static blob.
 
-**Decision:** kernel stores the bytes; userspace sets/gets via the new
-sub-ops.
+**Decision: option 3 — kernel-owned static descriptor.** Justification:
+
+* Single source of truth, grounded in the same module that knows the
+  firmware/MQD layout.
+* Any tool that opens `/dev/kfd` and has a valid `gpu_id` can ask. No
+  ordering dependency on the producer side.
+* Zero descriptor storage overhead (it's `.rodata`).
+* Bumping the descriptor requires a kernel module rebuild — exactly
+  the cadence of the firmware/MQD format itself, so no false
+  divergence.
+* Removes the entire `SET_DESCRIPTOR` sub-op: half the API surface
+  goes away.
 
 ### 3.B Record-type discrimination — descriptor declares size per type
 
@@ -615,80 +630,117 @@ holding a stale descriptor that doesn't list `type_id=3` logs the
 "unknown type" error and stops scanning the queue — a clear and
 actionable failure, not silent corruption.
 
-### 3.D UAPI surface (descriptor sub-ops)
+### 3.D UAPI surface (`GET_DESCRIPTOR` only)
 
-Sub-ops `KFD_IOC_DISPATCH_LOG_SET_DESCRIPTOR` (1) and
-`KFD_IOC_DISPATCH_LOG_GET_DESCRIPTOR` (2) reuse
-`struct kfd_ioctl_dispatch_log_args` with these field meanings:
+The only descriptor-related sub-op is
+`KFD_IOC_DISPATCH_LOG_GET_DESCRIPTOR` (1). It reuses
+`struct kfd_ioctl_dispatch_log_args`:
 
-* **SET_DESCRIPTOR:** `addr` = userspace pointer to descriptor bytes;
-  `num_records` = byte length; `desc_version` = monotonic version.
-  `queue_id` and `record_size_bytes` ignored.
 * **GET_DESCRIPTOR:** `addr` = userspace destination pointer;
-  `num_records` (in) = caller buffer size, (out) = bytes actually
-  written; `desc_version` (out) = stored version. Returns `-ENOENT` if
-  no descriptor stored, `-E2BIG` if caller buffer too small (and
-  `num_records` is set to required size).
+  `num_records` (in) = caller buffer bytes, (out) = bytes required;
+  `desc_version` (out) = the kernel-shipped descriptor version (a
+  `KFD_DISPATCH_LOG_DESC_VERSION` constant compiled into the module).
+  Returns `-E2BIG` if caller buffer is too small (and `num_records` is
+  set to the required size). `gpu_id` selects which device's descriptor
+  to return — different ASIC families ship different descriptors.
+  `queue_id` and `record_size_bytes` are ignored. **No CAP_PERFMON
+  requirement** — any process holding `/dev/kfd` may read.
 
-**Maximum descriptor size:** 8 KB
-(`#define KFD_DISPATCH_LOG_DESC_MAX_BYTES 8192`).
+**Storage:** the descriptor is a `static const char[]` compiled into
+the kernel module. No per-process or per-device dynamic allocation;
+the kernel just `copy_to_user`s the static blob.
 
-* Example schema is ~1 KB; 8× headroom covers ~30 record types or
-  richer per-field metadata.
-* Kernel cap prevents userspace from forcing arbitrary kernel
-  allocations.
-* Fits in a `kvmalloc` — no high-order page allocation risk.
+**Layout in kernel source** (proposed):
 
-**Storage location:** per-`kfd_process_device`.
-
-* Per-queue is too granular — descriptor describes wire format, which
-  is the same across queues on the same device given the same firmware.
-* Per-`kfd_dev` would prevent two cooperating processes from disagreeing
-  during a userspace upgrade window.
-* Per-process-per-device is the natural scope of "this process's view
-  of this device's profiling format."
-
-**Storage in `struct kfd_process_device`** (added in `kfd_priv.h` near
-other per-device process state):
-
-```c
-	/* Dispatch-log format descriptor (opaque to kernel; set/get via
-	 * KFD_IOC_PROFILER_DISPATCH_LOG. NULL until first SET_DESCRIPTOR.
-	 * Protected by p->mutex. */
-	void     *dispatch_log_descriptor;
-	u32       dispatch_log_descriptor_len;
-	u32       dispatch_log_descriptor_version;
+```
+amd/amdkfd/
+├── kfd_dispatch_log_descriptor.h   /* version macros, accessor decls */
+├── kfd_dispatch_log_descriptor.c   /* static const char gfx9_desc[] = ...; */
 ```
 
-Free in the existing `kfd_process_device` teardown path.
-
-**Encoding conventions:**
-
-* Encoding: UTF-8.
-* No null-termination required; length carried in `num_records`.
-* Endianness: irrelevant for the descriptor itself (text); the
-  descriptor specifies `u32le`/`u16le` etc. for the on-wire records.
-
-**Helper signatures** (in `kfd_chardev.c`, near `kfd_profiler_dispatch_log`):
+`kfd_dispatch_log_descriptor.c` defines one `static const char[]` per
+ASIC family that supports the firmware ring (today: gfx9 only — see
+KFD investigation, `kfd_mqd_manager_v9.c:379-392`). A small accessor
+selects the right blob:
 
 ```c
-static int kfd_dispatch_log_set_descriptor(struct kfd_process_device *pdd,
-					   void __user *user_buf,
-					   u32 byte_len,
-					   u32 version);
+struct kfd_dispatch_log_blob {
+	const char *bytes;
+	u32         len;
+	u32         version;
+};
 
+const struct kfd_dispatch_log_blob *
+kfd_dispatch_log_get_blob(struct kfd_node *dev);
+```
+
+The accessor inspects `dev->kfd->mec_fw_version` (or whatever existing
+field encodes the family/firmware combo) and returns the matching
+blob. If the device's firmware does not support the dispatch ring,
+`kfd_dispatch_log_get_blob` returns `NULL` and the ioctl returns
+`-ENOTSUPP`.
+
+**Maximum descriptor size:** No cap needed — the blob is part of
+`.rodata` and its size is fixed at module-build time. The current
+schema (§3.C) is ~1 KB. Comfortable headroom for additional record
+types in future kernel rebuilds.
+
+**Helper signature** (in `kfd_chardev.c`, near `kfd_profiler_dispatch_log`):
+
+```c
+/*
+ * Copy the static dispatch-log descriptor for @pdd's device into
+ * @user_buf. @inout_byte_len is in bytes (in: caller buffer size; out:
+ * bytes actually required — written even on -E2BIG). @out_version is
+ * the descriptor version constant compiled into this kernel module.
+ *
+ * Returns 0, -ENOTSUPP if the device's firmware doesn't support the
+ * dispatch ring, -E2BIG if the caller buffer is too small, or
+ * -EFAULT on copy_to_user failure.
+ */
 static int kfd_dispatch_log_get_descriptor(struct kfd_process_device *pdd,
 					   void __user *user_buf,
 					   u32 *inout_byte_len,
 					   u32 *out_version);
 ```
 
-* SET: validates `byte_len <= KFD_DISPATCH_LOG_DESC_MAX_BYTES`,
-  `kvzalloc`s, `copy_from_user`s, swaps under `p->mutex` (caller already
-  holds), `kvfree`s old buffer.
-* GET: validates `*inout_byte_len >= dispatch_log_descriptor_len`
-  (else `-E2BIG` and writes required size to `*inout_byte_len`),
-  `copy_to_user`s, returns version.
+Implementation sketch:
+
+```c
+static int kfd_dispatch_log_get_descriptor(struct kfd_process_device *pdd,
+					   void __user *user_buf,
+					   u32 *inout_byte_len,
+					   u32 *out_version)
+{
+	const struct kfd_dispatch_log_blob *blob =
+		kfd_dispatch_log_get_blob(pdd->dev);
+	u32 caller_size = *inout_byte_len;
+
+	if (!blob)
+		return -ENOTSUPP;
+
+	*inout_byte_len = blob->len;
+	*out_version    = blob->version;
+
+	if (caller_size < blob->len)
+		return -E2BIG;
+	if (!user_buf)
+		return -EINVAL;
+	if (copy_to_user(user_buf, blob->bytes, blob->len))
+		return -EFAULT;
+	return 0;
+}
+```
+
+**No new fields in `struct kfd_process_device`.** The kernel does not
+need to store the descriptor anywhere — `.rodata` is the storage.
+
+**Encoding conventions** (still apply to the static blob):
+
+* Encoding: UTF-8.
+* No null-termination required; length is fixed at compile time.
+* Endianness: irrelevant for the descriptor itself (text); the
+  descriptor specifies `u32le`/`u16le` etc. for the on-wire records.
 
 ### 3.E Userspace flow (rocprofiler-sdk)
 
@@ -704,12 +756,16 @@ Files affected:
 2. Issue `AMDKFD_IOC_PROFILER` with `op = KFD_IOC_PROFILER_VERSION` to
    confirm version ≥ 2.
 3. If ≥ 2: issue
-   `op = KFD_IOC_PROFILER_DISPATCH_LOG, sub_op = GET_DESCRIPTOR`. On
-   success, parse JSON into a `RecordDescriptor` C++ struct (one entry
+   `op = KFD_IOC_PROFILER_DISPATCH_LOG, sub_op = GET_DESCRIPTOR` with
+   `gpu_id` for each device. First call with `num_records = 0` to learn
+   the required size; second call with the right buffer to receive the
+   blob. Parse JSON into a `RecordDescriptor` C++ struct (one entry
    per `type_id` holding `{size, fields}`).
-4. If `-ENOENT` (no descriptor stored): fall back to hardcoded
-   `mec_dispatch_record_16` parser. Log a one-shot warning.
-5. If profiler version < 2: same fallback. Log a one-shot warning.
+4. If `-ENOTSUPP` (firmware doesn't support dispatch ring): fall back
+   to hardcoded `mec_dispatch_record_16` parser if any older firmware
+   ring records show up; otherwise simply skip drainer registration
+   for this device. Log once.
+5. If profiler version < 2: fall back to hardcoded parser. Log once.
 
 **Per-record parse loop replacement.** Today's drainer (per
 `firmware_ring_drainer.cpp` `mec_dispatch_record_16`) casts each 16-byte
@@ -737,9 +793,10 @@ during migration.
 
 **Migration path:**
 
-* Phase 1 (this PR set): kernel stores descriptor; rocprofiler-sdk
-  reads it; producers (libhsakmt or ROCr) start populating it via
-  SET_DESCRIPTOR.
+* Phase 1 (this PR set): kernel ships descriptor as `.rodata`;
+  rocprofiler-sdk reads it via `GET_DESCRIPTOR`. Producers
+  (libhsakmt, ROCr) need no changes for the descriptor — they just
+  call the new `SET` sub-op for ring buffer setup.
 * Phase 2: once telemetry confirms all consumers go through the
   descriptor, remove the 16-byte fallback in rocprofiler-sdk.
 
@@ -752,9 +809,12 @@ Three independent levels:
    breaking changes. Drainer warn-and-fallbacks on unsupported major.
 2. **Kernel sub-op set version** (`KFD_IOC_PROFILER_VERSION_NUM` 1→2)
    indicates the `DISPATCH_LOG` sub-op family is available.
-3. **`desc_version` field** (kernel-stored, monotonic, set by producer
-   at SET_DESCRIPTOR time; returned by GET_DESCRIPTOR). Lets consumers
-   detect re-uploads (after process re-init) without re-parsing.
+3. **`desc_version` field** (compiled-in constant
+   `KFD_DISPATCH_LOG_DESC_VERSION` returned by `GET_DESCRIPTOR`). Bumped
+   in lockstep with the static blob whenever the kernel rebuilds with a
+   different schema. Userspace can cache parsed descriptors keyed on
+   `(gpu_id, desc_version)` and reuse across processes if the version
+   matches.
 
 Userspace must check both (1) format_version major and (2) profiler
 version ≥ 2 before issuing the new sub-op.
@@ -804,11 +864,14 @@ enum kfd_profiler_ops {
 
 enum kfd_dispatch_log_op {
 	KFD_IOC_DISPATCH_LOG_SET            = 0,
-	KFD_IOC_DISPATCH_LOG_SET_DESCRIPTOR = 1,
-	KFD_IOC_DISPATCH_LOG_GET_DESCRIPTOR = 2,
+	KFD_IOC_DISPATCH_LOG_GET_DESCRIPTOR = 1,
 };
 
-#define KFD_DISPATCH_LOG_DESC_MAX_BYTES 8192
+/* Compiled-in descriptor version. Bumped whenever the static blob in
+ * kfd_dispatch_log_descriptor.c changes (new record_type, new field,
+ * etc.). Userspace returns this in dispatch_log.desc_version on
+ * GET_DESCRIPTOR. */
+#define KFD_DISPATCH_LOG_DESC_VERSION 1
 
 /**
  * Enables/Disables GPU Specific profiler settings
@@ -851,14 +914,15 @@ ioctl number and macro stay; only the union grows.
 
 | Component | Change required | Where | Breakage if not done |
 |---|---|---|---|
-| **KFD (kernel)** | Revert UPDATE_QUEUE fields, add new sub-op + descriptor storage | `kfd_ioctl.h`, `kfd_chardev.c`, `kfd_process_queue_manager.c`, `kfd_priv.h` | — (this is the change) |
+| **KFD (kernel)** | Revert UPDATE_QUEUE fields, add new sub-op (SET + GET_DESCRIPTOR), add static `.rodata` descriptor blob + accessor | `kfd_ioctl.h`, `kfd_chardev.c`, `kfd_process_queue_manager.c`, `kfd_priv.h`, **new** `kfd_dispatch_log_descriptor.{c,h}` | — (this is the change) |
 | **MEC firmware** | **None.** Wire format unchanged. | — | — |
-| **libhsakmt** | Replace `hsaKmtSetQueueProfilingBuffer` with `hsaKmtSetQueueDispatchLog` calling new ioctl | rocm-systems libhsakmt | Build failure: UPDATE_QUEUE no longer has dispatch_record fields |
-| **ROCr** `AqlQueue::SetProfiling` | Switch to new thunk; on first init also upload descriptor via SET_DESCRIPTOR | `rocr-runtime/.../amd_aql_queue.cpp` | Profiling silently no-ops |
-| **rocprofiler-sdk** | (a) Query descriptor at drainer init (§3.E). (b) Replace hardcoded `mec_dispatch_record_16` with descriptor-driven parser. (c) Keep 16-byte fallback. | `firmware_ring_drainer.{cpp,hpp}`, `queue_controller.cpp` | Drainer reads correctly today (16-byte fast path) but blocks Phase 2 cleanup |
+| **libhsakmt** | Replace `hsaKmtSetQueueProfilingBuffer` with `hsaKmtSetQueueDispatchLog` calling new ioctl (SET only — no descriptor upload) | rocm-systems libhsakmt | Build failure: UPDATE_QUEUE no longer has dispatch_record fields |
+| **ROCr** `AqlQueue::SetProfiling` | Switch to new thunk for ring buffer setup. Does NOT upload a descriptor (kernel owns it). | `rocr-runtime/.../amd_aql_queue.cpp` | Profiling silently no-ops |
+| **rocprofiler-sdk** | (a) Query descriptor from kernel at drainer init via `GET_DESCRIPTOR` (§3.E). (b) Replace hardcoded `mec_dispatch_record_16` with descriptor-driven parser. (c) Keep 16-byte fallback for older kernels. | `firmware_ring_drainer.{cpp,hpp}`, `queue_controller.cpp` | Drainer reads correctly today (16-byte fast path) but blocks Phase 2 cleanup |
 | **cpc_tracing branch consumers** | Audit any branch-private code that touches `properties.dispatch_record_buffer_addr` directly | Branch-local | Branch-private; trivial |
-| **Firmware-onboarding test machine** (`gbt350-odcdh5-wbc1-b.png-odc.dcgpu`) | Re-deploy: amdgpu module (new UAPI), libhsakmt (.so), libhsa-runtime64 (.so), rocprofiler-sdk (.so). Firmware untouched. | Remote | Profiling stops working until userspace + kernel match |
+| **Firmware-onboarding test machine** (`gbt350-odcdh5-wbc1-b.png-odc.dcgpu`) | Re-deploy: amdgpu module (new UAPI + descriptor blob), libhsakmt (.so), libhsa-runtime64 (.so), rocprofiler-sdk (.so). Firmware untouched. | Remote | Profiling stops working until userspace + kernel match |
 | **Older userspace running on new kernel** | Will trigger `_IOC_SIZE` mismatch in `kfd_ioctl()` (`kfd_chardev.c:3820-3823`). Behavior: ioctl works but tail bytes are ignored. | N/A | Acceptable on private branch |
+| **Other tools (crash dumpers, third-party profilers)** | Can now ask KFD for the format directly via `GET_DESCRIPTOR` — no co-build with libhsakmt/ROCr required. | N/A | — (this is a new capability) |
 
 Critically: **the firmware row used to read "MEC firmware: Write
 0x00100001/0x00100002 to DW2 instead of bare 1/2" — that row is now
@@ -900,34 +964,42 @@ Set with `addr != 0`, then set with `addr == 0`. Verify via debug
 logging or sysfs that DW43-47 zero in MQD. Re-set with `addr != 0`,
 confirm records appear again.
 
-### 6.5 Descriptor round-trip
+### 6.5 Descriptor query — size probe
 
-Set descriptor (a 1 KB JSON blob). Get it back. Compare bytes — should
-be byte-for-byte identical. `desc_version` returned matches set value.
+Issue `GET_DESCRIPTOR` with `num_records = 0` (no buffer). Expect
+`-E2BIG`, `num_records` returned as the static blob size,
+`desc_version` returned as `KFD_DISPATCH_LOG_DESC_VERSION`.
 
-### 6.6 Descriptor size cap
+### 6.6 Descriptor query — full read
 
-* Set descriptor with `byte_len = 8192`: succeeds.
-* Set with `byte_len = 8193`: `-EINVAL`.
-* Set with `byte_len = 0`: `-EINVAL` (recommended; reserve "clear" for
-  a future explicit op if needed).
+Allocate a buffer of size from the probe; call `GET_DESCRIPTOR` with
+that buffer. Expect 0; bytes copied are byte-for-byte identical to
+the static blob in `kfd_dispatch_log_descriptor.c`. Parse the JSON;
+verify it contains `format_version`, `record_types`, etc.
 
-### 6.7 GET_DESCRIPTOR with too-small buffer
+### 6.7 Unsupported device
 
-Set 1 KB descriptor, call GET with `byte_len = 100`. Expect `-E2BIG`,
-and `num_records` returned as 1024. Retry with correct size: success.
+Run `GET_DESCRIPTOR` against a `gpu_id` whose firmware doesn't
+support the dispatch ring (e.g., a gfx10 device on a multi-GPU
+system). Expect `-ENOTSUPP`.
 
-### 6.8 Permission test
+### 6.8 Unprivileged access to GET_DESCRIPTOR
 
-Run dispatch-log SET as a non-CAP_PERFMON user. Expect `-EPERM`.
+Run `GET_DESCRIPTOR` as a regular (non-CAP_PERFMON) user. Expect
+success — descriptor is read-only static data and should be available
+to any tool inspecting ring buffers (e.g., a crash-dump decoder).
 
-### 6.9 Concurrent PMC + DISPATCH_LOG
+### 6.9 Privileged access to SET
+
+Run `DISPATCH_LOG_SET` as a non-CAP_PERFMON user. Expect `-EPERM`.
+
+### 6.10 Concurrent PMC + DISPATCH_LOG
 
 Acquire PMC lock from one process; from another, issue
 DISPATCH_LOG_SET on a different queue. Expect success — the PMC
 profiler_lock must NOT block dispatch_log.
 
-### 6.10 Negative tests
+### 6.11 Negative tests
 
 * Bad `op`: `-EINVAL`.
 * `pad0` or `pad1` non-zero: `-EINVAL`.
@@ -937,7 +1009,7 @@ profiler_lock must NOT block dispatch_log.
 * `record_size_bytes = 0` with `addr != 0`: `-EINVAL`.
 * `num_records * record_size_bytes` overflows u32: `-EINVAL`.
 
-### 6.11 rocprofiler-sdk integration
+### 6.12 rocprofiler-sdk integration
 
 Run `rocprofv3 --kernel-trace ./test_profbuf_hsa_api`. Expected: same
 kernel trace output as today; per-dispatch start/end timestamps in JSON.
@@ -947,12 +1019,19 @@ verify the drainer logs "unknown record_type 99 — descriptor stale"
 and stops scanning that queue (does NOT advance and corrupt subsequent
 records).
 
-### 6.12 Userspace fallback path
+### 6.13 Userspace fallback path
 
 Run an older rocprofiler-sdk (without descriptor support) against the
-new kernel. It will not call SET_DESCRIPTOR; the kernel returns
-`-ENOENT` on GET_DESCRIPTOR. The drainer must fall back to hardcoded
-16-byte parsing and produce correct output.
+new kernel. It uses the hardcoded 16-byte parser and produces correct
+output. Run a new rocprofiler-sdk against an older kernel (one without
+profiler version ≥ 2): same fallback path, produces correct output.
+
+### 6.14 Third-party tool reading the format
+
+Stand-alone test program: open `/dev/kfd`, issue `GET_DESCRIPTOR`
+without ever issuing SET. Confirm the JSON blob comes back. Validates
+that any tool can decode the ring without coordinating with
+libhsakmt/ROCr.
 
 ---
 
@@ -970,23 +1049,29 @@ new kernel. It will not call SET_DESCRIPTOR; the kernel returns
 2. **Should `pqm_update_dispatch_record` defend against the queue
    being mid-destroy?** `get_queue_by_qid` doesn't take a lock beyond
    `p->mutex`. Today's code has the same exposure.
-3. **Is per-`kfd_process_device` storage right, or should we put the
-   descriptor in `struct kfd_dev` (per-device global, set by the first
-   process and shared)?** Per-process is safer for multi-tenant;
-   per-device avoids redundant uploads. Recommended per-process but
-   flagging.
-4. **Should the descriptor be queryable by an unprivileged process?**
-   Today only `perfmon_capable()` can call DISPATCH_LOG. If a
-   non-profiler tool wants to know the wire format (e.g., for crash
-   dumps), it can't. Possible mitigation: split GET_DESCRIPTOR off as
-   unprivileged, keep SET as `perfmon_capable()`-only.
-5. **The `record_size_bytes` field in SET is duplicate info** (also
+3. **Per-ASIC-family blob selection.** The accessor
+   `kfd_dispatch_log_get_blob` needs to map the device to a blob.
+   Open: do we key on ASIC family (gfx9/gfx10/...) only, or on
+   firmware version too? gfx9 covers MI200/MI300/MI350 — same family,
+   but only MI350 firmware writes the dispatch ring today. If the
+   blob is keyed by firmware version we can return `-ENOTSUPP` for
+   non-supporting MI200 firmware automatically. Recommended:
+   firmware-version-keyed, with a fallback to family for forward
+   compatibility.
+4. **The `record_size_bytes` field in SET is duplicate info** (also
    encoded in the descriptor). They can disagree → kernel sizes BO
    check against ioctl field, firmware writes records of descriptor's
    declared size, mismatch = corruption. For Phase 1: document that
    `record_size_bytes` is authoritative for kernel BO validation
-   only, and userspace MUST keep it in sync. For Phase 2: derive it
-   from the descriptor at SET-time.
+   only, and userspace MUST keep it in sync with what it parsed from
+   the descriptor. For Phase 2: kernel could parse the JSON enough to
+   extract the size for type_id=1 (dispatch start) — but this brings
+   parsing into the kernel, which we want to avoid.
+5. **Should the static blob be per-`kfd_node` rather than per
+   `kfd_dev`?** Multi-XCD MI300/MI350 expose multiple `kfd_node`s per
+   `kfd_dev`. Open whether the descriptor needs per-node specialization
+   (probably not — wire format is determined by firmware, which is
+   per-`kfd_dev`).
 
 ---
 
@@ -994,15 +1079,13 @@ new kernel. It will not call SET_DESCRIPTOR; the kernel returns
 
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|---|
-| R1 | Descriptor stale relative to firmware (firmware adds new record_type that descriptor doesn't know) | Low (firmware rolls slowly; descriptor ships with software) | Medium (drainer aborts queue scan with clear logged error — not silent corruption) | Ship descriptor in lockstep with firmware updates. Descriptor is software-shippable so this is a normal SDK release operation. Detect via "unknown record_type N" log line. |
+| R1 | Static blob in kernel goes stale relative to firmware (firmware adds a new `record_type` that the kernel-shipped descriptor doesn't list) | Low (kernel rebuilds in lockstep with firmware drops) | Medium (drainer aborts queue scan with clear logged error — not silent corruption) | Bump `KFD_DISPATCH_LOG_DESC_VERSION` and update the blob whenever firmware adds a record type. Detect via "unknown record_type N" log line. Coordination point is the kernel/firmware release, not a userspace coordination. |
 | R2 | libhsakmt + ROCr roll out before kernel — userspace tries new ioctl on old kernel | Medium | Profiling silently disabled | Userspace probes `KFD_IOC_PROFILER_VERSION` and falls back to legacy UPDATE_QUEUE path on version < 2. But UPDATE_QUEUE no longer accepts the fields in the new userspace build — fallback requires keeping the old code paths in libhsakmt/ROCr behind a runtime check. Document in PR. |
-| R3 | Descriptor JSON payload triggers OOM if cap is too high | Low | Medium (DoS by privileged process) | Cap at 8 KB; use `kvzalloc`; cap enforced before allocation |
-| R4 | rocprofiler-sdk's standalone drainer registered under a context without CAP_PERFMON | Low | Drainer can't query descriptor → fallback to 16-byte hardcoded path | Document; track in telemetry whether descriptor query succeeded |
-| R5 | Splitting `pqm_update_queue_properties` introduces a regression in the queue update path | Medium | High (any KFD queue update breaks) | Diff the new `pqm_update_queue_properties` against `pqm.c.orig` — should be byte-identical. CI: run `kfdtest` on the test machine. |
-| R6 | `KFD_IOC_PROFILER_VERSION_NUM` bump breaks existing PMC/PC_SAMPLE callers that gate on `version == 1` | Low | Low | Convention is `>=`, not `==`. Audit; current callers use `>=`. |
-| R7 | per-`kfd_process_device` descriptor storage leaks on process abnormal exit | Low | Low (small bounded leak per process) | Hook into existing `kfd_process_device` teardown; `kvfree(pdd->dispatch_log_descriptor)`. |
-| R8 | `record_size_bytes` field in SET disagrees with descriptor's declared size | Medium | Medium (kernel sizes BO check based on ioctl field; firmware writes per-its-knowledge; mismatch = corruption) | Phase 1: document as caller responsibility. Phase 2: derive from descriptor at SET-time. |
-| R9 | Descriptor not present at drainer init (older producer hasn't called SET_DESCRIPTOR) | Medium during transition | Low | Fall back to hardcoded 16-byte parser; log a warning. |
+| R3 | Splitting `pqm_update_queue_properties` introduces a regression in the queue update path | Medium | High (any KFD queue update breaks) | Diff the new `pqm_update_queue_properties` against `pqm.c.orig` — should be byte-identical. CI: run `kfdtest` on the test machine. |
+| R4 | `KFD_IOC_PROFILER_VERSION_NUM` bump breaks existing PMC/PC_SAMPLE callers that gate on `version == 1` | Low | Low | Convention is `>=`, not `==`. Audit; current callers use `>=`. |
+| R5 | `record_size_bytes` field in SET disagrees with descriptor's declared size | Medium | Medium (kernel sizes BO check based on ioctl field; firmware writes per-its-knowledge; mismatch = corruption) | Phase 1: document as caller responsibility (userspace parses descriptor and passes the correct size). Phase 2: kernel could parse just enough JSON to derive size — but this brings parsing into kernel, which we want to avoid. |
+| R6 | `GET_DESCRIPTOR` returns `-ENOTSUPP` on unsupported devices but caller doesn't distinguish from other errors | Low | Low | Document the error code. Userspace sample code shows the right pattern. |
+| R7 | Descriptor blob increases kernel module image size | Low | Negligible | ~1 KB per ASIC family in `.rodata`. Module size growth is tiny. |
 
 ---
 
