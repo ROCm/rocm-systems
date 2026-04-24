@@ -310,7 +310,7 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
             ${ROCPROFSYS_DEFAULT_ROCM_PATH}
             /opt/rocm
         )
-            if(EXISTS ${_DIR})
+            if(EXISTS "${_DIR}")
                 get_filename_component(_ABS_DIR "${_DIR}" REALPATH)
                 list(APPEND _PATHS ${_ABS_DIR})
             endif()
@@ -322,8 +322,8 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
 
     foreach(_PATH ${_PATHS})
         foreach(_FILE ${_VERSION_FILES})
-            set(_F ${_PATH}/.info/${_FILE})
-            if(EXISTS ${_F})
+            set(_F "${_PATH}/.info/${_FILE}")
+            if(EXISTS "${_F}")
                 set(ROCmVersion_VERSION_FILE
                     "${_F}"
                     CACHE FILEPATH
