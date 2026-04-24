@@ -872,6 +872,13 @@ bool Buffer::create(bool alloc_local) {
         flags.contiguous_ = (memFlags & ROCCLR_MEM_HSA_CONTIGUOUS) != 0;
         flags.uncached_ = (memFlags & ROCCLR_MEM_HSA_UNCACHED) != 0;
         deviceMemory_ = dev().deviceLocalAlloc(size(), flags);
+#if defined(__APPLE__)
+        if (deviceMemory_ != nullptr) {
+          // Darwin's MVP device-local allocation is backed by CPU-visible
+          // memory, so host blits must not recurse through an indirect map.
+          flags_ |= HostMemoryDirectAccess;
+        }
+#endif
       }
       owner()->setSvmPtr(deviceMemory_);
     } else {
@@ -977,6 +984,11 @@ bool Buffer::create(bool alloc_local) {
         const_cast<Device&>(dev()).updateFreeMemory(size(), false);
       }
     } else {
+#if defined(__APPLE__)
+      // Darwin's MVP local-memory pool is host-backed until the DEXT path
+      // exposes GPU VM/VRAM allocations, so CPU blits can access it directly.
+      flags_ |= HostMemoryDirectAccess;
+#endif
       const_cast<Device&>(dev()).updateFreeMemory(size(), false);
     }
 
@@ -1065,7 +1077,7 @@ bool Buffer::ExportHandle(void* handle) const {
 // ================================================================================================
 bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle) {
   int dmabuffd = -1;
-  size_t offset = 0;
+  uint64_t offset = 0;
 
   // In case of vmm, we use a different set of APIs for retrieving the dmabuffd.
   if (vmm) {

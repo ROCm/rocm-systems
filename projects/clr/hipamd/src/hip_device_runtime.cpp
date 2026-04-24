@@ -208,10 +208,10 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
       break;
     case hipDeviceAttributeTotalConstantMemory:
       // size_t to int casting
-      *pi = std::min(prop.totalConstMem, int32_max);
+      *pi = std::min<uint64_t>(prop.totalConstMem, int32_max);
       break;
     case hipDeviceAttributeTotalGlobalMem:
-      *pi = std::min(prop.totalGlobalMem, int32_max);
+      *pi = std::min<uint64_t>(prop.totalGlobalMem, int32_max);
       break;
     case hipDeviceAttributeWarpSize:
       *pi = prop.warpSize;
@@ -341,7 +341,7 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
       break;
     case hipDeviceAttributeMaxPitch:
       // size_t to int casting
-      *pi = std::min(prop.memPitch, int32_max);
+      *pi = std::min<uint64_t>(prop.memPitch, int32_max);
       break;
     case hipDeviceAttributeTextureAlignment:
       *pi = prop.textureAlignment;

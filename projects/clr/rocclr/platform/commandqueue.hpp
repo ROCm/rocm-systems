@@ -176,7 +176,11 @@ class HostQueue : public CommandQueue {
       }
     }
 
-    void Release() const { virtualDevice_->release(); }
+    void Release() const {
+      if (virtualDevice_ != nullptr) {
+        virtualDevice_->release();
+      }
+    }
 
     //! Get virtual device for the current thread
     device::VirtualDevice* vdev() const { return virtualDevice_; }

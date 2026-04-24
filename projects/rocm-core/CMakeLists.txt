@@ -89,10 +89,12 @@ set( SRCS rocm_version.cpp rocm_getpath.cpp)
 add_library( ${CORE_TARGET} ${SRCS} )
 
 set( CXX_FLAGS ${CXX_FLAGS} -g -fPIC -fvisibility=hidden -W -Wall -Wextra -Wno-unused-parameter -Wformat-security -Wundef -Wshadow -Wpointer-arith -Wcast-qual -Wmissing-declarations -Wredundant-decls -Wunreachable-code -std=c++11 )
-set( CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS}  -Wl,-z,nodelete -Wl,-no-undefined" )
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set( CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS}  -Wl,-z,nodelete -Wl,-no-undefined" )
+endif()
 target_include_directories( ${CORE_TARGET} PRIVATE ${BUILD_DIR} )
 if(BUILD_SHARED_LIBS)
-  target_link_libraries( ${CORE_TARGET} PRIVATE dl )
+  target_link_libraries( ${CORE_TARGET} PRIVATE ${CMAKE_DL_LIBS} )
 endif()
 
 ## Set the VERSION and SOVERSION values

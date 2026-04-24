@@ -7,6 +7,8 @@
 #pragma once
 
 #include <hip/hip_runtime.h>
+#include <hip/hip_deprecated.h>
+#include <hip/hip_gl_interop.h>
 
 // Define some version macros for the API table. Use similar naming conventions to HSA-runtime
 // (MAJOR and STEP versions). Three groups at this time:

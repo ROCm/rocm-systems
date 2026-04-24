@@ -47,8 +47,13 @@
 #error "amd_macos_driver.h should only be used in the Darwin build"
 #endif
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "core/inc/driver.h"
 #include "core/inc/memory_region.h"
@@ -86,6 +91,19 @@ namespace AMD {
 /// skeleton.
 class MacOsDriver final : public core::Driver {
  public:
+  struct DirectComputeQueue {
+    uint32_t queue_id = 0;
+    uint32_t queue_index = 0;
+    uint32_t doorbell_index = 0;
+    uint32_t ring_size_bytes = 0;
+    uint64_t ring_gpu = 0;
+    uint64_t wptr = 0;
+    volatile uint32_t* ring_cpu = nullptr;
+    volatile uint64_t* wptr_cpu = nullptr;
+    volatile uint64_t* rptr_cpu = nullptr;
+    volatile uint64_t* doorbell_cpu = nullptr;
+  };
+
   explicit MacOsDriver(std::string devnode_name);
 
   /// @brief Probe for a usable DEXT. Returns HSA_STATUS_SUCCESS with a live
@@ -172,11 +190,51 @@ class MacOsDriver final : public core::Driver {
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address,
                                     size_t* size) const override;
 
+  hsa_status_t AllocateVram(size_t size, size_t align, void** cpu_addr,
+                            uint64_t* gpu_addr);
+  hsa_status_t HostToGpuAddress(const void* ptr, uint64_t* gpu_addr) const;
+  void RegisterVramShadow(const void* cpu_addr, size_t size, const void* src);
+  hsa_status_t VramShadowAddress(const void* cpu_addr, size_t size,
+                                 const void** shadow_addr) const;
+  hsa_status_t CreateDirectComputeQueue(DirectComputeQueue* queue);
+  hsa_status_t DestroyDirectComputeQueue(const DirectComputeQueue& queue);
+  hsa_status_t SubmitDirectCompute(DirectComputeQueue& queue,
+                                   const uint32_t* pm4, size_t dword_count) const;
+  hsa_status_t ReadDirectComputeRptr(const DirectComputeQueue& queue,
+                                     uint32_t* rptr) const;
+
  private:
+  struct VramAllocation {
+    uint64_t offset = 0;
+    uint64_t size = 0;
+    uint64_t gpu_addr = 0;
+    std::vector<uint8_t> shadow;
+  };
+
+  hsa_status_t EnsureBarMappingsLocked();
+  hsa_status_t EnsureDoorbellApertureLocked();
+  hsa_status_t ReadMmio32(uint32_t base, uint32_t reg, uint32_t* value) const;
+  hsa_status_t WriteMmio32(uint32_t base, uint32_t reg, uint32_t value) const;
+  hsa_status_t SelectHqdLocked(uint32_t me, uint32_t pipe, uint32_t queue) const;
+  hsa_status_t WaitForDirectHqdIdleLocked(uint32_t pipe, uint32_t queue,
+                                          const char* phase) const;
+  hsa_status_t ActivateDirectComputeQueueLocked(DirectComputeQueue* queue);
+  void VramWrite32Locked(uint64_t offset, uint32_t value) const;
+  void ZeroVramLocked(uint64_t offset, uint64_t size) const;
+
   // Opaque libmacgpu handle. nullptr until Open() succeeds.
   macgpu_device_t* dev_ = nullptr;
   // Cached device info populated on Open(); reused by GetNodeProperties.
   macgpu_device_info_t info_{};
+  mutable std::mutex gpu_lock_;
+  void* vram_bar_ = nullptr;
+  uint64_t vram_bar_size_ = 0;
+  void* doorbell_bar_ = nullptr;
+  uint64_t doorbell_bar_size_ = 0;
+  uint64_t framebuffer_base_ = 0;
+  uint64_t next_vram_offset_ = 0;
+  uint32_t next_direct_queue_index_ = 0;
+  std::unordered_map<void*, VramAllocation> vram_allocations_;
 };
 
 }  // namespace AMD

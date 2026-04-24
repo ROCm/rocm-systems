@@ -13,6 +13,38 @@
 #include "utils/flags.hpp"
 #include "device/rocm/rocglinterop.hpp"
 
+#if defined(__APPLE__)
+
+namespace amd::roc {
+namespace GlInterop {
+
+bool Init(MESA_INTEROP_KIND Kind) {
+  return false;
+}
+
+bool GetInfo(mesa_glinterop_device_info& info, MESA_INTEROP_KIND Kind, const DisplayHandle display,
+             const ContextHandle context) {
+  return false;
+}
+
+bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_INTEROP_KIND Kind,
+            const DisplayHandle display, const ContextHandle context) {
+  return false;
+}
+
+bool glAssociate(Device* device, uint flags, void* gfxContext, void* glDevice) {
+  return false;
+}
+
+bool glDissociate(Device*, void*, void*) {
+  return true;
+}
+
+}  // namespace GlInterop
+}  // namespace amd::roc
+
+#else
+
 #include <dlfcn.h>
 
 namespace amd::roc {
@@ -200,3 +232,5 @@ bool glDissociate(Device*, void*, void*) {
 
 }  // namespace GlInterop
 }  // namespace amd::roc
+
+#endif

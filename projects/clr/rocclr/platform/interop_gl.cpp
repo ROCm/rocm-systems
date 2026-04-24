@@ -12,12 +12,16 @@
 #include <dxgi.h>
 #endif  //_WIN32
 
+#if defined(__APPLE__)
+#include <OpenGL/gl.h>
+#include <OpenGL/glext.h>
+#else
 #include <GL/gl.h>
 #include <GL/glext.h>
-
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <EGL/eglplatform.h>
+#endif
 
 #include "cl_common.hpp"
 
@@ -68,6 +72,8 @@ bool amd::ClGlEvent::waitForFence() {
                                                static_cast<GLuint64>(-1));
     if (!(ret == GL_ALREADY_SIGNALED || ret == GL_CONDITION_SATISFIED)) return false;
   }
+#elif defined(__APPLE__)
+  return false;
 #else  // Lnx
   Display* tempDpy_ = context().glenv()->glXGetCurrentDisplay_();
   GLXDrawable tempDrawable_ = context().glenv()->glXGetCurrentDrawable_();
@@ -179,7 +185,7 @@ amd::GLFunctions::GLFunctions(HMODULE h, bool isEGL)
   } else {
     GetProcAddress_ = (PFN_xxxGetProcAddress)GETPROCADDRESS(h, API_GETPROCADDR);
   }
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
   // Initialize pointers to X11/GLX functions
   // We can not link with these functions on compile time since we need to support
   // console mode. In console mode X server and X server components may be absent.
@@ -215,6 +221,9 @@ amd::GLFunctions::GLFunctions(HMODULE h, bool isEGL)
   }
 // Initialize pointers to GL functions
 #include "gl_functions.hpp"
+#elif defined(__APPLE__)
+  // macOS has no GLX/Mesa interop path. Keep the object constructible but make init fail.
+  ++missed_;
 #else
   if (!isEGL_) {
     wglCreateContext_ = (PFN_wglCreateContext)GETPROCADDRESS(h, "wglCreateContext");
@@ -241,6 +250,8 @@ amd::GLFunctions::~GLFunctions() {
       LogWarning("Cannot delete GLRC");
     }
   }
+#elif defined(__APPLE__)
+  // No GLX resources are created on macOS.
 #else   //!_WIN32
   if (intDpy_) {
     if (intCtx_) {
@@ -271,6 +282,8 @@ bool amd::GLFunctions::update(intptr_t hglrc) {
     err = GetLastError();
     return false;
   }
+#elif defined(__APPLE__)
+  return false;
 #else  //!_WIN32
   Dpy_ = glXGetCurrentDisplay_();
   Drawable_ = glXGetCurrentDrawable_();
@@ -353,6 +366,8 @@ bool amd::GLFunctions::init(intptr_t hdc, intptr_t hglrc) {
   if (missed_ == 0) {
     return true;
   }
+#elif defined(__APPLE__)
+  return false;
 #else  //!_WIN32
   if (!missed_) {
     if (!hdc) {
@@ -404,6 +419,8 @@ bool amd::GLFunctions::setIntEnv() {
       return false;
     }
   }
+#elif defined(__APPLE__)
+  return false;
 #else   //!_WIN32
   tempDpy_ = glXGetCurrentDisplay_();
   tempDrawable_ = glXGetCurrentDrawable_();
@@ -432,6 +449,8 @@ bool amd::GLFunctions::restoreEnv() {
     LogWarning("cannot restore original GL environment");
     return false;
   }
+#elif defined(__APPLE__)
+  return false;
 #else   //!_WIN32
   // Restore Display and GLXContext
   if (tempDpy_) {

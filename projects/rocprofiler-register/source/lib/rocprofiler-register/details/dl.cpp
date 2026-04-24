@@ -32,11 +32,16 @@
 #include <string_view>
 
 #include <dlfcn.h>
-#include <elf.h>
 #include <fmt/core.h>
-#include <link.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#if defined(__linux__)
+#include <elf.h>
+#include <link.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 
 namespace rocprofiler_register
 {
@@ -51,6 +56,7 @@ std::vector<segment_address_ranges>
 get_segment_addresses(pid_t _pid)
 {
     auto _data  = std::vector<segment_address_ranges>{};
+#if defined(__linux__)
     auto _fname = fmt::format("/{}/{}/{}", "proc", _pid, "maps");
     auto ifs    = std::ifstream{ _fname };
     if(!ifs)
@@ -86,6 +92,9 @@ get_segment_addresses(pid_t _pid)
             }
         }
     }
+#else
+    (void) _pid;
+#endif
     return _data;
 }
 
@@ -107,12 +116,26 @@ get_linked_path(std::string_view _name, open_modes_vec_t&& _open_modes)
 
     if(_handle)
     {
+#if defined(__linux__)
         struct link_map* _link_map = nullptr;
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
         {
             return fs::absolute(fs::path{ _link_map->l_name }).string();
         }
+#elif defined(__APPLE__)
+        auto _requested = fs::path{ _name };
+        for(uint32_t i = 0, e = _dyld_image_count(); i < e; ++i)
+        {
+            const char* _image = _dyld_get_image_name(i);
+            if(_image == nullptr) continue;
+            auto _image_path = fs::path{ _image };
+            if(_image_path == _requested || _image_path.filename() == _requested.filename())
+            {
+                return fs::absolute(_image_path).string();
+            }
+        }
+#endif
         if(_noload == false) dlclose(_handle);
     }
 

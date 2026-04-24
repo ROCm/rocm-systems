@@ -10,8 +10,13 @@
 #include "hip_internal.hpp"
 #include "platform/interop_gl.hpp"
 #include "cl_common.hpp"
+#if defined(__APPLE__)
+#include <OpenGL/gl.h>
+#include <OpenGL/glext.h>
+#else
 #include <GL/gl.h>
 #include <GL/glext.h>
+#endif
 #include "hip_conversions.hpp"
 #include <mutex>
 #include <shared_mutex>

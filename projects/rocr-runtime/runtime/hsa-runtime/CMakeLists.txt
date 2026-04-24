@@ -88,9 +88,11 @@ endif() # if (ROCM_CCACHE_BUILD)
 ## Find external dependencies.
 find_package(PkgConfig)
 
-find_package(LibElf CONFIG)
-if(NOT LibElf_FOUND)
-  find_package(LibElf REQUIRED)
+if(NOT TARGET elf::elf)
+  find_package(LibElf CONFIG)
+  if(NOT LibElf_FOUND)
+    find_package(LibElf REQUIRED)
+  endif()
 endif()
 
 ## Find AMD CUID library.
@@ -251,6 +253,7 @@ if (APPLE)
   # more plumbing first — tracked as follow-up).
   set ( SRCS core/driver/driver.cpp
              core/driver/macos/amd_macos_driver.cpp
+             core/runtime/amd_macos_aql_queue.cpp
              core/runtime/amd_macos_agent.cpp )
 else()
   set ( SRCS core/driver/driver.cpp

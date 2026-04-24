@@ -1383,7 +1383,7 @@ void Options::setDumpFileName(const char* val) {
 #ifdef _WIN32
     const std::int32_t pid = _getpid();
 #endif
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
     const std::int32_t pid = getpid();
 #endif
     dumpPrefix.replace(pidPos, 5, std::to_string(pid));
@@ -1401,7 +1401,7 @@ void Options::setDumpFileName(const char* val) {
 #ifdef _WIN32
   basename_max = FILENAME_MAX;
 #endif
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
   const std::string curPath = fullPath + ".";
   basename_max = pathconf(curPath.c_str(), _PC_NAME_MAX);
   assert(basename_max != -1);

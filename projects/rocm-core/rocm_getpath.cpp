@@ -4,9 +4,13 @@
 #include <cstring> /* String Operations */
 #include <cstdlib> /* Dynamic Memory Mgmt */
 #include <cstdio>  /* FILENAME_MAX */
-#if !defined(_WIN32) && !defined(_WIN64)
+#if defined(__linux__)
   #include <climits> /* PATH_MAX */
-  #include <link.h>  /* ELF Dynamic Linking DS */
+  #include <link.h>  /* ELF Dynamic Linking DS - Linux only */
+  #include <dlfcn.h> /* Dynamic linker Operations */
+  #define RC_PATH_MAX (PATH_MAX+1)
+#elif defined(__APPLE__)
+  #include <climits> /* PATH_MAX */
   #include <dlfcn.h> /* Dynamic linker Operations */
   #define RC_PATH_MAX (PATH_MAX+1)
 #else
@@ -114,7 +118,34 @@ static int getROCmBase(char *buf)
   /* Limited support for Windows:
    * getROCmBase() Needs ROCM_PATH environment variable set on Windows. */
   return PathWindowsNotSet;
-#else
+#elif defined(__APPLE__)
+  #if BUILD_SHARED_LIBS
+    /* Query the image containing this function; Darwin has no dlinfo/link_map. */
+    Dl_info info;
+    if (dladdr(reinterpret_cast<void*>(&getROCmInstallPath), &info) &&
+        info.dli_fname && realpath(info.dli_fname, buf)) {
+      end = strrchr(buf, '/');
+      if (end && end > buf) {
+        *end = '\0';
+      }
+    }
+    else{
+      return PathLinuxRuntimeErrors;
+    }
+
+    /* find the start of substring TARGET_LIB_INSTALL_DIR
+     * To strip down Path up to Parent Directory of TARGET_LIB_INSTALL_DIR. */
+    end=strstr(buf, TARGET_LIB_INSTALL_DIR);
+    if( NULL == end ){
+      /* We can't find the library install directory*/
+      return PathLinuxRuntimeErrors;
+    }
+    *end = '\0';
+  #else
+    // BUILD_SHARED_LIBS not defined
+    return PathLinuxRuntimeErrors;
+  #endif
+#elif defined(__linux__)
   #if BUILD_SHARED_LIBS
     sprintf(libFileName, "lib%s.so", TARGET_LIBRARY_NAME);
     void *handle=dlopen(libFileName,RTLD_NOW);
@@ -153,10 +184,11 @@ static int getROCmBase(char *buf)
     // BUILD_SHARED_LIBS not defined
     return PathLinuxRuntimeErrors;
   #endif
+#else
+  #error "Unsupported platform"
 #endif
   /* Length of Path String up to Parent Directoy (ROCm Base Path)
    * with trailing '/'.*/
   len = strlen(buf);
   return len;
 }
-

@@ -6,7 +6,16 @@
 
 #pragma once
 
-#ifndef _WIN32
+#if defined(__APPLE__)
+#include <OpenGL/gl.h>
+#include <OpenGL/glext.h>
+struct _XDisplay;
+struct __GLXcontextRec;
+typedef _XDisplay Display;
+typedef __GLXcontextRec* GLXContext;
+typedef void* EGLDisplay;
+typedef void* EGLContext;
+#elif !defined(_WIN32)
 #include <GL/glx.h>
 #include <EGL/egl.h>
 #else

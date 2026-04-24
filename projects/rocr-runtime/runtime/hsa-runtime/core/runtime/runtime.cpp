@@ -1121,6 +1121,62 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       }
     }
 
+#if defined(__APPLE__)
+    // Darwin has no KFD thunk to answer hsaKmtQueryPointerInfo. For allocations
+    // created through this runtime, the allocation map has enough information
+    // for ROCclr's access bookkeeping and pointer-attribute queries.
+    auto darwin_fragment = allocation_map_.upper_bound(ptr);
+    if (darwin_fragment != allocation_map_.begin()) {
+      --darwin_fragment;
+      const auto* base = reinterpret_cast<const uint8_t*>(darwin_fragment->first);
+      const auto* query = reinterpret_cast<const uint8_t*>(ptr);
+      if ((base <= query) && (query < base + darwin_fragment->second.size_requested)) {
+        const AMD::MemoryRegion* region =
+            reinterpret_cast<const AMD::MemoryRegion*>(darwin_fragment->second.region);
+        retInfo.type = HSA_EXT_POINTER_TYPE_HSA;
+        retInfo.agentBaseAddress = const_cast<void*>(darwin_fragment->first);
+        retInfo.hostBaseAddress = retInfo.agentBaseAddress;
+        retInfo.sizeInBytes = darwin_fragment->second.size_requested;
+        retInfo.registered = true;
+        retInfo.userData = darwin_fragment->second.user_ptr;
+        if (region != nullptr) {
+          uint32_t global_flags = 0;
+          if (region->GetPoolInfo(HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &global_flags) ==
+              HSA_STATUS_SUCCESS) {
+            retInfo.global_flags = global_flags;
+          }
+          retInfo.agentOwner = region->owner()->public_handle();
+          if (block_info != nullptr) {
+            block_info->base = retInfo.hostBaseAddress;
+            block_info->length = darwin_fragment->second.size_requested;
+            block_info->agentOwner = region->owner();
+          }
+        }
+        memcpy(info, &retInfo, retInfo.size);
+        if (returnListData) {
+          if (region != nullptr) {
+            *num_agents_accessible = 1;
+            *accessible = static_cast<hsa_agent_t*>(alloc(sizeof(hsa_agent_t)));
+            if (*accessible == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+            (*accessible)[0] = region->owner()->public_handle();
+          } else {
+            *num_agents_accessible = 0;
+            *accessible = nullptr;
+          }
+        }
+        return HSA_STATUS_SUCCESS;
+      }
+    }
+
+    retInfo.type = HSA_EXT_POINTER_TYPE_UNKNOWN;
+    memcpy(info, &retInfo, retInfo.size);
+    if (returnListData) {
+      *num_agents_accessible = 0;
+      *accessible = nullptr;
+    }
+    return HSA_STATUS_SUCCESS;
+#endif
+
     // We don't care if this returns an error code.
     // The type will be HSA_EXT_POINTER_TYPE_UNKNOWN if so.
     auto err = HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, &thunkInfo));
@@ -2424,16 +2480,7 @@ hsa_status_t Runtime::Load() {
 
   BindErrorHandlers();
 
-#if defined(__APPLE__)
-  // TODO(macos-port): AmdHsaCodeLoader's ReaderWriterLock member null-derefs
-  // inside std::make_shared<std::mutex> during construction (likely an
-  // interaction between -fno-rtti and libc++ condition_variable_any on
-  // macOS 26). Skip loader init on Darwin for now — we can't actually
-  // load code objects without a GPU agent anyway.
-  loader_ = nullptr;
-#else
   loader_.reset(amd::hsa::loader::Loader::Create(&loader_context_));
-#endif
 
   // Load extensions
   LoadExtensions();

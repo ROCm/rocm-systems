@@ -12,16 +12,121 @@
 #include <dlfcn.h>
 #endif  //!_WIN32
 
+#if defined(__APPLE__)
+#include <OpenGL/gl.h>
+#include <OpenGL/glext.h>
+#else
 #include <GL/gl.h>
 #include <GL/glext.h>
+#endif
 #include "CL/cl_gl.h"
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
 #include <GL/glx.h>
 #endif  //!_WIN32
 
+#if defined(__APPLE__)
+struct _XDisplay;
+struct XVisualInfo;
+struct __GLXcontextRec;
+typedef _XDisplay Display;
+typedef unsigned long Window;
+typedef unsigned long GLXDrawable;
+typedef __GLXcontextRec* GLXContext;
+typedef int Bool;
+#ifndef _Xconst
+#define _Xconst const
+#endif
+#ifndef None
+#define None 0L
+#endif
+#ifndef GLX_RGBA
+#define GLX_RGBA 4
+#endif
+typedef void* EGLDisplay;
+typedef void* EGLContext;
+#ifndef EGL_NO_DISPLAY
+#define EGL_NO_DISPLAY nullptr
+#endif
+#ifndef EGL_NO_CONTEXT
+#define EGL_NO_CONTEXT nullptr
+#endif
+#ifndef GL_RGB10_EXT
+#define GL_RGB10_EXT 0x8052
+#endif
+#ifndef GL_RGB8UI
+#define GL_RGB8UI 0x8D7D
+#endif
+#ifndef GL_RGB8I
+#define GL_RGB8I 0x8D8F
+#endif
+#ifndef GL_RGBA8UI
+#define GL_RGBA8UI 0x8D7C
+#endif
+#ifndef GL_RGBA8I
+#define GL_RGBA8I 0x8D8E
+#endif
+#ifndef GL_RGB16UI
+#define GL_RGB16UI 0x8D77
+#endif
+#ifndef GL_RGB16I
+#define GL_RGB16I 0x8D89
+#endif
+#ifndef GL_RGB16F
+#define GL_RGB16F 0x881B
+#endif
+#ifndef GL_RGBA16UI
+#define GL_RGBA16UI 0x8D76
+#endif
+#ifndef GL_RGBA16I
+#define GL_RGBA16I 0x8D88
+#endif
+#ifndef GL_RGBA16F
+#define GL_RGBA16F 0x881A
+#endif
+#ifndef GL_RGB32I
+#define GL_RGB32I 0x8D83
+#endif
+#ifndef GL_RGB32UI
+#define GL_RGB32UI 0x8D71
+#endif
+#ifndef GL_RGB32F
+#define GL_RGB32F 0x8815
+#endif
+#ifndef GL_RGBA32I
+#define GL_RGBA32I 0x8D82
+#endif
+#ifndef GL_RGBA32UI
+#define GL_RGBA32UI 0x8D70
+#endif
+#ifndef GL_RGBA32F
+#define GL_RGBA32F 0x8814
+#endif
+#ifndef GL_TEXTURE_BUFFER
+#define GL_TEXTURE_BUFFER 0x8C2A
+#endif
+#ifndef GL_TEXTURE_1D_ARRAY
+#define GL_TEXTURE_1D_ARRAY 0x8C18
+#endif
+#ifndef GL_TEXTURE_2D_ARRAY
+#define GL_TEXTURE_2D_ARRAY 0x8C1A
+#endif
+#ifndef GL_TEXTURE_2D_MULTISAMPLE
+#define GL_TEXTURE_2D_MULTISAMPLE 0x9100
+#endif
+#ifndef GL_TEXTURE_SAMPLES
+#define GL_TEXTURE_SAMPLES 0x9106
+#endif
+#ifndef GL_TEXTURE_BUFFER_DATA_STORE_BINDING
+#define GL_TEXTURE_BUFFER_DATA_STORE_BINDING 0x8C2D
+#endif
+#ifndef GL_TEXTURE_BUFFER_FORMAT_EXT
+#define GL_TEXTURE_BUFFER_FORMAT_EXT 0x8C2E
+#endif
+#else
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <EGL/eglplatform.h>
+#endif
 
 #include "platform/context.hpp"
 #include "platform/command.hpp"

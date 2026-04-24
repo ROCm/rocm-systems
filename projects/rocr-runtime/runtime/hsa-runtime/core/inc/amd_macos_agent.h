@@ -68,8 +68,8 @@ namespace AMD {
 /// implemented:
 ///   - node_id / device_type / driver() (from Agent base).
 ///   - regions() / supported_isas() return the vectors populated in the
-///     constructor (currently empty — populating them is follow-up work
-///     tracked as "MacGpuAgent: wire VRAM region" in the plan).
+///     constructor, including an MVP host-backed framebuffer pool used by
+///     the code-object loader.
 ///   - GetInfo returns fixed identity fields from the libmacgpu probe so
 ///     rocminfo can print a plausible device name.
 ///   - current_coherency_type getter/setter store a member var.
@@ -160,6 +160,11 @@ class MacGpuAgent : public GpuAgentInt {
                            core::HsaEventCallback event_callback, void* data,
                            uint32_t private_segment_size, uint32_t group_segment_size,
                            core::Queue** queue) override;
+  hsa_status_t DmaCopy(void* dst, const void* src, size_t size) override;
+  hsa_status_t DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_agent,
+                             uint32_t* engine_ids_mask) override;
+  hsa_status_t DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
+                                  uint32_t* recommended_ids_mask) override;
 
   hsa_status_t GetInfo(hsa_agent_info_t attribute, void* value) const override;
 
@@ -178,6 +183,7 @@ class MacGpuAgent : public GpuAgentInt {
   uint64_t KfdGpuID() const { return node_id(); }
 
  private:
+  HsaNodeProperties node_props_;
   hsa_amd_coherency_type_t current_coherency_type_;
   bool rec_sdma_eng_override_;
   std::vector<std::shared_ptr<const core::MemoryRegion>> regions_;

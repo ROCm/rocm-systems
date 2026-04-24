@@ -16,6 +16,21 @@ bool Comgr::is_ready_ = false;
 bool Comgr::LoadLib(bool is_versioned) {
 #if defined(COMGR_DYN_DLL)
 
+#if defined(__APPLE__)
+  (void)is_versioned;
+  static constexpr const char* comgr_lib_names[] = {
+      "@loader_path/libamd_comgr.3.dylib",
+      "@rpath/libamd_comgr.3.dylib",
+      "libamd_comgr.3.dylib",
+      "libamd_comgr.dylib",
+  };
+  for (const char* comgr_lib_name : comgr_lib_names) {
+    cep_.handle = Os::loadLibrary(comgr_lib_name);
+    if (nullptr != cep_.handle) {
+      break;
+    }
+  }
+#else
   if (is_versioned) {
 #if defined(HIP_MAJOR_VERSION) && defined(HIP_MAJOR_VERSION)
     std::string comgr_versioned_name, major_version, minor_version;
@@ -48,6 +63,7 @@ bool Comgr::LoadLib(bool is_versioned) {
                     WINDOWS_SWITCH(comgr_major_dll.c_str(), "libamd_comgr.so.3"));
     cep_.handle = Os::loadLibrary(comgr_lib_name);
   }
+#endif
   if (nullptr == cep_.handle) {
     ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "Failed to load COMGR library.");
     return false;

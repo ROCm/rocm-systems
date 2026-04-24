@@ -140,6 +140,12 @@ extern __thread Thread* thread_ __attribute__((tls_model("initial-exec")));
 
 static inline Thread* currentThread() { return thread_; }
 
+#elif defined(__APPLE__)
+
+extern thread_local Thread* thread_;
+
+static inline Thread* currentThread() { return thread_; }
+
 #elif defined(_WIN32)
 
 #if defined(USE_DECLSPEC_THREAD)

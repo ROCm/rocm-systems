@@ -120,8 +120,8 @@ target_include_directories(rocclr PUBLIC
   ${AMD_OPENCL_INCLUDE_DIRS})
 
 target_link_libraries(rocclr PUBLIC Threads::Threads)
-# IPC on Windows is not supported
-if(UNIX)
+# IPC on Windows is not supported. librt is Linux-specific; Darwin has shm APIs in libSystem.
+if(UNIX AND NOT APPLE)
   target_link_libraries(rocclr PUBLIC rt)
 endif()
 

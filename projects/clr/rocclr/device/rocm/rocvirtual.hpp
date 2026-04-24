@@ -410,6 +410,7 @@ class VirtualGPU : public device::VirtualDevice {
   ~VirtualGPU();
 
   bool create();
+  bool createHostBlitOnly();
   const Device& dev() const { return roc_device_; }
 
   void profilingBegin(amd::Command& command, bool sdmaProfiling = false);

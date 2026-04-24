@@ -13,7 +13,7 @@
 #include "top.hpp"
 #include <cassert>
 #include <sstream>
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
 #include <unistd.h>
 #endif
 #ifdef _WIN32

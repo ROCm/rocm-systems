@@ -279,7 +279,7 @@ private:
 };
 
 const core::MemoryRegion* RegionMemory::AgentLocal(hsa_agent_t agent, bool is_code) {
-  AMD::GpuAgent *amd_agent = (AMD::GpuAgent*)core::Agent::Convert(agent);
+  core::Agent* amd_agent = core::Agent::Convert(agent);
   assert(amd_agent->device_type() == core::Agent::kAmdGpuDevice && "Invalid agent type.");
   auto agent_local_region =
       std::find_if(amd_agent->regions().begin(), amd_agent->regions().end(),
@@ -353,20 +353,27 @@ bool RegionMemory::Freeze() {
     core::Runtime::runtime_singleton_->flag().co_dmacopy_size();
 
   const bool isGpuDevice = (agent->device_type() == core::Agent::kAmdGpuDevice);
+#if defined(__APPLE__)
+  const bool isLargeBarDisabled = false;
+  const bool shouldDmaCopy = isGpuDevice;
+#else
   const bool isLargeBarDisabled = isGpuDevice && !reinterpret_cast<AMD::GpuAgent*>(agent)->LargeBarEnabled();
   const bool shouldDmaCopy = isGpuDevice && (isLargeBarDisabled || size_ > code_object_dmacopy_size);
+#endif
 
   if (shouldDmaCopy) {
       if (HSA_STATUS_SUCCESS != agent->DmaCopy(ptr_, host_ptr_, size_)) return false;
   } else {
       memcpy(ptr_, host_ptr_, size_);
+#if !defined(__APPLE__)
       if (is_code_ && isGpuDevice)
         reinterpret_cast<AMD::GpuAgent*>(agent)->PcieWcFlush(ptr_, size_);
+#endif
   }
 
   // Invalidate agent caches if needed
   if (is_code_ && isGpuDevice)
-      reinterpret_cast<AMD::GpuAgent*>(agent)->InvalidateCodeCaches(ptr_, size_);
+      static_cast<AMD::GpuAgentInt*>(agent)->InvalidateCodeCaches(ptr_, size_);
 
   return true;
 }

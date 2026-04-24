@@ -43,6 +43,7 @@
  *
  */
 #include <stdio.h>
+#include <inttypes.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -351,8 +352,8 @@ static void DisplaySystemInfo(system_info_t const *sys_info) {
   printLabel("System Timestamp Freq.:");
   printf("%fMHz\n", sys_info->timestamp_frequency / 1e6);
   printLabel("Sig. Max Wait Duration:");
-  printf("%lu (0x%lX) (timestamp count)\n", sys_info->max_wait,
-                                                           sys_info->max_wait);
+  printf("%" PRIu64 " (0x%" PRIX64 ") (timestamp count)\n",
+         sys_info->max_wait, sys_info->max_wait);
 
   printLabel("Machine Model:");
   if (HSA_MACHINE_MODEL_SMALL == sys_info->machine_model) {
@@ -1231,7 +1232,12 @@ int CheckInitialState(void) {
   bool member = false;
   struct passwd *pw;
   int num_groups = 0;
-  gid_t *groups;
+#ifdef __APPLE__
+  using group_list_entry_t = int;
+#else
+  using group_list_entry_t = gid_t;
+#endif
+  group_list_entry_t *groups;
 
   // Check if we can open /dev/kfd as read-write. If not, try to
   // diagnose common reasons why you can't.
@@ -1280,7 +1286,7 @@ int CheckInitialState(void) {
   }
 
   (void)getgrouplist(u_name, pw->pw_gid, NULL, &num_groups);
-  groups = new gid_t[num_groups];
+  groups = new group_list_entry_t[num_groups];
   if (getgrouplist(u_name, pw->pw_gid, groups, &num_groups) == -1) {
     printf("%sFailed to get user group list%s\n", COL_RED, COL_RESET);
     delete []groups;

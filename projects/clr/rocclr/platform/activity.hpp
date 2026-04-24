@@ -29,6 +29,8 @@ extern std::atomic<int (*)(activity_domain_t domain, uint32_t operation_id, void
 
 #if defined(__linux__)
 extern __thread activity_correlation_id_t correlation_id __attribute__((tls_model("initial-exec")));
+#elif defined(__APPLE__)
+extern thread_local activity_correlation_id_t correlation_id;
 #elif defined(_WIN32)
 extern __declspec(thread) activity_correlation_id_t correlation_id;
 #endif  // defined(_WIN32)

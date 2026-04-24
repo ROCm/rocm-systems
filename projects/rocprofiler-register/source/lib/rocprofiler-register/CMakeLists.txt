@@ -24,6 +24,10 @@ target_link_libraries(
             rocprofiler-register::memcheck rocprofiler-register::stdcxxfs
             rocprofiler-register::dl)
 
+if(APPLE)
+    target_link_options(rocprofiler-register PRIVATE "LINKER:-undefined,dynamic_lookup")
+endif()
+
 set_target_properties(
     rocprofiler-register
     PROPERTIES OUTPUT_NAME rocprofiler-register

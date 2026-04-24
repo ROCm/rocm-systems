@@ -115,6 +115,20 @@ void Thread::registerStack(address base, address top) {
 
 void Thread::setCurrent() { details::thread_ = this; }
 
+#elif defined(__APPLE__)
+
+namespace details {
+
+thread_local Thread* thread_;
+
+}  // namespace details
+
+void Thread::registerStack(address base, address top) {
+  // Nothing to do.
+}
+
+void Thread::setCurrent() { details::thread_ = this; }
+
 #elif defined(_WIN32)
 
 namespace details {

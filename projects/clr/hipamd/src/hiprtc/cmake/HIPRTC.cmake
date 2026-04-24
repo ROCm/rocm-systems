@@ -94,21 +94,32 @@ endmacro(generate_hiprtc_header)
 macro(generate_hiprtc_mcin HiprtcMcin HiprtcPreprocessedInput)
   if(WIN32)
     set(HIPRTC_TYPE_LINUX_ONLY "")
+    set(HIPRTC_HEADER_SYMBOL "__hipRTC_header")
+    set(HIPRTC_HEADER_SIZE_SYMBOL "__hipRTC_header_size")
+    set(HIPRTC_HEADER_SECTION ".hipRTC_header,\"a\"")
+  elseif(APPLE)
+    set(HIPRTC_TYPE_LINUX_ONLY "")
+    set(HIPRTC_HEADER_SYMBOL "___hipRTC_header")
+    set(HIPRTC_HEADER_SIZE_SYMBOL "___hipRTC_header_size")
+    set(HIPRTC_HEADER_SECTION "__DATA,__hipRTC_header")
   else()
     set(HIPRTC_TYPE_LINUX_ONLY
       "  .section .note.GNU-stack,\"\",@progbits\n"
       "  .type __hipRTC_header,@object\n"
       "  .type __hipRTC_header_size,@object")
+    set(HIPRTC_HEADER_SYMBOL "__hipRTC_header")
+    set(HIPRTC_HEADER_SIZE_SYMBOL "__hipRTC_header_size")
+    set(HIPRTC_HEADER_SECTION ".hipRTC_header,\"a\"")
   endif()
   FILE(WRITE ${HiprtcMcin}
 "// Automatically generated script for HIPRTC.\n\
 ${HIPRTC_TYPE_LINUX_ONLY}\n\
-  .section .hipRTC_header,\"a\"\n\
-  .globl __hipRTC_header\n\
-  .globl __hipRTC_header_size\n\
+  .section ${HIPRTC_HEADER_SECTION}\n\
+  .globl ${HIPRTC_HEADER_SYMBOL}\n\
+  .globl ${HIPRTC_HEADER_SIZE_SYMBOL}\n\
   .p2align 3\n\
-__hipRTC_header:\n\
+${HIPRTC_HEADER_SYMBOL}:\n\
   .incbin \"${HiprtcPreprocessedInput}\"\n\
-__hipRTC_header_size:\n\
-  .long __hipRTC_header_size - __hipRTC_header\n")
+${HIPRTC_HEADER_SIZE_SYMBOL}:\n\
+  .long ${HIPRTC_HEADER_SIZE_SYMBOL} - ${HIPRTC_HEADER_SYMBOL}\n")
 endmacro(generate_hiprtc_mcin)
