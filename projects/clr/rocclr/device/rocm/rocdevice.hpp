@@ -120,19 +120,33 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
 struct GraphSignalPool {
   ProfilingSignal* Acquire() {
     size_t idx = next_idx_.fetch_add(1, std::memory_order_relaxed);
-    if (idx < signals_.size()) {
-      return signals_[idx];
+    ProfilingSignal* ps;
+    if (idx < capacity_.load(std::memory_order_acquire)) {
+      ps = signals_[idx];
+    } else {
+      ps = GrowAndAcquire(idx);
     }
-    return GrowAndAcquire(idx);
+    if (ps) last_acquired_ = ps;
+    return ps;
   }
 
   ProfilingSignal* AcquireIrq(bool system_scope) {
     size_t idx = irq_next_idx_.fetch_add(1, std::memory_order_relaxed);
-    if (idx < irq_signals_.size()) {
-      return irq_signals_[idx];
+    ProfilingSignal* ps;
+    if (idx < irq_capacity_.load(std::memory_order_acquire)) {
+      ps = irq_signals_[idx];
+    } else {
+      ps = GrowAndAcquireIrq(idx, system_scope);
     }
-    return GrowAndAcquireIrq(idx, system_scope);
+    if (ps) last_acquired_ = ps;
+    return ps;
   }
+
+  //! Returns the most recently acquired signal from a GPU dispatch (not pre-allocation)
+  ProfilingSignal* GetLastAcquired() const { return last_acquired_; }
+
+  //! Reset after pre-allocation so GetLastAcquired only reflects actual GPU dispatches
+  void ResetLastAcquired() { last_acquired_ = nullptr; }
 
   bool Allocate(size_t count);
   bool AllocateIrq(size_t count, bool system_scope);
@@ -144,9 +158,12 @@ struct GraphSignalPool {
 
  private:
   std::vector<ProfilingSignal*> signals_;       //!< GPU-only signals
+  std::atomic<size_t> capacity_{0};             //!< Current GPU-only signal count (atomic to avoid race with growth)
   std::atomic<size_t> next_idx_{0};             //!< Next GPU-only signal index
   std::vector<ProfilingSignal*> irq_signals_;   //!< Interrupt-capable signals
+  std::atomic<size_t> irq_capacity_{0};         //!< Current interrupt signal count
   std::atomic<size_t> irq_next_idx_{0};         //!< Next interrupt signal index
+  ProfilingSignal* last_acquired_ = nullptr;    //!< Most recently acquired signal
   amd::Monitor lock_;                           //!< Protects growth of both vectors
 
   static ProfilingSignal* AllocateOneSignal(bool interrupt, bool system_scope);

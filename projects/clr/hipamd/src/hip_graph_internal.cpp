@@ -1738,10 +1738,18 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
   // Create per-launch graph signal pool for intra-segment ActiveSignal() calls.
   auto* launch_pool = new amd::roc::GraphSignalPool();
   if (graph_signal_count_ > 0) {
-    launch_pool->Allocate(graph_signal_count_);
+    if (!launch_pool->Allocate(graph_signal_count_)) {
+      delete launch_pool;
+      if (out_status != nullptr) *out_status = hipErrorOutOfMemory;
+      return nullptr;
+    }
   }
   if (graph_irq_signal_count_ > 0) {
-    launch_pool->AllocateIrq(graph_irq_signal_count_, true);
+    if (!launch_pool->AllocateIrq(graph_irq_signal_count_, true)) {
+      delete launch_pool;
+      if (out_status != nullptr) *out_status = hipErrorOutOfMemory;
+      return nullptr;
+    }
   }
 
   // Allocate SyncPlan HW events from the graph pool (replaces CreateHwEvents).
@@ -1750,7 +1758,16 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
   std::vector<void*> segment_hw_events(sync_plan_.num_segments, nullptr);
   for (int i = 0; i < sync_plan_.num_segments; ++i) {
     segment_hw_events[i] = launch_pool->Acquire();
+    if (segment_hw_events[i] == nullptr) {
+      delete launch_pool;
+      if (out_status != nullptr) *out_status = hipErrorOutOfMemory;
+      return nullptr;
+    }
   }
+
+  // SyncPlan Acquire calls above are pre-allocation, not GPU dispatches.
+  // Reset so GetLastAcquired() only reflects signals from actual dispatches.
+  launch_pool->ResetLastAcquired();
 
   // Apply pre-computed patches — writes HW events directly into flatPacketData
   if (!sync_plan_.patch_list.empty()) {
@@ -1762,6 +1779,8 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
 
   // Single AccumulateCommand on launch_stream manages graph pool lifetime
   // and serves as the dispatch anchor for all segments across all streams.
+  // Note: SetOwnedGraphSignalPool transfers ownership — on error paths below,
+  // graph_accumulate->release() deletes the pool via ~AccumulateCommand.
   auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
   graph_accumulate->SetGraphSignalPool(launch_pool);
   graph_accumulate->SetOwnedGraphSignalPool(launch_pool);
@@ -1854,8 +1873,11 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
 
   size_t batchIndex = 0;
 
-  // Lambda to dispatch the current batch at batchIndex
-  auto dispatchCurrentBatch = [&]() -> hipError_t {
+  // Lambda to dispatch the current batch at batchIndex.
+  // attach_signal: when true, places a completion signal on the last packet so a
+  // subsequent non-captured node (e.g. SDMA) can wait on it directly via
+  // WaitingSignal, avoiding an extra barrier packet in the AQL queue.
+  auto dispatchCurrentBatch = [&](bool attach_signal = false) -> hipError_t {
     if (!segBatch || batchIndex >= segBatch->packet_batches.size()) {
       return hipSuccess;
     }
@@ -1882,7 +1904,7 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
 
     if (!flatData->empty()) {
       bool batchStatus = stream->vdev()->dispatchAqlPacketBatchFlat(
-          *flatData, *flatHdrs, accumulate, false, kernelNamesToDispatch, true);
+          *flatData, *flatHdrs, accumulate, attach_signal, kernelNamesToDispatch, true);
       if (!batchStatus) {
         return hipErrorUnknown;
       }
@@ -1960,7 +1982,18 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
         // Skip all consecutive captured nodes that belong to this batch
         i += packetBatch.nodeRanges.size() - 1;
 
-        status = dispatchCurrentBatch();
+        // Check if an uncaptured SDMA node (memcpy/memset) follows this batch.
+        // If so, attach a signal to the last packet so the SDMA engine can wait
+        // on it directly via WaitingSignal, avoiding an extra barrier packet.
+        bool sdma_follows = false;
+        size_t next = i + 1;
+        if (next < segment.nodes.size() &&
+            next < segBatch->node_capture_status.size() &&
+            !segBatch->node_capture_status[next]) {
+          sdma_follows = (segment.nodes[next]->GetType() == hipGraphNodeTypeMemcpy);
+        }
+
+        status = dispatchCurrentBatch(sdma_follows);
         if (status != hipSuccess) return status;
       }
     } else {

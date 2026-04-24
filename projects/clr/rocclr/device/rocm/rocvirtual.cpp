@@ -600,6 +600,10 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
 
     if (ps == nullptr) {
       LogError("GraphSignalPool: failed to allocate signal");
+      if (cmd->HwEvent() != nullptr) {
+        reinterpret_cast<ProfilingSignal*>(cmd->HwEvent())->release();
+      }
+      cmd->SetHwEvent(nullptr);
       return hsa_signal_t{0};
     }
 
@@ -641,12 +645,10 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
         }
       }
     }
-    last_graph_signal_ = ps;
     return ps->signal_;
   }
 
   // --- Normal runtime pool path ---
-  last_graph_signal_ = nullptr;
 
   // If no signal is needed, decrement the refcount and clear the hw_event of current command
   if (!attach_signal) {
@@ -882,6 +884,16 @@ bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
 }
 
 // ================================================================================================
+ProfilingSignal* VirtualGPU::HwQueueTracker::GetLastSignal() const {
+  auto* cmd = gpu_.command();
+  if (cmd != nullptr && cmd->graphSignalPool() != nullptr) {
+    auto* last = cmd->graphSignalPool()->GetLastAcquired();
+    if (last != nullptr) return last;
+  }
+  return signal_list_[current_id_];
+}
+
+// ================================================================================================
 bool VirtualGPU::HwQueueTracker::WaitCurrent() {
   ProfilingSignal* signal = GetLastSignal();
   return CpuWaitForSignal(signal);
@@ -889,7 +901,8 @@ bool VirtualGPU::HwQueueTracker::WaitCurrent() {
 
 // ================================================================================================
 void VirtualGPU::HwQueueTracker::WaitNext() {
-  if (last_graph_signal_ != nullptr) return;
+  auto* cmd = gpu_.command();
+  if (cmd != nullptr && cmd->graphSignalPool() != nullptr) return;
   size_t next = (current_id_ + 1) % signal_list_.size();
   ProfilingSignal* signal = signal_list_[next];
   // Only wait, there is no need to save timestamp for the next signal
@@ -899,9 +912,12 @@ void VirtualGPU::HwQueueTracker::WaitNext() {
 
 // ================================================================================================
 void VirtualGPU::HwQueueTracker::ResetCurrentSignal() {
-  if (last_graph_signal_ != nullptr) {
-    Hsa::signal_silent_store_relaxed(last_graph_signal_->signal_, 0);
-    last_graph_signal_ = nullptr;
+  auto* cmd = gpu_.command();
+  if (cmd != nullptr && cmd->graphSignalPool() != nullptr) {
+    auto* last = cmd->graphSignalPool()->GetLastAcquired();
+    if (last != nullptr) {
+      Hsa::signal_silent_store_relaxed(last->signal_, 0);
+    }
     return;
   }
   // Reset the signal and return
@@ -1546,6 +1562,13 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
              (thisChunk - firstCount) * kPacketSize);
     }
 
+    // Attach signal to the last packet when requested (before per-packet logging).
+    auto* lastSlotPtr = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
+        queueBase + ((startIndex + chunkEnd - 1) & queueMask) * kPacketSize);
+    if (isLastChunk && (attach_signal || blocking) && timestamp_ == nullptr) {
+      lastSlotPtr->completion_signal = Barriers().ActiveSignal();
+    }
+
     // Per-packet fixups: profiling signals and kernel-name printing.
     if (timestamp_ != nullptr || IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2)) {
       for (size_t i = chunkStart; i < chunkEnd; ++i) {
@@ -1556,8 +1579,6 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
         const uint8_t pktType =
             extractAqlBits(hdr, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
         if (timestamp_ != nullptr) {
-          // When pre_patched, skip any slot whose completion_signal was already
-          // written by ApplyHwEventPatches (non-zero means pre-patched).
           bool has_prepatched_signal = pre_patched && (slot->completion_signal.handle != 0);
           if (!has_prepatched_signal) {
             slot->completion_signal =
@@ -1597,12 +1618,6 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
                   Hsa::queue_load_read_index_scacquire(gpu_queue_), slotIdx);
         }
       }
-    }
-
-    auto* lastSlotPtr = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
-        queueBase + ((startIndex + chunkEnd - 1) & queueMask) * kPacketSize);
-    if (isLastChunk && (attach_signal || blocking) && timestamp_ == nullptr) {
-      lastSlotPtr->completion_signal = Barriers().ActiveSignal();
     }
 
     // Write valid headers and ring the doorbell for this chunk.
