@@ -2,8 +2,7 @@ cmake_minimum_required(VERSION 3.16.0)
 project(aqlprofile-sdk-tests)
 
 include(GoogleTest)
-find_package(GTest QUIET)
-include_directories(${GTEST_INCLUDE_DIRS})
+# GTest is already found/fetched by parent CMakeLists.txt
 
 if(NOT DEFINED AQLPROFILE_TARGET)
     find_library(
@@ -234,4 +233,86 @@ add_test(NAME aql-profile-v2-c-compatibility-test
          COMMAND $<TARGET_FILE:aql-profile-v2-c-compatibility-test>)
 set_tests_properties(
     aql-profile-v2-c-compatibility-test
+# Add tests for new architecture abstractions
+add_executable(hardware-config-test)
+SET(HARDWARE_CONFIG_TEST_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/hardware_config_tests.cpp
+)
+target_sources(hardware-config-test PRIVATE ${HARDWARE_CONFIG_TEST_SOURCES})
+target_include_directories(hardware-config-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
+target_link_libraries(
+    hardware-config-test
+    PRIVATE
+            GTest::gtest
+            GTest::gtest_main
+            ${CMAKE_DL_LIBS})
+gtest_discover_tests(
+    hardware-config-test
+    DISCOVERY_MODE PRE_TEST
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    PROPERTIES TIMEOUT 45 LABELS "unittests")
+
+add_executable(register-schema-test)
+SET(REGISTER_SCHEMA_TEST_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/register_schema_tests.cpp
+)
+target_sources(register-schema-test PRIVATE ${REGISTER_SCHEMA_TEST_SOURCES})
+target_include_directories(register-schema-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
+target_link_libraries(
+    register-schema-test
+    PRIVATE
+            GTest::gtest
+            GTest::gtest_main
+            ${CMAKE_DL_LIBS})
+gtest_discover_tests(
+    register-schema-test
+    DISCOVERY_MODE PRE_TEST
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    PROPERTIES TIMEOUT 45 LABELS "unittests")
+
+add_executable(architecture-registry-test)
+SET(ARCHITECTURE_REGISTRY_TEST_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/architecture_registry_tests.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architecture_registry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../hardware_architecture.cpp
+)
+target_sources(architecture-registry-test PRIVATE ${ARCHITECTURE_REGISTRY_TEST_SOURCES})
+target_include_directories(architecture-registry-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
+target_link_libraries(
+    architecture-registry-test
+    PRIVATE
+            aqlprofile::headers
+            $<$<NOT:$<BOOL:${WIN32}>>:hsa-runtime64::hsa-runtime64>
+            $<$<BOOL:${WIN32}>:${AMDHIP64_LIB}>
+            GTest::gtest
+            GTest::gtest_main
+            GTest::gmock
+            GTest::gmock_main
+            ${CMAKE_DL_LIBS})
+gtest_discover_tests(
+    architecture-registry-test
+    DISCOVERY_MODE PRE_TEST
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    PROPERTIES TIMEOUT 45 LABELS "unittests")
+
+add_executable(hardware-architecture-test)
+SET(HARDWARE_ARCHITECTURE_TEST_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/hardware_architecture_tests.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../hardware_architecture.cpp
+)
+target_sources(hardware-architecture-test PRIVATE ${HARDWARE_ARCHITECTURE_TEST_SOURCES})
+target_include_directories(hardware-architecture-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
+target_link_libraries(
+    hardware-architecture-test
+    PRIVATE
+            aqlprofile::headers
+            $<$<NOT:$<BOOL:${WIN32}>>:hsa-runtime64::hsa-runtime64>
+            $<$<BOOL:${WIN32}>:${AMDHIP64_LIB}>
+            GTest::gtest
+            GTest::gtest_main
+            ${CMAKE_DL_LIBS})
+gtest_discover_tests(
+    hardware-architecture-test
+    DISCOVERY_MODE PRE_TEST
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")

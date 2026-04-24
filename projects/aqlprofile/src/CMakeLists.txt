@@ -21,6 +21,19 @@ set ( LIB_SRC
   ${LIB_DIR}/core/gfx115x_factory.cpp
   ${LIB_DIR}/core/gfx12_factory.cpp
   ${LIB_DIR}/core/gfx1250_factory.cpp
+  ${LIB_DIR}/core/architecture_init.cpp
+  ${LIB_DIR}/core/architecture_registry.cpp
+  ${LIB_DIR}/core/hardware_architecture.cpp
+  ${LIB_DIR}/core/pm4_factory_adapter.cpp
+  ${LIB_DIR}/core/architectures/gfx9_architecture.cpp
+  ${LIB_DIR}/core/architectures/gfx10_architecture.cpp
+  ${LIB_DIR}/core/architectures/gfx11_architecture.cpp
+  ${LIB_DIR}/core/architectures/gfx12_architecture.cpp
+  ${LIB_DIR}/core/architectures/mi450_architecture.cpp
+  ${LIB_DIR}/core/architectures/mi100_architecture.cpp
+  ${LIB_DIR}/core/architectures/mi200_architecture.cpp
+  ${LIB_DIR}/core/architectures/mi300_architecture.cpp
+  ${LIB_DIR}/core/architectures/mi350_architecture.cpp
   ${LIB_DIR}/core/vega20_reg_init.cpp
   ${LIB_DIR}/core/parse_ip_discovery.cpp
   ${LIB_DIR}/core/navi_reg_init.cpp

@@ -71,8 +71,20 @@ include(CTest)
 
 # Locate or fetch GoogleTest
 find_package(GTest QUIET)
+# Check if GMock is available (required by tests)
+set(_need_fetch FALSE)
 if(NOT GTest_FOUND)
+    set(_need_fetch TRUE)
     message(STATUS "GTest not found on system -- fetching via FetchContent")
+elseif(NOT TARGET GTest::gmock)
+    set(_need_fetch TRUE)
+    message(STATUS "GTest found but GMock not available -- fetching via FetchContent")
+    # Clear system GTest to avoid conflicts
+    unset(GTest_FOUND)
+    unset(GTest_FOUND CACHE)
+endif()
+
+if(_need_fetch)
     include(FetchContent)
     set(BUILD_GMOCK ON CACHE BOOL "Build GMock" FORCE)
     set(INSTALL_GTEST OFF CACHE BOOL "Disable GTest installation" FORCE)

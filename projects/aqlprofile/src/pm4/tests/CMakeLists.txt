@@ -1,8 +1,7 @@
 cmake_minimum_required(VERSION 3.16.0)
 
 include(GoogleTest)
-find_package(GTest QUIET)
-include_directories(${GTEST_INCLUDE_DIRS})
+# GTest is already found/fetched by parent CMakeLists.txt
 
 # Add a test for gfx9 command builder
 add_executable(command-builder-test)
