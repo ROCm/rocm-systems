@@ -23,6 +23,32 @@ jobs:
     runs-on: [ubuntu-24.04]
     outputs:
       changed_dockerfile: ${{ steps.ci-flags.outputs.changed_dockerfile }}
+      ci_matrix: ${{ steps.matrices.outputs.ci_matrix }}
+      build_ci_image_matrix: ${{ steps.matrices.outputs.build_ci_image_matrix }}
+    env:
+      # Matrix variables go here in JSON notation.
+      # '>-' strips newlines
+      SUPPORTED_PLATFORMS: >-
+        [
+          "rocky",
+          "rocky8",
+          "suse",
+          "ubuntu"
+        ]
+      ROCM_VERSIONS: >-
+        [
+          "7.2.2"
+        ]
+      # MATRIX_INCLUDE / MATRIX_EXCLUDE: extra/removed matrix entries,
+      # passed through to GHA's strategy.matrix include/exclude keys
+      # so non-rectangular combinations (e.g. ubuntu x 7.13.0 only) can
+      # be expressed without abandoning the base cross-product.
+      MATRIX_INCLUDE: >-
+        [
+          {"supported_platforms": "ubuntu", "rocm_versions": "7.13.0"}
+        ]
+      MATRIX_EXCLUDE: >-
+        []
     steps:
       - name: Fetching code repository...
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -40,22 +66,98 @@ jobs:
         id: ci-flags
         run: |
           echo "changed_dockerfile=$(./util/files-changed.sh "origin/${GITHUB_BASE_REF}" HEAD 'projects/hipfile/util/docker/DOCKERFILE.*')" >> "${GITHUB_OUTPUT}"
+      - name: Compute matrix configurations
+        id: matrices
+        # ci_matrix is the full strategy.matrix object handed to the test
+        # job (Linux). GHA expands the cross-product and applies the
+        # include/exclude keys itself.
+        #
+        # build_ci_image_matrix drives the image-build job. It is derived
+        # by simulating GHA's matrix expansion on ci_matrix, projecting
+        # each resulting combo down to (supported_platforms, rocm_versions),
+        # and deduping. This way, future test-only axes on ci_matrix
+        # (CXX, compiler, ...) do not multiply images, and an exclude that
+        # removes all test legs for a given (platform, version) correctly
+        # removes that image from the build matrix.
+        #
+        # The build_ci_image_matrix is emitted in include-only form so GHA spawns
+        # exactly one image-build job per row.
+        run: |
+          ci_matrix=$(
+            jq -c --null-input \
+              --argjson supported_platforms "${SUPPORTED_PLATFORMS}" \
+              --argjson rocm_versions "${ROCM_VERSIONS}" \
+              --argjson matrix_include "${MATRIX_INCLUDE}" \
+              --argjson matrix_exclude "${MATRIX_EXCLUDE}" \
+              '{
+                supported_platforms: $supported_platforms,
+                rocm_versions: $rocm_versions,
+                include: $matrix_include,
+                exclude: $matrix_exclude
+              }'
+          )
+          echo "hipFile CI Matrix: "
+          echo "${ci_matrix}" | jq .
+          echo "ci_matrix=${ci_matrix}" >> ${GITHUB_OUTPUT}
+
+          build_ci_image_matrix=$(
+            printf '%s' "${ci_matrix}" | jq -c '
+              . as $ci
+              | ($ci
+                  | with_entries(select(.key != "include" and .key != "exclude"))
+                ) as $base
+              | ($ci.include // []) as $includes
+              | ($ci.exclude // []) as $excludes
+
+              # Cross-product of all base axes (auto-extends when axes added)
+              | (reduce ($base | to_entries)[] as $axis (
+                  [{}];
+                  [ .[] as $combo
+                  | $axis.value[] as $v
+                  | $combo + { ($axis.key): $v }
+                  ]
+                )) as $cross
+
+              # Apply excludes (partial match: every pinned field must match)
+              | ($cross | map(. as $c | select(
+                  [ $excludes[] | . as $e
+                  | ($e | to_entries | all($c[.key] == .value))
+                  ] | any | not
+                ))) as $after_exclude
+
+              # Includes that cannot merge into any original combo create
+              # new combos. An include merges if none of its base-axis
+              # values would overwrite the combos value; non-base-axis
+              # fields are always mergeable.
+              | ($includes | map(select(. as $incl
+                  | [ $after_exclude[] | . as $c
+                    | ($incl | to_entries | all(
+                        ((.key as $k | $base | has($k)) | not)
+                        or ($c[.key] == .value)
+                      ))
+                    ] | any | not
+                ))) as $new_combos
+
+              # Project to image-identity axes, drop empty rows, dedupe
+              | ($after_exclude + $new_combos
+                  | map({supported_platforms, rocm_versions}
+                        | with_entries(select(.value != null)))
+                  | map(select(length > 0))
+                  | unique
+                ) as $image_pairs
+
+              | { include: $image_pairs }
+            '
+          )
+          echo "hipFile Build CI Image Matrix: "
+          echo "${build_ci_image_matrix}" | jq .
+          echo "build_ci_image_matrix=${build_ci_image_matrix}" >> ${GITHUB_OUTPUT}
 
   Linux:
     needs: [Precheck]
     strategy:
       fail-fast: false
-      matrix:
-        supported_platforms:
-          - rocky
-          - rocky8
-          - suse
-          - ubuntu
-        rocm_versions:
-          - 7.2.2
-        include:
-          - supported_platforms: ubuntu
-            rocm_versions: 7.13.0
+      matrix: ${{ fromJSON(needs.Precheck.outputs.ci_matrix) }}
     uses: ./.github/workflows/hipfile-ci.yml
     with:
       dockerfile_changed: ${{ needs.Precheck.outputs.changed_dockerfile == '1' }}
