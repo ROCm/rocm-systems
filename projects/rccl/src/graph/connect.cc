@@ -61,7 +61,7 @@
  * @return          ncclSuccess on successful mapping, or internal error on failure.
  */
 ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graphs)[NCCL_NUM_ALGORITHMS], struct ncclTopoRanks* topoRanks) {
-  // --- STAGE 1: NULL Pointer & Basic State Checks ---
+  // --- NULL Pointer & Basic State Checks ---
   if (comm == NULL || graphs == NULL || topoRanks == NULL) return ncclInvalidArgument;
   if (comm->topo == NULL) {
     WARN("TopoPreset: Communicator state is incomplete");
@@ -72,7 +72,7 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
   int localRanks = comm->topo->nodes[GPU].count;
   int nChannels = comm->nChannels;
 
-  // --- STAGE 2: Bounds & Resource Checks ---
+  // --- Bounds & Resource Checks ---
   if (nChannels > MAXCHANNELS) {
     WARN("TopoPreset: nChannels (%d) exceeds MAXCHANNELS (%d)", nChannels, MAXCHANNELS);
     return ncclInvalidUsage;
@@ -84,7 +84,7 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
     return ncclInternalError;
   }
 
-  // --- STAGE 3: Pre-validation of Rank Presence ---
+  // ---Pre-validation of Rank Presence ---
   // We check the first channel of the Ring to ensure this rank is even part of the plan
   bool rankFound = false;
   int* firstRing = graphs[NCCL_ALGO_RING]->intra;
@@ -98,21 +98,34 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
 
   topoRanks->crossNicRing = graphs[NCCL_ALGO_RING]->crossNic;
   topoRanks->nvlsHeadNum = 0;
-   // set all the uninitialized adjacent ranks values to -1 , 0 from calloc is ambiguous with rank 0
+
+  // ---- POISONING / INITIALIZATION ---
+  // set all the uninitialized topoRanks rank values to -1 , 0 from calloc is ambiguous with rank 0
   for (int c=0; c< MAXCHANNELS; c++) {
+    topoRanks->ringNext[c] = topoRanks->ringPrev[c] = -1;
+    topoRanks->ringSend[c] = topoRanks->ringRecv[c] = -1;
+    topoRanks->treeToParent[c] = -1;
+    topoRanks->treeToChild0[c] = -1;
+    topoRanks->treeToChild1[c] = -1;
+    topoRanks->nvlsHeads[c] = -1; // Align NVLS with Tree/Ring sentinels
+
     struct ncclChannel* channel = comm->channels+c;
     channel->ring.prev = channel->ring.next = -1;
     channel->tree.up = -1;
     channel->collnetChain.up = -1;
-    for (int i=0; i<NCCL_MAX_TREE_ARITY; i++) channel->tree.down[i] = -1;
-    for (int i=0; i<NCCL_MAX_TREE_ARITY; i++) channel->collnetChain.down[i] = -1;
+    for (int i=0; i<NCCL_MAX_TREE_ARITY; i++)  {
+      channel->tree.down[i] = -1;
+      channel->collnetChain.down[i] = -1;
+    }
     channel->collnetDirect.out = -1;
     channel->collnetDirect.headRank = -1;
     channel->collnetDirect.nHeads = 0;
     channel->collnetDirect.shift = 0;
     for (int i=0; i<NCCL_MAX_DIRECT_ARITY+1; i++) channel->collnetDirect.heads[i] = -1;
-    for (int i=0; i<NCCL_MAX_DIRECT_ARITY; i++) channel->collnetDirect.up[i] = -1;
-    for (int i=0; i<NCCL_MAX_DIRECT_ARITY; i++) channel->collnetDirect.down[i] = -1;
+    for (int i=0; i<NCCL_MAX_DIRECT_ARITY; i++)  {
+      channel->collnetDirect.up[i] = -1;
+      channel->collnetDirect.down[i] = -1;
+    } 
   }
 
   for (int c=0; c<nChannels; c++) {
@@ -131,18 +144,18 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
       }
       if (treeIntra[i] == rank) {
         int parentIndex = 0;
-        int child0Index = graphs[NCCL_ALGO_TREE]->pattern == NCCL_TOPO_PATTERN_TREE ? 0 : 1;
-        int child1Index = graphs[NCCL_ALGO_TREE]->pattern == NCCL_TOPO_PATTERN_SPLIT_TREE ? 1 : 0;
+        int child0Index = ( graphs[NCCL_ALGO_TREE]->pattern == NCCL_TOPO_PATTERN_TREE ) ? 0 : 1;
+        int child1Index = ( graphs[NCCL_ALGO_TREE]->pattern == NCCL_TOPO_PATTERN_SPLIT_TREE ) ? 1 : 0;
 
         topoRanks->treeToParent[c] = treeIntra[parentIndex];
         topoRanks->treeToChild0[c] = treeIntra[child0Index];
         topoRanks->treeToChild1[c] = treeIntra[child1Index];
-        channel->tree.up         = i == 0 ? -1 : treeIntra[i-1];
-        channel->tree.down[0]    = i == localRanks-1 ? -1 : treeIntra[i+1];
+        channel->tree.up         = (i == 0) ? -1 : treeIntra[i-1];
+        channel->tree.down[0]    = (i == localRanks-1) ? -1 : treeIntra[i+1];
       }
       if (collNetIntra[i] == rank) {
-        channel->collnetChain.up      = i == 0 ? comm->nRanks : collNetIntra[i-1];
-        channel->collnetChain.down[0] = i == localRanks-1 ? -1 : collNetIntra[i+1];
+        channel->collnetChain.up      = (i == 0) ? comm->nRanks : collNetIntra[i-1];
+        channel->collnetChain.down[0] = (i == localRanks-1) ? -1 : collNetIntra[i+1];
       }
     }
   }
