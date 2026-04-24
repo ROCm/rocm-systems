@@ -11,7 +11,7 @@ GPU violations monitoring in AMD SMI tracks throttling events caused by power or
 
 :::{note}
 NVML users: the closest equivalent to `nvmlDeviceGetViolationStatus()` is `amdsmi_get_violation_status()`.
-See [GPU monitoring](/doxygen/docBin/html/group__tagGPUMonitor) for more information.
+See [Usage](#usage) for more information.
 
 | nvidia-smi command | amd-smi equivalent | Notes |
 |--------------------|--------------------|-------|
@@ -42,16 +42,16 @@ See [GPU monitoring](/doxygen/docBin/html/group__tagGPUMonitor) for more informa
 
 `throttle_status` and the violation API target different GPU generations and rely on different gpu_metrics versions:
 
-| Feature | Navi / MI1x / MI2x | MI3x+ (MI300X and newer) |
+| Feature | Radeon (Navi) and Instinct MI1x / MI2x | Instinct MI3x+ (MI300X and newer) |
 |---------|---------------------|--------------------------|
 | gpu_metrics version | v1.3 (fixed layout) | v1.8+ (per-XCP/XCC fields); v1.9+ (full dynamic layout) |
 | `THROTTLE_STATUS` in `metric --power` | THROTTLED / UNTHROTTLED | N/A |
 | `metric --violation` / `monitor --violation` | N/A (unsupported) | Full violation details |
 | Recommended throttle check | `amd-smi metric --power` | `amd-smi metric --violation` or `amd-smi monitor --violation` |
 
-**Navi/MI1x/MI2x:** Use `amd-smi metric --power` to check `THROTTLE_STATUS`. The violation API (`amdsmi_get_violation_status()`) is not supported on these ASICs and returns N/A or max_uint.
+- **Navi/MI1x/MI2x:** Use `amd-smi metric --power` to check `THROTTLE_STATUS`. The violation API (`amdsmi_get_violation_status()`) is not supported on these ASICs and returns N/A or max_uint.
 
-**MI3x+ (MI300X and newer):** Use `amd-smi metric --violation` or `amd-smi monitor --violation` for detailed violation data (PROCHOT, PPT, Socket Thermal, VR Thermal, HBM Thermal). The `THROTTLE_STATUS` field in `metric --power` shows N/A on these ASICs.
+- **MI3x+ (MI300X and newer):** Use `amd-smi metric --violation` or `amd-smi monitor --violation` for detailed violation data (PROCHOT, PPT, Socket Thermal, VR Thermal, HBM Thermal). The `THROTTLE_STATUS` field in `metric --power` shows N/A on these ASICs.
 
 ## Common questions
 
@@ -65,7 +65,8 @@ No. The violations API (MI3x+ only) provides time-based percentages (PVIOL%, TVI
 
 ### How can I monitor PROCHOT throttling using AMD SMI?
 
-On **MI3x+**: Use `amd-smi metric --violation` or `amd-smi monitor --violation` to check `prochot_violation_activity` and `prochot_violation_status`. On **Navi/MI1x/MI2x**: Use `amdsmi_get_gpu_metrics_info()` and check the `indep_throttle_status` field for `PROCHOT_GFX` bits. PROCHOT indicates emergency thermal throttling when the GPU hits critical temperature limits.
+- On **MI3x+**: Use `amd-smi metric --violation` or `amd-smi monitor --violation` to check `prochot_violation_activity` and `prochot_violation_status`.
+- On **Navi/MI1x/MI2x**: Use `amdsmi_get_gpu_metrics_info()` and check the `indep_throttle_status` field for `PROCHOT_GFX` bits. PROCHOT indicates emergency thermal throttling when the GPU hits critical temperature limits.
 
 ### What are the different types of thermal violations AMD SMI can detect?
 
@@ -73,15 +74,25 @@ AMD SMI detects: **TVIOL** (overall thermal violation %), **PROCHOT** (processor
 
 ### How do I check for power limit violations on AMD GPUs?
 
-On **MI3x+**: Use `amdsmi_get_violation_status()` to get `per_ppt_pwr` (PVIOL%). Values >0% indicate time spent power-throttled. From CLI: `amd-smi metric --violation` or `amd-smi monitor --violation` displays PVIOL percentage. On **Navi/MI1x/MI2x**: Check `throttle_status` in `amd-smi metric --power` for PPT (package power tracking) throttling.
+- On **MI3x+**: Use `amdsmi_get_violation_status()` to get `per_ppt_pwr` (PVIOL%). Values >0% indicate time spent power-throttled. From CLI: `amd-smi metric --violation` or `amd-smi monitor --violation` displays PVIOL percentage.
+- On **Navi/MI1x/MI2x**: Check `throttle_status` in `amd-smi metric --power` for PPT (package power tracking) throttling.
 
 ### What does HBM thermal throttling mean and how to detect it?
 
-HBM (High-Bandwidth Memory) thermal throttling occurs when GPU memory overheats. On **MI3x+**: Detected via `per_hbm_thrm` (HBM_TVIOL%) and `active_hbm_thrm` in the violation API. On **Navi/MI1x/MI2x**: Check the `TEMP_MEM` bit in `indep_throttle_status`. Detailed HBM violation percentages are only available on MI3x+.
+HBM (High-Bandwidth Memory) thermal throttling occurs when GPU memory overheats.
+
+- On **MI3x+**: Detected via `per_hbm_thrm` (HBM_TVIOL%) and `active_hbm_thrm` in the violation API.
+- On **Navi/MI1x/MI2x**: Check the `TEMP_MEM` bit in `indep_throttle_status`. Detailed HBM violation percentages are only available on MI3x+.
 
 ### How to interpret violation status codes in AMD SMI?
 
-Violation percentages: **0%** = no throttling (good), **>0%** = time spent throttled (higher = worse), **N/A or max_uint** = feature not supported on this GPU. The API returns both power_violation_pct (PVIOL) and thermal_violation_pct (TVIOL) as percentages.
+Violation percentages:
+
+- **0%** = no throttling (good)
+- **>0%** = time spent throttled (higher = worse)
+- **N/A or max_uint** = feature not supported on this GPU.
+
+The API returns both `power_violation_pct` (PVIOL) and `thermal_violation_pct` (TVIOL) as percentages.
 
 ### What triggers socket power violations in AMD GPUs?
 
@@ -97,7 +108,13 @@ Throttling directly reduces GPU clock speeds to stay within power/thermal limits
 
 ### How to distinguish between thermal and power violations?
 
-**PVIOL (power)** = hitting wattage limits, GPU draws too much power. **TVIOL (thermal)** = hitting temperature limits, GPU too hot. A GPU can have both simultaneously (e.g., 30% PVIOL + 20% TVIOL). On **MI3x+**: Check both percentages via `amdsmi_get_violation_status()` or `amd-smi metric --violation`. On **Navi/MI1x/MI2x**: Use `throttle_status` bit flags in `amd-smi metric --power` to see if PPT (power) or thermal throttling is active.
+- **PVIOL (power)** = hitting wattage limits, GPU draws too much power.
+- **TVIOL (thermal)** = hitting temperature limits, GPU too hot.
+
+A GPU can have both simultaneously (e.g., 30% PVIOL + 20% TVIOL).
+
+- On **MI3x+**: Check both percentages via `amdsmi_get_violation_status()` or `amd-smi metric --violation`.
+- On **Navi/MI1x/MI2x**: Use `throttle_status` bit flags in `amd-smi metric --power` to see if PPT (power) or thermal throttling is active.
 
 ## Interpreting violation results
 
@@ -183,12 +200,13 @@ AMD SMI provides tools to programmatically monitor GPU violations and throttling
 ::::{tab-item} C/C++
 
 The AMD SMI library provides APIs to query violation status.
+
+**Related AMD SMI APIs:**
+
 See [GPU monitoring](/doxygen/docBin/html/group__tagGPUMonitor) and [Clock,
 power, and performance
 queries](/doxygen/docBin/html/group__tagClkPowerPerfQuery) for more
 information.
-
-**Related AMD SMI APIs:**
 
 - `amdsmi_get_violation_status()` - Get violation percentages
 - `amdsmi_get_gpu_metrics_info()` - Get throttle_status and detailed metrics
@@ -291,36 +309,7 @@ amd-smi metric --gpu all --power --temperature
 
 :::::
 
-## Troubleshooting
-
-### High PVIOL (Power Violations)?
-
-- Check power limit settings with `amdsmi_get_power_cap_info()`
-- View static power cap details (default, min, max): `amd-smi static --limit`
-- Monitor live power consumption: `amd-smi monitor --power`
-- Verify adequate PSU capacity for your system
-- Consider reducing workload intensity or power limits
-- Monitor with: `amd-smi metric --gpu all --power`
-
-:::{note}
-`amd-smi static --limit` shows power cap thresholds and thermal shutdown/slowdown limits. If your GPU is hitting these limits, it may throttle to stay within them, causing PVIOL/TVIOL. Adjusting power limits or improving cooling can help reduce Power or thermal related violations.
-:::
-
-### High TVIOL (Thermal Violations)?
-
-- Check cooling system (fans, airflow)
-- Verify thermal paste application
-- Monitor ambient temperature
-- Check for dust buildup in coolers
-- Use: `amd-smi metric --gpu all --temperature`
-
-### Getting N/A or max_uint values?
-
-- **For violation fields (`metric --violation`) returning N/A:** The violation API is only supported on MI3x+ (MI300X and newer). On older ASICs (Navi/MI1x/MI2x), use `amd-smi metric --power` and check `THROTTLE_STATUS` instead.
-- **For `THROTTLE_STATUS` in `metric --power` showing N/A:** This field is available on Navi/MI1x/MI2x (gpu_metrics v1.3) but not on MI3x+. On MI3x+, use `amd-smi metric --violation` or `amd-smi monitor --violation` instead.
-- Check your ASIC generation with `amdsmi_get_gpu_asic_info()` or `amd-smi static --asic`
-
-## Adjusting clock limits (MI3x+)
+### Adjusting clock limits (MI3x+)
 
 Some MI3x+ variants support adjusting the Graphics clock (SCLK) and memory clock (MCLK) min/max limits, which can help manage power violations by capping clock speeds before the hardware throttles.
 
@@ -345,6 +334,35 @@ sudo amd-smi reset --clocks
 ```
 
 Lowering the SCLK maximum reduces peak power draw, which can reduce PVIOL percentage at the cost of peak compute throughput. See `amd-smi set -h` for the full list of supported options for your hardware.
+
+## Troubleshooting
+
+### High PVIOL (Power Violations)?
+
+- Check power limit settings with `amdsmi_get_power_cap_info()`
+- View static power cap details (default, min, max): `amd-smi static --limit`
+- Monitor live power consumption: `amd-smi monitor --power`
+- Verify adequate PSU capacity for your system
+- Consider reducing workload intensity or power limits
+- Monitor with: `amd-smi metric --gpu all --power`
+
+:::{note}
+`amd-smi static --limit` shows power cap thresholds and thermal shutdown/slowdown limits. If your GPU is hitting these limits, it may throttle to stay within them, causing PVIOL/TVIOL. Adjusting power limits or improving cooling can help reduce power or thermal related violations.
+:::
+
+### High TVIOL (Thermal Violations)?
+
+- Check cooling system (fans, airflow)
+- Verify thermal paste application
+- Monitor ambient temperature
+- Check for dust buildup in coolers
+- Use: `amd-smi metric --gpu all --temperature`
+
+### Getting N/A or max_uint values?
+
+- **For violation fields (`metric --violation`) returning N/A:** The violation API is only supported on MI3x+ (MI300X and newer). On older ASICs (Navi/MI1x/MI2x), use `amd-smi metric --power` and check `THROTTLE_STATUS` instead.
+- **For `THROTTLE_STATUS` in `metric --power` showing N/A:** This field is available on Navi/MI1x/MI2x (gpu_metrics v1.3) but not on MI3x+. On MI3x+, use `amd-smi metric --violation` or `amd-smi monitor --violation` instead.
+- Check your ASIC generation with `amdsmi_get_gpu_asic_info()` or `amd-smi static --asic`
 
 ## Further reading
 
