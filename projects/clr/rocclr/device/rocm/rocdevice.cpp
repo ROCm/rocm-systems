@@ -1200,6 +1200,7 @@ bool Device::populateOCLDeviceConstants() {
   info_.maxWorkItemDimensions_ = 3;
 
   uint8_t memory_properties[8];
+  memset(memory_properties, 0, sizeof(memory_properties));
   // Get the memory property from ROCr.
   if (HSA_STATUS_SUCCESS !=
       Hsa::agent_get_info(bkendDevice_, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES,
@@ -1208,9 +1209,11 @@ bool Device::populateOCLDeviceConstants() {
   }
 
   // Check if the device is APU
-  if (hsa_flag_isset64(memory_properties, HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU)) {
+  bool is_apu = hsa_flag_isset64(memory_properties, HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU);
+  if (is_apu) {
     info_.hostUnifiedMemory_ = 1;
   }
+  LogPrintfInfo("Memory properties: is_apu=%d, hostUnifiedMemory=%d", is_apu, info_.hostUnifiedMemory_);
 
   if (settings().enableLocalMemory_ && gpuvm_segment_.handle != 0) {
     size_t global_segment_size = 0;
@@ -1221,9 +1224,29 @@ bool Device::populateOCLDeviceConstants() {
     }
 
     assert(global_segment_size > 0);
-    info_.globalMemSize_ = (static_cast<uint64_t>(std::min(GPU_MAX_HEAP_SIZE, 100u)) *
-                            static_cast<uint64_t>(global_segment_size)) /
-                           100u;
+
+    // When GPU_ENABLE_PAL=0 on APU systems, the driver may report a very small local memory
+    // segment (e.g., 283MB) instead of the actual shared system memory. Detect this case
+    // and use host memory fallback.
+    const size_t MIN_EXPECTED_GPU_MEM = 1 * Gi;  // 1GB threshold
+    if (global_segment_size < MIN_EXPECTED_GPU_MEM) {
+      uint64_t host_mem = amd::Os::hostTotalPhysicalMemory();
+      LogPrintfInfo("GPU memory segment too small (%zu MB), likely PAL-disabled APU. Using host memory fallback: %zu MB",
+                    global_segment_size / (1024*1024), host_mem / (1024*1024));
+      info_.globalMemSize_ = host_mem / 2;  // Use half of system memory for APU
+      info_.globalMemSize_ = std::max(info_.globalMemSize_, uint64_t(1 * Gi));
+      info_.globalMemSize_ = (static_cast<uint64_t>(std::min(GPU_MAX_HEAP_SIZE, 100u)) *
+                              static_cast<uint64_t>(info_.globalMemSize_)) /
+                             100u;
+      // Force hostUnifiedMemory since this is clearly an APU
+      info_.hostUnifiedMemory_ = 1;
+    } else {
+      info_.globalMemSize_ = (static_cast<uint64_t>(std::min(GPU_MAX_HEAP_SIZE, 100u)) *
+                              static_cast<uint64_t>(global_segment_size)) /
+                             100u;
+      LogPrintfInfo("Using gpuvm_segment path: global_segment_size=%zu, globalMemSize=%zu MB",
+                    global_segment_size, info_.globalMemSize_ / (1024*1024));
+    }
 
     // For APU with vram size <= 512MiB, use a smaller single alloc percentage
     if (info_.globalMemSize_ <= 536870912) {
@@ -1255,11 +1278,15 @@ bool Device::populateOCLDeviceConstants() {
     assert(alloc_granularity_ > 0);
   } else {
     // We suppose half of physical memory can be used by GPU in APU system
-    info_.globalMemSize_ = amd::Os::hostTotalPhysicalMemory() / 2;
+    uint64_t host_mem = amd::Os::hostTotalPhysicalMemory();
+    info_.globalMemSize_ = host_mem / 2;
     info_.globalMemSize_ = std::max(info_.globalMemSize_, uint64_t(1 * Gi));
     info_.globalMemSize_ = (static_cast<uint64_t>(std::min(GPU_MAX_HEAP_SIZE, 100u)) *
                             static_cast<uint64_t>(info_.globalMemSize_)) /
                            100u;
+    LogPrintfInfo("Using fallback path: hostTotalPhysicalMemory=%zu MB, globalMemSize=%zu MB, enableLocalMemory=%d, gpuvm_segment.handle=%p",
+                  host_mem / (1024*1024), info_.globalMemSize_ / (1024*1024),
+                  settings().enableLocalMemory_, (void*)gpuvm_segment_.handle);
 
     info_.maxMemAllocSize_ =
         uint64_t(info_.globalMemSize_ * std::min(GPU_SINGLE_ALLOC_PERCENT, 100u) / 100u);
@@ -1791,8 +1818,16 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
       Hsa::agent_get_info(bkendDevice_,
                           static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_AVAIL),
                           &globalAvailMemory)) {
-    LogError("HSA_AMD_AGENT_INFO_MEMORY_AVAIL query failed.");
-    return false;
+    // Fallback for APU systems: When the query fails (e.g., when GPU_ENABLE_PAL=0 on
+    // integrated GPUs), use the total device memory size as an approximation of available memory.
+    // For discrete GPUs, this query should not fail, so return error.
+    if (info_.hostUnifiedMemory_) {
+      LogWarning("HSA_AMD_AGENT_INFO_MEMORY_AVAIL query failed on APU. Falling back to total device memory.");
+      globalAvailMemory = info_.globalMemSize_;
+    } else {
+      LogError("HSA_AMD_AGENT_INFO_MEMORY_AVAIL query failed.");
+      return false;
+    }
   }
 
   globalAvailMemory = globalAvailMemory / Ki;
