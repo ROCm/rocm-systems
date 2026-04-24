@@ -20,8 +20,6 @@
 #include <iostream>
 #include <ios>
 
-#include <cmd_options.hh>
-
 #define MASK_SHIFT(x, n) \
   (x & (static_cast<uint64_t>(1) << n)) >> n
 
