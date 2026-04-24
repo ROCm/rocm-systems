@@ -54,10 +54,16 @@ re-connect, so syncing after every launch puts the cost on the per-
 dispatch path. Workloads with batched dispatches between syncs
 amortize the cost over many launches.
 
-| Workload pattern                                | Measured / estimated overhead |
-|-------------------------------------------------|-------------------------------|
-| 1 launch + 1 sync, microbenchmark (worst case)  | +1.7 µs / dispatch (+10.9%) — measured |
-| graphbench (batched, real workload)             | &lt;0.4% — **preliminary measurement, subject to change** (in the noise floor of the run) |
+> **All numbers in this section are preliminary and subject to
+> change.** They are point-in-time results from a small number of runs
+> on a single machine; they have not been characterized across firmware
+> revisions, ASIC variants, or extensive workload coverage. Treat as
+> directional, not as a steady-state performance contract.
+
+| Workload pattern                                | Preliminary overhead |
+|-------------------------------------------------|----------------------|
+| 1 launch + 1 sync, microbenchmark (worst case)  | +1.7 µs / dispatch (+10.9%) |
+| graphbench (batched, real workload)             | &lt;0.4% (in the noise floor of the run) |
 | Typical batched inference / training / Triton   | Expected near-zero by extension of the graphbench result; not yet measured per-workload |
 
 The per-`AqlConnect` overhead is the only added cost on the
