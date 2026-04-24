@@ -39,12 +39,12 @@ def test_resolve_config_dir_returns_bundled_path():
     assert (p / "mcp.json").exists()
 
 
-def test_resolve_binary_uses_override(tmp_path: Path, monkeypatch):
+def test_resolve_user_binary_uses_override(tmp_path: Path, monkeypatch):
     fake_bin = tmp_path / "fake-opencode"
     fake_bin.write_text("#!/bin/sh\necho fake\n")
     fake_bin.chmod(0o755)
     monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", str(fake_bin))
-    assert opencode_launcher.resolve_opencode_binary() == fake_bin
+    assert opencode_launcher.resolve_user_opencode_binary() == fake_bin
 
 
 def test_resolve_binary_prefers_repo_local_patched_build(tmp_path: Path, monkeypatch):
@@ -73,11 +73,23 @@ def test_resolve_binary_prefers_repo_local_patched_build(tmp_path: Path, monkeyp
     assert opencode_launcher.resolve_opencode_binary() == local_bin
 
 
-def test_resolve_binary_raises_when_override_missing(tmp_path: Path, monkeypatch):
-    """PERFXPERT_OPENCODE_PATH pointing to a nonexistent file must raise immediately."""
+def test_resolve_user_binary_raises_when_override_missing(tmp_path: Path, monkeypatch):
+    """The explicit upstream-opencode escape hatch validates its override."""
     monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", str(tmp_path / "nonexistent"))
     with pytest.raises(FileNotFoundError, match="does not exist"):
-        opencode_launcher.resolve_opencode_binary()
+        opencode_launcher.resolve_user_opencode_binary()
+
+
+def test_resolve_user_binary_raises_when_override_not_executable(
+    tmp_path: Path, monkeypatch
+):
+    """The explicit upstream-opencode escape hatch validates execute bit."""
+    fake_bin = tmp_path / "fake-opencode"
+    fake_bin.write_text("#!/bin/sh\necho fake\n")
+    fake_bin.chmod(0o644)
+    monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", str(fake_bin))
+    with pytest.raises(FileNotFoundError, match="not executable"):
+        opencode_launcher.resolve_user_opencode_binary()
 
 
 def test_prepare_runtime_config_dir_skips_subdirectories(tmp_path: Path):
@@ -178,9 +190,9 @@ def test_amd_red_in_banner(monkeypatch):
 # -- Fix 4: doctor autodiscovery of well-known opencode paths ---------------
 
 
-def test_resolve_binary_autodiscovers_home_opencode_bin(tmp_path: Path, monkeypatch):
+def test_resolve_user_binary_autodiscovers_home_opencode_bin(tmp_path: Path, monkeypatch):
     """`~/.opencode/bin/opencode` is the upstream installer's default;
-    resolve_opencode_binary() must find it without PATH munging."""
+    the explicit `perfxpert-code opencode` path must find it without PATH munging."""
     fake_home = tmp_path
     fake_bin_dir = fake_home / ".opencode" / "bin"
     fake_bin_dir.mkdir(parents=True)
@@ -202,7 +214,7 @@ def test_resolve_binary_autodiscovers_home_opencode_bin(tmp_path: Path, monkeypa
 
     monkeypatch.setattr(opencode_launcher.resources, "as_file", _fake_as_file)
 
-    resolved = opencode_launcher.resolve_opencode_binary()
+    resolved = opencode_launcher.resolve_user_opencode_binary()
     assert resolved == fake_bin
 
 
@@ -213,10 +225,10 @@ def test_resolve_binary_autodiscovers_home_opencode_bin(tmp_path: Path, monkeypa
         ".local/bin/opencode",
     ],
 )
-def test_resolve_binary_autodiscovers_multiple_wellknown_paths(
+def test_resolve_user_binary_autodiscovers_multiple_wellknown_paths(
     tmp_path: Path, monkeypatch, subpath
 ):
-    """Each of the well-known install locations must be auto-discovered."""
+    """Each well-known upstream location must be auto-discovered for the escape hatch."""
     fake_home = tmp_path
     fake_bin = fake_home / subpath
     fake_bin.parent.mkdir(parents=True, exist_ok=True)
@@ -235,13 +247,11 @@ def test_resolve_binary_autodiscovers_multiple_wellknown_paths(
 
     monkeypatch.setattr(opencode_launcher.resources, "as_file", _fake_as_file)
 
-    assert opencode_launcher.resolve_opencode_binary() == fake_bin
+    assert opencode_launcher.resolve_user_opencode_binary() == fake_bin
 
 
-def test_resolve_binary_missing_suggests_install_command(monkeypatch, tmp_path: Path):
-    """When no opencode binary is found anywhere, the error message must
-    mention the upstream install command so doctor's output is actionable.
-    """
+def test_resolve_default_binary_missing_suggests_wrapper(monkeypatch, tmp_path: Path):
+    """The default path must point users back to the bundled submodule build."""
     monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
     # Ensure no well-known path resolves
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
@@ -258,9 +268,22 @@ def test_resolve_binary_missing_suggests_install_command(monkeypatch, tmp_path: 
     with pytest.raises(FileNotFoundError) as exc:
         opencode_launcher.resolve_opencode_binary()
     msg = str(exc.value)
-    assert "opencode.ai/install.sh" in msg, (
-        "install hint must surface the upstream installer URL"
-    )
+    assert "bundled patched opencode binary not found" in msg
+    assert "pip-install-from-git.sh" in msg
+    assert "perfxpert-code opencode" in msg
+
+
+def test_resolve_user_binary_missing_suggests_upstream_install(
+    monkeypatch, tmp_path: Path
+):
+    """The explicit upstream-opencode escape hatch gives upstream install help."""
+    monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(opencode_launcher.shutil, "which", lambda _: None)
+
+    with pytest.raises(FileNotFoundError) as exc:
+        opencode_launcher.resolve_user_opencode_binary()
+    assert "opencode.ai/install.sh" in str(exc.value)
 
 
 def test_wellknown_paths_list_includes_home_opencode():

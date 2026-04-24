@@ -197,7 +197,8 @@ def add_args(parser: argparse.ArgumentParser):
         choices=["text", "json", "markdown", "webview"],
         default="text",
         help="Output format: text, json, markdown, or webview (default: text). "
-        "File extension is set automatically: .txt, .json, .md, .html",
+        "File extension is set automatically: .txt, .json, .md, .html. "
+        "Non-text formats write a report file by default.",
     )
 
     analysis_options.add_argument(
@@ -1821,7 +1822,15 @@ def _execute_agentic(
     _ext_map = {"json": ".json", "markdown": ".md", "webview": ".html", "text": ".txt"}
     _ext = _ext_map.get(output_format, ".txt")
 
-    if config and config.output_path and not config.output_file:
+    if config and output_format != "text":
+        if not config.output_path:
+            config.output_path = "."
+        if not config.output_file:
+            if database_path:
+                config.output_file = os.path.splitext(os.path.basename(database_path))[0]
+            else:
+                config.output_file = "analysis"
+    elif config and config.output_path and not config.output_file:
         if database_path:
             config.output_file = os.path.splitext(os.path.basename(database_path))[0]
         else:

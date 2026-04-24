@@ -2,7 +2,7 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
-## HIP 7.13 for ROCm 7.13
+## HIP 7.14 for ROCm 7.14
 
 ### Added
 * New HIP APIs
@@ -23,6 +23,17 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
       * `hipExecutionCtxRecordEvent` records an event on an execution context
       * `hipExecutionCtxSynchronize` blocks until all work on an execution context has completed
       * `hipExecutionCtxWaitEvent` makes an execution context wait on an event
+
+## HIP 7.13 for ROCm 7.13
+
+### Added
+
+* New HIP APIs
+    - `cooperative_groups::reduce()` allows calling reduce operators on `thread_block_tile` and `coalesced_threads`. The implementation is based on the `__reduce_*_sync` operations, so the macro `HIP_ENABLE_EXTRA_WARP_SYNC_TYPES` may be needed to unlock some optimizations.
+
+### Changed
+
+* `__reduce_and_sync()`, `__reduce_or_sync()` and `__reduce_xor_sync()` now provide a consistent behavior for all masks values and with CUDA. Before, some masks would be translated to bitwise operations but other would not (like the ones containing "holes"). Now all masks cause bitwise instructions to be emitted. This is a change of behavior from previous versions.
 
 ## HIP 7.12 for ROCm 7.12
 

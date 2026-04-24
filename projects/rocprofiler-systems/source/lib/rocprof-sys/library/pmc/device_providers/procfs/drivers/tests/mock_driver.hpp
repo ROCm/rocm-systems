@@ -84,6 +84,8 @@ public:
     }
 };
 
+using strict_mock_driver = ::testing::StrictMock<mock_driver>;
+
 /**
  * @brief Factory for creating and injecting mock driver instances in tests.
  */

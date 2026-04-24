@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "core/sdma_feature.hpp"
+
 #include <cstdint>
 #include <memory>
 

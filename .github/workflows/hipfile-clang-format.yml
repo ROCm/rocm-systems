@@ -1,4 +1,4 @@
-name: hipfile-clang-format
+name: "hipFile clang-format"
 
 on:
   push:
