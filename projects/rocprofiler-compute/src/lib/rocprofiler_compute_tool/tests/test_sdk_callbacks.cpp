@@ -223,10 +223,10 @@ void TestSdkCallbacks::invoke_record_callback(uint64_t           counter_id,
                                               double             counter_value)
 {
     rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
-    dispatch_data.dispatch_info.dispatch_id        = 100;
-    dispatch_data.dispatch_info.agent_id.handle    = 200;
-    dispatch_data.dispatch_info.kernel_id          = 300;
-    dispatch_data.dispatch_info.group_segment_size = 400;
+    dispatch_data.dispatch_info.dispatch_id                    = 100;
+    dispatch_data.dispatch_info.agent_id.handle                = 200;
+    dispatch_data.dispatch_info.kernel_id                      = 300;
+    dispatch_data.dispatch_info.group_segment_size             = 400;
 
     std::vector<rocprofiler_counter_record_t> record_data(2);
     record_data[0].counter_value = counter_value;
@@ -317,7 +317,6 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(rocprofiler_compute_tool::iteration_multiplexing_mode_t::DISABLED,
                       rocprofiler_compute_tool::iteration_multiplexing_mode_t::KERNEL,
                       rocprofiler_compute_tool::iteration_multiplexing_mode_t::LAUNCH));
-
 
 //////////////////////////////////////////////////////////////////////////
 /// TestSdkCallbacksKernelFiltering

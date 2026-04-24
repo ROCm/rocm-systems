@@ -1,5 +1,10 @@
 include(${CMAKE_CURRENT_LIST_DIR}/GitSubmodule.cmake)
 
+# TheRock to introduces "hermetic" builds where submodules are checked out and then network access is disabled.
+# This means that we can't rely on fetching submodules during build, ex via FetchContent.
+# At the same time we can't rely on CI to always calling `submodule update`, therefore hybrid solution:
+# dependencies are added as submodules but they are checked out on cmake as well.
+
 if(ENABLE_TESTS)
     rocprofiler_compute_checkout_git_submodule(
         RELATIVE_PATH googletest
