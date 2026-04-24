@@ -1,0 +1,48 @@
+/*
+ * Restrictive linker version script for the LTTng-UST provider .so spike.
+ *
+ * Mirrors the HSA-runtime "hsacore.so.def" pattern:
+ *   - default visibility is hidden (via -fvisibility=hidden + local: *)
+ *   - only the explicit globals listed below are exported in dynsym
+ *
+ * Phase 0 EMPIRICAL FINDING (capture for Phase 4):
+ *
+ *   These wildcards turned out to be UNNECESSARY for LTTng provider
+ *   registration. The companion restrictive_strict.map exports NOTHING
+ *   (only `local: *;`) and the resulting .so still registers
+ *   rocm_spike:hello with lttng-sessiond when LD_PRELOADed.
+ *
+ *   Reason: the LTTng provider's __attribute__((constructor)) is invoked
+ *   by glibc's .init_array at .so load time. The constructor's address
+ *   does not need to be visible in the dynamic symbol table for the loader
+ *   to call it. Registration with sessiond happens entirely via the
+ *   per-.so __lttng_ust_tracepoints_ptrs section, which lttng-ust
+ *   discovers via __start_/__stop_ linker-defined symbols inside the
+ *   same .so (also not requiring dynsym entries).
+ *
+ *   IMPLICATION FOR PHASE 4: hsacore.so.def does NOT need any new entries
+ *   to support LTTng-UST. The existing whitelist can stay as-is. This is
+ *   a meaningful simplification of the originally planned HSA build-system
+ *   change.
+ *
+ *   The wildcards below are kept ONLY as a safety belt -- if a future
+ *   liblttng-ust release changes the registration mechanism to require
+ *   external symbol resolution (extremely unlikely given the upstream
+ *   committed API stability), this map widens the export set. Cost is
+ *   zero today because LTO already eliminates these symbols.
+ *
+ * VERIFIED: librocm_lttng_spike_so.so (this map) -- 0 dynsym entries,
+ *           registers OK.
+ * VERIFIED: librocm_lttng_spike_strict_so.so (restrictive_strict.map)
+ *                                            -- 0 dynsym entries,
+ *           registers OK.
+ */
+{
+    global:
+        __tracepoint_*;
+        __tracepoint_provider_*;
+        __lttng_*;
+        __ust_*;
+    local:
+        *;
+};
