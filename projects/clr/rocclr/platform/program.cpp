@@ -217,7 +217,7 @@ amd::Status Program::compile(const std::vector<Device*>& devices, size_t numHead
       continue;
     }
     // We only build a Device-Program once
-    if (devProgram->buildStatus() != static_cast<int32_t>(amd::BuildStatus::BuildNone)) {
+    if (devProgram->buildStatus() != amd::BuildStatus::BuildNone) {
       continue;
     }
     if (sourceCode_.empty()) {
@@ -310,7 +310,7 @@ amd::Status Program::link(const std::vector<Device*>& devices, size_t numInputs,
     }
 
     // We only build a Device-Program once
-    if (devProgram->buildStatus() != static_cast<int32_t>(amd::BuildStatus::BuildNone)) {
+    if (devProgram->buildStatus() != amd::BuildStatus::BuildNone) {
       continue;
     }
     amd::Status result =
@@ -457,7 +457,7 @@ amd::Status Program::build(const std::vector<Device*>& devices, const char* opti
     }
 
     // We only build a Device-Program once
-    if (devProgram->buildStatus() != static_cast<int32_t>(amd::BuildStatus::BuildNone)) {
+    if (devProgram->buildStatus() != amd::BuildStatus::BuildNone) {
       continue;
     }
     amd::Status result =

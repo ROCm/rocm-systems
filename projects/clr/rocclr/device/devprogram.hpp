@@ -120,7 +120,7 @@ class Program : public amd::HeapObject {
                                           //!< or clBuildProgram(), whichever is called last
   std::string lastBuildOptionsArg_;
   mutable std::string buildLog_;  //!< build log.
-  int32_t buildStatus_;           //!< build status.
+  amd::BuildStatus buildStatus_;  //!< build status.
   int32_t buildError_;            //!< build error
 
   size_t globalVariableTotalSize_;
@@ -180,7 +180,7 @@ class Program : public amd::HeapObject {
   const std::string& buildLog() const { return buildLog_; }
 
   //! Return the build status.
-  cl_build_status buildStatus() const { return buildStatus_; }
+  amd::BuildStatus buildStatus() const { return buildStatus_; }
 
   //! Return the build error.
   int32_t buildError() const { return buildError_; }

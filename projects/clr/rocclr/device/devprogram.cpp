@@ -54,7 +54,7 @@ Program::Program(amd::Device& device, amd::Program& owner)
       compileOptions_(),
       linkOptions_(),
       lastBuildOptionsArg_(),
-      buildStatus_(CL_BUILD_NONE),
+      buildStatus_(amd::BuildStatus::BuildNone),
       buildError_(CL_SUCCESS),
       globalVariableTotalSize_(0),
       programOptions_(nullptr) {}
@@ -998,9 +998,9 @@ int32_t Program::compile(const std::string& sourceCode,
     compileOptions_ = options->origOptionStr;
   }
 
-  buildStatus_ = CL_BUILD_IN_PROGRESS;
+  buildStatus_ = amd::BuildStatus::InProgress;
   if (!initBuild(options)) {
-    buildStatus_ = CL_BUILD_ERROR;
+    buildStatus_ = amd::BuildStatus::BuildError;
     if (buildLog_.empty()) {
       buildLog_ = "Internal error: Compilation init failed.";
     }
@@ -1008,16 +1008,16 @@ int32_t Program::compile(const std::string& sourceCode,
 
   if (options->oVariables->FP32RoundDivideSqrt &&
       !(device().info().singleFPConfig_ & amd::FpConfig::CorrectlyRounded)) {
-    buildStatus_ = CL_BUILD_ERROR;
+    buildStatus_ = amd::BuildStatus::BuildError;
     buildLog_ +=
         "Error: -cl-fp32-correctly-rounded-divide-sqrt "
         "specified without device support";
   }
 
   // Compile the source code if any
-  if ((buildStatus_ == CL_BUILD_IN_PROGRESS) && !sourceCode.empty() &&
+  if ((buildStatus_ == amd::BuildStatus::InProgress) && !sourceCode.empty() &&
       !compileImpl(sourceCode, headers, headerIncludeNames, options)) {
-    buildStatus_ = CL_BUILD_ERROR;
+    buildStatus_ = amd::BuildStatus::BuildError;
     if (buildLog_.empty()) {
       buildLog_ = "Internal error: Compilation failed.";
     }
@@ -1025,19 +1025,19 @@ int32_t Program::compile(const std::string& sourceCode,
 
   setType(TYPE_COMPILED);
 
-  if ((buildStatus_ == CL_BUILD_IN_PROGRESS) && !createBinary(options)) {
+  if ((buildStatus_ == amd::BuildStatus::InProgress) && !createBinary(options)) {
     buildLog_ += "Internal Error: creating OpenCL binary failed!\n";
   }
 
-  if (!finiBuild(buildStatus_ == CL_BUILD_IN_PROGRESS)) {
-    buildStatus_ = CL_BUILD_ERROR;
+  if (!finiBuild(buildStatus_ == amd::BuildStatus::InProgress)) {
+    buildStatus_ = amd::BuildStatus::BuildError;
     if (buildLog_.empty()) {
       buildLog_ = "Internal error: Compilation fini failed.";
     }
   }
 
-  if (buildStatus_ == CL_BUILD_IN_PROGRESS) {
-    buildStatus_ = CL_BUILD_SUCCESS;
+  if (buildStatus_ == amd::BuildStatus::InProgress) {
+    buildStatus_ = amd::BuildStatus::Success;
   } else {
     buildError_ = CL_COMPILE_PROGRAM_FAILURE;
   }
@@ -1078,17 +1078,17 @@ int32_t Program::link(const std::vector<Program*>& inputPrograms, const char* or
     linkOptions_ = linkOptions->origOptionStr;
   }
 
-  buildStatus_ = CL_BUILD_IN_PROGRESS;
+  buildStatus_ = amd::BuildStatus::InProgress;
 
   amd::option::Options options;
   if (!getCompileOptionsAtLinking(inputPrograms, linkOptions)) {
-    buildStatus_ = CL_BUILD_ERROR;
+    buildStatus_ = amd::BuildStatus::BuildError;
     if (buildLog_.empty()) {
       buildLog_ += "Internal error: Get compile options failed.";
     }
   } else {
     if (!amd::option::parseAllOptions(compileOptions_, options, false)) {
-      buildStatus_ = CL_BUILD_ERROR;
+      buildStatus_ = amd::BuildStatus::BuildError;
       buildLog_ += options.optionsLog();
       LogError("Parsing compile options failed.");
     }
@@ -1103,8 +1103,8 @@ int32_t Program::link(const std::vector<Program*>& inputPrograms, const char* or
   // initBuild() will clear buildLog_, so store it in a temporary variable
   std::string tmpBuildLog = buildLog_;
 
-  if ((buildStatus_ == CL_BUILD_IN_PROGRESS) && !initBuild(&options)) {
-    buildStatus_ = CL_BUILD_ERROR;
+  if ((buildStatus_ == amd::BuildStatus::InProgress) && !initBuild(&options)) {
+    buildStatus_ = amd::BuildStatus::BuildError;
     if (buildLog_.empty()) {
       buildLog_ += "Internal error: Compilation init failed.";
     }
@@ -1114,30 +1114,30 @@ int32_t Program::link(const std::vector<Program*>& inputPrograms, const char* or
 
   if (options.oVariables->FP32RoundDivideSqrt &&
       !(device().info().singleFPConfig_ & amd::FpConfig::CorrectlyRounded)) {
-    buildStatus_ = CL_BUILD_ERROR;
+    buildStatus_ = amd::BuildStatus::BuildError;
     buildLog_ +=
         "Error: -cl-fp32-correctly-rounded-divide-sqrt "
         "specified without device support";
   }
 
   bool createLibrary = linkOptions ? linkOptions->oVariables->clCreateLibrary : false;
-  if ((buildStatus_ == CL_BUILD_IN_PROGRESS) && !linkImpl(inputPrograms, &options, createLibrary)) {
-    buildStatus_ = CL_BUILD_ERROR;
+  if ((buildStatus_ == amd::BuildStatus::InProgress) && !linkImpl(inputPrograms, &options, createLibrary)) {
+    buildStatus_ = amd::BuildStatus::BuildError;
     if (buildLog_.empty()) {
       buildLog_ += "Internal error: Link failed.\n";
       buildLog_ += "Make sure the system setup is correct.";
     }
   }
 
-  if (!finiBuild(buildStatus_ == CL_BUILD_IN_PROGRESS)) {
-    buildStatus_ = CL_BUILD_ERROR;
+  if (!finiBuild(buildStatus_ == amd::BuildStatus::InProgress)) {
+    buildStatus_ = amd::BuildStatus::BuildError;
     if (buildLog_.empty()) {
       buildLog_ = "Internal error: Compilation fini failed.";
     }
   }
 
-  if (buildStatus_ == CL_BUILD_IN_PROGRESS) {
-    buildStatus_ = CL_BUILD_SUCCESS;
+  if (buildStatus_ == amd::BuildStatus::InProgress) {
+    buildStatus_ = amd::BuildStatus::Success;
   } else {
     buildError_ = CL_LINK_PROGRAM_FAILURE;
   }
@@ -1233,12 +1233,12 @@ bool Program::trySubstObjFile(const char* SubstCfgFile, const std::string& sourc
   }
 
   if (!binary) {
-    buildStatus_ = CL_BUILD_ERROR;
+    buildStatus_ = amd::BuildStatus::BuildError;
     buildError_ = CL_BUILD_PROGRAM_FAILURE;
     str << "Subst failure: cannot read binary file " << substRes.first << '\n';
   } else {
     if (setKernels(binary, binSize)) {
-      buildStatus_ = CL_BUILD_SUCCESS;
+      buildStatus_ = amd::BuildStatus::Success;
       buildError_ = 0;
       str << "Substituted program hash 0x" << std::setbase(16) << substRes.second << " with "
           << substRes.first << '\n';
@@ -1266,9 +1266,9 @@ int32_t Program::build(const std::string& sourceCode, const char* origOptions,
     compileOptions_ = options->origOptionStr;
   }
 
-  buildStatus_ = CL_BUILD_IN_PROGRESS;
+  buildStatus_ = amd::BuildStatus::InProgress;
   if (!initBuild(options)) {
-    buildStatus_ = CL_BUILD_ERROR;
+    buildStatus_ = amd::BuildStatus::BuildError;
     if (buildLog_.empty()) {
       buildLog_ = "Internal error: Compilation init failed.";
     }
@@ -1276,7 +1276,7 @@ int32_t Program::build(const std::string& sourceCode, const char* origOptions,
 
   if (options->oVariables->FP32RoundDivideSqrt &&
       !(device().info().singleFPConfig_ & amd::FpConfig::CorrectlyRounded)) {
-    buildStatus_ = CL_BUILD_ERROR;
+    buildStatus_ = amd::BuildStatus::BuildError;
     buildLog_ +=
         "Error: -cl-fp32-correctly-rounded-divide-sqrt "
         "specified without device support";
@@ -1294,7 +1294,7 @@ int32_t Program::build(const std::string& sourceCode, const char* origOptions,
   }
   // Compile the source code if any
   bool compileStatus = true;
-  if ((buildStatus_ == CL_BUILD_IN_PROGRESS) && !sourceCode.empty()) {
+  if ((buildStatus_ == amd::BuildStatus::InProgress) && !sourceCode.empty()) {
     if (!headerIncludeNames.empty()) {
       compileStatus = compileImpl(sourceCode, headers, &headerIncludeNames[0], options);
     } else {
@@ -1302,28 +1302,28 @@ int32_t Program::build(const std::string& sourceCode, const char* origOptions,
     }
   }
   if (!compileStatus) {
-    buildStatus_ = CL_BUILD_ERROR;
+    buildStatus_ = amd::BuildStatus::BuildError;
     if (buildLog_.empty()) {
       buildLog_ = "Internal error: Compilation failed.";
     }
   }
-  if ((buildStatus_ == CL_BUILD_IN_PROGRESS) && !linkImpl(options)) {
-    buildStatus_ = CL_BUILD_ERROR;
+  if ((buildStatus_ == amd::BuildStatus::InProgress) && !linkImpl(options)) {
+    buildStatus_ = amd::BuildStatus::BuildError;
     if (buildLog_.empty()) {
       buildLog_ += "Internal error: Link failed.\n";
       buildLog_ += "Make sure the system setup is correct.";
     }
   }
 
-  if (!finiBuild(buildStatus_ == CL_BUILD_IN_PROGRESS)) {
-    buildStatus_ = CL_BUILD_ERROR;
+  if (!finiBuild(buildStatus_ == amd::BuildStatus::InProgress)) {
+    buildStatus_ = amd::BuildStatus::BuildError;
     if (buildLog_.empty()) {
       buildLog_ = "Internal error: Compilation fini failed.";
     }
   }
 
-  if (buildStatus_ == CL_BUILD_IN_PROGRESS) {
-    buildStatus_ = CL_BUILD_SUCCESS;
+  if (buildStatus_ == amd::BuildStatus::InProgress) {
+    buildStatus_ = amd::BuildStatus::Success;
   } else {
     buildError_ = CL_BUILD_PROGRAM_FAILURE;
   }

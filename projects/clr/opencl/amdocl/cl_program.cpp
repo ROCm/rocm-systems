@@ -1104,7 +1104,7 @@ RUNTIME_ENTRY(cl_int, clGetProgramBuildInfo,
 
   switch (param_name) {
     case CL_PROGRAM_BUILD_STATUS: {
-      cl_build_status status = devProgram->buildStatus();
+      cl_build_status status = static_cast<cl_build_status>(devProgram->buildStatus());
       return amd::clGetInfo(status, param_value_size, param_value, param_value_size_ret);
     }
     case CL_PROGRAM_BUILD_OPTIONS: {
