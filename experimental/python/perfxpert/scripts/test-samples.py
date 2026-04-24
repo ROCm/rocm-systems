@@ -6,6 +6,7 @@ Part of the docs-audit tooling
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import json
@@ -94,12 +95,12 @@ def extract_samples(doc_path: Path) -> List[Dict[str, Any]]:
     return samples
 
 
-def run_bash_sample(code: str) -> Dict[str, Any]:
+def run_bash_sample(code: str, bash: str) -> Dict[str, Any]:
     """Execute a bash sample."""
     try:
         result = subprocess.run(
-            code,
-            shell=True,
+            [bash, "-lc", code],
+            shell=False,
             capture_output=True,
             text=True,
             timeout=10,
@@ -131,7 +132,7 @@ def run_python_sample(code: str) -> Dict[str, Any]:
     """
     try:
         result = subprocess.run(
-            ['python3', '-c', code],
+            [sys.executable, '-c', code],
             capture_output=True,
             text=True,
             timeout=10,
@@ -173,7 +174,12 @@ def run_sample(sample: Dict[str, Any]) -> Dict[str, Any]:
 
     # Run sample
     if sample['type'] == 'bash':
-        result = run_bash_sample(code)
+        bash = shutil.which("bash")
+        if bash is None:
+            sample['status'] = 'SKIPPED'
+            sample['reason'] = 'bash not found on PATH'
+            return sample
+        result = run_bash_sample(code, bash)
     elif sample['type'] == 'python':
         result = run_python_sample(code)
     else:
