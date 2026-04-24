@@ -8,6 +8,8 @@ Each item is referenced by `TODO(KNOWN_ISSUES.md item N)` comments at the
 relevant `file:line` site.
 
 > **See also:**
+> - `DESIGN_SUMMARY_FOR_LEADERSHIP.md` — concise high-level summary
+>   suitable for cross-team review and leadership presentation.
 > - `FIRMWARE_RING_HYBRID_DESIGN.md` — proposed hybrid that resolves
 >   items 1, 7, 8, 9, 10 by combining the firmware ring with a
 >   launching-thread doorbell hook (no SDK-allocated completion
