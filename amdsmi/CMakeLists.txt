@@ -57,7 +57,7 @@ set(BUILD_DEBIAN_PKGING_FLAG
 #Prepare final version for the CPACK use
 # Use package version from top-level CMakeLists.txt
 if(NOT DEFINED AMDSMI_PACKAGE_VERSION)
-    set(AMDSMI_PACKAGE_VERSION "1.1.1")  # fallback for standalone build
+    set(AMDSMI_PACKAGE_VERSION "1.1.2")  # fallback for standalone build
 endif()
 set(CPACK_PACKAGE_VERSION "${AMDSMI_PACKAGE_VERSION}")
 

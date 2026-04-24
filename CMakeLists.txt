@@ -31,7 +31,7 @@ set ( ROCDXG "rocdxg" )
 set ( ROCDXG_PACKAGE "rocdxg-roct" )
 set ( ROCDXG_COMPONENT "lib${ROCDXG}" )
 set ( ROCDXG_TARGET "${ROCDXG}" )
-set ( ROCDXG_VERSION "1.1.1")
+set ( ROCDXG_VERSION "1.1.2")
 
 project ( ${ROCDXG_TARGET} VERSION ${ROCDXG_VERSION} )
 # Project/version initialized; expose version to code via target defs below
