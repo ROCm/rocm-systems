@@ -391,7 +391,7 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr,
     const ActiveWFInfo& wf_info) {
   uint32_t atomic_idx = 0;
 
-    if (wf_info.is_pe_group_first) {
+  if (wf_info.is_pe_group_first) {
     lock(&bnxt_sq.lock);
   }
 
