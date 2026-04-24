@@ -224,6 +224,9 @@ jobs:
       platform: ${{ matrix.supported_platforms }}
       rocm_version: ${{ matrix.rocm_versions }}
 
+  # Due to GHA matrix limitations, we cannot inspect the result of individual jobs
+  # in the matrix. To avoid confusing errors, our only option is that if a single
+  # build fails, the entire workflow must stop. Which is rather unfortunate.
   Linux:
     if: >-
       ${{
