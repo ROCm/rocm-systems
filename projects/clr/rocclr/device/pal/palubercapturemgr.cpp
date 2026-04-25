@@ -1,22 +1,8 @@
-/* Copyright (c) 2024 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "device/pal/palubercapturemgr.hpp"
 #include "device/pal/paldevice.hpp"
@@ -330,11 +316,10 @@ Pal::Result UberTraceCaptureMgr::TimedQueueSubmit(Pal::IQueue* queue, uint64_t c
   timedSubmitInfo.pSqttCmdBufIds = &sqttCmdBufIds;
   timedSubmitInfo.frameIndex = 0;
 
-  // Do a timed submit of all the command buffers
-  Pal::Result result = queue_timings_trace_source_->TimedSubmit(queue, submitInfo, timedSubmitInfo);
-
-  // Punt to non-timed submit if a timed submit fails (or is not supported)
-  if (result != Pal::Result::Success) {
+  Pal::Result result = Pal::Result::Success;
+  if (IsQueueTimingActive()) {
+    result = queue_timings_trace_source_->TimedSubmit(queue, submitInfo, timedSubmitInfo);
+  } else {
     result = queue->Submit(submitInfo);
   }
 

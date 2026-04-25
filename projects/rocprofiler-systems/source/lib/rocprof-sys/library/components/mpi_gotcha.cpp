@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/components/mpi_gotcha.hpp"
 #include "api.hpp"
@@ -28,8 +9,10 @@
 #include "core/mproc.hpp"
 #include "library/components/category_region.hpp"
 #include "library/components/comm_data.hpp"
+#include "mpi_gotcha.hpp"
 #include "mpip.hpp"
 
+#include <mutex>
 #include <timemory/backends/process.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/signals/signal_mask.hpp>
@@ -150,6 +133,9 @@ auto permit_bindings = strset_t{};
 auto reject_bindings = strset_t{};
 }  // namespace
 
+std::mutex mpi_gotcha::s_on_init_callbacks_mutex                                     = {};
+std::vector<std::function<void(int rank, int size)>> mpi_gotcha::s_on_init_callbacks = {};
+
 void
 mpi_gotcha::configure()
 {
@@ -192,9 +178,36 @@ mpi_gotcha::configure()
 }
 
 void
+mpi_gotcha::subscribe_to_init_event(
+    const std::function<void(int rank, int size)>& _callback)
+{
+    std::lock_guard<std::mutex> _lk{ s_on_init_callbacks_mutex };
+    if(_callback)
+    {
+        s_on_init_callbacks.push_back(_callback);
+    }
+}
+
+void
 mpi_gotcha::shutdown()
 {
     update();
+}
+
+std::mutex mpi_gotcha::s_mutex = {};
+
+void
+mpi_gotcha::pause()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    mpi_gotcha_t::set_ready(false);
+}
+
+void
+mpi_gotcha::resume()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    mpi_gotcha_t::set_ready(true);
 }
 
 bool
@@ -324,7 +337,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
        (_data.tool_id.find("MPI_Init") == 0 || _data.tool_id.find("PMPI_Init") == 0))
     {
         rocprofsys_mpi_set_attr();
-        // rocprof-sys will set this environement variable to true in binary rewrite mode
+        // rocprof-sys will set this environment variable to true in binary rewrite mode
         // when it detects MPI. Hides this env variable from the user to avoid this
         // being activated unwaringly during runtime instrumentation because that
         // will result in double instrumenting the MPI functions (unless the MPI functions
@@ -343,16 +356,9 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
         auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
         if(!mproc_comm_record.updated())
         {
-            auto _pid  = getpid();
-            auto _ppid = getppid();
-            auto _size = mproc::get_concurrent_processes(_ppid).size();
-            if(_size > 0)
-            {
-                mproc_comm_record.comm = _ppid;
-                mproc_comm_record.size = m_size = _size;
-                auto _rank                      = mproc::get_process_index(_pid, _ppid);
-                if(_rank >= 0) mproc_comm_record.rank = m_rank = _rank;
-            }
+            populate_rank_and_size();
+            update();
+            publish_rank_and_size(m_rank, m_size);
         }
     }
     else if(_retval == rocprofsys::mpi::success_v &&
@@ -397,6 +403,59 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
     }
     rocprofsys_pop_trace_hidden(_data.tool_id.c_str());
 }
+
+void
+mpi_gotcha::populate_rank_and_size()
+{
+#if defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0
+    // Full MPI is available
+    int _comm_rank = -1;
+    int _comm_size = -1;
+    int _rank_ret  = PMPI_Comm_rank(MPI_COMM_WORLD, &_comm_rank);  // NOLINT
+    int _size_ret  = PMPI_Comm_size(MPI_COMM_WORLD, &_comm_size);  // NOLINT
+
+    if(_rank_ret == MPI_SUCCESS && _size_ret == MPI_SUCCESS)
+    {
+        m_rank                 = _comm_rank;
+        mproc_comm_record.rank = m_rank;
+        m_size                 = _comm_size;
+        mproc_comm_record.size = m_size;
+        mproc_comm_record.comm = (uintptr_t) MPI_COMM_WORLD;  // NOLINT
+    }
+    else
+    {
+        LOG_CRITICAL("Error! PMPI_Comm_rank returned {}, PMPI_Comm_size returned {}",
+                     _rank_ret, _size_ret);
+    }
+#elif defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0
+    // Only MPI headers are available, proceed with process based index
+    int  _comm_rank = -1;
+    int  _comm_size = -1;
+    auto _pid       = getpid();
+    auto _ppid      = getppid();
+    _comm_size      = mproc::get_concurrent_processes(_ppid).size();
+    if(_comm_size > 0)
+    {
+        mproc_comm_record.comm = _ppid;
+        mproc_comm_record.size = m_size = _comm_size;
+        _comm_rank                      = mproc::get_process_index(_pid, _ppid);
+        if(_comm_rank >= 0) mproc_comm_record.rank = m_rank = _comm_rank;
+    }
+#endif
+}
+
+void
+mpi_gotcha::publish_rank_and_size(int rank, int size)
+{
+    for(const auto& callback : s_on_init_callbacks)
+    {
+        if(callback)
+        {
+            callback(rank, size);
+        }
+    }
+}
+
 }  // namespace component
 }  // namespace rocprofsys
 

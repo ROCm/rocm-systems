@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -546,7 +532,7 @@ class MemorySubAllocator : public amd::HeapObject {
   GpuMemoryReference* Allocate(Pal::gpusize size, Pal::gpusize alignment,
                                const Pal::IGpuMemory* reserved_va, Pal::gpusize* offset);
   //! Free suballocation
-  bool Free(amd::Monitor* monitor, GpuMemoryReference* mem_ref, Pal::gpusize offset);
+  bool Free(std::recursive_mutex& monitor, GpuMemoryReference* mem_ref, Pal::gpusize offset);
 
  protected:
   //! Allocate new chunk of memory
@@ -584,8 +570,7 @@ class ResourceCache : public amd::HeapObject {
  public:
   //! Default constructor
   ResourceCache(Device* device, size_t cacheSizeLimit)
-      : lockCacheOps_(true), /* PAL resource cache */
-        cacheSize_(0),
+      : cacheSize_(0),
         lclCacheSize_(0),
         persistentCacheSize_(0),
         cacheSizeLimit_(cacheSizeLimit),
@@ -633,7 +618,7 @@ class ResourceCache : public amd::HeapObject {
   //! Removes one last entry from the cache
   void removeLast();
 
-  amd::Monitor lockCacheOps_;  //!< Lock to serialise cache access
+  std::recursive_mutex lockCacheOps_;  //!< Lock to serialise cache access
 
   size_t cacheSize_;             //!< Current cache size in bytes
   size_t lclCacheSize_;          //!< Local memory stored in the cache

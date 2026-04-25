@@ -86,10 +86,10 @@ struct hsakmtRuntime {
   bool CommitSystemHeapSpace(void* addr, int64_t size, bool lock);
   bool DecommitSystemHeapSpace(void* addr, int64_t size);
   void InitSystemHeapMgr();
-  ErrorCode ReserveGpuVirtualAddress(const thunk_proxy::AllocDomain domain,
+  ErrorCode ReserveGpuVirtualAddress(const Wkmi::AllocDomain domain,
           gpusize hit_base_addr, gpusize size,
           gpusize *out_gpu_virt_addr, gpusize alignment, bool lock);
-  ErrorCode FreeGpuVirtualAddress(const thunk_proxy::AllocDomain domain,
+  ErrorCode FreeGpuVirtualAddress(const Wkmi::AllocDomain domain,
           gpusize gpu_addr, gpusize size);
   bool CommitSystemHeapSpaceIPC(void* addr, int64_t size, int &fd, bool lock=false);
   bool DecommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memfd);

@@ -19,24 +19,25 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "overdrive_read.h"
+
+#include <gtest/gtest.h>
 
 #include <cstdint>
-
 #include <iostream>
 #include <string>
 
-#include <gtest/gtest.h>
+#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "overdrive_read.h"
 
 TestOverdriveRead::TestOverdriveRead() : TestBase() {
   set_title("AMDSMI Overdrive Read Test");
-  set_description("The Overdrive Read tests verifies that the "
-                             "current overdrive level can be read properly.");
+  set_description(
+      "The Overdrive Read tests verifies that the "
+      "current overdrive level can be read properly.");
 }
 
-TestOverdriveRead::~TestOverdriveRead(void) {
-}
+TestOverdriveRead::~TestOverdriveRead(void) {}
 
 void TestOverdriveRead::SetUp(void) {
   TestBase::SetUp();
@@ -44,9 +45,7 @@ void TestOverdriveRead::SetUp(void) {
   return;
 }
 
-void TestOverdriveRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestOverdriveRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestOverdriveRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -59,12 +58,12 @@ void TestOverdriveRead::Close() {
   TestBase::Close();
 }
 
-
 void TestOverdriveRead::Run(void) {
   amdsmi_status_t err;
   uint32_t val_ui32;
 
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;
@@ -73,19 +72,22 @@ void TestOverdriveRead::Run(void) {
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(processor_handles_[i]);
 
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_overdrive_level", "gpu=" + std::to_string(i),
+                       VERB(STANDARD));
     err = amdsmi_get_gpu_overdrive_level(processor_handles_[i], &val_ui32);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-      IF_VERB(STANDARD) {
-        std::cout << "\t** Not supported on this machine" << std::endl;
-      }
       continue;
     }
     CHK_ERR_ASRT(err)
     IF_VERB(STANDARD) {
-    std::cout << "\t**OverDrive Level:" << val_ui32 << std::endl;
-    // Verify api support checking functionality is working
-    err = amdsmi_get_gpu_overdrive_level(processor_handles_[i], nullptr);
-    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+      std::cout << "\t**OverDrive Level:" << val_ui32 << std::endl;
+      // Verify api support checking functionality is working
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_overdrive_level", "gpu=" + std::to_string(i),
+                         VERB(STANDARD));
+      err = amdsmi_get_gpu_overdrive_level(processor_handles_[i], nullptr);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+      ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
     }
   }
 }

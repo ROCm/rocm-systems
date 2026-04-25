@@ -27,7 +27,7 @@
 using namespace rocshmem;
 
 TEST(HeapMemoryTest, size_constructor) {
-  HeapMemory<HIPAllocator> heap_mem{2048};
+  HeapMemoryType<HIPAllocator> heap_mem{2048};
   ASSERT_EQ(heap_mem.get_size(), 2048);
   ASSERT_NE(heap_mem.get_ptr(), nullptr);
 }

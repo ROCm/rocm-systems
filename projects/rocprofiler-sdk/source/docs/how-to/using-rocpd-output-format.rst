@@ -93,7 +93,8 @@ The command-line options as displayed using ``rocpd convert --help`` are listed 
 .. code-block:: none
 
    usage: rocpd convert [-h] -i INPUT [INPUT ...] -f {csv,pftrace,otf2} [{csv,pftrace,otf2} ...]
-                        [-o OUTPUT_FILE] [-d OUTPUT_PATH] [--kernel-rename]
+                        [-o OUTPUT_FILE] [-d OUTPUT_PATH] [--automerge-limit LIMIT]
+                        [--kernel-rename]
                         [--agent-index-value {absolute,relative,type-relative}]
                         [--perfetto-backend {inprocess,system}]
                         [--perfetto-buffer-fill-policy {discard,ring_buffer}]
@@ -125,9 +126,11 @@ The following table provides a detailed listing of the ``rocpd convert`` command
 
   * - I/O configuration
     - | ``-o OUTPUT_FILE``, ``--output-file OUTPUT_FILE`` |br| |br|
-      | ``-d OUTPUT_PATH``, ``--output-path OUTPUT_PATH``
+      | ``-d OUTPUT_PATH``, ``--output-path OUTPUT_PATH`` |br| |br|
+      | ``--automerge-limit LIMIT``
     - | Configures the base filename for generated output files (default: ``out``). |br| |br|
-      | Specifies the target directory for output file generation (default: ``./rocpd-output-data``).
+      | Specifies the target directory for output file generation (default: ``./rocpd-output-data``). |br| |br|
+      | Controls the database auto-merge limit. When the number of input databases exceeds this limit, they are automatically merged into a ``.rpdb`` package to stay within SQLite3's attach limit (max 10). Default: 1, maximum: 8.
 
   * - Kernel identification Options
     - ``--kernel-rename``
@@ -186,7 +189,7 @@ Here are the types of conversion supported by ``rocpd``:
 
   .. code-block:: bash
 
-    /opt/rocm/bin/rocpd convert -i db1.db db2.db --output-format pftrace -d "./output/" -o "twoFileTraces" --start 30% --end 100%
+    /opt/rocm/bin/rocpd convert -i db1.db db2.db --output-format pftrace -d ./output/ -o twoFileTraces --start 30% --end 100%
 
 - Batch conversion into multiple formats
 
@@ -194,7 +197,7 @@ Here are the types of conversion supported by ``rocpd``:
 
   .. code-block:: bash
 
-    /opt/rocm/bin/rocpd convert -i db{0..5}.db --output-format csv pftrace -d "~/output_folder/" -o "sixFileTraces"
+    /opt/rocm/bin/rocpd convert -i db{0..5}.db -f csv pftrace -d ~/output_folder/ -o sixFileTraces
 
 - Comprehensive format conversion
 
@@ -202,7 +205,70 @@ Here are the types of conversion supported by ``rocpd``:
 
   .. code-block:: bash
 
-    /opt/rocm/bin/rocpd convert -i db{3,4}.db --output-format csv otf2 pftrace
+    /opt/rocm/bin/rocpd convert -i db{3,4}.db -f csv otf2 pftrace
+
+- Convert .rpdb package
+
+  The following example converts a packaged database collection to Perfetto format:
+
+  .. code-block:: bash
+
+    /opt/rocm/bin/rocpd convert -i my_profiling_data.rpdb -f pftrace
+
+**Automatic database merging:**
+
+When multiple database files are provided as input, ``rocpd convert`` automatically manages database file counts to stay within SQLite3's attach limit:
+
+- SQLite3 has a maximum limit of 10 attached databases
+- If the number of input databases exceeds the automerge limit (default: 1), the tool automatically merges them into a temporary ``.rpdb`` package
+- The automerge limit can be controlled with the ``--automerge-limit`` parameter (max: 8, conservatively set below SQLite3's limit of 10)
+- For explicit control over merging, use the ``rocpd merge`` or ``rocpd package`` commands before analysis (see :ref:`managing-multiple-databases`)
+
+Example with automerge control:
+
+.. code-block:: bash
+
+    # Allow up to 4 databases without automatic merging
+    rocpd convert -i db1.db db2.db db3.db db4.db --automerge-limit 4 -f pftrace
+
+Example with automerge control using an index.yaml package file:
+
+.. code-block:: bash
+
+    # Don't automerge, use the index.yaml package file to attach databases as is
+    rocpd convert -i index.yaml --automerge-limit 6 -f csv
+
+**Automatic merging in action:**
+
+When multiple databases exceed the automerge limit, you'll see output like this:
+
+.. code-block:: console
+
+    $ rocpd convert -i database1.db database2.db -f pftrace
+    Found 2 database files.
+    More than 1 database files found. It is recommended to merge and package databases
+    Original number of DBs: 2, Target number of DBs to merge per batch: 2
+    Adding database1.db
+    Tables found: 20
+    Adding database2.db
+    Tables found: 20
+    Merge completed successfully! Output saved to: rocpd-20260205-011104.rpdb/merged_db_0_e7e1a495-8185-4875-bdcd-6570e9b2fa81.db
+    Time: 1.02 sec
+    Reduced to 1 database files.
+    Converting database(s) to pftrace format:
+    ...
+    Done. Exiting...
+
+The rocpd convert command automatically:
+
+- Detected 2 input databases exceeding the limit (default: 1)
+- Created a timestamped ``.rpdb`` folder (``rocpd-20260205-011104.rpdb``)
+- Merged the databases to stay within SQLite3's attach limit (max 10 attached databases)
+- Proceeded with the requested conversion operation
+
+The merged database remains in the ``.rpdb`` folder for future use, eliminating the need to re-merge for subsequent operations.
+
+For more information on explicit database merging and packaging, see :ref:`managing-multiple-databases`.
 
 .. _conversion-tools:
 
@@ -386,7 +452,7 @@ rocpd2summary - statistical analysis tool
 
 - Comprehensive statistics: Statistics include kernel execution times, API call frequencies, and memory transfer analysis.
 
-- Domain-specific analysis: Generates separate summaries for HIP, ROCr, Markers, and other trace domains. For examples, see :ref:`analysis-categories`.
+- Domain-specific analysis: Generates separate summaries for HIP, ROCr, Markers, and other trace domains.
 
 - Rank-based analysis: Per-process and per-rank performance breakdowns for MPI applications.
 
@@ -416,14 +482,15 @@ Here is how you can generate summary for specific trace domains:
 
 .. code-block:: bash
 
-    # Include all available domains
-    rocpd2summary -i profile.db --region-categories HIP HSA MARKERS KERNEL
+    # By default, all available domains will be processed and you can identify which domain regions are included in your profiled data
+    rocpd2summary -i profile.db
 
-    # Focus on GPU kernel analysis only
-    rocpd2summary -i profile.db --region-categories KERNEL
+    # Only include HIP and HSA regions (and skip others) to speed up analysis
+    rocpd2summary -i profile.db --region-categories HIP HSA
 
-    # Exclude markers to speed up processing
-    rocpd2summary -i profile.db --region-categories HIP HSA KERNEL
+    # Exclude all domain categories so that only the kernels and memory copies are analyzed, to speed up analysis
+    rocpd2summary -i profile.db --region-categories NONE
+
 
 **Advanced analysis options:**
 
@@ -510,10 +577,13 @@ Here are the benefits of using ``rocpd summary`` for multidatabase summary:
     rocpd summary -i session1.db session2.db session3.db --format html -o unified_summary
 
     # Combine all MPI rank databases for overall application analysis
-    rocpd summary -i rank_*.db --format csv -o mpi_application_summary
+    rocpd summary -i rank_*.db -f csv -o mpi_application_summary
 
     # Time-series aggregation across multiple profiling runs
-    rocpd summary -i daily_profile_*.db --format json -o weekly_performance_trends
+    rocpd summary -i daily_profile_*.db -f json -o weekly_performance_trends
+
+    # Generate summary from .rpdb package
+    rocpd summary -i simulation_run_001.rpdb -f html -o mpi_performance_summary
 
 - **Rankwise comparative analysis:**
 
@@ -522,13 +592,13 @@ Here are the benefits of using ``rocpd summary`` for multidatabase summary:
   .. code-block:: bash
 
     # Compare performance across MPI ranks
-    rocpd summary -i rank_0.db rank_1.db rank_2.db rank_3.db --summary-by-rank --format html -o rank_comparison
+    rocpd summary -i rank_0.db rank_1.db rank_2.db rank_3.db --summary-by-rank -f html -o rank_comparison
 
     # Analyze multi-node performance characteristics
-    rocpd summary -i node_*.db --summary-by-rank --format csv -o node_performance_analysis
+    rocpd summary -i node_*.db --summary-by-rank -f csv -o node_performance_analysis
 
     # Compare GPU device performance in multi-GPU applications
-    rocpd summary -i gpu_0.db gpu_1.db gpu_2.db gpu_3.db --summary-by-rank --format json -o gpu_scaling_analysis
+    rocpd summary -i gpu_0.db gpu_1.db gpu_2.db gpu_3.db --summary-by-rank -f json -o gpu_scaling_analysis
 
 Use cases for multidatabase summary analysis
 #############################################
@@ -550,16 +620,16 @@ Use cases for multidatabase summary analysis
 
   .. code-block:: bash
 
-    # Profile scaling from 1 to 4 GPUs
-    for gpus in 1 2 4; do
-        rocprofv3 --hip-trace --device 0:$((gpus-1)) --output-format rocpd -o "scaling_${gpus}gpu.db" -- gpu_benchmark
-    done
+    # Profile scaling from 1 to 4 GPUs (control GPUs via HIP_VISIBLE_DEVICES)
+    HIP_VISIBLE_DEVICES=0 rocprofv3 --hip-trace --output-format rocpd -o scaling_1gpu -- gpu_benchmark
+    HIP_VISIBLE_DEVICES=0,1 rocprofv3 --hip-trace --output-format rocpd -o scaling_2gpu -- gpu_benchmark
+    HIP_VISIBLE_DEVICES=0,1,2,3 rocprofv3 --hip-trace --output-format rocpd -o scaling_4gpu -- gpu_benchmark
 
     # Aggregate scaling analysis
-    rocpd summary -i scaling_*gpu.db --format html -o gpu_scaling_summary
+    rocpd summary -i scaling_*.db --format html -o gpu_scaling_summary
 
     # Compare efficiency across different GPU counts
-    rocpd summary -i scaling_*gpu.db --summary-by-rank --format json -o scaling_efficiency
+    rocpd summary -i scaling_*.db --summary-by-rank --format json -o scaling_efficiency
 
 - **Performance regression testing:**
 
@@ -615,6 +685,24 @@ Integration with rocprofv3 workflow
 
 The ``rocpd summary`` command maintains full compatibility with ``rocprofv3`` summary analysis, while extending capabilities to multidatabase scenarios. Users familiar with ``rocprofv3 --summary`` will find identical statistical outputs and report formats when using ``rocpd summary`` on database files, with the added benefit of cross-session analysis capabilities.
 
+**Automatic database merging:**
+
+When multiple database files are provided as input, ``rocpd summary`` automatically manages database file counts to stay within SQLite3's attach limit:
+
+- SQLite3 has a maximum limit of 10 attached databases
+- If the number of input databases exceeds the automerge limit (default: 1), the tool automatically merges them into a temporary ``.rpdb`` package
+- The automerge limit can be controlled with the ``--automerge-limit`` parameter (max: 8, conservatively set below SQLite3's limit of 10)
+- For explicit control over merging, use the ``rocpd merge`` or ``rocpd package`` commands before analysis (see :ref:`managing-multiple-databases`)
+
+Example with automerge control:
+
+.. code-block:: bash
+
+    # Allow up to 4 databases without automatic merging
+    rocpd summary -i db1.db db2.db db3.db db4.db --automerge-limit 4 -f html
+
+For explicit control over database organization, see :ref:`managing-multiple-databases`.
+
 Aggregating multiprofiling data using rocpd
 --------------------------------------------
 
@@ -661,11 +749,11 @@ Here are the use cases of data aggregation using ``rocpd``:
 
     .. code-block:: bash
 
-        # Profile application with multiple GPU devices
-        rocprofv3 --hip-trace --device 0,1,2,3 --output-format rocpd -- multi_gpu_app
+        # Profile application with multiple GPU devices (GPUs visible to the app via HIP_VISIBLE_DEVICES)
+        HIP_VISIBLE_DEVICES=0,1,2,3 rocprofv3 --hip-trace --output-format rocpd -o multi_gpu -- multi_gpu_app
 
         # Aggregate device utilization analysis
-        rocpd query -i multi_gpu_results.db \
+        rocpd query -i multi_gpu*.db \
                     --query "SELECT agent_abs_index as device_id, COUNT(*) as operations, SUM(duration) as total_time FROM kernels GROUP BY device_id"
 
         # Cross-device performance comparison
@@ -711,6 +799,399 @@ Here are the benefits of data aggregation using ``rocpd``:
 - Cross-platform comparison: Compares performance across different hardware platforms using unified database schema.
 
 The aggregation capabilities of ``rocpd`` format enable sophisticated analysis workflows that provide deeper insight into application performance characteristics across diverse computing environments.
+
+.. _managing-multiple-databases:
+
+Managing multiple database files with rocpd
+--------------------------------------------
+
+When working with distributed profiling sessions, multi-rank MPI applications, or multi-node GPU workloads, ``rocpd`` provides specialized tools for managing and consolidating multiple database files. The ``rocpd merge`` and ``rocpd package`` commands streamline database management, enabling efficient organization and analysis of large-scale profiling datasets.
+
+rocpd merge - Database merging tool
+++++++++++++++++++++++++++++++++++++
+
+**Purpose:** To merge multiple SQLite3 databases into a single unified database file for simplified analysis and reduced file management overhead.
+
+**Location:** ``/opt/rocm/bin/rocpd merge``
+
+**Syntax:**
+
+.. code-block:: bash
+
+    rocpd merge -i INPUT [INPUT ...] [OPTIONS]
+
+**Key features:**
+
+- Database consolidation: Combines multiple ``rocpd`` databases into a single unified database file.
+
+- Schema integrity: Validates that all input databases share the same schema version before merging.
+
+- Comprehensive merging: Preserves all database objects including tables, views, indexes, and triggers.
+
+- Data aggregation: Creates UNION views that automatically aggregate data from all merged sources.
+
+- Integrity handling: Re-enables SQLite foreign key enforcement for subsequent operations on the merged database.
+
+**Command-line options:**
+
+The following table provides a detailed listing of the ``rocpd merge`` command-line options:
+
+.. # COMMENT: The following lines define a line break for use in the table below.
+.. |br| raw:: html
+
+    <br />
+
+.. list-table::
+  :header-rows: 1
+
+  * - Category
+    - Option
+    - Description
+
+  * - Required arguments
+    - ``-i INPUT [INPUT ...]``, ``--input INPUT [INPUT ...]``
+    - Specifies input database file paths. Accepts multiple SQLite3 database files separated by whitespace. Supports wildcard patterns and ``.rpdb`` folder inputs.
+
+  * - Output configuration
+    - | ``-o OUTPUT_FILE``, ``--output-file OUTPUT_FILE`` |br| |br|
+      | ``-d OUTPUT_PATH``, ``--output-path OUTPUT_PATH``
+    - | Sets the base output filename (default: ``merged``). The ``.db`` extension is added automatically if not provided. |br| |br|
+      | Specifies the output directory path (default: ``./rocpd-output-data``).
+
+  * - Command-line help
+    - ``-h``, ``--help``
+    - Displays comprehensive command syntax, parameter descriptions, and usage examples.
+
+**Usage examples:**
+
+- Basic database merge:
+
+  .. code-block:: bash
+
+    # Merge three databases into a single file
+    rocpd merge -i db0.db db1.db db2.db
+
+    # Output: ./rocpd-output-data/merged.db
+
+- Merge with custom output location:
+
+  .. code-block:: bash
+
+    # Merge databases with custom output directory and filename
+    rocpd merge -i db0.db db1.db db2.db -d merged3DBs -o combined_results
+
+    # Output: merged3DBs/combined_results.db
+
+- Merge multi-node profiling data:
+
+  .. code-block:: bash
+
+    # Consolidate all databases from a node directory
+    rocpd merge -i node0/*.db -d node0_output -o largeMerged
+
+    # Output: node0_output/largeMerged.db
+
+- Merge MPI rank databases:
+
+  .. code-block:: bash
+
+    # Merge all rank databases from distributed MPI run
+    rocpd merge -i results_rank_*.db -d mpi_merged -o unified_mpi_profile
+
+    # Output: mpi_merged/unified_mpi_profile.db
+
+.. warning::
+
+   **Consider alternatives to merging large databases**
+
+   Merging multiple large databases creates a single, very large output file that may be difficult to manage, transfer, or analyze. For large profiling datasets, consider these alternatives:
+
+   - **Use** ``rocpd package`` **instead**: Package databases with metadata files that reference them in their current locations, avoiding the creation of a single large file.
+   - **Selective merging**: Merge only subsets of databases by node or rank, then package the merged subsets.
+   - **Direct analysis**: Many ``rocpd`` commands (``convert``, ``query``, ``summary``) can work directly with multiple database files or ``.rpdb`` packages without requiring a merge operation.
+
+   **Example - Package instead of merge for large datasets:**
+
+   .. code-block:: bash
+
+       # Instead of merging (which creates one large file):
+       # rocpd merge -i node*/rank*.db -o huge_merged.db
+
+       # Package them to reference in-place (no large file created):
+       rocpd package -i node*/rank*.db -d my_large_dataset
+
+       # Then analyze the package:
+       rocpd summary -i my_large_dataset.rpdb -f html --automerge-limit 8
+
+**Use cases:**
+
+- MPI application consolidation: Merge databases from all MPI ranks into a single unified database for comprehensive performance analysis.
+
+- Multi-node profiling: Consolidate profiling data collected across multiple compute nodes for centralized analysis.
+
+- Database file reduction: Reduce the number of database files when working with analysis tools that have file count limitations.
+
+- Simplified analysis: Create a single database file for easier sharing, archival, or integration with external analysis tools.
+
+**Important considerations:**
+
+- Schema version compatibility: All input databases must have matching schema versions. Merging fails if version mismatches are detected.
+
+- Table name uniqueness: The merge operation assumes globally unique table names across all input databases.
+
+- Merged database size: The output database size equals the sum of all input database sizes plus index overhead.
+
+- Large dataset management: For very large databases, consider using ``rocpd package`` instead to avoid creating an unwieldy single file.
+
+rocpd package - Database packaging tool
+++++++++++++++++++++++++++++++++++++++++
+
+**Purpose:** To create organized database collections with metadata files, enabling efficient management and distribution of multiple profiling databases.
+
+**Location:** ``/opt/rocm/bin/rocpd package``
+
+**Syntax:**
+
+.. code-block:: bash
+
+    rocpd package -i INPUT [INPUT ...] [OPTIONS]
+
+**Key features:**
+
+- Metadata generation: Creates ``.rpdb`` folders containing ``index.yaml`` metadata files that reference database collections.
+
+- Consolidation support: Optionally moves or copies database files into a centralized ``.rpdb`` folder structure.
+
+- Flexible input handling: Accepts database files, directories, wildcard patterns, and existing ``.rpdb`` folders as input.
+
+- In-place referencing: Can create metadata files that reference databases in their original locations without moving them.
+
+**Command-line options:**
+
+The following table provides a detailed listing of the ``rocpd package`` command-line options:
+
+.. list-table::
+  :header-rows: 1
+
+  * - Category
+    - Option
+    - Description
+
+  * - Required arguments
+    - ``-i INPUT [INPUT ...]``, ``--input INPUT [INPUT ...]``
+    - Input paths to database files or directories. Supports multiple inputs, wildcard patterns (e.g., ``*.db``), directories containing databases, and existing ``.rpdb`` folders.
+
+  * - Package configuration
+    - | ``-c``, ``--consolidate`` |br| |br| |br|
+      | ``--copy`` |br| |br|
+      | ``-d OUTPUT_PATH``, ``--output-path OUTPUT_PATH``
+    - | Consolidates database files by moving them into the output ``.rpdb`` folder and generates metadata file. |br| |br|
+      | When used with ``--consolidate``, copies database files instead of moving them. |br| |br|
+      | Specifies the output folder name. Without ``--consolidate``, creates metadata in current directory. With ``--consolidate``, creates a ``.rpdb`` folder with the specified name.
+
+  * - Command-line help
+    - ``-h``, ``--help``
+    - Displays comprehensive command syntax, parameter descriptions, and usage examples.
+
+**The .rpdb package format:**
+
+The ``.rpdb`` (ROCProfiler Database) package is a standardized folder structure for organizing multiple profiling databases:
+
+- Folder structure: A directory with the ``.rpdb`` extension containing database files and metadata.
+
+- Metadata file: Contains an ``index.yaml`` file in YAML format with database inventory and configuration.
+
+- Portability: The entire ``.rpdb`` folder can be moved, archived, or shared as a self-contained profiling dataset.
+
+- Tool integration: ``.rpdb`` folders are recognized as valid input by all ``rocpd`` commands (``convert``, ``query``, ``summary``, ``merge``).
+
+**Metadata file structure (index.yaml):**
+
+.. code-block:: yaml
+
+    rocprofiler-sdk:
+      rocpd:
+        rocpd_package_version: "1.0"
+        path: "."
+        files:
+          - "database1.db"
+          - "database2.db"
+          - "database3.db"
+
+.. note::
+
+   **When to use** ``rocpd package`` **instead of** ``rocpd merge``:
+
+   - **Large databases**: Packaging avoids creating a single large merged file while maintaining organized access to all data
+   - **Distributed storage**: When databases reside on different folders withing the same filesystem, packaging can reference them in-place
+   - **Iterative analysis**: Package databases once, then run multiple analysis operations without repeated merging overhead
+   - **Flexible organization**: Easily add or remove databases from a package by updating the metadata file
+
+**Usage examples:**
+
+- Create metadata file for in-place databases:
+
+  .. code-block:: bash
+
+    # Index databases without moving them
+    rocpd package -i node0/db0.db node1/db1.db node2/db2.db
+
+    # Output: ./index.yaml (references databases in original locations)
+
+- Package and consolidate databases:
+
+  .. code-block:: bash
+
+    # Copy all databases into a new .rpdb folder
+    rocpd package -i node0/db0.db node1/db1.db node2/db2.db \
+                   -d my_MPI_run_1 --consolidate --copy
+
+    # Output: my_MPI_run_1.rpdb/ folder containing copies of all databases and index.yaml
+
+- Append databases to existing package:
+
+  .. code-block:: bash
+
+    # Add additional databases to existing .rpdb folder
+    rocpd package -i my_MPI_run_1.rpdb node5/db5.db \
+                   -d my_MPI_run_1_append_5 --consolidate --copy
+
+    # Output: my_MPI_run_1_append_5.rpdb/ folder with expanded database collection
+
+- Consolidate with move operation:
+
+  .. code-block:: bash
+
+    # Move databases into .rpdb folder (original files are moved, not copied)
+    rocpd package -i my_MPI_run_1.rpdb node7/db7.db \
+                   -d my_MPI_run_1 --consolidate
+
+    # Output: my_MPI_run_1.rpdb/ folder with all databases moved into it
+
+- Package directory of databases:
+
+  .. code-block:: bash
+
+    # Package all databases from a directory
+    rocpd package -i ./profiling_results/ -d archived_run --consolidate --copy
+
+    # Output: archived_run.rpdb/ folder with all .db files from profiling_results/
+
+**Use cases:**
+
+- MPI profiling organization: Package databases from all MPI ranks into a single portable ``.rpdb`` folder for easy distribution and analysis.
+
+- Archival and backup: Create self-contained ``.rpdb`` packages for long-term storage or sharing with collaborators.
+
+- Distributed profiling management: Organize databases from multi-node runs with clear metadata tracking.
+
+- Analysis workflow simplification: Create ``.rpdb`` packages that can be directly consumed by ``rocpd convert``, ``query``, and ``summary`` commands.
+
+- Database consolidation: Reduce filesystem clutter by collecting scattered database files into organized ``.rpdb`` folders.
+
+Integration with other rocpd commands
+++++++++++++++++++++++++++++++++++++++
+
+The ``rocpd merge`` and ``rocpd package`` commands integrate seamlessly with other ``rocpd`` functionality, enabling sophisticated profiling workflows:
+
+**Using .rpdb folders as input:**
+
+All ``rocpd`` commands accept ``.rpdb`` folders as input, automatically processing the metadata and loading referenced databases:
+
+.. code-block:: bash
+
+    # Convert .rpdb package to Perfetto format
+    rocpd convert -i my_profiling_data.rpdb -f pftrace
+
+    # Generate summary from packaged databases
+    rocpd summary -i archived_run.rpdb -f html -o performance_report
+
+    # Query packaged databases
+    rocpd query -i mpi_results.rpdb --query "SELECT * FROM top_kernels LIMIT 10"
+
+**Automatic merging in analysis workflows:**
+
+The ``rocpd convert``, ``query``, and ``summary`` commands automatically merge databases when the file count exceeds optimal thresholds:
+
+.. code-block:: bash
+
+    # Convert many databases - automatic merging if count exceeds threshold
+    rocpd convert -i node_*/rank_*.db -f pftrace
+
+    # The tool automatically merges databases into manageable batches for optimal performance
+
+**Complete profiling and analysis workflow:**
+
+Here is an example workflow demonstrating merge and package integration:
+
+.. code-block:: bash
+
+    # Step 1: Profile distributed MPI application (8 ranks)
+    mpirun -np 8 rocprofv3 --hip-trace --output-format rocpd -o results_rank_%rank% -- mpi_simulation
+
+    # Step 2: Package all rank databases with consolidation
+    rocpd package -i results_rank_*.db -d simulation_run_001 --consolidate --copy
+
+    # Step 3: Generate comprehensive summary from package
+    rocpd summary -i simulation_run_001.rpdb --summary-by-rank -f html \
+                  -o mpi_performance_analysis
+
+    # Step 4: Convert to Perfetto for visualizing the data
+    rocpd convert -i simulation_run_001.rpdb -f pftrace
+
+    # Step 5: Perform custom analysis with SQL queries
+    rocpd query -i simulation_run_001.rpdb \
+                --query "SELECT pid, COUNT(*) as kernel_count, \
+                         AVG(duration) as avg_duration \
+                         FROM kernels GROUP BY pid" \
+                --format csv -o rank_comparison
+
+**Alternative workflow with merge:**
+
+.. code-block:: bash
+
+    # Step 1: Profile distributed application
+    mpirun -np 4 rocprofv3 --hip-trace --output-format rocpd -o results_rank_%rank% -- gpu_workload
+
+    # Step 2: Merge all rank databases into single unified database
+    rocpd merge -i results_rank_*.db -d merged_results -o unified_profile
+
+    # Step 3: Analyze merged database (simpler than handling multiple files)
+    rocpd convert -i merged_results/unified_profile.db -f pftrace csv
+
+    # Step 4: Generate unified summary
+    rocpd summary -i merged_results/unified_profile.db -f html
+
+**Combining merge and package:**
+
+.. code-block:: bash
+
+    # Merge subsets of databases, then package the merged results
+    
+    # Merge databases by node
+    rocpd merge -i node0/rank_*.db -d merged_by_node -o node0_merged
+    rocpd merge -i node1/rank_*.db -d merged_by_node -o node1_merged
+    rocpd merge -i node2/rank_*.db -d merged_by_node -o node2_merged
+    
+    # Package the node-level merged databases
+    rocpd package -i merged_by_node/*.db -d cluster_profiling_data \
+                   --consolidate --copy
+
+    # Analyze the packaged multi-node data
+    rocpd summary -i cluster_profiling_data.rpdb --summary-by-rank \
+                  -f html -o cluster_performance_report
+
+**Benefits of integrated workflows:**
+
+- Simplified file management: Reduce complexity of handling dozens or hundreds of database files.
+
+- Portable analysis: Create self-contained ``.rpdb`` packages for easy sharing and archival.
+
+- Flexible analysis: Choose between merged single-database or packaged multi-database approaches based on analysis needs.
+
+- Scalable processing: Automatic merging ensures optimal performance regardless of database file count.
+
+- Reproducible workflows: Metadata files document database provenance and organization for reproducible analysis.
 
 Tool integration and workflow examples
 --------------------------------------
@@ -796,7 +1277,7 @@ Database schema and views
 
     -- API trace information
     SELECT * FROM regions_and_samples WHERE category LIKE 'HIP_%';
-    SELECT * FROM regions_and_samples WHERE category LIKE 'RCCL_%;
+    SELECT * FROM regions_and_samples WHERE category LIKE 'RCCL_%';
 
     -- Performance counters
     SELECT * FROM counters_collection;
@@ -855,6 +1336,15 @@ The following examples demonstrate the usage of ``rocpd query`` for performing s
     # Cross-session performance comparison
     rocpd query -i baseline.db optimized.db \
                 --query "SELECT name as kernel_name, AVG(duration) as avg_duration FROM kernels GROUP BY kernel_name"
+
+- **Query .rpdb package:**
+
+  .. code-block:: bash
+
+    # Execute SQL query against packaged database collection
+    rocpd query -i cluster_data.rpdb \
+                --query "SELECT * FROM top_kernels LIMIT 10" \
+                --format csv -o top_kernels_report
 
 - **Advanced analytics:**
 
@@ -945,6 +1435,33 @@ Output format options
 
     # Generate PDF report with monospace formatting
     rocpd query -i profile.db --query "SELECT name, duration FROM top_kernels" --format pdf -o kernel_report
+
+**Automatic database merging:**
+
+When multiple database files are provided as input, ``rocpd query`` automatically manages database file counts to stay within SQLite3's attach limit:
+
+- SQLite3 has a maximum limit of 10 attached databases
+- If the number of input databases exceeds the automerge limit (default: 1), the tool automatically merges them into a ``.rpdb`` package
+- The automerge limit can be controlled with the ``--automerge-limit`` parameter (max: 8, conservatively set below SQLite3's limit of 10)
+- For explicit control over merging, use the ``rocpd merge`` or ``rocpd package`` commands before analysis (see :ref:`managing-multiple-databases`)
+
+Example with automerge control:
+
+.. code-block:: bash
+
+    # Allow up to 4 databases without automatic merging
+    rocpd query -i db1.db db2.db db3.db db4.db --automerge-limit 4 \
+                --query "SELECT COUNT(*) FROM kernels"
+
+Example referencing an index.yaml package file with automerge control (don't automerge, use the package as is):
+
+.. code-block:: bash
+
+    # Don't automerge, use the index.yaml package file to attach databases as is
+    rocpd query -i index.yaml --automerge-limit 6 \
+                --query "SELECT * FROM top_kernels"
+
+To learn more about database merging and packaging workflows, see :ref:`managing-multiple-databases`.
 
 Script-based analysis
 ++++++++++++++++++++++
@@ -1095,7 +1612,7 @@ The command-line options as displayed using ``rocpd query --help`` are listed he
 
    usage: rocpd query [-h] -i INPUT [INPUT ...] --query QUERY [--script SCRIPT]
                       [--format {console,csv,html,json,md,pdf,dashboard,clipboard}]
-                      [-o OUTPUT_FILE] [-d OUTPUT_PATH]
+                      [-o OUTPUT_FILE] [-d OUTPUT_PATH] [--automerge-limit LIMIT]
                       [--email-to EMAIL_TO] [--email-from EMAIL_FROM]
                       [--email-subject EMAIL_SUBJECT] [--smtp-server SMTP_SERVER]
                       [--smtp-port SMTP_PORT] [--smtp-user SMTP_USER]
@@ -1132,9 +1649,11 @@ The following table provides a detailed listing of the ``rocpd query`` command-l
   * - Output configuration
     - | ``-o OUTPUT_FILE``, ``--output-file OUTPUT_FILE`` |br| |br| |br|
       | ``-d OUTPUT_PATH``, ``--output-path OUTPUT_PATH`` |br| |br|
+      | ``--automerge-limit LIMIT`` |br| |br| |br|
       | ``--template-path TEMPLATE_PATH``
     - | Base filename for exported files. |br| |br|
       | Output directory path. |br| |br|
+      | Controls the database auto-merge limit. When the number of input databases exceeds this limit, they are automatically merged into a ``.rpdb`` package to stay below SQLite3's attach limit (max 10). Default: 1, maximum: 8. |br| |br|
       | Jinja2 template file for dashboard format customization.
 
   * - Email reporting

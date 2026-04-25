@@ -316,6 +316,11 @@ class GpuAgent : public GpuAgentInt {
                                   uint32_t* recommended_ids_mask) override;
 
   // @brief Override from core::Agent.
+  hsa_status_t DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
+                            uint32_t num_ops,
+                            std::vector<core::Signal*>& dep_signals) override;
+
+  // @brief Override from core::Agent.
   hsa_status_t DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
                            const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
                            const hsa_dim3_t* range, hsa_amd_copy_direction_t dir,
@@ -331,7 +336,7 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                            core::HsaEventCallback event_callback, void* data,
                            uint32_t private_segment_size, uint32_t group_segment_size,
-                           core::Queue** queue) override;
+                           bool metadata_queue, core::Queue** queue) override;
 
   // @brief Decrement GWS ref count.
   void GWSRelease();
@@ -343,7 +348,7 @@ class GpuAgent : public GpuAgentInt {
   void AcquireQueueAltScratch(ScratchInfo& scratch) override;
   void ReleaseQueueAltScratch(ScratchInfo& scratch) override;
 
-  // @brief Create a pool of shared queues for multiple user applications within a max limit 
+  // @brief Create a pool of shared queues for multiple user applications within a max limit
   hsa_status_t AcquireCountedQueue(hsa_queue_type_t type,
                                    HSA::hsa_amd_queue_priority_internal_t priority,
                                    void (*callback)(hsa_status_t, hsa_queue_t*, void*),
@@ -371,6 +376,8 @@ class GpuAgent : public GpuAgentInt {
   hsa_amd_coherency_type_t current_coherency_type() const override {
     return current_coherency_type_;
   }
+
+  hsa_status_t Preload(uint64_t flags);
 
   core::Agent* GetNearestCpuAgent(void) const;
 
@@ -459,8 +466,13 @@ class GpuAgent : public GpuAgentInt {
     }
   }
 
-  const size_t MAX_SCRATCH_APERTURE_PER_XCC = (1ULL << 32);
-  size_t MaxScratchDevice() const { return properties_.NumXcc * MAX_SCRATCH_APERTURE_PER_XCC; }
+  const size_t MAX_SCRATCH_APERTURE_PER_XCC = (1ULL << 32); // 4GB
+  const size_t MAX_SCRATCH_APERTURE_PER_XCC_GFX12 = (2ULL << 32); // 8GB
+  __forceinline size_t MaxScratchDevice() const {
+    return properties_.NumXcc *
+          (isa_->GetMajorVersion() >= 12 ? MAX_SCRATCH_APERTURE_PER_XCC_GFX12 :
+                                            MAX_SCRATCH_APERTURE_PER_XCC);
+  }
 
   void ReserveScratch();
 
@@ -472,12 +484,27 @@ class GpuAgent : public GpuAgentInt {
     const uint32_t GFX94X_MIN_CP_FW_VERSION_REQUIRED = 177;
     const uint32_t GFX95X_MIN_CP_FW_VERSION_REQUIRED = 24;
 
-    return (core::Runtime::runtime_singleton_->flag().enable_scratch_async_reclaim() &&
-	    supported_isas()[0]->GetMajorVersion() == 9 &&
-	    ((supported_isas()[0]->GetMinorVersion() == 4 &&
-	      properties_.EngineId.ui32.uCode >= GFX94X_MIN_CP_FW_VERSION_REQUIRED) ||
-	     (supported_isas()[0]->GetMinorVersion() == 5 &&
-	      properties_.EngineId.ui32.uCode >= GFX95X_MIN_CP_FW_VERSION_REQUIRED)));
+    if (!core::Runtime::runtime_singleton_->flag().enable_scratch_async_reclaim())
+      return false;
+
+    switch (supported_isas()[0]->GetMajorVersion()) {
+      case 9:
+        switch (supported_isas()[0]->GetMinorVersion()) {
+          case 4:
+            return (properties_.EngineId.ui32.uCode >= GFX94X_MIN_CP_FW_VERSION_REQUIRED);
+          case 5:
+            return (properties_.EngineId.ui32.uCode >= GFX95X_MIN_CP_FW_VERSION_REQUIRED);
+          default:
+            break;
+        }
+        break;
+      case 12:
+        return (supported_isas()[0]->GetMinorVersion() >= 5);
+      default:
+        break;
+    }
+
+    return false;
   };
 
   hsa_status_t SetAsyncScratchThresholds(size_t use_once_limit) override;
@@ -514,20 +541,29 @@ class GpuAgent : public GpuAgentInt {
     return coarsegrain_deallocator_;
   }
 
+  /// @brief Get scratch memory base address and size for core dump filtering
+  void GetScratchAperture(void** base, size_t* size) const {
+    *base = scratch_pool_.base();
+    *size = scratch_pool_.size();
+  }
+
+  /// @brief Get list of AQL queues for core dump filtering
+  const std::vector<core::Queue*>& GetAqlQueues() const { return aql_queues_; }
+
  protected:
   // Sizes are in packets.
   const uint32_t minAqlSize_ = 0x40;     // 4KB min
   const uint32_t maxAqlSize_ = 0x20000;  // 8MB max
 
   // @brief Create an internal queue allowing tools to be notified.
-  core::Queue* CreateInterceptibleQueue(const uint32_t size = 0) {
-    return CreateInterceptibleQueue(core::Queue::DefaultErrorHandler, nullptr, size);
+  core::Queue* CreateInterceptibleQueue(bool metadata_prefetch, const uint32_t size = 0) {
+    return CreateInterceptibleQueue(core::Queue::DefaultErrorHandler, nullptr, metadata_prefetch, size);
   }
 
   // @brief Create an internal queue, with a custom error handler, allowing tools to be
   // notified.
   core::Queue* CreateInterceptibleQueue(void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data),
-                                        void* data, const uint32_t size);
+                                        void* data, bool metadata_prefetch, const uint32_t size);
 
   // @brief Create SDMA blit object.
   //
@@ -660,6 +696,9 @@ class GpuAgent : public GpuAgentInt {
   // @brief Pool of shared queues owned by this agent
   rocr::core::CountedQueuePoolManager queue_pool_;
 
+  // @brief /// Cached derived CUID for this GPU agent (16 bytes, zeroed if unavailable).
+  uint8_t derived_cuid_[16] = {};
+
   void* trap_code_buf_;
 
   size_t trap_code_buf_size_;
@@ -703,6 +742,10 @@ class GpuAgent : public GpuAgentInt {
   // @brief Initialize scratch handler thresholds
   void InitAsyncScratchThresholds();
 
+  // @brief Initialize Secondary CUID for GPU device that 
+  // this agent is running on.
+  void InitDerivedCuid() override;
+
   // @brief Register signal for notification when scratch may become available.
   // @p signal is notified by OR'ing with @p value.
   bool AddScratchNotifier(hsa_signal_t signal, hsa_signal_value_t value) {
@@ -717,6 +760,43 @@ class GpuAgent : public GpuAgentInt {
   // @brief Releases scratch back to the driver.
   // caller must hold scratch_lock_.
   void ReleaseScratch(void* base, size_t size, bool large);
+
+  // Broadcast copy: copies op.src to each destination in op.dst_list.
+  // Uses HW broadcast for transfers < 1 MB when supported; otherwise falls
+  // back to prologue/body/epilogue fan-out across available SDMA engines.
+  hsa_status_t DmaCopyBroadcast(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
+  // Multi-linear copy: LINEAR op with num_entries > 0, independent copies
+  // (different src/dst/size per entry) sharing a single completion signal.
+  // Uses prologue/body/epilogue fan-out across available SDMA engines.
+  hsa_status_t DmaCopyMulti(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
+  // Linear swap: exchanges the contents of src and dst buffers.
+  // Only supported on gfx94X / gfx95X.  Uses DmaCopyFanOutOp with
+  // HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP.
+  hsa_status_t DmaCopySwap(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
+  // Common fan-out implementation shared by DmaCopyBroadcast, DmaCopyMulti,
+  // and swap operations.  Submits prologue, per-entry bodies (selected by
+  // @p op), and epilogue with one signal.
+  // @p op is the hsa_amd_memory_copy_op_type_t from the public API; only
+  // HSA_AMD_MEMORY_COPY_OP_LINEAR and HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP are
+  // currently supported.
+  hsa_status_t DmaCopyFanOutOp(
+      hsa_amd_memory_copy_op_type_t op,
+      core::Signal& out_signal,
+      std::vector<core::Signal*>& dep_signals,
+      uint16_t num_entries,
+      const void* const* src_list,
+      void* const* dst_list,
+      const hsa_agent_t* dst_agent_list,
+      const size_t* size_list);
 
   // Bind index of peer device that is connected via xGMI links
   lazy_ptr<core::Blit>& GetXgmiBlit(const core::Agent& peer_agent);
@@ -736,6 +816,8 @@ class GpuAgent : public GpuAgentInt {
   void InitLibDrm();
 
   void GetInfoMemoryProperties(uint8_t value[8]) const;
+
+  void GetAqlInfoProperties(uint8_t value[8]) const;
 
   // @brief Alternative aperture base address. Only on KV.
   uintptr_t ape1_base_;
@@ -818,6 +900,11 @@ class GpuAgent : public GpuAgentInt {
     // new signal on each call
     hsa_signal_t exec_pm4_signal;
 
+    // Host-side copies - cannot read these from device_data on non-large BAR systems
+    hsa_signal_t done_sig0;
+    hsa_signal_t done_sig1;
+    uint32_t buf_size;
+
     os::Thread thread;
     pcs::PcsRuntime::PcSamplingSession* session;
   } pcs_data_t;
@@ -834,8 +921,6 @@ class GpuAgent : public GpuAgentInt {
   amdgpu_device_handle ldrm_dev_;
   HsaAMDGPUDeviceHandle libthunk_dev_;
 
-  DISALLOW_COPY_AND_ASSIGN(GpuAgent);
-
   // Check if SDMA engine by ID is free
   bool DmaEngineIsFree(uint32_t engine_id);
 
@@ -845,6 +930,9 @@ class GpuAgent : public GpuAgentInt {
 
   bool uses_rec_sdma_eng_id_mask_;
   bool rec_sdma_eng_override_;
+
+  // Round-robin index for spreading SDMA work across engines.
+  uint32_t sdma_rr_index_ = 0;
 
   // structure for host trap sampling
   pcs_data_t pcs_hosttrap_data_;
@@ -856,6 +944,17 @@ class GpuAgent : public GpuAgentInt {
   bool xgmi_cpu_gpu_;
   /// @brief Is PCIe large BAR enabled.
   bool large_bar_enabled_;
+
+  bool extended_aql_dispatch_supported_;
+
+  /* Workgroup Cluster Parameters */
+  bool workgroup_clusters_supported_;
+  hsa_amd_dim3_t kern_cluster_max_dim_;
+  hsa_amd_dim3_t cluster_max_dim_;
+
+  size_t max_wave_scratch_;
+
+  DISALLOW_COPY_AND_ASSIGN(GpuAgent);
 };
 
 }  // namespace amd

@@ -33,7 +33,7 @@
 
 struct amdcuid_cpu_info {
     amdcuid_cuid_public_fields header;
-    // Add more fields as needed (e.g., model name, apic id, etc.)
+    std::string device_node;  // sysfs path e.g. /sys/devices/system/cpu/cpu0
 };
 
 class CuidCpu : public CuidDevice {

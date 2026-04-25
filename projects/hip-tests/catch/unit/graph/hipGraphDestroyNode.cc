@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*
 Testcase Scenarios of hipGraphDestroyNode API:
@@ -56,7 +43,7 @@ static __global__ void dummyKernel() { return; }
 
 /* This test covers the negative scenarios of
    hipGraphDestroyNode API */
-TEST_CASE("Unit_hipGraphDestroyNode_Negative") {
+HIP_TEST_CASE(Unit_hipGraphDestroyNode_Negative) {
   SECTION("Passing nullptr to graph Node") {
     REQUIRE(hipGraphDestroyNode(nullptr) == hipErrorInvalidValue);
   }
@@ -66,7 +53,7 @@ TEST_CASE("Unit_hipGraphDestroyNode_Negative") {
    hipGraphDestroyNode API where we create and destroy
    the node
 */
-TEST_CASE("Unit_hipGraphDestroyNode_BasicFunctionality") {
+HIP_TEST_CASE(Unit_hipGraphDestroyNode_BasicFunctionality) {
   char* pOutBuff_d{};
   constexpr size_t size = 1024;
   hipGraph_t graph{};
@@ -92,7 +79,7 @@ This testcase verifies the following scenario where
 graph is created with dependencies and one of the dependency is
 destroyed before execute the graph
 */
-TEST_CASE("Unit_hipGraphDestroyNode_DestroyDependencyNode") {
+HIP_TEST_CASE(Unit_hipGraphDestroyNode_DestroyDependencyNode) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -157,7 +144,7 @@ TEST_CASE("Unit_hipGraphDestroyNode_DestroyDependencyNode") {
  * Functional Test to test hipGraphDestroyNode using hipGraphGetNodes
  * and hipGraphGetEdges APIs.
  */
-TEST_CASE("Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep") {
+HIP_TEST_CASE(Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep) {
   hipGraph_t graph;
   hipGraphNode_t kernelnode[NUM_OF_DUMMY_NODES];
   hipKernelNodeParams kernelNodeParams[NUM_OF_DUMMY_NODES];
@@ -197,7 +184,7 @@ TEST_CASE("Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep") {
  * Functional Test to test hipGraphDestroyNode using hipGraphGetNodes
  * and hipGraphGetEdges APIs on a cloned graph
  */
-TEST_CASE("Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ClonedGrph") {
+HIP_TEST_CASE(Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ClonedGrph) {
   hipGraph_t graph, clonedgraph;
   hipGraphNode_t kernelnode[NUM_OF_DUMMY_NODES];
   hipKernelNodeParams kernelNodeParams[NUM_OF_DUMMY_NODES];
@@ -243,7 +230,7 @@ TEST_CASE("Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ClonedGrph") {
  * Functional Test to test hipGraphDestroyNode on child node using
  * hipGraphGetNodes and hipGraphGetEdges APIs on a cloned graph.
  */
-TEST_CASE("Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ChldNode") {
+HIP_TEST_CASE(Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ChldNode) {
   hipGraph_t graph0, graph1;
   hipGraphNode_t kernelnode[NUM_OF_DUMMY_NODES], childGraphNode;
   hipKernelNodeParams kernelNodeParams[NUM_OF_DUMMY_NODES];

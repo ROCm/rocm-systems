@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Common Tests - Test independent of all platforms
 if(HIP_PLATFORM MATCHES "amd" AND UNIX AND GCC_EXEC)
     set(TEST_SRC

@@ -30,13 +30,13 @@ using namespace rocshmem;
 
 /* Declare the template with a generic implementation */
 template <typename T>
-__device__ void wg_team_alltoallv(rocshmem_team_t team,
-                                  T *dest,
-                                  const size_t dest_nelems[],
-                                  const size_t dest_displs[],
-                                  T *source,
-                                  const size_t source_nelems[],
-                                  const size_t source_displs[]) {
+__device__ void wg_team_alltoallv([[maybe_unused]] rocshmem_team_t team,
+                                  [[maybe_unused]] T *dest,
+                                  [[maybe_unused]] const size_t dest_nelems[],
+                                  [[maybe_unused]] const size_t dest_displs[],
+                                  [[maybe_unused]] T *source,
+                                  [[maybe_unused]] const size_t source_nelems[],
+                                  [[maybe_unused]] const size_t source_displs[]) {
   return;
 }
 
@@ -83,7 +83,7 @@ __global__ void TeamAlltoallvTest(int loop, int skip,
                                   T1 *source,
                                   const size_t source_nelems[],
                                   const size_t source_displs[],
-                                  ShmemContextType ctx_type,
+                                  [[maybe_unused]] ShmemContextType ctx_type,
                                   rocshmem_team_t *teams) {
 
   __syncthreads();
@@ -251,7 +251,7 @@ void TeamAlltoallvTester<T1>::verifyResults(size_t size) {
     T1* dst = (T1*) ((char*)dest_buf + (dest_displs[pe] * sizeof(T1)));
     T1* src = (T1*) &source_buf[pe * num_elems];
 
-    for(int i = 0; i < dest_nelems[pe]; i++) {
+    for(size_t i = 0; i < static_cast<size_t>(dest_nelems[pe]); i++) {
       if (dst[i] != src[i]) {
         std::cerr << "Data validation error at idx " << i << std::endl;
         std::cerr << "PE " << my_pe << " Got " << dest_buf[i]

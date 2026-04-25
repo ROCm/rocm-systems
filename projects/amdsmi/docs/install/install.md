@@ -38,8 +38,7 @@ AMD SMI library can run on AMD ROCm supported platforms. Refer to
 for more information.
 <!--https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html-->
 
-To run the AMD SMI library, the `amdgpu` driver and the `amd_hsmp` or `hsmp_acpi` driver need to be installed. Optionally, `libdrm` can be installed to query firmware
-information and hardware IPs.
+To run the AMD SMI library, the `amdgpu` driver and the `amd_hsmp` or `hsmp_acpi` driver need to be installed.
 
 ### Python interface and CLI tool prerequisites
 

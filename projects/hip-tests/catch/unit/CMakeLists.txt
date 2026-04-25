@@ -1,22 +1,6 @@
-# Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 add_subdirectory(rtc)
 add_subdirectory(graph)
@@ -38,7 +22,6 @@ add_subdirectory(context)
 add_subdirectory(device_memory)
 add_subdirectory(warp)
 add_subdirectory(dynamicLoading)
-add_subdirectory(c_compilation)
 add_subdirectory(g++)
 #add_subdirectory(gcc)   # TODO link error TheRock build
 add_subdirectory(module)
@@ -49,23 +32,26 @@ add_subdirectory(complex)
 add_subdirectory(p2p)
 add_subdirectory(threadfence)
 add_subdirectory(virtualMemoryManagement)
+add_subdirectory(deviceLib)
 # TODO Rock build failures
 if(UNIX)
-    add_subdirectory(atomics)
-    add_subdirectory(math)
-    # TODO compute build failures
-    add_subdirectory(deviceLib)
-    add_subdirectory(syncthreads)
+  add_subdirectory(atomics)
+  add_subdirectory(math)
+  # TODO compute build failures
+  add_subdirectory(syncthreads)
 endif()
 if(HIP_PLATFORM STREQUAL "amd")
-    add_subdirectory(callback)
-    add_subdirectory(clock)
-    add_subdirectory(hip_specific)
-    # Vulkan interop APIs currently undefined for Nvidia
-    add_subdirectory(vulkan_interop)
-    add_subdirectory(gl_interop) # Disabled on NVIDIA due to defect - EXSWHTEC-246
+  add_subdirectory(callback)
+  add_subdirectory(clock)
+  add_subdirectory(hip_specific)
+  # fails while including the hip_nvidia_details
+  add_subdirectory(c_compilation)
+  # Vulkan interop APIs currently undefined for Nvidia
+  add_subdirectory(vulkan_interop)
+  add_subdirectory(gl_interop) # Disabled on NVIDIA due to defect - EXSWHTEC-246
 endif()
 add_subdirectory(synchronization)
 add_subdirectory(launchBounds)
 add_subdirectory(assertion)
 add_subdirectory(library)
+add_subdirectory(sanityTests)

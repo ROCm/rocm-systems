@@ -42,7 +42,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
     }
 #endif
 
-    Primitives<T, RedOp, FanAsymmetric<0, 1>, 0, Proto, 1>
+    Primitives<T, RedOp, FanAsymmetric<0, 1>, /*Direct=*/1, Proto, 1>
       prims(tid, tn, nullptr, &work->sendRank, work->sendAddr, nullptr,
             /*redOpArg(ignored)=*/0, group, work->sendConnIndex, work->sendConnIndex, nullptr, work, stepSize);
 
@@ -101,7 +101,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
     }
 #endif
 
-    Primitives<T, RedOp, FanAsymmetric<1, 0>, 0, Proto, 1>
+    Primitives<T, RedOp, FanAsymmetric<1, 0>, /*Direct=*/1, Proto, 1>
       prims(tid, tn, &work->recvRank, nullptr, nullptr, work->recvAddr,
             /*redOpArg(ignored)=*/0, group, work->recvConnIndex, work->recvConnIndex, nullptr, work, stepSize);
 
@@ -165,7 +165,8 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
         struct ncclDevWorkP2p* work = &works[workIx];
         size_t bytes = isSend ? work->sendBytes : work->recvBytes;
         int nParts = isSend ? work->nSendChannels : work->nRecvChannels;
-        int part = ncclP2pChannelToPart(work->nP2pChannels, work->channelBase, ncclShmem.channelId, ncclShmem.comm.p2pnChannelsPerPeer, ncclShmem.comm.nNodes);
+        int part = ncclP2pChannelToPart(work->nP2pChannels, work->channelBase, ncclShmem.channelId, ncclShmem.comm.p2pnChannelsPerPeer,
+          ncclShmem.comm.nNodes, ncclShmem.comm.p2pChannelShiftSize);
         hasWork = (part < nParts);
         if (nParts != 0) {
           size_t partBeg, partEnd;

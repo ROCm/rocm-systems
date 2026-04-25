@@ -1,26 +1,7 @@
 #!/usr/bin/env python3
 
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import os
 import re
@@ -30,6 +11,33 @@ import socket
 import shutil
 import argparse
 import multiprocessing
+
+IS_GITHUB_ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
+
+
+def log(msg, level="info"):
+    if IS_GITHUB_ACTIONS:
+        if level == "warning":
+            print(f"::warning::{msg}", flush=True)
+        elif level == "error":
+            print(f"::error::{msg}", flush=True)
+        else:
+            print(msg, flush=True)
+    else:
+        prefix = {"warning": "WARNING", "error": "ERROR"}.get(level, "INFO")
+        print(f"[{prefix}] {msg}", flush=True)
+
+
+def log_group_start(title):
+    if IS_GITHUB_ACTIONS:
+        print(f"::group::{title}", flush=True)
+    else:
+        print(f"\n{'=' * 60}\n{title}\n{'=' * 60}", flush=True)
+
+
+def log_group_end():
+    if IS_GITHUB_ACTIONS:
+        print("::endgroup::", flush=True)
 
 
 def which(cmd, require):
@@ -103,9 +111,19 @@ def generate_dashboard_script(args):
 
         include("${CMAKE_CURRENT_LIST_DIR}/CTestCustom.cmake")
 
+        macro(safe_submit)
+            ctest_submit(${ARGN} RETURN_VALUE _submit_ret CAPTURE_CMAKE_ERROR _submit_err)
+            if(NOT _submit_ret EQUAL 0 OR NOT _submit_err EQUAL 0)
+                message(WARNING "CDash submit failed (ret=${_submit_ret}, err=${_submit_err}), continuing...")
+                if("$ENV{GITHUB_ACTIONS}" STREQUAL "true")
+                    message("::warning::CDash submit failed (ret=${_submit_ret}, err=${_submit_err})")
+                endif()
+            endif()
+        endmacro()
+
         macro(handle_error _message _ret)
             if(NOT ${${_ret}} EQUAL 0)
-                ctest_submit(PARTS Done RETURN_VALUE _submit_ret)
+                safe_submit(PARTS Done)
                 message(FATAL_ERROR "${_message} failed: ${${_ret}}")
             endif()
         endmacro()
@@ -115,29 +133,29 @@ def generate_dashboard_script(args):
         ctest_start({DASHBOARD_MODE})
         ctest_update(SOURCE "{SOURCE_DIR}")
         ctest_configure(BUILD "{BINARY_DIR}" RETURN_VALUE _configure_ret)
-        ctest_submit(PARTS Start Update Configure RETURN_VALUE _submit_ret)
+        safe_submit(PARTS Start Update Configure)
 
         handle_error("Configure" _configure_ret)
 
         ctest_build(BUILD "{BINARY_DIR}" RETURN_VALUE _build_ret)
-        ctest_submit(PARTS Build RETURN_VALUE _submit_ret)
+        safe_submit(PARTS Build)
 
         handle_error("Build" _build_ret)
 
         ctest_test(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
-        ctest_submit(PARTS Test RETURN_VALUE _submit_ret)
+        safe_submit(PARTS Test)
 
         if("{CODECOV}" GREATER 0)
             ctest_coverage(
                 BUILD "{BINARY_DIR}"
                 RETURN_VALUE _coverage_ret
                 CAPTURE_CMAKE_ERROR _coverage_err)
-            ctest_submit(PARTS Coverage RETURN_VALUE _submit_ret)
+            safe_submit(PARTS Coverage)
         endif()
 
         handle_error("Testing" _test_ret)
 
-        ctest_submit(PARTS Done RETURN_VALUE _submit_ret)
+        safe_submit(PARTS Done)
         """
     return _script
 
@@ -273,14 +291,35 @@ if __name__ == "__main__":
 
     from textwrap import dedent
 
+    log_group_start("Generating CTest configuration")
+    log(f"Name: {args.name}")
+    log(f"Site: {args.site}")
+    log(f"Mode: {args.mode}")
+    log(f"Stages: {', '.join(args.stages)}")
+    log(f"Source dir: {os.path.realpath(args.source_dir)}")
+    log(f"Binary dir: {os.path.realpath(args.binary_dir)}")
+    log(f"Build jobs: {args.build_jobs}")
+    log(f"Coverage: {args.coverage}")
+    log(f"Submit URL: {args.submit_url}")
+    if cmake_args:
+        log(f"CMake args: {' '.join(cmake_args)}")
+    if ctest_args:
+        log(f"CTest args: {' '.join(ctest_args)}")
+
     _config = dedent(generate_custom(args, cmake_args, ctest_args))
     _script = dedent(generate_dashboard_script(args))
 
-    with open(os.path.join(args.binary_dir, "CTestCustom.cmake"), "w") as f:
-        f.write(f"{_config}\n")
+    config_path = os.path.join(args.binary_dir, "CTestCustom.cmake")
+    script_path = os.path.join(args.binary_dir, "dashboard.cmake")
 
-    with open(os.path.join(args.binary_dir, "dashboard.cmake"), "w") as f:
+    with open(config_path, "w") as f:
+        f.write(f"{_config}\n")
+    log(f"Wrote {config_path}")
+
+    with open(script_path, "w") as f:
         f.write(f"{_script}\n")
+    log(f"Wrote {script_path}")
+    log_group_end()
 
     CTEST_CMD = which("ctest", require=True)
 
@@ -288,34 +327,39 @@ if __name__ == "__main__":
     for itr in args.stages:
         dashboard_args.append(f"{args.mode}{itr}")
 
+    cmd = (
+        [CTEST_CMD]
+        + dashboard_args
+        + ["-S", script_path, "--output-on-failure", "-V"]
+        + ctest_args
+    )
+
+    log_group_start("Running CTest dashboard")
+    log(f"Command: {' '.join(cmd)}")
+    log_group_end()
+
     try:
-        run(
-            [CTEST_CMD]
-            + dashboard_args
-            + [
-                "-S",
-                os.path.join(args.binary_dir, "dashboard.cmake"),
-                "--output-on-failure",
-                "-V",
-            ]
-            + ctest_args,
-            check=True,
-        )
+        run(cmd, check=True)
+    except Exception as e:
+        log(f"CTest dashboard failed: {e}", level="error")
+        raise
     finally:
+        log_group_start("Collecting test artifacts")
         if "-VV" not in ctest_args:
             for file in glob.glob(
                 os.path.join(args.binary_dir, "Testing/**"), recursive=True
             ):
                 if not os.path.isfile(file):
                     continue
-                print(f"\n\n\n###### Reading {file}... ######\n\n\n")
+                log(f"Reading {file}")
                 with open(file, "r") as inpf:
                     fdata = inpf.read()
                     if "LastTest" not in file and "Coverage" not in file:
                         print(fdata)
                     oname = os.path.basename(file)
-                    if oname.endswith(".log"):
+                    if not oname.endswith(".log"):
                         oname += ".log"
                     with open(os.path.join(args.binary_dir, oname), "w") as outf:
-                        print(f"\n\n###### Writing {oname}... ######\n\n")
+                        log(f"Writing {oname}")
                         outf.write(fdata)
+        log_group_end()

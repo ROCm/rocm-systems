@@ -307,6 +307,8 @@ parse:
         FAIL_REGULAR_EXPRESSION: '*'
         SKIP_REGULAR_EXPRESSION: '*'
         SOURCES: '*'
+        CONFIGURE_FILES: '*'
+        DATA: '*'
     rocprofiler_add_integration_execute_test:
       flags:
         - WILL_FAIL
@@ -347,9 +349,6 @@ parse:
         TIMEOUT: '*'
         LABELS: '*'
         DISABLED: '*'
-        FIXTURES_SETUP: '*'
-        FIXTURES_REQUIRED: '*'
-        FIXTURES_CLEANUP: '*'
         DISABLED_MEMCHECKS: '*'
         TEST_PATHS: '*'
         CONFIG: '*'
@@ -358,8 +357,12 @@ parse:
         DISCOVERY_ARGS: '*'
         ATTACHED_FILES: '*'
         ATTACHED_FILES_ON_FAIL: '*'
-        ENVIRONMENT: '*'
         PYTHON_PATH: '*'
+        ENVIRONMENT: '*'
+        PRELOAD: '*'
+        FIXTURES_SETUP: '*'
+        FIXTURES_REQUIRED: '*'
+        FIXTURES_CLEANUP: '*'
         PASS_REGULAR_EXPRESSION: '*'
         FAIL_REGULAR_EXPRESSION: '*'
         SKIP_REGULAR_EXPRESSION: '*'

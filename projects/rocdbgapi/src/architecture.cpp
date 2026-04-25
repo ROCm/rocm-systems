@@ -98,21 +98,6 @@ protected:
     cdbgsys_and_user, /* Conditional Debug for System and User is 1.  */
   };
 
-#if defined(__linux__)
-  static constexpr agent_address_t local_address_aperture_base
-    = agent_address_t{ 1 } << 48;
-  static constexpr agent_address_t private_address_aperture_base
-    = agent_address_t{ 2 } << 48;
-#elif defined(_WIN32)
-  static constexpr agent_address_t local_address_aperture_base
-    = agent_address_t{ 2 } << 60;
-  static constexpr agent_address_t private_address_aperture_base
-    = agent_address_t{ 1 } << 60;
-#endif
-
-  static constexpr agent_address_t address_aperture_mask
-    = utils::bit_mask<agent_address_t> (0, 15) << 48;
-
   static constexpr uint32_t sq_wave_status_scc_mask = 1 << 0;
   static constexpr uint32_t sq_wave_status_priv_mask = 1 << 5;
   static constexpr uint32_t sq_wave_status_trap_en_mask = 1 << 6;
@@ -126,18 +111,19 @@ protected:
   static constexpr uint32_t sq_wave_status_cond_dbg_user_mask = 1 << 20;
   static constexpr uint32_t sq_wave_status_cond_dbg_sys_mask = 1 << 21;
 
-  static constexpr uint32_t ttmp11_wave_in_group_mask = utils::bit_mask (0, 5);
+  static constexpr auto ttmp11_wave_in_group_mask
+    = utils::bit_mask<uint32_t> (0, 5);
   static constexpr int ttmp11_wave_in_group_shift = 0;
-  static constexpr uint32_t ttmp6_spi_ttmps_setup_disabled_mask = 1 << 31;
+  static constexpr uint32_t ttmp6_spi_ttmps_setup_disabled_mask = 1u << 31;
   static constexpr uint32_t ttmp6_wave_stopped_mask = 1 << 30;
   static constexpr uint32_t ttmp6_saved_status_halt_mask = 1 << 29;
   static constexpr int ttmp6_saved_trap_id_shift = 25;
   static constexpr int ttmp6_saved_trap_id_size = 4;
-  static constexpr uint32_t ttmp6_saved_trap_id_mask = utils::bit_mask (
+  static constexpr auto ttmp6_saved_trap_id_mask = utils::bit_mask<uint32_t> (
     ttmp6_saved_trap_id_shift,
     ttmp6_saved_trap_id_shift + ttmp6_saved_trap_id_size - 1);
-  static constexpr uint32_t ttmp6_queue_packet_id_mask
-    = utils::bit_mask (0, 24);
+  static constexpr auto ttmp6_queue_packet_id_mask
+    = utils::bit_mask<uint32_t> (0, 24);
   static constexpr int ttmp6_queue_packet_id_shift = 0;
 
   /* See https://llvm.org/docs/AMDGPUUsage.html#trap-handler-abi  */
@@ -149,19 +135,7 @@ protected:
     debug_trap = 0x3,
   };
 
-  /* The trap handler only saves 4 bits of the original trap_id.  trap_id 0
-     cannot be detected and is invalid, trap_id >= 15 could be any ID between
-     15 and 255, and therefore cannot be differentiated.  The debugger API
-     library only handles trap IDs between 1 and 14.  */
-  static constexpr std::optional<trap_id_t> ttmp6_saved_trap_id (uint32_t x)
-  {
-    if (uint8_t trap_id = utils::bit_extract (
-          x, ttmp6_saved_trap_id_shift,
-          ttmp6_saved_trap_id_shift + ttmp6_saved_trap_id_size - 1);
-        trap_id != 0)
-      return trap_id_t{ trap_id };
-    return std::nullopt;
-  }
+  virtual std::optional<trap_id_t> trap_id (const wave_t &wave) const;
 
   static constexpr uint32_t sq_wave_mode_debug_en_mask = 1 << 11;
   static constexpr uint32_t sq_wave_mode_excp_en_invalid_mask = 1 << 12;
@@ -189,9 +163,10 @@ protected:
   static constexpr uint32_t sq_wave_trapsts_excp_hi_addr_watch3_mask = 1 << 14;
   static constexpr uint32_t sq_wave_trapsts_xnack_error_mask = 1 << 28;
 
-  static constexpr uint32_t sq_wave_trapsts_excp_mask = utils::bit_mask (0, 8);
-  static constexpr uint32_t sq_wave_trapsts_excp_hi_mask
-    = utils::bit_mask (12, 14);
+  static constexpr auto sq_wave_trapsts_excp_mask
+    = utils::bit_mask<uint32_t> (0, 8);
+  static constexpr auto sq_wave_trapsts_excp_hi_mask
+    = utils::bit_mask<uint32_t> (12, 14);
 
   static constexpr uint32_t compute_relaunch_is_event (uint32_t relaunch)
   {
@@ -500,6 +475,8 @@ protected:
   simulate_instruction (wave_t &wave, agent_address_t pc,
                         const instruction_t &instruction) const;
 
+  virtual void simulate_instruction_fixup (wave_t &wave) const = 0;
+
   virtual void simulate_trap_handler (wave_t &wave, agent_address_t pc,
                                       std::optional<trap_id_t> trap_id
                                       = {}) const;
@@ -526,6 +503,24 @@ struct disassembly_user_data_t
 };
 
 } /* namespace detail */
+
+std::optional<amdgcn_architecture_t::trap_id_t>
+amdgcn_architecture_t::trap_id (const wave_t &wave) const
+{
+  uint32_t ttmp6;
+  wave.read_register (amdgpu_regnum_t::ttmp6, &ttmp6);
+
+  /* The trap handler only saves 4 bits of the original trap_id.  trap_id 0
+     cannot be detected and is invalid, trap_id >= 15 could be any ID between
+     15 and 255, and therefore cannot be differentiated.  The debugger API
+     library only handles trap IDs between 1 and 14.  */
+  if (uint8_t trap_id = utils::bit_extract<uint8_t> (
+        ttmp6, ttmp6_saved_trap_id_shift,
+        ttmp6_saved_trap_id_shift + ttmp6_saved_trap_id_size - 1);
+      trap_id != 0)
+    return { trap_id_t{ trap_id } };
+  return std::nullopt;
+}
 
 amd_comgr_disassembly_info_t
 amdgcn_architecture_t::disassembly_info () const
@@ -877,7 +872,8 @@ amdgcn_architecture_t::branch_target (wave_t &wave, agent_address_t pc,
       uint32_t csp;
       wave.read_register (amdgpu_regnum_t::csp, &csp);
 
-      amdgpu_regnum_t regnum = amdgpu_regnum_t::s0 + --csp * 4;
+      amdgpu_regnum_t regnum = (amdgpu_regnum_t::s0
+                                + utils::narrow<amdgpu_regdiff_t> (--csp * 4));
 
       uint32_t pc_lo, pc_hi;
       wave.read_register (regnum + 2, &pc_lo);
@@ -1148,15 +1144,16 @@ amdgcn_architecture_t::simulate_instruction (
             = (taken ? pc + instruction.size ()
                      : branch_target (wave, pc, instruction));
 
-          uint32_t saved_exec_lo = taken ? mask_fail : mask_pass;
-          uint32_t saved_exec_hi = (taken ? mask_fail : mask_pass) >> 32;
-          uint32_t saved_pc_lo = saved_pc;
-          uint32_t saved_pc_hi = saved_pc >> 32;
+          auto saved_exec = taken ? mask_fail : mask_pass;
+          auto [saved_exec_lo, saved_exec_hi] = utils::split (saved_exec);
+          auto [saved_pc_lo, saved_pc_hi] = utils::split (saved_pc);
 
           uint32_t csp;
           wave.read_register (amdgpu_regnum_t::csp, &csp);
 
-          amdgpu_regnum_t regnum = amdgpu_regnum_t::s0 + csp++ * 4;
+          amdgpu_regnum_t regnum
+            = (amdgpu_regnum_t::s0
+               + utils::narrow<amdgpu_regdiff_t> (--csp * 4));
           wave.write_register (regnum + 0, saved_exec_lo);
           wave.write_register (regnum + 1, saved_exec_hi);
           wave.write_register (regnum + 2, saved_pc_lo);
@@ -1176,7 +1173,9 @@ amdgcn_architecture_t::simulate_instruction (
           uint32_t csp;
           wave.read_register (amdgpu_regnum_t::csp, &csp);
 
-          amdgpu_regnum_t regnum = amdgpu_regnum_t::s0 + --csp * 4;
+          amdgpu_regnum_t regnum
+            = (amdgpu_regnum_t::s0
+               + utils::narrow<amdgpu_regdiff_t> (--csp * 4));
 
           uint32_t exec_lo, exec_hi;
           wave.read_register (regnum + 0, &exec_lo);
@@ -1553,7 +1552,7 @@ amdgcn_architecture_t::wave_get_state (wave_t &wave) const
     stop_reason |= AMD_DBGAPI_WAVE_STOP_REASON_TRAP;
 
   /* Check for traps caused by an s_trap instruction.  */
-  if (auto trap_id = ttmp6_saved_trap_id (ttmp6); trap_id)
+  if (auto trap_id = this->trap_id (wave); trap_id.has_value ())
     {
       switch (*trap_id)
         {
@@ -1751,31 +1750,31 @@ amdgcn_architecture_t::wave_disable_traps (
 uint8_t
 amdgcn_architecture_t::ssrc0_operand (const instruction_t &instruction)
 {
-  return utils::bit_extract (instruction.word<0> (), 0, 7);
+  return utils::bit_extract<uint8_t> (instruction.word<0> (), 0, 7);
 }
 
 uint8_t
 amdgcn_architecture_t::ssrc1_operand (const instruction_t &instruction)
 {
-  return utils::bit_extract (instruction.word<0> (), 8, 15);
+  return utils::bit_extract<uint8_t> (instruction.word<0> (), 8, 15);
 }
 
 uint8_t
 amdgcn_architecture_t::sdst_operand (const instruction_t &instruction)
 {
-  return utils::bit_extract (instruction.word<0> (), 16, 22);
+  return utils::bit_extract<uint8_t> (instruction.word<0> (), 16, 22);
 }
 
 int16_t
 amdgcn_architecture_t::simm16_operand (const instruction_t &instruction)
 {
-  return utils::bit_extract (instruction.word<0> (), 0, 15);
+  return utils::bit_extract<int16_t> (instruction.word<0> (), 0, 15);
 }
 
 uint8_t
 amdgcn_architecture_t::encoding_op7 (const instruction_t &instruction)
 {
-  return utils::bit_extract (instruction.word<0> (), 16, 22);
+  return utils::bit_extract<uint8_t> (instruction.word<0> (), 16, 22);
 }
 
 template <int... op5>
@@ -1852,19 +1851,21 @@ amdgcn_architecture_t::register_name (amdgpu_regnum_t regnum) const
   if (regnum >= amdgpu_regnum_t::first_shadow_sgpr
       && regnum <= amdgpu_regnum_t::last_shadow_sgpr)
     {
-      return string_printf ("s%" PRId64,
-                            regnum - amdgpu_regnum_t::first_shadow_sgpr);
+      auto print_num
+        = utils::narrow<int> (regnum - amdgpu_regnum_t::first_shadow_sgpr);
+      return string_printf ("s%d", print_num);
     }
   if (regnum >= amdgpu_regnum_t::first_sgpr
       && regnum <= amdgpu_regnum_t::last_sgpr)
     {
-      return string_printf ("s%" PRId64, regnum - amdgpu_regnum_t::first_sgpr);
+      auto print_num
+        = utils::narrow<int> (regnum - amdgpu_regnum_t::first_sgpr);
+      return string_printf ("s%d", print_num);
     }
-  if (regnum >= amdgpu_regnum_t::first_vgpr_64
-      && regnum <= amdgpu_regnum_t::last_vgpr_64)
+  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= amdgpu_regnum_t::v255_64)
     {
-      return string_printf ("v%" PRId64,
-                            regnum - amdgpu_regnum_t::first_vgpr_64);
+      int print_num = utils::narrow<int> (regnum - amdgpu_regnum_t::v0_64);
+      return string_printf ("v%d", print_num);
     }
   if (regnum >= amdgpu_regnum_t::first_ttmp
       && regnum <= amdgpu_regnum_t::last_ttmp)
@@ -1880,8 +1881,11 @@ amdgcn_architecture_t::register_name (amdgpu_regnum_t regnum) const
         case amdgpu_regnum_t::ttmp10:
         case amdgpu_regnum_t::ttmp11:
         case amdgpu_regnum_t::ttmp13:
-          return string_printf ("ttmp%" PRId64,
-                                regnum - amdgpu_regnum_t::first_ttmp);
+          {
+            auto print_num
+              = utils::narrow<int> (regnum - amdgpu_regnum_t::first_ttmp);
+            return string_printf ("ttmp%d", print_num);
+          }
         default:
           break;
         }
@@ -1889,8 +1893,9 @@ amdgcn_architecture_t::register_name (amdgpu_regnum_t regnum) const
   if (regnum >= amdgpu_regnum_t::first_hwreg
       && regnum <= amdgpu_regnum_t::last_hwreg)
     {
-      return string_printf ("hwreg%" PRId64,
-                            regnum - amdgpu_regnum_t::first_hwreg);
+      auto print_num
+        = utils::narrow<int> (regnum - amdgpu_regnum_t::first_hwreg);
+      return string_printf ("hwreg%d", print_num);
     }
 
   if (regnum == amdgpu_regnum_t::exec_64
@@ -1955,8 +1960,7 @@ std::string
 amdgcn_architecture_t::register_type (amdgpu_regnum_t regnum) const
 {
   /* Vector registers.  */
-  if (regnum >= amdgpu_regnum_t::first_vgpr_64
-      && regnum <= amdgpu_regnum_t::last_vgpr_64)
+  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= amdgpu_regnum_t::v255_64)
     {
       return "int32_t[64]";
     }
@@ -2019,8 +2023,7 @@ amd_dbgapi_size_t
 amdgcn_architecture_t::register_size (amdgpu_regnum_t regnum) const
 {
   /* Vector registers.  */
-  if (regnum >= amdgpu_regnum_t::first_vgpr_64
-      && regnum <= amdgpu_regnum_t::last_vgpr_64)
+  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= amdgpu_regnum_t::v255_64)
     {
       return sizeof (int32_t) * 64;
     }
@@ -2087,26 +2090,28 @@ amdgcn_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
     case amdgpu_regnum_t::trapsts:
       {
         static uint32_t trapsts_read_only_bits
-          = utils::bit_mask (9, 9) /* 0  */ | utils::bit_mask (15, 15) /* 0  */
-            | utils::bit_mask (22, 27) /* 0  */;
+          = (utils::bit_mask<uint32_t> (9, 9)       /* 0 */
+             | utils::bit_mask<uint32_t> (15, 15)   /* 0 */
+             | utils::bit_mask<uint32_t> (22, 27)); /* 0 */
         return &trapsts_read_only_bits;
       }
 
     case amdgpu_regnum_t::mode:
       {
-        static uint32_t mode_read_only_bits = utils::bit_mask (21, 22); /* 0 */
+        static uint32_t mode_read_only_bits
+          = utils::bit_mask<uint32_t> (21, 22); /* 0 */
         return &mode_read_only_bits;
       }
 
     case amdgpu_regnum_t::pseudo_status:
       {
         static uint32_t status_read_only_bits
-          = utils::bit_mask (5, 7)      /* priv, trap_en, ttrace_en  */
-            | utils::bit_mask (9, 12)   /* execz, vccz, in_tg, in_barrier  */
-            | utils::bit_mask (14, 16)  /* trap, ttrace_cu_en, valid  */
-            | utils::bit_mask (18, 19)  /* skip_export, perf_en  */
-            | utils::bit_mask (22, 26)  /* allow_replay, fatal_halt, 0  */
-            | utils::bit_mask (28, 31); /* 0  */
+          = (utils::bit_mask<uint32_t> (5, 7)       /* priv, trap_en, ttrace_en */
+             | utils::bit_mask<uint32_t> (9, 12)    /* execz, vccz, in_tg, in_barrier */
+             | utils::bit_mask<uint32_t> (14,16)    /* trap, ttrace_cu_en, valid */
+             | utils::bit_mask<uint32_t> (18, 19)   /* skip_export, perf_en */
+             | utils::bit_mask<uint32_t> (22, 26)   /* allow_replay, fatal_halt, 0 */
+             | utils::bit_mask<uint32_t> (28, 31)); /* 0 */
         return &status_read_only_bits;
       }
 
@@ -2344,7 +2349,7 @@ amdgcn_architecture_t::write_pseudo_register (const wave_t &wave,
       memcpy (reinterpret_cast<std::byte *> (&csp) + offset, value,
               value_size);
 
-      mode = (mode & ~utils::bit_mask (29, 31)) | (csp << 29);
+      mode = (mode & ~utils::bit_mask<uint32_t> (29, 31)) | (csp << 29);
 
       wave.write_register (amdgpu_regnum_t::mode, mode);
       return;
@@ -2362,13 +2367,13 @@ amdgcn_architecture_t::save_pc_for_park (const wave_t &wave,
 
   uint32_t ttmp7, ttmp11;
   /* The trap handler saves PC[31:0] in ttmp7[31:0] ...  */
-  ttmp7 = utils::bit_extract (pc, 0, 31);
+  ttmp7 = utils::bit_extract<uint32_t> (pc, 0, 31);
   wave.write_register (amdgpu_regnum_t::ttmp7, ttmp7);
 
   /* ... and PC[47:32] in ttmp11[22:7].  */
   wave.read_register (amdgpu_regnum_t::ttmp11, &ttmp11);
-  ttmp11 &= ~utils::bit_mask (7, 22);
-  ttmp11 |= (utils::bit_extract (pc, 32, 47) << 7);
+  ttmp11 &= ~utils::bit_mask<uint32_t> (7, 22);
+  ttmp11 |= (utils::bit_extract<uint32_t> (pc, 32, 47) << 7);
   wave.write_register (amdgpu_regnum_t::ttmp11, ttmp11);
 }
 
@@ -2481,6 +2486,7 @@ protected:
     bool is_first_wave () const override;
 
     size_t lds_size () const override;
+    size_t hwreg_count () const override;
 
     agent_address_t begin () const override
     {
@@ -2562,6 +2568,12 @@ public:
   scratch_memory_region (
     const agent_t &agent, uint32_t compute_tmpring_size_register,
     const architecture_t::cwsr_record_t &cwsr_record) const override;
+
+protected:
+  void simulate_instruction_fixup (wave_t & /* wave  */) const override
+  {
+    /* No fixup is necessary.  */
+  }
 };
 
 gfx9_architecture_t::gfx9_architecture_t (elf_amdgpu_machine_t e_machine,
@@ -2575,13 +2587,7 @@ gfx9_architecture_t::gfx9_architecture_t (elf_amdgpu_machine_t e_machine,
   auto &private_lane = create<private_swizzled_address_space_t> (
     "private_lane", /* interleave_size  */ sizeof (uint32_t));
   create<private_unswizzled_address_space_t> ("private_wave");
-
-  auto &generic = create<generic_address_space_t> (
-    "generic",
-    std::vector<generic_address_space_t::aperture_t>{
-      { local_address_aperture_base, address_aperture_mask, local },
-      { private_address_aperture_base, address_aperture_mask, private_lane },
-      { 0, 0, address_space_t::global () } });
+  auto &generic = create<generic_address_space_t> ("generic");
 
   /* Create address classes.  */
 
@@ -2597,19 +2603,24 @@ gfx9_architecture_t::gfx9_architecture_t (elf_amdgpu_machine_t e_machine,
 
   /* Scalar registers: [s0-s102].  */
   auto &scalar_registers = create<register_class_t> (*this, "scalar");
-  scalar_registers.add_registers (
-    amdgpu_regnum_t::first_sgpr,
-    amdgpu_regnum_t::first_sgpr + gfx9_architecture_t::scalar_register_count ()
-      - 1);
-  scalar_registers.add_registers (
-    amdgpu_regnum_t::first_shadow_sgpr,
-    amdgpu_regnum_t::first_shadow_sgpr
-      + gfx9_architecture_t::scalar_register_count () - 1);
+  const auto scalar_register_count
+    = gfx9_architecture_t::scalar_register_count ();
+
+  scalar_registers.add_registers
+    (amdgpu_regnum_t::first_sgpr,
+     (amdgpu_regnum_t::first_sgpr
+      + utils::narrow<amdgpu_regdiff_t> (scalar_register_count)
+      - 1));
+  scalar_registers.add_registers
+    (amdgpu_regnum_t::first_shadow_sgpr,
+     (amdgpu_regnum_t::first_shadow_sgpr
+      + utils::narrow<amdgpu_regdiff_t> (scalar_register_count)
+      - 1));
 
   /* Vector registers: [v0-v255]  */
   auto &vector_registers = create<register_class_t> (*this, "vector");
-  vector_registers.add_registers (amdgpu_regnum_t::first_vgpr_64,
-                                  amdgpu_regnum_t::last_vgpr_64);
+  vector_registers.add_registers (amdgpu_regnum_t::v0_64,
+                                  amdgpu_regnum_t::v255_64);
 
   /* Trap temporary registers: [ttmp4-ttmp11, ttmp13]  */
   auto &trap_registers = create<register_class_t> (*this, "trap");
@@ -2633,12 +2644,13 @@ gfx9_architecture_t::gfx9_architecture_t (elf_amdgpu_machine_t e_machine,
 
   /* General registers: [{scalar}, {vector}, pc, exec, vcc]  */
   auto &general_registers = create<register_class_t> (*this, "general");
-  general_registers.add_registers (
-    amdgpu_regnum_t::first_sgpr,
-    amdgpu_regnum_t::first_sgpr + gfx9_architecture_t::scalar_register_count ()
-      - 1);
-  general_registers.add_registers (amdgpu_regnum_t::first_vgpr_64,
-                                   amdgpu_regnum_t::last_vgpr_64);
+  general_registers.add_registers
+    (amdgpu_regnum_t::first_sgpr,
+     amdgpu_regnum_t::first_sgpr
+     + utils::narrow<amdgpu_regdiff_t> (scalar_register_count)
+     - 1);
+  general_registers.add_registers (amdgpu_regnum_t::v0_64,
+                                   amdgpu_regnum_t::v255_64);
   general_registers.add_registers (amdgpu_regnum_t::m0, amdgpu_regnum_t::m0);
   general_registers.add_registers (amdgpu_regnum_t::pc, amdgpu_regnum_t::pc);
   general_registers.add_registers (amdgpu_regnum_t::pseudo_exec_64,
@@ -2779,6 +2791,12 @@ gfx9_architecture_t::cwsr_record_t::lds_size () const
 {
   return compute_relaunch_state_payload_lds_size (m_compute_relaunch_state)
          * 128 * sizeof (uint32_t);
+}
+
+size_t
+gfx9_architecture_t::cwsr_record_t::hwreg_count () const
+{
+  return 32;
 }
 
 bool
@@ -3149,19 +3167,22 @@ gfx9_architecture_t::cwsr_record_t::register_address (
         return save_area_addr;
     }
 
-  size_t ttmp_size = sizeof (uint32_t);
-  size_t ttmp_count = 16;
-  agent_address_t ttmps_addr = save_area_addr - ttmp_count * ttmp_size;
+  const size_t hwreg_size = sizeof (uint32_t);
+  const agent_address_t hwregs_addr
+    = save_area_addr - (this->hwreg_count () * hwreg_size);
+
+  /* TTMP registers are saved at the end of the HWREG block.  */
+  const size_t ttmp_size = sizeof (uint32_t);
+  const size_t ttmp_count = 16;
+  const agent_address_t ttmps_addr = save_area_addr - ttmp_count * ttmp_size;
 
   if (regnum >= amdgpu_regnum_t::first_ttmp
       && regnum <= amdgpu_regnum_t::last_ttmp)
     {
-      return ttmps_addr + (regnum - amdgpu_regnum_t::first_ttmp) * ttmp_size;
+      return (ttmps_addr
+              + (utils::narrow<size_t> (regnum - amdgpu_regnum_t::first_ttmp)
+                 * ttmp_size));
     }
-
-  size_t hwreg_count = 16;
-  size_t hwreg_size = sizeof (uint32_t);
-  agent_address_t hwregs_addr = ttmps_addr - hwreg_count * hwreg_size;
 
   /* Rename registers that map to the hwreg block.  */
   switch (regnum)
@@ -3202,22 +3223,27 @@ gfx9_architecture_t::cwsr_record_t::register_address (
   if (regnum >= amdgpu_regnum_t::first_hwreg
       && regnum <= amdgpu_regnum_t::last_hwreg)
     {
-      return hwregs_addr
-             + (regnum - amdgpu_regnum_t::first_hwreg) * hwreg_size;
+      return (hwregs_addr
+              + utils::narrow<size_t> (regnum - amdgpu_regnum_t::first_hwreg)
+              * hwreg_size);
     }
 
   size_t sgpr_count = this->sgpr_count ();
   size_t sgpr_size = sizeof (int32_t);
   agent_address_t sgprs_addr = hwregs_addr - sgpr_count * sgpr_size;
 
+  auto arch_scalars_count = (architecture.scalar_register_count ()
+                             + architecture.scalar_alias_count ());
   amdgpu_regnum_t aliased_sgpr_end
-    = amdgpu_regnum_t::first_sgpr
-      + std::min (architecture.scalar_register_count ()
-                    + architecture.scalar_alias_count (),
-                  sgpr_count);
+    = (amdgpu_regnum_t::first_sgpr
+       + utils::narrow<amdgpu_regdiff_t> (std::min (arch_scalars_count,
+                                                    sgpr_count)));
+
+  auto scalar_alias_count = architecture.scalar_alias_count ();
 
   /* Exclude the aliased sgprs.  */
-  if (regnum >= (aliased_sgpr_end - architecture.scalar_alias_count ())
+  if (regnum >= (aliased_sgpr_end
+                 - utils::narrow<amdgpu_regdiff_t> (scalar_alias_count))
       && regnum < aliased_sgpr_end)
     return std::nullopt;
 
@@ -3247,13 +3273,16 @@ gfx9_architecture_t::cwsr_record_t::register_address (
       + (amdgpu_regnum_t::first_shadow_sgpr - amdgpu_regnum_t::first_sgpr);
 
   /* Map the shadow sgprs onto the same slots as "regular" sgprs.  */
-  if (regnum >= (shadow_sgpr_end - architecture.scalar_alias_count ())
+  if (regnum >= (shadow_sgpr_end
+                 - utils::narrow<amdgpu_regdiff_t> (scalar_alias_count))
       && regnum < shadow_sgpr_end)
     {
       /* The xnack_mask register (shadow_sgpr_end[-4:-3]) really is saved in
          the hwreg block (hwreg[7:8]) by the CWSR handler.  */
       if (regnum == (shadow_sgpr_end - 4) || regnum == (shadow_sgpr_end - 3))
-        return hwregs_addr + (11 - (shadow_sgpr_end - regnum)) * hwreg_size;
+        return (hwregs_addr
+                + (utils::narrow<size_t> (11 - (shadow_sgpr_end - regnum))
+                   * hwreg_size));
 
       regnum = amdgpu_regnum_t::first_sgpr
                + (regnum - amdgpu_regnum_t::first_shadow_sgpr);
@@ -3261,18 +3290,22 @@ gfx9_architecture_t::cwsr_record_t::register_address (
 
   if (regnum >= amdgpu_regnum_t::first_sgpr && regnum < aliased_sgpr_end)
     {
-      return sgprs_addr + (regnum - amdgpu_regnum_t::s0) * sgpr_size;
+      return (sgprs_addr
+              + (utils::narrow<size_t> (regnum - amdgpu_regnum_t::s0)
+                 * sgpr_size));
     }
 
   size_t vgpr_count = this->vgpr_count ();
   size_t vgpr_size = sizeof (int32_t) * 64;
   agent_address_t vgprs_addr = sgprs_addr - vgpr_count * vgpr_size;
 
-  if (regnum >= amdgpu_regnum_t::first_vgpr_64
-      && regnum <= amdgpu_regnum_t::last_vgpr_64
-      && ((regnum - amdgpu_regnum_t::v0_64) < vgpr_count))
+  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= amdgpu_regnum_t::v255_64
+      && ((regnum - amdgpu_regnum_t::v0_64)
+          < utils::narrow<amdgpu_regdiff_t> (vgpr_count)))
     {
-      return vgprs_addr + (regnum - amdgpu_regnum_t::v0_64) * vgpr_size;
+      return (vgprs_addr
+              + (utils::narrow<size_t> (regnum - amdgpu_regnum_t::v0_64)
+                 * vgpr_size));
     }
 
   return std::nullopt;
@@ -3311,8 +3344,7 @@ gfx9_architecture_t::control_stack_iterate (
             queue, xcc_id, relaunch, state, last_wave_area - 64);
 
           last_wave_area
-            = cwsr_record->register_address (amdgpu_regnum_t::first_vgpr_64)
-                .value ();
+            = cwsr_record->register_address (amdgpu_regnum_t::v0_64).value ();
 
           wave_callback (std::move (cwsr_record));
           ++wave_count;
@@ -3357,8 +3389,8 @@ gfx9_architecture_t::scratch_memory_region (
   amd_dbgapi_size_t wavesize
     = utils::bit_extract (compute_tmpring_size_register, 12, 24) * 1024;
 
-  uint32_t shader_engine_count
-    = agent.os_info ().shader_engine_count / agent.os_info ().xcc_count;
+  auto shader_engine_count = utils::narrow<uint32_t> (
+    agent.os_info ().shader_engine_count / agent.os_info ().xcc_count);
   dbgapi_assert (shader_engine_count != 0);
 
   amd_dbgapi_size_t offset
@@ -3472,8 +3504,8 @@ mi_architecture_t::mi_architecture_t (elf_amdgpu_machine_t e_machine,
                { return register_class.name () == "vector"; });
   dbgapi_assert (vector_registers != nullptr);
 
-  vector_registers->add_registers (amdgpu_regnum_t::first_accvgpr_64,
-                                   amdgpu_regnum_t::last_accvgpr_64);
+  vector_registers->add_registers (amdgpu_regnum_t::a0_64,
+                                   amdgpu_regnum_t::a255_64);
 
   /* General registers: [a0-a255]  */
   register_class_t *general_registers
@@ -3481,18 +3513,17 @@ mi_architecture_t::mi_architecture_t (elf_amdgpu_machine_t e_machine,
                { return register_class.name () == "general"; });
   dbgapi_assert (general_registers != nullptr);
 
-  general_registers->add_registers (amdgpu_regnum_t::first_accvgpr_64,
-                                    amdgpu_regnum_t::last_accvgpr_64);
+  general_registers->add_registers (amdgpu_regnum_t::a0_64,
+                                    amdgpu_regnum_t::a255_64);
 }
 
 std::string
 mi_architecture_t::register_name (amdgpu_regnum_t regnum) const
 {
-  if (regnum >= amdgpu_regnum_t::first_accvgpr_64
-      && regnum <= amdgpu_regnum_t::last_accvgpr_64)
+  if (regnum >= amdgpu_regnum_t::a0_64 && regnum <= amdgpu_regnum_t::a255_64)
     {
-      return string_printf ("a%" PRId64,
-                            regnum - amdgpu_regnum_t::first_accvgpr_64);
+      int print_num = utils::narrow<int> (regnum - amdgpu_regnum_t::a0_64);
+      return string_printf ("a%d", print_num);
     }
 
   return gfx9_architecture_t::register_name (regnum);
@@ -3501,8 +3532,7 @@ mi_architecture_t::register_name (amdgpu_regnum_t regnum) const
 std::string
 mi_architecture_t::register_type (amdgpu_regnum_t regnum) const
 {
-  if (regnum >= amdgpu_regnum_t::first_accvgpr_64
-      && regnum <= amdgpu_regnum_t::last_accvgpr_64)
+  if (regnum >= amdgpu_regnum_t::a0_64 && regnum <= amdgpu_regnum_t::a255_64)
     {
       return "int32_t[64]";
     }
@@ -3513,8 +3543,7 @@ mi_architecture_t::register_type (amdgpu_regnum_t regnum) const
 amd_dbgapi_size_t
 mi_architecture_t::register_size (amdgpu_regnum_t regnum) const
 {
-  if (regnum >= amdgpu_regnum_t::first_accvgpr_64
-      && regnum <= amdgpu_regnum_t::last_accvgpr_64)
+  if (regnum >= amdgpu_regnum_t::a0_64 && regnum <= amdgpu_regnum_t::a255_64)
     {
       return sizeof (int32_t) * 64;
     }
@@ -3541,22 +3570,26 @@ mi_architecture_t::cwsr_record_t::register_address (
   size_t accvgpr_size = sizeof (int32_t) * 64;
   agent_address_t accvgprs_addr = sgprs_addr - accvgpr_count * accvgpr_size;
 
-  if (regnum >= amdgpu_regnum_t::first_accvgpr_64
-      && regnum <= amdgpu_regnum_t::last_accvgpr_64
-      && ((regnum - amdgpu_regnum_t::a0_64) < accvgpr_count))
+  if (regnum >= amdgpu_regnum_t::a0_64 && regnum <= amdgpu_regnum_t::a255_64
+      && ((regnum - amdgpu_regnum_t::a0_64)
+          < utils::narrow<amdgpu_regdiff_t> (accvgpr_count)))
     {
-      return accvgprs_addr + (regnum - amdgpu_regnum_t::a0_64) * accvgpr_size;
+      return (accvgprs_addr
+              + (utils::narrow<size_t> (regnum - amdgpu_regnum_t::a0_64)
+                 * accvgpr_size));
     }
 
   size_t vgpr_count = this->vgpr_count ();
   size_t vgpr_size = sizeof (int32_t) * 64;
   agent_address_t vgprs_addr = accvgprs_addr - vgpr_count * vgpr_size;
 
-  if (regnum >= amdgpu_regnum_t::first_vgpr_64
-      && regnum <= amdgpu_regnum_t::last_vgpr_64
-      && ((regnum - amdgpu_regnum_t::v0_64) < vgpr_count))
+  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= amdgpu_regnum_t::v255_64
+      && ((regnum - amdgpu_regnum_t::v0_64)
+          < utils::narrow<amdgpu_regdiff_t> (vgpr_count)))
     {
-      return vgprs_addr + (regnum - amdgpu_regnum_t::v0_64) * vgpr_size;
+      return (vgprs_addr
+              + (utils::narrow<size_t> (regnum - amdgpu_regnum_t::v0_64)
+                 * vgpr_size));
     }
 
   return std::nullopt;
@@ -3716,10 +3749,10 @@ protected:
   static constexpr uint32_t sq_wave_trapsts_trap_after_inst_mask = 1 << 25;
   static constexpr uint32_t sq_wave_trapsts_perf_snapshot_mask = 1 << 26;
 
-  static constexpr uint32_t ttmp11_queue_packet_id_mask
-    = utils::bit_mask (6, 30);
+  static constexpr auto ttmp11_queue_packet_id_mask
+    = utils::bit_mask<uint32_t> (6, 30);
   static constexpr int ttmp11_queue_packet_id_shift = 6;
-  static constexpr uint32_t ttmp11_trap_hander_ttmps_setup_mask = 1 << 31;
+  static constexpr uint32_t ttmp11_trap_hander_ttmps_setup_mask = 1u << 31;
 
   class cwsr_record_t : public gfx90a_t::cwsr_record_t
   {
@@ -3807,6 +3840,8 @@ protected:
   std::optional<agent_address_t>
   simulate_instruction (wave_t &wave, agent_address_t pc,
                         const instruction_t &instruction) const override;
+
+  void simulate_instruction_fixup (wave_t &wave) const override;
 
   std::string register_type (amdgpu_regnum_t regnum) const override;
   const void *register_read_only_mask (amdgpu_regnum_t regnum) const override;
@@ -3972,28 +4007,31 @@ gfx9_4_architecture_t::simulate_instruction (
   auto next_pc = gfx90a_t::simulate_instruction (wave, pc, instruction);
 
   if (next_pc)
-    {
-      uint32_t mode_reg;
-      wave.read_register (amdgpu_regnum_t::mode, &mode_reg);
-
-      /* If single-stepping, raise the trap_after_inst exception.  */
-      if (mode_reg & sq_wave_mode_debug_en_mask)
-        {
-          uint32_t trapsts;
-          wave.read_register (amdgpu_regnum_t::trapsts, &trapsts);
-          trapsts |= sq_wave_trapsts_trap_after_inst_mask;
-          wave.write_register (amdgpu_regnum_t::trapsts, trapsts);
-        }
-    }
+    simulate_instruction_fixup (wave);
 
   return next_pc;
+}
+
+void
+gfx9_4_architecture_t::simulate_instruction_fixup (wave_t &wave) const
+{
+  uint32_t mode_reg;
+  wave.read_register (amdgpu_regnum_t::mode, &mode_reg);
+
+  /* If single-stepping, raise the trap_after_inst exception.  */
+  if (mode_reg & sq_wave_mode_debug_en_mask)
+    {
+      uint32_t trapsts;
+      wave.read_register (amdgpu_regnum_t::trapsts, &trapsts);
+      trapsts |= sq_wave_trapsts_trap_after_inst_mask;
+      wave.write_register (amdgpu_regnum_t::trapsts, trapsts);
+    }
 }
 
 std::string
 gfx9_4_architecture_t::register_type (amdgpu_regnum_t regnum) const
 {
-  if (regnum >= amdgpu_regnum_t::first_accvgpr_64
-      && regnum <= amdgpu_regnum_t::last_accvgpr_64)
+  if (regnum >= amdgpu_regnum_t::a0_64 && regnum <= amdgpu_regnum_t::a255_64)
     {
       return "int32_t[64]";
     }
@@ -4108,24 +4146,32 @@ gfx9_4_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
   switch (regnum)
     {
     case amdgpu_regnum_t::trapsts:
-      static uint32_t trapsts_read_only_bits
-        = utils::bit_mask (9, 9) /* 0  */ | utils::bit_mask (15, 15) /* 0  */
-          | utils::bit_mask (27, 27) /* 0  */;
-      return &trapsts_read_only_bits;
+      {
+        static uint32_t trapsts_read_only_bits
+          = (utils::bit_mask<uint32_t> (9, 9)       /* 0 */
+             | utils::bit_mask<uint32_t> (15, 15)   /* 0 */
+             | utils::bit_mask<uint32_t> (27, 27)); /* 0 */
+        return &trapsts_read_only_bits;
+      }
 
     case amdgpu_regnum_t::mode:
-      static uint32_t mode_read_only_bits = utils::bit_mask (22, 22); /* 0 */
-      return &mode_read_only_bits;
+      {
+        static uint32_t mode_read_only_bits
+          = utils::bit_mask<uint32_t> (22, 22); /* 0 */
+        return &mode_read_only_bits;
+      }
 
     case amdgpu_regnum_t::pseudo_status:
-      static uint32_t status_read_only_bits
-        = utils::bit_mask (5, 7)      /* priv, trap_en, ttrace_en  */
-          | utils::bit_mask (9, 12)   /* execz, vccz, in_tg, in_barrier  */
-          | utils::bit_mask (14, 16)  /* trap, ttrace_cu_en, valid  */
-          | utils::bit_mask (18, 19)  /* skip_export, perf_en  */
-          | utils::bit_mask (22, 26)  /* allow_replay, fatal_halt, 0  */
-          | utils::bit_mask (29, 30); /* 0  */
-      return &status_read_only_bits;
+      {
+        static uint32_t status_read_only_bits
+          = (utils::bit_mask<uint32_t> (5, 7)       /* priv, trap_en, ttrace_en */
+             | utils::bit_mask<uint32_t> (9, 12)    /* execz, vccz, in_tg, in_barrier */
+             | utils::bit_mask<uint32_t> (14, 16)   /* trap, ttrace_cu_en, valid */
+             | utils::bit_mask<uint32_t> (18, 19)   /* skip_export, perf_en */
+             | utils::bit_mask<uint32_t> (22, 26)   /* allow_replay, fatal_halt, 0 */
+             | utils::bit_mask<uint32_t> (29, 30)); /* 0 */
+        return &status_read_only_bits;
+      }
 
     default:
       return gfx90a_t::register_read_only_mask (regnum);
@@ -4394,17 +4440,24 @@ gfx10_architecture_t::gfx10_architecture_t (elf_amdgpu_machine_t e_machine,
                { return register_class.name () == "scalar"; });
   dbgapi_assert (scalar_registers != nullptr);
 
-  scalar_registers->add_registers (
-    amdgpu_regnum_t::first_sgpr
-      + gfx9_architecture_t::scalar_register_count (),
-    amdgpu_regnum_t::first_sgpr
-      + gfx10_architecture_t::scalar_register_count () - 1);
+  auto gfx9_scalar_register_count
+    = gfx9_architecture_t::scalar_register_count ();
+  auto gfx10_scalar_register_count
+    = gfx10_architecture_t::scalar_register_count ();
 
-  scalar_registers->add_registers (
-    amdgpu_regnum_t::first_shadow_sgpr
-      + gfx9_architecture_t::scalar_register_count (),
-    amdgpu_regnum_t::first_shadow_sgpr
-      + gfx10_architecture_t::scalar_register_count () - 1);
+  scalar_registers->add_registers
+    ((amdgpu_regnum_t::first_sgpr
+      + utils::narrow<amdgpu_regdiff_t> (gfx9_scalar_register_count)),
+     (amdgpu_regnum_t::first_sgpr
+      + utils::narrow<amdgpu_regdiff_t> (gfx10_scalar_register_count)
+      - 1));
+
+  scalar_registers->add_registers
+    ((amdgpu_regnum_t::first_shadow_sgpr
+      + utils::narrow<amdgpu_regdiff_t> (gfx9_scalar_register_count)),
+     (amdgpu_regnum_t::first_shadow_sgpr
+      + utils::narrow<amdgpu_regdiff_t> (gfx10_scalar_register_count)
+      - 1));
 
   /* Vector registers: [v0_32-v255_32]  */
   register_class_t *vector_registers
@@ -4412,8 +4465,8 @@ gfx10_architecture_t::gfx10_architecture_t (elf_amdgpu_machine_t e_machine,
                { return register_class.name () == "vector"; });
   dbgapi_assert (vector_registers != nullptr);
 
-  vector_registers->add_registers (amdgpu_regnum_t::first_vgpr_32,
-                                   amdgpu_regnum_t::last_vgpr_32);
+  vector_registers->add_registers (amdgpu_regnum_t::v0_32,
+                                   amdgpu_regnum_t::v255_32);
 
   /* System registers: [xnack_mask_32]  */
   register_class_t *system_registers
@@ -4437,13 +4490,14 @@ gfx10_architecture_t::gfx10_architecture_t (elf_amdgpu_machine_t e_machine,
                { return register_class.name () == "general"; });
   dbgapi_assert (general_registers != nullptr);
 
-  general_registers->add_registers (
-    amdgpu_regnum_t::first_sgpr
-      + gfx9_architecture_t::scalar_register_count (),
-    amdgpu_regnum_t::first_sgpr
-      + gfx10_architecture_t::scalar_register_count () - 1);
-  general_registers->add_registers (amdgpu_regnum_t::first_vgpr_32,
-                                    amdgpu_regnum_t::last_vgpr_32);
+  general_registers->add_registers
+    ((amdgpu_regnum_t::first_sgpr
+      + utils::narrow<amdgpu_regdiff_t> (gfx9_scalar_register_count)),
+     (amdgpu_regnum_t::first_sgpr
+      + utils::narrow<amdgpu_regdiff_t> (gfx10_scalar_register_count)
+      - 1));
+  general_registers->add_registers (amdgpu_regnum_t::v0_32,
+                                    amdgpu_regnum_t::v255_32);
   general_registers->add_registers (amdgpu_regnum_t::pseudo_exec_32,
                                     amdgpu_regnum_t::pseudo_exec_32);
   general_registers->add_registers (amdgpu_regnum_t::pseudo_vcc_32,
@@ -4453,11 +4507,10 @@ gfx10_architecture_t::gfx10_architecture_t (elf_amdgpu_machine_t e_machine,
 std::string
 gfx10_architecture_t::register_name (amdgpu_regnum_t regnum) const
 {
-  if (regnum >= amdgpu_regnum_t::first_vgpr_32
-      && regnum <= amdgpu_regnum_t::last_vgpr_32)
+  if (regnum >= amdgpu_regnum_t::v0_32 && regnum <= amdgpu_regnum_t::v255_32)
     {
-      return string_printf ("v%" PRId64,
-                            regnum - amdgpu_regnum_t::first_vgpr_32);
+      int print_num = utils::narrow<int> (regnum - amdgpu_regnum_t::v0_32);
+      return string_printf ("v%d", print_num);
     }
   if (regnum == amdgpu_regnum_t::exec_32
       || regnum == amdgpu_regnum_t::pseudo_exec_32)
@@ -4490,8 +4543,7 @@ std::string
 gfx10_architecture_t::register_type (amdgpu_regnum_t regnum) const
 {
   /* Vector registers (arch and acc).  */
-  if ((regnum >= amdgpu_regnum_t::first_vgpr_32
-       && regnum <= amdgpu_regnum_t::last_vgpr_32))
+  if ((regnum >= amdgpu_regnum_t::v0_32 && regnum <= amdgpu_regnum_t::v255_32))
     {
       return "int32_t[32]";
     }
@@ -4606,8 +4658,7 @@ amd_dbgapi_size_t
 gfx10_architecture_t::register_size (amdgpu_regnum_t regnum) const
 {
   /* Vector registers (arch and acc).  */
-  if ((regnum >= amdgpu_regnum_t::first_vgpr_32
-       && regnum <= amdgpu_regnum_t::last_vgpr_32))
+  if ((regnum >= amdgpu_regnum_t::v0_32 && regnum <= amdgpu_regnum_t::v255_32))
     {
       return sizeof (int32_t) * 32;
     }
@@ -4898,30 +4949,39 @@ gfx10_architecture_t::cwsr_record_t::register_address (
   agent_address_t private_vgprs_addr
     = shared_vgprs_addr - private_vgpr_count * private_vgpr_size;
 
-  if (regnum >= (amdgpu_regnum_t::v0_32 + private_vgpr_count)
-      && regnum <= amdgpu_regnum_t::last_vgpr_32
+  if (regnum >= (amdgpu_regnum_t::v0_32
+                 + utils::narrow<amdgpu_regdiff_t> (private_vgpr_count))
+      && regnum <= amdgpu_regnum_t::v255_32
       && ((regnum - amdgpu_regnum_t::v0_32)
-          < (private_vgpr_count + shared_vgpr_count)))
+          < utils::narrow<amdgpu_regdiff_t> (private_vgpr_count
+                                             + shared_vgpr_count)))
     {
-      return shared_vgprs_addr
-             + (regnum - (amdgpu_regnum_t::v0_32 + private_vgpr_count))
-                 * shared_vgpr_size;
+      return (shared_vgprs_addr
+              + (utils::narrow<size_t>
+                 (regnum
+                  - (amdgpu_regnum_t::v0_32
+                     + utils::narrow<amdgpu_regdiff_t> (private_vgpr_count)))
+                 * shared_vgpr_size));
     }
 
-  if (lane_count == 32 && regnum >= amdgpu_regnum_t::first_vgpr_32
-      && regnum <= amdgpu_regnum_t::last_vgpr_32
-      && ((regnum - amdgpu_regnum_t::v0_32) < private_vgpr_count))
+  if (lane_count == 32 && regnum >= amdgpu_regnum_t::v0_32
+      && regnum <= amdgpu_regnum_t::v255_32
+      && ((regnum - amdgpu_regnum_t::v0_32)
+          < utils::narrow<amdgpu_regdiff_t> (private_vgpr_count)))
     {
-      return private_vgprs_addr
-             + (regnum - amdgpu_regnum_t::v0_32) * private_vgpr_size;
+      return (private_vgprs_addr
+              + (utils::narrow<size_t> (regnum - amdgpu_regnum_t::v0_32)
+                 * private_vgpr_size));
     }
 
-  if (lane_count == 64 && regnum >= amdgpu_regnum_t::first_vgpr_64
-      && regnum <= amdgpu_regnum_t::last_vgpr_64
-      && ((regnum - amdgpu_regnum_t::v0_64) < private_vgpr_count))
+  if (lane_count == 64 && regnum >= amdgpu_regnum_t::v0_64
+      && regnum <= amdgpu_regnum_t::v255_64
+      && ((regnum - amdgpu_regnum_t::v0_64)
+          < utils::narrow<amdgpu_regdiff_t> (private_vgpr_count)))
     {
-      return private_vgprs_addr
-             + (regnum - amdgpu_regnum_t::v0_64) * private_vgpr_size;
+      return (private_vgprs_addr
+              + (utils::narrow<size_t> (regnum - amdgpu_regnum_t::v0_64)
+                 * private_vgpr_size));
     }
 
   return std::nullopt;
@@ -5417,6 +5477,8 @@ public:
   simulate_instruction (wave_t &wave, agent_address_t pc,
                         const instruction_t &instruction) const override;
 
+  void simulate_instruction_fixup (wave_t &wave) const override;
+
   std::string register_type (amdgpu_regnum_t regnum) const override;
 
   cbranch_cond_t
@@ -5459,7 +5521,7 @@ public:
     const architecture_t::cwsr_record_t &cwsr_record) const override;
 
   bool can_halt_at_endpgm () const override { return true; }
-  bool can_halt_at_sendmsg_dealloc_vgprs () const
+  virtual bool can_halt_at_sendmsg_dealloc_vgprs () const
   {
     /* If a wave is halted and is PC points to a `s_sendmsg
        sendmsg(MSG_DEALLOC_VGPRS)` instruction, the device recognises that the
@@ -5573,10 +5635,9 @@ std::optional<agent_address_t>
 gfx11_architecture_t::cwsr_record_t::register_address (
   amdgpu_regnum_t regnum) const
 {
-  if ((regnum >= amdgpu_regnum_t::first_vgpr_64
-       && regnum < amdgpu_regnum_t::last_vgpr_64)
-      || (regnum >= amdgpu_regnum_t::first_vgpr_32
-          && regnum < amdgpu_regnum_t::last_vgpr_32))
+  if ((regnum >= amdgpu_regnum_t::v0_64 && regnum < amdgpu_regnum_t::v255_64)
+      || (regnum >= amdgpu_regnum_t::v0_32
+          && regnum < amdgpu_regnum_t::v255_32))
     {
       const agent_address_t status_reg_address
         = register_address (amdgpu_regnum_t::status).value ();
@@ -5610,21 +5671,25 @@ gfx11_architecture_t::simulate_instruction (
       = gfx10_architecture_t::simulate_instruction (wave, pc, instruction);
 
   if (next_pc)
-    {
-      uint32_t mode_reg;
-      wave.read_register (amdgpu_regnum_t::mode, &mode_reg);
-
-      /* If single-stepping, raise the trap_after_inst exception.  */
-      if (mode_reg & sq_wave_mode_trap_after_inst_en_mask)
-        {
-          uint32_t trapsts;
-          wave.read_register (amdgpu_regnum_t::trapsts, &trapsts);
-          trapsts |= sq_wave_trapsts_trap_after_inst_mask;
-          wave.write_register (amdgpu_regnum_t::trapsts, trapsts);
-        }
-    }
+    simulate_instruction_fixup (wave);
 
   return next_pc;
+}
+
+void
+gfx11_architecture_t::simulate_instruction_fixup (wave_t &wave) const
+{
+  uint32_t mode_reg;
+  wave.read_register (amdgpu_regnum_t::mode, &mode_reg);
+
+  /* If single-stepping, raise the trap_after_inst exception.  */
+  if (mode_reg & sq_wave_mode_trap_after_inst_en_mask)
+    {
+      uint32_t trapsts;
+      wave.read_register (amdgpu_regnum_t::trapsts, &trapsts);
+      trapsts |= sq_wave_trapsts_trap_after_inst_mask;
+      wave.write_register (amdgpu_regnum_t::trapsts, trapsts);
+    }
 }
 
 std::string
@@ -5750,23 +5815,25 @@ gfx11_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
     case amdgpu_regnum_t::trapsts:
       {
         static uint32_t trapsts_read_only_bits
-          = utils::bit_mask (9, 9) /* 0  */ | utils::bit_mask (21, 27) /* 0  */
-            | utils::bit_mask (29, 31) /* 0  */;
+          = (utils::bit_mask<uint32_t> (9, 9)       /* 0  */
+             | utils::bit_mask<uint32_t> (21, 27)   /* 0  */
+             | utils::bit_mask<uint32_t> (29, 31)); /* 0  */
         return &trapsts_read_only_bits;
       }
 
     case amdgpu_regnum_t::mode:
       {
         static uint32_t mode_read_only_bits
-          = utils::bit_mask (22, 22)   /* 0 */
-            | utils::bit_mask (24, 26) /* 0 */
-            | utils::bit_mask (28, 31) /* 0 */;
+          = (utils::bit_mask<uint32_t> (22, 22)     /* 0 */
+             | utils::bit_mask<uint32_t> (24, 26)   /* 0 */
+             | utils::bit_mask<uint32_t> (28, 31)); /* 0 */
         return &mode_read_only_bits;
       }
 
     case amdgpu_regnum_t::pseudo_status:
       {
-        static uint32_t status_read_only_bits = utils::bit_mask (0, 31);
+        static uint32_t status_read_only_bits
+          = utils::bit_mask<uint32_t> (0, 31);
         return &status_read_only_bits;
       }
 
@@ -5969,7 +6036,7 @@ gfx11_architecture_t::is_sendmsg (const instruction_t &instruction,
   if (message != nullptr)
     {
       /* Message type is in SIMM16[7:0] */
-      *message = simm16_operand (instruction) & 0xff;
+      utils::narrow_assign (*message, simm16_operand (instruction) & 0xff);
     }
 
   return true;
@@ -6020,8 +6087,8 @@ gfx11_architecture_t::scratch_memory_region (
                               + cwsr_record.scratch_scoreboard_id ())
                              * wavesize;
 
-  uint32_t shader_engine_count
-    = agent.os_info ().shader_engine_count / agent.os_info ().xcc_count;
+  auto shader_engine_count = utils::narrow<uint32_t> (
+    agent.os_info ().shader_engine_count / agent.os_info ().xcc_count);
 
   /* The scratch memory is evenly divided between all XCCs, so each XCC has its
      own scratch base.  */
@@ -6125,13 +6192,13 @@ protected:
   static constexpr uint32_t sq_wave_state_priv_barrier_complete_mask = 1 << 2;
   static constexpr uint32_t sq_wave_state_priv_named_barrier_complete_mask
     = 1 << 3;
-  static constexpr uint32_t sq_wave_state_priv_named_barrier_id_mask
-    = utils::bit_mask (4, 8);
+  static constexpr auto sq_wave_state_priv_named_barrier_id_mask
+    = utils::bit_mask<uint32_t> (4, 8);
   static constexpr uint32_t sq_wave_state_priv_scc_mask = 1 << 9;
-  static constexpr uint32_t sq_wave_state_priv_sys_prio_mask
-    = utils::bit_mask (10, 11);
-  static constexpr uint32_t sq_wave_state_priv_user_prio_mask
-    = utils::bit_mask (12, 13);
+  static constexpr auto sq_wave_state_priv_sys_prio_mask
+    = utils::bit_mask<uint32_t> (10, 11);
+  static constexpr auto sq_wave_state_priv_user_prio_mask
+    = utils::bit_mask<uint32_t> (12, 13);
   static constexpr uint32_t sq_wave_state_priv_halt_mask = 1 << 14;
   static constexpr uint32_t sq_wave_state_priv_poison_err_mask = 1 << 15;
   static constexpr uint32_t sq_wave_state_priv_cond_dbg_user_mask = 1 << 16;
@@ -6140,13 +6207,13 @@ protected:
   static constexpr uint32_t sq_wave_state_priv_perf_en_mask = 1 << 19;
   static constexpr uint32_t sq_wave_state_priv_ttrace_en_mask = 1 << 20;
 
-  static constexpr uint32_t ttmp8_queue_packet_id_mask
-    = utils::bit_mask (0, 24);
+  static constexpr auto ttmp8_queue_packet_id_mask
+    = utils::bit_mask<uint32_t> (0, 24);
   static constexpr uint32_t ttmp8_queue_packet_id_shift = 0;
-  static constexpr uint32_t ttmp8_wave_in_group_mask
-    = utils::bit_mask (25, 29);
+  static constexpr auto ttmp8_wave_in_group_mask
+    = utils::bit_mask<uint32_t> (25, 29);
   static constexpr uint32_t ttmp8_grid_yz_valid = 1 << 30;
-  static constexpr uint32_t ttmp8_debug_mark_mask = 1 << 31;
+  static constexpr uint32_t ttmp8_debug_mark_mask = 1u << 31;
 
   static constexpr uint32_t sq_wave_trap_ctrl_alu_invalid_mask = 1 << 0;
   static constexpr uint32_t sq_wave_trap_ctrl_alu_input_denorm_mask = 1 << 1;
@@ -6172,8 +6239,8 @@ protected:
   static constexpr uint32_t sq_wave_excp_priv_perf_snapshot_mask = 1 << 10;
   static constexpr uint32_t sq_wave_excp_priv_trap_after_inst_mask = 1 << 11;
   static constexpr uint32_t sq_wave_excp_priv_xnack_error_mask = 1 << 12;
-  static constexpr uint32_t sq_wave_excp_priv_first_memviol_source_watch
-    = utils::bit_mask (30, 31);
+  static constexpr auto sq_wave_excp_priv_first_memviol_source_watch
+    = utils::bit_mask<uint32_t> (30, 31);
 
   static constexpr uint32_t sq_wave_excp_user_alu_invalid_mask = 1 << 0;
   static constexpr uint32_t sq_wave_excp_user_alu_input_denorm_mask = 1 << 1;
@@ -6183,7 +6250,7 @@ protected:
   static constexpr uint32_t sq_wave_excp_user_alu_inexact_mask = 1 << 5;
   static constexpr uint32_t sq_wave_excp_user_alu_int_div0_mask = 1 << 6;
   static constexpr uint32_t sq_wave_excp_user_buffer_oob_mask = 1 << 30;
-  static constexpr uint32_t sq_wave_excp_user_lod_clamped_mask = 1 << 31;
+  static constexpr uint32_t sq_wave_excp_user_lod_clamped_mask = 1u << 31;
 
   class cwsr_record_t : public gfx11_architecture_t::cwsr_record_t
   {
@@ -6287,9 +6354,7 @@ protected:
   void simulate_trap_handler (wave_t &wave, agent_address_t pc,
                               std::optional<trap_id_t> trap_id) const override;
 
-  std::optional<agent_address_t>
-  simulate_instruction (wave_t &wave, agent_address_t pc,
-                        const instruction_t &instruction) const override;
+  void simulate_instruction_fixup (wave_t &wave) const override;
 
   bool is_barrier (const instruction_t &instruction) const override;
   bool is_sequential (const instruction_t &instruction) const override;
@@ -6837,39 +6902,43 @@ gfx12_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
       {
         /* PRIV is RO, all unasigned bits are 0.  */
         static uint32_t status_ro_bits
-          = utils::bit_mask (0, 5) | utils::bit_mask (7, 7)
-            | utils::bit_mask (12, 13) | utils::bit_mask (17, 17)
-            | utils::bit_mask (19, 21);
+          = (utils::bit_mask<uint32_t> (0, 5)
+             | utils::bit_mask<uint32_t> (7, 7)
+             | utils::bit_mask<uint32_t> (12, 13)
+             | utils::bit_mask<uint32_t> (17, 17)
+             | utils::bit_mask<uint32_t> (19, 21));
         return &status_ro_bits;
       }
     case amdgpu_regnum_t::pseudo_state_priv:
       {
         static uint32_t state_priv_ro_bits
-          = utils::bit_mask (15, 17)
-            | utils::bit_mask (19, 20) /* PERF_EN and TTRACE_EN are RO.  */
-            | utils::bit_mask (21, 31);
+          = (utils::bit_mask<uint32_t> (15, 17)
+             | utils::bit_mask<uint32_t> (19, 20) /* PERF_EN and TTRACE_EN are RO.  */
+             | utils::bit_mask<uint32_t> (21, 31));
         return &state_priv_ro_bits;
       }
     case amdgpu_regnum_t::mode:
       {
-        static uint32_t mode_ro_bits = utils::bit_mask (8, 22)
-                                       | utils::bit_mask (25, 26)
-                                       | utils::bit_mask (28, 31);
+        static uint32_t mode_ro_bits = (utils::bit_mask<uint32_t> (8, 22)
+                                        | utils::bit_mask<uint32_t> (25, 26)
+                                        | utils::bit_mask<uint32_t> (28, 31));
         return &mode_ro_bits;
       }
     case amdgpu_regnum_t::trap_ctrl:
       {
-        static uint32_t trap_ctrl_ro_bits = utils::bit_mask (10, 31);
+        static uint32_t trap_ctrl_ro_bits = utils::bit_mask<uint32_t> (10, 31);
         return &trap_ctrl_ro_bits;
       }
     case amdgpu_regnum_t::excp_flag_priv:
       {
-        static uint32_t excp_flag_priv_ro_bits = utils::bit_mask (13, 29);
+        static uint32_t excp_flag_priv_ro_bits
+          = utils::bit_mask<uint32_t> (13, 29);
         return &excp_flag_priv_ro_bits;
       }
     case amdgpu_regnum_t::excp_flag_user:
       {
-        static uint32_t excp_flag_user_ro_bits = utils::bit_mask (7, 29);
+        static uint32_t excp_flag_user_ro_bits
+          = utils::bit_mask<uint32_t> (7, 29);
         return &excp_flag_user_ro_bits;
       }
 
@@ -6992,6 +7061,9 @@ gfx12_architecture_t::write_pseudo_register (const wave_t &wave,
       uint32_t state_priv_reg, ttmp6;
       wave.read_register (amdgpu_regnum_t::state_priv, &state_priv_reg);
       wave.read_register (amdgpu_regnum_t::ttmp6, &ttmp6);
+
+      memcpy (reinterpret_cast<std::byte *> (&state_priv_reg) + offset, value,
+              value_size);
 
       ttmp6 &= ~ttmp6_saved_status_halt_mask;
       if (state_priv_reg & sq_wave_state_priv_halt_mask)
@@ -7147,13 +7219,13 @@ gfx12_architecture_t::save_pc_for_park (const wave_t &wave,
 
   uint32_t ttmp10, ttmp11;
   /* The trap handler saves PC[31:0] in ttmp10[31:0] ...  */
-  ttmp10 = utils::bit_extract (pc, 0, 31);
+  ttmp10 = utils::bit_extract<uint32_t> (pc, 0, 31);
   wave.write_register (amdgpu_regnum_t::ttmp10, ttmp10);
 
   /* ... and PC[47:32] in ttmp11[22:7].  */
   wave.read_register (amdgpu_regnum_t::ttmp11, &ttmp11);
-  ttmp11 &= ~utils::bit_mask (7, 22);
-  ttmp11 |= (utils::bit_extract (pc, 32, 47) << 7);
+  ttmp11 &= ~utils::bit_mask<uint32_t> (7, 22);
+  ttmp11 |= (utils::bit_extract<uint32_t> (pc, 32, 47) << 7);
   wave.write_register (amdgpu_regnum_t::ttmp11, ttmp11);
 }
 
@@ -7212,45 +7284,22 @@ gfx12_architecture_t::simulate_trap_handler (
   wave.write_register (amdgpu_regnum_t::state_priv, state_priv_reg);
 }
 
-std::optional<agent_address_t>
-gfx12_architecture_t::simulate_instruction (
-  wave_t &wave, agent_address_t pc, const instruction_t &instruction) const
+void
+gfx12_architecture_t::simulate_instruction_fixup (wave_t &wave) const
 {
-  std::optional<agent_address_t> next_pc;
-  sendmsg_message_type_t msg;
-  if (is_sendmsg (instruction, &msg) && msg == MSG_DEALLOC_VGPRS)
+  uint32_t trap_ctrl_reg;
+  wave.read_register (amdgpu_regnum_t::trap_ctrl, &trap_ctrl_reg);
+
+  /* If single-stepping, raise the trap_after_inst exception.  */
+  if (trap_ctrl_reg & sq_wave_trap_ctrl_trap_after_inst_mask)
     {
-      uint32_t status_reg;
-      wave.read_register (amdgpu_regnum_t::status, &status_reg);
-      status_reg |= sq_wave_status_no_vgprs_mask;
-      wave.write_register (amdgpu_regnum_t::status, status_reg);
-
-      next_pc = pc + instruction.size ();
+      uint32_t excp_flag_priv_reg;
+      wave.read_register (amdgpu_regnum_t::excp_flag_priv,
+                          &excp_flag_priv_reg);
+      excp_flag_priv_reg |= sq_wave_excp_priv_trap_after_inst_mask;
+      wave.write_register (amdgpu_regnum_t::excp_flag_priv,
+                           excp_flag_priv_reg);
     }
-  else
-    next_pc
-      = gfx10_architecture_t::simulate_instruction (wave, pc, instruction);
-
-  if (next_pc)
-    {
-      /* TODO this block could be a virtual method so simulate_insn can be
-         shared with gfx11.  */
-      uint32_t trap_ctrl_reg;
-      wave.read_register (amdgpu_regnum_t::trap_ctrl, &trap_ctrl_reg);
-
-      /* If single-stepping, raise the trap_after_inst exception.  */
-      if (trap_ctrl_reg & sq_wave_trap_ctrl_trap_after_inst_mask)
-        {
-          uint32_t excp_flag_priv_reg;
-          wave.read_register (amdgpu_regnum_t::excp_flag_priv,
-                              &excp_flag_priv_reg);
-          excp_flag_priv_reg |= sq_wave_excp_priv_trap_after_inst_mask;
-          wave.write_register (amdgpu_regnum_t::excp_flag_priv,
-                               excp_flag_priv_reg);
-        }
-    }
-
-  return next_pc;
 }
 
 amd_dbgapi_wave_id_t
@@ -7300,8 +7349,8 @@ gfx12_architecture_t::cwsr_record_t::group_ids () const
   coordinates[0] = ttmp9;
   if (ttmp8 & ttmp8_grid_yz_valid)
     {
-      coordinates[1] = ttmp7 & utils::bit_mask (0, 15);
-      coordinates[2] = (ttmp7 & utils::bit_mask (16, 31)) >> 16;
+      coordinates[1] = ttmp7 & utils::bit_mask<uint32_t> (0, 15);
+      coordinates[2] = (ttmp7 & utils::bit_mask<uint32_t> (16, 31)) >> 16;
     }
 
   return coordinates;
@@ -7320,7 +7369,7 @@ gfx12_architecture_t::cwsr_record_t::position_in_group () const
 
   agent ().read_agent_memory (ttmp8_address, &ttmp8);
 
-  return (ttmp8 & utils::bit_mask (25, 29)) >> 25;
+  return utils::narrow<uint32_t> ((ttmp8 & utils::bit_mask (25, 29)) >> 25);
 }
 
 size_t
@@ -7467,8 +7516,8 @@ gfx12_architecture_t::scratch_memory_region (
                               + cwsr_record.scratch_scoreboard_id ())
                              * wavesize;
 
-  uint32_t shader_engine_count
-    = agent.os_info ().shader_engine_count / agent.os_info ().xcc_count;
+  auto shader_engine_count = utils::narrow<uint32_t> (
+    agent.os_info ().shader_engine_count / agent.os_info ().xcc_count);
 
   /* The scratch memory is evenly divided between all XCCs, so each XCC has its
      own scratch base.  */
@@ -7506,6 +7555,687 @@ public:
   gfx1201_t ()
     : gfx12_architecture_t (EF_AMDGPU_MACH_AMDGCN_GFX1201,
                             "amdgcn-amd-amdhsa--gfx1201")
+  {
+  }
+};
+
+class gfx12_5_architecture_t : public gfx12_architecture_t
+{
+protected:
+  gfx12_5_architecture_t (elf_amdgpu_machine_t e_machine,
+                          std::string target_triplet);
+
+  class cwsr_record_t : public gfx12_architecture_t::cwsr_record_t
+  {
+  protected:
+    static constexpr uint32_t
+    compute_relaunch_state_payload_lds_size (uint32_t relaunch_state)
+    {
+      return utils::bit_extract (relaunch_state, 10, 18);
+    }
+
+    static constexpr uint32_t
+    compute_relaunch_wave_payload_last_wave (uint32_t relaunch_wave)
+    {
+      return utils::bit_extract (relaunch_wave, 13, 13);
+    }
+
+  public:
+    cwsr_record_t (compute_queue_t &queue, uint32_t xcc_id,
+                   uint32_t compute_relaunch_wave,
+                   uint32_t compute_relaunch_state,
+                   uint32_t compute_relaunch2_state,
+                   agent_address_t context_save_address)
+      : gfx12_architecture_t::cwsr_record_t (
+          queue, xcc_id, compute_relaunch_wave, compute_relaunch_state,
+          compute_relaunch2_state, context_save_address)
+    {
+    }
+
+    /* There's no "shared_vgpr" in gfx 125x anymore.  */
+    size_t shared_vgpr_count () const override { return 0; }
+    size_t vgpr_count () const override;
+    size_t hwreg_count () const override;
+    size_t lds_size () const override;
+    bool is_last_wave () const override;
+
+    std::optional<agent_address_t>
+    register_address (amdgpu_regnum_t regnum) const override;
+  };
+
+  std::unique_ptr<architecture_t::cwsr_record_t>
+  make_gfx1x_cwsr_record (compute_queue_t &queue,
+                          uint32_t xcc_id,
+                          uint32_t compute_relaunch_wave,
+                          uint32_t compute_relaunch_state,
+                          uint32_t compute_relaunch2_state,
+                          agent_address_t context_save_address) const override
+  {
+    return std::make_unique<cwsr_record_t> (
+      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state,
+      compute_relaunch2_state, context_save_address);
+  }
+
+  /* A note regarding all the register methods in this class:
+
+     gfx10_architecute_t can handle the XNACK_MASK_32 regnum.
+     However, since it is not the one that actually adds it
+     to the "system" group (see the comment in gfx12_5 arch
+     constructor to know why), we handle it in these methods
+     for the sake of symmetry and clarity.  */
+  std::string register_name (amdgpu_regnum_t regnum) const override;
+  std::string register_type (amdgpu_regnum_t regnum) const override;
+  amd_dbgapi_size_t register_size (amdgpu_regnum_t regnum) const override;
+  amd_dbgapi_register_properties_t
+  register_properties (amdgpu_regnum_t regnum) const override;
+
+  static constexpr int ttmp11_saved_trap_id_shift = 28;
+  static constexpr int ttmp11_saved_trap_id_size = 4;
+  static constexpr uint32_t ttmp11_saved_trap_id_mask
+    = utils::bit_mask<uint32_t> (ttmp11_saved_trap_id_shift,
+                                 ttmp11_saved_trap_id_shift
+                                   + ttmp11_saved_trap_id_size - 1);
+
+  std::optional<trap_id_t> trap_id (const wave_t &wave) const override;
+
+  void initialize_trap_handler_ttmps (const wave_t &wave) const override;
+
+  void simulate_trap_handler (wave_t &wave, agent_address_t pc,
+                              std::optional<trap_id_t> trap_id) const override;
+
+  bool can_halt_at_endpgm () const override { return true; }
+  bool can_halt_at_sendmsg_dealloc_vgprs () const override { return true; }
+
+  static bool is_ssrc_inline (uint8_t ssrc)
+  {
+    return (ssrc >= 128 && ssrc <= 208);
+  }
+
+  static bool is_ssrc_lit32 (uint8_t ssrc) { return (ssrc == 255); }
+
+  static bool is_ssrc_lit64 (uint8_t ssrc) { return (ssrc == 254); }
+
+  static bool is_ssrc_immediate (uint8_t ssrc)
+  {
+    return (is_ssrc_lit64 (ssrc) || is_ssrc_lit32 (ssrc)
+            || is_ssrc_inline (ssrc));
+  }
+
+  static int ssrc_inline_to_num (uint8_t ssrc)
+  {
+    if (ssrc >= 128 && ssrc <= 192)
+      return ssrc - 128;
+    else if (ssrc >= 193 && ssrc <= 208)
+      return 192 - ssrc;
+    dbgapi_assert_not_reached ("illegal instruction: invalid ssrc inline");
+  }
+
+  static int32_t simm32_operand (const instruction_t &instruction)
+  {
+    return static_cast<int32_t> (instruction.word<1> ());
+  }
+
+  static int64_t simm64_operand (const instruction_t &instruction)
+  {
+    uint32_t imm64_lo = instruction.word<1> ();
+    uint32_t imm64_hi = instruction.word<2> ();
+    return ((static_cast<int64_t> (imm64_hi) << 32) | imm64_lo);
+  }
+
+  virtual bool is_add_pc (const instruction_t &instruction) const;
+  bool can_execute_displaced (wave_t &wave,
+                              const instruction_t &instruction) const override;
+  bool can_simulate (wave_t &wave,
+                     const instruction_t &instruction) const override;
+  bool is_branch_taken (wave_t &wave,
+                        const instruction_t &instruction) const override;
+  agent_address_t
+  branch_target (wave_t &wave, agent_address_t pc,
+                 const instruction_t &instruction) const override;
+  std::optional<agent_address_t>
+  simulate_instruction (wave_t &wave, agent_address_t pc,
+                        const instruction_t &instruction) const override;
+
+  std::tuple<amd_dbgapi_instruction_kind_t,       /* instruction_kind  */
+             amd_dbgapi_instruction_properties_t, /* instruction_properties  */
+             size_t,                              /* instruction_size  */
+             std::vector<uint64_t> /* instruction_information  */>
+  classify_instruction (agent_address_t address,
+                        const instruction_t &instruction) const override;
+
+public:
+  const void *register_read_only_mask (amdgpu_regnum_t regnum) const override;
+
+private:
+  register_class_t &get_register_class (const char *class_name);
+};
+
+register_class_t &
+gfx12_5_architecture_t::get_register_class (const char *class_name)
+{
+  register_class_t *reg_class
+    = find_if ([&class_name] (const register_class_t &rc)
+               { return rc.name () == class_name; });
+  dbgapi_assert (reg_class != nullptr);
+
+  return *reg_class;
+}
+
+gfx12_5_architecture_t::gfx12_5_architecture_t (elf_amdgpu_machine_t e_machine,
+                                                std::string target_triple)
+  : gfx12_architecture_t (e_machine, target_triple)
+{
+  auto &sys_regs = get_register_class ("system");
+  auto &vec_regs = get_register_class ("vector");
+  auto &gen_regs = get_register_class ("general");
+
+  /* v0_32-v255_32 are added by gfx10_architecture_t.  */
+  vec_regs.add_registers (amdgpu_regnum_t::v255_32 + 1,
+                          amdgpu_regnum_t::v1023_32);
+  gen_regs.add_registers (amdgpu_regnum_t::v255_32 + 1,
+                          amdgpu_regnum_t::v1023_32);
+
+  /* GFX10 adds an xnack_mask_32 conditionally for ELF machines:
+
+       EF_AMDGPU_MACH_AMDGCN_GFX1010
+       EF_AMDGPU_MACH_AMDGCN_GFX1011
+       EF_AMDGPU_MACH_AMDGCN_GFX1012
+
+     So, it won't be useful to us.  We have to add it explicitly.  */
+  sys_regs.add_registers (amdgpu_regnum_t::xnack_mask_32,
+                          amdgpu_regnum_t::xnack_mask_32);
+}
+
+std::string
+gfx12_5_architecture_t::register_name (amdgpu_regnum_t regnum) const
+{
+  if (regnum >= amdgpu_regnum_t::v0_32 && regnum <= amdgpu_regnum_t::v1023_32)
+    {
+      int print_num = utils::narrow<int> (regnum - amdgpu_regnum_t::v0_32);
+      return string_printf ("v%d", print_num);
+    }
+
+  switch (regnum)
+    {
+    case amdgpu_regnum_t::xnack_mask_32:
+      return "xnack_mask";
+    default:
+      break;
+    }
+  return gfx12_architecture_t::register_name (regnum);
+}
+
+std::string
+gfx12_5_architecture_t::register_type (amdgpu_regnum_t regnum) const
+{
+  if ((regnum >= amdgpu_regnum_t::v0_32
+       && regnum <= amdgpu_regnum_t::v1023_32))
+    {
+      return "int32_t[32]";
+    }
+
+  switch (regnum)
+    {
+    case amdgpu_regnum_t::mode:
+      return "flags32_t mode {"
+             "  enum fp_round {"
+             "    NEAREST_EVEN = 0,"
+             "    PLUS_INF     = 1,"
+             "    MINUS_INF    = 2,"
+             "    ZERO         = 3"
+             "  } FP_ROUND.32 @0-1;"
+             "  enum fp_round FP_ROUND.64_16 @2-3;"
+             "  enum fp_denorm {"
+             "    FLUSH_SRC_DST = 0,"
+             "    FLUSH_DST     = 1,"
+             "    FLUSH_SRC     = 2,"
+             "    FLUSH_NONE    = 3"
+             "  } FP_DENORM.32 @4-5;"
+             "  enum fp_denorm FP_DENORM.64_16 @6-7;"
+             "  uint32_t DST_VGPR_MSB @12-13;"
+             "  uint32_t SRC0_VGPR_MSB @14-15;"
+             "  uint32_t SRC1_VGPR_MSB @16-17;"
+             "  uint32_t SRC2_VGPR_MSB @18-19;"
+             "  bool FP16_OVFL @23;"
+             "  bool SCALAR_PREFETCH_EN @24;"
+             "  enum replay_mode {"
+             "    SINGLE_VMEM_GROUP = 0,"
+             "    MULTI_VMEM_GROUP = 1"
+             "  } REPLAY_MODE @25-25;"
+             "  enum flat_scratch_is_nv {"
+             "    USE_ISA_NV_BIT = 0,"
+             "    OVERRIDE_TO_NV = 1"
+             "  } FLAT_SCRATCH_IS_NV @26-26;"
+             "  bool DISABLE_PERF @27;"
+             "}";
+    case amdgpu_regnum_t::xnack_mask_32:
+      return "uint32_t";
+    default:
+      break;
+    }
+  return gfx12_architecture_t::register_type (regnum);
+}
+
+amd_dbgapi_size_t
+gfx12_5_architecture_t::register_size (amdgpu_regnum_t regnum) const
+{
+  if ((regnum >= amdgpu_regnum_t::v0_32
+       && regnum <= amdgpu_regnum_t::v1023_32))
+    {
+      return sizeof (int32_t) * 32;
+    }
+
+  switch (regnum)
+    {
+    case amdgpu_regnum_t::xnack_mask_32:
+      return sizeof (uint32_t);
+    default:
+      break;
+    }
+  return gfx12_architecture_t::register_size (regnum);
+}
+
+amd_dbgapi_register_properties_t
+gfx12_5_architecture_t::register_properties (amdgpu_regnum_t regnum) const
+{
+  /* Don't let XNACK_MASK_32 register bleed into GFX10's
+     "register_properties()".  The property of GFX10's XNACK_MASK_32
+     is not suitable for this GFX125x register.  */
+  if (regnum == amdgpu_regnum_t::xnack_mask_32)
+    return AMD_DBGAPI_REGISTER_PROPERTY_NONE;
+
+  return gfx12_architecture_t::register_properties (regnum);
+}
+
+/* One of the clients of this method is the
+   "amdgcn_architecture_t::register_properties ()".  In case,
+   a non "nullptr" is returned, amdgcn's "register_properties ()" will
+   consider it an "AMD_DBGAPI_REGISTER_PROPERTY_READONLY_BITS" property.  */
+
+const void *
+gfx12_5_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
+{
+  switch (regnum)
+    {
+    case amdgpu_regnum_t::mode:
+      {
+        static uint32_t mode_ro_bits = utils::bit_mask<uint32_t> (8, 11)
+                                       | utils::bit_mask<uint32_t> (20, 22)
+                                       | utils::bit_mask<uint32_t> (28, 31);
+        return &mode_ro_bits;
+      }
+    default:
+      break;
+    }
+  return gfx12_architecture_t::register_read_only_mask (regnum);
+}
+
+size_t
+gfx12_5_architecture_t::cwsr_record_t::vgpr_count () const
+{
+  /* VGPRs are allocated in blocks of 16/8 registers (W32/W64).  */
+  size_t reg_count;
+  const uint32_t vgpr_blocks
+    = compute_relaunch_state_payload_vgprs (m_compute_relaunch_state) + 1;
+  const uint32_t wave32
+    = compute_relaunch_state_payload_w32_en (m_compute_relaunch_state);
+
+  if (wave32)
+    reg_count = 16;
+  else
+    fatal_error ("gfx12_5_architecture_t::cwsr_record_t::vgpr_count: "
+                 "wave64 is not expected.");
+
+  /* vgprs are allocated in blocks of 16/8 registers (W32/W64).  */
+  return vgpr_blocks * reg_count;
+}
+
+size_t
+gfx12_5_architecture_t::cwsr_record_t::hwreg_count () const
+{
+  return 128;
+}
+
+size_t
+gfx12_5_architecture_t::cwsr_record_t::lds_size () const
+{
+  /* There's no WGP_TAKEOVER mode anymore.  Just consider the "lds_size".
+     "lds_size": 256 dwords granularity.  */
+  return (compute_relaunch_state_payload_lds_size (m_compute_relaunch_state)
+          * 256 * sizeof (uint32_t));
+}
+
+bool
+gfx12_5_architecture_t::cwsr_record_t::is_last_wave () const
+{
+  return compute_relaunch_wave_payload_last_wave (m_compute_relaunch_wave);
+}
+
+std::optional<agent_address_t>
+gfx12_5_architecture_t::cwsr_record_t::register_address (
+  amdgpu_regnum_t regnum) const
+{
+  /* 0x00: M0
+     0x04: PC_LO
+     0x08: PC_HI
+     0x0C: EXEC_LO
+     0x10: EXEC_HI
+     0x14: STATE_PRIV
+     0x18: TRAPSTS
+     0x1C: XNACK_MASK
+     0x20: MODE
+     0x24: FLAT_SCRATCH_LO
+     0x28: FLAT_SCRATCH_HI
+     0x2C: EXCP_FLAG_USER
+     0x30: TRAP_CTRL
+     0x34: STATUS
+     0x38: barrier
+     0x3C: <blank>
+     0x40: TTMP4
+     0x44: TTMP5
+     0x48: TTMP6
+     0x4C: TTMP7
+     0x50: TTMP8
+     0x54: TTMP9
+     0x58: TTMP10
+     0x5C: TTMP11: XNACK_STATE_PRIV
+     0x60: TTMP13  */
+  switch (regnum)
+    {
+    case amdgpu_regnum_t::xnack_mask_32:
+      regnum = amdgpu_regnum_t::first_hwreg + 7;
+      break;
+    default:
+      break;
+    }
+
+  /* In gfx125x TTMPs are saved at the end of the SGPR block.  */
+  if (regnum >= amdgpu_regnum_t::first_ttmp
+      && regnum <= amdgpu_regnum_t::last_ttmp)
+    {
+      const size_t ttmp_size = sizeof (uint32_t);
+      const size_t ttmp_count = 16;
+      const size_t ttmps_addr
+        = gfx12_architecture_t::cwsr_record_t::register_address (
+            amdgpu_regnum_t::first_sgpr)
+            .value ()
+          + sgpr_count () * sizeof (uint32_t) - ttmp_size * ttmp_count;
+
+      size_t ttmp_nr
+        = utils::narrow<size_t> (regnum - amdgpu_regnum_t::first_ttmp);
+      return ttmps_addr + ttmp_nr * ttmp_size;
+    }
+
+  return gfx12_architecture_t::cwsr_record_t::register_address (regnum);
+}
+
+std::optional<amdgcn_architecture_t::trap_id_t>
+gfx12_5_architecture_t::trap_id (const wave_t &wave) const
+{
+  uint32_t ttmp11;
+  wave.read_register (amdgpu_regnum_t::ttmp11, &ttmp11);
+
+  if (uint8_t trap_id = utils::bit_extract<uint8_t> (
+        ttmp11, ttmp11_saved_trap_id_shift,
+        ttmp11_saved_trap_id_shift + ttmp11_saved_trap_id_size - 1);
+      trap_id != 0)
+    return trap_id_t{ trap_id };
+  return std::nullopt;
+}
+
+void
+gfx12_5_architecture_t::initialize_trap_handler_ttmps (
+  const wave_t &wave) const
+{
+  uint32_t ttmp6, ttmp8, ttmp11;
+
+  wave.read_register (amdgpu_regnum_t::ttmp6, &ttmp6);
+  wave.read_register (amdgpu_regnum_t::ttmp8, &ttmp8);
+  wave.read_register (amdgpu_regnum_t::ttmp11, &ttmp11);
+
+  dbgapi_assert (!(ttmp8 & ttmp8_debug_mark_mask)
+                 && "ttmps are already initialized");
+
+  ttmp8 |= ttmp8_debug_mark_mask;
+  ttmp11 &= ~ttmp11_saved_trap_id_mask; /* Clear the "trap_id".  */
+
+  /* If the wave has not entered the trap handler, it is not stopped,
+     and the saved halt is meaningless.  */
+  ttmp6 &= ~(ttmp6_wave_stopped_mask | ttmp6_saved_status_halt_mask);
+
+  wave.write_register (amdgpu_regnum_t::ttmp4, 0);
+  wave.write_register (amdgpu_regnum_t::ttmp5, 0);
+  wave.write_register (amdgpu_regnum_t::ttmp6, ttmp6);
+  wave.write_register (amdgpu_regnum_t::ttmp8, ttmp8);
+  wave.write_register (amdgpu_regnum_t::ttmp11, ttmp11);
+}
+
+void
+gfx12_5_architecture_t::simulate_trap_handler (
+  wave_t &wave, agent_address_t pc, std::optional<trap_id_t> trap_id) const
+{
+  dbgapi_assert (utils::is_aligned (pc, minimum_instruction_alignment ()));
+
+  uint32_t state_priv_reg, ttmp6, ttmp11;
+  wave.read_register (amdgpu_regnum_t::state_priv, &state_priv_reg);
+  wave.read_register (amdgpu_regnum_t::ttmp6, &ttmp6);
+  wave.read_register (amdgpu_regnum_t::ttmp11, &ttmp11);
+
+  /* Set the ttmp6.wave_stopped.  */
+  ttmp6 |= ttmp6_wave_stopped_mask;
+
+  /* Decide the ttmp6.saved_halt value.  */
+  ttmp6 &= ~ttmp6_saved_status_halt_mask;
+  if (state_priv_reg & sq_wave_state_priv_halt_mask)
+    ttmp6 |= ttmp6_saved_status_halt_mask;
+
+  wave.write_register (amdgpu_regnum_t::ttmp6, ttmp6);
+
+  /* Set the ttmp11.trap_id[3:0].  */
+  ttmp11 &= ~ttmp11_saved_trap_id_mask;
+  if (trap_id)
+    ttmp11 |= (static_cast<uint32_t> (*trap_id) << ttmp11_saved_trap_id_shift)
+              & ttmp11_saved_trap_id_mask;
+
+  wave.write_register (amdgpu_regnum_t::ttmp11, ttmp11);
+
+  /* Park the wave.  */
+  if (park_stopped_waves (wave.process ().runtime_rdebug_version ()))
+    {
+      save_pc_for_park (wave, pc);
+      pc = wave.queue ().park_instruction_address ();
+    }
+
+  wave.write_register (amdgpu_regnum_t::pc, pc);
+
+  /* Then halt the wave.  */
+  state_priv_reg |= sq_wave_state_priv_halt_mask;
+  wave.write_register (amdgpu_regnum_t::state_priv, state_priv_reg);
+}
+
+bool
+gfx12_5_architecture_t::is_add_pc (const instruction_t &instruction) const
+{
+  /* s_add_pc_i64: SOP1 Opcode 75  */
+  if (instruction.is_valid () && is_sop1_encoding<75> (instruction))
+    {
+      uint8_t ssrc0 = ssrc0_operand (instruction);
+      if (is_ssrc_immediate (ssrc0))
+        return true;
+
+      /* If dealing with a valid even register number (to represent a pair),
+         then it's a valid "s_add_pc_i64" instruction.  */
+      std::optional<amdgpu_regnum_t> reg = scalar_operand_to_regnum (ssrc0);
+      return (reg.has_value () && !(*reg & 1));
+    }
+  return false;
+}
+
+bool
+gfx12_5_architecture_t::can_execute_displaced (
+  wave_t &wave, const instruction_t &instruction) const
+{
+  if (is_add_pc (instruction))
+    return false;
+
+  /* Any "sendmsg", including DEALLOC_VGPRS, can be executed now.
+     If we don't return "true" here, "can_execute_displaced" method
+     of gfx11_architecture will return "false" for the DEALLOC_VGPRS
+     messages.  */
+  if (is_sendmsg (instruction))
+    return true;
+
+  return gfx12_architecture_t::can_execute_displaced (wave, instruction);
+}
+
+bool
+gfx12_5_architecture_t::can_simulate (wave_t &wave,
+                                      const instruction_t &instruction) const
+{
+  if (!instruction.is_valid ())
+    return false;
+
+  if (is_add_pc (instruction))
+    return true;
+
+  /* No need to simulate "sendmsg dealloc_vgprs" anymore, because the driver
+     sets up the configuration as such that the hardware treats it like a
+     NOP.  */
+  if (is_sendmsg (instruction))
+    return false;
+
+  return gfx12_architecture_t::can_simulate (wave, instruction);
+}
+
+bool
+gfx12_5_architecture_t::is_branch_taken (
+  wave_t &wave, const instruction_t &instruction) const
+{
+  if (is_add_pc (instruction))
+    return true;
+  return gfx12_architecture_t::is_branch_taken (wave, instruction);
+}
+
+agent_address_t
+gfx12_5_architecture_t::branch_target (wave_t &wave,
+                                       agent_address_t pc,
+                                       const instruction_t &instruction) const
+{
+  dbgapi_assert (instruction.is_valid ());
+
+  if (is_add_pc (instruction))
+    {
+      /* OFFSET is declared signed, because we may relatively (PC + OFFSET)
+         jump forward or backward.  We don't need to concern ourselves about
+         adding an uint64_t (PC) with an int64_t (OFFSET) as it will be
+         absolved by the 2's complement system.  */
+      int64_t offset;
+      uint8_t ssrc0 = ssrc0_operand (instruction);
+      pc += instruction.size ();
+
+      /* Dealing with an immediate offset?  */
+      if (is_ssrc_immediate (ssrc0))
+        {
+          if (is_ssrc_lit64 (ssrc0))
+            offset = simm64_operand (instruction);
+          else if (is_ssrc_lit32 (ssrc0))
+            offset = simm32_operand (instruction);
+          else if (is_ssrc_inline (ssrc0))
+            offset = ssrc_inline_to_num (ssrc0);
+          else
+            dbgapi_assert_not_reached ("Invalid is_add_pc offset");
+
+          return pc + offset;
+        }
+      /* Dealing with a register pair.  */
+      else
+        {
+          auto regnum = scalar_operand_to_regnum (ssrc0);
+          dbgapi_assert (regnum.has_value ());
+
+          uint32_t reg_lo, reg_hi;
+          wave.read_register (*regnum + 0, &reg_lo);
+          wave.read_register (*regnum + 1, &reg_hi);
+          offset
+            = static_cast<int64_t> (static_cast<uint64_t> (reg_lo)
+                                    | (static_cast<uint64_t> (reg_hi) << 32));
+          return pc + offset;
+        }
+    }
+  else
+    return gfx12_architecture_t::branch_target (wave, pc, instruction);
+}
+
+std::optional<agent_address_t>
+gfx12_5_architecture_t::simulate_instruction (
+  wave_t &wave, agent_address_t pc, const instruction_t &instruction) const
+{
+  std::optional<agent_address_t> next_pc;
+
+  if (is_add_pc (instruction))
+    next_pc = branch_target (wave, pc, instruction);
+  /* See the comments in "::can_simulate ()".  */
+  else if (!is_sendmsg (instruction))
+    next_pc
+      = gfx12_architecture_t::simulate_instruction (wave, pc, instruction);
+
+  if (next_pc)
+    simulate_instruction_fixup (wave);
+
+  return next_pc;
+}
+
+std::tuple<amd_dbgapi_instruction_kind_t, amd_dbgapi_instruction_properties_t,
+           size_t, std::vector<uint64_t>>
+gfx12_5_architecture_t::classify_instruction (
+  agent_address_t address, const instruction_t &instruction) const
+{
+  if (is_add_pc (instruction))
+    {
+      uint8_t ssrc0 = ssrc0_operand (instruction);
+      amd_dbgapi_instruction_kind_t instruction_kind;
+      std::vector<uint64_t> info;
+
+      /* Dealing with an immediate offset?  */
+      if (is_ssrc_immediate (ssrc0))
+        {
+          int64_t offset;
+          if (is_ssrc_lit64 (ssrc0))
+            offset = simm64_operand (instruction);
+          else if (is_ssrc_lit32 (ssrc0))
+            offset = simm32_operand (instruction);
+          else if (is_ssrc_inline (ssrc0))
+            offset = ssrc_inline_to_num (ssrc0);
+          else
+            dbgapi_assert_not_reached ("Invalid is_add_pc offset");
+          info.emplace_back (address + instruction.size () + offset);
+          instruction_kind = AMD_DBGAPI_INSTRUCTION_KIND_DIRECT_BRANCH;
+        }
+      /* Dealing with a register pair.  */
+      else
+        {
+          auto regnum = scalar_operand_to_regnum (ssrc0);
+          dbgapi_assert (regnum);
+
+          info.emplace_back (static_cast<uint64_t> (
+            regnum_to_register_id (*regnum + 0).handle));
+          info.emplace_back (static_cast<uint64_t> (
+            regnum_to_register_id (*regnum + 1).handle));
+          instruction_kind
+            = AMD_DBGAPI_INSTRUCTION_KIND_RELATIVE_BRANCH_REGISTER_PAIR;
+        }
+      return { instruction_kind, AMD_DBGAPI_INSTRUCTION_PROPERTY_NONE,
+               instruction.size (), std::move (info) };
+    }
+  return gfx12_architecture_t::classify_instruction (address, instruction);
+}
+
+class gfx1250_t final : public gfx12_5_architecture_t
+{
+public:
+  gfx1250_t ()
+    : gfx12_5_architecture_t (EF_AMDGPU_MACH_AMDGCN_GFX1250,
+                              "amdgcn-amd-amdhsa--gfx1250")
   {
   }
 };
@@ -7698,6 +8428,7 @@ decltype (architecture_t::s_architecture_map)
       map.emplace (make_architecture<gfx12_generic_t> ());
       map.emplace (make_architecture<gfx1200_t> ());
       map.emplace (make_architecture<gfx1201_t> ());
+      map.emplace (make_architecture<gfx1250_t> ());
       return map;
     }()
   };
@@ -7931,7 +8662,7 @@ amd_dbgapi_classify_instruction (
 
     if (instruction_information_p != nullptr)
       {
-        using information_type = decltype (information)::value_type;
+        using information_type = typename decltype (information)::value_type;
         size_t mem_size = information.size () * sizeof (information_type);
 
         if (!mem_size)

@@ -25,6 +25,7 @@
 #ifndef _TESTER_HPP_
 #define _TESTER_HPP_
 
+#include <algorithm>
 #include <rocshmem/rocshmem.hpp>
 #include <vector>
 #include <climits>
@@ -126,6 +127,15 @@ enum TestType {
   FloodGetTestType = 86,
   FloodGetNBITestType = 87,
   FloodGTestType = 88,
+  HipModuleInitTestType = 89,
+  FloodAddTestType = 90,
+  FloodFAddTestType = 91,
+  FloodWaitAmoTestType = 92,
+  DeviceBitcodeTestType = 93,
+  LibraryInfoTestType = 94,
+  TeamCtxSharedInfraTestType = 95,
+  QuietOnStreamTestType = 96,
+  SyncAllOnStreamTestType = 97,
 };
 
 enum OpType { PutType = 0, GetType = 1 };
@@ -140,7 +150,7 @@ class Tester {
   explicit Tester(TesterArguments args);
   virtual ~Tester();
 
-  void execute();
+  virtual void execute();
 
   static std::vector<Tester *> create(TesterArguments args);
 
@@ -157,11 +167,12 @@ class Tester {
   virtual void verifyResults(uint64_t size) = 0;
 
   size_t max_msg_size = 0;
-  int num_msgs = 0;
-  int num_timed_msgs = 0;
+  size_t num_msgs = 0;
+  size_t num_timed_msgs = 0;
   int num_loops = 0;
   int size_factor = 1;
   int bw_factor = 1;
+  int rtt_factor = 1;
   int num_warps = 0;
   int wf_size = 0;
   int device_id = 0;

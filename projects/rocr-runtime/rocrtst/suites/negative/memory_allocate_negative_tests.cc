@@ -203,6 +203,16 @@ void MemoryAllocateNegativeTest::MaxMemoryAllocateTest(hsa_agent_t agent,
     return;
   }
 
+#ifdef ROCRTST_ASAN
+  // Under ASAN, hsa_amd_memory_pool_allocate is intercepted by the ASAN runtime and uses
+  // ASAN's own heap allocator. Attempting to allocate (max_size + gran_sz) bytes from ASAN's
+  // heap allocator causes an OOM abort that kills the entire process. Skip this check under ASAN.
+  if (verbosity() > 0) {
+    std::cout << "  Skipping MaxMemoryAllocate under ASAN (ASAN heap OOM)" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+  return;
+#else
     char *memoryPtr;
   auto gran_sz = pool_i.alloc_granule;
   size_t max_size = pool_i.aggregate_alloc_max;
@@ -210,6 +220,7 @@ void MemoryAllocateNegativeTest::MaxMemoryAllocateTest(hsa_agent_t agent,
                                        reinterpret_cast<void**>(&memoryPtr));
     ASSERT_EQ(err, HSA_STATUS_ERROR_INVALID_ALLOCATION);
   return;
+#endif
 }
 
 
@@ -235,10 +246,21 @@ void MemoryAllocateNegativeTest::ZeroMemoryAllocateTest(hsa_agent_t agent,
                    HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &alloc);
 
   if (alloc) {
+#ifdef ROCRTST_ASAN
+    // Under ASAN, hsa_amd_memory_pool_allocate is intercepted by the ASAN runtime and
+    // internally calls malloc(0), which returns a non-null pointer (success). The real HSA
+    // runtime returns HSA_STATUS_ERROR_INVALID_ARGUMENT. Skip this check under ASAN.
+    if (verbosity() > 0) {
+      std::cout << "  Skipping ZeroMemoryAllocate under ASAN (ASAN interceptor masks HSA validation)" << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+#else
     char *memoryPtr;
     err = hsa_amd_memory_pool_allocate(pool, 0, 0,
                                        reinterpret_cast<void**>(&memoryPtr));
     ASSERT_EQ(err, HSA_STATUS_ERROR_INVALID_ARGUMENT);
+#endif
   }
   return;
 }

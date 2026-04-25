@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 """
 rocprofsys testing utilities package.
@@ -24,6 +24,8 @@ from .runners import (
     BinaryRewriteRunner,
     RuntimeInstrumentRunner,
     SysRunRunner,
+    CausalRunner,
+    PythonRunner,
 )
 from .validators import (
     ValidationResult,
@@ -33,6 +35,7 @@ from .validators import (
     validate_causal_json,
     validate_file_exists,
     validate_regex,
+    validate_file_regex,
 )
 
 from .gpu import (
@@ -42,6 +45,7 @@ from .gpu import (
     lookup_gpu_category,
     get_target_gpu_arch,
     get_offload_extractor,
+    get_xnack_support,
 )
 
 __all__ = [
@@ -56,6 +60,8 @@ __all__ = [
     "BinaryRewriteRunner",
     "RuntimeInstrumentRunner",
     "SysRunRunner",
+    "CausalRunner",
+    "PythonRunner",
     # Validators
     "ValidationResult",
     "validate_perfetto_trace",
@@ -64,6 +70,7 @@ __all__ = [
     "validate_causal_json",
     "validate_file_exists",
     "validate_regex",
+    "validate_file_regex",
     # GPU
     "GPUInfo",
     "get_rocminfo",

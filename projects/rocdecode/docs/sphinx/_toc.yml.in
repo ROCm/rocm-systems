@@ -9,25 +9,23 @@ subtrees:
 - caption: Install
   entries:
   - file: install/rocDecode-prerequisites.rst
-    title: rocDecode prerequisites
-  - file: install/rocDecode-package-install.rst
-    title: Installing rocDecode with the package installer
+    title: Prerequisites
+  - file: install/rocDecode-clone-project.rst
+    title: Cloning the project
   - file: install/rocDecode-build-and-install.rst
-    title: Installing rocDecode from its source code
-  - url: https://github.com/ROCm/rocDecode/tree/develop/docker
-    title: rocDecode Docker containers
+    title: Installing from source code
 
 - caption: Conceptual
   entries:
   - file: conceptual/video-decoding-pipeline.rst
     title: Video decoding pipeline
   - file: conceptual/rocDecode-memory-types.rst
-    title: rocDecode surface memory locations
+    title: Surface memory locations
 
 - caption: Samples
   entries:
   - file: tutorials/rocDecode-samples.rst
-    title: rocDecode samples
+    title: Samples
 
 - caption: How to
   entries:
@@ -54,8 +52,20 @@ subtrees:
         title: Hardware decoder API
       - file: reference/rocDecode-sw-decoder.rst
         title: Software decoder API
+  - file: reference/rocDecode-utility-classes.rst
+    title: Utility classes 
+    subtrees:
+    - entries:
+      - file: reference/rocDecode-util-decoder.rst
+        title: RocVideoDecoder class
+      - file: reference/rocDecode-demux.rst
+        title: Video demultiplexer class
+      - file: reference/rocDecode-ffmpeg-decoder.rst
+        title: FFMpeg decoder class
   - file: reference/rocDecode-logging-control.rst
     title: Logging levels 
+  - file: reference/rocDecode-env-vars.rst
+    title: Environment variables
   - file: reference/rocDecode-formats-and-architectures.rst
     title: rocDecode supported codecs and architectures
   - file: doxygen/html/files

@@ -54,6 +54,7 @@
 class DtifPlatform;
 typedef DtifPlatform* (DtifCreateFunc)(const char*);
 typedef void (DtifDestroyFunc)();
+typedef HSAKMT_STATUS (DxgAbiCheckFunc)(HsaStructureSizes*);
 
 namespace rocr {
 namespace core {
@@ -115,6 +116,17 @@ class ThunkLoader {
                                       HSAuint32 SdmaEngineId, \
                                       void* QueueAddress, \
                                       HSAuint64 QueueSizeInBytes, \
+                                      HSAuint64 MetaDataPrefetchSizeInBytes, \
+                                      HsaEvent* Event, \
+                                      HsaQueueResource* QueueResource);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtCreateQueueV2))(HSAuint32 NodeId, \
+                                      HSA_QUEUE_TYPE Type, \
+                                      HSAuint32 QueuePercentage, \
+                                      HSA_QUEUE_PRIORITY Priority, \
+                                      HSAuint32 SdmaEngineId, \
+                                      void* QueueAddress, \
+                                      HSAuint64 QueueSizeInBytes, \
+                                      HSAuint64 MetaDataPrefetchSizeInBytes, \
                                       HsaEvent* Event, \
                                       HsaQueueResource* QueueResource);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtUpdateQueue))( HSA_QUEUEID QueueId, \
@@ -332,10 +344,12 @@ class ThunkLoader {
                                       HsaAisFlags flags, \
                                       HSAuint64 *SizeCopiedInBytes, \
                                       HSAint32 *status);
+#if defined(_WIN32)
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetMemoryHandle))(void* va, \
                                       void* MemoryAddress, \
                                       HSAuint64 SizeInBytes, \
                                       uint64_t* SharedMemoryHandle);
+#endif
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtHandleImport))(const HsaExternalHandleDesc* ImportDesc, \
                                       HsaHandleImportResult* ImportResult, \
                                       HsaHandleImportFlags* flags);
@@ -406,6 +420,7 @@ class ThunkLoader {
     void LoadThunkApiTable();
     bool CreateThunkInstance();
     bool DestroyThunkInstance();
+    bool CheckThunkAbi();
     bool IsDXG() const { return is_dxg_; }
     bool IsDTIF() const { return is_dtif_; }
     bool IsSharedLibraryLoaded() const { return is_loaded_; }
@@ -429,6 +444,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtWaitOnMultipleEvents)* HSAKMT_PFN(hsaKmtWaitOnMultipleEvents);
     HSAKMT_DEF(hsaKmtCreateQueue)* HSAKMT_PFN(hsaKmtCreateQueue);
     HSAKMT_DEF(hsaKmtCreateQueueExt)* HSAKMT_PFN(hsaKmtCreateQueueExt);
+    HSAKMT_DEF(hsaKmtCreateQueueV2)* HSAKMT_PFN(hsaKmtCreateQueueV2);
     HSAKMT_DEF(hsaKmtUpdateQueue)* HSAKMT_PFN(hsaKmtUpdateQueue);
     HSAKMT_DEF(hsaKmtDestroyQueue)* HSAKMT_PFN(hsaKmtDestroyQueue);
     HSAKMT_DEF(hsaKmtSetQueueCUMask)* HSAKMT_PFN(hsaKmtSetQueueCUMask);
@@ -504,7 +520,9 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtModelEnabled)* HSAKMT_PFN(hsaKmtModelEnabled);
     HSAKMT_DEF(hsaKmtQueueRingDoorbell)* HSAKMT_PFN(hsaKmtQueueRingDoorbell);
     HSAKMT_DEF(hsaKmtAisReadWriteFile)* HSAKMT_PFN(hsaKmtAisReadWriteFile);
+#if defined(_WIN32)
     HSAKMT_DEF(hsaKmtGetMemoryHandle)* HSAKMT_PFN(hsaKmtGetMemoryHandle);
+#endif
     HSAKMT_DEF(hsaKmtHandleImport)* HSAKMT_PFN(hsaKmtHandleImport);
     HSAKMT_DEF(hsaKmtMemoryVaMap)* HSAKMT_PFN(hsaKmtMemoryVaMap);
     HSAKMT_DEF(hsaKmtMemoryVaUnmap)* HSAKMT_PFN(hsaKmtMemoryVaUnmap);

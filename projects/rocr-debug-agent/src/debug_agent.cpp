@@ -58,6 +58,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -110,6 +111,10 @@ std::optional<std::string> g_code_objects_dir;
 bool g_all_wavefronts{ false };
 bool g_precise_emmory{ false };
 bool g_precise_alu_exceptions{ false };
+bool g_lazy{ true };
+bool g_delay_loading{ false };
+
+static std::shared_mutex g_r_debug_r_state_mutex;
 
 /* Global state accessed by the dbgapi callbacks.  */
 std::optional<amd_dbgapi_breakpoint_id_t> g_rbrk_breakpoint_id;
@@ -386,9 +391,95 @@ print_registers (amd_dbgapi_wave_id_t wave_id)
   free (register_class_ids);
 }
 
+template <typename T = uint32_t, size_t num_columns = 32 / sizeof (T)>
+void
+print_memory (amd_dbgapi_process_id_t process_id, amd_dbgapi_wave_id_t wave_id,
+              amd_dbgapi_lane_id_t lane_id,
+              amd_dbgapi_address_space_id_t address_space_id,
+              amd_dbgapi_segment_address_t segment_address,
+              amd_dbgapi_size_t size, std::string header = {})
+{
+  std::vector<T> buffer (1024);
+  static constexpr amd_dbgapi_size_t word_size = sizeof (buffer[0]);
+
+  /* Make sure the segment address and the size are aligned, the rest of
+     this function relies on it.  */
+  auto end_address = (segment_address + size + word_size - 1) & -word_size;
+  segment_address &= -word_size;
+
+  /* size == -1 means we are reading as much as we can, so do not align.  */
+  if (size != ~amd_dbgapi_size_t{ 0 })
+    size = end_address - segment_address;
+
+  if (!header.empty ())
+    agent_out << std::endl << header;
+
+  if (auto pad = segment_address % (num_columns * word_size); pad != 0)
+    {
+      agent_out << std::endl
+                << "    0x" << std::setfill ('0') << std::setw (4)
+                << (segment_address - pad) << ":";
+      for (size_t i = 0; i < pad; i += word_size)
+        agent_out << std::setfill (' ') << std::setw (2 * word_size + 1)
+                  << ' ';
+    }
+
+  while (true)
+    {
+      size_t requested_size = std::min (buffer.size () * word_size, size);
+      size_t bytes_read = requested_size;
+      if (amd_dbgapi_read_memory (process_id, wave_id, lane_id,
+                                  address_space_id, segment_address,
+                                  &bytes_read, buffer.data ())
+          != AMD_DBGAPI_STATUS_SUCCESS)
+        break;
+
+      agent_assert ((bytes_read % word_size) == 0);
+      buffer.resize (bytes_read / word_size);
+
+      for (size_t i = 0, column = (segment_address / word_size) % num_columns;
+           i < buffer.size (); ++i)
+        {
+          if ((column++ % num_columns) == 0)
+            {
+              agent_out << std::endl
+                        << "    0x" << std::setfill ('0') << std::setw (4)
+                        << (segment_address + i * word_size) << ":";
+              column = 1;
+            }
+
+          agent_out << " " << std::hex << std::setfill ('0')
+                    << std::setw (2 * word_size) << +buffer[i];
+        }
+
+      segment_address += bytes_read;
+      size -= bytes_read;
+
+      if (size == 0 || bytes_read != requested_size)
+        break;
+    }
+
+  agent_out << std::endl;
+}
+
 void
 print_local_memory (amd_dbgapi_wave_id_t wave_id)
 {
+  amd_dbgapi_dispatch_id_t dispatch_id;
+  if (auto status
+      = amd_dbgapi_wave_get_info (wave_id, AMD_DBGAPI_WAVE_INFO_DISPATCH,
+                                  sizeof (dispatch_id), &dispatch_id);
+      status != AMD_DBGAPI_STATUS_SUCCESS)
+    return;
+
+  amd_dbgapi_size_t group_segment_size;
+  DBGAPI_CHECK (amd_dbgapi_dispatch_get_info (
+      dispatch_id, AMD_DBGAPI_DISPATCH_INFO_GROUP_SEGMENT_SIZE,
+      sizeof (group_segment_size), &group_segment_size));
+
+  if (!group_segment_size)
+    return;
+
   amd_dbgapi_process_id_t process_id;
   DBGAPI_CHECK (amd_dbgapi_wave_get_info (wave_id,
                                           AMD_DBGAPI_WAVE_INFO_PROCESS,
@@ -404,47 +495,10 @@ print_local_memory (amd_dbgapi_wave_id_t wave_id)
       architecture_id, 0x3 /* DW_ASPACE_AMDGPU_local */,
       &local_address_space_id));
 
-  std::vector<uint32_t> buffer (1024);
-  amd_dbgapi_segment_address_t base_address{ 0 };
-
-  while (true)
-    {
-      size_t requested_size = buffer.size () * sizeof (buffer[0]);
-      size_t size = requested_size;
-      if (amd_dbgapi_read_memory (process_id, wave_id, 0,
-                                  local_address_space_id, base_address, &size,
-                                  buffer.data ())
-          != AMD_DBGAPI_STATUS_SUCCESS)
-        break;
-
-      agent_assert ((size % sizeof (buffer[0])) == 0);
-      buffer.resize (size / sizeof (buffer[0]));
-
-      if (!base_address)
-        agent_out << std::endl << "Local memory content:";
-
-      for (size_t i = 0, column = 0; i < buffer.size (); ++i)
-        {
-          if ((column++ % 8) == 0)
-            {
-              agent_out << std::endl
-                        << "    0x" << std::setfill ('0') << std::setw (4)
-                        << (base_address + i * sizeof (buffer[0])) << ":";
-              column = 1;
-            }
-
-          agent_out << " " << std::hex << std::setfill ('0') << std::setw (8)
-                    << buffer[i];
-        }
-
-      base_address += size;
-
-      if (size != requested_size)
-        break;
-    }
-
-  if (base_address)
-    agent_out << std::endl;
+  std::ostringstream oss;
+  oss << "Local memory content (" << group_segment_size << " bytes):";
+  print_memory (process_id, wave_id, AMD_DBGAPI_LANE_NONE,
+                local_address_space_id, 0, -1, oss.str ().c_str ());
 }
 
 void
@@ -576,14 +630,14 @@ stop_all_wavefronts (amd_dbgapi_process_id_t process_id)
   agent_log (log_level_t::info, "all wavefronts are stopped");
 }
 
-void
+std::vector<amd_dbgapi_code_object_id_t>
 print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
                   code_object_map_t &code_object_map)
 {
   /* This function is not thread-safe and not re-entrant.  */
   static std::mutex lock;
   if (!lock.try_lock ())
-    return;
+    return {};
   /* Make sure the lock is released when this function returns.  */
   std::scoped_lock sl (std::adopt_lock, lock);
 
@@ -595,6 +649,7 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
   DBGAPI_CHECK (amd_dbgapi_process_wave_list (process_id, &wave_count,
                                               &wave_ids, nullptr));
 
+  std::vector<amd_dbgapi_code_object_id_t> code_objects_disassembled;
   for (size_t i = 0; i < wave_count; ++i)
     {
       amd_dbgapi_wave_id_t wave_id = wave_ids[i];
@@ -643,7 +698,26 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
       agent_out << "wave_" << std::dec << wave_id.handle << ": pc=0x"
                 << std::hex << pc << " (kernel_code_entry=";
 
-      if (kernel_entry)
+      using kernel_descriptor_t = struct
+      {
+        uint32_t group_segment_fixed_size;
+        uint32_t private_segment_fixed_size;
+        uint32_t kernarg_size;
+        uint8_t reserved0[4];
+        int64_t kernel_code_entry_byte_offset;
+        uint8_t reserved1[20];
+        uint32_t compute_pgm_rsrc3;
+        uint32_t compute_pgm_rsrc1;
+        uint32_t compute_pgm_rsrc2;
+        uint16_t kernel_code_properties;
+        uint16_t kernarg_preload;
+        uint8_t reserved2[4];
+      };
+
+      std::optional<amd_dbgapi_global_address_t> kernarg_ptr;
+      decltype (kernel_descriptor_t::kernarg_size) kernarg_size{};
+
+      if (kernel_entry.has_value ())
         {
           agent_out << "0x" << std::hex << *kernel_entry;
 
@@ -657,6 +731,30 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
                   agent_out << " <" << symbol->m_name << ">";
                 break;
               }
+
+          DBGAPI_CHECK (amd_dbgapi_dispatch_get_info (
+              dispatch_id,
+              AMD_DBGAPI_DISPATCH_INFO_KERNEL_ARGUMENT_SEGMENT_ADDRESS,
+              sizeof (decltype (kernarg_ptr)::value_type),
+              &kernarg_ptr.emplace ()));
+
+          amd_dbgapi_global_address_t kernel_descriptor_addr;
+          DBGAPI_CHECK (amd_dbgapi_dispatch_get_info (
+              dispatch_id, AMD_DBGAPI_DISPATCH_INFO_KERNEL_DESCRIPTOR_ADDRESS,
+              sizeof (kernel_descriptor_addr), &kernel_descriptor_addr));
+
+          amd_dbgapi_size_t requested_size = sizeof (kernarg_size);
+          DBGAPI_CHECK (amd_dbgapi_read_memory (
+              process_id, AMD_DBGAPI_WAVE_NONE, AMD_DBGAPI_LANE_NONE,
+              AMD_DBGAPI_ADDRESS_SPACE_GLOBAL,
+              kernel_descriptor_addr
+                  + offsetof (kernel_descriptor_t, kernarg_size),
+              &requested_size, &kernarg_size));
+
+          if (requested_size != sizeof (kernarg_size))
+            kernarg_size = {};
+
+          agent_out << ", kernargs=0x" << std::hex << *kernarg_ptr;
         }
       else
         agent_out << "not available";
@@ -735,6 +833,17 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
       print_registers (wave_id);
       print_local_memory (wave_id);
 
+      /* If available, print the content of the kernarg segment.  */
+      if (kernarg_ptr.has_value () && kernarg_size != 0)
+        {
+          std::ostringstream oss;
+          oss << "Global memory (kernarg segment, " << kernarg_size
+              << " bytes):";
+          print_memory (process_id, AMD_DBGAPI_WAVE_NONE, AMD_DBGAPI_LANE_NONE,
+                        AMD_DBGAPI_ADDRESS_SPACE_GLOBAL, *kernarg_ptr,
+                        kernarg_size, oss.str ().c_str ());
+        }
+
       /* Find the code object that contains this pc.  */
       code_object_t *code_object_found{ nullptr };
       for ([[maybe_unused]] auto &&[id, code_object] : code_object_map)
@@ -754,6 +863,8 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
 
           /* Disassemble instructions around `pc`  */
           code_object_found->disassemble (architecture_id, pc);
+
+          code_objects_disassembled.emplace_back (code_object_found->id ());
         }
       else
         {
@@ -762,6 +873,7 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
     }
 
   free (wave_ids);
+  return code_objects_disassembled;
 }
 
 void
@@ -779,6 +891,26 @@ print_usage ()
             << std::endl
             << "                              "
                "the current directory."
+            << std::endl;
+  std::cerr << "  -c, --load-all-code-objects "
+               "Load all code objects as soon as they are loaded"
+            << std::endl
+            << "                              "
+            << "by the runtime.";
+  std::cerr << "  -z, --lazy                  "
+               "Delay inspecting the content of all loaded code "
+            << std::endl
+            << "                              "
+            << "obects until after an exception is reported."
+            << std::endl
+            << "                              "
+            << "Note that the application must not free the code "
+            << std::endl
+            << "                              "
+            << "objects' memory while they are loaded on the device."
+            << std::endl
+            << "                              "
+            << "This option is incompatible with -c."
             << std::endl;
   std::cerr << "  -p, --precise-memory        "
             << "Enable precise memory mode which ensures that " << std::endl
@@ -893,18 +1025,21 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
                   {
                     code_object_t code_object (code_objects_ids[i]);
 
-                    code_object.open ();
-                    if (!code_object.is_open ())
+                    if (!g_delay_loading)
                       {
-                        agent_warning ("could not open code_object_%ld",
-                                       code_objects_ids[i].handle);
-                        continue;
-                      }
+                        if (!code_object.open ())
+                          {
+                            agent_warning ("could not open code_object_%ld",
+                                           code_objects_ids[i].handle);
+                            continue;
+                          }
 
-                    if (g_code_objects_dir
-                        && !code_object.save (*g_code_objects_dir))
-                      agent_warning ("could not save code object to %s",
-                                     g_code_objects_dir->c_str ());
+                        if (!g_lazy && g_code_objects_dir
+                            && !code_object.save (*g_code_objects_dir))
+                          agent_warning ("could not save code object %s to %s",
+                                         code_object.uri ().c_str (),
+                                         g_code_objects_dir->c_str ());
+                      }
 
                     fresh_map.emplace (code_objects_ids[i],
                                        std::move (code_object));
@@ -931,7 +1066,7 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
       DBGAPI_CHECK (amd_dbgapi_event_processed (event_id));
     }
 
-  /* Some events do not require us to do anythig more.  If so, just return
+  /* Some events do not require us to do anything more.  If so, just return
      early.  */
   if (!need_print_waves && !wave_need_resume)
     return;
@@ -945,7 +1080,49 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
       process_id, AMD_DBGAPI_WAVE_CREATION_STOP));
 
   if (need_print_waves)
-    print_wavefronts (process_id, all_wavefronts, code_object_map);
+    {
+      if (g_delay_loading)
+        {
+          amd_dbgapi_breakpoint_action_t bpaction;
+          {
+            std::unique_lock<std::shared_mutex> lock (g_r_debug_r_state_mutex);
+            DBGAPI_CHECK (amd_dbgapi_report_breakpoint_hit (
+                g_rbrk_breakpoint_id.value (), 0, &bpaction));
+          }
+
+          if (bpaction == AMD_DBGAPI_BREAKPOINT_ACTION_HALT)
+            process_dbgapi_events (process_id, all_wavefronts,
+                                   code_object_map);
+        }
+
+      /* With --lazy,-z, code objects may not have been opened yet.
+         Open them now so we can resolve PCs to code objects.  */
+      for (auto it = code_object_map.begin (); it != code_object_map.end ();)
+        if (!it->second.is_open () && !it->second.open ())
+          {
+            agent_warning ("could not open code_object_%ld", it->first.handle);
+            it = code_object_map.erase (it);
+          }
+        else
+          ++it;
+
+      auto code_objects_disassembled
+          = print_wavefronts (process_id, all_wavefronts, code_object_map);
+
+      /* If the code objects were lazily loaded, save them now.  */
+      if (g_lazy && g_code_objects_dir)
+        for (auto &&code_object_id : code_objects_disassembled)
+          {
+            auto it = code_object_map.find (code_object_id);
+            agent_assert (it != code_object_map.end ());
+
+            auto &code_object = it->second;
+            if (!code_object.save (*g_code_objects_dir))
+              agent_warning ("could not save code object %s to %s",
+                             code_object.uri ().c_str (),
+                             g_code_objects_dir->c_str ());
+          }
+    }
 
   /* We now need to resume execution of the waves present.  This will allow any
      exception to be delivered to the runtime who will be able to act on it if
@@ -1015,8 +1192,7 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
               break;
 
             case AMD_DBGAPI_WAVE_STOP_REASON_ADDRESS_ERROR:
-              resume_exceptions
-                  |= AMD_DBGAPI_EXCEPTION_WAVE_ADDRESS_ERROR;
+              resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_ADDRESS_ERROR;
               break;
 
             case AMD_DBGAPI_WAVE_STOP_REASON_ILLEGAL_INSTRUCTION:
@@ -1154,7 +1330,7 @@ dbgapi_worker (int listen_fd, bool all_wavefronts, bool precise_memory,
 
   /* The initial setup is finished, notify the main thread it can go on.  */
   [[maybe_unused]] bool promise_available
-    = g_rbrk_sync.guard.load (std::memory_order::memory_order_acquire);
+      = g_rbrk_sync.guard.load (std::memory_order::memory_order_acquire);
   agent_assert (promise_available);
   g_rbrk_sync.promise->set_value ();
 
@@ -1447,19 +1623,29 @@ hsa_status_t
 debug_agent_hsa_executable_freeze (hsa_executable_t executable,
                                    const char *options)
 {
-  auto v = original_hsa_executable_freeze (executable, options);
+  hsa_status_t retval;
+  {
+    std::shared_lock<std::shared_mutex> lock (g_r_debug_r_state_mutex);
+    retval = original_hsa_executable_freeze (executable, options);
+  }
 
-  get_worker_thread ().update_code_object_list ();
-  return v;
+  if (!g_delay_loading)
+    get_worker_thread ().update_code_object_list ();
+  return retval;
 }
 
 hsa_status_t
 debug_agent_hsa_executable_destroy (hsa_executable_t executable)
 {
-  auto v = original_hsa_executable_destroy (executable);
+  hsa_status_t retval;
+  {
+    std::shared_lock<std::shared_mutex> lock (g_r_debug_r_state_mutex);
+    retval = original_hsa_executable_destroy (executable);
+  }
 
-  get_worker_thread ().update_code_object_list ();
-  return v;
+  if (!g_delay_loading)
+    get_worker_thread ().update_code_object_list ();
+  return retval;
 }
 
 } /* namespace.  */
@@ -1492,6 +1678,8 @@ OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
           { "log-level", required_argument, nullptr, 'l' },
           { "output", required_argument, nullptr, 'o' },
           { "save-code-objects", optional_argument, nullptr, 's' },
+          { "lazy", no_argument, nullptr, 'z' },
+          { "load-all-code-objects", no_argument, nullptr, 'c' },
           { "precise-memory", no_argument, nullptr, 'p' },
           { "precise-alu-exceptions", no_argument, nullptr, 'e' },
           { "help", no_argument, nullptr, 'h' },
@@ -1502,7 +1690,8 @@ OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
   int saved_optind = optind;
   optind = 1;
 
-  while (int c = getopt_long (argc, argv, ":as::o:dpel:h", options, nullptr))
+  while (int c
+         = getopt_long (argc, argv, ":as::o:dpezcl:h", options, nullptr))
     {
       if (c == -1)
         break;
@@ -1551,6 +1740,14 @@ OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
             print_usage ();
           break;
 
+        case 'c': /* -c or --load-all-code-objects.  */
+          g_lazy = false;
+          break;
+
+        case 'z': /* -z or --lazy. */
+          g_delay_loading = true;
+          break;
+
         case 's': /* -s or --save-code-objects  */
           if (argument)
             {
@@ -1589,6 +1786,13 @@ OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
         default:
           print_usage ();
         }
+    }
+
+  if (!g_lazy && g_delay_loading)
+    {
+      std::cerr << "\"--load-all-code-objects\" and \"--lazy\" are mutually "
+                   "exclusive" << std::endl;
+      print_usage ();
     }
 
   /* Restore the global optind.  */

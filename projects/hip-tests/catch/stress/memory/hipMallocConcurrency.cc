@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Testcase Scenarios :
@@ -210,7 +197,7 @@ static void threadFunc(int gpu) {
  * Regress hipMalloc()/hipFree() in loop for bigger chunks and
  * smaller chunks of memory allocation
  */
-TEST_CASE("Stress_hipMalloc_LoopRegressionAllocFreeCycles") {
+HIP_TEST_CASE(Stress_hipMalloc_LoopRegressionAllocFreeCycles) {
   int devCnt = 0;
 
   // Get GPU count
@@ -227,7 +214,7 @@ TEST_CASE("Stress_hipMalloc_LoopRegressionAllocFreeCycles") {
  * continuously, stores it for later use and then frees it at later point
  * of time.
  */
-TEST_CASE("Stress_hipMalloc_AllocateAndPoolBuffers") {
+HIP_TEST_CASE(Stress_hipMalloc_AllocateAndPoolBuffers) {
   size_t avail{0}, tot{0};
   bool ret{false};
   hipError_t err{};
@@ -268,7 +255,7 @@ TEST_CASE("Stress_hipMalloc_AllocateAndPoolBuffers") {
  * Exercise hipMalloc() api parellely on all gpus from
  * multiple threads and regress the api.
  */
-TEST_CASE("Stress_hipMalloc_Multithreaded_MultiGPU", "[multigpu]") {
+HIP_TEST_CASE(Stress_hipMalloc_Multithreaded_MultiGPU) {
   std::vector<std::thread> threadlist;
   int devCnt;
 

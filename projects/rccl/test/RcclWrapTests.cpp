@@ -11,9 +11,11 @@
 #include <cstring>
 
 #include "comm.h"
+#include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "debug.h"
 #include "graph/topo.h"
+#include "rocmwrap.h"
 
 namespace RcclUnitTesting
 {
@@ -155,6 +157,14 @@ static bool isProtoStrValid(const char* envStr)
         }
     }
     return false; // No match found
+}
+
+// Helper that exercises CUCHECK with a guaranteed-to-fail HIP call
+static ncclResult_t triggerCucheckFailure()
+{
+    CUCHECK(hipPointerGetAttribute(nullptr, HIP_POINTER_ATTRIBUTE_CONTEXT,
+                                   (hipDeviceptr_t)0x1));
+    return ncclSuccess;
 }
 
 // Helper function to validate algorithm string against known valid algorithms
@@ -383,8 +393,7 @@ TEST(Rcclwrap, RcclUpdateThreadThreshold_UserEnvSet)
 
             if(!value)
             {
-                INFO(
-                    NCCL_LOG_INFO,
+                TEST_INFO(
                     "[Rcclwrap] Test skipped. Set environment variable "
                     "NCCL_THREAD_THRESHOLD"
                 );
@@ -422,8 +431,7 @@ TEST(Rcclwrap, RcclUpdateThreadThreshold_MinNChannelsSet)
             const char* value = getenv("NCCL_MIN_NCHANNELS");
             if(!value)
             {
-                INFO(
-                    NCCL_LOG_INFO,
+                TEST_INFO(
                     "[Rcclwrap] Test skipped. Set environment "
                     "variable NCCL_MIN_NCHANNELS"
                 );
@@ -460,8 +468,7 @@ TEST(Rcclwrap, RcclUpdateThreadThreshold_MaxChannelsSet)
             const char* value = getenv("NCCL_MAX_NCHANNELS");
             if(!value)
             {
-                INFO(
-                    NCCL_LOG_INFO,
+                TEST_INFO(
                     "[Rcclwrap] Test skipped. Set environment "
                     "variable NCCL_MAX_NCHANNELS"
                 );
@@ -1076,8 +1083,7 @@ TEST(Rcclwrap, RcclOverrideAlgorithm_InvalidOverridePersists)
 
 TEST(Rcclwrap, AllrcclSetP2pNetChunkSizeTests)
 {
-    INFO(
-        NCCL_LOG_INFO,
+    TEST_INFO(
         "=== Starting Process-Isolated rcclSetP2pNetChunkSize "
         "Tests Execution ==="
     );
@@ -1189,8 +1195,7 @@ TEST(Rcclwrap, AllrcclSetP2pNetChunkSizeTests)
     // Verify that all tests passed
     EXPECT_TRUE(allTestsPassed) << "One or more process-isolated GFX tests failed";
 
-    INFO(
-        NCCL_LOG_INFO,
+    TEST_INFO(
         "=== Process-Isolated rcclSetP2pNetChunkSize Tests "
         "Execution Completed ==="
     );
@@ -1256,8 +1261,7 @@ TEST(Rcclwrap, AllPxnTests)
                         return;
                     }
 
-                    INFO(
-                        NCCL_LOG_INFO,
+                    TEST_INFO(
                         "Testing rcclSetPxn for %s with %d ranks",
                         tc.arch.c_str(),
                         tc.ranks
@@ -1274,8 +1278,7 @@ TEST(Rcclwrap, AllPxnTests)
                     EXPECT_EQ(pxnDisable, tc.expectedPxnDisable)
                         << "Failed for " << tc.arch << " with " << tc.ranks << " ranks";
 
-                    INFO(
-                        NCCL_LOG_INFO,
+                    TEST_INFO(
                         "%s test completed - pxnDisable: %d",
                         tc.name.c_str(),
                         pxnDisable
@@ -1304,6 +1307,50 @@ TEST(Rcclwrap, AllPxnTests)
     bool allTestsPassed = ProcessIsolatedTestRunner::executeAllTests(options);
 
     EXPECT_TRUE(allTestsPassed) << "One or more PXN process-isolated tests failed";
+}
+
+TEST(Rcclwrap, CucheckMacro_CheckStickyHipErrorOnFailure)
+{
+    hipError_t hipErr = hipSetDevice(0);
+    if(hipErr != hipSuccess)
+    {
+        GTEST_SKIP() << "No GPU available";
+    }
+
+    // Clear any pre-existing sticky error so we start clean
+    (void)hipGetLastError();
+
+    // Force a HIP failure through CUCHECK using an invalid device pointer (0x1)
+    ncclResult_t ret = triggerCucheckFailure();
+
+    EXPECT_EQ(ncclUnhandledCudaError, ret)
+        << "CUCHECK should return ncclUnhandledCudaError on failure";
+    EXPECT_EQ(hipSuccess, hipGetLastError())
+        << "CUCHECK must clear sticky HIP error after failure";
+}
+
+TEST(Rcclwrap, CucheckgotoMacro_CheckStickyHipErrorOnFailure)
+{
+    hipError_t hipErr = hipSetDevice(0);
+    if(hipErr != hipSuccess)
+    {
+        GTEST_SKIP() << "No GPU available";
+    }
+
+    // Clear any pre-existing sticky error so we start clean
+    (void)hipGetLastError();
+
+    // Force a HIP failure through CUCHECKGOTO using an invalid device pointer (0x1)
+    ncclResult_t ret = ncclSuccess;
+    CUCHECKGOTO(hipPointerGetAttribute(nullptr, HIP_POINTER_ATTRIBUTE_CONTEXT,
+                                       (hipDeviceptr_t)0x1),
+                ret, check_sticky);
+
+check_sticky:
+    EXPECT_EQ(ncclUnhandledCudaError, ret)
+        << "CUCHECKGOTO should set result to ncclUnhandledCudaError on failure";
+    EXPECT_EQ(hipSuccess, hipGetLastError())
+        << "CUCHECKGOTO must clear sticky HIP error after failure";
 }
 
 } // namespace RcclUnitTesting

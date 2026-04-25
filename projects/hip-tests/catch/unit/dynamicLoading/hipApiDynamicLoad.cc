@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <hip_test_common.hh>
 
 #include <stdio.h>
@@ -64,7 +52,7 @@ THE SOFTWARE.
  */
 
 void test_dynamicLoading(void* sym_hipGetDevice, void* sym_hipMalloc, void* sym_hipMemcpyHtoD,
-                         void* sym_hipMemcpyDtoH, void* sym_hipModuleLoad,
+                         void* sym_hipMemcpyDtoH, void* sym_hipModuleLoad, void* sym_hipModuleUnload,
                          void* sym_hipGetDeviceProperties, void* sym_hipModuleGetFunction,
                          void* sym_hipModuleLaunchKernel) {
   uint32_t *A_d, *C_d;
@@ -85,6 +73,9 @@ void test_dynamicLoading(void* sym_hipGetDevice, void* sym_hipMalloc, void* sym_
 
   hipError_t (*dyn_hipModuleLoad)(hipModule_t*, const char*) =
       reinterpret_cast<hipError_t (*)(hipModule_t*, const char*)>(sym_hipModuleLoad);
+
+  hipError_t (*dyn_hipModuleUnload)(hipModule_t) =
+      reinterpret_cast<hipError_t (*)(hipModule_t)>(sym_hipModuleUnload);
 
   hipError_t (*dyn_hipGetDeviceProperties)(hipDeviceProp_t*, int) =
       reinterpret_cast<hipError_t (*)(hipDeviceProp_t*, int)>(sym_hipGetDeviceProperties);
@@ -147,17 +138,21 @@ void test_dynamicLoading(void* sym_hipGetDevice, void* sym_hipMalloc, void* sym_
     unsigned Agold = ((A_h[i] & 0xf00) >> 8);
     REQUIRE(C_h[i] == Agold);
   }
+  HIP_CHECK(dyn_hipModuleUnload(Module));
   HIPCHECK(hipFree(A_d));
   HIPCHECK(hipFree(C_d));
   free(A_h);
   free(C_h);
 }
-TEST_CASE("Unit_hipApiDynamicLoad_hipGetProcAddress") {
+
+#if HT_AMD
+HIP_TEST_CASE(Unit_hipApiDynamicLoad_hipGetProcAddress) {
   void* sym_hipGetDevice;
   void* sym_hipMalloc;
   void* sym_hipMemcpyHtoD;
   void* sym_hipMemcpyDtoH;
   void* sym_hipModuleLoad;
+  void* sym_hipModuleUnload;
   void* sym_hipGetDeviceProperties;
   void* sym_hipModuleGetFunction;
   void* sym_hipModuleLaunchKernel;
@@ -170,6 +165,7 @@ TEST_CASE("Unit_hipApiDynamicLoad_hipGetProcAddress") {
   HIPCHECK(hipGetProcAddress("hipMemcpyHtoD", &sym_hipMemcpyHtoD, currentHipVersion, 0, nullptr));
   HIPCHECK(hipGetProcAddress("hipMemcpyDtoH", &sym_hipMemcpyDtoH, currentHipVersion, 0, nullptr));
   HIPCHECK(hipGetProcAddress("hipModuleLoad", &sym_hipModuleLoad, currentHipVersion, 0, nullptr));
+  HIPCHECK(hipGetProcAddress("hipModuleUnload", &sym_hipModuleUnload, currentHipVersion, 0, nullptr));
   HIPCHECK(hipGetProcAddress("hipGetDeviceProperties", &sym_hipGetDeviceProperties,
                              currentHipVersion, 0, nullptr));
   HIPCHECK(hipGetProcAddress("hipModuleGetFunction", &sym_hipModuleGetFunction, currentHipVersion,
@@ -178,12 +174,12 @@ TEST_CASE("Unit_hipApiDynamicLoad_hipGetProcAddress") {
                              0, nullptr));
 
   test_dynamicLoading(sym_hipGetDevice, sym_hipMalloc, sym_hipMemcpyHtoD, sym_hipMemcpyDtoH,
-                      sym_hipModuleLoad, sym_hipGetDeviceProperties, sym_hipModuleGetFunction,
-                      sym_hipModuleLaunchKernel);
+                      sym_hipModuleLoad, sym_hipModuleUnload, sym_hipGetDeviceProperties,
+                      sym_hipModuleGetFunction, sym_hipModuleLaunchKernel);
 }
 
 
-TEST_CASE("Unit_hipApiDynamicLoad") {
+HIP_TEST_CASE(Unit_hipApiDynamicLoad) {
   void* handle = dlopen("libamdhip64.so", RTLD_LAZY);
   REQUIRE(handle != NULL);
 
@@ -192,6 +188,7 @@ TEST_CASE("Unit_hipApiDynamicLoad") {
   void* sym_hipMemcpyHtoD = dlsym(handle, "hipMemcpyHtoD");
   void* sym_hipMemcpyDtoH = dlsym(handle, "hipMemcpyDtoH");
   void* sym_hipModuleLoad = dlsym(handle, "hipModuleLoad");
+  void* sym_hipModuleUnload = dlsym(handle, "hipModuleUnload");
   void* sym_hipGetDeviceProperties = dlsym(handle, "hipGetDeviceProperties");
   void* sym_hipModuleGetFunction = dlsym(handle, "hipModuleGetFunction");
   void* sym_hipModuleLaunchKernel = dlsym(handle, "hipModuleLaunchKernel");
@@ -199,9 +196,10 @@ TEST_CASE("Unit_hipApiDynamicLoad") {
   dlclose(handle);
 
   test_dynamicLoading(sym_hipGetDevice, sym_hipMalloc, sym_hipMemcpyHtoD, sym_hipMemcpyDtoH,
-                      sym_hipModuleLoad, sym_hipGetDeviceProperties, sym_hipModuleGetFunction,
-                      sym_hipModuleLaunchKernel);
+                      sym_hipModuleLoad, sym_hipModuleUnload, sym_hipGetDeviceProperties,
+                      sym_hipModuleGetFunction, sym_hipModuleLaunchKernel);
 }
+#endif
 
 /**
  * End doxygen group DynamicLoading.

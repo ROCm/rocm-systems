@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/buffer_storage.hpp"
 #include "mocked_types.hpp"
@@ -291,6 +272,43 @@ TEST_F(buffer_storage_test, MixedSampleTypes)
     verify_buffer_contains(sample1, buffer, buffer_pos);
     verify_buffer_contains(sample4, buffer, buffer_pos);
     verify_buffer_contains(sample5, buffer, buffer_pos);
+
+    EXPECT_EQ(buffer_pos, buffer_data.size());
+}
+
+TEST_F(buffer_storage_test, mixed_sample_types_with_optional)
+{
+    rocprofsys::trace_cache::buffer_storage<mock_worker_factory_t, test_type_identifier_t>
+        storage(test_file_path);
+    SetUpStartStopOnCall();
+    EXPECT_CALL(*g_mock_worker, start).Times(1);
+    EXPECT_CALL(*g_mock_worker, stop).Times(1);
+
+    storage.start();
+    test_sample_1 sample1(42, "event_data");
+    test_sample_5 sample5_with_value(std::optional<uint32_t>{ 99 });
+    test_sample_5 sample5_nullopt(std::nullopt);
+    test_sample_2 sample2(2.71828, 1002);
+
+    EXPECT_NO_THROW(storage.store(sample1));
+    EXPECT_NO_THROW(storage.store(sample5_with_value));
+    EXPECT_NO_THROW(storage.store(sample5_nullopt));
+    EXPECT_NO_THROW(storage.store(sample2));
+
+    g_mock_worker->execute_flush(true);
+
+    EXPECT_NO_THROW(storage.shutdown());
+
+    std::string buffer_data = g_mock_worker->m_output_string_stream.str();
+    ASSERT_FALSE(buffer_data.empty());
+
+    const uint8_t* buffer     = reinterpret_cast<const uint8_t*>(buffer_data.data());
+    size_t         buffer_pos = 0;
+
+    verify_buffer_contains(sample1, buffer, buffer_pos);
+    verify_buffer_contains(sample5_with_value, buffer, buffer_pos);
+    verify_buffer_contains(sample5_nullopt, buffer, buffer_pos);
+    verify_buffer_contains(sample2, buffer, buffer_pos);
 
     EXPECT_EQ(buffer_pos, buffer_data.size());
 }

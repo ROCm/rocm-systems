@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "cl_common.hpp"
 
@@ -164,13 +150,9 @@ static bool validateImageDescriptor(const std::vector<amd::Device*>& devices,
   }
 
   // Check if any device supports mipmaps
-  bool mipMapSupport = false;
-  for (auto& dev : devices) {
-    if (dev->settings().checkExtension(ClKhrMipMapImage)) {
-      mipMapSupport = true;
-      break;
-    }
-  }
+  bool mipMapSupport = std::any_of(devices.begin(), devices.end(), [](const amd::Device* device) {
+    return device->settings().checkExtension(ClKhrMipMapImage);
+  });
 
   // Check if any device can accept mipmaps
   if ((desc->num_mip_levels != 0) && (!mipMapSupport || (hostPtr != NULL))) {
@@ -350,14 +332,11 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateBuffer,
     return (cl_mem)0;
   }
   const std::vector<amd::Device*>& devices = as_amd(context)->devices();
-  bool sizePass = false;
-  for (auto& dev : devices) {
-    if ((dev->info().maxMemAllocSize_ >= size) ||
-        (flags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR))) {
-      sizePass = true;
-      break;
-    }
-  }
+  bool sizePass =
+      std::any_of(devices.begin(), devices.end(), [size, flags](const amd::Device* device) {
+        return (device->info().maxMemAllocSize_ >= size) ||
+               (flags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR));
+      });
   if (!sizePass) {
     *not_null(errcode_ret) = CL_INVALID_BUFFER_SIZE;
     LogWarning("invalid parameter \"size\"");
@@ -479,14 +458,12 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateSubBuffer,
   const cl_buffer_region* region = (const cl_buffer_region*)buffer_create_info;
 
   // Check sub buffer offset alignment
-  bool alignmentPass = false;
   const std::vector<amd::Device*>& devices = buffer.getContext().devices();
-  for (auto& dev : devices) {
-    cl_uint deviceAlignmentBytes = dev->info().memBaseAddrAlign_ >> 3;
-    if (region->origin == amd::alignDown(region->origin, deviceAlignmentBytes)) {
-      alignmentPass = true;
-    }
-  }
+  bool alignmentPass =
+      std::any_of(devices.begin(), devices.end(), [region](const amd::Device* device) {
+        cl_uint deviceAlignmentBytes = device->info().memBaseAddrAlign_ >> 3;
+        return region->origin == amd::alignDown(region->origin, deviceAlignmentBytes);
+      });
 
   // Return an error if the offset is misaligned on all devices
   if (!alignmentPass) {
@@ -3293,7 +3270,8 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
     *not_null(errcode_ret) = CL_INVALID_MEM_OBJECT;
     return NULL;
   }
-  amd::Image* srcImage = as_amd(image)->asImage();
+  amd::Memory* srcMem = as_amd(image);
+  amd::Image* srcImage = srcMem->asImage();
   if (srcImage == NULL) {
     *not_null(errcode_ret) = CL_INVALID_MEM_OBJECT;
     return NULL;
@@ -3341,7 +3319,8 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
   amd::Coord3D srcRegion(region[0], region[1], region[2]);
 
   ImageViewRef mip;
-  if (srcImage->getMipLevels() > 1) {
+  const auto mipmapLevels = srcImage->getMipLevels();
+  if (mipmapLevels > 1) {
     // Create a view for the specified mip level
     mip = srcImage->createView(srcImage->getContext(), srcImage->getImageFormat(), hostQueue.vdev(),
                                origin[srcImage->getDims()]);
@@ -3409,6 +3388,17 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
     // Runtime can't map persistent memory if it's still busy or
     // even wasn't submitted to HW from the worker thread yet
     hostQueue.finish();
+  }
+
+  if (mipmapLevels > 1) {
+    // For clEnqueueUnmapMemObject to query the level view of mipmap image per mapPtr
+    auto* devMem = srcMem->getDeviceMemory(hostQueue.device());
+    if (devMem == NULL) {
+      delete command;
+      *not_null(errcode_ret) = CL_MEM_OBJECT_ALLOCATION_FAILURE;
+      return NULL;
+    }
+    devMem->saveMapInfo(mapPtr, srcOrigin, srcRegion, map_flags, command->isEntireMemory(), srcImage);
   }
 
   // Send the map command for processing
@@ -3518,6 +3508,21 @@ RUNTIME_ENTRY(cl_int, clEnqueueUnmapMemObject,
     return err;
   }
 
+  device::Memory* mem = amdMemory->getDeviceMemory(hostQueue.device());
+  amd::Image* srcImage = amdMemory->asImage();
+  ImageViewRef mip;
+  if (srcImage && srcImage->getMipLevels() > 1) {
+    // This is a mipmap image, so query its level view per mapped_ptr
+    const device::Memory::WriteMapInfo* mapInfo = mem->writeMapInfo(mapped_ptr);
+    assert(mapInfo->baseMip_ != nullptr);
+     // Assign mip level view
+    mip = mapInfo->baseMip_; // Will be released on exit
+    amdMemory->decMapCount();
+    amdMemory = mip();
+    // Clear unmap flags from the parent image
+    mem->clearUnmapInfo(mapped_ptr);
+  }
+
   amd::UnmapMemoryCommand* command = new amd::UnmapMemoryCommand(
       hostQueue, CL_COMMAND_UNMAP_MEM_OBJECT, eventWaitList, *amdMemory, mapped_ptr);
 
@@ -3531,7 +3536,6 @@ RUNTIME_ENTRY(cl_int, clEnqueueUnmapMemObject,
     return CL_MEM_OBJECT_ALLOCATION_FAILURE;
   }
 
-  device::Memory* mem = amdMemory->getDeviceMemory(hostQueue.device());
   bool blocking = false;
   if (mem->isPersistentMapped()) {
     blocking = true;
@@ -3998,13 +4002,8 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateImage,
   }
 
   const std::vector<amd::Device*>& devices = as_amd(context)->devices();
-  bool supportPass = false;
-  for (auto& dev : devices) {
-    if (dev->info().imageSupport_) {
-      supportPass = true;
-      break;
-    }
-  }
+  bool supportPass = std::any_of(devices.begin(), devices.end(),
+                                 [](const amd::Device* dev) { return dev->info().imageSupport_; });
 
   if (!supportPass) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
@@ -4587,6 +4586,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueMigrateMemObjects,
   }
 
   std::vector<amd::Memory*> memObjects;
+  memObjects.reserve(num_mem_objects);
   for (uint i = 0; i < num_mem_objects; ++i) {
     if (!is_valid(mem_objects[i])) {
       return CL_INVALID_MEM_OBJECT;
@@ -4680,13 +4680,9 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateBufferFromImageAMD,
 
   amd::Context& amdContext = *as_amd(context);
   const std::vector<amd::Device*>& devices = amdContext.devices();
-  bool supportPass = false;
-  for (auto& dev : devices) {
-    if (dev->info().bufferFromImageSupport_) {
-      supportPass = true;
-      break;
-    }
-  }
+  bool supportPass = std::any_of(devices.begin(), devices.end(), [](const amd::Device* dev) {
+    return dev->info().bufferFromImageSupport_;
+  });
 
   if (!supportPass) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;

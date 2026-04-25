@@ -36,7 +36,7 @@ foreach(target_id ${GPU_TARGETS})
                    ${target_id}_agent_kernels.hsaco)
 endforeach()
 
-add_custom_target(agent_hasco_targets DEPENDS ${HSACO_TARGET_LIST})
+add_custom_target(agent_hsaco_targets DEPENDS ${HSACO_TARGET_LIST})
 
 install(
     FILES ${HSACO_TARGET_LIST}
@@ -61,7 +61,7 @@ target_link_libraries(
 
 set(ROCPROFILER_LIB_COUNTER_TEST_SOURCES
     metrics_test.cpp evaluate_ast_test.cpp dimension.cpp core.cpp code_object_loader.cpp
-    device_counting.cpp)
+    device_counting.cpp firmware_restrictions.cpp)
 set(ROCPROFILER_LIB_COUNTER_TEST_HEADERS code_object_loader.hpp device_counting.hpp)
 
 add_executable(counter-tests)
@@ -69,7 +69,7 @@ add_executable(counter-tests)
 target_sources(counter-tests PRIVATE ${ROCPROFILER_LIB_COUNTER_TEST_SOURCES}
                                      ${ROCPROFILER_LIB_COUNTER_TEST_HEADERS})
 
-add_dependencies(counter-tests agent_hasco_targets)
+add_dependencies(counter-tests agent_hsaco_targets)
 
 target_link_libraries(
     counter-tests
@@ -104,21 +104,3 @@ rocprofiler_add_unit_test(
         device_counting_service_test.sync_sq_waves_verify_non_intercept
         device_counting_service_test.raw_sq_waves_verify
         device_counting_service_test.sync_grbm_verify)
-
-set(ROCPROFILER_LIB_CONSUMER_TEST_SOURCES consumer_test.cpp)
-
-add_executable(consumer-tests)
-target_sources(consumer-tests PRIVATE ${ROCPROFILER_LIB_CONSUMER_TEST_SOURCES})
-
-target_link_libraries(
-    consumer-tests rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
-    rocprofiler-sdk::rocprofiler-sdk-hip rocprofiler-sdk::rocprofiler-sdk-common-library
-    rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest GTest::gtest_main)
-
-rocprofiler_add_unit_test(
-    TARGET consumer-tests
-    SOURCES ${ROCPROFILER_LIB_CONSUMER_TEST_SOURCES}
-    TIMEOUT 45
-    ENVIRONMENT
-        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
-    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

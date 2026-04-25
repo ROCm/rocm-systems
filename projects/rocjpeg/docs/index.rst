@@ -10,7 +10,7 @@ rocJPEG provides APIs and samples that you can use to easily access the JPEG dec
 features of your media engines (VCNs). It also allows interoperability with other compute engines on
 the GPU using Video Acceleration API (VA-API)/HIP. To learn more, see :doc:`what-is-rocJPEG`
 
-The rocJPEG public repository is located at `https://github.com/ROCm/rocJPEG <https://github.com/ROCm/rocJPEG>`_.
+rocJPEG is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. The rocJPEG source code is located at https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg.
 
 .. grid:: 2
   :gutter: 3
@@ -18,7 +18,7 @@ The rocJPEG public repository is located at `https://github.com/ROCm/rocJPEG <ht
   .. grid-item-card:: Install
 
     * :doc:`rocJPEG installation prerequisites <./install/rocjpeg-prerequisites>`
-    * :doc:`Installing rocJPEG with the package installer <./install/rocjpeg-package-install>`
+    * :doc:`Cloning the rocJPEG project <./install/rocjpeg-clone-repo>`
     * :doc:`Building rocJPEG from source code <./install/rocjpeg-build-and-install>`
 
   .. grid-item-card:: How to
@@ -29,10 +29,11 @@ The rocJPEG public repository is located at `https://github.com/ROCm/rocJPEG <ht
 
   .. grid-item-card:: Samples
 
-    * `rocJPEG samples on GitHub <https://github.com/ROCm/rocJPEG/tree/develop/samples>`_
+    * `rocJPEG samples on GitHub <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg/samples>`_
 
   .. grid-item-card:: Reference
 
+    * :doc:`rocJPEG environment variables <./reference/rocJPEG-env-vars>`
     * :doc:`rocJPEG subsampling and hardware capabilities <./reference/rocjpeg-formats-and-architectures>`
     * :doc:`rocJPEG API library <../doxygen/html/files>`
     * :doc:`rocJPEG Functions <../doxygen/html/globals>`

@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/components/backtrace_metrics.hpp"
 #include "core/common.hpp"
@@ -29,7 +10,6 @@
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/components/ensure_storage.hpp"
-#include "library/ptl.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
@@ -261,16 +241,23 @@ cache_backtrace_metrics_events(const uint32_t device_id, uint64_t timestamp_ns,
     size_t      stack_id        = 0;
     size_t      parent_stack_id = 0;
     size_t      correlation_id  = 0;
-    const auto* event_metadata  = "";
-    const auto* call_stack      = "";
-    const auto* line_info       = "";
+    const auto* event_metadata  = "{}";
+    const auto* call_stack      = "{}";
+    const auto* line_info       = "{}";
+
+    std::optional<int64_t> _system_tid{ std::nullopt };
+    const auto&            _thread_info = thread_info::get(_tid, SequentTID);
+    if(_thread_info.has_value())
+    {
+        _system_tid = _thread_info->index_data->system_value;
+    }
 
     auto insert_event_and_sample = [&](const char* _track_name, double _value) {
         trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
             static_cast<size_t>(category_enum_id<Category>::value), _track_name,
             timestamp_ns, event_metadata, stack_id, parent_stack_id, correlation_id,
             call_stack, line_info, device_id, static_cast<uint8_t>(agent_type::CPU),
-            _track_name, _value });
+            _track_name, _value, _system_tid });
     };
 
     if constexpr(std::is_same_v<Category, category::thread_hardware_counter>)
@@ -592,10 +579,8 @@ backtrace_metrics::post_process_perfetto(int64_t _tid, uint64_t _ts) const
 }
 
 void
-backtrace_metrics::cache_backtrace_data([[maybe_unused]] int64_t  _tid,
-                                        [[maybe_unused]] uint64_t _ts) const
+backtrace_metrics::cache_backtrace_data(int64_t _tid, uint64_t _ts) const
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto is_category_enabled = [&](const auto& _category) { return (*this)(_category); };
 
     if(is_category_enabled(category::thread_cpu_time{}))
@@ -627,21 +612,8 @@ backtrace_metrics::cache_backtrace_data([[maybe_unused]] int64_t  _tid,
         cache_backtrace_metrics_events<category::thread_hardware_counter,
                                        hw_counter_data_t>(0, _ts, m_hw_counter, _tid);
     }
-#endif
 }
 }  // namespace component
 }  // namespace rocprofsys
-
-ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_wall_clock>), true,
-    double)
-
-ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_cpu_clock>), true,
-    double)
-
-ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_fraction>), true,
-    double)
 
 TIMEMORY_INITIALIZE_STORAGE(rocprofsys::component::backtrace_metrics)

@@ -7,6 +7,7 @@ lib
 packages
 build
 tags
+__pycache__
 samples/0_Intro/module_api/runKernel.hip.out
 samples/0_Intro/module_api/vcpy_isa.code
 samples/0_Intro/module_api/vcpy_isa.hsaco

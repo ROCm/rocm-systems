@@ -109,7 +109,7 @@ get_first_agent_for_metric(rocprofiler_counter_id_t counter_id)
         // Find the first GPU agent with this architecture
         for(const auto* agent : rocprofiler::agent::get_agents())
         {
-            if(agent && agent->type == ROCPROFILER_AGENT_TYPE_GPU &&
+            if(agent != nullptr && agent->type == ROCPROFILER_AGENT_TYPE_GPU &&
                std::string(agent->name) == arch_name)
             {
                 return agent->id;

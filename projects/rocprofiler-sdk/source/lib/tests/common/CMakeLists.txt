@@ -6,6 +6,7 @@ project(rocprofiler-sdk-tests-common LANGUAGES C CXX)
 set(common_sources
     c_array.cpp
     demangling.cpp
+    dl.cpp
     environment.cpp
     md5sum.cpp
     mpl.cpp

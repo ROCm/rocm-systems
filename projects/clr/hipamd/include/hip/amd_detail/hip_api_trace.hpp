@@ -1,24 +1,9 @@
 /*
-    Copyright (c) 2023 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
-    Permission is hereby granted, free of charge, to any person obtaining a copy
-    of this software and associated documentation files (the "Software"), to deal
-    in the Software without restriction, including without limitation the rights
-    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-    copies of the Software, and to permit persons to whom the Software is
-    furnished to do so, subject to the following conditions:
-
-    The above copyright notice and this permission notice shall be included in
-    all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-    THE SOFTWARE.
-   */
 #pragma once
 
 #include <hip/hip_runtime.h>
@@ -62,8 +47,8 @@
 // - Reset any of the *_STEP_VERSION defines to zero if the corresponding *_MAJOR_VERSION increases
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
-#define HIP_TOOLS_API_TABLE_STEP_VERSION 0
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 23
+#define HIP_TOOLS_API_TABLE_STEP_VERSION 1
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 27
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -88,6 +73,7 @@ typedef void (*t___hipUnregisterFatBinary)(void** modules);
 
 // HIP tools dispatch functions
 typedef void (*t___hipReportDevices)(size_t numDevices, const hipUUID* uuids);
+typedef void (*t___hipTriggerReportDevices)();
 
 // HIP runtime dispatch functions
 typedef const char* (*t_hipApiName)(uint32_t id);
@@ -540,6 +526,10 @@ typedef hipError_t (*t_hipMemPrefetchAsync)(const void* dev_ptr, size_t count, i
 typedef hipError_t (*t_hipMemPrefetchAsync_v2)(const void* dev_ptr, size_t count,
                                                hipMemLocation location, unsigned int flags,
                                                hipStream_t stream);
+typedef hipError_t (*t_hipMemPrefetchBatchAsync)(void** dev_ptrs, size_t* sizes, size_t count,
+                                                hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
+                                                size_t num_prefetch_locs, unsigned long long flags,
+                                                hipStream_t stream);
 typedef hipError_t (*t_hipMemPtrGetInfo)(void* ptr, size_t* size);
 typedef hipError_t (*t_hipMemRangeGetAttribute)(void* data, size_t data_size,
                                                 hipMemRangeAttribute attribute, const void* dev_ptr,
@@ -695,6 +685,10 @@ typedef hipError_t (*t_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags)(
 typedef hipError_t (*t_hipOccupancyMaxPotentialBlockSize)(int* gridSize, int* blockSize,
                                                           const void* f, size_t dynSharedMemPerBlk,
                                                           int blockSizeLimit);
+typedef hipError_t (*t_hipOccupancyMaxActiveClusters)(int* numClusters, const void* f,
+                                                      const hipLaunchConfig_t* launchConfig);
+typedef hipError_t (*t_hipOccupancyMaxPotentialClusterSize)(int* clusterSize, const void* f,
+                                                            const hipLaunchConfig_t* config);
 typedef hipError_t (*t_hipPeekAtLastError)(void);
 typedef hipError_t (*t_hipPointerGetAttribute)(void* data, hipPointer_attribute attribute,
                                                hipDeviceptr_t ptr);
@@ -1116,6 +1110,13 @@ typedef hipError_t (*t_hipGetProcAddress_spt)(const char* symbol, void** pfn, in
 typedef hipError_t (*t_hipExtDisableLogging)();
 typedef hipError_t (*t_hipExtEnableLogging)();
 typedef hipError_t (*t_hipExtSetLoggingParams)(size_t log_level, size_t log_size, size_t log_mask);
+typedef hipError_t (*t_hipKernelGetAttribute)(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
+                                              hipDevice_t dev);
+typedef hipError_t (*t_hipKernelSetAttribute)(hipFunction_attribute attrib,
+                                         int value, hipKernel_t kernel, hipDevice_t dev);
+
+typedef hipError_t (*t_hipKernelGetFunction)(hipFunction_t* pFunc, hipKernel_t kernel);
+
 
 typedef hipError_t (*t_hipKernelGetParamInfo)(hipKernel_t kernel, size_t paramIndex,
                                               size_t* paramOffset, size_t* paramSize);
@@ -1716,6 +1717,7 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 20
   t_hipKernelGetParamInfo hipKernelGetParamInfo_fn;
 
+
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 21
   t_hipExtDisableLogging hipExtDisableLogging_fn;
   t_hipExtEnableLogging hipExtEnableLogging_fn;
@@ -1728,8 +1730,22 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 23
   t_hipMipmappedArrayGetMemoryRequirements hipMipmappedArrayGetMemoryRequirements_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 24
+  t_hipKernelGetAttribute hipKernelGetAttribute_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 25
+  t_hipKernelSetAttribute hipKernelSetAttribute_fn;
+  t_hipKernelGetFunction hipKernelGetFunction_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 26
+  t_hipMemPrefetchBatchAsync hipMemPrefetchBatchAsync_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 27
+  t_hipOccupancyMaxPotentialClusterSize hipOccupancyMaxPotentialClusterSize_fn;
+  t_hipOccupancyMaxActiveClusters hipOccupancyMaxActiveClusters_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 28
 
   // ******************************************************************************************* //
   //
@@ -1737,7 +1753,7 @@ struct HipDispatchTable {
   //
   // ******************************************************************************************* //
   // KEEP AT END OF STRUCT
-  // 1) DO NOT REORDER ANY EXIST MEMBERS
+  // 1) DO NOT REORDER ANY EXISTING MEMBERS
   // 2) INCREASE STEP VERSION DEFINE BEFORE ADDING NEW MEMBERS
   // 3) INSERT NEW MEMBERS UNDER APPROPRIATE STEP VERSION COMMENT
   // 4) GENERATE COMMENT FOR NEXT STEP VERSION
@@ -1749,10 +1765,15 @@ struct HipDispatchTable {
 struct HipToolsDispatchTable {
   // HIP_TOOLS_API_TABLE_STEP_VERSION == 0
   size_t size;
+  // Callback implemented and registered in profiler, called in hip.
   t___hipReportDevices __hipReportDevices_fn;
+  // HIP_TOOLS_API_TABLE_STEP_VERSION == 1
+  // Callback implemented in hip, called in hip::init(), and again in profiler
+  // when app attached by profiler.
+  t___hipTriggerReportDevices __hipTriggerReportDevices_fn;
 
   // DO NOT EDIT ABOVE!
-  // HIP_TOOLS_API_TABLE_STEP_VERSION == 1
+  // HIP_TOOLS_API_TABLE_STEP_VERSION == 2
 
   // ******************************************************************************************* //
   //

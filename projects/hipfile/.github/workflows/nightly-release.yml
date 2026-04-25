@@ -1,0 +1,81 @@
+name: nightly-release
+run-name: Create a nightly release of hipFile
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+  packages: write
+jobs:
+  # We can use a matrix job if we don't need to reference the outputs
+  # of each individual job within the matrix.
+  # This relies on using a glob pattern to reference the build artifacts.
+  build_nightly_hipFile:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - rocky
+          - suse
+          - ubuntu
+        rocm_versions:
+          - 7.2.0
+    uses: ./.github/workflows/nightly-build-ais.yml
+    with:
+      platform: ${{ matrix.platform }}
+      rocm_version: ${{ matrix.rocm_versions }}
+  publish_release:
+    needs: [build_nightly_hipFile]
+    runs-on: [ubuntu-24.04]
+    permissions:
+      contents: write
+    steps:
+      - name: Fetch hipFile Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - name: Download hipFile packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
+        with:
+          merge-multiple: true
+          # Currently only vetted for ubuntu, suse, and rocky.
+          # Best effort to only match runtime and development packages while
+          # avoiding any extras/testing packages.
+          pattern: hipfile{[-_][0-9],-dev_[0-9],-devel-[0-9]}*.{deb,rpm}
+      - name: List Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list
+      - name: Test if 'nightly' already exists.
+        id: nightly-exists
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view nightly
+      - name: Delete 'nightly' if it already exists.
+        if: ${{ steps.nightly-exists.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete nightly --yes
+      - name: Create a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          gh release create \
+            --notes "
+              Nightly Build as of: $(date)
+
+              The packages contained here are not suitable for production workloads.
+              Please see the filename for which version of ROCm the hipFile package belongs to.
+            " \
+            --prerelease \
+            --target develop \
+            --title Nightly \
+            nightly \
+            hipfile{[-_][0-9],-dev_[0-9],-devel-[0-9]}*.{deb,rpm}

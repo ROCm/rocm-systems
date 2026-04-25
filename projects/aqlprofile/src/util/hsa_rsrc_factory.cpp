@@ -23,25 +23,32 @@
 
 #include "util/hsa_rsrc_factory.h"
 
-#include <dlfcn.h>
-#include <fcntl.h>
-#include <hsa/hsa.h>
-#include <hsa/hsa_ext_amd.h>
-#include <hsa/hsa_ext_finalize.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <io.h>
+#include <fcntl.h>
+#else
+#include <dlfcn.h>
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#endif
 
 #include <atomic>
 #include <cassert>
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 
 // Callback function to get available in the system agents
@@ -162,6 +169,10 @@ HsaRsrcFactory::~HsaRsrcFactory() {
 }
 
 hsa_status_t HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api) {
+#ifdef _WIN32
+  (void)api;
+  return HSA_STATUS_ERROR;
+#else
   void* handle = dlopen(kAqlProfileLib, RTLD_NOW);
   if (handle == NULL) {
     fprintf(stderr, "Loading '%s' failed, %s\n", kAqlProfileLib, dlerror());
@@ -193,6 +204,7 @@ hsa_status_t HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api) {
           handle, "hsa_ven_amd_aqlprofile_iterate_data");
 
   return HSA_STATUS_SUCCESS;
+#endif
 }
 
 // Add system agent info
@@ -431,11 +443,15 @@ uint8_t* HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t s
 // @return uint8_t* Pointer to buffer, null if allocation fails.
 uint8_t* HsaRsrcFactory::AllocateCmdMemory(const AgentInfo* agent_info, size_t size) {
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
+#ifdef _WIN32
+  uint8_t* ptr = AllocateSysMemory(agent_info, size);
+#else
   uint8_t* ptr =
       (agent_info->is_apu && CMD_MEMORY_MMAP)
           ? reinterpret_cast<uint8_t*>(mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC,
                                             MAP_SHARED | MAP_ANONYMOUS, 0, 0))
           : AllocateSysMemory(agent_info, size);
+#endif
   return ptr;
 }
 
@@ -502,7 +518,11 @@ bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* br
   std::clog << "Code object filename: " << filename << std::endl;
 
   // Open the file containing code object
+#ifdef _WIN32
+  hsa_file_t file_handle = _open(filename.c_str(), _O_RDONLY | _O_BINARY);
+#else
   hsa_file_t file_handle = open(filename.c_str(), O_RDONLY);
+#endif
   if (file_handle == -1) {
     std::cerr << "Error: failed to load '" << filename << "'" << std::endl;
     assert(false);
@@ -537,7 +557,11 @@ bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* br
                                      &kernelSymbol);
   CHECK_STATUS("Error in looking up kernel symbol", status);
 
+#ifdef _WIN32
+  _close(file_handle);
+#else
   close(file_handle);
+#endif
 
   status = hsa_code_object_reader_destroy(code_obj_rdr);
   CHECK_STATUS("Error in destroying code object reader", status);
@@ -580,7 +604,7 @@ uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet) {
   const uint64_t write_idx = hsa_queue_load_write_index_relaxed(queue);
   hsa_queue_store_write_index_relaxed(queue, write_idx + 1);
   while ((write_idx - hsa_queue_load_read_index_relaxed(queue)) >= queue->size) {
-    sched_yield();
+    std::this_thread::yield();
   }
 
   uint32_t slot_idx = (uint32_t)(write_idx % queue->size);

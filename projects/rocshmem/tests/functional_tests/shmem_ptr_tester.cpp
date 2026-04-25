@@ -135,14 +135,14 @@ ShmemPtrTester::~ShmemPtrTester() {
   rocshmem_free(dest);
 }
 
-void ShmemPtrTester::resetBuffers(size_t size) {
+void ShmemPtrTester::resetBuffers([[maybe_unused]] size_t size) {
   size_t buff_size = args.wg_size * args.num_wgs + sizeof(int);
   memset(dest, '0', buff_size);
   memset(_available, 0, sizeof(int));
 }
 
 void ShmemPtrTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                                  size_t size) {
+                                  [[maybe_unused]] size_t size) {
   size_t shared_bytes = 0;
 
   hipLaunchKernelGGL(ShmemPtrTest, gridSize, blockSize, shared_bytes,
@@ -153,7 +153,7 @@ void ShmemPtrTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
   num_timed_msgs = loop * gridSize.x * blockSize.x;
 }
 
-void ShmemPtrTester::verifyResults(size_t size) {
+void ShmemPtrTester::verifyResults([[maybe_unused]] size_t size) {
   if (args.myid == 0) {
     if (*_available == 0) {
       _print_results = false;

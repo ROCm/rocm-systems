@@ -41,7 +41,7 @@ class WindowProxy {
    * Placement new the memory which is allocated by proxy_
    */
   WindowProxy(SymmetricHeap *heap, MPI_Comm comm, size_t num_windows)
-    : num_windows_{num_windows}, proxy_{num_windows} {
+    : proxy_{num_windows}, num_windows_{num_windows} {
 
     WindowInfoMPI** window_info{proxy_.get()};
 

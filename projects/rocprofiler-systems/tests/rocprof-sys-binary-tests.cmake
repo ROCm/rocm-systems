@@ -1,24 +1,5 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -49,6 +30,7 @@ rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-instrument-simulate-ls
     TARGET rocprofiler-systems-instrument
     ARGS --simulate
+         --dump-info
          --print-format
          json
          txt
@@ -310,6 +292,53 @@ rocprofiler_systems_add_bin_test(
     LABELS "rocprofiler-systems-avail"
     PASS_REGEX
         "ROCPROFSYS_CONFIG_FILE(.*)ROCPROFSYS_ENABLED(.*)ROCPROFSYS_SUPPRESS_CONFIG(.*)ROCPROFSYS_SUPPRESS_PARSING(.*)ROCPROFSYS_VERBOSE"
+)
+
+# -------------------------------------------------------------------------------------- #
+# Conditional GPU init tests - verify settings/components work without GPU queries
+# -------------------------------------------------------------------------------------- #
+
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-settings-no-gpu
+    TARGET rocprofiler-systems-avail
+    ARGS --settings --brief
+    LABELS "rocprofiler-systems-avail"
+    TIMEOUT 45
+    PASS_REGEX "ROCPROFSYS_TRACE"
+)
+
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-components-no-gpu
+    TARGET rocprofiler-systems-avail
+    ARGS --components --brief
+    LABELS "rocprofiler-systems-avail"
+    TIMEOUT 45
+    PASS_REGEX "COMPONENT"
+)
+
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-settings-description
+    TARGET rocprofiler-systems-avail
+    ARGS --settings --description --brief
+    LABELS "rocprofiler-systems-avail"
+    TIMEOUT 45
+    PASS_REGEX "ROCPROFSYS_OUTPUT_PATH"
+)
+
+if(NOT _VALID_GPU)
+    set(_DISABLE_GPU_TESTS ON)
+else()
+    set(_DISABLE_GPU_TESTS OFF)
+endif()
+
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-settings-rocm-available
+    TARGET rocprofiler-systems-avail
+    ARGS --settings --description --brief
+    LABELS "rocprofiler-systems-avail" "rocm"
+    TIMEOUT 45
+    PASS_REGEX "ROCPROFSYS_AMD_SMI_METRICS(.*)ROCPROFSYS_ROCM_DOMAINS(.*)"
+    DISABLED ${_DISABLE_GPU_TESTS}
 )
 
 rocprofiler_systems_add_bin_test(

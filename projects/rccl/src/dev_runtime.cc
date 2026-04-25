@@ -68,7 +68,11 @@ ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) {
   }
 
   CUmemAllocationProp memProp = {};
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+  memProp.type = hipMemAllocationTypeUncached;
+#else
   memProp.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+#endif
   memProp.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   memProp.requestedHandleType = ncclCuMemHandleType;
   memProp.location.id = comm->cudaDev;
@@ -116,12 +120,13 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
         ncclShadowPoolFree(&devr->shadows, tableDev, stream);
         tableDev = next;
       }
-      cudaStreamSynchronize(stream);
-      cudaStreamDestroy(stream);
+      CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+      CUDACHECKIGNORE(cudaStreamDestroy(stream));
     }
   }
   CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
-  CUCHECKIGNORE(cuMemUnmap(flatAddr, devr->lsaSize*devr->bigSize));
+  // Returns error: invalid argument. Already unmapped by symMemoryDropRef
+  // CUCHECKIGNORE(cuMemUnmap(flatAddr, devr->lsaSize*devr->bigSize));
   CUCHECKIGNORE(cuMemAddressFree(flatAddr, devr->lsaSize*devr->bigSize));
   ncclShadowPoolDestruct(&devr->shadows);
   ncclSpaceDestruct(&devr->bigSpace);
@@ -598,15 +603,15 @@ ncclResult_t ncclDevrWindowRegisterInGroup(
   // symWindowCreate needs barrier.
   NCCLCHECKGOTO(bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, 0xbeef), ret, fail_locReg_memHandle_mem_stream_win);
 
-  cudaStreamDestroy(stream);
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
   return ret;
 
 fail_locReg_memHandle_mem_stream_win:
   symWindowDestroy(comm, *outWinDev, stream);
   *outWinDev = nullptr;
-  cudaStreamSynchronize(stream);
+  CUDACHECKIGNORE(cudaStreamSynchronize(stream));
 fail_locReg_memHandle_mem_stream:
-  cudaStreamDestroy(stream);
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
   symMemoryDropRef(comm, mem);
 fail_locReg_memHandle:
   if (memHandle != 0x0) { CUCHECKIGNORE(cuMemRelease(memHandle)); }
@@ -743,7 +748,11 @@ ncclResult_t ncclDevrCommCreateInternal(
     outDevComm->resourceWindow_inlined = {};
   } else {
     CUmemAllocationProp memProp = {};
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+    memProp.type = hipMemAllocationTypeUncached;
+#else
     memProp.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+#endif
     memProp.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     memProp.requestedHandleType = ncclCuMemHandleType;
     memProp.location.id = comm->cudaDev;
@@ -768,13 +777,13 @@ ncclResult_t ncclDevrCommCreateInternal(
 
   NCCLCHECKGOTO(bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, 0xbeef), ret, fail);
 
-  cudaStreamDestroy(stream);
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
   return ret;
 
 fail:
   if (win != nullptr) {
     symWindowDestroy(comm, win->vidmem, stream);
-    cudaStreamSynchronize(stream);
+    CUDACHECKIGNORE(cudaStreamSynchronize(stream));
   }
   if (mem != nullptr) {
     symMemoryDropRef(comm, mem);
@@ -783,7 +792,7 @@ fail:
     CUCHECKIGNORE(cuMemRelease(memHandle));
   }
   if (stream != nullptr) {
-    cudaStreamDestroy(stream);
+    CUDACHECKIGNORE(cudaStreamDestroy(stream));
   }
   return ret;
 }
@@ -820,7 +829,7 @@ ncclResult_t ncclCommWindowRegister_impl(
 exit:
   ncclGroupErrCheck(ret);
   NCCLCHECK(ncclGroupEndInternal());
-  cudaSetDevice(saveDev);
+  CUDACHECKIGNORE(cudaSetDevice(saveDev));
   return ret;
 fail:
   goto exit;
@@ -843,10 +852,10 @@ ncclResult_t ncclCommWindowDeregister_impl(struct ncclComm* comm, struct ncclWin
   CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail_dev);
   NCCLCHECKGOTO(symWindowDestroy(comm, winDev, stream), ret, fail_dev_stream);
 fail_dev_stream:
-  cudaStreamSynchronize(stream);
-  cudaStreamDestroy(stream);
+  CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
 fail_dev:
-  cudaSetDevice(saveDev);
+  CUDACHECKIGNORE(cudaSetDevice(saveDev));
 fail:
 exit:
   return ret;
@@ -899,7 +908,7 @@ ncclResult_t ncclDevCommCreate(
 exit:
   ncclGroupErrCheck(ret);
   NCCLCHECK(ncclGroupEndInternal());
-  cudaSetDevice(saveDev);
+  CUDACHECKIGNORE(cudaSetDevice(saveDev));
   return ret;
 fail:
   free(task);

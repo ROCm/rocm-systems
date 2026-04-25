@@ -106,7 +106,9 @@ amdcuid_status_t CuidNic::discover_single(amdcuid_nic_info* nic_info, const std:
     }
     else
     {
-        pci_class_integer = (uint16_t)strtol(pci_class.c_str(), nullptr, 16);
+        // sysfs class file returns 24-bit value (class:subclass:prog_if), shift right by 8
+        // to get 16-bit class:subclass
+        pci_class_integer = (uint16_t)(strtol(pci_class.c_str(), nullptr, 16) >> 8);
     }
     info.header.fields.nic.pci_class = pci_class_integer;
 

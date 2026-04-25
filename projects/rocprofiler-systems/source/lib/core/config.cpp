@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "config.hpp"
 #include "amd_smi.hpp"
@@ -27,6 +8,7 @@
 #include "constraint.hpp"
 #include "defines.hpp"
 #include "gpu.hpp"
+#include "logger/logger.hpp"
 #include "mproc.hpp"
 #include "perf.hpp"
 #include "perfetto.hpp"
@@ -56,6 +38,7 @@
 
 #include "logger/debug.hpp"
 
+#include <nlohmann/json.hpp>
 #include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
@@ -343,10 +326,6 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCPD", "Enable rocpd backend", false,
                               "backend", "rocpd");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCM",
-                              "Enable ROCm API and kernel tracing", true, "backend",
-                              "rocm");
-
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_AMD_SMI",
                               "Enable sampling GPU power, temp, utilization, "
                               "vcn_activity, jpeg_activity and memory usage",
@@ -383,6 +362,10 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_UCX",
                               "Enable support for UCX functions", false, "ucx", "backend",
                               "parallelism");
+
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_SHMEM",
+                              "Enable support for OpenSHMEM functions", false, "shmem",
+                              "backend", "parallelism");
 
     ROCPROFSYS_CONFIG_SETTING(
         bool, "ROCPROFSYS_USE_RCCLP",
@@ -428,6 +411,14 @@ configure_settings(bool _init)
         "If > 0.0, time (in seconds) to collect trace/profile data. If multiple delays + "
         "durations are needed, see ROCPROFSYS_TRACE_PERIODS.",
         0.0, "trace", "profile", "perfetto", "timemory");
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_SELECTED_REGIONS",
+        "Comma-separated list of roctx region names. When set, only "
+        "activity inside roctx regions matching one of these names "
+        "(matched against roctxRangeStartA message). Uses process-wide "
+        "roctxRangeStart/roctxRangeStop markers.",
+        std::string{}, "trace", "profile", "perfetto", "rocpd", "timemory", "rocm");
 
     auto _clock_choices = std::vector<std::string>{};
     for(const auto& itr : constraint::get_valid_clock_ids())
@@ -519,10 +510,19 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_SAMPLING_CPUS",
-        "CPUs to collect frequency information for. Values should be separated by commas "
-        "and can be explicit or ranges, e.g. 0,1,5-8. An empty value implies 'all' and "
-        "'none' suppresses all CPU frequency sampling",
+        "CPU socket (physical package) IDs for CPU PMC sampling. Values should be "
+        "separated by commas and can be explicit or ranges, e.g. 0,1. Selects which "
+        "CPU sockets to monitor; all cores on a selected socket are always sampled. "
+        "An empty value or 'all' enables all sockets; 'none' disables CPU PMC sampling",
         std::string{ "none" }, "process_sampling");
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_CPU_METRICS",
+        "CPU metrics to collect. Comma-separated tokens: frequency, load, memory "
+        "(page_rss+virt_mem+peak_rss), ctx_switches, page_faults, cpu_time "
+        "(user_time+kernel_time). Fine-grained: page_rss, virt_mem, peak_rss, "
+        "user_time, kernel_time. Special: all, none",
+        std::string{ "all" }, "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_SAMPLING_AINICS",
                               "AI NICs to query when ROCPROFSYS_USE_AMD_SMI=ON. NIC "
@@ -875,6 +875,18 @@ configure_settings(bool _init)
         kill_delay_config->set(0);
     }
 
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_RANK_FILTER_ID",
+        "Name of environment variable to read rank from for MPI output filtering",
+        std::string{}, "data", "io", "advanced");
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_RANK_FILTER_OUTPUT",
+        "Ranks for which file output is generated. Values should be separated by commas "
+        "and can be explicit or ranges, e.g. 0,1,5-8. An empty value enables output "
+        "for all ranks",
+        std::string{}, "data", "io", "advanced");
+
     // set the defaults
     _config->get_flamegraph_output()     = false;
     _config->get_ctest_notes()           = false;
@@ -1199,10 +1211,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
 
     if(gpu::device_count() == 0)
     {
-#if ROCPROFSYS_ROCM_VERSION > 0
-        LOG_WARNING("No ROCm devices were found: disabling rocm and amd_smi...");
-#endif
-        _set("ROCPROFSYS_USE_ROCM", false);
+        LOG_WARNING("No ROCm devices were found: disabling amd_smi...");
         _set("ROCPROFSYS_USE_AMD_SMI", false);
     }
 
@@ -1234,7 +1243,6 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set("ROCPROFSYS_USE_TRACE", false);
         _set("ROCPROFSYS_PROFILE", false);
         _set("ROCPROFSYS_USE_CAUSAL", false);
-        _set("ROCPROFSYS_USE_ROCM", false);
         _set("ROCPROFSYS_USE_AMD_SMI", false);
         _set("ROCPROFSYS_USE_KOKKOSP", false);
         _set("ROCPROFSYS_USE_RCCLP", false);
@@ -1419,21 +1427,6 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
     _handle_use_option("ROCPROFSYS_USE_OMPT", "ompt");
     _handle_use_option("ROCPROFSYS_USE_RCCLP", "rcclp");
     _handle_use_option("ROCPROFSYS_USE_AMD_SMI", "amd_smi");
-    _handle_use_option("ROCPROFSYS_USE_ROCM", "rocm");
-
-#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
-    _config->find("ROCPROFSYS_USE_AMD_SMI")->second->set_hidden(true);
-    for(const auto& itr : _config->disable_category("amd_smi"))
-        _config->find(itr)->second->set_hidden(true);
-
-    _config->find("ROCPROFSYS_USE_RCCLP")->second->set_hidden(true);
-    for(const auto& itr : _config->disable_category("rcclp"))
-        _config->find(itr)->second->set_hidden(true);
-
-    _config->find("ROCPROFSYS_USE_ROCM")->second->set_hidden(true);
-    for(const auto& itr : _config->disable_category("rocm"))
-        _config->find(itr)->second->set_hidden(true);
-#endif
 
 #if defined(ROCPROFSYS_USE_OMPT) || ROCPROFSYS_USE_OMPT == 0
     _config->find("ROCPROFSYS_USE_OMPT")->second->set_hidden(true);
@@ -1504,7 +1497,8 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
 }
 
 void
-handle_deprecated_setting(const std::string& _old, const std::string& _new, int _verbose)
+handle_deprecated_setting(const std::string& _old, const std::string& _new,
+                          int /*_verbose*/)
 {
     auto _config      = settings::shared_instance();
     auto _old_setting = _config->find(_old);
@@ -1521,7 +1515,7 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new, int 
     if(_old_setting->second->get_environ_updated() ||
        _old_setting->second->get_config_updated())
     {
-        auto _separator = [_verbose]() {
+        auto _separator = []() {
             std::array<char, 79> _v = {};
             _v.fill('=');
             _v.back() = '\0';
@@ -1705,6 +1699,22 @@ print_settings(
 
     tim::log::stream(_ros, tim::log::color::info()) << _os.str();
     _ros << std::flush;
+}
+
+void
+print_settings_json(std::ostream& _output_stream)
+{
+    nlohmann::json _config_result = {};
+
+    for(const auto& [key, setting] : *get_config())
+    {
+        if(setting->get_hidden() || !setting->get_enabled()) continue;
+        auto value = setting->as_string();
+        if(value.empty()) continue;
+        _config_result[setting->get_env_name()] = value;
+    }
+
+    _output_stream << _config_result.dump() << std::flush;
 }
 
 void
@@ -1896,23 +1906,8 @@ get_use_causal()
 bool
 get_use_amd_smi()
 {
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
     static auto _v = get_config()->find("ROCPROFSYS_USE_AMD_SMI");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-#else
-    return false;
-#endif
-}
-
-bool
-get_use_rocm()
-{
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
-    static auto _v = get_config()->find("ROCPROFSYS_USE_ROCM");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-#else
-    return false;
-#endif
 }
 
 bool&
@@ -1972,6 +1967,13 @@ get_use_ucx()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
+bool&
+get_use_shmem()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_USE_SHMEM");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
 bool
 get_use_kokkosp()
 {
@@ -1990,7 +1992,6 @@ get_use_kokkosp_kernel_logger()
 bool
 get_use_vaapi_tracing()
 {
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
     static auto _v = get_config()->find("ROCPROFSYS_ROCM_DOMAINS");
     if(_v == get_config()->end())
     {
@@ -2002,9 +2003,6 @@ get_use_vaapi_tracing()
                domain_list.end() ||
            std::find(domain_list.begin(), domain_list.end(), "rocjpeg_api") !=
                domain_list.end();  // Check rocdecode_api or rocjpeg_api is present
-#else
-    return false;
-#endif
 }
 
 bool
@@ -2087,12 +2085,8 @@ get_perfetto_flush_period()
 bool
 get_perfetto_combined_traces()
 {
-#if defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0
     static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_COMBINE_TRACES");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-#else
-    return false;
-#endif
 }
 
 std::string
@@ -2203,45 +2197,54 @@ get_perfetto_backend()
 std::string
 get_perfetto_output_filename()
 {
-    static auto _v   = get_config()->find("ROCPROFSYS_PERFETTO_FILE");
-    auto        _val = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+    const auto*  pwd                   = getenv("PWD");
+    static auto  setting               = get_config()->find("ROCPROFSYS_PERFETTO_FILE");
+    static auto* attach_add_session_id = getenv("ROCPROFSYS_REATTACH_ADD_SESSION_ID");
 
-    auto _pos_dir = _val.find_last_of('/');
-    auto _dir     = std::string{};
-    auto _ext     = std::string{ "proto" };
-    if(_pos_dir != std::string::npos)
+    if(setting == get_config()->end())
     {
-        _dir = _val.substr(0, _pos_dir + 1);
-        _val = _val.substr(_pos_dir + 1);
-    }
-    auto _pos_ext = _val.find_last_of('.');
-    if(_pos_ext + 1 < _val.length())
-    {
-        _ext = _val.substr(_pos_ext + 1);
-        _val = _val.substr(0, _pos_ext);
+        LOG_ERROR("Error! ROCPROFSYS_PERFETTO_FILE not found. Please check your "
+                  "environment configuration.");
+        return fmt::format("{}/perfetto-trace-{}.proto", pwd, getpid());
     }
 
-    LOG_DEBUG("Parsed: dir='{}', basename='{}', ext='{}'", _dir, _val, _ext);
-    LOG_DEBUG("settings::output_path()='{}'", settings::output_path());
-    LOG_DEBUG("settings::output_prefix()='{}'", settings::output_prefix());
+    auto basename = dynamic_cast<tim::tsettings<std::string>&>(*setting->second).get();
 
-    auto _cfg = settings::compose_filename_config{ settings::use_output_suffix(),
-                                                   settings::default_process_suffix(),
-                                                   false, _dir };
-    _val      = settings::compose_output_filename(_val, _ext, _cfg);
+    auto dir = std::string{};
+    auto ext = std::string{ "proto" };
 
-    LOG_DEBUG("After compose_output_filename: '{}'", _val);
-
-    if(!_val.empty() && _val.at(0) != '/')
+    if(const auto pos_dir = basename.find_last_of('/'); pos_dir != std::string::npos)
     {
-        auto _result = settings::format(fmt::format("{}/{}", getenv("PWD"), _val),
-                                        get_config()->get_tag());
-        LOG_DEBUG("Path is relative, prepending PWD: '{}'", _result);
-        return _result;
+        dir      = basename.substr(0, pos_dir + 1);
+        basename = basename.substr(pos_dir + 1);
     }
 
-    LOG_DEBUG("Path is absolute, returning: '{}'", _val);
-    return _val;
+    if(const auto pos_ext = basename.find_last_of('.'); pos_ext + 1 < basename.length())
+    {
+        ext      = basename.substr(pos_ext + 1);
+        basename = basename.substr(0, pos_ext);
+    }
+
+    LOG_DEBUG("Parsed: dir='{}', basename='{}', ext='{}'", dir, basename, ext);
+
+    static auto session_id = 0;
+    auto        cfg =
+        attach_add_session_id
+                   ? settings::compose_filename_config{ settings::use_output_suffix(),
+                                                 fmt::format("%pid%-{}", session_id++),
+                                                 false, dir }
+                   : settings::compose_filename_config{ settings::use_output_suffix(),
+                                                 settings::default_process_suffix(),
+                                                 false, dir };
+
+    auto result = settings::compose_output_filename(basename, ext, cfg);
+
+    LOG_DEBUG("After compose_output_filename: '{}'", result);
+
+    return (!result.empty() && result.at(0) != '/')
+               ? settings::format(fmt::format("{}/{}", pwd, result),
+                                  get_config()->get_tag())
+               : result;
 }
 
 double
@@ -2317,6 +2320,14 @@ get_sampling_cpus()
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
+std::string
+get_cpu_metrics()
+{
+    auto _v = get_config()->find("ROCPROFSYS_CPU_METRICS");
+    if(_v == get_config()->end()) return "all";
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+}
+
 std::set<int64_t>
 get_sampling_tids()
 {
@@ -2383,12 +2394,8 @@ get_process_sampling_duration()
 std::string
 get_sampling_gpus()
 {
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
     static auto _v = get_config()->find("ROCPROFSYS_SAMPLING_GPUS");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-#else
-    return std::string{};
-#endif
 }
 
 bool
@@ -2424,6 +2431,13 @@ get_trace_thread_join()
 {
     static auto _v = get_config()->find("ROCPROFSYS_TRACE_THREAD_JOIN");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+std::string
+get_trace_region()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_SELECTED_REGIONS");
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
 bool
@@ -2470,29 +2484,38 @@ get_tmpdir()
 std::string
 get_database_absolute_path(std::string_view database_name, std::string_view suffix)
 {
-    const auto* _existing_path = std::getenv("ROCPROFSYS_DATABASE_DIR");
-    auto        _dir = _existing_path ? std::string{ _existing_path } : std::string{};
-    auto        _ext = std::string{ "db" };
+    const auto*  pwd                   = getenv("PWD");
+    const auto*  existing_path         = std::getenv("ROCPROFSYS_DATABASE_DIR");
+    static auto* attach_add_session_id = getenv("ROCPROFSYS_REATTACH_ADD_SESSION_ID");
 
-    auto _cfg = settings::compose_filename_config{ settings::use_output_suffix(), suffix,
-                                                   false, _dir };
+    auto dir = existing_path ? std::string{ existing_path } : std::string{};
+    auto ext = std::string{ "db" };
 
-    const auto get_path = [](const std::string& path) {
-        size_t last_slash = path.find_last_of("/\\");
+    static auto session_id = 0;
+    auto        cfg =
+        attach_add_session_id
+                   ? settings::compose_filename_config{ settings::use_output_suffix(),
+                                                 fmt::format("%pid%-{}", session_id++),
+                                                 false, dir }
+                   : settings::compose_filename_config{ settings::use_output_suffix(), suffix,
+                                                 false, dir };
+
+    auto result =
+        settings::compose_output_filename(std::string{ database_name }, ext, cfg);
+
+    const auto get_dir = [](const std::string& path) {
+        const auto last_slash = path.find_last_of("/\\");
         return (last_slash != std::string::npos) ? path.substr(0, last_slash + 1)
                                                  : std::string{};
     };
 
-    auto _val =
-        settings::compose_output_filename(std::string{ database_name }, _ext, _cfg);
-    _dir = get_path(_val);
+    dir = get_dir(result);
+    setenv("ROCPROFSYS_DATABASE_DIR", dir.c_str(), 1);
 
-    setenv("ROCPROFSYS_DATABASE_DIR", _dir.c_str(), 1);
-
-    if(!_val.empty() && _val.at(0) != '/')
-        return settings::format(fmt::format("{}/{}", getenv("PWD"), _val),
+    if(!result.empty() && result.at(0) != '/')
+        return settings::format(fmt::format("{}/{}", pwd, result),
                                 get_config()->get_tag());
-    return _val;
+    return result;
 }
 
 std::string
@@ -2583,6 +2606,97 @@ get_kill_delay()
     static auto _v = get_config()->find("ROCPROFSYS_KILL_DELAY");
     return static_cast<tim::tsettings<int>&>(*_v->second).get();
 }
+
+namespace
+{
+std::string
+get_rank_filter_id()
+{
+    static auto _v = get_config()->at("ROCPROFSYS_RANK_FILTER_ID");
+    return static_cast<tim::tsettings<std::string>&>(*_v).get();
+}
+
+std::string
+get_rank_filter_output()
+{
+    static auto _v = get_config()->at("ROCPROFSYS_RANK_FILTER_OUTPUT");
+    return static_cast<tim::tsettings<std::string>&>(*_v).get();
+}
+
+#if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
+    (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
+#    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 1
+#else
+#    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 0
+#endif
+
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
+std::optional<uint64_t>
+get_mpi_rank_from_env()
+{
+    const std::vector<std::string> rank_env_var_options = {
+        // rank env vars: user-provided then most generic to most runtime-specific
+        get_rank_filter_id(),  "MPI_RANK",
+        "MPI_LOCALRANKID",     "MPI_RANKID",
+        "MV2_COMM_WORLD_RANK", "OMPI_COMM_WORLD_RANK"
+    };
+
+    for(const auto& env_var : rank_env_var_options)
+    {
+        const std::string rank_str = get_env(env_var, std::string{}, false);
+
+        if(rank_str.empty()) continue;
+        try
+        {
+            const auto rank = std::stoul(rank_str);
+            LOG_DEBUG("MPI output filtering: using MPI rank = {} from {}", rank, env_var);
+            return rank;
+        } catch(const std::exception& e)
+        {
+            LOG_WARNING("MPI output filtering: failed to get MPI rank from {}='{}': {}",
+                        env_var, rank_str, e.what());
+        }
+    }
+
+    return std::nullopt;
+}
+#endif
+}  // namespace
+
+namespace output_filtering
+{
+bool
+is_output_enabled_for_current_mpi_rank()
+{
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
+    auto enabled_ranks_str = get_rank_filter_output();
+    rocprofsys::utility::trim_str(enabled_ranks_str);
+    for(auto& ch : enabled_ranks_str)
+        ch = std::tolower(ch);
+
+    if(enabled_ranks_str.empty() || enabled_ranks_str == "all") return true;
+    if(enabled_ranks_str == "none") return false;
+
+    const auto current_rank = get_mpi_rank_from_env();
+    if(!current_rank)
+    {
+        LOG_WARNING("MPI output filtering DISABLED: failed to get MPI rank");
+        return true;
+    }
+
+    const auto enabled_ranks =
+        rocprofsys::utility::parse_numeric_range<int64_t, std::unordered_set<int64_t>>(
+            enabled_ranks_str, "ranks", 1L);
+
+    const auto is_enabled = enabled_ranks.count(current_rank.value()) != 0;
+    LOG_DEBUG("Output for MPI rank {} is {}", current_rank.value(),
+              is_enabled ? "enabled" : "disabled");
+    return is_enabled;
+#else
+    return true;
+#endif
+}
+}  // namespace output_filtering
 
 tmp_file::tmp_file(std::string _v)
 : filename{ std::move(_v) }
@@ -2766,7 +2880,17 @@ get_tmp_file(std::string _basename, std::string _ext)
     _cfg.use_suffix    = true;
     _cfg.suffix        = "%pid%";
     _cfg.explicit_path = get_tmpdir();
-    _cfg.subdirectory  = fmt::format("{}/{}", settings::output_path(), "%ppid%");
+
+    // Use only basename of output_path to avoid embedding absolute paths in subdirectory.
+    // E.g. output_path="/home/user/rocprofsys-output" ->
+    // subdirectory="rocprofsys-output/%ppid%" (not
+    // "/home/user/rocprofsys-output/%ppid%"), so files go under
+    // get_tmpdir()/rocprofsys-output/.
+    auto _output_path = settings::output_path();
+    auto _pos         = _output_path.rfind('/');
+    if(_pos != std::string::npos) _output_path = _output_path.substr(_pos + 1);
+    if(_output_path.empty()) _output_path = "rocprofsys";
+    _cfg.subdirectory = fmt::format("{}/{}/", _output_path, "%ppid%");
     auto _fname =
         settings::compose_output_filename(std::move(_basename), std::move(_ext), _cfg);
 

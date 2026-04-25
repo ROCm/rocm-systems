@@ -1,0 +1,7 @@
+---
+TypeQualifiers:
+  Unit_hipManagedKeyword_SingleGpu: *level_2
+  Unit_hipManagedKeyword_MultiGpu:
+    <<: *level_2
+    # SWDEV-396615 mGPUs not considered correctly
+    disabled: [amd_windows, amd_wsl]

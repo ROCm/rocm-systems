@@ -1,15 +1,22 @@
 """
-This script determines which build flag and tests to run based on SUBTREES
+This script determines which build flags and tests to run based on the
+GitHub event type and configured subtrees/projects.
 
-Required environment variables:
-  - SUBTREES
+For push and pull_request events, SUBTREES is used to decide which parts
+of the repository changed and which projects to run. Nightly (schedule)
+and some workflow_dispatch invocations do not require SUBTREES.
 """
 
 import fnmatch
 import json
 import logging
 import subprocess
-from therock_matrix import subtree_to_project_map, project_map
+from therock_matrix import (
+    subtree_to_project_map,
+    project_map,
+    trigger_windows_ci_for_subtrees_paths,
+    windows_only_subtrees,
+)
 import time
 from typing import Mapping, Optional, Iterable
 import os
@@ -31,6 +38,7 @@ def set_github_output(d: Mapping[str, str]):
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
 
+
 def retry(max_attempts, delay_seconds, exceptions):
     def decorator(func):
         def newfn(*args, **kwargs):
@@ -39,14 +47,19 @@ def retry(max_attempts, delay_seconds, exceptions):
                 try:
                     return func(*args, **kwargs)
                 except exceptions as e:
-                    print(f'Exception {str(e)} thrown when attempting to run , attempt {attempt} of {max_attempts}')
+                    print(
+                        f"Exception {str(e)} thrown when attempting to run , attempt {attempt} of {max_attempts}"
+                    )
                     attempt += 1
                     if attempt < max_attempts:
                         backoff = delay_seconds * (2 ** (attempt - 1))
                         time.sleep(backoff)
             return func(*args, **kwargs)
+
         return newfn
+
     return decorator
+
 
 @retry(max_attempts=3, delay_seconds=2, exceptions=(TimeoutError))
 def get_modified_paths(base_ref: str) -> Optional[Iterable[str]]:
@@ -81,6 +94,28 @@ def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> boo
     return any(is_path_workflow_file_related_to_ci(p) for p in paths)
 
 
+def check_trigger_windows_ci_for_subtree_path(path):
+    """Returns true if path matches any of matches windows ci subtree patterns"""
+    for windows_ci_subtree_patterns in trigger_windows_ci_for_subtrees_paths:
+        if fnmatch.fnmatch(path, windows_ci_subtree_patterns):
+            return True
+    return False
+
+
+def check_trigger_windows_ci_for_subtree(subtree: str) -> bool:
+    """Returns true if the subtree root corresponds to a Windows CI-triggering subtree.
+
+    Used for workflow_dispatch where explicit subtrees are provided rather than
+    modified file paths. Patterns like 'projects/clr/*' are matched by stripping
+    the trailing glob to get the subtree prefix 'projects/clr'.
+    """
+    for pattern in trigger_windows_ci_for_subtrees_paths:
+        subtree_prefix = pattern.rstrip("/*").rstrip("/")
+        if subtree == subtree_prefix or subtree.startswith(subtree_prefix + "/"):
+            return True
+    return False
+
+
 # Paths matching any of these patterns are considered to have no influence over
 # build or test workflows so any related jobs can be skipped if all paths
 # modified by a commit/PR match a pattern in this list.
@@ -97,9 +132,9 @@ SKIPPABLE_PATH_PATTERNS = [
     "projects/*/docs/*",
     "projects/*/.gitignore",
     "projects/rocr-runtime/libhsakmt/src/dxg/*",
-    "projects/rocshmem/*",
     "shared/*/docs/*",
     "shared/*/.gitignore",
+    "experimental/python/perfxpert/*",
 ]
 
 
@@ -116,57 +151,151 @@ def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
 
 
 def retrieve_projects(args):
+    # Nightly (schedule): use same test coverage as TheRock submodule bump PRs —
+    # single nightly job with THEROCK_ENABLE_ALL=ON and full projects_to_test list.
+    if args.get("is_nightly"):
+        nightly_config = project_map.get("nightly")
+        if not nightly_config:
+            logging.warning("No 'nightly' entry in project_map, nightly will have no jobs")
+            return []
+        # Run full coverage on both Linux and Windows (no path-based skip).
+        return [
+            {
+                "cmake_options": nightly_config.get("cmake_options", ""),
+                "projects_to_test": nightly_config.get("projects_to_test", ""),
+            }
+        ]
+
     # Check if CI should be skipped based on modified paths
     # (only for push and pull_request events, not workflow_dispatch or nightly)
-    if args.get("is_push") or args.get("is_pull_request"):
-        base_ref = args.get("base_ref")
-        modified_paths = get_modified_paths(base_ref)
-
-        paths_set = set(modified_paths)
-        contains_non_skippable_files = check_for_non_skippable_path(paths_set)
-
-        # If only skippable paths were modified, skip CI
-        if not contains_non_skippable_files:
-            logging.info("Only skippable paths were modified, skipping CI")
-            return []
-
-    if args.get("is_pull_request"):
-        subtrees = list(subtree_to_project_map.keys())
-
-    if args.get("is_workflow_dispatch"):
-        if args.get("input_projects") == "all":
-            subtrees = list(subtree_to_project_map.keys())
-        else:
-            subtrees = args.get("input_projects").split()
-
-    # If a push event to develop happens, we run tests on all subtrees
-    if args.get("is_push"):
-        subtrees = list(subtree_to_project_map.keys())
-
-    # If .github/*/therock* were changed, run all subtrees
     base_ref = args.get("base_ref")
     modified_paths = get_modified_paths(base_ref)
     print("modified_paths (max 200):", modified_paths[:200])
-    related_to_therock_ci = check_for_workflow_file_related_to_ci(modified_paths)
-    if related_to_therock_ci:
+
+    # If only skippable paths were modified, skip CI
+    if args.get("is_push") or args.get("is_pull_request"):
+        if not check_for_non_skippable_path(modified_paths):
+            logging.info("Only skippable paths were modified, skipping CI")
+            return []
+
+    # Push event → evaluate all subtrees
+    if args.get("is_push"):
         subtrees = list(subtree_to_project_map.keys())
 
-    projects = set()
-    # collect the associated subtree to project
-    for subtree in subtrees:
-        if subtree in subtree_to_project_map:
-            projects.add(subtree_to_project_map.get(subtree))
+    # Manual workflow dispatch: respect explicit project selection, bypass CI file change detection
+    elif args.get("is_workflow_dispatch"):
+        if args.get("input_projects") == "all":
+            subtrees = list(subtree_to_project_map.keys())
+        else:
+            subtrees = args.get("input_projects", "").split()
 
-    # retrieve the subtrees to checkout, cmake options to build, and projects to test
-    project_to_run = []
-    # Currently as we have no tests, we just build all packages available if an applicable change is made.
-    # As we start to get an idea of test times, we can divide test jobs.
-    if projects:
-        for project in ["all"]:
-            if project in project_map:
-                project_to_run.append(project_map.get(project))
+    else:
+        # Determine which subtrees were modified (only needed for non-push/dispatch paths)
+        matched_subtrees = set()
+        for path in modified_paths:
+            for subtree in subtree_to_project_map:
+                if path.startswith(subtree):
+                    matched_subtrees.add(subtree)
 
-    return project_to_run
+        # Change in CI workflow triggers full subtree evaluation
+        if check_for_workflow_file_related_to_ci(modified_paths):
+            logging.info("CI workflow files changed, evaluating all subtrees")
+            subtrees = list(subtree_to_project_map.keys())
+
+        # Pull request
+        elif args.get("is_pull_request"):
+            if args.get("input_subtrees"):
+                subtrees = args.get("input_subtrees").split()
+            else:
+                subtrees = list(matched_subtrees)
+
+        # Default case
+        else:
+            subtrees = list(matched_subtrees)
+
+        # If files changed but no subtree matched → evaluate all
+        if modified_paths and not subtrees:
+            logging.info(
+                "Modified files did not match known subtrees, evaluating all projects"
+            )
+            subtrees = list(subtree_to_project_map.keys())
+
+    # Holds the python-specific cmake options passed to TheRock build.
+    common_python_options = []
+
+    # Linux CI skip logic: exclude Windows-only subtrees so they don't
+    # produce Linux projects. If nothing remains, Linux CI is skipped.
+    if args.get("platform") == "linux":
+        subtrees = [s for s in subtrees if s not in windows_only_subtrees]
+
+        # Common Python executable options for all builds.
+        # Replaces TheRock's manylinux build behavior.
+        # See build_tools/github_actions/manylinux_config.py in TheRock.
+        common_python_options = [
+            "-DTHEROCK_SHARED_PYTHON_EXECUTABLES=/opt/python-shared/cp310-cp310/bin/python3;/opt/python-shared/cp311-cp311/bin/python3;/opt/python-shared/cp312-cp312/bin/python3;/opt/python-shared/cp313-cp313/bin/python3;/opt/python-shared/cp314-cp314/bin/python3",
+            "-DTHEROCK_DIST_PYTHON_EXECUTABLES=/opt/python/cp310-cp310/bin/python;/opt/python/cp311-cp311/bin/python;/opt/python/cp312-cp312/bin/python;/opt/python/cp313-cp313/bin/python",
+        ]
+
+    # Windows CI skip logic: skip if neither the modified file paths nor the
+    # explicitly selected subtrees require Windows CI.
+    if args.get("platform") == "windows":
+        if args.get("is_workflow_dispatch"):
+            if not any(check_trigger_windows_ci_for_subtree(s) for s in subtrees):
+                logging.info("Selected subtrees do not require Windows CI, skipping")
+                return []
+        elif not any(
+            check_trigger_windows_ci_for_subtree_path(path) for path in modified_paths
+        ):
+            logging.info("Modified paths do not require Windows CI, skipping")
+            return []
+    # Determine logical projects impacted
+    projects = {
+        subtree_to_project_map[subtree]
+        for subtree in subtrees
+        if subtree in subtree_to_project_map
+    }
+
+    if not projects:
+        return []
+
+    merged_flags = set()
+    merged_tests = set()
+    enable_all = False
+
+    for project in projects:
+        config = project_map.get(project)
+        if not config:
+            continue
+        cmake_options = config.get("cmake_options", [])
+        # Handle both array and string formats for backwards compatibility
+        if isinstance(cmake_options, str):
+            flags = [f.strip() for f in cmake_options.split()]
+        else:
+            flags = cmake_options
+        if "-DTHEROCK_ENABLE_ALL=ON" in flags:
+            enable_all = True
+        merged_flags.update(flags)
+        tests = config.get("projects_to_test", "")
+        if tests:
+            merged_tests.update(t.strip() for t in tests.split(","))
+    if enable_all:
+        final_flags_list = ["-DTHEROCK_ENABLE_ALL=ON"]
+    else:
+        final_flags_list = sorted(merged_flags)
+    # Always append -DTHEROCK_ENABLE_CORE=ON as a default at the end
+    final_flags_list.append("-DTHEROCK_ENABLE_CORE=ON")
+    # Always append the Python options.
+    final_flags_list += common_python_options
+    # Removing duplicates
+    final_flags_list = list(set(final_flags_list))
+    final_flags = " ".join(final_flags_list)
+
+    return [
+        {
+            "cmake_options": final_flags,
+            "projects_to_test": ", ".join(sorted(merged_tests)),
+        }
+    ]
 
 
 def run(args):
@@ -180,12 +309,16 @@ if __name__ == "__main__":
     args["is_pull_request"] = github_event_name == "pull_request"
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
+    args["is_nightly"] = github_event_name == "schedule"
 
     input_subtrees = os.getenv("SUBTREES", "")
     args["input_subtrees"] = input_subtrees
 
     input_projects = os.getenv("PROJECTS", "")
     args["input_projects"] = input_projects
+
+    input_platform = os.getenv("PLATFORM")
+    args["platform"] = input_platform
 
     args["base_ref"] = os.environ.get("BASE_REF", "HEAD^")
 

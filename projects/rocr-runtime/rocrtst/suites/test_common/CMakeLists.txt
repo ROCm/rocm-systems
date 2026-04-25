@@ -112,7 +112,7 @@ endif()
 set(DEFAULT_TARGETS "gfx700;gfx701;gfx702;gfx801;gfx802;gfx803;gfx805;gfx810"
                     "gfx900;gfx902;gfx904;gfx906;gfx908;gfx909;gfx90a;gfx90c;gfx942;gfx950"
                     "gfx1010;gfx1011;gfx1012;gfx1013;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036"
-                    "gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
+                    "gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1200;gfx1201;gfx1250;gfx1251")
 
 #
 # Currently support for Windows platform is not present
@@ -255,11 +255,19 @@ else()
 endif()
 
 # Target devices configuration
-if (NOT DEFINED TARGET_DEVICES)
-  message("No target devices provided on command line")
-  message("  e.g., cmake -DTARGET_DEVICES=\"gfx803;gfx900;gfx...\" ..")
-  message("  Using default target of ${DEFAULT_TARGETS}")
-  list(APPEND TARGET_DEVICES ${DEFAULT_TARGETS})
+if(NOT DEFINED TARGET_DEVICES OR TARGET_DEVICES STREQUAL "")
+  if(DEFINED GPU_TARGETS AND NOT GPU_TARGETS STREQUAL "")
+    message(STATUS "Using GPU_TARGETS from build system: ${GPU_TARGETS}")
+    set(TARGET_DEVICES ${GPU_TARGETS})
+  elseif(DEFINED AMDGPU_TARGETS AND NOT AMDGPU_TARGETS STREQUAL "")
+    message(STATUS "Using AMDGPU_TARGETS from build system: ${AMDGPU_TARGETS}")
+    set(TARGET_DEVICES ${AMDGPU_TARGETS})
+  else()
+    message("No target devices provided on command line")
+    message("  e.g., cmake -DTARGET_DEVICES=\"gfx803;gfx900;gfx...\" ..")
+    message("  Using default target of ${DEFAULT_TARGETS}")
+    list(APPEND TARGET_DEVICES ${DEFAULT_TARGETS})
+  endif()
 endif()
 
 # Build type configuration
@@ -396,6 +404,7 @@ function(build_kernel S_NAME TARG_DEV)
   set(TARG_NAME "${S_NAME}_hsaco.${TARG_DEV}")
   set(HSACO_TARG_LIST ${HSACO_TARG_LIST} "${KERNEL_DIR}/${SNAME_KERNEL}" PARENT_SCOPE)
   string(SUBSTRING ${TARG_DEV} 3 -1 gfxNum)
+  string(REGEX REPLACE ":.*$" "" gfxNum "${gfxNum}")  # strip xnack+/xnack- and other suffixes
   separate_arguments(CLANG_ARG_LIST UNIX_COMMAND
    "-D ROCRTST_GPU=0x${gfxNum} -x cl -target amdgcn-amd-amdhsa -include ${OPENCL_INC_DIR}/opencl-c.h -mcpu=${TARG_DEV} ${BITCODE_ARGS} -cl-std=CL${OPENCL_VER} -mcode-object-version=4 ${CL_FILE_LIST} -o ${KERNEL_DIR}/${SNAME_KERNEL}")
   add_custom_command(OUTPUT "${KERNEL_DIR}/${SNAME_KERNEL}" COMMAND ${CLANG} ${CLANG_ARG_LIST} DEPENDS ${CL_FILE_LIST} ${CLANG} COMMENT "BUILDING ${KERNEL_DIR}/${SNAME_KERNEL}" VERBATIM)
@@ -408,6 +417,26 @@ function(build_sample_for_devices S_NAME)
   set(HSACO_TARG_LIST ${HSACO_TARG_LIST} PARENT_SCOPE)
 endfunction(build_sample_for_devices)
 
+# Use this function to build any samples that have kernels to be built
+function(build_kernel_kernarg_preload S_NAME TARG_DEV)
+  set(KERNEL_DIR ${PROJECT_BINARY_DIR}/${TARG_DEV})
+  set(SNAME_KERNEL "${S_NAME}_kernels_argpreload.hsaco")
+
+  set(TARG_NAME "${S_NAME}_hsaco.${TARG_DEV}")
+  set(HSACO_TARG_LIST ${HSACO_TARG_LIST} "${KERNEL_DIR}/${SNAME_KERNEL}" PARENT_SCOPE)
+  string(SUBSTRING ${TARG_DEV} 3 -1 gfxNum)
+  separate_arguments(CLANG_ARG_LIST UNIX_COMMAND
+  "-D ROCRTST_GPU=0x${gfxNum} -x cl -target amdgcn-amd-amdhsa -include ${OPENCL_INC_DIR}/opencl-c.h -mcpu=${TARG_DEV} ${BITCODE_ARGS} -cl-std=CL${OPENCL_VER} -mcode-object-version=4 -mllvm -amdgpu-kernarg-preload-count=16 ${CL_FILE_LIST} -o ${KERNEL_DIR}/${SNAME_KERNEL}")
+  add_custom_command(OUTPUT "${KERNEL_DIR}/${SNAME_KERNEL}" COMMAND ${CLANG} ${CLANG_ARG_LIST} DEPENDS ${CL_FILE_LIST} ${CLANG} COMMENT "BUILDING ${KERNEL_DIR}/${SNAME_KERNEL}" VERBATIM)
+endfunction(build_kernel_kernarg_preload)
+
+function(build_sample_for_devices_kernarg_preload S_NAME)
+  foreach(t ${TARGET_DEVICES})
+    build_kernel_kernarg_preload(${S_NAME} ${t})
+  endforeach(t)
+  set(HSACO_TARG_LIST ${HSACO_TARG_LIST} PARENT_SCOPE)
+endfunction(build_sample_for_devices_kernarg_preload)
+
 # Make directories for each possible target device
 # List of symlinks per directory
 set(ROCRTST_LINKS_LIST "")
@@ -415,7 +444,9 @@ foreach(td ${TARGET_DEVICES})
   file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/${td})
   add_custom_command(OUTPUT "${PROJECT_BINARY_DIR}/${td}/${ROCRTST}" COMMAND ${CMAKE_COMMAND} -E create_symlink "../${ROCRTST}" "${td}/${ROCRTST}" COMMENT "BUILDING ${td}/${ROCRTST}" VERBATIM)
   set(ROCRTST_LINKS_LIST ${ROCRTST_LINKS_LIST} "${PROJECT_BINARY_DIR}/${td}/${ROCRTST}")
-  install ( DIRECTORY ${PROJECT_BINARY_DIR}/${td} DESTINATION bin )
+  install ( DIRECTORY ${PROJECT_BINARY_DIR}/${td}
+            DESTINATION share/rocrtst
+            PATTERN "${ROCRTST}" EXCLUDE )
 endforeach(td)
 
 ######################
@@ -437,6 +468,11 @@ endif()
 set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
 set(CL_FILE_LIST "${KERNELS_DIR}/test_case_template_kernels.cl")
 build_sample_for_devices("test_case_template")
+
+## Test Case Template example
+set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
+set(CL_FILE_LIST "${KERNELS_DIR}/test_case_template_kernels.cl")
+build_sample_for_devices_kernarg_preload("test_case_template")
 
 # P2P Memory Access
 #set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
@@ -579,6 +615,14 @@ add_executable(${ROCRTST} ${performanceSources} ${functionalSources} ${negativeS
 
 # Add HAVE_NUMA compile definition so code can conditionally compile NUMA features
 target_compile_definitions(${ROCRTST} PRIVATE HAVE_NUMA=$<BOOL:${HAVE_NUMA}>)
+
+# Detect AddressSanitizer and define ROCRTST_ASAN
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-fsanitize=address" COMPILER_HAS_ASAN)
+if(COMPILER_HAS_ASAN AND (CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" OR CMAKE_C_FLAGS MATCHES "-fsanitize=address"))
+  target_compile_definitions(${ROCRTST} PRIVATE ROCRTST_ASAN=1)
+  message(STATUS "AddressSanitizer detected - defining ROCRTST_ASAN")
+endif()
 
 # Find hwloc library
 set(HAVE_HWLOC FALSE)

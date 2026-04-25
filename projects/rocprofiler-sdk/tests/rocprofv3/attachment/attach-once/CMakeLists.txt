@@ -47,6 +47,7 @@ rocprofiler_add_integration_execute_test(
     SKIP_REGULAR_EXPRESSION "This test is skipped."
     FIXTURES_SETUP rocprofv3-test-attachment-attach-once
     FAIL_REGULAR_EXPRESSION "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 # Validate the output from the attached profiling
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-attachment-attach-once-csv
