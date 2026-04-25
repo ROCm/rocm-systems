@@ -100,8 +100,7 @@ def detect_missing_counters(
     if kernels_with_missing_counters:
         unique_kernels = list(set(kernels_with_missing_counters))
         kernel_list = "\n\n".join(
-            f"  Kernel {i}: {name}"
-            for i, name in enumerate(unique_kernels, start=1)
+            f"  Kernel {i}: {name}" for i, name in enumerate(unique_kernels, start=1)
         )
         console_warning(
             "join_prof",
