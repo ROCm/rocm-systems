@@ -10,7 +10,7 @@ import shutil
 import subprocess
 
 from .config import Config
-from .utils import log, log_verbose, warn
+from .utils import ensure_dir, log, log_verbose, warn
 
 
 def detect_slurm(cfg):
@@ -109,7 +109,7 @@ def detect_slurm(cfg):
     # --- Write hostfile ---
     hostfile_dir = os.path.dirname(cfg.hostfile)
     if hostfile_dir:
-        os.makedirs(hostfile_dir, exist_ok=True)
+        ensure_dir(hostfile_dir)
 
     with open(cfg.hostfile, "w") as f:
         for host in hosts:

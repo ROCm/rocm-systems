@@ -15,7 +15,7 @@ from typing import Dict, Optional, Tuple
 from .config import Config
 from .utils import (
     log, log_verbose, get_local_hostnames, Timer,
-    ssh_opts, ssh_cmd, host_ssh_cmd, run_parallel,
+    ensure_dir, ssh_opts, ssh_cmd, host_ssh_cmd, run_parallel,
 )
 
 
@@ -68,8 +68,7 @@ def _add_to_host_authorized_keys(pub_key_path):
     # type: (str) -> None
     """Append the public key to the host's ~/.ssh/authorized_keys (idempotent)."""
     host_ssh_dir = os.path.join(os.path.expanduser("~"), ".ssh")
-    if not os.path.isdir(host_ssh_dir):
-        os.makedirs(host_ssh_dir, mode=0o700, exist_ok=True)
+    ensure_dir(host_ssh_dir, modes=(0o700,))
 
     auth_keys = os.path.join(host_ssh_dir, "authorized_keys")
     with open(pub_key_path, "r") as f:
@@ -280,7 +279,7 @@ def _verify_self_ssh(cfg, hosts):
             log("  [FAIL] {} -> localhost (container cannot SSH to itself)".format(host))
             failed = True
             if cfg.verbose:
-                for line in r.stderr_text().splitlines()[-10:]:
+                for line in r.stderr_text.splitlines()[-10:]:
                     log_verbose("  {}".format(line))
     return failed
 

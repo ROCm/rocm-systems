@@ -55,6 +55,44 @@ def expand_path(p):
 
 
 # ---------------------------------------------------------------------------
+# Filesystem helper
+# ---------------------------------------------------------------------------
+def ensure_dir(path, modes=()):
+    # type: (str, tuple) -> None
+    """Create *path* (idempotent) and best-effort apply the first mode that sticks.
+
+    *modes* is an ordered tuple of permission masks to try.  The first one
+    that ``chmod`` accepts wins; later modes are tried only if earlier
+    ones raise ``OSError`` (e.g. shared-FS where 0o777 is rejected, fall
+    back to 0o755).  Pass an empty tuple to skip chmod entirely.
+    """
+    if not os.path.isdir(path):
+        os.makedirs(path, exist_ok=True)
+    for m in modes:
+        try:
+            os.chmod(path, m)
+            return
+        except OSError:
+            continue
+
+
+# ---------------------------------------------------------------------------
+# Subprocess helper (single-shot, both streams captured)
+# ---------------------------------------------------------------------------
+def run_capture(cmd, merge_stderr=False):
+    # type: (list, bool) -> ParallelResult
+    """Run *cmd* synchronously and return a :class:`ParallelResult`.
+
+    Mirrors the :func:`run_parallel` result shape so single-shot and
+    fan-out call sites can share post-processing helpers.  Errors are
+    NOT raised; inspect ``.ok`` / ``.returncode`` on the result.
+    """
+    stderr_arg = subprocess.STDOUT if merge_stderr else subprocess.PIPE
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=stderr_arg)
+    return ParallelResult(p.returncode, p.stdout, p.stderr)
+
+
+# ---------------------------------------------------------------------------
 # GPU auto-detection
 # ---------------------------------------------------------------------------
 def auto_detect_gpus():
@@ -206,12 +244,14 @@ class ParallelResult(object):
         # type: () -> bool
         return self.returncode == 0
 
+    @property
     def stdout_text(self):
         # type: () -> str
         if not self.stdout:
             return ""
         return self.stdout.decode("utf-8", errors="replace")
 
+    @property
     def stderr_text(self):
         # type: () -> str
         if not self.stderr:

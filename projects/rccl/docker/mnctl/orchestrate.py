@@ -15,12 +15,12 @@ import threading
 import time
 from typing import Dict, List, Tuple
 
-from .config import Config
+from .config import Config, DEFAULT_DOCKERFILE, DEFAULT_NIC_TYPE
 from .shared_fs import resolve_shared_fs
 from .ssh import install_ssh_keys
 from .utils import (
     log, log_verbose, parse_hostfile, get_local_hostnames, Timer,
-    ssh_opts, host_ssh_cmd, run_parallel,
+    ensure_dir, ssh_opts, host_ssh_cmd, run_parallel,
 )
 
 
@@ -34,26 +34,20 @@ def setup_host(cfg):
         log("=== Host setup ===")
 
         for d in (cfg.shared_dir, cfg.builds_dir):
-            if not os.path.isdir(d):
-                os.makedirs(d, exist_ok=True)
-                try:
-                    os.chmod(d, 0o777)
-                except OSError:
-                    try:
-                        os.chmod(d, 0o755)
-                    except OSError:
-                        pass
-                log_verbose("Created {}".format(d))
-            else:
-                log_verbose("Exists  {}".format(d))
+            existed = os.path.isdir(d)
+            # Prefer 0o777 so other users on the same host (different UIDs
+            # in the container) can write; fall back to 0o755 on filesystems
+            # that reject world-writable bits (e.g. some shared FS mounts).
+            ensure_dir(d, modes=(0o777, 0o755))
+            log_verbose(("Exists  " if existed else "Created ") + d)
 
         key_dir = cfg.ssh.key_dir
-        if not os.path.isdir(key_dir):
-            os.makedirs(key_dir, exist_ok=True)
-            os.chmod(key_dir, 0o700)
-            log_verbose("Created {} (mode 700)".format(key_dir))
-        else:
-            log_verbose("Exists  {}".format(key_dir))
+        existed = os.path.isdir(key_dir)
+        ensure_dir(key_dir, modes=(0o700,))
+        log_verbose(
+            ("Exists  " if existed else "Created ")
+            + "{}{}".format(key_dir, "" if existed else " (mode 700)")
+        )
 
         install_ssh_keys(cfg)
 
@@ -73,19 +67,6 @@ def setup_host(cfg):
                 log_verbose("Hostfile: {} (not found)".format(hf))
 
     log("")
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-def _ssh_base_cmd(cfg, host):
-    # type: (Config, str) -> List[str]
-    """Build the SSH prefix for reaching *host* (host-level SSH).
-
-    Thin wrapper around :func:`utils.host_ssh_cmd` that returns the
-    command list without a remote command appended.
-    """
-    return host_ssh_cmd(cfg, host)
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +120,7 @@ def _push_pubkey_to_remotes(cfg, remote_hosts, pub_key_path):
                 "|| echo '{key}' >> ~/.ssh/authorized_keys && "
                 "chmod 600 ~/.ssh/authorized_keys"
             ).format(key=pub_data)
-            cmd = _ssh_base_cmd(cfg, host) + [remote_cmd]
+            cmd = host_ssh_cmd(cfg, host) + [remote_cmd]
         jobs[host] = cmd
     results = run_parallel(jobs)
 
@@ -152,7 +133,7 @@ def _push_pubkey_to_remotes(cfg, remote_hosts, pub_key_path):
         else:
             log_verbose(
                 "  Key push to {} returned {}: {}".format(
-                    host, r.returncode, r.stderr_text().strip()[:200]
+                    host, r.returncode, r.stderr_text.strip()[:200]
                 )
             )
 
@@ -259,13 +240,13 @@ def _distribute_files(cfg, remote_hosts):
             remote_dirs.add(os.path.dirname(local_path))
 
     mkdir_jobs = {
-        host: _ssh_base_cmd(cfg, host) + ["mkdir", "-p"] + sorted(remote_dirs)
+        host: host_ssh_cmd(cfg, host) + ["mkdir", "-p"] + sorted(remote_dirs)
         for host in remote_hosts
     }
     for host, r in run_parallel(mkdir_jobs).items():
         if not r.ok and cfg.verbose:
             log_verbose(
-                "mkdir on {}: {}".format(host, r.stderr_text().strip()[:200])
+                "mkdir on {}: {}".format(host, r.stderr_text.strip()[:200])
             )
 
     # Phase 2: rsync each item to each remote host (parallel)
@@ -294,7 +275,7 @@ def _distribute_files(cfg, remote_hosts):
             log_verbose("  [OK] {} -> {}".format(label, host))
         else:
             log("  [FAIL] {} -> {}: {}".format(
-                label, host, r.stderr_text().strip()[:200],
+                label, host, r.stderr_text.strip()[:200],
             ))
             failed.append(key)
 
@@ -345,7 +326,7 @@ def _build_forward_args(cfg, action="--run",
     ]
     if cfg.gpus_explicit:
         args += ["--gpus", cfg.gpus]
-    if cfg.dockerfile != "Dockerfile.Multinode.Ubuntu":
+    if cfg.dockerfile != DEFAULT_DOCKERFILE:
         args += ["--dockerfile", cfg.dockerfile]
     if force_rebuild:
         args.append("--rebuild")
@@ -363,7 +344,7 @@ def _build_forward_args(cfg, action="--run",
         args.append("--ssh")
     for vol in cfg.extra_volumes:
         args += ["--volume", vol]
-    if cfg.nic_type != "mellanox":
+    if cfg.nic_type != DEFAULT_NIC_TYPE:
         args += ["--nic-type", cfg.nic_type]
     if cfg.gpu_targets:
         args += ["--gpu-targets", cfg.gpu_targets]
@@ -379,12 +360,6 @@ def _build_forward_args(cfg, action="--run",
 # ---------------------------------------------------------------------------
 # Launch containers on all nodes (parallel via Popen, streamed output)
 # ---------------------------------------------------------------------------
-def _make_host_label(host, max_len):
-    # type: (str, int) -> str
-    """Right-pad *host* so streaming prefixes align across nodes."""
-    return host.ljust(max_len)
-
-
 def launch_all(cfg):
     # type: (Config) -> None
     """Build + launch a container on every node in the hostfile.
@@ -447,7 +422,7 @@ def launch_all(cfg):
                 )
             else:
                 procs[host] = subprocess.Popen(
-                    _ssh_base_cmd(cfg, host) + [compound],
+                    host_ssh_cmd(cfg, host) + [compound],
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 )
 
@@ -458,7 +433,7 @@ def launch_all(cfg):
 
         def _reader(host, proc):
             # type: (str, subprocess.Popen) -> None
-            label = _make_host_label(host, label_len)
+            label = host.ljust(label_len)
             lines = []  # type: List[str]
             for raw in iter(proc.stdout.readline, b""):
                 line = raw.decode("utf-8", errors="replace").rstrip("\n\r")
@@ -558,16 +533,16 @@ def stop_all(cfg):
         if host in local_names:
             jobs[host] = ["sh", "-c", stop_cmd]
         else:
-            jobs[host] = _ssh_base_cmd(cfg, host) + [stop_cmd]
+            jobs[host] = host_ssh_cmd(cfg, host) + [stop_cmd]
     results = run_parallel(jobs)
 
     # Collect results (all procs ran concurrently)
     unreachable = []
     for host in hosts:
         r = results[host]
-        output = r.stdout_text().strip()
+        output = r.stdout_text.strip()
         if not r.ok:
-            err = r.stderr_text().strip()
+            err = r.stderr_text.strip()
             output = "[UNREACHABLE] {}".format(
                 err[:200] if err else "exit {}".format(r.returncode)
             )

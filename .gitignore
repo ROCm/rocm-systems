@@ -12,3 +12,8 @@
 # Visual Studio Code settings
 .vscode/
 /.rocshmem-worktree
+
+# Python bytecode caches
+__pycache__/
+*.pyc
+*.pyo

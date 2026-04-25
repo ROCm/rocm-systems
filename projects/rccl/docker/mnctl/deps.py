@@ -16,7 +16,7 @@ See :mod:`mnctl.shared_fs` for the detection and lock primitives.
 import os
 
 from .config import Config
-from .utils import log, log_verbose, Timer
+from .utils import ensure_dir, log, log_verbose, Timer
 from .versions import (
     UCX_VERSION, OMPI_VERSION,
     UCX_TARBALL_URL, OMPI_TARBALL_URL,
@@ -110,7 +110,7 @@ def setup_shared_deps(cfg):
 
     # We are either the leader (shared FS) or running standalone (local FS).
     log_dir = os.path.join(cfg.shared_dir, "logs")
-    os.makedirs(log_dir, exist_ok=True)
+    ensure_dir(log_dir)
     ucx_log = os.path.join(log_dir, "ucx-build.log")
     ompi_log = os.path.join(log_dir, "ompi-build.log")
 

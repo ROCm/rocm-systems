@@ -14,7 +14,7 @@ import time
 from typing import Dict, List, Optional
 
 from .runtime import ContainerRuntime
-from .utils import error, log, log_verbose, Timer
+from .utils import error, log, log_verbose, run_capture, Timer
 
 
 # ---------------------------------------------------------------------------
@@ -49,11 +49,8 @@ def _bind_mount_rdma_libs(args):
 
 def _docker_output(cmd):
     # type: (List[str]) -> str
-    """Run a docker command and return stripped stdout."""
-    result = subprocess.run(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
-    return result.stdout.decode("utf-8", errors="replace").strip()
+    """Run a docker command and return stripped stdout (best-effort)."""
+    return run_capture(cmd).stdout_text.strip()
 
 
 def _resolve_dockerfile_base(dockerfile_path):
@@ -177,17 +174,33 @@ def _resolve_post_setup_dirs(cfg):
 
     A non-existent NIC dir is silently skipped (not an error): the
     user may have a custom ``--nic-type`` that has no built-in recipe.
+
+    The result is memoized on ``cfg._resolved_post_setup_dirs`` so the
+    expensive path checks (and stable ordering) are computed once per
+    invocation.  Call ``cfg.invalidate_resolved_post_setup_dirs()`` if
+    any input attribute changes after the first call.
     """
+    cached = getattr(cfg, "_resolved_post_setup_dirs", None)
+    if cached is not None:
+        return cached
+
     user_dirs = list(cfg.post_setup_dirs or [])
     if cfg.no_builtin_nic_setup or not cfg.nic_type:
-        return user_dirs
-    builtin = os.path.join(cfg.script_dir, "post-setup", cfg.nic_type)
-    if not os.path.isdir(builtin):
-        return user_dirs
-    # De-dup: if user explicitly lists the same dir, do not double-mount.
-    if any(os.path.abspath(d) == os.path.abspath(builtin) for d in user_dirs):
-        return user_dirs
-    return [builtin] + user_dirs
+        result = user_dirs
+    else:
+        builtin = os.path.join(cfg.script_dir, "post-setup", cfg.nic_type)
+        if not os.path.isdir(builtin):
+            result = user_dirs
+        elif any(
+            os.path.abspath(d) == os.path.abspath(builtin) for d in user_dirs
+        ):
+            # De-dup: user explicitly listed the same dir; do not double-mount.
+            result = user_dirs
+        else:
+            result = [builtin] + user_dirs
+
+    cfg._resolved_post_setup_dirs = result
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -207,11 +220,7 @@ class DockerRuntime(ContainerRuntime):
         # type: (Optional[str]) -> bool
         """Return True if *tag* (or ``cfg.image_tag``) is present locally."""
         target = tag or self.cfg.image_tag
-        result = subprocess.run(
-            ["docker", "image", "inspect", target],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
-        return result.returncode == 0
+        return run_capture(["docker", "image", "inspect", target]).ok
 
     def build_image(self):
         # type: () -> None
@@ -435,11 +444,8 @@ class DockerRuntime(ContainerRuntime):
             return
 
         log("  Base image '{}' not found locally, pulling...".format(base))
-        pull = subprocess.run(
-            ["docker", "pull", base],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
-        if pull.returncode == 0:
+        pull = run_capture(["docker", "pull", base])
+        if pull.ok:
             log("  Pulled '{}'".format(base))
             return
 
@@ -463,10 +469,7 @@ class DockerRuntime(ContainerRuntime):
 
     def _remove_container(self):
         # type: () -> None
-        subprocess.run(
-            ["docker", "rm", "-f", self.cfg.container_name],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
+        run_capture(["docker", "rm", "-f", self.cfg.container_name])
 
     def _wait_for_entrypoint(self, timeout=600):
         # type: (int) -> None
@@ -563,15 +566,13 @@ class DockerRuntime(ContainerRuntime):
     def _inspect_container_state(self):
         # type: () -> Optional[str]
         """Return the container's current state (e.g. ``running``) or None."""
-        try:
-            out = subprocess.check_output(
-                ["docker", "inspect", "-f", "{{.State.Status}}",
-                 self.cfg.container_name],
-                stderr=subprocess.PIPE,
-            )
-            return out.decode("utf-8", errors="replace").strip() or None
-        except (subprocess.CalledProcessError, OSError):
+        r = run_capture([
+            "docker", "inspect", "-f", "{{.State.Status}}",
+            self.cfg.container_name,
+        ])
+        if not r.ok:
             return None
+        return r.stdout_text.strip() or None
 
     def _assemble_run_args(self):
         # type: () -> List[str]
