@@ -14,7 +14,7 @@ from typing import List, Optional
 # Default values
 # ---------------------------------------------------------------------------
 # Centralized so build-time, runtime, and forwarding code all share one
-# source of truth.  Forwarding logic (orchestrate._build_forward_args)
+# source of truth.  Forwarding logic (orchestrate.forward.build_forward_args)
 # uses these to suppress redundant CLI flags whose value already matches
 # the default the remote node would compute on its own.
 DEFAULT_ROCM_IMAGE      = "rocm/dev-ubuntu-24.04:7.1.1-complete"
@@ -144,7 +144,7 @@ class Config(object):
 
     Example: ``MNCTL_GPUS`` (host) becomes ``GPUS`` (container).
 
-    See :func:`docker_ops._container_env_pairs` for the full mapping.
+    See :func:`docker_ops.env_map.container_env_pairs` for the full mapping.
     """
 
     def __init__(self):
@@ -190,7 +190,7 @@ class Config(object):
         if env_dir and env_dir not in self.post_setup_dirs:
             self.post_setup_dirs.append(env_dir)
         # When True, the NIC-type built-in dir is NOT auto-prepended (see
-        # docker_ops._resolve_post_setup_dirs).  User supplies their own.
+        # docker_ops.env_map.resolve_post_setup_dirs).  User supplies their own.
         self.no_builtin_nic_setup = _env_bool("MNCTL_NO_BUILTIN_NIC_SETUP")
 
         # --- Networking / runtime ---
@@ -250,7 +250,7 @@ class Config(object):
             os.path.dirname(os.path.abspath(__file__))
         )
 
-        # Lazily filled by docker_ops._resolve_post_setup_dirs() after the
+        # Lazily filled by docker_ops.env_map.resolve_post_setup_dirs() after the
         # final values of ``post_setup_dirs`` / ``no_builtin_nic_setup`` /
         # ``nic_type`` are known.  Reset to None whenever any of those
         # change so the next access recomputes (see invalidate helper).

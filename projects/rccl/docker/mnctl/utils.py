@@ -3,9 +3,10 @@
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
-from typing import List, Set
+from typing import Callable, List, Optional, Set
 
 # ---------------------------------------------------------------------------
 # Module-level verbose flag (set once from main)
@@ -287,6 +288,71 @@ def run_parallel(jobs, merge_stderr=False):
     for key, proc in procs.items():
         out, err = proc.communicate()
         results[key] = ParallelResult(proc.returncode, out, err)
+    return results
+
+
+def run_parallel_streaming(jobs, on_line=None):
+    # type: (dict, Optional[Callable[[object, str], None]]) -> dict
+    """Spawn *jobs* concurrently and stream output line-by-line.
+
+    Like :func:`run_parallel` but each subprocess's combined stdout+stderr
+    is read by a dedicated reader thread that invokes
+    ``on_line(key, line)`` as each line arrives.  This lets the caller
+    interleave per-job output in real time (e.g. ``[host] message``
+    formatting) instead of waiting for ``communicate()`` to drain.
+
+    Parameters
+    ----------
+    jobs : Mapping[Hashable, list[str]]
+        Keys are arbitrary (typically host names).  Values are argv
+        lists; never use ``shell=True``.
+    on_line : callable(key, line) -> None, optional
+        Called once per output line.  Lines have trailing CR/LF stripped.
+        ``None`` suppresses streaming and only collects the captured
+        output.  Implementations that print should serialize with their
+        own lock — this helper does not lock around ``on_line``.
+
+    Returns
+    -------
+    dict[key, ParallelResult]
+        Same shape as :func:`run_parallel`.  ``stdout`` holds the
+        captured combined stream as bytes; ``stderr`` is always
+        ``b""`` because stderr is merged into stdout for streaming.
+    """
+    procs = {}
+    for key, cmd in jobs.items():
+        procs[key] = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+
+    captured = {}  # type: dict
+    threads = {}
+
+    def _reader(key, proc):
+        # type: (object, subprocess.Popen) -> None
+        lines = []
+        for raw in iter(proc.stdout.readline, b""):
+            line = raw.decode("utf-8", errors="replace").rstrip("\n\r")
+            lines.append(line)
+            if on_line is not None:
+                on_line(key, line)
+        captured[key] = lines
+
+    for key, proc in procs.items():
+        t = threading.Thread(target=_reader, args=(key, proc))
+        t.daemon = True
+        t.start()
+        threads[key] = t
+
+    results = {}
+    for key, proc in procs.items():
+        proc.wait()
+        # Reader exits soon after the pipe closes; small join window.
+        threads[key].join(timeout=5)
+        text = "\n".join(captured.get(key, []))
+        results[key] = ParallelResult(
+            proc.returncode, text.encode("utf-8"), b"",
+        )
     return results
 
 

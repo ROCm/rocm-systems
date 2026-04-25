@@ -20,7 +20,7 @@ class ContainerRuntime(ABC):
 
     Each subclass encapsulates one way to build images, launch containers,
     run ephemeral build tasks, and stop containers.  The orchestration
-    layer (``orchestrate.py``) fans operations out to nodes and uses
+    layer (``orchestrate/``) fans operations out to nodes and uses
     this interface for the per-node work.
     """
 

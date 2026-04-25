@@ -74,7 +74,7 @@ Host vs container env-var naming:
       MNCTL_NIC_TYPE     -> NIC_TYPE
       MNCTL_GPU_TARGETS  -> GPU_TARGETS
 
-  See docker_ops._container_env_pairs() for the authoritative mapping.
+  See docker_ops.env_map.container_env_pairs() for the authoritative mapping.
 
 Path expansion:
   All path options support ~ and $VAR / ${VAR} expansion.
