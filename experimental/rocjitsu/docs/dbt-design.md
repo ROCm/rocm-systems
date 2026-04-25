@@ -130,15 +130,22 @@ Instruction lowering handles `Action::Expand` from the legalization table — in
 
 ## Supporting Modules
 
-The DBT layer depends on two modules defined in the `code/patch/` layer. Their design is documented separately; only their role in the DBT pipeline is described here.
+### Register Liveness Analysis (`analysis/register_liveness.h`)
+
+Per-basic-block backward liveness analysis over VGPR indices (0-511, covering both VGPR and AccVGPR ranges in the unified file). Computed per-block before semantic and encoding passes. Provides:
+
+- `is_live(offset, vgpr_index)` — query whether a register is live at an instruction
+- `find_free_run(offset, count)` — find consecutive free registers for operand expansion
+
+Used by the semantic translator for safe register remapping (AccVGPR elimination, MFMA→WMMA expansion). Lives at the top level of rocjitsu (not in `code/`) because it's general analysis infrastructure shared by DBT, DBI, and the simulator.
 
 ### Code Object Patcher (`code/patch/code_object_patcher.h`)
 
-Handles ELF-level mutations: kernel descriptor translation (`compute_pgm_rsrc1/2/3`, `kernel_code_properties`), ELF flag updates, `.text` overwrite, code cave management, and workgroup ID SGPR layout extraction from kernel descriptors.
+Handles ELF-level mutations: kernel descriptor translation (`compute_pgm_rsrc1/2/3`, `kernel_code_properties`), ELF flag updates, `.text` overwrite, code cave management, and workgroup ID SGPR layout extraction from kernel descriptors. Documented separately.
 
 ### Instruction Builder (`code/patch/instruction_builder.h`)
 
-Provides ISA-parameterized helpers for encoding common instructions (`s_branch`, `s_nop`). Used by both the DBT code cave mechanism and the semantic translator's lowering functions. Will also be used by the DBI layer.
+Provides ISA-parameterized helpers for encoding common instructions (`s_branch`, `s_nop`). Used by both the DBT code cave mechanism and the semantic translator's lowering functions. Will also be used by the DBI layer. Documented separately.
 
 ---
 
@@ -147,14 +154,15 @@ Provides ISA-parameterized helpers for encoding common instructions (`s_branch`,
 For each code object:
 
 1. **Decode:** Create a `Decoder` for the guest ISA and build basic blocks from the `.text` section.
-2. **Semantic pass:** For each basic block, run `SemanticTranslator::translate()` to handle waitcnt and other semantic rules. Apply `rewrite_workgroup_ids()` after encoding translation to fix ABI differences.
-3. **Encoding pass:** For each instruction not consumed by the semantic pass:
+2. **Analyze:** Compute `RegisterLiveness` per basic block (backward scan for VGPR gen/kill sets).
+3. **Semantic pass:** For each basic block, run `SemanticTranslator::translate()` to handle waitcnt and other semantic rules. Apply `rewrite_workgroup_ids()` after encoding translation to fix ABI differences.
+4. **Encoding pass:** For each instruction not consumed by the semantic pass:
    - Look up the legalization table for the (encoding_id, opcode) pair.
    - If Identity or Substitute: call the encoding translator.
    - If Expand: call `try_lower_expand()` for instruction lowering.
    - If the result is larger than the source, create a code cave.
-4. **Patch:** Update ELF flags, translate kernel descriptors, write cave body into NOP padding.
-5. **Emit:** Return the modified ELF bytes.
+5. **Patch:** Update ELF flags, translate kernel descriptors, write cave body into NOP padding.
+6. **Emit:** Return the modified ELF bytes.
 
 ---
 

@@ -8,6 +8,7 @@ add_subdirectory(kernels)
 
 # Common object libraries linked by all test/tool executables.
 set(RJ_OBJECT_LIBS
+    rocjitsu_analysis
     rocjitsu_code
     rocjitsu_isa
     rocjitsu_isa_cdna1

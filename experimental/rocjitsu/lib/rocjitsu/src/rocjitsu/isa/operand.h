@@ -36,6 +36,32 @@ public:
   /// @brief Raw encoding value from the instruction binary.
   int encoding_value() const { return encoding_value_; }
 
+  /// @brief Operand width in bits.
+  int size_bits() const { return size_bits_; }
+
+  /// @brief Whether this operand references a VGPR or AccVGPR.
+  /// @details Classified at construction time by ISA-specific subclasses using
+  /// the auto-generated is_vgpr_operand_type() from operand_types.h.
+  [[nodiscard]] bool is_vgpr() const { return is_vgpr_; }
+
+  /// @brief Unified VGPR index for this operand (0-511).
+  /// @details Maps AMDGPU encoding ranges to a unified index space:
+  ///   VGPRs 0-255, AccVGPRs 256-511. Only valid when is_vgpr() is true.
+  [[nodiscard]] uint16_t unified_vgpr_index() const {
+    if (encoding_value_ >= 768)
+      return static_cast<uint16_t>(encoding_value_ - 512);
+    if (encoding_value_ >= 512)
+      return static_cast<uint16_t>(encoding_value_ - 256);
+    if (encoding_value_ >= 256)
+      return static_cast<uint16_t>(encoding_value_ - 256);
+    return static_cast<uint16_t>(encoding_value_);
+  }
+
+  /// @brief Number of consecutive VGPRs this operand spans.
+  [[nodiscard]] uint16_t vgpr_count() const {
+    return static_cast<uint16_t>(std::max(1, size_bits_ / 32));
+  }
+
   /// @brief Read this operand as a scalar 32-bit value.
   /// @param wf Wavefront providing register state.
   /// @returns The 32-bit scalar value.
@@ -93,6 +119,7 @@ public:
 
   int size_bits_ = 0;
   int encoding_value_ = 0;
+  bool is_vgpr_ = false;
 
 private:
   Operand *delegate_ = nullptr;
