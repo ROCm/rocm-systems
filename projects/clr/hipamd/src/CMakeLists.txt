@@ -340,6 +340,17 @@ if(HIP_ENABLE_LTTNG_UST)
     target_include_directories(amdhip64 PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/lttng)
     target_link_libraries(amdhip64 PRIVATE PkgConfig::LTTNG_UST ${CMAKE_DL_LIBS})
+
+    # Symbol-coverage gate: every exported HIP/__hip text symbol from the
+    # built libamdhip64.so must appear in one of the migration inventories
+    # written by lttng_migrate.py. Fails the build on any miss.
+    add_custom_command(TARGET amdhip64 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E echo "Running LTTng symbol-coverage gate..."
+        COMMAND bash ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_coverage_gate.sh
+                $<TARGET_FILE:amdhip64>
+                ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_migration_inventory.txt
+                ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_migration_inventory_c.txt
+        VERBATIM)
 endif()
 
 add_custom_command(TARGET amdhip64 POST_BUILD COMMAND
