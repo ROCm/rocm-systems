@@ -46,7 +46,9 @@ Environment Variables (override defaults without flags):
   MNCTL_ROCM_IMAGE, MNCTL_CONTAINER_NAME, MNCTL_GPUS,
   MNCTL_SSH_PORT, MNCTL_SHM_SIZE, MNCTL_SHARED_DIR,
   MNCTL_BUILDS_DIR, MNCTL_SSH_KEY_DIR, MNCTL_SSH_KEY,
-  MNCTL_HOSTFILE, MNCTL_HOST_SSH_PORT, MNCTL_POST_SETUP_DIR,
+  MNCTL_HOSTFILE, MNCTL_HOST_SSH_PORT,
+  MNCTL_POST_SETUP_DIRS (colon-separated) or MNCTL_POST_SETUP_DIR (single),
+  MNCTL_NO_BUILTIN_NIC_SETUP,
   MNCTL_DOCKERFILE, MNCTL_NIC_TYPE, MNCTL_GPU_TARGETS, MNCTL_VERBOSE,
   MNCTL_SHARED_FS, MNCTL_DEPS_LOCK_TTL_SEC, MNCTL_DEPS_WAIT_TIMEOUT_SEC
 
@@ -131,8 +133,24 @@ Path expansion:
         help="Extra host volume mount SRC:DST (repeatable)",
     )
     parser.add_argument(
-        "--post-setup", dest="post_setup_dir",
-        help="Post-setup dir with setup.sh/env.sh (optional)",
+        "--post-setup", dest="post_setup_dirs",
+        action="append", default=None,
+        help=(
+            "Post-setup dir with setup.sh/env.sh (repeatable). "
+            "Dirs run in CLI order; later env.sh exports override earlier. "
+            "When --nic-type matches a sibling of post-setup/ "
+            "(e.g. post-setup/ainic) that dir is auto-prepended; "
+            "use --no-builtin-nic-setup to suppress."
+        ),
+    )
+    parser.add_argument(
+        "--no-builtin-nic-setup", dest="no_builtin_nic_setup",
+        action="store_true",
+        help=(
+            "Do NOT auto-prepend post-setup/<nic-type> when running "
+            "post-setup. Use this to fully replace built-in NIC config "
+            "with your own --post-setup dirs."
+        ),
     )
     parser.add_argument(
         "--dockerfile",
@@ -229,8 +247,14 @@ def _apply_cli_args(cfg, args):
         cfg.hostfile_explicit = True
     if args.volumes:
         cfg.extra_volumes = list(args.volumes)
-    if args.post_setup_dir is not None:
-        cfg.post_setup_dir = args.post_setup_dir
+    if args.post_setup_dirs is not None:
+        # CLI overrides env-derived defaults entirely: anything passed on
+        # the command line is the authoritative list. Use the env vars
+        # (MNCTL_POST_SETUP_DIRS / MNCTL_POST_SETUP_DIR) instead if you
+        # want defaults that the CLI extends.
+        cfg.post_setup_dirs = list(args.post_setup_dirs)
+    if args.no_builtin_nic_setup:
+        cfg.no_builtin_nic_setup = True
     if args.dockerfile is not None:
         cfg.dockerfile = args.dockerfile
     if args.nic_type is not None:
@@ -293,8 +317,7 @@ def _expand_paths(cfg):
     cfg.builds_dir = expand_path(cfg.builds_dir)
     cfg.ssh.key_dir = expand_path(cfg.ssh.key_dir)
     cfg.hostfile = expand_path(cfg.hostfile)
-    if cfg.post_setup_dir:
-        cfg.post_setup_dir = expand_path(cfg.post_setup_dir)
+    cfg.post_setup_dirs = [expand_path(d) for d in cfg.post_setup_dirs if d]
     if cfg.ssh.key:
         cfg.ssh.key = expand_path(cfg.ssh.key)
     cfg.extra_volumes = [expand_path(v) for v in cfg.extra_volumes]
@@ -315,7 +338,8 @@ def _dump_config(cfg):
     log_verbose("builds_dir={}".format(cfg.builds_dir))
     log_verbose("ssh.key_dir={}".format(cfg.ssh.key_dir))
     log_verbose("hostfile={}".format(cfg.hostfile))
-    log_verbose("post_setup_dir={}".format(cfg.post_setup_dir))
+    log_verbose("post_setup_dirs={}".format(cfg.post_setup_dirs))
+    log_verbose("no_builtin_nic_setup={}".format(cfg.no_builtin_nic_setup))
     log_verbose("ssh.key={}".format(cfg.ssh.key or ""))
     log_verbose("ssh.keygen={}".format(cfg.ssh.keygen))
     log_verbose("action={}".format(cfg.action.value))

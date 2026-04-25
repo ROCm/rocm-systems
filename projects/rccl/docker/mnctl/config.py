@@ -100,7 +100,25 @@ class Config(object):
         # the built-in default. Lets SLURM auto-detection regenerate the
         # default file safely without clobbering a user-provided one.
         self.hostfile_explicit = bool(_env_hostfile)
-        self.post_setup_dir = os.environ.get("MNCTL_POST_SETUP_DIR", "")
+        # Post-setup directories (list, run in order).  Two env vars are
+        # accepted:
+        #   * MNCTL_POST_SETUP_DIRS  - colon-separated list (canonical form)
+        #   * MNCTL_POST_SETUP_DIR   - single dir (back-compat); appended last
+        # On the CLI, ``--post-setup`` is repeatable; each occurrence appends.
+        _env_dirs = os.environ.get("MNCTL_POST_SETUP_DIRS", "")
+        _env_dir = os.environ.get("MNCTL_POST_SETUP_DIR", "")
+        self.post_setup_dirs = []  # type: List[str]
+        if _env_dirs:
+            self.post_setup_dirs.extend(
+                d for d in _env_dirs.split(":") if d
+            )
+        if _env_dir and _env_dir not in self.post_setup_dirs:
+            self.post_setup_dirs.append(_env_dir)
+        # When True, the NIC-type built-in dir is NOT auto-prepended (see
+        # docker_ops._resolve_post_setup_dirs).  User supplies their own.
+        self.no_builtin_nic_setup = bool(
+            os.environ.get("MNCTL_NO_BUILTIN_NIC_SETUP", "")
+        )
         self.host_ssh_port = int(os.environ.get("MNCTL_HOST_SSH_PORT", "22"))
         self.verbose = bool(os.environ.get("MNCTL_VERBOSE", ""))
         self.force_rebuild = False

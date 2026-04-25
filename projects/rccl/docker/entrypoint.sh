@@ -15,7 +15,11 @@
 #   CONTAINER_USER       - non-root user name                    (default: ubuntu)
 #   LAUNCH_SCRIPT        - script to exec after setup            (default: "")
 #   LAUNCH_SCRIPT_ARGS   - args for the launch script            (default: "")
-#   POST_SETUP_DIR       - post-setup dir with setup.sh/env.sh   (default: /opt/post-setup)
+#   POST_SETUP_DIRS      - colon-separated post-setup dirs        (default: "")
+#                          Each dir may contain setup.sh/env.sh.
+#                          Dirs are processed in order; later env.sh
+#                          exports override earlier ones.  mnctl mounts
+#                          host dirs at /opt/post-setup.0, .1, ...
 #   VERBOSE              - set to 1 for detailed debug logging   (default: "")
 #
 
@@ -26,7 +30,7 @@ SSH_KEY_SOURCE="${SSH_KEY_SOURCE:-/opt/ssh-keys}"
 CONTAINER_USER="${CONTAINER_USER:-ubuntu}"
 NIC_TYPE="${NIC_TYPE:-mellanox}"
 VERBOSE="${VERBOSE:-}"
-POST_SETUP_DIR="${POST_SETUP_DIR:-/opt/post-setup}"
+POST_SETUP_DIRS="${POST_SETUP_DIRS:-}"
 
 log_verbose() {
     [[ -n "${VERBOSE}" ]] && echo "  [verbose] $*" || true
@@ -135,73 +139,110 @@ setup_user_ssh() {
 
 # ============================================================================
 # Post-setup configuration hook (setup.sh + env.sh)
+#
+# Each entry in POST_SETUP_DIRS (colon-separated) is processed by
+# run_one_post_setup.  env.sh contents are CONCATENATED (in order) into
+# /etc/profile.d/post-setup-env.sh; later dirs win on conflicting exports.
+# setup.sh is per-dir, idempotent via SHA256 marker under /opt/builds.
 # ============================================================================
-run_post_setup() {
-    if [[ ! -d "${POST_SETUP_DIR}" ]] || [[ -z "$(ls -A "${POST_SETUP_DIR}" 2>/dev/null)" ]]; then
-        log_verbose "No post-setup config at ${POST_SETUP_DIR} (skipping)"
+run_one_post_setup() {
+    local dir="$1"
+    local idx="$2"
+
+    if [[ ! -d "${dir}" ]] || [[ -z "$(ls -A "${dir}" 2>/dev/null)" ]]; then
+        log_verbose "  Post-setup[${idx}]: ${dir} empty/missing, skipping"
         return
     fi
 
-    echo "  Post-setup: ${POST_SETUP_DIR}"
+    echo "  Post-setup[${idx}]: ${dir}"
 
-    if [[ -f "${POST_SETUP_DIR}/env.sh" ]]; then
+    if [[ -f "${dir}/env.sh" ]]; then
         local hash
-        hash=$(sha256sum "${POST_SETUP_DIR}/env.sh" 2>/dev/null | awk '{print $1}')
-        log_verbose "env.sh SHA256: ${hash}"
-        cp "${POST_SETUP_DIR}/env.sh" /etc/profile.d/post-setup-env.sh
-        chmod 644 /etc/profile.d/post-setup-env.sh
+        hash=$(sha256sum "${dir}/env.sh" 2>/dev/null | awk '{print $1}')
+        log_verbose "    env.sh SHA256: ${hash}"
+        # Append (rather than overwrite) so multiple dirs compose.  The
+        # caller (run_post_setup) truncates the file once, before the loop.
+        {
+            echo ""
+            echo "# --- post-setup[${idx}] from ${dir} ---"
+            cat "${dir}/env.sh"
+        } >> /etc/profile.d/post-setup-env.sh
+        echo "    env.sh appended ($(grep -c '^export' "${dir}/env.sh" 2>/dev/null || echo 0) exports)"
+    fi
+
+    if [[ -f "${dir}/setup.sh" ]]; then
+        local first_line
+        first_line=$(head -1 "${dir}/setup.sh")
+        if [[ "${first_line}" != "#!/bin/bash"* ]] && [[ "${first_line}" != "#!/usr/bin/env bash"* ]]; then
+            echo "    WARN: setup.sh missing bash shebang, skipping for safety"
+            return
+        fi
+
+        local hash
+        hash=$(sha256sum "${dir}/setup.sh" 2>/dev/null | awk '{print $1}')
+        echo "    setup.sh (SHA256: ${hash:0:16}...)"
+
+        local marker="/opt/builds/.post-setup.${hash:0:16}.done"
+
+        if [[ "${FORCE_POST_SETUP:-}" == "1" ]] && [[ -f "${marker}" ]]; then
+            echo "    clearing stale marker (FORCE_POST_SETUP=1)"
+            rm -f "${marker}"
+        fi
+
+        if [[ -f "${marker}" ]]; then
+            echo "    already completed (cached)"
+            log_verbose "    marker: ${marker}"
+            return
+        fi
+
+        local work_dir
+        work_dir=$(mktemp -d /tmp/post-setup.XXXXXX)
+        cp -a "${dir}/." "${work_dir}/"
+        chmod +x "${work_dir}/setup.sh"
+
+        echo "    running setup.sh ..."
+        local rc=0
+        ( set -o pipefail; bash "${work_dir}/setup.sh" 2>&1 | sed 's/^/      [post-setup] /' ) || rc=$?
+
+        if [[ "${rc}" -eq 0 ]]; then
+            touch "${marker}" 2>/dev/null || true
+            echo "    [OK] setup.sh completed"
+        else
+            echo "    [FAIL] setup.sh exited with code ${rc}"
+        fi
+
+        rm -rf "${work_dir}"
+    fi
+}
+
+run_post_setup() {
+    if [[ -z "${POST_SETUP_DIRS}" ]]; then
+        log_verbose "No POST_SETUP_DIRS set, skipping post-setup"
+        return
+    fi
+
+    # Truncate combined env file once; per-dir env.sh blocks are appended.
+    : > /etc/profile.d/post-setup-env.sh
+    chmod 644 /etc/profile.d/post-setup-env.sh
+
+    local idx=0
+    local IFS=':'
+    for dir in ${POST_SETUP_DIRS}; do
+        run_one_post_setup "${dir}" "${idx}"
+        idx=$((idx + 1))
+    done
+
+    # Source the combined env, and ensure shells pick it up.
+    if [[ -s /etc/profile.d/post-setup-env.sh ]]; then
+        # shellcheck disable=SC1091
         source /etc/profile.d/post-setup-env.sh
         for rc in /root/.bashrc /home/${CONTAINER_USER}/.bashrc; do
             if [[ -f "$rc" ]] && ! grep -q 'post-setup-env.sh' "$rc" 2>/dev/null; then
                 echo 'source /etc/profile.d/post-setup-env.sh' >> "$rc"
             fi
         done
-        echo "  Post-setup env loaded ($(grep -c '^export' "${POST_SETUP_DIR}/env.sh" 2>/dev/null || echo 0) vars)"
-    fi
-
-    if [[ -f "${POST_SETUP_DIR}/setup.sh" ]]; then
-        local first_line
-        first_line=$(head -1 "${POST_SETUP_DIR}/setup.sh")
-        if [[ "${first_line}" != "#!/bin/bash"* ]] && [[ "${first_line}" != "#!/usr/bin/env bash"* ]]; then
-            echo "  WARN: setup.sh missing bash shebang, skipping for safety"
-            return
-        fi
-
-        local hash
-        hash=$(sha256sum "${POST_SETUP_DIR}/setup.sh" 2>/dev/null | awk '{print $1}')
-        echo "  Post-setup: setup.sh (SHA256: ${hash:0:16}...)"
-
-        local marker="/opt/builds/.post-setup.${hash:0:16}.done"
-
-        # --rebuild clears stale markers so post-setup always re-runs
-        if [[ "${FORCE_POST_SETUP:-}" == "1" ]] && [[ -f "${marker}" ]]; then
-            echo "  Post-setup: clearing stale marker (FORCE_POST_SETUP=1)"
-            rm -f "${marker}"
-        fi
-
-        if [[ -f "${marker}" ]]; then
-            echo "  Post-setup already completed (cached)"
-            log_verbose "Marker: ${marker}"
-            return
-        fi
-
-        local work_dir
-        work_dir=$(mktemp -d /tmp/post-setup.XXXXXX)
-        cp -a "${POST_SETUP_DIR}/." "${work_dir}/"
-        chmod +x "${work_dir}/setup.sh"
-
-        echo "  Post-setup: running setup.sh ..."
-        local rc=0
-        ( set -o pipefail; bash "${work_dir}/setup.sh" 2>&1 | sed 's/^/    [post-setup] /' ) || rc=$?
-
-        if [[ "${rc}" -eq 0 ]]; then
-            touch "${marker}" 2>/dev/null || true
-            echo "  [OK] Post-setup completed"
-        else
-            echo "  [FAIL] Post-setup exited with code ${rc}"
-        fi
-
-        rm -rf "${work_dir}"
+    else
+        rm -f /etc/profile.d/post-setup-env.sh
     fi
 }
 
@@ -217,7 +258,7 @@ if [[ -n "${VERBOSE}" ]]; then
     log_verbose "  CONTAINER_USER=${CONTAINER_USER}"
     log_verbose "  HOST_UID=${HOST_UID:-1000}  HOST_GID=${HOST_GID:-1000}"
     log_verbose "  LAUNCH_SCRIPT=${LAUNCH_SCRIPT:-}"
-    log_verbose "  POST_SETUP_DIR=${POST_SETUP_DIR}"
+    log_verbose "  POST_SETUP_DIRS=${POST_SETUP_DIRS}"
     log_verbose "  NIC_TYPE=${NIC_TYPE}"
     log_verbose "  GPUS=${GPUS:-}"
     log_verbose "Mounted volumes:"
@@ -251,20 +292,9 @@ else
 fi
 
 echo "  NIC type: ${NIC_TYPE}"
-
-# NIC-specific setup (failures warn but do not block post-setup / sshd)
-if [[ "${NIC_TYPE}" == "ainic" ]]; then
-    if [[ -x /opt/install_ainic_driver.sh ]]; then
-        if ! /opt/install_ainic_driver.sh; then
-            echo "  WARNING: AINIC driver install failed (see output above)"
-            echo "           Continuing with post-setup and idle..."
-        fi
-    fi
-elif [[ "${NIC_TYPE}" == "mellanox" ]]; then
-    log_verbose "Mellanox: using host RDMA libs (bind-mounted by mnctl)"
-else
-    log_verbose "Custom NIC type '${NIC_TYPE}': no built-in driver setup"
-fi
+log_verbose "NIC-specific setup (if any) is delivered as a post-setup dir"
+log_verbose "(mnctl auto-prepends post-setup/<NIC_TYPE> unless"
+log_verbose " --no-builtin-nic-setup is passed)"
 
 run_post_setup
 

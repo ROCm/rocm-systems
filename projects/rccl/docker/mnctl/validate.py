@@ -10,7 +10,7 @@ from typing import List
 
 from .checks import (
     SSH_KEY_MISSING, POST_SETUP_MISSING, POST_SETUP_EMPTY,
-    hostfile_status, ssh_key_status, post_setup_status,
+    hostfile_status, ssh_key_status, post_setup_statuses,
     resolve_dockerfile, list_available_dockerfiles,
 )
 from .config import Action, Config
@@ -71,17 +71,14 @@ def validate(cfg):
                 )
             )
 
-    # --- Post-setup directory ---
-    if cfg.post_setup_dir:
-        ps_status, _files = post_setup_status(cfg)
+    # --- Post-setup directories (each user-supplied dir validated) ---
+    for path, ps_status, _files in post_setup_statuses(cfg):
         if ps_status == POST_SETUP_MISSING:
-            errors.append(
-                "Post-setup directory not found: {}".format(cfg.post_setup_dir)
-            )
+            errors.append("Post-setup directory not found: {}".format(path))
         elif ps_status == POST_SETUP_EMPTY:
             errors.append(
                 "Post-setup dir must contain setup.sh and/or env.sh: {}".format(
-                    cfg.post_setup_dir
+                    path
                 )
             )
 

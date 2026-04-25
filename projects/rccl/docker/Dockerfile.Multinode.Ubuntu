@@ -114,9 +114,10 @@ RUN echo ">>> Checking ROCm compiler symlinks..." \
 # ---------------------------------------------------------------------------
 RUN echo ">>> Creating mount-point directories..." \
     && mkdir -p -m 777 /opt/shared /opt/builds \
-    && mkdir -p /opt/ssh-keys /opt/post-setup \
+    && mkdir -p /opt/ssh-keys \
     && echo ">>> Mount points:" \
-    && ls -ld /opt/shared /opt/builds /opt/ssh-keys /opt/post-setup | sed 's/^/      /'
+    && ls -ld /opt/shared /opt/builds /opt/ssh-keys | sed 's/^/      /' \
+    && echo ">>> (post-setup dirs are mounted at /opt/post-setup.<N> at runtime)"
 
 # ---------------------------------------------------------------------------
 # Non-root user (entrypoint remaps UID/GID at runtime to match the host)
@@ -175,7 +176,7 @@ RUN echo "========================================" \
     && echo "  SSH port:   ${SSH_PORT}" \
     && echo "  User:       ${CONTAINER_USER} (uid=$(id -u ${CONTAINER_USER}), gid=$(id -g ${CONTAINER_USER}))" \
     && echo "  Entrypoint: /opt/entrypoint.sh" \
-    && echo "  Mount pts:  /opt/shared /opt/builds /opt/ssh-keys /opt/post-setup" \
+    && echo "  Mount pts:  /opt/shared /opt/builds /opt/ssh-keys (post-setup at runtime)" \
     && echo "  Shared deps: UCX + OpenMPI built via --setup-deps into /opt/shared" \
     && echo "========================================"
 

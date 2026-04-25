@@ -15,7 +15,7 @@ from typing import List
 from .checks import (
     SSH_KEY_OK, SSH_KEY_KEYGEN, SSH_KEY_MISSING, SSH_KEY_NONE,
     POST_SETUP_OK, POST_SETUP_MISSING, POST_SETUP_EMPTY,
-    hostfile_status, ssh_key_status, post_setup_status,
+    hostfile_status, ssh_key_status, post_setup_statuses,
     resolve_dockerfile,
 )
 from .config import Action, Config
@@ -88,7 +88,7 @@ def run_preflight(cfg):
     elif action == Action.VERIFY:
         _check_hostfile(cfg, report)
 
-    if cfg.post_setup_dir:
+    if cfg.post_setup_dirs:
         _check_post_setup(cfg, report)
 
     log("")
@@ -247,11 +247,11 @@ def _check_docker_remote(cfg, hosts, report):
 
 def _check_post_setup(cfg, report):
     # type: (Config, PreflightReport) -> None
-    d = cfg.post_setup_dir
-    status, files = post_setup_status(cfg)
-    if status == POST_SETUP_MISSING:
-        report.fail("Post-setup directory not found: {}".format(d))
-    elif status == POST_SETUP_EMPTY:
-        report.fail("Post-setup dir has no setup.sh or env.sh: {}".format(d))
-    else:  # POST_SETUP_OK
-        report.ok("Post-setup: {} ({})".format(d, ", ".join(files)))
+    """Validate every dir in cfg.post_setup_dirs (CLI order)."""
+    for d, status, files in post_setup_statuses(cfg):
+        if status == POST_SETUP_MISSING:
+            report.fail("Post-setup directory not found: {}".format(d))
+        elif status == POST_SETUP_EMPTY:
+            report.fail("Post-setup dir has no setup.sh or env.sh: {}".format(d))
+        else:  # POST_SETUP_OK
+            report.ok("Post-setup: {} ({})".format(d, ", ".join(files)))

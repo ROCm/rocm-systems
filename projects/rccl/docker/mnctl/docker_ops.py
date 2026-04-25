@@ -127,6 +127,10 @@ def _container_env_pairs(cfg, render_gid):
         MNCTL_GPU_TARGETS  -> GPU_TARGETS         (only set when non-empty)
         (derived)          -> HOST_UID, HOST_GID, RENDER_GID
         (derived)          -> FORCE_POST_SETUP    (when --rebuild/--replace)
+        (derived)          -> POST_SETUP_DIRS     (colon-separated list of
+                                                   in-container post-setup
+                                                   mountpoints; see
+                                                   _resolve_post_setup_dirs)
 
     To add a new pair: append it here AND document it in the epilog of
     ``__main__.py`` and (for end-user-visible settings) in
@@ -145,7 +149,45 @@ def _container_env_pairs(cfg, render_gid):
         pairs.append(("GPU_TARGETS", cfg.gpu_targets))
     if cfg.force_rebuild or cfg.force_replace:
         pairs.append(("FORCE_POST_SETUP", "1"))
+    resolved = _resolve_post_setup_dirs(cfg)
+    if resolved:
+        in_container = ":".join(
+            "/opt/post-setup.{}".format(i) for i in range(len(resolved))
+        )
+        pairs.append(("POST_SETUP_DIRS", in_container))
     return pairs
+
+
+# ---------------------------------------------------------------------------
+# Post-setup directory resolution
+# ---------------------------------------------------------------------------
+def _resolve_post_setup_dirs(cfg):
+    # type: (object) -> List[str]
+    """Resolve the final ordered list of host-side post-setup directories.
+
+    Order: NIC-type built-in dir (if applicable) FIRST, then user dirs in
+    CLI declaration order.  Later dirs run after earlier ones, so user
+    dirs can override NIC defaults via env.sh exports or follow-up
+    setup.sh actions.
+
+    The NIC-type built-in is auto-prepended when:
+      * ``cfg.no_builtin_nic_setup`` is False (the default), AND
+      * ``<script_dir>/post-setup/<nic_type>/`` exists on disk, AND
+      * that path is not already explicitly listed by the user.
+
+    A non-existent NIC dir is silently skipped (not an error): the
+    user may have a custom ``--nic-type`` that has no built-in recipe.
+    """
+    user_dirs = list(cfg.post_setup_dirs or [])
+    if cfg.no_builtin_nic_setup or not cfg.nic_type:
+        return user_dirs
+    builtin = os.path.join(cfg.script_dir, "post-setup", cfg.nic_type)
+    if not os.path.isdir(builtin):
+        return user_dirs
+    # De-dup: if user explicitly lists the same dir, do not double-mount.
+    if any(os.path.abspath(d) == os.path.abspath(builtin) for d in user_dirs):
+        return user_dirs
+    return [builtin] + user_dirs
 
 
 # ---------------------------------------------------------------------------
@@ -595,9 +637,12 @@ class DockerRuntime(ContainerRuntime):
             "-v", "{}:/opt/ssh-keys:ro".format(cfg.ssh.key_dir),
         ]
 
-        if cfg.post_setup_dir:
+        # Mount each resolved post-setup dir at /opt/post-setup.N (read-only).
+        # The numeric suffix preserves CLI order so the entrypoint can iterate
+        # POST_SETUP_DIRS (set in _container_env_pairs) without reparsing.
+        for i, host_dir in enumerate(_resolve_post_setup_dirs(cfg)):
             args += [
-                "-v", "{}:/opt/post-setup:ro".format(cfg.post_setup_dir)
+                "-v", "{}:/opt/post-setup.{}:ro".format(host_dir, i)
             ]
 
         for vol in cfg.extra_volumes:

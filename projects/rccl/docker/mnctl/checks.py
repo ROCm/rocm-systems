@@ -81,29 +81,34 @@ def ssh_key_status(cfg):
 
 
 # ---------------------------------------------------------------------------
-# Post-setup directory
+# Post-setup directories
 # ---------------------------------------------------------------------------
-POST_SETUP_MISSING = "missing"  # cfg.post_setup_dir is not a directory
+POST_SETUP_MISSING = "missing"  # path is not a directory
 POST_SETUP_EMPTY = "empty"      # exists but no setup.sh / env.sh
 POST_SETUP_OK = "ok"            # exists and has at least one of the scripts
 
 
-def post_setup_status(cfg):
-    # type: (Config) -> Tuple[str, List[str]]
-    """Return ``(status, files)``.
+def post_setup_dir_status(path):
+    # type: (str) -> Tuple[str, List[str]]
+    """Return ``(status, files)`` for a single post-setup directory.
 
-    ``files`` is the subset of ``["setup.sh", "env.sh"]`` that exists in
-    ``cfg.post_setup_dir``.  Only meaningful when ``cfg.post_setup_dir`` is
-    truthy; callers are expected to gate on that themselves.
+    ``files`` is the subset of ``["setup.sh", "env.sh"]`` that exists.
     """
-    d = cfg.post_setup_dir
-    if not os.path.isdir(d):
+    if not os.path.isdir(path):
         return POST_SETUP_MISSING, []
     files = []
-    if os.path.isfile(os.path.join(d, "setup.sh")):
+    if os.path.isfile(os.path.join(path, "setup.sh")):
         files.append("setup.sh")
-    if os.path.isfile(os.path.join(d, "env.sh")):
+    if os.path.isfile(os.path.join(path, "env.sh")):
         files.append("env.sh")
     if not files:
         return POST_SETUP_EMPTY, []
     return POST_SETUP_OK, files
+
+
+def post_setup_statuses(cfg):
+    # type: (Config) -> List[Tuple[str, str, List[str]]]
+    """Return a list of ``(path, status, files)`` for every dir in
+    ``cfg.post_setup_dirs``.  Empty list when the user supplied none.
+    """
+    return [(d,) + post_setup_dir_status(d) for d in cfg.post_setup_dirs]

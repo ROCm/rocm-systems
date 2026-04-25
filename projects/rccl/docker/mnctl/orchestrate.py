@@ -207,8 +207,13 @@ def _distribute_files(cfg, remote_hosts):
     ]
     if cfg.hostfile and os.path.isfile(cfg.hostfile):
         items.append((cfg.hostfile, False, "hostfile"))
-    if cfg.post_setup_dir and os.path.isdir(cfg.post_setup_dir):
-        items.append((cfg.post_setup_dir, True, "post-setup"))
+    for i, ps_dir in enumerate(cfg.post_setup_dirs):
+        if ps_dir and os.path.isdir(ps_dir):
+            label = (
+                "post-setup[{}]".format(i)
+                if len(cfg.post_setup_dirs) > 1 else "post-setup"
+            )
+            items.append((ps_dir, True, label))
 
     # Filter out items already on a shared filesystem (visible to all nodes).
     items_to_copy = []
@@ -348,8 +353,10 @@ def _build_forward_args(cfg, action="--run",
         args.append("--replace")
     if cfg.verbose:
         args.append("--verbose")
-    if cfg.post_setup_dir:
-        args += ["--post-setup", cfg.post_setup_dir]
+    for ps_dir in cfg.post_setup_dirs:
+        args += ["--post-setup", ps_dir]
+    if cfg.no_builtin_nic_setup:
+        args.append("--no-builtin-nic-setup")
     if cfg.ssh.key:
         args += ["--ssh", cfg.ssh.key]
     elif cfg.ssh.keygen:
