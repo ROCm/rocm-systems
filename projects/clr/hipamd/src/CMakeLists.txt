@@ -339,19 +339,24 @@ if(HIP_ENABLE_LTTNG_UST)
         ${CMAKE_CURRENT_LIST_DIR}/lttng)
 
     # Two link modes:
-    #   1. STATIC (default ON when LTTNG_UST_STATIC_INSTALL_DIR is set):
-    #      link the .a files from the in-tree external/lttng-ust submodule
-    #      build. Eliminates runtime liblttng-ust*.so.1 dependency AND
-    #      sidesteps the dlmopen(LM_ID_NEWLM) SEGFAULT at the source
-    #      (no internal dlopen of liblttng-ust-tracepoint.so.1 happens).
+    #   1. PARTIAL-STATIC (when LTTNG_UST_STATIC_INSTALL_DIR is set):
+    #      link liblttng-ust.a + liblttng-ust-common.a from the in-tree
+    #      external/lttng-ust submodule build. liblttng-ust-tracepoint
+    #      MUST remain a runtime .so dep — LTTng-UST's design requires
+    #      liblttng-ust-tracepoint.so.1 to be discoverable by lttng-sessiond
+    #      for event registration to flow back to the producer's ring buffer.
+    #      Linking the tracepoint .a statically silently breaks event emission
+    #      (provider registers, sessiond enables, no events ever appear).
+    #      Still eliminates 2 of 3 LTTng .so deps and significantly reduces
+    #      the surface area exposed to the dlmopen SEGFAULT.
     #   2. DYNAMIC (fallback): pkg_check_modules against system liblttng-ust.
     if(LTTNG_UST_STATIC_INSTALL_DIR)
-        message(STATUS "HIP: linking LTTng-UST statically from ${LTTNG_UST_STATIC_INSTALL_DIR}")
+        message(STATUS "HIP: linking LTTng-UST partially-static from ${LTTNG_UST_STATIC_INSTALL_DIR}")
         target_include_directories(amdhip64 PRIVATE ${LTTNG_UST_STATIC_INSTALL_DIR}/include)
         target_link_libraries(amdhip64 PRIVATE
             ${LTTNG_UST_STATIC_INSTALL_DIR}/lib/liblttng-ust.a
-            ${LTTNG_UST_STATIC_INSTALL_DIR}/lib/liblttng-ust-tracepoint.a
             ${LTTNG_UST_STATIC_INSTALL_DIR}/lib/liblttng-ust-common.a
+            ${LTTNG_UST_STATIC_INSTALL_DIR}/lib/liblttng-ust-tracepoint.so   # dynamic; required by sessiond
             urcu-bp urcu-cds numa rt
             ${CMAKE_DL_LIBS} pthread)
     else()
