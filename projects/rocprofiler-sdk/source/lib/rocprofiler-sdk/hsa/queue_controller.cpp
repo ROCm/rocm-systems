@@ -640,9 +640,21 @@ queue_controller_init(HsaApiTable* table)
             const bool has_kernel_tracing =
                 itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) ||
                 itr->is_tracing(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
-            // PC sampling still owns the queue; firmware ring path is
-            // restricted to no-PCS contexts in this iteration.
-            if(has_kernel_tracing && itr->pc_sampler == nullptr)
+            const bool has_scratch_reporting =
+                itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY) ||
+                itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
+
+            // The firmware-ring drainer and the WriteInterceptor path are
+            // mutually exclusive — running both would produce duplicate
+            // records and double-decrement correlation refcounts. Counter,
+            // ATT, scratch, and PCS contexts all engage WriteInterceptor,
+            // so the drainer must NOT start when any of them are present.
+            const bool needs_interceptor =
+                itr->dispatch_counter_collection || itr->pc_sampler        ||
+                itr->device_counter_collection   || itr->device_thread_trace ||
+                itr->dispatch_thread_trace       || has_scratch_reporting;
+
+            if(has_kernel_tracing && !needs_interceptor)
             {
                 needs_drainer = true;
                 break;
