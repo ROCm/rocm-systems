@@ -62,13 +62,28 @@ create_queue(hsa_agent_t        agent,
             std::unique_ptr<Queue> new_queue;
             const auto mode = needs_packet_rewriting_intercept() ? Queue::Mode::full_intercept
                                                                  : Queue::Mode::tracing_only;
-            if(queue_intercept::is_intercepting_inline())
+            // The inline (queue_intercept) path installs only doorbell /
+            // wptr wrappers — it does NOT call hsa_amd_queue_intercept_register
+            // and the lambda passed below as set_write_interceptor is a
+            // no-op. That is correct for Mode::tracing_only (no AQL packet
+            // rewriting needed; the firmware ring drainer reads timestamps
+            // out-of-band).
+            //
+            // For Mode::full_intercept (counter / ATT / scratch / PCS
+            // contexts) the WriteInterceptor MUST run to rewrite AQL
+            // packets, allocate completion signals, and engage the
+            // serializer. Taking the inline path in that mode would
+            // silently disable all instrumentation — the queue would be
+            // a real HSA queue with only a no-op write-interceptor stub.
+            //
+            // Constrain the inline path to Mode::tracing_only; fall back
+            // to the legacy hsa_amd_queue_intercept_create path when
+            // packet rewriting is required, even when is_intercepting_inline()
+            // returned true.
+            if(queue_intercept::is_intercepting_inline() && mode == Queue::Mode::tracing_only)
             {
                 ROCP_INFO << "[queue-intercept] creating queue via INLINE path for agent "
-                          << agent.handle << " (mode="
-                          << (mode == Queue::Mode::full_intercept ? "full_intercept"
-                                                                  : "tracing_only")
-                          << ")";
+                          << agent.handle << " (mode=tracing_only)";
                 auto status = controller->get_core_table().hsa_queue_create_fn(agent,
                                                                                size,
                                                                                type,
