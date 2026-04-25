@@ -105,11 +105,21 @@ endif()
 # for Shared Library Only.
 if (BUILD_SHARED_LIBS)
   set(HSA_DEP_ROCPROFILER_REGISTER ON CACHE INTERNAL "")
+  # Default LTTng-UST package dep ON for shared builds; the subdir
+  # CMakeLists overrides this to OFF if ROCR_ENABLE_LTTNG_UST=OFF.
+  set(HSA_DEP_LTTNG_UST ON CACHE INTERNAL "")
 endif()
 
 if (HSA_DEP_ROCPROFILER_REGISTER)
   string(APPEND CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS ", rocprofiler-register")
   string(APPEND CPACK_RPM_BINARY_PACKAGE_REQUIRES " rocprofiler-register")
+endif()
+
+# LTTng-UST runtime dep — added in the same change as the link-dep so the
+# binary's NEEDED libliblttng-ust.so.1 entry always has a package guarantee.
+if (HSA_DEP_LTTNG_UST)
+  string(APPEND CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS ", liblttng-ust1 (>= 2.13)")
+  string(APPEND CPACK_RPM_BINARY_PACKAGE_REQUIRES " lttng-ust >= 2.13")
 endif()
 
 if (NOT DEFINED BUILD_THUNK_VIRTIO)
@@ -254,6 +264,9 @@ endif()
 if (HSA_DEP_ROCPROFILER_REGISTER)
   string(APPEND CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS ", rocprofiler-register")
 endif()
+if (HSA_DEP_LTTNG_UST)
+  string(APPEND CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS ", liblttng-ust1 (>= 2.13)")
+endif()
 # Declare package relationships (hsa-ext-rocr-dev is a legacy package that we subsume)
 set(CPACK_DEBIAN_DEV_PACKAGE_BREAKS "hsa-ext-rocr-dev")
 
@@ -325,6 +338,9 @@ elseif (UNIX)
 endif()
 if (HSA_DEP_ROCPROFILER_REGISTER)
   string(APPEND CPACK_RPM_BINARY_PACKAGE_REQUIRES " rocprofiler-register")
+endif()
+if (HSA_DEP_LTTNG_UST)
+  string(APPEND CPACK_RPM_BINARY_PACKAGE_REQUIRES " lttng-ust >= 2.13")
 endif()
 
 if(NOT BUILD_SHARED_LIBS)

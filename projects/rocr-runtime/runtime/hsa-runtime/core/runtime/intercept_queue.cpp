@@ -46,6 +46,8 @@
 #include "core/util/utils.h"
 #include "inc/hsa_api_trace.h"
 
+#include "lttng/rocm_trace_emit.h"
+
 namespace rocr {
 namespace core {
 
@@ -401,6 +403,14 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
     Cursor.interceptor_index = interceptors.size() - 1;
     Cursor.pkt_index = next_packet_;
     auto& handler = interceptors[Cursor.interceptor_index];
+
+    // Sniff the packet type of the first packet in the batch so consumers
+    // can filter intercept events by type (KERNEL_DISPATCH vs barrier traffic).
+    const uint8_t first_pkt_type = rocm_trace_sniff_packet_type(
+        ring, mask, (int64_t)(next_packet_ + 1));
+    rocm_trace_emit_hsa_intercept_packets(
+        (uint32_t)wrapped->amd_queue_.hsa_queue.id, next_packet_,
+        (uint32_t)packet_count, first_pkt_type);
 
     // Check if packets wrap around the ring buffer boundary using unmasked indices.
     // The interceptor callback expects packets to be contiguous in memory.
