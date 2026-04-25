@@ -153,13 +153,34 @@ emit_kernel_dispatch_tracing(hsa_agent_t                            hag,
                              context::correlation_id*               cid,
                              rocprofiler_thread_id_t                thr_id,
                              tracing::external_correlation_id_map_t ext_ids,
-                             uint64_t /*enqueue_ts*/)
+                             uint64_t /*enqueue_ts*/,
+                             uint16_t                               wg_x,
+                             uint16_t                               wg_y,
+                             uint16_t                               wg_z,
+                             uint32_t                               grid_x,
+                             uint32_t                               grid_y,
+                             uint32_t                               grid_z,
+                             uint32_t                               priv_seg,
+                             uint32_t                               group_seg,
+                             tracing::tracing_data                  captured_td)
 {
-    tracing::tracing_data td{};
-    tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
-                               ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
-                               ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
-                               td);
+    // H7 fix: emit to the contexts captured at enqueue time, not to
+    // whatever is active at completion. captured_td was populated by
+    // process_doorbell_tracing_only and travelled here through
+    // CorrEntry. For the fallback path (late-attach / alias-rejected /
+    // post-destroy), captured_td is empty; populate from current
+    // active contexts so those records still reach SOMETHING.
+    tracing::tracing_data* td_ptr = &captured_td;
+    tracing::tracing_data  fallback_td{};
+    if(captured_td.callback_contexts.empty() && captured_td.buffered_contexts.empty())
+    {
+        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                   ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                   ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
+                                   fallback_td);
+        td_ptr = &fallback_td;
+    }
+    auto& td = *td_ptr;
     if(td.callback_contexts.empty() && td.buffered_contexts.empty()) return;
 
     uint64_t start_ns = raw_start_ts;
@@ -192,15 +213,14 @@ emit_kernel_dispatch_tracing(hsa_agent_t                            hag,
     dispatch_info.queue_id  = rocprofiler_queue_id_t{queue->id};
     dispatch_info.kernel_id = rocprofiler_kernel_id_t{kid};
     dispatch_info.dispatch_id = dispatch_id;
-    // TODO(ai/KNOWN_ISSUES.md item 8): workgroup_size, grid_size, and
-    // segment sizes are zeroed because we do not yet read them off the
-    // AQL packet at lookup time. lookup_kernel_object() reads
-    // queue->base_address[dispatch_idx % size]; reading the same
-    // hsa_kernel_dispatch_packet_t for these fields is a small follow-up.
-    dispatch_info.workgroup_size       = {0, 0, 0};
-    dispatch_info.grid_size            = {0, 0, 0};
-    dispatch_info.private_segment_size = 0;
-    dispatch_info.group_segment_size   = 0;
+    // M2 fix: workgroup_size, grid_size, and segment sizes are now
+    // captured at doorbell-store time (Block 2) and threaded through
+    // here. For the fallback path (no slot match) these arrive as
+    // zero, matching prior behavior.
+    dispatch_info.workgroup_size       = {wg_x, wg_y, wg_z};
+    dispatch_info.grid_size            = {grid_x, grid_y, grid_z};
+    dispatch_info.private_segment_size = priv_seg;
+    dispatch_info.group_segment_size   = group_seg;
 
     auto tracer_data = rocprofiler_callback_tracing_kernel_dispatch_data_t{};
     tracer_data.size            = sizeof(tracer_data);
@@ -254,17 +274,25 @@ void
 process_dispatch_record(queue_ring_state_t* st,
                         uint32_t            dispatch_idx,
                         uint64_t            raw_start_ts,
-                        uint64_t            raw_end_ts,
-                        uint64_t            kernel_object)
+                        uint64_t            raw_end_ts)
 {
     // Look up correlation captured by the launching-thread doorbell hook.
     // See PHASE1_TRACING_ONLY_INTERCEPT_DESIGN.md §3.4-3.5.
     auto qstate = hsa::queue_intercept::lookup_queue_state(st->queue_ptr);
 
-    context::correlation_id*               cid    = nullptr;
-    rocprofiler_thread_id_t                thr_id = 0;
-    uint64_t                               enq_ts = 0;
+    context::correlation_id*               cid             = nullptr;
+    rocprofiler_thread_id_t                thr_id          = 0;
+    uint64_t                               enq_ts          = 0;
     tracing::external_correlation_id_map_t ext_ids;
+    // Block 2 (H6, M2): captured AQL packet data. Read out of the
+    // CorrEntry slot under slot_publish_mu so the drainer never reads
+    // the live AQL queue (which the application may have reused).
+    uint64_t                               kernel_obj_capt = 0;
+    uint16_t                               wg_x = 0, wg_y = 0, wg_z = 0;
+    uint32_t                               grid_x = 0, grid_y = 0, grid_z = 0;
+    uint32_t                               priv_seg = 0, group_seg = 0;
+    // Block 2 (H7): captured tracing context snapshot.
+    tracing::tracing_data                  captured_td;
 
     if(qstate && !qstate->corr_slots.empty())
     {
@@ -279,10 +307,20 @@ process_dispatch_record(queue_ring_state_t* st,
         if(slot.gen.load(std::memory_order_acquire) != 0 && slot.corr_id != nullptr &&
            static_cast<uint32_t>(slot.captured_wdid & 0xFFFFFFFFu) == dispatch_idx)
         {
-            cid     = slot.corr_id;
-            thr_id  = slot.tid;
-            enq_ts  = slot.enqueue_ts;
-            ext_ids = std::move(slot.external_corr_ids);
+            cid             = slot.corr_id;
+            thr_id          = slot.tid;
+            enq_ts          = slot.enqueue_ts;
+            ext_ids         = std::move(slot.external_corr_ids);
+            kernel_obj_capt = slot.kernel_object;
+            wg_x            = slot.workgroup_size_x;
+            wg_y            = slot.workgroup_size_y;
+            wg_z            = slot.workgroup_size_z;
+            grid_x          = slot.grid_size_x;
+            grid_y          = slot.grid_size_y;
+            grid_z          = slot.grid_size_z;
+            priv_seg        = slot.private_segment_size;
+            group_seg       = slot.group_segment_size;
+            captured_td     = std::move(slot.captured_tracing_data);
             // Consume: clear corr_id then gen.
             slot.corr_id = nullptr;
             slot.gen.store(0, std::memory_order_release);
@@ -303,6 +341,15 @@ process_dispatch_record(queue_ring_state_t* st,
         cid    = &fallback_cid;
         thr_id = common::get_tid();
         // ext_ids stays empty
+        // For fallback, there is no captured kernel_object — the slot
+        // either never existed (late-attach) or has already been
+        // cleared (alias rejection / destroy). Fall back to reading
+        // the live AQL queue. This restores prior behavior on the
+        // fallback path; it accepts the slot-reuse race for
+        // late-attach kernels, which is no worse than the situation
+        // before Block 2 (those kernels already had no correlation).
+        kernel_obj_capt = lookup_kernel_object(*st, dispatch_idx);
+        // wg/grid/segs stay zero on fallback — same as prior behavior.
     }
 
     auto dispatch_id = g_next_dispatch_id.fetch_add(1, std::memory_order_relaxed);
@@ -310,12 +357,16 @@ process_dispatch_record(queue_ring_state_t* st,
                                  st->queue,
                                  raw_start_ts,
                                  raw_end_ts,
-                                 kernel_object,
+                                 kernel_obj_capt,
                                  dispatch_id,
                                  cid,
                                  thr_id,
                                  std::move(ext_ids),
-                                 enq_ts);
+                                 enq_ts,
+                                 wg_x, wg_y, wg_z,
+                                 grid_x, grid_y, grid_z,
+                                 priv_seg, group_seg,
+                                 std::move(captured_td));
 
     // §3.5 Invariant 4: drainer-consume retirement path. Skip for the
     // fallback path (the fallback_cid is a static thread_local sentinel
@@ -418,20 +469,6 @@ register_or_refresh_queue(hsa_queue_t* queue, void* /*data*/)
 void
 drain_all()
 {
-    // Find any queue with a populated AQL ring; we use it as the source
-    // of kernel_object lookups when the queue we found the record on
-    // does not itself have a base_address. This is a multi-XCC
-    // workaround.
-    queue_ring_state_t* aql_qs = nullptr;
-    for(auto& [_, qs] : g_queue_rings)
-    {
-        if(qs.queue && qs.queue->base_address && qs.queue->size > 0)
-        {
-            aql_qs = &qs;
-            break;
-        }
-    }
-
     for(auto& [qid, qs] : g_queue_rings)
     {
         if(!qs.buf || qs.record_size == 0 || qs.ring_bytes < qs.record_size) continue;
@@ -448,15 +485,19 @@ drain_all()
         if(qs.last_consumed_dispatch_idx.size() != num_slots)
             qs.last_consumed_dispatch_idx.assign(num_slots, UINT32_MAX);
 
-        // Correlation lookup MUST use the queue that owns the
-        // firmware-ring records — the launching thread captured into
-        // THIS queue's corr_slots, not aql_qs's. The aql_qs fallback is
-        // ONLY for kernel_object lookup in the multi-XCC case where qs
-        // itself lacks a base_address.
+        // Correlation lookup uses the queue that owns the firmware-ring
+        // records — the launching thread captured into THIS queue's
+        // corr_slots. With Block 2 the captured kernel_object travels
+        // through CorrEntry, so the multi-XCC workaround that scanned
+        // for any queue with a populated base_address is no longer
+        // needed for the common (slot-hit) path. The fallback path
+        // inside process_dispatch_record reads the live AQL queue via
+        // lookup_kernel_object(*st, ...) — so st itself must have a
+        // base_address for the fallback to find a kernel object. Slot
+        // hits don't need this; slot misses produce zero kernel_object
+        // when st->queue->base_address is null, which is the same
+        // graceful degradation the multi-XCC workaround papered over.
         queue_ring_state_t* corr_lookup_qs = &qs;
-        queue_ring_state_t* kobj_lookup_qs =
-            (qs.queue && qs.queue->base_address) ? &qs : aql_qs;
-        if(!kobj_lookup_qs) continue;  // no source for kernel_object — skip
 
         // Walk forward from the per-ring read cursor. Bounded at
         // num_slots iterations per drain pass to keep per-tick work
@@ -509,11 +550,8 @@ drain_all()
                     const uint64_t start_ts = it->second;
                     qs.pending_starts.erase(it);
 
-                    const uint64_t kernel_obj =
-                        lookup_kernel_object(*kobj_lookup_qs, r16.dispatch_idx);
-
                     process_dispatch_record(
-                        corr_lookup_qs, r16.dispatch_idx, start_ts, ts, kernel_obj);
+                        corr_lookup_qs, r16.dispatch_idx, start_ts, ts);
                     corr_lookup_qs->dispatch_count++;
                 }
                 // No matching START: late-attached drainer or lost
