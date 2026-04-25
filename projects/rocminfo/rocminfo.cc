@@ -1180,6 +1180,10 @@ AcquireAndDisplayAgentInfo(hsa_agent_t agent, void* data) {
 }
 
 int CheckInitialState(void) {
+#ifdef __APPLE__
+  // Darwin uses the DriverKit MacOsDriver backend, not Linux ROCk/KFD.
+  return 0;
+#endif
   // Check kernel module for ROCk is loaded
 
   std::ifstream amdgpu_initstate("/sys/module/amdgpu/initstate");
