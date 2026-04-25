@@ -169,131 +169,115 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Dynamic library loading
 # ---------------------------------------------------------------------------
-# Two installation contexts exist, each shipping its own .so:
+# The AMD SMI Python wrapper is shipped in two contexts:
 #
-#   1. Linux system package (RPM / DEB)
-#      wrapper:  /opt/rocm/share/amd_smi/amdsmi/amdsmi_wrapper.py
-#      library:  /opt/rocm/lib/libamd_smi.so
-#      Note: /opt/rocm may be a symlink (e.g. /opt/rocm -> /opt/rocm-X.Y.Z).
-#            Path.resolve() handles this transparently.
+#   1. System package (RPM / DEB)
+#      wrapper:  <rocm_root>/share/amd_smi/amdsmi/amdsmi_wrapper.py
+#      library:  <rocm_root>/share/amd_smi/amdsmi/libamd_smi_python.so   (preferred)
+#                <rocm_root>/lib/libamd_smi.so                           (fallback)
 #
-#   2. Python pip package (wheel)
+#   2. pip wheel
 #      wrapper:  <site-packages>/amdsmi/amdsmi_wrapper.py
-#      library:  <site-packages>/amdsmi/libamd_smi_python.so
-#      The exact site-packages location varies per distro / venv / conda.
+#      library:  <site-packages>/amdsmi/libamd_smi_python.so             (bundled)
 #
-# Detection strategy (based on the absolute *resolved* path of THIS file):
-#   - If libamd_smi_python.so exists next to this wrapper -> pip context
-#   - Otherwise -> system-package context (derive ROCm root from path or env)
+# libamd_smi_python.so has a distinct SONAME (libamd_smi_python.so.<MAJOR>) so
+# it never collides with libamd_smi.so even when both end up in the same
+# process (e.g. when PyTorch loads librocm_smi64.so which transitively pulls
+# libamd_smi.so). This is the fix for ROCM-23477 / ROCm/TheRock#3702.
 #
-# Regardless of which .so is loaded, it is stored under the key
-#   _libraries['libamd_smi.so']
-# so every downstream ctypes binding in this wrapper works unchanged.
+# Search order (closest match wins, libamd_smi_python.so preferred):
+#   1.  <wrapper_dir>/libamd_smi_python.so          -- adjacent (wheel, system)
+#   2.  <rocm_root>/share/amd_smi/amdsmi/libamd_smi_python.so
+#   3.  <wrapper_dir>/libamd_smi.so                 -- legacy / BUILD_PYTHON_LIB=OFF
+#   4.  <rocm_root>/lib/libamd_smi.so               -- system fallback
+#   5.  $ROCM_HOME / $ROCM_PATH variants
+#   6.  bare names (let ld.so resolve via LD_LIBRARY_PATH / ld.so.conf.d)
+#
+# All paths are fully resolved so a symlinked /opt/rocm -> /opt/rocm-X.Y.Z is
+# handled transparently.
 # ---------------------------------------------------------------------------
 
-def _detect_install_context():
-    """Classify the current install as ``"pip"`` or ``"system"``.
 
-    Returns
-    -------
-    tuple[str, Path]
-        ``("pip",    module_dir)``  - *module_dir* contains the wrapper **and**
-        ``libamd_smi_python.so``.
-        ``("system", rocm_root)``   - *rocm_root* is the resolved ROCm prefix
-        (e.g. ``/opt/rocm``).
-
-    All paths are fully resolved so symlinks like
-    ``/opt/rocm -> /opt/rocm-X.Y.Z`` are handled automatically.
-    """
-    wrapper_path = Path(__file__).resolve()
-    module_dir = wrapper_path.parent # .../amdsmi/
-
-    # pip context
-    # The wheel ships libamd_smi_python.so right next to the wrapper.
-    if (module_dir / "libamd_smi_python.so").exists():
-        return "pip", module_dir
-
-    #  system-package context
-    # Expected layout:
-    #   <rocm_root>/share/amd_smi/amdsmi/amdsmi_wrapper.py
-    #   module_dir  = <rocm_root>/share/amd_smi/amdsmi
-    #   rocm_root   = module_dir / ../../..          (3 dirs up)
-    potential_rocm_root = module_dir.parent.parent.parent
-    if (potential_rocm_root / "lib").is_dir():
-        return "system", potential_rocm_root
-
-    # Fallback to ROCM_HOME / ROCM_PATH environment variables
-    for env_var in ("ROCM_HOME", "ROCM_PATH"):
-        env_val = os.getenv(env_var)
-        if env_val:
-            p = Path(env_val).resolve()
-            if (p / "lib").is_dir():
-                return "system", p
-
-    # Last resort - default ROCm location.
-    return "system", Path("/opt/rocm").resolve()
-
-
-def _build_candidate_paths():
+def _candidate_lib_paths():
     """Return an ordered list of .so paths to try, best-match first."""
-    context, base = _detect_install_context()
     candidates = []
+    seen = set()
 
-    if context == "pip":
-        # .so is self-contained inside the wheel / site-packages.
-        # Do NOT fall back to the system libamd_smi.so: loading both libraries
-        # in the same process causes segfaults during static initialisation of
-        # std::variant tables on older toolchains (GCC 8 / glibc 2.28).
-        candidates.append(base / "libamd_smi_python.so")
-        return candidates
+    def add(path):
+        s = str(path)
+        if s not in seen:
+            seen.add(s)
+            candidates.append(path)
 
-    # System package - .so lives under <rocm_root>/lib/
-    candidates.append(base / "lib" / "libamd_smi.so")
+    wrapper_dir = Path(__file__).resolve().parent
 
-    # Fallbacks
+    # 1. Adjacent libamd_smi_python.so (wheel + default system layout)
+    add(wrapper_dir / "libamd_smi_python.so")
+
+    # 2/4. Derive ROCm root from the wrapper's location
+    #      Expected:  <rocm_root>/share/amd_smi/amdsmi/amdsmi_wrapper.py
+    inferred_root = wrapper_dir.parent.parent.parent
+    if (inferred_root / "lib").is_dir() or (inferred_root / "share/amd_smi").is_dir():
+        add(inferred_root / "share/amd_smi/amdsmi/libamd_smi_python.so")
+        add(inferred_root / "lib/libamd_smi.so")
+
+    # 3. Adjacent libamd_smi.so (legacy BUILD_PYTHON_LIB=OFF)
+    add(wrapper_dir / "libamd_smi.so")
+
+    # 5. ROCM_HOME / ROCM_PATH env vars
     for env_var in ("ROCM_HOME", "ROCM_PATH"):
         env_val = os.getenv(env_var)
         if env_val:
-            candidates.append(Path(env_val) / "lib" / "libamd_smi.so")
+            p = Path(env_val)
+            add(p / "share/amd_smi/amdsmi/libamd_smi_python.so")
+            add(p / "lib/libamd_smi.so")
 
-    # Let the dynamic linker try LD_LIBRARY_PATH / ld.so.conf.d
-    candidates.append("libamd_smi.so")
+    # Default ROCm location (covers misconfigured envs)
+    add(Path("/opt/rocm/share/amd_smi/amdsmi/libamd_smi_python.so"))
+    add(Path("/opt/rocm/lib/libamd_smi.so"))
+
+    # 6. Bare names: let ld.so search LD_LIBRARY_PATH / ld.so.conf.d
+    add("libamd_smi_python.so")
+    add("libamd_smi.so")
 
     return candidates
 
 
-def _load_library():
-    """Load the AMD SMI shared library for the detected install context.
+def _load_amd_smi_library():
+    """Load the first AMD SMI shared library that opens successfully.
 
     Returns
     -------
     tuple[ctypes.CDLL, str]
-        The loaded library handle and the path that was successfully loaded.
+        Library handle and the path that was successfully loaded.
 
     Raises
     ------
     OSError
         If none of the candidate paths could be loaded.
     """
-    candidates = _build_candidate_paths()
-    last_err = None
-    mode = getattr(ctypes, "RTLD_LOCAL", 0)
+    candidates = _candidate_lib_paths()
+    errors = []
 
     for candidate in candidates:
         try:
-            lib = ctypes.CDLL(str(candidate), mode=mode)
-            return lib, str(candidate)
+            return ctypes.CDLL(str(candidate)), str(candidate)
         except OSError as exc:
-            last_err = exc
+            errors.append((str(candidate), str(exc)))
 
-    raise last_err or OSError(
-        "Could not load AMD SMI library.  Searched:\n"
-        + "\n".join(f"  - {c}" for c in candidates)
+    msg = ["Could not load AMD SMI shared library.  Tried:"]
+    for path, err in errors:
+        msg.append("  - {}: {}".format(path, err))
+    msg.append(
+        "Install amd-smi-lib from your package manager, "
+        "or set ROCM_HOME / ROCM_PATH to the ROCm install prefix."
     )
+    raise OSError("\n".join(msg))
 
 
-# The dict key stays 'libamd_smi.so' regardless of the actual .so loaded
-_libraries['libamd_smi.so'], _loaded_lib_path = _load_library()
+# Dict key is always 'libamd_smi.so' so all downstream ctypes bindings work
+# unchanged regardless of which physical .so was actually loaded.
+_libraries['libamd_smi.so'], _loaded_lib_path = _load_amd_smi_library()
 
 #Add support for amdsmi_free_name_value_pairs
 amdsmi_free_name_value_pairs = _libraries['libamd_smi.so'].amdsmi_free_name_value_pairs

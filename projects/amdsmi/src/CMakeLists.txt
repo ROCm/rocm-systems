@@ -9,7 +9,12 @@ message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
 ## Include common cmake modules
 include(utils)
 
-option(BUILD_PYTHON_LIB "Build Python-specific shared library for wheel packaging" OFF)
+# When ON, builds an additional shared library named libamd_smi_python.so that
+# is installed alongside the Python wrapper at <prefix>/share/amd_smi/amdsmi/.
+# Having a distinct SONAME avoids the inode-based DSO de-duplication conflict
+# that occurred when two physical copies of libamd_smi.so existed on disk
+# (see ROCM-23477, pytorch/pytorch#175648, ROCm/TheRock#3702).
+option(BUILD_PYTHON_LIB "Build the Python-facing shared library (libamd_smi_python.so)" ON)
 
 set(SO_VERSION_GIT_TAG_PREFIX "amdsmi_so_ver")
 
@@ -190,11 +195,7 @@ set_property(TARGET ${AMD_SMI} PROPERTY VERSION "${SO_VERSION_STRING}")
 if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     if(BUILD_BOTH_LIBS OR BUILD_SHARED_LIBS)
         if(TARGET ${AMD_SMI})
-            add_custom_command(
-                TARGET ${AMD_SMI}
-                POST_BUILD
-                COMMAND ${CMAKE_STRIP} lib${AMD_SMI}.so.${SO_VERSION_STRING}
-            )
+            add_custom_command(TARGET ${AMD_SMI} POST_BUILD COMMAND ${CMAKE_STRIP} $<TARGET_FILE:${AMD_SMI}>)
         endif()
     endif()
 endif()
@@ -242,20 +243,17 @@ if(BUILD_PYTHON_LIB)
     target_link_options(${AMD_SMI}_python PRIVATE "LINKER:--version-script=${VERSION_SCRIPT}")
     set_property(TARGET ${AMD_SMI}_python APPEND PROPERTY LINK_DEPENDS "${VERSION_SCRIPT}")
 
-    # Install pre-built Python wheel into share dir (built by CI before make package)
-    install(
-        CODE
-            "
-        file(GLOB WHEEL_FILES \"${CMAKE_BINARY_DIR}/py-interface/python_package/*.whl\")
-        if(WHEEL_FILES)
-            list(GET WHEEL_FILES 0 WHEEL_FILE)
-            message(STATUS \"Installing Python wheel into package: \\${WHEEL_FILE}\")
-            file(INSTALL DESTINATION \"\\${CMAKE_INSTALL_PREFIX}/share/amd_smi\"
-                 TYPE FILE FILES \"\\${WHEEL_FILE}\")
-        endif()
-    "
-        COMPONENT dev
-    )
+    ## Strip the python lib too on Release builds
+    if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
+        add_custom_command(TARGET ${AMD_SMI}_python POST_BUILD COMMAND ${CMAKE_STRIP} $<TARGET_FILE:${AMD_SMI}_python>)
+    endif()
+
+    ## Install libamd_smi_python.so* alongside the Python wrapper.
+    ## Destination: <prefix>/share/amd_smi/amdsmi/  (same dir as amdsmi_wrapper.py)
+    ## The python lib has a distinct SONAME (libamd_smi_python.so.${MAJOR}) so
+    ## it never collides with libamd_smi.so loaded by other consumers
+    ## (e.g. PyTorch). This is the fix for ROCM-23477 / TheRock#3702.
+    install(TARGETS ${AMD_SMI}_python LIBRARY DESTINATION ${SHARE_INSTALL_PREFIX}/amdsmi COMPONENT dev)
 endif()
 ## Add the install directives for the runtime library.
 set(_INSTALL_TARGETS ${AMD_SMI} amdsminic)

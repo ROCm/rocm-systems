@@ -12,6 +12,12 @@ set(PY_BUILD_DIR "python_package")
 # additionally defined in pyproject.toml
 set(PY_PACKAGE_DIR "${PY_BUILD_DIR}/amdsmi")
 set(PY_WRAPPER_INSTALL_DIR "${SHARE_INSTALL_PREFIX}" CACHE STRING "Wrapper installation directory")
+
+# Filename of the .so that ships next to the wrapper.
+#  - BUILD_PYTHON_LIB=ON  (default): libamd_smi_python.so (distinct SONAME, avoids
+#    the inode-dedup conflict that occurs when two copies of libamd_smi.so coexist)
+#  - BUILD_PYTHON_LIB=OFF: libamd_smi.so (legacy single-lib build; no .so installed
+#    into share/ -- the wrapper falls back to <prefix>/lib/libamd_smi.so at runtime)
 set(AMDSMI_PYTHON_LIB_NAME "libamd_smi.so")
 if(BUILD_PYTHON_LIB)
     set(AMDSMI_PYTHON_LIB_NAME "libamd_smi_python.so")
@@ -74,9 +80,14 @@ else()
             generator.py
             ${PROJECT_SOURCE_DIR}/include/amd_smi/amdsmi.h
         COMMAND cp ${PROJECT_SOURCE_DIR}/include/amd_smi/amdsmi.h ./
+        # Always pass libamd_smi.so to the generator so the resulting wrapper
+        # uses '_libraries["libamd_smi.so"]' as the binding-dict key. The actual
+        # .so loaded at runtime (libamd_smi_python.so or libamd_smi.so) is
+        # decided by the wrapper's loader logic; symbols are identical between
+        # the two .so files (same source, only SONAME differs).
         COMMAND
             ${Python3_EXECUTABLE} generator.py "$<$<BOOL:${ENABLE_ESMI_LIB}>:-e -DENABLE_ESMI_LIB>" -i amdsmi.h -l
-            ${AMDSMI_PYTHON_LIB_PATH} -o ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_wrapper.py
+            ${PROJECT_BINARY_DIR}/src/libamd_smi.so -o ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_wrapper.py
         COMMAND mkdir -p ${PY_PACKAGE_DIR}
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_wrapper.py ${PY_PACKAGE_DIR}/
     )
@@ -129,19 +140,42 @@ if(BUILD_PYTHON_LIB)
 endif()
 
 # Build a wheel into the binary dir; opt-in only (cmake --build . --target python_wheel)
-add_custom_target(
-    python_wheel
-    DEPENDS python_package
-    COMMAND
-        ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR} ${Python3_EXECUTABLE} -m pip
-        wheel --no-deps -w ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR} ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}
-    COMMENT "Building amdsmi wheel without dependencies"
-)
+if(Python3_Interpreter_FOUND)
+    add_custom_target(
+        python_wheel
+        DEPENDS python_package
+        COMMAND
+            ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR} ${Python3_EXECUTABLE} -m pip
+            wheel --no-deps -w ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR} ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}
+        COMMENT "Building amdsmi wheel without dependencies"
+    )
+else()
+    add_custom_target(
+        python_wheel
+        COMMAND ${CMAKE_COMMAND} -E echo "python_wheel target requires Python3 interpreter (not found)"
+        COMMAND ${CMAKE_COMMAND} -E false
+    )
+endif()
 
+# Install the package directory (amdsmi/) under <prefix>/share/amd_smi/.
+# The package's *.so files are intentionally NOT installed here; the runtime
+# .so (libamd_smi_python.so) is installed by src/CMakeLists.txt directly into
+# <prefix>/share/amd_smi/amdsmi/ so it lives next to the wrapper at runtime.
 install(
     DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}
     DESTINATION ${PY_WRAPPER_INSTALL_DIR}
     COMPONENT dev
     PATTERN "*.so" EXCLUDE
+)
+
+# pyproject.toml lives at <prefix>/share/amd_smi/ (one level above the
+# amdsmi/ package dir). The post-install hook does
+#   pip install <prefix>/share/amd_smi
+# to register the package with the system Python. Without this file the
+# pip install step in postinst.in fails.
+install(
+    FILES ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}/pyproject.toml
+    DESTINATION ${PY_WRAPPER_INSTALL_DIR}
+    COMPONENT dev
 )
