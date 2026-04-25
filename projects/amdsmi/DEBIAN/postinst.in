@@ -144,29 +144,25 @@ do_install_amdsmi_python_lib() {
   fi
 
  check_and_install_amdsmi() {
-  local setuptools_version
-  setuptools_version=$(python3 -c 'import setuptools; print(setuptools.__version__)')
-  if [ $? -ne 0 ]; then
-    echo "[WARNING] Could not determine setuptools version. "\
-      "AMD-SMI python library will not be installed."
+  # The package ships a pre-built wheel so pip never needs to compile anything.
+  # This works on any pip version that supports wheels (>= 1.5) regardless of
+  # setuptools version, Python version, or network availability.
+  local share_path=@CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@
+
+  # Guard: the wheel is owned by amd-smi-lib.  amd-smi-lib-tests installs first
+  # in a joint transaction, so the wheel may not be on disk yet when its
+  # scriptlet runs.  Skip gracefully and let amd-smi-lib's scriptlet handle it.
+  local wheel_file
+  wheel_file=$(ls "$share_path"/amdsmi-*.whl 2>/dev/null | head -1)
+  if [ -z "$wheel_file" ]; then
+    echo "INFO: No amdsmi wheel found at $share_path." \
+         "Python library will be registered by the amd-smi-lib package."
     return
   fi
 
-  # install python library at @CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@/amdsmi
-  local python_lib_path=@CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@
-  local amdsmi_python_lib_path="$python_lib_path"
-  local amdsmi_setup_py_path="$python_lib_path/setup.py"
-
-  # Decide installation method based on setuptools version
-  if [[ "$(printf '%s\n' "$setuptools_version" "28.5" | sort -V | head -n1)" == "$setuptools_version" ]]; then
-    echo "[WARNING] Setuptools version is less than 28.5. AMD-SMI will not be installed."
-  elif [[ "$(printf '%s\n' "$setuptools_version" "41.0.1" | sort -V | head -n1)" != "41.0.1" ]]; then
-    echo "Using setup.py for installation due to setuptools version $setuptools_version"
-    python3 "$amdsmi_setup_py_path" install
-  else
-    echo "Using pyproject.toml for installation due to setuptools version $setuptools_version"
-    python3 -m pip install "$amdsmi_python_lib_path" --quiet --disable-pip-version-check --no-build-isolation --no-index
-  fi
+  echo "Installing AMD-SMI Python package from wheel: $wheel_file"
+  python3 -m pip install "$wheel_file" \
+      --quiet --no-index --disable-pip-version-check
 }
 
   # Call the function

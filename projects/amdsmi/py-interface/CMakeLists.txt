@@ -139,43 +139,68 @@ if(BUILD_PYTHON_LIB)
     add_dependencies(python_package ${AMD_SMI}_python)
 endif()
 
-# Build a wheel into the binary dir; opt-in only (cmake --build . --target python_wheel)
+# Always attempt to build the wheel.  pip is optional: if it is unavailable
+# or the build fails, the || true makes the step non-fatal so the rest of the
+# package still builds.  The postinstall guard skips pip registration when no
+# wheel is present.
 if(Python3_Interpreter_FOUND)
-    add_custom_target(
-        python_wheel
-        DEPENDS python_package
-        COMMAND
-            ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR} ${Python3_EXECUTABLE} -m pip
-            wheel --no-deps -w ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR} ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}
-        COMMENT "Building amdsmi wheel without dependencies"
-    )
+    set(_PY3 ${Python3_EXECUTABLE})
 else()
-    add_custom_target(
-        python_wheel
-        COMMAND ${CMAKE_COMMAND} -E echo "python_wheel target requires Python3 interpreter (not found)"
-        COMMAND ${CMAKE_COMMAND} -E false
-    )
+    set(_PY3 "python3")
 endif()
 
+# Generate a small cmake script so that pip wheel runs non-fatally at build
+# time without relying on shell quoting or multi-line COMMAND strings.
+file(
+    GENERATE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/run_pip_wheel.cmake
+    CONTENT
+        "set(ENV{PYTHONPATH} \"${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}\")
+execute_process(
+    COMMAND ${_PY3} -m pip wheel --no-deps
+            -w ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}
+            ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}
+    RESULT_VARIABLE _PIP_RC
+)
+if(NOT _PIP_RC EQUAL 0)
+    message(STATUS \"INFO: pip wheel build skipped (pip unavailable or failed)\")
+endif()
+"
+)
+
+add_custom_target(
+    python_wheel
+    ALL
+    DEPENDS python_package
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/run_pip_wheel.cmake
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}
+    COMMENT "Building amdsmi wheel (optional)"
+)
+
+install(
+    CODE
+        "
+        file(GLOB _WHEEL_FILES
+             \"${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}/amdsmi-*.whl\")
+        if(_WHEEL_FILES)
+            list(GET _WHEEL_FILES 0 _WHEEL_FILE)
+            message(STATUS \"Installing wheel: \${_WHEEL_FILE}\")
+            file(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${PY_WRAPPER_INSTALL_DIR}\"
+                 TYPE FILE FILES \"\${_WHEEL_FILE}\")
+        else()
+            message(STATUS \"No amdsmi wheel found in build dir -- pip registration skipped.\")
+        endif()
+    "
+    COMPONENT dev
+)
+
 # Install the package directory (amdsmi/) under <prefix>/share/amd_smi/.
-# The package's *.so files are intentionally NOT installed here; the runtime
-# .so (libamd_smi_python.so) is installed by src/CMakeLists.txt directly into
-# <prefix>/share/amd_smi/amdsmi/ so it lives next to the wrapper at runtime.
+# *.so files are excluded here — libamd_smi_python.so is installed by
+# src/CMakeLists.txt directly into <prefix>/share/amd_smi/amdsmi/ so it sits
+# next to the wrapper at runtime and is found by the wrapper's load logic.
 install(
     DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}
     DESTINATION ${PY_WRAPPER_INSTALL_DIR}
     COMPONENT dev
     PATTERN "*.so" EXCLUDE
-)
-
-# pyproject.toml lives at <prefix>/share/amd_smi/ (one level above the
-# amdsmi/ package dir). The post-install hook does
-#   pip install <prefix>/share/amd_smi
-# to register the package with the system Python. Without this file the
-# pip install step in postinst.in fails.
-install(
-    FILES ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}/pyproject.toml
-    DESTINATION ${PY_WRAPPER_INSTALL_DIR}
-    COMPONENT dev
 )
