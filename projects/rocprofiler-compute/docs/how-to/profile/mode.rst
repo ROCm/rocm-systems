@@ -816,13 +816,6 @@ This is useful for:
 .. code-block:: shell-session
 
    $ rocprof-compute profile --name my_bench --bench-only
-   ...
-   INFO [roofline] Running roofline microbenchmark on device 0
-   GPU Device 0 (gfx942) with 304 CUs: Profiling...
-   ...
-   GPU Benchmarking completed
-   INFO [roofline] Roofline data saved to workloads/my_bench/MI300X_A1/roofline.csv
-     Run 'rocprof-compute analyze -p workloads/my_bench/MI300X_A1' for charts
 
 To target a specific GPU device, use ``--device``:
 
@@ -836,9 +829,6 @@ To regenerate benchmark data in an existing profiled workload directory, use
 .. code-block:: shell-session
 
    $ rocprof-compute profile --bench-only --output-directory workloads/vcopy/MI300X_A1
-   ...
-   INFO [roofline] Roofline data saved to workloads/vcopy/MI300X_A1/roofline.csv
-     Run 'rocprof-compute analyze -p workloads/vcopy/MI300X_A1' for charts
 
 .. _torch-operator-mapping:
 

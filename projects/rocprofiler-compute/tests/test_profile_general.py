@@ -1317,9 +1317,9 @@ def test_bench_only_basic(binary_handler_profile_rocprof_compute):
     assert returncode == 0
     roofline_csv = Path(workload_dir) / "roofline.csv"
     assert roofline_csv.exists(), f"Expected {roofline_csv} to be created"
-    # Bench-only must not produce profiling artifacts (no perfmon/, no pmc_perf_*.csv)
+    # Bench-only must not produce profiling artifacts.
     assert not (Path(workload_dir) / "perfmon").exists()
-    assert not list(Path(workload_dir).glob("pmc_perf_*.csv"))
+    assert not list(Path(workload_dir).glob("results_*.csv"))
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
