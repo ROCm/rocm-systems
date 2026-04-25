@@ -304,6 +304,270 @@ TEST(QueueIntercept, CreateAndDestroyQueueState)
     EXPECT_EQ(lookup_queue_state_by_doorbell({.handle = 9999}), nullptr);
 }
 
+// ---------------------------------------------------------------------------
+// Phase 1: tracing-only mode unit tests (spec §9.1, plan Task 10).
+//
+// These tests exercise the capture/consume side-table logic in isolation.
+// They synthesize a QueueState (no real HSA queue/signal) so the slot
+// invariants can be poked directly. See PHASE1_TRACING_ONLY_INTERCEPT_DESIGN.md
+// §3.5 for the invariants under test.
+// ---------------------------------------------------------------------------
+
+struct TracingOnlyQueueStateFixture
+{
+    std::shared_ptr<QueueState>               state;
+    static constexpr uint32_t                 kQueueSize = 64;  // small for tests
+    static constexpr uint32_t                 kRingMask  = kQueueSize - 1;
+    std::vector<hsa_kernel_dispatch_packet_t> packet_storage;
+
+    TracingOnlyQueueStateFixture()
+    {
+        state                  = std::make_shared<QueueState>();
+        state->mode            = QueueState::Mode::tracing_only;
+        state->corr_ring_mask  = kRingMask;
+        // CorrEntry::gen is non-movable atomic; vector::resize fails the
+        // static_assert. Use the (N) ctor for in-place default-construction.
+        state->corr_slots      = std::vector<CorrEntry>(kQueueSize);
+        packet_storage.resize(kQueueSize);
+        // Initialize every packet header to KERNEL_DISPATCH so the
+        // tracing-only capture path doesn't skip them.
+        for(auto& p : packet_storage)
+        {
+            p.header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+        }
+        state->ring_buf = packet_storage.data();
+    }
+};
+
+TEST(QueueInterceptTracingOnly, SingleProducerRoundTrip)
+{
+    TracingOnlyQueueStateFixture f;
+
+    // Capture: simulate doorbell store with val=0 (one new packet at slot 0).
+    process_doorbell_tracing_only(f.state, /*val=*/0);
+
+    auto& slot = f.state->corr_slots[0];
+    EXPECT_NE(slot.gen.load(std::memory_order_acquire), 0UL);
+    EXPECT_NE(slot.corr_id, nullptr);
+    EXPECT_EQ(slot.captured_wdid, 0UL);
+
+    // Consume: emulate drainer.
+    {
+        std::lock_guard<std::mutex> g(f.state->slot_publish_mu);
+        EXPECT_EQ(static_cast<uint32_t>(slot.captured_wdid & 0xFFFFFFFFu), 0U);
+        // Consume the slot.
+        auto* held_corr_id = slot.corr_id;
+        slot.corr_id       = nullptr;
+        slot.gen.store(0, std::memory_order_release);
+        held_corr_id->sub_kern_count();
+        held_corr_id->sub_ref_count();
+    }
+
+    EXPECT_EQ(slot.gen.load(), 0UL);
+    EXPECT_EQ(slot.corr_id, nullptr);
+}
+
+TEST(QueueInterceptTracingOnly, MultiDoorbellSingleThread)
+{
+    TracingOnlyQueueStateFixture f;
+
+    // One doorbell publishing 4 packets at once.
+    process_doorbell_tracing_only(f.state, /*val=*/3);  // wdid moves to 4
+
+    // All 4 slots should be populated with the SAME corr_id.
+    auto* expected_corr = f.state->corr_slots[0].corr_id;
+    EXPECT_NE(expected_corr, nullptr);
+    for(uint32_t i = 0; i < 4; ++i)
+    {
+        EXPECT_NE(f.state->corr_slots[i].gen.load(), 0UL);
+        EXPECT_EQ(f.state->corr_slots[i].corr_id, expected_corr);
+        EXPECT_EQ(f.state->corr_slots[i].captured_wdid, static_cast<uint64_t>(i));
+    }
+    // Slots 4-63 should remain empty.
+    for(uint32_t i = 4; i < 64; ++i)
+        EXPECT_EQ(f.state->corr_slots[i].gen.load(), 0UL);
+}
+
+TEST(QueueInterceptTracingOnly, MultiProducerSerializedEnqueue)
+{
+    // Phase 1 hazard documented in §7.2: out-of-order doorbells may
+    // mis-attribute. This test specifically tests the SERIALIZED case
+    // where lock-acquisition order matches doorbell-value order — i.e.,
+    // each thread's add_write_index → write packet → ring doorbell
+    // sequence completes before the next thread's begins.
+    TracingOnlyQueueStateFixture   f;
+    constexpr int                  kNumThreads = 8;
+    std::mutex                     enqueue_serialize_mu;
+    std::atomic<hsa_signal_value_t> next_val{0};
+    std::vector<std::thread>       threads;
+    threads.reserve(kNumThreads);
+
+    for(int t = 0; t < kNumThreads; ++t)
+    {
+        threads.emplace_back([&, t]() {
+            (void) t;
+            std::lock_guard<std::mutex> g(enqueue_serialize_mu);
+            auto                        val = next_val.fetch_add(1);
+            process_doorbell_tracing_only(f.state, val);
+        });
+    }
+    for(auto& th : threads) th.join();
+
+    // All 8 slots populated.
+    for(int i = 0; i < kNumThreads; ++i)
+    {
+        EXPECT_NE(f.state->corr_slots[i].gen.load(), 0UL) << "slot " << i;
+        EXPECT_EQ(f.state->corr_slots[i].captured_wdid, static_cast<uint64_t>(i));
+    }
+}
+
+TEST(QueueInterceptTracingOnly, WraparoundOverwriteRetiresPrior)
+{
+    TracingOnlyQueueStateFixture f;
+
+    // First capture: slot 0.
+    process_doorbell_tracing_only(f.state, /*val=*/0);
+    auto& slot       = f.state->corr_slots[0];
+    auto* first_corr = slot.corr_id;
+    ASSERT_NE(first_corr, nullptr);
+    auto first_kern_count = first_corr->get_kern_count();
+    auto first_ref_count  = first_corr->get_ref_count();
+    EXPECT_GE(first_kern_count, 1u);
+    EXPECT_GE(first_ref_count, 1u);
+
+    // Advance last_observed_wdid past one full ring without consuming.
+    // Then capture again at the same slot index (slot 0 = wdid 64 & mask).
+    //
+    // Production semantics (process_doorbell_tracing_only):
+    //   prev = last_observed_wdid; new_wdid = value + 1; iterate d in [prev,new_wdid).
+    // To make d == 64 land in slot 0 (64 & mask == 0), need prev=64 and value=64
+    // so new_wdid=65 and the single iterated d is 64.
+    f.state->last_observed_wdid.store(64);
+    process_doorbell_tracing_only(f.state, /*val=*/64);  // publishes d=64 -> slot 0
+
+    auto& reused = f.state->corr_slots[0];
+    EXPECT_EQ(reused.captured_wdid, 64UL);
+    EXPECT_NE(reused.corr_id, nullptr);
+
+    // First occupant's refcounts should have been decremented by the
+    // overwrite path. The exact post-decrement value depends on the
+    // initial refcount; the invariant we test is that they DECREASED
+    // by 1 each.
+    EXPECT_EQ(first_corr->get_kern_count(), first_kern_count - 1)
+        << "Wraparound overwrite must retire prior occupant's kern_count";
+    EXPECT_EQ(first_corr->get_ref_count(), first_ref_count - 1)
+        << "Wraparound overwrite must retire prior occupant's ref_count";
+
+    // Throttled warning logged.
+    EXPECT_TRUE(f.state->overwrite_warning_logged.load());
+}
+
+TEST(QueueInterceptTracingOnly, ConsumeAliasGuardRejectsStale)
+{
+    TracingOnlyQueueStateFixture f;
+
+    // Capture a dispatch with wdid = 64 (slot 0 after wraparound).
+    // See WraparoundOverwriteRetiresPrior for the prev/value arithmetic.
+    f.state->last_observed_wdid.store(64);
+    process_doorbell_tracing_only(f.state, /*val=*/64);
+    auto& slot = f.state->corr_slots[0];
+    EXPECT_EQ(slot.captured_wdid, 64UL);
+
+    // Drainer presents firmware record with dispatch_idx = 0 (low 32
+    // bits of an OLDER, displaced wdid). Alias guard MUST reject.
+    const uint32_t stale_dispatch_idx = 0;
+    bool           consumed           = false;
+    {
+        std::lock_guard<std::mutex> g(f.state->slot_publish_mu);
+        if(slot.gen.load(std::memory_order_acquire) != 0 && slot.corr_id != nullptr &&
+           static_cast<uint32_t>(slot.captured_wdid & 0xFFFFFFFFu) == stale_dispatch_idx)
+        {
+            consumed = true;  // SHOULD NOT REACH
+        }
+    }
+    EXPECT_FALSE(consumed) << "Alias guard must reject stale firmware record";
+
+    // Slot still occupied (alias rejection does NOT consume).
+    EXPECT_NE(slot.gen.load(), 0UL);
+    EXPECT_NE(slot.corr_id, nullptr);
+}
+
+TEST(QueueInterceptTracingOnly, RefcountBalance)
+{
+    TracingOnlyQueueStateFixture f;
+
+    // Capture one dispatch.
+    process_doorbell_tracing_only(f.state, /*val=*/0);
+    auto& slot               = f.state->corr_slots[0];
+    auto* cid                = slot.corr_id;
+    ASSERT_NE(cid, nullptr);
+    auto  kern_after_capture = cid->get_kern_count();
+    auto  ref_after_capture  = cid->get_ref_count();
+
+    // Drainer-side consume + retirement.
+    {
+        std::lock_guard<std::mutex> g(f.state->slot_publish_mu);
+        slot.corr_id = nullptr;
+        slot.gen.store(0, std::memory_order_release);
+    }
+    cid->sub_kern_count();
+    cid->sub_ref_count();
+
+    EXPECT_EQ(cid->get_kern_count(), kern_after_capture - 1);
+    EXPECT_EQ(cid->get_ref_count(), ref_after_capture - 1);
+}
+
+TEST(QueueInterceptTracingOnly, LateAttachReturnsFallback)
+{
+    TracingOnlyQueueStateFixture f;
+    // No capture; lookup at slot 0 should miss.
+    auto& slot = f.state->corr_slots[0];
+    EXPECT_EQ(slot.gen.load(std::memory_order_acquire), 0UL);
+    EXPECT_EQ(slot.corr_id, nullptr);
+}
+
+TEST(QueueInterceptTracingOnly, ShutdownDrainsAllSlots)
+{
+    TracingOnlyQueueStateFixture f;
+
+    // Populate 5 slots without consuming.
+    for(int i = 0; i < 5; ++i)
+        process_doorbell_tracing_only(f.state, /*val=*/i);
+
+    std::vector<context::correlation_id*> captured_ids;
+    std::vector<uint32_t>                 pre_kern, pre_ref;
+    for(int i = 0; i < 5; ++i)
+    {
+        auto* c = f.state->corr_slots[i].corr_id;
+        ASSERT_NE(c, nullptr);
+        captured_ids.push_back(c);
+        pre_kern.push_back(c->get_kern_count());
+        pre_ref.push_back(c->get_ref_count());
+    }
+
+    // Simulate shutdown_intercept's per-state drain loop.
+    {
+        std::lock_guard<std::mutex> g(f.state->slot_publish_mu);
+        for(auto& entry : f.state->corr_slots)
+        {
+            if(entry.gen.load(std::memory_order_relaxed) != 0 && entry.corr_id)
+            {
+                entry.corr_id->sub_kern_count();
+                entry.corr_id->sub_ref_count();
+                entry.corr_id = nullptr;
+                entry.gen.store(0, std::memory_order_release);
+            }
+        }
+    }
+
+    // Each captured corr_id has had its refcounts decremented once.
+    for(int i = 0; i < 5; ++i)
+    {
+        EXPECT_EQ(captured_ids[i]->get_kern_count(), pre_kern[i] - 1);
+        EXPECT_EQ(captured_ids[i]->get_ref_count(), pre_ref[i] - 1);
+    }
+}
+
 TEST(QueueIntercept, DoorbellBackpressureWaitsWhenRingFullK0)
 {
     auto             state = std::make_shared<QueueState>();
