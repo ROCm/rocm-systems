@@ -432,11 +432,21 @@ void
 destroy_queue_state(const hsa_queue_t* queue)
 {
     // §3.5 Invariants 3 (single mutex) and 4 (exactly-once retirement):
-    // Drain any captured-but-not-consumed corr_slots BEFORE erasing the
-    // QueueState from the registry. Doing this after erase would race
-    // with lookup_queue_state returning null and leak correlation_id
-    // refcounts. The slot_publish_mu serializes against in-flight
-    // capture (launch path) and consume (drainer).
+    // Unregister the doorbell FIRST so new doorbell stores cannot find
+    // this QueueState. Otherwise a launching thread could ring a
+    // doorbell between drain and registry-erase, capture into the
+    // just-drained slots via lookup_queue_state_by_doorbell, and leak
+    // correlation_id refcounts when the shared_ptr drops.
+    hsa_signal_t doorbell = {0};
+    if(auto state = lookup_queue_state(queue))
+    {
+        doorbell = state->doorbell_signal;
+    }
+    if(doorbell.handle != 0) unregister_doorbell(doorbell);
+
+    // Now safe to drain. New doorbell stores will see no QueueState in
+    // the doorbell map and chain through unmodified. The slot_publish_mu
+    // serializes against any drainer-consume still in flight.
     if(auto state = lookup_queue_state(queue))
     {
         std::lock_guard<std::mutex> g(state->slot_publish_mu);
@@ -452,21 +462,15 @@ destroy_queue_state(const hsa_queue_t* queue)
         }
     }
 
-    hsa_signal_t      doorbell = {0};
-    queue_state_ptr_t doomed   = {};
+    // Finally, erase from the queue registry so the QueueState's
+    // shared_ptr drops to zero and the memory is freed.
+    queue_state_ptr_t doomed = {};
     get_queue_registry().wlock([&](auto& map) {
         auto it = map.find(queue);
-        if(it == map.end())
-        {
-            return;
-        }
+        if(it == map.end()) return;
         doomed = it->second;
-        if(doomed) doorbell = doomed->doorbell_signal;
         map.erase(it);
     });
-
-    if(!doomed) return;
-    if(doorbell.handle != 0) unregister_doorbell(doorbell);
 }
 
 namespace
