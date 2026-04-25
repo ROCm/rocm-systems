@@ -282,7 +282,10 @@ TEST(QueueIntercept, CreateAndDestroyQueueState)
     uint64_t fake_wdid = 0;
     uint64_t fake_rdid = 0;
 
-    create_queue_state(&fake_queue, &fake_wdid, &fake_rdid);
+    create_queue_state(&fake_queue,
+                       &fake_wdid,
+                       &fake_rdid,
+                       QueueState::Mode::full_intercept);
 
     auto state = lookup_queue_state(&fake_queue);
     ASSERT_NE(state, nullptr);

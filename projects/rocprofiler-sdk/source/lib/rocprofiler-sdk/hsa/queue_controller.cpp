@@ -244,6 +244,8 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 {
     CHECK(queue);
     const auto agent_id = queue->get_agent().get_rocp_agent()->id;
+    // Capture mode BEFORE std::move below; queue is invalid afterwards.
+    const auto queue_mode = queue->mode();
 
     _callback_cache.wlock([&](auto& callbacks) {
         _queues.wlock([&](auto& map) {
@@ -260,8 +262,14 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
     });
 
     // Register queue state for SDK-level write pointer interception
-    auto* amd_q = reinterpret_cast<amd_queue_t*>(id);
-    queue_intercept::create_queue_state(id, &amd_q->write_dispatch_id, &amd_q->read_dispatch_id);
+    auto*      amd_q        = reinterpret_cast<amd_queue_t*>(id);
+    const auto qstate_mode  = (queue_mode == Queue::Mode::tracing_only)
+                                  ? queue_intercept::QueueState::Mode::tracing_only
+                                  : queue_intercept::QueueState::Mode::full_intercept;
+    queue_intercept::create_queue_state(id,
+                                        &amd_q->write_dispatch_id,
+                                        &amd_q->read_dispatch_id,
+                                        qstate_mode);
 }
 
 void

@@ -279,14 +279,21 @@ process_doorbell_tracing_only(const queue_state_ptr_t& state, hsa_signal_value_t
  * queue registry and doorbell map. This should be called when a queue is
  * created by the application.
  *
- * @param queue The HSA queue to create state for
- * @param wdid_addr Pointer to the queue's real write doorbell index
- * @param rdid_addr Pointer to the queue's real read doorbell index
+ * @param queue The HSA queue to create state for (real, not intercept queue,
+ *              in tracing-only mode)
+ * @param wdid_addr Pointer to the queue's real write doorbell index (into the
+ *                  queue's amd_queue_t mqd fields)
+ * @param rdid_addr Pointer to the queue's real read doorbell index (into the
+ *                  queue's amd_queue_t mqd fields)
+ * @param mode Which Mode this QueueState should operate in. Tracing-only
+ *             allocates corr_slots sized to queue->size; full_intercept
+ *             leaves them empty.
  */
 void
 create_queue_state(const hsa_queue_t* queue,
                    volatile uint64_t* wdid_addr,
-                   volatile uint64_t* rdid_addr);
+                   volatile uint64_t* rdid_addr,
+                   QueueState::Mode   mode);
 
 /**
  * @brief Destroy and unregister queue state

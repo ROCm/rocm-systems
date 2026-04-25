@@ -389,8 +389,14 @@ process_doorbell_tracing_only(const queue_state_ptr_t& state, hsa_signal_value_t
 void
 create_queue_state(const hsa_queue_t* queue,
                    volatile uint64_t* wdid_addr,
-                   volatile uint64_t* rdid_addr)
+                   volatile uint64_t* rdid_addr,
+                   QueueState::Mode   mode)
 {
+    // Idempotency guard: if a QueueState already exists for this
+    // queue (e.g., late-attach raced with normal queue creation),
+    // return without overwriting.
+    if(lookup_queue_state(queue)) return;
+
     auto     state         = std::make_shared<QueueState>();
     uint64_t current_wdid  = __atomic_load_n(wdid_addr, __ATOMIC_ACQUIRE);
     state->ring_buf        = queue->base_address;
@@ -403,6 +409,20 @@ create_queue_state(const hsa_queue_t* queue,
     state->virtual_wptr.store(current_wdid, std::memory_order_relaxed);
     state->next_scan_pos   = current_wdid;
     state->next_submit_pos = current_wdid;
+
+    // Phase 1 fields.
+    state->mode               = mode;
+    state->corr_ring_mask     = queue->size - 1;
+    state->last_observed_wdid.store(current_wdid, std::memory_order_relaxed);
+    if(mode == QueueState::Mode::tracing_only)
+    {
+        // CorrEntry has std::atomic<uint64_t> gen, which is neither copy- nor
+        // move-constructible. vector::resize() instantiates the relocation
+        // path and fails the static_assert on libstdc++. The vector(N) ctor
+        // allocates and default-initializes in place — no relocation — which
+        // works for non-movable element types.
+        state->corr_slots = std::vector<CorrEntry>(queue->size);
+    }
 
     get_queue_registry().wlock([&](auto& map) { map[queue] = state; });
     get_doorbell_map().wlock([&](auto& map) { map[queue->doorbell_signal.handle] = state; });
