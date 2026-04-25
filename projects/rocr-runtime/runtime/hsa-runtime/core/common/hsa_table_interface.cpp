@@ -43,6 +43,35 @@
 #include "inc/hsa_api_trace.h"
 #include "core/inc/hsa_api_trace_int.h"
 
+#include "lttng/rocm_trace_emit.h"
+#include "lttng/rocm_trace_tid.h"
+
+/* Three typed exit macros mirror Phase 2's HIP-side. The libclang AST
+ * migration in scripts/lttng_migrate.py inserts the matching macro
+ * into each wrapper based on the wrapper's return type. __rocm_corr is
+ * declared at the top of each migrated wrapper body by the same pass. */
+#define ROCR_TRACE_API_RET_STATUS(EXPR)                                        \
+    do {                                                                       \
+        const auto __rocm_rv = (EXPR);                                         \
+        rocm_trace_emit_hsa_api_exit_status(__func__, __rocm_corr,             \
+                                            static_cast<int32_t>(__rocm_rv));  \
+        return __rocm_rv;                                                      \
+    } while (0)
+
+#define ROCR_TRACE_API_RET_PTR(EXPR)                                           \
+    do {                                                                       \
+        auto* __rocm_rv = (EXPR);                                              \
+        rocm_trace_emit_hsa_api_exit_ptr(__func__, __rocm_corr, __rocm_rv);    \
+        return __rocm_rv;                                                      \
+    } while (0)
+
+#define ROCR_TRACE_API_RET_VOID(EXPR)                                          \
+    do {                                                                       \
+        (EXPR);                                                                \
+        rocm_trace_emit_hsa_api_exit_void(__func__, __rocm_corr);              \
+        return;                                                                \
+    } while (0)
+
 static const HsaApiTable* hsaApiTable;
 static const CoreApiTable* coreApiTable;
 static const AmdExtTable* amdExtTable;
