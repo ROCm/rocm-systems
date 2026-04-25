@@ -6,7 +6,6 @@
 #include "configuration.h"
 #include "environment.h"
 #include "hip.h"
-#include "static.h"
 
 #include <optional>
 
@@ -15,9 +14,9 @@ using namespace hipFile;
 bool
 Configuration::fastpath() const noexcept
 {
-    HIPFILE_STATIC bool fastpath_env{!Environment::force_compat_mode().value_or(false)};
-    HIPFILE_STATIC bool readExists{!!getHipAmdFileReadPtr()};
-    HIPFILE_STATIC bool writeExists{!!getHipAmdFileWritePtr()};
+    static bool fastpath_env{!Environment::force_compat_mode().value_or(false)};
+    static bool readExists{!!getHipAmdFileReadPtr()};
+    static bool writeExists{!!getHipAmdFileWritePtr()};
     return readExists && writeExists && m_fastpath_override.value_or(fastpath_env);
 }
 
@@ -30,7 +29,7 @@ Configuration::fastpath(bool enabled) noexcept
 bool
 Configuration::fallback() const noexcept
 {
-    HIPFILE_STATIC bool fallback_env{Environment::allow_compat_mode().value_or(true)};
+    static bool fallback_env{Environment::allow_compat_mode().value_or(true)};
     return m_fallback_override.value_or(fallback_env);
 }
 
@@ -43,13 +42,13 @@ Configuration::fallback(bool enabled) noexcept
 unsigned int
 Configuration::statsLevel() const noexcept
 {
-    HIPFILE_STATIC unsigned int stats_level_env{Environment::stats_level().value_or(1)};
+    static unsigned int stats_level_env{Environment::stats_level().value_or(1)};
     return stats_level_env;
 }
 
 bool
 Configuration::unsupportedFileSystems() const noexcept
 {
-    HIPFILE_STATIC bool unsupported_file_systems_env{Environment::unsupported_file_systems().value_or(false)};
+    static bool unsupported_file_systems_env{Environment::unsupported_file_systems().value_or(false)};
     return unsupported_file_systems_env;
 }

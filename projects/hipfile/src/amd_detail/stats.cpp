@@ -424,7 +424,7 @@ StatsIoTracker::complete(uint64_t bytes) const noexcept
 void
 StatsCollection::addIo(IoType ioType, StatsBackend backend, uint64_t bytes, uint64_t timeUs) const noexcept
 {
-    Stats *stats{Context<StatsServer>::get()->getStats()};
+    Stats *stats{Context<IStatsServer>::get()->getStats()};
     if (stats == nullptr || stats->getLevel() < StatsLevel::Basic) {
         return;
     }

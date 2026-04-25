@@ -939,6 +939,7 @@ typedef struct {
   uint32_t hsa_id;                          //!< the HSA enumeration ID
   uint32_t hip_id;                          //!< the HIP enumeration ID
   char hip_uuid[AMDSMI_MAX_STRING_LENGTH];  //!< the HIP unique identifier
+  uint32_t oam_id;                          //!< Physical XGMI ID / OAM ID (0xFFFFFFFF if N/A)
 } amdsmi_enumeration_info_t;
 
 /**

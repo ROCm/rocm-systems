@@ -81,6 +81,22 @@ if ! command -v clang-format &>/dev/null; then
   exit 1
 fi
 
+# Reorder: headers first, then .cpp. Hand-written and most autogen .h
+# files format in milliseconds, while the autogen .cpp files under
+# isa/arch/amdgpu/*/ can take tens of seconds each. Checking headers
+# first lets fail-fast surface the common-case failure (a hand-written
+# file with bad formatting) before workers start chewing on the slow
+# .cpp files.
+declare -a _headers=() _sources=()
+for _f in "${staged[@]}"; do
+  case "$_f" in
+    *.h)   _headers+=("$_f") ;;
+    *.cpp) _sources+=("$_f") ;;
+  esac
+done
+staged=("${_headers[@]}" "${_sources[@]}")
+unset _headers _sources _f
+
 # Check each file by piping its *staged* content into clang-format.
 #   git show ":0:$f"   the contents of $f at stage 0 of the index (i.e.
 #                      what will be committed). This is independent of any
@@ -93,16 +109,32 @@ fi
 #                      rather than letting clang-format search upward
 #                      (which could pick up a different config from the
 #                      parent repo).
-bad=()
-for f in "${staged[@]}"; do
+#
+# Worker prints the path and exits 255 on a bad file. xargs treats
+# 255 as "stop launching new workers", giving fail-fast across the
+# parallel pool — in-flight workers still complete, so `bad` may end
+# up with a few paths rather than just one.
+check_one() {
+  local f="$1"
   if ! git -C "$GIT_ROOT" show ":0:$f" \
         | clang-format --dry-run --Werror \
                        -style=file:"$ROCJITSU_DIR/.clang-format" \
                        --assume-filename="$f" \
                        &>/dev/null; then
-    bad+=("$f")
+    printf '%s\0' "$f"
+    exit 255
   fi
-done
+}
+export -f check_one
+export GIT_ROOT ROCJITSU_DIR
+
+# Fan checks out across all cores. xargs's non-zero exit doesn't abort
+# the script (process substitution is exempt from `set -e`); we detect
+# failure via `bad[@]` below.
+mapfile -d '' -t bad < <(
+  printf '%s\0' "${staged[@]}" \
+    | xargs -0 -n1 -P "$(nproc)" bash -c 'check_one "$1"' _
+)
 
 # If any file would be reformatted, abort the commit with a message
 # pointing the user at the fix. Exit 1 tells git to reject the commit.

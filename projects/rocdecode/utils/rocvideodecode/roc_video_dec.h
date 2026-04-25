@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <string>
 #include <iostream>
 #include <sstream>
+#include <iomanip>
 #include <string.h>
 #include <queue>
 #include <stdexcept>
@@ -39,7 +40,6 @@ THE SOFTWARE.
 #include <ctime>
 #include <time.h>
 #include <unistd.h>
-#include <sys/syscall.h>
 #include <hip/hip_runtime.h>
 #include "rocdecode/rocdecode.h"
 #include "rocdecode/rocparser.h"
@@ -48,16 +48,19 @@ THE SOFTWARE.
 #define ROCVIDEODEC_STR(X) std::string(X)
 
 // Simple logging macros - format matches src/commons.h:
-//   [0, Critical] filename:line: timestamp_us us: [pid:X tid:Y] func(): message
+//   [0, Critical] filename:line: timestamp_us us: [pid:X tid: 0xYYYYY] func(): message
 #define RocVideoDecCriticalLog(msg) \
     do { \
         struct timespec _ts_; \
         clock_gettime(CLOCK_MONOTONIC, &_ts_); \
         uint64_t _us_ = static_cast<uint64_t>(_ts_.tv_sec) * 1000000ULL + _ts_.tv_nsec / 1000ULL; \
         const char *_f_ = strrchr(__FILE__, '/'); \
+        std::ostringstream _tid_oss_; \
+        _tid_oss_ << "0x" << std::hex << std::setw(5) << std::setfill('0') \
+                  << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); \
         std::cerr << "[0, Critical] " << (_f_ ? _f_ + 1 : __FILE__) \
                   << ":" << __LINE__ << ": " << _us_ << " us: [pid:" \
-                  << getpid() << " tid:" << syscall(SYS_gettid) << "] " \
+                  << getpid() << " tid: " << _tid_oss_.str() << "] " \
                   << __func__ << "(): " << (msg) << std::endl; \
     } while (0)
 
@@ -325,13 +328,13 @@ class RocVideoDecoder {
          */
         int FlushAndReconfigure();
         /**
-         * @brief this function decodes a frame and returns the number of frames avalable for display
+         * @brief this function decodes a frame and returns the number of frames available for display
          * 
-         * @param data - pointer to the data buffer that is to be decode
+         * @param data - pointer to the data buffer that is to be decoded
          * @param size - size of the data buffer in bytes
          * @param pts - presentation timestamp
          * @param flags - video packet flags
-         * @param num_decoded_pics - nummber of pictures decoded in this call
+         * @param num_decoded_pics - number of pictures decoded in this call
          * @return int - num of frames to display
          */
         virtual int DecodeFrame(const uint8_t *data, size_t size, int pkt_flags, int64_t pts = 0, int *num_decoded_pics = nullptr);
@@ -347,7 +350,7 @@ class RocVideoDecoder {
          * @param pTimestamp - timestamp of the frame to be released (unmapped)
          * @param b_flushing - true when flushing
          * @return true      - success
-         * @return false     - falied
+         * @return false     - failed
          */
         virtual bool ReleaseFrame(int64_t pTimestamp, bool b_flushing = false);
 
@@ -383,7 +386,7 @@ class RocVideoDecoder {
         virtual void SaveFrameToFile(std::string output_file_name, void *surf_mem, OutputSurfaceInfo *surf_info, size_t rgb_image_size = 0);
 
         /**
-         * @brief Helper funtion to close a existing file and dump to new file in case of multiple files using same decoder
+         * @brief Helper function to close an existing file and dump to new file in case of multiple files using same decoder
         */
         virtual void ResetSaveFrameToFile();
 
@@ -467,7 +470,7 @@ class RocVideoDecoder {
          * @brief function to release all internal frames and clear the vp_frames_q_ (used with reconfigure): Only used with "OUT_SURFACE_MEM_DEV_INTERNAL"
          * 
          * @return true      - success
-         * @return false     - falied
+         * @return false     - failed
          */
         bool ReleaseInternalFrames();
 
