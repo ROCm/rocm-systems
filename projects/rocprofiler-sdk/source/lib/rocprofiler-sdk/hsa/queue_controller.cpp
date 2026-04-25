@@ -122,7 +122,51 @@ create_queue(hsa_agent_t        agent,
 hsa_status_t
 destroy_queue(hsa_queue_t* hsa_queue)
 {
-    if(get_queue_controller()) get_queue_controller()->destroy_queue(hsa_queue);
+    if(!hsa_queue) return HSA_STATUS_ERROR_INVALID_QUEUE;
+
+    auto* controller = get_queue_controller();
+
+    // Capture the Queue::Mode BEFORE controller->destroy_queue erases the
+    // entry from the map. We need the mode to decide whether to chain
+    // through to the real hsa_queue_destroy_fn below.
+    //
+    // Default to full_intercept on lookup miss (e.g. queue we never
+    // tracked) so we do NOT issue a real destroy on something we did not
+    // create — preserving prior behaviour for unknown queues.
+    auto mode = Queue::Mode::full_intercept;
+    if(controller)
+    {
+        if(const auto* q = controller->get_queue(*hsa_queue))
+        {
+            mode = q->mode();
+        }
+    }
+
+    if(controller) controller->destroy_queue(hsa_queue);
+
+    // For Mode::tracing_only the Queue ctor created a real HSA queue via
+    // hsa_queue_create_fn (queue.cpp:743), and Queue::~Queue() does NOT
+    // destroy it. Without the chain-through below, every tracing-only
+    // queue leaks its underlying ROCr resources (queue memory, doorbell
+    // signal, etc.) for the lifetime of the process.
+    //
+    // get_core_table() returns the snapshot saved in QueueController::init
+    // BEFORE this wrapper was installed (see queue_controller.cpp ~L355
+    // vs L398), so it is the correct next-in-chain function pointer and
+    // will not infinite-loop back into us.
+    //
+    // For Mode::full_intercept, the underlying intercept queue (created
+    // via hsa_amd_queue_intercept_create_fn) is also currently leaked —
+    // Queue::~Queue() does not destroy it and nothing else does either.
+    // That pre-existing leak is intentionally left untouched here: it
+    // predates Phase 1 and fixing it correctly requires verifying the
+    // intercept queue can be safely destroyed via hsa_queue_destroy_fn,
+    // which is out of scope for this Block 3 mode-dispatch fix.
+    if(mode == Queue::Mode::tracing_only && controller)
+    {
+        return controller->get_core_table().hsa_queue_destroy_fn(hsa_queue);
+    }
+
     return HSA_STATUS_SUCCESS;
 }
 
