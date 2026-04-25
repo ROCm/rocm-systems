@@ -22,6 +22,7 @@
 
 set(data_storage_sources
     ${CMAKE_CURRENT_LIST_DIR}/backends/sqlite_backend.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/vtable/kernel_dispatch_buffer.cpp
     ${CMAKE_CURRENT_LIST_DIR}/vtable/kernel_dispatch_buffer_vtab.cpp
 )
 
