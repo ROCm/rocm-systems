@@ -7,6 +7,21 @@
 
 #include <hip/hip_runtime_api.h>
 
+// On the AMD build these functions are called through the dispatch table in
+// src/amd_detail/api_trace, which expects the runtime implementations to live
+// in namespace hipFile. On the NVIDIA build there is no dispatch table; the
+// rest of nvidia_detail defines its public API as plain extern "C" functions,
+// so these must stay at global scope to link.
+#if defined(__HIP_PLATFORM_AMD__)
+namespace hipFile {
+
+// Local declarations; the canonical declarations for the amd backend live in
+// src/amd_detail/api_trace/api-trace-internal.h, but this file is also
+// compiled into the nvidia backend which does not have access to that header.
+const char    *hipFileGetOpErrorString(hipFileOpError_t status);
+hipFileError_t hipFileGetVersion(unsigned *major, unsigned *minor, unsigned *patch);
+#endif
+
 const char *
 hipFileGetOpErrorString(hipFileOpError_t status)
 {
@@ -111,3 +126,7 @@ try {
 catch (...) {
     return {hipFileInternalError, hipSuccess};
 }
+
+#if defined(__HIP_PLATFORM_AMD__)
+} // namespace hipFile
+#endif
