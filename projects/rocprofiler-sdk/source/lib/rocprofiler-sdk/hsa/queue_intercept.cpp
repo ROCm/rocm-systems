@@ -431,6 +431,27 @@ create_queue_state(const hsa_queue_t* queue,
 void
 destroy_queue_state(const hsa_queue_t* queue)
 {
+    // §3.5 Invariants 3 (single mutex) and 4 (exactly-once retirement):
+    // Drain any captured-but-not-consumed corr_slots BEFORE erasing the
+    // QueueState from the registry. Doing this after erase would race
+    // with lookup_queue_state returning null and leak correlation_id
+    // refcounts. The slot_publish_mu serializes against in-flight
+    // capture (launch path) and consume (drainer).
+    if(auto state = lookup_queue_state(queue))
+    {
+        std::lock_guard<std::mutex> g(state->slot_publish_mu);
+        for(auto& entry : state->corr_slots)
+        {
+            if(entry.gen.load(std::memory_order_relaxed) != 0 && entry.corr_id)
+            {
+                entry.corr_id->sub_kern_count();
+                entry.corr_id->sub_ref_count();
+                entry.corr_id = nullptr;
+                entry.gen.store(0, std::memory_order_release);
+            }
+        }
+    }
+
     hsa_signal_t      doorbell = {0};
     queue_state_ptr_t doomed   = {};
     get_queue_registry().wlock([&](auto& map) {
@@ -704,6 +725,31 @@ void
 shutdown_intercept()
 {
     s_intercept_installed.store(false, std::memory_order_release);
+
+    // §3.5 Invariants 3 (single mutex) and 4 (exactly-once retirement):
+    // Walk every QueueState still in the registry and drain any
+    // captured-but-not-consumed corr_slots before clearing the registry.
+    // Without this, process shutdown with in-flight slots leaks the
+    // correlation_id refcounts. Take each state's slot_publish_mu so the
+    // drain serializes against any (now-bypassed) capture/consume.
+    get_queue_registry().rlock([](const auto& map) {
+        for(const auto& kv : map)
+        {
+            const auto& state = kv.second;
+            if(!state) continue;
+            std::lock_guard<std::mutex> g(state->slot_publish_mu);
+            for(auto& entry : state->corr_slots)
+            {
+                if(entry.gen.load(std::memory_order_relaxed) != 0 && entry.corr_id)
+                {
+                    entry.corr_id->sub_kern_count();
+                    entry.corr_id->sub_ref_count();
+                    entry.corr_id = nullptr;
+                    entry.gen.store(0, std::memory_order_release);
+                }
+            }
+        }
+    });
 
     get_queue_registry().wlock([](auto& map) { map.clear(); });
     get_doorbell_map().wlock([](auto& map) { map.clear(); });
