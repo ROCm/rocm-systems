@@ -149,26 +149,31 @@ test_utils.check_resource_allocation()
 # Get soc info
 gpu_arch, soc = test_utils.gpu_soc()
 
-# Discover available set options for the current GPU arch
-AVAILABLE_SETS = []
-if gpu_arch:
-    ROOT = os.path.dirname(os.path.dirname(__file__))
-    SRC = os.path.join(ROOT, "src")
+ROOT = os.path.dirname(os.path.dirname(__file__))
+SRC = os.path.join(ROOT, "src")
+
+
+def get_available_sets_for_arch(gpu_arch):
+    """Return available set options for the given GPU arch,
+    or [] if gpu_arch is falsy."""
+    if not gpu_arch:
+        return []
     if SRC not in sys.path:
         sys.path.insert(0, SRC)
-
-    _sets_file = (
+    sets_file = (
         Path(SRC)
         / "rocprof_compute_soc"
         / "profile_configs"
         / "sets"
         / f"{gpu_arch}_sets.yaml"
     )
-    if _sets_file.exists():
-        _data = yaml.safe_load(_sets_file.read_text())
-        AVAILABLE_SETS = [
-            s["set_option"] for s in _data.get("sets", []) if s.get("set_option")
-        ]
+    if not sets_file.exists():
+        return []
+    data = yaml.safe_load(sets_file.read_text())
+    return [s["set_option"] for s in data.get("sets", []) if s.get("set_option")]
+
+
+AVAILABLE_SETS = get_available_sets_for_arch(gpu_arch)
 
 # Set default profiler
 os.environ["ROCPROF"] = "rocprofiler-sdk"
