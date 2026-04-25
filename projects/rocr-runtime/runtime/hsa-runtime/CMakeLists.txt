@@ -416,21 +416,18 @@ if( BUILD_SHARED_LIBS )
           ${CMAKE_CURRENT_SOURCE_DIR}/lttng)
 
       # Two link modes (mirror of HIP CLR's LTTng wiring):
-      #   1. PARTIAL-STATIC (when LTTNG_UST_STATIC_INSTALL_DIR is set):
-      #      link liblttng-ust.a + liblttng-ust-common.a from the in-tree
-      #      external/lttng-ust build. liblttng-ust-tracepoint stays as
-      #      a .so dep — see HIP CLR's CMakeLists.txt for the full reason
-      #      (LTTng-UST's sessiond protocol requires the tracepoint shim
-      #      to be discoverable by name; static-linking it silently breaks
-      #      event emission).
+      #   1. STATIC (default when LTTNG_UST_STATIC_INSTALL_DIR is set):
+      #      link the .a files from the in-tree external/lttng-ust build.
+      #      Eliminates runtime liblttng-ust*.so.1 dependency AND fixes
+      #      the dlmopen SEGFAULT at the source.
       #   2. DYNAMIC fallback: pkg_check_modules against system liblttng-ust.
       if(LTTNG_UST_STATIC_INSTALL_DIR)
-        message(STATUS "ROCr: linking LTTng-UST partially-static from ${LTTNG_UST_STATIC_INSTALL_DIR}")
+        message(STATUS "ROCr: linking LTTng-UST statically from ${LTTNG_UST_STATIC_INSTALL_DIR}")
         target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE ${LTTNG_UST_STATIC_INSTALL_DIR}/include)
         target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE
             ${LTTNG_UST_STATIC_INSTALL_DIR}/lib/liblttng-ust.a
+            ${LTTNG_UST_STATIC_INSTALL_DIR}/lib/liblttng-ust-tracepoint.a
             ${LTTNG_UST_STATIC_INSTALL_DIR}/lib/liblttng-ust-common.a
-            ${LTTNG_UST_STATIC_INSTALL_DIR}/lib/liblttng-ust-tracepoint.so   # dynamic; required by sessiond
             urcu-bp urcu-cds numa rt
             ${CMAKE_DL_LIBS} pthread)
       else()
