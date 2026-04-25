@@ -22,6 +22,10 @@
 
 #pragma once
 
+#ifndef ROCPROFILER_INTERNAL_AQLPROFILE_INCLUDE
+#error "This file should not be included directly, use lib/aqlprofile/aqlprofile.hpp instead"
+#endif
+
 #ifdef _WIN32
 #    include <hsa.h>
 #    include <hsa_ven_amd_aqlprofile.h>

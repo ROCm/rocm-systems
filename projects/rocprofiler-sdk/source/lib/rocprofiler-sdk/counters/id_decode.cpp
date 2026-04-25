@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
-#include "lib/aqlprofile/aql_profile_v2.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 

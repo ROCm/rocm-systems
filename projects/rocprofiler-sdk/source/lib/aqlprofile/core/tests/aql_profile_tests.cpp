@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 #include "lib/aqlprofile/core/aql_profile.hpp"
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
-#include "lib/aqlprofile/version.h"
 #include "lib/aqlprofile/aql_profile_v2.h"
 
 #include <gtest/gtest.h>

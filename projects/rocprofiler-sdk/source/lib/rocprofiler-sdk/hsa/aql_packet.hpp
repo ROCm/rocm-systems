@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "lib/aqlprofile/aql_profile_v2.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/common/container/small_vector.hpp"
 
 #include <rocprofiler-sdk/hsa.h>
