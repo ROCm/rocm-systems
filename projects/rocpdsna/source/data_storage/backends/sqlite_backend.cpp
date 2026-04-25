@@ -197,6 +197,24 @@ sqlite_backend::sqlite_backend(std::string db_path, std::string uuid, storage_mo
             sqlite3_open(m_db_path.c_str(), &m_sqlite3), "", "database open failed!");
     }
 
+    // Tune PRAGMAs for write throughput. Done before any other queries.
+    // WAL is a no-op for :memory: databases but is harmless to request.
+    auto exec_pragma = [this](const char* sql) {
+        char* err_msg = nullptr;
+        int   rc      = sqlite3_exec(m_sqlite3, sql, nullptr, nullptr, &err_msg);
+        if(rc != SQLITE_OK)
+        {
+            LOG_ERROR("Failed to apply PRAGMA '{}': {}",
+                      sql,
+                      err_msg != nullptr ? err_msg : "unknown error");
+            sqlite3_free(err_msg);
+        }
+    };
+    exec_pragma("PRAGMA journal_mode=WAL");
+    exec_pragma("PRAGMA synchronous=NORMAL");
+    exec_pragma("PRAGMA cache_size=-65536");  // 64 MiB page cache
+    exec_pragma("PRAGMA temp_store=MEMORY");
+
     LOG_INFO("rocpdsna database initialized (uuid: {}, path: {})", m_uuid, m_db_path);
 }
 
@@ -280,6 +298,11 @@ sqlite_backend::execute(const std::string& query)
 void
 sqlite_backend::flush()
 {
+    // Truncate the WAL so on-disk state is consistent and small. No-op for
+    // journal modes other than WAL.
+    sqlite3_wal_checkpoint_v2(
+        m_sqlite3, nullptr, SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
+
     if(m_mode != storage_mode_t::in_memory)
     {
         LOG_WARNING("Flushing database is not supported for database type: {}",

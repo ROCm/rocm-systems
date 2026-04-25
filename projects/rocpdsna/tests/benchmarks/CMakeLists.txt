@@ -41,3 +41,14 @@ target_include_directories(
     rocpdsna_benchmarks
     PRIVATE ${CMAKE_SOURCE_DIR}/source ${CMAKE_SOURCE_DIR}/source/common
 )
+
+# Standalone CLI bench used to compare baseline vs WAL+PRAGMA throughput.
+add_executable(rocpdsna_bench_write bench_write.cpp)
+target_link_libraries(
+    rocpdsna_bench_write
+    PRIVATE rocpdsna spdlog::spdlog rocpdsna-sqlite3
+)
+target_include_directories(
+    rocpdsna_bench_write
+    PRIVATE ${CMAKE_SOURCE_DIR}/source ${CMAKE_SOURCE_DIR}/source/common
+)
