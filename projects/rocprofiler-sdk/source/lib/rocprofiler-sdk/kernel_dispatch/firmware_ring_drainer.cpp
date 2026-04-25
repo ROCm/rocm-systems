@@ -543,11 +543,15 @@ drainer_loop()
     {
         if(hsa::firmware_dispatch_ring_available())
         {
-            {
-                std::lock_guard<std::mutex> lk(g_ring_mu);
-                discover_queues();
-                drain_all();
-            }
+            // Discover queues OUTSIDE g_ring_mu — register_or_refresh_queue
+            // (the iterate callback) takes g_ring_mu itself. Holding the
+            // mutex across discover_queues would self-deadlock because
+            // std::mutex is non-recursive.
+            discover_queues();
+
+            // Drain holds the lock for the duration of the iteration.
+            std::lock_guard<std::mutex> lk(g_ring_mu);
+            drain_all();
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -557,10 +561,12 @@ drainer_loop()
     // late records arrived after the most recent drain pass.
     if(hsa::firmware_dispatch_ring_available())
     {
+        // Same lock-ordering rule as above: discover OUTSIDE the mutex.
+        discover_queues();
+
         std::lock_guard<std::mutex> lk(g_ring_mu);
         for(auto& [_, qs] : g_queue_rings)
             qs.last_processed_record_count = 0;
-        discover_queues();
         drain_all();
     }
 }
