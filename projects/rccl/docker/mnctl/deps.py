@@ -57,9 +57,13 @@ _OMPI_SCRIPT = (
 ).format(url=OMPI_TARBALL_URL, ver=OMPI_VERSION)
 
 
-def setup_shared_deps(cfg):
-    # type: (Config) -> None
+def setup_shared_deps(cfg, runtime):
+    # type: (Config, object) -> None
     """Build UCX and OpenMPI into ``cfg.shared_dir`` (runs once).
+
+    *runtime* is a :class:`mnctl.runtime.ContainerRuntime` used to launch
+    the throwaway build container; it is passed in explicitly so this
+    module never reaches into ``cfg`` for the runtime instance.
 
     On a shared filesystem only one node ("leader") performs the build;
     the others ("followers") wait for a completion marker.  On a local
@@ -124,17 +128,18 @@ def setup_shared_deps(cfg):
 
     try:
         # Ensure the image exists first
-        if not cfg.runtime.image_exists():
+        if not runtime.image_exists():
             log(
                 "  Image {} not found; building first...".format(cfg.image_tag)
             )
-            cfg.runtime.build_image()
+            runtime.build_image()
 
         _build_component(
-            cfg, "UCX {}".format(UCX_VERSION), _UCX_SCRIPT, ucx_log,
+            runtime, "UCX {}".format(UCX_VERSION), _UCX_SCRIPT, ucx_log,
         )
         _build_component(
-            cfg, "OpenMPI {}".format(OMPI_VERSION), _OMPI_SCRIPT, ompi_log,
+            runtime, "OpenMPI {}".format(OMPI_VERSION),
+            _OMPI_SCRIPT, ompi_log,
         )
 
         if is_shared:
@@ -153,12 +158,12 @@ def setup_shared_deps(cfg):
     log("")
 
 
-def _build_component(cfg, label, script, log_path):
-    # type: (Config, str, str, str) -> None
+def _build_component(runtime, label, script, log_path):
+    # type: (object, str, str, str) -> None
     """Run a build script inside a throwaway container; abort on failure."""
     with Timer("{} build".format(label)):
         log("  Building {} (log: {})...".format(label, log_path))
-        rc = cfg.runtime.run_build_task(script, log_path)
+        rc = runtime.run_build_task(script, log_path)
         if rc != 0:
             log("  [FAIL] {} build failed. See {}".format(label, log_path))
             _tail_log(log_path, 20)

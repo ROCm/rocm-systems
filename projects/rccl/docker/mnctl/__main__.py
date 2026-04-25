@@ -376,8 +376,9 @@ def _run():
     # Enable verbose logging
     set_verbose(cfg.verbose)
 
-    # Instantiate the container runtime
-    cfg.runtime = get_runtime(cfg)
+    # Instantiate the container runtime.  Held as a local (not on cfg) so
+    # Config remains pure data and the cfg<->runtime cycle is broken.
+    runtime = get_runtime(cfg)
 
     # SLURM auto-detection (may mutate hostfile and ssh settings)
     detect_slurm(cfg)
@@ -391,7 +392,7 @@ def _run():
 
     # Dry-run: pre-flight checks only, then exit
     if cfg.dry_run:
-        run_preflight(cfg)
+        run_preflight(cfg, runtime)
         return
 
     # --- Dispatch ---
@@ -399,28 +400,28 @@ def _run():
         verify_ssh(cfg)
 
     elif cfg.action == Action.STOP_ALL:
-        stop_all(cfg)
+        stop_all(cfg, runtime)
 
     elif cfg.action == Action.SETUP_DEPS:
         setup_host(cfg)
-        cfg.runtime.build_image()
-        setup_shared_deps(cfg)
+        runtime.build_image()
+        setup_shared_deps(cfg, runtime)
 
     elif cfg.action == Action.LAUNCH_ALL:
         setup_host(cfg)
-        cfg.runtime.build_image()
-        setup_shared_deps(cfg)
-        launch_all(cfg)
+        runtime.build_image()
+        setup_shared_deps(cfg, runtime)
+        launch_all(cfg, runtime)
 
     elif cfg.action == Action.RUN:
         setup_host(cfg)
-        cfg.runtime.build_image()
-        cfg.runtime.launch()
+        runtime.build_image()
+        runtime.launch()
 
     else:
         # Default: build only
         setup_host(cfg)
-        cfg.runtime.build_image()
+        runtime.build_image()
         log("Image ready: {}".format(cfg.image_tag))
         log("")
         log("To launch a container:")

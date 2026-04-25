@@ -360,14 +360,21 @@ def _build_forward_args(cfg, action="--run",
 # ---------------------------------------------------------------------------
 # Launch containers on all nodes (parallel via Popen, streamed output)
 # ---------------------------------------------------------------------------
-def launch_all(cfg):
-    # type: (Config) -> None
+def launch_all(cfg, runtime):
+    # type: (Config, object) -> None
     """Build + launch a container on every node in the hostfile.
+
+    *runtime* is currently unused inside ``launch_all`` (each remote node
+    re-instantiates its own runtime via ``run_mnctl.py``) but is part of
+    the public signature so the dispatch layer treats every multi-node
+    entry point uniformly and so any future inline runtime probing can
+    use it without re-plumbing.
 
     1. Distribute SSH keys, tool code, hostfile, and post-setup to remotes
     2. Spawn deps-build + container-launch on every node concurrently
     3. Stream output line-by-line from each node as it arrives
     """
+    del runtime  # currently unused; see docstring
     with Timer("Launch all nodes"):
         log("=== Launching containers on all nodes ===")
         log("")
@@ -517,15 +524,15 @@ def _report_launch_failures(cfg, hosts, results, failed, succeeded):
 # ---------------------------------------------------------------------------
 # Stop containers on all nodes (parallel via Popen)
 # ---------------------------------------------------------------------------
-def stop_all(cfg):
-    # type: (Config) -> None
+def stop_all(cfg, runtime):
+    # type: (Config, object) -> None
     """Stop and remove containers on every node in the hostfile."""
     log("=== Stopping containers on all nodes ===")
     log("")
 
     hosts = parse_hostfile(cfg.hostfile)
     local_names = get_local_hostnames()
-    stop_cmd = cfg.runtime.get_stop_cmd()
+    stop_cmd = runtime.get_stop_cmd()
 
     # Spawn all stop commands at once
     jobs = {}  # type: Dict[str, List[str]]

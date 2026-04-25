@@ -57,9 +57,14 @@ class PreflightReport(object):
         log("  [WARN] {}".format(msg))
 
 
-def run_preflight(cfg):
-    # type: (Config) -> None
-    """Run all pre-flight checks for the configured action, then exit."""
+def run_preflight(cfg, runtime):
+    # type: (Config, object) -> None
+    """Run all pre-flight checks for the configured action, then exit.
+
+    *runtime* is the resolved :class:`ContainerRuntime` instance from
+    :func:`mnctl.runtime.get_runtime`; it is passed in explicitly so
+    Config does not need to hold a reference to the runtime.
+    """
     report = PreflightReport()
 
     action = cfg.action
@@ -74,7 +79,7 @@ def run_preflight(cfg):
     )
     if needs_build:
         _check_dockerfile(cfg, report)
-        _check_base_image(cfg, report)
+        _check_base_image(cfg, runtime, report)
 
     _check_ssh_keys(cfg, report)
 
@@ -162,9 +167,9 @@ def _check_dockerfile(cfg, report):
         report.fail("Dockerfile not found: {}".format(df_path))
 
 
-def _check_base_image(cfg, report):
-    # type: (Config, PreflightReport) -> None
-    if cfg.runtime.image_exists(cfg.rocm_image):
+def _check_base_image(cfg, runtime, report):
+    # type: (Config, object, PreflightReport) -> None
+    if runtime.image_exists(cfg.rocm_image):
         report.ok("Base image '{}' available locally".format(cfg.rocm_image))
     else:
         report.warn(
