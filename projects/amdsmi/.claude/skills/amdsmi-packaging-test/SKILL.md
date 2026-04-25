@@ -42,8 +42,14 @@ rm -rf build-manylinux
 cmake -S . -B build-manylinux \
     -G Ninja \
     -DBUILD_TESTS=OFF \
+    -DENABLE_LDCONFIG=OFF \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DCPACK_GENERATOR="RPM;DEB" 2>&1 | tail -15
+# NOTE: ENABLE_LDCONFIG=OFF is intentional. Real users typically do not enable
+# ldconfig for amd-smi, and leaving it ON during testing masks bugs in the
+# wrapper's library-resolution logic (the linker becomes a safety net that
+# hides path-resolution failures). Test the no-ldconfig path that real
+# deployments use.
 
 cmake --build build-manylinux -j"$(nproc)" 2>&1 | tail -15
 cd build-manylinux && cpack 2>&1 | tail -10
