@@ -40,7 +40,6 @@
 #include <hsa/amd_hsa_queue.h>
 #include <hsa/hsa.h>
 
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -48,7 +47,6 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -73,14 +71,6 @@ struct mec_dispatch_record_16
 };
 #pragma pack(pop)
 
-struct timed_record_t
-{
-    uint64_t ts;
-    uint32_t record_type;
-    uint32_t slot;
-    uint32_t dispatch_idx;
-};
-
 struct queue_ring_state_t
 {
     hsa_queue_t*       queue{};
@@ -90,11 +80,25 @@ struct queue_ring_state_t
     uint32_t           record_size{};
     hsa_agent_t        agent{};
     uint64_t           dispatch_count{0};
-    // TODO(ai/KNOWN_ISSUES.md item 5): last_processed_record_count is a
-    // monotonic per-buffer counter that grows without bound and is reset
-    // only at shutdown. Acceptable for short-lived processes; not for
-    // long-running ones.
-    uint32_t last_processed_record_count{0};
+
+    // Per-ring read cursor: index into the firmware ring (modulo
+    // num_slots) of the next slot to read. Advances monotonically as
+    // we consume. Wraparound is handled by the
+    // last_consumed_dispatch_idx check below: an old slot whose
+    // record we already consumed has the same dispatch_idx as last
+    // time, while a freshly-overwritten slot has a different one.
+    uint32_t read_cursor{0};
+
+    // Per-slot last-consumed dispatch_idx, used to detect when the
+    // firmware has overwritten a slot we already consumed (vs. a new
+    // record at a still-empty slot). Sized to num_slots on first
+    // drain.
+    std::vector<uint32_t> last_consumed_dispatch_idx;
+
+    // Per-queue pending START records, keyed by dispatch_idx for
+    // exact O(1) pairing with END records. Maps dispatch_idx ->
+    // start timestamp.
+    std::unordered_map<uint32_t, uint64_t> pending_starts;
 
     // Phase 1: stored at registration so the drainer can call
     // queue_intercept::lookup_queue_state(queue_ptr) to reach the
@@ -108,13 +112,6 @@ std::unordered_map<uint64_t, queue_ring_state_t> g_queue_rings;
 std::atomic<bool>                                g_drainer_stop{true};
 std::thread                                      g_drainer_thread;
 std::atomic<rocprofiler_dispatch_id_t>           g_next_dispatch_id{1};
-
-// TODO(ai/KNOWN_ISSUES.md item 5): g_emitted_dispatch_idx is an unbounded
-// unordered_set that is never pruned during normal operation. After
-// 2^32 dispatches the dispatch_idx wraps and dedup will become
-// incorrect. Bound this in a follow-up by per-queue ring of recently
-// seen indices.
-std::unordered_set<uint32_t> g_emitted_dispatch_idx;
 
 uint32_t
 infer_record_size(uint32_t ring_bytes)
@@ -437,31 +434,13 @@ drain_all()
         const auto*    base      = static_cast<const uint8_t*>(qs.buf);
         const uint32_t num_slots = qs.ring_bytes / qs.record_size;
 
-        std::vector<timed_record_t> records;
-        records.reserve(num_slots);
-        for(uint32_t i = 0; i < num_slots; i++)
-        {
-            mec_dispatch_record_16 r16{};
-            std::memcpy(&r16, base + i * sizeof(r16), sizeof(r16));
-            const uint64_t ts = (static_cast<uint64_t>(r16.ts_hi) << 32) | r16.ts_lo;
-            if(ts != 0 && (r16.record_type == 1 || r16.record_type == 2))
-                records.push_back({ts, r16.record_type, i, r16.dispatch_idx});
-        }
-
-        if(records.size() <= qs.last_processed_record_count) continue;
-        qs.last_processed_record_count = static_cast<uint32_t>(records.size());
-
-        // Filter records whose dispatch_idx has already been emitted by
-        // a prior drain pass.
-        std::vector<timed_record_t> fresh;
-        fresh.reserve(records.size());
-        for(const auto& r : records)
-        {
-            if(!g_emitted_dispatch_idx.count(r.dispatch_idx)) fresh.push_back(r);
-        }
-
-        std::sort(fresh.begin(), fresh.end(),
-                  [](const timed_record_t& a, const timed_record_t& b) { return a.ts < b.ts; });
+        // Lazy-init last_consumed_dispatch_idx on first drain (or on
+        // the first drain after the ring geometry changes). UINT32_MAX
+        // is a sentinel that doesn't equal any real dispatch_idx the
+        // firmware will produce on the first pass, so the first
+        // consumed record at every slot is always treated as fresh.
+        if(qs.last_consumed_dispatch_idx.size() != num_slots)
+            qs.last_consumed_dispatch_idx.assign(num_slots, UINT32_MAX);
 
         // Correlation lookup MUST use the queue that owns the
         // firmware-ring records — the launching thread captured into
@@ -473,56 +452,70 @@ drain_all()
             (qs.queue && qs.queue->base_address) ? &qs : aql_qs;
         if(!kobj_lookup_qs) continue;  // no source for kernel_object — skip
 
-        // TODO(ai/KNOWN_ISSUES.md item 2): pair START with END using a
-        // smallest-positive-gap heuristic. This produces correct
-        // pairings only when concurrent dispatches are well-separated
-        // in time. For overlapping kernels on different XCCs the
-        // heuristic will mis-pair. Real fix needs an XCC/pipe id in
-        // the firmware record.
-        struct pending_t
+        // Walk forward from the per-ring read cursor. Bounded at
+        // num_slots iterations per drain pass to keep per-tick work
+        // proportional to ring size and prevent starving other queues
+        // when one queue is producing fast.
+        for(uint32_t consumed = 0; consumed < num_slots; ++consumed)
         {
-            uint64_t ts;
-            uint32_t dispatch_idx;
-        };
-        std::vector<pending_t> pending_starts;
+            const uint32_t slot = qs.read_cursor;
 
-        for(const auto& r : fresh)
-        {
-            if(r.record_type == 1)
+            mec_dispatch_record_16 r16{};
+            std::memcpy(&r16, base + slot * sizeof(r16), sizeof(r16));
+
+            const uint64_t ts = (static_cast<uint64_t>(r16.ts_hi) << 32) | r16.ts_lo;
+
+            // Empty slot — firmware hasn't written here yet. Stop the
+            // scan; subsequent slots can't be newer.
+            if(ts == 0) break;
+
+            // Already-consumed slot: same dispatch_idx as last time we
+            // looked. The firmware hasn't overwritten it since, so
+            // there's nothing new past this point either.
+            //
+            // Caveat: if 32-bit dispatch_idx wraps AND the new record
+            // happens to land on the same low-32-bits as the
+            // last-consumed one, we'd miss it. That's the same
+            // 4-billion-dispatch wrap concern called out elsewhere.
+            if(qs.last_consumed_dispatch_idx[slot] == r16.dispatch_idx) break;
+
+            // Defensive skip for unknown record types. Still advance the
+            // cursor so we don't get stuck.
+            if(r16.record_type != 1 && r16.record_type != 2)
             {
-                pending_starts.push_back({r.ts, r.dispatch_idx});
+                qs.last_consumed_dispatch_idx[slot] = r16.dispatch_idx;
+                qs.read_cursor                      = (qs.read_cursor + 1) % num_slots;
+                continue;
             }
-            else if(r.record_type == 2 && !pending_starts.empty())
+
+            if(r16.record_type == 1)
             {
-                int      best_i   = -1;
-                uint64_t best_gap = UINT64_MAX;
-                for(int i = static_cast<int>(pending_starts.size()) - 1; i >= 0; i--)
+                // START: park the timestamp keyed by dispatch_idx for
+                // the matching END to find. If a duplicate START
+                // arrives (shouldn't happen) the newer one wins.
+                qs.pending_starts[r16.dispatch_idx] = ts;
+            }
+            else  // r16.record_type == 2 (END)
+            {
+                auto it = qs.pending_starts.find(r16.dispatch_idx);
+                if(it != qs.pending_starts.end())
                 {
-                    if(pending_starts[i].ts < r.ts)
-                    {
-                        const uint64_t gap = r.ts - pending_starts[i].ts;
-                        if(gap < best_gap)
-                        {
-                            best_gap = gap;
-                            best_i   = i;
-                        }
-                    }
+                    const uint64_t start_ts = it->second;
+                    qs.pending_starts.erase(it);
+
+                    const uint64_t kernel_obj =
+                        lookup_kernel_object(*kobj_lookup_qs, r16.dispatch_idx);
+
+                    process_dispatch_record(
+                        corr_lookup_qs, r16.dispatch_idx, start_ts, ts, kernel_obj);
+                    corr_lookup_qs->dispatch_count++;
                 }
-                if(best_i < 0) continue;
-
-                const auto start = pending_starts[best_i];
-                pending_starts.erase(pending_starts.begin() + best_i);
-
-                if(g_emitted_dispatch_idx.count(start.dispatch_idx)) continue;
-
-                const uint64_t kernel_obj =
-                    lookup_kernel_object(*kobj_lookup_qs, start.dispatch_idx);
-
-                process_dispatch_record(
-                    corr_lookup_qs, start.dispatch_idx, start.ts, r.ts, kernel_obj);
-                g_emitted_dispatch_idx.insert(start.dispatch_idx);
-                corr_lookup_qs->dispatch_count++;
+                // No matching START: late-attached drainer or lost
+                // START record. Drop silently and keep going.
             }
+
+            qs.last_consumed_dispatch_idx[slot] = r16.dispatch_idx;
+            qs.read_cursor                      = (qs.read_cursor + 1) % num_slots;
         }
     }
 }
@@ -556,17 +549,16 @@ drainer_loop()
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
-    // Final drain after stop is requested. Reset the per-queue
-    // last_processed_record_count so we re-examine every slot in case
-    // late records arrived after the most recent drain pass.
+    // Final drain after stop is requested. With the per-ring cursor
+    // model there's no scan/dedup state to reset — drain_all() picks
+    // up wherever the cursor was left and consumes any newly-arrived
+    // records past it.
     if(hsa::firmware_dispatch_ring_available())
     {
         // Same lock-ordering rule as above: discover OUTSIDE the mutex.
         discover_queues();
 
         std::lock_guard<std::mutex> lk(g_ring_mu);
-        for(auto& [_, qs] : g_queue_rings)
-            qs.last_processed_record_count = 0;
         drain_all();
     }
 }
@@ -606,7 +598,6 @@ stop_firmware_dispatch_ring_drainer()
 
     std::lock_guard<std::mutex> lk(g_ring_mu);
     g_queue_rings.clear();
-    g_emitted_dispatch_idx.clear();
 }
 
 }  // namespace kernel_dispatch
