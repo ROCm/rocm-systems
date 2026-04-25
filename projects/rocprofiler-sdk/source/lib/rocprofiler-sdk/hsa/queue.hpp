@@ -161,6 +161,12 @@ public:
     static void             release_signal(pooled_signal_t* signal);
     static void             destroy_signal(pooled_signal_t* signal);
 
+    // Counter incremented on every Queue::create_signal call.
+    // Used by integration tests to verify that mode_tracing_only does NOT
+    // allocate per-dispatch signals. Always available (not gated on build
+    // type) so test harnesses don't need a debug build.
+    static std::atomic<uint64_t>& create_signal_call_count();
+
     template <typename FuncT>
     void signal_callback(FuncT&& func) const;
 

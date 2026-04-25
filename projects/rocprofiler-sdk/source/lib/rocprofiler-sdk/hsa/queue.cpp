@@ -923,9 +923,18 @@ Queue::signal_async_handler(pooled_signal_t* signal, hsa_signal_t raw_signal, vo
                        hsa::get_hsa_status_string(status));
 }
 
+std::atomic<uint64_t>&
+Queue::create_signal_call_count()
+{
+    static std::atomic<uint64_t> counter{0};
+    return counter;
+}
+
 Queue::pooled_signal_t*
 Queue::create_signal(uint32_t attribute, hsa_signal_t* signal, bool use_pool)
 {
+    create_signal_call_count().fetch_add(1, std::memory_order_relaxed);
+
     if(auto* pool = get_signal_pool(); use_pool && pool && attribute == 0)
     {
         auto& _signal = pool->acquire(construct_hsa_signal, 0, 0, nullptr, attribute);
