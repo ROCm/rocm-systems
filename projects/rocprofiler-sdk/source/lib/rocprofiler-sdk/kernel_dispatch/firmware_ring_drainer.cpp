@@ -110,8 +110,14 @@ struct queue_ring_state_t
 std::mutex                                       g_ring_mu;
 std::unordered_map<uint64_t, queue_ring_state_t> g_queue_rings;
 std::atomic<bool>                                g_drainer_stop{true};
-std::thread                                      g_drainer_thread;
-std::atomic<rocprofiler_dispatch_id_t>           g_next_dispatch_id{1};
+// Owned strictly by start_/stop_firmware_dispatch_ring_drainer to make
+// the start/stop sequence idempotent: start returns early when already
+// running; stop returns early when not running. CAS on this flag
+// gates ownership of g_drainer_thread (and of the g_drainer_stop
+// transition).
+std::atomic<bool>                      g_drainer_running{false};
+std::thread                            g_drainer_thread;
+std::atomic<rocprofiler_dispatch_id_t> g_next_dispatch_id{1};
 
 uint32_t
 infer_record_size(uint32_t ring_bytes)
@@ -569,8 +575,14 @@ start_firmware_dispatch_ring_drainer()
 {
     if(!hsa::firmware_dispatch_ring_available()) return;
 
+    // Idempotency guard: only one drainer thread, ever. A second
+    // start_* call while the drainer is already running is a no-op
+    // (rather than an attempt to spawn-and-join, which would try to
+    // join an already-joinable thread and abort).
+    bool expected = false;
+    if(!g_drainer_running.compare_exchange_strong(expected, true)) return;
+
     g_drainer_stop.store(false, std::memory_order_release);
-    if(g_drainer_thread.joinable()) g_drainer_thread.join();
     g_drainer_thread = std::thread{drainer_loop};
 }
 
@@ -585,7 +597,11 @@ unregister_queue(hsa_queue_t* queue)
 void
 stop_firmware_dispatch_ring_drainer()
 {
-    if(!g_drainer_thread.joinable()) return;
+    // Idempotency guard: only the thread that wins the CAS owns the
+    // shutdown sequence. A second stop_* call (or one without a
+    // matching start_*) returns immediately.
+    bool expected = true;
+    if(!g_drainer_running.compare_exchange_strong(expected, false)) return;
 
     // TODO(ai/KNOWN_ISSUES.md item 3): the 10ms grace sleep gives the
     // drainer a few extra cycles to pick up records emitted by recent
@@ -594,7 +610,7 @@ stop_firmware_dispatch_ring_drainer()
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
     g_drainer_stop.store(true, std::memory_order_release);
-    g_drainer_thread.join();
+    if(g_drainer_thread.joinable()) g_drainer_thread.join();
 
     std::lock_guard<std::mutex> lk(g_ring_mu);
     g_queue_rings.clear();
