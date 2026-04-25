@@ -30,10 +30,14 @@ struct storage_t::impl::database_factory_t
                     uuid,
                     data_storage::sqlite_backend::storage_mode_t::on_disk);
             case storage_type_t::write:
+                // Open the writer directly on disk. The PRAGMAs configured in
+                // sqlite_backend (WAL + NORMAL synchronous) make on-disk writes
+                // competitive with the previous in-memory + backup pattern,
+                // while avoiding a full DB copy at flush() time.
                 return data_storage::sqlite_backend::create(
                     database_path,
                     uuid,
-                    data_storage::sqlite_backend::storage_mode_t::in_memory);
+                    data_storage::sqlite_backend::storage_mode_t::on_disk);
             default:
                 throw std::invalid_argument(
                     "Invalid storage type: " +

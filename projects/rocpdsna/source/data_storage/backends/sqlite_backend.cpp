@@ -298,15 +298,13 @@ sqlite_backend::execute(const std::string& query)
 void
 sqlite_backend::flush()
 {
-    // Truncate the WAL so on-disk state is consistent and small. No-op for
-    // journal modes other than WAL.
-    sqlite3_wal_checkpoint_v2(
-        m_sqlite3, nullptr, SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
-
-    if(m_mode != storage_mode_t::in_memory)
+    if(m_mode == storage_mode_t::on_disk)
     {
-        LOG_WARNING("Flushing database is not supported for database type: {}",
-                    static_cast<int>(m_mode));
+        // Already on disk. Just checkpoint the WAL so the main file holds the
+        // committed state and the WAL/SHM files shrink. No-op for non-WAL
+        // journal modes.
+        sqlite3_wal_checkpoint_v2(
+            m_sqlite3, nullptr, SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
         return;
     }
 
