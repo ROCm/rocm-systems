@@ -60,10 +60,15 @@ create_queue(hsa_agent_t        agent,
         if(agent_info.get_hsa_agent().handle == agent.handle)
         {
             std::unique_ptr<Queue> new_queue;
+            const auto mode = needs_packet_rewriting_intercept() ? Queue::Mode::full_intercept
+                                                                 : Queue::Mode::tracing_only;
             if(queue_intercept::is_intercepting_inline())
             {
                 ROCP_INFO << "[queue-intercept] creating queue via INLINE path for agent "
-                          << agent.handle;
+                          << agent.handle << " (mode="
+                          << (mode == Queue::Mode::full_intercept ? "full_intercept"
+                                                                  : "tracing_only")
+                          << ")";
                 auto status = controller->get_core_table().hsa_queue_create_fn(agent,
                                                                                size,
                                                                                type,
@@ -74,16 +79,16 @@ create_queue(hsa_agent_t        agent,
                                                                                queue);
                 if(status != HSA_STATUS_SUCCESS) return status;
 
-                new_queue = std::make_unique<Queue>(agent_info,
-                                                    controller->get_core_table(),
-                                                    controller->get_ext_table(),
-                                                    *queue,
-                                                    [](write_interceptor_t, void*) {});
+                new_queue = std::make_unique<Queue>(
+                    agent_info,
+                    controller->get_core_table(),
+                    controller->get_ext_table(),
+                    *queue,
+                    [](write_interceptor_t, void*) {},
+                    mode);
             }
             else
             {
-                const auto mode = needs_packet_rewriting_intercept() ? Queue::Mode::full_intercept
-                                                                     : Queue::Mode::tracing_only;
                 ROCP_INFO << "[queue-intercept] creating queue via LEGACY path for agent "
                           << agent.handle << " (mode="
                           << (mode == Queue::Mode::full_intercept ? "full_intercept"
@@ -201,6 +206,12 @@ queue_controller_iterate_attach_queue(hsa_queue_t* queue, hsa_agent_t agent, voi
             ->rocprofiler_attach_set_write_interceptor(queue, wi, data);
     };
 
+    // Late-attach honors the same Mode selection as the create_queue path
+    // so existing queues registered after rocprofiler attaches end up on
+    // the Phase 1 tracing-only fast path when the firmware ring is
+    // available, instead of silently defaulting to full_intercept.
+    const auto mode = needs_packet_rewriting_intercept() ? Queue::Mode::full_intercept
+                                                         : Queue::Mode::tracing_only;
     for(const auto& [_, agent_info] : qc->get_supported_agents())
     {
         if(agent_info.get_hsa_agent().handle == agent.handle)
@@ -209,7 +220,8 @@ queue_controller_iterate_attach_queue(hsa_queue_t* queue, hsa_agent_t agent, voi
                                                                        qc->get_core_table(),
                                                                        qc->get_ext_table(),
                                                                        queue,
-                                                                       set_write_interceptor);
+                                                                       set_write_interceptor,
+                                                                       mode);
 
             qc->serializer(new_queue.get()).wlock([&](auto& serializer) {
                 serializer.add_queue(&queue, *new_queue);

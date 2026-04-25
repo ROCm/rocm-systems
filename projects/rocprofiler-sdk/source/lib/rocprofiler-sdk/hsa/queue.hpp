@@ -146,11 +146,15 @@ public:
           Mode               mode = Mode::full_intercept);
 
     // Used when creating a Queue from a previously created intercept queue.
+    // The Mode parameter selects between Phase 1 tracing-only fast path and
+    // the existing PR 5219 full_intercept path. Default full_intercept for
+    // backward compatibility, mirroring the multi-arg ctor above.
     Queue(const AgentCache&       agent,
           CoreApiTable            core_api,
           AmdExtTable             ext_api,
           hsa_queue_t*            queue,
-          set_write_interceptor_t set_write_interceptor);
+          set_write_interceptor_t set_write_interceptor,
+          Mode                    mode = Mode::full_intercept);
     virtual ~Queue();
 
     const hsa_queue_t*        intercept_queue() const { return _intercept_queue; };

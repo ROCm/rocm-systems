@@ -832,44 +832,55 @@ Queue::Queue(
     CoreApiTable            core_api,
     AmdExtTable             ext_api,
     hsa_queue_t*            queue,
-    set_write_interceptor_t set_write_interceptor)  // NOLINT(performance-unnecessary-value-param)
+    set_write_interceptor_t set_write_interceptor,  // NOLINT(performance-unnecessary-value-param)
+    Mode                    mode)
 : _core_api(core_api)
 , _ext_api(ext_api)
 , _agent(agent)
 , _intercept_queue(queue)
+, _mode(mode)
 {
-    if(!context::get_registered_contexts([](const context::context* ctx) {
-            return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
-                    ctx->dispatch_thread_trace || ctx->device_thread_trace);
-        }).empty())
+    // Mode::tracing_only skips the counter/ATT profiler-active block and the
+    // WriteInterceptor install — those are owned by the existing PR 5219
+    // full_intercept path. Counter/ATT contexts cannot reach this branch
+    // because they force needs_packet_rewriting_intercept() == true, which
+    // selects Mode::full_intercept upstream.
+    if(mode == Mode::full_intercept)
     {
-        CHECK(_agent.cpu_pool().handle != 0);
-        CHECK(_agent.get_hsa_agent().handle != 0);
+        if(!context::get_registered_contexts([](const context::context* ctx) {
+                return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
+                        ctx->dispatch_thread_trace || ctx->device_thread_trace);
+            }).empty())
+        {
+            CHECK(_agent.cpu_pool().handle != 0);
+            CHECK(_agent.get_hsa_agent().handle != 0);
 
-        // Set state of the queue to allow profiling
-        aql::set_profiler_active_on_queue(
-            _agent.cpu_pool(), _agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
-                hsa_signal_t completion;
-                create_signal(0, &completion, false);
-                pkt.ext_amd_aql_pm4.completion_signal = completion;
-                counters::submitPacket(_intercept_queue, &pkt);
-                constexpr auto timeout_hint =
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
-                if(core_api.hsa_signal_wait_relaxed_fn(completion,
-                                                       HSA_SIGNAL_CONDITION_EQ,
-                                                       0,
-                                                       timeout_hint.count(),
-                                                       HSA_WAIT_STATE_ACTIVE) != 0)
-                {
-                    ROCP_FATAL << "Could not set agent to be profiled";
-                }
-                core_api.hsa_signal_destroy_fn(completion);
-            });
-    }
+            // Set state of the queue to allow profiling
+            aql::set_profiler_active_on_queue(
+                _agent.cpu_pool(), _agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
+                    hsa_signal_t completion;
+                    create_signal(0, &completion, false);
+                    pkt.ext_amd_aql_pm4.completion_signal = completion;
+                    counters::submitPacket(_intercept_queue, &pkt);
+                    constexpr auto timeout_hint =
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::seconds{1});
+                    if(core_api.hsa_signal_wait_relaxed_fn(completion,
+                                                           HSA_SIGNAL_CONDITION_EQ,
+                                                           0,
+                                                           timeout_hint.count(),
+                                                           HSA_WAIT_STATE_ACTIVE) != 0)
+                    {
+                        ROCP_FATAL << "Could not set agent to be profiled";
+                    }
+                    core_api.hsa_signal_destroy_fn(completion);
+                });
+        }
 
-    if(!queue_intercept::is_intercepting_inline())
-    {
-        set_write_interceptor(WriteInterceptor, this);
+        if(!queue_intercept::is_intercepting_inline())
+        {
+            set_write_interceptor(WriteInterceptor, this);
+        }
     }
 
     create_signal(0, &ready_signal, false);
