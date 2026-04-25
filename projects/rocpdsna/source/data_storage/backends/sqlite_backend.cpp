@@ -284,6 +284,21 @@ sqlite_backend::initialize_schema()
     }
 
     m_initialized = true;
+
+    // Disable foreign-key validation on the writer connection. Applied after
+    // initialize_schema() because the schema SQL contains
+    // 'PRAGMA foreign_keys = ON' which would otherwise re-enable it.
+    {
+        char* err_msg = nullptr;
+        int   rc      = sqlite3_exec(
+            m_sqlite3, "PRAGMA foreign_keys=OFF", nullptr, nullptr, &err_msg);
+        if(rc != SQLITE_OK)
+        {
+            LOG_ERROR("Failed to apply PRAGMA foreign_keys=OFF: {}",
+                      err_msg != nullptr ? err_msg : "unknown error");
+            sqlite3_free(err_msg);
+        }
+    }
 }
 
 void
