@@ -377,6 +377,23 @@ register_or_refresh_queue(hsa_queue_t* queue, void* /*data*/)
     ent.agent       = agent;
     ent.record_size = rec_sz;
     ent.queue_ptr   = queue;
+
+    // Late-attach: ensure a QueueState exists for this queue so the
+    // doorbell wrapper has a place to capture correlation. Idempotent —
+    // returns immediately if a state already exists (e.g., the queue was
+    // created after the SDK loaded and went through the normal
+    // QueueController::add_queue → create_queue_state path).
+    //
+    // We always pass Mode::tracing_only here because the drainer only
+    // runs when the firmware-ring tracing-only path is engaged (Task 8
+    // gate).
+    auto* amd_q = reinterpret_cast<amd_queue_t*>(queue);
+    hsa::queue_intercept::create_queue_state(
+        queue,
+        &amd_q->write_dispatch_id,
+        &amd_q->read_dispatch_id,
+        hsa::queue_intercept::QueueState::Mode::tracing_only);
+
     return HSA_STATUS_SUCCESS;
 }
 
