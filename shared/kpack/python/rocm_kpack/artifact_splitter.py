@@ -85,6 +85,11 @@ class FileClassificationVisitor:
             str, List[Tuple[Path, DatabaseHandler]]
         ] = defaultdict(list)
         self.exclude_from_generic: Set[Path] = set()
+        # Files under a handler's PER_ARCH_ONLY_PATHS that no handler claimed.
+        # Tracked here so the splitter can fail loud rather than silently
+        # routing arch-keyed content to _generic (last-write-wins corruption
+        # in multi-arch shard uploads).
+        self.unclaimed_per_arch_files: List[Tuple[Path, str]] = []
 
     def visit_file(self, file_path: Path, prefix_path: Path) -> None:
         """
@@ -129,6 +134,18 @@ class FileClassificationVisitor:
             self.fat_binaries.append(file_path)
             if self.verbose:
                 print(f"  Found fat binary: {file_path.relative_to(prefix_path)}")
+            return
+
+        # No handler claimed this file and it's not a fat binary. If it
+        # lives under a per-arch-only path, record it so the splitter
+        # can fail loudly — letting it leak to _generic causes cross-shard
+        # last-write-wins corruption in multi-arch builds.
+        rel_str = str(file_path.relative_to(prefix_path)).replace("\\", "/")
+        for handler in self.database_handlers:
+            for marker in handler.PER_ARCH_ONLY_PATHS:
+                if marker in rel_str:
+                    self.unclaimed_per_arch_files.append((file_path, marker))
+                    return
 
     def get_statistics(self) -> str:
         """Get a summary of classification results."""
@@ -719,6 +736,22 @@ class ArtifactSplitter:
                 gpu_targets=self.gpu_targets,
             )
             self.scan_prefix(prefix_path, classifier)
+
+            # Fail loud on arch-keyed files that no handler claimed.
+            # These would otherwise leak into _generic and (in multi-arch
+            # builds) get clobbered by the last shard's upload.
+            if classifier.unclaimed_per_arch_files:
+                lines = [
+                    "Refusing to route arch-keyed files to _generic. "
+                    "These live under a per-arch-only directory but no "
+                    "handler could identify their target arch — fix the "
+                    "install rule to embed the arch in the filename or "
+                    "place the file under library/<arch>/:",
+                ]
+                for path, marker in classifier.unclaimed_per_arch_files:
+                    rel = path.relative_to(prefix_path)
+                    lines.append(f"  [{marker}] {rel}")
+                raise RuntimeError("\n".join(lines))
 
             # Phase 2: Process database files (move to arch-specific artifacts)
             if self.database_handlers and classifier.database_files_by_arch:

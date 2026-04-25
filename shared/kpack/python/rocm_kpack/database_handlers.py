@@ -42,6 +42,12 @@ _MIOPEN_CK_SO_PATTERN = re.compile(
 class DatabaseHandler(ABC):
     """Base class for kernel database handlers."""
 
+    # Path fragments under which every file is arch-keyed by construction.
+    # If a file lives under one of these but no handler claims it, the
+    # splitter must fail loudly — letting it leak to _generic causes
+    # cross-shard last-write-wins corruption in multi-arch builds.
+    PER_ARCH_ONLY_PATHS: tuple = ()
+
     @abstractmethod
     def name(self) -> str:
         """
@@ -149,6 +155,7 @@ class RocBLASHandler(_TensileHandler):
     """Handler for rocBLAS Tensile library files."""
 
     _library_dir = "rocblas/library"
+    PER_ARCH_ONLY_PATHS = (_library_dir,)
 
     def name(self) -> str:
         return "rocblas"
@@ -158,6 +165,7 @@ class HipBLASLtHandler(_TensileHandler):
     """Handler for hipBLASLt kernel files."""
 
     _library_dir = "hipblaslt/library"
+    PER_ARCH_ONLY_PATHS = (_library_dir,)
 
     def name(self) -> str:
         return "hipblaslt"
@@ -167,6 +175,7 @@ class HipSparseLtHandler(_TensileHandler):
     """Handler for hipSPARSELt Tensile kernel files."""
 
     _library_dir = "hipsparselt/library"
+    PER_ARCH_ONLY_PATHS = (_library_dir,)
 
     def name(self) -> str:
         return "hipsparselt"
