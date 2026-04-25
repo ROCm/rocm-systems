@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <hsa/hsa.h>
+
 // Standalone MEC firmware-assisted dispatch ring drainer.
 //
 // Drains 16-byte dispatch records written by the MEC firmware into a
@@ -53,5 +55,17 @@ start_firmware_dispatch_ring_drainer();
 // Stop the drainer thread. No-op if the drainer was never started.
 void
 stop_firmware_dispatch_ring_drainer();
+
+// Forget any drainer state for the given hsa_queue_t. Called from
+// queue_controller::destroy_queue when an HSA queue is destroyed.
+// Idempotent; no-op if the queue is unknown to the drainer or if
+// queue is null.
+//
+// Without this, g_queue_rings retains a stale entry whose qs.queue
+// points at a freed amd_queue_t. The next drainer poll would
+// dereference qs.queue->base_address (now a use-after-free) and
+// segfault.
+void
+unregister_queue(hsa_queue_t* queue);
 }  // namespace kernel_dispatch
 }  // namespace rocprofiler

@@ -294,6 +294,11 @@ QueueController::destroy_queue(hsa_queue_t* id)
     // return if queue does not exist
     if(!queue) return;
 
+    // Drop the firmware-ring drainer's per-queue state BEFORE the HSA
+    // queue is destroyed, so the next drainer poll cannot dereference a
+    // queue whose base_address has been freed.
+    kernel_dispatch::unregister_queue(id);
+
     queue_intercept::destroy_queue_state(id);
     queue->sync();
     if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);

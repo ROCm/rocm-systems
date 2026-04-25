@@ -583,6 +583,14 @@ start_firmware_dispatch_ring_drainer()
 }
 
 void
+unregister_queue(hsa_queue_t* queue)
+{
+    if(!queue) return;
+    std::lock_guard<std::mutex> lk(g_ring_mu);
+    g_queue_rings.erase(queue->id);
+}
+
+void
 stop_firmware_dispatch_ring_drainer()
 {
     if(!g_drainer_thread.joinable()) return;
