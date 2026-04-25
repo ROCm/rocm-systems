@@ -39,6 +39,14 @@ MCP server (stdio, command `perfxpert-mcp`).
      `perfxpert_regression_compare_runs` / `perfxpert_sol_sanity_check`
      on the results. Don't ask the user to copy-paste commands you
      could run yourself.
+   - If required execution or validation tooling is missing on the local
+     machine or an SSH remote host (for example `sqlite3` needed to
+     inspect a generated `.db`), do NOT silently skip the validation,
+     leave the artifact uninspected, or continue with lower confidence.
+     Ask the user for explicit permission to install the missing tool on
+     the specific host, naming the package/tool and the install command
+     you would run. If the user declines, report that the validation is
+     blocked and stop or ask for an alternate validation path.
 
 3. **Route intent via `perfxpert_intent_classify` first.** Then pick
    downstream tools freely — there is no forced handoff after intent

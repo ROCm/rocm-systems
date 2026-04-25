@@ -171,6 +171,15 @@ def test_codex_prompt_forbids_ssh_fallback_without_gate_tools() -> None:
     assert "fallback path" in rendered
 
 
+def test_codex_prompt_requires_consent_before_installing_missing_remote_tooling() -> None:
+    rendered = CodexAdapter()._render_prompt_for_codex()
+    assert "sqlite3" in rendered
+    assert "SSH remote host" in rendered
+    assert "Ask the user for explicit permission" in rendered
+    assert "install command" in rendered
+    assert "leave the artifact uninspected" in rendered
+
+
 def test_spawn_strategy_is_execvpe() -> None:
     assert CodexAdapter.spawn_strategy == "execvpe"
 
