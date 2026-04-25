@@ -392,11 +392,7 @@ create_queue_state(const hsa_queue_t* queue,
                    volatile uint64_t* rdid_addr,
                    QueueState::Mode   mode)
 {
-    // Idempotency guard: if a QueueState already exists for this
-    // queue (e.g., late-attach raced with normal queue creation),
-    // return without overwriting.
-    if(lookup_queue_state(queue)) return;
-
+    // Build the state OUTSIDE the lock — no shared mutation here.
     auto     state         = std::make_shared<QueueState>();
     uint64_t current_wdid  = __atomic_load_n(wdid_addr, __ATOMIC_ACQUIRE);
     state->ring_buf        = queue->base_address;
@@ -424,8 +420,26 @@ create_queue_state(const hsa_queue_t* queue,
         state->corr_slots = std::vector<CorrEntry>(queue->size);
     }
 
-    get_queue_registry().wlock([&](auto& map) { map[queue] = state; });
-    get_doorbell_map().wlock([&](auto& map) { map[queue->doorbell_signal.handle] = state; });
+    // §3.5 Invariant 3: atomicize the existence-check + insert under
+    // the same registry wlock. Without this, two concurrent creators
+    // (e.g., QueueController::add_queue racing with the firmware-ring
+    // drainer's late-attach call) could both pass an unlocked existence
+    // check and both insert, with the second overwriting the first and
+    // orphaning any captures already published into the first state.
+    bool inserted = false;
+    get_queue_registry().wlock([&](auto& map) {
+        auto [it, ok] = map.try_emplace(queue, state);
+        (void) it;
+        inserted = ok;
+    });
+
+    if(!inserted) return;  // someone else won the race; our state is freed
+
+    // Doorbell map insert is safe to do separately: it's keyed by
+    // signal handle, not queue pointer, and is only consulted by the
+    // doorbell wrapper (which doesn't race with create_queue_state).
+    get_doorbell_map().wlock(
+        [&](auto& map) { map[queue->doorbell_signal.handle] = state; });
 }
 
 void
