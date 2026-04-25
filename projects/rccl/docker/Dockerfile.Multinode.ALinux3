@@ -11,7 +11,7 @@
 #   docker build --build-arg ROCM_IMAGE=<alinux3-rocm-base>:latest \
 #                -t rocm-multinode-alinux3:latest -f Dockerfile.Multinode.ALinux3 .
 #
-# See setup_multinode.sh for a one-command build + launch workflow.
+# See `python3 -m mnctl --help` for a one-command build + launch workflow.
 
 ARG ROCM_IMAGE_NAME=rocm/dev-almalinux-8
 ARG ROCM_IMAGE_TAG=7.2.2-complete
@@ -73,7 +73,7 @@ RUN echo ">>> Configuring SSH daemon (port ${SSH_PORT})..." \
 
 # ---------------------------------------------------------------------------
 # Build tools needed for compiling UCX/OpenMPI into the shared directory.
-# The actual build is done once via: setup_multinode.sh --setup-deps
+# The actual build is done once via: python3 -m mnctl --setup-deps
 # ---------------------------------------------------------------------------
 RUN echo ">>> Installing build tools for shared deps..." \
     && dnf install -y \

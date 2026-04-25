@@ -74,7 +74,7 @@ ENV ROCM_PATH=/opt/rocm
 
 ## UCX / OpenMPI versions
 # Kept in sync with docker/versions.env (the single source of truth used
-# by mnctl and setup_multinode.sh).  Override at build time with
+# by mnctl).  Override at build time with
 # `docker build --build-arg UCX_VERSION=... --build-arg OMPI_VERSION=...`.
 ARG UCX_VERSION=1.16.0
 ARG OMPI_VERSION=4.1.6

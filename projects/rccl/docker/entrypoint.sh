@@ -130,7 +130,7 @@ setup_user_ssh() {
         log_verbose "Copied shared keys from ${SSH_KEY_SOURCE}"
     else
         echo "  WARN: no shared SSH keys at ${SSH_KEY_SOURCE}; generating local-only keys"
-        echo "  Hint: for multi-node SSH, pass --ssh-key or --ssh-keygen to setup_multinode.sh"
+        echo "  Hint: for multi-node SSH, pass --ssh [KEY_PATH] to mnctl"
         echo "        (auto-detected when running inside a SLURM allocation)"
         [ -f "${user_home}/.ssh/id_rsa" ] || {
             ssh-keygen -t rsa -b 4096 -N "" -f "${user_home}/.ssh/id_rsa" -C "local-key" -q

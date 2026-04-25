@@ -3,8 +3,8 @@
 # Sourced in every shell inside the container.
 #
 # Host RDMA libraries (libibverbs, libmlx5) are automatically bind-mounted
-# by setup_multinode.sh when InfiniBand devices are detected. No driver
-# installation is typically needed.
+# by mnctl when InfiniBand devices are detected. No driver installation is
+# typically needed.
 #
 # Uncomment and adjust variables below for your cluster:
 
