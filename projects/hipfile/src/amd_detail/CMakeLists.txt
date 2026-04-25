@@ -30,6 +30,14 @@ set(HIPFILE_SOURCES
     sys.cpp
 )
 
+if (AIS_ENABLE_PROFILING)
+    set(HIPFILE_SOURCES
+        api_trace/api-dispatch-interface.cpp
+        api_trace/api-trace.cpp
+        ${HIPFILE_SOURCES}
+    )
+endif()
+
 # Create hipfile target
 ais_add_libraries(
     NAME     hipfile

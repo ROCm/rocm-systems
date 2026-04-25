@@ -220,11 +220,15 @@ option(AIS_INSTALL_EXAMPLES "Install example programs" ON)
 #------------------
 option(AIS_INSTALL_TOOLS "Install tool programs" ON)
 
-
 #------
 # docs
 #------
 include(AISDocumentation)
+
+#---------------
+# API Profiling
+#---------------
+include(AISProfiling)
 
 #-----------------------------------------------------------------------------
 # Find important packages for building the software
