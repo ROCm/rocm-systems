@@ -737,7 +737,15 @@ class CodexAdapter:
             "editing codex config.toml directly"
         )
 
-        config_toml.parent.mkdir(parents=True, exist_ok=True)
+        config_dir = config_toml.parent
+        try:
+            config_dir.mkdir(parents=True, exist_ok=True)
+        except FileExistsError as exc:
+            raise ConfigClobber(
+                f"{config_dir} exists but is not a directory. Move it "
+                f"aside (for example: `mv {config_dir} "
+                f"{config_dir}.bak`) and re-run perfxpert-code codex."
+            ) from exc
         existing = (
             config_toml.read_text(encoding="utf-8")
             if config_toml.is_file()

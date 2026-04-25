@@ -582,6 +582,19 @@ def test_structured_edit_refreshes_stale_perfxpert_filters(
     assert "disabled_tools" not in text
 
 
+def test_structured_edit_reports_file_at_codex_config_dir(
+    tmp_path: Path,
+) -> None:
+    project_cwd = tmp_path / "proj"
+    project_cwd.mkdir()
+    (project_cwd / ".codex").write_text("not a directory\n")
+
+    with pytest.raises(ConfigClobber, match="exists but is not a directory"):
+        CodexAdapter()._structured_edit_config_toml(
+            project_cwd / ".codex" / "config.toml"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Never mutates tracked AGENTS.md.
 # ---------------------------------------------------------------------------
