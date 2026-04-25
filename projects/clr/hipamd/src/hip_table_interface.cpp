@@ -8,6 +8,8 @@
 #include "hip_internal.hpp"
 #include "utils/flags.hpp"
 #include "utils/debug.hpp"
+#include "lttng/rocm_trace_emit.h"
+#include "lttng/rocm_trace_tid.h"
 #include <exception>
 #include <tuple>
 
@@ -52,6 +54,43 @@ template <> hipError_t HandleException<hipError_t>() {
 #define TRY try {
 #define CATCH } catch(...) { return hip::HandleException<hipError_t>(); }
 #define CATCHRET(RETURN_TYPE) } catch(...) { return hip::HandleException<RETURN_TYPE>(); }
+
+/* Typed exit macros used by the AST-migrated wrappers (see
+ * scripts/lttng_migrate.py). The wrapper body declares the corr id with
+ *   `const uint64_t __rocm_corr = rocm_trace_next_corr_id();
+ *    rocm_trace_emit_hip_api_enter(__func__, __rocm_corr);`
+ * as the very first statement (inserted by the AST pass), so __rocm_corr
+ * is in scope when these macros expand at the return site.
+ *
+ *   STATUS variant: hipError_t / int / bool. Captures status as int32_t.
+ *   PTR    variant: any pointer return type. Captures pointer as uint64_t.
+ *   VOID   variant: void return. Captures function name + corr only.
+ *
+ * Exception paths (via TRY/CATCH/CATCHRET) do NOT emit the exit tracepoint;
+ * that's an accepted limitation - the caller will see hip_api_enter without
+ * a matching hip_api_exit_status, which the consumer can interpret as
+ * "exception thrown". */
+#define ROCM_TRACE_RET_STATUS(EXPR)                                            \
+    do {                                                                       \
+        const auto __rocm_rv = (EXPR);                                         \
+        rocm_trace_emit_hip_api_exit_status(__func__, __rocm_corr,             \
+                                            static_cast<int32_t>(__rocm_rv));  \
+        return __rocm_rv;                                                      \
+    } while (0)
+
+#define ROCM_TRACE_RET_PTR(EXPR)                                               \
+    do {                                                                       \
+        auto* const __rocm_rv = (EXPR);                                        \
+        rocm_trace_emit_hip_api_exit_ptr(__func__, __rocm_corr, __rocm_rv);    \
+        return __rocm_rv;                                                      \
+    } while (0)
+
+#define ROCM_TRACE_RET_VOID(EXPR)                                              \
+    do {                                                                       \
+        (EXPR);                                                                \
+        rocm_trace_emit_hip_api_exit_void(__func__, __rocm_corr);              \
+        return;                                                                \
+    } while (0)
 
 extern "C" hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem,
                                                 hipStream_t* stream) {
