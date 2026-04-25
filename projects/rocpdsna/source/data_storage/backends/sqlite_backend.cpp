@@ -4,6 +4,10 @@
 #include "sqlite_backend.hpp"
 
 #include "data_storage/vtable/kernel_dispatch_buffer_vtab.hpp"
+#include "data_storage/vtable/memory_alloc_buffer_vtab.hpp"
+#include "data_storage/vtable/memory_copy_buffer_vtab.hpp"
+#include "data_storage/vtable/pmc_event_buffer_vtab.hpp"
+#include "data_storage/vtable/region_buffer_vtab.hpp"
 #include "debug.hpp"
 #include "directory.hpp"
 
@@ -303,24 +307,46 @@ sqlite_backend::initialize_schema()
         }
     }
 
-    // Shape 3 POC: register the kernel_dispatch_buffer vtable module and create
-    // a virtual table that fronts the real rocpd_kernel_dispatch_<uuid> table.
+    // Shape 3 POC: register the per-table buffer vtable modules and create
+    // virtual tables that front the real rocpd_<table>_<uuid> tables.
     vtable::register_kernel_dispatch_buffer_module(m_sqlite3);
+    vtable::register_memory_copy_buffer_module(m_sqlite3);
+    vtable::register_memory_alloc_buffer_module(m_sqlite3);
+    vtable::register_region_buffer_module(m_sqlite3);
+    vtable::register_pmc_event_buffer_module(m_sqlite3);
 
-    {
+    auto create_buf_vtab = [&](const char*        vtab_name,
+                               const char*        module_name,
+                               const std::string& real_table) {
         const auto sql =
-            fmt::format("CREATE VIRTUAL TABLE IF NOT EXISTS kernel_dispatch_buf "
-                        "USING kernel_dispatch_buffer('rocpd_kernel_dispatch_{}')",
-                        m_uuid);
+            fmt::format("CREATE VIRTUAL TABLE IF NOT EXISTS {} USING {}('{}')",
+                        vtab_name,
+                        module_name,
+                        real_table);
         char* err = nullptr;
         int   rc  = sqlite3_exec(m_sqlite3, sql.c_str(), nullptr, nullptr, &err);
         if(rc != SQLITE_OK)
         {
-            LOG_ERROR("Failed to create kernel_dispatch_buf vtable: {}",
+            LOG_ERROR("Failed to create {} vtable: {}",
+                      vtab_name,
                       err != nullptr ? err : "unknown");
             sqlite3_free(err);
         }
-    }
+    };
+
+    create_buf_vtab("kernel_dispatch_buf",
+                    "kernel_dispatch_buffer",
+                    fmt::format("rocpd_kernel_dispatch_{}", m_uuid));
+    create_buf_vtab("memory_copy_buf",
+                    "memory_copy_buffer",
+                    fmt::format("rocpd_memory_copy_{}", m_uuid));
+    create_buf_vtab("memory_alloc_buf",
+                    "memory_alloc_buffer",
+                    fmt::format("rocpd_memory_allocate_{}", m_uuid));
+    create_buf_vtab(
+        "region_buf", "region_buffer", fmt::format("rocpd_region_{}", m_uuid));
+    create_buf_vtab(
+        "pmc_event_buf", "pmc_event_buffer", fmt::format("rocpd_pmc_event_{}", m_uuid));
 }
 
 void

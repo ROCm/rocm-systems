@@ -24,6 +24,14 @@ set(data_storage_sources
     ${CMAKE_CURRENT_LIST_DIR}/backends/sqlite_backend.cpp
     ${CMAKE_CURRENT_LIST_DIR}/vtable/kernel_dispatch_buffer.cpp
     ${CMAKE_CURRENT_LIST_DIR}/vtable/kernel_dispatch_buffer_vtab.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/vtable/memory_copy_buffer.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/vtable/memory_copy_buffer_vtab.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/vtable/memory_alloc_buffer.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/vtable/memory_alloc_buffer_vtab.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/vtable/region_buffer.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/vtable/region_buffer_vtab.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/vtable/pmc_event_buffer.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/vtable/pmc_event_buffer_vtab.cpp
 )
 
 target_sources(rocpdsna-objects PRIVATE ${data_storage_sources})

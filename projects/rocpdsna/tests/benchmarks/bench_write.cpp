@@ -2,8 +2,10 @@
 //
 // Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
 //
-// Standalone CLI benchmark for kernel_dispatch writes. Used to compare
-// baseline-vs-WAL throughput. Usage: bench_write <output.db> [N=100000]
+// Standalone CLI benchmark for the per-table buffer writers. Used to compare
+// throughput per writer.
+// Usage: bench_write <output.db> [N=100000] [table=kernel_dispatch]
+//   table in {kernel_dispatch, memory_copy, memory_alloc, region, pmc_event}
 
 #include "rocpdsna/storage.hpp"
 #include "rocpdsna/storage_types.hpp"
@@ -11,13 +13,19 @@
 #include "rocpdsna/writer_types.hpp"
 
 #include "data_storage/vtable/kernel_dispatch_buffer.hpp"
+#include "data_storage/vtable/memory_alloc_buffer.hpp"
+#include "data_storage/vtable/memory_copy_buffer.hpp"
+#include "data_storage/vtable/pmc_event_buffer.hpp"
+#include "data_storage/vtable/region_buffer.hpp"
 
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <string_view>
 
 using namespace rocpdsna::writer_types;
 
@@ -125,46 +133,17 @@ register_setup(rocpdsna::writer_t& writer, agent_unique_id_t& gpu_agent_out)
     gpu_agent_out = gpu_agent;
 }
 
-}  // namespace
-
-int
-main(int argc, char** argv)
+void
+bench_kernel_dispatch(rocpdsna::writer_t&        writer,
+                      const trace_environment_t& env,
+                      size_t                     count)
 {
-    if(argc < 2 || argc > 3)
-    {
-        std::fprintf(stderr, "Usage: %s <output.db> [N=%zu]\n", argv[0], k_default_count);
-        return 1;
-    }
-
-    const std::string db_path = argv[1];
-    const size_t      count   = (argc == 3)
-                                    ? static_cast<size_t>(std::strtoull(argv[2], nullptr, 10))
-                                    : k_default_count;
-
-    std::remove(db_path.c_str());
-
-    auto storage = std::make_unique<rocpdsna::storage_t>(db_path, std::string{ "bench" });
-    auto writer  = std::make_shared<rocpdsna::writer_t>(std::move(storage));
-
-    agent_unique_id_t gpu_agent;
-    register_setup(*writer, gpu_agent);
-
     if(auto* buffer =
            rocpdsna::data_storage::vtable::kernel_dispatch_buffer::get_active_instance(
                "rocpd_kernel_dispatch_bench"))
     {
         buffer->reserve(count);
     }
-
-    const trace_environment_t trace_env{ .node_id    = k_node_id,
-                                         .process_id = k_pid,
-                                         .thread_id  = k_tid,
-                                         .agent_id   = gpu_agent,
-                                         .stream_id  = 1,
-                                         .queue_id   = 1,
-                                         .track_name = "gpu_kernel" };
-
-    const auto t0 = std::chrono::steady_clock::now();
 
     for(size_t i = 0; i < count; ++i)
     {
@@ -184,8 +163,199 @@ main(int argc, char** argv)
                                            .grid_size_z          = 1,
                                            .name                 = "vectorAdd",
                                            .extdata              = "{}" };
-        writer->insert_kernel_dispatch_data(data, trace_env);
+        writer.insert_kernel_dispatch_data(data, env);
     }
+}
+
+void
+bench_memory_copy(rocpdsna::writer_t&        writer,
+                  const trace_environment_t& env,
+                  size_t                     count)
+{
+    if(auto* buffer =
+           rocpdsna::data_storage::vtable::memory_copy_buffer::get_active_instance(
+               "rocpd_memory_copy_bench"))
+    {
+        buffer->reserve(count);
+    }
+
+    for(size_t i = 0; i < count; ++i)
+    {
+        const memory_copy_data_t data{ .event           = std::nullopt,
+                                       .start_timestamp = i * 1000,
+                                       .end_timestamp   = i * 1000 + 500,
+                                       .dst_agent_id    = env.agent_id,
+                                       .dst_address  = static_cast<size_t>(0x10000 + i),
+                                       .src_agent_id = env.agent_id,
+                                       .src_address  = static_cast<size_t>(0x20000 + i),
+                                       .size         = 4096,
+                                       .name         = "hipMemcpy",
+                                       .region_name  = std::nullopt,
+                                       .extdata      = "{}" };
+        writer.insert_memory_copy_data(data, env);
+    }
+}
+
+void
+bench_memory_alloc(rocpdsna::writer_t&        writer,
+                   const trace_environment_t& env,
+                   size_t                     count)
+{
+    if(auto* buffer =
+           rocpdsna::data_storage::vtable::memory_alloc_buffer::get_active_instance(
+               "rocpd_memory_allocate_bench"))
+    {
+        buffer->reserve(count);
+    }
+
+    for(size_t i = 0; i < count; ++i)
+    {
+        const memory_alloc_data_t data{ .event           = std::nullopt,
+                                        .type            = std::string_view{ "ALLOC" },
+                                        .level           = std::string_view{ "REAL" },
+                                        .start_timestamp = i * 1000,
+                                        .end_timestamp   = i * 1000 + 500,
+                                        .address = static_cast<size_t>(0x30000 + i),
+                                        .size    = 4096,
+                                        .extdata = "{}" };
+        writer.insert_memory_alloc_data(data, env);
+    }
+}
+
+void
+bench_region(rocpdsna::writer_t& writer, const trace_environment_t& env, size_t count)
+{
+    if(auto* buffer = rocpdsna::data_storage::vtable::region_buffer::get_active_instance(
+           "rocpd_region_bench"))
+    {
+        buffer->reserve(count);
+    }
+
+    for(size_t i = 0; i < count; ++i)
+    {
+        const region_data_t data{ .event           = std::nullopt,
+                                  .start_timestamp = i * 1000,
+                                  .end_timestamp   = i * 1000 + 500,
+                                  .name            = "hipKernelLaunch",
+                                  .extdata         = "{}",
+                                  .args            = {} };
+        writer.insert_region_data(data, env);
+    }
+}
+
+void
+bench_pmc_event(rocpdsna::writer_t& writer, const trace_environment_t& env, size_t count)
+{
+    // pmc_event needs a registered pmc info row.
+    const pmc_info_unique_id_t pmc_unique_id{ "GPUBusy", env.agent_id };
+    writer.register_pmc_info(pmc_info_t{ .unique_id        = pmc_unique_id,
+                                         .target_arch      = std::string_view{ "GPU" },
+                                         .event_code       = 0,
+                                         .instance_id      = 0,
+                                         .symbol           = "GPUBusy",
+                                         .description      = "GPU busy %",
+                                         .long_description = "GPU Busy",
+                                         .component        = std::nullopt,
+                                         .units            = "%",
+                                         .value_type       = std::string_view{ "ABS" },
+                                         .block            = "GFX",
+                                         .expression       = std::nullopt,
+                                         .is_constant      = 0,
+                                         .is_derived       = 0,
+                                         .extdata          = "{}",
+                                         .node_id          = k_node_id,
+                                         .process_id       = k_pid });
+
+    if(auto* buffer =
+           rocpdsna::data_storage::vtable::pmc_event_buffer::get_active_instance(
+               "rocpd_pmc_event_bench"))
+    {
+        buffer->reserve(count);
+    }
+
+    for(size_t i = 0; i < count; ++i)
+    {
+        const sample_data_t    sample{ .timestamp = i * 1000,
+                                       .track     = track_info_t{ .name       = "gpu_kernel",
+                                                                  .extdata    = "{}",
+                                                                  .node_id    = k_node_id,
+                                                                  .process_id = k_pid,
+                                                                  .thread_id  = k_tid },
+                                       .extdata   = "{}" };
+        const pmc_event_data_t data{ .event   = std::nullopt,
+                                     .value   = static_cast<double>(i % 100),
+                                     .extdata = "{}",
+                                     .sample  = sample };
+        writer.insert_pmc_event_data(data, pmc_unique_id);
+    }
+}
+
+}  // namespace
+
+int
+main(int argc, char** argv)
+{
+    if(argc < 2 || argc > 4)
+    {
+        std::fprintf(stderr,
+                     "Usage: %s <output.db> [N=%zu] [table=kernel_dispatch]\n"
+                     "  table: kernel_dispatch | memory_copy | memory_alloc | "
+                     "region | pmc_event\n",
+                     argv[0],
+                     k_default_count);
+        return 1;
+    }
+
+    const std::string db_path = argv[1];
+    const size_t      count   = (argc >= 3)
+                                    ? static_cast<size_t>(std::strtoull(argv[2], nullptr, 10))
+                                    : k_default_count;
+    const std::string table   = (argc >= 4) ? argv[3] : "kernel_dispatch";
+
+    std::remove(db_path.c_str());
+
+    auto storage = std::make_unique<rocpdsna::storage_t>(db_path, std::string{ "bench" });
+    auto writer  = std::make_shared<rocpdsna::writer_t>(std::move(storage));
+
+    agent_unique_id_t gpu_agent;
+    register_setup(*writer, gpu_agent);
+
+    const trace_environment_t trace_env{ .node_id    = k_node_id,
+                                         .process_id = k_pid,
+                                         .thread_id  = k_tid,
+                                         .agent_id   = gpu_agent,
+                                         .stream_id  = 1,
+                                         .queue_id   = 1,
+                                         .track_name = "gpu_kernel" };
+
+    const auto t0 = std::chrono::steady_clock::now();
+
+    if(table == "kernel_dispatch")
+    {
+        bench_kernel_dispatch(*writer, trace_env, count);
+    }
+    else if(table == "memory_copy")
+    {
+        bench_memory_copy(*writer, trace_env, count);
+    }
+    else if(table == "memory_alloc")
+    {
+        bench_memory_alloc(*writer, trace_env, count);
+    }
+    else if(table == "region")
+    {
+        bench_region(*writer, trace_env, count);
+    }
+    else if(table == "pmc_event")
+    {
+        bench_pmc_event(*writer, trace_env, count);
+    }
+    else
+    {
+        std::fprintf(stderr, "Unknown table '%s'\n", table.c_str());
+        return 2;
+    }
+
     writer->flush_in_memory_data_to_disk();
 
     const auto t1 = std::chrono::steady_clock::now();
@@ -193,7 +363,7 @@ main(int argc, char** argv)
     const double wall_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
     const double rows_per_sec = (wall_ms > 0.0) ? (count * 1000.0 / wall_ms) : 0.0;
 
-    std::cout << "rows=" << count << " wall_ms=" << wall_ms
+    std::cout << "table=" << table << " rows=" << count << " wall_ms=" << wall_ms
               << " rows_per_sec=" << rows_per_sec << '\n';
 
     return 0;
