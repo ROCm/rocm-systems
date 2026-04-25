@@ -21,22 +21,88 @@
 #include <vector>
 
 // ============================================================================
+// Mock marker policy — shared by all fixtures
+// ============================================================================
+
+namespace
+{
+
+using rocprofsys::rocprofiler_sdk::annotation_entry;
+using rocprofsys::trace_cache::region_sample;
+
+using ::testing::NiceMock;
+
+class mock_api
+{
+public:
+    MOCK_METHOD(void, push_timemory, (std::string_view name));
+    MOCK_METHOD(void, pop_timemory, (std::string_view name));
+    MOCK_METHOD(void, push_perfetto_ts,
+                (const char* name, uint64_t ts, uint64_t flow_id,
+                 const std::vector<annotation_entry>& annotations));
+    MOCK_METHOD(void, pop_perfetto_ts,
+                (const char* name, uint64_t ts,
+                 const std::vector<annotation_entry>& annotations));
+    MOCK_METHOD(void, add_string, (std::string_view string_value));
+    MOCK_METHOD(void, store_region, (const region_sample& sample));
+    MOCK_METHOD(void, add_thread_info,
+                (const rocprofsys::trace_cache::info::thread& thread_info));
+};
+
+struct mock_marker_policy
+{
+    static inline std::unique_ptr<NiceMock<mock_api>> api{};
+
+    static void reset() { api = std::make_unique<NiceMock<mock_api>>(); }
+
+    static void push_timemory(std::string_view name) { api->push_timemory(name); }
+    static void pop_timemory(std::string_view name) { api->pop_timemory(name); }
+
+    static void push_perfetto_ts(const char* name, uint64_t ts, uint64_t flow_id,
+                                 const std::vector<annotation_entry>& annotations)
+    {
+        api->push_perfetto_ts(name, ts, flow_id, annotations);
+    }
+
+    static void pop_perfetto_ts(const char* name, uint64_t ts,
+                                const std::vector<annotation_entry>& annotations)
+    {
+        api->pop_perfetto_ts(name, ts, annotations);
+    }
+
+    static void add_string(std::string_view string_value)
+    {
+        api->add_string(string_value);
+    }
+    static void store_region(const region_sample& sample) { api->store_region(sample); }
+    static void add_thread_info(const rocprofsys::trace_cache::info::thread& thread_info)
+    {
+        api->add_thread_info(thread_info);
+    }
+};
+
+}  // namespace
+
+class mock_cleanup_base : public ::testing::Test
+{
+protected:
+    void SetUp() override { mock_marker_policy::reset(); }
+    void TearDown() override { mock_marker_policy::api.reset(); }
+};
+
+// ============================================================================
 // roctx_client construction tests
 // ============================================================================
 
-class roctx_client_test : public ::testing::Test
-{
-protected:
-    void SetUp() override {}
-    void TearDown() override {}
-};
+class roctx_client_test : public mock_cleanup_base
+{};
 
 TEST_F(roctx_client_test, constructor_creates_controller)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config config{ true, true, true, false, "TestRegion" };
-    roctx_client<>            client(config);
+    const roctx_client_config        config{ true, true, true, false, "TestRegion" };
+    roctx_client<mock_marker_policy> client(config);
     EXPECT_NE(client.get_controller(), nullptr);
 }
 
@@ -44,8 +110,8 @@ TEST_F(roctx_client_test, constructor_without_region_filter)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config config{ true, true, true, false, "" };
-    roctx_client<>            client(config);
+    const roctx_client_config        config{ true, true, true, false, "" };
+    roctx_client<mock_marker_policy> client(config);
     EXPECT_NE(client.get_controller(), nullptr);
     EXPECT_FALSE(client.get_controller()->region_filter_active());
 }
@@ -54,8 +120,8 @@ TEST_F(roctx_client_test, constructor_with_region_filter)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config config{ true, true, true, false, "Region 1" };
-    roctx_client<>            client(config);
+    const roctx_client_config        config{ true, true, true, false, "Region 1" };
+    roctx_client<mock_marker_policy> client(config);
     EXPECT_TRUE(client.get_controller()->region_filter_active());
 }
 
@@ -63,8 +129,8 @@ TEST_F(roctx_client_test, should_write_no_filter)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config config{ true, true, true, false, "" };
-    const roctx_client<>      client(config);
+    const roctx_client_config              config{ true, true, true, false, "" };
+    const roctx_client<mock_marker_policy> client(config);
     EXPECT_TRUE(client.get_controller()->should_write_markers());
 }
 
@@ -72,8 +138,8 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config config{ true, true, true, false, "Region 1" };
-    const roctx_client<>      client(config);
+    const roctx_client_config              config{ true, true, true, false, "Region 1" };
+    const roctx_client<mock_marker_policy> client(config);
     EXPECT_FALSE(client.get_controller()->should_write_markers());
 }
 
@@ -87,10 +153,10 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
 // and that start/stop callbacks fire at the right times.
 // ============================================================================
 
-class roctx_client_control_test : public ::testing::Test
+class roctx_client_control_test : public mock_cleanup_base
 {
 protected:
-    using roctx_client_t = rocprofsys::rocprofiler_sdk::roctx_client<>;
+    using roctx_client_t = rocprofsys::rocprofiler_sdk::roctx_client<mock_marker_policy>;
     using roctx_config_t = rocprofsys::rocprofiler_sdk::roctx_client_config;
 
     int start_count = 0;
@@ -484,15 +550,11 @@ TEST_F(roctx_client_control_test, start_with_null_message_is_ignored)
 namespace
 {
 
-using rocprofsys::rocprofiler_sdk::annotation_entry;
-using rocprofsys::trace_cache::region_sample;
-
 using ::testing::_;
 using ::testing::AllOf;
 using ::testing::ElementsAre;
 using ::testing::Field;
 using ::testing::IsEmpty;
-using ::testing::NiceMock;
 using ::testing::SizeIs;
 using ::testing::StrEq;
 
@@ -501,55 +563,6 @@ MATCHER_P2(IsAnnotation, key, value, "")
     return std::string(arg.key) == key && std::holds_alternative<uint64_t>(arg.value) &&
            std::get<uint64_t>(arg.value) == static_cast<uint64_t>(value);
 }
-
-class mock_api
-{
-public:
-    MOCK_METHOD(void, push_timemory, (std::string_view name));
-    MOCK_METHOD(void, pop_timemory, (std::string_view name));
-    MOCK_METHOD(void, push_perfetto_ts,
-                (const char* name, uint64_t ts, uint64_t flow_id,
-                 const std::vector<annotation_entry>& annotations));
-    MOCK_METHOD(void, pop_perfetto_ts,
-                (const char* name, uint64_t ts,
-                 const std::vector<annotation_entry>& annotations));
-    MOCK_METHOD(void, add_string, (std::string_view string_value));
-    MOCK_METHOD(void, store_region, (const region_sample& sample));
-    MOCK_METHOD(void, add_thread_info,
-                (const rocprofsys::trace_cache::info::thread& thread_info));
-};
-
-struct mock_marker_policy
-{
-    static inline std::unique_ptr<NiceMock<mock_api>> api{};
-
-    static void reset() { api = std::make_unique<NiceMock<mock_api>>(); }
-
-    static void push_timemory(std::string_view name) { api->push_timemory(name); }
-    static void pop_timemory(std::string_view name) { api->pop_timemory(name); }
-
-    static void push_perfetto_ts(const char* name, uint64_t ts, uint64_t flow_id,
-                                 const std::vector<annotation_entry>& annotations)
-    {
-        api->push_perfetto_ts(name, ts, flow_id, annotations);
-    }
-
-    static void pop_perfetto_ts(const char* name, uint64_t ts,
-                                const std::vector<annotation_entry>& annotations)
-    {
-        api->pop_perfetto_ts(name, ts, annotations);
-    }
-
-    static void add_string(std::string_view string_value)
-    {
-        api->add_string(string_value);
-    }
-    static void store_region(const region_sample& sample) { api->store_region(sample); }
-    static void add_thread_info(const rocprofsys::trace_cache::info::thread& thread_info)
-    {
-        api->add_thread_info(thread_info);
-    }
-};
 
 using mock_marker_writer = rocprofsys::rocprofiler_sdk::marker_writer<mock_marker_policy>;
 
@@ -565,12 +578,8 @@ make_record(uint64_t thread_id, uint64_t corr_internal, uint64_t corr_external)
 
 }  // namespace
 
-class marker_write_test : public ::testing::Test
-{
-protected:
-    void SetUp() override { mock_marker_policy::reset(); }
-    void TearDown() override { mock_marker_policy::api.reset(); }
-};
+class marker_write_test : public mock_cleanup_base
+{};
 
 TEST_F(marker_write_test, all_backends_with_annotations)
 {

@@ -42,10 +42,22 @@ if(AIS_INSTALL_EXAMPLES)
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/examples/aiscp/CMakeLists.install.cmake"
         "examples/aiscp/CMakeLists.txt"
+        @ONLY
     )
     install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/examples/aiscp/CMakeLists.txt"
         DESTINATION "share/doc/${CMAKE_PROJECT_NAME}/examples/aiscp/"
+    )
+
+    # API examples
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/examples/api/CMakeLists.install.in"
+        "examples/api/CMakeLists.txt"
+        @ONLY
+    )
+    install(FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/examples/api/CMakeLists.txt"
+        DESTINATION "share/doc/${CMAKE_PROJECT_NAME}/examples/api/"
     )
 endif()
 

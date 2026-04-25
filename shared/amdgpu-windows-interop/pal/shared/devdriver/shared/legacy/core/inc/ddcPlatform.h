@@ -140,7 +140,7 @@ typedef void (*ThreadFunction)(void* pThreadParameter);
     #error "DD_DEBUG_BREAK not defined by platform!"
 #endif
 
-// This only exists for 32bit Windows to specificy callbacks as __stdcall.
+// This only exists for 32bit Windows to specify callbacks as __stdcall.
 #if !defined(DD_APIENTRY)
     #define DD_APIENTRY
 #endif

@@ -4,6 +4,7 @@
 #ifndef ROCJITSU_VM_RISC_V_HART_H_
 #define ROCJITSU_VM_RISC_V_HART_H_
 
+#include "rocjitsu/vm/execution_plugin.h"
 #include "rocjitsu/vm/risc_v/hart_state.h"
 #include "rocjitsu/vm/risc_v/memory.h"
 #include "simdojo/sim/clock_domain.h"
@@ -49,9 +50,13 @@ public:
   /// @returns Const reference to the memory interface.
   const Memory &memory() const { return memory_; }
 
+  /// @brief Set the execution plugin group (shared ownership).
+  void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) { plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group(); }
+
 private:
   HartState state_;
   Memory memory_{"memory"};
+  std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
 };
 
 } // namespace risc_v
