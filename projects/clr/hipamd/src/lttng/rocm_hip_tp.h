@@ -98,6 +98,34 @@ LTTNG_UST_TRACEPOINT_EVENT(
     )
 )
 
+/* hip_aql_kernel_dispatch_submit: emitted at the HIP CLR packet-write site
+ * (rocvirtual.cpp:dispatchGenericAqlPacket and dispatchAqlPacketBatchFlat),
+ * once per AQL kernel-dispatch packet written into a queue ring. Captures
+ * HIP's intent BEFORE any HSA intercept-queue rewrite, with corr_id from
+ * TLS naturally available. This is the join key for the firmware-ring track. */
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip,
+    hip_aql_kernel_dispatch_submit,
+    LTTNG_UST_TP_ARGS(
+        uint32_t,    queue_id,
+        uint64_t,    write_idx,
+        uint64_t,    dispatch_idx,
+        uint64_t,    corr_id,
+        uint32_t,    tid,
+        uint64_t,    kernel_object,
+        uint64_t,    completion_signal
+    ),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint32_t, queue_id, queue_id)
+        lttng_ust_field_integer(uint64_t, write_idx, write_idx)
+        lttng_ust_field_integer(uint64_t, dispatch_idx, dispatch_idx)
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+        lttng_ust_field_integer(uint32_t, tid, tid)
+        lttng_ust_field_integer_hex(uint64_t, kernel_object, kernel_object)
+        lttng_ust_field_integer_hex(uint64_t, completion_signal, completion_signal)
+    )
+)
+
 #endif /* _ROCM_HIP_TP_H */
 
 #include <lttng/tracepoint-event.h>

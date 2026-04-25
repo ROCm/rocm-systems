@@ -341,6 +341,19 @@ if(HIP_ENABLE_LTTNG_UST)
         ${CMAKE_CURRENT_LIST_DIR}/lttng)
     target_link_libraries(amdhip64 PRIVATE PkgConfig::LTTNG_UST ${CMAKE_DL_LIBS})
 
+    # Per-packet AQL kernel-dispatch tracepoint lives at the HIP CLR packet-
+    # write site (rocclr/device/rocm/rocvirtual.cpp). rocclr is built as a
+    # static archive and linked into amdhip64; the tracepoint emit symbols
+    # live in amdhip64 (via lttng/rocm_hip_tp.cpp), but rocvirtual.cpp needs
+    # the include path, the HIP_ENABLE_LTTNG_UST macro, and the LTTng-UST
+    # headers to compile the call sites. Apply all to the rocclr target here.
+    if(TARGET rocclr)
+        target_compile_definitions(rocclr PRIVATE HIP_ENABLE_LTTNG_UST=1)
+        target_include_directories(rocclr PRIVATE
+            ${CMAKE_CURRENT_LIST_DIR}/lttng
+            ${LTTNG_UST_INCLUDE_DIRS})
+    endif()
+
     # Symbol-coverage gate: every exported HIP/__hip text symbol from the
     # built libamdhip64.so must appear in one of the migration inventories
     # written by lttng_migrate.py. Fails the build on any miss.

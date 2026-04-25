@@ -84,6 +84,19 @@ static inline void rocm_trace_emit_hip_kernel_dispatch_enqueue(
     }
 }
 
+/* hip_aql_kernel_dispatch_submit: emit at the HIP CLR per-packet write site,
+ * once per AQL kernel-dispatch packet written to a queue ring. */
+static inline void rocm_trace_emit_hip_aql_kernel_dispatch_submit(
+    uint32_t queue_id, uint64_t write_idx, uint64_t dispatch_idx,
+    uint64_t corr_id, uint64_t kernel_object, uint64_t completion_signal) {
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hip_aql_kernel_dispatch_submit)) {
+        lttng_ust_do_tracepoint(rocm_hip, hip_aql_kernel_dispatch_submit,
+                                queue_id, write_idx, dispatch_idx,
+                                corr_id, rocm_trace_current_tid(),
+                                kernel_object, completion_signal);
+    }
+}
+
 #else /* !HIP_ENABLE_LTTNG_UST */
 
 static inline void rocm_trace_emit_hip_api_enter(const char* a, uint64_t c) { (void)a; (void)c; }
@@ -100,6 +113,10 @@ static inline void rocm_trace_emit_hip_kernel_dispatch_enqueue(
     const char* a, uint64_t b, void* c, uint32_t d, uint32_t e, uint32_t f,
     uint32_t g, uint32_t h, uint32_t i, uint32_t j) {
     (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; (void)h; (void)i; (void)j;
+}
+static inline void rocm_trace_emit_hip_aql_kernel_dispatch_submit(
+    uint32_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t e, uint64_t f) {
+    (void)a; (void)b; (void)c; (void)d; (void)e; (void)f;
 }
 
 #endif
