@@ -324,10 +324,14 @@ process_doorbell_tracing_only(const queue_state_ptr_t& state, hsa_signal_value_t
         corr_id->thread_idx ? corr_id->thread_idx : common::get_tid();
     const auto enqueue_ts = common::timestamp_ns();
 
-    // Snapshot external correlation IDs once for the whole batch.
+    // Snapshot tracing contexts active at enqueue time. Filtered by
+    // the COMPLETE operation so the captured set matches what the
+    // drainer will emit. The drainer emits to THESE contexts (H7
+    // fix): contexts active at enqueue, not at completion.
     tracing::tracing_data td{};
     tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
                                ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                               ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
                                td);
     tracing::populate_external_correlation_ids(
         td.external_correlation_ids,
@@ -378,6 +382,29 @@ process_doorbell_tracing_only(const queue_state_ptr_t& state, hsa_signal_value_t
         entry.external_corr_ids = td.external_correlation_ids;
         entry.seq               = s_seq.fetch_add(1, std::memory_order_relaxed);
         entry.captured_wdid     = d;  // §3.5 Invariant 1
+
+        // Block 2 (H6, M2): capture AQL packet data synchronously
+        // while we hold the slot. The drainer reads END records ~1ms
+        // later and the application may have reused the slot for a
+        // new dispatch by then; capturing here avoids the slot-reuse
+        // race entirely.
+        const auto& pkt              = pkts[slot_idx];
+        entry.kernel_object          = pkt.kernel_object;
+        entry.workgroup_size_x       = pkt.workgroup_size_x;
+        entry.workgroup_size_y       = pkt.workgroup_size_y;
+        entry.workgroup_size_z       = pkt.workgroup_size_z;
+        entry.grid_size_x            = pkt.grid_size_x;
+        entry.grid_size_y            = pkt.grid_size_y;
+        entry.grid_size_z            = pkt.grid_size_z;
+        entry.private_segment_size   = pkt.private_segment_size;
+        entry.group_segment_size     = pkt.group_segment_size;
+
+        // Block 2 (H7): snapshot tracing_data so the drainer emits
+        // to the contexts that were active at enqueue, not whatever
+        // is active at completion. Copy (not move) — td is reused
+        // across the loop iterations for the rest of this batch.
+        entry.captured_tracing_data  = td;
+
         entry.gen.fetch_add(1, std::memory_order_release);  // publish
     }
 

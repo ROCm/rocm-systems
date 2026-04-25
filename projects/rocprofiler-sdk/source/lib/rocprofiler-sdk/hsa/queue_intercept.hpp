@@ -66,6 +66,30 @@ struct CorrEntry
     // Full 64-bit dispatch index (NOT modulo'd). Drainer compares
     // (captured_wdid & 0xFFFFFFFFu) == record.dispatch_idx.
     uint64_t                               captured_wdid = 0;
+
+    // ----- Captured AQL packet data (Block 2 / fixes H6, M2) -----
+    // Captured synchronously at doorbell-store time so the drainer
+    // does not race with the application reusing the AQL slot. Without
+    // this, slot reuse between kernel completion and the ~1ms drainer
+    // poll would attribute the original kernel's record to a new
+    // dispatch.
+    uint64_t  kernel_object        = 0;
+    uint16_t  workgroup_size_x     = 0;
+    uint16_t  workgroup_size_y     = 0;
+    uint16_t  workgroup_size_z     = 0;
+    uint32_t  grid_size_x          = 0;
+    uint32_t  grid_size_y          = 0;
+    uint32_t  grid_size_z          = 0;
+    uint32_t  private_segment_size = 0;
+    uint32_t  group_segment_size   = 0;
+
+    // ----- Captured tracing context snapshot (Block 2 / fixes H7) -----
+    // Snapshot of tracing_contexts active at enqueue time. The drainer
+    // emits to THESE contexts, not to whatever is active at completion.
+    // Mirrors what packet_data.tracing_data does in the
+    // WriteInterceptor path.
+    tracing::tracing_data captured_tracing_data;
+
     // 0 == empty/consumed; non-zero == occupied. Release-store on publish.
     std::atomic<uint64_t>                  gen{0};
 };
