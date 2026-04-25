@@ -15,13 +15,23 @@ enum {
     ROCM_PKT_UNKNOWN         = 255,
 };
 
-/* TLS hint used by the PM4 doorbell-ring path to tell StoreRelaxed that the
- * ringing packet is PM4 rather than AQL. Consumed-on-read (reset to 0). */
+/* TLS hint used by the PM4 doorbell-ring path to tell StoreRelaxed that
+ * the ringing packet is PM4 rather than AQL. We use a separate "valid"
+ * boolean alongside the value because 0 (ROCM_PKT_KERNEL_DISPATCH) is a
+ * valid hint value, so it cannot also serve as the "unset" sentinel.
+ * Consumed-on-read (valid is cleared back to 0). */
 static __thread uint8_t g_rocm_packet_type_hint;
-static inline void rocm_trace_set_packet_type_hint(uint8_t t) { g_rocm_packet_type_hint = t; }
+static __thread uint8_t g_rocm_packet_type_hint_valid;
+static inline void rocm_trace_set_packet_type_hint(uint8_t t) {
+    g_rocm_packet_type_hint = t;
+    g_rocm_packet_type_hint_valid = 1;
+}
+/* Returns the hint if set, ROCM_PKT_UNKNOWN otherwise. Always clears
+ * the valid flag. */
 static inline uint8_t rocm_trace_consume_packet_type_hint(void) {
+    if (!g_rocm_packet_type_hint_valid) return ROCM_PKT_UNKNOWN;
     uint8_t t = g_rocm_packet_type_hint;
-    g_rocm_packet_type_hint = 0;
+    g_rocm_packet_type_hint_valid = 0;
     return t;
 }
 

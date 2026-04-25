@@ -50,46 +50,97 @@ cc "$TRACE_DIR/tiny.c" -o "$TRACE_DIR/tiny" \
     -I/opt/rocm/include -L"$LIB_DIR" -lhsa-runtime64 \
     -Wl,-rpath,"$LIB_DIR"
 
-# Start a per-user sessiond, isolated session.
-SESSION="hsa-api-test-$$"
+# Optional: a HIP dispatch test to exercise hsa_doorbell_ring with
+# packet_type = KERNEL_DISPATCH. Built only if hipcc + a sample exist
+# under /opt/rocm/share/hip/samples. If absent, the doorbell assertion
+# is skipped and reported.
+HIP_DISPATCH_BIN=""
+if command -v /opt/rocm/bin/hipcc >/dev/null 2>&1 \
+   && [ -f /opt/rocm/share/hip/samples/0_Intro/square/square.hipref.cpp ]; then
+    cp /opt/rocm/share/hip/samples/0_Intro/square/square.hipref.cpp "$TRACE_DIR/square.cpp"
+    if /opt/rocm/bin/hipcc "$TRACE_DIR/square.cpp" -o "$TRACE_DIR/square" \
+        >"$TRACE_DIR/hipcc.log" 2>&1; then
+        HIP_DISPATCH_BIN="$TRACE_DIR/square"
+    else
+        echo "INFO: hipcc compile failed; doorbell assertion will be skipped."
+    fi
+fi
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+
+# Start a per-user sessiond.
 lttng-sessiond --daemonize --no-kernel
 trap 'pkill -f "lttng-sessiond.*--no-kernel" 2>/dev/null || true; rm -rf "$TRACE_DIR"' EXIT
 
-lttng create "$SESSION" --output="$TRACE_DIR/trace" >/dev/null
+# ============================================================
+# Run 1: API events (tiny standalone HSA program)
+# ============================================================
+SESSION_API="hsa-api-test-$$"
+lttng create "$SESSION_API" --output="$TRACE_DIR/trace_api" >/dev/null
 # Per the channel-mode commitment: discard policy.
 # Sub-buffer sizing: per Phase 0 finding #1, container hosts with /dev/shm
 # limited to 64 MiB and ~224 CPUs need a much smaller channel than
 # LTTng's default (524288 B x 4 sub-buffers per CPU). 4 KiB x 2 fits.
 lttng enable-channel --userspace --discard --subbuf-size=4096 --num-subbuf=2 default >/dev/null
-lttng enable-event --userspace -c default 'rocm_hsa:hsa_api_enter,rocm_hsa:hsa_api_exit_status,rocm_hsa:hsa_api_exit_ptr,rocm_hsa:hsa_api_exit_void,rocm_hsa:hsa_doorbell_ring,rocm_hsa:hsa_intercept_packets' >/dev/null
-lttng start "$SESSION" >/dev/null
+lttng enable-event --userspace -c default 'rocm_hsa:hsa_api_enter,rocm_hsa:hsa_api_exit_status,rocm_hsa:hsa_api_exit_ptr,rocm_hsa:hsa_api_exit_void' >/dev/null
+lttng start "$SESSION_API" >/dev/null
 
-# Run the tiny program. If no GPU is reachable, we still expect at least
-# hsa_init events; that is enough to verify the tracepoint plumbing.
 LD_LIBRARY_PATH="$LIB_DIR:${LD_LIBRARY_PATH:-}" "$TRACE_DIR/tiny" || true
 
-lttng stop "$SESSION" >/dev/null
-lttng destroy "$SESSION" >/dev/null
+lttng stop "$SESSION_API" >/dev/null
+lttng destroy "$SESSION_API" >/dev/null
 
-LOG="$TRACE_DIR/babeltrace.log"
-babeltrace2 "$TRACE_DIR/trace" > "$LOG"
+LOG_API="$TRACE_DIR/babeltrace_api.log"
+babeltrace2 "$TRACE_DIR/trace_api" > "$LOG_API" 2>/dev/null
 
-# Assertions: hsa_init must produce at least one enter and one exit_status.
 EXPECTED_APIS=(hsa_init hsa_shut_down)
-
-fail() { echo "FAIL: $*" >&2; exit 1; }
-
 for api in "${EXPECTED_APIS[@]}"; do
-    grep -q "rocm_hsa:hsa_api_enter:.*api_name = \"$api\"" "$LOG" \
-        || fail "missing enter event for $api"
-    grep -q "rocm_hsa:hsa_api_exit_status:.*api_name = \"$api\"" "$LOG" \
-        || fail "missing exit_status event for $api"
+    grep -q "rocm_hsa:hsa_api_enter:.*api_name = \"$api\"" "$LOG_API" \
+        || fail "missing enter event for $api (api session)"
+    grep -q "rocm_hsa:hsa_api_exit_status:.*api_name = \"$api\"" "$LOG_API" \
+        || fail "missing exit_status event for $api (api session)"
 done
 
-# Print summary.
-N_EVENTS=$(wc -l < "$LOG")
-N_ENTER=$(grep -c 'rocm_hsa:hsa_api_enter' "$LOG" || true)
-N_EXIT=$(grep -c 'rocm_hsa:hsa_api_exit_status' "$LOG" || true)
-N_DOORBELL=$(grep -c 'rocm_hsa:hsa_doorbell_ring' "$LOG" || true)
+N_API_EVENTS=$(wc -l < "$LOG_API")
+N_ENTER=$(grep -c 'rocm_hsa:hsa_api_enter' "$LOG_API" || true)
+N_EXIT=$(grep -c 'rocm_hsa:hsa_api_exit_status' "$LOG_API" || true)
 
-echo "PASS hsa_api_tracepoints: $N_EVENTS events, $N_ENTER enter, $N_EXIT exit_status, $N_DOORBELL doorbell"
+# ============================================================
+# Run 2: doorbell events (HIP dispatch — only if available)
+# ============================================================
+N_DOORBELL=0
+DOORBELL_DETAIL=""
+if [ -n "$HIP_DISPATCH_BIN" ]; then
+    SESSION_DB="hsa-doorbell-test-$$"
+    lttng create "$SESSION_DB" --output="$TRACE_DIR/trace_db" >/dev/null
+    lttng enable-channel --userspace --discard --subbuf-size=4096 --num-subbuf=2 default >/dev/null
+    # Only enable doorbell + intercept events to keep volume low and avoid
+    # /dev/shm-sized buffer overflow.
+    lttng enable-event --userspace -c default 'rocm_hsa:hsa_doorbell_ring,rocm_hsa:hsa_intercept_packets' >/dev/null
+    lttng start "$SESSION_DB" >/dev/null
+
+    LD_LIBRARY_PATH="$LIB_DIR:/opt/rocm/lib:${LD_LIBRARY_PATH:-}" "$HIP_DISPATCH_BIN" \
+        > "$TRACE_DIR/dispatch.log" 2>&1 || true
+
+    lttng stop "$SESSION_DB" >/dev/null
+    lttng destroy "$SESSION_DB" >/dev/null
+
+    LOG_DB="$TRACE_DIR/babeltrace_db.log"
+    babeltrace2 "$TRACE_DIR/trace_db" > "$LOG_DB" 2>/dev/null
+
+    grep -q 'rocm_hsa:hsa_doorbell_ring' "$LOG_DB" \
+        || fail "no doorbell-ring tracepoint observed despite dispatch binary"
+    grep -q 'rocm_hsa:hsa_doorbell_ring.*packet_type = 0' "$LOG_DB" \
+        || fail "no KERNEL_DISPATCH-typed doorbell event observed"
+
+    N_DOORBELL=$(grep -c 'rocm_hsa:hsa_doorbell_ring' "$LOG_DB" || true)
+    DOORBELL_DETAIL=$(grep 'rocm_hsa:hsa_doorbell_ring.*packet_type = 0' "$LOG_DB" | head -1)
+fi
+
+# ============================================================
+# Summary
+# ============================================================
+echo "PASS hsa_api_tracepoints: api_events=$N_API_EVENTS enter=$N_ENTER exit_status=$N_EXIT doorbell=$N_DOORBELL"
+if [ -n "$DOORBELL_DETAIL" ]; then
+    echo "  doorbell sample: $DOORBELL_DETAIL"
+fi
