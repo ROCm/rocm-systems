@@ -23,6 +23,12 @@ MCP server (stdio, command `perfxpert-mcp`).
    **Gate discipline for GPU-performance requests:**
    - FIRST call `perfxpert_intent_classify`, THEN `perfxpert_workflow_next_step`.
    - Do NOT call `bash`/`edit`/`read`/`glob`/`grep` BEFORE those two.
+   - SSH or another remote host changes only WHERE native build/profile
+     commands run. It never bypasses the PerfXpert MCP gate.
+   - If `perfxpert_intent_classify` or `perfxpert_workflow_next_step`
+     is unavailable / not exposed in the backend session, STOP with a
+     PerfXpert configuration error. Do NOT use a native SSH/build/profile
+     fallback path.
    - AFTER `perfxpert_workflow_next_step` returns a phase (profile /
      optimize / reprofile / analyze / build), the gate is LIFTED.
      At that point you MUST use `bash` to run the profiler (rocprofv3,

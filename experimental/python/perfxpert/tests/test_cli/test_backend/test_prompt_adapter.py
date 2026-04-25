@@ -92,6 +92,20 @@ def test_render_includes_rejection_stanza_when_true() -> None:
     assert "mcp__perfxpert__intent_classify" in out
 
 
+def test_render_rejects_native_fallback_when_gate_tool_missing() -> None:
+    out = pa.render_prompt(
+        SOURCE,
+        backend="codex",
+        tool_name_template="mcp_perfxpert_{tool}",
+        known_tools=TOOLS,
+        reject_language=True,
+    )
+    assert "not available or not exposed" in out
+    assert "STOP with a PerfXpert configuration error" in out
+    assert "SSH" in out
+    assert "remote-host builds" in out
+
+
 def test_render_omits_rejection_stanza_when_false() -> None:
     out = pa.render_prompt(
         SOURCE,

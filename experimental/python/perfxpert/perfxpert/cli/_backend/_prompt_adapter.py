@@ -71,6 +71,11 @@ pre-tool-call hook — the rejection is not advisory.
 
 After `{classify_tool}` returns, any tool is permitted for the
 rest of the session.
+
+If `{classify_tool}` is not available or not exposed in the current
+backend session, STOP with a PerfXpert configuration error. Do not
+fall back to native execution tools, including local shells, SSH
+commands, remote-host builds, or profiling commands.
 """
 
 

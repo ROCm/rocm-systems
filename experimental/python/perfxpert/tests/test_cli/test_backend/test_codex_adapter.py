@@ -159,6 +159,17 @@ def test_tool_name_template() -> None:
     assert CodexAdapter.tool_name_template == "mcp_perfxpert_{tool}"
 
 
+def test_codex_prompt_forbids_ssh_fallback_without_gate_tools() -> None:
+    rendered = CodexAdapter()._render_prompt_for_codex()
+    assert "SSH or another remote host" in rendered
+    assert "never bypasses the PerfXpert MCP gate" in rendered
+    assert "mcp_perfxpert_intent_classify" in rendered
+    assert "mcp_perfxpert_workflow_next_step" in rendered
+    assert "not exposed in the backend session" in rendered
+    assert "native SSH/build/profile" in rendered
+    assert "fallback path" in rendered
+
+
 def test_spawn_strategy_is_execvpe() -> None:
     assert CodexAdapter.spawn_strategy == "execvpe"
 
