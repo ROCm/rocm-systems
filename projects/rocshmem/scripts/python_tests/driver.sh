@@ -96,8 +96,8 @@ ExecPythonTest() {
   cmd=( mpirun
         --allow-run-as-root
         -n "$NUM_RANKS"
-        -mca pml "${OMPI_MCA_pml:-ucx}"
-        -mca osc "${OMPI_MCA_osc:-ucx}"
+        ${OMPI_MCA_pml:+-mca pml "$OMPI_MCA_pml"}
+        ${OMPI_MCA_osc:+-mca osc "$OMPI_MCA_osc"}
         -x "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
         -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=${UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS:-16384}"
         -x "LD_LIBRARY_PATH"
@@ -113,10 +113,9 @@ ExecPythonTest() {
   echo "Test:   $TEST_LOG_NAME"
   echo "# ${cmd[*]}" > "$LOG_DIR/$TEST_LOG_NAME.log"
 
-  "${cmd[@]}" >> "$LOG_DIR/$TEST_LOG_NAME.log" 2>&1
-  if [ $? -ne 0 ]; then
+  "${cmd[@]}" 2>&1 | tee -a "$LOG_DIR/$TEST_LOG_NAME.log"
+  if [ ${PIPESTATUS[0]} -ne 0 ]; then
     echo "FAILED: $TEST_LOG_NAME"
-    cat "$LOG_DIR/$TEST_LOG_NAME.log"
     DRIVER_RETURN_STATUS=1
     FAILED_LIST="$FAILED_LIST $TEST_LOG_NAME"
   fi
