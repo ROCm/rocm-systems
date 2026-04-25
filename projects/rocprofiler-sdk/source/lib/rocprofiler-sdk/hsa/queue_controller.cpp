@@ -695,7 +695,27 @@ queue_controller_init(HsaApiTable* table)
     // instead of via HSA queue interception.
     if(firmware_dispatch_ring_available())
     {
-        bool needs_drainer = false;
+        // The firmware-ring drainer and the WriteInterceptor path are
+        // mutually exclusive — running both would produce duplicate
+        // kernel-dispatch records and double-decrement correlation
+        // refcounts. Counter, ATT, scratch, and PCS contexts all engage
+        // the WriteInterceptor, and that decision is made GLOBALLY in
+        // needs_packet_rewriting_intercept (used by create_queue): if
+        // ANY context needs the interceptor, ALL queues are constructed
+        // in Mode::full_intercept and the WriteInterceptor runs.
+        //
+        // The previous per-context check broke this invariant: with one
+        // kernel-tracing-only context and one counter context, the
+        // kernel-tracing context still satisfied the per-context
+        // condition (has_kernel_tracing && !needs_interceptor) and
+        // started the drainer, while the counter context forced every
+        // queue into full_intercept mode — producing two records per
+        // kernel and two refcount decrements.
+        //
+        // Compute both predicates GLOBALLY across all contexts to match
+        // the global mode-selection invariant.
+        bool any_kernel_tracing   = false;
+        bool any_needs_interceptor = false;
         for(const auto& itr : context::get_registered_contexts())
         {
             const bool has_kernel_tracing =
@@ -705,23 +725,16 @@ queue_controller_init(HsaApiTable* table)
                 itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY) ||
                 itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
 
-            // The firmware-ring drainer and the WriteInterceptor path are
-            // mutually exclusive — running both would produce duplicate
-            // records and double-decrement correlation refcounts. Counter,
-            // ATT, scratch, and PCS contexts all engage WriteInterceptor,
-            // so the drainer must NOT start when any of them are present.
             const bool needs_interceptor =
                 itr->dispatch_counter_collection || itr->pc_sampler        ||
                 itr->device_counter_collection   || itr->device_thread_trace ||
                 itr->dispatch_thread_trace       || has_scratch_reporting;
 
-            if(has_kernel_tracing && !needs_interceptor)
-            {
-                needs_drainer = true;
-                break;
-            }
+            if(has_kernel_tracing) any_kernel_tracing = true;
+            if(needs_interceptor) any_needs_interceptor = true;
         }
-        if(needs_drainer) kernel_dispatch::start_firmware_dispatch_ring_drainer();
+        if(any_kernel_tracing && !any_needs_interceptor)
+            kernel_dispatch::start_firmware_dispatch_ring_drainer();
     }
 }
 
