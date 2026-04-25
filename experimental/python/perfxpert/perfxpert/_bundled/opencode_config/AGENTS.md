@@ -29,6 +29,17 @@ MCP server (stdio, command `perfxpert-mcp`).
      is unavailable / not exposed in the backend session, STOP with a
      PerfXpert configuration error. Do NOT use a native SSH/build/profile
      fallback path.
+   <!--backend:codex-->
+   - Codex may defer MCP tools behind its metadata-search surface when
+     the initial tool inventory is crowded. If
+     `perfxpert_intent_classify` is not directly exposed but `tool_search`
+     / `tool_search_tool` is available, the only allowed pre-gate
+     exception is to search for "perfxpert intent_classify
+     workflow_next_step" and then immediately call the returned
+     PerfXpert MCP gate tool. If discovery cannot expose the gate, STOP
+     with the same PerfXpert configuration error. Do NOT use shell, SSH,
+     build, edit, or profiling tools as a discovery fallback.
+   <!--/backend:codex-->
    - AFTER `perfxpert_workflow_next_step` returns a phase (profile /
      optimize / reprofile / analyze / build), the gate is LIFTED.
      At that point you MUST use `bash` to run the profiler (rocprofv3,

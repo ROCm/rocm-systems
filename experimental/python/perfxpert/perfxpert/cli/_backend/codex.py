@@ -1109,6 +1109,7 @@ class CodexAdapter:
                 tool_name_template=self.tool_name_template,
                 known_tools=_KNOWN_TOOLS,
                 reject_language=True,
+                discovery_tools=("tool_search", "tool_search_tool"),
             )
         return pa.render_prompt(
             bundled_source,
@@ -1116,6 +1117,7 @@ class CodexAdapter:
             tool_name_template=self.tool_name_template,
             known_tools=_KNOWN_TOOLS,
             reject_language=True,
+            discovery_tools=("tool_search", "tool_search_tool"),
         )
 
     def _stage_codex_prompt_file(

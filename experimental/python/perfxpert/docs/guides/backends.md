@@ -193,6 +193,14 @@ embedded in a perfxpert-managed `AGENTS.override.md`
 appends a perfxpert-managed block so Codex sees both the repo guidance
 and the perfxpert gate. `AGENTS.override.md` is a compatibility file
 owned by the adapter, not a native Codex-only source of truth.
+Codex can defer MCP tool metadata out of the initial model-visible tool
+inventory when the session is crowded. In that case, the generated
+Codex prompt allows exactly one pre-gate exception: use Codex's
+metadata search tool (`tool_search` / `tool_search_tool`) to expose the
+PerfXpert `intent_classify` and `workflow_next_step` MCP tools, then
+call the gate immediately. If discovery does not expose the gate, the
+agent must still stop with a PerfXpert configuration error instead of
+using shell, SSH, build, edit, or profiling commands as a fallback.
 Smaller models may bypass advisory language; if
 mechanical enforcement matters for your workflow, use
 `perfxpert-code claude` or the bundled `opencode` default (both

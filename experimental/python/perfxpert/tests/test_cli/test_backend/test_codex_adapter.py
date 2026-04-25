@@ -171,6 +171,16 @@ def test_codex_prompt_forbids_ssh_fallback_without_gate_tools() -> None:
     assert "fallback path" in rendered
 
 
+def test_codex_prompt_allows_only_tool_search_for_deferred_gate_tool() -> None:
+    rendered = CodexAdapter()._render_prompt_for_codex()
+    assert "tool_search" in rendered
+    assert "tool_search_tool" in rendered
+    assert "discovery-only metadata tools" in rendered
+    assert "perfxpert intent_classify" in rendered
+    assert "Do NOT use shell, SSH," in rendered
+    assert "build, edit, or profiling tools as a discovery fallback" in rendered
+
+
 def test_codex_prompt_requires_consent_before_installing_missing_remote_tooling() -> None:
     rendered = CodexAdapter()._render_prompt_for_codex()
     assert "sqlite3" in rendered
