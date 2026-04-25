@@ -331,7 +331,22 @@ register_or_refresh_queue(hsa_queue_t* queue, void* /*data*/)
 
     {
         std::lock_guard<std::mutex> lk(g_ring_mu);
-        if(g_queue_rings.count(queue->id)) return HSA_STATUS_SUCCESS;
+        auto                        it = g_queue_rings.find(queue->id);
+        if(it != g_queue_rings.end())
+        {
+            if(it->second.queue_ptr == queue)
+            {
+                // Same queue (and same address) — already registered.
+                return HSA_STATUS_SUCCESS;
+            }
+            // Same id, different pointer = HSA reused the id after
+            // destroy. Evict the stale ring/metadata entry. The
+            // associated QueueState (if any) is owned by
+            // queue_intercept and will be cleaned up when its
+            // hsa_queue_destroy fires (which it should have, ahead of
+            // the new create). Then fall through to fresh registration.
+            g_queue_rings.erase(it);
+        }
     }
 
     auto* ext = hsa::get_amd_ext_table();
