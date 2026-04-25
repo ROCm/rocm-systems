@@ -3,10 +3,15 @@
 
 #include "sqlite_backend.hpp"
 
+#include "data_storage/vtable/kernel_dispatch_buffer.hpp"
 #include "data_storage/vtable/kernel_dispatch_buffer_vtab.hpp"
+#include "data_storage/vtable/memory_alloc_buffer.hpp"
 #include "data_storage/vtable/memory_alloc_buffer_vtab.hpp"
+#include "data_storage/vtable/memory_copy_buffer.hpp"
 #include "data_storage/vtable/memory_copy_buffer_vtab.hpp"
+#include "data_storage/vtable/pmc_event_buffer.hpp"
 #include "data_storage/vtable/pmc_event_buffer_vtab.hpp"
+#include "data_storage/vtable/region_buffer.hpp"
 #include "data_storage/vtable/region_buffer_vtab.hpp"
 #include "debug.hpp"
 #include "directory.hpp"
@@ -361,6 +366,26 @@ sqlite_backend::execute(const std::string& query)
 void
 sqlite_backend::flush()
 {
+    // Drain the per-table column buffers so pending rows reach the real
+    // rocpd_<table>_<uuid> tables. Without this, rows inserted via the
+    // *_buf vtables stay in C++ memory until the buffer instance is destroyed.
+    const auto drain_buffer = [](auto* buffer) {
+        if(buffer != nullptr)
+        {
+            buffer->flush();
+        }
+    };
+    drain_buffer(vtable::kernel_dispatch_buffer::get_active_instance(
+        fmt::format("rocpd_kernel_dispatch_{}", m_uuid)));
+    drain_buffer(vtable::memory_copy_buffer::get_active_instance(
+        fmt::format("rocpd_memory_copy_{}", m_uuid)));
+    drain_buffer(vtable::memory_alloc_buffer::get_active_instance(
+        fmt::format("rocpd_memory_allocate_{}", m_uuid)));
+    drain_buffer(vtable::region_buffer::get_active_instance(
+        fmt::format("rocpd_region_{}", m_uuid)));
+    drain_buffer(vtable::pmc_event_buffer::get_active_instance(
+        fmt::format("rocpd_pmc_event_{}", m_uuid)));
+
     if(m_mode == storage_mode_t::on_disk)
     {
         // Already on disk. Just checkpoint the WAL so the main file holds the
