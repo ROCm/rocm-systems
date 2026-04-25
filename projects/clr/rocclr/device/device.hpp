@@ -1472,6 +1472,9 @@ class MemObjMap : public AllStatic {
   //!< Same as FindMemObj but for ipc handle to MemObj mapping
   static amd::Memory* FindIpcHandleMemObj(const IpcMemHandle& k);
 
+  //!< Atomically find and remove a mem object by ptr. Returns the removed Memory* or nullptr.
+  static amd::Memory* FindAndRemoveMemObj(const void* k);
+
   //!< Shared read/write lock for all MemObjMap operations (including per-device maps)
   static std::shared_mutex AllocatedLock_;
 

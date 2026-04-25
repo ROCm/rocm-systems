@@ -388,6 +388,25 @@ amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
   return nullptr;
 }
 
+amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {
+  std::unique_lock lock(AllocatedLock_);
+  uintptr_t key = reinterpret_cast<uintptr_t>(k);
+  auto it = MemObjMap_.upper_bound(key);
+  if (it == MemObjMap_.begin()) {
+    return nullptr;
+  }
+  --it;
+  amd::Memory* mem = it->second;
+  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+                        ? sizeof(mem->getUserData().hsa_handle)
+                        : mem->getSize();
+  if (key < it->first || key >= (it->first + mem_size)) {
+    return nullptr;
+  }
+  MemObjMap_.erase(it);
+  return mem;
+}
+
 void MemObjMap::UpdateAccess(amd::Device* peerDev) {
   if (peerDev == nullptr) {
     return;
