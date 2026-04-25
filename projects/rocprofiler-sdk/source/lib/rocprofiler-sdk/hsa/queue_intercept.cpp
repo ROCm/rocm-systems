@@ -22,9 +22,15 @@
 
 #include "lib/rocprofiler-sdk/hsa/queue_intercept.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/tracing/tracing.hpp"
+
+#include <hsa/hsa.h>
 
 #include <cstring>
 #include <thread>
@@ -129,6 +135,20 @@ thread_local uint64_t             tls_submit_pos                = 0;
 thread_local uint32_t             tls_pkt_size                  = 64;
 thread_local const doorbell_fn_t* tls_ring_doorbell             = nullptr;
 thread_local uint64_t             tls_last_published_submit_pos = 0;
+
+inline void
+log_overwrite_warning_once(QueueState* state)
+{
+    bool already = state->overwrite_warning_logged.exchange(true, std::memory_order_relaxed);
+    if(!already)
+    {
+        ROCP_WARNING << "queue_intercept: tracing-only slot wraparound on queue="
+                     << state->hsa_queue
+                     << " — drainer cadence is slower than enqueue rate; "
+                        "one or more dispatches will lose correlation. This warning "
+                        "is logged once per queue.";
+    }
+}
 
 inline void
 publish_submitted_packets(QueueState* state, uint64_t submit_pos)
@@ -255,6 +275,115 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     tls_ring_doorbell             = nullptr;
     tls_last_published_submit_pos = 0;
     tls_state                     = nullptr;
+}
+
+void
+process_doorbell_tracing_only(const queue_state_ptr_t& state, hsa_signal_value_t value)
+{
+    if(!state) return;
+    auto* state_ptr = state.get();
+
+    // §3.5 Invariant 3: take the slot mutex; serializes capture vs
+    // consume vs cleanup.
+    std::lock_guard<std::mutex> g(state_ptr->slot_publish_mu);
+
+    const uint64_t prev = state_ptr->last_observed_wdid.load(std::memory_order_relaxed);
+    // HIP convention: hsa_signal_store_screlease(doorbell, new_wdid - 1).
+    const uint64_t new_wdid = static_cast<uint64_t>(value) + 1;
+
+    // Stale/sentinel doorbell — no advance.
+    if(new_wdid <= prev) return;
+
+    auto* corr_id      = context::get_latest_correlation_id();
+    bool  popping_corr = false;
+    if(!corr_id)
+    {
+        corr_id      = context::correlation_tracing_service::construct(1);
+        popping_corr = true;
+    }
+    if(!corr_id)
+    {
+        // Finalization race — service is tearing down. Advance the
+        // observed wdid so we don't reprocess this range; drainer will
+        // see no entry and emit zero-corr fallback.
+        state_ptr->last_observed_wdid.store(new_wdid, std::memory_order_release);
+        return;
+    }
+
+    // Balance construct's initial +1 at scope exit; per-slot adds are
+    // released to the drainer.
+    auto _corr_id_dtor = common::scope_destructor{[&] {
+        if(popping_corr)
+        {
+            context::pop_latest_correlation_id(corr_id);
+            corr_id->sub_ref_count();
+        }
+    }};
+
+    const auto tid =
+        corr_id->thread_idx ? corr_id->thread_idx : common::get_tid();
+    const auto enqueue_ts = common::timestamp_ns();
+
+    // Snapshot external correlation IDs once for the whole batch.
+    tracing::tracing_data td{};
+    tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                               ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                               td);
+    tracing::populate_external_correlation_ids(
+        td.external_correlation_ids,
+        tid,
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
+        ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
+        corr_id->internal);
+
+    static std::atomic<uint64_t> s_seq{0};
+
+    const auto* pkts =
+        static_cast<const hsa_kernel_dispatch_packet_t*>(state_ptr->ring_buf);
+
+    for(uint64_t d = prev; d < new_wdid; ++d)
+    {
+        const uint32_t slot_idx = static_cast<uint32_t>(d & state_ptr->corr_ring_mask);
+
+        // Skip non-kernel-dispatch packets (barrier_and/or, agent_dispatch).
+        // The firmware ring only emits records for kernel dispatches, so a
+        // captured slot for a non-kernel-dispatch packet would never be
+        // consumed and would slowly leak.
+        const uint16_t hdr =
+            __atomic_load_n(&pkts[slot_idx].header, __ATOMIC_ACQUIRE);
+        const uint8_t ptype = (hdr >> HSA_PACKET_HEADER_TYPE) &
+                              ((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u);
+        if(ptype != HSA_PACKET_TYPE_KERNEL_DISPATCH) continue;
+
+        auto& entry = state_ptr->corr_slots[slot_idx];
+
+        // §3.5 Invariant 2: detect wraparound overwrite. If the slot is
+        // still occupied by a previous capture that the drainer has not
+        // consumed, retire its refcounts so we don't leak. The drainer
+        // will receive the prior dispatch's END record later, fail the
+        // alias guard, and emit it as a zero-corr fallback.
+        if(entry.gen.load(std::memory_order_relaxed) != 0 && entry.corr_id)
+        {
+            entry.corr_id->sub_kern_count();
+            entry.corr_id->sub_ref_count();
+            log_overwrite_warning_once(state_ptr);
+        }
+
+        corr_id->add_ref_count();
+        corr_id->add_kern_count();
+
+        entry.corr_id           = corr_id;
+        entry.tid               = tid;
+        entry.enqueue_ts        = enqueue_ts;
+        entry.external_corr_ids = td.external_correlation_ids;
+        entry.seq               = s_seq.fetch_add(1, std::memory_order_relaxed);
+        entry.captured_wdid     = d;  // §3.5 Invariant 1
+        entry.gen.fetch_add(1, std::memory_order_release);  // publish
+    }
+
+    state_ptr->last_observed_wdid.store(new_wdid, std::memory_order_release);
+    // _corr_id_dtor fires here, balancing the construct's initial +1 if
+    // popping_corr.
 }
 
 void

@@ -262,6 +262,16 @@ process_doorbell_impl(const queue_state_ptr_t& state,
                       hsa_signal_value_t       value,
                       const doorbell_fn_t&     ring_doorbell);
 
+// Capture-only doorbell processor for Mode::tracing_only.
+// Captures correlation/tid/external-corr into state->corr_slots and
+// returns; does NOT call invoke_write_interceptor and does NOT
+// publish_submitted_packets. The caller chains through to the real
+// hsa_signal_store_* after this returns.
+//
+// See PHASE1_TRACING_ONLY_INTERCEPT_DESIGN.md §4 for full rationale.
+void
+process_doorbell_tracing_only(const queue_state_ptr_t& state, hsa_signal_value_t value);
+
 /**
  * @brief Create and register queue state
  *
