@@ -522,6 +522,66 @@ def test_structured_edit_fallback_uses_tomlkit(
     assert "perfxpert-mcp" in text
 
 
+def test_register_project_scope_writes_project_config_without_codex_mcp_add(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list] = []
+
+    def _run(cmd, *args, **kwargs):
+        calls.append(list(cmd))
+
+        class _R:
+            returncode = 0
+            stdout = b"perfxpert\n"
+            stderr = b""
+
+        return _R()
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr("perfxpert.cli._backend.codex.subprocess.run", _run)
+
+    project_cwd = tmp_path / "proj"
+    project_cwd.mkdir()
+    cfg = project_cwd / ".codex" / "config.toml"
+    CodexAdapter()._register_mcp(project_cwd, cfg, "project")
+
+    assert cfg.is_file()
+    text = cfg.read_text()
+    assert "[mcp_servers.perfxpert]" in text or "perfxpert" in text
+    assert 'command = "perfxpert-mcp"' in text
+    assert "required = true" in text
+    assert "enabled_tools" not in text
+    assert "disabled_tools" not in text
+    assert not [c for c in calls if "mcp" in c and "add" in c]
+
+
+def test_structured_edit_refreshes_stale_perfxpert_filters(
+    tmp_path: Path,
+) -> None:
+    project_cwd = tmp_path / "proj"
+    project_cwd.mkdir()
+    cfg = project_cwd / ".codex" / "config.toml"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(
+        '[mcp_servers.perfxpert]\n'
+        'command = "perfxpert-mcp"\n'
+        "args = []\n"
+        "enabled = false\n"
+        'enabled_tools = ["report"]\n'
+        'disabled_tools = ["intent_classify"]\n'
+    )
+
+    CodexAdapter()._structured_edit_config_toml(cfg)
+
+    text = cfg.read_text()
+    assert 'command = "perfxpert-mcp"' in text
+    assert "enabled = true" in text
+    assert "required = true" in text
+    assert "enabled_tools" not in text
+    assert "disabled_tools" not in text
+
+
 # ---------------------------------------------------------------------------
 # Never mutates tracked AGENTS.md.
 # ---------------------------------------------------------------------------

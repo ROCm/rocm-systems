@@ -631,12 +631,22 @@ class CodexAdapter:
         config_toml: Path,
         scope: Literal["project", "user"],
     ) -> None:
-        """Primary: `codex mcp add perfxpert -- perfxpert-mcp`.
+        """Register the PerfXpert MCP server for the effective scope.
 
-        Fallback: lazy-import `tomlkit` and add/merge
-        `[mcp_servers.perfxpert]` into `config_toml` directly
-        (preserves comments + unknown keys).
+        Project scope edits `<cwd>/.codex/config.toml` directly because
+        `codex mcp add` targets the default Codex config. User scope
+        still prefers `codex mcp add`, then falls back to a structured
+        direct TOML edit.
         """
+        if scope == "project":
+            # `codex mcp add` writes the default Codex config, while a
+            # trusted project launch depends on the project-scoped layer.
+            # Always write the project entry directly so a stale/global
+            # perfxpert listing cannot make install pass with no tools
+            # exposed in the launched session.
+            self._structured_edit_config_toml(config_toml)
+            return
+
         binary = shutil.which(self.binary_name)
 
         # 1) Idempotency: skip if already registered.
@@ -747,15 +757,19 @@ class CodexAdapter:
                     f"{config_toml} already has [mcp_servers.perfxpert] "
                     f"with command {cmd!r}; refuse to overwrite."
                 )
-            # Same entry — idempotent no-op.
-            return
+            entry = existing_entry
+        else:
+            entry = tomlkit_mod.table()
+            servers["perfxpert"] = entry
 
-        entry = tomlkit_mod.table()
         entry["command"] = "perfxpert-mcp"
         entry["args"] = tomlkit_mod.array()
         entry["enabled"] = True
+        entry["required"] = True
         entry["startup_timeout_sec"] = 10
-        servers["perfxpert"] = entry
+        for filter_key in ("enabled_tools", "disabled_tools"):
+            if filter_key in entry:
+                del entry[filter_key]
 
         pa.atomic_write(config_toml, tomlkit_mod.dumps(doc))
 
