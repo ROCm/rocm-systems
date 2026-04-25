@@ -252,7 +252,9 @@ set ( SRCS core/driver/driver.cpp
            libamdhsacode/amd_hsa_code_util.cpp
            libamdhsacode/amd_hsa_locks.cpp
            libamdhsacode/amd_options.cpp
-           libamdhsacode/amd_hsa_code.cpp)
+           libamdhsacode/amd_hsa_code.cpp
+           lttng/rocm_hsa_tp.cpp
+           lttng/rocm_trace_init.cpp)
 
 if(UNIX)
   set(SRC_OS core/util/lnx/os_linux.cpp
@@ -402,6 +404,24 @@ if( BUILD_SHARED_LIBS )
     else()
       set(HSA_DEP_ROCPROFILER_REGISTER OFF CACHE INTERNAL "")
     endif() # end rocprofiler-register_FOUND
+
+    ## LTTng-UST tracepoint provider — see runtime/hsa-runtime/lttng/.
+    ## Producer-side instrumentation that runs in parallel with the
+    ## rocprofiler-register dispatch table; the dispatch table itself is
+    ## unmodified.
+    option(ROCR_ENABLE_LTTNG_UST "Build with LTTng-UST tracepoint emission" ON)
+    if(ROCR_ENABLE_LTTNG_UST)
+      find_package(PkgConfig REQUIRED)
+      pkg_check_modules(LTTNG_UST REQUIRED IMPORTED_TARGET lttng-ust>=2.13)
+      target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSA_ENABLE_LTTNG_UST=1)
+      target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE
+          ${CMAKE_CURRENT_SOURCE_DIR}/lttng)
+      target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE
+          PkgConfig::LTTNG_UST ${CMAKE_DL_LIBS})
+      set(HSA_DEP_LTTNG_UST ON CACHE INTERNAL "")
+    else()
+      set(HSA_DEP_LTTNG_UST OFF CACHE INTERNAL "")
+    endif()
   else()
     target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt::hsakmt)
   endif()
