@@ -228,7 +228,23 @@ ncclResult_t ncclTopoGetSystem(const char* xmlTopoFile, struct ncclTopoSystem** 
   struct ncclXml* xml;
   NCCLCHECK(xmlAlloc(&xml, NCCL_GRAPH_XML_MAX_NODES));
   NCCLCHECK(ncclTopoGetXmlFromFile(xmlTopoFile, xml, 0));
-  NCCLCHECK(ncclTopoGetSystemFromXml(xml, system, 0));
+  // Extract host_hash from the first CPU node so XMLs with explicit host_hash
+  // attributes (e.g. topo_8p_950.xml) are handled correctly. XMLs without
+  // host_hash default to 0, which matches the previous behaviour.
+  uint64_t localHostHash = 0;
+  struct ncclXmlNode* systemNode;
+  if (xmlFindTag(xml, "system", &systemNode) == ncclSuccess) {
+    for (int s = 0; s < systemNode->nSubs; s++) {
+      struct ncclXmlNode* node = systemNode->subs[s];
+      if (strcmp(node->name, "cpu") == 0) {
+        const char* hostHashStr;
+        if (xmlGetAttr(node, "host_hash", &hostHashStr) == ncclSuccess && hostHashStr)
+          localHostHash = strtoull(hostHashStr, NULL, 16);
+        break;
+      }
+    }
+  }
+  NCCLCHECK(ncclTopoGetSystemFromXml(xml, system, localHostHash));
   free(xml);
   return ncclSuccess;
 }
