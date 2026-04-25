@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/hsa/dispatch_ring_buffer_support.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_intercept.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
@@ -94,6 +95,12 @@ struct queue_ring_state_t
     // only at shutdown. Acceptable for short-lived processes; not for
     // long-running ones.
     uint32_t last_processed_record_count{0};
+
+    // Phase 1: stored at registration so the drainer can call
+    // queue_intercept::lookup_queue_state(queue_ptr) to reach the
+    // correlation side-table populated by the launching-thread doorbell
+    // hook. See PHASE1_TRACING_ONLY_INTERCEPT_DESIGN.md §3.4.
+    hsa_queue_t* queue_ptr = nullptr;
 };
 
 std::mutex                                       g_ring_mu;
@@ -134,13 +141,16 @@ lookup_kernel_object(queue_ring_state_t& qs, uint32_t dispatch_idx)
 }
 
 void
-emit_kernel_dispatch_tracing(hsa_agent_t                hag,
-                             hsa_queue_t*               queue,
-                             uint64_t                   raw_start_ts,
-                             uint64_t                   raw_end_ts,
-                             uint64_t                   kernel_object,
-                             rocprofiler_dispatch_id_t  dispatch_id,
-                             context::correlation_id*   cid)
+emit_kernel_dispatch_tracing(hsa_agent_t                            hag,
+                             hsa_queue_t*                           queue,
+                             uint64_t                               raw_start_ts,
+                             uint64_t                               raw_end_ts,
+                             uint64_t                               kernel_object,
+                             rocprofiler_dispatch_id_t              dispatch_id,
+                             context::correlation_id*               cid,
+                             rocprofiler_thread_id_t                thr_id,
+                             tracing::external_correlation_id_map_t ext_ids,
+                             uint64_t /*enqueue_ts*/)
 {
     tracing::tracing_data td{};
     tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
@@ -195,21 +205,20 @@ emit_kernel_dispatch_tracing(hsa_agent_t                hag,
     tracer_data.end_timestamp   = end_ns;
     tracer_data.dispatch_info   = dispatch_info;
 
-    // TODO(ai/KNOWN_ISSUES.md item 9): thread_id is the drainer thread's
-    // tid, not the launching thread's. The interception path captures
-    // the launching tid at enqueue time. Without queue interception we
-    // do not know the launching tid here.
-    auto  thr_id           = common::get_tid();
-    auto  internal_corr_id = cid->internal;
-    auto  ancestor_corr_id = cid->ancestor;
-    auto& extern_corr      = td.external_correlation_ids;
+    // tid and external correlation IDs are captured at launching-thread
+    // doorbell-store time and passed in via parameters (Phase 1
+    // tracing-only). For the fallback path they are populated by the
+    // caller (process_dispatch_record) using common::get_tid() and an
+    // empty external_corr_ids map.
+    auto internal_corr_id = cid->internal;
+    auto ancestor_corr_id = cid->ancestor;
 
     if(!td.callback_contexts.empty())
     {
         tracing::execute_phase_none_callbacks(td.callback_contexts,
                                               thr_id,
                                               internal_corr_id,
-                                              extern_corr,
+                                              ext_ids,
                                               ancestor_corr_id,
                                               ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
                                               ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
@@ -230,7 +239,7 @@ emit_kernel_dispatch_tracing(hsa_agent_t                hag,
         tracing::execute_buffer_record_emplace(td.buffered_contexts,
                                                thr_id,
                                                internal_corr_id,
-                                               extern_corr,
+                                               ext_ids,
                                                ancestor_corr_id,
                                                ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                                ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
@@ -240,25 +249,79 @@ emit_kernel_dispatch_tracing(hsa_agent_t                hag,
 
 void
 process_dispatch_record(queue_ring_state_t* st,
+                        uint32_t            dispatch_idx,
                         uint64_t            raw_start_ts,
                         uint64_t            raw_end_ts,
                         uint64_t            kernel_object)
 {
-    constexpr uint32_t init_ref = 2;
-    auto* cid = context::correlation_tracing_service::construct(init_ref);
-    // TODO(ai/KNOWN_ISSUES.md item 1): during finalization the correlation
-    // service may already be shut down and return null. We hand back a
-    // zero-initialized fallback so the dispatch record still flows out.
-    // This means the record's correlation IDs will be all zero and
-    // cannot be linked to anything. Real fix is a flush-handshake on
-    // shutdown so the drainer drains before the correlation service
-    // tears down.
+    // Look up correlation captured by the launching-thread doorbell hook.
+    // See PHASE1_TRACING_ONLY_INTERCEPT_DESIGN.md §3.4-3.5.
+    auto qstate = hsa::queue_intercept::lookup_queue_state(st->queue_ptr);
+
+    context::correlation_id*               cid    = nullptr;
+    rocprofiler_thread_id_t                thr_id = 0;
+    uint64_t                               enq_ts = 0;
+    tracing::external_correlation_id_map_t ext_ids;
+
+    if(qstate && !qstate->corr_slots.empty())
+    {
+        // §3.5 Invariant 3: take the slot mutex.
+        std::lock_guard<std::mutex> g(qstate->slot_publish_mu);
+        auto& slot = qstate->corr_slots[dispatch_idx & qstate->corr_ring_mask];
+
+        // §3.5 Invariant 1: alias guard. The firmware record carries the
+        // low 32 bits of the wdid; reject the slot if it's been
+        // overwritten by a wraparound capture since this dispatch was
+        // enqueued.
+        if(slot.gen.load(std::memory_order_acquire) != 0 && slot.corr_id != nullptr &&
+           static_cast<uint32_t>(slot.captured_wdid & 0xFFFFFFFFu) == dispatch_idx)
+        {
+            cid     = slot.corr_id;
+            thr_id  = slot.tid;
+            enq_ts  = slot.enqueue_ts;
+            ext_ids = std::move(slot.external_corr_ids);
+            // Consume: clear corr_id then gen.
+            slot.corr_id = nullptr;
+            slot.gen.store(0, std::memory_order_release);
+        }
+    }
+
+    // Late-attach for an in-flight kernel, alias-rejected, or slot
+    // already cleaned up by destroy_queue_state. Fallback emission with
+    // zero correlation IDs and the drainer thread's tid.
+    //
+    // TODO(ai/KNOWN_ISSUES.md item 1): the static thread_local
+    // fallback_cid carries zeroed internal/ancestor IDs and is NOT
+    // refcount-managed. Tools cannot link these records back to a
+    // launching API call.
     static thread_local context::correlation_id fallback_cid{};
-    if(!cid) cid = &fallback_cid;
+    if(!cid)
+    {
+        cid    = &fallback_cid;
+        thr_id = common::get_tid();
+        // ext_ids stays empty
+    }
 
     auto dispatch_id = g_next_dispatch_id.fetch_add(1, std::memory_order_relaxed);
-    emit_kernel_dispatch_tracing(
-        st->agent, st->queue, raw_start_ts, raw_end_ts, kernel_object, dispatch_id, cid);
+    emit_kernel_dispatch_tracing(st->agent,
+                                 st->queue,
+                                 raw_start_ts,
+                                 raw_end_ts,
+                                 kernel_object,
+                                 dispatch_id,
+                                 cid,
+                                 thr_id,
+                                 std::move(ext_ids),
+                                 enq_ts);
+
+    // §3.5 Invariant 4: drainer-consume retirement path. Skip for the
+    // fallback path (the fallback_cid is a static thread_local sentinel
+    // that doesn't participate in refcount lifecycle).
+    if(cid != &fallback_cid)
+    {
+        cid->sub_kern_count();
+        cid->sub_ref_count();
+    }
 }
 
 hsa_status_t
@@ -313,6 +376,7 @@ register_or_refresh_queue(hsa_queue_t* queue, void* /*data*/)
     ent.wptr        = wptr;
     ent.agent       = agent;
     ent.record_size = rec_sz;
+    ent.queue_ptr   = queue;
     return HSA_STATUS_SUCCESS;
 }
 
@@ -414,7 +478,8 @@ drain_all()
                 const uint64_t kernel_obj =
                     lookup_kernel_object(*lookup_qs, start.dispatch_idx);
 
-                process_dispatch_record(lookup_qs, start.ts, r.ts, kernel_obj);
+                process_dispatch_record(
+                    lookup_qs, start.dispatch_idx, start.ts, r.ts, kernel_obj);
                 g_emitted_dispatch_idx.insert(start.dispatch_idx);
                 lookup_qs->dispatch_count++;
             }
