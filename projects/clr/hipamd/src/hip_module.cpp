@@ -14,6 +14,8 @@
 #include "hip_event.hpp"
 #include "hip_platform.hpp"
 #include "hip_comgr_helper.hpp"
+#include "lttng/rocm_trace_emit.h"
+#include "lttng/rocm_trace_tid.h"
 
 namespace hip {
 
@@ -515,6 +517,35 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
     if (status != hipSuccess) {
       return status;
     }
+  }
+
+  // LTTng-UST: emit hip_kernel_dispatch_enqueue immediately before the
+  // command is enqueued. This is the single chokepoint every HIP-side
+  // kernel launch passes through (regular launch, cooperative launch,
+  // multi-grid, hipGraph node submission via ihipModuleLaunchKernel).
+  //
+  // Correlation id: reuse the HIP-API caller's corr id if it set one on
+  // this thread (same-thread case - one consistent id across hip_api_enter,
+  // hip_kernel_dispatch_enqueue, and downstream HSA tracepoints). When
+  // the launch happens on a different thread (no caller corr id in TLS),
+  // mint a fresh corr id; the consumer joins via (tid_high_32, timestamp).
+  {
+    uint64_t k_corr = rocm_trace_active_corr_id();
+    if (k_corr == 0) k_corr = rocm_trace_next_corr_id();
+    // grid_ holds the total number of workgroups in N-dims; local_ holds
+    // the workgroup size. Together they describe the launch's grid and
+    // block dims in CUDA-style hipDim3 terms.
+    rocm_trace_emit_hip_kernel_dispatch_enqueue(
+        FunctionName(f).c_str(),
+        k_corr,
+        static_cast<void*>(hStream),
+        static_cast<uint32_t>(launch_params.grid_[0]),
+        static_cast<uint32_t>(launch_params.grid_[1]),
+        static_cast<uint32_t>(launch_params.grid_[2]),
+        static_cast<uint32_t>(launch_params.local_[0]),
+        static_cast<uint32_t>(launch_params.local_[1]),
+        static_cast<uint32_t>(launch_params.local_[2]),
+        launch_params.sharedMemBytes_);
   }
 
   if (stopEvent != nullptr) {
