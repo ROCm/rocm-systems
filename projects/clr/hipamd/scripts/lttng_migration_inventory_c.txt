@@ -1,0 +1,2 @@
+hipExtModuleLaunchKernel	STATUS	hipError_t
+hipHccModuleLaunchKernel	STATUS	hipError_t
